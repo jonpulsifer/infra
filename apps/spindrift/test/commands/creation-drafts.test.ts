@@ -40,7 +40,7 @@ const database = withIsolatedDatabase();
 const builder = new FakeBuildAdapter({ name: 'hosted' });
 const stagedRepositories: string[] = [];
 const supplyChain = new SupplyChainHarness();
-/** What the stager learned of the commit beyond its sha, for the Build to keep. */
+/** What the stager learned of the commit beyond its sha. */
 const HEADLINE: CommitHeadline = {
   message: 'feat(web): stop the header wrapping',
   author: 'octocat',
@@ -145,16 +145,8 @@ async function seedCapabilities(
   return { repository: repository!, target: target! };
 }
 
-/**
- * Choose the repository, the way the screen does.
- *
- * A draft no longer opens on one — nothing preselects a repository for the
- * operator any more — so a test that wants a repository draft has to say which,
- * which is exactly the press this change added to the flow. Through
- * `draftReducer` rather than a literal, so these tests keep exercising the
- * derivation the browser runs: the App name comes off the repository, and the
- * directory goes back to the root.
- */
+// Picks the repository through draftReducer, as the browser does, so the App
+// name comes off the repository and the directory resets to the root.
 function pickRepository(draft: Draft, fullName = 'example/app'): Draft {
   return draftReducer(draft, {
     type: 'repo',
@@ -163,13 +155,8 @@ function pickRepository(draft: Draft, fullName = 'example/app'): Draft {
   });
 }
 
-/**
- * A draft that has been pointed at a repository, ready to complete.
- *
- * Two commands rather than one because that is now two acts: starting a draft
- * asks the question, and saving is the answer. Returns the saved view, so the
- * revision is the one a completion has to carry.
- */
+// Starts a draft and saves it with a repository. Returns the saved view, whose
+// revision a completion has to carry.
 async function startWithRepository(ctx: CommandContext) {
   const started = await startCreationDraft({}, ctx);
   if (!started.ok) throw new Error(started.failure.message);
@@ -182,8 +169,6 @@ async function startWithRepository(ctx: CommandContext) {
     ctx,
   );
   if (!saved.ok) throw new Error(saved.failure.message);
-  // The whole result, so callers read `started.value.revision` the way they do
-  // off `startCreationDraft` — the extra command is the only thing that moved.
   return saved;
 }
 
@@ -215,14 +200,8 @@ describe('creation drafts', () => {
   });
 
   test('the draft it opens on names no repository, and blocks until one does', async () => {
-    // It used to open on whichever active repository sorted first — so a draft
-    // arrived named after a repository nobody chose, and the screen read it
-    // before anybody pressed anything. Choosing is the operator's, and until
-    // they have, the preflight refuses rather than building a guess.
-    //
-    // The clone URL that a chosen repository carries is the manifest's host
-    // rather than the public one; that guarantee lives with the command that
-    // now mints it — see `listRepositories` in `repositories.test.ts`.
+    // Nothing preselects a repository, so preflight refuses until the operator
+    // picks one.
     await seedCapabilities();
     const started = await startCreationDraft({}, await context());
     expect(started.ok).toBe(true);
@@ -258,10 +237,8 @@ describe('creation drafts', () => {
   });
 
   test('a draft written before a key was retired is still editable', async () => {
-    // Drafts are durable jsonb rows somebody comes back to. The save schema is
-    // strict, and the browser sends back what it was given — so a retired key
-    // handed out on read is a draft that refuses its own next keystroke. The
-    // read drops it, which is the whole migration a jsonb column needs.
+    // The save schema is strict and the browser sends back what it was given,
+    // so the read drops a retired key.
     await seedCapabilities();
     const ctx = await context();
     const started = await startCreationDraft({}, ctx);
@@ -462,9 +439,8 @@ describe('creation drafts', () => {
   });
 
   test('the first Build of a repository App keeps the headline the stager fetched', async () => {
-    // The wizard is the common way a Build comes to exist, and it stages
-    // through its own path rather than `deployApp`'s — so the headline has to
-    // be carried here too, or every App's first row is a bare sha.
+    // The wizard stages through its own path, not deployApp's, so it must carry
+    // the headline too.
     await seedCapabilities();
     const ctx = await context();
     const started = await startWithRepository(ctx);
@@ -507,8 +483,7 @@ describe('creation drafts', () => {
       buildLevel: base.buildLevel,
       provenanceBuilderId: base.provenanceBuilderId,
       carriesHeldSecret: base.carriesHeldSecret,
-      // Every flavour, matching `FakeBuildAdapter`'s default: these fakes stand in
-      // for a route, not for one route's reach.
+      // Every flavour, as in FakeBuildAdapter's default.
       selfAuthorizedRegistries: [
         'artifactRegistry',
         'dockerHub',
@@ -813,8 +788,7 @@ describe('creation drafts', () => {
       buildLevel: 2 as const,
       provenanceBuilderId: 'https://builders.example.test/crashing',
       carriesHeldSecret: true,
-      // Every flavour, matching `FakeBuildAdapter`'s default: these fakes stand in
-      // for a route, not for one route's reach.
+      // Every flavour, as in FakeBuildAdapter's default.
       selfAuthorizedRegistries: [
         'artifactRegistry',
         'dockerHub',

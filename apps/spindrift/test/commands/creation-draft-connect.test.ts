@@ -1,23 +1,5 @@
-/**
- * Deploying from a repository Spindrift has not connected yet (§15, story 24).
- *
- * The creation flow lists every repository the GitHub App installation grants,
- * not only the ones with rows, and selecting one is a **read**:
- * `inspectRepository` writes nothing, so browsing five repositories leaves five
- * of nothing behind. That is the promise the draft itself makes on screen —
- * "Nothing has been created. This draft is kept." — and a wizard that opened a
- * configuration pull request per repository somebody looked at would leave a
- * trail of PRs for Apps that never existed.
- *
- * So the connect happens inside the one committing act. Pressing Deploy writes
- * the `repositories` row and opens §15's one configuration pull request, and it
- * does it through `connectRepository` rather than through a second way of
- * connecting a repository — the alternative is two acts that can disagree about
- * what connecting means.
- *
- * Both halves are asserted here, and the first one is the load-bearing one: an
- * abandoned draft leaves no row and no pull request.
- */
+// Selecting an unconnected repository writes nothing. Deploy connects it
+// through connectRepository, which opens the one configuration pull request.
 import { describe, expect, test } from 'bun:test';
 import {
   completeCreationDraft,
@@ -195,8 +177,7 @@ describe('a draft on a repository the grant offers', () => {
     if (!completed.ok || completed.value.app === null) {
       throw new Error('the App was not created');
     }
-    // §15's transaction, opened once, by the same command the Repositories
-    // screen presses.
+    // Opened once, by the command the Repositories screen uses.
     expect(fake.pulls).toHaveLength(1);
     const [row] = await database().db.select().from(repositories);
     expect(row).toMatchObject({
@@ -204,8 +185,7 @@ describe('a draft on a repository the grant offers', () => {
       access: 'active',
       configPullRequest: 1,
     });
-    // And the App is on that row rather than on a repository URL nothing
-    // resolves to.
+    // The App points at that row.
     const [app] = await database().db.select().from(apps);
     expect(app?.repositoryId).toBe(row!.id);
     expect(completed.value.app.buildStatus).toBe('PENDING');

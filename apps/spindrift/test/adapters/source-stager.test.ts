@@ -1,15 +1,7 @@
 /**
- * The default source stager, wired the way `createAdapterRegistry` wires it.
- *
- * `test/storage/bundle-cache.test.ts` proves the index answers correctly;
- * this proves the stager *asks* it, and asks it before spending a fetch. That
- * is the whole claim of the change: §15 stages "the exact commit once", and
- * one push to a repository hosting several Apps used to fetch the same tarball
- * once per App, because `dispatchAutoDeploys` calls `deployApp` per App and
- * nothing between those calls remembered the commit.
- *
- * Both far sides are faked and both are counted — the repository host through
- * {@link FakeGitHub}, the depot through the federation's own `fetch` seam.
+ * The default source stager as `createAdapterRegistry` wires it. It consults
+ * the bundle index before fetching, so one push that fans out to several Apps
+ * fetches the commit once.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -23,25 +15,21 @@ import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
 
 const database = withIsolatedDatabase();
 
-/** The bucket `test/fixtures/installation.example.yaml`'s home vessel declares. */
+/** The fixture installation's home-vessel `sourceBucket`. */
 const BUCKET = 'example-source-bucket';
 
 interface Depot {
-  /** Objects the depot holds, by name, as the fake stored them. */
+  /** Stored object sizes in bytes, by name. */
   readonly objects: Map<string, number>;
-  /** Every object-metadata read, which is what a cache hit costs. */
+  /** Object-metadata reads, made when the index already has the commit. */
   readonly reads: string[];
-  /** Every upload, which is what a miss costs. */
+  /** Uploads, spent only on a miss. */
   readonly writes: string[];
 }
 
 /**
- * A registry whose GitHub is `fake` and whose depot is an in-memory bucket.
- *
- * The manifest's federation carries the depot's `fetch`, because that is the
- * only seam `sourceDepotFor` reaches the far side through — `RegistryOptions`
- * has no separate one, and inventing one for a test would be a production
- * shape written for a test's convenience.
+ * The depot's `fetch` goes through the manifest's federation, the only path
+ * `sourceDepotFor` reaches the bucket by.
  */
 async function stagerAgainst(fake: FakeGitHub): Promise<{
   stage: (commit: string) => Promise<{
@@ -83,9 +71,8 @@ async function stagerAgainst(fake: FakeGitHub): Promise<{
     join(import.meta.dir, '../fixtures/installation.example.yaml'),
   ).text();
   const base = await resolveManifest(parseManifest(yaml, 'test'), {});
-  // `InstallationManifest` declares the config half only, so the two injection
-  // seams `FederationOptions` adds are carried in a value the manifest widens
-  // to rather than an object literal it would reject.
+  // A typed variable, since an object literal carrying `readToken` and `fetch`
+  // would fail the manifest's excess-property check.
   const federation: FederationOptions = {
     audience: '//iam.googleapis.com/projects/1/locations/global/p/x',
     tokenUrl: 'https://sts.example.test/token',
@@ -138,16 +125,13 @@ describe('the default source stager', () => {
     const object = `ephemeral/${bundle.digest.replace('sha256:', '')}.tgz`;
 
     expect(fake.tarballs).toEqual([commit]);
-    // Content-addressed and under the prefix the bucket's lifecycle rule
-    // matches — the two facts that make re-staging idempotent and expirable.
+    // The bucket's lifecycle rule expires objects under `ephemeral/`.
     expect(bundle.location).toBe(`gs://${BUCKET}/${object}`);
-    // The bundle, then its source receipt — durable, and named by its own
-    // bytes rather than by the bundle's.
+    // Then the source receipt, durable and named by its own digest.
     expect(depot.writes).toEqual([object, expect.stringMatching(/\.json$/)]);
   });
 
   test('the same commit staged again costs one metadata read, not a fetch', async () => {
-    // §15's "once", across the Apps a single push fans out to.
     const fake = new FakeGitHub();
     const commit = fake.commitFiles(
       'main',
@@ -164,8 +148,6 @@ describe('the default source stager', () => {
     const writesAfterFirst = depot.writes.length;
     const second = await stage(commit);
 
-    // The hit answers with the headline the fetch kept, so a Build staged
-    // from it reads the same as one staged from the tarball.
     expect(first.commit).toEqual({
       message: 'feat(web): stop the header wrapping',
       author: 'octocat',
@@ -193,9 +175,7 @@ describe('the default source stager', () => {
   });
 
   test('a bundle the depot no longer holds is staged again', async () => {
-    // What the bucket's 30-day `ephemeral/` lifecycle rule does to a bundle
-    // nothing has rebuilt. The row survives it; the object does not, and the
-    // stager must notice rather than hand a builder a dead `gs://` address.
+    // The lifecycle rule deletes `ephemeral/` objects but leaves the index row.
     const fake = new FakeGitHub();
     const commit = fake.commitFiles('main', { 'README.md': 'hello' });
     const { stage, depot } = await stagerAgainst(fake);

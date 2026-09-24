@@ -1,18 +1,7 @@
 /**
- * The stored manifest and the strict schema have to stay in agreement.
- *
- * `manifest.schema.ts` is `.strict()` and `readStoredManifest` parses the
- * **database row** through it, so removing a key from the schema without
- * removing it from documents already written under the old one is a boot
- * failure, not a degraded read: `validateManifest` throws, and every process
- * calls it before it can serve. Dropping `chartContract` was exactly that
- * shape — the ConfigMap and the schema lost the key while the row that
- * actually governs (`stored ?? declaration`) kept it.
- *
- * These tests run the **committed migration file** rather than a copy of its
- * statement, so they fail if the file is edited or deleted, and they assert the
- * property that matters rather than the mechanism: a document written under the
- * old schema is accepted by the new one after migrating.
+ * `readStoredManifest` validates the stored row against the `.strict()` schema,
+ * so a key dropped from the schema must be migrated out of stored documents or
+ * every process fails at boot.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -29,11 +18,7 @@ const MIGRATION = join(
   '../../src/db/migrations/0024_drop_chart_contract.sql',
 );
 
-/**
- * A manifest as it was authored before `chartContract` was removed. Built from
- * the placeholder so it stays a real document — every other key has to survive
- * the rewrite, and a hand-rolled stub would not notice if they did not.
- */
+/** The placeholder manifest plus the `chartContract` key the schema dropped. */
 function legacyDocument(): Record<string, unknown> {
   const document = structuredClone(
     DEFAULT_PLACEHOLDER_MANIFEST,
@@ -50,8 +35,7 @@ const database = withIsolatedDatabase();
 
 describe('a manifest written under the previous schema', () => {
   test('is refused by the strict schema while it still carries chartContract', () => {
-    // The premise. Without this the next test proves nothing — a migration that
-    // strips a key nobody would have rejected is not load-bearing.
+    // Without this refusal the next test proves nothing.
     expect(() => validateManifest(legacyDocument(), 'legacy document')).toThrow(
       /chartContract/,
     );
@@ -75,9 +59,7 @@ describe('a manifest written under the previous schema', () => {
   });
 
   test('keeps every Target, in order, because rank is read from that order', async () => {
-    // `reconcileManifestTargets` derives a Target's rank from its position in
-    // this array, so an aggregate that dropped or reordered an element would
-    // silently re-rank the installation.
+    // `reconcileManifestTargets` ranks Targets by their order in this array.
     const { db, client } = database();
     const document = legacyDocument();
     const before = (document.targets as { name: string }[]).map((t) => t.name);

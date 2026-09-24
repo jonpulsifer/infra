@@ -1,13 +1,6 @@
 /**
- * The hosted route's attest step, run as the file actually ships it.
- *
- * The same argument `build-report-statement.test.ts` makes: every other test in
- * this tree stands a fake in front of the runner, and a workflow that signs the
- * wrong set of digests passes all of them. Running the step's own `run:` script
- * is what catches it.
- *
- * The cloud route's half of this lives in `build-routes.test.ts`, next to the
- * fake that composes its steps.
+ * Runs the hosted route's attest step as the workflow file ships it, since a
+ * faked runner passes a workflow that signs the wrong digests.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -32,7 +25,6 @@ const ATTESTOR = 'projects/trusted-builds/attestors/provenance';
 const DESTINATION =
   'northamerica-northeast1-docker.pkg.dev/trusted-builds/i/demo/web';
 
-/** The `run:` script of the named step, straight out of the shipped file. */
 async function attestScript(): Promise<string> {
   const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
     jobs: { build: { steps: { name?: string; run?: string }[] } };
@@ -58,9 +50,8 @@ describe('the hosted route attests what a runtime can run', () => {
       },
     );
 
-    // The index, because that is the reference a Deploy pins; and the manifest
-    // a runtime resolves it to, because that is the digest admission is asked
-    // about. Two signing operations for a single-platform build, not three.
+    // A Deploy pins the index, and admission is asked about the platform
+    // manifest a runtime resolves it to.
     expect(digests).toEqual([
       `${DESTINATION}@${INDEX_DIGEST}`,
       `${DESTINATION}@${RUNTIME_DIGEST}`,
@@ -69,10 +60,8 @@ describe('the hosted route attests what a runtime can run', () => {
   });
 
   test('an occurrence that already exists is done, not a failure', async () => {
-    // An identical rebuild reuses its digest, and a rerun after a green attest
-    // meets its own occurrence — the condition this step exists to bring
-    // about. Observed live: a rerun died at `sign-and-create … is the subject
-    // of a conflict` with everything already attested.
+    // A rerun or an identical rebuild meets the occurrence an earlier green
+    // attest created.
     const conflictStub = `case "$*" in
   *print-access-token*) echo stub-token ;;
   *sign-and-create*) echo 'ERROR: (gcloud.beta.container.binauthz.attestations.sign-and-create) Resource in projects [trusted-builds] is the subject of a conflict: Could not create occurrence' >&2; exit 1 ;;

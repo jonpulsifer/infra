@@ -1,24 +1,5 @@
-/**
- * Adopting a sibling's artifact (§2, §4, §16).
- *
- * The claim is that sharing an artifact costs **no new noun and no second
- * build**: the adopter gets a `builds` row of its own naming the same digest, so
- * `deploys → builds → components` stays true and every admission gate re-runs on
- * the evidence that came with the digest rather than on a waiver.
- *
- * Each test here targets a sentence that would still look like it worked if it
- * were false:
- *
- * - **The gates re-run.** A destination Target with a higher policy than the
- *   source's refuses the adopted Build. Copying the provenance columns forward is
- *   only honest if this is true — otherwise it is a way to launder a Build past a
- *   threshold, which is exactly what §16 exists to prevent.
- * - **The ledger does not call it supplied.** `artifacts/list.ts:114` reads a null
- *   runner as §4's uploaded artifact, so a copy that dropped the runner would file
- *   a built artifact under "nobody built this" and nothing would say so.
- * - **Nothing builds.** The registry's `build()` throws, so "no second build" is
- *   asserted as a property of the code path rather than of the row it returned.
- */
+// Adoption copies a sibling's Build row under the adopter, so every admission
+// gate re-runs on the copied evidence and nothing builds.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
@@ -50,15 +31,11 @@ const manifest = await fixtureManifest();
 const FROZEN = new Date('2026-08-12T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 
-/** A digest of the right shape, distinct per call. */
 function digest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, '0')}`;
 }
 
-/**
- * A registry whose build side is a tripwire — adoption exists so that nothing
- * builds, and a `build()` that throws is what fails when something does.
- */
+/** `build()` throws, so any path that builds fails the test. */
 function registryOf(deployAdapter: DeployAdapter): AdapterRegistry {
   const chain = new SupplyChainHarness();
   return {
@@ -85,7 +62,6 @@ function context(adapters: AdapterRegistry): CommandContext {
   };
 }
 
-/** A Target that takes images, connected, with a stated policy. */
 async function aTarget(minBuildLevel?: number) {
   const db = database().db;
   const vessel = await insertVessel(db, 'kubernetes', {
@@ -108,7 +84,6 @@ async function aTarget(minBuildLevel?: number) {
   };
 }
 
-/** §2's monolith: one App, the Component that builds, the Component that runs. */
 async function aMonolith(name: string) {
   const db = database().db;
   const [app] = await db
@@ -177,8 +152,6 @@ describe('adopting a sibling Component’s artifact', () => {
       .db.select()
       .from(builds)
       .where(eq(builds.id, adopted.value.buildId));
-    // The whole of what the copy carries — the digest, the addresses it is
-    // pulled by, the source it came out of, and the evidence admission re-runs.
     expect(row).toMatchObject({
       componentId: worker.id,
       status: 'SUCCEEDED',
@@ -195,9 +168,8 @@ describe('adopting a sibling Component’s artifact', () => {
     });
     expect(row?.signature).toEqual(source.signature!);
 
-    // And it is deployable as itself: `createDeploy`'s "that Build belongs to a
-    // different Component" guard is untouched, and the copy is what routes
-    // around it while keeping deploys → builds → components true.
+    // The copy belongs to the adopter, so createDeploy's different-Component
+    // guard passes.
     const placed = await createDeploy(
       {
         componentId: worker.id,
@@ -212,9 +184,7 @@ describe('adopting a sibling Component’s artifact', () => {
   });
 
   test('the sibling’s own Build stays refused for the adopter', async () => {
-    // The guard that makes the copy necessary. If this ever passes, adoption is
-    // solving a problem that no longer exists — and `deploys → builds →
-    // components` has stopped meaning anything.
+    // The guard that makes the copy necessary.
     const { web, worker } = await aMonolith('guarded');
     const { target } = await aTarget();
     const source = await anArtifact(web.id, 2);
@@ -246,7 +216,6 @@ describe('adopting a sibling Component’s artifact', () => {
     expect(adopted.failure.code).toBe('INVALID_INPUT');
     expect(adopted.failure.message).toContain(theirs.web.id);
     expect(adopted.failure.message).toContain(mine.worker.id);
-    // Nothing was written: the App boundary is not a warning.
     expect(
       await database()
         .db.select()
@@ -256,9 +225,7 @@ describe('adopting a sibling Component’s artifact', () => {
   });
 
   test('a destination Target with a higher policy still refuses the adopted Build', async () => {
-    // The test that decides whether copying the provenance columns is honest.
-    // The source Build reached L2 and would deploy anywhere that asks for L2;
-    // adopting it does not buy the adopter an L3 Target.
+    // An L2 source does not buy the adopter an L3 Target.
     const { web, worker } = await aMonolith('policed');
     const { target, label } = await aTarget(3);
     const source = await anArtifact(web.id, 4, 2);
@@ -307,8 +274,8 @@ describe('adopting a sibling Component’s artifact', () => {
     const row = listed.value.artifacts.find(
       (artifact) => artifact.buildId === adopted.value.buildId,
     );
-    // §4's supplied artifact is uploaded finished output no builder ran over.
-    // A builder ran over this one; it just ran for the sibling.
+    // A supplied artifact is one no builder ran; this one was built for the
+    // sibling.
     expect(row).toMatchObject({
       component: 'worker',
       supplied: false,
@@ -338,9 +305,8 @@ describe('adopting a sibling Component’s artifact', () => {
   });
 
   test('a commit the adopter already has as a different artifact is refused', async () => {
-    // §2's key is (component, commit, target-shape). The adopter built this
-    // commit itself, so the key is taken by a row that is not this artifact —
-    // overwriting it would retarget a Build somebody may already be deploying.
+    // The adopter built this commit itself, so the (component, commit,
+    // target-shape) key is taken by a different artifact.
     const { web, worker } = await aMonolith('collided');
     const source = await anArtifact(web.id, 7);
     const [own] = await database()

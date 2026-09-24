@@ -1,17 +1,6 @@
 /**
- * Every adapter's own default API root, actually reached (§13, §20).
- *
- * `domain/target.ts` made `endpoint` optional on every cloud connection, on
- * the premise that Vercel, Cloudflare Pages, Cloud Run and Firebase Hosting
- * each answer at one hostname for every installation, so the adapter that owns
- * the fact should supply it rather than an operator retyping it per project.
- * Every other test in this tree builds its connection with an explicit
- * `endpoint` — the fixture-standing pattern §20 wants, so a fake serving one
- * host and an adapter addressing another fail for a reason nobody would look
- * for — which means the fallback branch itself, `connection.endpoint ??
- * DEFAULT_ENDPOINT`, is untouched by any of them. This file is that one check:
- * omit `endpoint` and prove the request still lands on the adapter's real
- * default, not on `undefined` turned into a string.
+ * Every other adapter test passes `endpoint` explicitly, so this file omits it
+ * and checks that each adapter falls back to its own default API root.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -41,7 +30,6 @@ import type {
 } from '../../src/domain/target.ts';
 import { fixtureManifest } from '../harness/installation.ts';
 
-/** A `Fetcher` that answers `404` to everything and remembers the one URL. */
 function capture(): {
   fetch: (request: Request) => Promise<Response>;
   url(): string;
@@ -154,9 +142,7 @@ describe('a secretStore with no stated endpoint', () => {
       { ...manifest, secretStore: { adapter: 'gcp-secret-manager' } },
       TOKEN,
     );
-    // The only way to observe `baseUrl` from outside is the class it produced —
-    // constructing at all (rather than throwing, or handing `StoreHttp` a
-    // `baseUrl` of `undefined`) is what proves the default resolved.
+    // `baseUrl` is not observable from outside; a missing default would throw.
     expect(store).toBeInstanceOf(SecretManagerStore);
   });
 

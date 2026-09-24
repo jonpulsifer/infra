@@ -1,19 +1,5 @@
-/**
- * Cancelling a Deploy (`cancelDeploy`, §6).
- *
- * The command is two acts under one name, and the refusals are the edges of
- * each:
- *
- * - **An intent nobody has claimed ends here.** `PENDING` is a row and nothing
- *   else, so the command fails it and moves the desired pointer back — only
- *   when the intent is what the pointer names. An older intent queued behind a
- *   newer one never held it, and a first-ever intent had nothing before it.
- * - **An in-flight attempt is only asked.** The generator is in the reconciler
- *   and the row stays `APPLYING`/`WAITING` with the request stamped; the loop's
- *   own tests prove the attempt honours it.
- * - **A verdict is not cancellable.** `LIVE` is a rollback wearing the wrong
- *   word, and `FAILED` has nothing left to stop.
- */
+// An unclaimed intent is failed here and the pointer moved back, an in-flight
+// attempt is only asked, and a verdict cannot be cancelled.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { cancelDeploy } from '../../src/commands/deploys/cancel.ts';
@@ -171,8 +157,7 @@ describe('cancelling a Deploy', () => {
       cancelRequestedAt: FROZEN,
       cancelRequestedBy: 'Jordan',
     });
-    // Nothing was desired here before it, so nothing is desired here now —
-    // which is what lets `rollbackDeploy` say so rather than name this row.
+    // Nothing was desired before this intent, so nothing is desired now.
     expect(await pointer()).toEqual({
       desiredBuildId: null,
       desiredDeployId: null,
@@ -202,8 +187,7 @@ describe('cancelling a Deploy', () => {
     expect((await cancelDeploy({ id: first.id }, context())).ok).toBe(true);
     const second = await intent('PENDING');
 
-    // Back past the intent this same command already failed, to the release
-    // that was actually desired before either press.
+    // Back past the already-failed intent to the release desired before both.
     expect((await cancelDeploy({ id: second.id }, context())).ok).toBe(true);
     expect(await pointer()).toEqual({
       desiredBuildId: landed.buildId,
@@ -256,15 +240,9 @@ describe('cancelling a Deploy', () => {
     expect(result.failure.message).toContain('nothing to cancel');
   });
 
-  /**
-   * The locking read, asserted the way `deploys.test.ts` asserts
-   * `placeIntent`'s: the desired row is **held from another session**, the
-   * command is watched stop, and the claim's write lands under the hold —
-   * from inside it, because `claimNextDeploy` skips a locked pair rather than
-   * waiting on it. Deleting cancel's `FOR UPDATE` fails this: the phase would
-   * be re-read before the claim committed, and the command would report an
-   * attempt it left streaming into the row as cancelled.
-   */
+  // Another session holds the desired row while the claim commits. Without the
+  // cancel's FOR UPDATE it would read the phase early and misreport the
+  // attempt.
   test('a claim that lands while the cancel waits on the desired row is what the cancel reads', async () => {
     const { intent, pointer, componentId, targetId } = await pair();
     const deploy = await intent('PENDING');
@@ -302,8 +280,7 @@ describe('cancelling a Deploy', () => {
     release();
     await holding;
 
-    // Asked, not ended: the claim came first, and the attempt it minted is
-    // what will honour the request.
+    // The claim came first, so the attempt it minted will honour the request.
     expect(await contending).toMatchObject({
       ok: true,
       value: { deployId: deploy.id, phase: 'APPLYING' },

@@ -1,12 +1,6 @@
 /**
- * The build contract's one non-negotiable term.
- *
- * §16: correlation joins on digest with no signer over-vouching, which forces
- * the bundle digest to be a build parameter on **every** route — otherwise the
- * source receipt Spindrift signs and the provenance document the backend
- * produces have no join. This file makes that a compile-time fact rather than a
- * convention: a route cannot be called without one, and cannot report a build
- * without echoing it.
+ * Every route takes the bundle digest and returns it on the provenance, which
+ * is how the source receipt joins the provenance document.
  */
 import { describe, expect, test } from 'bun:test';
 import type {
@@ -22,7 +16,6 @@ import { digestSchema } from '../../src/domain/digest.ts';
 import { digestPinnedRef } from '../../src/supply-chain/verify.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 
-/** A type-level claim that fails to compile if `T` is not exactly `true`. */
 type Assert<T extends true> = T;
 
 const spec: BuildSpec = {
@@ -49,7 +42,6 @@ const source: BuildSource = {
   },
 };
 
-/** A route that does the one thing every route must: echo what it was given. */
 const route: BuildAdapter = {
   name: 'example',
   logFidelity: 'LIVE_TEXT',
@@ -158,16 +150,6 @@ describe('log fidelity', () => {
   });
 });
 
-/**
- * The same term, applied to the fake route (Task 18).
- *
- * A fake that reports something the product would refuse is a fake that lets
- * every downstream assertion pass against an artifact the real system cannot
- * produce. `sha256:fake-0` and `<destination>@fake` were exactly that: the
- * digest fails the product's own definition in `src/domain/digest.ts`, and the
- * ref fails `digestPinnedRef` — the gate the real verifier applies before it
- * spawns anything.
- */
 describe('the fake route reports what the product would accept', () => {
   async function built(adapter: FakeBuildAdapter) {
     const stream = adapter.build(source, spec);
@@ -203,8 +185,7 @@ describe('the fake route reports what the product would accept', () => {
   });
 
   test('successive builds report different digests', async () => {
-    // One digest for every build would make "the deploy moved to the new
-    // artifact" unfalsifiable.
+    // Otherwise no test could tell that a deploy moved to the new artifact.
     const adapter = new FakeBuildAdapter();
     const first = await built(adapter);
     const second = await built(adapter);

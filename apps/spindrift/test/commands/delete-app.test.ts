@@ -1,28 +1,5 @@
-/**
- * `deleteApp` (§2, §11, §13).
- *
- * Every test here is an assertion about a promise the command makes that a
- * straightforward `DELETE FROM apps` would break:
- *
- * - **The review writes nothing.** The first call is the confirmation's source
- *   of truth, so an App is still there afterwards with every row it had.
- * - **Deletion cascades to what is only the App's, and detaches what is not.**
- *   Components, Builds and Deploys go (§2); a Datastore survives with
- *   `app_id = null` (§11), because reattachment to a different App is the whole
- *   reason it is a top-level noun.
- * - **A live workload is named, and then torn down.** The review names it before
- *   anything happens — that sentence is what the confirmation is for — and
- *   confirming calls `DeployAdapter.destroy` on the ref, including the ref a
- *   FAILED Deploy left behind. A teardown the platform refuses is reported
- *   rather than failing a delete the operator confirmed.
- * - **The `restrict` foreign keys do not block it.** `deploys.build_id` and
- *   `component_target_desired.desired_*` are `restrict`, and Postgres enforces
- *   one the moment its referenced row is deleted. A delete that leaned on the
- *   cascade would fail here, which is why the command deletes in order.
- *
- * Rows are what is asserted, not return values: a command that reported a
- * deletion it did not perform would pass a test of its own output.
- */
+// deleteApp's review writes nothing. Confirming tears down live refs, detaches
+// Datastores, and deletes in order past the `restrict` foreign keys.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { deleteApp } from '../../src/commands/apps/delete.ts';
@@ -75,8 +52,7 @@ function fakes(
       return fake;
     },
     build: () => null,
-    // Reaching a store would mean this delete tried to reap config it was never
-    // given; the throw is the assertion.
+    // Reaching a store would mean reaping config this delete was never given.
     store: () => {
       throw new Error('no store adapter is configured for this test');
     },
@@ -117,11 +93,8 @@ async function seedTarget(name: string, adapter: 'kubernetes' | 'static') {
   return target!;
 }
 
-/**
- * An App with one Component, and — where a Target is given — a Build, a live
- * Deploy, and the desired row whose `restrict` references are the interesting
- * part.
- */
+// An App with one Component and, given a Target, a Build, a live Deploy and the
+// desired row that references both.
 async function seedApp(
   name: string,
   options: {
@@ -252,8 +225,7 @@ describe('confirm deletes', () => {
   });
 
   test('the restrict-referenced Build and Deploy go with it', async () => {
-    // Without the ordered deletes this is the test that fails, and it fails as
-    // a foreign-key violation from Postgres rather than as a wrong row count.
+    // Without ordered deletes this fails as a foreign-key violation.
     const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('has-history', {
       targetId: target.id,
@@ -317,16 +289,12 @@ describe('a live workload is named and torn down', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // The ref reached the adapter — the whole point of the change, and the
-    // thing a test of return values alone would not notice.
     expect(of('kubernetes').destroyed).toEqual(['apps/web']);
     expect(result.value.deleted && result.value.retainedWorkloads).toEqual([]);
   });
 
   test('a refused teardown is reported, and the App still goes', async () => {
-    // The operator asked for the App to be gone. An unreachable Target is a
-    // thing to name, not a veto — and `destroy` is idempotent, so having tried
-    // costs nothing.
+    // An unreachable Target is named, not a veto, and `destroy` is idempotent.
     const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('wont-tear-down', { targetId: target.id });
     const { registry } = fakes({ destroyThrows: 'the cluster said no' });
@@ -347,9 +315,8 @@ describe('a live workload is named and torn down', () => {
   });
 
   test('a FAILED Deploy that left a ref is still torn down', async () => {
-    // `ref` persists through a failed re-attempt, so the resource it names is
-    // up there whatever the row's terminal phase says. Not stranded — nothing
-    // is serving — but very much still billing.
+    // `ref` survives a failed re-attempt, so its resource may still be up and
+    // billing.
     const target = await seedTarget('folly', 'kubernetes');
     await seedApp('half-made', { targetId: target.id, phase: 'FAILED' });
     const { registry, of } = fakes();
@@ -387,19 +354,15 @@ describe('a live workload is named and torn down', () => {
 
     expect(review.ok).toBe(true);
     if (!review.ok) return;
-    // The point of this box: a stranded schedule is not merely sitting there
-    // like a stranded service — it bills on every tick, so the review has to
-    // say so before the rows that name it are gone.
+    // A stranded schedule bills on every tick, so the review names it before
+    // the rows go.
     expect(review.value.stranded).toHaveLength(1);
     expect(review.value.stranded[0]?.firing).toBe(true);
   });
 
   test('a workload on static hosting is named as one whose name is spent', async () => {
-    // A site id is global and permanent — "the `SITE_ID` cannot be reactivated
-    // by you or anyone else" — so the hand clean-up this review sends the
-    // operator to do costs that address forever. The review has to say so
-    // before the confirmation, because it is the one consequence of deleting
-    // an App that going back and undoing it does not answer.
+    // A static hosting site id can never be reactivated, so the review warns
+    // that the address is spent before the confirmation.
     const target = await seedTarget('hosting', 'static');
     await seedApp('spends-its-name', { targetId: target.id });
     const { registry } = fakes();
@@ -444,9 +407,7 @@ describe('§9: confirming withdraws the vanity record (ticket 137b)', () => {
     );
 
     expect(result.ok).toBe(true);
-    // §9's handle is `<App>-<Component>` — withdrawn even though a cluster
-    // Target publishes its own vanity record through the App chart rather
-    // than through this seam.
+    // The handle is `<App>-<Component>`, withdrawn even for a cluster Target.
     expect(dns.withdrawn).toEqual(['is-live-web']);
   });
 
@@ -471,8 +432,7 @@ describe('§9: confirming withdraws the vanity record (ticket 137b)', () => {
 
 describe("the App's own container is swept after its placements", () => {
   test('the Target is swept once, by App name', async () => {
-    // The namespace an adapter made for the App is the one thing no ref names,
-    // so `destroy` alone always left it behind.
+    // No ref names the App's namespace, so `destroy` alone leaves it behind.
     const target = await seedTarget('folly', 'kubernetes');
     await seedApp('sweep-me', { targetId: target.id });
     const { registry, of } = fakes();
@@ -509,9 +469,8 @@ describe("the App's own container is swept after its placements", () => {
   });
 
   test('a container two Apps share is left in place', async () => {
-    // The container is named for the App, so a second App of the same name is
-    // in it. Sweeping would take its workloads — the same reason a name is not
-    // an identifier here.
+    // The container is named for the App, so another App of that name is in it
+    // too.
     const target = await seedTarget('folly', 'kubernetes');
     const mine = await seedApp('twinned', { targetId: target.id });
     await seedApp('twinned', { targetId: target.id });

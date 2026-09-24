@@ -1,18 +1,6 @@
 /**
- * Enrolment (§"First run and identity" stories 1, 2, and 4).
- *
- * Three claims, and each one is a fact about rows rather than about a return
- * value:
- *
- * 1. A first visit enrols a passkey against the token that shipped with the
- *    installation, and comes out fully privileged.
- * 2. **The token is consumed on use**, so the window in which anyone else could
- *    claim the installation closes the moment the first operator finishes.
- * 3. Recovery is rotating the token and replacing every passkey — so a *new*
- *    token enrols, and doing so leaves none of the old credentials behind.
- *
- * Real Postgres, because (2) rests on a unique index and not on a check
- * somebody remembered to write, and a fake store cannot falsify that.
+ * Enrolment against the installation's shipped token, and recovery by rotating
+ * it. Real Postgres, because spending the token rests on a unique index.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -48,7 +36,6 @@ function depsWith(token: string | null = SHIPPED_TOKEN): EnrolmentDeps {
   };
 }
 
-/** Run a whole enrolment the way a browser would: begin, ceremony, complete. */
 async function enrol(deps: EnrolmentDeps, token = SHIPPED_TOKEN) {
   const begun = await beginEnrolment(deps, { token });
   if (!begun.ok) return { begun, completed: null };
@@ -72,8 +59,7 @@ describe('a first visit', () => {
     expect(completed?.ok).toBe(true);
     if (!completed?.ok) return;
 
-    // A session token comes back exactly once — this is the only moment the
-    // value exists outside the browser.
+    // This session token is returned once; the row keeps only its hash.
     expect(completed.value.token).toBeString();
     expect(completed.value.principal.id).toBeString();
 
@@ -83,8 +69,8 @@ describe('a first visit', () => {
     const stored = await deps.db.select().from(credentials);
     expect(stored).toHaveLength(1);
     expect(stored[0]?.userId).toBe(user!.id);
-    // The public key is stored as the browser parsed it; there is no CBOR
-    // decoder in this codebase and this is the row that proves it is not needed.
+    // The public key is stored as the browser parsed it, so no CBOR decoder
+    // is needed.
     expect(stored[0]?.publicKey).toBeString();
     expect(stored[0]?.algorithm).toBe(-7);
   });
@@ -97,13 +83,11 @@ describe('a first visit', () => {
     if (begun.ok) return;
     expect(begun.failure.code).toBe('TOKEN_INVALID');
 
-    // Nothing was minted for a caller who could not name the token.
     expect(await deps.db.select().from(users)).toHaveLength(0);
   });
 
   test('is impossible on an installation that shipped no token', async () => {
-    // An installation whose Secret is missing the key cannot be claimed at all,
-    // which is the correct posture: the alternative is an open enrolment.
+    // A Secret without the key must not leave enrolment open.
     const deps = depsWith(null);
     const begun = await beginEnrolment(deps, { token: '' });
 
@@ -115,8 +99,6 @@ describe('a first visit', () => {
 
 describe('the enrolment token is consumed on use', () => {
   test('a second enrolment with the same token is refused', async () => {
-    // Story 2, stated as the window closing. This is the assertion the whole
-    // `enrolments` table exists for.
     const deps = depsWith();
     const first = await enrol(deps);
     expect(first.completed?.ok).toBe(true);
@@ -130,9 +112,8 @@ describe('the enrolment token is consumed on use', () => {
   });
 
   test('and is refused at completion too, not only at the start', async () => {
-    // The check that matters is the one next to the write: a caller who held a
-    // challenge from before the first enrolment must not be able to spend it
-    // afterwards. `begin` is a courtesy; this is the boundary.
+    // The boundary is at the write: a challenge issued before the first
+    // enrolment must not be spendable after it.
     const deps = depsWith();
     const begun = await beginEnrolment(deps, { token: SHIPPED_TOKEN });
     expect(begun.ok).toBe(true);
@@ -161,17 +142,12 @@ describe('the enrolment token is consumed on use', () => {
 
     const spent = await deps.db.select().from(enrolments);
     expect(spent).toHaveLength(1);
-    // The token is not in the row — only its hash, the same posture §10 takes
-    // with config values.
     expect(JSON.stringify(spent[0])).not.toContain(SHIPPED_TOKEN);
   });
 });
 
 describe('recovery is rotating the token', () => {
   test('a rotated token enrols and replaces every passkey', async () => {
-    // Story 4: "recovery to mean rotating the token and replacing every
-    // passkey, so that losing a device does not lose the installation." One
-    // act, not two — the operator edits the Secret and enrols again.
     const deps = depsWith();
     await enrol(deps);
 
@@ -187,14 +163,11 @@ describe('recovery is rotating the token', () => {
 
     const after = await deps.db.select().from(credentials);
     expect(after).toHaveLength(1);
-    // The lost device's passkey is gone rather than joined by a second one.
     expect(after[0]?.id).not.toBe(before[0]?.id);
   });
 
   test('and every session the lost device held', async () => {
-    // A recovery that left the stolen browser's session alive would recover
-    // nothing: the session is the credential §"First run" story 3 is worried
-    // about.
+    // A stolen browser's session is itself a credential.
     const deps = depsWith();
     const first = await enrol(deps);
     expect(first.completed?.ok).toBe(true);
@@ -208,7 +181,7 @@ describe('recovery is rotating the token', () => {
     await enrol(rotated, rotated.enrolmentToken!);
 
     const open = await deps.db.select().from(sessions);
-    // Exactly the one the recovery itself opened.
+    // The one the recovery itself opened.
     expect(open).toHaveLength(1);
   });
 
@@ -221,8 +194,7 @@ describe('recovery is rotating the token', () => {
     };
     await enrol(rotated, rotated.enrolmentToken!);
 
-    // v1 is single-operator (§ Out of Scope), so recovery restores the account
-    // rather than accumulating one per rotation.
+    // An installation has one operator, so recovery restores that account.
     expect(await deps.db.select().from(users)).toHaveLength(1);
   });
 });
@@ -262,9 +234,8 @@ describe('the ceremony itself', () => {
       (await completeEnrolment(deps, { token: SHIPPED_TOKEN, ...response })).ok,
     ).toBe(true);
 
-    // Replayed byte for byte. It fails on the challenge rather than on the
-    // token, which is the check that would still hold if the token had been
-    // rotated between the two attempts.
+    // Replayed byte for byte, it fails on the challenge, a check that holds
+    // even if the token is rotated between attempts.
     const replay = await completeEnrolment(deps, {
       token: SHIPPED_TOKEN,
       ...response,
@@ -299,8 +270,7 @@ describe('the ceremony itself', () => {
   });
 
   test('offers only the algorithms this installation can verify', async () => {
-    // A begin that offered Ed25519 would produce credentials no sign-in could
-    // check — the failure would land a ceremony later, on the operator.
+    // Offering Ed25519 would enrol credentials no sign-in can verify.
     const deps = depsWith();
     const begun = await beginEnrolment(deps, { token: SHIPPED_TOKEN });
     expect(begun.ok).toBe(true);
@@ -309,8 +279,8 @@ describe('the ceremony itself', () => {
   });
 
   test('asks for a discoverable credential, so signing in needs no username', async () => {
-    // v1 has one operator and no username field anywhere. A non-resident key
-    // would make sign-in need a credential id the browser has no way to supply.
+    // With no username field, sign-in cannot supply the credential id a
+    // non-resident key needs.
     const deps = depsWith();
     const begun = await beginEnrolment(deps, { token: SHIPPED_TOKEN });
     expect(begun.ok).toBe(true);

@@ -1,22 +1,6 @@
-/**
- * Dispatch backoff, and the signed URL as an attempt's last acquisition
- * (story 101).
- *
- * The incident this pins: a wedged Build was retried at loop cadence —
- * 500-1500ms, around the clock — and every attempt minted a signed bundle URL
- * (one STS exchange, one SignBlob) before failing on a condition knowable for
- * free. 84,729 SignBlob calls in a day, first noticed on a billing alert.
- *
- * Two mechanisms, asserted separately:
- *
- * - **Backoff**: a refused row earns an exponentially growing wait (capped),
- *   kept on the row, and the loop does not look at it again until the wait is
- *   up. A fresh claim or a fresh press resets the clock.
- * - **Ordering**: the signed URL is minted after every refusal *and after the
- *   claim*, so a refused attempt — missing route, refused shape, full
- *   concurrency slot, lost claim, even a federation gap — spends zero cloud
- *   calls, or fails before spending any more.
- */
+// A refused dispatch earns a capped exponential wait kept on the row. The
+// signed URL is minted after every refusal and the claim, so a refusal costs
+// nothing.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import {
@@ -197,14 +181,12 @@ describe('story 101: dispatch backoff and signed-URL ordering', () => {
     expect(dispatchBackoffMs(1)).toBe(1_000);
     expect(dispatchBackoffMs(2)).toBe(2_000);
     expect(dispatchBackoffMs(3)).toBe(4_000);
-    // Ten thousand refusals earn the cap, not an overflow: the incident's row
-    // would have reached one attempt per five minutes, not one per tick.
+    // Ten thousand refusals earn the cap, not an overflow.
     expect(dispatchBackoffMs(10_000)).toBe(DISPATCH_BACKOFF_CAP_MS);
   });
 
   test('a refusal paces the next attempt instead of the next tick', async () => {
-    // A federation gap: nothing is wrong with the row, so it waits — but it
-    // now waits with a clock, where it used to be retried every tick.
+    // Nothing is wrong with the row, so it waits, on a clock.
     const context = withFederation(null);
     const { component } = await seedApp('paced');
     const build = await seedBuild(component.id);
@@ -225,9 +207,8 @@ describe('story 101: dispatch backoff and signed-URL ordering', () => {
   });
 
   test('the loop does not look at a row whose wait is not up', async () => {
-    // An unplaced Component: the pass itself refuses, before dispatch. The
-    // first pass earns the row a wait; the second pass, at the same instant,
-    // must not spend an attempt on it.
+    // The pass refuses an unplaced Component before dispatch. A second pass at
+    // the same instant must skip it.
     await seedBuild((await seedApp('waiting')).component.id);
     await ctx.db
       .update(components)
@@ -245,8 +226,7 @@ describe('story 101: dispatch backoff and signed-URL ordering', () => {
   });
 
   test('a refused attempt spends no signature', async () => {
-    // The app is at its concurrency limit — a refusal knowable for free, and
-    // one that used to come *after* the mint. Zero cloud calls is the claim.
+    // A full concurrency slot is knowable for free, so no cloud call is made.
     const context = withFederation(signable());
     const { component } = await seedApp('busy');
     for (let sibling = 0; sibling < 3; sibling += 1) {
@@ -270,7 +250,7 @@ describe('story 101: dispatch backoff and signed-URL ordering', () => {
   test('a dispatched attempt signs once, and the claim resets the clock', async () => {
     const context = withFederation(signable());
     const { component } = await seedApp('shipped');
-    // A history of refusals, as the incident's row had.
+    // A history of refusals.
     const build = await seedBuild(component.id, {
       dispatchAttempts: 7,
       nextDispatchAt: NOW,

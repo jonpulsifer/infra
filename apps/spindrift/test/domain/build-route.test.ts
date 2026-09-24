@@ -1,11 +1,3 @@
-/**
- * Which route builds for which Target (Task 25, §16).
- *
- * §16's rule is two clauses in one sentence and the order of them is the whole
- * design: "the level is a threshold, **then** admin rank wins". These tests are
- * mostly about that order — a threshold that behaved like a preference would
- * pass a naive test and put an L1 build on an L2 Target.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   buildRouteCandidates,
@@ -13,7 +5,7 @@ import {
   selectBuildRoute,
 } from '../../src/domain/build-route.ts';
 
-/** The three routes an installation has, in admin rank order. */
+/** In admin rank order. */
 const ROUTES = [
   { name: 'local', level: 1 as const },
   { name: 'hosted', level: 2 as const },
@@ -33,9 +25,6 @@ describe('build route selection', () => {
   });
 
   test('an L2+ Target refuses in-cluster even when it is ranked first', () => {
-    // The whole point of a threshold: rank cannot promote a route below it.
-    // §4 states the consequence outright — a Target cannot be both
-    // offline-capable and require L2 or above.
     const { route } = selectBuildRoute(ROUTES, { minimumLevel: 2 });
     expect(route).not.toBe('local');
   });
@@ -54,8 +43,6 @@ describe('build route selection', () => {
   });
 
   test('rank is the input’s order and is never re-sorted', () => {
-    // The array of routes *is* the admin rank (§16). Sorting here would replace
-    // an operator's arrangement with this function's opinion of one.
     const reversed = [...ROUTES].reverse();
     expect(buildRouteCandidates(reversed).map((c) => c.route)).toEqual([
       'cloud',
@@ -77,16 +64,13 @@ describe('build route selection', () => {
   });
 
   test('a Target naming a route that is gone is not an error', () => {
-    // An installation may retire a route without editing every Target. The
-    // honest reading is that the route is unavailable, which is what the
-    // annotated non-candidates already say.
+    // A route can be retired without editing every Target that names it.
     const { route } = selectBuildRoute(ROUTES, { routes: ['retired'] });
     expect(route).toBeNull();
   });
 
   test('“nowhere can build this” is an answer with reasons, not an empty list', () => {
-    // The creation flow has to be able to stop on this before a Build row
-    // exists (§18's unmet prerequisite), which needs a sentence to show.
+    // The creation flow shows this reason before any Build row exists.
     const { route, candidates } = selectBuildRoute(
       [{ name: 'local', level: 1 }],
       { minimumLevel: 2 },
@@ -97,8 +81,7 @@ describe('build route selection', () => {
   });
 
   test('an installation with no routes configured is a supported installation', () => {
-    // An uploaded archive of finished output consults no route at all (§4), so
-    // this is a real state rather than a misconfiguration.
+    // An uploaded archive of finished output needs no route.
     expect(selectBuildRoute([]).route).toBeNull();
     expect(selectBuildRoute([]).candidates).toEqual([]);
   });

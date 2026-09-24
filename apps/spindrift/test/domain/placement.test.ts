@@ -1,12 +1,3 @@
-/**
- * Placement as a filter (§3).
- *
- * The assertions here are mostly about the *negative* half, because that is
- * where §3 puts the value: "non-candidates are listed, disabled, and annotated
- * with why... this makes 'nowhere fits' expressible, catches failures before
- * deploy, and needs no cost model because a human is the tie-break." A filter
- * that only returned what fits would satisfy the type and lose the feature.
- */
 import { describe, expect, test } from 'bun:test';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
@@ -71,8 +62,7 @@ function target(
       {
         adapter,
         artifactTypes: ARTIFACT_TYPES[adapter],
-        // Defaulted to what the adapter serves unasserted, so a test that
-        // says nothing about reach gets the honest floor rather than every cell.
+        // A test that says nothing about reach gets what the adapter serves.
         reaches: overrides.reaches ?? ASSERTED_REACHES_BY_ADAPTER[adapter],
         authReaches: overrides.authReaches ?? ['none', 'private', 'public'],
         deployPath: DEPLOY_PATH,
@@ -106,12 +96,9 @@ describe('the suggestion follows rank', () => {
         target({ id: 'second', vessel: 'cloud', adapter: 'cloudrun', rank: 5 }),
         target({ id: 'first', vessel: 'cluster', rank: 1 }),
       ],
-      // A reach both serve: rank is what this test is about, and a Target
-      // filtered out on reach would make it pass for the wrong reason.
+      // A reach both serve, so neither Target is filtered out.
       requirements({ reach: 'none', auth: 'none' }),
     );
-    // §13: "Rank is one global ordered list." Not the best fit — there is no
-    // fit score, and §3 declines to have a cost model.
     expect(placement.suggested?.target.id).toBe('first');
     expect(placement.candidates.map((c) => c.target.id)).toEqual([
       'first',
@@ -128,9 +115,7 @@ describe('the suggestion follows rank', () => {
   });
 
   test('a website suggests the metal cluster over the public CDN', () => {
-    // §13 calls this out as reading like a miss and being the private-baseline
-    // rule holding: a website is Private by default, and Private cannot live
-    // on a Target whose only exposure is public.
+    // The default reach is private, which the public-only static Target lacks.
     const placement = resolvePlacement(
       [
         target({ id: 'cluster', rank: 0 }),
@@ -168,16 +153,12 @@ describe('nowhere fits is a returnable result', () => {
   });
 
   test('quota exhaustion surfaces here rather than as a failed deploy', () => {
-    // §8: "Quota exhaustion needs no new failure reason (`REJECTED` covers it)
-    // but surfaces at Place time as a non-candidate."
     expect(
       exclusionsFor(target({ quotaExhausted: true }), requirements()),
     ).toEqual(['QUOTA_EXHAUSTED']);
   });
 
   test('an unhealthy Target is a non-candidate with a stated reason', () => {
-    // §13: an unmet prerequisite makes the Target a non-candidate — the same
-    // grammar exposure, quotas, and offline capability all reuse.
     expect(exclusionsFor(target({ healthy: false }), requirements())).toEqual([
       'UNHEALTHY',
     ]);
@@ -195,8 +176,6 @@ describe('exposure filters Targets and selects artifact shape', () => {
   });
 
   test('a non-public workload cannot land on the public-only Target', () => {
-    // The static Target asserts `public` and nothing else, so this falls out of
-    // the ordinary join rather than a special case about which Target it is.
     for (const reach of ['none', 'private'] as const) {
       expect(
         exclusionsFor(
@@ -227,36 +206,29 @@ describe('exposure filters Targets and selects artifact shape', () => {
 
 describe('moving between placements', () => {
   test('a shape the destination has no rendering of forces a rebuild', () => {
-    // §3: a Build's key includes the target shape, so a website moving from a
-    // cluster to the static Target has no artifact of the right shape.
+    // A Build's key includes its target shape.
     expect(takesShape('website', 'image', target({ adapter: 'static' }))).toBe(
       false,
     );
-    // And the inverse: `vercel-output` handed to a host that serves bare files.
     expect(
       takesShape('website', 'vercel-output', target({ adapter: 'static' })),
     ).toBe(false);
   });
 
   test('a same-shape move ships the artifact as is', () => {
-    // Which is what makes cluster-to-cloud, and cluster-to-cluster, free.
     expect(
       takesShape('service', 'image', target({ adapter: 'kubernetes' })),
     ).toBe(true);
   });
 
   test('an accepted non-preferred shape ships as is too', () => {
-    // Vercel prefers `vercel-output` for a website and still serves plain
-    // `files` — a static site moving in from Pages or Firebase travels
-    // without a rebuild, because the files are the site.
     const vercel = target({ adapter: 'vercel' });
     expect(artifactTypeFor('website', vercel)).toBe('vercel-output');
     expect(takesShape('website', 'files', vercel)).toBe(true);
   });
 
   test('a Target with no adapter keeps taking what it always took', () => {
-    // The empty accept list falls back to `artifactTypeFor`'s answer, so the
-    // membership gate never newly strands a placement equality admitted.
+    // An empty accept list leaves only artifactTypeFor's answer.
     const bare = {
       capabilities: { artifactTypes: [] as readonly ArtifactType[] },
     };
@@ -273,9 +245,6 @@ describe('an attached datastore constrains where its App can go', () => {
   };
 
   test('at attach time, the cloud becomes a non-candidate', () => {
-    // §11: "In-cluster datastores stay cluster-local in v1" — tunnelling a
-    // database across sites is the cloud-native path degraded. The
-    // consequence lands at attach time, not at deploy time.
     const placement = resolvePlacement(
       [
         target({ id: 'target-kubernetes', rank: 0 }),
@@ -318,11 +287,6 @@ describe('an attached datastore constrains where its App can go', () => {
   });
 });
 
-/**
- * Ticket 39's third criterion — a Target that can reach none of the registries
- * an artifact is pushed to is a non-candidate **before the build**, rather than
- * a failed revision after it.
- */
 describe('registry reachability at Place', () => {
   test('a Target reaching none of them is excluded, with a reason', () => {
     const excluded = exclusionsFor(
@@ -333,7 +297,7 @@ describe('registry reachability at Place', () => {
   });
 
   test('a Target reaching any one of them is a candidate', () => {
-    // Any, not all: an artifact is pulled once, from one registry.
+    // Any, not all: an artifact is pulled from one registry.
     expect(
       exclusionsFor(
         target({ discovery: { reachableRegistries: ['ghcr.io'] } }),
@@ -345,11 +309,7 @@ describe('registry reachability at Place', () => {
   });
 
   test('a Target declaring host/namespace is a candidate for that same registry', () => {
-    // The live bug: `folly` declares `ghcr.io/jonpulsifer` (a namespace, not a
-    // bare host) because its packages are public and need no credential. This
-    // is `artifactAddress`'s "matches the namespace spelling an operator
-    // actually writes" (`test/domain/artifact-address.test.ts`), pinned here
-    // too so the two call sites cannot drift apart again.
+    // Both this and artifactAddress match through pullableFrom.
     expect(
       exclusionsFor(
         target({ discovery: { reachableRegistries: ['ghcr.io/jonpulsifer'] } }),
@@ -359,8 +319,6 @@ describe('registry reachability at Place', () => {
   });
 
   test('declaring nothing is no restriction, not "reaches nothing"', () => {
-    // Every Target on this installation, until an operator says otherwise —
-    // reading an empty list as a refusal would exclude all of them.
     expect(
       exclusionsFor(
         target({ discovery: { reachableRegistries: [] } }),
@@ -370,8 +328,7 @@ describe('registry reachability at Place', () => {
   });
 
   test('a static Target is not asked the question', () => {
-    // It serves `files`, fetched from the depot, and its discovery reports
-    // `reachableRegistries: []` for that reason rather than as a refusal.
+    // A website there is files from the depot, so no image is pulled.
     expect(
       exclusionsFor(
         target({ adapter: 'static', discovery: { reachableRegistries: [] } }),
@@ -410,8 +367,6 @@ describe('the rest of the derived requirements', () => {
   });
 
   test('an unknown quantity excludes nothing', () => {
-    // Core never invents a scheduler (§3). A unit it cannot read is not
-    // grounds to disqualify a Target.
     expect(
       exclusionsFor(
         target({ discovery: { resourceCeiling: { memory: 'a lot' } } }),
@@ -442,10 +397,7 @@ describe('the rest of the derived requirements', () => {
 
 describe('§9: a Private website takes the server-image rendering', () => {
   test('the whole resolution routes it away from static hosting', () => {
-    // §9: "a rendering that leaves an unauthenticated alternate origin is
-    // disqualified rather than shipped with a caveat — which is why the static
-    // hosting product serves `Public` only, and why a Private website takes
-    // the server-image rendering."
+    // Static hosting leaves an unauthenticated origin, so it is public only.
     const placement = resolvePlacement(
       [
         target({ id: 'cdn', vessel: 'hosting', adapter: 'static', rank: 0 }),
@@ -454,13 +406,11 @@ describe('§9: a Private website takes the server-image rendering', () => {
       requirements({ kind: 'website', reach: 'private', auth: 'proxy' }),
     );
 
-    // Static outranks the cluster and is still not what is suggested.
     expect(placement.suggested?.target.id).toBe('cluster');
     expect(placement.suggested?.artifactType).toBe('image');
     expect(placement.candidates.map((one) => one.target.id)).toEqual([
       'cluster',
     ]);
-    // And the one that lost says why, rather than simply not appearing (§3).
     const excluded = placement.nonCandidates.find(
       (one) => one.target.id === 'cdn',
     );
@@ -485,11 +435,7 @@ describe('§9: a Private website takes the server-image rendering', () => {
 
 describe('§10: the reach rule does not bind a website', () => {
   test('a Target that reaches no store still holds a website', () => {
-    // §10's one exception makes a website's configuration build arguments
-    // derived from its kind, so there is nothing at run time for a store to
-    // deliver. Static hosting reaches no store precisely because it has no
-    // runtime — and applying the rule anyway would exclude it from the one
-    // kind it exists to run.
+    // A website's config is build arguments; nothing reads a store at runtime.
     const cdn = target({
       adapter: 'static',
       discovery: { reachableSecretStores: [] },
@@ -503,8 +449,6 @@ describe('§10: the reach rule does not bind a website', () => {
   });
 
   test('a service on the same Target is still bound by it', () => {
-    // The exemption is the kind's, not the Target's: a Component with a
-    // runtime that reads configuration needs somewhere to read it from.
     const unreachable = target({
       discovery: { reachableSecretStores: [] },
     });
@@ -516,10 +460,7 @@ describe('§10: the reach rule does not bind a website', () => {
 
 describe('§3: a kind an adapter does not render is refused at Place', () => {
   test('a job is a candidate on the cloud runtime', () => {
-    // `KINDS_BY_ADAPTER` is "a property of the code", and the Cloud Run adapter
-    // now renders a Job as well as a Service. A job reaches `none` because
-    // nothing routes to one — which is what the adapter renders, and what the
-    // App chart's `serving` helper says one layer over.
+    // A job reaches none because nothing routes to one.
     const cloud = target({ adapter: 'cloudrun' });
     expect(
       exclusionsFor(
@@ -530,10 +471,7 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
   });
 
   test('both backends that render a job also fire one', () => {
-    // Two quite different machineries reaching the same answer: the cluster's
-    // own controller fires the CronJob the chart renders, and the Cloud Run
-    // adapter puts a Cloud Scheduler job in front of the Job it renders. The
-    // capability is what makes those one row rather than a special case.
+    // A cluster fires the chart's CronJob; Cloud Run uses Cloud Scheduler.
     const scheduled = requirements({
       kind: 'job',
       reach: 'none',
@@ -549,12 +487,7 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
   });
 
   test('a schedule nothing fires is still refused at Place, and only a schedule', () => {
-    // No connected adapter is in this state today, which is exactly why it is
-    // constructed: the guard is what the *next* backend is measured against,
-    // and a rule with no test is a rule that rots. The kind is rendered and the
-    // schedule is not, so the refusal is its own reason and lands at Place — a
-    // scheduled job accepted here would be refused after a build and a Deploy,
-    // which is the direction §3 exists to prevent.
+    // Every adapter that renders a job fires one, so this Target is hand-built.
     const capable = target({ adapter: 'kubernetes' });
     const cadenceless: PlacementTarget = {
       ...capable,
@@ -569,13 +502,8 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
 
     expect(exclusionsFor(cadenceless, scheduled)).toEqual(['NO_SCHEDULER']);
     expect(exclusionsFor(cadenceless, unscheduled)).toEqual([]);
-    // A backend that renders no job at all says so once. NO_SCHEDULER's
-    // sentence opens by granting that this Target runs a job, so beside
-    // KIND_UNSUPPORTED it would contradict it on a single row — and
-    // `bluenose-static` is a connected Target, so that is a row a developer
-    // reads rather than a shape only a test constructs.
-    // REACH_UNSUPPORTED rides along because `static` serves only `public`;
-    // what matters is that NO_SCHEDULER is not the third.
+    // NO_SCHEDULER's sentence grants that the Target runs a job, so it never
+    // joins KIND_UNSUPPORTED. Static is public only, hence REACH_UNSUPPORTED.
     expect(exclusionsFor(target({ adapter: 'static' }), scheduled)).toEqual([
       'KIND_UNSUPPORTED',
       'REACH_UNSUPPORTED',
@@ -595,7 +523,6 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
 });
 
 describe('§9: reach and auth join as two independent facts', () => {
-  /** Offsite, as it declares itself: every reach, auth for `private` only. */
   const offsite = () =>
     target({
       reaches: ['none', 'private', 'public'],
@@ -603,9 +530,6 @@ describe('§9: reach and auth join as two independent facts', () => {
     });
 
   test('the four routed cells, three met and one unmet', () => {
-    // The grid the old three-state exposure could not express. Two of these
-    // cells had no name at all before: an unauthenticated address on your own
-    // network, and an authenticated public one.
     const met: [ReturnType<typeof requirements>['reach'], 'none' | 'proxy'][] =
       [
         ['private', 'none'],
@@ -618,9 +542,6 @@ describe('§9: reach and auth join as two independent facts', () => {
       );
     }
 
-    // Expressible and unmet, which is the point: the Target has the mechanism
-    // and cannot assert an audience wider than one GitHub user. It lights up
-    // the day it can, with no Spindrift change.
     expect(
       exclusionsFor(
         offsite(),
@@ -630,8 +551,7 @@ describe('§9: reach and auth join as two independent facts', () => {
   });
 
   test('the unroutable cell is refused before it can be placed', () => {
-    // A filter needs a route to sit on. Refused at validation, so placement
-    // never sees it — but if it did, auth would still find nothing to attach to.
+    // Validation refuses this cell first; auth needs a route to attach to.
     expect(
       exclusionsFor(offsite(), requirements({ reach: 'none', auth: 'proxy' })),
     ).toContain('AUTH_UNSUPPORTED');
@@ -649,8 +569,6 @@ describe('§9: reach and auth join as two independent facts', () => {
 
 describe('§3: a Target is refused on each fact it asserts', () => {
   test('a reach it does not serve', () => {
-    // Folly is `private`-only on purpose — it is on Starlink, so it should be
-    // pulling and not pushing. That is a fact about the site, not a limitation.
     const folly = target({ reaches: ['none', 'private'] });
     expect(
       exclusionsFor(folly, requirements({ reach: 'public', auth: 'none' })),
@@ -670,8 +588,7 @@ describe('§3: a Target is refused on each fact it asserts', () => {
   });
 
   test('a gateway it never named', () => {
-    // §3's grammar over the failure that produced this ticket: a green Deploy
-    // whose `parentRefs` named the empty string, and a URL nothing answered.
+    // Without one, parentRefs name an empty Gateway and nothing answers.
     expect(
       exclusionsFor(
         target({ routesAttachTo: false }),

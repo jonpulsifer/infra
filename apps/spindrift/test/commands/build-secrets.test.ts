@@ -1,23 +1,5 @@
-/**
- * Build secrets (story 112, §4, §10).
- *
- * The claims worth breaking, each asserted here because an implementation that
- * lost one would still look like it worked:
- *
- * - **A separate list.** A build secret never enters the pinned config
- *   document, so rotating one mints no Deploy and changes no `configVersion`;
- *   and one key cannot be both runtime config and a build secret — the
- *   conversion is refused in both directions rather than silently applied.
- * - **Core resolves, the builder never holds a store credential.** The value
- *   reaches the route on the spec, resolved; the store is read through the
- *   contract's one narrow verb, at dispatch and nowhere else.
- * - **The refusal direction.** A route that cannot carry a held secret is
- *   refused before anything runs, and so is a declaration whose pinned version
- *   is gone — a build that would have run without its secret is the failure
- *   mode this ticket exists to prevent.
- * - **Provenance records the names.** The Build row says which secrets the
- *   run could read — names only, never values.
- */
+// Build secrets live outside the pinned config document, are resolved by core
+// at dispatch, and are recorded on the Build by name only.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import {
@@ -404,9 +386,8 @@ describe('dispatch resolves, refuses, and records', () => {
   });
 
   test('without a placement there are no secrets to resolve', async () => {
-    // The same parity build arguments hold (§2, §10): a Build is keyed on
-    // shape, declarations on (Component, Target), and inventing a Target
-    // would hand the build some other Target's credentials.
+    // Declarations are keyed on (Component, Target), so with no placement there
+    // is nothing to resolve.
     const { component, target } = await fixture();
     const ctx = await context(
       registry(new FakeDeployAdapter({ adapter: 'kubernetes' })),

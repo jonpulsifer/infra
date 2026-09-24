@@ -1,20 +1,3 @@
-/**
- * An App opting in to deploying on push (§15).
- *
- * `apps.autoDeploy` shipped with its reader (`reconciler/auto-deploy.ts`) and
- * its trigger (the webhook route) and with **no writer at all** — the column
- * defaults `false`, `createApp` does not take it, and no command set it. So
- * deploy-on-push was complete, merged, and permanently off. Three claims:
- *
- * - **The switch actually moves the column**, which is the whole gap.
- * - **An archive App is refused**, because `dispatchAutoDeploys` reads the
- *   scopes of repository reconciliation passes — an App with no repository is
- *   not something it can ever reach, so `true` there would be a switch that
- *   sits on and never fires.
- * - **The dispatcher deploys what this turned on, and only that.** The reader
- *   and the writer meet here or they do not meet anywhere: a test that only
- *   asserted the column would pass just as well against a column nothing reads.
- */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { setAppAutoDeploy } from '../../src/commands/apps/auto-deploy.ts';
@@ -100,7 +83,6 @@ describe('deploy on push, turned on and off', () => {
   }
 
   test('the column every App defaults to, and the one nothing could change', async () => {
-    // The state this ticket is about: shipped, readable, and unreachable.
     expect(await autoDeployOf(repoAppId)).toBe(false);
   });
 
@@ -112,7 +94,6 @@ describe('deploy on push, turned on and off', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.autoDeploy).toBe(true);
-      // "On" is never reported without saying what it is on *for*.
       expect(result.value.repository).toBe('jonpulsifer/infra');
     }
     expect(await autoDeployOf(repoAppId)).toBe(true);
@@ -138,7 +119,7 @@ describe('deploy on push, turned on and off', () => {
       expect(result.failure.code).toBe('INVALID_INPUT');
       expect(result.failure.message).toContain('uploaded archive');
     }
-    // And it is refused *before* the write, not reported after one.
+    // Refused before any write.
     expect(await autoDeployOf(archiveAppId)).toBe(false);
   });
 
@@ -152,10 +133,6 @@ describe('deploy on push, turned on and off', () => {
   });
 
   test('the dispatcher deploys the App this turned on, and skips the one it did not', async () => {
-    // The claim that makes the other five worth anything: the writer and the
-    // reader are the same column. `dispatchAutoDeploys` selects on
-    // `apps.autoDeploy = true`, so an App this command has not switched on is
-    // not attempted at all — no `deployApp` call, no adapter needed.
     const { db } = database();
     const [second] = await db
       .insert(apps)
@@ -183,8 +160,6 @@ describe('deploy on push, turned on and off', () => {
   });
 
   test('nothing is dispatched from a pass that adopted no commit', async () => {
-    // `unchanged`, `frozen`, `rejected`, `unavailable` all mean nothing landed.
-    // An opted-in App must not redeploy on a pass that found no new commit.
     await setAppAutoDeploy({ appId: repoAppId, autoDeploy: true }, ctx);
 
     const attempts = await dispatchAutoDeploys(

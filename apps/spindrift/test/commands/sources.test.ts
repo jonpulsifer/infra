@@ -1,22 +1,6 @@
 /**
- * The Sources an installation has staged (§4, §15).
- *
- * Three derivations carry the whole listing and each is easy to get subtly
- * wrong, which is why they are asserted rather than read.
- *
- * **A row is a digest, not a Build.** The same staged bytes are dispatched once
- * per target shape, so a per-Build listing counted one Source twice and paged
- * as though there were two. Grouping is what makes the noun mean itself.
- *
- * **`supplied` is what happened, not what was declared.** §4's supplied
- * artifact is an archive of finished output that no route ever ran over, and
- * the durable evidence of that is a `SUCCEEDED` Build with no runner. Reading
- * the App's declared archive contents instead would mark a Source on the
- * strength of a claim made before anything was staged.
- *
- * **`retention` follows the source kind**, per `source-bundle.ts`: an upload is
- * durable and a repository fetch is ephemeral. It is what decides whether the
- * location on a row still resolves.
+ * Listing staged Sources. A row is one bundle digest, `supplied` means a
+ * SUCCEEDED Build with no runner, and `retention` follows the source kind.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { listSources } from '../../src/commands/sources/list.ts';
@@ -54,7 +38,7 @@ async function context(): Promise<CommandContext> {
   };
 }
 
-/** One App, one Component, one Build — the whole of what a Source row joins. */
+/** One Build, on an App and Component reused by name. */
 async function seed(
   ctx: CommandContext,
   input: {
@@ -189,11 +173,6 @@ describe('listing Sources', () => {
     expect(result.ok && result.value.sources[0]?.supplied).toBe(false);
   });
 
-  /**
-   * `upload://` is deliberately not a URL — no route can fetch it — and a
-   * listing that did not say so would show a Source that cannot be built as
-   * indistinguishable from one that can.
-   */
   test('names a location no builder could fetch', async () => {
     await seed(ctx, {
       name: 'on-local-disk',
@@ -217,10 +196,6 @@ describe('listing Sources', () => {
     expect(result.ok && result.value.sources).toEqual([]);
   });
 
-  /**
-   * The reason this listing groups. One commit built for two target shapes is
-   * two Builds over one set of bytes, and §15 stages those bytes once.
-   */
   test('one digest built for two shapes is one Source that counts both', async () => {
     await seed(ctx, {
       name: 'two-shapes',

@@ -1,10 +1,6 @@
 /**
- * The deploy contract's closed vocabulary.
- *
- * A failure test asserts the sentence the user reads, not that an error was
- * thrown — the closed reason set and `blame` exist precisely so a failure has an
- * assertable identity (§ Testing). This file asserts that identity: the eight
- * reasons, their blame, and that a stream ends on a verdict carrying one.
+ * The deploy contract's closed vocabulary: the eight reasons, their blame, and
+ * a stream that ends on a verdict carrying one.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -22,21 +18,6 @@ import type { DesiredState } from '../../src/domain/desired-state.ts';
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 import { deployTargetFor } from '../harness/installation.ts';
 
-/**
- * §6's table, transcribed. A reviewer can check this against the spec without
- * reading it, because the whole table is here:
- *
- * | Reason | Blame | Covers |
- * | --- | --- | --- |
- * | `BUILD_FAILED` | developer | compile error, failed build step |
- * | `ARTIFACT_UNAVAILABLE` | platform | image pull failure, registry auth, missing object |
- * | `REJECTED` | developer | admission webhook, invalid spec, quota, org policy |
- * | `STARTUP_FAILED` | developer | crash loop, exits non-zero, revision will not start |
- * | `UNHEALTHY` | developer | readiness never passed |
- * | `TIMEOUT` | — | no terminal state within budget |
- * | `TARGET_UNREACHABLE` | platform | credentials expired, cluster down, API unreachable |
- * | `INTERNAL` | platform | adapter bug |
- */
 const TABLE = [
   ['BUILD_FAILED', 'developer', 'compile error, failed build step'],
   [
@@ -68,7 +49,6 @@ const TABLE = [
   string,
 ])[];
 
-/** A type-level claim that fails to compile if `T` is not exactly `true`. */
 type Assert<T extends true> = T;
 
 describe("§6's failure vocabulary", () => {
@@ -122,11 +102,6 @@ const desired: DesiredState = {
   hostname: { canonical: 'web.example.test' },
 };
 
-/**
- * A red adapter, written here rather than reached for from the harness, because
- * what is under test is the contract's own shape: that a stream of events
- * resolves to a verdict, and that the verdict is what carries the reason.
- */
 const refuses: DeployAdapter = {
   adapter: 'kubernetes',
   artifactTypes: ['image'],
@@ -182,7 +157,6 @@ describe('apply', () => {
     expect(verdict.phase).toBe('FAILED');
     if (verdict.phase !== 'FAILED') throw new Error('unreachable');
     expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
-    // The green build with the red deploy: the case blame exists for (§6).
     expect(blameFor(verdict.reason)).toBe('platform');
   });
 });

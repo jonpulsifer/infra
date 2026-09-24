@@ -1,11 +1,6 @@
 /**
- * Where a `LIVE_STATUS` run can be watched while it is still running.
- *
- * §4 makes the fidelity visible rather than worked around, and this route's
- * fidelity means the log text does not exist on this side until the run is
- * over. The run's own page is where that text is being written, so the route
- * reports it — as a fact about the run, not as a line in a log that is by
- * definition still empty when a reader wants it.
+ * A `LIVE_STATUS` run has no log text until it ends, so the route reports the
+ * run's own page, where that text is being written.
  */
 import { describe, expect, test } from 'bun:test';
 import type {
@@ -47,7 +42,6 @@ const spec: BuildSpec = {
   buildSecrets: [],
 };
 
-/** A host whose run goes green, reporting whatever web address a test names. */
 function hostReporting(htmlUrl: string | null | undefined): ActionsHost {
   return {
     installationFor: async () => ({ installationId: '1' }),
@@ -124,8 +118,6 @@ describe('the run link a hosted build reports', () => {
   });
 
   test('it arrives before any log text, which is the whole of its value', async () => {
-    // `LIVE_STATUS` releases text only at the end. A link that landed with the
-    // text would arrive with the thing it exists to substitute for.
     const events = await eventsFrom(hostReporting(RUN_URL));
 
     const link = events.findIndex((event) => event.type === 'runner');
@@ -138,8 +130,6 @@ describe('the run link a hosted build reports', () => {
   });
 
   test('a host that reports no web address produces no event', async () => {
-    // Rather than an event carrying nothing, which reaches the screen as a link
-    // to nowhere offered at the moment the reader was told to go elsewhere.
     for (const absent of [null, undefined]) {
       const events = await eventsFrom(hostReporting(absent));
       expect(events.filter((event) => event.type === 'runner')).toHaveLength(0);

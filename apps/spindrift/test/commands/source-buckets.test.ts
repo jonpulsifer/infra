@@ -1,11 +1,6 @@
 /**
- * Declaring the bucket sources are staged to (§4, §20).
- *
- * The behaviour that matters is the order of two steps: **check, then write**.
- * A bucket the controller cannot write to is not a configuration mistake that
- * shows up in configuration — it is a build that dies minutes later at
- * staging, with a message about a signed URL. So a refused check must leave
- * the manifest exactly as it was, and that is what most of this file asserts.
+ * Declaring the buckets sources are staged to. The bucket is checked before the
+ * manifest is written, so a refused check leaves the manifest as it was.
  */
 import { describe, expect, test } from 'bun:test';
 import { listSourceBuckets } from '../../src/commands/storage/list-buckets.ts';
@@ -27,12 +22,8 @@ const database = withIsolatedDatabase();
 const NOW = new Date('2026-08-02T12:00:00.000Z');
 
 /**
- * A far side that answers the two-step token exchange, then the bucket read.
- *
- * The two steps answer in different shapes and that is not incidental: STS
- * speaks OAuth's `access_token`, and `iamcredentials` speaks its own
- * `accessToken`. A fake that answered one shape to both would pass a client
- * that reads the wrong field.
+ * A fake GCP token exchange and bucket read. STS answers OAuth's `access_token`
+ * and `iamcredentials` its own `accessToken`, as the real APIs do.
  */
 function cloud(bucketStatus: number): typeof fetch {
   return (async (input: Request | string) => {
@@ -78,17 +69,12 @@ async function context(bucketStatus = 200): Promise<CommandContext> {
         impersonationUrl:
           'https://iamcredentials.example/v1/projects/-/serviceAccounts/c@p.iam.gserviceaccount.com:generateAccessToken',
         fetch: cloud(bucketStatus),
-        // The projected volume a pod would have. Injected rather than written
-        // to a real path, for the same reason the transport is.
         readToken: async () => 'a-projected-token',
       },
     },
   } as CommandContext['manifest'];
 
-  // Stored as *authored*, not as resolved: the deployment's federation is
-  // joined onto the context's copy and the schema refuses it in the document.
-  // This command reads the durable one precisely so it never writes the
-  // resolved one back — storing the resolved one here would test the opposite.
+  // Stored as authored, since the schema refuses the resolved federation.
   await writeStoredManifest(database().db, await authoredFixture());
 
   return {
@@ -100,14 +86,7 @@ async function context(bucketStatus = 200): Promise<CommandContext> {
   };
 }
 
-/**
- * The declared list and the one staging picks, read back from the row.
- *
- * Two keys from two places now, and deliberately asserted together: the list is
- * `sources.buckets` and the choice is the home vessel's `shared.sourceBucket`,
- * so a write that moved one without the other is a manifest whose staging
- * bucket is not among its buckets.
- */
+/** `sources.buckets` and the home vessel's `shared.sourceBucket` together. */
 async function storedBuckets() {
   const stored = await readStoredManifest(database().db);
   if (stored === null) return null;
@@ -129,7 +108,6 @@ describe('declaring a source bucket', () => {
     expect(result.value.buckets).toContain('a-second-bucket');
     expect(await storedBuckets()).toMatchObject({
       buckets: ['example-source-bucket', 'a-second-bucket'],
-      // Not made default, because nobody asked for that.
       defaultBucket: 'example-source-bucket',
     });
   });
@@ -173,7 +151,6 @@ describe('declaring a source bucket', () => {
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
     expect(result.failure.message).toContain('not-ours');
-    // The whole point: a refused check leaves the manifest as it was.
     expect(await storedBuckets()).toMatchObject({
       buckets: ['example-source-bucket'],
       defaultBucket: 'example-source-bucket',

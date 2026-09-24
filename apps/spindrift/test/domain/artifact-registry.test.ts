@@ -1,12 +1,5 @@
-/**
- * What a registry namespace is, before anything is pushed to it (§16).
- *
- * `componentRepositories` appends `{app}/{component}` to each declared
- * namespace, so a namespace that is not a host plus a path segment produces a
- * repository name every registry answers `NAME_INVALID` to — and it does so at
- * `Build and push`, after the whole build has run. These are the rules that
- * catch it at the moment somebody declares the destination instead.
- */
+// These rules refuse a bad namespace when it is declared; otherwise it fails
+// with NAME_INVALID at push, after the build has run.
 import { describe, expect, test } from 'bun:test';
 import {
   isRegistryNamespace,
@@ -27,8 +20,7 @@ describe('a registry namespace', () => {
   });
 
   test('is not a repository path with the host left to be inferred', () => {
-    // Legal under Docker Hub's implicit host, and a destination that depends on
-    // which client resolves it — which is the thing §16 declares away.
+    // Legal under Docker Hub's implicit host, but the client picks the host.
     expect(isRegistryNamespace('alpine/git')).toBe(false);
   });
 
@@ -75,11 +67,8 @@ describe('the distribution API a namespace is probed at', () => {
     );
   });
 
-  /**
-   * The bug this exists to prevent: a namespace is written `docker.io/…` and
-   * that host does not serve the distribution API, so probing it as written
-   * reports Docker Hub unreachable on a namespace that pushes fine.
-   */
+  // docker.io does not serve the distribution API, so probing it as written
+  // reports a working namespace unreachable.
   test('is the registry, not the index, for every name Docker Hub answers to', () => {
     for (const host of ['docker.io', 'index.docker.io', 'registry-1.docker.io'])
       expect(registryApiBase(host)).toBe('https://registry-1.docker.io/v2/');

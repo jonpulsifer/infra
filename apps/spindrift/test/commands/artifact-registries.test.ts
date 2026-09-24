@@ -1,18 +1,5 @@
-/**
- * Declaring where artifacts are pushed (§16, §20).
- *
- * The same check-then-write order `source-buckets.test.ts` asserts, over a
- * weaker check — and the weakness is the thing most of this file pins down. A
- * bucket is verified *writable* with the identity that would write to it. A
- * registry has no such identity here: §13 leaves every push authorized by the
- * build route that makes it. So a registry that answers `401` is **reachable**,
- * and a check that called that a failure would refuse every private registry an
- * installation actually uses.
- *
- * The other half is order. `registry[0]` is what a Target with no declared
- * `reachableRegistries` pulls from, so moving the first entry is a real act and
- * not a cosmetic reorder.
- */
+// A registry has no push identity here, so a 401 counts as reachable. The first
+// entry is what a Target with no `reachableRegistries` pulls from.
 import { describe, expect, test } from 'bun:test';
 import { listArtifactRegistries } from '../../src/commands/storage/list-registries.ts';
 import { testRegistryReachability } from '../../src/commands/storage/test-registry.ts';
@@ -32,16 +19,11 @@ const database = withIsolatedDatabase();
 
 const NOW = new Date('2026-08-02T12:00:00.000Z');
 
-/** What the fixture manifest declares, so the assertions do not restate it. */
+/** The fixture manifest's one registry. */
 const DECLARED = 'registry.example.test/artifacts';
 
-/**
- * A registry far side that answers `GET /v2/` with one status.
- *
- * It records the URL it was asked for, because the whole of the Docker Hub
- * alias lives in that string: a probe that asked the namespace's host as
- * written would ask the wrong one.
- */
+// Answers `GET /v2/` with one status, and records each URL asked for so the
+// Docker Hub alias shows.
 function registryAnswering(status: number) {
   const asked: string[] = [];
   const send = async (request: Request): Promise<Response> => {
@@ -122,7 +104,6 @@ describe('probing a registry', () => {
     expect(result.value.requiresAuth).toBe(false);
   });
 
-  /** The one that matters: a private registry must not read as broken. */
   test('a challenge is reachable and closed, not unreachable', async () => {
     const { ctx } = await context(401);
     const result = await testRegistryReachability({ namespace: DECLARED }, ctx);
@@ -216,7 +197,6 @@ describe('declaring a registry', () => {
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
     expect(result.failure.message).toContain('ghcr.io/an-owner');
-    // The whole point: a refused check leaves the manifest as it was.
     expect(await storedRegistries()).toEqual([DECLARED]);
   });
 

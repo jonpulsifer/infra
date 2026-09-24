@@ -1,13 +1,6 @@
 /**
- * The bosun build route (Task: bosun build route).
- *
- * Unlike the other three routes, bosun's far side is not dialed — it is
- * polled through `src/storage/build-outbox.ts`, which is why this file's
- * fake (`FakeBosunOutbox`) scripts what `get` reports on each poll rather
- * than standing behind an HTTP client the way `FakeGitHub` or `FakeKubernetes`
- * do for the other three. The pacing pattern is identical to theirs:
- * `fakeClock()` only advances when the route sleeps, so a deadline test
- * spends no wall-clock time.
+ * The bosun build route polls the build outbox instead of dialing a far side,
+ * so `FakeBosunOutbox` scripts what each poll reports.
  */
 import { describe, expect, test } from 'bun:test';
 import { BosunBuildRoute } from '../../src/adapters/build/bosun.ts';
@@ -48,7 +41,6 @@ const spec: BuildSpec = {
   buildSecrets: [],
 };
 
-/** A clock that only moves when the route waits — see `build-routes.test.ts`. */
 function fakeClock(): {
   now: () => Date;
   sleep: (ms: number) => Promise<void>;
@@ -64,7 +56,6 @@ function fakeClock(): {
 
 const PACING = { intervalMs: 1_000, timeoutMs: 60_000 } as const;
 
-/** Drive a route to its verdict, collecting the timeline it yielded. */
 async function run(
   stream: AsyncGenerator<BuildEvent, BuildResult, void>,
 ): Promise<{ events: BuildEvent[]; result: BuildResult }> {
@@ -77,7 +68,6 @@ async function run(
   return { events, result: step.value };
 }
 
-/** Every log line the route yielded, joined — what a person would read. */
 function text(events: readonly BuildEvent[]): string {
   return events
     .filter((event) => event.type === 'log')
@@ -181,7 +171,6 @@ describe('a successful build', () => {
     expect(text(events)).toContain('line one');
     expect(result.status).toBe('SUCCEEDED');
     if (result.status === 'SUCCEEDED') {
-      // §16's join: the route echoes the digest it was given.
       expect(result.provenance.bundleDigest).toBe('sha256:bundle');
       expect(result.artifact.digest).toBe(digest);
       expect(result.provenance.claimedLevel).toBe(2);

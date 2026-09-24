@@ -1,28 +1,6 @@
 /**
- * Which application an operator is shown, decided by one predicate.
- *
- * `isUnconfiguredInstallation` is the whole of that decision: false renders the
- * product, true replaces it with a three-question wizard. The two directions are
- * not symmetric and neither is what a test owes them.
- *
- * **A false positive replaces a working installation with a wizard.** There is
- * no declaration in this repository to read any more — configuration is the
- * row's — so what is asserted is the predicate's shape rather than one
- * installation's document: each genuine choice, answered alone, is enough to
- * make an installation configured.
- *
- * **A false negative is a wizard nobody can reach.** That used to be the whole
- * of the placeholder's problem: the relying party came out of the document, so
- * an unconfigured installation was served at `spindrift.example.com` and no
- * browser would run a passkey ceremony against it. The relying party is a
- * deployment fact now, so every installation is served at its own origin and
- * this predicate's `true` is reachable by construction.
- *
- * **Each conjunct gets its own claim**, because dropping one from an `&&` is the
- * false-positive direction and the three-value assertion below cannot see it: it
- * reads the values, never the predicate. One claim per genuine choice, each
- * answering that choice alone and asserting configured, is what makes a conjunct
- * that stops being read a red build rather than a silent widening.
+ * `isUnconfiguredInstallation` chooses between the product and the onboarding
+ * wizard. Answering any one genuine choice must count as configured.
  */
 import { describe, expect, test } from 'bun:test';
 import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
@@ -38,13 +16,8 @@ describe('an installation nobody has configured says so', () => {
   });
 
   test('a declaration that seeds only the deployment facts is unconfigured', () => {
-    // The one state the wizard is reachable in today, and the one a
-    // whole-document comparison could not express. Everything corrected here is
-    // a fact the chart knows — the hostname above all, which is what makes a
-    // passkey ceremony possible at all — and every genuine choice is left at its
-    // stand-in. "Left" is generous: the schema has no optional keys, so this
-    // document restates all three stand-ins by hand, which is why the case is
-    // reachable rather than ordinary.
+    // Only facts the chart knows differ from the placeholder, and every genuine
+    // choice keeps its stand-in.
     const seeded = {
       ...DEFAULT_PLACEHOLDER_MANIFEST,
       controlPlane: { hostname: 'spindrift.substituted.example' },
@@ -61,13 +34,7 @@ describe('an installation nobody has configured says so', () => {
     );
   });
 
-  // One row per conjunct, and three rows rather than one assertion because
-  // dropping a single `&&` is invisible to everything else in this file: the
-  // claim above reads the three values but never routes them through the
-  // predicate, so it cannot watch the predicate stop reading one. Each row
-  // answers exactly one genuine choice and asserts configured — the smallest act
-  // that ends onboarding, which for the first row is an operator pressing
-  // Continue on an edited name and nothing else.
+  // One row per conjunct, so dropping any `&&` from the predicate fails a row.
   const answeringOne: readonly (readonly [string, AuthoredManifest])[] = [
     [
       'installation.name',
@@ -109,10 +76,8 @@ describe('an installation nobody has configured says so', () => {
   );
 
   test('a registry spelled as a bare string is the list it always was', () => {
-    // `supplyChain.registry` accepts either spelling and parses both to a list,
-    // so the stand-in stays the stand-in however it was written. A predicate
-    // comparing the raw document would answer differently for two documents that
-    // are the same document.
+    // `supplyChain.registry` parses a bare string to a list, so both spellings
+    // are the stand-in.
     const bare = validateManifest(
       {
         ...DEFAULT_PLACEHOLDER_MANIFEST,

@@ -1,20 +1,3 @@
-/**
- * What the Config tab says about where an App comes from (§5, §15).
- *
- * `getAppSource` is the read behind that card, and the three facts it has to
- * get right are the three an operator opens it for:
- *
- * - **The scope, not the repository root.** §5 makes a named directory the unit
- *   of detection, so an App scoped into `services/api` is asked about
- *   `services/api/spindrift.yaml` and nothing else.
- * - **At the adopted commit, never the branch head.** §15 makes
- *   `authoritative_commit` the configuration that is actually governing. A file
- *   pushed after it has not taken effect, and this read must not show it as
- *   though it had.
- * - **"Not there" and "could not look" are different answers.** A scope with no
- *   file is `absent`, which is detection's ordinary state; a repository that
- *   was never connected is `unread` with the reason on it.
- */
 import { describe, expect, test } from 'bun:test';
 import { getAppSource } from '../../src/commands/apps/source.ts';
 import type {
@@ -96,8 +79,7 @@ describe('getAppSource', () => {
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
       'services/api/Dockerfile': 'FROM scratch\n',
     });
-    // A later commit that changes the file. Adoption has not reached it, so
-    // this read must not see it.
+    // A later commit that adoption has not reached.
     fake.commitFiles('main', {
       'services/api/spindrift.yaml': 'version: 1\ncomponent:\n  kind: job\n',
     });
@@ -123,7 +105,7 @@ describe('getAppSource', () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
       'services/api/Dockerfile': 'FROM scratch\n',
-      // At the root, and therefore not this App's — the scope is what is read.
+      // Outside the scope, so not this App's.
       'spindrift.yaml': SPINDRIFT_YAML,
     });
 

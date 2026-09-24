@@ -1,11 +1,7 @@
 /**
- * The hosted route's files arm, run as the file actually ships it.
- *
- * The other half of this agreement is `static/oci.ts`: the adapter pulls one
- * layer and reads it as a gzipped tar, which is only true of what this arm
- * pushes — `FROM scratch` + `COPY . /`, one layer, no build. A fixture cannot
- * prove the shipped script writes that Dockerfile; running the step's own
- * `run:` script can (the same reasoning as `build-report-statement.test.ts`).
+ * Runs the hosted route's files arm as the workflow ships it. `static/oci.ts`
+ * reads the artifact as one gzipped tar layer, which holds only for
+ * `FROM scratch` plus `COPY . /`.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -25,7 +21,6 @@ const WORKFLOW = join(
 );
 const FRONTEND_STEP = 'Choose the frontend';
 
-/** The `run:` script of the named step, straight out of the shipped file. */
 async function frontendScript(): Promise<string> {
   const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
     jobs: { build: { steps: { name?: string; run?: string }[] } };
@@ -40,9 +35,7 @@ async function frontendScript(): Promise<string> {
 async function runArm(input: {
   artifactType: string;
   scopeFiles: Readonly<Record<string, string>>;
-  /** What the scope's `spindrift.yaml` named, as core resolved it (§3). */
   outputDirectory?: string;
-  /** The framework a `vercel-output` build declares to the platform (§6). */
   vercelFramework?: string;
 }): Promise<{ outputs: Record<string, string>; workspace: string }> {
   const workspace = await mkdtemp(join(tmpdir(), 'spindrift-files-arm-'));
@@ -93,9 +86,7 @@ describe('the files arm of “Choose the frontend”', () => {
       artifactType: 'files',
       scopeFiles: {
         'index.html': '<!doctype html>',
-        // A Dockerfile in the scope must not turn a files artifact into an
-        // image build: the artifact type decides what the thing *is*; a
-        // Dockerfile only ever decided how to build one.
+        // The artifact type wins over a Dockerfile in the scope.
         Dockerfile: 'FROM nginx',
       },
     });
@@ -114,22 +105,16 @@ describe('the files arm of “Choose the frontend”', () => {
   test('a declared output directory builds the scope first and lifts from it', async () => {
     const { outputs, workspace } = await runArm({
       artifactType: 'files',
-      // A scope that declares an output directory is the *sources* of a site,
-      // so its own Dockerfile is how the site gets made — the arm must fall
-      // through to the ladder rather than shipping the tree as it stands.
       scopeFiles: { Dockerfile: 'FROM node', 'package.json': '{}' },
       outputDirectory: 'dist',
     });
     try {
       expect(outputs.lift).toBe('dist');
-      // The ladder's answer, not the files short-circuit: this is the build
-      // that produces the site, and `Lift the site out of the build` runs it.
       expect(outputs.context).toBe(join(workspace, 'bundle'));
       expect(outputs.file).toBe(
         join(workspace, 'bundle', 'site', 'Dockerfile'),
       );
-      // Written either way, because both paths end by exporting one directory
-      // as the single gzipped tar layer `static/oci.ts` reads back.
+      // Written on both paths, since each exports one directory as one layer.
       const scratch = await readFile(outputs.scratchfile as string, 'utf8');
       expect(scratch).toBe('FROM scratch\nCOPY . /\n');
     } finally {
@@ -153,17 +138,13 @@ describe('the files arm of “Choose the frontend”', () => {
   test('the platform’s own build output hands the scope to the platform’s builder', async () => {
     const { outputs, workspace } = await runArm({
       artifactType: 'vercel-output',
-      // A Dockerfile in the scope decides nothing here: the platform's builder
-      // is the frontend for this shape, and §5's ladder never runs.
       scopeFiles: { 'package.json': '{}', Dockerfile: 'FROM nginx' },
       vercelFramework: 'nextjs',
     });
     try {
       expect(outputs.vercelscope).toBe(join(workspace, 'bundle', 'site'));
       expect(outputs.vercelframework).toBe('nextjs');
-      // The ladder's outputs are deliberately absent: nothing here is built by
-      // BuildKit until the export, which `Build and push` does from the tree
-      // the platform's builder leaves behind.
+      // BuildKit builds nothing here until `Build and push` exports the tree.
       expect(outputs.context).toBeUndefined();
       const scratch = await readFile(outputs.scratchfile as string, 'utf8');
       expect(scratch).toBe('FROM scratch\nCOPY . /\n');
@@ -173,9 +154,7 @@ describe('the files arm of “Choose the frontend”', () => {
   });
 
   test('the platform’s build output refuses to run without a framework', async () => {
-    // Core refuses this dispatch, so reaching the step at all means a spec was
-    // composed by something that does not know the shape. Failing loudly beats
-    // building the project as a directory of files and serving its sources.
+    // Core refuses this dispatch, so only a malformed spec reaches the step.
     await expect(
       runArm({
         artifactType: 'vercel-output',
@@ -201,16 +180,9 @@ describe('the files arm of “Choose the frontend”', () => {
 });
 
 /**
- * The platform builder step, run as the file actually ships it.
- *
- * The one behaviour worth pinning mechanically is what becomes of a symlink. A
- * framework that serves the same function under two routes emits one bundle
- * and symlinks the other at it, and `bundle.ts` admits regular files only — so
- * a link that survives into the artifact is a route that 404s on a deployment
- * which built, signed and deployed green, and a link copied out is a second
- * function the platform bills and counts. The step lifts each into a manifest
- * the deploy adapter recreates it from; nothing about either failure points
- * back here, which is exactly why it is asserted here.
+ * A framework serves one function under two routes by symlinking one bundle at
+ * the other, and `bundle.ts` admits regular files only. The step records each
+ * link in a manifest the deploy adapter recreates it from.
  */
 describe('“Build with the platform’s own builder”', () => {
   const STEP = "Build with the platform's own builder";
@@ -235,26 +207,19 @@ describe('“Build with the platform’s own builder”', () => {
       await mkdir(bin, { recursive: true });
       await writeFile(join(scope, 'package.json'), '{}');
 
-      // A file a function's filePathMap will name. It lives in the project,
-      // outside `.vercel/output`, and has to reach the deployment root.
+      // Named by a function's filePathMap, and outside `.vercel/output`.
       await mkdir(join(scope, 'node_modules', 'dep'), { recursive: true });
       await writeFile(join(scope, 'node_modules', 'dep', 'index.js'), 'dep');
 
-      // What Next writes for an external package: a hashed alias under
-      // `.next/node_modules` that is a *symlink to a directory*, named in the
-      // filePathMap. Dereferencing it is what took production down — the CLI
-      // adds a map entry to the upload without walking into it, so a real
-      // directory there contributes nothing and the function cannot resolve
-      // the module.
+      // Next aliases an external package as a symlink to a directory. The CLI
+      // uploads the map entry without entering it, so a real directory is lost.
       await mkdir(join(scope, '.next', 'node_modules'), { recursive: true });
       await symlink(
         '../../node_modules/dep',
         join(scope, '.next', 'node_modules', 'dep-a1b2c3'),
       );
 
-      // Stands in for the platform's builder: writes the tree it would write,
-      // including the symlinked second copy of one function that is the whole
-      // point of this test, and a `.vc-config.json` naming a project file.
+      // Stands in for the platform's builder.
       await writeFile(
         join(bin, 'npx'),
         [
@@ -303,11 +268,8 @@ describe('“Build with the platform’s own builder”', () => {
       const links =
         await Bun.$`find ${outputs.context as string} -type l`.text();
       expect(links.trim()).toBe('');
-      // The Build Output tree is staged under `.vercel/output/` with the one
-      // real function in it once, and each link recorded where the deploy
-      // adapter reads it back — path from the deployment root, target exactly
-      // as the builder wrote it. A dereference would pass the assertion above
-      // and ship the function twice; a plain drop would lose the route.
+      // A dereference would pass the check above but ship the function twice,
+      // and a plain drop would lose the route.
       expect(
         await readFile(
           join(
@@ -337,7 +299,6 @@ describe('“Build with the platform’s own builder”', () => {
       expect(
         [...manifest].sort((a, b) => a.path.localeCompare(b.path)),
       ).toEqual([
-        // The filePathMap alias, carried as a link rather than copied out.
         {
           path: '.next/node_modules/dep-a1b2c3',
           target: '../../node_modules/dep',
@@ -351,16 +312,13 @@ describe('“Build with the platform’s own builder”', () => {
           target: '../index.func',
         },
       ]);
-      // Never a real directory: that is the shape the CLI drops silently.
       expect(
         await Bun.file(
           join(outputs.context as string, '.next/node_modules/dep-a1b2c3'),
         ).exists(),
       ).toBe(false);
 
-      // The mapped file is staged at the deployment root — beside
-      // `.vercel/output`, never inside it, which is the path the platform
-      // resolves a function's filePathMap by.
+      // The platform resolves a filePathMap from the deployment root.
       expect(
         await readFile(
           join(outputs.context as string, 'node_modules/dep/index.js'),
@@ -376,8 +334,7 @@ describe('“Build with the platform’s own builder”', () => {
         ).exists(),
       ).toBe(false);
 
-      // The framework core resolved reaches the builder as project settings,
-      // which is what stops it building the project as a directory of files.
+      // Without a framework, the builder treats the project as plain files.
       const link = JSON.parse(
         await readFile(join(scope, '.vercel/project.json'), 'utf8'),
       ) as { settings: { framework: string } };

@@ -1,24 +1,7 @@
 /**
- * The Kubernetes deploy adapter (Task 17, §6, §7).
- *
- * Every test drives the real adapter against a fake of the cluster's HTTP API
- * (§ Seam 2) and asserts what a cluster would have been sent, or what the
- * adapter concluded from what it was told. Nothing here reaches core: the
- * command layer is Seam 1 and has its own tests.
- *
- * The claims worth stating up front, because each is a rule §6 or §7 makes
- * that a plausible implementation would break:
- *
- * - Spindrift applies a delivery object **through the API**, with **one inline
- *   values blob** — never a values ConfigMap, which Flux overwrites and Argo
- *   has no equivalent for.
- * - **The Target declares the flavour**, so the same `DesiredState` produces a
- *   `HelmRelease` on one Target and an Argo `Application` on another.
- * - Phase transitions come from the controller. The adapter polls; it never
- *   decides that something is ready.
- * - **On red it reads pods and events once** and fills in the reason — which is
- *   what turns "InstallFailed" into `ARTIFACT_UNAVAILABLE` with the blame on
- *   the platform rather than on the developer's code.
+ * The Kubernetes deploy adapter against a fake cluster API. It applies one
+ * delivery object with inline values in the flavour the Target declares, takes
+ * phases from the controller, and reads pods and events once on red.
  */
 import { describe, expect, test } from 'bun:test';
 import type {
@@ -44,7 +27,7 @@ import {
 } from '../harness/fakes/kubernetes-api.ts';
 
 const CHART = 'example/spindrift-app';
-/** The same chart as an artifact — §20's other legal spelling of `charts.app`. */
+/** The same chart as an OCI artifact, the other spelling of `charts.app`. */
 const OCI_CHART = 'oci://registry.example.test/charts/spindrift-app';
 
 const FLUX: KubernetesDelivery = {
@@ -62,13 +45,7 @@ const ARGO: KubernetesDelivery = {
   server: 'https://kubernetes.default.svc',
 };
 
-/**
- * The same Target told where {@link OCI_CHART} is served.
- *
- * An Argo Target's repository is the operator's own field, so an installation
- * that declares an artifact needs one naming the registry rather than the git
- * repository a path-sourced installation is checked out of.
- */
+/** An Argo Target whose repository names the registry of {@link OCI_CHART}. */
 const ARGO_OCI: KubernetesDelivery = {
   flavour: 'argo-application',
   namespace: 'delivery',
@@ -78,17 +55,14 @@ const ARGO_OCI: KubernetesDelivery = {
   server: 'https://kubernetes.default.svc',
 };
 
-/** The status an `Application` reports once Argo has synced it. */
 const SYNCED = () => ({
   health: { status: 'Healthy' },
   sync: { status: 'Synced' },
 });
 
 /**
- * Everything an Argo Target's checklist needs to be green but the chart.
- *
- * No Flux source object, because this flavour has none to read: Argo fetches
- * the repository itself and the reference lives in the `Application`.
+ * Everything an Argo Target's checklist needs but the chart. There is no Flux
+ * source object, since Argo fetches the repository itself.
  */
 const ARGO_CLUSTER: FakeKubernetesOptions = {
   objects: {
@@ -97,8 +71,7 @@ const ARGO_CLUSTER: FakeKubernetesOptions = {
       kind: 'Namespace',
       metadata: {
         name: 'apps',
-        // What the vessel declares admission to mean, and what every App
-        // namespace is stamped from.
+        // Every App namespace copies these labels.
         labels: {
           'pod-security.kubernetes.io/enforce': 'restricted',
           'pod-security.kubernetes.io/audit': 'restricted',
@@ -140,10 +113,6 @@ function connection(
   };
 }
 
-/**
- * A pod as the App chart renders it: stamped with the contract it came from,
- * and carrying the Component labels the chart puts on every pod it renders.
- */
 function podRenderedUnder(
   contract: string,
   overrides: { name?: string; createdAt?: string; phase?: string } = {},
@@ -163,7 +132,6 @@ function podRenderedUnder(
   };
 }
 
-/** What the standing checklist concluded about the value contract. */
 async function contractCheck(
   adapter: KubernetesDeployAdapter,
 ): Promise<PrerequisiteResult | undefined> {
@@ -206,10 +174,9 @@ function desiredState(overrides: Partial<DesiredState> = {}): DesiredState {
   };
 }
 
-/** The adapter, wired to one fake cluster, with the cadence spent instantly. */
 function adapterFor(
   options: FakeKubernetesOptions = {},
-  /** How this installation names the App chart — the source kind follows it. */
+  /** The source kind follows how the chart is named. */
   chart: string = CHART,
 ): {
   adapter: KubernetesDeployAdapter;
@@ -221,8 +188,6 @@ function adapterFor(
     token: cluster.token,
     fetch: cluster.fetch,
     pollIntervalMs: 1,
-    // A test must not spend the cadence it is asserting about, and a fake
-    // clock is also what makes the timeout case finite.
     sleep: async () => {},
   });
   return { adapter, cluster };
@@ -240,7 +205,6 @@ interface RenderedValues {
   };
 }
 
-/** The inline values on the Flux object, failing clearly if apply wrote none. */
 function renderedValues(cluster: FakeKubernetes): RenderedValues {
   const release = cluster.get('helmreleases/delivery/blog-web');
   const spec = release?.spec as { values?: RenderedValues } | undefined;
@@ -250,7 +214,6 @@ function renderedValues(cluster: FakeKubernetes): RenderedValues {
   return spec.values;
 }
 
-/** Drive a stream to its verdict, collecting the timeline. */
 async function drain(
   stream: AsyncGenerator<DeployEvent, DeployVerdict, void>,
 ): Promise<{ events: DeployEvent[]; verdict: DeployVerdict }> {
@@ -264,19 +227,14 @@ async function drain(
 }
 
 /**
- * The labels the chart puts on a pod of this Component.
- *
- * `spindrift-app.selectorLabels` in `packages/charts/spindrift-app`, which is
- * what the adapter's `labelSelector` names. A fixture without them is a pod
- * the cluster would not return for that selector, so they belong on every pod
- * a test expects the read-on-red or the tail to find.
+ * The chart's `spindrift-app.selectorLabels`, which the adapter's
+ * `labelSelector` names; a pod without them is invisible to it.
  */
 const POD_LABELS = {
   'app.kubernetes.io/name': 'web',
   'app.kubernetes.io/part-of': 'blog',
 };
 
-/** A pod in one waiting state, as the API reports it. */
 function pod(reason: string, message: string): FakeObject {
   return {
     apiVersion: 'v1',
@@ -290,7 +248,6 @@ function pod(reason: string, message: string): FakeObject {
   };
 }
 
-/** A pod the chart rendered that came up and never passed readiness. */
 function podNotReady(): FakeObject {
   return {
     apiVersion: 'v1',
@@ -300,13 +257,7 @@ function podNotReady(): FakeObject {
   };
 }
 
-/**
- * An adapter over a release that reports progress forever, on a clock that
- * reaches the deadline.
- *
- * `adapterFor` cannot serve this: the deadline case needs both a budget and a
- * clock that advances to it, and every other test in the file wants neither.
- */
+/** Progress forever, on a clock that reaches the deadline. */
 function stalling(lists: FakeKubernetesOptions['lists']): {
   adapter: KubernetesDeployAdapter;
   cluster: FakeKubernetes;
@@ -334,7 +285,7 @@ function stalling(lists: FakeKubernetesOptions['lists']): {
   return { adapter, cluster };
 }
 
-/** A `HelmRelease` that failed without saying why — the read-on-red case. */
+/** A `HelmRelease` that failed without saying why. */
 const INSTALL_FAILED: StatusScript = () => ({
   observedGeneration: 1,
   conditions: [
@@ -358,17 +309,14 @@ describe('the delivery object', () => {
     expect(applied?.kind).toBe('HelmRelease');
 
     const spec = applied?.spec as any;
-    // §7: one inline values blob. A values ConfigMap is dead as a portable
-    // mechanism — Flux merges `valuesFrom` and then overwrites it inline.
+    // Flux merges `valuesFrom` and then overwrites it with inline values.
     expect(spec.values.app.image).toBe(
       'registry.example.test/blog/web@sha256:feed',
     );
     expect(spec.valuesFrom).toBeUndefined();
     expect(cluster.all('configmaps')).toEqual([]);
 
-    // A path is a path inside a repository the Target trusts, so the release
-    // asks Flux to build a HelmChart from a GitRepository source — the only
-    // form that can carry a path at all.
+    // Only a HelmChart built from a GitRepository source can carry a path.
     expect(spec.chart.spec.chart).toBe(CHART);
     expect(spec.chart.spec.sourceRef).toEqual({
       kind: 'GitRepository',
@@ -376,17 +324,13 @@ describe('the delivery object', () => {
       namespace: 'delivery',
     });
     expect(spec.chartRef).toBeUndefined();
-    // Reconciliation lives in core: the controller must not retry an attempt
-    // nobody asked for (§6).
+    // Core owns retries, so the controller makes none.
     expect(spec.install.remediation.retries).toBe(0);
   });
 
   test('an oci:// chart is delivered as a chartRef at the Target’s OCIRepository', async () => {
-    // The other half of §7's per-Target pin. Flux refuses `chart` and
-    // `chartRef` together and its `chart.spec.sourceRef` does not accept an
-    // `OCIRepository` at all, so this is not a `kind` swap inside the same
-    // shape — the whole reference moves, and nothing is left naming a path
-    // that only a checkout of some repository resolves.
+    // Flux refuses `chart` beside `chartRef`, and `chart.spec.sourceRef` does
+    // not accept an `OCIRepository`, so the whole reference moves.
     const { adapter, cluster } = adapterFor({}, OCI_CHART);
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
 
@@ -398,8 +342,6 @@ describe('the delivery object', () => {
       namespace: 'delivery',
     });
     expect(spec.chart).toBeUndefined();
-    // Everything else about the release is the same object it always was: the
-    // source moved, not the delivery.
     expect(spec.values.app.image).toBe(
       'registry.example.test/blog/web@sha256:feed',
     );
@@ -413,16 +355,12 @@ describe('the delivery object', () => {
     const writes = cluster.requests.filter(
       (request) => request.method === 'PATCH',
     );
-    // Both writes are applies, which is what makes each converge on an object
-    // that is already there rather than fail on it — a second deploy of the
-    // same App must not trip over its own namespace.
+    // Applies converge, so a second deploy does not trip on its namespace.
     expect(writes.map((write) => write.contentType)).toEqual([
       'application/apply-patch+yaml',
       'application/apply-patch+yaml',
     ]);
-    // The App's namespace first, then the release into it. The order is the
-    // point: a release applied first would land in a namespace that is not
-    // there yet.
+    // Namespace first, or the release is written into a missing namespace.
     expect(writes.map((write) => write.path)).toEqual([
       '/api/v1/namespaces/app-blog',
       '/apis/helm.toolkit.fluxcd.io/v2/namespaces/delivery/helmreleases/blog-web',
@@ -433,9 +371,8 @@ describe('the delivery object', () => {
     const { adapter, cluster } = adapterFor();
     await drain(adapter.apply(target(), desiredState()));
 
-    // Copied off the Target's declared namespace rather than written from a
-    // table here, so an operator who changes what `restricted` means on their
-    // cluster changes it for every App without touching Spindrift.
+    // Copied from the Target's declared namespace, so an operator's change
+    // reaches every App.
     const namespace = cluster.get('namespaces//app-blog');
     expect(namespace?.metadata.labels).toMatchObject({
       'pod-security.kubernetes.io/enforce': 'restricted',
@@ -445,10 +382,8 @@ describe('the delivery object', () => {
   });
 
   test('a vessel declaring no admission policy gets no App namespace', async () => {
-    // The refusal that matters: a namespace created without Pod Security
-    // labels admits pods this vessel refuses, which is worse than a deploy
-    // that failed and said why. Live driving proved that admission
-    // load-bearing twice.
+    // A namespace without Pod Security labels would admit pods this vessel
+    // refuses.
     const { adapter, cluster } = adapterFor({ namespaceLabels: {} });
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
 
@@ -469,25 +404,20 @@ describe('the delivery object', () => {
     const spec = applied?.spec as any;
     expect(spec.source.helm.valuesObject.app.component).toBe('web');
     expect(spec.destination.namespace).toBe('app-blog');
-    // A path is a directory only a checkout of the repository resolves, which
-    // is the form a non-artifact chart reference has here too.
     expect(spec.source.repoURL).toBe('https://git.example.test/infra');
     expect(spec.source.path).toBe(CHART);
     expect(spec.source.chart).toBeUndefined();
-    // Argo makes the namespace itself, because Argo is the mechanism that can
-    // carry the admission labels — Flux's `createNamespace` takes no metadata
-    // at all, which is why Spindrift applies the Namespace on that flavour and
-    // not on this one.
+    // Argo creates the namespace with labels; Flux's `createNamespace` takes no
+    // metadata, so on Flux the adapter applies the Namespace itself.
     expect(spec.syncPolicy.syncOptions).toEqual(['CreateNamespace=true']);
     expect(spec.syncPolicy.managedNamespaceMetadata.labels).toMatchObject({
       'pod-security.kubernetes.io/enforce': 'restricted',
     });
-    // No tracking annotation, deliberately: tracking it would let a sync
-    // delete the namespace and every neighbouring workload in it.
+    // No tracking annotation, or a sync could delete the namespace and every
+    // workload in it.
     expect(
       spec.syncPolicy.managedNamespaceMetadata.annotations,
     ).toBeUndefined();
-    // And Spindrift wrote no Namespace of its own on this flavour.
     expect(
       cluster.requests.filter((request) =>
         request.path.startsWith('/api/v1/namespaces/app-blog'),
@@ -496,13 +426,8 @@ describe('the delivery object', () => {
   });
 
   test('an oci:// chart is an Argo chart reference, never a path', async () => {
-    // The Argo half of the same per-Target pin the Flux test above asserts.
-    // Argo takes an OCI chart the way Helm's own client does — the registry in
-    // `repoURL`, the chart's own name in `chart`, and its documentation is
-    // explicit that "the oci:// syntax is not included" — and it refuses a
-    // source carrying a `path` beside a `chart`. So an artifact reference
-    // written into `path` is not a release: Argo answers `ComparisonError`,
-    // and nothing before the first deploy would have said so.
+    // Argo takes an OCI chart as the registry in `repoURL` and the name in
+    // `chart`, without `oci://`, and refuses a `path` beside a `chart`.
     const { adapter, cluster } = adapterFor({ status: SYNCED }, OCI_CHART);
     const { verdict } = await drain(
       adapter.apply(target({ delivery: ARGO_OCI }), desiredState()),
@@ -514,8 +439,6 @@ describe('the delivery object', () => {
     expect(spec.source.chart).toBe('spindrift-app');
     expect(spec.source.path).toBeUndefined();
     expect(spec.source.targetRevision).toBe('1.4.0');
-    // Everything else about the Application is the object it always was: the
-    // source moved, not the delivery.
     expect(spec.source.helm.valuesObject.app.image).toBe(
       'registry.example.test/blog/web@sha256:feed',
     );
@@ -539,15 +462,12 @@ describe('the delivery object', () => {
     );
 
     const values = renderedValues(cluster);
-    // The operator's class, untouched.
     expect(values.platform.runtimeClassName).toBe('gvisor');
-    // The shared class: Spindrift's requests replace the operator's key,
-    // and the keys Spindrift has no opinion about survive.
+    // Core's `resources` replaces the operator's; other shared keys survive.
     expect(values.shared.resources).toEqual({
       requests: { cpu: '250m', memory: '256Mi' },
     });
     expect(values.shared.podLabels).toEqual({ tier: 'web' });
-    // Spindrift's own class, rendered from what core described.
     expect(values.app.artifactDigest).toBe('sha256:feed');
     expect(values.app.hostnames).toEqual(['blog-web.apps.example.test']);
   });
@@ -579,9 +499,7 @@ describe('the delivery object', () => {
 
 describe('sweeping the App away', () => {
   test('it deletes the namespace it made, and only that', async () => {
-    // The App's namespace is the one thing `destroy` cannot address: a ref
-    // names a placement, and Flux's `createNamespace` leaves a namespace that
-    // "will not be garbage collected".
+    // A ref names a placement, so `destroy` never reaches the App's namespace.
     const { adapter, cluster } = adapterFor();
     await drain(adapter.apply(target(), desiredState()));
     expect(cluster.get('namespaces//app-blog')).toBeDefined();
@@ -599,8 +517,7 @@ describe('sweeping the App away', () => {
 
   test('it refuses a namespace it did not make', async () => {
     // The fake answers every namespace read with the operator's declared one,
-    // which carries admission labels and no `managed-by`. That is a namespace
-    // Flux owns, and deleting it would take the whole Target with it.
+    // which has no `managed-by` label.
     const { adapter, cluster } = adapterFor();
 
     await expect(adapter.sweepApp(target(), 'blog')).rejects.toThrow(
@@ -640,15 +557,12 @@ describe('phases come from the controller', () => {
     const phases = events
       .filter((event) => event.type === 'status')
       .map((event) => (event.type === 'status' ? event.phase : ''));
-    // APPLYING once, WAITING once however many times it was polled, LIVE once.
     expect(phases).toEqual(['APPLYING', 'WAITING', 'LIVE']);
   });
 
   test("the controller's own sentence reaches the timeline, once each", async () => {
-    // A Helm upgrade says several different things while staying in one phase,
-    // and those sentences are the only progress a reader gets between the
-    // phase change and the verdict. Reporting phases alone left minutes of a
-    // rollout looking like a stopped screen.
+    // A Helm upgrade says several things within one phase, and those are the
+    // only progress a reader sees before the verdict.
     const said = ['pulling chart', 'pulling chart', 'running upgrade'];
     const { adapter } = adapterFor({
       status: (reads) => {
@@ -682,9 +596,7 @@ describe('phases come from the controller', () => {
     const lines = events
       .filter((event) => event.type === 'log')
       .map((event) => (event.type === 'log' ? event.line : ''));
-    // After the write this adapter reports itself: the repeated poll of an
-    // unchanged message does not repeat the line, and the terminal sentence is
-    // not echoed here — it travels on the verdict.
+    // The terminal sentence travels on the verdict, not the log.
     expect(lines).toEqual([
       'applied HelmRelease/delivery/blog-web',
       'pulling chart',
@@ -695,9 +607,8 @@ describe('phases come from the controller', () => {
   test('a LIVE verdict carries no url — the cluster gives no name of its own', async () => {
     const { adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
-    // §9: Spindrift mints the canonical name where the platform gives none,
-    // which is the metal cluster alone. A url coming back here would be a
-    // second naming authority.
+    // Core mints the name where the platform gives none, so a url here would
+    // be a second naming authority.
     expect(verdict).toEqual({
       phase: 'LIVE',
       ref: 'flux-helmrelease:delivery/blog-web',
@@ -705,9 +616,7 @@ describe('phases come from the controller', () => {
   });
 
   test('a stale status is not read as a verdict', async () => {
-    // The object still carries the last generation's Ready=True. An adapter
-    // that trusted it would report a re-deploy green before anything was
-    // tried.
+    // The object still carries the last generation's Ready=True.
     let observed = 0;
     const { adapter } = adapterFor({
       status: (reads) => {
@@ -756,8 +665,6 @@ describe('phases come from the controller', () => {
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
     if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
     expect(verdict.reason).toBe('TIMEOUT');
-    // §6's table gives TIMEOUT a dash: a deploy that never reached a terminal
-    // state indicts nobody.
     expect(blameFor(verdict.reason)).toBeNull();
   });
 
@@ -769,10 +676,7 @@ describe('phases come from the controller', () => {
 
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
     if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
-    // The rollout stalled rather than failing, so nothing declared a verdict —
-    // but a container backing off its image pull is an ARTIFACT_UNAVAILABLE at
-    // the deadline exactly as it is at a failure, and it is the reason §6
-    // cares most about getting right.
+    // A stalled rollout backing off its image pull is ARTIFACT_UNAVAILABLE too.
     expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
     expect(blameFor(verdict.reason)).toBe('platform');
   });
@@ -790,10 +694,8 @@ describe('phases come from the controller', () => {
 
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
     if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
-    // The guard on the read: under a *verdict* an empty namespace is REJECTED,
-    // because something refused the workload. Under a deadline the same
-    // emptiness is equally "not yet" — a chart still resolving, a wedged
-    // controller — so it must not indict the developer.
+    // Under a failure verdict an empty namespace is REJECTED; under a deadline
+    // it may be a chart still resolving, so it blames nobody.
     expect(verdict.reason).toBe('TIMEOUT');
     expect(blameFor(verdict.reason)).toBeNull();
   });
@@ -829,7 +731,7 @@ describe('the read on red', () => {
     expect(blameFor(verdict.reason)).toBe('platform');
     expect(verdict.detail).toBe('Back-off pulling image');
 
-    // Read **once** (§6): one pass over pods and one over events, not a watch.
+    // One read of pods, not a watch.
     expect(
       cluster.pathsOf('GET').filter((path) => path.endsWith('/pods')),
     ).toHaveLength(1);
@@ -869,8 +771,7 @@ describe('the read on red', () => {
     if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
     expect(verdict.reason).toBe('REJECTED');
     expect(verdict.detail).toBe('admission webhook denied the request');
-    // §12: the platform will not keep this — cluster events expire in about an
-    // hour — so the raw payload comes back for core to store.
+    // Cluster events expire in about an hour, so core stores the raw payload.
     expect(verdict.debug).toBeDefined();
   });
 
@@ -921,15 +822,8 @@ describe('a write that never landed', () => {
   });
 
   test('an apply the API server 404s is a failure, blamed on the platform', async () => {
-    // The write half of the same question the job `create` test asks. A
-    // server-side apply into a deleted namespace — or one whose delivery CRD is
-    // not installed — answers `404`, and `apply` returns `void`, so a swallowed
-    // one was a deploy that placed nothing and went on to poll for a verdict.
-    //
-    // And it is `TARGET_UNREACHABLE`, not `REJECTED`: an apply creates what is
-    // not there, so nothing missing here is the developer's object. §6 blames
-    // `REJECTED` on the developer, which would send them reading their chart
-    // values for a namespace the operator deleted.
+    // An apply into a deleted namespace or without its CRD answers `404`, and
+    // nothing missing here is the developer's object.
     const { adapter, cluster } = adapterFor({
       refuse: { status: 404, body: 'namespaces "apps" not found' },
     });
@@ -945,8 +839,6 @@ describe('a write that never landed', () => {
     const { adapter } = adapterFor({ token: 'a-different-token' });
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
     if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
-    // §6 puts "credentials expired" under TARGET_UNREACHABLE explicitly: the
-    // developer's app has nothing to do with it.
     expect(verdict.reason).toBe('TARGET_UNREACHABLE');
   });
 });
@@ -963,9 +855,7 @@ describe('observe is the authority on what is running', () => {
   });
 
   test('a workload nobody placed through Spindrift is still observable', async () => {
-    // Drift is detected by comparing what is serving against the desired row
-    // (§6), which only works if `observe` reads the cluster rather than core's
-    // memory of what it applied.
+    // Drift detection needs `observe` to read the cluster, not core's memory.
     const { adapter, cluster } = adapterFor();
     cluster.place('helmreleases/delivery/other-web', {
       apiVersion: 'helm.toolkit.fluxcd.io/v2',
@@ -981,7 +871,6 @@ describe('observe is the authority on what is running', () => {
     expect(observed?.artifactDigest).toBe('sha256:elsewhere');
   });
 
-  /** The Deployment the chart rendered, as its controller judges it. */
   function deployment(available: 'True' | 'False'): FakeObject {
     return {
       apiVersion: 'apps/v1',
@@ -1007,9 +896,8 @@ describe('observe is the authority on what is running', () => {
   }
 
   test('a ready HelmRelease over a crash-looping workload is FAILED, with the read on red', async () => {
-    // The HelmRelease this adapter renders never reconciles again on its own
-    // after a successful install, so `Ready=True` outlives the pods: the
-    // Deployment's own condition is what still tracks them (§6).
+    // The HelmRelease never reconciles again after a successful install, so
+    // its `Ready=True` outlives the pods; the Deployment's condition does not.
     const { adapter } = adapterFor({
       lists: {
         deployments: [deployment('False')],
@@ -1024,11 +912,9 @@ describe('observe is the authority on what is running', () => {
     expect(observed?.phase).toBe('FAILED');
     expect(observed?.reason).toBe('STARTUP_FAILED');
     expect(observed?.detail).toBe('back-off restarting failed container');
-    // Still the digest the object carries: the release is what failed, not
-    // what is desired, and core's drift comparison must keep telling them apart.
+    // Still the object's digest, so core's drift comparison stays correct.
     expect(observed?.artifactDigest).toBe('sha256:feed');
-    // §12: what the read saw travels with the verdict, because the cluster
-    // will not keep it.
+    // The cluster will not keep what the read saw, so the verdict carries it.
     expect(observed?.debug).toMatchObject({
       workload: [{ type: 'Available', status: 'False' }],
       diagnosis: { pods: [{ kind: 'Pod' }] },
@@ -1065,8 +951,7 @@ describe('observe is the authority on what is running', () => {
 
     const observed = await adapter.observe(target(), verdict.ref);
     expect(observed?.phase).toBe('LIVE');
-    // The delivery object and the Deployment — a read on red, not a watch:
-    // nothing was red, so no pods were read.
+    // The delivery object and the Deployment; nothing was red, so no pods.
     const reads = cluster.pathsOf('GET').slice(before);
     expect(reads).toHaveLength(2);
     expect(reads.some((path) => path.endsWith('/pods'))).toBe(false);
@@ -1105,8 +990,6 @@ describe('the checklist', () => {
           kind: 'Namespace',
           metadata: {
             name: 'apps',
-            // What the vessel declares admission to mean, and what every App
-            // namespace is stamped from.
             labels: {
               'pod-security.kubernetes.io/enforce': 'restricted',
               'pod-security.kubernetes.io/audit': 'restricted',
@@ -1132,9 +1015,7 @@ describe('the checklist', () => {
   });
 
   test('a Target without the chart source is unhealthy, and says so', async () => {
-    // §7 pins the App chart per Target, which makes "this source object exists
-    // in this cluster" a Target prerequisite rather than something a deploy
-    // discovers late.
+    // The chart is pinned per Target, so its source object is a prerequisite.
     const { adapter } = adapterFor({
       objects: {
         'namespaces//apps': {
@@ -1142,8 +1023,6 @@ describe('the checklist', () => {
           kind: 'Namespace',
           metadata: {
             name: 'apps',
-            // What the vessel declares admission to mean, and what every App
-            // namespace is stamped from.
             labels: {
               'pod-security.kubernetes.io/enforce': 'restricted',
               'pod-security.kubernetes.io/audit': 'restricted',
@@ -1164,10 +1043,7 @@ describe('the checklist', () => {
   });
 
   test('the kind the checklist reads follows the installation’s chart reference', async () => {
-    // The failure this rules out is the quiet one: a cluster carrying a
-    // GitRepository of the right name while the installation deploys from OCI
-    // would read green on a check that never looked at the object the release
-    // will actually reference, and fail on the first deploy instead.
+    // A GitRepository of the right name must not satisfy an OCI installation.
     const gitOnly = {
       objects: {
         'gitrepositories/delivery/charts': {
@@ -1180,8 +1056,6 @@ describe('the checklist', () => {
           kind: 'Namespace',
           metadata: {
             name: 'apps',
-            // What the vessel declares admission to mean, and what every App
-            // namespace is stamped from.
             labels: {
               'pod-security.kubernetes.io/enforce': 'restricted',
               'pod-security.kubernetes.io/audit': 'restricted',
@@ -1222,11 +1096,8 @@ describe('the checklist', () => {
   });
 
   test('a source object serving another artifact is named, not deployed to', async () => {
-    // The rendered `chartRef` carries the source object and nothing else, so
-    // what a Component pulls is whatever that object's `url` says — an
-    // installation declaring one artifact while a Target's source serves
-    // another deploys a chart nobody asked for, and every other check reads
-    // green. This is the only place the two references meet.
+    // `chartRef` names only the source object, so a Component pulls whatever
+    // that object's `url` says.
     const { adapter } = adapterFor(
       {
         objects: {
@@ -1241,8 +1112,6 @@ describe('the checklist', () => {
             kind: 'Namespace',
             metadata: {
               name: 'apps',
-              // What the vessel declares admission to mean, and what every App
-              // namespace is stamped from.
               labels: {
                 'pod-security.kubernetes.io/enforce': 'restricted',
                 'pod-security.kubernetes.io/audit': 'restricted',
@@ -1277,9 +1146,7 @@ describe('the checklist', () => {
   });
 
   test('an Argo Target on a cluster that serves no Application says which operator is missing', async () => {
-    // The checklist asks the API server what it serves, per flavour: a cluster
-    // running Flux is not a cluster an Argo Target can deliver through, and the
-    // sentence names the kind that is absent rather than "Flux or Argo".
+    // The checklist asks the API server what it serves, per flavour.
     const { adapter } = adapterFor(
       {
         servedKinds: { 'helm.toolkit.fluxcd.io/v2': ['HelmRelease'] },
@@ -1300,12 +1167,8 @@ describe('the checklist', () => {
   });
 
   test('an Argo Target pointed at another registry is not this chart’s source', async () => {
-    // The Argo mirror of the `OCIRepository` comparison above, and the same
-    // gap: the Application carries the Target's own repository with this
-    // installation's chart name under it, so a Target naming somewhere else
-    // pulls a different chart under this installation's declaration. Nothing
-    // else reads the two references together, and a row that reported met
-    // without comparing them is a check that never observed what it names.
+    // The Application pairs the Target's repository with this installation's
+    // chart name, so a Target naming another registry pulls a different chart.
     const { adapter } = adapterFor(ARGO_CLUSTER, OCI_CHART);
 
     const { prerequisites } = await adapter.inspect(target({ delivery: ARGO }));
@@ -1318,9 +1181,7 @@ describe('the checklist', () => {
   });
 
   test('an Argo Target naming the registry this installation is served from is met', async () => {
-    // The mirror, so the check above is not simply always-red — and the path
-    // form is met on the same cluster, because a path is written into the
-    // Application itself and has no second reference to disagree with.
+    // A path lives in the Application, so it has nothing to disagree with.
     const artifact = adapterFor(ARGO_CLUSTER, OCI_CHART);
     expect(
       (
@@ -1347,15 +1208,8 @@ describe('the checklist', () => {
   });
 
   test('chart-contract skew is read off the cluster, not off the connection', async () => {
-    // §7: Helm ignores unknown values silently, so a release whose values were
-    // written under an older contract applies cleanly, reports green, and runs
-    // without the config it was handed. The only way to notice is to look at
-    // what actually rendered — the chart stamps its contract onto every object
-    // including the pod template.
-    //
-    // This test cannot pass against a comparison between two Spindrift
-    // constants: the Target carries no contract field of any kind, so the pod
-    // list below is the only input that can move the verdict.
+    // Helm ignores unknown values silently, so skew shows only in the contract
+    // the chart records on what it rendered.
     const { adapter } = adapterFor({
       lists: { pods: [podRenderedUnder('2')] },
     });
@@ -1370,7 +1224,6 @@ describe('the checklist', () => {
   });
 
   test('objects rendered under this contract are met, and so is a Target that has rendered none', async () => {
-    // The mirror of the test above, so the check is not simply always-red.
     const rendered = adapterFor({
       lists: { pods: [podRenderedUnder(VALUES_CONTRACT)] },
     });
@@ -1380,9 +1233,7 @@ describe('the checklist', () => {
       )?.met,
     ).toBe(true);
 
-    // A pod that is not this chart's output carries no such annotation, which
-    // is also how a foreign workload sharing the namespace stays out of the
-    // verdict. Nothing rendered is nothing skewed.
+    // A foreign pod has no contract annotation, so it stays out of the verdict.
     const foreign = adapterFor({
       lists: {
         pods: [{ apiVersion: 'v1', kind: 'Pod', metadata: { name: 'other' } }],
@@ -1390,16 +1241,12 @@ describe('the checklist', () => {
     });
     const nothing = await contractCheck(foreign.adapter);
     expect(nothing?.met).toBe(true);
-    // And it says nothing, rather than naming a contract nobody rendered.
     expect(nothing?.detail).toBeUndefined();
   });
 
   test('a pod list this identity may not read is not a green contract check', async () => {
-    // The failure mode this whole check exists to remove: a prerequisite that
-    // reports met without having observed the thing it names. A cluster that
-    // refuses the read answers `403`, and an empty result standing in for that
-    // refusal makes "every rendered object agrees" vacuously true — so a
-    // Target whose Role was never bound would read green forever.
+    // A refused read must not stand in as an empty list, which would make
+    // "every rendered pod agrees" vacuously true.
     const { adapter } = adapterFor({ forbidden: ['pods'] });
 
     const contract = await contractCheck(adapter);
@@ -1408,11 +1255,7 @@ describe('the checklist', () => {
   });
 
   test('a rolling update is not skew, and a finished pod does not outlive its render', async () => {
-    // Both are the same mistake: reading a pod that is not desired state.
-    //
-    // During a rolling update after a contract bump the old ReplicaSet's pod
-    // and the new one coexist, and only the newer of the two says what the
-    // release now renders.
+    // Mid-rollout, only the newest pod says what the release now renders.
     const rolling = adapterFor({
       lists: {
         pods: [
@@ -1429,9 +1272,7 @@ describe('the checklist', () => {
     });
     expect((await contractCheck(rolling.adapter))?.met).toBe(true);
 
-    // And a job's Completed pod is the residue of a render that is over: a
-    // CronJob upgraded to the current contract but not yet fired again would
-    // otherwise be held red by its own history.
+    // A finished job pod belongs to a render that is over.
     const finished = adapterFor({
       lists: {
         pods: [
@@ -1464,15 +1305,14 @@ describe('discovery reports observations, never judgements', () => {
     const { discovery } = await adapter.inspect(target());
     expect(discovery.arch).toEqual(['amd64', 'arm64']);
     expect(discovery.gpu).toBe(true);
-    // The ceiling is the largest single workload the Target admits — one
-    // node's allocatable, never the sum, because nothing here schedules.
+    // The largest single workload: one node's allocatable, never the sum.
     expect(discovery.resourceCeiling).toEqual({ cpu: '8', memory: '32768Mi' });
     expect(discovery.persistence).toBe(true);
   });
 
   test('an audit-mode policy engine is reported as auditing, not as verified', async () => {
-    // §32: core decides what enforcing means. An adapter that answered
-    // `verifiedDeploy` would let two adapters disagree about it.
+    // Core decides what enforcing means, so no adapter answers
+    // `verifiedDeploy`.
     const { adapter } = adapterFor({
       lists: {
         clusterpolicies: [
@@ -1517,8 +1357,7 @@ describe('discovery reports observations, never judgements', () => {
         logHistorySeconds: 3_600,
       }),
     );
-    // §33's static check is over hosts nobody can discover from inside a
-    // cluster, and §18's reach is a property of a log store beside it.
+    // Neither can be discovered from inside the cluster.
     expect(discovery.servedHosts).toEqual(['registry.example.test']);
     expect(discovery.logHistorySeconds).toBe(3_600);
     expect(discovery).not.toHaveProperty('offlineDeploy');
@@ -1676,12 +1515,8 @@ describe('runtime log tail', () => {
 });
 
 /**
- * What the API says about a *kind*, as against what it holds of one.
- *
- * These go through `KubernetesApi` rather than through the adapter because the
- * distinction is the client's to preserve — `list` returns `null` for a kind
- * the cluster does not serve and `[]` for a served kind holding nothing, and
- * every call site's `?? []` is written against one of those two answers.
+ * Through `KubernetesApi` directly: `list` returns `null` for a kind the
+ * cluster does not serve and `[]` for a served kind holding nothing.
  */
 describe('what the API answers about a kind', () => {
   const apiFor = (options: FakeKubernetesOptions = {}) => {
@@ -1698,9 +1533,6 @@ describe('what the API answers about a kind', () => {
 
   test('a served kind holding nothing is an empty list, not an absent kind', async () => {
     const { api } = apiFor();
-    // Flux is installed here — `SERVED` says so — and this namespace holds no
-    // HelmRelease. That is `[]`, and it is a different answer from the one
-    // below.
     expect(
       await api.list({
         apiVersion: 'helm.toolkit.fluxcd.io/v2',
@@ -1738,15 +1570,13 @@ describe('what the API answers about a kind', () => {
         'app.kubernetes.io/name=web,app.kubernetes.io/part-of=blog',
       ),
     ).toHaveLength(1);
-    // The two keys the chart's `selectorLabels` defines are the contract. A
-    // selector naming anything else matches a pod the chart never labelled.
+    // Only the chart's two `selectorLabels` keys select its pods.
     expect(await listWith('app.kubernetes.io/instance=blog-web')).toEqual([]);
   });
 
   test('deleting what is already gone succeeds, on a cluster that says 404', async () => {
     const { api, cluster } = apiFor();
-    // §6's idempotence, proven rather than assumed: the fake refuses the
-    // delete outright, and the client still returns normally.
+    // The fake answers `404`, and the client still returns normally.
     await api.delete({
       apiVersion: 'helm.toolkit.fluxcd.io/v2',
       plural: 'helmreleases',
@@ -1806,17 +1636,8 @@ describe('a write is an apply only if it says so', () => {
 });
 
 /**
- * Reading a cluster that is not a Target yet (§13's connect, one step earlier).
- *
- * `inspect` cannot answer this — it takes a connection carrying the very facts
- * an operator is here to choose — so the probe is the read that runs against
- * nothing but an address, and everything it returns is a list to pick from.
- *
- * The behaviour worth pinning is the degradation. A cluster whose
- * `spindrift-target` RBAC has not merged yet answers some reads and refuses
- * others, and that is the *ordinary* state of a cluster somebody is connecting.
- * A probe that gave up on the first refusal would report nothing about a
- * cluster that is nearly ready, and the screen would have nothing to offer.
+ * The probe reads a cluster from its address alone. A cluster whose RBAC has
+ * not merged yet refuses some reads, and each refusal empties only its list.
  */
 describe('probing a cluster before it is a Target', () => {
   const gateway = (
@@ -1895,9 +1716,8 @@ describe('probing a cluster before it is a Target', () => {
   });
 
   test('the sources offered are the kind this installation’s chart needs', async () => {
-    // Every option a picker offers has to be an answer that would work. An
-    // installation deploying from OCI offered a GitRepository would be a screen
-    // whose only choices produce a Target that cannot deploy.
+    // A GitRepository offered to an OCI installation would make a Target that
+    // cannot deploy.
     const lists = {
       gitrepositories: [source('delivery', 'charts')],
       ocirepositories: [
@@ -1918,9 +1738,8 @@ describe('probing a cluster before it is a Target', () => {
   });
 
   test('a gateway with only a hostname offers no address to publish', async () => {
-    // `platform.dns.privateAddress` is published as an A record, so a name is
-    // not a value it can hold — and filling it with one would be worse than
-    // leaving the field to the operator.
+    // `platform.dns.privateAddress` is published as an A record, so a hostname
+    // cannot fill it.
     const probe = await probed({
       lists: {
         gateways: [
@@ -1974,13 +1793,8 @@ function node(arch: string, allocatable: Record<string, string>): FakeObject {
 }
 
 /**
- * A job's runs (§7, §17).
- *
- * The chart renders every job as a CronJob — suspended when unscheduled — so a
- * run is a Job created from that CronJob's own `jobTemplate` and owned by it.
- * Both halves have a failure mode a plausible implementation walks into: a run
- * built from anything other than the template runs the wrong image, and a run
- * with no owner outlives every execution beside it because nothing prunes it.
+ * The chart renders every job as a CronJob, suspended when unscheduled, so a
+ * run is a Job built from its `jobTemplate` and owned by it.
  */
 describe('a job is run, and its runs are read', () => {
   const RUN_AT = Date.UTC(2026, 7, 4, 12, 0, 0);
@@ -1991,11 +1805,8 @@ describe('a job is run, and its runs are read', () => {
   const REF = 'flux-helmrelease:delivery/blog-nightly';
 
   /**
-   * The release the chart rendered from, as the adapter reads it back.
-   *
-   * `targetNamespace` is where its runs are, and it is read rather than derived
-   * — a release placed before per-App namespaces still says the shared one, and
-   * its Jobs are still there. Every release this adapter writes states it.
+   * Runs are found through `targetNamespace`, which some releases set to a
+   * shared namespace instead of the App's own.
    */
   const release: FakeObject = {
     apiVersion: 'helm.toolkit.fluxcd.io/v2',
@@ -2053,8 +1864,8 @@ describe('a job is run, and its runs are read', () => {
         'cronjobs/apps/blog-nightly': cronJob,
         ...objects,
       },
-      // Nothing here polls for readiness, and the default script would
-      // otherwise stamp a ready HelmRelease's status onto every Job read.
+      // The default script would write a ready HelmRelease's status onto every
+      // Job read.
       status: () => null,
     });
   }
@@ -2078,8 +1889,6 @@ describe('a job is run, and its runs are read', () => {
 
     const created = far.get(`jobs/apps/${started.execution.name}`);
     expect(created?.kind).toBe('Job');
-    // The template's spec, verbatim: a run that assembled its own would run
-    // something other than what the chart rendered.
     expect(created?.spec).toEqual(jobTemplate.spec);
     expect(created?.metadata.labels).toEqual(JOB_LABELS);
     expect(created?.metadata.annotations).toEqual({
@@ -2098,10 +1907,8 @@ describe('a job is run, and its runs are read', () => {
   });
 
   test("puts this run's parameters on the container after the template's own, and their names on the Job", async () => {
-    // Appended, not merged: the kubelet reads a duplicated name by its last
-    // entry, so "after the template's own" is what makes a parameter the
-    // value the process sees. The names ride on the Job as an annotation and
-    // the values do not — the annotation is what the timeline reads.
+    // Appended, since the kubelet takes a duplicated name's last entry. Only
+    // the names go on the Job, as the annotation the timeline reads.
     const template = {
       metadata: { labels: JOB_LABELS },
       spec: {
@@ -2152,8 +1959,7 @@ describe('a job is run, and its runs are read', () => {
       'cronjob.kubernetes.io/instantiate': 'manual',
       'spindrift.dev/run-with': 'SNAPSHOT, SINCE',
     });
-    // The CronJob's own template is untouched: the parameters were this
-    // run's, and the next scheduled fire must not inherit them.
+    // The next scheduled fire must not inherit this run's parameters.
     expect(far.get('cronjobs/apps/blog-nightly')?.spec).toEqual(spec);
   });
 
@@ -2194,12 +2000,8 @@ describe('a job is run, and its runs are read', () => {
   });
 
   test('a create the API server 404s is a fault, not a started run', async () => {
-    // `POST /apis/batch/v1/namespaces/<ns>/jobs` answers `404` when the
-    // namespace has been deleted or the cluster does not serve `batch/v1`.
-    // Nothing is created either way, so a started run reported from it is a
-    // row reading `running` that the next `executions` read never lists —
-    // this repo's signature failure, an act that reached nothing and said it
-    // worked. `create` distinguishes stored from not-stored by raising.
+    // Creating a Job answers `404` when the namespace is gone or `batch/v1` is
+    // not served, and nothing is stored.
     const far = cluster();
     const adapter = new KubernetesDeployAdapter({
       chart: CHART,
@@ -2212,8 +2014,7 @@ describe('a job is run, and its runs are read', () => {
       now: () => RUN_AT,
     });
 
-    // Awaited: unawaited, the second assertion runs before `run` has issued its
-    // `POST` and would pass whatever the adapter did.
+    // Awaited, or the next assertion runs before `run` issues its `POST`.
     await expect(adapter.run(target(), REF)).rejects.toThrow(/404/);
     expect(far.all('jobs')).toHaveLength(0);
   });
@@ -2292,15 +2093,10 @@ describe('a job is run, and its runs are read', () => {
   });
 
   test('a list the API server 404s is a fault, not a job that never ran', async () => {
-    // The read half of the `create` test above, and the same failure: `403` on
-    // this call reaches the "these runs could not be read" arm, so a `404` —
-    // the namespace deleted, or a cluster that does not serve `batch/v1` —
-    // reading green and empty is an asymmetry nobody chose. `api.list` answers
-    // `null` for exactly that and `?? []` threw the distinction away.
+    // A `404` here means the namespace is gone or `batch/v1` is not served,
+    // which must not read as an empty history.
     const far = new FakeKubernetes({
-      // `CronJob` served and `Job` not: a `list jobs` here is a `404` while
-      // everything `placedJob` reads still answers, so the failure is this one
-      // call's and not the fixture falling over earlier.
+      // `CronJob` served and `Job` not, so only the `list jobs` call fails.
       servedKinds: { ...SERVED, 'batch/v1': ['CronJob'] },
       objects: {
         'helmreleases/delivery/blog-nightly': release,
@@ -2375,7 +2171,7 @@ describe('a job is run, and its runs are read', () => {
 
     expect(page.kind).toBe('stream');
     if (page.kind !== 'stream') return;
-    // The cluster filters, not the caller: only the named run's pod comes back.
+    // The cluster filters, so only the named run's pod comes back.
     expect(page.entries.map((entry) => entry.line)).toEqual([
       'from blog-nightly-2-xyz',
     ]);
@@ -2400,11 +2196,6 @@ describe('restart', () => {
   const STAMPED = new Date(RESTART_AT).toISOString();
   const REF = 'flux-helmrelease:delivery/blog-web';
 
-  /**
-   * A service release as the adapter wrote it and the API now holds it: the
-   * operator's own pod annotation beside Spindrift's classes, a version, and
-   * a status the controller wrote.
-   */
   const release: FakeObject = {
     apiVersion: 'helm.toolkit.fluxcd.io/v2',
     kind: 'HelmRelease',
@@ -2436,8 +2227,7 @@ describe('restart', () => {
     return new FakeKubernetes({
       servedKinds: SERVED,
       objects: { 'helmreleases/delivery/blog-web': release, ...objects },
-      // Nothing here polls, and the default script would stamp a ready status
-      // onto every read.
+      // The default script would write a ready status onto every read.
       status: () => null,
     });
   }
@@ -2472,14 +2262,13 @@ describe('restart', () => {
     const values = renderedValues(far) as RenderedValues & {
       shared: { podAnnotations?: Record<string, string> };
     };
-    // One key written into the operator's map, never the map over it: the
-    // shared class is either side's to write and the other key is theirs.
+    // One key added to the operator's map, never the map replaced.
     expect(values.shared.podAnnotations).toEqual({
       'example.com/owner': 'ops',
       [RESTART_STAMP]: STAMPED,
     });
     expect(values.shared.resources).toEqual({ requests: { cpu: '250m' } });
-    // Nothing else moved: the same digest, so `observe` reads no drift.
+    // The same digest, so `observe` reads no drift.
     expect(values.app.artifactDigest).toBe('sha256:feed');
   });
 
@@ -2492,13 +2281,13 @@ describe('restart', () => {
     );
     expect(patch?.contentType).toBe('application/apply-patch+yaml');
     const body = patch?.body as FakeObject;
-    // The precondition: a deploy that landed between the read and this write
-    // has to 409 rather than be reverted to the spec this read.
+    // A deploy written between the read and this write must 409, not be
+    // reverted.
     expect(body.metadata.resourceVersion).toBe('12');
     expect(body.metadata.labels).toEqual({
       'app.kubernetes.io/managed-by': 'spindrift',
     });
-    // And nothing the API server owns rides along to be claimed.
+    // Nothing the API server owns is sent to be claimed.
     expect(body).not.toHaveProperty('status');
   });
 
@@ -2524,7 +2313,6 @@ describe('restart', () => {
     await expect(adapter.restart(target(), REF)).rejects.toThrow(
       /409.*the object has been modified/,
     );
-    // The write was made under the version it read, and nothing landed.
     expect(far.pathsOf('PATCH')).toHaveLength(1);
     expect(stampOf(far)).toBeUndefined();
   });
@@ -2622,7 +2410,6 @@ describe('restart', () => {
     expect(spec.source.helm.valuesObject.shared.podAnnotations).toEqual({
       [RESTART_STAMP]: STAMPED,
     });
-    // The rest of the source is the same source.
     expect(spec.source.repoURL).toBe('https://git.example.test/infra');
     expect(spec.source.path).toBe(CHART);
     expect(spec.source.helm.releaseName).toBe('blog-web');

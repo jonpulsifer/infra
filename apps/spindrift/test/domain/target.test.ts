@@ -1,12 +1,3 @@
-/**
- * `deployTargetOf` — the composition that hands an adapter one flat object.
- *
- * The function is the only place a vessel's boundary facts cross into what an
- * adapter's `discover` reads, so a hole here is invisible to every adapter
- * test: those build their connections by hand. The claims worth pinning are
- * the network's — it is optional, and both halves of optional have a meaning
- * (§20: absence is a capability the Target lacks, not an unmet prerequisite).
- */
 import { describe, expect, test } from 'bun:test';
 import { deployTargetOf, type VesselRef } from '../../src/domain/target.ts';
 
@@ -34,9 +25,8 @@ describe('a gcp-project vessel and its network fact', () => {
     const ref = deployTargetOf(SURFACE, vessel());
     expect(ref.vessel).toBe('bluenose');
     expect(ref.adapter).toBe('cloudrun');
+    // No network is a capability the Target lacks, not an unmet prerequisite.
     expect(ref.connection).not.toHaveProperty('network');
-    // The address itself still crosses — the network is a rider, never the
-    // address.
     expect(ref.connection).toHaveProperty('project', 'bluenose');
   });
 

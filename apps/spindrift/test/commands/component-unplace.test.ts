@@ -1,16 +1,5 @@
-/**
- * Stopping a specific (Component, Target) placement (75, §6, §13).
- *
- * Two holes this closes, both the same shape once a live ref exists: a
- * Component whose Target moved left the old address running, and a Component
- * whose kind changed `job` → `service` left the old `jobs/<id>` ref orphaned
- * under a name nothing holds a handle on any more. `unplaceComponent` does not
- * distinguish the two — both are "a (Component, Target) pair with a live ref
- * that nobody wants any more" — so one set of tests below drives a real
- * Target move and the other drives the ref shape a kind change would strand,
- * without needing a kind-change command to exist yet (none does: see the
- * fixture in the second `describe`).
- */
+// Unplacing a (Component, Target) pair tears down its live ref, whether a
+// Target move or a kind change left it behind.
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import { unplaceComponent } from '../../src/commands/components/unplace.ts';
@@ -117,8 +106,8 @@ async function fixture(options: {
       auth: 'none',
     })
     .returning();
-  // Its own vessel: a Target is (vessel, adapter), so two fixtures sharing the
-  // harness default would collide on that pair rather than on a name.
+  // A Target is unique per (vessel, adapter), so each fixture gets its own
+  // vessel.
   const adapter = options.adapter ?? 'kubernetes';
   const vessel = await insertVessel(db, adapter);
   const [target] = await db
@@ -179,18 +168,13 @@ describe('unplacing after a Target move (75, box 3, first half)', () => {
     const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
     const adapters = registryOf(adapter);
 
-    // Placed and deployed on the old Target — the workload this ticket is
-    // about not stranding.
     await createDeploy(
       { componentId: component.id, targetId: oldTarget.id, buildId: build.id },
       context(adapters),
     );
     await runDeployPass(loopContext(adapter));
 
-    // The developer's actual move: a second placement, on a different
-    // Target, with nothing yet retracting the first — exactly the gap 75
-    // names ("nothing stops a developer from placing a Component on a second
-    // Target while the first is still live").
+    // A second placement, with nothing retracting the first.
     await createDeploy(
       { componentId: component.id, targetId: newTarget.id, buildId: build.id },
       context(adapters),
@@ -214,13 +198,12 @@ describe('unplacing after a Target move (75, box 3, first half)', () => {
     expect(result.value.destroyed).toBe(true);
     expect(adapter.destroyed).toEqual([oldRef]);
 
-    // The old pair's desired row is gone — retracted, not merely stranded.
+    // The old pair's desired row is retracted, not merely stranded.
     expect(await desiredRow(component.id, oldTarget.id)).toBeUndefined();
     const [oldDeploy] = await deployRows(component.id, oldTarget.id);
     expect(oldDeploy?.orphanedAt).not.toBeNull();
 
-    // The new placement is a different pair and this call named neither its
-    // ref nor its row.
+    // The new placement is a different pair, untouched.
     expect(await desiredRow(component.id, newTarget.id)).toBeDefined();
     const [newDeploy] = await deployRows(component.id, newTarget.id);
     expect(newDeploy?.orphanedAt).toBeNull();
@@ -250,8 +233,7 @@ describe('unplacing after a Target move (75, box 3, first half)', () => {
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.failure.code).toBe('NOT_FOUND');
-    // Idempotent at the adapter, not at this layer: a second `destroy` call
-    // never happens because there is nothing left here to name it against.
+    // Nothing is left to name a second destroy against.
     expect(adapter.destroyed).toHaveLength(1);
   });
 
@@ -318,8 +300,7 @@ describe('unplacing after a Target move (75, box 3, first half)', () => {
     expect(result.failure.code).toBe('NOT_REMOVABLE');
     expect(result.failure.message).toContain('refused');
 
-    // Nothing moved: the row a retry needs is still there, and the Deploy it
-    // named is still live rather than orphaned out from under a failed call.
+    // Nothing moved, so a retry still has the row and a live Deploy.
     expect(await desiredRow(component.id, target.id)).toBeDefined();
     const [deploy] = await deployRows(component.id, target.id);
     expect(deploy?.orphanedAt).toBeNull();
@@ -328,13 +309,8 @@ describe('unplacing after a Target move (75, box 3, first half)', () => {
 
 describe('unplacing the ref a kind change would strand (75, box 3, second half)', () => {
   test('a job ref is torn down the same way a service ref is', async () => {
-    // 75's own read of this half: no command mutates `components.kind` after
-    // creation, so a real `job` -> `service` transition cannot be produced
-    // through the command layer yet. What is true today, and what this test
-    // proves, is that `unplaceComponent` does not care why a (Component,
-    // Target) pair has a live ref — a `jobs/<id>`-shaped one a kind change
-    // would orphan is torn down through the identical path a Target move is.
-    // A future kind-change command's whole stranding answer is "call this."
+    // No command changes `components.kind` yet, so this drives the `jobs/<id>`
+    // ref a kind change would strand.
     const { component, target, build } = await fixture({
       kind: 'job',
       schedule: '0 3 * * *',
@@ -389,10 +365,8 @@ describe('§9: unplacing withdraws the vanity record (ticket 137b)', () => {
     );
 
     expect(result.ok).toBe(true);
-    // §9's handle is `<App>-<Component>` — idempotent even though a cluster
-    // Target publishes its own vanity record through the App chart rather
-    // than through this seam, which is why the test asserts the call was
-    // made rather than asserting anything about what it converged.
+    // The handle is `<App>-<Component>`. A cluster Target publishes through the
+    // App chart, so only the call is asserted.
     expect(dns.withdrawn).toEqual([`${app.name}-main`]);
   });
 
@@ -434,9 +408,7 @@ describe('an unregistered target adapter is a refusal, not a fault', () => {
       { componentId: component.id, targetId: target.id, buildId: build.id },
       context(adapters),
     );
-    // No `cloudrun` fake registered — `runDeployPass` cannot apply, so drive
-    // the ref straight onto the row the way a hand test of `destroy`'s caller
-    // has to: this is testing `unplaceComponent`'s own refusal, not the loop.
+    // No `cloudrun` fake is registered, so the ref goes straight onto the row.
     const [row] = await deployRows(component.id, target.id);
     await database()
       .db.update(deploys)

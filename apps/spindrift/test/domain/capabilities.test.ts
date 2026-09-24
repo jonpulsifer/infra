@@ -1,15 +1,3 @@
-/**
- * The two capabilities core refuses to take an adapter's word for (§32, §33).
- *
- * Both are derivations, and both exist because the obvious reading is wrong in a
- * way that produces a green result:
- *
- * - A policy engine that is installed but auditing lets every deploy pass while
- *   verifying nothing, so `verifiedDeploy` has to discover **enforcing**.
- * - A deploy path whose chart lives off-Target is not an offline deploy, however
- *   healthy the Target looks, so `offlineDeploy` is checked over all three
- *   references rather than assumed from one.
- */
 import { describe, expect, test } from 'bun:test';
 import { targetAdapterSchema } from '../../src/config/manifest.schema.ts';
 import {
@@ -29,10 +17,8 @@ import {
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 import { fixtureManifest } from '../harness/installation.ts';
 
-/** Read once: nothing here asserts on the manifest, only through it. */
 const MANIFEST = await fixtureManifest();
 
-/** A deploy path served entirely by the Target itself. */
 const LOCAL_PATH = {
   chart: 'oci://registry.cluster.test/charts/app:1.0.0',
   images: ['registry.cluster.test/artifacts'],
@@ -66,7 +52,7 @@ describe('verifiedDeploy discovers enforcing, not installed', () => {
   });
 
   test('an audit-mode policy engine is not', () => {
-    // §32: "under an audit-only policy a green deploy proves nothing."
+    // An audit-only policy passes every deploy while verifying nothing.
     expect(deriveVerifiedDeploy({ installed: true, mode: 'AUDIT' })).toBe(
       false,
     );
@@ -94,8 +80,6 @@ describe('offlineDeploy is a static check over three references', () => {
   });
 
   test('false when the chart ref is off-cluster', () => {
-    // The chart is the reference most easily left pointing at the internet,
-    // and §33 counts all three precisely so one of them cannot be forgotten.
     const offCluster = {
       ...LOCAL_PATH,
       chart: 'oci://charts.example.test/app:1.0.0',
@@ -121,8 +105,6 @@ describe('offlineDeploy is a static check over three references', () => {
   });
 
   test('an unparseable reference fails closed', () => {
-    // The claim is that a deploy needs nothing off-Target. A reference nobody
-    // can read is not evidence for that claim.
     expect(deriveOfflineDeploy({ ...LOCAL_PATH, images: [''] }, SERVED)).toBe(
       false,
     );
@@ -131,8 +113,6 @@ describe('offlineDeploy is a static check over three references', () => {
 
 describe('the provenances that are not discovered', () => {
   test('kinds come from the adapter type, not from the Target', () => {
-    // §13: splitting the cloud Targets is what makes picking the static one
-    // *mean* public — and it only means that because it runs websites alone.
     expect(KINDS_BY_ADAPTER.static).toEqual(['website']);
     expect(
       resolveCapabilities(discovery(), context({ adapter: 'static' })).kinds,
@@ -140,9 +120,6 @@ describe('the provenances that are not discovered', () => {
   });
 
   test('an unasserted reach falls back to what the adapter serves', () => {
-    // Nobody having asserted a tunnel is not the same as there being one — but
-    // it is also not the same as the cluster having no address at all. The
-    // floor is what the backend does by construction, and `public` is not on it.
     expect(
       resolveCapabilities(discovery(), context({ adapter: 'kubernetes' }))
         .reaches,
@@ -154,18 +131,13 @@ describe('the provenances that are not discovered', () => {
   });
 
   test('an unasserted authenticated edge is no edge', () => {
-    // The direction that fails closed: claiming auth nobody wired would put a
-    // Component behind a filter that is not there.
+    // Claiming an edge nobody wired would promise a filter that is not there.
     expect(resolveCapabilities(discovery(), context()).authReaches).toEqual([]);
   });
 
   test('firing a schedule takes the adapter and the Target both', () => {
-    // §3's grammar: a refusal a Target's own configuration already decides
-    // belongs at Place rather than after a build. A Cloud Scheduler job
-    // authenticates the `jobs.run` call it makes, so a Cloud Run Target naming
-    // no runtime identity has nothing for a schedule to fire *as* — and the
-    // adapter refuses it at apply, which is the after-the-build refusal this
-    // row exists to avoid.
+    // Cloud Scheduler authenticates its jobs.run call, so a Cloud Run Target
+    // with no runtime identity has nothing to fire a schedule as.
     const cloud = { adapter: 'cloudrun', project: 'vessel' } as const;
     const capable = capabilitiesOfRow(
       {
@@ -190,8 +162,7 @@ describe('the provenances that are not discovered', () => {
       { artifactTypes: ['image'], manifest: MANIFEST },
     );
     expect(anonymous.firesSchedules).toBe(false);
-    // And it subtracts only: a cluster connection has nothing that could
-    // withdraw the cadence its adapter keeps.
+    // A connection can only subtract from what the adapter fires.
     expect(
       capabilitiesOfRow(
         {
@@ -234,8 +205,6 @@ describe('health is the whole checklist', () => {
   });
 
   test('a partial checklist is unhealthy, never healthy by omission', () => {
-    // An item nobody answered is an item nobody checked. Reading absence as
-    // success is how a Target ends up green on a prerequisite it never met.
     expect(deriveHealth([{ name: 'VESSEL', met: true }], 'kubernetes')).toBe(
       'unhealthy',
     );
@@ -250,10 +219,6 @@ describe('the checklist is the adapter type\u2019s, not one list for all three',
   });
 
   test('a cloud Target is never asked about a chart or a delivery operator', () => {
-    // §13's list is written in a cluster's terms because a cluster is what it
-    // was written about. A Cloud Run Target has no operator to run and no chart
-    // to pin, and a row that can never fail teaches a reader that something was
-    // checked when nothing was.
     for (const adapter of ['cloudrun', 'static'] as const) {
       expect(prerequisitesFor(adapter)).not.toContain('DELIVERY_OPERATOR');
       expect(prerequisitesFor(adapter)).not.toContain('CHART_SOURCE');
@@ -270,8 +235,7 @@ describe('the checklist is the adapter type\u2019s, not one list for all three',
   });
 
   test('a cloud Target answering a cluster checklist is unhealthy', () => {
-    // The rows it answered are all met; they are simply not the rows a Cloud
-    // Run Target is asked, so health must not read them as an answer.
+    // Every row is met, but none is a row a Cloud Run Target is asked.
     const cluster = prerequisitesFor('kubernetes').map((name) => ({
       name,
       met: true,

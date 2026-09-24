@@ -1,11 +1,3 @@
-/**
- * The store-only ZIP writer.
- *
- * The far side here is `unzip` and Cloud Build's unpacker, neither of which can
- * be faked usefully — so the assertions are on the format itself: the CRC a
- * reader will check the bytes against, the three signatures a reader seeks by,
- * and, where the tool is installed, that a real unzip lists what went in.
- */
 import { describe, expect, test } from 'bun:test';
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -27,7 +19,7 @@ describe('zip', () => {
       archive.byteLength,
     );
     expect(view.getUint32(14, true)).toBe(0x3610a686);
-    // Stored, so both sizes are the input's length.
+    // Method 0 is stored, so both sizes are the input's length.
     expect(view.getUint16(8, true)).toBe(0);
     expect(view.getUint32(18, true)).toBe(5);
     expect(view.getUint32(22, true)).toBe(5);

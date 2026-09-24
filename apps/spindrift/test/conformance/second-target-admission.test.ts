@@ -1,18 +1,6 @@
 /**
- * Acceptance test for Ticket 12: Admit the artifact on a second Target.
- *
- * Acceptance Criteria verified:
- * - A second real Target is connected through native federation and reports its prerequisites,
- *   capabilities, build-level policy, chart/artifact contract, and naming boundary.
- * - Placement can select that Target by its real name and explains any non-candidate state before dispatch.
- * - The already-built immutable artifact is deployed without another Build, and the second Target
- *   independently verifies the same real signature.
- * - Installer and App chart distribution use independently pinned, extractable artifacts rather than
- *   depending on this installation's repository-local chart path.
- * - Status, diagnosis, and logs identify the second Target while preserving the App-first product view.
- * - End-to-end acceptance proves enrolment, Target connection, archive-to-URL,
- *   repository-to-signed-artifact, and second-Target admission on a clean installation.
- * - Only after every ticket's acceptance criteria pass is the effort recorded as Spindrift v1.
+ * One built artifact admitted on a second Target without another Build, and the
+ * charts both Targets deploy from pinned as pullable OCI artifacts.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -68,23 +56,11 @@ function digest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, '0')}`;
 }
 
-/** The repository root, for reading the cluster manifests this test proves. */
 const REPO_ROOT = join(import.meta.dir, '../../../..');
 
 /**
- * Whether a rendered `HelmRelease`'s chart source is an independently pinned,
- * extractable artifact rather than a path resolved inside this installation's
- * own repository checkout.
- *
- * The old shape — `chart.spec.sourceRef.kind: GitRepository` plus a
- * `chart.spec.chart` path — names somewhere inside a clone of this
- * repository, which is not an artifact on its own: nothing about the string
- * `packages/charts/spindrift` can be pulled by itself. A `chartRef` naming an
- * `OCIRepository` names an object Flux already pulled from a registry by tag,
- * independent of this repository's working tree, which is what "extractable"
- * means for a chart. This is the whole difference the old assertion missed —
- * it checked only that *some* string was present, which a repository-local
- * path satisfies exactly as an OCI reference would.
+ * An `OCIRepository` chart is pulled by tag on its own. A chart path inside a
+ * `GitRepository` needs this repository's checkout.
  */
 function isExtractableChartSource(release: {
   spec?: {
@@ -95,12 +71,6 @@ function isExtractableChartSource(release: {
   return release.spec?.chartRef?.kind === 'OCIRepository';
 }
 
-/**
- * Whether an App chart reference names an artifact independent of this
- * repository, rather than a path only this repository's own checkout
- * resolves — the same distinction {@link isExtractableChartSource} draws for
- * the installer, applied to the string `manifest.charts.app` carries.
- */
 function isExtractableAppChartRef(ref: string): boolean {
   return ref.startsWith('oci://');
 }
@@ -150,17 +120,14 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     ]);
     const ctx = context(harnessRegistry(adapterMap));
 
-    // Connect target 1 (primary)
     const primaryInput = clusterInput({ vessel: 'primary-k8s' });
     const res1 = await connectTarget(primaryInput, ctx);
     expect(res1.ok).toBe(true);
 
-    // Connect target 2 (secondary)
     const secondaryInput = clusterInput({ vessel: 'secondary-k8s' });
     const res2 = await connectTarget(secondaryInput, ctx);
     expect(res2.ok).toBe(true);
 
-    // Verify both targets exist in DB and report health & prerequisites
     const listRes = await listTargets({}, ctx);
     expect(listRes.ok).toBe(true);
     if (!listRes.ok) return;
@@ -170,7 +137,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     expect(targetNames).toContain('primary-k8s');
     expect(targetNames).toContain('secondary-k8s');
 
-    // Both report prerequisites and health
     for (const t of listRes.value.targets) {
       expect(t.health).toBe('healthy');
     }
@@ -235,7 +201,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     ]);
     const ctx = context(harnessRegistry(adapterMap, supplyChain));
 
-    // Create App & Component
     const [app] = await database()
       .db.insert(apps)
       .values({ name: 'multi-target-app', sourceKind: 'archive' })
@@ -245,7 +210,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       .values({ appId: app!.id, name: 'web', kind: 'service', expose: true })
       .returning();
 
-    // Connect both Targets using targetValues helper, each on its own vessel.
     const primaryVessel = await insertVessel(database().db, 'kubernetes', {
       name: 'primary-k8s',
     });
@@ -269,7 +233,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       )
       .returning();
 
-    // Create Build 1 (succeeded, signed)
     const artifactDig = digest(100);
     const [build] = await database()
       .db.insert(builds)
@@ -287,21 +250,18 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       })
       .returning();
 
-    // Deploy on Primary Target
     const deploy1 = await createDeploy(
       { componentId: comp!.id, targetId: t1!.id, buildId: build!.id },
       ctx,
     );
     expect(deploy1.ok).toBe(true);
 
-    // Deploy the SAME build on Secondary Target without a new Build!
     const deploy2 = await createDeploy(
       { componentId: comp!.id, targetId: t2!.id, buildId: build!.id },
       ctx,
     );
     expect(deploy2.ok).toBe(true);
 
-    // Assert that supplyChain verified the signature for BOTH deployments independently
     expect(supplyChain.signatureChecks.admissions).toHaveLength(2);
     expect(supplyChain.signatureChecks.admissions[0]?.artifactDigest).toBe(
       artifactDig,
@@ -312,10 +272,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
   });
 
   test('Installer chart distribution is an independently pinned, extractable OCI artifact', async () => {
-    // Read the real cluster manifests rather than a fixture: the point of
-    // this criterion is what this installation actually deploys from, and a
-    // fixture that says the right thing while the repo says the old thing is
-    // exactly the false positive this test replaces.
+    // The real cluster manifests, because a fixture can disagree with them.
     const helmRelease = Bun.YAML.parse(
       await Bun.file(
         join(REPO_ROOT, 'clusters/offsite/apps/spindrift/helm-release.yaml'),
@@ -335,10 +292,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
   });
 
   test('the installer check catches a repository-local chart path', () => {
-    // The exact shape clusters/offsite/apps/spindrift/helm-release.yaml
-    // carried before this ticket: `packages/charts/spindrift` resolved
-    // through GitRepository/infra. A detector nobody has seen fail is not a
-    // detector — this is the proof the assertion above is not vacuous.
     const beforeThisFix = {
       spec: {
         chart: {
@@ -357,19 +310,12 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
   });
 
   test('the App-chart check catches a repository-local chart path', () => {
-    // The proof the assertion above is not the vacuous one it replaces. The old
-    // guard asked only that `manifest.charts.app` was a defined string, which
-    // the exact value this installation carried before this ticket satisfies —
-    // so it passed the whole time nothing was built.
     expect(isExtractableAppChartRef('packages/charts/spindrift-app')).toBe(
       false,
     );
   });
 
   test('an oci:// App chart is rendered as an extractable source, not a path', () => {
-    // The declaration is only half the claim: `charts.app` naming an artifact
-    // means nothing unless the object the adapter writes fetches from it. This
-    // is that half, against the real renderer.
     const rendered = helmRelease({
       name: 'blog-web',
       namespace: 'spindrift-apps',
@@ -381,9 +327,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     }) as Parameters<typeof isExtractableChartSource>[0];
 
     expect(isExtractableChartSource(rendered)).toBe(true);
-    // The repository form still renders, unchanged, for an installation that
-    // names a path — extraction is a choice this installation made, not a
-    // capability the adapter lost.
+    // A chart path still renders with a `GitRepository` source.
     const path = helmRelease({
       name: 'blog-web',
       namespace: 'spindrift-apps',
@@ -399,27 +343,8 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
   });
 
   test('each chart consumer pins the version its Chart.yaml carries', async () => {
-    // `.github/workflows/spindrift-charts.yml` pushes each chart under the
-    // version its own Chart.yaml names, and each consumer pins that version by
-    // tag. Bumping one without the other is silent both ways: a version ahead
-    // of the tag ships nothing, and a tag ahead of the push leaves the source
-    // object failing to pull. This is the only thing holding the pair together.
-    //
-    // Fast lane: this test alone is `spindrift#test:chart-pins` in
-    // `turbo.json`, with its own narrow `inputs` (the three files below, plus
-    // this file) and no `build` dependency — so a PR that only bumps a chart
-    // version and its consumer tag reruns this one fast assertion (still pays
-    // for the file's per-test isolated schema, via the describe-scoped
-    // `withIsolatedDatabase()` below, but nothing more) instead of
-    // cache-busting the full `spindrift#test` suite. The two
-    // `oci-repository.yaml` consumers stay
-    // out of `spindrift#test`'s own inputs because every check the rest of
-    // the suite makes against them (existence of a `tag`/`digest`, `url`
-    // shape) is strictly weaker than this test's exact-match checks — nothing
-    // else needs a fresher copy than this test already demands. `Chart.yaml`
-    // for `spindrift-app` is the one file both tasks still list:
-    // `values.test.ts` reads a different field of it (the values-contract
-    // annotation) that this test does not touch and does not subsume.
+    // A version ahead of its tag ships nothing, and a tag ahead of the push
+    // cannot pull. turbo.json's `spindrift#test:chart-pins` inputs list these.
     const consumers: [string, string][] = [
       ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
       [
@@ -495,7 +420,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    // Verify Deploy is associated with secondary target
     const [deployRow] = await database()
       .db.select()
       .from(deploys)
@@ -522,7 +446,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     ]);
     const ctx = context(harnessRegistry(adapterMap, supplyChain));
 
-    // 1. Target connection
     const c1 = await connectTarget(
       clusterInput({ vessel: 'primary-k8s' }),
       ctx,
@@ -535,7 +458,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     expect(c2.ok).toBe(true);
     if (!c1.ok || !c2.ok) return;
 
-    // 2. Archive-to-URL flow
     const [app] = await database()
       .db.insert(apps)
       .values({ name: 'e2e-app', sourceKind: 'archive' })
@@ -558,8 +480,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     );
     expect(upload.ok).toBe(true);
 
-    // 3. Build & Sign
-    // Create a succeeded signed build
     const artifactDig = digest(300);
     const [build] = await database()
       .db.insert(builds)
@@ -577,7 +497,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       })
       .returning();
 
-    // 4. Deploy to Primary Target
     const d1 = await createDeploy(
       {
         componentId: comp!.id,
@@ -588,7 +507,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     );
     expect(d1.ok).toBe(true);
 
-    // 5. Deploy SAME signed artifact to Second Target (Admission)
     const d2 = await createDeploy(
       {
         componentId: comp!.id,

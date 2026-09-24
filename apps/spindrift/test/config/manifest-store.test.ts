@@ -28,7 +28,6 @@ import {
 
 const database = withIsolatedDatabase();
 
-/** The `targets.id` for the surface named by `(vessel, adapter)`. */
 async function targetIdOf(
   vessel: string,
   adapter: TargetAdapter = 'kubernetes',
@@ -57,15 +56,12 @@ const connectedManifest = {
     {
       name: 'cloud',
       kind: 'gcp-project',
-      // With the optional network, so the round-trip below proves the strict
-      // location schema accepts one and the store carries it onto the row.
+      // The optional network, so the round-trip below covers it.
       location: {
         project: 'example-vessel',
         network: { name: 'example-network', region: 'example-region' },
       },
-      // Carried from the fixture rather than restated: the home vessel is the
-      // one that must declare these, and which vessel that is comes from the
-      // fixture's own `installation.homeVessel`.
+      // Only the home vessel may carry `shared`, so take the fixture's.
       shared: fixtureManifest.vessels.find(
         (vessel) => vessel.name === fixtureManifest.installation.homeVessel,
       )?.shared,
@@ -102,13 +98,7 @@ const connectedManifest = {
   ],
 } satisfies AuthoredManifest;
 
-/**
- * A row seeded the way a fresh installation gets one, then booted from.
- *
- * The declaration used to do this: a document in the environment, read once on
- * a boot with no row. There is no such channel any more, so seeding is what it
- * always actually was — a write — and these tests say so directly.
- */
+/** Writes the document as a fresh installation's seed, then boots from it. */
 async function bootFrom(
   document: AuthoredManifest | string,
 ): Promise<InstallationManifest> {
@@ -219,16 +209,14 @@ describe('the stored installation manifest', () => {
       },
     ]);
 
-    // The boundary facts the seeds stated per surface are stored once. Both
-    // cloud surfaces are one vessel, named for what the suffix used to encode.
+    // Boundary facts are stored once per vessel, and both cloud Targets share
+    // one.
     const vesselRows = await database().db.query.vessels.findMany({
       orderBy: (vessels, { asc }) => [asc(vessels.name)],
     });
     expect(
       vesselRows
-        // The harness seeds one vessel per kind for fixtures that insert a
-        // Target directly; what this test is about is the ones the manifest
-        // described.
+        // Skip the harness's per-kind fixture vessels.
         .filter((vessel) => !vessel.name.startsWith('fixture-'))
         .map(({ name, kind, location }) => ({ name, kind, location })),
     ).toEqual([
@@ -271,13 +259,8 @@ describe('the stored installation manifest', () => {
       ),
     } satisfies AuthoredManifest;
 
-    // Configuration is the UI's to drive, so the trigger for reconciliation is
-    // an operator submitting a document — which is what a settings write is,
-    // and it is `writeStoredManifest` on both the seed path and
-    // `configureInstallation`. Written through that call rather than by
-    // updating the row and rebooting: a boot writes the stored document back
-    // without re-asserting it (see the test below), so the raw-update spelling
-    // was asserting this behaviour through the one path that no longer has it.
+    // Written through writeStoredManifest, since a boot writes the row back
+    // without reconciling the changed connection.
     await writeStoredManifest(database().db, changed);
 
     const cluster = (
@@ -289,9 +272,7 @@ describe('the stored installation manifest', () => {
           and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
         )
     )[0]?.targets;
-    // The address moved to the boundary, so that is where the edit lands —
-    // and the surface it carries is still reassessed, because what changed is
-    // still where this Target is.
+    // The address lives on the vessel, and its Target is still reassessed.
     const clusterVessel = await database().db.query.vessels.findFirst({
       where: (vessels, { eq }) => eq(vessels.name, 'cluster'),
     });
@@ -307,13 +288,11 @@ describe('the stored installation manifest', () => {
   test('a boot leaves an operator’s Target connection alone, and says where it diverges', async () => {
     await bootFrom(JSON.stringify(connectedManifest));
 
-    // What `connectTarget` writes: the row, and only the row. The manifest is
-    // untouched, which is the state 52 is about — the operator corrected a
-    // Target through the product and the document still declares the old one.
+    // What `connectTarget` writes: the row only, while the manifest keeps the
+    // old value.
     const corrected = {
       adapter: 'kubernetes' as const,
-      // No `apiServer`: where the cluster is belongs to its vessel now, and
-      // this is the surface's half.
+      // No `apiServer`: the cluster's address belongs to its vessel.
       namespace: 'apps',
       delivery: {
         flavour: 'flux-helmrelease' as const,
@@ -331,10 +310,8 @@ describe('the stored installation manifest', () => {
       .set({ connection: corrected, health: 'healthy' })
       .where(eq(targets.id, await targetIdOf('cluster')));
 
-    // The restart. It used to be the whole defect: `loadStoredManifest` writes
-    // the stored document back on every boot, and reconciliation re-asserted
-    // the manifest's copy of the connection over the row — so a connect-screen
-    // edit lasted exactly until the next pod rolled, silently.
+    // A restart: `loadStoredManifest` writes the stored document back on every
+    // boot.
     await loadStoredManifest(database().db);
 
     const cluster = (
@@ -347,14 +324,11 @@ describe('the stored installation manifest', () => {
         )
     )[0]?.targets;
     expect(cluster?.connection).toEqual(corrected);
-    // Nothing was re-declared, so nothing about the Target's assessment was
-    // invalidated either — a boot that reset this to unhealthy would make every
-    // rollout re-inspect every Target it had not been asked to change.
+    // A boot declares nothing, so the assessment stands.
     expect(cluster?.health).toBe('healthy');
 
-    // And the divergence is readable rather than silent: the row won, so what
-    // the manifest still declares has to be somewhere an operator can see it
-    // before they submit that document in Settings and take their own edit back.
+    // Submitting the document in Settings would revert the row, so the
+    // divergence is reported.
     expect(
       targetConnectionDivergence(
         connectedManifest.targets[0],
@@ -364,10 +338,8 @@ describe('the stored installation manifest', () => {
   });
 
   test('a Target the manifest declares no connection for never diverges', async () => {
-    // §13 lets a seed carry an identity and leave the connection to the
-    // product. That Target's connection is the row's outright, so there is
-    // nothing for it to disagree with — reporting one would put a permanent
-    // warning on every Target connected through the screen it belongs to.
+    // A seed may leave the connection to the product, so the row has nothing to
+    // diverge from.
     await bootFrom(fixtureText);
     await database()
       .db.update(targets)
@@ -395,8 +367,6 @@ describe('the stored installation manifest', () => {
     const first = await bootFrom(fixtureText);
     expect(first.installation.name).toBe('example');
 
-    // Configuration is the product's, so the last write wins outright. Nothing
-    // is reconciled from anywhere and nothing takes an edit back.
     const later = await bootFrom(
       fixtureText.replace('name: example', 'name: replacement'),
     );
@@ -463,21 +433,12 @@ describe('the stored installation manifest', () => {
       'installation: ""',
     );
 
-    // Ignored rather than fatal: a declaration does not govern a seeded
-    // installation, so this document was never going to be read. The row is
-    // what boots, unchanged.
     expect(await bootFrom(malformed)).toEqual(first);
 
     expect(await loadStoredManifest(database().db)).toEqual(first);
   });
 
   test('a declaration this build cannot parse does not stop a seeded boot', async () => {
-    // The ordinary shape of a rollout: a manifest key lands in the declaration
-    // with the merge and in the image with the digest bump, and between them
-    // every replica reads a document carrying a field it has no schema for.
-    // Crashing there takes a healthy control plane down over a value it had
-    // already decided not to use — the same controller/declaration skew the
-    // build workflow's `tags` default exists to absorb.
     const first = await bootFrom(fixtureText);
     const fromTheFuture = fixtureText.replace(
       'installation: example',
@@ -488,18 +449,12 @@ describe('the stored installation manifest', () => {
   });
 
   test('an unseeded installation still refuses to boot on a bad declaration', async () => {
-    // The other half, and it has to stay fatal: with no row the declaration is
-    // the whole configuration, and continuing would boot the placeholder as
-    // though the operator had declared nothing at all.
     await expect(
       bootFrom(fixtureText.replace('name: example', 'name: ""')),
     ).rejects.toThrow(ManifestError);
   });
 
   test('a stored row this build cannot parse re-seeds from the declaration', async () => {
-    // What actually happened: `dns.zones` replaced `dns.apexZone`, the row
-    // written by the previous image kept the old shape, and every replica
-    // crash-looped on a document whose mounted declaration was already correct.
     await bootFrom(fixtureText);
     await database()
       .db.update(installation)
@@ -513,7 +468,7 @@ describe('the stored installation manifest', () => {
     const booted = await bootFrom(fixtureText);
     expect(zoneFor('private', booted.dns.zones)).toBe('apps.example.test');
 
-    // Nothing honest to boot as without one, so the error stands.
+    // A row no upgrade can read fails the boot.
     await database()
       .db.update(installation)
       .set({
@@ -535,14 +490,9 @@ describe('the stored installation manifest', () => {
           and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
         )
     )[0]?.targets;
-    // Nobody has said, so the row asserts nothing and the adapter's floor is
-    // the whole answer — §3's asserted half is stated, never reported.
+    // No declared reach, so the row asserts none.
     expect(seeded?.reaches).toBeNull();
 
-    // The declaration now states one. Before this, `reaches` was written on
-    // INSERT only: a Target that already existed could never be given an
-    // asserted reach through any supported path, so a document that had always
-    // declared `public` never reached the row rendering the deploy.
     const [cluster, ...rest] = connectedManifest.targets;
     const asserting = {
       ...connectedManifest,
@@ -569,10 +519,7 @@ describe('the stored installation manifest', () => {
     expect(declared?.reaches).toEqual(['none', 'private', 'public']);
     expect(declared?.authReaches).toEqual(['private']);
 
-    // And the other half of 52's rule, one noun down: a reach is something an
-    // operator can have set on the row through the connect screen, so a boot —
-    // which declares nothing, it only writes back the document the installation
-    // already had — must leave it exactly where the operator put it.
+    // A boot declares nothing, so it keeps a reach the operator set on the row.
     await database()
       .db.update(targets)
       .set({ reaches: ['none'] })
@@ -652,11 +599,7 @@ describe('the stored installation manifest', () => {
 
   test('seeds default placeholder manifest when the database is empty and no bootstrap exists', async () => {
     const loaded = await loadStoredManifest(database().db);
-    // The placeholder as authored, plus the deployment facts resolved onto it.
-    // A deployment that mounts no cloud credential resolves `null`, which is
-    // what an installation with no cloud Targets honestly has; a deployment
-    // that serves no origin resolves the hostname no browser will run a
-    // ceremony against, which is what an unreachable installation honestly is.
+    // The placeholder, plus the deployment facts an empty environment resolves.
     expect(loaded).toEqual({
       ...DEFAULT_PLACEHOLDER_MANIFEST,
       cloud: { federation: null },
@@ -671,9 +614,8 @@ describe('the stored installation manifest', () => {
   });
 
   test('a row restating a fact the deployment declares is refused', async () => {
-    // The schema is strict, so the two keys the deployment owns cannot reach a
-    // reader from storage either. The installer chart refuses them at render,
-    // which is where an operator meets this.
+    // The schema is strict, so a key the deployment owns is refused from
+    // storage too.
     await database().client`
       INSERT INTO installation (manifest)
       VALUES (${JSON.stringify({
@@ -694,10 +636,7 @@ describe('naming where two documents disagree', () => {
   });
 
   test('names the dotted paths that differ, and only those', () => {
-    // Mirrors the live bug this guards against: PR #1607 moved the offsite
-    // Target's gateway — a value nested inside one Target's connection — in
-    // the declaration, while the row it seeded and every other field of
-    // every other Target stayed exactly where they were.
+    // Only a gateway nested in one Target's connection differs.
     const withGateway = (name: string, namespace: string) => ({
       ...connectedManifest,
       targets: connectedManifest.targets.map((target) =>
@@ -742,12 +681,8 @@ describe('naming where two documents disagree', () => {
 
     const paths = diffManifestPaths(connectedManifest, stored);
     expect(paths).toEqual(['vessels.0.location.apiServer']);
-    // Neither the declared value nor the stored value appears anywhere in
-    // what was returned — a path names *where* the two documents disagree,
-    // never *what* they disagree about. That is what keeps a value the
-    // schema has not been written yet — a credential on some future Target
-    // connection — off a startup log line, without this function needing to
-    // know which paths are sensitive.
+    // Paths only, so a credential in a future connection field never reaches a
+    // log line.
     const rendered = JSON.stringify(paths);
     expect(rendered).not.toContain('cluster.example.test');
     expect(rendered).not.toContain('replacement.example.test');

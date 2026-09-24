@@ -1,17 +1,3 @@
-/**
- * The Cloud Run functions deployer.
- *
- * Every test drives the real class against a fake of the runtime's HTTP API
- * (§ Seam 2). The claims worth stating:
- *
- * - **Read before write**, because the API has separate verbs for the first
- *   deploy and every one after it.
- * - **The source object is named by its digest**, so redeploying unchanged
- *   sources overwrites one object rather than growing the bucket.
- * - **The deploy is not finished when the API accepts it** — the operation is
- *   followed, and an operation that finishes with an error is a failure.
- * - **Openness is the Service's own field**, never an `allUsers` binding.
- */
 import { describe, expect, test } from 'bun:test';
 import { CloudRunFunctions } from '../../src/functions/cloud-functions.ts';
 import { FunctionDeployError } from '../../src/functions/contract.ts';
@@ -142,7 +128,7 @@ describe('CloudRunFunctions.deploy', () => {
     // removed variable on the Service.
     expect(created.serviceConfig.environmentVariables).toEqual({});
 
-    // §9's open cell: the Service's own field, never an `allUsers` binding.
+    // Opened by the Service's own field, never an allUsers binding.
     const opened = far.calls[4]!;
     expect(new URL(opened.url).searchParams.get('updateMask')).toBe(
       'invokerIamDisabled',

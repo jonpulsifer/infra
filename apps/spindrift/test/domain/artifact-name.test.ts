@@ -1,12 +1,3 @@
-/**
- * What a Component's artifact is called at the registry.
- *
- * The rule these cover is the one a registry enforces and nothing in this
- * codebase did: a repository is a *path*, and the installation's registry (§16)
- * is only its prefix. Every fixture in the adapter tests already supplied a
- * repository-shaped value, so the adapters were tested against the shape they
- * expect while the one place that produced the wrong shape had no test at all.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   artifactTags,
@@ -37,8 +28,7 @@ describe('a Component’s repository', () => {
       app: 'infra',
       component: 'web',
     });
-    // The defect verbatim: GHCR answers `NAME_INVALID` to a single-segment
-    // path, which is what the registry alone is.
+    // GHCR answers NAME_INVALID to a single-segment path such as the namespace.
     expect(repository).not.toContain(REGISTRY);
     expect(repository?.[0]?.slice(REGISTRY.length)).toBe('/infra/web');
   });
@@ -49,8 +39,7 @@ describe('a Component’s repository', () => {
   });
 
   test('nests rather than joining, so a hyphen in either half is unambiguous', () => {
-    // `naming.ts` states the reason for canonical names and it holds here:
-    // flattened, these two would both be `my-app-web-api`.
+    // Flattened, both would be my-app-web-api.
     const first = componentRepositories({
       registries: [REGISTRY],
       app: 'my-app',
@@ -65,11 +54,8 @@ describe('a Component’s repository', () => {
   });
 
   test('folds to two levels on Docker Hub, which holds no nested namespaces', () => {
-    // Docker Hub is namespace/repository and nothing deeper — the nested form
-    // is "push access denied, repository does not exist" after the whole
-    // build. The fold gives up the unambiguity above on that one registry;
-    // every other registry keeps the canonical nested name, and those are the
-    // refs Deploys pin.
+    // Docker Hub refuses a nested path with "push access denied, repository
+    // does not exist", after the build has run.
     expect(
       componentRepositories({
         registries: ['docker.io/jonpulsifer', REGISTRY],
@@ -83,8 +69,8 @@ describe('a Component’s repository', () => {
   });
 
   test('refuses a name no registry would accept rather than projecting it', () => {
-    // Projecting would push two Components to one repository, which is the
-    // quiet failure: the second build overwrites the first's tag.
+    // Projecting could push two Components to one repository, where the second
+    // build overwrites the first's tag.
     expect(
       componentRepositories({
         registries: [REGISTRY],
@@ -109,9 +95,7 @@ describe('a Component’s repository', () => {
   });
 
   test('composes one repository per registry, in the manifest’s order', () => {
-    // Ticket 39: two Targets on one installation cannot always share a
-    // registry, so the same digest is pushed to each. `refs[0]` stays the
-    // first, which is what a Target declaring no reachability gets.
+    // The first is what a Target that declares no reachable registry pulls.
     expect(
       componentRepositories({
         registries: [
@@ -128,8 +112,6 @@ describe('a Component’s repository', () => {
   });
 
   test('refuses every registry or none — never a partial push', () => {
-    // A partial answer would push to one destination and silently not to the
-    // other, which reads as "Cloud Run cannot pull what the cluster is running".
     expect(
       componentRepositories({
         registries: [REGISTRY, 'other.example.test/ns'],
@@ -163,9 +145,7 @@ describe('what a path segment may be', () => {
 
 describe('the tags one build pushes', () => {
   test('names what was built, from the digest both routes carry', () => {
-    // A colon is not legal in a tag, and an upload has no commit to use
-    // instead — which is why §16 makes the bundle digest the parameter every
-    // route gets.
+    // A tag may not contain a colon, and an upload has no commit to tag by.
     expect(bundleTag(DIGEST)).toBe(`sha256-${DIGEST.slice('sha256:'.length)}`);
     expect(bundleTag(DIGEST)).not.toContain(':');
   });
@@ -173,8 +153,7 @@ describe('the tags one build pushes', () => {
   test('carries an immutable tag as well as the moving one', () => {
     const tags = artifactTags(DIGEST);
     expect(tags).toEqual([bundleTag(DIGEST), MOVING_TAG]);
-    // §12 retains "by tagging" with N = 10 doubling as rollback depth. Only
-    // `latest` and there is nothing to count and nothing to roll back to.
+    // Retention counts the immutable tags, and a rollback names one.
     expect(tags.filter((tag) => tag !== MOVING_TAG)).toHaveLength(1);
   });
 

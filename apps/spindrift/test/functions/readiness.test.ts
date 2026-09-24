@@ -1,10 +1,3 @@
-/**
- * `probeUrl` (`functions/readiness.ts`).
- *
- * Every case is a fake fetcher rather than a real one: what this module
- * decides is entirely a function of what `fetch` returned or threw, and a
- * real network call would only make that decision flaky.
- */
 import { describe, expect, test } from 'bun:test';
 import { probeUrl } from '../../src/functions/readiness.ts';
 

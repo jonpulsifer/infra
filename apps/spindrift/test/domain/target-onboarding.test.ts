@@ -1,12 +1,3 @@
-/**
- * What is left to connect, and what may honestly be proposed for it (§13).
- *
- * The two claims worth a test are the two that are easy to get subtly wrong:
- * a cloud project is **one** act and not two, and a proposal carries only the
- * values that are not per-instance. The second one is a correctness property,
- * not a nicety — a second cluster prefilled with the first one's in-cluster
- * API server reads as correct and points somewhere else.
- */
 import { describe, expect, test } from 'bun:test';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
@@ -78,9 +69,7 @@ describe('what is still waiting to be connected', () => {
   });
 
   test('an unhealthy Target is not a pending connection', () => {
-    // An unmet checklist item is something to fix on the Target. Offering a
-    // connect form for it would be offering to re-supply facts that are
-    // already right and are not what is broken.
+    // An unmet checklist item is fixed on the Target, not by reconnecting it.
     const broken = { ...CLUSTER, health: 'unhealthy' as const };
     expect(pendingConnections([broken])).toEqual([]);
   });
@@ -102,8 +91,7 @@ describe('what is still waiting to be connected', () => {
   test('half a cloud project still names both Targets the act would write', () => {
     const pending = pendingConnections([CLOUD_RUN, unconfigured('static')]);
 
-    // Connecting re-registers the pair. Listing only the unconfigured half
-    // would under-report what the button is about to touch.
+    // Connecting re-registers both Targets.
     expect(pending[0]?.surfaces).toEqual(['cloudrun', 'static']);
   });
 
@@ -112,7 +100,6 @@ describe('what is still waiting to be connected', () => {
       {
         kind: 'cluster',
         vessel: OFFSITE_VESSEL.name,
-        // One surface, so it is the whole list §13 gives a cluster.
         surfaces: ['kubernetes'],
         proposal: { carriedFrom: null },
       },
@@ -137,7 +124,7 @@ describe('what a connect may be prefilled with', () => {
       deliveryFlavour: 'flux-helmrelease',
       sourceRef: { name: 'infra', namespace: 'flux-system' },
     });
-    // The one field that names a particular cluster.
+    // A copied API server reads as correct and points at the other cluster.
     expect(proposal).not.toHaveProperty('apiServer');
   });
 
@@ -147,11 +134,8 @@ describe('what a connect may be prefilled with', () => {
       'gcp-project',
     );
 
-    // Neither `endpoint` is here: both are one hostname for every project, so
-    // `cloudrun/index.ts` and `static/index.ts` each apply their own default
-    // rather than this being a value a donor Target teaches. `policyEndpoint`
-    // stays, because its presence is a real operator choice with no default —
-    // see `CloudRunConnection.policyEndpoint`.
+    // Each endpoint is one hostname for every project, which its adapter
+    // defaults. A policy endpoint has no default, so it is carried.
     expect(proposal).toEqual({
       carriedFrom: 'bluenose/cloudrun',
       region: 'northamerica-northeast1',
@@ -163,8 +147,6 @@ describe('what a connect may be prefilled with', () => {
   test('it prefers a healthy Target to copy from', () => {
     const broken: OnboardingTargetRow = { ...CLUSTER, health: 'unhealthy' };
 
-    // Copying a Target that does not work forward is the fastest way to turn
-    // one broken Target into two.
     expect(connectionProposal([broken, CLUSTER], 'cluster')).toMatchObject({
       carriedFrom: 'offsite/kubernetes',
     });

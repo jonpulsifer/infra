@@ -1,17 +1,5 @@
-/**
- * An App names the route it builds on (§4, §16).
- *
- * §16's sentence is "the level is a threshold, then admin rank wins", and the
- * App's choice enters on the *rank* side of that comma — it narrows the
- * candidates, it never lowers the bar. So the two things worth pinning are the
- * two halves of one rule: a chosen route that clears the Target's minimum is
- * what dispatch takes, and a chosen route that does not is refused with the
- * same sentence any other ineligible route gets.
- *
- * The fixture installation ranks `hosted` (L2) first, then `managed` (L3), then
- * `local` (L1) — three levels in rank order, which is what makes "rank picked
- * it" and "the App picked it" distinguishable at all.
- */
+// The fixture ranks `hosted` (L2), then `managed` (L3), then `local` (L1), so
+// the App's choice and rank order pick different routes.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { setAppBuildRoute } from '../../src/commands/apps/build-route.ts';
@@ -46,7 +34,6 @@ describe('an App choosing its build route', () => {
   let appId: string;
   let targetId: string;
 
-  /** Every route the fixture configures is available unless a test says not. */
   function registryWith(available: readonly string[]): AdapterRegistry {
     return {
       deploy: () => null,
@@ -64,10 +51,7 @@ describe('an App choosing its build route', () => {
     await db.delete(components);
     await db.delete(apps);
     await db.delete(targets);
-    // `seed` can run more than once per test (a test that raises the Target's
-    // level calls it again), so the vessel it mints has to go with the Target
-    // it belonged to — `vessels_name_unique` would otherwise refuse the second
-    // insert of the same fixture name.
+    // A second seed in one test would otherwise hit vessels_name_unique.
     await db.delete(vessels).where(eq(vessels.name, 'target-a'));
     await db.delete(users);
 
@@ -118,10 +102,6 @@ describe('an App choosing its build route', () => {
     await seed(null);
   });
 
-  /**
-   * The behaviour before this column existed, and the behaviour of every App
-   * that has not asked for anything. Null is "no opinion", not "no route".
-   */
   test('takes the highest-ranked eligible route when it has no opinion', async () => {
     expect(await routeForTarget(targetId, ctx, appId)).toBe('hosted');
   });
@@ -131,8 +111,6 @@ describe('an App choosing its build route', () => {
 
     expect(result.ok).toBe(true);
     expect(await routeForTarget(targetId, ctx, appId)).toBe('managed');
-    // The Target's own answer is unchanged: this is the App's say, not a
-    // re-ranking of the installation for everybody.
     expect(await routeForTarget(targetId, ctx)).toBe('hosted');
   });
 
@@ -144,11 +122,7 @@ describe('an App choosing its build route', () => {
     expect(await routeForTarget(targetId, ctx, appId)).toBe('hosted');
   });
 
-  /**
-   * §16's threshold, applied to the App's choice exactly as to any other
-   * candidate. `local` is the in-cluster route and it is L1, so a Target at the
-   * default L2 will not take it — and naming it is not a way around that.
-   */
+  // `local` is L1, below the default L2 minimum.
   test('refuses a route below the Target’s minimum, naming the level', async () => {
     const result = await setAppBuildRoute({ appId, route: 'local' }, ctx);
 
@@ -157,7 +131,6 @@ describe('an App choosing its build route', () => {
     expect(result.failure.code).toBe('NOT_BUILDABLE');
     expect(result.failure.message).toContain('target-a');
     expect(result.failure.message).toContain('Build Level 1');
-    // Nothing was written: a refused choice is not a choice.
     const [row] = await ctx.db
       .select({ buildRoute: apps.buildRoute })
       .from(apps)
@@ -173,12 +146,8 @@ describe('an App choosing its build route', () => {
     expect(result.failure.message).toContain('imaginary');
   });
 
-  /**
-   * A route an installation configures but this process cannot construct is
-   * unavailable rather than ineligible, and dispatch has to fall through it —
-   * otherwise a missing GitHub credential silently pins every App to a route
-   * that cannot run.
-   */
+  // A chosen route the process cannot construct yields no route, never one that
+  // cannot run.
   test('falls through a chosen route the process cannot construct', async () => {
     await setAppBuildRoute({ appId, route: 'managed' }, ctx);
     const without = {
@@ -189,16 +158,9 @@ describe('an App choosing its build route', () => {
     expect(await routeForTarget(targetId, without, appId)).toBeNull();
   });
 
-  /**
-   * The half a level threshold does not cover, and the one the cloud builder
-   * makes real: a route publishes where its own identity reaches, and a Target
-   * pulls from where it can reach. If those do not meet, the Build is green and
-   * the Deploy fails at the pull — so it is refused here instead.
-   */
+  // A route publishes where its own identity reaches. A Target that cannot pull
+  // from there would fail the Deploy at the pull.
   test('refuses a route that publishes nowhere the Target can pull from', async () => {
-    // A route whose identity reaches only the artifact registry, against a
-    // Target that pulls only from GHCR: the cloud builder's exact situation
-    // before a GHCR credential exists.
     const narrow = {
       ...ctx,
       adapters: {
@@ -228,12 +190,7 @@ describe('an App choosing its build route', () => {
     expect(result.failure.message).toContain('target-a');
   });
 
-  /**
-   * The other spelling a reachable list is allowed to use: a bare host, for a
-   * Target that reaches every namespace on one registry. The route publishes
-   * to a namespace under that host, so the two meet — refusing here was the
-   * bug this test pins, because live Targets declare hosts.
-   */
+  // A bare host in reachableRegistries covers every namespace under it.
   test('a Target declaring a bare registry host accepts a route publishing a namespace under it', async () => {
     await ctx.db
       .update(targets)
@@ -249,10 +206,6 @@ describe('an App choosing its build route', () => {
     expect(result.ok).toBe(true);
   });
 
-  /**
-   * The Target's threshold is the Target's, so raising it takes the choice away
-   * — which is the direction being wrong has to fail in.
-   */
   test('an L3 Target takes the L3 route the App named and refuses the L2 one', async () => {
     await seed(3);
 

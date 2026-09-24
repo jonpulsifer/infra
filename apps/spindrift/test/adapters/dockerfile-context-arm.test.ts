@@ -1,13 +1,6 @@
 /**
- * The Dockerfile arm's context probe, run as the workflow actually ships it.
- *
- * One rule, three readers: the hosted workflow's "Choose the frontend" step,
- * the BuildKit program the other routes run (`DOCKERFILE_CONTEXT_PROBE`), and
- * detection's inspect-time mirror (`dockerfileBuildContext`). A fixture cannot
- * prove the shipped script chooses the context the operator was told about;
- * running the step's own `run:` script over the same tree detection reads can
- * (the same reasoning as `files-artifact-arm.test.ts`) — so each case below
- * asserts the arm's answer *and* that detection's answer is the same one.
+ * Runs the hosted workflow's "Choose the frontend" step over the tree detection
+ * reads, and checks it picks the same context as `dockerfileBuildContext`.
  */
 import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -24,7 +17,6 @@ const WORKFLOW = join(
 const FRONTEND_STEP = 'Choose the frontend';
 const SUBPATH = 'apps/ddns';
 
-/** The `run:` script of the named step, straight out of the shipped file. */
 async function frontendScript(): Promise<string> {
   const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
     jobs: { build: { steps: { name?: string; run?: string }[] } };
@@ -78,7 +70,6 @@ async function runArm(
   return { outputs, workspace };
 }
 
-/** Run the shipped arm and detection's mirror over one tree; both must agree. */
 async function contextChosen(
   files: Readonly<Record<string, string>>,
 ): Promise<'root' | 'scope'> {
@@ -101,10 +92,6 @@ async function contextChosen(
 
 describe('the Dockerfile arm of “Choose the frontend”', () => {
   test('a subpath Dockerfile copying from beside itself builds with its directory as the context', async () => {
-    // The failing arrangement: subpath scope, directory-context Dockerfile —
-    // `COPY go.mod ./` with go.mod beside the Dockerfile and not at the
-    // bundle root, the convention every standalone repository ships. The
-    // root as context died 5.4s into buildx with `"/go.mod": not found`.
     expect(
       await contextChosen({
         [`${SUBPATH}/Dockerfile`]:
@@ -135,10 +122,7 @@ describe('the Dockerfile arm of “Choose the frontend”', () => {
   });
 
   test('`COPY ./` names the whole context and decides nothing', async () => {
-    // `./` normalizes to an empty source, which resolves to a directory both
-    // roots have — never evidence. The shell probes always read it that way;
-    // the mirror once turned it into `{context: 'scope', copies: ''}` and a
-    // sentence claiming a context the build does not use.
+    // `./` normalizes to an empty source, a directory both roots have.
     expect(
       await contextChosen({
         [`${SUBPATH}/Dockerfile`]: 'FROM golang:1.24\nCOPY ./ /app\n',
@@ -162,9 +146,6 @@ describe('the Dockerfile arm of “Choose the frontend”', () => {
   });
 
   test('the workflow carries the same probe the BuildKit program routes run', async () => {
-    // Verbatim: the function is defined once (`buildkit.ts`) and shipped
-    // twice, and the two copies drifting apart would let the hosted route
-    // answer differently from the others over the same Dockerfile.
     expect(await frontendScript()).toContain(DOCKERFILE_CONTEXT_PROBE);
   });
 });

@@ -1,28 +1,6 @@
 /**
- * The two halves of §7's value contract, checked against each other.
- *
- * §7: "The chart declares its own value contract and version, read at pin
- * time." That is a claim about two files in two packages — `VALUES_CONTRACT`,
- * which is what the code writing the values believes, and the annotation in
- * `packages/charts/spindrift-app/Chart.yaml`, which is what the chart stamps
- * onto every object it renders. Nothing in either package fails when they
- * disagree, and they did: the change that moved the constant to `3` migrated
- * the chart's templates and `values.yaml` in the same commit and left the
- * annotation on `2`, so every rendered object was labelled with a contract
- * Spindrift had stopped writing.
- *
- * The check lives here rather than in the chart's own suite because the
- * dependency runs Spindrift → chart (§20 names the chart as Spindrift's
- * `charts.app`), never the reverse, and because the chart's harness is
- * deliberately sealed off from this package — it "knows about Helm and YAML
- * and nothing else" (`packages/charts/spindrift-app/tests/render.ts`), while
- * `values.ts` reaches into the domain layer.
- *
- * Reading across a package boundary means the runner has to be told: Turbo
- * hashes a task from its own package's files, so `Chart.yaml` is named in
- * `spindrift#test`'s `inputs` in the root `turbo.json`. Without that, the one
- * change this guard exists to catch does not invalidate the task and CI serves
- * a cached pass over a real skew — the same failure as the check it replaced.
+ * The Kubernetes adapter's chart values. `Chart.yaml` is in `spindrift#test`'s
+ * turbo inputs, so a chart-only change reruns the contract check.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -75,9 +53,8 @@ describe('a connection reference becomes an env entry (§11)', () => {
   }
 
   test('a secret reference names the operator-owned Secret and its own key', () => {
-    // `uri` is CloudNativePG's key for the whole connection string in the
-    // `<cluster>-app` Secret it generates — a Kubernetes fact, parsed here
-    // rather than in `domain/`, which stores the reference opaque.
+    // `uri` is CloudNativePG's key for the full connection string in the
+    // `<cluster>-app` Secret it generates.
     const values = appValues(
       desiredWith([
         {
@@ -95,18 +72,8 @@ describe('a connection reference becomes an env entry (§11)', () => {
   });
 
   test('a secret reference into another namespace is mirrored, not refused', () => {
-    // This refused to render while a Datastore lived in the release's own
-    // namespace by construction, and a mismatch could only be a Target
-    // renamespaced underneath one. Per-App namespaces make the mismatch the
-    // *ordinary* case — the Datastore is in the vessel's datastore namespace
-    // and the release is in the App's — so a throw here would refuse every
-    // attached Datastore there is.
-    //
-    // A `secretKeyRef` still cannot cross a namespace. What crosses instead is
-    // an ExternalSecret the chart renders against the store scoped to the
-    // datastore namespace, which is what `remoteSecretName` selects. The
-    // segment is still read rather than dropped; what changed is that reading
-    // it now picks a shape instead of deciding whether to fail.
+    // A `secretKeyRef` cannot cross a namespace, so `remoteSecretName` has the
+    // chart render an ExternalSecret against the datastore namespace's store.
     const values = appValues(
       desiredWith([
         {

@@ -1,21 +1,6 @@
 /**
- * The static-hosting deploy adapter and its bundle reader (Task 29, §6, §9, §17).
- *
- * Every test drives the real adapter against a fake of the product's HTTP API
- * (§ Seam 2), with a **real gzipped tar** written by `test/harness/tar.ts`
- * rather than by the reader under test — a round trip through one
- * implementation proves that implementation self-consistent and nothing else.
- *
- * The claims worth stating up front:
- *
- * - **`Public` only** (§9). A non-public Component reaching this adapter is
- *   core's bug, because placement excludes this Target for one.
- * - **The five-step release is the product's contract**, and a version that was
- *   never finalized must not serve.
- * - **The site names itself** (§9), so the address comes back on the verdict.
- * - **The vanity name goes on the site that is already serving**, which is what
- *   makes moving an App between backends one record re-point.
- * - **A bundle is untrusted input**: a path that leaves the bundle is refused.
+ * The static-hosting deploy adapter and its bundle reader, against a fake of
+ * the hosting API. Tars come from `test/harness/tar.ts`, not the reader.
  */
 import { describe, expect, test } from 'bun:test';
 import { BundleError, readBundle } from '@repo/archive/bundle';
@@ -119,14 +104,12 @@ describe('§9: static hosting serves Public only', () => {
       );
       expect(verdict.phase).toBe('FAILED');
       if (verdict.phase === 'FAILED') {
-        // Placement already excludes this Target for a non-public Component,
-        // so one arriving here is core's bug and not the developer's — which
-        // is the difference between INTERNAL and REJECTED.
+        // Placement never sends a non-public Component here, so one arriving is
+        // core's bug: INTERNAL, not REJECTED.
         expect(verdict.reason).toBe('INTERNAL');
         expect(blameFor(verdict.reason)).toBe('platform');
         expect(verdict.detail).toContain('a public reach only');
       }
-      // And nothing was placed on the way to refusing.
       expect(api.hasSite('shop-site')).toBe(false);
     }
   });
@@ -143,8 +126,7 @@ describe('the release is five steps, in the product’s order', () => {
       '/assets/app.css',
       '/index.html',
     ]);
-    // A draft version must not be what serves: the product refuses to release
-    // one, and the fake refuses for the same reason.
+    // The product refuses to release a draft version, and so does the fake.
     expect(api.serving('shop-site')?.status).toBe('FINALIZED');
   });
 
@@ -158,9 +140,8 @@ describe('the release is five steps, in the product’s order', () => {
   });
 
   test('only the files the product does not hold are uploaded', async () => {
-    // The hash offered is over the gzipped bytes, which is what the product
-    // stores and therefore what it deduplicates on — so a redeploy of an
-    // unchanged site uploads nothing.
+    // The offered hash is over the gzipped bytes, which the product stores and
+    // deduplicates on.
     const first = adapterFor();
     await drain(first.adapter.apply(TARGET, desired()));
     expect(first.api.uploads).toHaveLength(2);
@@ -169,15 +150,11 @@ describe('the release is five steps, in the product’s order', () => {
     const second = adapterFor({ held });
     await drain(second.adapter.apply(TARGET, desired()));
     expect(second.api.uploads).toEqual([]);
-    // And the site still serves both files: not uploading is not not-serving.
     expect(second.api.servedPaths('shop-site')).toHaveLength(2);
   });
 
   test('a site of more than a thousand files is offered in chunks the API takes', async () => {
-    // The API takes at most 1000 file hashes per `populateFiles` call and
-    // refuses the rest. A `next export` or any bundle with a hashed asset
-    // directory clears that on its first deploy, so this is the ordinary case
-    // rather than an extreme one.
+    // The API refuses more than 1000 file hashes in one `populateFiles` call.
     const many = tarball(
       Array.from({ length: 1_001 }, (_, at) => ({
         name: `assets/${at}.txt`,
@@ -193,15 +170,11 @@ describe('the release is five steps, in the product’s order', () => {
     const { verdict } = await drain(adapter.apply(TARGET, desired()));
 
     expect(verdict.phase).toBe('LIVE');
-    // Two calls, and the version holds every file from both of them — not
-    // just the ones the last chunk named.
     expect(
       api.pathsOf('POST').filter((path) => path.endsWith(':populateFiles')),
     ).toHaveLength(2);
     expect(api.servedPaths('shop-site')).toHaveLength(1_001);
-    // Every hash the API asked for across both answers was uploaded: an
-    // adapter that kept only the last chunk's answer would finalize a version
-    // whose bytes are not all there.
+    // Hashes from both chunks' answers are uploaded, not only the last's.
     expect(api.uploads).toHaveLength(1_001);
   });
 
@@ -218,10 +191,6 @@ describe('the release is five steps, in the product’s order', () => {
     ).toEqual([]);
   });
 
-  // The one above starts from a site somebody else made, so it never exercises
-  // the case an App actually lives: *this* deploy created the site, and the
-  // next one has to land on it. That is the ordinary act — pushing a new
-  // revision of a site you already published — and it was impossible.
   test('a site this adapter created takes the next deploy as a revision', async () => {
     const { api, adapter } = adapterFor();
 
@@ -233,7 +202,6 @@ describe('the release is five steps, in the product’s order', () => {
     );
     expect(second.verdict.phase).toBe('LIVE');
 
-    // One site, made once, serving the newer release.
     expect(
       api.pathsOf('POST').filter((path) => path.endsWith('/sites')),
     ).toHaveLength(1);
@@ -247,8 +215,8 @@ describe('the release is five steps, in the product’s order', () => {
 
     const { verdict } = await drain(adapter.apply(TARGET, desired()));
 
-    // The create was attempted and refused; the deploy carried on onto the
-    // site that turned up, because a site that exists is what was wanted.
+    // The one create is refused with a 409, and the deploy is applied to the
+    // site that exists.
     expect(
       api.pathsOf('POST').filter((path) => path.endsWith('/sites')),
     ).toHaveLength(1);
@@ -260,11 +228,8 @@ describe('the release is five steps, in the product’s order', () => {
   });
 
   test('a name reserved by a deleted site is refused as spent, not as existing', async () => {
-    // The other 409, and the opposite of the one above: a site id is global
-    // and permanent — "the `SITE_ID` cannot be reactivated by you or anyone
-    // else" — so a name a deleted site burnt collides forever with nothing to
-    // read back. Reported as "already exists" it sends an operator looking for
-    // a site that is not there and can never be there.
+    // A site id is global and stays reserved after its site is deleted, so its
+    // create collides forever and the read-back finds nothing.
     const { adapter } = adapterFor({ reserved: ['shop-site'] });
 
     const { verdict } = await drain(adapter.apply(TARGET, desired()));
@@ -279,10 +244,8 @@ describe('the release is five steps, in the product’s order', () => {
   });
 
   test('a 409 whose read-back never answered is not called spent', async () => {
-    // Permanence is a claim about the name, and the only evidence for it is a
-    // read-back that came back and said the site is not here. A read-back that
-    // fell over says nothing about the name — and this sentence is the one
-    // that sends an operator to rename the App, which spends a second id.
+    // Only a read-back that answers 404 proves the name is spent. A failed one
+    // says nothing, and "rename the App" would spend a second id.
     const { api } = adapterFor({ reserved: ['shop-site'] });
     let reads = 0;
     const adapter = new StaticDeployAdapter({
@@ -328,9 +291,6 @@ describe('a built files artifact is pulled out of the registry', () => {
       ...options,
     });
     const api = new FakeHosting({});
-    // One transport, split by host: the registry answers for itself and the
-    // hosting API answers for everything else — which is exactly the shape of
-    // the adapter's real traffic.
     const adapter = new StaticDeployAdapter({
       token: api.token,
       fetch: async (request) =>
@@ -356,8 +316,7 @@ describe('a built files artifact is pulled out of the registry', () => {
       '/assets/app.css',
       '/index.html',
     ]);
-    // Every registry call carried the same identity the hosting calls do —
-    // the read is federated, never anonymous and never a stored credential.
+    // Registry reads carry the hosting identity, never an anonymous pull.
     expect(registry.requests.length).toBeGreaterThan(0);
     for (const request of registry.requests) {
       expect(request.authorization).toStartWith('Bearer ');
@@ -365,9 +324,8 @@ describe('a built files artifact is pulled out of the registry', () => {
   });
 
   test('an image at a files address is refused with the layer count in the sentence', async () => {
-    // The shape every Build made by a route with no files arm has: an
-    // ordinary image. The count is what tells that story apart from a
-    // corrupt push.
+    // A build route with no files arm pushes an ordinary image. The layer count
+    // tells that apart from a corrupt push.
     const { adapter } = ociAdapter({ layerCount: 4 });
     const { verdict } = await drain(adapter.apply(TARGET, built([AR_REF])));
 
@@ -388,7 +346,6 @@ describe('a built files artifact is pulled out of the registry', () => {
       expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
       expect(verdict.detail).toContain('ghcr.io');
     }
-    // And nothing tried to pull anonymously on the way to refusing.
     expect(registry.requests).toEqual([]);
   });
 
@@ -407,7 +364,7 @@ describe('a built files artifact is pulled out of the registry', () => {
 });
 
 describe('a supplied upload is fetched out of the depot', () => {
-  /** Where `stageArchiveBytes` puts an upload when the installation has one. */
+  /** Where `stageArchiveBytes` stages an upload when there is a depot. */
   const OBJECT = 'gs://bluenose-spindrift-source/abc123.tgz';
 
   const FEDERATION = {
@@ -419,7 +376,6 @@ describe('a supplied upload is fetched out of the depot', () => {
       'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/controller@vessel.iam.gserviceaccount.com:generateAccessToken',
   };
 
-  /** A supplied artifact: the bundle's own address, and no registry anywhere. */
   function supplied(location: string): DesiredState {
     return desired({
       artifact: { type: 'files', digest: 'sha256:bundle', refs: [location] },
@@ -432,8 +388,7 @@ describe('a supplied upload is fetched out of the depot', () => {
     signed: string[];
     fetched: string[];
   } {
-    // The depot serves on the storage host, which is also where a signed URL
-    // points — so the adapter's own fetch of the object runs for real.
+    // A signed URL points at the storage host, so the fake depot serves there.
     const api = new FakeHosting({
       bundle: { origin: 'https://storage.googleapis.com', bytes: SITE },
     });
@@ -464,9 +419,7 @@ describe('a supplied upload is fetched out of the depot', () => {
   }
 
   test('a bundle staged at gs:// is signed for, fetched, and served', async () => {
-    // The whole reason this backend can take an upload at all: nothing built
-    // it, so there is no registry reference, and the depot address is not
-    // something an HTTP client resolves.
+    // An upload has no registry reference, and HTTP clients cannot fetch gs://.
     const { api, adapter, signed, fetched } = depotAdapter();
     const { verdict } = await drain(adapter.apply(TARGET, supplied(OBJECT)));
 
@@ -475,8 +428,7 @@ describe('a supplied upload is fetched out of the depot', () => {
       '/assets/app.css',
       '/index.html',
     ]);
-    // Signed with the federated identity rather than a stored credential
-    // (§13), and the object fetched with the capability that signature is.
+    // The federated identity signs; no stored credential is used.
     expect(signed).toHaveLength(1);
     expect(fetched).toHaveLength(1);
     expect(fetched[0]).toContain('/bluenose-spindrift-source/abc123.tgz?');
@@ -484,10 +436,8 @@ describe('a supplied upload is fetched out of the depot', () => {
   });
 
   test('a bundle nothing can fetch says that, rather than blaming a registry', async () => {
-    // An installation with no depot stages an upload on the web pod's own
-    // disk. That is unfetchable, and it used to be reported as an artifact
-    // homed on a registry this identity cannot read — a true sentence about a
-    // different problem, which sends the operator to IAM.
+    // With no depot, an upload is staged on the web pod's own disk, which no
+    // adapter can fetch. A registry sentence would send the operator to IAM.
     const { adapter } = depotAdapter();
     const { verdict } = await drain(
       adapter.apply(TARGET, supplied('upload://abc123')),
@@ -503,10 +453,7 @@ describe('a supplied upload is fetched out of the depot', () => {
   });
 
   test('an installation that federates nothing refuses rather than crashes', async () => {
-    // The construction every adapter site that omits `federation` produces —
-    // the conformance harness is one. A depot object is unreadable without a
-    // signature, and the refusal says that about the object rather than
-    // throwing out of `apply` as an INTERNAL nobody can act on.
+    // Without `federation` nothing can sign for a depot object.
     const api = new FakeHosting({
       bundle: { origin: 'https://storage.googleapis.com', bytes: SITE },
     });
@@ -534,9 +481,6 @@ describe('§9: the vanity name is one record on the serving site', () => {
         desired({ hostname: { canonical: '', vanity: 'shop.example.test' } }),
       ),
     );
-    // §9: "moving an App between backends is one record re-point." On this
-    // backend the record is a domain on the site, so a move is this one call
-    // rather than a leg to stand up.
     expect(api.domainsOf('shop-site')).toEqual(['shop.example.test']);
   });
 
@@ -563,7 +507,7 @@ describe('§9: the vanity name is one record on the serving site', () => {
 describe('§6: what a failure is, and whose it is', () => {
   test('an artifact that cannot be fetched blames the platform', async () => {
     const { adapter } = adapterFor({
-      // Nothing is served at the depot, so the address resolves to a refusal.
+      // The bundle is served elsewhere, so the depot address answers a refusal.
       bundle: { origin: 'https://nowhere.example.test', bytes: SITE },
     });
     const { verdict } = await drain(adapter.apply(TARGET, desired()));
@@ -617,9 +561,8 @@ describe('observe, destroy, and what the site is called', () => {
   });
 
   test('a site released by something else reports drift rather than agreement', async () => {
-    // The digest lives on a label Spindrift wrote. A version released by hand
-    // carries none, which compares unequal to every desired digest — which is
-    // exactly what drift is, and §6 surfaces it rather than correcting it.
+    // The digest lives on a label the adapter writes. A version released by
+    // hand carries none, so it compares unequal to every desired digest.
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(TARGET, desired()));
     const serving = api.serving('shop-site');
@@ -644,11 +587,8 @@ describe('observe, destroy, and what the site is called', () => {
   });
 
   test('a destroy that does not remove the site is never reported as one', async () => {
-    // The regression this guards: a DELETE that lands on a path the API
-    // doesn't serve for site deletion still answers 404, which used to be
-    // trusted as "already gone". The site survives; destroy must throw
-    // rather than resolve, or unplaceComponent would orphan the Deploy row
-    // over a workload that is still serving.
+    // A DELETE on a path the API does not serve also answers 404. If destroy
+    // resolved, `unplaceComponent` would orphan the Deploy row of a live site.
     const { api, adapter } = adapterFor({
       refuseDelete: {
         status: 404,
@@ -674,7 +614,7 @@ describe('observe, destroy, and what the site is called', () => {
     expect(siteId(long).length).toBeLessThanOrEqual(30);
     expect(siteId(long)).toBe(siteId({ ...long }));
     // Truncation alone would make these one site, and the second deploy would
-    // silently replace the first.
+    // replace the first.
     expect(siteId(long)).not.toBe(siteId(other));
   });
 });
@@ -684,7 +624,7 @@ describe('§13 and §17: what this Target is honest about', () => {
     const { adapter } = adapterFor();
     const { prerequisites } = await adapter.inspect(TARGET);
     expect(deriveHealth(prerequisites, 'static')).toBe('healthy');
-    // The chart rows are not asked, because there is no chart here to pin.
+    // No chart runs on this backend, so there is no chart contract to check.
     expect(prerequisites.map((item) => item.name)).not.toContain(
       'CHART_CONTRACT',
     );
@@ -693,8 +633,6 @@ describe('§13 and §17: what this Target is honest about', () => {
   test('runtime log history is zero, which is the honest empty state', async () => {
     const { adapter } = adapterFor();
     const { discovery } = await adapter.inspect(TARGET);
-    // §17 gives static hosting an honest empty state rather than a duration:
-    // no process ever wrote a line, so a tail reaches back no distance at all.
     expect(discovery.logHistorySeconds).toBe(0);
   });
 
@@ -709,11 +647,8 @@ describe('§13 and §17: what this Target is honest about', () => {
   });
 
   test('refuses to run, rather than being unimplemented', async () => {
-    // §17's other direction. `KINDS_BY_ADAPTER.static` is `['website']`, so a
-    // job never reaches this backend and the refusal is unreachable through
-    // placement — which is exactly why it has to be a sentence rather than a
-    // throw: a caller that forgot to check the kind gets an answer it can put
-    // on a screen instead of a stack trace it cannot.
+    // Placement never sends a job here, but a caller that skips the kind check
+    // still gets a sentence it can show, not a throw.
     const { adapter } = adapterFor();
     const refusal = {
       kind: 'none',
@@ -765,8 +700,8 @@ describe('the bundle reader', () => {
   });
 
   test('a path that leaves the bundle is refused, not normalized away', () => {
-    // The bundle is untrusted input. Writing outside a site would be the only
-    // path in this system by which one App could reach another's.
+    // A bundle is untrusted input, and a path outside its site could reach
+    // another App's files.
     expect(() =>
       readBundle(
         tarball([{ name: '../elsewhere/evil.html', bytes: bytes('x') }]),
@@ -794,8 +729,7 @@ describe('the bundle reader', () => {
   });
 
   test('an entry a website cannot contain is skipped, not fatal', () => {
-    // A symlink has no representation at a static host; the files around it
-    // still deploy, which is more useful than refusing the whole site.
+    // A static host has no symlinks; the files around one still deploy.
     const archive = tar([
       { name: 'link', bytes: new Uint8Array(), type: '2' },
       { name: 'index.html', bytes: bytes('hi') },
@@ -806,9 +740,8 @@ describe('the bundle reader', () => {
   });
 
   test('an archive that ends inside an entry is malformed, not silently short', () => {
-    // Cut inside the entry's declared data rather than after it: the reader
-    // must notice the archive claiming more than it carries, which is what
-    // separates a truncated download from a short file.
+    // Cut inside the entry's declared data, so the archive claims more bytes
+    // than it carries.
     const truncated = tar([
       { name: 'big.bin', bytes: bytes('x'.repeat(1000)) },
     ]).slice(0, 700);
@@ -829,7 +762,7 @@ describe('the bundle reader', () => {
 /** One pax record, in the `<length> <key>=<value>\n` form the format uses. */
 function paxRecord(key: string, value: string): Uint8Array<ArrayBuffer> {
   const body = `${key}=${value}\n`;
-  // The length counts itself, so it is solved for rather than measured.
+  // The length includes its own digits, so it is solved for.
   let length = body.length + 3;
   while (`${length}`.length + 1 + body.length !== length) {
     length = `${length}`.length + 1 + body.length;
@@ -837,7 +770,6 @@ function paxRecord(key: string, value: string): Uint8Array<ArrayBuffer> {
   return bytes(`${length} ${body}`);
 }
 
-/** The header writer is exercised by the reader above; this pins its shape. */
 describe('the test harness writes a real ustar header', () => {
   test('a header is one block with a valid checksum', () => {
     const block = header({ name: 'index.html', bytes: bytes('hi') });

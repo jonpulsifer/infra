@@ -1,24 +1,5 @@
-/**
- * `deleteComponent` (§2, §9, §13).
- *
- * The same claims `delete-app.test.ts` makes, over one Component instead of
- * every Component an App has:
- *
- * - **The review writes nothing.** The first call is the confirmation's
- *   source of truth.
- * - **Deletion cascades to what is only the Component's own.** Builds and
- *   Deploys go; the App and its other Components are untouched.
- * - **A live placement is named, and then torn down.** Confirming calls
- *   `DeployAdapter.destroy` on the ref, and withdraws whatever vanity record
- *   that placement earned.
- * - **The `restrict` foreign keys do not block it**, for the identical reason
- *   `delete-app.test.ts` states one: `deploys.build_id` and
- *   `component_target_desired.desired_*` are `restrict`, and Postgres
- *   enforces one the moment its referenced row is deleted.
- * - **This is what makes §9's sole-serving rule mean something.** An App with
- *   two serving Components gets no vanity name for either; deleting the dead
- *   one is what lets the survivor claim it.
- */
+// deleteComponent makes deleteApp's promises over one Component. Deleting one
+// of two serving Components lets the survivor claim the App's vanity name.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { deleteComponent } from '../../src/commands/components/delete.ts';
@@ -119,11 +100,8 @@ async function seedApp(name: string) {
   return app!;
 }
 
-/**
- * One Component under an already-seeded App, and — where a Target is given —
- * a Build, a live Deploy, and the desired row whose `restrict` references are
- * the interesting part.
- */
+// One Component under a seeded App and, given a Target, a Build, a live Deploy
+// and the desired row that references both.
 async function seedComponent(
   appId: string,
   name: string,
@@ -256,8 +234,7 @@ describe('confirm deletes', () => {
   });
 
   test('the restrict-referenced Build and Deploy go with it', async () => {
-    // Without the ordered deletes this is the test that fails, and it fails as
-    // a foreign-key violation from Postgres rather than as a wrong row count.
+    // Without ordered deletes this fails as a foreign-key violation.
     const target = await seedTarget('folly', 'kubernetes');
     const app = await seedApp('shop');
     const seeded = await seedComponent(app.id, 'web', {
@@ -425,13 +402,7 @@ describe('what it refuses', () => {
   });
 });
 
-/**
- * §9: "a sole serving Component carries the App's vanity name" — the fact
- * `deleteComponent` exists to make reachable. Two serving Components contend
- * for one name and neither gets it (`deploy-loop.test.ts` proves that half);
- * this proves the other half — deleting one is what lets the survivor claim
- * it.
- */
+// A sole serving Component carries the App's vanity name.
 describe('§9: the sole-serving rule sees one Component afterwards', () => {
   function loopContext(adapter: FakeDeployAdapter): DeployLoopContext {
     return {
@@ -457,8 +428,7 @@ describe('§9: the sole-serving rule sees one Component afterwards', () => {
     const demo = await seedComponent(app.id, 'demo', { targetId: target.id });
 
     const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
-    // Two serving Components: neither is unambiguous, so core mints no
-    // vanity name for either of them yet.
+    // Two serving Components, so neither gets the vanity name.
     await runDeployPass(loopContext(adapter));
     const contended = adapter.applied.find(
       (call) => call.desired.component === 'web',
@@ -472,8 +442,7 @@ describe('§9: the sole-serving rule sees one Component afterwards', () => {
     );
     expect(result.ok).toBe(true);
 
-    // The survivor is the App's only serving Component now — the next
-    // convergence carries the vanity name.
+    // The survivor is now the only serving Component.
     const redeployed = new FakeDeployAdapter({ adapter: 'kubernetes' });
     await database()
       .db.update(deploys)

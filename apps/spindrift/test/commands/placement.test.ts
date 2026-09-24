@@ -1,14 +1,7 @@
 /**
- * `resolveComponentPlacement` against a real Postgres (Task 15, §3).
- *
- * `test/domain/placement.test.ts` covers the filter itself. What is asserted
- * here is the half the filter cannot see: that the requirements handed to it are
- * genuinely **derived** — from the Component's kind, its exposure, and the
- * Datastores attached to its App — and that nothing is written when they are.
- *
- * Resolution is a query. §3 puts it before the build so "nowhere fits" is a
- * returnable answer rather than a deploy that fails later, and an act that
- * recorded a placement would make asking the question change the App.
+ * `resolveComponentPlacement` against a real Postgres. Requirements derive from
+ * the Component's kind, reach and attached Datastores, and resolving writes
+ * nothing.
  */
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
@@ -84,7 +77,7 @@ function context(registry: AdapterRegistry): CommandContext {
   };
 }
 
-/** The cluster and the two cloud Targets, in rank order, all healthy. */
+/** The cluster Target and the cloud vessel's two Targets, all healthy. */
 async function connectEverything(registry: AdapterRegistry) {
   await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
   await connectTarget(
@@ -139,16 +132,13 @@ describe('resolution is derived, and it is a query', () => {
     expect(placement.suggestedTargetId).toBe(
       connected.get('cluster/kubernetes')!.id,
     );
-    // Every Target appears, candidate or not, in one rank-ordered list — §3's
-    // grammar of listed-and-annotated rather than quietly filtered away.
+    // Every Target appears in rank order, candidate or not.
     expect(placement.options.map((option) => option.name)).toEqual([
       'cluster/kubernetes',
       'vessel/cloudrun',
       'vessel/static',
     ]);
-    // Only the cluster. A `private` reach is an address on the operator's own
-    // network, and neither cloud backend has one to publish — which is a
-    // sharper answer than the old three-state exposure could give.
+    // Neither cloud backend can publish a `private` address.
     expect(placement.options.map((option) => option.candidate)).toEqual([
       true,
       false,
@@ -172,7 +162,7 @@ describe('resolution is derived, and it is a query', () => {
   test('a public website reaches the static Target, as files', async () => {
     const registry = fakes();
     await connectEverything(registry);
-    // A reach the operator states, because §3 says nothing reports one (§13).
+    // Discovery reports no reach, so the operator states it.
     const staticTarget = (
       await database()
         .db.select({ id: targets.id })
@@ -190,9 +180,8 @@ describe('resolution is derived, and it is a query', () => {
     const cdn = placement.options.find((o) => o.name === 'vessel/static')!;
     expect(cdn.candidate).toBe(true);
     expect(cdn.artifactType).toBe('files');
-    // The cloud runtime serves a public reach too — its own URL, no tunnel
-    // needed — so what separates the two here is artifact shape rather than
-    // candidacy, and rank is the tie-break §3 leaves to a human.
+    // Cloud Run serves a public reach on its own URL, so both are candidates
+    // and differ by artifact shape.
     const run = placement.options.find((o) => o.name === 'vessel/cloudrun')!;
     expect(run.candidate).toBe(true);
     expect(run.artifactType).toBe('image');
@@ -208,10 +197,8 @@ describe('resolution is derived, and it is a query', () => {
       '0 3 * * *',
     );
 
-    // Two machineries, one row: the cluster's own controller fires the CronJob
-    // the chart renders, and the Cloud Run adapter puts a Cloud Scheduler job
-    // in front of the Job it renders. What the schedule still decides is the
-    // *static* Target, which renders no job at all.
+    // Kubernetes fires a CronJob and Cloud Run a Cloud Scheduler job, so only
+    // the static Target, which renders no job, is excluded.
     const placement = await place(registry, component.id);
     const run = placement.options.find((o) => o.name === 'vessel/cloudrun')!;
     expect(run.candidate).toBe(true);
@@ -220,13 +207,13 @@ describe('resolution is derived, and it is a query', () => {
       (o) => o.name === 'cluster/kubernetes',
     )!;
     expect(cluster.candidate).toBe(true);
-    // Rank is the tie-break §3 leaves to a human, and the cluster ranks first.
+    // Rank breaks the tie, and the cluster ranks first.
     expect(placement.suggestedTargetId).toBe(cluster.targetId);
     const cdn = placement.options.find((o) => o.name === 'vessel/static')!;
     expect(cdn.candidate).toBe(false);
     expect(cdn.reasons).toContain('KIND_UNSUPPORTED');
-    // NO_SCHEDULER's sentence opens by granting that this Target runs a job, so
-    // it never rides along beside the reason that says it does not.
+    // NO_SCHEDULER's sentence assumes the Target runs jobs, so it never
+    // appears beside KIND_UNSUPPORTED.
     expect(cdn.reasons).not.toContain('NO_SCHEDULER');
   });
 
@@ -235,10 +222,8 @@ describe('resolution is derived, and it is a query', () => {
     const connected = await connectEverything(registry);
     const { app, component } = await seedComponent('service', 'public', 'none');
 
-    // A public service with a cluster-local Datastore attached: the cluster
-    // hosts the Datastore and has no public reach, and the two cloud Targets
-    // serve the public and cannot reach a Datastore that stays where it is
-    // (§11). Two facts pulling opposite ways, so every row has a reason.
+    // The cluster holds the Datastore but has no public reach, and the cloud
+    // Targets have public reach but cannot reach a cluster-local Datastore.
     await database()
       .db.insert(datastores)
       .values({
@@ -284,8 +269,7 @@ describe('resolution is derived, and it is a query', () => {
 });
 
 describe('an attached cluster-local Datastore constrains the App', () => {
-  // A Component with no route, so both the cluster and the cloud runtime can
-  // hold it and the Datastore is the only thing that narrows the field.
+  // No route, so the attached Datastore is the only constraint.
   const unrouted = () => seedComponent('service', 'none', 'none');
 
   test('at attach time, the cloud stops being a candidate', async () => {
@@ -297,8 +281,7 @@ describe('an attached cluster-local Datastore constrains the App', () => {
       (await place(registry, component.id)).options.filter((o) => o.candidate),
     ).toHaveLength(2);
 
-    // §11: "In-cluster datastores stay cluster-local in v1." Attaching is the
-    // act that makes this true — not the deploy that comes later.
+    // An in-cluster Datastore is cluster-local from the moment it is attached.
     await database()
       .db.insert(datastores)
       .values({
@@ -322,8 +305,8 @@ describe('an attached cluster-local Datastore constrains the App', () => {
     const connected = await connectEverything(registry);
     const { component } = await unrouted();
 
-    // §2, §11: deleting an App detaches its Datastores and never cascades, so
-    // an orphaned Datastore row must not keep constraining anybody.
+    // Deleting an App detaches its Datastores, so an orphaned row constrains
+    // nobody.
     await database()
       .db.insert(datastores)
       .values({

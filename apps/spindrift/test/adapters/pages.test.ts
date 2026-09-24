@@ -1,26 +1,6 @@
 /**
- * The edge static-hosting deploy adapter (§6, §9, §17).
- *
- * Every test drives the real adapter against a fake of the platform's HTTP API
- * (§ Seam 2), with a **real gzipped tar** written by `test/harness/tar.ts`
- * rather than by the reader under test.
- *
- * The claims worth stating up front:
- *
- * - **The asset key is the vendor's formula**, checked against a fixed vector
- *   rather than against this implementation. It is the one thing here nothing
- *   else can catch: a wrong hash offers keys the store has never seen, uploads
- *   every file every time, and still deploys — so the site works and the
- *   contract is silently broken.
- * - **The two credentials are not interchangeable.** The account credential
- *   does not authorize the asset store and the minted token does not authorize
- *   anything else, so an adapter using one client for both fails here.
- * - **A deployment may only name files the store holds.** This is what the
- *   check-and-upload round exists to guarantee.
- * - **`Public` only** (§9), for the same reason its cloud sibling is: no
- *   non-public rendering here has a non-bypassable origin.
- * - **The platform names its own** (§9), and the canonical is the project's
- *   address rather than one deployment's.
+ * The edge static-hosting deploy adapter against a fake platform API, with a
+ * real gzipped tar from `test/harness/tar.ts`. It serves `Public` reach only.
  */
 import { describe, expect, test } from 'bun:test';
 import type {
@@ -59,7 +39,6 @@ const TARGET: DeployTarget = {
   connection: CONNECTION,
 };
 
-/** The project every test below deploys to. */
 const PROJECT = 'shop-site';
 
 function desired(overrides: Partial<DesiredState> = {}): DesiredState {
@@ -83,7 +62,6 @@ function desired(overrides: Partial<DesiredState> = {}): DesiredState {
   };
 }
 
-/** A site of two files, which is enough for order and dedup to be visible. */
 const SITE = tarball([
   { name: 'index.html', bytes: bytes('<!doctype html>home') },
   { name: 'assets/app.css', bytes: bytes('body{}') },
@@ -121,11 +99,8 @@ async function drain(
 
 describe('the asset key is the platform’s formula, not ours', () => {
   /**
-   * A vector computed from the published algorithm — BLAKE3 over the base64
-   * text of the contents concatenated with the extension without its dot,
-   * hex, first 32 characters — rather than from this implementation. A round
-   * trip through the code under test would prove it self-consistent and
-   * nothing else, and self-consistent is exactly what a wrong hash is.
+   * From the published formula, not this code: BLAKE3 over the base64 contents
+   * plus the extension without its dot, hex, first 32 characters.
    */
   test('a known file hashes to a known key', () => {
     expect(hashOf({ path: '/index.html', bytes: bytes('<h1>hi</h1>') })).toBe(
@@ -141,9 +116,7 @@ describe('the asset key is the platform’s formula, not ours', () => {
   });
 
   test('a file with no extension hashes with an empty one', () => {
-    // A dotfile is not an extension: `.nojekyll` is a name beginning with a
-    // dot, and reading `nojekyll` as its type is how a leading-dot name gets
-    // served as something it is not.
+    // A leading dot starts a name, not an extension.
     expect(hashOf({ path: '/LICENSE', bytes: bytes('x') })).toBe(
       hashOf({ path: '/nested/LICENSE', bytes: bytes('x') }),
     );
@@ -162,8 +135,7 @@ describe('§9: edge static hosting serves Public only', () => {
       );
       expect(verdict.phase).toBe('FAILED');
       if (verdict.phase === 'FAILED') {
-        // Placement already excludes this Target for a non-public Component,
-        // so one arriving here is core's bug and not the developer's.
+        // Placement already excludes this Target, so this is core's bug.
         expect(verdict.reason).toBe('INTERNAL');
         expect(blameFor(verdict.reason)).toBe('platform');
         expect(verdict.detail).toContain('a public reach only');
@@ -193,8 +165,7 @@ describe('a deploy is check, upload, deploy', () => {
       '/assets/app.css',
       '/index.html',
     ]);
-    // The deployment lands on the production branch, which is what makes it
-    // the live site rather than a preview nobody's name points at.
+    // The production branch is the live site; any other is a preview.
     expect(api.serving(PROJECT)?.branch).toBe('production');
   });
 
@@ -207,11 +178,9 @@ describe('a deploy is check, upload, deploy', () => {
 
     await drain(adapter.apply(TARGET, desired()));
 
-    // The held file was not offered again...
     expect(api.uploads).not.toContain(held);
     expect(api.uploads).toHaveLength(1);
-    // ...and the manifest still names it, because the manifest is what the
-    // site serves rather than a list of what changed.
+    // The manifest lists every file served, not only the uploads.
     expect(api.servedPaths(PROJECT)).toEqual([
       '/assets/app.css',
       '/index.html',
@@ -237,7 +206,6 @@ describe('a deploy is check, upload, deploy', () => {
 });
 
 describe('a supplied upload is fetched out of the depot', () => {
-  /** Where `stageArchiveBytes` puts an upload when the installation has one. */
   const OBJECT = 'gs://bluenose-spindrift-source/abc123.tgz';
 
   const FEDERATION = {
@@ -250,12 +218,8 @@ describe('a supplied upload is fetched out of the depot', () => {
   };
 
   test('a bundle staged at gs:// is signed for, fetched, and served', async () => {
-    // Nothing built a supplied upload, so it has no registry reference and no
-    // URL — only the depot address, which this backend's account credential
-    // has no bearing on at all. A V4 signature is what reads it.
+    // A supplied upload has only a depot address, read via a V4 signed URL.
     const api = new FakeCloudflarePages({
-      // The depot serves on the storage host, which is where a signed URL
-      // points — so the adapter's own fetch of the object runs for real.
       bundle: { origin: 'https://storage.googleapis.com', bytes: SITE },
     });
     const signed: string[] = [];
@@ -301,8 +265,6 @@ describe('a supplied upload is fetched out of the depot', () => {
       '/assets/app.css',
       '/index.html',
     ]);
-    // Signed with the federated identity rather than a stored credential
-    // (§13), and the object fetched with the capability that signature is.
     expect(signed).toHaveLength(1);
     expect(fetched).toHaveLength(1);
     expect(fetched[0]).toContain('/bluenose-spindrift-source/abc123.tgz?');
@@ -336,8 +298,7 @@ describe('the digest travels where a deployment can carry it', () => {
   test('a deployment nobody here made reports no digest, which reads as drift', async () => {
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(TARGET, desired()));
-    // Somebody deployed through the dashboard: a real deployment with a commit
-    // message that carries no marker.
+    // A dashboard deploy, whose commit message carries no marker.
     const form = new FormData();
     form.append('manifest', '{}');
     form.append('branch', 'production');
@@ -371,8 +332,8 @@ describe('§9: the platform names its own', () => {
       // A deployment's own URL changes every release, so it cannot be what a
       // name points at.
       expect(verdict.url).toBe(`https://${PROJECT}.pages.example.test`);
-      // §9: the vanity record `deploy-loop.ts` publishes points at the same
-      // subdomain, proxied — Cloudflare flattens an apex CNAME.
+      // The vanity record points at the same subdomain, proxied, because
+      // Cloudflare flattens an apex CNAME.
       expect(verdict.address).toEqual({
         recordType: 'CNAME',
         target: `${PROJECT}.pages.example.test`,
@@ -393,9 +354,8 @@ describe('§9: the platform names its own', () => {
   });
 
   test('a name already on the project is the state being asked for', async () => {
-    // The refusal for a duplicate is undocumented, so the adapter does not read
-    // the status code: it reads the domain back. A name that is there and
-    // serving is the state being asked for, whatever the POST answered.
+    // The duplicate refusal is undocumented, so the adapter reads the domain
+    // back instead of the status code.
     const { adapter } = adapterFor({
       domainAnswer: { status: 409, body: null },
       domainsAlready: { [PROJECT]: ['shop.example.com'] },
@@ -410,8 +370,6 @@ describe('§9: the platform names its own', () => {
   });
 
   test('a name that is not there makes the refusal the failure', async () => {
-    // Nothing to read back, so the POST's own refusal is the answer. Reporting
-    // LIVE here would announce a name that is on no project at all.
     const { adapter } = adapterFor({
       domainAnswer: { status: 409, body: null },
     });
@@ -425,11 +383,8 @@ describe('§9: the platform names its own', () => {
   });
 
   test('a certificate still issuing is said, and does not fail the deploy', async () => {
-    // `initializing` is the status of every first attach. The site is already
-    // serving on its own pages.dev address, so holding the deploy open on
-    // Cloudflare's clock would be waiting for something else — but a log line
-    // saying the name is on the project would be describing one that answers
-    // nothing.
+    // Every first attach is `initializing`, and the site already serves on its
+    // own address, so the deploy does not wait for the certificate.
     const { adapter } = adapterFor({ domainStatus: 'initializing' });
     const { verdict, events } = await drain(
       adapter.apply(
@@ -443,9 +398,6 @@ describe('§9: the platform names its own', () => {
   });
 
   test('a domain Cloudflare refused fails the deploy rather than going live', async () => {
-    // The defect this replaces: any non-error HTTP response was success, so a
-    // deploy went LIVE announcing a vanity name that resolved to nothing —
-    // the one failure nobody can debug, because every surface says it worked.
     const { adapter } = adapterFor({ domainStatus: 'blocked' });
     const { verdict } = await drain(
       adapter.apply(
@@ -476,8 +428,7 @@ describe('a built files artifact is pulled out of the registry', () => {
       layer: SITE,
     });
     const api = new FakeCloudflarePages({});
-    // One transport, split by host: the registry answers for itself and the
-    // platform API answers for everything else.
+    // One transport, split by host.
     const adapter = new PagesDeployAdapter({
       token: api.token,
       artifactToken: async () => 'federated-token',
@@ -504,8 +455,6 @@ describe('a built files artifact is pulled out of the registry', () => {
       '/assets/app.css',
       '/index.html',
     ]);
-    // The registry read carried the federated identity, never the account
-    // credential this adapter drives the platform with.
     expect(registry.requests.length).toBeGreaterThan(0);
     for (const request of registry.requests) {
       expect(request.authorization).toBe('Bearer federated-token');
@@ -518,13 +467,11 @@ describe('a built files artifact is pulled out of the registry', () => {
 
     expect(verdict.phase).toBe('FAILED');
     if (verdict.phase === 'FAILED') {
-      // §6 blames the platform: the build is green and the bytes are not
-      // reachable in the form this Target serves.
       expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
       expect(blameFor(verdict.reason)).toBe('platform');
       expect(verdict.detail).toContain('ghcr.io');
     }
-    // And nothing tried to pull anonymously on the way to refusing.
+    // No anonymous pull on the way to refusing.
     expect(registry.requests).toEqual([]);
   });
 });
@@ -547,10 +494,7 @@ describe('what this Target cannot fetch, it says so about', () => {
   });
 
   test('a bundle nothing can fetch says that, rather than blaming a credential', async () => {
-    // An installation with no depot stages an upload on the web pod's own
-    // disk. That is unfetchable, and it used to take the registry sentence — a
-    // true statement about a different problem, which sends the operator to a
-    // credential they cannot fix this with.
+    // With no depot, an upload is staged on the web pod's own disk.
     const { adapter } = adapterFor();
     const { verdict } = await drain(
       adapter.apply(
@@ -599,7 +543,6 @@ describe('a refusal from the platform is a verdict, not a throw', () => {
     });
     const { verdict } = await drain(adapter.apply(TARGET, desired()));
     expect(verdict.phase).toBe('FAILED');
-    // The project was made; nothing was deployed onto it.
     expect(api.hasProject(PROJECT)).toBe(true);
     expect(api.serving(PROJECT)).toBeUndefined();
   });
@@ -627,8 +570,6 @@ describe('§17: nothing here runs', () => {
     expect(tail.kind).toBe('none');
     expect(run.kind).toBe('none');
     expect(runs.kind).toBe('none');
-    // One fact, one sentence — three different ones would read as three
-    // different limitations.
     const because = [tail, run, runs].map((answer) =>
       answer.kind === 'none' ? answer.because : '',
     );
@@ -644,7 +585,6 @@ describe('destroy is idempotent, and never reports success it did not earn', () 
 
     await adapter.destroy(TARGET, ref);
     expect(api.hasProject(PROJECT)).toBe(false);
-    // Destroying what is already gone succeeds (§6).
     await adapter.destroy(TARGET, ref);
   });
 
@@ -676,13 +616,10 @@ describe('§13: the standing checklist', () => {
     const byName = new Map(
       inspection.prerequisites.map((item) => [item.name, item]),
     );
-    // The API answered, so what is unmet is the bearer and not the platform —
-    // the split that keeps an operator off the wrong page.
     expect(byName.get('PLATFORM_API')?.met).toBe(true);
     expect(byName.get('API_TOKEN')?.met).toBe(false);
     expect(byName.get('API_TOKEN')?.assessed).toBe(true);
-    // A boundary that refused to answer has not said it exists — reporting it
-    // met would be core deciding that what it failed to check was fine.
+    // An unanswered check is unassessed, never met.
     expect(byName.get('VESSEL')?.met).toBe(false);
     expect(byName.get('VESSEL')?.assessed).toBe(false);
   });
@@ -701,9 +638,8 @@ describe('§13: the standing checklist', () => {
   });
 
   test('the surface is never reported absent, because nothing can establish it', async () => {
-    // This product is not a per-account switch, so no refusal means "this
-    // account does not do static hosting" — reading one that way would delete
-    // a Target over an expired credential.
+    // Static hosting is not a per-account switch, so no refusal means the
+    // account lacks it.
     const { adapter } = adapterFor({ refuseList: { status: 403 } });
     expect((await adapter.inspect(TARGET)).surface.kind).toBe('undetermined');
   });
@@ -713,10 +649,8 @@ describe('§13: the standing checklist', () => {
     const names = (await adapter.inspect(TARGET)).prerequisites.map(
       (item) => item.name,
     );
-    // A federation row here could never fail, and would send an operator to
-    // configure a trust relationship that exists on neither side.
     expect(names).not.toContain('OIDC_FEDERATION');
-    // In this adapter's own declared order, which is what the screen shows.
+    // The screen shows this order.
     expect(names).toEqual(['PLATFORM_API', 'API_TOKEN', 'VESSEL']);
   });
 });
@@ -731,8 +665,6 @@ describe('a project is named once, deterministically', () => {
       desired({ app: 'a'.repeat(60), component: 'site' }),
     );
     expect(long.length).toBeLessThanOrEqual(58);
-    // Deterministic: a second deploy that computed a different name would
-    // create a second project rather than revise the first.
     expect(long).toBe(
       projectName(desired({ app: 'a'.repeat(60), component: 'site' })),
     );
@@ -748,22 +680,18 @@ describe('a re-apply finds the deployment it already made', () => {
     const again = await drain(adapter.apply(TARGET, desired()));
 
     expect(again.verdict.phase).toBe('LIVE');
-    // One deployment ever: the second apply found the first one by its
-    // commit-message marker and said so, rather than creating a sibling.
+    // Found by its commit-message marker.
     expect(api.deploymentCount).toBe(1);
     expect(
       again.events.some(
         (event) => event.type === 'log' && event.line.includes('adopting'),
       ),
     ).toBe(true);
-    // And it spent nothing getting there: no second fetch of the bundle, no
-    // second offer to the asset store.
     expect(
       api.requests.filter(
         (request) => request.path === '/pages/assets/check-missing',
       ),
     ).toHaveLength(1);
-    // The adopted verdict still carries the canonical address (§9).
     if (again.verdict.phase === 'LIVE') {
       expect(again.verdict.url).toBe(`https://${PROJECT}.pages.example.test`);
     }
@@ -777,8 +705,6 @@ describe('a re-apply finds the deployment it already made', () => {
 
     await drain(adapter.apply(TARGET, desired()));
 
-    // A failed deployment never served, so creating its successor is what a
-    // retry is; adopting it would pin the Deploy to a corpse.
     expect(api.deploymentCount).toBe(2);
   });
 });

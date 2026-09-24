@@ -1,25 +1,3 @@
-/**
- * Connecting a cluster, component by component (§13, §3, §7).
- *
- * The screen's whole job is turning "include this, leave that out" into one
- * `connectTarget` act, and three of the values it produces are **derived from
- * what was included** rather than typed. Each one is a wrong-by-default trap if
- * it is not derived, so each gets a test:
- *
- * - A Target that serves a gateway reaches `private`; one that does not reaches
- *   only `none`. Claiming a reach with no address behind it is how a Component
- *   gets a DNS record pointing nowhere.
- * - The chart's ingress is default-deny, so a route attached to a gateway whose
- *   namespace is not in `allowedNamespaces` renders correctly and reaches
- *   nothing — the failure that looks like a working deploy.
- * - `authReaches` never claims `public`, whatever edge was included.
- *
- * And the fourth claim, which is the point of the whole screen: **what the UI
- * writes and what the manifest declares are one shape.** `targetSeedOf` renders
- * the same act as the document that would perform it, so the test asserts the
- * declaration round-trips through the manifest's own schema rather than merely
- * looking plausible.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   targetSeedSchema,
@@ -47,7 +25,6 @@ const BASE: ClusterConnectChoices = {
   tunnelHostname: null,
 };
 
-/** Everything a fully blended cluster offers, as the probe would report it. */
 const BLENDED: ClusterConnectChoices = {
   ...BASE,
   gateway: { name: 'shared', namespace: 'edge', privateAddress: '10.0.0.9' },
@@ -92,9 +69,7 @@ describe('a cluster connect plan', () => {
   });
 
   test('a gateway beside the workloads needs no entry of its own', () => {
-    // The chart admits same-namespace siblings unconditionally, so naming the
-    // workload namespace here would be a line that means nothing — and the
-    // installation's own manifest says so in the same words.
+    // The chart already admits pods from the workload namespace.
     const plan = clusterConnectPlan({
       ...BLENDED,
       gateway: { name: 'apps', namespace: 'apps', privateAddress: '10.0.0.9' },
@@ -118,8 +93,7 @@ describe('a cluster connect plan', () => {
     const plan = clusterConnectPlan(BLENDED);
 
     expect(plan.reaches).toEqual(['none', 'private', 'public']);
-    // The proxy fronts the public address just as well; whether its policy is
-    // honest there is a claim nobody made, so the plan does not make it.
+    // The proxy fronts the public address too, but nobody vouched for it there.
     expect(plan.authReaches).toEqual(['private']);
   });
 
@@ -135,8 +109,7 @@ describe('a cluster connect plan', () => {
   test('writes only the operator’s value class', () => {
     const plan = clusterConnectPlan(BLENDED);
 
-    // §7: `app` and `shared` are rendered per deploy. Saving either here would
-    // be storing a value the next deploy overwrites.
+    // app and shared are rendered per deploy and would overwrite a saved value.
     expect(Object.keys(plan.chartValues)).toEqual(['platform']);
   });
 
@@ -145,8 +118,6 @@ describe('a cluster connect plan', () => {
     const parsed = targetSeedSchema.safeParse(targetSeedOf(plan));
 
     if (!parsed.success) throw parsed.error;
-    // The discriminant survives, which is what makes this the manifest's own
-    // cluster arm rather than something that merely parsed.
     if (parsed.data.adapter !== 'kubernetes') {
       throw new Error(`declared a ${parsed.data.adapter} Target`);
     }
@@ -156,9 +127,6 @@ describe('a cluster connect plan', () => {
   });
 
   test('declares an Argo Target the manifest’s own way', () => {
-    // §6 puts the flavour on the Target, so the screen has to be able to
-    // produce either one — and the arm that is not the default is the one that
-    // can drift into a shape the manifest would refuse.
     const plan = clusterConnectPlan({
       ...BLENDED,
       delivery: {
@@ -177,8 +145,6 @@ describe('a cluster connect plan', () => {
       throw new Error(`declared a ${parsed.data.adapter} Target`);
     }
     expect(parsed.data.connection?.delivery).toEqual(plan.delivery);
-    // The rest of the plan is flavour-blind, which is what makes the operator a
-    // choice rather than a second screen.
     expect(plan.reaches).toEqual(['none', 'private', 'public']);
     expect(platformOf(plan).networkPolicy).toEqual({
       allowedNamespaces: ['edge', 'auth'],
@@ -186,10 +152,6 @@ describe('a cluster connect plan', () => {
   });
 
   test('declares the boundary the same act connects', () => {
-    // Where the cluster is left the Target's connection when the vessel became
-    // a declared noun, so the screen's rendered document has to name it in the
-    // array it now lives in — otherwise an operator pastes a fragment that
-    // parses and points nowhere.
     const plan = clusterConnectPlan(BLENDED);
     const parsed = vesselSeedSchema.safeParse(vesselSeedOf(plan));
 

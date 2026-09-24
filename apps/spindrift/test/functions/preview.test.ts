@@ -1,11 +1,4 @@
-/**
- * Run — the preview worker, driven by real sources.
- *
- * Nothing is faked: the point of the seam is that an author's code actually
- * executes, so every case here is a module the worker imports for real. The
- * claim worth stating is the last one — a handler that never returns has to be
- * a bounded failure rather than a wedged request.
- */
+// Nothing is faked: each case runs a real module in the preview worker.
 import { describe, expect, test } from 'bun:test';
 import { runPreview } from '../../src/functions/preview.ts';
 

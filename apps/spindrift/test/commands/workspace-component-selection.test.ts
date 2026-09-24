@@ -1,16 +1,6 @@
 /**
- * The App workspace, on an App with more than one Component (§17, §18).
- *
- * Every App that had ever exercised a job surface had exactly one Component,
- * and that is what kept this invisible: the screen read `components[0]` for the
- * runtime, the placement and the config keys while listing every Component, so
- * an App whose job sits behind its service had no surface for that job at all —
- * no run list, no Run now, no config. `runComponent` took the pair happily; the
- * only screen that could call it was bound to a Component that was not a job.
- *
- * So the fixture here is the shape that was never tested: `components[0]` is a
- * `service` and the second Component is a `job`, each placed on a Target of its
- * own, and every claim below is about the second one being reachable by name.
+ * The App workspace on an App whose second Component is a job. A named
+ * Component selects the runtime, placement, config keys and Deploy target.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -105,9 +95,7 @@ async function placed(
       artifactDigest,
       status: 'SUCCEEDED',
       runner: 'hosted runner',
-      // What §16's gate admits. A Build without provenance and a signature over
-      // its artifact is one no press on Deploy could ever release, so a fixture
-      // carrying none could not state what Deploy does with the selection.
+      // Provenance and a signature, so the deploy gate admits this Build.
       verifiedBuildLevel: 2,
       signature: testSignature(artifactDigest),
     })
@@ -125,8 +113,7 @@ async function placed(
     })
     .returning();
 
-  // The workload the Deploy says is there. Every run verb refuses a ref with
-  // nothing behind it, which is a different state from this one.
+  // The fake refuses a run against a ref with nothing behind it.
   backend.place(ref, {
     ref,
     phase: 'LIVE',
@@ -137,11 +124,8 @@ async function placed(
 }
 
 /**
- * One App, a `service` first and a `job` second, each on its own Target.
- *
- * The job's Target sits on a vessel of its own, because the placement the
- * screen states is per Component: an App is not in a vessel, so a selection
- * that did not move the boundary would be reading the wrong Target's row.
+ * One App, a `service` first and a `job` second, each on its own Target. The
+ * job's vessel differs, so the stated placement shows which Component was read.
  */
 async function serviceThenJob(ctx: CommandContext, backend: FakeDeployAdapter) {
   const name = `two-${crypto.randomUUID().slice(0, 8)}`;
@@ -223,7 +207,7 @@ async function serviceThenJob(ctx: CommandContext, backend: FakeDeployAdapter) {
   };
 }
 
-/** A run nothing here started — the schedule's, read back off the platform. */
+/** A backend holding one scheduled run of the job. */
 function withARun(): FakeDeployAdapter {
   const backend = new FakeDeployAdapter();
   backend.ran('fake-deploy-nightly', {
@@ -246,8 +230,7 @@ describe('an App whose job sits behind its service', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const view = result.value.workspace;
-    // Unchanged for every caller that names no Component: the service is what
-    // an App-first screen opens on, and it is a `stream` rather than a list.
+    // With no Component named, the screen opens on the first one.
     expect(view.componentId).toBe(app.web.componentId);
     expect(view.runtime.kind).toBe('stream');
     expect(view.configKeys).toEqual(['PORT']);
@@ -267,8 +250,7 @@ describe('an App whose job sits behind its service', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const runtime = result.value.workspace.runtime;
-    // `{kind: 'executions'}` is what renders the run list and the Run now
-    // control, and it was unreachable for this Component at any URL.
+    // `executions` renders the run list and the Run now control.
     expect(runtime.kind).toBe('executions');
     if (runtime.kind !== 'executions') return;
     expect(runtime.componentId).toBe(app.nightly.componentId);
@@ -284,9 +266,6 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('lists every Component whichever one it is showing', async () => {
-    // The selection is a selection within one screen, not a screen per
-    // Component: an App-first view that could only see the Component it was
-    // showing would have nowhere to select the next one from.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -306,9 +285,8 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('scopes the config keys to the Component it is showing', async () => {
-    // `configKeys` is scoped to the pair a `Set variable` here would act on, so
-    // it has to be the *selected* pair: the same list showing the service's
-    // keys under the job would be one press away from writing them there.
+    // `Set variable` acts on the pair these keys belong to, so it must be the
+    // selected one.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -326,9 +304,8 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('states the placement of the Component it is showing', async () => {
-    // An App is not in a vessel — its Components are placed — so the boundary
-    // the screen names moves with the selection rather than staying on
-    // whichever Component happens to be first.
+    // Components are placed, never the App, so the vessel follows the
+    // selection.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -345,9 +322,7 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('hands the Run now control ids that start this job', async () => {
-    // The whole point of the surface: `runComponent` always accepted any
-    // Component's pair, and until now no screen could hand it a job's. The ids
-    // the card presses with are the ones the runtime carries.
+    // The Run now card presses with the ids the runtime carries.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -374,11 +349,8 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('deploys the Component it is showing, not the App’s first', async () => {
-    // The Deploy button sits in the header that states the selection's kind,
-    // phase, placement and release, and it writes an intent for one Component:
-    // `deployApp` takes the App's first unless it is told which, so the id the
-    // screen is showing is the one it has to press with. A press that built
-    // `web` from a screen reading `job · nightly` is the failure.
+    // `deployApp` takes the App's first Component unless told which, so the
+    // screen presses with the id it shows.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -409,12 +381,7 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('names the same first Component a deploy that names none acts on', async () => {
-    // "The App's first Component" is said twice — by the screen that opens with
-    // no selection and by a deploy that names none — and a row order is not a
-    // fact SQL hands out for free, so both commands order by `createdAt` and
-    // this is the claim that they agree. Two answers here is the same defect
-    // read backwards: the header describing one Component, Deploy pressing
-    // another.
+    // Both commands pick the first Component by `createdAt`, and must agree.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -434,8 +401,7 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('refuses a Component this App does not have', async () => {
-    // A selection that names nothing is not the App's first Component: the
-    // screen asked for something specific and there is no such thing.
+    // An unknown name never falls back to the first Component.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);

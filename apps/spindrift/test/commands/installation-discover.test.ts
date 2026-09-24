@@ -1,19 +1,6 @@
 /**
- * Discovering what an operator would otherwise type (§13, §20).
- *
- * The claim under test is one sentence: **a refusal is not an empty list.** A
- * confirmation screen showing "buckets: none" is an answer an operator will act
- * on, and producing it from a `403`, a switched-off API or an unreachable
- * network is worse than producing nothing — it launders a failed probe into a
- * fact. So the assertions below are about the *arm* an answer came back in, not
- * about the wording of a message, and the first three fail if that distinction
- * is ever collapsed.
- *
- * Driven through a real {@link createAdapterRegistry} against a fake far side,
- * per § Seam 2. The registry is not incidental: the whole point of discovery
- * living there is that it shares the one federated provider the cloud deploy
- * adapters use, so a test that handed the command a hand-built client would
- * prove the fold and none of the wiring.
+ * Installation discovery, through a real {@link createAdapterRegistry} against
+ * a fake GCP. A refused probe answers `unavailable`, never an empty list.
  */
 import { describe, expect, test } from 'bun:test';
 import { createAdapterRegistry } from '../../src/adapters/registry.ts';
@@ -36,13 +23,6 @@ import { fixtureManifest } from '../harness/installation.ts';
 const TOKEN = 'a-federated-token';
 const PROJECT = 'example-home';
 
-/**
- * A database that fails if it is touched.
- *
- * Discovery reads the cloud and writes nothing — confirming a value is
- * `configureInstallation`'s act, not this one's — and a fixture row here would
- * only be a way for that to stop being true unnoticed.
- */
 const db = new Proxy(
   {},
   {
@@ -54,7 +34,6 @@ const db = new Proxy(
 
 const fixture = await fixtureManifest();
 
-/** The fixture installation, with whatever federation a test needs. */
 function manifestWith(
   federation: Partial<
     NonNullable<InstallationManifest['cloud']['federation']>
@@ -84,31 +63,24 @@ function contextFor(
     adapters: createAdapterRegistry({
       manifest,
       env: {},
-      // The credential the registry hands every cloud client. Injected here so
-      // the fake can assert which one arrived, exactly as the token exchange
-      // would have minted it.
+      // The fake refuses any request that does not carry this bearer token.
       cloudToken: () => TOKEN,
       fetch: fake.fetch,
     }),
   };
 }
 
-/** Everything wired for one run: a fake far side and a context over it. */
 function installation(options: FakeGcpDiscoveryOptions = {}) {
   const fake = new FakeGcpDiscovery({ token: TOKEN, ...options });
   return { fake, context: contextFor(fake) };
 }
 
 /**
- * How the home vessel is addressed in a discovered path.
- *
- * Three of the five facts are that vessel's own properties, and they name it
- * rather than the position it holds — the position is the document's to give,
- * at the moment a value is applied to it.
+ * A discovered path names the home vessel by name; {@link placementOf} finds
+ * its index in the document.
  */
 const HOME = ['vessels', HOME_VESSEL] as const;
 
-/** One fact by the manifest path it proposes a value for. */
 function factAt(
   facts: readonly DiscoveredFact[],
   ...path: (string | number)[]
@@ -151,28 +123,22 @@ describe('a refusal is never an empty answer', () => {
     );
 
     expect(fact.kind).toBe('unavailable');
-    // On the arm, not on the sentence. A regression that answered
-    // `{ candidates: [] }` here would still carry a plausible message; what it
-    // could not do is stop having candidates at all.
+    // Assert the arm: `{ candidates: [] }` would still carry a plausible
+    // message.
     expect(fact).not.toHaveProperty('candidates');
     expect(fact).not.toHaveProperty('suggested');
     if (fact.kind !== 'unavailable') return;
     expect(fact.reason).toContain('Cloud Storage');
     expect(fact.reason).toContain(PROJECT);
-    // Which refusal, not just that there was one. A disabled API arrives as a
-    // `403` like a missing grant does, and telling an operator they lack a
-    // permission they already hold sends them to write IAM policy for a switch
-    // in a console. The sentence has to be the console's.
+    // A disabled API is a 403 like a missing grant, but its fix is a console
+    // switch, so the reason must not send the operator to IAM.
     expect(fact.reason).toContain('not enabled');
     expect(fact.reason).not.toContain('may not list');
   });
 
   test('a disabled API is still read when only the message says so', async () => {
-    // The other shape the same fact arrives in: these APIs put the reason in
-    // `error.details[].reason` on some calls and only in the message on
-    // others, which is why the fold matches the body as well as the parsed
-    // reason. One of the two halves being unbacked is one half of operators
-    // being told to fix a permission that is correct.
+    // Some GCP calls put the reason in `error.details[].reason` and others only
+    // in the message, so the fold matches both.
     const { context } = installation({
       projects: [PROJECT],
       refuse: {
@@ -197,11 +163,8 @@ describe('a refusal is never an empty answer', () => {
   });
 
   test('a disabled API names the consumer its ErrorInfo names, not the URL', async () => {
-    // The live shape this pins: Cloud KMS switched on in the project being
-    // read, switched off in the project the federated token bills. GCP
-    // refuses the call over the *consumer's* switch and says so in
-    // ErrorInfo; a sentence echoing the URL's project sends an operator to
-    // the console to verify an API that was never the problem.
+    // GCP checks the API switch in the project the token bills, and names that
+    // consumer in ErrorInfo, which can differ from the project in the URL.
     const { context } = installation({
       projects: [PROJECT],
       refuse: {
@@ -275,8 +238,6 @@ describe('what the reads answer', () => {
     expect(buckets.kind).toBe('found');
     expect(fallback.kind).toBe('found');
     if (buckets.kind !== 'found' || fallback.kind !== 'found') return;
-    // The same name, in the two shapes the two keys take. A screen deriving
-    // that would be a screen with an opinion about the schema.
     expect(buckets.suggested).toEqual({
       label: 'example-source-bucket',
       value: ['example-source-bucket'],
@@ -285,7 +246,6 @@ describe('what the reads answer', () => {
       label: 'example-source-bucket',
       value: 'example-source-bucket',
     });
-    // One read, not two: both keys are answered from a single bucket listing.
     expect(
       fake.requests.filter((request) => request.path === '/storage/v1/b'),
     ).toHaveLength(1);
@@ -320,9 +280,6 @@ describe('what the reads answer', () => {
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
-    // The URI is the prefix plus the key's own resource name, verbatim —
-    // assembling the six segments by hand is where a typo becomes a signing
-    // failure nothing catches until a build.
     expect(fact.candidates.map((candidate) => candidate.value)).toEqual([
       `gcpkms://projects/${PROJECT}/locations/a-region/keyRings/keys/cryptoKeys/signer`,
     ]);
@@ -364,7 +321,6 @@ describe('what the reads answer', () => {
       if (fact.kind !== 'unavailable') continue;
       expect(fact.reason).toContain('name a project');
     }
-    // Stated rather than probed: no project means no call that needed one.
     expect(fake.requests.map((request) => request.host)).toEqual([
       'cloudresourcemanager.googleapis.com',
     ]);
@@ -407,7 +363,6 @@ describe('truncation is not silence', () => {
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
-    // A single-page read answers one plausible project and reads as complete.
     expect(fact.candidates.map((candidate) => candidate.value)).toEqual([
       PROJECT,
       'example-artifacts',
@@ -417,9 +372,7 @@ describe('truncation is not silence', () => {
   });
 
   test('a listing that will not end is refused, never cut short', async () => {
-    // The cap earns its place only if hitting it says so. A `break` here would
-    // answer twenty projects out of thirty as a complete list — the same defect
-    // as an empty answer, wearing a plausible number.
+    // Past the page cap, a truncated list would read as complete.
     const { context, fake } = installation({
       projects: Array.from({ length: 30 }, (_, index) => `example-${index}`),
       pageSize: 1,
@@ -435,15 +388,12 @@ describe('truncation is not silence', () => {
     expect(fact.kind).toBe('unavailable');
     if (fact.kind !== 'unavailable') return;
     expect(fact.reason).toContain('did not finish listing');
-    // And it stopped asking, rather than walking all thirty pages anyway.
     expect(fake.requests.length).toBeLessThan(30);
   });
 
   test('more key rings than one pass will open is refused, not sampled', async () => {
-    // Same rule one API over: `signingKeys` opens each ring with its own call,
-    // so the cap is on rings rather than pages — and a signer list built from
-    // the first twenty rings of thirty is a manifest that validates and then
-    // fails at the first cosign call.
+    // `signingKeys` opens each ring with its own call, so this cap counts
+    // rings.
     const { context } = installation({
       projects: [PROJECT],
       buckets: { [PROJECT]: [] },
@@ -486,16 +436,12 @@ describe('the credential answers what it can without a call', () => {
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
-    // The project is what gets written; where it came from is what gets read.
     expect(fact.suggested?.value).toBe(PROJECT);
     expect(fact.suggested?.label).toContain('credential');
   });
 
   test('a project id at GCP’s longest is still read out of the identity', async () => {
-    // The bound, exactly: GCP project ids run 6 to 30 characters, and a regex
-    // one short at the top silently stops suggesting anything for the longest
-    // legal name — a wrong answer that looks like "this credential says
-    // nothing".
+    // GCP project ids run 6 to 30 characters.
     const longest = 'example-home-with-a-longer-nam';
     expect(longest).toHaveLength(30);
     const fake = new FakeGcpDiscovery({ token: TOKEN, refuse: {} });
@@ -519,9 +465,7 @@ describe('the credential answers what it can without a call', () => {
   });
 
   test('an identity that is not a service account suggests nothing', async () => {
-    // The fixture's own credential impersonates a host that is not a service
-    // account address. A partial match must yield nothing rather than a
-    // fragment of a project name presented as an answer.
+    // The fixture impersonates an address outside `iam.gserviceaccount.com`.
     const { context } = installation({ projects: [] });
 
     const fact = factAt(
@@ -538,10 +482,8 @@ describe('the credential answers what it can without a call', () => {
   });
 
   test('a suggestion survives a project list this identity may not read', async () => {
-    // The likely live posture: an identity granted on one bucket and one key is
-    // not usually granted `projects.list`. The credential still knows its own
-    // project, and losing that to a refusal elsewhere would be discovery
-    // refusing a question it had already answered.
+    // A narrowly granted identity often lacks `projects.list`, but its
+    // credential still names its own project.
     const fake = new FakeGcpDiscovery({
       token: TOKEN,
       refuse: { resourceManager: { status: 403 } },
@@ -558,15 +500,11 @@ describe('the credential answers what it can without a call', () => {
 
     expect(home.kind).toBe('found');
     if (home.kind !== 'found') return;
-    // This is the one place the two arms are crossed — a refused listing comes
-    // back `found` — so the candidate has to say where it came from. Without
-    // that, a `403` on `projects.list` reads on the screen exactly like a
-    // project the cloud confirmed, which is the laundering the arms exist for.
+    // A refused listing still answers `found` here, so the label must name the
+    // credential, or a 403 would read like a project the cloud confirmed.
     expect(home.candidates).toHaveLength(1);
     expect(home.candidates[0]?.label).toContain('credential');
     expect(home.candidates[0]?.value).toBe(PROJECT);
-    // And the key it cannot suggest anything for stays honest about the same
-    // refusal, rather than borrowing the answer.
     expect(factAt(facts, ...HOME, 'shared', 'artifactsProject').kind).toBe(
       'unavailable',
     );
@@ -584,16 +522,12 @@ describe('an installation with no cloud identity', () => {
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
     expect(result.failure.message).toContain('this installation');
-    // Proven rather than described: nothing was asked, so nothing failed.
     expect(fake.requests).toEqual([]);
   });
 
   test('a registry that builds no discovery client is refused as a fact too', async () => {
-    // `discovery` is optional on `AdapterRegistry` for the reason the four
-    // lookups above it are — a hand-built registry omits what it has no opinion
-    // about — so the absent case is reachable and is a different sentence from
-    // the absent-federation one above. A process that cannot reach a cloud API
-    // is a fact about the process, not about the manifest.
+    // `discovery` is optional on `AdapterRegistry`, so a hand-built registry
+    // can omit it.
     const { context } = installation({ projects: [PROJECT] });
 
     const result = await discoverInstallationFacts(
@@ -609,18 +543,11 @@ describe('an installation with no cloud identity', () => {
 });
 
 describe('every path discovery proposes is a path the manifest has', () => {
-  /**
-   * Walk the schema the settings form is generated from, key by key.
-   *
-   * The wizard's own walk, not a second one: onboarding resolves the keys it
-   * names through `manifestFieldAt`, and a copy here would be a second answer
-   * about one schema that only has to agree by luck.
-   */
+  /** Onboarding resolves its keys through the same `manifestFieldAt`. */
   function resolves(path: readonly (string | number)[]): boolean {
     return manifestFieldAt(path) !== null;
   }
 
-  /** The same walk, over a fact placed on a document the way the panel places it. */
   function placed(fact: DiscoveredFact): readonly (string | number)[] {
     const at = placementOf(fact, fixture);
     if (at === null) {
@@ -630,9 +557,6 @@ describe('every path discovery proposes is a path the manifest has', () => {
   }
 
   test('the walk rejects a key the schema no longer has', () => {
-    // The exact staleness this test exists to catch: `dns.apexZone` was the
-    // key when discovery was first specified, and `dns.zones` is the
-    // key now. A detector nobody has seen fail is not a detector.
     expect(resolves(['dns', 'apexZone'])).toBe(false);
     expect(resolves(['dns', 'zones', 0, 'name'])).toBe(true);
   });
@@ -666,10 +590,8 @@ describe('every path discovery proposes is a path the manifest has', () => {
   });
 
   test('a vessel path is placed by name, so an edited array cannot misplace it', async () => {
-    // The whole reason a discovered path names the home vessel rather than
-    // carrying its position: the settings form removes entries from `vessels`
-    // between the ask and the press, and `location.project` carries no
-    // refinement that would refuse a value written onto the wrong boundary.
+    // The settings form can remove `vessels` entries between discovery and
+    // apply; `location.project` has no refinement to refuse a misplaced value.
     const { context } = installation({ projects: [PROJECT] });
     const fact = factAt(
       await discover(context, { project: PROJECT }),
@@ -696,8 +618,6 @@ describe('every path discovery proposes is a path the manifest has', () => {
   });
 
   test('a document that declares no home vessel is placed nowhere', async () => {
-    // Rather than at the position the answer was produced for, which after a
-    // removal is whichever boundary slid into it.
     const { context } = installation({ projects: [PROJECT] });
     const fact = factAt(
       await discover(context, { project: PROJECT }),

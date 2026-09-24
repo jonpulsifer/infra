@@ -1,18 +1,6 @@
 /**
- * The crypto underneath enrolment and sign-in (Task 37).
- *
- * This is the one part of auth that is not a database claim, so it is the one
- * part a database cannot check. Everything here is a pure function over bytes,
- * and every case is driven by a keypair minted in the test — deterministic and
- * offline, with no fixture blob whose provenance nobody remembers.
- *
- * **The test signs the way an authenticator does, not the way WebCrypto does.**
- * WebCrypto's ECDSA output is raw `r || s`; a real authenticator emits the same
- * signature DER-encoded, and the browser passes that through untouched. So
- * {@link derEncode} sits between the two, which means these tests exercise the
- * decoder that exists precisely because of that mismatch. A test that signed
- * raw and verified raw would pass against an implementation that could not
- * verify a single real passkey.
+ * The WebAuthn crypto under enrolment and sign-in, driven by keypairs minted in
+ * the test. ECDSA signatures are DER-encoded, as an authenticator emits them.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -36,8 +24,7 @@ function derEncode(raw: Bytes): Bytes {
     let start = 0;
     while (start < bytes.length - 1 && bytes[start] === 0) start += 1;
     const body = [...bytes.slice(start)];
-    // DER integers are signed, so a leading bit of 1 needs a zero byte in
-    // front of it or it reads as negative.
+    // DER integers are signed, so a leading 1 bit needs a zero byte in front.
     if ((body[0]! & 0x80) !== 0) body.unshift(0);
     return [0x02, body.length, ...body];
   };
@@ -84,7 +71,7 @@ function clientData(
   );
 }
 
-/** A credential of one algorithm, plus a signer that emits what a browser would. */
+/** A credential, and a signer that emits what a browser would pass on. */
 async function credentialOf(algorithm: -7 | -257) {
   const params =
     algorithm === -7
@@ -124,8 +111,7 @@ async function credentialOf(algorithm: -7 | -257) {
           signed,
         ),
       );
-      // Only ECDSA has the raw-vs-DER mismatch; PKCS#1 v1.5 is the same bytes
-      // on both sides.
+      // WebCrypto emits ECDSA as raw `r || s`; PKCS#1 v1.5 needs no conversion.
       return base64urlEncode(algorithm === -7 ? derEncode(raw) : raw);
     },
   };
@@ -145,8 +131,7 @@ describe('base64url', () => {
   });
 
   test('refuses input that is not base64url rather than returning garbage', () => {
-    // A challenge that fails to decode must not silently become empty bytes and
-    // then compare equal to another empty decode.
+    // Empty bytes from a failed decode would compare equal to another failure.
     expect(base64urlDecode('not base64!')).toBeNull();
   });
 });
@@ -165,7 +150,7 @@ describe('client data', () => {
   });
 
   test('refuses a challenge that is not the one issued', () => {
-    // The replay claim. Everything else in a ceremony is public.
+    // Only the challenge prevents a replay; the rest of a ceremony is public.
     const result = verifyClientData({
       clientDataJSON: clientData({ challenge }),
       type: 'webauthn.get',
@@ -186,8 +171,7 @@ describe('client data', () => {
   });
 
   test('refuses a registration response offered as a sign-in', () => {
-    // Ceremony confusion: a `create` response carries no user gesture for the
-    // `get` the server thought it asked for.
+    // A `create` response carries no user gesture for the `get` that was asked.
     const result = verifyClientData({
       clientDataJSON: clientData({ challenge, type: 'webauthn.create' }),
       type: 'webauthn.get',
@@ -225,13 +209,8 @@ describe('authenticator data', () => {
 });
 
 describe('sign counts', () => {
-  /**
-   * §"First run and identity" wants a passkey, and a synced passkey reports a
-   * counter of zero forever — it lives in more than one place by design, so
-   * there is nothing to count. Rejecting a non-advancing zero would therefore
-   * reject every passkey, which is why the clone check binds only when both
-   * sides are counting.
-   */
+  // A synced passkey reports a counter of zero forever, so the clone check
+  // binds only when both sides count.
   test('a counter that never moves is a passkey, not a clone', () => {
     expect(isNewerSignCount(0, 0)).toBe(true);
   });
@@ -291,8 +270,7 @@ describe.each([
 
   test('is refused when the signed authenticator data is not the one sent', async () => {
     // The signature covers `authenticatorData || SHA-256(clientDataJSON)`, so
-    // swapping either half after signing must break it. This is what stops a
-    // replayed signature being re-pointed at a different relying party.
+    // swapping either half after signing must break it.
     const challenge = base64urlEncode(
       crypto.getRandomValues(new Uint8Array(32)),
     );
@@ -329,8 +307,7 @@ describe.each([
       expected: { challenge, origin: ORIGIN, rpId: RP_ID },
     });
 
-    // Refused on the relying party rather than the signature: the signature is
-    // genuine, and saying so is what makes the rejection readable.
+    // The signature is genuine, so the rejection names the relying party.
     expect(result).toEqual({
       ok: false,
       rejection: 'RELYING_PARTY_MISMATCH',
@@ -378,9 +355,7 @@ describe.each([
 
 describe('an algorithm outside the two supported', () => {
   test('is refused rather than passed to WebCrypto', async () => {
-    // Ed25519 (-8) is legal WebAuthn and is deliberately not accepted: it would
-    // be a third import path to keep correct for no credential this
-    // installation can currently enrol.
+    // Ed25519 (-8) is legal WebAuthn, but enrolment never offers it.
     const challenge = base64urlEncode(new Uint8Array([4, 5, 6]));
     const result = await verifyAssertion({
       credential: {
@@ -398,16 +373,8 @@ describe('an algorithm outside the two supported', () => {
 });
 
 describe('registration', () => {
-  /**
-   * Registration verifies the ceremony and **not an attestation statement**.
-   *
-   * The trust anchor for a first enrolment is the token that shipped in the
-   * installation Secret, not the provenance of the authenticator the operator
-   * happened to reach for: an attestation proving "this is a genuine YubiKey"
-   * changes nothing about whether the person holding the token meant to enrol
-   * it. That is what makes taking the browser-parsed SPKI key sound rather than
-   * a shortcut — and it is why no CBOR parser exists in this codebase.
-   */
+  // Registration verifies the ceremony, not an attestation: the trust anchor is
+  // the shipped enrolment token, so the browser-parsed SPKI key is enough.
   test('accepts a ceremony that matches the challenge it was issued', async () => {
     const challenge = base64urlEncode(
       crypto.getRandomValues(new Uint8Array(32)),

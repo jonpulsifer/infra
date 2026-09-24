@@ -1,21 +1,6 @@
 /**
- * The Vercel deploy adapter (§4, §6, §9, §17).
- *
- * Every test drives the real adapter against a fake of the platform's HTTP API
- * (§ Seam 2), with a **real gzipped tar** written by `test/harness/tar.ts`.
- *
- * The claims worth stating up front:
- *
- * - **The platform is never asked to build** (§4). A deployment carries the
- *   finished tree and project settings that name no framework and no build
- *   command, so a rollback re-deploys rather than rebuilding.
- * - **`Public` only** (§9), for the reason the other files backend states.
- * - **The deployment is not ready when it is created.** `apply` reaches its
- *   verdict from the platform's `readyState`, not from the create response.
- * - **The platform names its own** (§9), so the address comes back on the
- *   verdict.
- * - **A red deployment is a `BUILD_FAILED` the developer owns**, and a refused
- *   call is not.
+ * The Vercel deploy adapter against a fake of the platform API, with real
+ * gzipped tars from `test/harness/tar.ts`.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdir, readlink } from 'node:fs/promises';
@@ -56,7 +41,7 @@ const TARGET: DeployTarget = {
   connection: CONNECTION,
 };
 
-/** What every test deploys: `shop-site`, per `workloadName`. */
+/** The project `vercelProjectName` gives App `shop`, Component `site`. */
 const PROJECT = 'shop-site';
 
 function desired(overrides: Partial<DesiredState> = {}): DesiredState {
@@ -87,9 +72,8 @@ const SITE = tarball([
 ]);
 
 /**
- * The tree a `vercel-output` artifact is: the Build Output API tree under
- * `.vercel/output/`, and beside it at the root the files a function's
- * `filePathMap` names. The CLI is handed this directory verbatim.
+ * A `vercel-output` artifact: the Build Output tree under `.vercel/output/`,
+ * with the files a function's `filePathMap` names at the root beside it.
  */
 const OUTPUT_TREE = tarball([
   { name: '.vercel/output/config.json', bytes: bytes('{"version":3}') },
@@ -104,9 +88,8 @@ const OUTPUT_TREE = tarball([
 ]);
 
 /**
- * The same tree as the build stages it for a framework that dedups routes with
- * symlinks: the links are gone from the files and recorded in the manifest the
- * adapter recreates them from, at their path from the deployment root.
+ * The tree with its symlinks lifted out into the manifest the adapter recreates
+ * them from, each path relative to the deployment root.
  */
 function linkedTree(
   links: readonly { path: string; target: string }[],
@@ -139,8 +122,7 @@ function adapterFor(
     api,
     adapter: new VercelDeployAdapter({
       token: api.token,
-      // One fake stands for both far sides here: what the split buys is proved
-      // by the adapter having two providers, not by this test holding two.
+      // One fake stands for both the platform and the artifact registry.
       artifactToken: api.token,
       fetch: api.fetch,
       pollIntervalMs: 1,
@@ -162,7 +144,6 @@ async function drain(
   return { events, verdict: step.value };
 }
 
-/** The body of the one deployment that was created. */
 function createdBody(api: FakeVercel): Record<string, unknown> {
   const created = api.requests.find(
     (request) =>
@@ -182,9 +163,7 @@ describe('§4: build stays separate from deploy', () => {
       string,
       unknown
     >;
-    // Every one of these being null is what makes the platform serve what was
-    // uploaded rather than build it. A value here would be Spindrift asking for
-    // the second build §4 exists to prevent.
+    // With all three null, the platform serves the upload and builds nothing.
     expect(settings.framework).toBeNull();
     expect(settings.buildCommand).toBeNull();
     expect(settings.installCommand).toBeNull();
@@ -194,9 +173,8 @@ describe('§4: build stays separate from deploy', () => {
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(TARGET, desired()));
 
-    // The fake refuses a deployment referencing a file it never received, so
-    // reaching a served project at all is the ordering assertion; the paths
-    // are what proves the whole bundle went, root-relative.
+    // The fake refuses a deployment that references a file it never received,
+    // so a served project proves the order.
     expect(api.servedPaths(PROJECT)).toEqual(['assets/app.css', 'index.html']);
     expect(api.uploads).toHaveLength(2);
   });
@@ -225,7 +203,6 @@ describe('§4: build stays separate from deploy', () => {
 });
 
 describe('the platform’s own build output deploys prebuilt', () => {
-  /** The shape a Component built for this Target renders to. */
   const buildOutput = () =>
     desired({
       artifact: {
@@ -236,10 +213,8 @@ describe('the platform’s own build output deploys prebuilt', () => {
     });
 
   /**
-   * The adapter drives the platform's own CLI on this path; the fake stands in
-   * for `vercel deploy`, capturing the directory and inputs it was handed and
-   * registering the deployment the real CLI would create — which the adapter
-   * then finds by its meta and polls to its verdict.
+   * Stands in for `vercel deploy`: records the directory and inputs, and
+   * registers the deployment the real CLI would create.
    */
   function cliAdapter(tree: Uint8Array<ArrayBuffer> = OUTPUT_TREE): {
     api: FakeVercel;
@@ -258,7 +233,7 @@ describe('the platform’s own build output deploys prebuilt', () => {
       trees.push(
         (
           await Array.fromAsync(
-            // `dot: true` so `.vercel/output/…` is seen — the tree the CLI reads.
+            // Without `dot: true` the glob skips `.vercel/`.
             new Bun.Glob('**/*').scan({ cwd: input.directory, dot: true }),
           )
         ).sort(),
@@ -289,8 +264,7 @@ describe('the platform’s own build output deploys prebuilt', () => {
     const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
 
     expect(verdict.phase).toBe('LIVE');
-    // The deployment the CLI made carries the meta the adapter stamped, so it is
-    // found and adopted rather than a second one created.
+    // The adapter finds the CLI's deployment by the meta it set.
     expect(api.servedPrebuilt(PROJECT)).toBe(true);
   });
 
@@ -302,8 +276,6 @@ describe('the platform’s own build output deploys prebuilt', () => {
     expect(calls[0]?.project).toBe(PROJECT);
     expect(calls[0]?.team).toBe(CONNECTION.team);
     expect(calls[0]?.meta.spindriftDeploy).toBe('deploy-1');
-    // The directory is the tree the build staged: the Build Output tree under
-    // `.vercel/output/`, and the mapped file at the root beside it.
     expect(trees[0]).toContain('.vercel/output/config.json');
     expect(trees[0]).toContain('node_modules/@scope/dep/index.js');
   });
@@ -321,9 +293,8 @@ describe('the platform’s own build output deploys prebuilt', () => {
     const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
 
     expect(verdict.phase).toBe('LIVE');
-    // Recreated as links, target verbatim: the platform counts a linked
-    // function as the one it points at, which is the whole reason they were
-    // not copied out at build time.
+    // Recreated as links with the target verbatim: the platform counts a
+    // linked function as the one it points at.
     expect(links[0]).toEqual({
       '.vercel/output/functions/home.func': 'index.func',
       '.vercel/output/functions/home.segments/_tree.segment.rsc.func':
@@ -348,9 +319,8 @@ describe('the platform’s own build output deploys prebuilt', () => {
   });
 
   test('a chain of links that only escapes once it is followed is refused too', async () => {
-    // Each entry reads as inside on its own: `a` points at the root, so `a/c`
-    // is really `c` at the root, and its target `../secret` is a sibling of
-    // the whole deployment.
+    // `a` links to `.vercel`, so `a/c` is made at `.vercel/c` and its target
+    // resolves to a missing `secret` at the root, which realpath refuses.
     const { adapter, calls } = cliAdapter(
       linkedTree([
         { path: '.vercel/output/a', target: '..' },
@@ -368,16 +338,13 @@ describe('the platform’s own build output deploys prebuilt', () => {
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(TARGET, desired()));
 
-    // §4's supplied artifact is `files` and has no build output to have been
-    // produced by, so it must keep the built-nothing settings and the paths
-    // rooted at the site.
     expect(api.servedPrebuilt(PROJECT)).toBe(false);
     expect(api.servedPaths(PROJECT)).toEqual(['assets/app.css', 'index.html']);
   });
 });
 
 describe('a supplied upload is fetched out of the depot', () => {
-  /** Where `stageArchiveBytes` puts an upload when the installation has one. */
+  /** Where `stageArchiveBytes` stages an upload when there is a depot. */
   const OBJECT = 'gs://bluenose-spindrift-source/abc123.tgz';
 
   const FEDERATION = {
@@ -389,7 +356,6 @@ describe('a supplied upload is fetched out of the depot', () => {
       'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/controller@vessel.iam.gserviceaccount.com:generateAccessToken',
   };
 
-  /** A supplied artifact: the bundle's own address, and no registry anywhere. */
   function supplied(location: string): DesiredState {
     return desired({
       artifact: { type: 'files', digest: 'sha256:bundle', refs: [location] },
@@ -402,8 +368,7 @@ describe('a supplied upload is fetched out of the depot', () => {
     signed: string[];
     fetched: string[];
   } {
-    // The depot serves on the storage host, which is also where a signed URL
-    // points — so the adapter's own fetch of the object runs for real.
+    // A signed URL points at the storage host, so the fake depot serves there.
     const api = new FakeVercel({
       bundle: { origin: 'https://storage.googleapis.com', bytes: SITE },
     });
@@ -437,18 +402,13 @@ describe('a supplied upload is fetched out of the depot', () => {
   }
 
   test('a bundle staged at gs:// is signed for, fetched, and deployed', async () => {
-    // Both files backends take a supplied upload, and this one reached the
-    // same dead end: nothing built the bundle, so there is no registry
-    // reference, and the depot address is not something an HTTP client
-    // resolves.
+    // An upload has no registry reference, and HTTP clients cannot fetch gs://.
     const { api, adapter, signed, fetched } = depotAdapter();
     const { verdict } = await drain(adapter.apply(TARGET, supplied(OBJECT)));
 
     expect(verdict.phase).toBe('LIVE');
     expect(api.servedPaths(PROJECT)).toEqual(['assets/app.css', 'index.html']);
-    // Signed with the federated identity rather than a stored credential
-    // (§13), and the object fetched with the capability that signature is —
-    // neither of this adapter's two bearers was what read it.
+    // The federated identity signs; the fetch uses the signed URL.
     expect(signed).toHaveLength(1);
     expect(fetched).toHaveLength(1);
     expect(fetched[0]).toContain('/bluenose-spindrift-source/abc123.tgz?');
@@ -456,10 +416,8 @@ describe('a supplied upload is fetched out of the depot', () => {
   });
 
   test('a bundle nothing can fetch says that, rather than blaming a registry', async () => {
-    // An installation with no depot stages an upload on the web pod's own
-    // disk. That is unfetchable, and it used to be reported as an artifact
-    // homed on a registry this identity cannot read — a true sentence about a
-    // different problem, which sends the operator to IAM.
+    // With no depot, an upload is staged on the web pod's own disk, which no
+    // adapter can fetch. A registry sentence would send the operator to IAM.
     const { adapter } = depotAdapter();
     const { verdict } = await drain(
       adapter.apply(TARGET, supplied('upload://abc123')),
@@ -523,18 +481,16 @@ describe('§6: the verdict is the platform’s, read from the deployment', () =>
 
     expect(verdict.phase).toBe('LIVE');
     if (verdict.phase === 'LIVE') {
-      // §9: the platform names its own, and the API answers a bare host.
+      // The API answers a bare host; the adapter adds the scheme.
       expect(verdict.url).toBe(`https://${PROJECT}.vercel.app`);
-      // Every Vercel project answers the same vendor CNAME regardless of
-      // which project or deployment is live, unlike `url` above.
+      // Every Vercel project uses the same vendor CNAME.
       expect(verdict.address).toEqual({
         recordType: 'CNAME',
         target: 'cname.vercel-dns.com',
         proxied: true,
       });
     }
-    // WAITING is entered once however many polls it took: three events saying
-    // the same thing is not progress a reader can use.
+    // WAITING is emitted once, however many polls it takes.
     const waiting = events.filter(
       (event) => event.type === 'status' && event.phase === 'WAITING',
     );
@@ -550,7 +506,6 @@ describe('§6: the verdict is the platform’s, read from the deployment', () =>
       expect(verdict.reason).toBe('BUILD_FAILED');
       expect(blameFor(verdict.reason)).toBe('developer');
       expect(verdict.detail).toContain('did not succeed');
-      // The raw payload is kept for the operator (§6).
       expect(verdict.debug).toBeDefined();
     }
   });
@@ -584,8 +539,8 @@ describe('§6: the verdict is the platform’s, read from the deployment', () =>
       artifactToken: api.token,
       fetch: api.fetch,
       pollIntervalMs: 1,
-      // Every poll costs a minute, so the ten-minute budget runs out long
-      // before the fake would ever settle.
+      // Every poll costs a minute, so the five-minute budget runs out long
+      // before the fake settles.
       sleep: async () => {
         now += 60_000;
       },
@@ -629,11 +584,9 @@ describe('§13: the checklist is standing, and connect always succeeds', () => {
 
     expect(byName.get('PLATFORM_API')?.met).toBe(true);
     expect(byName.get('API_TOKEN')?.met).toBe(false);
-    // Not assessed rather than met: a platform that refused to answer has not
-    // said whether the team is there.
+    // A refused listing says nothing about whether the team exists.
     expect(byName.get('VESSEL')?.assessed).toBe(false);
-    // The surface is undetermined, never absent: every team can hold projects,
-    // so no refusal means "this boundary does not do deployments".
+    // Every team can hold projects, so a refusal never makes it absent.
     expect(inspection.surface?.kind).toBe('undetermined');
   });
 
@@ -714,7 +667,6 @@ describe('one project per (App, Component)', () => {
 });
 
 describe('a re-apply finds the deployment it already made', () => {
-  /** Drive a stream to the first matching event, then abandon it mid-flight. */
   async function abandonAfter(
     stream: AsyncGenerator<DeployEvent, DeployVerdict, void>,
     matches: (event: DeployEvent) => boolean,
@@ -735,16 +687,14 @@ describe('a re-apply finds the deployment it already made', () => {
     const again = await drain(adapter.apply(TARGET, desired()));
 
     expect(again.verdict.phase).toBe('LIVE');
-    // One deployment ever: the second apply found the first one by its
-    // DEPLOY_META and said so, rather than creating a production sibling.
+    // The second apply finds the first deployment by its Deploy meta.
     expect(api.deploymentCount).toBe(1);
     expect(
       again.events.some(
         (event) => event.type === 'log' && event.line.includes('adopting'),
       ),
     ).toBe(true);
-    // And it spent nothing getting there: no second fetch of the bundle, no
-    // second upload of its files.
+    // Only the first apply's two files were uploaded.
     expect(
       api.requests.filter((request) => request.path === '/v2/files'),
     ).toHaveLength(2);
@@ -752,8 +702,8 @@ describe('a re-apply finds the deployment it already made', () => {
 
   test('an attempt that died after creating is recovered, not orphaned', async () => {
     const { api, adapter } = adapterFor({ pollsBeforeSettling: 3 });
-    // The first attempt creates the deployment and dies before any verdict —
-    // the lease-reclaim shape: nothing recorded, the far side already real.
+    // The first attempt creates the deployment and dies before any verdict, as
+    // when a lease is reclaimed.
     await abandonAfter(
       adapter.apply(TARGET, desired()),
       (event) =>
@@ -762,8 +712,6 @@ describe('a re-apply finds the deployment it already made', () => {
 
     const { verdict } = await drain(adapter.apply(TARGET, desired()));
 
-    // The re-run adopted the mid-flight deployment and drove it to the
-    // platform's own verdict; a second production deployment never existed.
     expect(verdict.phase).toBe('LIVE');
     expect(api.deploymentCount).toBe(1);
   });
@@ -775,8 +723,7 @@ describe('a re-apply finds the deployment it already made', () => {
 
     const again = await drain(adapter.apply(TARGET, desired()));
 
-    // A failed deployment never served, so creating its successor is what a
-    // retry is; adopting it would pin the Deploy to a corpse.
+    // A failed deployment never served, so a retry creates a new one.
     expect(again.verdict.phase).toBe('FAILED');
     expect(api.deploymentCount).toBe(2);
   });

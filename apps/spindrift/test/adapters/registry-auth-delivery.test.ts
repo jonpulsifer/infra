@@ -1,15 +1,7 @@
 /**
- * How a registry credential reaches the thing that pushes (§16).
- *
- * The whole of the secret handling is one decision, and this is where it is
- * held: **the token goes on the container's environment and never into the
- * program**. The BuildKit program is a string that lands in a Job's `command`
- * and in a Cloud Build step's `args` — both readable by anyone who can `get`
- * the object, and both kept for as long as the object is. A token interpolated
- * into it would be a token in an API object with an hours-long TTL.
- *
- * So every assertion here is a variation on: the program mentions the variable,
- * and nothing anywhere mentions the value.
+ * A registry credential reaches the builder on the container's environment,
+ * never in the BuildKit program, which is stored in API objects anyone with
+ * `get` can read.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -30,12 +22,8 @@ const AUTH: readonly RegistryAuth[] = [
 
 describe('the Docker config a builder is handed', () => {
   /**
-   * Docker Hub under the legacy index URL and nothing else, because that is
-   * the only key BuildKit reads for it: it resolves the host to
-   * `registry-1.docker.io` and substitutes `DockerHubConfigfileKey` before
-   * looking anything up. Filed under either hostname the entry is invisible,
-   * and the push fails as `push access denied` — observed live on the managed
-   * route, where this config is the only credential the builder gets.
+   * BuildKit reads Docker Hub credentials only under the legacy index URL;
+   * under either hostname the push fails with `push access denied`.
    */
   test('files Docker Hub under the key BuildKit reads it from', () => {
     const config = dockerConfigFor(AUTH);
@@ -47,7 +35,7 @@ describe('the Docker config a builder is handed', () => {
         },
       },
     });
-    // The spelling an operator actually stores reaches the same entry.
+    // `docker.io`, as operators store it, maps to the same key.
     expect(
       JSON.parse(dockerConfigFor([{ ...AUTH[0]!, host: 'docker.io' }]) ?? '{}'),
     ).toEqual(JSON.parse(config ?? '{}'));
@@ -62,11 +50,7 @@ describe('the Docker config a builder is handed', () => {
     });
   });
 
-  /**
-   * `null` and not an empty document: a route sets no variable at all when
-   * there is no credential, so an installation that stores nothing leaves no
-   * trace of the mechanism on its build objects.
-   */
+  /** Null, so a route with no credential sets no variable at all. */
   test('is absent entirely when there is no credential', () => {
     expect(dockerConfigFor([])).toBeNull();
   });
@@ -95,9 +79,8 @@ describe('the BuildKit program', () => {
   });
 
   /**
-   * The program is identical whether or not a credential exists — it is the
-   * *environment* that differs. A program that varied would make the presence
-   * of a credential visible in every build object that ever ran.
+   * Only the environment varies, so a build object never shows whether a
+   * credential exists.
    */
   test('is the same program either way', () => {
     expect(program).toContain(`if [ -n "\${${REGISTRY_AUTH_VAR}:-}" ]`);
@@ -105,16 +88,10 @@ describe('the BuildKit program', () => {
 });
 
 /**
- * The one route whose push authorizes two ways at once.
- *
- * §16 has this installation pushing every artifact to several registries, and
- * the cloud builder reaches them by two different mechanisms: its own identity
- * from the metadata server for the vendor's registries, and a stored credential
- * for the ones no federation reaches. Both land in one Docker config or the
- * export 401s on whichever half lost.
+ * The cloud builder pushes with its metadata-server identity and with stored
+ * credentials at once, and both must be written to one Docker config.
  */
 describe('the cloud build route', () => {
-  /** The step this route submits, caught in the fetch before anything runs. */
   async function stepFor(registryAuth: readonly RegistryAuth[]) {
     let submitted: unknown;
     const route = new CloudBuildRoute({
@@ -130,7 +107,6 @@ describe('the cloud build route', () => {
       token: () => 'a-bearer-token',
       fetch: async (request: Request) => {
         submitted = await request.json();
-        // Enough to stop the route at the submit, which is all this needs.
         return new Response('no', { status: 500 });
       },
     });
@@ -185,32 +161,22 @@ describe('the cloud build route', () => {
   });
 
   /**
-   * The regression this describe block exists for. The prelude used to write
-   * `$DOCKER_CONFIG/config.json` itself, and the shared program then did
-   * `DOCKER_CONFIG=$(mktemp -d)` over the top of it whenever a stored
-   * credential was present — so the vendor half was discarded and the push to
-   * the artifact registry 401'd at the export, after the entire build.
+   * The prelude adds to the variable the program reads, since the program's
+   * `DOCKER_CONFIG=$(mktemp -d)` hides any config written before it.
    */
   test('mints its own credential into the same document, never over it', async () => {
-    // As the step will run it: the service's template expansion turns the
-    // route's `$$` literal-dollar escape back into `$` before sh sees it.
+    // The build service turns the route's `$$` escape back into `$` before sh
+    // sees it.
     const program = (await stepFor(AUTH)).args.join('\n').replaceAll('$$', '$');
 
-    // The prelude contributes to the variable the program is the sole reader of.
     expect(program).toContain(`${REGISTRY_AUTH_VAR}="{\\"auths\\":{`);
     expect(program).toContain(`export ${REGISTRY_AUTH_VAR}`);
-    // …and never writes a config of its own for the program to clobber. One
-    // `mktemp` is one writer; two was the bug.
     expect(program.split('DOCKER_CONFIG=$(mktemp -d)')).toHaveLength(2);
   });
 
   /**
-   * The submit-time regression. The build service expands `$UPPERCASE` and
-   * `${UPPERCASE}` in step fields as substitutions and refuses a template
-   * naming one it does not know — observed live: the prelude's
-   * `"$SPINDRIFT_REGISTRY_AUTH"` failed the whole submit with "not a valid
-   * built-in substitution". Lowercase shell variables are invisible to that
-   * grammar; anything it could claim must arrive `$$`-escaped.
+   * The build service reads `$UPPERCASE` and `${UPPERCASE}` in step fields as
+   * substitutions and refuses unknown ones, so those must arrive `$$`-escaped.
    */
   test('submits no unescaped dollar the service reads as a substitution', async () => {
     const step = await stepFor(AUTH);
@@ -229,7 +195,6 @@ describe('the cloud build route', () => {
 });
 
 describe('the in-cluster route', () => {
-  /** The Job this route composes, caught at `apply` before anything runs. */
   async function jobFor(
     registryAuth: readonly RegistryAuth[],
   ): Promise<KubernetesObject> {
@@ -244,8 +209,7 @@ describe('the in-cluster route', () => {
       api: {
         apply: async (object: KubernetesObject) => {
           applied.push(object);
-          // The route turns this into a refusal it yields rather than throwing,
-          // which is exactly what stops the build before it polls for a pod.
+          // The route yields this as a refusal, before polling for a pod.
           throw new Error('caught after the Job was composed');
         },
       } as never,

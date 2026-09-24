@@ -1,18 +1,6 @@
 /**
- * The datastore vessel-anchor migration against seeded pre-migration rows.
- *
- * The per-test harness can never exercise this: it applies every committed
- * migration onto an empty schema, so the backfill `UPDATE … SET vessel_id`
- * matches zero rows every time and a silent no-op reads as green. These tests
- * use `migrate.test.ts`'s pattern instead — a real throwaway database, the
- * journal sliced to stop just short of the vessel-anchor migration, rows
- * seeded under the old shape, and only then the pending migration applied.
- *
- * Two claims, one per test: a live installation's rows survive with their
- * `ref`, `connection_ref` and `phase` byte-identical (nothing re-provisions);
- * and the one state the new `(vessel_id, name)` key forbids — two Datastores
- * of one name on two surfaces of one vessel — fails the migration loudly and
- * atomically rather than silently dropping a row.
+ * The datastore vessel-anchor migration against rows seeded before it. The
+ * per-test harness migrates an empty schema, where the backfill matches no row.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
@@ -52,7 +40,6 @@ async function cleanDatabase() {
   return client;
 }
 
-/** A database migrated to the entry just before the vessel-anchor migration. */
 async function databaseBeforeVesselAnchor() {
   const client = await cleanDatabase();
   const journal = JSON.parse(
@@ -122,8 +109,7 @@ async function columnExists(client: SQL, column: string) {
 describe('the datastore vessel-anchor migration', () => {
   test('backfills each row to its Target’s vessel and re-provisions nothing', async () => {
     const client = await databaseBeforeVesselAnchor();
-    // Two Datastores of one name on two *different* vessels — the case the
-    // new key still allows, so both must come through.
+    // One name on two vessels, which the new key allows.
     const hereVessel = await insertVessel(client, 'folly', 'cluster');
     const thereVessel = await insertVessel(client, 'offsite', 'cluster');
     const here = await insertTarget(client, hereVessel, 'kubernetes');
@@ -145,9 +131,8 @@ describe('the datastore vessel-anchor migration', () => {
 
     await applyMigrations(client);
 
-    // The identity moved and everything the reconcile loop reads survived
-    // byte-identical: `ref` already encodes what observe and destroy address,
-    // so an intact row is a row nothing re-provisions.
+    // `ref` is what observe and destroy address, so an intact row re-provisions
+    // nothing.
     const rows = await client<
       {
         id: string;
@@ -183,8 +168,7 @@ describe('the datastore vessel-anchor migration', () => {
 
   test('two same-named Datastores on two surfaces of one vessel fail it loudly and atomically', async () => {
     const client = await databaseBeforeVesselAnchor();
-    // The state the new key exists to forbid: one boundary, two surfaces, one
-    // name — two rows for one database on the far side.
+    // One vessel, two surfaces, one name: two rows for one far-side database.
     const vessel = await insertVessel(client, 'shared-project', 'gcp-project');
     const cloudrun = await insertTarget(client, vessel, 'cloudrun');
     const statics = await insertTarget(client, vessel, 'static');
@@ -205,8 +189,7 @@ describe('the datastore vessel-anchor migration', () => {
 
     await expect(applyMigrations(client)).rejects.toThrow(/vessel, name/);
 
-    // Atomic: the failed migration rolled its DDL back whole, so the
-    // pre-migration shape — and both rows — are exactly as seeded.
+    // The failed migration rolls its DDL back whole.
     expect(await columnExists(client, 'target_id')).toBe(true);
     expect(await columnExists(client, 'vessel_id')).toBe(false);
     const rows = await client<{ count: number }[]>`

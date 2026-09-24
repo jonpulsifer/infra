@@ -1,10 +1,3 @@
-/**
- * Build dispatch:
- * 1. Durable dispatch identity and lease timeout
- * 2. Explicit Target binding when a Component has multiple placements
- * 3. Atomic per-App concurrency limit across reconciler replicas
- * 4. Fallback to available eligible build route
- */
 import { beforeEach, describe, expect, jest, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import {
@@ -139,7 +132,6 @@ describe('build dispatch follow-ups', () => {
       })
       .returning();
 
-    // 1. Dispatching with a DIFFERENT dispatchId while lease is active returns NOT_BUILDABLE
     const dispatchId2 = 'dispatch-lease-2';
     const result2 = await dispatchBuild(
       { buildId: build!.id, route: 'hosted', dispatchId: dispatchId2 },
@@ -150,13 +142,11 @@ describe('build dispatch follow-ups', () => {
       expect(result2.failure.message).toContain('already running');
     }
 
-    // 2. Fast-forward time past DISPATCH_LEASE_TIMEOUT_MS to expire the lease
     const expiredTime = new Date(
       ctx.clock.now().getTime() + DISPATCH_LEASE_TIMEOUT_MS + 1000,
     );
     (ctx as any).setSimulatedTime(expiredTime);
 
-    // 3. Dispatching with new dispatchId succeeds by reclaiming the expired lease
     const result3 = await dispatchBuild(
       { buildId: build!.id, route: 'hosted', dispatchId: dispatchId2 },
       ctx,
@@ -207,8 +197,8 @@ describe('build dispatch follow-ups', () => {
       })
       .returning();
 
-    // A far side that yields nothing for the whole of its run — a bosun host
-    // reports only when it posts — held open until the test lets it finish.
+    // A far side that yields nothing for its whole run, as a bosun host does,
+    // held open until the test lets it finish.
     let finish!: () => void;
     const held = new Promise<void>((resolve) => {
       finish = resolve;
@@ -240,7 +230,7 @@ describe('build dispatch follow-ups', () => {
         { buildId: build!.id, route: 'hosted' },
         context,
       );
-      // Each read is real I/O, which is what lets the claim land meanwhile.
+      // Each read is real I/O, so the claim can commit between reads.
       for (let i = 0; i < 200 && !started; i += 1) await row();
       expect(started).toBe(true);
       expect((await row()).leasedAt).toEqual(leasedAt);
@@ -256,8 +246,8 @@ describe('build dispatch follow-ups', () => {
       ) {
         current = await row();
       }
-      // Renewed under the claim while nothing was said: the row reads as live
-      // to a re-claim and to `cancelBuild`, which is what it is.
+      // Renewed under the claim while nothing was said, so the row reads as
+      // live.
       expect(current.status).toBe('RUNNING');
       expect(current.leasedAt).toEqual(renewedAt);
 
@@ -283,7 +273,6 @@ describe('build dispatch follow-ups', () => {
     const allTargets = await ctx.db.select().from(targets);
     expect(allTargets.length).toBeGreaterThanOrEqual(2);
 
-    // Add 2 target placements for this component
     await ctx.db.insert(componentTargetDesired).values([
       { componentId: comp!.id, targetId: allTargets[0]!.id },
       { componentId: comp!.id, targetId: allTargets[1]!.id },
@@ -302,7 +291,6 @@ describe('build dispatch follow-ups', () => {
       })
       .returning();
 
-    // 1. Dispatching without placementTargetId fails when there are multiple placements
     const resultOmitted = await dispatchBuild(
       { buildId: build!.id, route: 'hosted' },
       ctx,
@@ -314,7 +302,6 @@ describe('build dispatch follow-ups', () => {
       );
     }
 
-    // 2. Dispatching with explicit placementTargetId succeeds
     const resultExplicit = await dispatchBuild(
       {
         buildId: build!.id,
@@ -342,7 +329,6 @@ describe('build dispatch follow-ups', () => {
       .insert(componentTargetDesired)
       .values({ componentId: comp!.id, targetId: target!.id });
 
-    // Create RUNNING builds up to the limit
     for (let i = 0; i < CONCURRENT_BUILDS_PER_APP; i++) {
       await ctx.db.insert(builds).values({
         componentId: comp!.id,
@@ -354,7 +340,6 @@ describe('build dispatch follow-ups', () => {
       });
     }
 
-    // New pending build try to dispatch
     const [pendingBuild] = await ctx.db
       .insert(builds)
       .values({
@@ -382,7 +367,7 @@ describe('build dispatch follow-ups', () => {
     const allTargets = await ctx.db.select().from(targets).limit(1);
     const targetId = allTargets[0]!.id;
 
-    // 'hosted' adapter is registered in ctx.adapters.build
+    // Only `hosted` is constructible here.
     const selectedRoute = await routeForTarget(targetId, ctx);
     expect(selectedRoute).toBe('hosted');
   });

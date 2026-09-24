@@ -61,9 +61,8 @@ describe('the authenticated Gateway trust boundary', () => {
       }),
     ).not.toThrow();
 
-    // The attestation is a deployment fact, joined on by the same resolver that
-    // joins the federation and the hostname — so what the env says is what a
-    // reader sees, and nothing that can write a manifest can write it.
+    // The attestation comes from the environment, so no manifest write can set
+    // it.
     expect(
       (
         await resolveManifest(manifest, {
@@ -78,8 +77,7 @@ describe('the authenticated Gateway trust boundary', () => {
 
   test('the running version is a deployment fact, and unset is null', async () => {
     const manifest = parseManifest(fixtureText, FIXTURE);
-    // Joined by the same resolver as the hostname, so the footer and the
-    // traces name one thing; nothing that can write a manifest can write it.
+    // From the environment, so no manifest write can set it.
     expect(
       (await resolveManifest(manifest, { SPINDRIFT_VERSION: ' 1.2.3 ' }))
         .controlPlane.version,
@@ -164,8 +162,7 @@ describe('boot fails loudly', () => {
   });
 
   test('on a Target that repeats another’s vessel and adapter', () => {
-    // A Target has no name of its own — `(vessel, adapter)` is the pair that
-    // identifies it, and it is the pair a document cannot repeat.
+    // `(vessel, adapter)` identifies a Target.
     const document = fixtureText.replace(
       '  - vessel: cloud\n    adapter: static',
       '  - vessel: cluster\n    adapter: kubernetes',
@@ -176,11 +173,8 @@ describe('boot fails loudly', () => {
   });
 
   test('when a Target names a vessel the document does not declare', () => {
-    // What replaced the `<name>-cloudrun` / `<name>-static` pairing rule, and a
-    // stronger check than it was: that rule could only say two names looked
-    // related, and this one refuses a reference that resolves to nothing —
-    // which is what `reconcileManifestTargets` needs, since it looks a vessel
-    // up by name and has nothing honest to do without one.
+    // `reconcileManifestTargets` looks vessels up by name, so the reference
+    // must resolve.
     const document = fixtureText.replace(
       '  - vessel: cloud\n    adapter: static',
       '  - vessel: hosting\n    adapter: static',
@@ -207,13 +201,8 @@ describe('boot fails loudly', () => {
 });
 
 /**
- * The refusal this schema deliberately stopped making.
- *
- * A `targets[]` entry **is** how a document declares a surface on a vessel, and
- * which runtimes a boundary really has is established by probing it at connect.
- * A vessel's `kind` says only what shape its location has, so holding the
- * document to a table of surfaces per kind would refuse a project that runs a
- * cluster on the authority of a value that knows nothing about it.
+ * A vessel's `kind` shapes its location. Its surfaces come from `targets` and
+ * the connect probe.
  */
 describe('a vessel’s kind is not a list of the runtimes on it', () => {
   test('a document may declare a surface no table pairs with that kind', () => {
@@ -225,9 +214,6 @@ describe('a vessel’s kind is not a list of the runtimes on it', () => {
   });
 
   test('and the reference itself is still checked', () => {
-    // What survives is the rule that has teeth: `reconcileManifestTargets`
-    // looks a vessel up by name, so a Target naming one the document does not
-    // declare is a seed with nothing to attach to.
     const document = fixtureText.replace(
       '  - vessel: cloud\n    adapter: cloudrun',
       '  - vessel: nowhere\n    adapter: cloudrun',
@@ -239,12 +225,8 @@ describe('a vessel’s kind is not a list of the runtimes on it', () => {
 });
 
 /**
- * §15 gives the connected repository the Actions minutes and the billing, so
- * the caller Spindrift writes into somebody's repository runs with that
- * repository's own permissions. The ref names who holds that power: a commit
- * sha freezes it, a branch hands it to the platform repository's merge gate
- * and keeps every caller current. The schema takes either and still refuses a
- * value that does not address a workflow file at some ref at all.
+ * The caller workflow runs with the connected repository's permissions. A sha
+ * ref freezes the reusable workflow, and a branch follows its merge gate.
  */
 describe('the reusable build workflow ref', () => {
   const line = (value: string) => `  buildWorkflow: ${value}`;
@@ -280,8 +262,7 @@ describe('the reusable build workflow ref', () => {
   });
 
   test('accepts null, which is an installation that has published none', () => {
-    // Stated the way `auth.gateway` is. A placeholder commit would be a
-    // configuration that looks complete and fails at the first build.
+    // A placeholder ref would look complete and fail at the first build.
     const manifest = parseManifest(
       fixtureText.replace(current ?? '', line('null')),
       'test',
@@ -290,14 +271,7 @@ describe('the reusable build workflow ref', () => {
   });
 });
 
-/**
- * The two pointers, resolved the way a Target's `vessel` already is.
- *
- * Both are scalars naming a declared vessel, so cardinality comes free and the
- * only thing left to check is that the reference resolves — which is the same
- * document-level rule `targets[].vessel` goes through, and the same reason:
- * nothing below has anything honest to do with a name that is not there.
- */
+/** `controlPlaneVessel` and `homeVessel` must each name a declared vessel. */
 describe('the vessels this installation is built on', () => {
   const fixture = Bun.YAML.parse(fixtureText) as Record<string, unknown>;
 
@@ -322,9 +296,7 @@ describe('the vessels this installation is built on', () => {
   });
 
   test('the home vessel must declare the shared services', () => {
-    // `cluster` declares no `shared`, so pointing `homeVessel` at it leaves the
-    // source bucket, the store container and the artifacts project unstated —
-    // three values with no second place to read them from.
+    // `cluster` declares no `shared`.
     expect(() =>
       parseManifest(
         withInstallation({
@@ -338,8 +310,7 @@ describe('the vessels this installation is built on', () => {
   });
 
   test('no other vessel may declare them', () => {
-    // The other half, and the one that keeps the read total: two vessels
-    // carrying a `sourceBucket` is two answers with nothing to choose between.
+    // Two vessels with `shared` would give two answers.
     const vessels = (fixture.vessels as Record<string, unknown>[]).map(
       (vessel) => ({
         ...vessel,
@@ -370,8 +341,7 @@ describe('the vessels this installation is built on', () => {
       artifactsProject: 'example-artifacts',
       secretStoreContainer: 'example-secrets',
     });
-    // Absent rather than a throw: this fixture seeds identity and rank and
-    // leaves how to reach each boundary to the connect act.
+    // The fixture declares no vessel locations, so there is no project to read.
     expect(homeVesselProjectOf(manifest)).toBeNull();
     expect(isDeclaredInstallationVessel(manifest, 'cloud')).toBe(true);
     expect(isDeclaredInstallationVessel(manifest, 'somewhere-else')).toBe(

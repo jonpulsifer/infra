@@ -1,21 +1,6 @@
 /**
- * `openPrerequisiteRemediation` — an unmet row, opened as a pull request.
- *
- * The precedent is `connectRepository`'s configuration pull request, and the
- * rules that matter here are the ones it carries: **nothing is authoritative**.
- * So the assertions are mostly negative, and deliberately so — what a pull
- * request opens is easy to check and what it *did not* write is where this act
- * could quietly become a mutation:
- *
- * - the checklist row is still unmet afterwards, in the database,
- * - one file is touched and its previous contents survive,
- * - a row with no generated change opens nothing at all, and says why,
- * - a boundary with no declared root opens nothing, because there is nowhere
- *   for it to go and inventing one is the whole thing this declines to do.
- *
- * The far side is the fake of the repository host's HTTP API, so the real
- * client's Git-data sequencing runs and the tree that comes out is a tree a
- * test can read.
+ * `openPrerequisiteRemediation` opens an unmet checklist row as a pull request
+ * against a fake GitHub API, and writes nothing else: the row stays unmet.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -36,10 +21,9 @@ const manifest = await fixtureManifest();
 
 const NOW = new Date('2026-08-07T09:00:00.000Z');
 
-/** The repository the fixture manifest declares its boundaries live in. */
 const INFRASTRUCTURE = manifest.github.infrastructureRepository!;
 
-/** What `terraform/projects/cloud/services.tf` already held. */
+/** The contents `terraform/projects/cloud/services.tf` starts with. */
 const EXISTING = `resource "google_project_service" "existing" {
   project = "example-vessel"
   service = "storage.googleapis.com"
@@ -56,11 +40,8 @@ function host(fake: FakeGitHub): GitHubApp {
 }
 
 function context(fake: FakeGitHub | null): CommandContext {
-  // Every far side but the repository host is a tripwire. §14's claim is that
-  // Spindrift enables no service and mutates no boundary to clear a row, and
-  // the only way to assert a negative like that is to make the alternative
-  // fail: a remediation that reached a deploy adapter would be reaching a
-  // cloud control plane.
+  // Every adapter but the repository host throws: a remediation enables no
+  // service and mutates no boundary.
   const adapters: AdapterRegistry = {
     deploy: () => {
       throw new Error('a remediation reached a deploy adapter');
@@ -96,11 +77,8 @@ function repository(files: Record<string, string> = {}): FakeGitHub {
 }
 
 /**
- * The home boundary, unhealthy, carrying one connected runtime surface.
- *
- * Named for the vessel the fixture manifest points `installation.homeVessel`
- * at, because that pointer is what puts a source bucket and a declared root on
- * this row rather than on any other.
+ * The home vessel, unhealthy, with one Cloud Run Target. Only the home vessel
+ * has a source bucket and a declared Terraform root in the fixture.
  */
 async function seedBoundary(
   options: {
@@ -110,13 +88,7 @@ async function seedBoundary(
       readonly met: boolean;
       readonly assessed?: boolean;
     }[];
-    /**
-     * The second cloud surface of the same boundary.
-     *
-     * Off by default so the assertions above read about one Target, and on for
-     * the tests about two rows of one name on one vessel — which is the
-     * ordinary shape of a `gcp-project`, not an exotic one.
-     */
+    /** Adds the vessel's static Target beside Cloud Run. */
     readonly alsoStatic?: boolean;
   } = {},
 ) {
@@ -198,9 +170,7 @@ describe('opening the change on a surface', () => {
     expect(result.value.createdFile).toBe(false);
 
     const written = fake.filesAt(fake.head(result.value.branch)!);
-    // Exactly one file, because one pull request is one prerequisite's change.
-    // A tidy-up or a second service in the same tree is a review about
-    // something other than the row it came from.
+    // One pull request is one prerequisite's change.
     expect(Object.keys(written)).toEqual([
       'terraform/projects/cloud/services.tf',
     ]);
@@ -225,8 +195,8 @@ describe('opening the change on a surface', () => {
     const [pull] = fake.pulls;
     expect(pull).toBeDefined();
     expect(pull!.base).toBe(fake.defaultBranch);
-    // What clears the row is applying it, and the loop is what notices — so
-    // the body says that rather than implying a merge is the end of it.
+    // Applying the change clears the row, and the loop notices; a merge alone
+    // does not.
     expect(pull!.body).toContain('applying it is');
     expect(pull!.body).toContain('goes green on its own');
     expect(pull!.body).toContain('terraform/projects/cloud/services.tf');
@@ -247,8 +217,6 @@ describe('opening the change on a surface', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.prerequisiteMet).toBe(false);
 
-    // An unmerged pull request has changed nothing about the boundary, so a
-    // checklist that moved would be stating a fact nobody established.
     const [row] = await database()
       .db.select()
       .from(targets)
@@ -273,25 +241,19 @@ describe('opening the change on the boundary itself', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.path).toBe('terraform/projects/cloud/storage.tf');
-    // The destination file was not there, so this is the one case where a whole
-    // file is written — and it holds the stanza and nothing else.
     expect(result.value.createdFile).toBe(true);
     const written = fake.filesAt(fake.head(result.value.branch)!);
     expect(written['terraform/projects/cloud/storage.tf']).toContain(
       'google_storage_bucket',
     );
-    // And the file that was already there is untouched by this branch.
     expect(written['terraform/projects/cloud/services.tf']).toBe(EXISTING);
   });
 });
 
 describe('two surfaces of one boundary', () => {
   test('each opens its own branch, and neither overwrites the other', async () => {
-    // `PREREQUISITES_BY_ADAPTER` puts `PLATFORM_API` on both cloud surfaces, so
-    // one project routinely has two unmet rows of this name wanting different
-    // stanzas. Sharing a branch, the second open force-pushes over the first
-    // and the host answers with the first pull request's number — an operator
-    // told a change was opened that no longer exists anywhere.
+    // `PREREQUISITES_BY_ADAPTER` puts `PLATFORM_API` on both cloud Targets. On
+    // a shared branch, the second open would force-push over the first.
     await seedBoundary({ alsoStatic: true });
     const fake = repository();
 
@@ -325,8 +287,6 @@ describe('two surfaces of one boundary', () => {
     expect(onSite['terraform/projects/cloud/services.tf']).toContain(
       '"firebasehosting.googleapis.com"',
     );
-    // Each branch carries its own change and only its own: one pull request is
-    // one prerequisite's change on one surface.
     expect(onRun['terraform/projects/cloud/services.tf']).not.toContain(
       'firebasehosting',
     );
@@ -349,8 +309,7 @@ describe('two surfaces of one boundary', () => {
     );
 
     const [pull] = fake.pulls;
-    // Otherwise two pull requests against one vessel carry the same title and
-    // the same first sentence, and only the diff says which is which.
+    // Two pull requests on one vessel would otherwise share a title.
     expect(pull!.title).toContain('static');
     expect(pull!.body).toContain('static');
   });
@@ -358,10 +317,8 @@ describe('two surfaces of one boundary', () => {
 
 describe('a destination that already owns the change', () => {
   test('a file declaring the same resource is refused, not appended to', async () => {
-    // The real shape of this: `terraform/gcp/projects/bluenose/storage.tf`
-    // opens with exactly this resource. Appending is a duplicate address, which
-    // fails to parse — so the pull request Spindrift opened breaks the plan for
-    // every other change queued against that root.
+    // Appending would duplicate a resource address, which fails to parse and
+    // breaks the plan for every change against that root.
     const vessel = await seedBoundary();
     const fake = repository({
       'terraform/projects/cloud/storage.tf': `resource "google_storage_bucket" "spindrift_source" {
@@ -380,18 +337,14 @@ describe('a destination that already owns the change', () => {
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
     expect(result.failure.message).toContain('already declares this change');
     expect(fake.pulls).toHaveLength(0);
-    // Refused before anything was written, not after: a branch left behind
-    // would be a change on the repository that nothing opened or reviewed.
+    // Refused before the branch is created.
     expect(
       fake.head(`spindrift/remediate/${vessel.name}-source-bucket`),
     ).toBeUndefined();
   });
 
   test('a file owning the same fact under another label is refused too', async () => {
-    // The address does not clash, so this one parses — and is worse for it: two
-    // resources managing one API enablement apply cleanly and drift quietly.
-    // `services.tf` in the real root holds every API in one `for_each`, under a
-    // label nothing here could have predicted.
+    // This parses, but two resources managing one API enablement drift apart.
     await seedBoundary();
     const fake = repository({
       'terraform/projects/cloud/services.tf': `resource "google_project_service" "service" {
@@ -419,9 +372,8 @@ describe('a destination that already owns the change', () => {
   });
 
   test('opening the same row twice adds it once', async () => {
-    // Merged and not yet applied: the row is still red because Atlantis has not
-    // run, and the base branch now carries the stanza. A second press must not
-    // append a second copy.
+    // Merged but not applied: the row is still unmet, and the base branch
+    // already carries the stanza.
     await seedBoundary();
     const fake = repository();
     const first = await openPrerequisiteRemediation(
@@ -457,9 +409,8 @@ describe('a destination that already owns the change', () => {
 
 describe('a row nothing established', () => {
   test('an unassessed row carries the reason instead of a stanza', async () => {
-    // `cloud/checklist.ts` reports `OIDC_FEDERATION` unmet on a disabled
-    // service because the one probe that would have answered it never got that
-    // far. A grant generated from that names a call nobody made.
+    // A probe stopped by a disabled API leaves later rows unassessed, and a
+    // grant generated for one would be a guess.
     const db = database().db;
     const [vessel] = await db
       .insert(vessels)
@@ -506,7 +457,7 @@ describe('a row nothing established', () => {
     const rows = new Map(
       listed.value.targets[0]!.prerequisites.map((row) => [row.name, row]),
     );
-    // The row the probe did observe still gets its change.
+    // The observed row still gets its change.
     expect(rows.get('PLATFORM_API')?.remediation?.kind).toBe('generated');
     const federation = rows.get('OIDC_FEDERATION')?.remediation;
     expect(federation?.kind).toBe('none');
@@ -541,8 +492,6 @@ describe('what the checklist carries onto a screen', () => {
 
     const surface = result.value.targets[0]!;
     const rows = new Map(surface.prerequisites.map((row) => [row.name, row]));
-    // Met rows carry nothing: there is nothing to clear, and a change beside a
-    // green row is a change somebody might apply.
     expect(rows.get('OIDC_FEDERATION')?.remediation).toBeUndefined();
 
     const unmet = rows.get('PLATFORM_API')?.remediation;
@@ -570,16 +519,14 @@ describe('what the checklist carries onto a screen', () => {
     expect(bucket?.kind).toBe('generated');
     if (bucket?.kind !== 'generated') return;
     expect(bucket.terraform).toContain('google_storage_bucket');
-    // The runtime's own service is a fact about a surface, and answering a
-    // boundary's row with one would be the duplication the vessel exists to
-    // remove.
+    // API enablement belongs to a Target's row, so the vessel's row never
+    // carries it.
     expect(bucket.terraform).not.toContain('googleapis.com');
   });
 
   test('nothing about a remediation is stored on the row it explains', async () => {
-    // Derived at read time, exactly as health is: a stanza moves when a root is
-    // declared or a surface is connected, and a stored one would go stale with
-    // nothing watching.
+    // Derived at read time, since a stored stanza goes stale when a root or
+    // Target changes.
     const vessel = await seedBoundary();
     await listTargets({}, context(null));
     const [row] = await database()
@@ -628,9 +575,7 @@ describe('what it refuses, and why', () => {
   });
 
   test('a boundary with no declared root opens nothing', async () => {
-    // The honest arm. There is no path to write to, and a root has a backend,
-    // a provider and a version pin that nothing here observed — so this refuses
-    // rather than creating one.
+    // Creating a root would guess its backend, provider and version pin.
     const vessel = await seedBoundary({ vessel: 'elsewhere' });
     const fake = repository();
 
