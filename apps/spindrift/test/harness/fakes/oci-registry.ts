@@ -1,23 +1,17 @@
 /**
- * A fake of the OCI distribution read surface `static/oci.ts` speaks
- * (§ Seam 2): manifest by digest, index to child, blob by digest.
- *
- * It serves exactly one artifact, shaped the way the build workflow's files
- * arm pushes one — an index carrying one runnable child and one attestation
- * manifest, the child carrying the layers — because that is the object the
- * adapter meets in the world. Options bend it into the two wrong shapes the
- * tests need: an image of many layers, and a layer that is not a gzipped tar.
+ * The OCI read surface `static/oci.ts` uses, serving one artifact shaped as a
+ * files push is: an index of one runnable child and one attestation manifest.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
 
 export interface FakeOciRegistryOptions {
   /** e.g. `region-docker.pkg.dev`. */
   readonly host: string;
-  /** The repository path under the host, without the digest. */
+  /** The repository path under the host. */
   readonly repository: string;
-  /** The index digest the artifact is addressed by. */
+  /** The index digest. */
   readonly digest: string;
-  /** The one layer's bytes — the gzipped tar of the site. */
+  /** The first layer's bytes, normally a gzipped tar of the site. */
   readonly layer: Uint8Array;
   /** More than 1 fabricates an image at a files address. */
   readonly layerCount?: number;
@@ -50,9 +44,7 @@ export class FakeOciRegistry {
     const base = `/v2/${this.options.repository}`;
 
     if (url.pathname === `${base}/manifests/${this.options.digest}`) {
-      // The index every real push has: one runnable child, one attestation
-      // manifest — present so a reader that forgot to filter fails here
-      // rather than in the world.
+      // The attestation manifest fails a reader that does not filter it out.
       return json({
         schemaVersion: 2,
         mediaType: 'application/vnd.oci.image.index.v1+json',

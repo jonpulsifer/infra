@@ -1,16 +1,5 @@
-/**
- * The view assertions Tasks 37, 39, and 40 name, and the rules around them.
- *
- * These are rendered to static markup rather than driven in a browser. That is
- * the right depth for what is being claimed: every rule under test is a
- * statement about **what appears on the screen in a given state**, and none of
- * them is about interaction. A test that needed a click would be testing Radix.
- *
- * The screens are rendered from `test/fixtures/scenarios.ts`, which is the
- * placeholder data. When the query commands replace it these tests keep their
- * subject — they assert over `DeployView` and `WorkspaceView`, and those types
- * are the contract the queries will have to meet.
- */
+// Screens rendered to static markup from `test/fixtures/scenarios.ts`. Each
+// rule is about what appears in a given state, so none needs a click.
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type {
@@ -52,15 +41,7 @@ const deploy = (view: DeployView) =>
 const workspace = (view: WorkspaceView) =>
   renderToStaticMarkup(<Workspace view={view} />);
 
-/**
- * The rendered words, with the tags taken out.
- *
- * A stage header is assembled from several spans — an ordinal, a glyph, a name,
- * a verdict — so a claim about the sentence it reads as cannot be made against
- * raw markup without pinning the element boundaries, which is testing the
- * layout rather than the sentence. Collapsing to text asserts what a person
- * sees and survives the next time the header is restyled.
- */
+/** The rendered text, so a sentence split across spans is asserted whole. */
 const words = (markup: string) =>
   markup
     .replace(/<[^>]*>/g, ' ')
@@ -73,10 +54,6 @@ const RED = Object.entries(DEPLOY_SCENARIOS).filter(
 
 describe('the claimed front door', () => {
   test('offers recovery with a rotated enrolment token', () => {
-    // §"First run and identity" story 4 makes token rotation the whole recovery
-    // procedure. The server already accepts that ceremony; the claimed screen
-    // must expose it, or an operator who lost their passkey has no way to start
-    // the procedure the product promises.
     const markup = renderToStaticMarkup(
       <Gate claimed={true} onSignedIn={() => undefined} />,
     );
@@ -169,8 +146,6 @@ describe('the GitHub repository connector', () => {
         {...actions}
       />,
     );
-    // The form POSTs straight to the repository host with the manifest as its
-    // one field; nothing else is collected here and no PEM is ever shown.
     expect(markup).toContain('Create the App on');
     expect(markup).toContain(
       'action="https://github.example.test/settings/apps/new?state=sealed-state"',
@@ -179,15 +154,7 @@ describe('the GitHub repository connector', () => {
     expect(markup).not.toContain('PRIVATE KEY');
   });
 
-  /**
-   * The whole point of the rebuild, asserted as an absence.
-   *
-   * Connecting a repository asks for nothing. Every field this screen used to
-   * collect — the scope, the kind, the build frontend, the Dockerfile, the
-   * build command, the output directory, the watch paths — is something §5's
-   * detector reads out of the repository, and a regression here would be the
-   * form growing back one field at a time.
-   */
+  // The detector reads each of these fields from the repository.
   test('offers a repository to connect and asks for nothing', () => {
     const markup = renderToStaticMarkup(
       <RepositoryList
@@ -233,27 +200,17 @@ describe('the GitHub repository connector', () => {
 
 describe('the deploy screen names the builder', () => {
   test('states the platform in words and draws its mark', () => {
-    // "Building on hosted" names a route, which is a word an installation chose
-    // for itself. An operator reading it cannot tell GitHub Actions from Cloud
-    // Build, and the two fail in different places over different credentials —
-    // so the platform is named beside the route, the way a Target and a
-    // repository already identify theirs.
     const view = DEPLOY_SCENARIOS.live;
     expect(view.build?.runnerAdapter).toBe('github-actions');
 
     const markup = deploy(view);
-    // In words, because `Logo` is `aria-hidden` by construction: a mark that is
-    // the only carrier of a fact is a fact a screen reader never reads out.
+    // `Logo` is `aria-hidden`, so the platform is also named in words.
     expect(words(markup)).toContain('GitHub Actions');
     expect(markup).toContain(view.build!.runner);
-    // And the mark itself, from the same barrel every other platform mark comes
-    // from rather than a second one invented for this panel.
     expect(markup).toContain(logos.github);
   });
 
   test('a release that was never built names no builder at all', () => {
-    // §4's supplied artifact: nothing ran, so there is no platform, and a mark
-    // here would be a claim about a builder that was never involved.
     const view = DEPLOY_SCENARIOS.extracted;
     expect(view.build).toBeNull();
 
@@ -270,9 +227,7 @@ describe('the deploy screen, on red', () => {
 
   for (const [name, view] of RED) {
     test(`${name} says the previous release is still serving`, () => {
-      // §18's line, and the one that "changed the feel of failure more than
-      // anything else". §6 guarantees it is true: exposure is never mutated by
-      // a failed deploy, so on red a previous release is still up.
+      // A failed deploy never changes exposure, so the previous release is up.
       expect(view.previousReleaseServing).toBe(true);
       expect(deploy(view)).toContain('previous release is still serving');
     });
@@ -287,17 +242,8 @@ describe('the deploy screen, on red', () => {
     });
 
     test(`${name} opens the build log only if the build is what failed`, () => {
-      // §18's "auto-opens on red" is about the **build**, not about the screen.
-      // A deploy that failed on a green build wants the diagnosis read, not the
-      // build log — and opening the log there would contradict the `platform`
-      // blame chip three lines above it, which exists precisely to say "the
-      // build is fine, stop looking at it".
-      //
-      // Radix leaves closed content unmounted, so the step list appearing at
-      // all is what distinguishes the two.
-      //
-      // Every red scenario built something — §4's supplied-artifact arm has no
-      // build to open, and no failure mode that would want one opened.
+      // Radix leaves closed content unmounted, so a step name appears only when
+      // the build log is open.
       expect(view.build).not.toBeNull();
       const build = view.build!;
       const opened = deploy(view).includes(build.steps[0]!.name);
@@ -308,8 +254,6 @@ describe('the deploy screen, on red', () => {
   }
 
   test('a green build stays collapsed even when the deploy failed', () => {
-    // The case that makes the rule above worth having: the build succeeded and
-    // the cluster could not pull what it produced.
     const view = DEPLOY_SCENARIOS.imageUnpullable;
     expect(view.build?.status).toBe('done');
 
@@ -322,10 +266,6 @@ describe('the deploy screen, on red', () => {
   });
 
   test('names the two stages separately and marks only the one that failed', () => {
-    // The whole point of the pair. An artifact that exists is deployable to any
-    // supported Target, so a red placement says nothing about the image — and
-    // the screen has to be able to hold both facts at once rather than
-    // collapsing them into one verdict about "the pipeline".
     const view = DEPLOY_SCENARIOS.imageUnpullable;
     const text = words(deploy(view));
 
@@ -334,10 +274,8 @@ describe('the deploy screen, on red', () => {
   });
 
   test('shows the deploy stage even when the Build row is red', () => {
-    // Supply-chain admission produces exactly this pairing: the runner pushed
-    // an image, the artifact was refused, and the Deploy over it went red on
-    // its own. Gating the deploy stage on a green build hid the log on the one
-    // screen that needed it and left a build log claiming the whole failure.
+    // Supply-chain admission produces this pair: the runner pushed an image,
+    // the artifact was refused, and the Deploy over it failed too.
     const view: DeployView = {
       ...DEPLOY_SCENARIOS.imageUnpullable,
       build: { ...DEPLOY_SCENARIOS.buildFailed.build, status: 'failed' },
@@ -349,9 +287,6 @@ describe('the deploy screen, on red', () => {
   });
 
   test('but not when nothing is serving', () => {
-    // The sentence is a fact about the platform, not decoration on a red
-    // screen. A first deploy that fails has no previous release, and claiming
-    // one would be a lie in the reassuring direction — the worst kind.
     const firstDeploy: DeployView = {
       ...DEPLOY_SCENARIOS.buildFailed,
       previousReleaseServing: false,
@@ -363,10 +298,8 @@ describe('the deploy screen, on red', () => {
 });
 
 describe('a red deploy that recorded nothing', () => {
-  // The shape every failed Deploy on a real installation has: `debug` null, no
-  // `log` event, so `getDeployDetail` projects a diagnosis with no evidence and
-  // a null deploy log. The screen has an honest sentence for exactly this and
-  // never used to reach it, because `"{}"` arrived where the null belonged.
+  // With `debug` null and no `log` event, `getDeployDetail` projects no
+  // evidence and a null deploy log.
   const silent: DeployView = {
     ...DEPLOY_SCENARIOS.imageUnpullable,
     diagnosis: {
@@ -383,8 +316,6 @@ describe('a red deploy that recorded nothing', () => {
   });
 
   test('offers no disclosure over evidence it does not have', () => {
-    // The trigger promises an answer. Opening it onto an empty pane is the
-    // promise broken, and there is nothing to put behind it.
     expect(markup).not.toContain('what Spindrift found');
   });
 
@@ -395,10 +326,6 @@ describe('a red deploy that recorded nothing', () => {
 });
 
 describe('the build stage, on the transcript it carries', () => {
-  // The drawer is the checkpoints. The runner's text is evidence behind one
-  // more click, and only ever the tail of it — a drawer that opened onto a
-  // thousand lines of BuildKit chatter buried the seven that said what
-  // happened.
   test('leads with checkpoints rather than the runner output', () => {
     const text = words(deploy(DEPLOY_SCENARIOS.buildFailed));
 
@@ -414,9 +341,7 @@ describe('the build stage, on the transcript it carries', () => {
   });
 
   test('says how much of the log it is showing, and how much it is not', () => {
-    // A tail presented as the log is the UI editing evidence. `imageUnpullable`
-    // is the green build, whose drawer is shut — so the claim is made on the
-    // red one, where the reader is actually looking.
+    // Asserted on the red build: the green build's drawer is shut.
     const clipped: DeployView = {
       ...DEPLOY_SCENARIOS.buildFailed,
       build: { ...DEPLOY_SCENARIOS.buildFailed.build, logTotal: 812 },
@@ -444,8 +369,6 @@ describe('the deploy screen, on green', () => {
   });
 
   test('collapses the build log', () => {
-    // §18: collapsed on green — a finished green build is the one case nobody
-    // reads the log for.
     expect(markup).not.toContain('compiled successfully');
   });
 
@@ -458,8 +381,6 @@ describe('a runner that withholds log text', () => {
   const markup = deploy(DEPLOY_SCENARIOS.building);
 
   test('labels the checklist as the live view', () => {
-    // §18 makes this line load-bearing: without it the screen reads as a
-    // broken stream rather than a known limit of that runner.
     expect(DEPLOY_SCENARIOS.building.build.fidelity).toBe('LIVE_STATUS');
     expect(markup).toContain('LIVE_STATUS');
     expect(markup).toContain('the live view');
@@ -470,9 +391,6 @@ describe('a runner that withholds log text', () => {
   });
 
   test('sends the reader where the text is actually being written', () => {
-    // Stating the limit is necessary but not sufficient. The log exists and is
-    // live; it is only somewhere Spindrift cannot read from until the run ends,
-    // so the sentence that admits that carries the way to go read it.
     const url = DEPLOY_SCENARIOS.building.build.runUrl;
     expect(url).not.toBeNull();
     expect(markup).toContain(`href="${url}"`);
@@ -485,8 +403,6 @@ describe('a runner that withholds log text', () => {
   });
 
   test('offers no link where the runner reported none', () => {
-    // A guessed URL that 404s is worse than no link, because it is offered at
-    // the moment the reader has already been told the log is elsewhere.
     const withoutLink = deploy({
       ...DEPLOY_SCENARIOS.building,
       build: { ...DEPLOY_SCENARIOS.building.build, runUrl: null },
@@ -497,11 +413,6 @@ describe('a runner that withholds log text', () => {
 });
 
 describe('a release that was extracted rather than built', () => {
-  // §4: "An archive of *finished output* is a supplied artifact, digested over
-  // the uploaded bundle" — recorded with no build adapter looked up.
-  // `uploadArchive` writes that row with a null runner precisely because
-  // "saying so is more useful than naming a runner that never ran", and the
-  // screen has to carry that sentence rather than invent a builder.
   const view = DEPLOY_SCENARIOS.extracted;
   const markup = deploy(view);
 
@@ -525,17 +436,14 @@ describe('a release that was extracted rather than built', () => {
   });
 
   test('still names the artifact it delivers', () => {
-    // The digest is over the uploaded bundle on both arms (§16), which is what
-    // keeps the supply-chain join intact whether or not a build happened.
     expect(markup).toContain('Artifact');
     expect(markup).toContain(view.artifactDigest!);
   });
 });
 
 describe('an attempt that is only a Build', () => {
-  // §4: pressing Deploy with nothing deployable "writes a PENDING Build for the
-  // build loop to dispatch, and that is the whole act". The press still has to
-  // land somewhere, and this is the screen it lands on.
+  // Deploy with nothing deployable writes only a PENDING Build, and this is the
+  // screen the press lands on.
   const markup = renderToStaticMarkup(
     <DeployDetail
       view={BUILD_ATTEMPT}
@@ -556,8 +464,6 @@ describe('an attempt that is only a Build', () => {
   });
 
   test('shows no deploy log, because nothing was applied', () => {
-    // §6 gives the deploy leg its own drawer. There is no deploy leg here, and
-    // rendering an empty one would say the platform was asked and said nothing.
     expect(words(markup)).not.toContain('2 Deploy ·');
   });
 });
@@ -569,9 +475,7 @@ describe('the compact App history', () => {
   );
 
   test('shows every checkpoint it was handed, not the first three', () => {
-    // The bound belongs to `getAppWorkspace`, which asks for ten. A second one
-    // here could only disagree with it, and the way it disagreed was silent:
-    // the query was raised and the screen went on showing three.
+    // `getAppWorkspace` owns the bound, so the screen applies none of its own.
     expect(view.activity.length).toBeGreaterThan(3);
     for (const entry of view.activity) {
       expect(markup).toContain(entry.title);
@@ -587,9 +491,7 @@ describe('the compact App history', () => {
 
 describe('the App workspace', () => {
   test('every activity entry leads to the attempt it came from', () => {
-    // `attempt_events` constrains every row to exactly one attempt, so every
-    // entry has somewhere to go. An entry that led nowhere would be the one
-    // thing on this screen a reader could not act on.
+    // `attempt_events` ties every row to exactly one attempt.
     const view = WORKSPACE_SCENARIOS.service;
     const markup = renderToStaticMarkup(
       <Workspace view={view} onNavigate={() => undefined} />,
@@ -599,16 +501,12 @@ describe('the App workspace', () => {
       expect(entry.deployId ?? entry.buildId).not.toBeNull();
       expect(markup).toContain(entry.title);
     }
-    // Rendered as buttons rather than static rows — one per visible checkpoint,
-    // plus the global ledger links and release link in the hero.
+    // One button per checkpoint, plus the ledger links and the release link.
     const buttons = markup.split('<button').length - 1;
     expect(buttons).toBeGreaterThanOrEqual(view.activity.length);
   });
 
   test('an App that can receive a push offers the switch that makes it', () => {
-    // §15's dispatcher and the webhook both read `apps.autoDeploy`, and until
-    // now nothing anywhere could write it — the feature shipped permanently
-    // off. This is the control that turns it on.
     const markup = renderToStaticMarkup(
       <Workspace
         view={WORKSPACE_SCENARIOS.service}
@@ -619,9 +517,7 @@ describe('the App workspace', () => {
   });
 
   test('an App no push can reach is not offered a dead switch', () => {
-    // `autoDeploy: null` is the archive App: there is no repository, so there
-    // is no state to be turned out of. §3's grammar disables a choice and says
-    // why; this is not a choice at all, so the honest render is nothing.
+    // `autoDeploy: null` is an archive App, which has no repository to push to.
     const archive = {
       ...WORKSPACE_SCENARIOS.service,
       autoDeploy: null,
@@ -634,18 +530,12 @@ describe('the App workspace', () => {
   });
 
   test('a screen wiring no acts renders no switch either', () => {
-    // The same rule the reach and config editors follow: a control whose Save
-    // cannot be called is worse than no control.
     expect(workspace(WORKSPACE_SCENARIOS.service)).not.toContain(
       'Deploy on push',
     );
   });
 
   test('a website states that it has no runtime', () => {
-    // §17: the `static` adapter gets an honest empty state, and §18 puts it one
-    // level down rather than disabling a tab. `kind: 'none'` carries the reason
-    // with it — the difference between "nothing to show" and "nothing here to
-    // show it from".
     const website = WORKSPACE_SCENARIOS.website;
     expect(website.runtime.kind).toBe('none');
 
@@ -655,10 +545,6 @@ describe('the App workspace', () => {
   });
 
   test('a job is a list of executions, not a stream', () => {
-    // §17: "A job is not a stream but a list of executions. An execution
-    // terminates, so it is attempt-shaped; this pipe covers services only."
-    // Rendering one through the log tail would say a job has something to
-    // follow, which is exactly the conflation §17 refuses.
     const job = WORKSPACE_SCENARIOS.job;
     expect(job.runtime.kind).toBe('executions');
 
@@ -667,22 +553,15 @@ describe('the App workspace', () => {
     expect(markup).toContain('Execution 118');
     expect(markup).toContain('passed');
     expect(markup).toContain('failed');
-    // The caption says how many are shown and where the history lives, and
-    // stops there. `retained` is a page size on both backends and a retention
-    // depth on `kubernetes` only, where it happens to equal the chart's
-    // `successfulJobsHistoryLimit`; a Cloud Run project retains its own number
-    // and reports it nowhere, so "the last 10 are kept" sent an operator
-    // looking for a run `gcloud run jobs executions list` still had.
+    // `retained` is a retention depth only on `kubernetes`; Cloud Run keeps its
+    // own number and reports it nowhere, so the caption says nothing about it.
     expect(markup).toContain('Showing the last 10 runs');
     expect(markup).not.toContain('are kept');
   });
 
   test('runs that could not be read say so, and stay runnable', () => {
-    // The state this is about is the first one an operator meets after this
-    // merges: the Role granting `list` on batch has not reconciled yet, the
-    // Target answers `403`, and the read fails. Collapsing that to `kind:
-    // 'none'` took the Run now button off the card — the feature hiding itself
-    // in exactly the state where pressing it is the diagnosis.
+    // A `403` on the runs read keeps Run now on the card, because pressing it
+    // is the diagnosis.
     const refused = {
       ...WORKSPACE_SCENARIOS.job,
       runtime: {
@@ -702,19 +581,14 @@ describe('the App workspace', () => {
     expect(markup).toContain('Run now');
     expect(markup).toContain('could not be read');
     expect(markup).toContain('403');
-    // And not the sentence for a job that has genuinely never run: nobody
-    // found out whether it has.
+    // Whether the job has ever run is unknown.
     expect(markup).not.toContain('has not run yet');
-    // Nor the caption, which counts what was shown. Nothing was.
     expect(markup).not.toContain('Showing the last');
   });
 
   test('running a job is offered where the runs are, and only there', () => {
-    // §7 makes a job's `apply` two acts, and only the second one runs
-    // anything: the header's Deploy button writes an intent that places a
-    // CronJob triggered by nothing. Two buttons that both read `Run now` where
-    // one deploys is the label a reader cannot recover from, so the word
-    // belongs to the act that actually runs something.
+    // The header's Deploy places the job without running it, so `Run now`
+    // belongs only to the act that runs it.
     const job = WORKSPACE_SCENARIOS.job;
     const withoutAct = workspace(job);
     expect(withoutAct).toContain('Deploy');
@@ -724,17 +598,12 @@ describe('the App workspace', () => {
       <Workspace view={job} onRunJob={async () => ({ ok: true })} />,
     );
     expect(withAct).toContain('Run now');
-    // And the one-off script's argument beside it (§17): a run can be given
-    // parameters, and the affordance lives with the act that sends them.
     expect(withAct).toContain('Add parameter');
     expect(withoutAct).not.toContain('Add parameter');
   });
 
   test('restarting a service is offered where its output is, and only there', () => {
-    // §6's one act on a running process sits with the tail for the reason Run
-    // now sits with the runs: nothing about what is placed changes, so it is
-    // not a header button beside Deploy. A job has no process to bounce and
-    // must not be offered one, whatever the screen wires.
+    // A job has no process to restart, whatever the screen wires.
     const service = WORKSPACE_SCENARIOS.service;
     expect(service.runtime.kind).toBe('stream');
     expect(workspace(service)).not.toContain('Restart');
@@ -757,10 +626,6 @@ describe('the App workspace', () => {
   });
 
   describe('an App whose job is not its first Component', () => {
-    // The defect this fixture exists for: the screen listed every Component and
-    // could act on none but the first, so an App shaped like this one had no
-    // surface for its job at all — no run list, no Run now, no config of its
-    // own — while `runComponent` would have taken its pair happily.
     const view = WORKSPACE_SCENARIOS.jobBehindService;
 
     test('shows the runs of the Component it is showing, not of the first', () => {
@@ -768,15 +633,12 @@ describe('the App workspace', () => {
 
       expect(markup).toContain('Recent runs');
       expect(markup).toContain('nightly-29154360');
-      // And says whose runs they are. An App with a service and two jobs has
-      // three runtimes, and a card headed only "Recent runs" names none of them.
       expect(markup).toContain('Output of nightly');
     });
 
     test('and the config of that Component, on the view that holds config', () => {
-      // Config is scoped to one (Component, Target) pair and this App has
-      // several, so the heading names whose keys these are — a heading that
-      // said only "Config" was the same list claiming to be the App's.
+      // Config is scoped to one (Component, Target) pair, so the heading names
+      // the Component.
       const markup = renderToStaticMarkup(
         <Workspace view={view} tab="config" />,
       );
@@ -786,8 +648,7 @@ describe('the App workspace', () => {
     });
 
     test('offers Run now for that job', () => {
-      // `{kind: 'executions'}` is what renders the control, and it was
-      // unreachable for a job behind a service at any URL.
+      // Only an `executions` runtime renders the control.
       const markup = renderToStaticMarkup(
         <Workspace view={view} onRunJob={async () => ({ ok: true })} />,
       );
@@ -795,8 +656,6 @@ describe('the App workspace', () => {
     });
 
     test('leads with the selected Component rather than the first', () => {
-      // The eyebrow over the App's name says what is being looked at, and the
-      // hero underneath it is that Component's placement and release.
       expect(workspace(view)).toContain('job · nightly');
     });
 
@@ -805,8 +664,6 @@ describe('the App workspace', () => {
         <Workspace view={view} onSelectComponent={() => undefined} />,
       );
 
-      // Both boxes are pressable — the picture is what there is to look at, so
-      // it is also how another one is chosen — and exactly one is pressed.
       expect(markup.split('aria-pressed="true"').length - 1).toBe(1);
       expect(markup.split('aria-pressed="false"').length - 1).toBe(1);
       for (const component of view.components) {
@@ -815,8 +672,6 @@ describe('the App workspace', () => {
     });
 
     test('and states the chosen one beneath the picture', () => {
-      // What the rows under the diagram used to say, now said once — the four
-      // facts that are this Component's alone and nowhere else on the screen.
       const markup = renderToStaticMarkup(
         <Workspace view={view} onSelectComponent={() => undefined} />,
       );
@@ -826,15 +681,10 @@ describe('the App workspace', () => {
     });
 
     test('renders no selector where the screen wires no selection', () => {
-      // The same rule the reach, config and auto-deploy controls follow: a
-      // control whose press cannot be answered is worse than no control.
       expect(workspace(view)).not.toContain('aria-pressed');
     });
 
     test('states the selected Component, not the App, above its release', () => {
-      // The phase pill, the address and the release beside this sentence are
-      // all the job's. "Your App has no release serving yet" over an App whose
-      // service is serving is a sentence about a Component, told about the App.
       const markup = workspace(view);
 
       expect(markup).not.toContain('Your App');
@@ -842,9 +692,7 @@ describe('the App workspace', () => {
     });
 
     test('offers nothing to open for a Component that answers nowhere', () => {
-      // A job has no address, and `normaliseUrl('')` is `''` — an `Open app`
-      // anchor carrying that reloads the workspace instead of opening
-      // anything, which reads as a press that did nothing.
+      // A job has no address, and an anchor with `href=""` reloads the page.
       const markup = workspace(view);
 
       expect(markup).not.toContain('href=""');
@@ -852,8 +700,6 @@ describe('the App workspace', () => {
     });
 
     test('still opens the address of a Component that has one', () => {
-      // The other half of the same rule: the service's URL is still a link,
-      // and it is still the headline the screen leads with.
       const serving: WorkspaceView = {
         ...view,
         componentId: 'component-quay-web',
@@ -868,17 +714,12 @@ describe('the App workspace', () => {
   });
 
   test('a service states how far its log reaches', () => {
-    // §17: `logHistory` "is how far back `since` can honestly reach... so a
-    // Target never *lacks* logs; it only has a shorter memory, and the UI
-    // states reach rather than disabling a tab."
     const service = WORKSPACE_SCENARIOS.service;
     expect(service.runtime.kind).toBe('stream');
 
     const markup = workspace(service);
     expect(markup).toContain('7 days');
     expect(markup).toContain('of history');
-    // Deploys are markers on the stream, never a filter (§17) — the only shape
-    // that lets a human read across a rollback boundary.
     expect(markup).toContain('never a filter');
   });
 
@@ -889,9 +730,6 @@ describe('the App workspace', () => {
   });
 
   test('the placement states both the Target and the vessel it is on', () => {
-    // The vessel is where the App is placed, not something it was created
-    // with — so it is stated beside the Target it was read from, and never as
-    // a setting the developer is being told they cannot change.
     const markup = workspace(WORKSPACE_SCENARIOS.service);
     expect(markup).toContain(WORKSPACE_SCENARIOS.service.target);
     expect(markup).toContain(`on ${WORKSPACE_SCENARIOS.service.vessel}`);
@@ -899,16 +737,11 @@ describe('the App workspace', () => {
   });
 
   test('Components own the width of the Config tab', () => {
-    // The list is where the acts on a Component are, and every one of them
-    // writes something the next release picks up — so it sits with the rest of
-    // what a release is made of, and the Overview keeps only the picture.
     const markup = renderToStaticMarkup(
       <Workspace view={WORKSPACE_SCENARIOS.service} tab="config" />,
     );
     expect(markup).toContain('App structure');
-    // The card that made a Datastore a peer of the Components is gone: what
-    // is left is one line inside this one, and the lifetime acts are the
-    // ledger's.
+    // Datastore lifetime acts belong to the ledger.
     expect(markup).not.toContain('Attached resources');
     expect(markup).not.toContain('Create Datastore');
     expect(markup).not.toContain('>Detach<');
@@ -917,9 +750,6 @@ describe('the App workspace', () => {
 
   describe('the Datastore line (§11)', () => {
     test('names what this App reads through, and offers no attach unwired', () => {
-      // The both-or-neither rule: no handler, no picker — a select that
-      // cannot be submitted reads as a broken control rather than an absent
-      // one.
       const markup = renderToStaticMarkup(
         <Workspace view={WORKSPACE_SCENARIOS.service} tab="config" />,
       );
@@ -929,8 +759,7 @@ describe('the App workspace', () => {
     });
 
     test('offers the unattached ones, and only those', () => {
-      // `attachDatastore` accepts nothing else, so an attached row in the
-      // picker would be a choice whose only outcome is core's refusal.
+      // `attachDatastore` refuses a Datastore attached to another App.
       const markup = renderToStaticMarkup(
         <Workspace
           view={WORKSPACE_SCENARIOS.service}
@@ -945,8 +774,6 @@ describe('the App workspace', () => {
     });
 
     test('a website has nothing to say and says nothing', () => {
-      // §11: a `website` attaches none, and the fixture carries none — so the
-      // line is absent rather than an empty row under the Components.
       const markup = workspace(WORKSPACE_SCENARIOS.website);
       expect(markup).not.toContain('attach-datastore');
     });
@@ -1001,14 +828,10 @@ describe('the App workspace', () => {
       );
       expect(markup).toContain('Attach');
       expect(markup).toContain('beacon');
-      // Attach or detach, never both: the row already says which one applies.
       expect(markup).not.toContain('>Detach<');
     });
 
     test('no App exists, so no picker is drawn', () => {
-      // A select with nothing in it is the dead control the both-or-neither
-      // rule exists to prevent — and `attachDatastore` would have nothing to
-      // be pointed at.
       const markup = renderToStaticMarkup(
         <DatastoreLedger
           datastores={[store]}
@@ -1026,17 +849,11 @@ describe('the App workspace', () => {
     const markup = workspace(view);
 
     test('is a sequence, joined by a rule its markers sit on', () => {
-      // Stacked rows said these were unrelated events that happened to be near
-      // each other. The connector is what carries the reading down the column,
-      // and it is the difference between a list and a timeline.
       expect(markup).toContain('Recent checkpoints');
       expect(markup).toContain('<ol');
     });
 
     test('says which stage every checkpoint belongs to', () => {
-      // A column of red cannot say whether the image or its placement is the
-      // problem unless each row carries its lane. Build and Deploy are two
-      // stages, and this is where that is easiest to lose.
       const text = words(markup);
       for (const entry of view.activity) {
         expect(text).toContain(entry.kind);
@@ -1046,15 +863,6 @@ describe('the App workspace', () => {
   });
 });
 
-/**
- * What the App surface says now that the read model carries it.
- *
- * Every claim below is about a fact `getAppWorkspace` had in hand and dropped
- * on the floor — the commit, the instant, the failure reason, the drift, which
- * prerequisite is unmet. The screen rendered a phase pill over all of them, so
- * a drifted App read "is live" and a failed one read "has no release serving
- * yet" with no reason and no evidence.
- */
 describe('the App workspace states what the release did', () => {
   const service = WORKSPACE_SCENARIOS.service;
 
@@ -1066,8 +874,6 @@ describe('the App workspace states what the release did', () => {
       at: '2026-07-28T13:00:00.000Z',
     });
 
-    // Shortened to git's own seven, with the whole value on the title so a
-    // hover answers what the ellipsis ate.
     expect(markup).toContain('a1b2c3d');
     expect(markup).toContain('2026-07-28T13:00:00.000Z');
   });
@@ -1090,8 +896,6 @@ describe('the App workspace states what the release did', () => {
   });
 
   test('a drifted release says so instead of reading as live', () => {
-    // §6 calls drift "information, not an alarm" — and until now the App it is
-    // about was the one screen that could not report it.
     const markup = workspace({
       ...service,
       drift: {
@@ -1151,8 +955,6 @@ describe('the App workspace has views rather than one column', () => {
 
     expect(markup).toContain('Releases');
     expect(markup).toContain('role="tablist"');
-    // The hero is above the strip: whether the App is up is not a tab you can
-    // be on the wrong one of.
     expect(markup.indexOf('is live')).toBeLessThan(
       markup.indexOf('role="tablist"'),
     );
@@ -1163,8 +965,7 @@ describe('the App workspace has views rather than one column', () => {
   });
 
   test('the live tail follows, and says what it dropped', () => {
-    // `app.tsx` appends every socket page forever. Without a cap the pane grew
-    // the page without bound while the newest line sat off-screen.
+    // The workspace appends every socket page, so the pane caps its lines.
     const chatty = workspace({
       ...service,
       runtime: {
@@ -1180,13 +981,12 @@ describe('the App workspace has views rather than one column', () => {
 
     expect(chatty).toContain('Showing the last 2000 lines');
     expect(chatty).not.toContain('line 0\n');
-    // Following is what gives the pane a bottom to scroll to.
+    // `follow` bounds the pane's height, which gives it a bottom to scroll to.
     expect(chatty).toContain('max-h-[420px]');
   });
 
   test('no button on this screen does nothing when it is pressed', () => {
-    // `SectionHeader` renders its verb whether or not a handler was passed, so
-    // these two read as broken features rather than absent ones.
+    // With no handlers wired, `SectionHeader` renders neither verb.
     const markup = workspace(service);
 
     expect(markup).not.toContain('Add Component');
@@ -1194,14 +994,6 @@ describe('the App workspace has views rather than one column', () => {
   });
 });
 
-/**
- * The Targets surface (§13).
- *
- * Two claims, and the second is the one that used to have no screen at all:
- * a Target says what was *checked*, not only what is broken, and a Target the
- * manifest seeded but nobody connected is something an operator can finish
- * here rather than only in Git.
- */
 describe('the Targets surface', () => {
   const targets = (pending: Parameters<typeof TargetList>[0]['pending'] = []) =>
     renderToStaticMarkup(
@@ -1217,8 +1009,6 @@ describe('the Targets surface', () => {
 
   test('shows the whole checklist, met rows included', () => {
     const markup = targets();
-    // Every prerequisite a cluster is assessed against, not only the failures:
-    // "why can I not deploy here" is answered by what was checked.
     for (const item of [
       'DELIVERY_OPERATOR',
       'CHART_SOURCE',
@@ -1274,11 +1064,6 @@ describe('the Targets surface', () => {
   });
 
   test('a connected cluster can be corrected without submitting the whole manifest', () => {
-    // 52's first criterion. The connect form was reachable only from an
-    // unconfigured seed, so the gateway, the authenticated edge, the config
-    // store and the address a record points at were editable nowhere in the
-    // product once a Target existed — the procedure was to hand-write the whole
-    // installation document for a change of three fields.
     expect(targets()).toContain('Edit connection');
   });
 
@@ -1287,15 +1072,13 @@ describe('the Targets surface', () => {
     expect(markup).toContain(
       'connection.chartValues.platform.gateway.name, connection.chartValues.platform.gateway.namespace',
     );
-    // The row wins, and the sentence has to say which way round that is: a
-    // restart leaves the correction alone and saving Settings does not.
+    // The row wins: a restart keeps the correction, and saving the manifest in
+    // Settings replaces it.
     expect(markup).toContain('a restart leaves it alone');
-    // Paths, never values — the same promise `diffManifestPaths` makes, kept
-    // all the way onto the screen.
+    // Paths only, never values, as `diffManifestPaths` returns them.
     expect(markup).not.toContain('spindrift-apps');
   });
 
-  /** One card at a time, because the two claims below are about one card each. */
   const card = (id: string) =>
     renderToStaticMarkup(
       <TargetList
@@ -1309,20 +1092,14 @@ describe('the Targets surface', () => {
     );
 
   test('a surface on a vessel the installation is built on offers neither act', () => {
-    // That boundary reconciles from the mounted declaration on every boot, so
-    // an edit made here would survive exactly until the next restart — and a
-    // disconnect is refused one layer down, because neither pointer is a
-    // foreign key and nothing else would stop it.
     const markup = words(card('target-primary'));
     expect(markup).not.toContain('Edit connection');
     expect(markup).not.toContain('Disconnect');
-    // And the sentence saying why, rather than a disabled button saying nothing.
     expect(markup).toContain('where this control plane runs');
     expect(markup).toContain('cannot be disconnected');
   });
 
   test('an ordinary Target keeps both acts', () => {
-    // The other side of the same claim: the lock is by role, not by screen.
     const markup = words(card('target-secondary'));
     expect(markup).toContain('Edit connection');
     expect(markup).toContain('Disconnect');
@@ -1332,8 +1109,7 @@ describe('the Targets surface', () => {
   test('the boundaries carry a checklist of their own, and say which they are', () => {
     const markup = words(targets());
     expect(markup).toContain('Boundaries this installation is built on');
-    // The four the home vessel exists to hold. None of them belongs to a
-    // Target, and none is asked of an app vessel.
+    // Asked only of the home vessel, never of a Target or an app vessel.
     for (const item of [
       'SOURCE_BUCKET',
       'SECRET_STORE',
@@ -1344,33 +1120,25 @@ describe('the Targets surface', () => {
     }
     expect(markup).toContain('home vessel');
     expect(markup).toContain('where this control plane runs');
-    // Red where a row failed — a boundary's health is every catalogued row met.
+    // A boundary is healthy only when every catalogued row is met.
     expect(markup).toContain('unhealthy');
   });
 
   test('an unmet row carries the change that clears it, and where it goes', () => {
-    // §13's checklist stated the diagnosis and stopped. What an operator needs
-    // next is the fix, so the row carries it — with its destination, because a
-    // stanza with no path is a snippet.
     const markup = words(targets());
     expect(markup).toContain('Remediation');
     expect(markup).toContain('google_storage_bucket');
     expect(markup).toContain('terraform/projects/cloud/storage.tf');
     expect(markup).toContain('Copy');
     expect(markup).toContain('Open a pull request');
-    // And the promise the act keeps: applying is what clears the row, and the
-    // standing check is what notices.
     expect(markup).toContain('Spindrift changes nothing here');
   });
 
   test('a row with no generated change says so rather than showing an empty box', () => {
-    // The same found-versus-unavailable split `cloud-discovery.ts` keeps: an
-    // empty disclosure would say a change exists and is empty.
     const markup = words(targets());
     expect(markup).toContain('No generated remediation');
     expect(markup).toContain('cannot be changed afterwards');
-    // A row cleared somewhere other than Terraform names the tree that owns it
-    // rather than offering a pull request against the wrong one.
+    // A row cleared outside Terraform names the tree that owns it.
     expect(markup).toContain('GitOps tree rather than Terraform');
   });
 
@@ -1407,15 +1175,13 @@ describe('the Targets surface', () => {
     );
     expect(markup).toContain('has no Terraform root');
     expect(markup).toContain('what one would contain');
-    // There is nowhere to open it, so the act is not offered — and the stanza
-    // still is, because copying it is the move that remains.
+    // With no root there is nowhere to open a pull request, but the stanza can
+    // still be copied.
     expect(markup).not.toContain('Open a pull request');
     expect(markup).toContain('google_storage_bucket');
   });
 
   test('a boundary nobody has been past says so rather than reading as passed', () => {
-    // §18's rule in reverse: a snapshot has to say when, and never-assessed is
-    // a different state from assessed-and-everything-met.
     const markup = words(
       renderToStaticMarkup(
         <TargetList
@@ -1439,8 +1205,6 @@ describe('changing how a Component is reached (§9)', () => {
   const view = WORKSPACE_SCENARIOS.service;
 
   test('reach is not editable where no act is wired', () => {
-    // The fixture screens render this view with no acts. A form whose Save
-    // cannot be called is worse than no form.
     expect(workspace(view)).not.toContain('Save reach');
   });
 
@@ -1465,14 +1229,11 @@ describe('changing how a Component is reached (§9)', () => {
       ),
     );
 
-    // §9 keeps exposure out of the mutable-in-place category, and the App chart
-    // renders the route and the filter from values written at deploy time — so
-    // the one thing this form must never read as is a toggle that took effect.
+    // The App chart renders the route and the filter from values written at
+    // deploy time.
     expect(markup).toContain(
       'takes effect on the next Deploy rather than on the one that is serving',
     );
-    // Both halves of §9's grid, in the words the creation flow uses — the same
-    // constants, so a developer meets the decision once.
     for (const cell of ['none', 'private', 'public', 'proxy']) {
       expect(markup).toContain(cell);
     }
@@ -1483,9 +1244,8 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
   const view = WORKSPACE_SCENARIOS.service;
   const component = {
     ...view.components[0]!,
-    // A Component mid-move: placed on the second Target, still answering on
-    // the first. That is the state `placeComponent` leaves behind on purpose,
-    // and it is the only one an Unplace control has anything to act on.
+    // Mid-move: placed on one Target and still serving on both, the state
+    // `placeComponent` leaves behind.
     target: 'primary/kubernetes',
     serving: [
       { targetId: 'target-primary', label: 'primary/kubernetes' },
@@ -1497,8 +1257,7 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
   const unplace = async () => ({ ok: true as const, destroyed: true });
 
   test('the verb is on the row only where both acts and a list of Targets are', () => {
-    // Both, or neither: a screen that can strand a workload on a Target it
-    // cannot then tear down is worse than one that does not move it at all.
+    // Move without Unplace could strand a workload it cannot tear down.
     expect(workspace(placed)).not.toContain('Move');
     expect(
       renderToStaticMarkup(
@@ -1525,9 +1284,7 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
   });
 
   test('a Component nothing has placed is not offered a move', () => {
-    // A first placement is not a move: `deployApp` writes it while it is NULL
-    // (`src/commands/apps/deploy.ts:529-534`), which is the one act that owns
-    // that fact. The verb here would be a second answer to it.
+    // A first placement belongs to `deployApp`, which writes it while null.
     expect(
       renderToStaticMarkup(
         <Workspace
@@ -1552,9 +1309,7 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
       />,
     );
 
-    // One control per pair, because `unplaceComponent` takes a pair. A move
-    // leaves two rows answering and a single button could not say which of
-    // them it meant — which is why the command shipped without one.
+    // One control per pair, because `unplaceComponent` takes a pair.
     expect(markup).toContain('primary/kubernetes');
     expect(markup).toContain('vessel-a/cloudrun');
     expect(markup.match(/Unplace/g)?.length).toBe(2);
@@ -1584,8 +1339,6 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
     );
     expect(asWebsite).toContain('edge/static');
 
-    // A `static` surface takes no service, so offering it here would be a tile
-    // whose only outcome is a deploy that cannot be admitted (§3).
     const asService = renderToStaticMarkup(
       <PlacementEditor
         component={component}
@@ -1599,10 +1352,6 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
   });
 
   test('the demanded keys are a form, not a dead end', () => {
-    // §10: "Place names the keys that will not follow and demands them before
-    // the move commits." The refusal is a question, and this is where it is
-    // answered — one field per key, and core's sentence above them unedited,
-    // because it says the thing the fields cannot.
     const sentence =
       'API_KEY, TOKEN are configured through a store vessel-a/cloudrun cannot reach';
     const markup = renderToStaticMarkup(
@@ -1616,8 +1365,7 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
     expect(markup).toContain(sentence);
     expect(markup).toContain('name="supply-API_KEY"');
     expect(markup).toContain('name="supply-TOKEN"');
-    // The move is one post: the button that submits these is the move itself,
-    // never a config write followed by a second attempt.
+    // Supplying the keys and moving is one post.
     expect(markup).toContain('Supply and move');
     expect(markup).not.toContain('Save');
   });
@@ -1637,9 +1385,6 @@ describe('adding a Component from the App it belongs to (§2)', () => {
     );
 
   test('the verb is on the section only where an act is wired', () => {
-    // The both-or-neither rule `SectionHeader` enforces, from the side that
-    // made it necessary: "Add Component" shipped for months as a control that
-    // did nothing on press.
     expect(
       renderToStaticMarkup(<Workspace view={view} tab="config" />),
     ).not.toContain('Add Component');
@@ -1655,16 +1400,14 @@ describe('adding a Component from the App it belongs to (§2)', () => {
   });
 
   test('a schedule is asked for on a job and on nothing else', () => {
-    // §2: "`schedule` is a field on a job, not a kind." The command's input is
-    // a `.strict()` union, so a schedule offered beside a service would be a
-    // field whose only outcome is a validation failure.
+    // The command's input is a `.strict()` union, so a schedule on any other
+    // kind fails validation.
     expect(form()).not.toContain('Schedule');
     expect(form('website')).not.toContain('Schedule');
 
     const job = form('job');
     expect(job).toContain('Schedule');
     expect(job).toContain('Five cron fields');
-    // An unscheduled job is a state, not an omission — the form says which.
     expect(job).toContain('placed suspended');
   });
 
@@ -1673,9 +1416,7 @@ describe('adding a Component from the App it belongs to (§2)', () => {
     for (const kind of ['service', 'website', 'job']) {
       expect(markup).toContain(kind);
     }
-    // No §9 grid here: reach and auth are the command's defaults
-    // (`create.ts:64-65`) and `ReachEditor` is where they are changed, so the
-    // two tiles that would restate them are the ones that must not appear.
+    // Reach and auth take the command's defaults; `ReachEditor` changes them.
     expect(markup).not.toContain(REACH_NOTE.public);
     expect(markup).not.toContain(AUTH_NOTE.proxy);
   });
@@ -1683,7 +1424,6 @@ describe('adding a Component from the App it belongs to (§2)', () => {
 
 describe('editing config from the workspace (§10)', () => {
   const view = WORKSPACE_SCENARIOS.service;
-  /** Config is its own view of the App now, so the assertions open it. */
   const config = (v: WorkspaceView) =>
     renderToStaticMarkup(<Workspace view={v} tab="config" />);
 
@@ -1693,16 +1433,12 @@ describe('editing config from the workspace (§10)', () => {
       expect(markup).toContain(key);
     }
     expect(markup).toContain('value is write-only');
-    // The consequence, stated rather than hidden: this is the same posture
-    // `deployChange`'s own comment takes server-side, kept on the screen.
     expect(markup).toContain(
       'redeploys what is running under a new configVersion',
     );
   });
 
   test('the affordance is on the section only where an act is wired', () => {
-    // No form whose Save cannot be called — the same rule §9's Reach card
-    // states above.
     expect(config(view)).not.toContain('Set variable');
 
     const markup = renderToStaticMarkup(
@@ -1721,11 +1457,7 @@ describe('editing config from the workspace (§10)', () => {
   });
 
   test('pressing Delete on a key dispatches setConfig’s removal shape, and nothing else', () => {
-    // Called directly rather than clicked through a mounted tree, for the
-    // same reason `DeleteAppButton`'s own test in `app-list-identity.test.tsx`
-    // is: what is under test is which value the handler closes over, and
-    // `renderToStaticMarkup` — this file's usual depth — cannot click
-    // anything (see this file's own header).
+    // Called directly, because `renderToStaticMarkup` cannot click.
     const calls: {
       entries: readonly { key: string; value: string }[];
       removals: readonly string[];
@@ -1750,17 +1482,11 @@ describe('editing config from the workspace (§10)', () => {
     });
     (button.props as { onClick: () => void }).onClick();
 
-    // The exact shape `setConfig` takes: the key named, nothing about the
-    // keys left alone — a removal never restates a value it cannot read.
+    // A removal names only the key; values are write-only.
     expect(calls).toEqual([{ entries: [], removals: ['DATABASE_URL'] }]);
   });
 });
 
-/**
- * A commit is a sha nobody can read. Where a screen shows one, the headline
- * the Build kept goes beside it — and a row that kept none still shows the
- * sha alone rather than a blank where words would go.
- */
 describe('a commit shows its headline beside the sha', () => {
   test('the App hero puts the headline beside the seven characters', () => {
     const markup = workspace({

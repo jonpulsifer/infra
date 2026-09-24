@@ -95,9 +95,8 @@ describe('the object-first shell', () => {
       expect(markup).toContain(label);
     }
     expect(markup).toContain('real connector controls');
-    // The section that held source buckets, staged bundles and registries.
-    // Buckets and registries are connections; the bundles were Sources, and
-    // both nouns are supply-chain ledgers — nothing is left for a policy tab.
+    // Buckets and registries are Connections and bundles are Sources, so no
+    // policy tab remains.
     expect(markup).not.toContain('Artifact policy');
   });
 });
@@ -146,8 +145,6 @@ describe('the global operation ledgers', () => {
     expect(markup).toContain('Cloud Build');
     expect(markup).toContain('sha256:abc');
     expect(markup).toContain('Loading Build evidence');
-    // Builds is one of three supply-chain surfaces, and says so: the Artifact
-    // it produced is its own noun on its own tab.
     expect(markup).toContain('Supply chain');
     expect(markup).toContain('Artifacts');
   });
@@ -162,11 +159,6 @@ describe('the global operation ledgers', () => {
     expect(markup).toContain('Loading Deploy evidence');
   });
 
-  /**
-   * The two nouns either side of a Build. Each says what it *is* rather than
-   * what happened to it: a Source names its origin and whether a builder could
-   * still fetch it, an Artifact names how many Deploys have placed it.
-   */
   test('a Source reads as staged bytes, not as the Build that used them', () => {
     const markup = renderToStaticMarkup(
       <SourceLedger
@@ -230,11 +222,6 @@ describe('the global operation ledgers', () => {
     expect(markup).toContain('ghcr.io/an-owner/morrow');
   });
 
-  /**
-   * The ledgers are tables now, and the point of a table is the columns: the
-   * facts these rows carried and did not show were flattened into one `·`
-   * sentence nobody could sort, align or compare down.
-   */
   test('a ledger row is a table row with the facts it used to hide', () => {
     const markup = renderToStaticMarkup(
       <BuildLedger builds={[build]} onNavigate={() => undefined} />,
@@ -246,10 +233,7 @@ describe('the global operation ledgers', () => {
     }
   });
 
-  /**
-   * A count off an array the caller fetched with `limit: 12` is not a fleet
-   * total. The tile may only claim what it can back up.
-   */
+  // A count of one fetched page is not a fleet total.
   test('the landing screen scopes a page count instead of presenting it as a total', () => {
     const markup = renderToStaticMarkup(
       <Overview
@@ -306,7 +290,7 @@ describe('the global operation ledgers', () => {
   });
 });
 
-/** Every element in a tree, depth first — the tree as returned, not rendered. */
+// Every element in a tree, depth first, as returned and not rendered.
 function* elements(node: ReactNode): Generator<ReactElement> {
   if (Array.isArray(node)) {
     for (const child of node) yield* elements(child as ReactNode);
@@ -317,7 +301,6 @@ function* elements(node: ReactNode): Generator<ReactElement> {
   yield* elements((node.props as { children?: ReactNode }).children);
 }
 
-/** The `rowSearch` a ledger hands its explorer, read off the tree it returns. */
 function rowSearchOf<T>(tree: ReactNode): (row: T) => string {
   for (const element of elements(tree)) {
     const { rowSearch } = element.props as { rowSearch?: (row: T) => string };
@@ -326,12 +309,8 @@ function rowSearchOf<T>(tree: ReactNode): (row: T) => string {
   throw new Error('the ledger rendered no explorer');
 }
 
-/**
- * A filter matches the words a row shows. The explorer never reads rendered
- * cells — `rowSearch` is its whole haystack — so a headline printed beside the
- * sha has to be in that string too, or the one thing on the screen an operator
- * would type is the one thing typing cannot find.
- */
+// The explorer filters on `rowSearch` alone, never the rendered cells, so a
+// headline shown beside the sha must be in it.
 describe('a ledger filter matches the headline it shows', () => {
   const HEADLINE = 'feat(web): stop the header wrapping';
   const commit = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';

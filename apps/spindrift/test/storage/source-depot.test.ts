@@ -1,11 +1,6 @@
 /**
- * Staging a bundle where a builder can fetch it, and minting the URL that lets
- * it (ticket 23).
- *
- * The defect these cover is not a wrong value, it is a wrong *place*: bundles
- * were written to the web pod's own `tmpdir()` and handed to a GitHub-hosted
- * runner as `upload://<hex>`. Neither half could work — the scheme is not a
- * scheme, and the bytes are on a disk nothing outside that one pod can reach.
+ * Staging a bundle where a builder can fetch it, and signing the URL that lets
+ * it.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -52,7 +47,7 @@ const manifest = {
   cloud: { federation },
 } as unknown as Parameters<typeof sourceDepotFor>[0];
 
-/** A far side that answers the token exchange, the upload, and `signBlob`. */
+/** Answers the token exchange, impersonation, the upload and `signBlob`. */
 function fakeCloud(): {
   fetch: (request: Request) => Promise<Response>;
   uploads: { url: string; bytes: Uint8Array }[];
@@ -109,8 +104,7 @@ describe('the source depot', () => {
   });
 
   test('is absent when there is no federation to reach the bucket with', () => {
-    // A bucket name with nothing that can write to it is not a depot, and
-    // answering with one would stage bundles into a call that always fails.
+    // A bucket nothing can write to would stage into a call that always fails.
     const depot = sourceDepotFor({
       ...manifest,
       cloud: { ...manifest?.cloud, federation: null },
@@ -134,7 +128,7 @@ describe('the source depot', () => {
     const hex = digestOfBytes(bytes).replace('sha256:', '');
 
     expect(staged.location).toBe(`gs://bluenose-spindrift-source/${hex}.tgz`);
-    // Nothing on this pod's disk: that is the whole point of the change.
+    // Nothing on this pod's disk, which no builder can reach.
     expect(staged.filepath).toBeNull();
     expect(await readStagedArchive(staged.digest)).toBeNull();
     expect(cloud.uploads).toHaveLength(1);
@@ -142,11 +136,6 @@ describe('the source depot', () => {
   });
 
   test('an ephemeral bundle lands under the prefix the lifecycle rule matches', async () => {
-    // §15's "repository bundles are ephemeral" used to be a word in a union
-    // and nothing else: every object landed at the bucket root, where the
-    // bucket's lifecycle rules never touch a content-addressed object, and the
-    // depot grew one full source archive per built commit forever. The prefix
-    // is the property the bucket can act on.
     const cloud = fakeCloud();
     const bytes = new TextEncoder().encode('a repository bundle');
     const depot: SourceDepot = {
@@ -177,8 +166,7 @@ describe('the source depot', () => {
   });
 
   test('falls back to local disk under a handle that is not a URL', async () => {
-    // An installation with no depot gets the old behaviour, and the location it
-    // records says so: `upload://` cannot be mistaken for something fetchable.
+    // With no depot, `upload://` marks the bytes as local and not fetchable.
     const bytes = new TextEncoder().encode(`local ${Math.random()}`);
     const staged = await stageArchiveBytes('bundle.tgz', bytes, null);
 
@@ -245,9 +233,8 @@ describe('signing a bundle URL', () => {
   });
 
   test('signs with the federated token, never the impersonated one', async () => {
-    // `signBlob` is authorized by `serviceAccountTokenCreator`, which the
-    // workload identity holds on the service account — impersonating first
-    // would instead need that role held on itself, a grant nothing else needs.
+    // The workload identity holds `serviceAccountTokenCreator` on the service
+    // account; an impersonated token would need that role on itself.
     const cloud = fakeCloud();
     await signedObjectUrl({
       location,
@@ -274,8 +261,8 @@ describe('signing a bundle URL', () => {
         readToken: async () => 'jwt',
       },
     });
-    // A federated identity has no key GCS can verify a signature against, so
-    // there is nothing to sign with and the sentence says which knob is missing.
+    // A federated identity has no key GCS can verify, so signing needs the
+    // impersonated service account, and the error names the missing setting.
     expect(attempt).rejects.toThrow('impersonationUrl');
   });
 });

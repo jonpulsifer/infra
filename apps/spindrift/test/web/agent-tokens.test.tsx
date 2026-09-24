@@ -1,14 +1,3 @@
-/**
- * The agent-token card, rendered to static markup.
- *
- * Every rule here is a statement about what is on screen in a given state,
- * which is what this depth of render can settle. The one that matters is the
- * reveal: the token exists in the response and nowhere else afterwards, so a
- * screen that truncates it, hides it behind a copy button that may not work in
- * an insecure context, or clears it on a timer has quietly destroyed a
- * credential. The assertions below say the whole value is present as text and
- * that the screen says out loud that it will not be shown again.
- */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { AgentTokenListItem } from '../../src/commands/agent-tokens.ts';
@@ -22,8 +11,6 @@ function row(over: Partial<AgentTokenListItem> = {}): AgentTokenListItem {
     createdAt: '2026-06-01T00:00:00.000Z',
     expiresAt: '2026-08-30T00:00:00.000Z',
     expired: false,
-    // The default row is a token nobody has presented, because that is the
-    // state every token is in the moment it is minted.
     lastUsedAt: null,
     lastUsedIp: null,
     lastUsedAgent: null,
@@ -49,6 +36,8 @@ function screen({
   );
 }
 
+// The minted value is in no later response, so it must be on screen whole, as
+// text: a copy button may not work in an insecure context.
 describe('a token shown once is shown whole', () => {
   const SECRET = 'yGm4Qb2xTpL9vKcRfN8sWzA1dE7hJ0uYtX6oI3rB5nC';
 
@@ -58,8 +47,6 @@ describe('a token shown once is shown whole', () => {
   });
 
   test('and the screen says it will not be shown again', () => {
-    // Without this sentence the operator dismisses the panel and mints a
-    // second token to replace the one they did not copy.
     expect(screen({ minted: SECRET }).toLowerCase()).toContain(
       'not shown again',
     );
@@ -83,15 +70,11 @@ describe('the list is what makes a token revocable', () => {
   });
 
   test('an expired row says expired rather than expires', () => {
-    // The two states differ by one word and by whether the row still does
-    // anything; `Revoke` on a dead token has to not look like a live act.
     expect(screen({ tokens: [row({ expired: true })] })).toContain('Expired');
     expect(screen({ tokens: [row({ expired: false })] })).toContain('Expires');
   });
 
   test('a load that has not answered yet is not an empty list', () => {
-    // Rendering "no agent tokens" while the read is in flight tells the
-    // operator to mint one they may already have.
     expect(screen({ tokens: null }).toLowerCase()).not.toContain(
       'no agent tokens',
     );
@@ -114,8 +97,6 @@ describe('the card explains why this is not a cookie', () => {
 
 describe('when a token was last used', () => {
   test('a token nobody has presented says so, rather than leaving a blank', () => {
-    // The row an operator most wants to find, and the one an empty space where
-    // a date goes hides — a gap reads as a screen that has not loaded.
     expect(screen()).toContain('Never used');
   });
 
@@ -136,9 +117,7 @@ describe('when a token was last used', () => {
   });
 
   test('and says the address is only what the caller reported', () => {
-    // Whoever holds the token sets `X-Forwarded-For` and `User-Agent`. The
-    // qualifier is the difference between a hint and a claim, and dropping it
-    // would invite an operator to trust the one thing here that cannot be.
+    // The caller sets `X-Forwarded-For` and `User-Agent`, so neither is proof.
     expect(
       screen({
         tokens: [
@@ -152,7 +131,6 @@ describe('when a token was last used', () => {
   });
 
   test('a used token with no headers to show still says when', () => {
-    // A caller that sent neither header is not a caller that never came.
     const markup = screen({
       tokens: [row({ lastUsedAt: '2026-08-25T09:00:00.000Z' })],
     });

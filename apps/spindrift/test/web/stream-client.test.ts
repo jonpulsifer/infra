@@ -50,16 +50,12 @@ describe('resumable browser stream', () => {
       terminal: false,
     });
     sockets[0]!.drop();
-    // Not on the first drop: a reconnect that lands inside one backoff is a
-    // blip, and a banner that appears and clears within it is noise.
+    // Not on the first drop: a reconnect inside one backoff is a blip.
     expect(isReconnecting()).toBe(false);
     await Bun.sleep(1);
     expect(urls[1]).toContain('after=41');
 
-    // The second consecutive drop is what marks the shared "any stream is
-    // retrying" flag `shell.tsx` reads through `connection-status.ts` — before
-    // the reconnect resolves, not after, since that is the window a banner
-    // exists to cover.
+    // The second consecutive drop marks the flag, before the reconnect resolves.
     sockets[1]!.drop();
     expect(isReconnecting()).toBe(true);
     await Bun.sleep(1);
@@ -71,8 +67,7 @@ describe('resumable browser stream', () => {
       cursor: 42,
       terminal: true,
     });
-    // A message is what clears it — a reconnect that opened but has not yet
-    // heard back is not yet "connected" again.
+    // Only a message clears it; an opened socket has not yet heard back.
     expect(isReconnecting()).toBe(false);
     sockets[2]!.drop();
     await Bun.sleep(1);
@@ -135,9 +130,8 @@ describe('resumable browser stream', () => {
       },
     );
 
-    // What `pump` does when the adapter has nothing to tail: send the reason,
-    // then close. Reconnecting re-asks a question the frame already answered,
-    // and the workspace's own re-read is what notices if it changes.
+    // With nothing to tail, the server sends `none` and closes. The workspace's
+    // own re-read notices when that changes.
     sockets[0]!.message({
       kind: 'none',
       because: 'Nothing runs on that Target',
@@ -171,11 +165,8 @@ describe('resumable browser stream', () => {
       },
     );
 
-    // A stream that fails to read, closes, reconnects, and fails again is the
-    // shape that used to strobe: every frame reset the count, so the socket
-    // reopened at full speed forever and the banner marked and settled with
-    // it. Only a `stream` page counts as reaching the server, so this run of
-    // three reaches the session check rather than looping under it.
+    // Only a `stream` page resets the count, so three error frames reach the
+    // session check.
     for (let i = 0; i < 3; i++) {
       sockets.at(-1)!.message({ kind: 'error', message: 'read failed' });
       sockets.at(-1)!.drop();
@@ -190,10 +181,8 @@ describe('resumable browser stream', () => {
 });
 
 describe('a drop the socket cannot explain', () => {
-  // A failed WebSocket upgrade and a network blip fire the identical
-  // `onerror`/`onclose` pair — the browser does not hand back the 401 a
-  // reconnect got refused with. `checkSession` stands in for the real
-  // `readSession()` read `stream-client.ts` falls back to.
+  // A refused upgrade and a network blip fire the same `onerror`/`onclose` pair;
+  // the browser hides the 401. `checkSession` stands in for `readSession()`.
   function harness(checkSession: () => Promise<boolean>) {
     const urls: string[] = [];
     const sockets: FakeSocket[] = [];
@@ -228,8 +217,6 @@ describe('a drop the socket cannot explain', () => {
       await Bun.sleep(1);
     }
 
-    // A network blip: still signed in, so the loop keeps going rather than
-    // giving up on the first run of bad luck.
     expect(checks()).toBe(1);
     expect(urls).toHaveLength(4);
     stop();
@@ -249,8 +236,6 @@ describe('a drop the socket cannot explain', () => {
 
     removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
 
-    // No fourth socket: the loop stopped instead of hammering a session that
-    // is not coming back, and the shell's gate hears about it exactly once.
     expect(checks()).toBe(1);
     expect(urls).toHaveLength(3);
     expect(events).toEqual(['expired']);

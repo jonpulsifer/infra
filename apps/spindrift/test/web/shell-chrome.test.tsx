@@ -1,19 +1,5 @@
-/**
- * The chrome every screen in the product is rendered inside.
- *
- * These are claims about the frame rather than about any one screen: that the
- * rail names its destinations instead of only drawing them, that the two
- * navigations a document carries are distinguishable to anything reading
- * landmarks, that the crumb answers "which object is this" and not "what kind
- * of object is this", and that the palette's catalogue is built from the rows
- * the installation actually has.
- *
- * `renderToStaticMarkup` throughout, and the two pure functions called
- * directly. The shell holds a `localStorage` preference, a `navigator` sniff
- * and a keydown listener, none of which exist in a server render — which is the
- * point: this file is also the proof that none of that runs at module scope or
- * during the first paint.
- */
+// Static renders only. The shell's `localStorage`, `navigator` and keydown use
+// must not run at module scope or on first paint, and a server render proves it.
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { AppListItem } from '../../src/commands/views.ts';
@@ -55,7 +41,6 @@ function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
-/** One minimal, valid App row, so each test only spells out what it tests. */
 function app(
   overrides: Partial<AppListItem> & Pick<AppListItem, 'id' | 'name' | 'phase'>,
 ): AppListItem {
@@ -75,10 +60,7 @@ describe('the shell names where it goes', () => {
   test('every rail destination is a word, not only a glyph', () => {
     const markup = shell('/builds');
 
-    // `Apps` moved from a single static entry to a group with a live list and
-    // an "All apps" fallback row (§3 of this rail's brief); the group's own
-    // eyebrow still reads "Apps", so that word is covered by the group-label
-    // assertion below instead of by this row-level one.
+    // "Apps" is the group eyebrow, checked below; its fallback row is "All apps".
     for (const label of ['Overview', 'All apps', 'Supply chain', 'Deploys']) {
       expect(markup).toContain(`>${label}</span>`);
     }
@@ -111,7 +93,6 @@ describe('the shell names where it goes', () => {
     const markup = shell('/');
 
     expect(markup).toContain('aria-label="Account: Ada Operator"');
-    // Both things the menu exists to reach.
     expect(markup).toContain('Identity and passkeys');
     expect(markup).toContain('Sign out');
   });
@@ -153,13 +134,8 @@ describe('the active-entry rule: the most specific matching root wins', () => {
   });
 
   test('every entry lights itself: navigating to its own path lands on its own key', () => {
-    // Settings is the one deliberate exception (its own doc comment says so):
-    // its `path` defaults into Connections while its `roots` cover all of
-    // `/settings`, so a bare `/settings/connections` lights it rather than a
-    // more specific section. Every other entry's `path` is one of its own
-    // `roots`, and this is the assertion that would have caught Targets
-    // navigating to `/settings/connections` and lighting Settings instead of
-    // itself.
+    // `FOOTER_SETTINGS` is left out: its `path` is one section, `/settings/connections`,
+    // while its `roots` cover all of `/settings`.
     for (const entry of [...WORKSPACE, ...DEVELOPER]) {
       expect(activeKey(entry.path, ALL)).toBe(entry.key);
     }
@@ -167,12 +143,8 @@ describe('the active-entry rule: the most specific matching root wins', () => {
 });
 
 describe('the phone bar answers for every workspace destination', () => {
-  // `PHONE_NAV` folds several `WORKSPACE` entries into one (Targets and MCP
-  // both land on its `settings`), so this does not ask for the same key back
-  // the way the desktop rail's assertion above does — only that *something*
-  // lights, which is what a screen with no matching tab at all fails to do.
-  // This is the assertion that would have caught Datastores and Functions
-  // dropped from the phone bar with no tab left to reach either list from.
+  // `PHONE_NAV` folds several `WORKSPACE` entries into one, so this asks only
+  // that some entry lights.
   test('every WORKSPACE root lights some phone-bar entry', () => {
     for (const entry of WORKSPACE) {
       for (const root of entry.roots) {
@@ -183,10 +155,8 @@ describe('the phone bar answers for every workspace destination', () => {
 });
 
 describe('exactly one row lights, in the desktop rail, for a sample of paths', () => {
-  // The whole `<aside>` rather than only its `<nav>`: Settings is pinned in
-  // the rail's footer, outside the scrollable `<nav>` on purpose (§6 of this
-  // rail's brief — "pinned to the bottom"), so the one row a path lights can
-  // legitimately be there instead of inside the landmark.
+  // The whole `<aside>`: Settings is pinned in the rail's footer, outside the
+  // scrollable `<nav>`.
   function withinAside(markup: string): string {
     const start = markup.indexOf('<aside');
     return markup.slice(start, markup.indexOf('</aside>', start));
@@ -213,8 +183,8 @@ describe('the Apps group draws the rows it is given', () => {
     app({ id: 'a2', name: 'api', phase: 'APPLYING', deployId: 2 }),
     app({ id: 'a3', name: 'wiki', phase: 'FAILED', deployId: 3 }),
     app({ id: 'a4', name: 'stale', phase: 'LIVE', faulty: true, deployId: 4 }),
-    // `deployId` absent: never deployed, the case a fallback `PENDING` alone
-    // cannot tell apart from one queued for its second release.
+    // No `deployId`: never deployed, which `PENDING` alone cannot tell from a
+    // queued second release.
     app({ id: 'a5', name: 'fresh', phase: 'PENDING' }),
   ];
 
@@ -225,8 +195,7 @@ describe('the Apps group draws the rows it is given', () => {
     expect(markup).toContain('text-status-live');
     expect(markup).toContain('text-status-building');
     expect(markup).toContain('text-status-failed');
-    // The hollow ring — a stroke rather than a fifth fill colour, for the one
-    // tone that means "nothing has run yet".
+    // The idle tone is a hollow ring: a stroke, not a fill.
     expect(markup).toContain('text-status-idle');
     expect(markup).toContain('border border-current');
   });
@@ -264,10 +233,7 @@ describe('the Apps group draws the rows it is given', () => {
   });
 
   test('an absent list renders the rail without it, not broken', () => {
-    // No `apps` prop: the effect that would fetch it does not run under
-    // `renderToStaticMarkup`, which is also what a still-loading or a failed
-    // read looks like from this component's own point of view. Either way,
-    // nothing throws, and "All apps" — not data-dependent — stays reachable.
+    // No `apps` prop is also what a loading or failed read looks like here.
     expect(() => shell('/')).not.toThrow();
     expect(shell('/')).toContain('All apps');
   });
@@ -275,8 +241,7 @@ describe('the Apps group draws the rows it is given', () => {
 
 describe('the footer says what is running', () => {
   test('the version the deployment states, verbatim', () => {
-    // Digest-pinned delivery rolls pods without a version anybody typed; this
-    // line is how a browser tells which image it is talking to.
+    // Digest-pinned pods have no typed version; this line names the image serving.
     const markup = renderToStaticMarkup(
       <AppShell
         path="/"

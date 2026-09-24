@@ -1,19 +1,7 @@
 /**
- * The deploy loop (Task 20, §6).
- *
- * Four claims, each of which would look fine while being false:
- *
- * - **Every reason arrives with the blame §6's table assigns**, and the blame is
- *   core's derivation rather than the adapter's opinion — so the fake never
- *   supplies one and the row is read back to see what core wrote.
- * - **The diagnosis survives the platform forgetting.** §12 stores it precisely
- *   because cluster events expire in about an hour; the test makes the far side
- *   forget and reads the explanation back anyway.
- * - **Reach never mutates on red** (§9). A failed attempt leaves the App as
- *   reachable as it was, because the previous release is still serving.
- * - **The loop converges with `NOTIFY` dropped.** Notifications are lost when no
- *   listener is connected, so the poll has to be the correctness path. Every
- *   test here runs with no wake-up wired at all.
+ * The deploy loop. Core derives blame from the reason, a stored diagnosis
+ * outlives the platform's events, reach never changes on red, and the poll
+ * converges with no `NOTIFY` wake-up wired.
  */
 import { describe, expect, test } from 'bun:test';
 import { asc, eq } from 'drizzle-orm';
@@ -76,7 +64,6 @@ const DIGEST = `sha256:${'a'.repeat(64)}`;
 function context(
   adapter: FakeDeployAdapter,
   overrides: Partial<DeployLoopContext> = {},
-  /** Omitted is the ordinary case — every test but §9's dns block. */
   dns?: DnsPublisher,
 ): DeployLoopContext {
   const adapters: Pick<AdapterRegistry, 'deploy' | 'dns'> = {
@@ -91,10 +78,10 @@ async function pendingDeploy(
   options: {
     reach?: 'none' | 'private' | 'public';
     auth?: 'none' | 'proxy';
-    /** The backend this lands on, which decides who mints the name (§9). */
+    /** The backend decides who mints the canonical name. */
     adapter?: 'kubernetes' | 'cloudrun';
     kind?: 'service' | 'job';
-    /** The cadence the Component declares — the desired half of §6's drift. */
+    /** The Component's declared cadence, the desired half of drift. */
     schedule?: string;
     /** The two halves of the canonical name core mints. */
     appName?: string;
@@ -188,8 +175,7 @@ describe('claiming (§6, SKIP LOCKED)', () => {
     expect(first?.id).toBe(deploy.id);
     expect(first?.phase).toBe('APPLYING');
 
-    // The claim is the phase, not a held lock: a second worker looking now sees
-    // nothing to take, which is what stops two reconcilers applying one intent.
+    // The claim is the phase itself, so a second worker finds nothing to take.
     const second = await claimNextDeploy(context(adapter));
     expect(second).toBeNull();
   });
@@ -234,9 +220,8 @@ describe('claiming (§6, SKIP LOCKED)', () => {
     const otherDb = createDb(database().connect());
     let contendedClaim: Awaited<ReturnType<typeof claimNextDeploy>> = null;
     await database().db.transaction(async (tx) => {
-      // Hold the same durable pair row that a replica's claim transaction
-      // locks. The other replica must skip the pair, including its newer
-      // Deploy, rather than depending on scheduler timing to overlap.
+      // Hold the pair row a claim locks, so the other replica has to skip the
+      // pair and its newer Deploy without relying on timing.
       await tx
         .select({ componentId: componentTargetDesired.componentId })
         .from(componentTargetDesired)
@@ -296,15 +281,13 @@ describe('phases come from the platform, not from core (§6)', () => {
     expect(outcome?.phase).toBe('LIVE');
     const row = await deployRow(deploy.id);
     expect(row?.phase).toBe('LIVE');
-    // §6: the adapter's handle is opaque to core, stored and handed back.
+    // The adapter's handle is opaque to core: stored and handed back.
     expect(row?.ref).toBe('hr/apps/web');
-    // §9: core minted the canonical name, so the URL is core's and the adapter
-    // had nothing to add.
+    // Core minted the canonical name, so the URL is core's.
     expect(row?.url).toBe(
       `https://shop-web.${zoneFor('private', manifest.dns.zones)}`,
     );
 
-    // The whole timeline landed on the one attempt log the UI subscribes to.
     const events = await database()
       .db.select()
       .from(attemptEvents)
@@ -332,8 +315,8 @@ describe('phases come from the platform, not from core (§6)', () => {
     expect(desired.kind).toBe('service');
     expect(desired.artifact.digest).toBe(DIGEST);
     expect(desired.deploy).toBe(String(deploy.id));
-    // Flat, and the App leads: one label under the zone is what a wildcard
-    // certificate binds, and what makes the name resolvable over TLS at all.
+    // One label under the zone, because a wildcard certificate covers only
+    // that.
     expect(desired.hostname.canonical).toBe(
       `shop-web.${zoneFor('private', manifest.dns.zones)}`,
     );
@@ -342,11 +325,7 @@ describe('phases come from the platform, not from core (§6)', () => {
   test('a Component edited after the intent does not change what it places', async () => {
     const { deploy, component } = await pendingDeploy();
 
-    // Everything the old apply path re-read from `components`, moved. Under
-    // that path this attempt would have placed a suspended CronJob for a
-    // Component the developer had already stopped exposing — yesterday's
-    // artifact under today's shape, which is the same failure §10 pinned the
-    // config document to prevent.
+    // The intent's pinned document wins over a later edit to the Component.
     await database()
       .db.update(components)
       .set({ kind: 'job', expose: false, schedule: '0 3 * * *' })
@@ -362,7 +341,7 @@ describe('phases come from the platform, not from core (§6)', () => {
     expect(desired.schedule).toBeUndefined();
     expect(desired.deploy).toBe(String(deploy.id));
 
-    // And the row still says so afterwards, which is what a rollback reads.
+    // A rollback reads the row, which still says so.
     const [row] = await database()
       .db.select()
       .from(deploys)
@@ -372,8 +351,7 @@ describe('phases come from the platform, not from core (§6)', () => {
 });
 
 describe('§6: every reason, with the blame the table assigns', () => {
-  // BUILD_FAILED is in the shared vocabulary but cannot arrive from `apply` —
-  // §6: "a reason that cannot apply to a phase simply never occurs there."
+  // BUILD_FAILED is in the shared vocabulary but cannot come from `apply`.
   const fromApply = FAILURE_REASONS.filter(
     (reason) => reason !== 'BUILD_FAILED',
   );
@@ -381,8 +359,8 @@ describe('§6: every reason, with the blame the table assigns', () => {
   for (const reason of fromApply) {
     test(`${reason} is recorded with blame ${String(BLAME[reason])}`, async () => {
       const { deploy } = await pendingDeploy();
-      // The fake supplies a reason and never a blame — §6 makes blame core's
-      // derivation so two adapters cannot indict different people.
+      // The fake never supplies blame: core derives it, so adapters cannot
+      // disagree on it.
       const verdict: DeployVerdict = {
         phase: 'FAILED',
         reason,
@@ -404,8 +382,8 @@ describe('§6: every reason, with the blame the table assigns', () => {
 
   test('an adapter that throws is INTERNAL and blamed on the platform', async () => {
     const { deploy } = await pendingDeploy();
-    // `apply` is contracted not to throw, but an adapter is code. An attempt
-    // that ended by crashing the loop would stay APPLYING forever.
+    // `apply` must not throw, but if it does the attempt must not stay
+    // APPLYING.
     const adapter = new FakeDeployAdapter({
       applyThrows: 'the adapter has a bug',
     });
@@ -440,17 +418,14 @@ describe('§12: the diagnosis outlives the platform', () => {
     const claimed = await claimNextDeploy(context(adapter));
     await runAttempt(context(adapter), claimed!);
 
-    // Simulate the hour passing: cluster events expire and the backend can no
-    // longer answer the question at all. §12 is the whole reason this is
-    // survivable — "the platform will not keep it", so core did.
+    // Cluster events expire in about an hour, after which the backend knows
+    // nothing.
     const expired = new FakeDeployAdapter({
       applyThrows: 'the events are gone',
     });
     expired.observe = async () => null;
 
-    // Keep running against that amnesiac backend. Nothing may overwrite or
-    // clear what was already explained — a later pass that blanked the row
-    // because the platform no longer remembers would lose the only copy.
+    // A later pass must not clear the stored diagnosis, the only copy left.
     await runDeployPass(context(expired));
 
     const row = await deployRow(deploy.id);
@@ -462,15 +437,9 @@ describe('§12: the diagnosis outlives the platform', () => {
 });
 
 describe('§9: one vanity name, and never two claimants', () => {
-  // On a backend that names its own workloads, so the canonical it reports
-  // back is empty and only the vanity name is minted here (ticket 43). The
-  // contention itself is not specific to that case — ticket 137 puts the
-  // vanity name on every Target, and the test below this one is the same
-  // contention proven again on a cluster Target, where core also mints a
-  // canonical alongside it.
+  // Cloud Run names its own workloads, so core mints only the vanity name.
   const claimant = () =>
     pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
-  /** The fake standing in for that backend, so the loop has one to call. */
   const claimantAdapter = () => new FakeDeployAdapter({ adapter: 'cloudrun' });
 
   test('a sole serving Component carries the App’s vanity name', async () => {
@@ -489,10 +458,8 @@ describe('§9: one vanity name, and never two claimants', () => {
   });
 
   test('a sole serving Component on a cluster Target carries the vanity name too, beside its own canonical', async () => {
-    // Where core mints the canonical it used to be the whole answer (ticket
-    // 43's "it can simply mint a good one"), but that reasoning was never
-    // about the vanity name — `shop.apps.example.test` is not `shop-web.…`
-    // spelled differently, it is the App's own choice of what to share.
+    // The vanity name is the App's own choice, separate from the Component's
+    // canonical.
     const { app } = await pendingDeploy();
     await database()
       .db.update(apps)
@@ -509,10 +476,8 @@ describe('§9: one vanity name, and never two claimants', () => {
   });
 
   test('a second serving Component means neither gets it', async () => {
-    // §9 puts the vanity name on the App and the canonical on each Component.
-    // Handing one name to two Components puts the same hostname on two routes,
-    // and the platform resolves that collision arbitrarily — which is worse
-    // than the App simply not having a front-door name yet.
+    // One name on two routes is a collision the platform resolves
+    // arbitrarily.
     const { app, component, target, build } = await claimant();
     await database()
       .db.update(apps)
@@ -530,8 +495,8 @@ describe('§9: one vanity name, and never two claimants', () => {
 
     const desired = adapter.applied[0]?.desired;
     expect(desired?.hostname.vanity).toBeUndefined();
-    // The canonical is the platform's own here, reported back across the deploy
-    // seam rather than minted — so core hands over an empty one.
+    // The platform reports its own canonical back, so core hands over an empty
+    // one.
     expect(desired?.hostname.canonical).toBe('');
     expect(component.id).toBeDefined();
     expect(target.id).toBeDefined();
@@ -539,8 +504,7 @@ describe('§9: one vanity name, and never two claimants', () => {
   });
 
   test('an unexposed sibling is not a claimant', async () => {
-    // §2: an unexposed service is a queue worker, and a job serves nothing.
-    // Neither can contend for the App's front door.
+    // An unexposed service and a job serve nothing, so neither contends.
     const { app } = await claimant();
     await database()
       .db.update(apps)
@@ -574,7 +538,7 @@ describe("§9: no App is served on the installation's own names", () => {
   };
 
   test('a stored vanity label that mints the control plane never reaches the adapter', async () => {
-    // Written straight to the row, as one stored before `setAppVanity` refused it.
+    // Written straight to the row, past `setAppVanity`'s refusal.
     const { app, deploy } = await pendingDeploy({
       reach: 'public',
       auth: 'none',
@@ -641,9 +605,8 @@ describe("§9: no App is served on the installation's own names", () => {
 });
 
 describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
-  // `cloudrun` is any platform-named Target — `!coreMintsCanonical` is what
-  // gates this, not the adapter type, and the fake's verdict is scripted
-  // regardless of what a real Cloud Run would answer.
+  // `cloudrun` stands for any platform-named Target: `!coreMintsCanonical`
+  // gates this, not the adapter type.
   const claimant = () =>
     pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
 
@@ -690,12 +653,8 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
   });
 
   test('an apex is stated as published once, not as a re-point', async () => {
-    // The record goes out the same way a label's does — the difference is only
-    // in what the log claims. external-dns owns a record by a marker it cannot
-    // write for a zone apex, so the create lands and every update after it is
-    // dropped: a second deploy that says `published <zone> -> <new target>`
-    // describes a re-point that did not happen, on a screen where every other
-    // surface says the deploy worked.
+    // external-dns cannot write its ownership marker at a zone apex, so only
+    // the create lands, and the log must not claim a later re-point.
     const { app, deploy } = await claimant();
     const zone = zoneFor('public', manifest.dns.zones) as string;
     await database()
@@ -711,7 +670,7 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
 
     await runDeployPass(context(adapter, {}, dns));
 
-    // The record itself is unchanged: this is a change of sentence, not of act.
+    // The record matches a label's; only the log line differs.
     expect(dns.published).toEqual([
       {
         name: 'shop-web',
@@ -735,9 +694,7 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
   });
 
   test('no vanity name withdraws rather than publishing', async () => {
-    // The App never named one — the ordinary case, not a cleared one — and
-    // `withdraw` still runs: idempotent when nothing was ever published under
-    // this handle.
+    // `withdraw` runs even when nothing was ever published, and is idempotent.
     await claimant();
 
     const adapter = new FakeDeployAdapter({
@@ -759,8 +716,6 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
       .set({ vanityDomain: 'shop' })
       .where(eq(apps.id, app.id));
 
-    // No third argument: `context` wires no `dns` at all, exactly as every
-    // other test in this file already did before this ticket.
     const adapter = new FakeDeployAdapter({
       adapter: 'cloudrun',
       script: [withAddress],
@@ -793,8 +748,7 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
 
     const pass = await runDeployPass(context(adapter, {}, dns));
 
-    // The workload is up — a DNS write that failed is not a reason to tell
-    // the operator their deploy did not work.
+    // The workload is up, so a failed DNS write does not fail the deploy.
     expect(pass.applied[0]?.phase).toBe('LIVE');
     expect((await deployRow(deploy.id))?.phase).toBe('LIVE');
     const events = await database()
@@ -809,12 +763,8 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
 });
 
 describe('§9: a LIVE row states the name a developer shares', () => {
-  // §9's vanity is "the name a developer shares"; the canonical is what always
-  // resolves underneath it. The row every screen reads — the App list, the
-  // workspace headline, a Deploy's own page — has room for one of them, and it
-  // used to be the canonical on every App that had both: `shop-web.<zone>`
-  // where the developer had asked for `shop.<zone>`, and the platform's own
-  // `<project>.pages.dev` where they had asked for the bare domain.
+  // The row holds one URL: the vanity name where it resolves, else the
+  // canonical.
   const address = {
     recordType: 'CNAME',
     target: 'shop-web.a.run.app',
@@ -831,8 +781,7 @@ describe('§9: a LIVE row states the name a developer shares', () => {
   }
 
   test('a cluster Target’s row is the vanity, not the canonical it also minted', async () => {
-    // Both names resolve here — the chart is handed both (`values.ts`) — so
-    // this is only ever a question of which one to say.
+    // The chart is handed both names, so both resolve.
     const { app, deploy } = await pendingDeploy();
     await named(app.id, 'shop');
 
@@ -868,10 +817,8 @@ describe('§9: a LIVE row states the name a developer shares', () => {
   });
 
   test('a Target that reports no address keeps the platform’s own name', async () => {
-    // §6's contract: a platform that hands back no address is one nothing can
-    // point a record at, and `publishVanityRecord` says to do it by hand. The
-    // vanity names nothing until someone does, and a row that printed it would
-    // be the scan of what is up asserting an address that does not answer.
+    // With no address nothing points the vanity name anywhere, so the row
+    // must not print it.
     const { app, deploy } = await platformNamed();
     await named(app.id, 'shop');
 
@@ -910,9 +857,7 @@ describe('§9: reach and auth never mutate on red', () => {
 
     const row = await deployRow(deploy.id);
     expect(row?.phase).toBe('FAILED');
-    // The App is exactly as reachable as it was: the previous release is still
-    // serving, and quietly tightening this would turn one red deploy into an
-    // outage nobody asked for.
+    // The previous release still serves, so its reach must not change.
     expect(row?.desired.reach).toBe('public');
     expect(row?.desired.auth).toBe('none');
 
@@ -945,14 +890,11 @@ describe('drift is surfaced, never corrected (§6)', () => {
     const report = pass.drift.find((entry) => entry.deployId === deploy.id);
     expect(report?.drifted).toBe(true);
 
-    // Reported, and nothing else: no second apply went out to put it back.
-    // §6 — the re-converge is one click a human takes, not something a loop does
-    // to a cluster somebody may have changed on purpose during an incident.
+    // Reported only. Re-converging is a human's click, because the change may
+    // be deliberate.
     expect(adapter.applied).toHaveLength(1);
 
-    // And it is a *state*, not just a return value. §6 asks for drift to be
-    // visible, and the UI reads rows — a finding that lived for the length of
-    // one pass would be surfaced to nobody.
+    // Drift is stored on the row, which is what the UI reads.
     const row = await deployRow(deploy.id);
     expect(row?.phase).toBe('LIVE');
     expect(row?.driftedAt).toEqual(FROZEN);
@@ -966,10 +908,8 @@ describe('drift is surfaced, never corrected (§6)', () => {
     });
     await runDeployPass(context(adapter));
 
-    // The shape that went unnoticed for a day in the live installation: the
-    // chart's value contract moved, the stored values no longer render, and
-    // every reconcile fails behind a previous release that keeps serving. The
-    // digest still matches, so comparing digests alone reads this as converged.
+    // The stored values no longer render, so every reconcile fails behind a
+    // previous release that keeps serving and still matches the digest.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'FAILED',
@@ -983,19 +923,14 @@ describe('drift is surfaced, never corrected (§6)', () => {
     const report = pass.drift.find((entry) => entry.deployId === deploy.id);
     expect(report?.drifted).toBe(true);
 
-    // Still surfaced and still not corrected: the re-converge stays a click.
     expect(adapter.applied).toHaveLength(1);
 
     const row = await deployRow(deploy.id);
-    // The Deploy did not fail — it reached LIVE and the platform stopped
-    // agreeing afterwards. §9's "exposure never mutates on red" is the same
-    // argument: the previous release is up, and calling this FAILED would say
-    // an outage that is not happening.
+    // It reached LIVE and the previous release is up, so FAILED would claim
+    // an outage.
     expect(row?.phase).toBe('LIVE');
     expect(row?.driftedAt).toEqual(FROZEN);
-    // The platform's own sentence, which is the only thing that names the value
-    // the chart rejected. A drift flag without it says something is wrong
-    // without saying that waiting will not fix it.
+    // Only the platform's sentence names the value the chart rejected.
     expect(row?.driftDetail).toContain('platform.gateway.name is required');
   });
 
@@ -1013,9 +948,7 @@ describe('drift is surfaced, never corrected (§6)', () => {
     });
     await runDeployPass(context(adapter));
 
-    // Nothing refused anything here — something else is simply serving, which
-    // `observedDigest` already explains. A detail invented for this case would
-    // be the screen claiming the platform said something it did not.
+    // Nothing refused anything; `observedDigest` already explains this drift.
     const row = await deployRow(deploy.id);
     expect(row?.driftedAt).toEqual(FROZEN);
     expect(row?.driftDetail).toBeNull();
@@ -1038,9 +971,7 @@ describe('drift is surfaced, never corrected (§6)', () => {
     await runDeployPass(context(adapter));
     expect((await deployRow(deploy.id))?.driftDetail).not.toBeNull();
 
-    // A redeploy rewrote the values and the object applies again. The sentence
-    // has to go with the flag: a stale refusal left on the row would keep
-    // explaining a state that no longer exists.
+    // The object applies again, so the detail clears with the flag.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'LIVE',
@@ -1063,9 +994,7 @@ describe('drift is surfaced, never corrected (§6)', () => {
     });
     await runDeployPass(context(adapter));
 
-    // Everything the old pass looked at still agrees: the Job is there, it is
-    // `LIVE`, and it carries the digest that was asked for. What is gone is the
-    // only thing that ever ran it.
+    // The Job is LIVE at the desired digest, but its schedule is gone.
     adapter.place('jobs/nightly', {
       ref: 'jobs/nightly',
       phase: 'LIVE',
@@ -1078,21 +1007,16 @@ describe('drift is surfaced, never corrected (§6)', () => {
       pass.drift.find((entry) => entry.deployId === deploy.id)?.drifted,
     ).toBe(true);
 
-    // And it says which of the two halves disagreed. A bare flag on a row whose
-    // digest matches is the operator reading "drifted" beside three fields that
-    // all look right.
     const row = await deployRow(deploy.id);
     expect(row?.driftedAt).toEqual(FROZEN);
     expect(row?.driftDetail).toContain('0 3 * * *');
     expect(row?.driftDetail).toContain('nothing is firing this job');
 
-    // Surfaced, not corrected — §6 holds here exactly as it does for a digest.
     expect(adapter.applied).toHaveLength(1);
   });
 
   test('a job nobody scheduled is not drifted for having no schedule', async () => {
-    // The honest state for most jobs, and the one a naive fix marks drifted
-    // forever: nothing fires it because nothing was ever asked to.
+    // Most jobs have no schedule, so none observed is no drift.
     const { deploy } = await pendingDeploy({ kind: 'job' });
     const adapter = new FakeDeployAdapter({
       script: [{ verdict: { phase: 'LIVE', ref: 'jobs/nightly' } }],
@@ -1114,9 +1038,8 @@ describe('drift is surfaced, never corrected (§6)', () => {
   });
 
   test('a backend that reports no cadence is never drifted for one', async () => {
-    // Every service, and every Kubernetes placement. The field is absent rather
-    // than `null`, and absent has to mean "not applicable" — the alternative is
-    // every website in the installation permanently drifted.
+    // Services and Kubernetes placements omit `schedule`. Absent means not
+    // applicable, where `null` means nothing fires the job.
     const { deploy } = await pendingDeploy();
     const adapter = new FakeDeployAdapter({
       script: [{ verdict: { phase: 'LIVE', ref: 'hr/apps/web' } }],
@@ -1151,8 +1074,7 @@ describe('drift is surfaced, never corrected (§6)', () => {
     await runDeployPass(context(adapter));
     expect((await deployRow(deploy.id))?.driftedAt).toEqual(FROZEN);
 
-    // Somebody put it back by hand. Nothing should have to be clicked for the
-    // state to clear — it is an observation, not an acknowledgement.
+    // Put back by hand, the flag clears on observation with no dismissal.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'LIVE',
@@ -1180,22 +1102,15 @@ describe('drift is surfaced, never corrected (§6)', () => {
     };
 
     const pass = await runDeployPass(context(adapter));
-    // An uplink blip is not a developer changing something, and reporting it as
-    // drift would make every network hiccup look like a person.
+    // An unreachable Target is no evidence that anything changed.
     expect(
       pass.drift.find((entry) => entry.deployId === deploy.id),
     ).toBeUndefined();
   });
 
   test('a release a newer intent superseded is not observed at all', async () => {
-    // The live shape this was found in: eleven LIVE rows for one Component,
-    // ten of them superseded, every one reporting drift against the digest the
-    // newest one put there. `phase` is the platform's verdict on one attempt
-    // and is never edited afterwards, so a superseded release stays LIVE — and
-    // its own Build is by construction not what is serving. Observing it asks
-    // the platform what is running and compares it against a release nobody
-    // has desired since, which is drift on every pass, forever, and one more
-    // adapter round trip per redeploy ever made.
+    // `phase` is never edited after the verdict, so a superseded release stays
+    // LIVE, and observing it would report drift on every pass.
     const { component, target, deploy: older } = await pendingDeploy();
     const adapter = new FakeDeployAdapter({
       script: [
@@ -1235,22 +1150,18 @@ describe('drift is surfaced, never corrected (§6)', () => {
 
     const pass = await runDeployPass(context(adapter));
 
-    // Both rows are LIVE, and only the desired one was asked about.
     expect((await deployRow(older.id))?.phase).toBe('LIVE');
     expect((await deployRow(newer!.id))?.phase).toBe('LIVE');
     expect(pass.drift.map((entry) => entry.deployId)).toEqual([newer!.id]);
 
-    // And the superseded row carries no finding, which is what the ledger and
-    // the drift gauge both read.
     expect((await deployRow(older.id))?.driftedAt).toBeNull();
   });
 });
 
 describe('the poll is the correctness path (plan, Transport shape)', () => {
   test('a pass converges every pending intent with no notification wired', async () => {
-    // Nothing in this file ever wires a wake-up. If `NOTIFY` were load-bearing
-    // rather than an optimization, none of these tests would converge at all —
-    // which is the point: notifications are lost when no listener is connected.
+    // No test here wires a wake-up. `NOTIFY` is lost when no listener is
+    // connected, so the poll has to converge on its own.
     const first = await pendingDeploy();
     const scripted: ScriptedAttempt = {
       verdict: { phase: 'LIVE', ref: `hr/${crypto.randomUUID()}` },
@@ -1266,7 +1177,6 @@ describe('the poll is the correctness path (plan, Transport shape)', () => {
     const adapter = new FakeDeployAdapter({ script: [scripted] });
     const pass = await runDeployPass(context(adapter));
 
-    // Both intents were drained in one pass rather than one per interval.
     expect(pass.applied).toHaveLength(2);
     expect(pass.applied.every((outcome) => outcome.phase === 'LIVE')).toBe(
       true,
@@ -1282,8 +1192,8 @@ describe('the poll is the correctness path (plan, Transport shape)', () => {
   test('the interval is fast only while something is in flight', async () => {
     expect(intervalFor(['LIVE'])).toBe(DEFAULT_INTERVALS.slowMs);
     expect(intervalFor(['FAILED'])).toBe(DEFAULT_INTERVALS.slowMs);
-    // The converged cadence is also the drift cadence — drift is information,
-    // not an alarm, so it is checked in minutes rather than seconds.
+    // Drift has its own interval, so an idle loop still picks up work in
+    // seconds.
     expect(intervalFor([])).toBe(DEFAULT_INTERVALS.slowMs);
     expect(intervalFor(['LIVE', 'APPLYING'])).toBe(DEFAULT_INTERVALS.fastMs);
     expect(intervalFor(['WAITING'])).toBe(DEFAULT_INTERVALS.fastMs);
@@ -1300,9 +1210,8 @@ describe('the attempt fence (ticket 129)', () => {
     const held = await claimNextDeploy(context(first));
     expect(held?.attemptId).toEqual(expect.any(String));
 
-    // The second reconciler is the rollout's other pod, arriving after the
-    // first attempt's lease has aged out — which is what a long apply that
-    // emits nothing but `log` events used to look like from here.
+    // Another reconciler pod, arriving after the first attempt's lease aged
+    // out.
     const reclaimed = await claimNextDeploy(
       context(second, {
         db: otherDb,
@@ -1314,8 +1223,7 @@ describe('the attempt fence (ticket 129)', () => {
     expect(reclaimed?.id).toBe(deploy.id);
     expect(reclaimed?.attemptId).not.toBe(held?.attemptId);
 
-    // The first attempt finishes late and arrives at a verdict it no longer
-    // owns. Before the fence it wrote that verdict over the second attempt's.
+    // The first attempt finishes late, at a verdict it no longer owns.
     const outcome = await runAttempt(context(first), held!);
     expect(outcome?.phase).toBe('LOST');
 
@@ -1324,8 +1232,7 @@ describe('the attempt fence (ticket 129)', () => {
     expect(stranded?.phase).toBe('APPLYING');
     expect(stranded?.url).toBeNull();
 
-    // Said out loud, because an attempt that stopped and left no line reads
-    // from the log as a rollout that simply hung.
+    // Logged, or the stopped attempt reads as a hung rollout.
     const events = await database()
       .db.select()
       .from(attemptEvents)
@@ -1333,7 +1240,6 @@ describe('the attempt fence (ticket 129)', () => {
       .orderBy(asc(attemptEvents.id));
     expect(events.at(-1)?.line).toContain('lost its claim');
 
-    // And the holder settles normally.
     const landed = await runAttempt(
       context(second, { db: otherDb }),
       reclaimed!,
@@ -1347,8 +1253,8 @@ describe('the attempt fence (ticket 129)', () => {
     const adapter = new FakeDeployAdapter();
     const held = await claimNextDeploy(context(adapter));
 
-    // One tick short of the timeout, which is the point of the heartbeat: an
-    // upload that emits only `log` events writes no row update on its own.
+    // One tick short of the timeout. An upload that emits only `log` events
+    // writes no row update of its own.
     const later = new Date(FROZEN.getTime() + DEFAULT_CLAIM_TIMEOUT_MS - 1);
     const beating = context(adapter, { clock: { now: () => later } });
     expect(await heartbeatAttempt(beating, deploy.id, held!.attemptId)).toBe(
@@ -1356,8 +1262,8 @@ describe('the attempt fence (ticket 129)', () => {
     );
     expect((await deployRow(deploy.id))?.updatedAt).toEqual(later);
 
-    // A moment that would have been past the original lease is not past this
-    // one, so nothing reclaims a healthy attempt.
+    // Past the original lease but inside the renewed one, so nothing reclaims
+    // it.
     const afterOriginalLease = new Date(
       FROZEN.getTime() + DEFAULT_CLAIM_TIMEOUT_MS + 1,
     );
@@ -1367,8 +1273,7 @@ describe('the attempt fence (ticket 129)', () => {
       ),
     ).toBeNull();
 
-    // And a heartbeat from an attempt the row has moved past says so, which is
-    // how a reclaimed attempt learns to stop before it finishes.
+    // A heartbeat from a superseded attempt answers false, so it stops early.
     expect(
       await heartbeatAttempt(beating, deploy.id, crypto.randomUUID()),
     ).toBe(false);
@@ -1379,10 +1284,8 @@ describe('the attempt fence (ticket 129)', () => {
     const adapter = new FakeDeployAdapter();
     const held = await claimNextDeploy(context(adapter));
 
-    // A reclaim cannot happen until DEFAULT_CLAIM_TIMEOUT_MS after the last
-    // refresh, so it lands *past* DEPLOY_ATTEMPT_MAX_MS — the window in which
-    // the attempt has stopped refreshing but is still running. Ticks in that
-    // window are the only ones that can ever answer no.
+    // A reclaim needs DEFAULT_CLAIM_TIMEOUT_MS without a refresh, so it lands
+    // past DEPLOY_ATTEMPT_MAX_MS, while the attempt runs without refreshing.
     const afterCap = FROZEN.getTime() + DEPLOY_ATTEMPT_MAX_MS;
     const observing = context(adapter, {
       clock: { now: () => new Date(afterCap) },
@@ -1390,8 +1293,7 @@ describe('the attempt fence (ticket 129)', () => {
     expect(
       await heartbeatAttempt(observing, deploy.id, held!.attemptId, false),
     ).toBe(true);
-    // Read-only: it answered without moving the column the reclaim reads, which
-    // is what the cap took away and what keeps the lease expiring on schedule.
+    // Read-only past the cap, so the lease still expires on schedule.
     expect((await deployRow(deploy.id))?.updatedAt).toEqual(FROZEN);
 
     const reclaimTime = new Date(afterCap + DEFAULT_CLAIM_TIMEOUT_MS + 1);
@@ -1403,9 +1305,8 @@ describe('the attempt fence (ticket 129)', () => {
     );
     expect(reclaimed?.id).toBe(deploy.id);
 
-    // And now the still-running attempt finds out, which is the whole reason
-    // the timer outlives the cap: `lost` is what stops it streaming into a log
-    // somebody else owns.
+    // The still-running attempt learns it lost, and stops writing to a log
+    // another attempt owns.
     expect(
       await heartbeatAttempt(
         context(adapter, { clock: { now: () => reclaimTime } }),
@@ -1418,7 +1319,7 @@ describe('the attempt fence (ticket 129)', () => {
 });
 
 describe('cancelling an attempt (§6)', () => {
-  /** The press itself, over the same isolated schema the loop runs against. */
+  /** The operator's cancel press, against the loop's isolated schema. */
   function operator(): CommandContext {
     return {
       principal: { id: crypto.randomUUID(), displayName: 'Jordan' },
@@ -1452,9 +1353,8 @@ describe('cancelling an attempt (§6)', () => {
     const adapter = new FakeDeployAdapter();
     let finished = false;
     let resumed = 0;
-    // The press lands between the adapter's own events — arranged inside the
-    // stream so no timer is involved, and so the second event is the one the
-    // loop must never absorb.
+    // The press lands between the adapter's events with no timer involved, so
+    // the loop must not absorb the second event.
     adapter.apply = async function* () {
       try {
         yield { type: 'status', at: FROZEN, phase: 'APPLYING' };
@@ -1473,16 +1373,15 @@ describe('cancelling an attempt (§6)', () => {
     const outcome = await runAttempt(context(adapter), claimed!);
 
     expect(outcome?.phase).toBe('FAILED');
-    // `return`, not abandonment: the adapter's own `finally` ran, and the
-    // generator was never resumed past the event the cancel arrived on.
+    // The generator was returned: its `finally` ran, and it never resumed
+    // past the event the cancel arrived on.
     expect(finished).toBe(true);
     expect(resumed).toBe(1);
 
     const row = await deployRow(deploy.id);
     expect(row).toMatchObject({
       phase: 'FAILED',
-      // No reason and no blame: §6's set indicts a developer or the platform,
-      // and a cancellation indicts neither.
+      // A cancellation blames neither a developer nor the platform.
       reason: null,
       blame: null,
       detail: 'cancelled by Jordan',
@@ -1526,9 +1425,8 @@ describe('cancelling an attempt (§6)', () => {
     const pressed = await cancelDeploy({ id: deploy.id }, operator());
     expect(pressed.ok).toBe(true);
 
-    // The first attempt reads the request through its fence, which no longer
-    // matches — so it is not its request to honour, and the verdict it
-    // arrives at is not its to write either.
+    // The first attempt's fence no longer matches, so neither the request nor
+    // the verdict is its own.
     const late = await runAttempt(context(first), held!);
     expect(late?.phase).toBe('LOST');
     const stranded = await deployRow(deploy.id);
@@ -1587,8 +1485,7 @@ describe('cancelling an attempt (§6)', () => {
       value: { deployId: later!.id, phase: 'FAILED' },
     });
 
-    // Back to the release that was desired before the intent — which is what
-    // `deployApp` reads to decide the newer Build is not "already desired".
+    // The pointer returns to the previous release, which `deployApp` reads.
     const [desired] = await db
       .select()
       .from(componentTargetDesired)
@@ -1602,7 +1499,6 @@ describe('cancelling an attempt (§6)', () => {
       detail: 'cancelled by Jordan',
       attemptId: null,
     });
-    // Nothing is owed work: the loop never takes it.
     expect(await claimNextDeploy(context(new FakeDeployAdapter()))).toBeNull();
 
     const events = await eventsOf(later!.id);
@@ -1633,8 +1529,7 @@ describe('the post-LIVE soak (§6)', () => {
       faultyAt: null,
     });
 
-    // Readiness held, then did not — the case a green row with a late drift
-    // flag used to be the whole answer to.
+    // Readiness held, then failed inside the window.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'FAILED',
@@ -1669,8 +1564,7 @@ describe('the post-LIVE soak (§6)', () => {
       events.some((event) => event.line?.includes('faulty after readiness')),
     ).toBe(true);
 
-    // Judged once. The platform later agreeing again is drift clearing, and
-    // the verdict the soak drew stays what it was.
+    // Judged once: a later recovery clears drift and keeps the soak's verdict.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'LIVE',
@@ -1689,10 +1583,8 @@ describe('the post-LIVE soak (§6)', () => {
     const adapter = new FakeDeployAdapter({ script: [live] });
     await runDeployPass(context(adapter));
 
-    // What a Flux upgrade that failed inside the window reads as when the
-    // object's own conditions cannot say why: the read on red is the
-    // adapter's to take, and one that named nothing must not be guessed at —
-    // an image that stopped pulling is not the developer's `UNHEALTHY`.
+    // A failed Flux upgrade whose conditions name no reason. Core must not
+    // guess one: an image that stopped pulling is not the developer's fault.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'FAILED',
@@ -1725,8 +1617,8 @@ describe('the post-LIVE soak (§6)', () => {
     const adapter = new FakeDeployAdapter({ script: [live] });
     await runDeployPass(context(adapter));
 
-    // A restart pressed inside the window: the same digest, the controller
-    // replacing pods. Neither verdict, so neither stamp.
+    // A restart inside the window: same digest, pods being replaced, no
+    // verdict.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'WAITING',
@@ -1738,7 +1630,7 @@ describe('the post-LIVE soak (§6)', () => {
       faultyAt: null,
     });
 
-    // The restarted pods crash-loop: the verdict the soak exists to give.
+    // The restarted pods crash-loop.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'FAILED',
@@ -1770,8 +1662,7 @@ describe('the post-LIVE soak (§6)', () => {
       reason: null,
     });
 
-    // Well past the window: the same observation that would have been a
-    // fault inside it is now §6's drift — information, with no blame.
+    // Past the window the same observation is drift, with no blame.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'FAILED',
@@ -1792,8 +1683,8 @@ describe('the post-LIVE soak (§6)', () => {
     const adapter = new FakeDeployAdapter({ script: [live] });
     await runDeployPass(context(adapter));
 
-    // The same delivery object, re-applied by a later intent and failing under
-    // that release's digest. Whatever it says is the newer row's to carry.
+    // A later intent re-applied the object, which fails under its digest, so
+    // the newer row carries it.
     adapter.place('hr/apps/web', {
       ref: 'hr/apps/web',
       phase: 'FAILED',

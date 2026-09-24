@@ -1,9 +1,4 @@
-/**
- * `titleOf` mirrors `Screen`'s route table branch for branch — the tab must
- * name what the screen shows. These pin the mapping for every branch,
- * including the aliases that land on Settings and the bare `/name` workspace
- * fallback.
- */
+// `titleOf` mirrors `Screen`'s route table, so each route branch needs a row here.
 import { describe, expect, test } from 'bun:test';
 import { titleOf } from '../../src/web/app.tsx';
 import { PRODUCT_NAME } from '../../src/web/brand.ts';

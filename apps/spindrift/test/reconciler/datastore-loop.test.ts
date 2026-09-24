@@ -1,18 +1,7 @@
 /**
- * The datastore reconcile loop (§11).
- *
- * One claim, and every test here is a way of falsifying it: **the loop writes
- * `connection_ref` when the far side has one, and at no other moment.**
- *
- * That is not fussiness. `DatastoreState.connection` is `null` for the whole
- * of a healthy provision — the contract says a caller treating it as failure
- * "would fail every healthy provision" — so a pass that copied it
- * unconditionally would write null over a reference the deploy path has
- * already pinned into a release, and the App would come up with no
- * `DATABASE_URL` and a green rollout. The failure is silent in exactly the way
- * §10 spends a whole section preventing for config, so it is asserted here
- * three ways: WAITING must not write, LIVE must write, and a Target that will
- * not answer must leave the row alone.
+ * The datastore reconcile loop. It writes `connection_ref` only when the far
+ * side reports one: a null written over a pinned reference would drop the
+ * App's `DATABASE_URL` behind a green rollout.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -55,7 +44,7 @@ async function aTarget(overrides: Partial<NewTarget> = {}) {
   return target!;
 }
 
-/** A managed row mid-provision: a handle, no phase yet, no connection. */
+/** A managed PENDING row with a handle and no connection. */
 async function aProvisionedRow(
   overrides: Partial<typeof datastores.$inferInsert> = {},
 ) {
@@ -75,7 +64,6 @@ async function aProvisionedRow(
   return row!;
 }
 
-/** An App for a Datastore to be attached to, by name. */
 async function anApp(name: string) {
   const [app] = await database()
     .db.insert(apps)
@@ -121,8 +109,7 @@ describe('the connection reference', () => {
     const second = await runDatastorePass(context);
     const live = await reread(row.id);
 
-    // Mid-provision: the operator has not generated the credential, and the
-    // row must not claim it has.
+    // Mid-provision there is no credential yet, so the row must not claim one.
     expect(waiting.phase).toBe('WAITING');
     expect(waiting.detail).toBe('waiting for the PVC to bind');
     expect(waiting.connectionRef).toBeNull();
@@ -147,8 +134,7 @@ describe('the connection reference', () => {
 
     const reports = await runDatastorePass(context);
 
-    // The selection is the whole cost control: LIVE *and* connected has
-    // nothing left for a poll to learn.
+    // A LIVE, connected row has nothing left for a poll to learn.
     expect(reports).toEqual([]);
     expect(backend.observed).toEqual([]);
     expect((await reread(row.id)).connectionRef).toBe(
@@ -180,10 +166,8 @@ describe('the connection reference', () => {
   test('a later null answer never clears a reference already written', async () => {
     const row = await aProvisionedRow({ phase: 'WAITING' });
     const backend = new FakeDatastoreAdapter();
-    // CloudNativePG writes `<cluster>-app` during bootstrap and reports Ready
-    // afterwards, so the credential genuinely exists while the phase is still
-    // WAITING — which is what keeps this row in the loop's selection for a
-    // second pass to be able to damage it.
+    // CloudNativePG writes `<cluster>-app` before it reports Ready, so a
+    // WAITING row can hold a connection and stay selected for the next pass.
     backend.script(
       row.ref!,
       {
@@ -226,8 +210,7 @@ describe('what the loop refuses to touch', () => {
 
     const reports = await runDatastorePass(context);
 
-    // An uplink blip is not a verdict. FAILED here would blame the database
-    // for the network between this process and it.
+    // A network error is no verdict on the database.
     expect(reports).toEqual([]);
     const after = await reread(row.id);
     expect(after.phase).toBe('WAITING');
@@ -237,8 +220,7 @@ describe('what the loop refuses to touch', () => {
 
   test('an object that is gone is FAILED, naming the Target', async () => {
     const row = await aProvisionedRow();
-    // Nothing scripted for this ref: the fake answers `null`, which is the far
-    // side saying the object is not there.
+    // With nothing scripted the fake answers `null`: the object is gone.
     const backend = new FakeDatastoreAdapter();
     const context = {
       db: database().db,
@@ -263,8 +245,7 @@ describe('what the loop refuses to touch', () => {
       clock,
     });
 
-    // Nothing was provisioned for it, so there is nothing to poll — and a
-    // human authored its URL, which this loop has no business overwriting.
+    // A human authored its URL, and nothing was provisioned to poll.
     expect(reports).toEqual([]);
     expect(backend.observed).toEqual([]);
   });
@@ -298,15 +279,8 @@ describe('what the loop refuses to touch', () => {
 });
 
 /**
- * The network exception around a Datastore (§127).
- *
- * The claim: **the loop tells the far side which App namespace to admit, and
- * it does so from the row rather than from a command.** Attaching and
- * detaching are both bookkeeping — `attachDatastore` deliberately makes no
- * adapter call — and deleting an App is not even that: `app_id` is
- * `ON DELETE SET NULL`, so the row detaches with nothing running at all. A
- * revoke hung off the commands would silently never fire for the case that
- * matters most, which is what the middle test here is.
+ * The loop admits the attached App's namespace from the row, because deleting
+ * an App detaches its Datastore through `ON DELETE SET NULL` with no command.
  */
 describe('the network exception', () => {
   test('an attached Datastore has its App namespace admitted, with no poll', async () => {
@@ -324,13 +298,11 @@ describe('the network exception', () => {
       clock,
     });
 
-    // `app-{app}` is `appNamespaceFor`'s default and the namespace the release
-    // itself lands in — the two come from one function so they cannot drift.
+    // `app-{app}` is `appNamespaceFor`'s default, where the release lands.
     expect(backend.permits).toEqual([
       { ref: row.ref!, namespaces: ['app-storefront'] },
     ]);
-    // A settled row still costs no round trip on the poll seam: the attachment
-    // is what changed, not the datastore.
+    // A settled row is still not polled; only the attachment changed.
     expect(backend.observed).toEqual([]);
     expect(reports[0]?.permitted).toBe(true);
     expect((await reread(row.id)).permittedNamespace).toBe('app-storefront');
@@ -353,8 +325,8 @@ describe('the network exception', () => {
     await runDatastorePass(context);
     const second = await runDatastorePass(context);
 
-    // The column is what makes convergence converge. Without it every pass
-    // would rewrite every policy forever, at fifteen-second intervals.
+    // `permittedNamespace` records what was written, so an unchanged pass
+    // writes nothing.
     expect(backend.permits).toHaveLength(1);
     expect(second).toEqual([]);
   });
@@ -374,16 +346,14 @@ describe('the network exception', () => {
     };
     await runDatastorePass(context);
 
-    // Not `detachDatastore`: the App is deleted, and `app_id`'s
-    // `ON DELETE SET NULL` detaches the row with no command in the path. This
-    // is the case a revoke hanging off attach/detach could never have caught.
+    // Deleting the App detaches the row through `ON DELETE SET NULL`, with no
+    // command in the path.
     await database().db.delete(apps).where(eq(apps.id, app.id));
     await runDatastorePass(context);
 
     expect(backend.permits).toEqual([
       { ref: row.ref!, namespaces: ['app-storefront'] },
-      // The empty set is the whole permitted set, which is what makes it a
-      // revoke rather than an addition of nothing.
+      // The namespaces are the whole permitted set, so an empty one revokes.
       { ref: row.ref!, namespaces: [] },
     ]);
     expect((await reread(row.id)).permittedNamespace).toBeNull();
@@ -407,15 +377,11 @@ describe('the network exception', () => {
       clock,
     });
 
-    // The column says what the cluster was last actually told, so a write that
-    // did not land leaves the disagreement in place and the next pass asks
-    // again. Recording it optimistically would close the hole in the database
-    // and leave it open in the cluster.
+    // The column records what the cluster was last told, so a failed write
+    // leaves it unset and the next pass tries again.
     expect((await reread(row.id)).permittedNamespace).toBeNull();
-    // But the poll is not the policy's hostage. A Target whose kustomization
-    // has not caught up refuses the write on every pass, and coupling the two
-    // would leave the Datastore in PENDING forever with nothing said anywhere
-    // about why — the database that never comes up, cause invisible.
+    // The poll still runs, or a Target refusing every policy write would hold
+    // the Datastore in PENDING with no reason shown.
     expect(backend.observed).toEqual([row.ref!]);
     expect(reports[0]).toMatchObject({ phase: 'LIVE', permitted: false });
     expect((await reread(row.id)).phase).toBe('LIVE');
@@ -432,10 +398,8 @@ describe('the network exception', () => {
     const db = database().db;
     await runDatastorePass({ db, adapters: adaptersFor(backend), clock });
 
-    // An hour later, with the row unchanged. The policy is not core's to
-    // remember: `kubectl delete netpol` during triage takes it away and the
-    // row still agrees with itself, so a loop that only writes on disagreement
-    // never writes it again and the App is denied its own store forever.
+    // Past the one-hour reassert window with the row unchanged. A policy
+    // deleted by hand leaves the row consistent, so only age re-sends it.
     const later: Clock = {
       now: () => new Date('2024-06-01T02:00:00.000Z'),
     };
@@ -459,9 +423,8 @@ describe('the network exception', () => {
       phase: 'LIVE',
       connectionRef: 'secret://spindrift-datastores/orders-app',
     });
-    // The legacy ref: the adapter's guard returns before it touches the API,
-    // because there is no deny floor in `spindrift-apps` for an exception to
-    // sit on.
+    // `permit` answers `false` when it writes nothing, as for a ref outside
+    // the datastore namespace.
     const backend = new FakeDatastoreAdapter({ permitNoops: true });
 
     const reports = await runDatastorePass({
@@ -470,9 +433,7 @@ describe('the network exception', () => {
       clock,
     });
 
-    // Recording it would have the column claim a cluster fact nobody
-    // established — and the comparison that guards the next pass would believe
-    // it forever.
+    // Recording it would claim a cluster fact nobody established.
     expect((await reread(row.id)).permittedNamespace).toBeNull();
     expect((await reread(row.id)).permittedAt).toBeNull();
     expect(reports).toEqual([]);

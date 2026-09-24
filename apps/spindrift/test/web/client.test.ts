@@ -1,13 +1,3 @@
-/**
- * `command()`'s one side effect: an `UNAUTHENTICATED` refusal — the 24h
- * session gone mid-visit — raises {@link SESSION_EXPIRED_EVENT} rather than
- * handing the view a refusal it has nothing sensible to render. Every other
- * refusal is the view's own to show, unchanged.
- *
- * Stubs `globalThis.fetch` rather than standing up a server: `command()`
- * reaches the network through that one global and nothing else, the same
- * seam `test/web/app-mounted.test.tsx` stubs for the same reason.
- */
 import { describe, expect, test } from 'bun:test';
 import { command } from '../../src/web/client.ts';
 import { SESSION_EXPIRED_EVENT } from '../../src/web/session-events.ts';

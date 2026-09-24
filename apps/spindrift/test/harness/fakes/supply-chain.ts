@@ -1,32 +1,7 @@
 /**
- * The far side of core's supply chain: the pinned `spindrift-verifier` process.
- *
- * § Testing: **"Fake the far side, not our side."** The far side here is a
- * subprocess, and all three of core's supply-chain classes already expose a
- * {@link ProcessExecutor} seam for it. So {@link SupplyChainHarness} composes
- * the *real* {@link SlsaVerifier}, {@link CosignSigner} and
- * {@link SpindriftSignatureVerifier} over {@link FakeVerifierProcess} — their
- * real argv construction, their real temp-file handling, their real stdout
- * parsing and their real refusal paths all run in every test that touches a
- * build or a deploy.
- *
- * {@link FakeVerifierProcess} answers the argv `apps/spindrift-verifier/main.go`
- * answers, refuses what it refuses, and prints what it prints — including the
- * detail that `verify-image --print-provenance` echoes the *provenance file it
- * was handed* (`verify.go`: `Envelope: req.Provenance.Statement`), which is what
- * makes the TypeScript side's bundle-digest binding a real check.
- *
- * **The signature is genuinely cryptographic.** `sign` mints a real Ed25519
- * keypair derived from the signer reference and signs the digest; the bundle it
- * writes carries the same five fields `pkg/verifier/sign.go` writes;
- * `verify-signature` pins the embedded public key against the trusted signer
- * before checking the signature. A tampered bundle, a bundle covering another
- * digest, or a bundle signed by a different key all fail here exactly as they
- * would in production.
- *
- * Scripted answers survive for the tests that need a backend to refuse — but
- * they are an override on top of the real class, not a replacement for it, so
- * the unscripted path every other test runs is the real one.
+ * A fake `spindrift-verifier` process under the real {@link SlsaVerifier},
+ * {@link CosignSigner} and {@link SpindriftSignatureVerifier}. It signs with
+ * real Ed25519 keys derived from the signer reference.
  */
 import {
   createHash,
@@ -57,10 +32,9 @@ import {
   type VerifyProvenanceInput,
 } from '../../../src/supply-chain/verify.ts';
 
-/** The signer reference the harness signs and admits with. */
 export const TEST_SIGNER_KEY = '/spindrift/test-signer.key';
 
-/** What `pkg/verifier/sign.go` writes, field for field. */
+/** Must match `SignatureMediaType` in `pkg/verifier/sign.go`. */
 const SIGNATURE_MEDIA_TYPE = 'application/vnd.spindrift.signature.v1+json';
 
 /** PKCS#8 header for a raw 32-byte Ed25519 seed. */
@@ -69,19 +43,14 @@ const PKCS8_ED25519_PREFIX = Buffer.from(
   'hex',
 );
 
-/** A PKCS#8 Ed25519 key, seeded by the signer reference itself. */
 function derFor(reference: string): Buffer {
   const seed = createHash('sha256').update(reference).digest();
   return Buffer.concat([PKCS8_ED25519_PREFIX, seed]);
 }
 
 /**
- * A keypair that is the same every time for a given signer reference.
- *
- * The real signer loads an Ed25519 private key from the path it was given, so
- * the fake derives one from that path instead: same reference, same key, and a
- * *different* reference is genuinely a different key — which is what makes the
- * admission pin testable rather than assumed.
+ * The real signer reads a key file at the reference; this derives the key from
+ * the reference instead, so a different reference is a different key.
  */
 function keyFor(reference: string) {
   return createPrivateKey({
@@ -92,8 +61,6 @@ function keyFor(reference: string) {
 }
 
 function publicKeyObjectOf(reference: string) {
-  // Derived from the private key, the way the binary derives the expected
-  // public key from the signer reference it was pinned to.
   return createPublicKey(
     keyFor(reference).export({ format: 'pem', type: 'pkcs8' }).toString(),
   );
@@ -106,13 +73,8 @@ function publicKeyOf(reference: string): string {
 }
 
 /**
- * A signature the pinned verifier will admit, for a fixture that inserts a
- * SUCCEEDED Build directly.
- *
- * A stored `{ mediaType: … }` and nothing else is exactly the placeholder
- * `pkg/verifier/sign.go` documents as rejected, so a fixture carrying one is a
- * fixture whose deploy would be refused in production. This mints what the
- * harness's own signer would have written for that digest.
+ * A signature the verifier admits, for a fixture that inserts a SUCCEEDED
+ * Build directly. The verifier rejects a bundle with only a `mediaType`.
  */
 export function testSignature(
   artifactDigest: string,
@@ -137,32 +99,22 @@ export function testSignature(
   };
 }
 
-/** One invocation, as the harness recorded it. */
 export interface RecordedProcess {
   readonly command: readonly string[];
   readonly result: ProcessResult;
 }
 
 export interface FakeVerifierProcessOptions {
-  /** The signer reference whose key the process holds. */
+  /** Not read: each subcommand takes its key reference from argv. */
   readonly signerKey?: string;
-  /**
-   * Refuse `verify-image` with this message on stderr, as the binary does when
-   * `verifier.Verify` answers `!ok`.
-   */
+  /** Stderr for a refused `verify-image`, as the binary prints it. */
   readonly refuseVerify?: string;
-  /** Refuse `sign` with this message on stderr. */
+  /** Stderr for a refused `sign`. */
   readonly refuseSign?: string;
 }
 
-/**
- * The pinned verifier binary, as a process.
- *
- * Everything it refuses, `main.go` and `pkg/verifier` refuse for the same
- * reason and with the same words. Everything it accepts, they accept.
- */
+/** The verifier binary's argv, refusal messages and output. */
 export class FakeVerifierProcess implements ProcessExecutor {
-  /** Every invocation, in order — the assertion surface for argv. */
   readonly runs: RecordedProcess[] = [];
 
   constructor(private readonly options: FakeVerifierProcessOptions = {}) {}
@@ -173,7 +125,6 @@ export class FakeVerifierProcess implements ProcessExecutor {
     return result;
   }
 
-  /** Every invocation of one subcommand, for a test that wants only those. */
   callsTo(subcommand: string): readonly RecordedProcess[] {
     return this.runs.filter((run) => run.command[1] === subcommand);
   }
@@ -193,13 +144,7 @@ export class FakeVerifierProcess implements ProcessExecutor {
     }
   }
 
-  /**
-   * `verify-image`, which is the legacy slsa-verifier-shaped path core calls.
-   *
-   * The refusals below are `pkg/verifier/verify.go` steps 1-4c in order, and
-   * the success case prints `Assessment.Envelope` — the provenance file,
-   * verbatim — because that is what the binary prints.
-   */
+  /** Legacy `verify-image`, with the refusal messages of `verify.go`. */
   private async verifyImage(args: readonly string[]): Promise<ProcessResult> {
     const flags = legacyFlags(args, [
       'provenance-path',
@@ -262,13 +207,12 @@ export class FakeVerifierProcess implements ProcessExecutor {
       );
     }
 
-    // `--print-provenance` prints the envelope, which is the statement it was
-    // handed. Nothing is synthesised here, which is the point: the bundle
-    // digest core binds against has to have come out of the document.
+    // The binary prints the envelope, which is the provenance file verbatim,
+    // and core binds the bundle digest against it.
     return { exitCode: 0, stdout: `${raw}\n`, stderr: '' };
   }
 
-  /** `sign`, in cosign's flag shape — what {@link CosignSigner} builds. */
+  /** `sign` in the cosign flag shape {@link CosignSigner} builds. */
   private async sign(args: readonly string[]): Promise<ProcessResult> {
     const flags = legacyFlags(args, ['key', 'bundle']);
     if (this.options.refuseSign !== undefined) {
@@ -300,7 +244,6 @@ export class FakeVerifierProcess implements ProcessExecutor {
     return { exitCode: 0, stdout: `${bundle}\n`, stderr: '' };
   }
 
-  /** `verify-signature`, including the signer pin admission depends on. */
   private async verifySignature(
     args: readonly string[],
   ): Promise<ProcessResult> {
@@ -346,7 +289,7 @@ export class FakeVerifierProcess implements ProcessExecutor {
         `signature did not verify: bundle covers digest "${bundle.artifactDigest ?? ''}", not "${digest}"\n`,
       );
     }
-    // The pin: the bundle's own key is not trusted, the configured one is.
+    // Only the configured signer's key is trusted, never the bundle's own.
     if (bundle.publicKey !== publicKeyOf(signerKey)) {
       return failed(
         'signature did not verify: bundle public key is not the trusted Spindrift signer\n',
@@ -369,13 +312,7 @@ export class FakeVerifierProcess implements ProcessExecutor {
   }
 }
 
-/**
- * Records what core asked for, then asks the real verifier.
- *
- * Recording is not faking: the delegate below is the production class. The
- * optional answer is the one escape hatch, for the tests whose subject is "the
- * backend refused" rather than "the verifier ran".
- */
+/** `answer` replaces the real verifier, for tests of a backend refusal. */
 class RecordingVerifier implements ProvenanceVerifier {
   readonly verified: VerifyProvenanceInput[] = [];
 
@@ -395,7 +332,7 @@ class RecordingVerifier implements ProvenanceVerifier {
 
 class RecordingSigner implements ArtifactSigner {
   readonly signed: Artifact[] = [];
-  /** A KMS refusing is a far-side event, so a test may script one. */
+  /** A scripted KMS refusal. */
   failure: Error | null = null;
 
   constructor(private readonly inner: ArtifactSigner) {}
@@ -409,11 +346,8 @@ class RecordingSigner implements ArtifactSigner {
 }
 
 /**
- * Records each admission check, then runs the real one.
- *
- * The default answer is the pinned verifier's, over the bundle the signer
- * actually wrote — a stub `{ ok: true }` would pass §16's signature gate for
- * free in every deploy test.
+ * Answers with the real verifier over the bundle the signer wrote, unless
+ * `answer` is given, so no deploy test passes the signature gate for free.
  */
 export class RecordingSignatureVerifier implements SignatureVerifier {
   readonly admissions: VerifySignatureInput[] = [];
@@ -437,7 +371,7 @@ export class SupplyChainHarness extends CoreSupplyChain {
   readonly signed: Artifact[];
   readonly signatureChecks: RecordingSignatureVerifier;
   readonly signing: RecordingSigner;
-  /** The process every one of the three real classes ran against. */
+  /** The process all three real classes run against. */
   readonly processes: FakeVerifierProcess;
 
   constructor(
@@ -480,11 +414,8 @@ function failed(stderr: string): ProcessResult {
 }
 
 /**
- * The manual argv walk `main.go` does instead of `fs.Parse`.
- *
- * Modelled rather than replaced by a parser, because the binary's own loop is
- * what core's argv has to satisfy: `--flag value` pairs, bare `--flag` treated
- * as a boolean, and the first non-flag argument taken as the reference.
+ * The manual argv walk `main.go` does for `verify-image` and legacy `sign`:
+ * named flags take the next argument, and any other flag is skipped.
  */
 function legacyFlags(
   args: readonly string[],

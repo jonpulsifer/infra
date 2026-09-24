@@ -1,9 +1,6 @@
 /**
- * The reconciler process (§19, ticket 06).
- *
- * This is the lifecycle seam above the five individual loop suites. It proves
- * that a systemic failure escaping one loop is retried without taking its
- * siblings down, and that one shutdown signal releases every supervisor.
+ * The reconciler process: a failure escaping one loop is retried without
+ * stopping its siblings, and one shutdown signal releases every supervisor.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -44,11 +41,8 @@ const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 /**
- * Pinned to an instant, advancing at wall pace. A fully frozen clock would
- * freeze the dispatch backoff too (story 101): a refused Build earns a wait
- * measured against this clock, and the manifest test below depends on the
- * loop refusing the same row across several passes — which now requires the
- * waits to expire.
+ * Pinned to an instant and advancing at wall pace, so a refused Build's
+ * dispatch backoff can expire between passes.
  */
 const EPOCH = Date.now();
 const clock: Clock = {
@@ -207,29 +201,20 @@ describe('reconciler loop composition', () => {
 });
 
 /**
- * Ticket 38 — the reconciler read the manifest once, at boot.
- *
- * `supplyChain.attestor` is the field that caught it: it was added through the
- * product's own authoring path, and the next Build still dispatched with the
- * empty value the process had booted with, so the attestation step skipped
- * itself and the artifact went out unattested with every step green. The row
- * is the seam — `configureInstallation` writes it and this asserts the
- * reconciler reads it again — so the write here is the store function that
- * command calls, without assembling a whole command context to reach it.
+ * The reconciler re-reads the stored manifest row and reassembles its adapters
+ * when the document changes.
  */
 describe('a manifest saved after boot', () => {
   test('reaches the loops without restarting the process', async () => {
     await pendingBuildNoRouteSatisfies();
     const shutdown = new AbortController();
-    /** Every manifest handed to adapter assembly, in order. */
     const assembled: InstallationManifest[] = [];
     /** Which generation of adapters each build pass routed through. */
     const routedThrough: number[] = [];
     const ATTESTOR = 'projects/trusted-builds/attestors/spindrift';
 
     let written = false;
-    // The row, which is the only thing a process boots from. Seeded here the
-    // way a configured installation already has one.
+    // A process boots from the stored manifest row, so seed one.
     await writeStoredManifest(database().db, toAuthoredManifest(manifest));
     await startReconciler({
       signal: shutdown.signal,
@@ -244,10 +229,8 @@ describe('a manifest saved after boot', () => {
         const generation = assembled.push(storedManifest);
         return {
           ...adaptersFor(new FakeDeployAdapter()),
-          // `routeForTarget` asks this per pending Build, per pass, so which
-          // generation answers says which manifest that pass ran against.
-          // Answering `null` leaves the Build PENDING, which is what keeps
-          // the build loop looking at it every idle interval.
+          // Asked per pending Build per pass, so the generation that answers
+          // names the manifest that pass ran against. `null` keeps it PENDING.
           build: () => {
             routedThrough.push(generation);
             return null;
@@ -260,8 +243,7 @@ describe('a manifest saved after boot', () => {
         if (event.loop === 'manifest' && !written) {
           written = true;
           const authored = toAuthoredManifest(manifest);
-          // The row `configureInstallation` writes, written the way it
-          // writes it — without assembling a command context to reach it.
+          // The same store write `configureInstallation` makes.
           await writeStoredManifest(database().db, {
             ...authored,
             supplyChain: { ...authored.supplyChain, attestor: ATTESTOR },
@@ -269,9 +251,7 @@ describe('a manifest saved after boot', () => {
           return;
         }
 
-        // Stop once a build pass has routed through the rebuilt adapters —
-        // the point being that a loop acted on the new manifest, not merely
-        // that the row was re-read.
+        // Stop once a build pass has routed through the rebuilt adapters.
         if (routedThrough.includes(2)) shutdown.abort();
       },
     });
@@ -280,9 +260,8 @@ describe('a manifest saved after boot', () => {
     expect(assembled).toHaveLength(2);
     expect(assembled[0]?.supplyChain.attestor).toBeUndefined();
     expect(assembled[1]?.supplyChain.attestor).toBe(ATTESTOR);
-    // And a loop is running against the second one, with no restart between.
     expect(routedThrough).toContain(2);
-    // Two build-loop idle intervals plus the change between them.
+    // Two build-loop idle intervals plus the manifest change between them.
   }, 20_000);
 
   test('an unchanged document rebuilds nothing', async () => {
@@ -311,8 +290,7 @@ describe('a manifest saved after boot', () => {
       },
     });
 
-    // Three re-reads, one assembly: the deep comparison is what keeps polling
-    // affordable enough to do every 30 seconds.
+    // Three re-reads, one assembly: an unchanged document is not reassembled.
     expect(manifestPasses).toBeGreaterThanOrEqual(3);
     expect(assembled).toHaveLength(1);
   });
@@ -378,9 +356,8 @@ async function reconcilePendingDeploy(platform: FakeDeployAdapter) {
     signal: shutdown.signal,
     client: database().connect(),
     clock,
-    // The deployment's own credential, which is the other half of how a pod
-    // starts: the row names the installation, the mounted external_account
-    // document names the federation, and the boot manifest is the two joined.
+    // The boot manifest joins the stored row with the federation the mounted
+    // credential names.
     env: {
       ...FIXTURE_DEPLOYMENT_ENV,
     },
@@ -399,14 +376,9 @@ async function reconcilePendingDeploy(platform: FakeDeployAdapter) {
   return { stored, bootManifest };
 }
 
-/** An App, Component, Target, Build, and one PENDING Deploy intent. */
 /**
- * A PENDING Build placed on a Target, for a registry whose `build()` answers
- * `null`.
- *
- * No route clears the Target's policy, so `runBuildPass` leaves it PENDING and
- * looks at it again every idle interval — which is what makes the build loop
- * observable more than once inside a test.
+ * A PENDING Build placed on a Target. With `build()` answering `null` no route
+ * is configured, so the build loop sees it again every idle interval.
  */
 async function pendingBuildNoRouteSatisfies() {
   const db = database().db;
@@ -441,6 +413,7 @@ async function pendingBuildNoRouteSatisfies() {
   });
 }
 
+/** An App, Component, Target, succeeded Build and one PENDING Deploy. */
 async function pendingDeploy() {
   const db = database().db;
   const [app] = await db

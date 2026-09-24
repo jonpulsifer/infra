@@ -1,21 +1,6 @@
 /**
- * A fake static-hosting API (Task 29, § Seam 2).
- *
- * "A fake of the far-side HTTP API behind the real client, with the test
- * asserting the requests that were made" — so the adapter's real five-step
- * release, its real hashing, and its real bundle reading all run.
- *
- * Three behaviours are modelled because the adapter depends on all three:
- *
- * - **`populateFiles` asks for the hashes it does not already hold**, which is
- *   what makes a redeploy of an unchanged site cheap. A fake that always asked
- *   for everything would let an adapter that ignored the answer pass.
- * - **A version has to be finalized before a release will take it**, because
- *   that ordering is the product's whole contract about immutability and an
- *   adapter that released a draft would silently serve nothing.
- * - **The bundle is served from wherever the artifact says it is**, over the
- *   same injected transport, because the adapter fetching its own artifact is a
- *   real step that a fake API alone would leave untested.
+ * The Firebase Hosting API behind the real adapter. `populateFiles` asks only
+ * for hashes it lacks, and a release takes only a finalized version.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
 import { CLOUD_ENDPOINTS } from '../installation.ts';
@@ -29,56 +14,31 @@ export interface RecordedHostingRequest {
 
 export interface FakeHostingOptions {
   readonly project?: string;
-  /** Sites that already exist, by id. */
   readonly sites?: readonly string[];
-  /**
-   * A site that appears between the adapter's read and its create.
-   *
-   * The create race: two deploys of a new App, or a retry after a timeout
-   * that did land. The read says missing, the create says `ALREADY_EXISTS`,
-   * and the desired state is true either way — so this exists to prove the
-   * adapter treats it that way rather than failing on a site it wanted.
-   */
+  /** Appears between the adapter's read and its create, which then gets 409. */
   readonly appearsBeforeCreate?: string;
   /**
-   * Site ids that are taken but are in no project this fake will show.
-   *
-   * The permanent reservation: "If you delete a site, ... the `SITE_ID` cannot
-   * be reactivated by you or anyone else." So the create collides forever and
-   * the read-back finds nothing — the one 409 the adapter cannot reconcile,
-   * and the one it must not report as an ordinary already-exists.
+   * Ids in no visible project: a deleted site's id is reserved forever, so the
+   * create gets 409 and the read-back finds nothing.
    */
   readonly reserved?: readonly string[];
-  /** Hashes the product already holds, so it will not ask for them again. */
+  /** Hashes already held, which `populateFiles` does not ask for. */
   readonly held?: readonly string[];
-  /**
-   * The artifact depot, and the bundle every address under it serves.
-   *
-   * Matched by origin rather than by exact URL because a `files` artifact is
-   * addressed by its own digest: a fake keyed on one URL would have to be
-   * rebuilt for every digest a test uses, which is a fixture detail leaking
-   * into what the test is actually about.
-   */
+  /** An artifact origin that serves `bytes` at every address. */
   readonly bundle?: {
     readonly origin: string;
     readonly bytes: Uint8Array;
   };
-  /** When set, the list probe `inspect` makes is refused with this. */
+  /** When set, listing sites answers with this. */
   readonly refuseList?: { status: number; body: unknown };
-  /** When set, creating a version is refused with this. */
   readonly refuseVersion?: { status: number; body: unknown };
-  /**
-   * When set, deleting a site at the real (project-scoped) path answers with
-   * this instead of removing the site — the regression arrangement for a
-   * destroy that must not report success it did not earn.
-   */
+  /** When set, deleting a site answers with this and keeps the site. */
   readonly refuseDelete?: { status: number; body: unknown };
   /** When set, adding a domain answers with this. */
   readonly domainAnswer?: { status: number; body: unknown };
   readonly token?: string;
 }
 
-/** One version the fake is holding, with what has been done to it. */
 interface FakeVersion {
   name: string;
   site: string;
@@ -89,12 +49,7 @@ interface FakeVersion {
 
 const UPLOAD_BASE = 'https://upload.example.test/files';
 
-/**
- * The most file hashes one `populateFiles` call may carry.
- *
- * The API's documented ceiling, modelled because it is the boundary every
- * real static site crosses and the one nothing here could previously reach.
- */
+/** The documented maximum of file hashes per `populateFiles` call. */
 const POPULATE_LIMIT = 1000;
 
 export class FakeHosting {
@@ -103,9 +58,8 @@ export class FakeHosting {
 
   private readonly sites = new Set<string>();
   private readonly versions = new Map<string, FakeVersion>();
-  /** Site id → the version name currently released on it. */
+  /** Each site's released version name. */
   private readonly released = new Map<string, string>();
-  /** Domains attached, by site — the assertion surface for §9's re-point. */
   private readonly domains = new Map<string, string[]>();
   private readonly held: Set<string>;
   private readonly uploaded = new Set<string>();
@@ -120,36 +74,30 @@ export class FakeHosting {
     return this.options.project ?? 'example-vessel';
   }
 
-  /** Mint the token provider the adapter is constructed with. */
+  /** The adapter's token provider. */
   token = (): string => this.options.token ?? 'federated-token';
 
-  /** Whether a site exists — the assertion surface for `destroy`. */
   hasSite(site: string): boolean {
     return this.sites.has(site);
   }
 
-  /** Every site that exists — the surface for idempotent re-apply. */
   get siteCount(): number {
     return this.sites.size;
   }
 
-  /** The version currently serving on one site, if any. */
   serving(site: string): FakeVersion | undefined {
     const name = this.released.get(site);
     return name === undefined ? undefined : this.versions.get(name);
   }
 
-  /** The file paths the released version holds, sorted. */
   servedPaths(site: string): string[] {
     return Object.keys(this.serving(site)?.files ?? {}).sort();
   }
 
-  /** Hashes actually uploaded — what proves the adapter honoured the answer. */
   get uploads(): string[] {
     return [...this.uploaded].sort();
   }
 
-  /** Domains attached to one site (§9). */
   domainsOf(site: string): string[] {
     return [...(this.domains.get(site) ?? [])];
   }
@@ -163,8 +111,7 @@ export class FakeHosting {
   fetch: Fetcher = async (request) => {
     const url = new URL(request.url);
 
-    // The bundle is not part of the hosting API and carries no bearer token:
-    // it is an artifact address, served here so the adapter's own fetch runs.
+    // The bundle is an artifact address outside the hosting API, with no token.
     const bundle = this.options.bundle;
     if (bundle !== undefined && url.origin === new URL(bundle.origin).origin) {
       return new Response(bundle.bytes as unknown as BodyInit);
@@ -173,13 +120,8 @@ export class FakeHosting {
     if (url.href.startsWith(UPLOAD_BASE)) {
       const hash = url.pathname.split('/').pop() ?? '';
       const bytes = new Uint8Array(await request.clone().arrayBuffer());
-      // The address a file is uploaded to *is* its hash, and the product
-      // stores the compressed file: "The hash is calculated by Gzipping the
-      // file then taking the SHA256 hash of the newly compressed file." An
-      // adapter that hashed the file's own bytes, or that offered a gzip hash
-      // and then uploaded the plain file, would be storing content under an
-      // address that is not its content — so both halves are checked rather
-      // than assumed correct because they happen to be today.
+      // The upload address is the SHA-256 of the gzipped file, so both the gzip
+      // and the hash are checked.
       if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) {
         return json(400, invalid('the uploaded file is not gzipped'));
       }
@@ -232,15 +174,10 @@ export class FakeHosting {
       if (method === 'POST') {
         const id = url.searchParams.get('siteId') ?? '';
         if (id === '') return json(400, error('no siteId'));
-        // Somebody else got there between the read and this call.
         if (this.options.appearsBeforeCreate === id && !this.sites.has(id)) {
           this.sites.add(id);
         }
-        // Creating a site that exists is a 409, not a second create. A fake
-        // that quietly succeeded here let a deploy-once adapter look
-        // idempotent: nothing in the suite could tell "the site was already
-        // there" from "the site was made", which is the whole difference
-        // between a revision and a first deploy.
+        // An existing or reserved id answers 409, as the real API does.
         if (this.sites.has(id) || this.options.reserved?.includes(id)) {
           return json(409, {
             error: {
@@ -255,15 +192,11 @@ export class FakeHosting {
       }
     }
 
-    // `projects.sites.delete` — the only path the real API serves for site
-    // deletion. There is no flat `sites.delete`; the flat `sites/{id}` form
-    // below answers reads only, so a DELETE aimed at it falls through to the
-    // catch-all 404, same as the real API.
+    // A site itself is only `projects/{project}/sites/{id}`; the flat
+    // `sites/{id}` form holds sub-collections, and anything else there 404s.
     const projectSiteMatch = path.match(
       new RegExp(`^projects/${this.project}/sites/([^/]+)$`),
     );
-    // `projects.sites.get` — and the only form of it. Reading a site is
-    // project-scoped for the same reason deleting one is.
     if (projectSiteMatch !== null && method === 'GET') {
       const id = projectSiteMatch[1] as string;
       return this.sites.has(id)
@@ -305,14 +238,6 @@ export class FakeHosting {
         body,
       );
     }
-
-    // No flat `sites/{id}` resource: the real API routes the sub-collections
-    // below (`/versions`, `/releases`, `/domains`) under a bare site id, but
-    // the site *itself* is only ever `projects/{project}/sites/{id}`. A GET
-    // here falls through to the catch-all, which is what production does —
-    // and a 404 from a path that was never a path reads exactly like a 404
-    // from a site that is not there, which is how a deploy-once adapter
-    // survived this suite.
 
     const versionsMatch = path.match(/^sites\/([^/]+)\/versions$/);
     if (versionsMatch !== null && method === 'POST') {
@@ -366,9 +291,6 @@ export class FakeHosting {
     const version = this.versions.get(name);
     if (version === undefined) return json(404, error('no version'));
     const files = (body as { files?: Record<string, string> })?.files ?? {};
-    // "You can send a maximum of 1000 file hashes in each API request." A
-    // built site clears that on its first deploy, so an adapter that offers
-    // the whole map in one call fails here rather than only in production.
     if (Object.keys(files).length > POPULATE_LIMIT) {
       return json(
         400,
@@ -377,12 +299,8 @@ export class FakeHosting {
         ),
       );
     }
-    // "The files in each call will be added to the version" — the calls
-    // accumulate. A fake that replaced would make a chunked offer look like it
-    // had populated only its last chunk.
+    // Calls accumulate into the version, as documented.
     version.files = { ...version.files, ...files };
-    // Only the hashes not already held are asked for, which is the behaviour
-    // the adapter's upload loop is written against.
     const wanted = [...new Set(Object.values(files))].filter(
       (hash) => !this.held.has(hash),
     );
@@ -414,7 +332,6 @@ export class FakeHosting {
     const name = url.searchParams.get('versionName') ?? '';
     const version = this.versions.get(name);
     if (version === undefined) return json(404, error('no version'));
-    // The product will not serve a draft, so neither will the fake.
     if (version.status !== 'FINALIZED') {
       return json(400, error(`version ${name} is ${version.status}`));
     }
@@ -458,7 +375,6 @@ function error(message: string): unknown {
   return { error: { message, status: 'NOT_FOUND' } };
 }
 
-/** A refusal because the request itself was malformed, not because of state. */
 function invalid(message: string): unknown {
   return { error: { message, status: 'INVALID_ARGUMENT' } };
 }

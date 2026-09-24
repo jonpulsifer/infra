@@ -1,15 +1,6 @@
 /**
- * The upload boundary's one container.
- *
- * The defect these cover is not a wrong value, it is a *late* refusal: a ZIP
- * was accepted, staged, signed for, dispatched, and died inside the builder at
- * `tar: This does not look like a tar archive`, reported back four steps later
- * as `ARTIFACT_UNAVAILABLE` — a platform fault for a container-format mistake,
- * after a workflow run had already been spent.
- *
- * So the assertions worth making are about what a *builder* would find. A test
- * that only checked "the function returned some bytes" is the test that was
- * already passing while a static App could not be uploaded as a ZIP at all.
+ * Upload archive normalization, checked against what a builder extracts. A bad
+ * container has to be refused at upload, before a build is spent on it.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -27,10 +18,7 @@ import {
 import { zipOf } from '../fixtures/zip.ts';
 import { bytes, tar, tarball } from '../harness/tar.ts';
 
-/**
- * Read the produced tar the way an extractor does, so the assertions are about
- * an archive rather than about this module's own idea of one.
- */
+/** Parses the tar independently of the module under test. */
 function tarEntries(
   gzipped: Uint8Array,
 ): { path: string; text: string; mode: number; type: string }[] {
@@ -43,8 +31,8 @@ function tarEntries(
     const header = tar.subarray(at, at + 512);
     if (header.every((byte) => byte === 0)) break;
 
-    // The checksum, verified rather than assumed: it is the one field that
-    // makes `tar` call an archive corrupt, and the one a writer gets wrong.
+    // `tar` calls an archive corrupt on a bad header checksum, which sums the
+    // header with its own field read as spaces.
     const declared = Number.parseInt(
       decoder.decode(header.subarray(148, 156)).replace(/\0.*$/, '').trim(),
       8,
@@ -113,8 +101,7 @@ describe('normalizeArchive', () => {
     );
 
     expect(normalized.from).toBe('zip');
-    // Named for what it now is: the depot object is content-addressed with this
-    // extension, and calling a tarball `.zip` is how the next reader is misled.
+    // The depot object keeps this extension, so it names the new container.
     expect(normalized.filename).toBe('deck.tar.gz');
     expect(sniffArchiveFormat(normalized.bytes)).toBe('gzip');
 
@@ -184,8 +171,6 @@ describe('normalizeArchive', () => {
     expect(thrown).toBeInstanceOf(ArchiveFormatError);
     const error = thrown as ArchiveFormatError;
     expect(error.code).toBe('UNKNOWN_FORMAT');
-    // The refusal has to name the real cause. `ARTIFACT_UNAVAILABLE` four steps
-    // later is the failure this whole module exists to stop.
     expect(error.message).toContain('gzipped tar');
     expect(error.message).toContain('3c 21 64 6f');
   });
@@ -218,9 +203,8 @@ describe('normalizeArchive', () => {
 });
 
 /**
- * One upload per format the boundary accepts, keyed by the union itself: a new
- * member of {@link ArchiveFormat} fails the typecheck here until it has a
- * sample, and then has to survive the extraction below like the others.
+ * Keyed by {@link ArchiveFormat}, so a new format fails the typecheck until it
+ * has a sample.
  */
 const ACCEPTED: Record<ArchiveFormat, Uint8Array> = {
   gzip: tarball([{ name: 'index.html', bytes: bytes('hi') }]),
@@ -239,9 +223,7 @@ describe('the wire format of a staged bundle', () => {
       jobs: { build: { steps: { name?: string; run?: string }[] } };
     };
     const step = document.jobs.build.steps.find((s) => s.name === FETCH_STEP);
-    // The half of the contract that lives outside this repository's type
-    // system. Change the fetcher to open something else and the samples below
-    // stop describing what a builder receives.
+    // The builder's half of the contract, which no type checks.
     expect(step?.run).toContain('| tar -xz');
   });
 
@@ -250,9 +232,7 @@ describe('the wire format of a staged bundle', () => {
       const normalized = normalizeArchive(`upload.${format}`, upload);
       const workspace = await mkdtemp(join(tmpdir(), 'spindrift-bundle-'));
       try {
-        // Real tar, not this suite's reader: the failure being pinned is a
-        // builder saying `This does not look like a tar archive`, and only the
-        // program that says it can prove it will not.
+        // The real `tar` binary, because it is what a builder runs.
         const proc = Bun.spawn(['tar', '-xz', '-C', workspace], {
           stdin: normalized.bytes,
           stdout: 'pipe',
@@ -275,11 +255,8 @@ describe('the wire format of a staged bundle', () => {
 });
 
 describe('canonical gzip framing', () => {
-  // The instability being pinned: two fetches of the same commit whose gzip
-  // wrappers disagree — a different compression level here, a header mtime
-  // there — while the tar inside is byte-identical, the way `git archive`
-  // makes it. §16 digests the staged bytes, so without re-framing these would
-  // be two depot objects holding the same source.
+  // Two fetches of one commit can wrap an identical tar at different gzip
+  // levels or header mtimes, and the staged bytes are what gets digested.
   const tarBytes = tar([
     { name: 'repo-abc123/README.md', bytes: bytes('hello') },
     { name: 'repo-abc123/build.sh', bytes: bytes('#!/bin/sh\n') },
@@ -299,16 +276,13 @@ describe('canonical gzip framing', () => {
   });
 
   test('the tar inside is untouched', () => {
-    // The §16 chain depends on this: the digest describes bytes whose *tar*
-    // content is exactly what the host archived, so `tar -xz` in the build
-    // hull extracts the same tree whichever wrapper the fetch arrived in.
     const framed = canonicalGzip(Bun.gzipSync(tarBytes, { level: 3 }));
     expect(new Uint8Array(gunzipSync(framed))).toEqual(tarBytes);
   });
 
   test('re-framing its own output is the identity', () => {
-    // Staging the same commit twice runs the fetch twice; the second pass must
-    // land on the first pass's digest or the depot grows an object per fetch.
+    // A re-staged commit must land on the same digest, or the depot grows an
+    // object per fetch.
     const once = canonicalGzip(Bun.gzipSync(tarBytes));
     expect(canonicalGzip(once)).toEqual(once);
   });

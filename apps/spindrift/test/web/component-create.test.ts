@@ -1,18 +1,5 @@
-/**
- * What the Components card posts when it adds a Component, and what the press
- * that first deploys the new row names (ticket 118, §2).
- *
- * `createComponentInput` is a `.strict()` discriminated union
- * (`src/commands/components/create.ts:68-98`), so the fields a kind does not
- * take are not fields the command ignores — they are a validation failure. That
- * makes the composition a claim worth pinning, and it is asserted against the
- * schema itself: a shape this file thought was right and the command refused
- * would be a test agreeing with the bug.
- *
- * Against `componentCreation` rather than the mounted screen, for the reason
- * `test/web/workspace-refresh.test.ts` states: reaching it there means pressing
- * a kind tile, and `test/harness/dom.ts` simulates no clicks.
- */
+// `createComponentInput` is a strict discriminated union: a field a kind does
+// not take is refused, not ignored, so each payload is checked against it.
 import { describe, expect, test } from 'bun:test';
 import { createComponentInput } from '../../src/commands/components/create.ts';
 import type { WorkspaceView } from '../../src/commands/views.ts';
@@ -25,7 +12,6 @@ import { WORKSPACE_SCENARIOS } from '../fixtures/scenarios.ts';
 
 const APP_ID = '3f0f2f2a-6d2a-4a1a-9f3e-2a5b1c0d4e6f';
 
-/** The command's own schema, as the dispatcher applies it. */
 const accepted = (input: unknown) => createComponentInput.safeParse(input);
 
 describe('what the Components card posts', () => {
@@ -67,9 +53,7 @@ describe('what the Components card posts', () => {
     });
     expect(accepted(scheduled).success).toBe(true);
 
-    // Absent rather than empty: §7 renders an unscheduled job as a suspended
-    // CronJob, and `''` is not a five-field cron expression — the schema says
-    // so, which is why the form must not send one.
+    // Omitted, not empty: `''` is not a cron expression.
     const unscheduled = componentCreation(APP_ID, {
       name: 'nightly',
       kind: 'job',
@@ -80,8 +64,6 @@ describe('what the Components card posts', () => {
   });
 
   test('an entrypoint travels on every kind, and is absent when nothing was typed', () => {
-    // The field a second Component off one image is usually the whole of: the
-    // App is one scope, so the sibling builds the same tree.
     const worker = componentCreation(APP_ID, {
       name: 'worker',
       kind: 'service',
@@ -90,9 +72,7 @@ describe('what the Components card posts', () => {
     expect(worker).toMatchObject({ command: ['node', 'job.js'] });
     expect(accepted(worker).success).toBe(true);
 
-    // Absent rather than null or empty, the same way an unscheduled job omits
-    // `schedule`: `argv` refuses `[]`, so a form that sent one for an empty
-    // field would be refused after the press.
+    // Omitted, not empty: `argv` refuses `[]`.
     const plain = componentCreation(APP_ID, {
       name: 'worker',
       kind: 'service',
@@ -110,9 +90,6 @@ describe('what the Components card posts', () => {
   });
 
   test('the strictness this composition exists for', () => {
-    // The failure a single flat payload would produce: a schedule on a service
-    // is refused outright, so "send everything and let the command sort it out"
-    // is not a shape this command has.
     const service = componentCreation(APP_ID, { name: 'web', kind: 'service' });
     expect(accepted({ ...service, schedule: '0 3 * * *' }).success).toBe(false);
   });
@@ -121,12 +98,10 @@ describe('what the Components card posts', () => {
 describe('the Target a first Deploy names', () => {
   const placed: WorkspaceView = WORKSPACE_SCENARIOS.service;
 
-  /** The App as it reads with a Component added beside the placed one. */
   const withAnUnplacedSelection = (): WorkspaceView => ({
     ...placed,
-    // The selection is the new row, so the workspace carries no placement of
-    // record — which is exactly the state `getAppWorkspace` answers with for a
-    // Component `createComponent` has just written.
+    // No placement of record, as `getAppWorkspace` answers for a Component
+    // `createComponent` just wrote.
     componentId: 'component-nightly',
     targetId: undefined,
     components: [
@@ -144,17 +119,14 @@ describe('the Target a first Deploy names', () => {
   });
 
   test('is the sibling’s, where the selected Component has no placement', () => {
-    // Without this the first press on a Component the card just added is
-    // refused: `deployApp` will not guess a Target, and a first deploy is what
-    // writes one.
+    // `deployApp` will not guess a Target, and a first deploy is what writes one.
     expect(targetForFirstDeploy(withAnUnplacedSelection())).toBe(
       'bluenose/kubernetes',
     );
   });
 
   test('is nothing at all where the selection is placed', () => {
-    // A Target named against an existing placement is a move, and moves go
-    // through `placeComponent` — so the press must not carry one.
+    // A Target against an existing placement is a move, which is `placeComponent`'s act.
     expect(
       targetForFirstDeploy({ ...placed, targetId: 'target-metal' }),
     ).toBeUndefined();

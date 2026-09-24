@@ -1,19 +1,6 @@
-/**
- * The creation screen names its own object partway through, and survives it.
- *
- * `/apps/new` has no id until the draft exists, so the screen starts one and
- * then rewrites the path to `/apps/new/<id>`. Every other screen in the route
- * table is keyed on the id in its path — for the reason `Screen`'s own header
- * gives — and this is the one place that rule turns on itself: the id appearing
- * is not navigation to another draft, it is this draft becoming addressable.
- * Keyed on it, the screen that just started the draft is unmounted and rebuilt,
- * re-reading the draft, the Targets, the repositories and the repository
- * detection, and discarding whatever had been typed in between.
- *
- * So this mounts the route table rather than the screen: the claim is about the
- * key the table writes, and a test rendering `NewAppScreen` itself would supply
- * that key and assert its own prop.
- */
+// `/apps/new` rewrites its path to `/apps/new/<id>` once the draft exists. A
+// screen keyed on that id would remount and re-read everything, so this mounts
+// the route table, which writes the key.
 import {
   afterAll,
   beforeAll,
@@ -43,9 +30,7 @@ const DRAFT_VIEW = {
   ready: true,
 };
 
-/** Every command the mounted table called, in order. */
 let called: string[] = [];
-/** Command names to refuse once, so a retry can be observed answering. */
 let refuseOnce = new Set<string>();
 
 let dom: DomShim;
@@ -111,7 +96,7 @@ beforeEach(() => {
   refuseOnce = new Set();
 });
 
-/** The route table, with the hash router's navigation modelled as a re-render. */
+// The hash router's navigation is modelled as a re-render.
 function mount(initial: string) {
   const container = dom.document.createElement('div');
   let root!: Root;
@@ -141,18 +126,14 @@ describe('a draft becoming addressable', () => {
     await screen.open();
     await screen.settle();
 
-    // The rewrite happened: the draft has an id and the path names it.
     expect(screen.path()).toBe(`/apps/new/${DRAFT_ID}`);
-    // And every read behind the screen was made exactly once. A remount here
-    // costs a second `getCreationDraft`, a second placement resolution, a
-    // second repository list and a second read of the repository.
+    // A remount would repeat each of these reads.
     expect(count('startCreationDraft')).toBe(1);
     expect(count('getCreationDraft')).toBe(0);
     expect(count('listTargets')).toBe(1);
     expect(count('listRepositories')).toBe(1);
     expect(count('inspectRepository')).toBe(1);
 
-    // Still the screen, rather than the placeholder a reload puts back.
     expect(screen.text()).toContain(INITIAL_DRAFT.detection.reason);
     expect(screen.text()).not.toContain('Recovering the draft');
 
@@ -160,8 +141,6 @@ describe('a draft becoming addressable', () => {
   });
 
   test('an addressed draft is read once, without starting one', async () => {
-    // The other direction: opening the URL directly resumes rather than
-    // creating, which is what makes the draft a durable row worth addressing.
     const screen = mount(`/apps/new/${DRAFT_ID}`);
     await screen.open();
     await screen.settle();
@@ -183,7 +162,6 @@ describe('a load that failed', () => {
 
     expect(screen.text()).toContain('the database was asleep');
     expect(screen.text()).toContain('Try again');
-    // And the path was never rewritten, because there is no draft to name.
     expect(screen.path()).toBe('/apps/new');
 
     screen.unmount();

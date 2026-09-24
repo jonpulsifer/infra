@@ -9,14 +9,12 @@ import {
 } from '../../src/web/brand.ts';
 import { Wordmark } from '../../src/web/components/wordmark.tsx';
 
-// Every other test reads the name from the module, so this is the one place
-// the words themselves are pinned.
+// Every other test reads the name from the module; this one pins the words.
 test('the name, as each surface spells it', () => {
   expect(PRODUCT_NAME).toBe('kthx');
   expect(WORDMARK).toBe('kthx');
   expect(WORDMARK_GLYPH).toBe('k');
-  // The machine name is a protocol identifier, deliberately untouched by the
-  // brand a person reads.
+  // A protocol identifier, so it does not follow the brand.
   expect(MACHINE_NAME).toBe('spindrift');
 });
 
@@ -37,13 +35,10 @@ describe('Wordmark', () => {
     );
     expect(markup).toContain('font-mono');
     expect(markup).toContain('text-[15px]');
-    // `font-medium` (500), not `font-semibold` (600) — DM Mono is only imported
-    // at 400 and 500, and 600 is a browser-synthesized faux bold rather than
-    // a real cut of the face.
+    // DM Mono is imported at 400 and 500 only; 600 would be a synthesized bold.
     expect(markup).toContain('font-medium');
     expect(markup).toContain('tracking-tight');
     expect(markup).toContain('truncate');
-    // Never the hero's display face or its clamp.
     expect(markup).not.toContain('font-display');
   });
 
@@ -59,8 +54,6 @@ describe('Wordmark', () => {
 
   test('the underscore is decorative pink; the word alone is what a reader is left to name it by', () => {
     const markup = renderToStaticMarkup(<Wordmark setting="rail" />);
-    // The word is a plain text node ahead of the hidden underscore, not
-    // wrapped in anything a screen reader would skip.
     expect(markup).toMatch(
       new RegExp(`>${WORDMARK}<span aria-hidden="true"[^>]*>_</span>`),
     );

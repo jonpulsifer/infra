@@ -1,21 +1,6 @@
-/**
- * `/mcp`, the command registry over MCP.
- *
- * Two things are worth asserting here and nothing else is. The first is that
- * the tool list *is* the registry — the same set-equality `dispatch.test.ts`
- * makes about routes, because the same drift (a tool that is not a command, a
- * command that is not a tool) is the same failure seen from two sides.
- *
- * The second is that this surface has its own key. A browser cookie must not
- * open it, which is the property the `kind` column exists for and the reason
- * `serve.ts` hands it `resolveAgentToken` rather than `authenticateRequest`.
- * That half is asserted against a real database in
- * `test/auth/agent-token.test.ts`; what is asserted here is that this route
- * reads nothing but its own `authenticate`.
- *
- * No database: every path under test refuses or answers before a handler runs,
- * and `unreachableContext` throws if one does not.
- */
+// The MCP tool list is the command registry, and the route reads nothing but
+// its own `authenticate`, so a browser cookie cannot open it. Every path here
+// refuses or answers before a handler runs; `unreachableContext` throws if one does not.
 import { describe, expect, spyOn, test } from 'bun:test';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { Principal } from '../../src/commands/types.ts';
@@ -85,8 +70,7 @@ describe('the tool list is the registry', () => {
     const { result } = await call(authenticated, 'tools/list');
     for (const tool of result.tools) {
       expect(tool.inputSchema.type).toBe('object');
-      // A model picks a tool off this string; an empty one is a tool it cannot
-      // choose. The name is the floor, and the floor has to be non-empty.
+      // A model chooses a tool by its description.
       expect(tool.description.length).toBeGreaterThan(0);
     }
   });
@@ -199,9 +183,7 @@ describe('an agent token cannot widen its own standing', () => {
 
 describe('protocol', () => {
   test('an unknown tool is a tool result, not a transport error', async () => {
-    // The model is meant to read the sentence and pick a real tool, which it
-    // cannot do if the refusal arrives as a JSON-RPC error it has no handler
-    // for.
+    // As a tool result, the model can read the refusal and pick a real tool.
     const { result } = await call(authenticated, 'tools/call', {
       name: 'noSuchCommand',
       arguments: {},

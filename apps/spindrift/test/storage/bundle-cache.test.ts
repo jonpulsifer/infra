@@ -1,12 +1,7 @@
 /**
- * The commit → bundle index, over real Postgres and a faked depot
- * (`src/storage/bundle-cache.ts`).
- *
- * One claim carries the whole design: **a hit is only ever returned after the
- * depot confirmed the object**. Every way that confirmation can fail to arrive
- * has to come back as a miss rather than as a throw, because the fall-through
- * is the fetch that used to happen unconditionally — a cache is allowed to be
- * cold and is not allowed to fail a deploy.
+ * The commit → bundle index over real Postgres and a faked depot. A hit comes
+ * back only once the depot confirms the object. Every other outcome is a miss,
+ * so a cold cache cannot fail a deploy.
  */
 import { describe, expect, test } from 'bun:test';
 import type { SourceDepot } from '../../src/storage/archives.ts';
@@ -32,12 +27,6 @@ const BUNDLE = {
   retention: 'ephemeral' as const,
 };
 
-/**
- * A depot whose object metadata endpoint answers however the test says.
- *
- * Requests are recorded so "the hit was verified" is an assertion about a call
- * that happened, not an inference from the value that came back.
- */
 function depotFor(
   answer: (url: string) => Response,
   bucket = BUCKET,
@@ -96,8 +85,7 @@ describe('cachedBundle', () => {
   });
 
   test('a bundle the lifecycle rule expired is a miss, not a dead location', async () => {
-    // The founding defect wearing its newest scheme: handing back a `gs://`
-    // address whose object is gone dies at `curl` inside a runner log.
+    // A gone object's `gs://` address would fail at `curl` in the runner.
     const { depot } = expired();
     await rememberBundle(database().db, REPOSITORY, COMMIT, BUNDLE, STAGED_AT);
 
@@ -107,8 +95,8 @@ describe('cachedBundle', () => {
   });
 
   test('a row naming another bucket is a miss', async () => {
-    // An installation that moved `sources.buckets` has rows pointing outside
-    // the bucket its manifest says it stages to (§20).
+    // After `sources.buckets` moves, old rows point outside the bucket the
+    // manifest stages to.
     const { depot, reads } = depotFor(
       () => new Response('{"name":"x"}'),
       'some-other-bucket',

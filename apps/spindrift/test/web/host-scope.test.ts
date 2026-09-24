@@ -1,7 +1,5 @@
-/**
- * Which routes answer for which `Host`, through a real `Bun.serve`: its router
- * matches by path alone, so the property only exists in the served table.
- */
+// Which routes answer for which `Host`, through a real `Bun.serve`: its router
+// matches by path alone, so host scoping exists only in the served table.
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { EnrolmentDeps } from '../../src/auth/enrol.ts';
 import type { GatewayDeps } from '../../src/auth/gateway.ts';

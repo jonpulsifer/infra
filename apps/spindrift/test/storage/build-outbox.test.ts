@@ -1,11 +1,6 @@
 /**
- * The bosun outbox's claim race, over real Postgres (Task: bosun build
- * route).
- *
- * § Testing: "the concurrency design is a claim about transactions and a
- * fake store cannot falsify it." `claim` is `SELECT ... FOR UPDATE SKIP
- * LOCKED`, the identical mechanism `test/reconciler/deploy-loop.test.ts`
- * proves for `claimNextDeploy` — this file is that proof for the outbox.
+ * The bosun build outbox over real Postgres: `claim` races on `FOR UPDATE SKIP
+ * LOCKED`, which a fake store cannot test.
  */
 import { describe, expect, test } from 'bun:test';
 import { createDb } from '../../src/db/client.ts';
@@ -42,8 +37,7 @@ describe('enqueue and claim', () => {
 
     const claimed = await store.claim(['skiff-b']);
     expect(claimed?.id).toBe(wanted);
-    // Nothing left to claim under either class this call could take: the
-    // `skiff-a` row is untouched (wrong class) and `skiff-b`'s is taken.
+    // `skiff-b`'s row is taken, and the `skiff-a` row is the wrong class.
     expect(await store.claim(['skiff-b'])).toBeNull();
   });
 
@@ -118,13 +112,10 @@ describe('lease expiry and reclamation', () => {
     const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
     expect((await store.claim(['skiff-a']))?.id).toBe(id);
 
-    // Well within the lease: reclamation finds nothing, and the row stays
-    // unavailable to a second claimant.
     clock = new Date(clock.getTime() + BUILD_REQUEST_LEASE_MS - 1000);
     await store.reclaimExpired();
     expect(await store.claim(['skiff-a'])).toBeNull();
 
-    // Past the lease: reclamation returns it to PENDING, claimable again.
     clock = new Date(clock.getTime() + 2000);
     await store.reclaimExpired();
     expect((await store.claim(['skiff-a']))?.id).toBe(id);
@@ -139,8 +130,7 @@ describe('lease expiry and reclamation', () => {
     clock = new Date(clock.getTime() + BUILD_REQUEST_LEASE_MS - 1000);
     expect(await store.heartbeat(id)).toBe(true);
 
-    // Had the heartbeat not landed, this moment would already be past the
-    // original lease and reclaimable.
+    // Past the original lease, so only the heartbeat keeps the row claimed.
     clock = new Date(clock.getTime() + BUILD_REQUEST_LEASE_MS - 1000);
     await store.reclaimExpired();
     expect(await store.claim(['skiff-a'])).toBeNull();
@@ -149,7 +139,6 @@ describe('lease expiry and reclamation', () => {
   test('heartbeat on an unclaimed or unknown id answers false', async () => {
     const store = buildOutbox(database().db);
     const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
-    // PENDING, never claimed.
     expect(await store.heartbeat(id)).toBe(false);
     expect(await store.heartbeat(crypto.randomUUID())).toBe(false);
   });
@@ -165,8 +154,7 @@ describe('lease expiry and reclamation', () => {
     const second = await store.claim(['skiff-a']);
     expect(second?.claimant).not.toBe(first?.claimant);
 
-    // The first host is still running, and its heartbeat would otherwise keep
-    // the lease the second host now holds alive under it.
+    // A stale host's heartbeat must not keep the new holder's lease alive.
     expect(await store.heartbeat(id, first!.claimant)).toBe(false);
     expect(await store.heartbeat(id, second!.claimant)).toBe(true);
   });
@@ -176,10 +164,8 @@ describe('lease expiry and reclamation', () => {
     const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
     await store.claim(['skiff-a']);
 
-    // The tolerant window: bosun reaches production on its own auto-upgrade,
-    // so a host that has not learned to send a claimant yet must keep working.
-    // An empty string is what a claim response without the field decodes to on
-    // the Go side, and it means the same thing as sending nothing.
+    // Bosun hosts upgrade on their own schedule, so one that sends no claimant
+    // is served. Go decodes a missing claimant to '', which counts as none.
     expect(await store.heartbeat(id)).toBe(true);
     expect(await store.heartbeat(id, '')).toBe(true);
   });
@@ -224,8 +210,6 @@ describe('complete', () => {
     clock = new Date(clock.getTime() + BUILD_REQUEST_LEASE_MS + 1000);
     await store.reclaimExpired();
 
-    // Nobody holds it yet, so the late result still beats a rerun — that is
-    // the property the unfenced `complete` had and this keeps.
     const second = await store.claim(['skiff-a']);
     const late = { status: 'SUCCEEDED' as const, log: 'late' };
     expect(await store.complete(id, late, first!.claimant)).toBe('conflict');
@@ -290,10 +274,8 @@ describe('stats', () => {
   test('pending count, claimed count, and oldest-pending age, per class', async () => {
     const store = buildOutbox(database().db);
 
-    // skiff-a ends with one DONE (excluded entirely), one CLAIMED, and one
-    // still PENDING — enqueued and claimed in that order, so `claim`'s own
-    // oldest-first rule (proved above) never has two pending rows to choose
-    // between and there is nothing timing-sensitive left to assert.
+    // skiff-a ends with one DONE, one CLAIMED and one PENDING, each claimed
+    // before the next is enqueued, so no claim chooses between pending rows.
     const { id: toComplete } = await store.enqueue({
       class: 'skiff-a',
       request: {},
@@ -302,7 +284,7 @@ describe('stats', () => {
     await store.complete(toComplete, { status: 'SUCCEEDED', log: 'ok' });
 
     await store.enqueue({ class: 'skiff-a', request: {} });
-    await store.claim(['skiff-a']); // leaves nothing PENDING for skiff-a yet
+    await store.claim(['skiff-a']);
 
     const { id: stillPendingA } = await store.enqueue({
       class: 'skiff-a',
@@ -325,7 +307,7 @@ describe('stats', () => {
       claimed: 0,
       oldestPendingAt: (await store.get(stillPendingB))?.createdAt ?? null,
     });
-    // A class with nothing enqueued answers zeroed, not omitted.
+    // A class with nothing enqueued still gets a zeroed entry.
     expect(stats['skiff-c']).toEqual({
       pending: 0,
       claimed: 0,

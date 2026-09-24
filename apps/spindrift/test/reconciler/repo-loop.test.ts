@@ -1,22 +1,6 @@
 /**
- * The repository loop (Task 24, §15).
- *
- * Two of Task 24's three acceptance criteria live here, and both are stated as
- * facts about the database rather than about a return value:
- *
- * - **"An unmerged PR changes nothing."** The configuration pull request is
- *   opened on a branch, and the loop adopts only from the default branch. The
- *   test opens a real transaction through the real client against the fake API,
- *   then reconciles, and asserts that nothing was adopted — the same assertion
- *   whether the PR exists or not.
- * - **"Revoked access sets a frozen state with every Deploy intact."** The test
- *   snapshots every `apps`, `builds`, and `deploys` row, takes access away, and
- *   asserts the snapshot is byte-identical afterwards while the repository is
- *   frozen with a sentence on it.
- *
- * Everything runs against a real Postgres through the harness, because
- * "changes nothing" and "intact" are claims about rows and a fake would be
- * asserting them against itself.
+ * The repository loop over real Postgres. It adopts only from the default
+ * branch, and lost access freezes the repository with every Deploy intact.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -120,7 +104,7 @@ async function connect(
   return { repository: repository!, app: app! };
 }
 
-/** A live Deploy, so "never destroys a Deploy" has something to be about. */
+/** A LIVE Deploy for the access tests to leave intact. */
 async function liveDeploy(appId: string) {
   const db = database().db;
   const [component] = await db
@@ -184,8 +168,7 @@ describe('adopting the default branch', () => {
         proposal: {
           ...proposal,
           source: 'spindrift-file',
-          // The file that settled it, named — this is what the workspace shows
-          // when it says where a Component's kind came from.
+          // The workspace shows this as where the Component's kind came from.
           reason: 'services/api/spindrift.yaml asserts this scope is a service',
           kinds: [
             {
@@ -273,22 +256,20 @@ describe('adopting the default branch', () => {
     expect(pass.outcome === 'rejected' && pass.scopes[0]).toMatchObject({
       outcome: 'invalid',
     });
-    // The previously adopted commit is still what governs: §15 makes the
-    // repository's configuration one transaction, so half of it does not land.
+    // A commit's configuration lands whole or not at all, so the previous
+    // commit still governs.
     expect((await reload(repository.id)).authoritativeCommit).toBe(adopted);
   });
 });
 
-/** Every Spindrift-file read the client made, which `adopt: false` skips. */
+/** Every file-contents read the client made; `adopt: false` skips them. */
 function scopeFileReads(fake: FakeGitHub) {
   return fake.requests.filter((request) => request.path.includes('/contents/'));
 }
 
 /**
- * A repository that has already adopted a commit and has not been looked at
- * since, wearing a default-branch name the far side has moved on from — the
- * three columns the refresh half of a pass owns, all visibly stale, so that
- * "was refreshed" is an assertion rather than a coincidence of the frozen clock.
+ * A repository that adopted `commit`, with all three columns a refresh owns
+ * visibly stale.
  */
 async function alreadyAdopted(fake: FakeGitHub, commit: string) {
   const { repository } = await connect(fake);
@@ -320,21 +301,15 @@ describe('a pass that is not going to dispatch', () => {
       adopt: false,
     });
 
-    // `behind` rather than `unchanged`: there is a commit waiting, and saying
-    // so is the difference between a screen that can render "one push behind"
-    // and one that cannot tell that state from nothing having happened.
+    // `behind`: a commit is waiting, which a screen can show.
     expect(read).toMatchObject({ outcome: 'behind', commit: pushed, adopted });
     const row = await reload(repository.id);
-    // The transition itself is untouched…
     expect(row.authoritativeCommit).toBe(adopted);
-    // …while the facts a screen actually came for are current.
     expect(row.defaultBranch).toBe('main');
     expect(row.reconciledAt).toEqual(NOW);
 
-    // The point of the whole option: the push is still there to be claimed. A
-    // read that advanced the cursor would have cancelled it for good — nothing
-    // dispatches a `behind`, and every later pass would see `head ===
-    // authoritativeCommit` and report `unchanged`.
+    // The push is still there to claim. Nothing dispatches a `behind`, so a
+    // read that advanced the cursor would lose it.
     const claim = await reconcileRepository(loop, await reload(repository.id));
     expect(claim).toMatchObject({ outcome: 'adopted', commit: pushed });
     expect((await reload(repository.id)).authoritativeCommit).toBe(pushed);
@@ -356,13 +331,11 @@ describe('a pass that is not going to dispatch', () => {
       adopt: false,
     });
 
-    // Not an optimisation detail: reading every scope of every repository is
-    // most of what a listing costs, and a pass that is not going to adopt has
-    // nothing to do with what those files say.
+    // Scope file reads are most of what a listing costs, and a pass that will
+    // not adopt has no use for them.
     expect(scopeFileReads(fake)).toEqual([]);
 
-    // And the scope is genuinely there — the adopting pass reads it — so the
-    // empty list above is the option working rather than the fixture being bare.
+    // The adopting pass does read the scope, so the fixture is not bare.
     await reconcileRepository(loop, await reload(repository.id));
     expect(
       scopeFileReads(fake).map((request) => request.path.split('?')[0]),
@@ -384,20 +357,16 @@ describe('claiming a transition exactly once', () => {
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
       'README.md': 'pushed',
     });
-    // This row is not a simulation of the race — it *is* the race. The webhook
-    // pass and the poll pass each `SELECT` the repository before they read the
-    // branch, so the loser is holding exactly this: a row whose
-    // `authoritativeCommit` is the predecessor, read before the winner wrote.
-    // Passing it twice replays that interleaving without threads.
+    // The webhook and poll passes each read the row before the branch, so the
+    // loser holds this stale row. Passing it twice replays that race.
     const observed = await reload(repository.id);
 
     const winner = await reconcileRepository(loop, observed);
     const loser = await reconcileRepository(loop, observed);
 
     expect(winner).toMatchObject({ outcome: 'adopted', commit: pushed });
-    // `unchanged`, not `adopted`: the winner is dispatching this commit, and a
-    // second `adopted` would put a second Build on it — which since ticket 131
-    // is keyed `commit#<millis>` and so cannot be collapsed by the unique index.
+    // A second `adopted` would add a second Build, and its `commit#<millis>`
+    // key keeps the unique index from collapsing it.
     expect(loser).toMatchObject({ outcome: 'unchanged', commit: pushed });
     expect((await reload(repository.id)).authoritativeCommit).toBe(pushed);
   });
@@ -407,10 +376,7 @@ describe('claiming a transition exactly once', () => {
     const first = fake.commitFiles('main', {
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
     });
-    // Nothing adopted yet, so the compare-and-swap has no predecessor to name
-    // and swaps on the column still being null instead. That is a different
-    // `WHERE` from every other adoption, and it is the one every repository
-    // takes exactly once.
+    // With nothing adopted yet, the compare-and-swap matches a null column.
     const { repository } = await connect(fake);
     const loop = await context(fake);
     expect(repository.authoritativeCommit).toBeNull();
@@ -420,8 +386,7 @@ describe('claiming a transition exactly once', () => {
     expect(pass).toMatchObject({ outcome: 'adopted', commit: first });
     expect((await reload(repository.id)).authoritativeCommit).toBe(first);
 
-    // And the null arm is a real condition rather than an unconditional write:
-    // a concurrent pass holding the same pre-adoption row loses it too.
+    // A concurrent pass holding the same pre-adoption row loses the swap.
     const loser = await reconcileRepository(loop, repository);
     expect(loser).toMatchObject({ outcome: 'unchanged', commit: first });
   });
@@ -434,7 +399,6 @@ describe('an unmerged configuration pull request', () => {
     const { repository } = await connect(fake);
     const github = await host(fake);
 
-    // The real client writes the real transaction to its own branch.
     const opened = await openConfigurationPullRequest(
       github,
       { installationId: fake.installationId },
@@ -454,9 +418,8 @@ describe('an unmerged configuration pull request', () => {
       repository,
     );
 
-    // The branch the PR is on carries a Spindrift file. The default branch does
-    // not, so the scope reconciles as absent and the adopted commit is the
-    // default branch's — never the pull request's.
+    // Only the PR branch has the scope file, so the default branch adopts the
+    // scope as absent.
     expect(pass.outcome).toBe('adopted');
     expect(pass.outcome === 'adopted' && pass.scopes[0]?.outcome).toBe(
       'absent',
@@ -473,8 +436,7 @@ describe('an unmerged configuration pull request', () => {
     const loop = await context(fake);
     await reconcileRepository(loop, repository);
 
-    // Merging is somebody moving the default branch, which is the only act §15
-    // treats as authoritative.
+    // A merge moves the default branch, the only authoritative act.
     const merged = fake.commitFiles('main', {
       'README.md': 'unconnected',
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
@@ -489,12 +451,8 @@ describe('an unmerged configuration pull request', () => {
 });
 
 /**
- * `configPullRequest` is written once, when the configuration transaction
- * opens the pull request, and otherwise trusted — merging clears it (above),
- * but nothing used to ask again once it did not. A pull request closed
- * without merging left the column claiming "still open" forever, because the
- * one pass that would have noticed is exactly the one where the branch never
- * moves and every other read here reports `unchanged` (ticket 136).
+ * Each pass checks a recorded configuration pull request, so one closed
+ * unmerged is cleared even though the branch never moves.
  */
 describe('a closed configuration pull request', () => {
   /** A connected repository past its first reconcile, with an open PR on it. */
@@ -502,9 +460,7 @@ describe('a closed configuration pull request', () => {
     fake.commitFiles('main', { 'README.md': 'unconnected' });
     const { repository } = await connect(fake);
     const loop = await context(fake);
-    // The first pass adopts the repository's very first commit, exactly as
-    // every connected repository does — leaving a second pass with nothing on
-    // the branch left to notice.
+    // After the first adoption the branch does not move again.
     await reconcileRepository(loop, repository);
 
     const github = await host(fake);
@@ -535,8 +491,7 @@ describe('a closed configuration pull request', () => {
 
     const pass = await reconcileRepository(loop, await reload(repository.id));
 
-    // The branch never moved, so this is the exact pass that used to leave
-    // the column stuck claiming a merge was still possible.
+    // The branch never moved, so only the pull request check clears it.
     expect(pass.outcome).toBe('unchanged');
     expect((await reload(repository.id)).configPullRequest).toBeNull();
   });
@@ -554,9 +509,7 @@ describe('a closed configuration pull request', () => {
   test('tolerates a deleted pull request as closed', async () => {
     const fake = new FakeGitHub();
     const { loop, repository } = await withOpenPullRequest(fake);
-    // Nothing about the fake models a delete; standing in for one is simply a
-    // number the far side no longer has an answer for — the same `404` a
-    // pull request's own deletion answers with.
+    // The fake has no delete; an unknown number answers the same `404`.
     fake.pulls.length = 0;
 
     const pass = await reconcileRepository(loop, await reload(repository.id));
@@ -598,7 +551,7 @@ describe('losing access', () => {
     expect(row.frozenAt).toEqual(NOW);
     // Source-driven changes stop; nothing that is running is touched.
     expect(await snapshot()).toEqual(before);
-    // And the last known-good configuration still governs.
+    // The last known-good configuration still governs.
     expect(row.authoritativeCommit).not.toBeNull();
   });
 
@@ -646,8 +599,7 @@ describe('losing access', () => {
     fake.accessLost = false;
     const passes = await reconcileAllRepositories(loop);
 
-    // A freeze is a state to recover from, so skipping frozen repositories
-    // would make it permanent until somebody noticed by hand.
+    // Skipping frozen repositories would make a freeze permanent.
     expect(passes).toHaveLength(1);
     expect((await reload(repository.id)).access).toBe('active');
   });
@@ -691,8 +643,7 @@ describe('a verified webhook delivery', () => {
 
     expect(passes).toEqual([]);
     expect((await reload(repository.id)).authoritativeCommit).toBeNull();
-    // Not one call was made: reconciling would have read the default branch and
-    // found nothing new, one round trip later.
+    // No call at all: the default branch cannot have moved.
     expect(fake.requests).toEqual([]);
   });
 
@@ -729,7 +680,6 @@ describe('a verified webhook delivery', () => {
     const row = await reload(repository.id);
     expect(row.access).toBe('frozen');
     expect(row.frozenReason).toBe('the GitHub App installation was deleted');
-    // Nothing else in the delivery path can reach a Deploy.
     expect(await database().db.select().from(deploys)).toHaveLength(1);
   });
 
@@ -764,9 +714,8 @@ describe('a verified webhook delivery', () => {
 });
 
 /**
- * A rename is silent: the host keeps answering the old name, so the poll keeps
- * working, while every push delivery arrives under the new one and matches no
- * row. §15 makes the poll the truth, so the poll is what notices.
+ * The host keeps answering a renamed repository's old name while deliveries
+ * arrive under the new one, so the poll follows the rename.
  */
 describe('a renamed repository', () => {
   test('the poll follows the rename, and a delivery under the new name then matches', async () => {
@@ -791,8 +740,8 @@ describe('a renamed repository', () => {
       head: pushed,
     };
 
-    // Until the poll has looked, the delivery names a repository no row
-    // carries. Nothing is lost — the poll adopts the same commit.
+    // Until the poll looks, the delivery matches no row, and the poll adopts
+    // the same commit.
     expect(await applyWebhookDelivery(loop, delivery)).toEqual([]);
 
     const [poll] = await reconcileAllRepositories(loop);
@@ -831,8 +780,7 @@ describe('a renamed repository', () => {
     fake.rename('example/renamed');
     const pass = await reconcileRepository(loop, await reload(repository.id));
 
-    // The branch never moved, so this is the pass that reports `unchanged` —
-    // and the one a rename without a push has to be caught by.
+    // An `unchanged` pass still follows the rename.
     expect(pass).toMatchObject({
       outcome: 'unchanged',
       fullName: 'example/renamed',
@@ -856,8 +804,8 @@ describe('a renamed repository', () => {
     fake.rename('example/renamed');
     const passes = await reconcileAllRepositories(loop);
 
-    // `full_name` is unique, so the rename cannot land; the pass keeps working
-    // under the stored name rather than throwing the whole fleet's pass away.
+    // `full_name` is unique, so the rename cannot land; the pass keeps the
+    // stored name and the other passes still run.
     expect(passes).toHaveLength(2);
     expect(
       passes.find((pass) => pass.repositoryId === repository.id),
@@ -866,7 +814,7 @@ describe('a renamed repository', () => {
   });
 });
 
-/** Every default-branch ref read the client made — one per pass. */
+/** Every default-branch ref read the client made, one per pass. */
 function refReads(fake: FakeGitHub) {
   return fake.requests.filter((request) =>
     request.path.endsWith('/git/ref/heads/main'),
@@ -874,13 +822,11 @@ function refReads(fake: FakeGitHub) {
 }
 
 /**
- * A push delivery can arrive before the ref it announces is readable. The
- * first pass then reads the previous head, and without a second one the pushed
- * commit costs the full poll interval on the one path that exists to shorten
- * it. One bounded wait and one re-read, never a loop.
+ * A push delivery can arrive before its ref is readable, so a pass that misses
+ * the delivered commit waits once and re-reads once.
  */
 describe('a push the API has not caught up to', () => {
-  /** A repository at `adopted`, with `pushed` ahead of it that the ref does not show yet. */
+  /** A repository at `adopted` whose ref does not show `pushed` yet. */
   async function lagged(fake: FakeGitHub) {
     const adopted = fake.commitFiles('main', {
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
@@ -905,7 +851,7 @@ describe('a push the API has not caught up to', () => {
         defaultBranch: 'main',
         head: pushed,
       },
-      /** A loop whose wait is recorded, and during which the far side catches up. */
+      /** Records each wait, during which the far side catches up. */
       loop: (catchUp: () => void): RepoLoopContext => ({
         db: database().db,
         clock,
@@ -929,9 +875,7 @@ describe('a push the API has not caught up to', () => {
 
     expect(waits).toEqual([PUSH_LAG_RETRY_MS]);
     expect(refReads(fake)).toHaveLength(2);
-    // Both passes are handed on: the dispatcher reads `adopted` and ignores
-    // the rest, and a first pass that adopted something of its own is not
-    // dropped on the floor.
+    // Both passes are returned, so a first pass that adopted something is kept.
     expect(passes.map((pass) => pass.outcome)).toEqual([
       'unchanged',
       'adopted',
@@ -949,7 +893,6 @@ describe('a push the API has not caught up to', () => {
       delivery,
     );
 
-    // One retry, not a loop: two reads, one wait, and the poll gets the rest.
     expect(waits).toEqual([PUSH_LAG_RETRY_MS]);
     expect(refReads(fake)).toHaveLength(2);
     expect(passes.map((pass) => pass.outcome)).toEqual([
@@ -1001,7 +944,7 @@ describe('a push the API has not caught up to', () => {
       delivery,
     );
 
-    // A rate limit is a delay, and retrying into it is what a quota is for.
+    // Retrying into a rate limit would only spend more of the quota.
     expect(waits).toEqual([]);
     expect(passes.map((pass) => pass.outcome)).toEqual(['unavailable']);
   });

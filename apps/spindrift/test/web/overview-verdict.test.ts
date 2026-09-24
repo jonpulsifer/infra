@@ -1,20 +1,6 @@
-/**
- * The one sentence the Overview exists to say.
- *
- * It is computed from counts the screen already had, so the thing worth
- * proving is not arithmetic — it is **precedence**. An installation is rarely
- * in one state: something is red *and* something is moving *and* a Target is
- * unhealthy, all at once, and the banner gets one line. Which fact wins is the
- * whole design, and it is the part a later edit can quietly invert without
- * breaking a render.
- *
- * Every case below is a pair of true facts where only one belongs in the
- * headline.
- */
 import { describe, expect, test } from 'bun:test';
 import { verdict } from '../../src/web/views/operations/overview.tsx';
 
-/** A healthy installation, as the baseline every case perturbs. */
 function counts(overrides: Partial<Parameters<typeof verdict>[0]> = {}) {
   return {
     apps: 6,
@@ -37,7 +23,6 @@ describe('what the banner says', () => {
   });
 
   test('an empty installation is onboarding, not a zero', () => {
-    // Six metric tiles reading 0 is what a fresh install used to arrive at.
     const { headline, lede } = verdict(counts({ apps: 0, liveApps: 0 }));
     expect(headline).toBe('Nothing is running yet.');
     expect(lede).toContain('Create an App');
@@ -53,8 +38,6 @@ describe('what the banner says', () => {
   });
 
   test('the red App says the previous release is still answering', () => {
-    // §18's rule for the deploy screen, applied to the front door: the thing
-    // that makes a failed release survivable is that something is still up.
     const { lede } = verdict(counts({ failedApps: 1, liveApps: 5 }));
     expect(lede).toContain('the one before it is still what answers');
   });
@@ -62,7 +45,6 @@ describe('what the banner says', () => {
 
 describe('which fact wins when several are true', () => {
   test('a failed App outranks anything in flight', () => {
-    // A release that is still trying is not the thing you were paged for.
     const both = verdict(
       counts({ failedApps: 1, liveApps: 4, inFlightApps: 1, runningBuilds: 2 }),
     );
@@ -77,8 +59,6 @@ describe('which fact wins when several are true', () => {
   });
 
   test('an unhealthy Target is named even while everything serves', () => {
-    // The case this branch exists for: nothing is down, and the next Deploy
-    // to that Target will be. Silence here is how that gets found at 3am.
     const { headline, lede } = verdict(counts({ attentionTargets: 1 }));
     expect(headline).toBe('Everything is serving.');
     expect(lede).toContain('1 Target needs attention');
@@ -95,8 +75,7 @@ describe('which fact wins when several are true', () => {
       counts({ inFlightApps: 1, liveApps: 5, runningBuilds: 2 }),
     );
     expect(headline).toBe('All serving. Something shipping.');
-    // In-flight Apps and running Builds are both "moving", counted together —
-    // a reader does not care which layer the movement is in.
+    // In-flight Apps and running Builds count together.
     expect(lede).toContain('3 things are moving');
   });
 
@@ -107,8 +86,7 @@ describe('which fact wins when several are true', () => {
   });
 
   test('failures behind the ledger never claim something is down', () => {
-    // A FAILED Deploy in the ledger with every App serving is the ordinary
-    // aftermath of a rollback. Saying "an App needs you" there is a false page.
+    // Failed Deploys with every App serving are what a rollback leaves behind.
     const { headline, lede } = verdict(
       counts({ failedDeploys: 4, failedBuilds: 2 }),
     );
@@ -136,8 +114,6 @@ describe('the sentence is always a sentence', () => {
       expect(lede.length).toBeGreaterThan(0);
       expect(headline.endsWith('.')).toBe(true);
       expect(lede.endsWith('.')).toBe(true);
-      // A count that reached the copy as `undefined` or `NaN` renders as a
-      // word, and every branch here interpolates at least one.
       expect(lede).not.toContain('undefined');
       expect(lede).not.toContain('NaN');
     }

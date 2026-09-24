@@ -1,20 +1,10 @@
 /**
- * A passkey, in software (Task 37).
- *
- * § Testing: "**fake the far side, not our side**". The far side of an
- * enrolment is the authenticator and the browser in front of it, and this is
- * both — it holds a keypair and emits exactly the fields
- * `src/auth/webauthn.ts` expects a client to send.
- *
- * It signs the way a real authenticator does rather than the way WebCrypto
- * does: ECDSA output is re-encoded as the DER `SEQUENCE` an authenticator
- * emits, so a test using this exercises the decoder that exists because of that
- * mismatch. Signing raw here would let an implementation that cannot verify one
- * real passkey pass every test in the suite.
+ * A software passkey and the browser in front of it: a P-256 keypair that emits
+ * the fields `src/auth/webauthn.ts` expects from a client. Signatures are DER,
+ * as a real authenticator sends them, where WebCrypto signs raw `r || s`.
  */
 import { type Bytes, base64urlEncode, ES256 } from '../../src/auth/webauthn.ts';
 
-/** What a client posts to complete an enrolment. */
 export interface RegistrationResponse {
   readonly credentialId: string;
   readonly publicKey: string;
@@ -23,7 +13,6 @@ export interface RegistrationResponse {
   readonly clientDataJSON: string;
 }
 
-/** What a client posts to complete a sign-in. */
 export interface AssertionResponse {
   readonly credentialId: string;
   readonly authenticatorData: string;
@@ -46,15 +35,12 @@ export interface Authenticator {
 }
 
 export interface CeremonyOptions {
-  /** Override the relying party the ceremony claims to be for. */
   readonly rpId?: string;
-  /** Override the origin `clientDataJSON` names. */
   readonly origin?: string;
-  /** Override the counter the authenticator reports. */
   readonly signCount?: number;
-  /** Emit a ceremony nobody touched the authenticator for. */
+  /** `false` clears the user-present flag. */
   readonly userPresent?: boolean;
-  /** Emit a ceremony that did not locally verify its user. */
+  /** `false` clears the user-verified flag. */
   readonly userVerified?: boolean;
 }
 
@@ -102,7 +88,6 @@ function clientDataJSON(
   );
 }
 
-/** Mint one software passkey bound to a relying party. */
 export async function createAuthenticator(
   options: AuthenticatorOptions,
 ): Promise<Authenticator> {

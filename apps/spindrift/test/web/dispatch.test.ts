@@ -1,18 +1,5 @@
-/**
- * The browser command boundary's two acceptance criteria (Task 36b), plus the
- * property they exist to protect.
- *
- * §21 declines to declare an external API, and the plan takes the cost of one
- * anyway because a React client needs somewhere to call. What makes that
- * survivable is that the surface is **generated**, so this file's real subject
- * is not "does dispatch work" — `test/commands/registry.test.ts` already
- * settles that — but "can this surface grow a route the command layer does not
- * back". The answer has to be no by construction, and these are the assertions
- * that hold it.
- *
- * No database anywhere: every path under test refuses before a handler runs,
- * and `unreachableContext` throws if one does not.
- */
+// The browser command routes are generated from the registry. Every path here
+// refuses before a handler runs; `unreachableContext` throws if one does not.
 import { describe, expect, test } from 'bun:test';
 import { commandNames, isCommandName } from '../../src/commands/registry.ts';
 import type { Principal } from '../../src/commands/types.ts';
@@ -31,13 +18,11 @@ const OPERATOR: Principal = {
   displayName: 'Operator',
 };
 
-/** A boundary with somebody behind it. */
 const authenticated: DispatchDeps = {
   authenticate: async () => ({ kind: 'authenticated', principal: OPERATOR }),
   context: () => context,
 };
 
-/** A boundary with nobody behind it — today's `server.ts`, and Task 37's before. */
 const anonymous: DispatchDeps = {
   authenticate: async () => ({ kind: 'anonymous' }),
   context: () => {
@@ -65,9 +50,6 @@ function post(path: string, body: unknown = {}): Request {
 
 describe('the route table is the registry', () => {
   test('every command is reachable, and nothing else is', () => {
-    // Set equality in one assertion rather than two subset checks: a route
-    // that is not a command and a command that is not a route are the same
-    // failure seen from two sides, and both must be impossible.
     expect(Object.keys(commandRoutes(authenticated)).sort()).toEqual(
       commandNames.map(pathFor).sort(),
     );
@@ -80,8 +62,7 @@ describe('the route table is the registry', () => {
   });
 
   test('the prefix carries no version', () => {
-    // §21's status for this surface is "internal, unversioned". A `/v1` here
-    // is the moment somebody outside starts depending on it.
+    // The surface is internal and unversioned; a `/v1` invites outside callers.
     expect(COMMAND_PATH_PREFIX).not.toMatch(/v\d/);
   });
 
@@ -99,9 +80,8 @@ describe('each command answers on its own route', () => {
   for (const name of commandNames) {
     test(`${name} reaches the command layer`, async () => {
       const handler = routes[pathFor(name)]!;
-      // An array satisfies no command's schema (all expect objects), so the refusal proves
-      // the route found *this* command and handed it to `dispatch`: a route
-      // wired to a name the registry lacks would answer UNKNOWN_COMMAND.
+      // An array fails every command's schema, so INVALID_INPUT proves the route
+      // reached `dispatch`; a name the registry lacks answers UNKNOWN_COMMAND.
       const response = await handler(post(pathFor(name), []));
 
       expect(response.status).toBe(422);
@@ -129,9 +109,7 @@ describe('the surface is session-authenticated', () => {
   }
 
   test('and rejects before it builds a context', async () => {
-    // `anonymous.context` throws. Reaching 401 rather than an exception is
-    // what proves the session check runs first — a boundary that assembled a
-    // context and then checked would leak work to unauthenticated callers.
+    // `anonymous.context` throws, so a 401 proves the session check runs first.
     const name = commandNames[0]!;
     const response = await routes[pathFor(name)]!(post(pathFor(name)));
     expect(response.status).toBe(401);

@@ -1,28 +1,7 @@
 /**
- * A fake edge static-hosting API (§ Seam 2).
- *
- * "A fake of the far-side HTTP API behind the real client, with the test
- * asserting the requests that were made" — so the adapter's real project
- * ensure, its real hashing, its real bucket packing and its real bundle reading
- * all run.
- *
- * Four behaviours are modelled because the adapter depends on all four, and
- * each one is a way a plausible adapter could be wrong:
- *
- * - **The asset store accepts only the minted token.** The account credential is
- *   refused there, and the minted one is refused everywhere else. An adapter
- *   that used one client for both would pass a fake that checked neither and
- *   `401` on every file in production.
- * - **`check-missing` answers only what it does not hold**, which is what makes
- *   redeploying an unchanged site cheap. A fake that always asked for
- *   everything would let an adapter that ignored the answer pass.
- * - **A deployment's manifest may only name hashes the store holds.** This is
- *   the invariant the whole upload exists to satisfy: a manifest naming a hash
- *   nobody uploaded finalizes happily and serves a broken site, so it is
- *   refused here rather than discovered by a person.
- * - **The bundle is served from wherever the artifact says it is**, over the
- *   same injected transport, because the adapter fetching its own artifact is a
- *   real step a fake API alone would leave untested.
+ * The Cloudflare Pages API behind the real adapter. The asset store takes only
+ * the minted upload token, `check-missing` asks only for hashes it lacks, and a
+ * deployment manifest may name only hashes the store holds.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
 import { CLOUDFLARE_ENDPOINT } from '../installation.ts';
@@ -36,60 +15,38 @@ export interface RecordedCloudflareRequest {
 
 export interface FakeCloudflarePagesOptions {
   readonly account?: string;
-  /** Projects that already exist, by name. */
   readonly projects?: readonly string[];
-  /**
-   * A project that appears between the adapter's read and its create.
-   *
-   * The create race: two deploys of a new App, or a retry after a timeout that
-   * did land. The read says missing, the create says conflict, and the desired
-   * state is true either way — so this exists to prove the adapter treats it
-   * that way rather than failing on a project it wanted.
-   */
+  /** Appears between the adapter's read and its create, which then gets 409. */
   readonly appearsBeforeCreate?: string;
-  /** Hashes the store already holds, so it will not ask for them again. */
+  /** Hashes the store already holds, which `check-missing` leaves out. */
   readonly held?: readonly string[];
-  /** The artifact depot, and the bundle every address under it serves. */
+  /** An artifact origin that serves `bytes` at every address. */
   readonly bundle?: {
     readonly origin: string;
     readonly bytes: Uint8Array;
   };
-  /** When set, the list probe `inspect` makes is refused with this. */
+  /** When set, listing projects answers with this. */
   readonly refuseList?: { status: number; body?: unknown };
-  /** When set, minting an upload token is refused with this. */
   readonly refuseToken?: { status: number; body?: unknown };
-  /** When set, creating a deployment is refused with this. */
   readonly refuseDeployment?: { status: number; body?: unknown };
-  /**
-   * When set, deleting a project answers with this instead of removing it —
-   * the arrangement for a destroy that must not report success it did not earn.
-   */
+  /** When set, deleting a project answers with this and keeps the project. */
   readonly refuseDelete?: { status: number; body?: unknown };
   /** When set, adding a domain answers with this. */
   readonly domainAnswer?: { status: number; body?: unknown };
   /**
-   * The status a newly added domain reports.
-   *
-   * Cloudflare answers `initializing` on a first attach and settles to
-   * `active` once the certificate is issued; `blocked` and `error` are
-   * terminal. Defaulting to `active` keeps every test that is not about
-   * issuance saying what it meant.
+   * An added domain's status: Cloudflare reports `initializing` until the
+   * certificate issues, then `active`; `blocked` and `error` are terminal.
    */
   readonly domainStatus?: string;
-  /** Domains already on the project before this adapter touches it. */
+  /** Domains on each project before the adapter runs, by project. */
   readonly domainsAlready?: Readonly<Record<string, readonly string[]>>;
   readonly token?: string;
-  /** The production branch an already-existing project carries. */
+  /** The `production_branch` every project reports. */
   readonly productionBranch?: string;
-  /**
-   * The stage every created deployment reports. Defaults to the deploy stage
-   * having succeeded; a test models a deployment the platform failed by
-   * setting `{ name: 'deploy', status: 'failure' }` here.
-   */
+  /** Every created deployment's stage; defaults to a successful deploy. */
   readonly stage?: { readonly name: string; readonly status: string };
 }
 
-/** One deployment the fake is holding. */
 interface FakeDeployment {
   id: string;
   project: string;
@@ -99,7 +56,7 @@ interface FakeDeployment {
   stage: { name: string; status: string };
 }
 
-/** What `upload-token` mints. Opaque to the adapter, checked by the store. */
+/** What `upload-token` mints and the asset store requires. */
 const UPLOAD_TOKEN = 'minted-upload-token';
 
 export class FakeCloudflarePages {
@@ -107,10 +64,9 @@ export class FakeCloudflarePages {
   readonly requests: RecordedCloudflareRequest[] = [];
 
   private readonly projects = new Set<string>();
-  /** Project → its deployments, newest first. */
+  /** Each project's deployments, newest first. */
   private readonly deployments = new Map<string, FakeDeployment[]>();
-  /** Domains attached, by project — the assertion surface for §9's re-point. */
-  /** Project -> domain name -> status. */
+  /** Project to domain name to status. */
   private readonly domains = new Map<string, Map<string, string>>();
   private readonly held: Set<string>;
   private readonly uploaded = new Set<string>();
@@ -133,30 +89,25 @@ export class FakeCloudflarePages {
     return this.options.account ?? 'example-account';
   }
 
-  /** Mint the token provider the adapter is constructed with. */
+  /** The adapter's token provider, which yields the account credential. */
   token = (): string => this.options.token ?? 'account-credential';
 
-  /** Whether a project exists — the assertion surface for `destroy`. */
   hasProject(project: string): boolean {
     return this.projects.has(project);
   }
 
-  /** The deployment currently serving on one project, if any. */
   serving(project: string): FakeDeployment | undefined {
     return this.deployments.get(project)?.[0];
   }
 
-  /** The file paths the latest deployment serves, sorted. */
   servedPaths(project: string): string[] {
     return Object.keys(this.serving(project)?.manifest ?? {}).sort();
   }
 
-  /** Hashes actually uploaded — what proves the adapter honoured the answer. */
   get uploads(): string[] {
     return [...this.uploaded].sort();
   }
 
-  /** Every deployment ever created — the surface for idempotent re-apply. */
   get deploymentCount(): number {
     return [...this.deployments.values()].reduce(
       (count, held) => count + held.length,
@@ -164,7 +115,6 @@ export class FakeCloudflarePages {
     );
   }
 
-  /** Domains attached to one project (§9). */
   domainsOf(project: string): string[] {
     return [...(this.domains.get(project)?.keys() ?? [])];
   }
@@ -178,8 +128,7 @@ export class FakeCloudflarePages {
   fetch: Fetcher = async (request) => {
     const url = new URL(request.url);
 
-    // The bundle is not part of the hosting API and carries no bearer token:
-    // it is an artifact address, served here so the adapter's own fetch runs.
+    // The bundle is an artifact address outside the hosting API, with no token.
     const bundle = this.options.bundle;
     if (bundle !== undefined && url.origin === new URL(bundle.origin).origin) {
       return new Response(bundle.bytes as unknown as BodyInit);
@@ -204,8 +153,7 @@ export class FakeCloudflarePages {
 
     const authorization = request.headers.get('authorization');
     const store = url.pathname.startsWith('/pages/assets/');
-    // The two credentials are not interchangeable, and neither is accepted
-    // where the other belongs — see the file header.
+    // Each credential is refused where the other belongs.
     const expected = store ? UPLOAD_TOKEN : this.token();
     if (authorization !== `Bearer ${expected}`) {
       return envelope(401, null, [
@@ -255,13 +203,10 @@ export class FakeCloudflarePages {
       if (method === 'POST') {
         const name = (body as { name?: string })?.name ?? '';
         if (name === '') return envelope(400, null, [{ message: 'no name' }]);
-        // Somebody else got there between the read and this call.
         if (this.options.appearsBeforeCreate === name) {
           this.projects.add(name);
         }
-        // Creating a project that exists is a conflict, not a second create. A
-        // fake that quietly succeeded here would let a deploy-once adapter look
-        // idempotent.
+        // An existing name answers 409, as the real API does.
         if (this.projects.has(name)) {
           return envelope(409, null, [
             {
@@ -275,9 +220,7 @@ export class FakeCloudflarePages {
       }
     }
 
-    // Two segments, not one: reading a single domain back is
-    // `/domains/{name}`, and a one-segment pattern silently 404s it at the
-    // router rather than at the handler that knows what it means.
+    // Up to two segments, so `/domains/{name}` reaches its handler.
     const projectMatch = path.match(
       new RegExp(`^${quoted(base)}/([^/]+)((?:/[^/]+){0,2})$`),
     );
@@ -323,9 +266,7 @@ export class FakeCloudflarePages {
 
     if (sub === '/deployments') {
       if (method === 'GET') {
-        // Rendered through the same shape a create answers with. Handing back
-        // the internal row would let an adapter that read a field the real API
-        // does not have pass here and find nothing in production.
+        // The create answer's shape, so a field the real API lacks is absent.
         const page = Number(url.searchParams.get('per_page') ?? '0');
         const all = (this.deployments.get(project) ?? []).map((deployment) =>
           this.asDeployment(deployment),
@@ -350,9 +291,8 @@ export class FakeCloudflarePages {
       return envelope(200, { name, status });
     }
 
-    // Reading one domain back is how the adapter learns what a refused POST
-    // meant: a name already on the project answers here, and one that is not
-    // there does not.
+    // The adapter reads a domain back to learn whether a refused POST means it
+    // is already attached.
     if (sub.startsWith('/domains/') && method === 'GET') {
       const name = decodeURIComponent(sub.slice('/domains/'.length));
       const status = this.domains.get(project)?.get(name);
@@ -365,13 +305,8 @@ export class FakeCloudflarePages {
   }
 
   /**
-   * Accept a bucket of files.
-   *
-   * The key is checked for shape rather than recomputed: the payload carries no
-   * file name, so the extension the real formula folds in is not here to fold.
-   * That half is pinned by a fixed vector in `test/adapters/pages.test.ts`,
-   * where it can be checked against the vendor's own algorithm with no far side
-   * at all.
+   * Checks each key's shape only: the real formula folds in the file extension,
+   * which the payload lacks. `test/adapters/pages.test.ts` pins the formula.
    */
   private upload(body: unknown): Response {
     const files = Array.isArray(body) ? body : [];
@@ -414,7 +349,7 @@ export class FakeCloudflarePages {
       string,
       string
     >;
-    // The invariant the whole upload exists to satisfy — see the file header.
+    // A manifest naming an unheld hash would finalize and serve a broken site.
     const absent = Object.entries(manifest)
       .filter(([, hash]) => !this.held.has(hash))
       .map(([path]) => path);
@@ -462,7 +397,7 @@ export class FakeCloudflarePages {
   }
 }
 
-/** Every answer is enveloped, success included — see `pages/assets.ts`. */
+/** Every answer is enveloped, success included. */
 function envelope(
   status: number,
   result: unknown,

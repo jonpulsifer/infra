@@ -1,12 +1,6 @@
 /**
- * The Target loop (Task 14, §13 and §3).
- *
- * The claim under test is §3's reason for having a loop at all: "**a connect-
- * time snapshot rots**, and the symptom is a Target disabled long after it
- * stopped being incapable." So the load-bearing test here is the last one — a
- * capability changing on the far side changes what can be placed there on the
- * next pass, **without a reconnect**. If that only worked at connect time, every
- * other test in this file could still pass.
+ * The Target loop. Each pass re-inspects every connected Target, so a far-side
+ * capability change reaches candidacy without a reconnect.
  */
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
@@ -89,7 +83,6 @@ function context(registry: AdapterRegistry, clock: Clock): CommandContext {
   };
 }
 
-/** The Target row for the surface named by `(vessel, adapter)`. */
 async function targetRow(
   vessel: string,
   adapter: TargetAdapter = 'kubernetes',
@@ -102,7 +95,7 @@ async function targetRow(
   return rows[0]!.targets;
 }
 
-/** A Target row on its own, freshly named vessel — what `targetValues({ name })` used to give it. */
+/** A Target row on its own freshly named vessel. */
 async function insertNamedTarget(
   name: string,
   overrides: Partial<Parameters<typeof targetValues>[0]> = {},
@@ -116,7 +109,6 @@ async function insertNamedTarget(
   return row!;
 }
 
-/** The boundary a Target sits on — half of what `refreshTarget` inspects. */
 async function vesselOf(id: string) {
   const rows = await database()
     .db.select()
@@ -152,8 +144,6 @@ describe('one pass over every connected Target', () => {
     await insertNamedTarget('gone', { status: 'disconnected' });
 
     expect(await refreshAllTargets(context(registry, clock))).toEqual([]);
-    // Continuing to poll a Target the operator removed would keep someone
-    // else's control plane in the loop's hot path for as long as the row lives.
     expect(of('kubernetes').inspected).toEqual([]);
   });
 
@@ -163,8 +153,7 @@ describe('one pass over every connected Target', () => {
     await insertNamedTarget('cluster', { health: 'unhealthy' });
 
     await refreshAllTargets(context(registry, clock));
-    // Connected and disconnected are the operator's statement. A loop that
-    // could set them would make a disconnect undo itself.
+    // Status is the operator's; a loop that set it could undo a disconnect.
     expect((await targetRow('cluster')).status).toBe('connected');
     expect((await targetRow('cluster')).health).toBe('healthy');
   });
@@ -212,12 +201,8 @@ describe('one pass over every connected Target', () => {
 
 describe('a surface whose vessel states the other kind of address', () => {
   test('says which address is missing instead of asking the adapter', async () => {
-    // The manifest allows this pairing on purpose — which runtimes a boundary
-    // carries is established by probing it, not by a table of surfaces per
-    // kind — so a `cloudrun` surface can sit on a cluster. What it must not do
-    // is reach the adapter: composed from a cluster's address the connection
-    // carries no project, and Cloud Run would request `projects/undefined`
-    // every tick and hand the operator a sentence with `undefined` in it.
+    // The manifest allows a `cloudrun` surface on a cluster, but a cluster's
+    // address carries no project, so the adapter must not be asked.
     const { registry, of } = fakes();
     const clock = ticking();
     const vessel = await insertVessel(database().db, 'kubernetes', {
@@ -232,8 +217,7 @@ describe('a surface whose vessel states the other kind of address', () => {
 
     expect(refresh.health).toBe('unhealthy');
     expect(of('cloudrun').inspected).toEqual([]);
-    // §3's grammar: an unmet checklist item carrying the reason, which is what
-    // makes the Target a non-candidate with something an operator can act on.
+    // The reason lands as an unmet checklist item the operator can act on.
     const stored = await targetRow('cluster', 'cloudrun');
     expect(stored.prerequisites?.[0]?.detail).toContain('states no project');
     expect(stored.prerequisites?.every((item) => !item.met)).toBe(true);
@@ -268,22 +252,20 @@ describe('a capability flip changes candidacy on the next pass', () => {
 
     expect((await place()).suggestedTargetId).not.toBeNull();
 
-    // The far side changes: the cluster loses its route to the secret store.
-    // Nothing about the Target row changes until the loop looks again.
+    // The cluster loses its route to the secret store. The Target row does not
+    // change until the loop looks again.
     of('kubernetes').discover({ reachableSecretStores: [] });
     expect((await place()).suggestedTargetId).not.toBeNull();
 
     clock.advance();
     await refreshAllTargets(ctx());
 
-    // §3: "the symptom is a Target disabled long after it stopped being
-    // incapable" — the loop is what stops that being true in both directions.
     const after = await place();
     expect(after.suggestedTargetId).toBeNull();
     expect(after.options[0]?.candidate).toBe(false);
     expect(after.options[0]?.reasons).toEqual(['STORE_UNREACHABLE']);
 
-    // And back again, still with no reconnect.
+    // Back again, still with no reconnect.
     of('kubernetes').discover({
       reachableSecretStores: ['gcp-secret-manager'],
     });

@@ -1,14 +1,6 @@
 /**
- * `dispatchAutoDeploys` — the opt-in gate, and which act a push asks for (§15).
- *
- * `repo-loop.test.ts` proves what a pass over a repository adopts;
- * `webhook-route.test.ts` proves one delivery reaches this module end to end.
- * This file is about the two decisions that are this module's own: which of
- * the Apps a pass named gets dispatched at all, and — because a push carries a
- * commit and the workspace button does not — which act it is dispatched for.
- * The passes below are synthetic, `RepositoryReconciliation` values built by
- * hand rather than produced by a real reconciliation pass, which is what lets
- * this file vary the adopted commit against the Build on hand.
+ * `dispatchAutoDeploys`: which Apps an adopted pass dispatches, and whether a
+ * push builds its commit or deploys the Build already made from it.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -47,9 +39,7 @@ const manifest = await fixtureManifest();
 const NOW = new Date('2026-07-28T12:00:00.000Z');
 const clock = { now: () => NOW };
 
-/** The commit every `adoptedPass` below says was just pushed. */
 const PUSHED = '1'.repeat(40);
-/** What the App's existing Build was made from — one commit ago. */
 const PREVIOUS = '0'.repeat(40);
 
 /** Records what it was asked to stage; fetches nothing. */
@@ -72,24 +62,8 @@ class FakeSourceStager implements RepositorySourceStager {
 let stager = new FakeSourceStager();
 
 /**
- * An App with a Component, a connected Target, and a Build ready to deploy.
- *
- * A **repo** App, because that is the only kind a push can reach — the archive
- * arm of `setAppAutoDeploy` refuses the opt-in outright, so an archive fixture
- * with `autoDeploy` set is a state the product cannot produce.
- *
- * `builtCommit` is what the existing Build was made from. Passing `PUSHED`
- * makes the App already-built at the commit the pass adopts; the default leaves
- * it one commit behind, which is the ordinary case a push arrives in.
- */
-/**
- * A repository row whose adopted commit is what a pass will claim to carry.
- *
- * Separate from the App because `dispatchAutoDeploys` re-reads
- * `authoritative_commit` before acting: a pass whose commit no longer governs
- * has been overtaken, and skipping it is the point. So a synthetic pass has to
- * name a real repository sitting at the commit it claims, or it is testing the
- * overtaken path by accident.
+ * `dispatchAutoDeploys` skips a pass whose commit no longer governs, so a
+ * synthetic pass needs a repository row at the commit it claims.
  */
 async function repositoryAt(commit: string) {
   const [repository] = await database()
@@ -104,6 +78,10 @@ async function repositoryAt(commit: string) {
   return repository!;
 }
 
+/**
+ * A repo App, the only kind that can opt in, with a placed Component and a
+ * signed Build of `builtCommit`.
+ */
 async function deployableApp(
   autoDeploy: boolean,
   builtCommit: string = PREVIOUS,
@@ -155,9 +133,8 @@ async function deployableApp(
       status: 'SUCCEEDED',
       verifiedBuildLevel: 2,
       signature: testSignature(digest, NOW.toISOString()),
-      // Explicit, and before the frozen clock: the column defaults to the
-      // database's `now()`, which in a test is the real wall clock and
-      // therefore *newer* than every row a dispatch writes at `NOW`.
+      // The column defaults to the database's wall-clock `now()`, which is
+      // newer than every row a dispatch writes at the frozen `NOW`.
       createdAt: new Date(NOW.getTime() - 60_000),
     })
     .returning();
@@ -169,7 +146,7 @@ async function deployableApp(
   };
 }
 
-/** A working `AutoDeployContext` — a real `createDeploy` runs behind it. */
+/** A real `createDeploy` runs behind this context. */
 function context(): AutoDeployContext {
   return {
     db: database().db,
@@ -239,21 +216,17 @@ describe('which act a push asks for', () => {
       result: { ok: true, value: { phase: 'BUILDING' } },
     });
 
-    // The pushed commit is what got staged — not the one the previous Build
-    // was made from, and not `HEAD`.
+    // The pushed commit, never the previous Build's or `HEAD`.
     expect(stager.staged.map((entry) => entry.commit)).toEqual([PUSHED]);
 
-    // A PENDING Build of the pushed commit, beside the one that already
-    // succeeded. Its `#<millis>` suffix is the rerun uniqueness key, so the
-    // commit is read off the base.
+    // A Build `deployApp` writes carries a `#<millis>` uniqueness suffix, so
+    // compare the base commit.
     const rows = await buildsFor(component.id);
     expect(rows).toHaveLength(2);
     const pending = rows.find((row) => row.id !== build.id);
     expect(pending?.status).toBe('PENDING');
     expect(pending?.commit.split('#')[0]).toBe(PUSHED);
 
-    // And crucially: no Deploy of the *previous* commit's artifact, which is
-    // what a push used to produce.
     expect(await deployCountFor(component.id)).toBe(0);
   });
 
@@ -277,7 +250,6 @@ describe('which act a push asks for', () => {
       .from(componentTargetDesired)
       .where(eq(componentTargetDesired.componentId, component.id));
     expect(desired?.desiredBuildId).toBe(build.id);
-    // Nothing was rebuilt: the commit on hand is the commit that was pushed.
     expect(stager.staged).toEqual([]);
     expect(await buildsFor(component.id)).toHaveLength(1);
   });
@@ -289,8 +261,7 @@ describe('which act a push asks for', () => {
       PUSHED,
     );
 
-    // The first pass places it. This is the state an App created from the very
-    // commit the loop is about to adopt lands in.
+    // The first pass places it, as for an App created from the adopted commit.
     await dispatchAutoDeploys(context(), [adoptedPass(repository, [app.id])]);
     expect(await deployCountFor(component.id)).toBe(1);
 
@@ -301,8 +272,6 @@ describe('which act a push asks for', () => {
     expect(again[0]).toMatchObject({
       result: { ok: true, value: { buildId: build.id, phase: 'UNCHANGED' } },
     });
-    // No second Deploy row, and therefore no second re-apply of a
-    // byte-identical artifact.
     expect(await deployCountFor(component.id)).toBe(1);
     expect(await buildsFor(component.id)).toHaveLength(1);
   });
@@ -311,13 +280,12 @@ describe('which act a push asks for', () => {
     stager = new FakeSourceStager();
     const { app, component, repository } = await deployableApp(true);
 
-    // First push: a PENDING Build of the pushed commit.
     await dispatchAutoDeploys(context(), [adoptedPass(repository, [app.id])]);
     const afterFirst = await buildsFor(component.id);
     expect(afterFirst).toHaveLength(2);
 
-    // The same commit adopted again — the webhook and the poll loop racing, or
-    // a redelivery. It must not reset the Build that is already for it.
+    // The webhook and the poll loop can adopt the same commit twice, and the
+    // second must not reset its Build.
     const again = await dispatchAutoDeploys(context(), [
       adoptedPass(repository, [app.id]),
     ]);
@@ -360,10 +328,8 @@ describe('a pass that has been overtaken', () => {
   test('dispatches nothing, because a newer commit already governs', async () => {
     stager = new FakeSourceStager();
     const { app, component, repository } = await deployableApp(true);
-    // The poll loop reconciles the whole fleet before it dispatches any of it,
-    // so this pass can be minutes old on arrival. In that window the webhook —
-    // another process — adopted a newer commit and dispatched it. The row is
-    // what that looks like from here.
+    // A poll pass can be minutes old on arrival, and the webhook may have
+    // adopted a newer commit meanwhile.
     const newer = '3'.repeat(40);
     await database()
       .db.update(repositories)
@@ -374,9 +340,7 @@ describe('a pass that has been overtaken', () => {
       adoptedPass(repository, [app.id], PUSHED),
     ]);
 
-    // Acting on the older commit would stage it, build it, and place it after
-    // the newer one — a rollback nobody asked for. The newer pass is already
-    // doing this work.
+    // Acting on the older commit would roll back the newer one.
     expect(attempts).toEqual([]);
     expect(stager.staged).toEqual([]);
     expect(await buildsFor(component.id)).toHaveLength(1);
@@ -387,8 +351,7 @@ describe('a pass that has been overtaken', () => {
     stager = new FakeSourceStager();
     const { app, component, repository } = await deployableApp(true);
 
-    // Identical to the case above but for the row, which is what makes that one
-    // the guard firing rather than the fixture being inert.
+    // The control for the case above: the same pass with the row unchanged.
     const attempts = await dispatchAutoDeploys(context(), [
       adoptedPass(repository, [app.id], PUSHED),
     ]);
@@ -414,9 +377,6 @@ describe('the opt-in gate', () => {
 
   test('one repository can carry both — only the opted-in App moves', async () => {
     stager = new FakeSourceStager();
-    // One repository, two Apps — which is the premise: the opt-in is a
-    // property of the App, so the same adopted commit must move one and not
-    // the other.
     const shared = await repositoryAt(PUSHED);
     const opted = await deployableApp(true, PUSHED, shared);
     const silent = await deployableApp(false, PUSHED, shared);
@@ -433,9 +393,8 @@ describe('the opt-in gate', () => {
   test('a pass that adopted nothing dispatches nothing, opted in or not', async () => {
     stager = new FakeSourceStager();
     const { app, component, repository } = await deployableApp(true, PUSHED);
-    // The App's own repository, at the commit it has actually adopted — so the
-    // empty result below is the `unchanged` outcome being ignored, and not a
-    // pass this dispatcher would have skipped for naming a stranger.
+    // The App's own repository at its adopted commit, so only the `unchanged`
+    // outcome can explain an empty result.
     const unchanged: RepositoryReconciliation = {
       repositoryId: repository.id,
       fullName: repository.fullName,
@@ -447,8 +406,7 @@ describe('the opt-in gate', () => {
 
     expect(attempts).toEqual([]);
     expect(await deployCountFor(component.id)).toBe(0);
-    // Confirms the App really was eligible, so the empty result above is the
-    // pass being ignored rather than the fixture being wrong.
+    // The App was eligible, so the empty result is the pass being ignored.
     expect(app.autoDeploy).toBe(true);
   });
 

@@ -305,17 +305,12 @@ describe('authenticated attempt stream', () => {
   });
 
   test('events written by the reconciler while no pump is connected are picked up on resume without gaps', async () => {
-    // Simulates a controller restart: the web process was down (or the
-    // WebSocket was disconnected), the reconciler kept writing events, and
-    // then a new web process or a new WebSocket connection picks up from
-    // the last cursor. This proves the durable cursor survives the gap.
     const seeded = await seedAttempt();
     const principal = {
       id: seeded.user.id,
       displayName: seeded.user.displayName,
     };
 
-    // Phase 1: A pump reads the first event and records a cursor.
     await recordBuildEvent(
       database().db,
       {
@@ -347,8 +342,7 @@ describe('authenticated attempt stream', () => {
     expect(firstPage.entries).toHaveLength(1);
     const savedCursor = firstPage.cursor;
 
-    // Phase 2: While no WebSocket is connected (simulating web downtime),
-    // the reconciler writes multiple events. No pump is running.
+    // No socket is connected while these are written.
     await recordBuildEvent(
       database().db,
       {
@@ -377,9 +371,7 @@ describe('authenticated attempt stream', () => {
       { type: 'status', phase: 'APPLYING' },
     );
 
-    // Phase 3: A completely new context (simulating a restarted web
-    // process) resumes from the saved cursor. All events written during
-    // the gap must appear, in order, with no duplicates.
+    // A fresh context stands in for a restarted web process.
     let resumedData: StreamSocketData | null = null;
     const newServer = {
       upgrade: (_request: Request, options: { data: StreamSocketData }) => {
@@ -400,7 +392,6 @@ describe('authenticated attempt stream', () => {
     const resumed = await readStreamPage(resumedData!);
     expect(resumed.kind).toBe('attempt');
     if (resumed.kind !== 'attempt') return;
-    // Exactly the 3 events written during the gap, nothing from before
     expect(resumed.entries).toHaveLength(3);
     expect(resumed.entries.map((e) => e.type)).toEqual([
       'log',
@@ -430,11 +421,9 @@ describe('in-process attempt event notifications', () => {
     notifyAttemptEvent('comp-1');
     expect(wakes).toEqual(['woke']);
 
-    // A second component's events do not wake this listener.
     notifyAttemptEvent('comp-2');
     expect(wakes).toEqual(['woke']);
 
-    // After unsubscribing, no more wakes.
     unsub();
     notifyAttemptEvent('comp-1');
     expect(wakes).toEqual(['woke']);
@@ -461,15 +450,8 @@ describe('in-process attempt event notifications', () => {
   });
 });
 
-/**
- * §17's second pipe, aimed at a job.
- *
- * A job's output belongs to a run, so the subject the socket carries has to say
- * which one. Both directions are asserted, because the failure of each is
- * silent: a job with no run named would tail every run at once, and a service
- * with one named would drop the name and hand back the Component's whole tail
- * under it.
- */
+// Both are refused: otherwise a job with no run named would tail every run, and
+// a service given one would drop it and return its whole tail.
 describe('a job tails one run rather than the Component', () => {
   async function seedJob(): Promise<{
     user: { id: string; displayName: string };
@@ -543,30 +525,19 @@ describe('a job tails one run rather than the Component', () => {
   });
 
   test('a run name that is not one is refused before an adapter sees it', async () => {
-    // The Cloud Run adapter concatenates this into a Cloud Logging filter over
-    // `projects/<vessel>`, joining its clauses with ` AND `. `AND` binds
-    // tighter than `OR`, so a value carrying a quote and an `OR` widens the
-    // filter to every entry the project has — other Apps' output, GCP audit
-    // logs — and the lines render in the run pane of whoever asked for them.
-    // The check is here because this is the one place the value crosses in
-    // from a browser.
+    // The Cloud Run adapter joins this into a Cloud Logging filter with ` AND `,
+    // which binds tighter than `OR`, so a quote and an `OR` would widen it.
     const { user, componentId, targetId } = await seedJob();
 
     for (const attempt of [
       'a" OR timestamp>="2020-01-01T00:00:00Z',
       'nightly-2" OR "x"="x',
-      // `?execution=` is an empty string rather than `null`, so it passes the
-      // "name one to read it" guard and names nothing.
+      // `?execution=` is an empty string, not null, so the missing-run guard passes it.
       '',
       'Nightly-2',
       'nightly_2',
-      // Deliberately narrower than Kubernetes, which names a Job as a DNS
-      // *subdomain*: dots are legal there, and `executions()` lists by label,
-      // so a Job somebody else created can reach the card under a name this
-      // refuses. That is the trade — a name Spindrift cannot have produced
-      // does not get to widen a browser-controlled string on its way into two
-      // query languages, and one row whose log pane will not open is a smaller
-      // failure than one that opens the whole project's.
+      // Narrower than a Kubernetes Job name, which may hold dots: a foreign Job's
+      // log pane may not open, which is safer than a widened filter.
       'blog.nightly-1',
     ]) {
       const { response, upgraded } = await upgrade(

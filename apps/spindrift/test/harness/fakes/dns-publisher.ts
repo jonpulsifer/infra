@@ -1,20 +1,13 @@
-/**
- * A fake `DnsPublisher` (§9).
- *
- * `deploy-loop.ts`'s subject here is *when* it calls `publish`/`withdraw`,
- * never a backend's own write — the real seam that call reaches is
- * `ClusterDnsPublisher`, covered against a fake cluster in
- * `test/adapters/dns-cluster.test.ts`. This one only records.
- */
+/** A `DnsPublisher` that records each call and writes nothing. */
 import type {
   DnsPublisher,
   DnsRecord,
 } from '../../../src/adapters/dns/contract.ts';
 
 export interface FakeDnsPublisherOptions {
-  /** When set, `publish` throws — the far side that refused the write. */
+  /** When set, `publish` records the call and then throws this message. */
   publishThrows?: string;
-  /** When set, `withdraw` throws. */
+  /** When set, `withdraw` records the call and then throws this message. */
   withdrawThrows?: string;
 }
 
@@ -24,9 +17,7 @@ export interface RecordedPublish {
 }
 
 export class FakeDnsPublisher implements DnsPublisher {
-  /** Every `publish`, in call order. */
   readonly published: RecordedPublish[] = [];
-  /** Every `withdraw`, in call order. */
   readonly withdrawn: string[] = [];
 
   constructor(private readonly options: FakeDnsPublisherOptions = {}) {}

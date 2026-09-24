@@ -1,16 +1,4 @@
-/**
- * A fake datastore backend.
- *
- * § Testing: **"Fake the far side, not our side."** This sits exactly at
- * `DatastoreAdapter` — it is the operator that is not there, never a stand-in
- * for anything in core.
- *
- * It does the two things a real operator cannot be asked to do on demand: it
- * **records** every call, so a test can assert what core asked for, and it
- * **replays a scripted state sequence**, so the mid-provision answer §11 calls
- * ordinary — `phase: 'WAITING'`, `connection: null` — is arrangeable without a
- * cluster that happens to be slow that day.
- */
+/** A `DatastoreAdapter` that records each call and replays scripted states. */
 import type {
   DatastoreAdapter,
   DatastoreEngine,
@@ -21,25 +9,18 @@ import type {
 import type { DeployTarget } from '../../../src/adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../../../src/config/manifest.schema.ts';
 
+/** Each `*Throws` makes its method record the call and then throw the message. */
 export interface FakeDatastoreAdapterOptions {
   adapter?: TargetAdapter;
   engines?: readonly DatastoreEngine[];
-  /** When set, `provision` throws — the operator that refused the object. */
   provisionThrows?: string;
-  /** When set, `destroy` throws — the far side refusing to tear down. */
   destroyThrows?: string;
-  /** When set, `observe` throws — the Target that cannot be reached at all. */
   observeThrows?: string;
-  /** What `describe` answers with. Absent means the far side holds no object. */
+  /** What `describe` returns; absent returns `null`, as for no object. */
   describes?: unknown;
-  /** When set, `describe` throws — the same unreachable Target, on the read path. */
   describeThrows?: string;
-  /** When set, `permit` throws — the Target that would not take the policy. */
   permitThrows?: string;
-  /**
-   * When set, `permit` answers `false` — the backend with nothing to write for
-   * this ref, which is a no-op and not a failure.
-   */
+  /** `permit` returns `false`: the backend had nothing to write. */
   permitNoops?: boolean;
 }
 
@@ -47,28 +28,12 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
   readonly adapter: TargetAdapter;
   readonly engines: readonly DatastoreEngine[];
 
-  /** Every `provision`, in call order. */
   readonly provisioned: DatastoreRequest[] = [];
-  /** Every `destroy`, including the repeats that prove idempotence. */
   readonly destroyed: DatastoreRef[] = [];
-  /** Every `observe`, so a test can count the polls a pass actually made. */
   readonly observed: DatastoreRef[] = [];
-  /**
-   * Every `permit`, in call order, with the whole permitted set each time.
-   *
-   * The call count is half the assertion: the loop is supposed to speak to the
-   * far side only when what it knows disagrees with what it last said, so a
-   * pass that changed nothing must appear here not at all.
-   */
   readonly permits: { ref: DatastoreRef; namespaces: readonly string[] }[] = [];
 
-  /**
-   * The states each ref answers with, oldest first, the last one repeating.
-   *
-   * A queue rather than one value because the whole point of the loop is that
-   * a datastore's answer changes between passes: WAITING with no connection,
-   * then LIVE with one.
-   */
+  /** Each ref's states, oldest first; the last one repeats. */
   private readonly states = new Map<DatastoreRef, DatastoreState[]>();
 
   constructor(private readonly options: FakeDatastoreAdapterOptions = {}) {
@@ -77,12 +42,8 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
   }
 
   /**
-   * Script what this ref reports, pass by pass.
-   *
-   * Arrangeable independently of `provision` for the same reason
-   * `FakeDeployAdapter.place` is: "the adapter is the authority on what is
-   * running, not core's memory" is only testable against a far side core never
-   * saw created.
+   * Scripts a ref's states without a `provision` call, as for a far side core
+   * never saw created.
    */
   script(ref: DatastoreRef, ...states: readonly DatastoreState[]): void {
     this.states.set(ref, [...states]);
@@ -113,12 +74,9 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
     }
     const queue = this.states.get(ref);
     if (queue === undefined || queue.length === 0) return null;
-    // The last scripted state repeats: a test that cares about the first two
-    // passes should not have to script the rest.
     return queue.length === 1 ? queue[0]! : queue.shift()!;
   }
 
-  /** Every `describe`, so a test can prove the read path asked at all. */
   readonly described: DatastoreRef[] = [];
 
   async describe(_target: DeployTarget, ref: DatastoreRef): Promise<unknown> {

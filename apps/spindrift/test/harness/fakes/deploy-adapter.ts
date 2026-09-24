@@ -1,16 +1,4 @@
-/**
- * A fake deploy backend (Task 7).
- *
- * § Testing: **"Fake the far side, not our side."** This sits exactly at the
- * adapter contract — it is the cluster that is not there, never a stand-in for
- * anything inside core. Core runs for real against it.
- *
- * It does two things a real backend cannot be asked to do on demand: it
- * **records** the {@link DesiredState} it was handed, so a test can assert what
- * core described, and it **replays a scripted verdict sequence**, so a test can
- * drive any phase progression or failure reason §6 names without arranging a
- * real cluster to misbehave.
- */
+/** A `DeployAdapter` that records each call and replays scripted verdicts. */
 import type {
   DeployAdapter,
   DeployEvent,
@@ -39,89 +27,46 @@ import type {
   DesiredState,
 } from '../../../src/domain/desired-state.ts';
 
-/** One scripted attempt: what to yield along the way, and how it ends. */
 export interface ScriptedAttempt {
   events?: readonly DeployEvent[];
   verdict: DeployVerdict;
 }
 
-/** What the fake was asked to do, in order. */
 export interface RecordedApply {
   target: DeployTarget;
   desired: DesiredState;
 }
 
+/** Each `*Throws` makes its method throw the message. */
 export interface FakeDeployAdapterOptions {
   adapter?: TargetAdapter;
   artifactTypes?: readonly ArtifactType[];
-  /**
-   * One entry per `apply` call. When the script runs out the fake keeps
-   * replaying its last entry rather than throwing, so a test that only cares
-   * about the first attempt does not have to script the rest.
-   */
+  /** One entry per `apply`; the last repeats once the script runs out. */
   script?: readonly ScriptedAttempt[];
-  /**
-   * What `inspect` reports. Partial: whatever is not overridden comes from
-   * {@link CAPABLE_DISCOVERY}, so a test that cares about one capability says
-   * one thing rather than restating the other ten.
-   */
+  /** Overrides on {@link CAPABLE_DISCOVERY} for what `inspect` reports. */
   discovery?: Partial<TargetDiscovery>;
   /** Checklist items to report unmet, with the sentence behind each. */
   unmet?: Readonly<Partial<Record<Prerequisite, string>>>;
-  /** When set, `inspect` throws — the Target that cannot be reached at all. */
+  /** When set, `inspect` throws this message. */
   unreachable?: string;
   /**
-   * When set, `inspect` reports the boundary does not carry this surface.
-   *
-   * The far side saying "there is no such runtime here" — a cloud project with
-   * the service switched off — which is a different answer from a refused read
-   * and has to be arrangeable separately from {@link unreachable} for a test to
-   * tell core's two responses apart.
+   * When set, `inspect` reports the surface absent, as a project with the service
+   * off does, and every prerequisite unmet with this detail.
    */
   surfaceAbsent?: string;
-  /**
-   * When set, `apply` throws instead of returning a verdict.
-   *
-   * §6 contracts `apply` not to throw — "an adapter that cannot place the
-   * workload says so as a `FAILED` verdict, because a thrown error has no reason
-   * and therefore no blame" — but an adapter is code, and code has bugs. Core
-   * has to survive one, so the fake has to be able to be one.
-   */
+  /** The contract forbids `apply` from throwing, but a buggy adapter does. */
   applyThrows?: string;
-  /**
-   * When set, both run verbs refuse with this sentence — the `static` shape.
-   *
-   * §17 gives a backend that runs nothing an explicit refusal rather than an
-   * empty list, so a test about how core handles one needs a fake that can be
-   * that backend without being a different class.
-   */
+  /** When set, `run`, `executions` and `restart` refuse with this. */
   noRuns?: string;
-  /** When set, `run` throws — the far side that was asked correctly and failed. */
   runThrows?: string;
-  /** When set, `restart` throws — the same far side, refusing the other verb. */
   restartThrows?: string;
-  /** When set, `destroy` throws — the far side refusing to tear down what is there. */
   destroyThrows?: string;
-  /** When set, `sweepApp` throws — the container the far side would not remove. */
   sweepThrows?: string;
-  /**
-   * When set, `executions` throws while `run` still works.
-   *
-   * Separate from {@link runThrows} because that is the state this feature's
-   * first day looks like: `list` on batch jobs is a grant the Role has not
-   * reconciled yet, so reading the runs `403`s while starting one would have
-   * worked. A fake that could only fail both could not tell whether core hid
-   * the button because the job is unrunnable or because nobody could look.
-   */
+  /** Fails reading runs while `run` works, as a Role without `list` does. */
   executionsThrows?: string;
 }
 
-/**
- * A Target that passes everything. The fake's default is deliberately capable,
- * so a placement test that wants a Target excluded has to say which capability
- * it is missing — an inert default would exclude Targets for reasons the test
- * never stated.
- */
+/** Passes everything, so a test that excludes a Target names what it lacks. */
 export const CAPABLE_DISCOVERY: TargetDiscovery = {
   arch: ['amd64', 'arm64'],
   gpu: false,
@@ -137,7 +82,7 @@ export const CAPABLE_DISCOVERY: TargetDiscovery = {
   reachableSecretStores: ['gcp-secret-manager'],
 };
 
-/** A clock the fake stamps events with, so a test's assertions stay stable. */
+/** A fixed time for event stamps. */
 const AT = new Date('2000-01-01T00:00:00.000Z');
 
 const DEFAULT_ATTEMPT: ScriptedAttempt = {
@@ -148,29 +93,22 @@ export class FakeDeployAdapter implements DeployAdapter {
   readonly adapter: TargetAdapter;
   readonly artifactTypes: readonly ArtifactType[];
 
-  /** Every `apply`, in call order — the assertion surface §Testing asks for. */
   readonly applied: RecordedApply[] = [];
-  /** Every `destroy`, including the repeats that prove idempotence. */
   readonly destroyed: DeployRef[] = [];
-  /** Every `sweepApp`, by App name — one per Target is what `deleteApp` owes. */
   readonly swept: string[] = [];
 
-  /** Every `inspect`, so a test can prove the loop ran without a reconnect. */
   readonly inspected: DeployTarget[] = [];
 
-  /** Every `run`, in call order — what proves a press reached the backend. */
   readonly runsStarted: DeployRef[] = [];
-  /** What each `run` was started with — the parameters a press carried. */
   readonly runsStartedWith: Readonly<Record<string, string>>[] = [];
-  /** Every `restart`, in call order — the same proof for the other press. */
   readonly restarted: DeployRef[] = [];
 
   private readonly script: readonly ScriptedAttempt[];
   private readonly options: FakeDeployAdapterOptions;
   private attempts = 0;
-  /** What `apply` placed, so `observe` can report it back (§6). */
+  /** What `observe` reports, set by `apply` or `place`. */
   private readonly placed = new Map<DeployRef, ObservedState>();
-  /** The runs each ref has had, oldest first — the platform's own history. */
+  /** Each ref's runs, oldest first. */
   private readonly runs = new Map<DeployRef, JobExecution[]>();
 
   constructor(options: FakeDeployAdapterOptions = {}) {
@@ -180,24 +118,16 @@ export class FakeDeployAdapter implements DeployAdapter {
     this.script = options.script?.length ? options.script : [DEFAULT_ATTEMPT];
   }
 
-  /**
-   * Put a workload on the far side that this fake did not place.
-   *
-   * What `observe` reports has to be arrangeable independently of `apply`, or
-   * "the adapter is the authority on what is running, not core's memory" is
-   * untestable — the only way to tell the two apart is a workload core never
-   * saw placed.
-   */
+  /** Places a workload core never applied, as the far side reports it. */
   place(ref: DeployRef, state: ObservedState): void {
     this.placed.set(ref, state);
   }
 
-  /** How many distinct refs hold a placement — the idempotency surface. */
   get placementCount(): number {
     return this.placed.size;
   }
 
-  /** Change what the next `inspect` reports — a capability flip, mid-test. */
+  /** Merges into what later `inspect` calls report. */
   discover(discovery: Partial<TargetDiscovery>): void {
     this.options.discovery = { ...this.options.discovery, ...discovery };
   }
@@ -212,8 +142,7 @@ export class FakeDeployAdapter implements DeployAdapter {
       throw new Error(this.options.applyThrows);
     }
 
-    // An artifact type this backend never declared is a core bug, and §6 says
-    // so in the adapter's own vocabulary rather than by throwing.
+    // An undeclared artifact type is a core bug, answered as a `FAILED` verdict.
     if (!this.artifactTypes.includes(desired.artifact.type)) {
       const verdict: DeployVerdict = {
         phase: 'FAILED',
@@ -259,14 +188,7 @@ export class FakeDeployAdapter implements DeployAdapter {
     }
   }
 
-  /**
-   * Put a run on the far side that this fake did not start.
-   *
-   * The same reason {@link place} exists: a job's history is the platform's,
-   * and most of it was written by the scheduler rather than by anything core
-   * asked for — so a test about reading runs has to be able to arrange runs
-   * without pressing the button first.
-   */
+  /** Records a run core never started, as a scheduler would. */
   ran(ref: DeployRef, execution: JobExecution): void {
     this.runs.set(ref, [...(this.runs.get(ref) ?? []), execution]);
   }
@@ -283,8 +205,7 @@ export class FakeDeployAdapter implements DeployAdapter {
     }
     const refusal = this.refusalFor(ref);
     if (refusal !== null) return refusal;
-    // The names and never the values, as every real adapter reports a run it
-    // started with parameters ({@link RunOptions}).
+    // Names only, never values, as real adapters report a run's parameters.
     const names = Object.keys(options.env ?? {});
     const execution: JobExecution = {
       name: `${ref}-run-${(this.runs.get(ref)?.length ?? 0) + 1}`,
@@ -296,14 +217,7 @@ export class FakeDeployAdapter implements DeployAdapter {
     return { kind: 'started', execution };
   }
 
-  /**
-   * Restart what is placed under this ref, counting the press.
-   *
-   * The same refusals as the run verbs: a `noRuns` fake stands for a backend
-   * with no process at all, and a ref nothing is placed under has nothing to
-   * bounce. The detail carries the count so a test can tell one press from
-   * two, which is the property a real stamp has.
-   */
+  /** The detail counts restarts per ref, so a test can tell two presses apart. */
   async restart(_target: DeployTarget, ref: DeployRef): Promise<Restarted> {
     this.restarted.push(ref);
     if (this.options.restartThrows !== undefined) {
@@ -347,8 +261,6 @@ export class FakeDeployAdapter implements DeployAdapter {
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     this.inspected.push(target);
     if (this.options.unreachable !== undefined) {
-      // §13's "connect always succeeds" is core's promise, not the adapter's:
-      // the adapter is allowed to fail, and core has to survive it.
       throw new Error(this.options.unreachable);
     }
     const absent = this.options.surfaceAbsent;
@@ -369,14 +281,7 @@ export class FakeDeployAdapter implements DeployAdapter {
     };
   }
 
-  /**
-   * Why this ref has no runs, or `null` when it has.
-   *
-   * A ref nothing was placed under refuses for the same reason `observe`
-   * returns `null` for one: the far side does not have it. Both run verbs share
-   * the answer so a test cannot arrange a fake that would start a run it could
-   * never then list.
-   */
+  /** Shared by `run` and `executions`, so no run starts that cannot be listed. */
   private refusalFor(
     ref: DeployRef,
   ): Extract<JobRuns, { kind: 'none' }> | null {
@@ -392,7 +297,6 @@ export class FakeDeployAdapter implements DeployAdapter {
     return null;
   }
 
-  /** The last scripted attempt repeats once the script is exhausted. */
   private nextAttempt(): ScriptedAttempt {
     const index = Math.min(this.attempts, this.script.length - 1);
     this.attempts += 1;

@@ -1,7 +1,3 @@
-/**
- * The Function editor's snippet catalogue: unique, described, and valid JS
- * once dropped into the placement it claims.
- */
 import { describe, expect, test } from 'bun:test';
 import { SNIPPETS } from '../../src/web/views/functions/snippets.ts';
 

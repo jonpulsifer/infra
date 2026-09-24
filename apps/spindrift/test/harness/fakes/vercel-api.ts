@@ -1,23 +1,7 @@
 /**
- * A fake Vercel API (§ Seam 2).
- *
- * "A fake of the far-side HTTP API behind the real client, with the test
- * asserting the requests that were made" — so the adapter's real upload loop,
- * its real SHA-1 addressing, and its real bundle reading all run.
- *
- * Four behaviours are modelled, because the adapter depends on all four:
- *
- * - **A deployment does not arrive ready.** It reports `QUEUED`, then
- *   `BUILDING`, then whatever it settles on, so an adapter that returned on the
- *   create response would report `LIVE` for a deployment that is still queuing.
- * - **A file is referenced by the SHA-1 of its own bytes.** The upload checks
- *   the digest header against what was sent, so an adapter that offered one hash
- *   and uploaded other bytes fails here rather than in production.
- * - **A deployment may only reference files that were uploaded**, which is what
- *   makes the upload step a step rather than a formality.
- * - **The bundle is served from wherever the artifact says it is**, over the
- *   same injected transport, because the adapter fetching its own artifact is a
- *   real step a fake API alone would leave untested.
+ * A fake Vercel API for the real Vercel adapters. Deployments settle only after
+ * polling, uploads must match their SHA-1 header, and a deployment may
+ * reference only uploaded files.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
 import { VERCEL_ENDPOINT } from '../installation.ts';
@@ -33,14 +17,7 @@ export interface FakeVercelOptions {
   readonly team?: string;
   /** Projects that already exist, by name. */
   readonly projects?: readonly string[];
-  /**
-   * What every created deployment settles on, after queuing and building.
-   *
-   * `READY` is the ordinary case. `ERROR` is what a real build failure looks
-   * like from here, and it is a state rather than a refusal — the create
-   * succeeded and the deployment went red, which is the distinction §6's
-   * verdict has to preserve.
-   */
+  /** Terminal state; a failed build is `ERROR` after a successful create. */
   readonly settlesOn?: 'READY' | 'ERROR' | 'CANCELED';
   /** How many polls a deployment spends short of its terminal state. */
   readonly pollsBeforeSettling?: number;
@@ -52,7 +29,7 @@ export interface FakeVercelOptions {
   readonly refuseDelete?: { status: number; body: unknown };
   /** When set, adding a domain answers with this. */
   readonly domainAnswer?: { status: number; body: unknown };
-  /** See `FakeHosting.bundle` — matched by origin, for the same reason. */
+  /** Served for any URL at `origin`, since artifact URLs carry a digest. */
   readonly bundle?: {
     readonly origin: string;
     readonly bytes: Uint8Array;
@@ -60,20 +37,13 @@ export interface FakeVercelOptions {
   readonly token?: string;
 }
 
-/** One deployment the fake is holding. */
 interface FakeDeployment {
   id: string;
   project: string;
   url: string;
   meta: Record<string, string>;
   files: string[];
-  /**
-   * Whether this deployment was created as prebuilt.
-   *
-   * On the query rather than the body, which is where the real API takes it —
-   * so a fake that read it from the body would let an adapter that never sent
-   * it pass.
-   */
+  /** Read from the create's query, where the real API takes it. */
   prebuilt: boolean;
   /** Polls remaining before it reaches {@link FakeVercelOptions.settlesOn}. */
   pending: number;
@@ -87,16 +57,9 @@ export class FakeVercel {
   private readonly deployments = new Map<string, FakeDeployment>();
   /** Project name → the deployment currently serving production. */
   private readonly production = new Map<string, string>();
-  /** Domains attached, by project — the assertion surface for §9's re-point. */
+  /** Domains attached, by project. */
   private readonly domains = new Map<string, string[]>();
   private readonly uploaded = new Set<string>();
-  /**
-   * Environment variables per project, in insertion order.
-   *
-   * The platform's own constraint modelled rather than assumed: one variable
-   * per `key` per target, so a create whose key is already there is refused —
-   * which is what makes `put`'s delete-then-create the only thing that works.
-   */
   private readonly env = new Map<
     string,
     {
@@ -117,21 +80,16 @@ export class FakeVercel {
     return this.options.team ?? 'example-team';
   }
 
-  /** Mint the token provider the adapter is constructed with. */
+  /** The token provider the adapter is constructed with. */
   token = (): string => this.options.token ?? 'vercel-token';
 
-  /** Whether a project exists — the assertion surface for `destroy`. */
   hasProject(project: string): boolean {
     return this.projects.has(project);
   }
 
   /**
-   * Register the deployment `vercel deploy` would have created.
-   *
-   * The CLI path does not POST `/v13/deployments`, so an injected `deployPrebuilt`
-   * fake calls this to stand up the deployment the adapter then finds by its
-   * meta and polls to `READY` — the same shape `create` produces, without the
-   * upload contract, because the CLI owns the upload on that path.
+   * Registers the deployment `vercel deploy --prebuilt` would create, for an
+   * injected `deployPrebuilt`, since the CLI never POSTs `/v13/deployments`.
    */
   recordPrebuiltDeploy(input: {
     project: string;
@@ -151,23 +109,19 @@ export class FakeVercel {
     return id;
   }
 
-  /** The deployment currently serving production on one project, if any. */
   serving(project: string): FakeDeployment | undefined {
     const id = this.production.get(project);
     return id === undefined ? undefined : this.deployments.get(id);
   }
 
-  /** The file paths the serving deployment holds, sorted. */
   servedPaths(project: string): string[] {
     return [...(this.serving(project)?.files ?? [])].sort();
   }
 
-  /** Whether the serving deployment was created as a prebuilt one. */
   servedPrebuilt(project: string): boolean {
     return this.serving(project)?.prebuilt ?? false;
   }
 
-  /** The environment variables one project holds, for a test to assert on. */
   environment(project: string): { key: string; type: string }[] {
     return (this.env.get(project) ?? []).map(({ key, type }) => ({
       key,
@@ -175,12 +129,11 @@ export class FakeVercel {
     }));
   }
 
-  /** Digests actually uploaded — what proves the upload step ran. */
   get uploads(): string[] {
     return [...this.uploaded].sort();
   }
 
-  /** Every deployment ever created — the surface for idempotent re-apply. */
+  /** Every deployment ever created, serving or not. */
   get deploymentCount(): number {
     return this.deployments.size;
   }
@@ -198,8 +151,7 @@ export class FakeVercel {
   fetch: Fetcher = async (request) => {
     const url = new URL(request.url);
 
-    // The bundle is not part of the platform's API and carries no bearer: it is
-    // an artifact address, served here so the adapter's own fetch runs.
+    // The bundle is an artifact address and carries no bearer token.
     const bundle = this.options.bundle;
     if (bundle !== undefined && url.origin === new URL(bundle.origin).origin) {
       return new Response(bundle.bytes as unknown as BodyInit);
@@ -234,9 +186,7 @@ export class FakeVercel {
     const bytes = new Uint8Array(await request.clone().arrayBuffer());
     const digest = new Bun.CryptoHasher('sha1').update(bytes).digest('hex');
     const claimed = request.headers.get('x-vercel-digest');
-    // The platform checks the digest against the bytes, so the fake does too:
-    // an adapter that referenced one hash and uploaded another would otherwise
-    // create a deployment whose files are not its files.
+    // The platform checks the digest header against the bytes.
     if (claimed !== digest) {
       return json(400, {
         error: {
@@ -293,8 +243,7 @@ export class FakeVercel {
       if (!this.projects.has(project)) return json(404, notFound('no project'));
       const input = body as { key?: string; value?: string; type?: string };
       const held = this.env.get(project) ?? [];
-      // The platform's own refusal, which is the whole reason a put deletes
-      // first: an existing key is a `403`, not an overwrite.
+      // The platform refuses an existing key, so `put` deletes first.
       if (held.some((one) => one.key === input.key)) {
         return json(403, {
           error: {
@@ -406,9 +355,7 @@ export class FakeVercel {
     if (project === '') return json(400, notFound('a deployment needs a name'));
 
     const files = input.files ?? [];
-    // Every referenced file must have been uploaded first: that ordering is the
-    // platform's contract, and an adapter that skipped the upload would
-    // otherwise create a deployment the platform could never serve.
+    // The platform refuses a deployment that references a file not yet uploaded.
     const orphan = files.find((file) => !this.uploaded.has(file.sha));
     if (orphan !== undefined) {
       return json(400, {
@@ -419,7 +366,7 @@ export class FakeVercel {
       });
     }
 
-    // A deployment names the project it creates, exactly as the real API does.
+    // Creating a deployment creates the project it names, as the real API does.
     this.projects.add(project);
     const id = `dpl_${this.next++}`;
     const deployment: FakeDeployment = {
@@ -440,7 +387,7 @@ export class FakeVercel {
     });
   }
 
-  /** One read, which is also one tick of the deployment's progress. */
+  /** Each read advances the deployment by one poll. */
   private read(id: string): Response {
     const deployment = this.deployments.get(id);
     if (deployment === undefined) return json(404, notFound('no deployment'));
@@ -472,10 +419,8 @@ export class FakeVercel {
   private list(url: URL): Response {
     const project = url.searchParams.get('projectId') ?? '';
 
-    // `meta-{key}` filtering, as the real endpoint honours it: across every
-    // deployment of the project, newest first, queued and building included —
-    // which is what lets the adapter's idempotency read find a deployment an
-    // interrupted attempt created moments ago and never finished polling.
+    // The real endpoint applies `meta-{key}` filters to every deployment of the
+    // project, newest first, unfinished ones included.
     const meta = [...url.searchParams.entries()].filter(([key]) =>
       key.startsWith('meta-'),
     );

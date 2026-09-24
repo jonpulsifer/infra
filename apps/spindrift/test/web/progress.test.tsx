@@ -1,16 +1,3 @@
-/**
- * The progress strip, and the one claim it exists to make.
- *
- * Rendered to static markup for the same reason `views.test.tsx` is: every rule
- * here is a statement about what appears on screen in a given state, and none
- * of them is about interaction.
- *
- * The claim that matters is the last one — **a failed deploy whose previous
- * release is still serving does not report the App as down**. §9 never mutates
- * exposure on red, so that pairing is the ordinary shape of a failure, and a
- * strip that painted it all red would be the most frightening wrong thing this
- * screen could say.
- */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { DeployView } from '../../src/commands/views.ts';
@@ -25,10 +12,8 @@ const strip = (stages: Parameters<typeof StageProgress>[0]['stages']) =>
 const screen = (view: DeployView) =>
   renderToStaticMarkup(<DeployDetail view={view} />);
 
-/** The bar's fill, as the inline style states it. */
 const width = (markup: string) => /width:\s*([0-9]+)%/.exec(markup)?.[1];
 
-/** The strip's own summary, which is also what a screen reader is handed. */
 const summary = (markup: string) =>
   /aria-label="Progress: ([^"]*)"/.exec(markup)?.[1];
 
@@ -68,8 +53,6 @@ describe('the bar reports settled work, never a guess', () => {
   });
 
   test('nothing behind a failure is credited as progress', () => {
-    // The two stages after the failure are `done` on the row, which is what a
-    // naive count would add up. A red pipeline stopped where it stopped.
     expect(
       width(
         strip([
@@ -117,8 +100,7 @@ describe('the strip a release renders', () => {
   });
 
   test('a failed build leaves the App up, and says so', () => {
-    // Failed at Build, and `Live` is *queued* rather than failed: the previous
-    // release is still serving, so the App is not down.
+    // `Live` is queued, not failed: a failed deploy leaves the previous release serving.
     const markup = screen(DEPLOY_SCENARIOS.buildFailed as DeployView);
     expect(summary(markup)).toBe(
       'Source done, Build failed, Deploy failed, Live queued',

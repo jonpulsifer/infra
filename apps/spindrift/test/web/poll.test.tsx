@@ -1,20 +1,5 @@
-/**
- * The two things an interval got wrong, and the four answers every screen used
- * to write out by hand — asserted against the chain and the read that replaced
- * them.
- *
- * `setInterval` fired whether or not the last read came back, so the
- * workspace's two-second in-flight cadence stacked requests the moment a read
- * took longer than the gap — and it fired in a hidden tab, so a page left open
- * in another window polled the installation all day. Neither is visible from a
- * screen: both are about *when* a read is issued, which is why this drives the
- * hook itself rather than reaching it through a mounted view.
- *
- * The same goes for what `useRead` decides. Which refusal a screen reporting
- * one shows, and whether a lost request blanks a screen that was readable a
- * second ago, are claims about the hook: thirty screens used to answer them
- * thirty times, and the drift between those copies is what this replaces.
- */
+// Drives `usePoll` and `useRead` directly: when a read is issued is not
+// visible from a mounted screen.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -23,16 +8,9 @@ import { type DomShim, installDomShim } from '../harness/dom.ts';
 
 let shim: DomShim;
 let root: Root;
-/** Set by a case that wants the document to report itself hidden. */
 let visibility: 'visible' | 'hidden' = 'visible';
-/**
- * How the command dispatch answers, per command name and per case.
- *
- * `client.ts` reaches the network through the one `fetch` global and nothing
- * else, so this is the whole seam: a body that is a refusal envelope is the
- * server answering, and a throw is the case `client.ts` reserves for a response
- * that was not the server at all.
- */
+// A refusal envelope is the server answering; a throw is `client.ts`'s case for
+// a response that did not come from the server.
 let answers: Record<string, () => unknown> = {};
 
 beforeEach(() => {
@@ -84,8 +62,7 @@ describe('a read on a cadence', () => {
     act(() => root.render(<Poller read={read} ms={1} />));
     expect(started).toBe(1);
 
-    // Well past several intervals, with the first read still in flight. An
-    // interval would have issued one per tick and queued them behind this.
+    // Several intervals pass with the first read still in flight.
     await act(async () => {
       await Bun.sleep(20);
     });
@@ -110,8 +87,7 @@ describe('a read on a cadence', () => {
     await act(async () => {
       await Bun.sleep(20);
     });
-    // The cadence kept its place — it is the request that is skipped, not the
-    // timer — so nothing was asked of the server for a screen nobody sees.
+    // The timer re-arms; only the request is skipped.
     expect(started).toBe(0);
 
     visibility = 'visible';
@@ -134,10 +110,8 @@ describe('a read on a cadence', () => {
     });
     expect(started).toBe(1);
 
-    // `null` asked for one read per change of `deps`, and returning to the tab
-    // is not one. The screens that choose it — repositories, buckets,
-    // registries — sit in front of a rate limit, which is the whole reason
-    // they are not on a cadence.
+    // `null` reads once per change of `deps`. The screens that use it sit in
+    // front of a rate limit.
     await act(async () => {
       shim.document.dispatch('visibilitychange');
       await Bun.sleep(20);
@@ -156,8 +130,6 @@ describe('a read on a cadence', () => {
     await act(async () => {
       await Bun.sleep(20);
     });
-    // A screen that stops refreshing after one bad response is the failure the
-    // cadence exists to prevent.
     expect(started).toBeGreaterThan(2);
   });
 
@@ -181,7 +153,6 @@ describe('a read on a cadence', () => {
   });
 });
 
-/** The last state the hook rendered with, for a case to assert over. */
 function Reader<Value>({
   read,
   seen,
@@ -279,8 +250,7 @@ describe('a read of one or more commands', () => {
     });
     expect(state).toMatchObject({ type: 'success' });
 
-    // A dropped connection or a proxy serving HTML — not the server answering,
-    // and not a reason to take a live screen away over one bad tick.
+    // A throw is not the server answering, so the screen keeps its value.
     answers.listApps = () => {
       throw new Error('the link went away');
     };
@@ -293,8 +263,7 @@ describe('a read of one or more commands', () => {
       value: [{ apps: ['one'] }],
     });
 
-    // An answer the server gave — the App was deleted from another window, and
-    // continuing to show it as though it were there is the bug.
+    // A refusal is the server answering, so it replaces the value.
     answers.listApps = () => ({
       ok: false,
       failure: { code: 'NOT_FOUND', message: 'no App by that name' },
@@ -332,8 +301,7 @@ describe('a read of one or more commands', () => {
       );
       await Bun.sleep(10);
     });
-    // Nothing to merge with on the first read, which is why the ledgers can
-    // take the fresh cursor on it and keep their own on every one after.
+    // The first read has nothing to merge with.
     expect(state).toMatchObject({
       type: 'success',
       value: [{ apps: ['read 1'] }],

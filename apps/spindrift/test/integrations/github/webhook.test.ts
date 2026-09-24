@@ -1,17 +1,6 @@
 /**
- * The signed repository webhook (Task 24, §15, §21).
- *
- * §21 makes this one of the only externally reachable endpoints, so the tests
- * that matter most are the ones about what it refuses. The load-bearing one is
- * `does not parse an unsigned body`: everything after verification treats the
- * payload as structured data, and a parser that runs before the HMAC matches is
- * a parser the internet can reach.
- *
- * The classification tests exist because §15 gives a delivery exactly three
- * things it can say — the branch moved, access went away, access came back —
- * and everything else has to fall through to `ignored` rather than throw. A
- * repository host adds events over time, and a `500` on this endpoint would be
- * somebody else's product decision becoming this installation's incident.
+ * The signed repository webhook, which the internet can reach. Nothing parses a
+ * body before its HMAC matches, and an unknown event is ignored without an error.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -100,8 +89,7 @@ describe('signature verification', () => {
 
 describe('the whole endpoint', () => {
   test('does not parse an unsigned body', async () => {
-    // Not JSON at all. If verification ran second, the parser would be the
-    // thing that refused this — and the parser would be reachable unsigned.
+    // Not JSON, so a parser running before verification would refuse it first.
     const handled = handleWebhookDelivery(
       {
         event: 'push',
@@ -154,8 +142,7 @@ describe('the whole endpoint', () => {
 
 describe('classification', () => {
   test('a push carries its ref rather than a verdict about it', () => {
-    // Whether this ref is *the* ref is the loop's question: the delivery says
-    // what moved, and only the stored default branch says what matters.
+    // The loop compares the ref against the stored default branch.
     expect(
       parseWebhookDelivery('push', { ...push, ref: 'refs/heads/topic' }),
     ).toMatchObject({ kind: 'push', ref: 'refs/heads/topic' });
@@ -183,8 +170,7 @@ describe('classification', () => {
       ).toEqual({
         kind: 'accessLost',
         installationId: '4242',
-        // Empty means every repository of the installation, which is what a
-        // deletion is: the delivery names an installation, not a list.
+        // Empty means every repository of the installation.
         repositories: [],
         detail,
       });

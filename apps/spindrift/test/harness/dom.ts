@@ -1,44 +1,12 @@
 /**
- * Just enough DOM for `react-dom/client` to mount into.
- *
- * The repo has no jsdom/happy-dom (absent from `package.json`, absent from
- * `bun.lock`, and the Bun runtime has no DOM global of its own), and adding one
- * to run a handful of mounted tests is a dependency the suite does not otherwise
- * need. What follows is not a DOM implementation; it is the subset
- * `react-dom/client`'s host config and the component trees under test actually
- * call — `appendChild`/`insertBefore`/`removeChild`,
- * `setAttribute`/`getAttribute` (Radix reports `data-state` and `hidden`
- * through these rather than through an IDL property, which is what makes them a
- * reliable read), `style` as a plain object, a no-op `addEventListener`
- * (nothing here simulates a click) and a `getBoundingClientRect` that satisfies
- * a layout effect without a layout.
- *
- * **Why a module and not a copy in each file.** Two of them exist now — the
- * mounted route table and the mounted shell — and the second one arrived
- * because a whole feature's only wiring was observed by nothing. A second copy
- * of this shim would be a second answer to "what does React need", and the copy
- * that fell behind would be the one whose test file mysteriously stopped
- * mounting.
- *
- * **Installed and restored per file, never at import.** These are globals: a
- * `document` left on `globalThis` flips every `typeof window !== 'undefined'`
- * feature check in every file that runs afterwards. {@link installDomShim}
- * captures whatever was there — including the keys a caller passes in `extras`
- * — and `restore()` puts all of it back, so a file that installs in `beforeAll`
- * and restores in `afterAll` leaves the suite exactly as it found it.
+ * The subset of the DOM that `react-dom/client` and the trees under test call,
+ * since the repo has no jsdom or happy-dom.
  */
 
 export const ELEMENT_NODE = 1;
 export const TEXT_NODE = 3;
 
-/**
- * `CollapsibleContentImpl` sets a `--radix-collapsible-content-height` custom
- * property alongside ordinary style keys. React DOM routes any `--`-prefixed
- * style key through `style.setProperty` rather than a direct assignment (that
- * split exists for real CSSStyleDeclarations, where custom properties are not
- * reflected as JS properties) — a plain object supports neither, so this is a
- * plain object plus that one method.
- */
+/** React DOM sets `--` custom properties, like Radix's, via `setProperty`. */
 class FakeStyle {
   [key: string]: unknown;
   setProperty(name: string, value: string): void {
@@ -71,9 +39,8 @@ export class FakeNode {
     this.ownerDocument = ownerDocument;
     this.text = text;
     this.namespaceURI = namespaceURI;
-    // `getRootHostContext` reads the container's `tagName` (uppercase, per DOM
-    // convention) to seed the SVG/HTML namespace switch; every other fake node
-    // just carries it for parity.
+    // `getRootHostContext` reads the container's uppercase `tagName` to choose
+    // between the SVG and HTML namespaces.
     this.tagName = tag.toUpperCase();
   }
 
@@ -126,28 +93,14 @@ export class FakeNode {
   removeEventListener(): void {}
 
   /**
-   * Just enough of `HTMLSelectElement.options` to mount a `<select>`.
-   *
-   * React's `updateOptions` runs on every select as it is created — it reads
-   * `node.options` and walks it looking for the one whose `value` matches, so a
-   * select without that collection throws before the tree is ever on screen.
-   * Derived from `childNodes` rather than maintained beside them, so an option
-   * React inserts later is in the list without a second write path.
-   *
-   * Which option ends up marked `selected` is not modelled: nothing here
-   * renders a selection, and `textContent` — what these tests read — carries
-   * every option's label either way.
+   * React's `updateOptions` walks this on every `<select>` it creates. Which
+   * option is `selected` is not modelled.
    */
   get options(): FakeNode[] {
     return this.childNodes.filter((child) => child.tagName === 'OPTION');
   }
 
-  /**
-   * `commitMount` calls this directly on a mounted `input`/`select`/`button`
-   * carrying `autoFocus`, so a tree with an autofocused control does not mount
-   * without it. There is no focus in this shim — `activeElement` stays `null` —
-   * and that is the honest state: nothing here has a viewport to focus into.
-   */
+  /** `commitMount` calls this on an `autoFocus` control. Nothing takes focus. */
   focus(): void {}
 
   getBoundingClientRect() {
@@ -184,24 +137,15 @@ export class FakeNode {
 
 export class FakeDocument {
   readonly nodeType = 9;
-  // Set to `globalThis` once installed as the global `window` —
-  // `commitBeforeMutationEffects` reads focus through
-  // `container.ownerDocument.defaultView.document`, so `defaultView` has to be
-  // the same object as `globalThis.document`'s owner, not a lookalike.
+  // Set to `globalThis` on install: `commitBeforeMutationEffects` reads focus
+  // through `container.ownerDocument.defaultView.document`.
   defaultView: typeof globalThis | undefined;
-  // Read by `getActiveElement`; there is no focus in this shim, and `null` says
-  // so instead of leaving the property (and the `|| doc.body` fallback it
-  // feeds) undefined.
+  // Read by React's `getActiveElement`; `null` means nothing has focus.
   readonly activeElement: null = null;
   readonly body: null = null;
 
-  // React registers a handful of document-level listeners (selection,
-  // composition) alongside the per-root ones, and none of those is ever fired
-  // here. They are recorded rather than dropped because one listener the
-  // product registers *is* worth firing: `usePoll` re-reads on
-  // `visibilitychange`, and a no-op registry made that path untestable — the
-  // existing hidden-tab case passes on the timer re-arming instead, which is a
-  // different mechanism. Only {@link dispatch} fires anything.
+  // Recorded so a test can fire `visibilitychange` at `usePoll`. Only
+  // `dispatch` fires anything.
   private readonly listeners = new Map<string, Set<() => void>>();
 
   addEventListener(type: string, listener: () => void): void {
@@ -214,7 +158,6 @@ export class FakeDocument {
     this.listeners.get(type)?.delete(listener);
   }
 
-  /** Fire what is registered for one event type. Tests only. */
   dispatch(type: string): void {
     for (const listener of [...(this.listeners.get(type) ?? [])]) listener();
   }
@@ -234,39 +177,28 @@ export class FakeDocument {
 }
 
 export interface DomShim {
-  /** The document mounted trees are created from. */
   readonly document: FakeDocument;
-  /** Put every global this replaced back the way it was. */
+  /** Restores every global the shim replaced, `extras` included. */
   restore(): void;
 }
 
 /**
- * Install the shim on `globalThis`.
- *
- * `extras` is where a file states the seams its own tree reaches — a `fetch`, a
- * `WebSocket`, a `location`. They are passed in rather than defaulted because
- * what a stub is allowed to answer is a claim the test is making, and a default
- * answer shared between files would be a claim nobody wrote down.
+ * Restore in the same file: a global `document` flips every `typeof window`
+ * check in files that run later. `extras` adds globals, such as a `fetch`.
  */
 export function installDomShim(extras: Record<string, unknown> = {}): DomShim {
   const document = new FakeDocument();
   const values: Record<string, unknown> = {
     document,
-    // `@radix-ui/react-primitive` does a bare `typeof window !== 'undefined'`
-    // feature check on every mount, and react-dom's own focus-restoration pass
-    // reads `container.ownerDocument.defaultView.document` — both need `window`
-    // to be the same object `document` was installed on.
+    // Radix checks `typeof window`, and react-dom reads focus through
+    // `defaultView.document`, so `window` is the object `document` is on.
     window: globalThis,
-    // `@radix-ui/react-presence` reads this to decide whether an open/close
-    // transition is mid CSS-animation. Nothing here has a stylesheet, so
-    // reporting no `animationName` is correct rather than a stub of convenience.
+    // `@radix-ui/react-presence` reads `animationName`, which stays unset here.
     getComputedStyle: (node: FakeNode) => node.style,
     requestAnimationFrame: (cb: () => void) => setTimeout(cb, 0),
     cancelAnimationFrame: (id: number) => clearTimeout(id),
     IS_REACT_ACT_ENVIRONMENT: true,
-    // react-dom's focus restoration walks into iframes via
-    // `element instanceof window.HTMLIFrameElement`; nothing here ever is one,
-    // but the right-hand side still has to be a real constructor.
+    // react-dom's focus restoration tests `instanceof window.HTMLIFrameElement`.
     HTMLIFrameElement: class {},
     ...extras,
   };

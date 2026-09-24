@@ -1,12 +1,5 @@
-/**
- * The telemetry wrapper must stay transparent to a WebSocket upgrade.
- *
- * It sits between `Bun.serve` and every route, including the two stream
- * upgrades in `src/web/streams.ts`. Those need the `server` argument Bun passes
- * second, and they return `undefined` once Bun owns the socket. A wrapper that
- * forwards only the request, or that reads `.status` off the result, answers 500
- * to every stream — which is a build log page that never updates.
- */
+// A stream upgrade needs the `server` argument Bun passes second and returns
+// `undefined` once Bun owns the socket, so the wrapper must pass both through.
 import { expect, test } from 'bun:test';
 import { instrumentRoutes } from '../../src/web/serve.ts';
 

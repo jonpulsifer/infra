@@ -1,10 +1,3 @@
-/**
- * The shared "any stream is retrying" flag `shell.tsx` reads to show a
- * disconnected banner. The one claim worth a test on its own: membership is
- * idempotent, so a socket that drops twice before its next message — the
- * ordinary shape of `stream-client.ts`'s backoff — never leaves the flag
- * stuck on for one stream while another has long since settled.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   isReconnecting,
@@ -14,6 +7,7 @@ import {
 } from '../../src/web/connection-status.ts';
 
 describe('the shared reconnecting flag', () => {
+  // The stream client marks a stream again on every drop until it settles.
   test('marking the same id twice does not require two settles to clear', () => {
     const id = Symbol('a');
     markReconnecting(id);

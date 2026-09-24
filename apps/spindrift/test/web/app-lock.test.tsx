@@ -1,8 +1,3 @@
-/**
- * The lock banner and the pushed-but-not-live line on the workspace hero (§6,
- * §15). Both are columns the command layer now reports, and a column nobody
- * can see is not done.
- */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { WorkspaceView } from '../../src/commands/views.ts';
@@ -33,7 +28,6 @@ describe('the lock banner', () => {
     expect(markup).toContain('rollback to Build 30 requested');
     expect(markup).toContain('by Operator, 2h ago');
     expect(markup).toContain('Unlock');
-    // Locked already: the control that sets a lock is not offered twice.
     expect(markup).not.toContain('Lock deploys');
   });
 
@@ -79,9 +73,7 @@ describe('pushed but not live', () => {
   });
 
   test('a push App with nothing on its way is told which button ships it', () => {
-    // The switch is on and no Build of the commit exists — after an unlock
-    // that resumed nothing, or a push whose Build failed. The copy reads the
-    // evidence, not the switch.
+    // The copy follows whether a Build was dispatched, not the autoDeploy switch.
     const markup = behind(false, { autoDeploy: true });
     expect(markup).toContain('press Rebuild to ship it');
     expect(markup).not.toContain('a deploy is coming');

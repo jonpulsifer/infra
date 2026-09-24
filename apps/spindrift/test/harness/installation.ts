@@ -1,17 +1,6 @@
 /**
- * The installation a test runs as.
- *
- * §20's extraction contract puts every installation-naming value in the
- * manifest, and `CommandContext` carries one so no command has to read a
- * module-level singleton. That makes "which installation" a per-test choice, and
- * this is where tests make it: the fixture manifest, parsed through the real
- * loader so a schema change that the fixture does not satisfy fails here rather
- * than only in production.
- *
- * `targetValues` exists for the same reason in the other direction. A Target row
- * has required columns a test does not care about — a connection, a health — and
- * restating them at every insert would mean a test asserting something about
- * ranks silently deciding what a healthy Target looks like.
+ * The installation a test runs as, and the connect inputs, vessels and Target
+ * rows that fixtures build on.
  */
 import { join } from 'node:path';
 import { GCP_CREDENTIALS_VAR } from '@repo/archive/federation-credential';
@@ -47,32 +36,19 @@ import { defaultVesselId } from './db.ts';
 
 const FIXTURE = join(import.meta.dir, '../fixtures/installation.example.yaml');
 
-/**
- * The fixture deployment's own credential.
- *
- * §13's federation is not in the manifest — it is read from the
- * `external_account` document the installer chart renders — so a test
- * installation needs a deployment as well as a document. This is that
- * deployment, and pointing the real resolver at it is what makes every test
- * context carry federation the same way a pod does.
- */
+/** The env the chart renders for a deployment, which no manifest carries. */
 export const FIXTURE_DEPLOYMENT_ENV: Record<string, string> = {
   [GCP_CREDENTIALS_VAR]: join(
     import.meta.dir,
     '../fixtures/gcp-credentials.json',
   ),
-  // Where the fixture deployment serves the control plane, which is the passkey
-  // relying party. A deployment fact like the credential above and for the same
-  // reason: the chart renders it from the one `hostname` that also renders the
-  // Gateway and the HTTPRoute, so no authored document carries it.
+  // The control plane's host, which is also the passkey relying party.
   [HOSTNAME_VAR]: 'spindrift.example.test',
   // The tunnel's name for the machine routes, in the fixture's public zone.
   [PUBLIC_HOSTNAME_VAR]: 'spindrift-control.example.test',
   // Another workload's name on the Apps gateway, in the same zone.
   [RESERVED_HOSTNAMES_VAR]: 'kthx.example.test',
-  // What the fixture deployment runs: the chart renders it from the image
-  // digest CD pinned, and a command answering the footer forwards it. Set so a
-  // test can tell a forwarded value from a hard-coded null.
+  // Set so a test can tell a forwarded version from a hard-coded null.
   [VERSION_VAR]: 'sha256:deadbeef0123',
 };
 
@@ -89,27 +65,12 @@ export async function fixtureManifest(): Promise<InstallationManifest> {
   return cached;
 }
 
-/**
- * The same installation as an operator authors it.
- *
- * {@link fixtureManifest} is resolved — the deployment's federation is joined
- * onto it — and the schema refuses that document on the way in. A test writing
- * a manifest wants this one; a test carrying a context wants the resolved one.
- */
+/** The fixture as an operator authors it; the schema refuses the resolved one. */
 export async function authoredFixture(): Promise<AuthoredManifest> {
   return toAuthoredManifest(await fixtureManifest());
 }
 
-/**
- * The connect input a cluster takes, with anything a test cares about
- * overridden.
- *
- * A Kubernetes Target carries more than an endpoint — §6 makes the delivery
- * flavour a Target's own declaration, and the App chart's source is a
- * prerequisite until the OCI swap — and none of it has a default (§20). So the
- * shape lives here once rather than in every test that connects a cluster and
- * does not care which operator it runs.
- */
+/** A cluster's connect input. Its delivery and chart values have no defaults. */
 export function clusterInput(
   overrides: Partial<KubernetesConnectInput> = {},
 ): KubernetesConnectInput {
@@ -123,13 +84,10 @@ export function clusterInput(
       namespace: 'apps',
       sourceRef: { name: 'charts', namespace: 'delivery' },
     },
-    // The edge the ExternalAuth backend below is. Asserted because §3 says
-    // nothing reports it — and `reaches` is left unasserted for the same reason,
-    // so this fixture cluster has an authenticated edge and no tunnel.
+    // The edge the ExternalAuth backend below serves. Nothing reports an edge,
+    // and `reaches` is unset, so this cluster has no tunnel.
     authReaches: ['private'],
-    // A connected cluster names the gateway its routes attach to. Absent, every
-    // Component with a reach is a non-candidate — which is the point of the
-    // check, and would make every fixture here a Target nothing can land on.
+    // Without a gateway, no Component with a reach can land on this cluster.
     chartValues: {
       platform: {
         gateway: { name: 'cluster-gateway', namespace: 'gateway' },
@@ -148,29 +106,20 @@ export function clusterInput(
   };
 }
 
-/** The kubernetes arm of `connectTargetInput`. */
 export type KubernetesConnectInput = Extract<
   ConnectTargetInput,
   { kind: 'cluster' }
 >;
 
-/**
- * The control APIs a connected cloud project is driven through.
- *
- * Constants rather than per-test strings because both a Target's connection and
- * the fake standing behind it have to agree on them: a fake serving one host
- * while the adapter addresses another is a test that fails for a reason nobody
- * would look for. The fakes default to these.
- */
+/** Shared by cloud Target connections and the fakes behind them. */
 export const CLOUD_ENDPOINTS = {
   run: 'https://run.example.test',
   hosting: 'https://hosting.example.test',
   policy: 'https://admission.example.test',
-  /** What fires a scheduled job — not the Target's own control plane. */
+  /** Fires scheduled jobs; not part of the Target's control plane. */
   scheduler: 'https://scheduler.example.test',
 } as const;
 
-/** The connect input a cloud project takes, with anything overridden. */
 export function cloudInput(
   overrides: Partial<CloudConnectInput> = {},
 ): CloudConnectInput {
@@ -181,24 +130,20 @@ export function cloudInput(
     region: 'somewhere',
     runEndpoint: CLOUD_ENDPOINTS.run,
     hostingEndpoint: CLOUD_ENDPOINTS.hosting,
-    // The vessel names one — see `clusters/offsite/apps/spindrift/`. A fixture
-    // that left it out would be a Target no scheduled job can be placed on,
-    // which is a real state but not the ordinary one.
+    // Without one, no scheduled job can be placed on this Target.
     serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
     ...overrides,
   };
 }
 
-/** The cloud arm of `connectTargetInput`. */
 export type CloudConnectInput = Extract<
   ConnectTargetInput,
   { kind: 'gcp-project' }
 >;
 
-/** Where the fake edge platform answers, for the same reason as above. */
+/** Shared by Vercel Target connections and the fake Vercel API. */
 export const VERCEL_ENDPOINT = 'https://vercel.example.test';
 
-/** The connect input a Vercel team takes, with anything overridden. */
 export function vercelInput(
   overrides: Partial<VercelConnectInput> = {},
 ): VercelConnectInput {
@@ -211,22 +156,19 @@ export function vercelInput(
   };
 }
 
-/** The Vercel arm of `connectTargetInput`. */
 export type VercelConnectInput = Extract<
   ConnectTargetInput,
   { kind: 'vercel-team' }
 >;
 
-/** The Cloudflare arm of `connectTargetInput`. */
 export type CloudflareConnectInput = Extract<
   ConnectTargetInput,
   { kind: 'cloudflare-account' }
 >;
 
-/** Where the fake Cloudflare API answers. See {@link CLOUD_ENDPOINTS}. */
+/** Shared by Cloudflare Target connections and the fake Cloudflare API. */
 export const CLOUDFLARE_ENDPOINT = 'https://cloudflare.example.test';
 
-/** The connect input a Cloudflare account takes, with anything overridden. */
 export function cloudflareInput(
   overrides: Partial<CloudflareConnectInput> = {},
 ): CloudflareConnectInput {
@@ -239,13 +181,7 @@ export function cloudflareInput(
   };
 }
 
-/**
- * The **surface** half of a connection, as its adapter needs it.
- *
- * Where the boundary is, and what it can reach, are {@link vesselFor}'s — the
- * same split the row has. A test that needs the flat view an adapter receives
- * composes them with `deployTargetOf`, exactly as core does.
- */
+/** A connection's surface half; {@link vesselFor} is the boundary half. */
 export function connectionFor(adapter: TargetAdapter): TargetConnection {
   switch (adapter) {
     case 'kubernetes': {
@@ -254,9 +190,7 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
         adapter,
         namespace: input.namespace,
         delivery: input.delivery,
-        // Mirrors what the connect act stores, field for field: a helper that
-        // drops one of them makes every "the row holds what was connected"
-        // assertion pass for the wrong reason.
+        // Must match what the connect act stores, field for field.
         ...(input.chartValues === undefined
           ? {}
           : { chartValues: input.chartValues }),
@@ -286,13 +220,8 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
 }
 
 /**
- * Which of the seeded vessels a fixture Target of this adapter sits on.
- *
- * A **fixture convention, not a domain rule.** The domain has no reverse lookup
- * from a surface to a kind of boundary — a project may run a cluster, and which
- * surfaces a vessel carries is what its Targets say — so this is only the
- * arrangement `withIsolatedDatabase` seeds, spelled once so every fixture
- * reaches the same row.
+ * Which seeded vessel a fixture Target of each adapter sits on. A fixture
+ * convention only: the domain maps no surface to a kind of vessel.
  */
 const FIXTURE_VESSEL_KIND = {
   kubernetes: 'cluster',
@@ -306,7 +235,6 @@ export function fixtureVesselKind(adapter: TargetAdapter): VesselKind {
   return FIXTURE_VESSEL_KIND[adapter];
 }
 
-/** The boundary one adapter's surfaces sit on. */
 export function vesselFor(adapter: TargetAdapter): NewVessel {
   const kind = fixtureVesselKind(adapter);
   return {
@@ -316,7 +244,6 @@ export function vesselFor(adapter: TargetAdapter): NewVessel {
   };
 }
 
-/** Where a fixture boundary of this kind is, in its own kind's terms. */
 function fixtureLocation(kind: VesselKind): VesselLocation {
   switch (kind) {
     case 'cluster':
@@ -330,12 +257,6 @@ function fixtureLocation(kind: VesselKind): VesselLocation {
   }
 }
 
-/**
- * A vessel row a Target can reference, inserted and returned.
- *
- * Every Target needs one — `vesselId` is NOT NULL — so this is what most
- * fixtures reach for rather than building the pair by hand.
- */
 export async function insertVessel(
   db: Database,
   adapter: TargetAdapter = 'kubernetes',
@@ -348,13 +269,7 @@ export async function insertVessel(
   return row!;
 }
 
-/**
- * The flat view an adapter receives, composed exactly as core composes it.
- *
- * A test that calls an adapter verb wants this rather than {@link connectionFor}
- * on its own: the surface half alone is not addressable, and building the pair
- * by hand in each test is how the two drift apart.
- */
+/** The flat view an adapter receives, composed as core composes it. */
 export function deployTargetFor(
   adapter: TargetAdapter,
   vesselName = `vessel-${adapter}`,
@@ -371,20 +286,17 @@ export function deployTargetFor(
   );
 }
 
-/** A complete, healthy Target row, with anything a test cares about overridden. */
+/** A complete, healthy Target row; override only what the test asserts. */
 export function targetValues(overrides: Partial<NewTarget> = {}): NewTarget {
   const adapter = overrides.adapter ?? 'kubernetes';
   return {
     adapter,
     rank: 0,
-    // The isolated database seeds one vessel per kind; a Target that wants its
-    // own passes it. See `defaultVesselId`.
+    // The isolated database seeds one vessel per kind.
     vesselId: defaultVesselId(fixtureVesselKind(adapter)),
     connection: connectionFor(adapter),
     health: 'healthy',
-    // The cluster fixture wires an ExternalAuth backend, so it asserts the edge
-    // that backend is. `private` only, and no `reaches` at all: a tunnel is the
-    // thing §3 says nothing reports, so an unasserted Target does not have one.
+    // Matches `clusterInput`: an authenticated private edge and no tunnel.
     ...(adapter === 'kubernetes' ? { authReaches: ['private' as const] } : {}),
     ...overrides,
   };

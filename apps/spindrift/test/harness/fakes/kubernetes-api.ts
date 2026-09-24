@@ -1,27 +1,7 @@
 /**
- * A fake Kubernetes API (Task 17, § Seam 2).
- *
- * "A fake of the far-side HTTP API behind the real client, with the test
- * asserting the requests that were made" — so the adapter's real paths, its
- * real server-side apply, and its real status reading all run. Nothing inside
- * core is faked; this is the cluster that is not there.
- *
- * Four behaviours are modelled because the adapter has to survive them:
- *
- * - **A kind the cluster does not serve answers `404`, and a served kind with
- *   nothing in it answers `200` with an empty `items`.** That distinction is
- *   the whole reason `KubernetesApi.list` returns `null` rather than `[]`, so
- *   `servedKinds` decides it — not whether a test happened to seed anything.
- * - **The controller writes status after the object is applied.** A fake that
- *   returned a ready object immediately would let an adapter that never polled
- *   pass, which is the whole of `apply`'s second half.
- * - **A rejected write answers `4xx` with a body**, because §6 wants the
- *   sentence the developer reads and a fake that returned a bare status code
- *   would leave nothing to read.
- * - **A write is only a server-side apply if it says so.** The content type and
- *   the field manager are what make a `PATCH` an apply rather than some other
- *   patch, and the API server refuses one that omits either — so this does too,
- *   rather than storing whatever it is handed.
+ * The Kubernetes API behind the real adapter. An unserved kind lists 404 and an
+ * empty served one lists 200, status arrives on a later read, and a `PATCH` is
+ * accepted only as a server-side apply.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/kubernetes/api.ts';
 
@@ -33,7 +13,6 @@ export interface RecordedRequest {
   body: unknown;
 }
 
-/** Any object the fake holds, as loosely typed as the API's own JSON. */
 export interface FakeObject {
   apiVersion: string;
   kind: string;
@@ -41,66 +20,39 @@ export interface FakeObject {
   [key: string]: unknown;
 }
 
-/** What one applied object's status becomes, read by read. */
+/** An object's `status` on its nth read, or `null` for none. */
 export type StatusScript = (reads: number) => Record<string, unknown> | null;
 
 export interface FakeKubernetesOptions {
-  /**
-   * Kinds this cluster serves, as `group/version` → kind names.
-   *
-   * The core group is served by every cluster and is therefore not a question
-   * a test has to answer; anything listed here for `v1` is served in addition
-   * to {@link CORE_KINDS}.
-   */
+  /** `group/version` to kind names; `v1` entries add to {@link CORE_KINDS}. */
   servedKinds?: Record<string, string[]>;
   /** Objects that already exist, keyed by `plural/namespace/name`. */
   objects?: Record<string, FakeObject>;
   /** Collections a list call returns, keyed by plural. */
   lists?: Record<string, FakeObject[]>;
   /**
-   * The labels an unseeded namespace answers with, defaulting to the three Pod
-   * Security labels a Target's declared namespace carries. `{}` models the
-   * cluster whose namespace is absent or carries no admission policy, which is
-   * the one case an App namespace cannot be created from.
+   * Labels an unseeded namespace answers with, by default the Pod Security labels
+   * a Target's namespace carries. `{}` makes an unseeded namespace absent.
    */
   namespaceLabels?: Record<string, string>;
-  /**
-   * Plurals this identity may not list, answered `403`.
-   *
-   * A cluster that serves a kind and refuses to show it is the ordinary state
-   * of a Role that was never bound, and it is a *third* answer alongside the
-   * two above: not an empty list and not an unserved kind. A caller that reads
-   * a refusal as either of those is reporting a fact it never observed, so the
-   * fake has to be able to produce one.
-   */
+  /** Plurals this identity may not list, answered 403. */
   forbidden?: readonly string[];
-  /** What an applied delivery object's status becomes over successive reads. */
   status?: StatusScript;
-  /** When set, every apply is refused with this status and body. */
+  /** When set, every valid apply answers with this. */
   refuse?: { status: number; body: string };
   /** What a `SelfSubjectAccessReview` answers. */
   allowed?: boolean;
   token?: string;
   /**
-   * What a pod's log reads, by pod name and by read count.
-   *
-   * A function of the read rather than a string because a build's log grows
-   * while the build runs: a fake that served the whole log on the first read
-   * would let a route that never polled — and never yielded a timeline — pass.
+   * A pod's log by read count, since a build's log grows while it runs. `null`
+   * answers 400, as a container not yet started does.
    */
   logs?: (pod: string, reads: number) => string | null;
 }
 
 const HOST = 'https://cluster.invalid';
 
-/**
- * The core-group kinds every cluster serves.
- *
- * Fixed rather than configurable: a cluster that did not serve `Pod` is not a
- * cluster, so making a test declare it would only be a way to forget it and
- * get a `404` that means nothing. A core plural outside this list still
- * `404`s, which is the honest answer for a kind that does not exist.
- */
+/** The core kinds every cluster serves; any other core plural 404s. */
 const CORE_KINDS = [
   'Pod',
   'Event',
@@ -113,13 +65,7 @@ const CORE_KINDS = [
   'PersistentVolumeClaim',
 ];
 
-/**
- * The plural the API path uses for one kind.
- *
- * The API server's own rule, which is why the discovery document and the list
- * route can share it: a fake whose discovery said one plural and whose routing
- * expected another would answer inconsistently about the same kind.
- */
+/** The API server's pluralization, shared by discovery and routing. */
 function pluralOf(kind: string): string {
   const lower = kind.toLowerCase();
   if (lower.endsWith('y')) return `${lower.slice(0, -1)}ies`;
@@ -127,7 +73,6 @@ function pluralOf(kind: string): string {
   return `${lower}s`;
 }
 
-/** The body the API server returns for a kind or object that is not there. */
 function notFound(message: string): unknown {
   return {
     kind: 'Status',
@@ -140,12 +85,8 @@ function notFound(message: string): unknown {
 }
 
 /**
- * Whether one object satisfies a `labelSelector`.
- *
- * Equality and existence only, which is every form this adapter sends — and
- * every unsupported form falls through to matching nothing rather than to
- * matching everything, because "the selector was ignored" is exactly the
- * failure this is here to make visible.
+ * Equality and existence only, the forms the adapter sends. Any other form
+ * matches nothing, so an ignored selector shows.
  */
 function matchesSelector(object: FakeObject, selector: string): boolean {
   const labels = (object.metadata.labels ?? {}) as Record<string, string>;
@@ -159,7 +100,7 @@ function matchesSelector(object: FakeObject, selector: string): boolean {
     });
 }
 
-/** The default: the controller reports ready on the first read after apply. */
+/** The default: ready on the first read after apply. */
 const READY: StatusScript = () => ({
   observedGeneration: 1,
   conditions: [
@@ -172,13 +113,7 @@ const READY: StatusScript = () => ({
   ],
 });
 
-/**
- * What `spindrift-target/namespace.yaml` puts on a Target's declared namespace.
- *
- * The same three labels, because what the adapter copies onto an App namespace
- * has to be the thing the cluster actually declares — a fake carrying a
- * different set would let a rendering bug pass here and fail live.
- */
+/** The Pod Security labels the `spindrift-target` namespace declares. */
 const DECLARED_NAMESPACE_LABELS: Record<string, string> = {
   'pod-security.kubernetes.io/enforce': 'restricted',
   'pod-security.kubernetes.io/audit': 'restricted',
@@ -200,31 +135,22 @@ export class FakeKubernetes {
     }
   }
 
-  /** Mint the token provider the adapter is constructed with. */
+  /** The adapter's token provider. */
   token = (): string => this.options.token ?? 'federated-token';
 
-  /** Put an object where the adapter will find it. */
   place(key: string, object: FakeObject): void {
     this.objects.set(key, object);
   }
 
-  /** Take an object away mid-test, as a delete from elsewhere would. */
+  /** Deletes an object out of band. */
   remove(key: string): void {
     this.objects.delete(key);
     this.reads.delete(key);
   }
 
   /**
-   * A namespace nobody seeded, as a real Target cluster has one.
-   *
-   * Every cluster a Target is configured against has its declared namespace
-   * already there, carrying the Pod Security labels Flux put on it — the
-   * adapter reads them to stamp each App namespace, so a fake that answered
-   * `404` would model a cluster no Target is ever connected to and turn a
-   * fixture omission into a refusal every test had to opt out of.
-   *
-   * `namespaceLabels: {}` is how a test models the cluster this does *not*
-   * describe: a namespace absent, or declared without an admission policy.
+   * An unseeded namespace, which a Target's cluster always has, labelled for the
+   * adapter to copy onto each App namespace.
    */
   private declaredNamespace(key: string): FakeObject | undefined {
     if (!key.startsWith('namespaces/')) return undefined;
@@ -238,19 +164,16 @@ export class FakeKubernetes {
     };
   }
 
-  /** What the cluster holds now — the assertion surface for a write. */
   get(key: string): FakeObject | undefined {
     return this.objects.get(key);
   }
 
-  /** Every object of one plural, in insertion order. */
   all(plural: string): FakeObject[] {
     return [...this.objects.entries()]
       .filter(([key]) => key.startsWith(`${plural}/`))
       .map(([, object]) => object);
   }
 
-  /** Requests the adapter made, in order — what § Seam 2 asserts on. */
   pathsOf(method: string): string[] {
     return this.requests
       .filter((request) => request.method === method)
@@ -271,10 +194,7 @@ export class FakeKubernetes {
       body,
     });
 
-    // The cluster trusts one federated credential. `token()` is the adapter's
-    // injected provider, so overriding it must be able to model an expired or
-    // otherwise invalid credential rather than silently teaching the fake to
-    // trust the bad value too.
+    // A literal, so overriding `token` models an invalid credential.
     if (request.headers.get('authorization') !== 'Bearer federated-token') {
       return json(401, { message: 'unauthenticated' });
     }
@@ -285,9 +205,7 @@ export class FakeKubernetes {
     const parsed = parsePath(url.pathname);
     if (parsed === null) return json(404, { message: 'no such path' });
 
-    // The one API that answers rather than stores. It answers about the
-    // attributes it is asked about, so a review carrying none is a review
-    // about nothing — the API server refuses it rather than approving it.
+    // The API server refuses a review that names no verb or resource.
     if (parsed.plural === 'selfsubjectaccessreviews') {
       const spec = (body as { spec?: { resourceAttributes?: unknown } } | null)
         ?.spec;
@@ -315,18 +233,13 @@ export class FakeKubernetes {
       const reads = (this.reads.get(url.pathname) ?? 0) + 1;
       this.reads.set(url.pathname, reads);
       const text = this.options.logs?.(parsed.name ?? '', reads) ?? null;
-      // A pod whose container has not started answers `400`, which is not a
-      // fault: the honest answer is that there is no log yet.
       return text === null
         ? json(400, { message: 'container is waiting to start' })
         : new Response(text);
     }
 
     if (parsed.name === undefined) {
-      // A `POST` to a collection creates. It is the one write that refuses a
-      // name already taken — a `409`, not an overwrite — which is what makes a
-      // caller relying on that refusal for idempotence testable here rather
-      // than only in a cluster.
+      // A `POST` to a collection creates, and a taken name answers 409.
       if (request.method === 'POST') {
         const object = body as FakeObject;
         const key = `${parsed.plural}/${parsed.namespace ?? ''}/${object.metadata.name}`;
@@ -353,9 +266,7 @@ export class FakeKubernetes {
       case 'PATCH':
         return this.applyResponse(key, body as FakeObject, request, url);
       case 'DELETE':
-        // Deleting what is not there is a `404`, which is what makes
-        // `KubernetesApi.delete`'s idempotence a property of the adapter
-        // rather than of a fake that never disagreed.
+        // Deleting what is not there answers 404, as the API server does.
         if (!this.objects.has(key)) {
           return json(
             404,
@@ -390,18 +301,8 @@ export class FakeKubernetes {
   }
 
   /**
-   * A list, or the `404` that means this cluster does not serve the kind.
-   *
-   * The two are different answers and `KubernetesApi.list` exists to keep them
-   * apart, so what decides is whether the kind is *served* — never whether it
-   * happens to hold anything. A served kind holding nothing answers `200` with
-   * an empty `items`, which is the branch every `?? []` at a call site is
-   * written for and which nothing could previously reach.
-   *
-   * `servedKinds` is the authority. Seeded objects and a seeded `lists` entry
-   * also make a kind served, because they cannot mean anything else: an API
-   * that hands back `Pod`s serves `Pod`s. What they no longer do is the
-   * inverse — an unseeded kind is absent, not unheard of.
+   * An unserved kind answers 404 and a served empty one 200. `servedKinds`, a
+   * `lists` entry or a seeded object makes a kind served.
    */
   private listResponse(parsed: ParsedPath, query: URLSearchParams): Response {
     if (this.options.forbidden?.includes(parsed.plural)) {
@@ -427,8 +328,7 @@ export class FakeKubernetes {
     }
     const items =
       this.options.lists?.[parsed.plural] ?? this.all(parsed.plural);
-    // The cluster filters, not the caller: a selector the adapter got wrong
-    // comes back with nothing rather than with everything.
+    // The cluster filters, so a wrong selector returns nothing.
     const selector = query.get('labelSelector');
     return json(200, {
       items:
@@ -442,8 +342,7 @@ export class FakeKubernetes {
     const object = this.objects.get(key) ?? this.declaredNamespace(key);
     if (object === undefined) return json(404, { message: 'not found' });
 
-    // The controller writes status *after* the object exists, which is what
-    // makes `apply` poll rather than assume.
+    // Status arrives after the object exists, so `apply` polls.
     const script = this.options.status ?? READY;
     const reads = (this.reads.get(key) ?? 0) + 1;
     this.reads.set(key, reads);
@@ -457,11 +356,8 @@ export class FakeKubernetes {
     request: Request,
     url: URL,
   ): Response {
-    // "Whether you are submitting JSON data or YAML data, use
-    // `application/apply-patch+yaml` as the Content-Type header value." A
-    // `PATCH` sent as `application/json` is a merge patch — a different verb
-    // with different semantics — and the API server refuses it here rather
-    // than quietly applying it as one.
+    // SSA takes `application/apply-patch+yaml` even for a JSON body;
+    // `application/json` would be a merge patch.
     if (
       request.headers.get('content-type') !== 'application/apply-patch+yaml'
     ) {
@@ -474,10 +370,7 @@ export class FakeKubernetes {
           'the body of the request was in an unknown format - accepted media types include: application/apply-patch+yaml',
       });
     }
-    // "All Server-Side Apply patch requests are required to identify themselves
-    // by providing a `fieldManager` query parameter." Without one there is
-    // nobody for the applied fields to belong to, which is the whole mechanism
-    // that keeps an operator's edit from being reverted by the next deploy.
+    // Server-side apply requires a `fieldManager` to own the applied fields.
     if ((url.searchParams.get('fieldManager') ?? '') === '') {
       return json(400, {
         kind: 'Status',
@@ -492,10 +385,7 @@ export class FakeKubernetes {
         status: this.options.refuse.status,
       });
     }
-    // A `resourceVersion` in the body is a precondition: the API server
-    // answers 409 when the version it holds has moved on. A fake that stored
-    // the body anyway would let a restart revert a deploy that landed between
-    // its read and its write and still pass.
+    // A `resourceVersion` in the body is a precondition: a moved version is 409.
     const expected = object.metadata.resourceVersion;
     const current = this.objects.get(key)?.metadata.resourceVersion;
     if (
@@ -534,11 +424,11 @@ interface ParsedPath {
   plural: string;
   namespace?: string;
   name?: string;
-  /** `log`, `status`, and the rest — a segment after the object's name. */
+  /** A segment after the object's name, such as `log`. */
   subresource?: string;
 }
 
-/** The inverse of `resourcePath` — what the adapter addressed. */
+/** The inverse of the adapter's `resourcePath`. */
 function parsePath(path: string): ParsedPath | null {
   const parts = path.split('/').filter((part) => part.length > 0);
   // /api/v1/... or /apis/group/version/...
