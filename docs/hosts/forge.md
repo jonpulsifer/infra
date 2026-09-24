@@ -29,5 +29,5 @@ Reach it at `forge.lolwtf.ca` or [`forge.<tailnet>`](index.md#reach-a-host).
 
 ## Quirks
 
-- The EEPROM boot settings are outside git. `BOOT_ORDER=0xf1276` tries the NVMe, then [rackpi5](rackpi5.md) from spore. The `0xf7` in `nix/hosts/rackpi5.nix` skips the NVMe. See [Netboot](../platform/nixos/netboot.md).
+- The EEPROM boot settings are outside git. `BOOT_ORDER=0xf1276` tries the NVMe, then [rackpi5](rackpi5.md) from spore. See [Netboot](../platform/nixos/netboot.md).
 - A stock EEPROM update erases the enrolled public key of spore's `/var/lib/pi-boot-sign/private.pem`. HTTP boot fails until the key is enrolled again.
