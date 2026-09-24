@@ -60,8 +60,10 @@ wildcard route, and `src/web/status-route.ts` is the page it lands on: one
 process serves both surfaces and tells them apart by the `Host` header, which is
 what `controlPlane.hostname` is resolved from `SPINDRIFT_HOSTNAME` for. Every
 other route answers on that name alone — plus the webhook, the bosun outbox, and
-`/mcp` on `SPINDRIFT_PUBLIC_HOSTNAME`, and the probes on a pod address — so any
-path on an App's name lands here (`src/web/host-scope.ts`). It answers 503 rather than 200 —
+`/mcp` on `SPINDRIFT_PUBLIC_HOSTNAME` and on the release's in-cluster Service
+names (`SPINDRIFT_SERVICE_NAME`, `SPINDRIFT_SERVICE_NAMESPACE`), and the probes
+on a pod address — so any path on an App's name lands here
+(`src/web/host-scope.ts`). It answers 503 rather than 200 —
 every state it reports is an address that is not serving — and says only which
 name was asked for and whether a release has reached it. The two halves outside
 this app are the wildcard route on the Apps gateway

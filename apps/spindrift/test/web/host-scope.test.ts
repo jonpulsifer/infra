@@ -9,7 +9,12 @@ import { authPathFor } from '../../src/auth/routes.ts';
 import type { Database } from '../../src/db/client.ts';
 import { apps, components } from '../../src/db/schema.ts';
 import { BOSUN_CLAIM_PATH } from '../../src/web/bosun-route.ts';
-import { scopeToHost } from '../../src/web/host-scope.ts';
+import {
+  inClusterHostnames,
+  SERVICE_NAME_VAR,
+  SERVICE_NAMESPACE_VAR,
+  scopeToHost,
+} from '../../src/web/host-scope.ts';
 import { MCP_PATH } from '../../src/web/mcp-route.ts';
 import { HEALTH_PATH, READY_PATH, webRoutes } from '../../src/web/routes.ts';
 import { STATUS_PATH } from '../../src/web/status-route.ts';
@@ -25,6 +30,10 @@ const CONTROL_PLANE = manifest.controlPlane.hostname;
 const ZONE = 'apps.example.test';
 const APP_NAME = `someapp.${ZONE}`;
 const PUBLIC_NAME = `spindrift-control.${ZONE}`;
+const IN_CLUSTER = inClusterHostnames({
+  [SERVICE_NAME_VAR]: 'spindrift',
+  [SERVICE_NAMESPACE_VAR]: 'spindrift',
+});
 const CLIENT_DOCUMENT = 'the client document';
 
 const anonymous = {
@@ -75,6 +84,7 @@ function mount(db: Database) {
   return scopeToHost(table(db), {
     controlPlane: CONTROL_PLANE,
     public: PUBLIC_NAME,
+    inCluster: IN_CLUSTER,
   });
 }
 
@@ -201,6 +211,55 @@ describe('the public name carries the machine surfaces and nothing else', () => 
     for (const path of ['/', authPathFor('session'), HEALTH_PATH]) {
       await expectStatusPage(await send(PUBLIC_NAME, path), path);
     }
+  });
+});
+
+describe("the Service's in-cluster names carry the machine surfaces too", () => {
+  test('every name cluster DNS answers for the Service', () => {
+    expect(IN_CLUSTER).toEqual([
+      'spindrift',
+      'spindrift.spindrift',
+      'spindrift.spindrift.svc',
+      'spindrift.spindrift.svc.cluster.local',
+    ]);
+    expect(inClusterHostnames({ [SERVICE_NAME_VAR]: 'spindrift' })).toEqual([]);
+  });
+
+  test('MCP, the webhook, and the bosun outbox reach their handlers', async () => {
+    for (const host of IN_CLUSTER) {
+      const mcp = await send(`${host}:3000`, MCP_PATH, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+      });
+      expect({ host, status: mcp.status }).toEqual({ host, status: 401 });
+
+      for (const path of [WEBHOOK_PATH, BOSUN_CLAIM_PATH]) {
+        const response = await send(host, path, { method: 'POST', body: '{}' });
+        expect({ host, path, status: response.status }).toEqual({
+          host,
+          path,
+          status: 503,
+        });
+      }
+    }
+  });
+
+  test('the UI, auth, and the probes are not there', async () => {
+    for (const host of IN_CLUSTER) {
+      for (const path of ['/', authPathFor('session'), HEALTH_PATH]) {
+        await expectStatusPage(await send(host, path), `${host}${path}`);
+      }
+    }
+  });
+
+  test('a public name that merely contains one is not it', async () => {
+    const response = await send(
+      `spindrift.spindrift.svc.cluster.local.${ZONE}`,
+      MCP_PATH,
+      { method: 'POST', body: '{}' },
+    );
+    await expectStatusPage(response, 'suffixed in-cluster name');
   });
 });
 

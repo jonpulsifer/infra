@@ -9,11 +9,36 @@ import { HEALTH_PATH, READY_PATH } from './routes.ts';
 import { STATUS_PATH } from './status-route.ts';
 import { WEBHOOK_PATH } from './webhook-route.ts';
 
+/** The Service in front of the web pod, as the chart names it. */
+export const SERVICE_NAME_VAR = 'SPINDRIFT_SERVICE_NAME';
+export const SERVICE_NAMESPACE_VAR = 'SPINDRIFT_SERVICE_NAMESPACE';
+
 export interface ServedHosts {
   /** Every route answers here. */
   readonly controlPlane: string;
   /** The machine-authenticated routes answer here as well. */
   readonly public: string | null;
+  /** And here, for a pod calling the Service directly. */
+  readonly inCluster: readonly string[];
+}
+
+/**
+ * No edge forwards a name outside its own zones, so none of these can arrive
+ * from outside the cluster.
+ */
+export function inClusterHostnames(
+  env: Record<string, string | undefined>,
+): string[] {
+  const service = env[SERVICE_NAME_VAR]?.trim().toLowerCase();
+  const namespace = env[SERVICE_NAMESPACE_VAR]?.trim().toLowerCase();
+  if (!service || !namespace) return [];
+  const qualified = `${service}.${namespace}.svc`;
+  return [
+    service,
+    `${service}.${namespace}`,
+    qualified,
+    `${qualified}.cluster.local`,
+  ];
 }
 
 const MACHINE_PATHS: ReadonlySet<string> = new Set([
@@ -33,12 +58,16 @@ export function scopeToHost<T extends Record<string, unknown>>(
 ): T {
   const status = routes[STATUS_PATH] as Handler;
   const controlPlane = hosts.controlPlane.toLowerCase();
-  const machine = hosts.public?.toLowerCase() ?? null;
+  const machine = new Set(
+    [hosts.public, ...hosts.inCluster].flatMap((host) =>
+      host ? [host.toLowerCase()] : [],
+    ),
+  );
 
   const answers = (path: string, host: string | null) =>
     host !== null &&
     (host === controlPlane ||
-      (MACHINE_PATHS.has(path) && host === machine) ||
+      (MACHINE_PATHS.has(path) && machine.has(host)) ||
       (PROBE_PATHS.has(path) && isAddress(host)));
 
   const scoped: Record<string, unknown> = {};

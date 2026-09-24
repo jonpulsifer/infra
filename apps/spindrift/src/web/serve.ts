@@ -35,7 +35,7 @@ import {
   githubAppWebhookSecret,
 } from '../integrations/github/app-auth.ts';
 import { BOSUN_SECRET_VAR } from './bosun-route.ts';
-import { scopeToHost } from './host-scope.ts';
+import { inClusterHostnames, scopeToHost } from './host-scope.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
 
@@ -284,6 +284,7 @@ export async function start(
       : scopeToHost(instrumented, {
           controlPlane: manifest.controlPlane.hostname,
           public: manifest.controlPlane.publicHostname,
+          inCluster: inClusterHostnames(Bun.env),
         }),
     websocket: streamWebSocket,
     // The abuse floor for a surface anybody can post bytes to. A console

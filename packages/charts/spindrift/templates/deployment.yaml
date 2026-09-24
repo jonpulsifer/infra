@@ -127,6 +127,14 @@ spec:
               value: /tmp
             - name: PORT
               value: {{ $top.Values.port | quote }}
+            {{- if $process.serves }}
+            # The Service in front of this pod: the machine routes answer on
+            # its in-cluster names as well as on the public ones.
+            - name: SPINDRIFT_SERVICE_NAME
+              value: {{ include "spindrift.fullname" $top | quote }}
+            - name: SPINDRIFT_SERVICE_NAMESPACE
+              value: {{ include "spindrift.namespace" $top | quote }}
+            {{- end }}
             {{- if contains "@" $top.Values.image }}
             # What the footer says is running: the digest CD pinned, shortened
             # the way the product already prints digests — `sha256:` and the
