@@ -1,34 +1,7 @@
 /**
- * The front door (Task 37, §"First run and identity").
- *
- * One screen with two states, not two screens. Which one an operator sees is a
- * fact about the installation rather than a choice they make: an installation
- * nobody has claimed shows enrolment, and one somebody has shows sign-in. There
- * is no toggle between them, because offering "enrol instead" on a claimed
- * installation would be offering something that always fails.
- *
- * §"First run" gives this screen its whole copy deck. Story 1 says the token
- * "shipped with the installation", so the field says where to find it rather
- * than just asking for it; story 2's consumption is why enrolment disappears
- * afterwards; and story 4's recovery — rotate the token, replace every passkey
- * — is the sentence under a sign-in that has stopped working, because that is
- * the moment somebody needs it.
- *
- * **It says which installation this is, and it says it with the origin.** This
- * is the first thing a human ever sees of the product and it identified
- * nothing, so staging and production were the same screen. The manifest holds
- * an `installation.name`, and nothing here can read it: this side of the door
- * has no session, and a control plane that told an anonymous caller what it is
- * called would be answering a question nobody authenticated to ask. The origin
- * is the honest identity available here — a ceremony is scoped to
- * `controlPlane.hostname` and a browser refuses one whose relying party is not
- * a suffix of the host in the address bar, so the host **is** what the passkey
- * is about to be bound to.
- *
- * **What it does, in one sentence, instead of what it is made of.** "Passkey
- * Authentication & UI-Driven Manifest Operations" is the vocabulary of the
- * implementation, and "manifest operations" is the noun this product exists to
- * hide from the person reading it.
+ * The sign-in screen: enrolment on an unclaimed installation, passkey sign-in
+ * on a claimed one. It names the installation by origin, since a signed-out
+ * caller may not read the manifest.
  */
 import { KeyRound, ShieldCheck } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -41,10 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
 
 export interface GateProps {
-  /**
-   * Whether anybody has enrolled here yet. Decides which of the two states
-   * renders, and comes from the server rather than from a guess.
-   */
+  /** Whether anybody has enrolled here yet; the server decides. */
   readonly claimed: boolean;
   readonly gatewayUnlinked?: boolean;
   readonly onSignedIn: (principal: Principal) => void;
@@ -57,9 +27,6 @@ export function Gate({
 }: GateProps) {
   return (
     <>
-      {/* Nobody has signed in yet, which is exactly the screen the landing's
-          own mascot idles behind — see `components/roflcopter.tsx` for why
-          this is a separate instance from the one the shell mounts. */}
       <Roflcopter />
       <main className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col justify-center gap-6 px-5 py-12">
         <div className="flex flex-col items-center gap-2 text-center">
@@ -80,13 +47,7 @@ export function Gate({
   );
 }
 
-/**
- * Which installation the passkey is about to be bound to.
- *
- * Rendered as nothing when there is no origin to read — this file is also
- * rendered to static markup in a test, and a screen that invented a hostname
- * for that would be the one thing worse than a screen that names none.
- */
+/** The origin the passkey binds to. Renders nothing where there is no `location`. */
 function Installation() {
   const host = typeof location === 'undefined' ? '' : location.host;
   if (host === '') return null;
@@ -115,8 +76,6 @@ function useCeremony(onSignedIn: (principal: Principal) => void) {
       if (result.ok) {
         onSignedIn(result.value.principal);
       } else {
-        // The server's own sentence, not one composed here — every refusal in
-        // `src/auth/types.ts` carries the message its reader needs.
         setError(result.failure.message);
       }
     } catch (cause) {
@@ -163,9 +122,7 @@ function Enrol({ onSignedIn }: { onSignedIn: (p: Principal) => void }) {
             label="Enrolment token"
             type="password"
             autoComplete="off"
-            // The first control a human ever meets in this product. It was not
-            // focused, so the first act was a mouse hunt for the only box on
-            // the screen — and this screen has exactly one.
+            // The only box on this screen, so it takes focus.
             autoFocus
             value={token}
             placeholder="from SPINDRIFT_ENROLMENT_TOKEN"
@@ -258,13 +215,8 @@ function SignIn({
 }
 
 /**
- * That the browser is waiting on a passkey, out loud.
- *
- * The only sign a ceremony was in flight was a button label, which is announced
- * to nobody — and this ceremony can sit for thirty seconds while an operator
- * looks for a security key. Empty rather than unmounted while idle, so the
- * region exists before it has anything to say and the change is what is
- * announced.
+ * Announces the passkey wait. Empty while idle but mounted, since a live region
+ * must exist before a change to it is announced.
  */
 function Ceremony({ running }: { running: boolean }) {
   return (

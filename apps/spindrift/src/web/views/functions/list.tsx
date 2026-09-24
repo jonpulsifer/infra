@@ -1,11 +1,6 @@
 /**
- * Functions — every `fetch(request, env)` handler this installation deploys,
- * top-level and independent of any App.
- *
- * A row is a link to its own editor (`/functions/<name>`); there is no
- * inspector here, because a function's whole state — source, target, the
- * deploy it last produced — is the one thing worth opening, not a fact this
- * ledger row summarises twice.
+ * The Functions ledger: every `fetch(request, env)` handler this installation
+ * deploys, independent of any App. A row opens its editor.
  */
 import { Plus, Zap } from 'lucide-react';
 import type { FunctionListItem } from '../../../commands/views.ts';

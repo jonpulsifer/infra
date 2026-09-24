@@ -1,16 +1,6 @@
 /**
- * A key the reader is meant to press, drawn as a key.
- *
- * It exists because a shortcut nobody can see is a shortcut nobody uses: the
- * whole application contained one `onKeyDown` handler, and the moment there is a
- * palette on ⌘K there has to be somewhere for "⌘K" to be *shown* — in the hint
- * beside the search affordance, and in the palette's own rows.
- *
- * A real `<kbd>`, so the base stylesheet's monospace and tabular-nums rule
- * already applies and a screen reader announces it as keyboard input rather than
- * as a stray glyph. The caller supplies the glyph: this component has no opinion
- * about ⌘ versus Ctrl, because that is a fact about the reader's platform and
- * not about the shortcut.
+ * A key the reader is meant to press. The caller supplies the glyph, since the
+ * modifier depends on the reader's platform.
  */
 import type { ReactNode } from 'react';
 import { cn } from './utils.ts';

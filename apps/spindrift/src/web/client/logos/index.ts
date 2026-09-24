@@ -1,14 +1,7 @@
 /**
- * Platform marks, keyed by name, valued by bundle URL.
- *
- * The SVGs sit beside this file because `bundle.ts` serves exactly what the
- * build emitted — a file that no module imports never reaches `dist/` and so
- * has no URL to render. Importing them here puts them in the client graph;
- * `Bun.build` copies each one out content-hashed and rewrites the import to
- * its served path.
- *
- * Squares except `gvisor`, which upstream only publishes as a 2:1 wordmark.
- * Size these with CSS against the `viewBox`; do not assume a common ratio.
+ * Platform marks by name, each valued by its bundle URL. An SVG no module
+ * imports never reaches `dist/`. All are square except `gvisor`, a 2:1
+ * wordmark, so size each against its `viewBox`.
  */
 import argoCd from './argo-cd.svg';
 import certManager from './cert-manager.svg';

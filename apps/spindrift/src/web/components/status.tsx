@@ -1,11 +1,4 @@
-/**
- * The status atoms that carry domain meaning rather than styling.
- *
- * Each one exists because §6 or §18 named the thing it renders. They are here
- * and not in `ui/` for that reason: `ui/` holds primitives that would look the
- * same in any product, and these would not — a `BlameChip` is meaningless
- * outside a system that decided blame is derived, closed, and worth a chip.
- */
+/** Status atoms that carry domain meaning, kept apart from the generic `ui/`. */
 import { Check, CircleDashed, Loader2, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Blame } from '../../adapters/deploy/contract.ts';
@@ -19,12 +12,8 @@ import { Badge, Dot } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 
 /**
- * The tone each phase reads in. `LIVE` is the only green state there is — and
- * a faulty release is `LIVE` that no longer earns it.
- *
- * Exported for {@link appDotTone}, the rail's own reading of this same
- * derivation — one function deciding what a phase means, not two that could
- * disagree the day a phase is added.
+ * `LIVE` is the only green phase, and a faulty release loses it.
+ * {@link appDotTone} reads this too, so the two never disagree.
  */
 export function toneFor(phase: DeployPhase, faulty: boolean) {
   if (faulty || phase === 'FAILED') return 'destructive' as const;
@@ -32,25 +21,14 @@ export function toneFor(phase: DeployPhase, faulty: boolean) {
   return 'warning' as const;
 }
 
-/** The three tones, as the text colour a bare dot inherits its fill from. */
+// A bare dot takes its fill from the text colour.
 const DOT = {
   success: 'text-success',
   warning: 'text-warning',
   destructive: 'text-destructive',
 } as const satisfies Record<ReturnType<typeof toneFor>, string>;
 
-/**
- * The phase, as a coloured dot alone — for the one place a word will not fit.
- *
- * The topology boxes are 184 pixels wide and already carry a kind, a name and
- * a placement; a `PhasePill` beside those is the fourth thing competing in a
- * box whose whole job is to be recognised at a glance. What the list of
- * Components used to state per row, the picture now has to, and this is the
- * smallest shape that still states it.
- *
- * The word goes to a screen reader rather than being dropped: colour is the
- * only encoding here, and colour alone is never an answer.
- */
+/** For the topology boxes, too narrow for a word; screen readers get it. */
 export function PhaseDot({
   phase,
   faulty = false,
@@ -69,10 +47,8 @@ export function PhaseDot({
   );
 }
 
-/** The four tones the rail's Apps group draws a dot in. */
 export type AppDotTone = 'live' | 'building' | 'failed' | 'idle';
 
-/** {@link AppDotTone}, as the `text-status-*` colour a dot inherits its stroke or fill from. */
 const APP_DOT_TONE: Record<AppDotTone, string> = {
   live: 'text-status-live',
   building: 'text-status-building',
@@ -81,18 +57,8 @@ const APP_DOT_TONE: Record<AppDotTone, string> = {
 };
 
 /**
- * The rail's dot for one App list row, over the same ranking `listApps`
- * already did (`commands/apps/list.ts`'s worst-Component-first reduce).
- *
- * `deployId` absent is what that ranking leaves on a row whose worst Component
- * has never deployed — `toneFor` cannot see that, because it is only ever
- * handed a phase, and the fallback `PENDING` a never-deployed Component reports
- * is indistinguishable from one queued for its second release. So idle is
- * checked first, ahead of `toneFor`, rather than folded into a fifth phase.
- *
- * Both halves are required. A row that reports a phase other than `PENDING`
- * has something to say whether or not it names a Deploy, and the rail must
- * never call idle what the Apps table beside it calls live.
+ * A never-deployed App reports `PENDING` with no `deployId`, which `toneFor`
+ * would read as building, so idle is checked first.
  */
 export function appDotTone(app: {
   readonly phase: DeployPhase;
@@ -106,12 +72,7 @@ export function appDotTone(app: {
   return 'building';
 }
 
-/**
- * The Apps group's own dot — hollow for `idle`, pulsing for `building`,
- * filled and still otherwise. `aria-hidden`, because the row it sits on is a
- * link named by the App's own name; the tone is a scan aid beside it, not a
- * second name for it.
- */
+/** Hidden from screen readers, since the row's label states the status. */
 export function AppDot({
   app,
   className,
@@ -131,20 +92,8 @@ export function AppDot({
 }
 
 /**
- * The phase marker: a tone, a word, and a dot that pulses only while the phase
- * is still moving.
- *
- * The word defaults to {@link deployPhaseWord} because every caller that had to
- * supply one chose differently — two passed the raw `DeployPhase`, so two
- * screens rendered `APPLYING` in capitals at a reader. A default is what makes
- * the shared vocabulary the path of least resistance rather than a convention
- * each new screen has to be told about. `children` stays open for the one
- * caller with more context than a phase: the release screen separates a Build
- * that failed from a Deploy that did, and no phase alone can.
- *
- * `faulty` is the soak's verdict on a `LIVE` row (§6): the phase is still the
- * platform's word for the rollout, so it stays the key, and this is the one
- * fact beside it that changes what the pill says.
+ * `children` replaces the phase word where a phase alone says too little.
+ * `faulty` is the soak's verdict on a `LIVE` release.
  */
 export function PhasePill({
   phase,
@@ -163,16 +112,7 @@ export function PhasePill({
   );
 }
 
-/**
- * §18: "`blame` earns its chip."
- *
- * It is justified hardest by `ARTIFACT_UNAVAILABLE`, where the build is green
- * and every instinct wrongly says "look at my app" — so the chip is what stops
- * a developer debugging code that is fine. A `null` blame renders nothing at
- * all rather than a third word: §6 gives `TIMEOUT` a dash because a deploy that
- * never reached a terminal state indicts nobody, and printing "unknown" would
- * be a guess the table refused to make.
- */
+/** A `null` blame renders nothing: an undecided failure indicts nobody. */
 export function BlameChip({ blame }: { blame: Blame | null }) {
   if (blame === null) return null;
   return (
@@ -188,22 +128,7 @@ export function BlameChip({ blame }: { blame: Blame | null }) {
   );
 }
 
-/**
- * Everything a step status renders as, in one row per status.
- *
- * Four parallel maps keyed by the same union is four chances to add a status
- * to three of them. One record makes a missing field a compile error, which is
- * the same discipline `BLAME` and `KINDS_BY_ADAPTER` use in the domain — and
- * `waiting` is the row that proves it earns its keep: it is the only status
- * whose glyph, tone, and word all disagree with its key.
- *
- * `spin` is a claim about the system, not decoration. It is set on exactly the
- * status that means work is happening right now, so a stopped spinner is a
- * statement that nothing is moving — which is what makes the moving one
- * trustworthy. A step whose backend went silent still reads `running` and still
- * spins, and that is correct: the phase is what the platform last said, and the
- * screen does not get to decide it has gone stale.
- */
+// One record per status, so a status missing any field fails to compile.
 const STATUS = {
   done: { icon: Check, tone: 'text-success', word: 'done', spin: false },
   running: {
@@ -225,22 +150,8 @@ const STATUS = {
 >;
 
 /**
- * The leading glyph on a checklist line.
- *
- * **`done` draws its tick.** It is the one status that marks a transition
- * rather than a state — everything else is where a thing currently is, and
- * `done` is where it just arrived — so it is the one worth animating. The
- * stroke is drawn rather than the glyph faded because a fade is a thing
- * appearing and a draw is a thing being written, and the second is what
- * finishing a step reads as.
- *
- * `pathLength={1}` is what makes one keyframe do it: every path in the icon is
- * normalized to a single unit, so `stroke-dasharray: 1` covers the whole stroke
- * whatever shape lucide drew. Set here rather than in CSS because it is an SVG
- * attribute, not a property.
- *
- * One-shot, and keyed by nothing: a glyph that re-mounts redraws, and a glyph
- * that stays put does not. That is right — a step does not finish twice.
+ * `done` draws its tick once, on mount. `pathLength={1}` normalises every path,
+ * so one dash keyframe covers any icon's stroke.
  */
 export function StepGlyph({ status }: { status: StepStatus }) {
   const { icon: Icon, tone, spin } = STATUS[status];
@@ -259,7 +170,6 @@ export function StepGlyph({ status }: { status: StepStatus }) {
   );
 }
 
-/** The word a step status reads as, where one is written out. */
 export function statusWord(status: StepStatus): string {
   return STATUS[status].word;
 }

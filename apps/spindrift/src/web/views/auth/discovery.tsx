@@ -1,45 +1,7 @@
 /**
- * Confirming cloud facts instead of typing them (§13, §20).
- *
- * The settings form below this panel can already edit every manifest key. What
- * it cannot do is tell an operator what the right value *is* — so a project id
- * or a signer URI is typed from memory, and a typo is invisible until a build
- * dies on a signed URL. `discoverInstallationFacts` asks the cloud with the
- * credential the pod already holds; this is the hand that reaches it and the
- * screen that shows what came back.
- *
- * **Nothing here names a manifest key**, which is the same correctness
- * requirement `installation.tsx` states for the form itself. Every answer
- * carries its own `path`, the panel titles it with {@link humanize} of the last
- * segment, and applying a candidate is {@link withValueAt} at that path — so
- * the panel keeps working as keys leave the schema, and a value it cannot place
- * is not a value it can silently misplace.
- *
- * **A refusal reads as a fact, not as a field error.** That is the third of the
- * three refusals `installation.tsx` keeps apart: `unavailable` means the cloud
- * did not answer, which is nothing an operator can fix by re-typing a value in
- * this form. It renders in the neutral voice, beside the field it could not
- * answer, with the sentence the command produced — never as a blank, because a
- * blank on a confirmation screen reads as a confirmed answer.
- *
- * **Every row is a reconciliation, not a row of buttons.** The panel shipped
- * deriving each candidate's selected style from `fact.suggested` — a property
- * of the *server's* answer, identical before and after a press — so confirming
- * a value changed the document and changed nothing on screen. What a row says
- * now is a comparison: the value the document holds at
- * {@link placementOf}, and which candidate, if any, is that value. A press is
- * visible because the document is what is being read.
- *
- * **It seeds the two narrowing inputs from the document, and that is the one
- * place it names keys.** Discovery is staged on purpose — with no project the
- * command answers "name a project and run discovery again" for buckets and
- * signing keys — and the candidate that unblocks it reads
- * `"<project> — this deployment's own credential"`, so an operator who types
- * what they read types a project that does not exist. Two paths are named to
- * close that: the home vessel's project, and the location inside the signer
- * this installation already holds. Both are paths the command itself answers
- * for, so a key that leaves the schema leaves the seed empty rather than
- * leaving a control writing somewhere nothing reads.
+ * Confirms cloud facts from `discoverInstallationFacts` instead of typing them.
+ * Each answer carries its manifest path, so the panel names no keys beyond the
+ * two it narrows by.
  */
 import { Check, CircleAlert, Search } from 'lucide-react';
 import { type CSSProperties, useState } from 'react';
@@ -60,24 +22,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
 import { cn } from '../../ui/utils.ts';
 
-/** One ask, in the two arms every answer on this path comes back in. */
 export type DiscoveryAnswer =
   | { readonly facts: readonly DiscoveredFact[] }
   | { readonly refusal: string };
 
 /**
- * The request the panel makes, and the fold of everything it can come back as.
- *
- * Named and exported rather than living inside the click handler, for the
- * reason {@link applyDiscovered} is: the two things worth asserting here are
- * **which narrowing arguments are sent** and **that no way of failing turns
- * into an empty answer**, and neither needs a browser to observe. The panel
- * around it is then a shell that puts the result in state.
- *
- * Three ways of coming back, one shape: a result, a refusal the server gave,
- * and a `fetch` or a non-JSON body that never reached the command layer at all.
- * The last one throws out of `command`, and swallowing it into `facts: []`
- * would put a blank on a confirmation screen that reads as a confirmed answer.
+ * A transport failure becomes a refusal, since an empty answer would read as
+ * a confirmed one.
  */
 export async function askInstallationCloud(narrowing: {
   readonly project: string;
@@ -87,8 +38,7 @@ export async function askInstallationCloud(narrowing: {
   const kmsLocation = narrowing.kmsLocation.trim();
   try {
     const result = await command('discoverInstallationFacts', {
-      // Absent rather than empty: the command's input is `.strict()` and an
-      // empty project is not a project, it is the first pass.
+      // Omitted when empty: with no project, the command lists projects.
       ...(project === '' ? {} : { project }),
       ...(kmsLocation === '' ? {} : { kmsLocation }),
     });
@@ -105,15 +55,6 @@ export async function askInstallationCloud(narrowing: {
   }
 }
 
-/**
- * Ask the cloud, then apply what an operator confirms.
- *
- * Self-contained rather than lifted into `InstallationSettingsView`'s props:
- * everything it holds — the two narrowing inputs, the last answer, whether a
- * request is in flight — is its own, and the only thing it has to say to the
- * screen around it is the edited document, which is the same `onChange` every
- * control on the page already speaks.
- */
 export function DiscoveryPanel({
   document,
   disabled = false,
@@ -123,10 +64,7 @@ export function DiscoveryPanel({
   readonly disabled?: boolean;
   onChange(document: unknown): void;
 }) {
-  // Seeded once, from the document this panel opened on. Later edits do not
-  // move these: they are what the operator is *narrowing* by, and a text box
-  // that rewrote itself under a cursor because a candidate landed elsewhere
-  // would be a worse bug than the empty one this replaces.
+  // Seeded once, so a later edit never rewrites a box under the cursor.
   const seed = narrowingFrom(document);
   const [project, setProject] = useState(seed.project);
   const [kmsLocation, setKmsLocation] = useState(seed.kmsLocation);
@@ -145,15 +83,7 @@ export function DiscoveryPanel({
     setBusy(false);
   };
 
-  /**
-   * Confirming a value, and — for the project — asking again with it.
-   *
-   * The second half is what makes the staging finishable in the place it was
-   * staged. Buckets and signing keys are not read until a project is named, so
-   * the press that names one is the press that should produce them; leaving the
-   * operator to copy a label into a box was leaving them to copy the words
-   * "this deployment's own credential" along with it.
-   */
+  /** Applying a project also asks again: buckets and signing keys need one. */
   const apply = (fact: DiscoveredFact, candidate: DiscoveredCandidate) => {
     onChange(applyDiscovered(document, fact, candidate));
     if (!isProjectFact(fact) || typeof candidate.value !== 'string') return;
@@ -174,10 +104,7 @@ export function DiscoveryPanel({
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {/* A real form, so Enter in either narrowing box asks — and its own
-            form rather than the manifest's, which is why `installation.tsx`
-            mounts this panel outside the form it saves with: Enter here used
-            to submit the whole manifest. */}
+        {/* Its own form, so Enter in a narrowing box asks. */}
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {
@@ -208,8 +135,6 @@ export function DiscoveryPanel({
               <Search aria-hidden="true" />
               {busy ? 'Asking…' : 'Ask this installation’s cloud'}
             </Button>
-            {/* The ask can take as long as three cloud APIs take, and a button
-                label is not announced. This is. */}
             <p
               role="status"
               aria-live="polite"
@@ -224,23 +149,8 @@ export function DiscoveryPanel({
           </div>
         </form>
         {refusal === null ? null : <DiscoveryRefusal reason={refusal} />}
-        {/* The card grows by five rows the first time the cloud answers, and
-            it used to do it in one frame — the form jumped up the page while
-            the operator was still reading the button they had just pressed.
-            The rows' own stagger cannot fix that: `animate-rise` moves opacity
-            and four pixels, so the rows are in the layout at full height from
-            the first frame and the height is what snaps.
-
-            A grid whose single row track goes `0fr` → `1fr` is the one way to
-            transition to a content height without naming one: the track
-            resolves to what the content needs, and `fr` is a length the
-            browser will interpolate where `auto` is not. The inner element
-            carries the `overflow-hidden` that makes the closed state hide
-            rather than spill.
-
-            Rendered on every state rather than beside the conditional, because
-            a transition needs both ends: an element that only exists once the
-            facts do has nothing to have grown from. */}
+        {/* A grid row going from 0fr to 1fr animates to the content's height.
+            It renders in every state, so the transition has a start. */}
         <div
           className={cn(
             'grid transition-[grid-template-rows] duration-200 ease-out',
@@ -270,14 +180,8 @@ function isProjectFact(fact: DiscoveredFact): boolean {
 }
 
 /**
- * What this document already says about the two things discovery narrows by.
- *
- * Exported and pure because it is the whole of what the panel knows about the
- * schema, and the one claim worth pinning without a browser: a document that
- * already names its project must arrive with that project in the box, or the
- * second stage of a two-stage ask is unreachable from the screen that staged
- * it. A path that resolves to nothing yields an empty string, which is exactly
- * the first-pass ask.
+ * The project and key location the document already names. A path that
+ * resolves to nothing gives an empty string, which is the first-pass ask.
  */
 export function narrowingFrom(document: unknown): {
   readonly project: string;
@@ -288,9 +192,7 @@ export function narrowingFrom(document: unknown): {
     document,
   );
   const project = at === null ? undefined : valueAt(document, at);
-  // The location is not a manifest key of its own: it is a segment inside the
-  // signer this installation already holds, and reading it back is cheaper for
-  // an operator than finding the console page that lists it.
+  // The key location is a segment of the signer URI, not a key of its own.
   const signer = valueAt(document, ['supplyChain', 'signer']);
   const location =
     typeof signer === 'string'
@@ -306,13 +208,8 @@ export function narrowingFrom(document: unknown): {
 const NO_ANSWER = { kind: 'found', candidates: [], suggested: null } as const;
 
 /**
- * The whole ask having failed, in the neutral voice.
- *
- * Not a field error, and the markup says which: `role="alert"` beside a
- * sentence about the installation rather than an error class on an input. An
- * operator cannot fix an absent federation or a `403` by re-typing a value in
- * the form below, and telling them to would be the third of the three refusals
- * `installation.tsx` keeps apart, collapsed into the first.
+ * The ask failed. No value typed in the form fixes that, so it is not shown
+ * as a field error.
  */
 export function DiscoveryRefusal({ reason }: { readonly reason: string }) {
   return (
@@ -332,38 +229,22 @@ export function DiscoveryRefusal({ reason }: { readonly reason: string }) {
   );
 }
 
-/**
- * The document with one confirmed value in it.
- *
- * Named rather than inlined so it can be asserted without a browser: the whole
- * of what confirming does is put a value the command produced at a path the
- * command produced, and neither of those is this screen's to decide. A version
- * of this that reached for a key name would compile and would be the bug the
- * panel exists to avoid.
- */
+/** Writes the candidate at the path the command gave; no key is named here. */
 export function applyDiscovered(
   document: unknown,
   fact: DiscoveredFact,
   candidate: DiscoveredCandidate,
 ): unknown {
   const at = placementOf(fact, document);
-  // A document with nowhere to put this is left alone rather than written at
-  // the position the answer was produced for: an entry removed between the ask
-  // and the press would make that position address a different boundary.
+  // No placement leaves the document alone: an entry removed since the ask
+  // would make the old position address a different boundary.
   if (at === null) return document;
   return withValueAt(document, at, candidate.value);
 }
 
 /**
- * Why a confirmed value would not land, or `null` when it would.
- *
- * One way of not landing: an answer about a vessel the document below does not
- * declare has nowhere to go, and the sentence says where to fix it. Offering a
- * value that cannot be written is the shape of button
- * `commands/targets/disconnect.ts` refuses to render — an act that cannot
- * happen, shown as one that can — so the reason takes the place of the
- * candidates rather than greying them, because a disabled button with no
- * sentence reads as a cloud that answered nothing.
+ * Why a confirmed value has nowhere to go, or `null`. The reason replaces the
+ * candidates, since greyed buttons read as a cloud that answered nothing.
  */
 export function unwritable(
   fact: DiscoveredFact,
@@ -375,16 +256,8 @@ export function unwritable(
 }
 
 /**
- * What came back, one row per manifest path, against what the document holds.
- *
- * Pure, and exported, because this is the half with the claims in it: the arms
- * have to read as different things, and a press has to change something — both
- * statements about markup rather than about a request.
- *
- * `document` is optional and its absence is honest rather than defaulted: a
- * caller with no document has nothing to compare against, so the row shows the
- * candidates and says nothing about which one is in force. Passing a document
- * is what turns the row into a reconciliation.
+ * One row per manifest path. Without `document`, a row lists candidates but
+ * cannot say which one the document holds.
  */
 export function DiscoveredFactList({
   facts,
@@ -394,10 +267,9 @@ export function DiscoveredFactList({
   onApply,
 }: {
   readonly facts: readonly DiscoveredFact[];
-  /** The document being edited, for the value each row is reconciled against. */
   readonly document?: unknown;
   readonly disabled?: boolean;
-  /** {@link unwritable}, threaded by the panel. Omitted answers everything writable. */
+  /** Omitted means every fact is writable. */
   unwritable?(fact: DiscoveredFact): string | null;
   onApply(fact: DiscoveredFact, candidate: DiscoveredCandidate): void;
 }) {
@@ -413,19 +285,8 @@ export function DiscoveredFactList({
         return (
           <div
             key={fact.path.join('.')}
-            // Rows arrive in the order the cloud answered for, one behind the
-            // next, because five values appearing at once reads as a page
-            // reloading rather than as an installation being read.
-            //
-            // **A refusal does not arrive**, and that is the whole of the
-            // rule this file already keeps in words: an `unavailable` arm is
-            // an API that is switched off, and animating it in would make a
-            // dead end look like something still landing. It renders as it
-            // always did, immediately and still.
-            //
-            // The delay is per row rather than per group so a stagger stays a
-            // stagger when a group is one row long, and `--i` carries the
-            // index because CSS cannot count siblings into a duration.
+            // `--i` carries the index, since CSS cannot count siblings. An
+            // unavailable row is a dead end, so it renders still.
             style={
               fact.kind === 'unavailable'
                 ? undefined
@@ -441,14 +302,9 @@ export function DiscoveredFactList({
           >
             <dt className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
-                {/* The last segment, humanized. Never a key written here — the
-                    path came from the command, and the schema owns which keys
-                    exist. */}
                 {humanize(String(fact.path[fact.path.length - 1] ?? ''))}
               </span>
-              {/* And the whole path beside it, because the tail alone is
-                  ambiguous by construction: two of the five answers humanize
-                  to the same word for two different keys. */}
+              {/* The full path too, since two keys can share a last segment. */}
               <code className="font-mono text-micro text-subtle">
                 {fact.path.join('.')}
               </code>
@@ -481,10 +337,7 @@ export function DiscoveredFactList({
                       key={candidate.label}
                       type="button"
                       size="sm"
-                      // Applied, not suggested. The suggestion is the server's
-                      // opinion and never changes; what an operator needs to
-                      // see is which candidate the document is currently
-                      // holding, which is the thing a press moves.
+                      // Marks what the document holds; `suggested` never changes on a press.
                       variant={candidate === applied ? 'default' : 'outline'}
                       aria-pressed={candidate === applied}
                       disabled={disabled}
@@ -506,14 +359,7 @@ export function DiscoveredFactList({
   );
 }
 
-/**
- * Whether the document is already holding what this candidate would write.
- *
- * By value rather than by label: a candidate's `value` is what lands, and for
- * a list-valued key it is a list, so `===` would answer "no" to a value it
- * just wrote. Serialized because these are manifest scalars and short lists,
- * where a deep compare is the same three lines with more edge cases.
- */
+/** Compares serialized values, since a list-valued key never passes `===`. */
 function holds(current: unknown, candidate: DiscoveredCandidate): boolean {
   return JSON.stringify(current) === JSON.stringify(candidate.value);
 }

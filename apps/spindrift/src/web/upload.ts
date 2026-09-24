@@ -1,12 +1,6 @@
 /**
- * The archive upload boundary.
- *
- * §4: "Archive upload accepts real bytes, stages them durably, and follows the
- * supplied-artifact or source-build path selected during creation."
- *
- * Session-authenticated route `/internal/upload` that receives archive bytes,
- * computes the SHA-256 digest, stages the archive to durable storage, and
- * returns the digest and location.
+ * The session-authenticated archive upload. It normalizes the bytes, stages
+ * them in the installation's source depot, and returns the digest and location.
  */
 import {
   ArchiveFormatError,
@@ -111,14 +105,8 @@ export async function handleUpload(
       bytes = new Uint8Array(buffer);
     }
 
-    // The one container every build route can open, before anything durable
-    // happens. A ZIP is transcoded and anything else is refused here — see
-    // `@repo/archive/archive-format` for why the boundary is the right place and
-    // why the digest is therefore over the converted bytes.
-    //
-    // Refused as a `400`, because it is: the request carried bytes this
-    // installation cannot stage, and saying so now is the whole difference
-    // between a wrong upload and a spent build that blames the platform.
+    // Before anything is staged: a ZIP is transcoded and other formats refused,
+    // so the digest covers the converted bytes.
     let archive: ReturnType<typeof normalizeArchive>;
     try {
       archive = normalizeArchive(filename, bytes);
@@ -132,14 +120,7 @@ export async function handleUpload(
       throw error;
     }
 
-    // One staging call, to one place, so the returned location describes where
-    // the bytes actually are. A depot failure is a `500` that says so, because
-    // a staged bundle nobody can retrieve is not a staged bundle.
-    //
-    // The place is the installation's, not the request's. This route used to
-    // honour an `x-bucket` header, which made "which bucket" a thing a caller
-    // asserted rather than a thing the manifest declares — see
-    // `sourceDepotFor`.
+    // The depot comes from the manifest, never from the request.
     const context = await deps.context(authentication.principal);
     const depot = sourceDepotFor(context.manifest);
 

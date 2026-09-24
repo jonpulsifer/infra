@@ -1,34 +1,17 @@
 /**
- * Editing a JSON document by path, without a form library.
- *
- * The manifest is one document that is valid or is not — `configureInstallation`
- * takes the whole thing for that reason — so the editing model here is a
- * document and a cursor into it, never a bag of per-field states. Two properties
- * follow that are worth having on purpose:
- *
- * 1. **What is submitted is what was read, plus edits.** A key this build's
- *    schema does not render is carried through untouched rather than dropped,
- *    so an older UI cannot silently delete a key a newer server requires. The
- *    schema decides what is *editable*; it does not decide what is *kept*.
- * 2. **Every edit is a whole new document.** React re-renders on identity, and
- *    a mutation in place is the bug where a field types and nothing moves.
- *
- * Absence and `null` are different states and both are reachable: a manifest key
- * may be optional, nullable, or neither, and flattening the two would make
- * "this installation has no Gateway" indistinguishable from "this build of the
- * form did not know about Gateways".
+ * Editing a JSON document by path. A key the schema does not render is carried
+ * through, so an older UI cannot drop a key a newer server requires. Every edit
+ * returns a new document, and absence stays distinct from `null`.
  */
 import type { FormNode, FormVariant } from './schema.ts';
 
-/** Where a value sits: object keys and array indices, outermost first. */
+/** Object keys and array indices, outermost first. */
 export type Path = readonly (string | number)[];
 
-/** A path rendered for an input's `name`, and for keying an error to a field. */
 export function pathKey(path: Path): string {
   return path.map(String).join('.');
 }
 
-/** The value at a path, or `undefined` where nothing is there. */
 export function valueAt(document: unknown, path: Path): unknown {
   let current = document;
   for (const step of path) {
@@ -38,7 +21,7 @@ export function valueAt(document: unknown, path: Path): unknown {
   return current;
 }
 
-/** The document with `value` at `path`, and every container along it replaced. */
+/** Copies every container along the path, creating any that is missing. */
 export function withValueAt(
   document: unknown,
   path: Path,
@@ -61,7 +44,6 @@ export function withValueAt(
   return { ...object, [step]: withValueAt(object[step], rest, value) };
 }
 
-/** The document with whatever is at `path` removed — a key, or an array item. */
 export function withoutValueAt(document: unknown, path: Path): unknown {
   if (path.length === 0) return undefined;
   const [step, ...rest] = path as [string | number, ...Path];
@@ -79,16 +61,8 @@ export function withoutValueAt(document: unknown, path: Path): unknown {
 }
 
 /**
- * A value of the right shape, with nothing filled in.
- *
- * What "nothing" means is the schema's answer, not a convention: an enum's
- * first member, a literal's only legal value, an object carrying exactly its
- * required keys. Optional keys are left out, because a blank optional key is a
- * value the operator did not choose and the schema does not require.
- *
- * Blank strings are what make the form's own validation say something useful:
- * an empty required string fails `min(1)` and is reported against its own path,
- * which is a better sentence than a missing key's.
+ * A value of the right shape with nothing filled in. Optional keys are left
+ * out, and an empty required string fails `min(1)` against its own path.
  */
 export function blankValue(node: FormNode): unknown {
   switch (node.kind) {
@@ -121,13 +95,7 @@ export function blankValue(node: FormNode): unknown {
   }
 }
 
-/**
- * Which arm of a discriminated union a value is currently in.
- *
- * By the discriminator's value rather than by trial parse: a half-edited object
- * matches no arm cleanly, and a form that lost track of which variant it was
- * showing every time the value was momentarily invalid would be unusable.
- */
+/** Matched by discriminator, since a half-edited value parses as no arm. */
 export function variantOf(
   variants: readonly FormVariant[],
   discriminator: string | null,
@@ -139,14 +107,8 @@ export function variantOf(
 }
 
 /**
- * Move a value to another arm of a union, keeping what both arms declare.
- *
- * The rule is the schema's, not a list of field names: a key the new arm also
- * has keeps its value unless it is the discriminator or a literal, both of
- * which the arm itself decides. So changing a Target from one adapter to
- * another keeps its name and discards the connection facts that only meant
- * something to the old adapter — without this module knowing that Targets have
- * names.
+ * Keeps each key the new arm also declares, except literals such as the
+ * discriminator, which the new arm sets.
  */
 export function switchVariant(value: unknown, to: FormVariant): unknown {
   const blank = blankValue(to.node);

@@ -1,16 +1,13 @@
 /**
- * Ready-made fragments for the Function editor's "Insert snippet" control.
- *
- * Each `code` is web-standard `fetch`/`Request`/`Response` — it runs
- * identically in the Bun preview, on Cloudflare Workers and on Cloud Run
- * functions. `placement` says where it is meant to land: `'body'` snippets
- * paste inside `fetch(request, env) { … }`; `'top'` snippets paste as a
- * top-level helper above it.
+ * Fragments for the Function editor's "Insert snippet" control. Web-standard
+ * `fetch`, `Request` and `Response` only: each runs in the Bun preview, on
+ * Workers and on Cloud Run.
  */
 export interface Snippet {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  /** `body` goes inside `fetch(request, env) { … }`; `top` goes above it. */
   readonly placement: 'body' | 'top';
   readonly code: string;
 }

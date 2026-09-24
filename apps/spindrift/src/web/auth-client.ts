@@ -1,24 +1,7 @@
 /**
- * The browser half of enrolment and sign-in (Task 37).
- *
- * `client.ts` is the typed wrapper for commands so that no view hand-writes a
- * `fetch`; this is the same rule for the one surface that is not a command, and
- * it carries a second job on top of it: **it is the only place
- * `navigator.credentials` is called.** That matters more than the fetch
- * wrapping does, because the WebAuthn API is where the codebase's one real
- * simplification lives, and it lives on this side of the wire.
- *
- * `src/auth/webauthn.ts` has no CBOR decoder, which is only possible because
- * the browser is asked for the two things it can already parse:
- *
- * - `getPublicKey()` — the credential's key as SPKI, which is what
- *   `crypto.subtle.importKey` takes.
- * - `getAuthenticatorData()` — the authenticator data on its own, rather than
- *   wrapped in the CBOR `attestationObject`.
- *
- * Both are standard `AuthenticatorAttestationResponse` methods and both are
- * assumed present rather than felt for: an authenticator old enough to lack
- * them is one this installation would rather refuse than half-support.
+ * The browser side of enrolment and sign-in, and the only caller of
+ * `navigator.credentials`. It sends the SPKI key and bare authenticator data,
+ * so the server needs no CBOR decoder.
  */
 
 import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
@@ -34,7 +17,6 @@ export type AuthClientResult<Value> =
   | { readonly ok: true; readonly value: Value }
   | { readonly ok: false; readonly failure: AuthFailure };
 
-/** Decode a server challenge, which is always valid base64url on this boundary. */
 function decode(value: string): Uint8Array<ArrayBuffer> {
   const bytes = base64urlDecode(value);
   if (bytes === null) {
@@ -48,8 +30,7 @@ async function callAuth<Value>(
   init: RequestInit,
 ): Promise<AuthClientResult<Value>> {
   const response = await fetch(`${AUTH_PATH_PREFIX}/${act}`, {
-    // Same as `client.ts`: the session is a cookie, and `same-origin` is stated
-    // rather than left to the default so nobody later widens it to `include`.
+    // The session is a cookie. Stated so nobody widens it to `include`.
     credentials: 'same-origin',
     ...init,
   });
@@ -72,16 +53,14 @@ function postAuth<Value>(
   });
 }
 
-/** What the shell needs before it can render anything. */
 export interface SessionState {
   readonly principal: Principal | null;
-  /** Whether anybody has enrolled here — which of the front door's two states. */
+  /** Whether anybody has enrolled here. */
   readonly claimed: boolean;
   /** Whether passkey sign-in is needed before this Gateway can be linked. */
   readonly gatewayUnlinked: boolean;
 }
 
-/** Who the browser is, and whether this installation has been claimed. */
 export async function readSession(): Promise<SessionState> {
   const result = await callAuth<SessionState>('session', { method: 'GET' });
   return result.ok
@@ -200,7 +179,6 @@ export async function enrol(
   });
 }
 
-/** Sign in with a passkey already enrolled here. */
 export async function signIn(): Promise<
   AuthClientResult<{ principal: Principal }>
 > {
@@ -216,12 +194,10 @@ export async function signIn(): Promise<
   );
 }
 
-/** End the session, on the server as well as in the browser. */
 export async function signOut(): Promise<void> {
   await postAuth('signout', {});
 }
 
-/** Read the current operator's authentication methods. */
 export async function readCredentialSettings(): Promise<CredentialSettings> {
   const result = await callAuth<CredentialSettings>('credentials', {
     method: 'GET',
@@ -243,7 +219,6 @@ async function freshAssertion(): Promise<AuthClientResult<AssertionFields>> {
     : begun;
 }
 
-/** Add an additional passkey without replacing the existing account roots. */
 export async function addPasskey(): Promise<AuthClientResult<unknown>> {
   const fresh = await freshAssertion();
   if (!fresh.ok) return fresh;
@@ -255,7 +230,7 @@ export async function addPasskey(): Promise<AuthClientResult<unknown>> {
   return postAuth('passkeys/add/complete', await createPasskey(begun.value));
 }
 
-/** Remove one passkey. The server refuses the final account root. */
+/** The server refuses to remove the last account root. */
 export async function removePasskey(
   credentialId: string,
 ): Promise<AuthClientResult<unknown>> {
@@ -274,7 +249,6 @@ export async function linkGateway(): Promise<AuthClientResult<unknown>> {
   return fresh.ok ? postAuth('gateway/link', fresh.value) : fresh;
 }
 
-/** Remove the linked Gateway identity while retaining passkey access. */
 export async function unlinkGateway(): Promise<AuthClientResult<unknown>> {
   const fresh = await freshAssertion();
   return fresh.ok ? postAuth('gateway/unlink', fresh.value) : fresh;

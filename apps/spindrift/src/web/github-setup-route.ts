@@ -1,26 +1,7 @@
 /**
- * Where GitHub's App-creation and installation flows land (§15).
- *
- * One path, two legs, told apart by which query parameter arrived:
- *
- * - **`code=`** is the manifest conversion — it arrives exactly once, right
- *   after the operator clicks create on GitHub's confirmation page. The
- *   `state` nonce is checked against the acting session (it is the one leg
- *   whose callback is believed), the code is converted, and the returned key
- *   is sealed into the `github_app` row. Refused outright when a row already
- *   exists: replacing the App identity is a deliberate act, not a side effect
- *   of resubmitting the create flow.
- * - **`installation_id=`** is the install/reconfigure callback. The docs say
- *   not to trust the parameter, so nothing from it is believed — it is a pure
- *   "refresh now" signal, answered by sending the operator back to the
- *   Repositories screen, which re-enumerates through the App JWT.
- *
- * Session-authenticated, unlike the webhook beside it: both legs arrive in
- * the operator's own browser, which carries the session cookie. Responses are
- * `Cache-Control: no-store` — the conversion response upstream of this route
- * is the only place the App's key ever exists as plaintext outside GitHub,
- * and nothing about this exchange belongs in a cache. Nothing here logs the
- * query string; telemetry records the route path alone.
+ * The target of GitHub's App-creation and installation redirects. Both reach
+ * the operator's browser, so both need the session. Never log or cache the
+ * query: it carries the one-time conversion code and the session nonce.
  */
 import type { RequestAuthentication } from '../auth/types.ts';
 import {
@@ -33,15 +14,12 @@ export const GITHUB_SETUP_PATH = '/internal/github/setup';
 export interface GitHubSetupRouteDeps {
   authenticate(request: Request): Promise<RequestAuthentication>;
   /**
-   * The auth agent over the current manifest, or `null` where this
-   * installation holds no keyring or database. Resolved per request for the
-   * same reason the webhook secret is: the manifest row and the App row both
-   * change mid-flight.
+   * `null` where this installation holds no keyring or database. Resolved per
+   * request, since the manifest and App rows change at runtime.
    */
   auth(): Promise<GitHubAppAuth | null>;
 }
 
-/** Every answer this route gives carries the no-store posture. */
 function respond(status: number, body: string): Response {
   return new Response(body, {
     status,
@@ -84,6 +62,8 @@ async function handleSetup(
 
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
+  // The manifest conversion: `state` must match this session, and an existing
+  // App row refuses it.
   if (code !== null) {
     const auth = await deps.auth();
     if (auth === null) {
@@ -107,6 +87,7 @@ async function handleSetup(
     return seeRepositories();
   }
 
+  // Untrusted per GitHub's docs, so it only prompts a re-enumeration.
   if (url.searchParams.has('installation_id')) {
     return seeRepositories();
   }

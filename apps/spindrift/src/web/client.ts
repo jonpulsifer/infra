@@ -1,15 +1,6 @@
 /**
- * The typed client — so a view never hand-writes a `fetch` (Task 36b).
- *
- * The types come from the registry, which means the browser and the command
- * layer cannot disagree about a name or an input shape without `tsc` saying so.
- * That is the point: the dispatch surface is deliberately unversioned and
- * internal, and the only thing making an unversioned protocol safe to change is
- * that both ends are compiled together.
- *
- * There is no `get`, no `list`, and no second verb. Every screen's data will
- * arrive the same way, because the alternative — one convenience helper for
- * reads — is how the boundary grows into the API §21 declined to declare.
+ * The one way a view calls a command. Its types come from the registry, so
+ * `tsc` catches drift across the unversioned dispatch protocol.
  */
 import type { commandRegistry } from '../commands/registry.ts';
 import type { CommandResult } from '../commands/types.ts';
@@ -18,14 +9,12 @@ import { reportSessionExpired } from './session-events.ts';
 
 type Registry = typeof commandRegistry;
 
-/** The input a command takes, read off its registered schema. */
 export type InputOf<Name extends keyof Registry> = Registry[Name] extends {
   input: { _output: infer Input };
 }
   ? Input
   : never;
 
-/** What a command's handler resolves to, unwrapped from its result envelope. */
 export type OutputOf<Name extends keyof Registry> = Registry[Name] extends {
   handler: (...args: never) => Promise<CommandResult<infer Output>>;
 }
@@ -33,28 +22,14 @@ export type OutputOf<Name extends keyof Registry> = Registry[Name] extends {
   : never;
 
 /**
- * A command and the input it takes, as one value.
- *
- * Distributed over the names rather than written `[CommandName, InputOf<CommandName>]`,
- * which is the shape that looks equivalent and is not: that one pairs *any*
- * name with *any* command's input, so `['listBuilds', { name: 'web' }]` type
- * checks. Written this way the pair is a union of correct pairs, and a name
- * beside the wrong input has no member to match.
- *
- * It exists because {@link useRead} takes a *list* of reads, and a list cannot
- * carry a type parameter per element any other way.
+ * Distributed over the names, so a name beside another command's input fails
+ * to type check.
  */
 export type Call = {
   [Name in keyof Registry & string]: readonly [Name, InputOf<Name>];
 }[keyof Registry & string];
 
-/**
- * What a list of {@link Call}s answers with, position for position.
- *
- * A mapped type over the tuple rather than `OutputOf<CommandName>[]`, so a
- * screen reading four commands destructures four differently-typed values
- * instead of one union it would have to narrow by hand.
- */
+/** Mapped by position, so each read destructures to its own output type. */
 export type OutputsOf<Calls extends readonly Call[]> = {
   [Index in keyof Calls]: Calls[Index] extends readonly [
     infer Name extends keyof Registry & string,
@@ -64,15 +39,7 @@ export type OutputsOf<Calls extends readonly Call[]> = {
     : never;
 };
 
-/**
- * The failure a caller sees.
- *
- * `code` is {@link TransportFailureCode} — the command layer's own closed set
- * plus the codes only a transport can produce — rather than a bare `string`.
- * Widening it here would quietly spend the property the rest of this layer is
- * built on: a view branching on a refusal is branching over a closed set, and
- * a code it forgot is a compile error rather than a silent fallthrough.
- */
+/** `code` stays a closed set, so a view branches over known refusals only. */
 export interface TransportFailure {
   readonly code: TransportFailureCode;
   readonly message: string;
@@ -83,13 +50,7 @@ export type ClientResult<Output> =
   | { readonly ok: true; readonly value: Output }
   | { readonly ok: false; readonly failure: TransportFailure };
 
-/**
- * Run a command.
- *
- * A non-JSON response is the one case that throws rather than resolving to a
- * refusal: a refusal is an answer the server gave, and a proxy returning HTML
- * is not the server answering.
- */
+/** Throws on a non-JSON response, such as a proxy's HTML error page. */
 export async function command<Name extends keyof Registry & string>(
   name: Name,
   input: InputOf<Name>,
@@ -97,8 +58,7 @@ export async function command<Name extends keyof Registry & string>(
   const response = await fetch(pathFor(name), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    // The session is a cookie; `same-origin` is the default, and it is stated
-    // here so that nobody later "fixes" it to `include` and widens the surface.
+    // The session is a cookie. Stated so nobody widens it to `include`.
     credentials: 'same-origin',
     body: JSON.stringify(input),
   });
@@ -111,11 +71,7 @@ export async function command<Name extends keyof Registry & string>(
   }
 
   const result = body as ClientResult<OutputOf<Name>>;
-  // The 24h session this request rode has expired mid-visit. The view that
-  // called `command()` did not ask "is my session still good" — it asked for
-  // an App or a Build — so it has nothing sensible to render for this refusal
-  // beyond the raw sentence. Re-gating to sign-in is the one answer that is
-  // right for every caller, which is why it happens here rather than in each.
+  // An expired session re-gates the shell here, since no caller can render it.
   if (!result.ok && result.failure.code === 'UNAUTHENTICATED') {
     reportSessionExpired();
   }

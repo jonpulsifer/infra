@@ -1,37 +1,7 @@
 /**
- * Connecting a Target (§13).
- *
- * The cluster half of this screen used to be eight text fields — an API server,
- * a namespace, a `GitRepository` and its namespace, and nothing at all for the
- * gateway, the authenticated edge, the config store, or the address a route's
- * DNS record points at, which meant a cluster connected here could never take
- * an App that had to be reachable. Every one of those is something the cluster
- * can be asked for, and asking a person to type them made connecting a Target a
- * form about how Kubernetes delivery works rather than a decision about where
- * to deploy.
- *
- * So it is the repository screen's shape, one noun over: **give an address,
- * read what is there, choose what to blend into, confirm.** `probeCluster` is
- * the read and it writes nothing; `connectTarget` is the confirm.
- *
- * What that buys, beyond fewer keystrokes:
- *
- * - **The components are the form.** A gateway, an authenticated edge, and a
- *   config store are each a card the operator includes or leaves out, and
- *   leaving one out is a supported Target rather than a half-filled one. §3's
- *   reaches fall out of what was included rather than being a fourth question.
- * - **Nothing is proposed that this cluster did not confirm.** A namespace, a
- *   chart source, and a gateway address come off the probe. What is carried
- *   from a working Target is only what `clusters/base` makes identical on every
- *   cluster, and the card says which of the two a value came from.
- * - **The declaration is on the screen.** What the button is about to do is
- *   rendered as the manifest entry that would do the same thing, because §13's
- *   connect act and the manifest's `targets[]` are one shape with two entry
- *   points — and an operator who cannot see that has to take it on faith.
- *
- * Connect still always succeeds, so there is still no test button. Press it and
- * read the checklist; that *is* the test, and unlike a preflight it keeps being
- * true tomorrow.
+ * Connecting a Target. A cluster is read with `probeCluster`, which writes
+ * nothing, and each component it offers is a card to include or leave out. The
+ * other boundary kinds are short forms. `connectTarget` always succeeds.
  */
 import {
   AlertTriangle,
@@ -72,7 +42,6 @@ import { cn } from '../../ui/utils.ts';
 type ConnectTargetInput = InputOf<'connectTarget'>;
 type Probed = OutputOf<'probeCluster'>;
 
-/** What the panel is doing, in the same three states the repository scan has. */
 type Scan =
   | { readonly state: 'idle' }
   | { readonly state: 'reading' }
@@ -86,21 +55,15 @@ export function ConnectTargetForm(props: {
   /** True on the "add a Vessel" path, where no manifest seed named it. */
   vesselEditable?: boolean;
   /**
-   * The address to start from, which is only ever *this* Target's own.
-   *
-   * Empty on both connect paths, for the reason {@link TargetConnectionProposal}
-   * gives for having no `apiServer` field: a cluster prefilled with another
-   * cluster's address reads as correct and points somewhere else. Editing a
-   * Target that is already connected is the one case where the address is not
-   * somebody else's, and re-typing it to correct a gateway would be asking the
-   * operator to restate the one fact the row is certain of.
+   * Set only on an edit, to this Target's own address. Another cluster's
+   * address prefilled here would read as correct and point somewhere else.
    */
   apiServer?: string;
-  /** The same fact for a cloud boundary, on the same one path — an edit. */
+  /** A cloud boundary's own project, on an edit. */
   project?: string;
-  /** And for an edge platform's boundary: the team this surface deploys into. */
+  /** An edge platform's own team, on an edit. */
   team?: string;
-  /** And for a Cloudflare account: the account every surface on it sits in. */
+  /** A Cloudflare boundary's own account, on an edit. */
   account?: string;
   /** What an edit of a cloud boundary restates so the act does not delete it. */
   carried?: CloudBoundaryFacts;
@@ -124,7 +87,6 @@ export function ConnectTargetForm(props: {
   );
 }
 
-/** What an operator calls the boundary they are connecting. */
 const BOUNDARY_NOUN: Record<VesselKind, string> = {
   cluster: 'cluster',
   'gcp-project': 'cloud project',
@@ -178,8 +140,6 @@ function Heading({
   );
 }
 
-// --- The cluster flow -------------------------------------------------------
-
 function ConnectCluster({
   vessel,
   vesselEditable = false,
@@ -198,11 +158,6 @@ function ConnectCluster({
   onCancel: () => void;
 }) {
   const [vesselName, setVesselName] = useState(vessel);
-  // Per-instance, so never proposed *from another Target*: this is the one field
-  // that names *this* cluster, and a second cluster prefilled with the first
-  // one's address would read as correct and deploy somewhere else. The caller
-  // may still supply the row's own address, which is the same fact rather than
-  // a proposal about it.
   const [apiServer, setApiServer] = useState(knownApiServer);
   const [scan, setScan] = useState<Scan>({ state: 'idle' });
   /** Counts reads, so a re-read remounts the panel below on the new answer. */
@@ -249,9 +204,7 @@ function ConnectCluster({
           value={apiServer}
           onChange={(event) => {
             setApiServer(event.target.value);
-            // The panel below is about the cluster that was read, so editing
-            // the address retires it rather than leaving choices standing that
-            // came from somewhere else.
+            // The panel's choices came from the cluster at the old address.
             setScan({ state: 'idle' });
           }}
           placeholder="https://cluster.example:6443"
@@ -310,13 +263,6 @@ function ConnectCluster({
   );
 }
 
-/**
- * The components this cluster offers, and the choice about each.
- *
- * Mounted fresh per read — the caller keys it on the read count — so re-reading
- * a cluster after fixing its RBAC re-derives every default rather than leaving
- * a stale pick that the new probe no longer offers.
- */
 function ClusterComponents({
   vessel,
   apiServer,
@@ -350,11 +296,8 @@ function ClusterComponents({
   const [flavour, setFlavour] = useState<KubernetesDeliveryFlavour>(
     pickFlavour(probe.deliveryFlavours, proposal.deliveryFlavour),
   );
-  // Argo's half. None of it is readable: `repoURL` and `targetRevision` are
-  // where *this installation's* chart lives, which the cluster has no opinion
-  // about, and a project is a name Argo would answer for only if it were asked
-  // about one that already exists. So the two that have a conventional answer
-  // start at it and the two that do not start empty and gate the button.
+  // None of Argo's fields can be read off the cluster. Project and server start
+  // at Argo's conventions; repoUrl and revision start empty and gate Connect.
   const [project, setProject] = useState('default');
   const [repoUrl, setRepoUrl] = useState('');
   const [revision, setRevision] = useState('');
@@ -363,13 +306,8 @@ function ClusterComponents({
     refKey(probe.gateways, undefined),
   );
   /**
-   * Read off the Gateway, and still editable.
-   *
-   * Two states need it to be a field rather than a derived value, and both are
-   * ordinary: a Gateway whose load balancer has not been assigned yet reports
-   * no address, and a cluster that would not let its Gateways be listed offers
-   * nothing to read one off. Either way the operator knows the address and the
-   * alternative is a Target that can only reach `none`.
+   * Editable: a Gateway still waiting on its load balancer reports no address,
+   * and a cluster that will not list its Gateways offers none to read.
    */
   const [privateAddress, setPrivateAddress] = useState(
     probe.gateways[0]?.address ?? '',
@@ -388,10 +326,8 @@ function ClusterComponents({
   const [tunnelOn, setTunnelOn] = useState(false);
   const [tunnel, setTunnel] = useState('');
 
-  // Parsed rather than looked up, because {@link Choice} degrades to a text
-  // field on a cluster that would not list the kind — and a form that could
-  // only accept what the probe returned would be unusable on exactly the
-  // cluster whose RBAC has not merged yet, which is every cluster once.
+  // Parsed from text: {@link Choice} is a typed field when the probe could not
+  // list the kind.
   const chosenGateway = parseRef(gatewayName);
   const chosenSource = parseRef(source);
   const discoveredAddress =
@@ -478,11 +414,8 @@ function ClusterComponents({
             label="Operator"
             value={delivery.flavour}
             onChange={(value) => setFlavour(value as KubernetesDeliveryFlavour)}
-            // Both, always, and never only what the probe found: a cluster
-            // whose Argo CRDs are applied but not yet established reads as
-            // serving neither, and a picker offering neither is a cluster that
-            // cannot be connected until somebody else's reconcile finishes.
-            // What was read shows up as the notice above instead.
+            // Every flavour: a cluster whose Argo CRDs are not yet established
+            // reads as serving neither. The notice above says what was read.
             options={[...KUBERNETES_DELIVERY_FLAVOURS]}
             hint={
               probe.deliveryFlavours.length === 0
@@ -575,8 +508,7 @@ function ClusterComponents({
             value={gatewayName}
             onChange={(value) => {
               setGatewayName(value);
-              // Follow the pick. An address left behind from the previous
-              // Gateway is the one wrong value here that would look right.
+              // An address left from the previous Gateway would look right.
               setPrivateAddress(
                 probe.gateways.find((entry) => refOf(entry) === value)
                   ?.address ?? '',
@@ -721,10 +653,7 @@ function Declaration({
           not overwrite one that is already configured.
         </>
       }
-      // Both arrays, because one connect act names a boundary and a surface on
-      // it. The two seeds come from `domain/target-onboarding.ts`, which is
-      // what the server connects with — so this is the act, not a rendering of
-      // what somebody hopes the act is.
+      // Built by the same seed functions the server connects with.
       text={JSON.stringify(
         { vessels: [vesselSeedOf(plan)], targets: [targetSeedOf(plan)] },
         null,
@@ -734,25 +663,9 @@ function Declaration({
   );
 }
 
-// --- The cloud flow, unchanged ---------------------------------------------
-
 /**
- * A cloud project's Targets, in one act (§13).
- *
- * Still a flat form, and not because nobody got to it: a project has no
- * discovery API to enumerate itself through before it is named, so there is
- * nothing here for a probe to read. The region is carried from a working cloud
- * Target; the project id never is — except on an edit, where the id is this
- * boundary's own rather than somebody else's, and pressing the button again is
- * how a surface the last probe did not find gets asked about a second time.
- *
- * **No control for either endpoint.** Both used to be typed here on the theory
- * that they were connection material the way `apiServer` is; they are not —
- * `run.googleapis.com` and `firebasehosting.googleapis.com` answer for every
- * project, so `cloudrun/index.ts` and `static/index.ts` each apply their own
- * default and this form asks nothing about either. An installation behind a
- * perimeter or a mirror still has the override; it is declared in the manifest
- * (§20), which this screen never mediates.
+ * A flat form: a project cannot be enumerated before it is named. Each adapter
+ * defaults its own endpoint, and an override is declared in the manifest.
  */
 function ConnectCloud({
   vessel,
@@ -809,11 +722,8 @@ function ConnectCloud({
               ...(proposal.policyEndpoint === undefined
                 ? {}
                 : { policyEndpoint: proposal.policyEndpoint }),
-              // One act writes the whole connection and the whole vessel row,
-              // so what this boundary already states has to go back with it or
-              // the edit deletes it. There is no field for these because they
-              // are not decisions being made again — the fresh-connect path
-              // sends none, having nothing to preserve.
+              // One act rewrites the whole connection and Vessel row, so an
+              // edit sends back what the boundary already states.
               ...carried,
             })
           }
@@ -829,22 +739,8 @@ function ConnectCloud({
 }
 
 /**
- * A Vercel team's one surface, in one act.
- *
- * Flat for the reason the cloud form above it is: a team has no discovery API
- * to enumerate itself through before it is named. One field, not two — there is
- * no region to pick, because the platform serves one network from one place,
- * and no control for the API root either: `api.vercel.com` answers for every
- * team, so `vercel/index.ts` applies it without asking. The only thing this
- * boundary can tell Spindrift that Spindrift could not already assume is which
- * team it is.
- *
- * **No field for the token**, and that is the point rather than an omission:
- * the bearer this Target is driven with is the installation's, read from its
- * Secret per request, so a form that took one would be storing a credential per
- * Target — the thing §13's rule is actually about. A team whose token is
- * missing or unauthorized connects anyway and reads `API_TOKEN` unmet, which is
- * §13's "connect always succeeds" doing its job.
+ * One field: a team cannot be enumerated before it is named. No token field:
+ * the installation's own token is read from its Secret per request.
  */
 function ConnectVercel({
   vessel,
@@ -899,25 +795,7 @@ function ConnectVercel({
   );
 }
 
-/**
- * A Cloudflare account, in one act.
- *
- * The same one field {@link ConnectVercel} takes, one vendor over and for the
- * same reason — an account cannot be enumerated before it is named — plus the
- * same omission: the platform's REST root answers for every account, so
- * `adapters/cloudflare.ts` applies it without asking, and the only thing left
- * for this form to ask about is which account.
- *
- * **What comes back is more than the surface it registers.** The act reads the
- * account itself — its zones, its Workers subdomain, its Pages projects — and
- * the Targets screen shows that under the connection, so an operator who has
- * typed an account id sees what is in it rather than only that it answered.
- *
- * **No field for the token here either**, and the same sentence applies: the
- * bearer is the installation's, read from its Secret per request, so a form
- * that took one would be storing a credential per Target. An account whose
- * token is missing or unscoped connects anyway and reads `API_TOKEN` unmet.
- */
+/** The same one-field form as {@link ConnectVercel}, for the same reasons. */
 function ConnectCloudflareAccount({
   vessel,
   account: knownAccount = '',
@@ -971,22 +849,9 @@ function ConnectCloudflareAccount({
   );
 }
 
-// --- atoms ------------------------------------------------------------------
-
 /**
- * One thing a Target can blend into, and whether it is included.
- *
- * `required` and `on` are the two shapes: a required component has no toggle
- * because a Target without it is not addressable, and an optional one is a
- * checkbox whose off state is a supported Target rather than an incomplete
- * form.
- *
- * There is deliberately no disabled state. Nothing here is unavailable because
- * the probe did not find it — a cluster that would not list its Gateways still
- * has one, and greying the card out would make a cluster whose RBAC has not
- * merged yet unconnectable through the product. What the probe did not find
- * shows up as a field to type with the sentence saying nothing was read, which
- * is §3's grammar rather than a dead control.
+ * A required component has no toggle; leaving an optional one out is a
+ * supported Target. There is no disabled state: what the probe missed is typed.
  */
 function Component({
   icon,
@@ -1059,9 +924,6 @@ function Choice({
   options: readonly string[];
   hint?: string;
 }) {
-  // Nothing was readable, so there is nothing to pick from and the operator
-  // types it. The same field either way — a disabled select would be a dead end
-  // on a cluster whose RBAC is merged but not yet reconciled.
   if (options.length === 0) {
     return (
       <Field
@@ -1129,7 +991,6 @@ function parseRef(value: string): { name: string; namespace: string } | null {
   return { namespace, name };
 }
 
-/** The preferred ref when this cluster has it, otherwise the first one. */
 function refKey(
   entries: readonly { name: string; namespace: string }[],
   preferred: { name: string; namespace: string } | undefined,
@@ -1147,13 +1008,8 @@ function refKey(
 }
 
 /**
- * Which operator to start on.
- *
- * What a working Target of this installation already uses, when this cluster
- * serves it — that is the answer for the second cluster of a fleet, and the
- * whole point of carrying a proposal. Otherwise whatever this cluster was found
- * serving, and Flux when it was found serving neither: an unreadable cluster
- * gets a pick that is editable rather than a blank one that gates the button.
+ * A working Target's operator when this cluster serves it, else one it serves,
+ * else Flux, so an unreadable cluster still starts with an editable pick.
  */
 function pickFlavour(
   served: readonly KubernetesDeliveryFlavour[],
@@ -1163,7 +1019,6 @@ function pickFlavour(
   return served[0] ?? proposed ?? 'flux-helmrelease';
 }
 
-/** The preferred option when this cluster has it, otherwise the first one. */
 function pick(
   options: readonly string[],
   preferred: string | undefined,
@@ -1173,12 +1028,8 @@ function pick(
 }
 
 /**
- * The parts of a working Target's chart-values worth carrying.
- *
- * Only `externalAuth`: `clusters/base` installs the authenticated edge in the
- * same namespace on every cluster, so the value a working Target holds is the
- * right proposal for the next one. `dns` and `gateway` are pointedly not here —
- * they name one cluster's address, and the probe read this one's.
+ * Only `externalAuth` is carried from a working Target, since the edge sits in
+ * the same namespace on every cluster. `dns` and `gateway` name one cluster.
  */
 function carriedPlatform(proposal: TargetConnectionProposal): {
   externalAuth: { name: string; namespace: string; port: number } | null;

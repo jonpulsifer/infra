@@ -1,33 +1,12 @@
 /**
- * Where an attempt has got to, as one strip across the top of the screen.
- *
- * §18 rejects the stage rail every CI tool reaches for, and this is not that
- * rail: it does not *structure* the page, it summarises it. The order down the
- * screen is still state, diagnosis, what the release is, resources, logs — the
- * running App first and the pipeline second. What this adds is the one thing
- * that order cannot carry on its own, which is **how far along**. A reader who
- * arrives mid-deploy should not have to infer that from which drawers happen to
- * be open.
- *
- * It earns its place by being a legend rather than a navigation surface:
- * nothing here is clickable, every segment names its own state in words, and
- * the whole thing collapses to a single line once the release is live. A strip
- * you can press would be a rail again.
- *
- * **The bar is honest about not knowing.** A deploy has no percentage — the
- * platform reports phases, not fractions — so the fill is derived from *stages
- * settled*, and the stage in flight contributes a half rather than a guess. The
- * sweep across the fill is what says "moving, duration unknown"; a bar that
- * crept toward 90% and waited there would be inventing a number the controller
- * never gave. What the running stage's `detail` may carry instead is history —
- * "usually about 4:10, from 12 deploys" — which is a fact about earlier
- * releases, stated with its sample size, and not a claim about this one.
+ * How far an attempt has got, as one strip nothing can press. A deploy reports
+ * phases and no percentage, so the fill counts settled stages and the sweep says
+ * the running stage has no known duration.
  */
 import type { StepStatus } from '../../commands/views.ts';
 import { cn } from '../ui/utils.ts';
 import { StepGlyph, statusWord } from './status.tsx';
 
-/** One leg of the journey from source to serving. */
 export interface Stage {
   readonly name: string;
   readonly status: StepStatus;
@@ -36,11 +15,8 @@ export interface Stage {
 }
 
 /**
- * How full the bar is.
- *
- * A settled stage counts whole and a running one counts half, so the bar moves
- * on real transitions and never on a timer. Everything after a failure stays
- * unfilled: a red deploy has not quietly made progress on the legs behind it.
+ * A settled stage counts whole and a running one half, so the bar moves only on
+ * real transitions. Nothing after a failure fills.
  */
 function fractionOf(stages: readonly Stage[]): number {
   if (stages.length === 0) return 0;
@@ -56,7 +32,6 @@ function fractionOf(stages: readonly Stage[]): number {
   return filled / stages.length;
 }
 
-/** The tone the whole strip reads in: red beats moving, moving beats green. */
 function toneOf(stages: readonly Stage[]): 'failed' | 'running' | 'done' {
   if (stages.some((stage) => stage.status === 'failed')) return 'failed';
   if (stages.some((stage) => stage.status === 'running')) return 'running';
@@ -83,9 +58,7 @@ export function StageProgress({
   return (
     <div
       className={cn('flex flex-col gap-2', className)}
-      // One label for the whole strip. Each segment repeats its state in words
-      // below, so a screen reader that walks the list gets the detail; this is
-      // the summary somebody arriving on the region hears first.
+      // The summary; each segment below also states itself in words.
       role="group"
       aria-label={`Progress: ${stages
         .map((stage) => `${stage.name} ${statusWord(stage.status)}`)
@@ -95,15 +68,9 @@ export function StageProgress({
         <div
           className={cn(
             'relative h-full overflow-hidden rounded-full',
-            // `width` rather than `scaleX`: the fill is `rounded-full`, and a
-            // scaled box takes its rounded cap with it, so the leading edge
-            // would flatten as the bar grew. One element transitioning five
-            // times across a deploy is a trade worth making for a cap that
-            // stays a cap.
+            // `width`, since `scaleX` would squash the rounded leading cap.
             'transition-[width] duration-700 ease-out',
             FILL[tone],
-            // Only the moving bar moves. A settled one holding a sweep would
-            // say something is happening when nothing is.
             tone === 'running' &&
               cn(
                 'after:absolute after:inset-0 after:bg-[image:var(--shimmer)]',

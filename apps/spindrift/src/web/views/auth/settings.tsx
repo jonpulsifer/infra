@@ -1,14 +1,6 @@
 /**
- * The credentials an operator signs in with, and the one act that removes one.
- *
- * **A passkey row has to say which passkey it is.** `Remove` is irreversible
- * and the rows were labelled `Passkey 1`, `Passkey 2` by array index — an
- * ordinal that renumbers itself the moment an earlier one goes — over a created
- * date that is the same week for every key somebody enrolled in one sitting.
- * `lastUsedAt` is the fact that separates the laptop in front of you from the
- * key in a drawer, the server has always returned it, and this screen threw it
- * away. It is not a nickname and does not pretend to be: a nickname needs a
- * column, and this needed a line.
+ * Operator credentials: passkeys and the Gateway identity link. Each passkey
+ * row shows its last use, which tells apart keys enrolled together.
  */
 import { KeyRound, Link, Link2Off, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -142,7 +134,6 @@ export function CredentialSettingsView({
         </p>
       )}
 
-      {/* Account Passkeys */}
       <Card>
         <CardHeader>
           <KeyRound aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
@@ -170,10 +161,7 @@ export function CredentialSettingsView({
                       Added <Timestamp at={passkey.createdAt} />
                     </span>
                     <span aria-hidden="true">·</span>
-                    {/* The half of the row that makes `Remove` a decision
-                        rather than a guess. `never used` is a fact worth
-                        rendering loudly: it is what an abandoned enrolment
-                        looks like. */}
+                    {/* "never used" is what an abandoned enrolment looks like. */}
                     {passkey.lastUsedAt === null ? (
                       <span>never used</span>
                     ) : (
@@ -218,7 +206,6 @@ export function CredentialSettingsView({
         </CardContent>
       </Card>
 
-      {/* Gateway identity */}
       <Card>
         <CardHeader>
           {settings.gatewayLinked ? (

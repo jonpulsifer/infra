@@ -1,9 +1,6 @@
 /**
- * The shell, and the client's whole route table.
- *
- * What is left here after the screens moved out beside the views they render:
- * whether there is anybody to show anything to, whether this installation has
- * been configured, which screen a path names, and the chrome around all three.
+ * The shell and the client's route table: the sign-in gate, the onboarding
+ * gate, and the screen each path names.
  */
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -33,9 +30,6 @@ import { ArtifactsScreen } from './views/supply-chain/artifacts.tsx';
 import { BuildsScreen } from './views/supply-chain/builds.tsx';
 import { SourcesScreen } from './views/supply-chain/sources.tsx';
 
-/**
- * Nobody, somebody, or not asked yet.
- */
 type Gatekeeping =
   | { readonly state: 'asking' }
   | {
@@ -46,14 +40,7 @@ type Gatekeeping =
   | { readonly state: 'signed-in'; readonly principal: Principal };
 
 /**
- * Whether this installation has been configured, and the document to onboard
- * from if it has not.
- *
- * The same shape as {@link Gatekeeping} and for the same reason: which screen
- * renders is a fact about the installation rather than a choice anybody makes,
- * and `asking` is a third state because rendering the product for one frame and
- * then replacing it with onboarding is the flash of a broken app this exists to
- * remove.
+ * `asking` keeps the product from flashing up before onboarding replaces it.
  */
 export type Configuration =
   | { readonly state: 'asking' }
@@ -62,13 +49,8 @@ export type Configuration =
       readonly state: 'configured';
     };
 
-/**
- * How long the whole product waits on the read below before rendering anyway.
- *
- * Generous, because the answer decides which application an operator is looking
- * at and guessing early on a merely-slow installation would replace the product
- * with a wizard for no reason. It is a ceiling on a hang, not a latency budget.
- */
+// A timeout renders the product even on an unconfigured installation, so this
+// only bounds a hang.
 const ASK_TIMEOUT_MS = 10_000;
 
 export function App() {
@@ -77,11 +59,8 @@ export function App() {
   const [installation, setInstallation] = useState<Configuration>({
     state: 'asking',
   });
-  // What the answering process is running, from the same read as the
-  // configuration below; the shell's footer repeats it.
   const [version, setVersion] = useState<string | null>(null);
 
-  // The tab bar is where an operator holding three Deploys tells them apart.
   useEffect(() => {
     document.title = titleOf(route.path);
   }, [route.path]);
@@ -111,14 +90,8 @@ export function App() {
     };
   }, []);
 
-  /**
-   * Re-gate on the one signal `client.ts`, the archive upload, and
-   * `stream-client.ts` all raise the same way: a 24h session that expired
-   * mid-visit, read as `UNAUTHENTICATED` by a transport with nothing sensible
-   * to render for it. The reset is the same shape `onSignOut` below already
-   * uses — this installation is still claimed, and nothing here suggests the
-   * linked Gateway went anywhere.
-   */
+  // A transport raises this when the session expires mid-visit. The
+  // installation stays claimed and its Gateway linked.
   useEffect(() => {
     const onExpired = () =>
       setGate({ state: 'anonymous', claimed: true, gatewayUnlinked: false });
@@ -126,41 +99,18 @@ export function App() {
     return () => removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
 
-  /**
-   * Ask, once there is somebody to ask on behalf of, whether this installation
-   * has been configured.
-   *
-   * **After the session rather than beside it**, which costs a second round
-   * trip before the first paint of the product. The alternative is firing an
-   * unauthenticated command on every anonymous load to learn a fact only a
-   * signed-in operator can act on, and a 401 on the sign-in screen every time
-   * is the worse trade.
-   *
-   * **A read that fails means the product**, not onboarding. Onboarding is the
-   * more disruptive answer — it replaces the whole application — so a transport
-   * failure resolves to the state that takes nothing away, and Settings still
-   * reaches everything this screen would have asked.
-   *
-   * **And a read that never answers means the same thing**, which needs the
-   * deadline below because a rejection is not the failure mode this one has. A
-   * request a proxy is holding open, or one issued into a pod mid-rollout, does
-   * not reject — it hangs, and `SignedIn` renders nothing while the answer is
-   * outstanding. Without a deadline that is a blank document with no chrome and
-   * no way to sign out, for as long as the socket stays up. The whole product is
-   * behind this one read, so the read is not allowed to be the thing that never
-   * finishes.
-   */
+  // Asked only once signed in, so an anonymous load never draws a 401.
   useEffect(() => {
     if (gate.state !== 'signed-in') {
-      // A sign-out has to un-answer this: the next operator to sign in is a
-      // different session on a possibly different installation state, and
-      // carrying the previous answer over would show them the product while
-      // this effect was still asking.
+      // Reset on sign-out, so the next session never inherits this answer.
       setInstallation({ state: 'asking' });
       return;
     }
     let live = true;
     let deadline: ReturnType<typeof setTimeout> | undefined;
+    // A request held by a proxy or a rolling pod hangs without rejecting. A
+    // failed or hung read shows the product, since onboarding would replace
+    // the whole app on a guess.
     Promise.race([
       command('getInstallationManifest', {}),
       new Promise<null>((resolve) => {
@@ -207,11 +157,7 @@ export function App() {
       version={version}
       path={route.path}
       onNavigate={route.navigate}
-      onConfigured={() =>
-        // Onboarding's own write just seeded this installation, so there is
-        // nothing yet for a declaration to disagree with — see `Configuration`.
-        setInstallation({ state: 'configured' })
-      }
+      onConfigured={() => setInstallation({ state: 'configured' })}
       onSignOut={() => {
         void signOut().then(() =>
           setGate({
@@ -226,21 +172,8 @@ export function App() {
 }
 
 /**
- * What somebody who has signed in is shown.
- *
- * Two things, and which one is not a preference: an installation that has been
- * configured gets the product, and one that has not gets onboarding *instead
- * of* it. Not beside it and not after it — an unconfigured installation has no
- * Apps, no Builds and no Targets, so the product it would otherwise render is a
- * navigation to six empty screens with one form buried at the end of it, and
- * every act reachable from there refuses on whichever placeholder it read first.
- *
- * Exported for `test/web/onboarding.test.tsx`, for the same reason {@link Screen}
- * is exported for the mounted route-table test: the claim is about *this*
- * function's branches, and a test that rendered `Onboarding` directly would be
- * asserting that a component it constructed itself renders. The discovery panel
- * on the settings screen shipped in exactly that state — every test around it
- * passed, and deleting the one line that mounted it changed nothing.
+ * Onboarding replaces the whole product until the installation is configured.
+ * Exported so tests exercise these branches.
  */
 export function SignedIn({
   principal,
@@ -288,15 +221,8 @@ export function SignedIn({
 }
 
 /**
- * The document title for a path — the tab's answer to "which one is this?".
- *
- * Derived from the path alone, mirroring `Screen` below branch for branch,
- * because the path already carries the human name: Apps route by name, Deploys
- * and Builds by the id their screens render as `#42`. Waiting for loaded data
- * would say the same words later, and leave every tab reading "Spindrift"
- * until its fetch returned.
- *
- * Exported for `test/web/screen-titles.test.ts`, which pins the mapping.
+ * Mirrors {@link Screen} branch for branch, from the path alone, so a tab is
+ * titled before any fetch returns.
  */
 export function titleOf(path: string): string {
   if (path.startsWith('/settings')) return pageTitle('Settings');
@@ -308,8 +234,7 @@ export function titleOf(path: string): string {
     return pageTitle('Settings');
   if (path.startsWith('/sources')) return pageTitle('Sources');
   if (path.startsWith('/artifacts')) return pageTitle('Artifacts');
-  // No name in the path, so the tab says the noun. The id is a uuid: a title
-  // holding one would be a title nobody can read a Datastore's name out of.
+  // The id in the path is a uuid, which no reader wants as a title.
   if (path.startsWith('/datastores')) return pageTitle('Datastores');
   if (path.startsWith('/functions')) return pageTitle('Functions');
   if (path.startsWith('/apps/new')) return pageTitle('New App');
@@ -328,30 +253,8 @@ export function titleOf(path: string): string {
 }
 
 /**
- * The route table.
- *
- * **A screen that names one object is keyed on that object's id.** Every screen
- * below that takes an id holds evidence about *that* object in `useState` —
- * a Deploy's checklist, log, diagnosis and phase; a Build's attempt; a
- * workspace's timeline — and React reuses a component instance whose type and
- * position are unchanged. Switching between two Deploys of the same App is
- * exactly that case: without a key the instance survives, so the previous
- * Deploy's evidence stays on screen under the new Deploy's id until the fetch
- * for it returns, and every `useState` seeded from the old view (the build
- * drawer's open-ness, the transcript's) carries over with it. A different App
- * does not look broken only because the id in the path happens to change more
- * of the tree — the bug is the same one, and the key is what refuses it.
- *
- * The key does the second half too: a remount unmounts the old instance, which
- * runs its effect cleanup, which drops that fetch's `live` flag and closes its
- * stream. An in-flight response for the object navigated away from then has no
- * state cell left to write into — a structural guarantee rather than a race the
- * `live` flag has to win.
- *
- * Exported for `test/web/deploy-detail-mounted.test.tsx`, which mounts this
- * table and changes the path: the claim above is about *this* function's keys,
- * and a test that rendered `DeployScreen` itself would be asserting its own key
- * prop.
+ * A screen that names one object is keyed on its id, so switching objects
+ * remounts it: no state carries over, and cleanup closes the old fetch.
  */
 export function Screen({
   path,
@@ -362,10 +265,7 @@ export function Screen({
 }) {
   if (path.startsWith('/settings'))
     return <SettingsScreen path={path} onNavigate={onNavigate} />;
-  // Every system Spindrift holds an address for is one screen, so the three
-  // routes that used to be their own land on it. `/storage` is among them: the
-  // buckets and registries it named are connections, and the bundles it listed
-  // are Sources.
+  // Targets, repos and storage are all connections.
   if (
     path.startsWith('/targets') ||
     path.startsWith('/repos') ||
@@ -378,9 +278,6 @@ export function Screen({
     return <SourcesScreen onNavigate={onNavigate} />;
   if (path.startsWith('/artifacts'))
     return <ArtifactsScreen onNavigate={onNavigate} />;
-  // Must land before the catch-all below, which otherwise reads any
-  // unmatched single segment as an App name — `/datastores` would render a
-  // `WorkspaceScreen` for an App called "datastores" that does not exist.
   if (path.startsWith('/datastores')) {
     const datastoreId = path.replace(/^\/datastores\/?/, '');
     return datastoreId ? (
@@ -393,8 +290,6 @@ export function Screen({
       <DatastoresScreen onNavigate={onNavigate} />
     );
   }
-  // Same reason as `/datastores` above: must land before the catch-all, or
-  // `/functions` reads as an App name.
   if (path.startsWith('/functions')) {
     const name = path.replace(/^\/functions\/?/, '') || null;
     if (name === 'new') {
@@ -406,12 +301,8 @@ export function Screen({
       <FunctionsScreen onNavigate={onNavigate} />
     );
   }
-  // The one screen keyed on the route rather than on the object in it, because
-  // it is the one screen that *names* its object partway through: a draft
-  // starts, the path is rewritten to `/apps/new/<id>`, and a key reading that
-  // id would tear down the screen that just created it. `NewAppScreen` keeps
-  // its own record of which draft is loaded and keys `NewApp` on it, so a
-  // different draft still resets everything a different draft should.
+  // Keyed on the route, because the path gains the draft id once the draft
+  // starts. NewAppScreen keys each loaded draft itself.
   if (path.startsWith('/apps/new')) {
     const draftId = path.replace(/^\/apps\/new\/?/, '') || null;
     return (
@@ -430,9 +321,6 @@ export function Screen({
       <DeploysScreen onNavigate={onNavigate} />
     );
   }
-  // §4: pressing Deploy with nothing deployable starts a Build and writes no
-  // intent, so the act has a durable id but no release. This is where that
-  // press lands until an intent exists.
   if (path.startsWith('/builds')) {
     const buildId = path.replace(/^\/builds\/?/, '');
     return buildId ? (
@@ -454,6 +342,7 @@ export function Screen({
       />
     );
   }
+  // Any other single segment is an App name, so every other route matches first.
   const appName = path.slice(1);
   return (
     <WorkspaceScreen key={appName} appName={appName} onNavigate={onNavigate} />

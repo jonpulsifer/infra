@@ -1,30 +1,7 @@
 /**
- * Sources — the immutable bytes every Build starts from.
- *
- * The first term of §2's chain, and the one that had no surface. It lived as a
- * "Bundles" section on a Settings screen about storage, beside the buckets it
- * is staged into — which put an object of the product inside its own
- * configuration and left "bundle" meaning both an input and, for §4's supplied
- * artifact, an output.
- *
- * **One row is one digest, not one Build.** The same staged bytes are
- * dispatched once per target shape, so a per-Build reading showed the same
- * Source twice; `builds` on the row is how many were dispatched from it.
- *
- * The two facts worth reading on a row are `retention` and `fetchable`, and
- * they are separate on purpose. Retention is what was promised — an upload is
- * durable, a repository fetch ephemeral. Fetchable is whether a build route
- * could be handed this location at all: `upload://` is deliberately not a URL,
- * and a listing that did not say so would show a Source that cannot be built
- * as indistinguishable from one that can. Both were one word in a single status
- * slot before, which meant a `durable` Source no builder can fetch could only
- * report one of the two things wrong with it.
- *
- * `origin` and `commit` were in the Explorer's invisible `search` string: an
- * operator could filter for a repository and never see which rows came from
- * one. And every row carried an `at` that never reached the screen, because the
- * old row only drew a time when the server had also computed a relative phrase
- * — which `listSources` does not. {@link Timestamp} needs only the instant.
+ * The Sources ledger: one row per staged digest, which may feed several Builds.
+ * Retention is what was promised; fetchable is whether a build route can be
+ * handed the location.
  */
 import { PackageOpen } from 'lucide-react';
 import type { OutputOf } from '../../client.ts';
@@ -47,11 +24,8 @@ import { SupplyChainTabs } from './tabs.tsx';
 export type SourceListItem = OutputOf<'listSources'>['sources'][number];
 
 /**
- * `sha256:abc…` — enough to recognise, short enough to sit in a heading.
- *
- * Kept beside {@link Ref}, which shortens the same way but renders a control.
- * A heading and an accessible name are text, and a copy button inside either is
- * a control nobody can reach by reading.
+ * The algorithm and 12 hex characters, as plain text for headings and
+ * accessible names. {@link Ref} shortens the same way but renders a control.
  */
 export function shortDigest(digest: string): string {
   const [algorithm, hex] = digest.split(':');
@@ -132,9 +106,6 @@ const COLUMNS: readonly Column<SourceListItem>[] = [
     header: 'Fetchable',
     sortable: true,
     sortValue: (source) => (source.fetchable ? 1 : 0),
-    // The warning is the whole reason this column exists: a Source no build
-    // route can be handed is a dead end, and it used to look like every other
-    // row until somebody clicked it.
     cell: (source) =>
       source.fetchable ? (
         <span className="text-muted-foreground">yes</span>
@@ -290,15 +261,7 @@ export function SourceLedger({
   );
 }
 
-/**
- * The Sources screen — the ledger, and the read that fills it.
- *
- * Read once rather than on a cadence: a Source is written by a build that
- * finished, and nothing about an existing row changes afterwards, so a tick
- * would re-ask the same question of the same immutable rows. The reader who
- * wants a newer list has the retry the failure state offers and the navigation
- * that remounts this.
- */
+/** Read once: a Source is immutable, but its Builds count is as of load. */
 export function SourcesScreen({
   onNavigate,
 }: {

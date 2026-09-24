@@ -1,42 +1,7 @@
 /**
- * The installation manifest, edited in the product (§20, ticket 32 slice 1).
- *
- * §20 makes the manifest the place everything naming an installation lives, and
- * `manifest-store.ts` has always said the point of storing it durably is "so
- * the UI can drive all configuration dynamically". `configureInstallation`
- * built the write; this is the hand that reaches it. Until both exist, a value
- * seeded wrong stays wrong for the life of the installation — a declaration
- * only seeds an empty row, so re-declaring it changes nothing once a row is
- * there.
- *
- * **Rendered from the schema, not from a list of fields.** The keys, their
- * kinds, their optionality and their order all come from
- * `installationManifestSchema` through `forms/schema.ts`. That is a correctness
- * requirement rather than a preference: the manifest is losing keys to the
- * chart and gaining discovery, and a hand-listed form absorbs neither — it
- * would keep offering a key that no longer exists and quietly never offer one
- * that appeared. Nothing in this file names a manifest key.
- *
- * **Refusals are not flattened.** `configureInstallation` can refuse in three
- * different ways and they mean three different things, so they read three
- * different ways here:
- *
- * - `INVALID_INPUT` — the document is wrong, and there is a field to fix. The
- *   issues land against the paths that caused them.
- * - `NOT_DEPLOYABLE` — the document is well formed and this installation cannot
- *   take it, because reconciling the Targets it declares meets the ones that
- *   already exist. Nothing was written and no field is wrong; telling an
- *   operator to correct a key here would be a lie.
- * - anything else — a transport or session refusal, which is about the request
- *   rather than the manifest.
- *
- * **The concurrent-edit cost, carried not compounded.** There is no revision
- * column on `installation`, so two operators saving at once lose one edit
- * whole; `STALE_EDIT` exists for that shape and stays unused while this is the
- * one editing surface. This screen does not add a second: it reads once, edits
- * a document, saves it whole, and re-reads what was stored afterwards, so the
- * next edit starts from the row rather than from a stale copy. Reload discards
- * local edits for the same reason.
+ * The installation manifest editor, rendered from the manifest schema, since
+ * keys leave and arrive. The row has no revision, so concurrent saves lose one
+ * edit; each save re-reads it.
  */
 import {
   CircleAlert,
@@ -65,7 +30,7 @@ export type SaveOutcome =
   | { readonly kind: 'invalid'; readonly message: string }
   /** A fact about this installation, not a field to correct. */
   | { readonly kind: 'refused'; readonly message: string }
-  /** The request itself did not get to be an answer about the manifest. */
+  /** A transport or session failure. */
   | { readonly kind: 'failed'; readonly message: string };
 
 export function InstallationSettings() {
@@ -95,12 +60,8 @@ export function InstallationSettings() {
   }, [load]);
 
   const save = async () => {
-    // Checked here first so the issues can be shown against the fields that
-    // caused them: `configureInstallation` reports every offending key at once
-    // in one sentence, which is the right shape for a log and the wrong shape
-    // for a form. The command validates again regardless — it is the authority,
-    // and this is only the earlier of two identical checks against the same
-    // schema module.
+    // Checked here so each issue reaches its field; the command validates
+    // again and has the final say.
     const issues = manifestIssues(document);
     if (issues.size > 0) {
       setErrors(issues);
@@ -119,9 +80,7 @@ export function InstallationSettings() {
       });
       if (result.ok) {
         setOutcome({ kind: 'saved', targets: result.value.targets });
-        // What the row now holds, rather than what was sent: the two are the
-        // same document only when nothing else wrote in between, and this
-        // screen has no revision to notice that with.
+        // Re-read the stored row: another save may have come in between.
         await load();
       } else {
         setOutcome(refusalOf(result.failure));
@@ -151,11 +110,6 @@ export function InstallationSettings() {
   }
 
   if (document === undefined) {
-    // The shape that is coming, not a sentence where it will be: this screen
-    // resolves into a page header and a column of cards, and a single grey line
-    // meant the whole surface jumped into place under the reader. The sentence
-    // stays as the thing announced, because a screen reader cannot see a
-    // rectangle.
     return (
       <div className="flex flex-col gap-6">
         <p role="status" aria-live="polite" className="sr-only">
@@ -200,12 +154,8 @@ export function InstallationSettings() {
 }
 
 /**
- * A refusal, kept in the three kinds the command actually draws.
- *
- * Exported so onboarding refuses in the same three kinds rather than in a
- * second reading of the same codes: the distinction `NOT_DEPLOYABLE` draws is
- * the one a form is most likely to flatten, and two screens that flattened it
- * differently would be two different lies.
+ * `INVALID_INPUT` has a field to fix, `NOT_DEPLOYABLE` is a fact about this
+ * installation, and anything else is a transport failure. Onboarding shares it.
  */
 export function refusalOf(failure: TransportFailure): SaveOutcome {
   switch (failure.code) {
@@ -222,8 +172,8 @@ export function refusalOf(failure: TransportFailure): SaveOutcome {
 export function issuesOf(failure: TransportFailure): FieldErrors {
   const errors = new Map<string, string[]>();
   for (const issue of failure.issues ?? []) {
-    // The dispatch layer paths an issue from the command's *input*, whose one
-    // key is the document. The form's paths are into the document itself.
+    // Issue paths start at the command input's `manifest` key; the form's
+    // paths start inside the document.
     const path = issue.path.replace(/^manifest\.?/, '');
     const existing = errors.get(path);
     if (existing === undefined) {
@@ -254,15 +204,7 @@ export function InstallationSettingsView({
   onSave(): void;
   onReload(): void;
 }) {
-  // The slice the mounted declaration takes back on every boot. Read-only here
-  // rather than accepted and reverted: `configureInstallation` refuses a
-  // document that edits it, and a field an operator can type into but not save
-  // is a field that teaches them the wrong thing about who owns it. Still no
-  // key named in this file — the paths come from the schema module that owns
-  // them, resolved against the document being edited.
   const form = { document, errors, disabled: saving, onChange };
-  // Sections are whichever keys have structure. Derived rather than listed, so
-  // a key that changes shape moves itself between the two halves.
   const nested = fields.filter(
     (field) => field.node.kind === 'object' || field.node.kind === 'array',
   );
@@ -287,25 +229,14 @@ export function InstallationSettingsView({
         </p>
       </div>
 
-      {/* Above the form, because it is the step that comes before editing: a
-          value confirmed from the cloud is a value nobody has to type, and one
-          typed here is a value nothing checked. It edits the same document
-          through the same `onChange`, so a discovered value is an unsaved edit
-          like any other until the whole manifest is saved. */}
+      {/* Discovered values are unsaved edits until the manifest is saved. */}
       <DiscoveryPanel
         document={document}
         disabled={saving}
         onChange={onChange}
       />
 
-      {/* Not a card. Every one of this schema's top-level keys has structure,
-          so `plain` is empty for every manifest this build can hold — and a
-          card was drawn around it anyway, which put a titled, blurbed, and
-          permanently empty box above the twelve cards that are the actual
-          document. The copy was never a section's: it is what this whole page
-          is, so it is the page's. The keys keep a home for the day the schema
-          grows a scalar, and it is a plain fieldset rather than a card, because
-          a card with nothing in it is the thing being deleted. */}
+      {/* Top-level scalar keys, outside any card. */}
       {plain.length === 0 ? null : (
         <SchemaFields fields={plain} at={[]} form={form} />
       )}
@@ -326,10 +257,8 @@ export function InstallationSettingsView({
             {field.node.kind === 'object' &&
             !field.optional &&
             !field.nullable ? (
-              // A required object is its keys — the card's own title already
-              // names it, and repeating the label inside would be the same
-              // word twice. A key that may be absent keeps its wrapper,
-              // because the wrapper is where "not configured" is said.
+              // A required object renders its keys under the card's title. An
+              // optional one keeps its wrapper, where "not configured" is said.
               <SchemaFields
                 fields={field.node.fields}
                 at={[field.key]}
@@ -364,26 +293,8 @@ export function InstallationSettingsView({
 }
 
 /**
- * The document this installation actually has, as a file.
- *
- * **What replaced the declaration as the disaster-recovery artifact.** A
- * mounted document was a copy of the configuration that only ever matched by
- * somebody remembering to keep it matching — it seeded an empty row and was
- * ignored ever after, so the file in git and the row a torn-down installation
- * would need to come back as drifted apart silently, and the drift surfaced as
- * a warning in a pod log at the moment a rollout stopped matching what was
- * running. This is the same artifact derived the other way round: it is by
- * construction what the installation has, because it is read back out of it.
- *
- * **Re-read rather than serialized from the form.** The screen above holds an
- * edited document, and a file written from that is a record of what somebody
- * was in the middle of typing. What is worth committing is what is stored, so
- * this asks the server for it.
- *
- * JSON, and no YAML emitter anywhere near the browser bundle: JSON is valid
- * YAML, `parseManifest` says so, and the restore below reads this file back
- * through that same reader. An emitter here would be a second serializer to
- * keep in step with a schema that is still moving.
+ * Downloads the stored document, not the form's unsaved edits. It is JSON,
+ * which the restore below reads back as YAML.
  */
 function DownloadInstallation({ disabled }: { readonly disabled: boolean }) {
   const [failure, setFailure] = useState<string | null>(null);
@@ -410,8 +321,6 @@ function DownloadInstallation({ disabled }: { readonly disabled: boolean }) {
       link.href = url;
       link.download = `${manifest.installation?.name ?? 'installation'}.json`;
       link.click();
-      // The object URL outlives the click and nothing else will ever ask for
-      // it, so releasing it here is the whole of this element's lifetime.
       URL.revokeObjectURL(url);
     } catch (cause) {
       setFailure(
@@ -445,31 +354,15 @@ function DownloadInstallation({ disabled }: { readonly disabled: boolean }) {
 }
 
 /**
- * A document from a file, restored whole.
- *
- * The other half of {@link DownloadInstallation}, and the reason that one is
- * worth having: an export nothing can read back is a file somebody keeps out of
- * superstition. This is how a torn-down installation comes back configured —
- * the act a mounted declaration used to perform at boot, done on purpose by
- * somebody who chose the document, rather than silently by whichever document
- * happened to be mounted.
- *
- * **The text, not a parse.** The file goes to `configureInstallation` as a
- * string and the server reads it, so the one reader that decides what a
- * manifest is stays the one every other document goes through. That also makes
- * a file that is not a manifest at all a refusal an operator reads, rather than
- * an exception in a browser console.
- *
- * The input is reset after every attempt: choosing the same file twice is a
- * real thing to want after fixing it, and a file input fires nothing when the
- * selection has not changed.
+ * Sends the file's text for the server to parse. The input resets after each
+ * attempt, since choosing the same file again fires no change event.
  */
 export function RestoreInstallation({
   disabled,
   onRestored,
 }: {
   readonly disabled: boolean;
-  /** A document landed. The caller decides what to show next. */
+  /** Called with every attempt's outcome. */
   onRestored(outcome: SaveOutcome): void;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -526,17 +419,8 @@ export function RestoreInstallation({
 }
 
 /**
- * What the last attempt did, in the grammar the refusal came in.
- *
- * The `refused` arm is the one that earns its own shape. §3's
- * disabled-with-reasons grammar is that a caller is told a fact about the
- * world, not asked to fix a field, and `NOT_DEPLOYABLE` is that code — a
- * message about a Target that already exists with a different adapter is not
- * something re-typing a value in this form can resolve.
- *
- * Exported for the reason {@link refusalOf} is: onboarding writes through the
- * same command and therefore meets the same three refusals, and it says them in
- * this markup rather than in a second copy that could drift out of the grammar.
+ * The last attempt's outcome. Onboarding shares it, so both screens show a
+ * refusal the same way.
  */
 export function Outcome({ outcome }: { readonly outcome: SaveOutcome | null }) {
   if (outcome === null) return null;

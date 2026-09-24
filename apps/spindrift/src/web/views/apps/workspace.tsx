@@ -1,43 +1,6 @@
 /**
- * The App workspace (Task 40, §18).
- *
- * **Live state and URL lead**, then the placement — Target and the vessel it
- * is a surface on — then the standing policy about this App's deploys, banded
- * at the foot of the hero because neither half of it is an act. Under the
- * tabs, Overview is the picture of what this App is made of and the Component
- * it is pointed at; every verb that writes is on Config.
- *
- * **Overview observes and Config writes.** That is the line the two tabs are
- * split on, and it is why the Components list, the Builder picker and the
- * Datastore attach all sit on the second one: each of them changes what the
- * *next* release will be, and none of them changes what is running. Overview
- * is what is running, read two ways — as a shape, and as a timeline.
- *
- * A Datastore is a top-level noun (§11) with its own screens under
- * `/datastores`, which is where its lifetime lives. What this screen keeps is
- * the one line of it an App owns: which stores it reads through, and a picker
- * that attaches one more.
- *
- * Two things are stated here rather than hidden:
- *
- * - **The vessel is where the App is placed**, not something it was created
- *   with. It is read from the placed Target, so it is one fact rather than two
- *   that can disagree, and moving a Component moves it.
- * - **A `website` has no runtime**, one level down (§17, §18). Static files are
- *   served by the Target, so there is no process output — an honest empty state,
- *   not a disabled tab.
- * - **Config shows keys, never values** (§10). Core's store is write-only, so
- *   the section below Components is a list of names and a form that writes —
- *   there is nothing here that could show a secret it was handed by accident,
- *   because nothing here is ever handed one.
- *
- * **The hero is the running App, and the tabs are everything else.** §18 is
- * explicit that "the running App is the product, the pipeline is only how it got
- * there", and the screen used to contradict it by stacking six equal cards down
- * one column: config editing sat above the timeline, the live log was a
- * half-width card at the bottom, and the App's releases had no surface at all.
- * The hero and its diagnosis stay above the strip on every tab, because the
- * answer to "is my App up" is not a tab you can be on the wrong one of.
+ * The App workspace: the running App in the hero, then Overview (what is
+ * running), Releases, and Config (what the next release will be).
  */
 import { ChevronRight, ExternalLink, Lock } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
@@ -105,14 +68,7 @@ import {
 } from './new/summary.tsx';
 import { Releases } from './releases.tsx';
 
-/**
- * Saving a Component's reach, as the screen above needs it answered.
- *
- * A promise rather than a fire-and-forget callback plus two state props: the
- * form has exactly one thing to say after the press — the Targets still placing
- * the old answer, or why it was refused — and threading that back as props
- * would put this card's transient state on the screen that owns the App.
- */
+/** `pendingRelease` names the Targets still serving the previous reach. */
 export type SetReach = (change: {
   readonly componentId: string;
   readonly reach: Reach;
@@ -123,30 +79,8 @@ export type SetReach = (change: {
 >;
 
 /**
- * Adding one Component to the App this screen already lists (§2), as the screen
- * above needs it answered.
- *
- * **Four fields, because the command takes four decisions.** `reach` and
- * `auth` have command-side defaults (`src/commands/components/create.ts:64-65`)
- * and `expose` is what a kind means rather than a choice (`create.ts:154-163`),
- * so a form offering any of them would be a second place for a default to be
- * wrong — and the card this form sits in is already where reach is edited.
- *
- * `schedule` travels only for a `job`, and is absent rather than empty for an
- * unscheduled one: `createComponentInput` is a `.strict()` discriminated union
- * (`create.ts:68-98`), so a schedule sent on a service is a validation failure
- * rather than a field nobody reads.
- *
- * `command` travels for every kind, and is the field that makes a second
- * Component worth adding at all: an App is one scope, so a sibling builds the
- * same image, and the entrypoint is the whole of what makes it a different
- * workload. Absent is the image's own, which is what every Component that says
- * nothing already means.
- *
- * No `targetId`, deliberately. `createComponent` does not write a placement
- * (`create.ts:123-138`) and `deployApp` fills it only while it is NULL
- * (`src/commands/apps/deploy.ts:529-534`) — a form that placed as well would
- * move that fact out of the one command that owns it.
+ * `schedule` is sent only for a job, since the command's union is strict.
+ * `command` absent means the image's own entrypoint.
  */
 export type CreateComponent = (create: {
   readonly name: string;
@@ -158,23 +92,8 @@ export type CreateComponent = (create: {
 >;
 
 /**
- * Moving a placed Component to another Target (§3, §10), as the screen above
- * needs it answered.
- *
- * **`supply` rides the move.** §10's sentence is "Place names the keys that
- * will not follow and demands them before the move commits", and
- * `placeComponent` puts the values on its own input for the reason its comment
- * states (`src/commands/components/place.ts:54-60`): "demands them before the
- * move commits" is only true if the move and the supply are one transaction
- * from the developer's side. So this seam carries them too, and the form above
- * it re-posts *one* call rather than writing config and trying again.
- *
- * **`demanded` is what the refusal names.** It comes back structurally rather
- * than as prose to be parsed — `placeComponent` attaches the keys as `issues`
- * — because the whole point of showing this refusal is to render a field per
- * key. The message stays core's sentence, unedited, because it says the thing
- * the fields cannot: that the values will not follow and that Spindrift never
- * reads one back.
+ * `supply` carries values for keys that will not follow, so they commit with
+ * the move. `demanded` is the keys a refusal asks for.
  */
 export type MoveComponent = (move: {
   readonly componentId: string;
@@ -190,16 +109,8 @@ export type MoveComponent = (move: {
 >;
 
 /**
- * Retiring one (Component, Target) pair that still serves (§6, §13).
- *
- * By the pair, never by the Component: a move leaves two rows serving on
- * purpose, and "unplace this Component" would be a button that cannot say
- * which of them it means.
- *
- * `destroyed` travels because it is the difference between the two honest
- * sentences this act has — a workload was torn down, or there was never one to
- * tear down (`src/commands/components/unplace.ts:68-75`). A control that said
- * the first over the second would be claiming a teardown that never happened.
+ * Retires one (Component, Target) pair, since a move leaves two serving.
+ * `destroyed` is false when there was no workload to tear down.
  */
 export type UnplaceComponent = (pair: {
   readonly componentId: string;
@@ -209,43 +120,20 @@ export type UnplaceComponent = (pair: {
   | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Turning deploy-on-push on or off for this App (§15).
- *
- * Sends the state it wants rather than "flip it", which is what
- * `setAppAutoDeploy` takes and for the reason stated there: two presses racing
- * a toggle disagree about where they left it, and two presses racing a set do
- * not.
- */
+/** Sends the wanted state, so two racing presses agree on the result. */
 export type SetAutoDeploy = (
   autoDeploy: boolean,
 ) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Holding this App's deploys with a reason, or letting them through again
- * (§6, `setAppLock`). `null` unlocks — the one act a rollback leaves for the
- * operator to do once the cause is fixed.
- */
+/** Locks deploys with a reason; `null` unlocks. */
 export type SetLock = (
   reason: string | null,
 ) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * An App naming the build route it builds on, or clearing that choice back to
- * rank order (§4, §16), as the screen above needs it answered.
- *
- * The same shape {@link SetAutoDeploy} takes and for the same reason: the App
- * is bound by the screen above, and sending the value to set rather than a
- * flip means two presses racing a set do not disagree about where they left
- * it. `null` clears the choice — `setAppBuildRoute`'s own "leave it as it is
- * vs. clear it" distinction, carried through as a value this screen can send
- * rather than a second act.
- */
-/** Naming the App's own shared address, as the screen needs it answered (§9). */
 export type SetDomain = (choice: {
   /** The label, `@` for the zone itself, or null to have no name of its own. */
   readonly label: string | null;
@@ -255,6 +143,7 @@ export type SetDomain = (choice: {
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
+/** `null` clears the choice back to rank order. */
 export type SetBuildRoute = (
   route: string | null,
 ) => Promise<
@@ -262,16 +151,8 @@ export type SetBuildRoute = (
 >;
 
 /**
- * Starting one run of a job, as the screen above needs it answered (§17).
- *
- * The same shape {@link SetReach} takes and for the same reason: the press has
- * exactly one thing to say afterwards — it started, or here is the sentence the
- * command refused with — and threading that back as two props would put this
- * card's transient state on the screen that owns the App.
- *
- * `env` is this run's parameters, present only when the card has some to send;
- * what they may be called and what they may not shadow is `runComponent`'s to
- * refuse, and the sentence comes back through the same arm.
+ * `env` is this run's parameters; `runComponent` refuses a name that config
+ * already sets.
  */
 export type RunJob = (
   env?: Readonly<Record<string, string>>,
@@ -279,26 +160,11 @@ export type RunJob = (
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Bouncing the service this screen is showing (§6), as the screen above
- * needs it answered — {@link RunJob}'s shape, for the same reason: the press
- * has one thing to say afterwards, and the pair is the screen's to bind.
- */
 export type RestartService = () => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Writing or removing config for the pair this workspace is showing (§10),
- * as the screen above needs it answered.
- *
- * One call for both, because `setConfig` itself takes entries and removals
- * together — there is no separate "edit" act, because setting a key that
- * already exists *is* the edit (core upserts and never reads the old value
- * back to compare against). `componentId`/`targetId` are not part of this
- * shape: the workspace has exactly one pair on screen, so the screen above
- * binds them once rather than asking every call here to restate it.
- */
+/** Writes and removes keys in one call; setting an existing key overwrites it. */
 export type SetConfig = (change: {
   readonly entries: readonly { key: string; value: string }[];
   readonly removals: readonly string[];
@@ -312,16 +178,6 @@ export type SetConfig = (change: {
   | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Attaching one Datastore to the App this screen is showing (§11).
- *
- * The App is bound by the screen above, exactly as it is for {@link SetConfig},
- * and every refusal is a sentence core composed — the attachment rules (one
- * store per engine per App, cluster-local placement) live in `attachDatastore`
- * and are not restated here. Detach and destroy are the ledger's: they need no
- * App, and a second place to end a Datastore's life is a second place for a
- * refusal to come back to.
- */
 export type AttachDatastore = (
   datastoreId: string,
 ) => Promise<
@@ -356,140 +212,42 @@ export function Workspace({
   onUploadArchive,
 }: {
   view: WorkspaceView;
-  /**
-   * Give one Component new bytes. Both or neither — staging without a command
-   * to spend the digest on is a control that cannot finish.
-   */
+  /** Pass both or neither: the upload command spends the staged digest. */
   onStageArchive?: StageArchive;
   onUploadArchive?: SubmitUpload;
   onDeploy?: () => void;
-  /**
-   * Ask for a Build outright.
-   *
-   * Its own control rather than a mode on the one above, because that button's
-   * whole job is to decide — and a decision an operator can silently flip is
-   * the substitution `deployApp` refuses to make. Always offered, never
-   * conditional on what is built: "Rebuild" does exactly one thing whatever
-   * the state, which is what makes it safe to press next to one that does not.
-   */
+  /** Always starts a Build, whatever is already built. */
   onRebuild?: () => void;
   deploying?: boolean;
   onNavigate?: (path: string) => void;
-  /**
-   * Absent where there is nothing to navigate back to after a delete — the
-   * screen owns where the operator lands, so a caller that cannot answer that
-   * question does not offer the act.
-   */
   deletion?: AppDeletionControls;
-  /**
-   * Absent where reach is not editable from here — the fixture screens render
-   * this view with no acts wired, and a form whose Save cannot be called is
-   * worse than no form.
-   */
   onSetReach?: SetReach;
-  /**
-   * Absent where config is not editable from here, for the same reason
-   * {@link onSetReach} is — the fixture screens render this view with no acts
-   * wired, and a form whose Save cannot be called is worse than no form.
-   */
   onSetConfig?: SetConfig;
-  /**
-   * Show another Component of this App, by name.
-   *
-   * The Components list is the selector, because it is already the list of what
-   * there is to look at. Absent where the screen reads a fixed view — a row
-   * that could be pressed and changed nothing would be worse than a row that
-   * cannot.
-   */
+  /** Selects another Component of this App, by name. */
   onSelectComponent?: (component: string) => void;
-  /**
-   * Add a Component to this App (§2). Absent where the screen wires no acts,
-   * for the same reason {@link onSetReach} is.
-   */
   onCreateComponent?: CreateComponent;
-  /**
-   * Move a Component to another Target, and retire a pair it has left (§3,
-   * §10). Absent where the screen wires no acts, for the same reason
-   * {@link onSetReach} is.
-   */
   onMoveComponent?: MoveComponent;
   onUnplaceComponent?: UnplaceComponent;
-  /**
-   * The Targets this installation has, as `listTargets` reports them — the
-   * list a move picks from.
-   *
-   * Empty rather than optional-and-absent, and the move control is not offered
-   * over an empty one: a screen that has read no Targets cannot name one to
-   * move to, and a disclosure that opens on nothing is the dead button
-   * `SectionHeader` was hardened against, one level down.
-   */
+  /** The Targets a move picks from. Move is not offered while this is empty. */
   targets?: readonly TargetListItem[];
-  /**
-   * Start one run of this App's job (§17). Absent where the screen wires no
-   * acts, and absent for every Component that is not a job — the runtime card
-   * is what decides, because it is the only branch with runs to start.
-   */
   onRunJob?: RunJob;
-  /**
-   * Bounce this App's placed service (§6). Absent where the screen wires no
-   * acts, and absent for every Component without a process — the runtime card
-   * decides, because its stream branch is the only one with a process to
-   * bounce.
-   */
   onRestartService?: RestartService;
-  /**
-   * Absent where deploy-on-push is not editable from here, for the same reason
-   * {@link onSetReach} is. Also absent for an archive App — but that one the
-   * view already says with `autoDeploy: null`, so the control is not rendered
-   * at all rather than rendered dead.
-   */
   onSetAutoDeploy?: SetAutoDeploy;
-  /**
-   * Absent where the lock is not editable from here, for the same reason
-   * {@link onSetReach} is. The banner still renders read-only: a lock a
-   * rollback set is a fact about the App whether or not this screen can lift it.
-   */
   onSetLock?: SetLock;
-  /**
-   * Absent where the build route is not editable from here, for the same
-   * reason {@link onSetReach} is. Also absent for an archive App — the view
-   * says so with `buildRouteOptions: []`, so the picker is not rendered at
-   * all rather than rendered on a Target it has nothing to check a level
-   * against.
-   */
   onSetBuildRoute?: SetBuildRoute;
-  /** Absent where the App's address is not editable from here — the fixture
-   * screens render this read-only, for the reason the others do. */
   onSetDomain?: SetDomain;
-  /**
-   * Attach a Datastore to this App (§11). Absent where the screen wires no
-   * acts, for the same reason {@link onSetReach} is.
-   */
   onAttachDatastore?: AttachDatastore;
-  /** Follow one run's output, or nothing when the name is `null`. */
+  /** `null` stops following. */
   onFollowExecution?: (execution: string | null) => void;
   /** The lines of whichever run is being followed. */
   executionLines?: readonly LogLine[];
   /**
-   * Which tab the screen opens on.
-   *
-   * ponytail: the selection lives in this component rather than in the hash,
-   * because `app.tsx` resolves an App by everything after `/apps/`, so
-   * `#/apps/42/releases` reads as an App named `42/releases` and 404s. Making
-   * each tab a real route is a two-line change *there* — strip the tab segment
-   * before the read and key the screen on the App alone — and this prop is
-   * what it would drive when it lands. Until then a tab is not linkable and
-   * survives no reload.
+   * ponytail: the tab lives in state, since `app.tsx` reads everything after
+   * `/apps/` as the App name. A tab is not linkable and survives no reload.
    */
   tab?: WorkspaceTab;
 }) {
-  /*
-    Which Component the rest of this screen is about — its runtime, its config
-    keys, its placement and its release. `componentId` is the selection the
-    read resolved; a view carrying none is showing the App's first Component,
-    which is the same answer, so this is a lookup rather than a second guess at
-    what the card below belongs to.
-  */
+  // A view with no `componentId` is showing the App's first Component.
   const selected =
     view.components.find((component) => component.id === view.componentId) ??
     view.components[0];
@@ -503,9 +261,7 @@ export function Workspace({
         title={view.app}
         actions={
           <>
-            {/* And the id, because a name is not one: `deleteApp` resolves on
-                the id, and a workspace that only knew what this App is called
-                could not tell it apart from another App called the same. */}
+            {/* By id: two Apps can share a name. */}
             {deletion && view.appId ? (
               <DeleteAppButton
                 appId={view.appId}
@@ -514,9 +270,7 @@ export function Workspace({
                 label
               />
             ) : null}
-            {/* Only where the selected Component answers somewhere: a job has
-                no address, and `Open app` on an empty one reloads this
-                screen. */}
+            {/* A job has no address, and an empty href reloads this screen. */}
             {view.url === '' ? null : (
               <Button variant="outline" asChild>
                 <a
@@ -537,13 +291,8 @@ export function Workspace({
                 Rebuild
               </Button>
             ) : null}
-            {/*
-              "Deploy" whatever the kind. This button writes an intent, and for
-              a job that places a CronJob triggered by nothing — it has never
-              made anything run, and calling it `Run now` beside a button that
-              does is the one label a reader cannot recover from. Running is on
-              the runtime card, where the runs are (§17).
-            */}
+            {/* "Deploy" for every kind: for a job it places the CronJob without
+                running it. Run now is on the runtime card. */}
             <Button onClick={onDeploy} disabled={deploying}>
               {deploying ? 'Deploying...' : 'Deploy'}
             </Button>
@@ -559,28 +308,17 @@ export function Workspace({
         {...(onSetLock === undefined ? {} : { onSetLock })}
       />
 
-      {/*
-        Above the tabs, never inside one. §6 persists a diagnosis on red and
-        records `drifted_at` when a converged release stops matching what is
-        running, and both were readable only at `/deploys/:id` — so this screen
-        said "has no release serving yet" over a failure whose reason was in
-        hand, and "is live" over a release the platform had been refusing for
-        two days. Neither is a thing an operator should have to be on the right
-        tab to find out.
-      */}
+      {/* Above the tabs, so a failure or drift shows on every tab. */}
       {view.diagnosis ? (
         <DiagnosisPanel
           diagnosis={view.diagnosis}
-          // The workspace does not know whether an older release is still up —
-          // that is a second query about a Deploy this screen never reads — and
-          // §6 does guarantee a failed deploy never touched exposure. The
-          // release link says it properly, one press away.
+          // This screen does not read whether an older release is still up;
+          // the release screen says so.
           previousReleaseServing={false}
           url={view.url}
         />
       ) : null}
-      {/* As on the release screen: a faulty release's drift is the same
-          observation the soak judged, so the amber panel yields to the red. */}
+      {/* A faulty release's drift is what the soak judged, so the drift panel yields. */}
       {view.drift && !view.faulty ? (
         <DriftPanel
           drift={view.drift}
@@ -599,16 +337,6 @@ export function Workspace({
 
       {current === 'overview' ? (
         <>
-          {/*
-            The picture, and under it whichever Component it is pointed at.
-
-            There used to be a list of rows below this saying the same names a
-            second time, and pressing a row was what chose the Component the
-            hero, the runtime card and the config keys are about. One list is
-            enough, and the one with the edges in it is the one worth keeping —
-            so the boxes are the selector and the strip beneath is what the
-            rows said. Every act that *writes* went with them, to Config.
-          */}
           {view.components.length === 0 ? (
             <Card>
               <CardContent>
@@ -634,12 +362,7 @@ export function Workspace({
             </Topology>
           )}
           <div className="grid gap-4 md:grid-cols-2">
-            {/*
-              Every entry the view carries, un-sliced. `getAppWorkspace` bounds
-              the query that produces them, and a second bound here would be a
-              number that can silently disagree with it — a limit raised on the
-              server and not here reads as applied and is not.
-            */}
+            {/* Un-sliced: `getAppWorkspace` already bounds the entries. */}
             <Activity entries={view.activity} onNavigate={onNavigate} />
             <Runtime
               view={view}
@@ -667,24 +390,9 @@ export function Workspace({
 
       {current === 'config' ? (
         <>
-          {/*
-            One order, and it is a sentence: what this App is built *from*, how
-            it is built, what it is made of, what the result is called, and what
-            that result runs with. Every card here writes something that takes
-            effect on the next release — which is the line between this tab and
-            Overview, where nothing is written at all.
-
-            Keyed by id, not by name, for the reason `getAppWorkspace` resolves
-            by id: two Apps may wear one name.
-          */}
+          {/* By id: two Apps can share a name. */}
           {view.appId === undefined ? null : <SourceSection app={view.appId} />}
-          {/*
-            Empty rather than optional-and-absent for an archive App and for
-            one with no Target placed yet — `getAppWorkspace` says so with
-            `buildRouteOptions: []`, and the card is not rendered on nothing
-            to pick from rather than rendered with a lone "Rank order" tile
-            that has no other routes to rank against.
-          */}
+          {/* No options for an archive App or one with no Target placed yet. */}
           {view.buildRouteOptions.length > 0 && onSetBuildRoute ? (
             <BuildRoutePicker
               buildRoute={view.buildRoute}
@@ -727,17 +435,6 @@ export function Workspace({
   );
 }
 
-/**
- * The three views of one App.
- *
- * Three rather than the six the audit sketched, because a tab is only worth its
- * click where the thing behind it is a *different question*. Releases is one
- * (`listDeploys`, which nothing in the browser had ever called) and Config is
- * one (§10's write-only store, which has no business sitting above the
- * timeline). Logs and Components are both answers to "what is this App doing
- * right now", which is Overview, and splitting them would make the common
- * visit three clicks instead of none.
- */
 export type WorkspaceTab = 'overview' | 'releases' | 'config';
 
 const TABS = [
@@ -747,24 +444,12 @@ const TABS = [
 ] as const satisfies readonly { id: WorkspaceTab; label: string }[];
 
 /**
- * What the hero says about the Component the screen is showing.
- *
- * Named rather than called "Your App", because everything beside this sentence
- * — the phase pill, the address, the release, the placement — is one
- * Component's: an App whose `job` sits behind a serving `service` would
- * otherwise read "Your App has no release serving yet" over a service that is
- * serving, and "Your App is live" over a CronJob the moment it is placed.
- *
- * A Component with no address is stated as deployed rather than as serving.
- * Every job is one, and so is a service kept off the network — neither of them
- * has anything an operator could open, and "no release serving yet" reads as a
- * release that failed rather than one that was never meant to serve.
+ * Names the Component, since everything beside it is that Component's. A LIVE
+ * one with no address reads "deployed": a job or unrouted service never serves.
  */
 function heroHeadline(view: WorkspaceView, component?: ComponentView): string {
   const subject = component?.name ?? 'Your App';
-  // The soak's verdict outranks the address: the rollout landed and the
-  // platform has since reported the workload broken, which is the one
-  // sentence "is live" must never stand in for (§6).
+  // The soak's verdict outranks a live address.
   if (view.faulty) return `${subject} is faulty`;
   if (view.url === '') {
     return view.phase === 'LIVE'
@@ -776,7 +461,6 @@ function heroHeadline(view: WorkspaceView, component?: ComponentView): string {
     : `${subject} has no release serving yet`;
 }
 
-/** Live state and URL on the left; placement on the right. */
 function Hero({
   view,
   component,
@@ -785,14 +469,13 @@ function Hero({
   onSetLock,
 }: {
   view: WorkspaceView;
-  /** The Component this card is about. Absent for an App with none yet. */
+  /** Absent for an App with no Components yet. */
   component?: ComponentView;
   onNavigate?: (path: string) => void;
   onSetAutoDeploy?: SetAutoDeploy;
   onSetLock?: SetLock;
 }) {
-  // What `release` names: the Deploy where there is one, the Build that is
-  // still the whole of the attempt where there is not.
+  // `release` names the Deploy where there is one, else the Build.
   const releasePath =
     view.latestDeployId !== undefined
       ? `/deploys/${view.latestDeployId}`
@@ -800,42 +483,17 @@ function Hero({
         ? `/builds/${view.latestBuildId}`
         : null;
 
-  /*
-    Where a commit goes when it is pressed.
-
-    A seven-character hash is a thing on the repository host, and both of the
-    ones this card prints — what is serving, and what the branch is at — were
-    text you had to retype into a URL bar. `source.url` is the origin the
-    installation knows for that host; an App with no repository connected has
-    none, and there the hash stays a value with a copy button and no promise.
-  */
+  // An App with no repository connected has no `source.url`, so no commit links.
   const repo = view.source?.url;
   const commitUrl = (sha: string) =>
     repo === undefined ? {} : { href: `${repo}/commit/${sha}` };
 
-  /*
-    The two standing policies about this App's deploys, banded together at the
-    foot of the card.
-
-    Neither is an act — one changes what happens on the *next* push and the
-    other stops the next press — and neither belongs beside placement, which is
-    a fact about where the App runs and not a control at all. They are also not
-    header material: the header holds the two buttons that make something
-    happen now, and a switch that arms a future deploy sitting between them is
-    the one misread that costs a surprise release. So: their own band, below
-    everything the card states, labelled with what they are about.
-  */
   const policy =
     (view.autoDeploy !== null && onSetAutoDeploy) ||
     (view.lock === undefined && onSetLock);
 
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
-      {/*
-        Above both columns, because it is about the App and not about either
-        half: a locked App has a placement and a release like any other, and
-        what has changed is that the Deploy button above will refuse.
-      */}
       {view.lock ? (
         <LockBanner
           lock={view.lock}
@@ -847,8 +505,7 @@ function Hero({
         <p className="text-xl font-semibold tracking-tight">
           {heroHeadline(view, component)}
         </p>
-        {/* No address, no link: `normaliseUrl('')` is `''`, and an anchor
-            carrying that reloads the screen it is on. */}
+        {/* An empty href reloads this screen. */}
         {view.url === '' ? null : (
           <a
             href={normaliseUrl(view.url)}
@@ -862,15 +519,6 @@ function Hero({
             {view.url}
           </a>
         )}
-        {/*
-          The release is a link because it is a thing, not a label: §2's Deploy
-          is Heroku's Release, and the attempt that produced what is running is
-          one press away from the screen that says how it went.
-
-          Before there is a Deploy the same is true of the Build: the create
-          flow starts one, `release` names it, and it was the one word on this
-          screen that stated a running attempt and led nowhere.
-        */}
         {releasePath && onNavigate ? (
           <button
             type="button"
@@ -882,12 +530,6 @@ function Hero({
         ) : (
           <Eyebrow>{view.release}</Eyebrow>
         )}
-        {/*
-          What shipped, and when. A phase pill with no date on it cannot tell
-          four minutes apart from four months, and the commit behind a running
-          App was reachable only by opening the release. Both are columns on the
-          Deploy row this screen already reads.
-        */}
         {view.commit || view.at ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {view.commit ? (
@@ -903,14 +545,8 @@ function Hero({
             ) : null}
           </div>
         ) : null}
-        {/*
-          Pushed but not live (§15). The adopted commit beside the serving
-          one, and what happens next read from evidence rather than from the
-          switch beside placement: a Build of the adopted commit exists and
-          has not failed (`pending.dispatched`), the lock is holding it, or
-          nothing is on its way and the Rebuild press is what ships it —
-          Deploy alone would place the artifact already built.
-        */}
+        {/* The adopted commit is ahead of the serving one. Deploy alone would
+            place the artifact already built, so Rebuild is what ships it. */}
         {view.source?.pending ? (
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
             <span className="font-mono">{view.source.branch}</span> is at{' '}
@@ -954,29 +590,19 @@ function Hero({
         />
       </div>
 
-      {/*
-        The deploy policy band. Full width and hairline-topped, so it reads as
-        a footer to the whole card rather than as more of either column — and
-        `-mx-5 -mb-5` so the rule reaches the card's edges instead of floating
-        inside its padding.
-      */}
+      {/* The negative margins run the top rule to the card's edges. */}
       {policy ? (
         <div className="-mx-5 -mb-5 mt-1 flex basis-full flex-wrap items-center gap-3 border-t border-border-soft px-5 py-3">
           <Eyebrow>Deploy policy</Eyebrow>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            {/*
-              Rendered only where the App can receive a push at all —
-              `autoDeploy` is `null` for an archive App, and a dead switch
-              would offer a choice that does not exist.
-            */}
+            {/* `autoDeploy` is null for an archive App, which receives no push. */}
             {view.autoDeploy !== null && onSetAutoDeploy ? (
               <AutoDeployToggle
                 autoDeploy={view.autoDeploy}
                 onSetAutoDeploy={onSetAutoDeploy}
               />
             ) : null}
-            {/* The hold, where it can be set by hand. Lifting one is the
-                banner's, at the top of this card. */}
+            {/* Only while unlocked: the banner above lifts a lock. */}
             {view.lock === undefined && onSetLock ? (
               <LockControl onSetLock={onSetLock} />
             ) : null}
@@ -987,13 +613,7 @@ function Hero({
   );
 }
 
-/**
- * The hold on this App's deploys, and the one act that lifts it (§6).
- *
- * Read-only without `onSetLock`, never hidden: a lock a rollback set is why
- * the Deploy button is about to refuse, and that is true on every screen that
- * shows the App, including the ones that wire no acts.
- */
+/** Read-only without `onSetLock`: the lock explains why Deploy refuses. */
 function LockBanner({
   lock,
   onSetLock,
@@ -1044,16 +664,8 @@ function LockBanner({
 }
 
 /**
- * Setting the hold by hand — "nothing changes here over the weekend" without
- * turning deploy-on-push off and forgetting to turn it back on.
- *
- * A reason is required because the banner prints it to whoever meets the
- * refusal next, and that person may not be the one who set it.
- *
- * A `Button`, not the bare text link this used to be. What it does — stop
- * every deploy of this App, including somebody else's — is the heaviest thing
- * on the card, and it was drawn lighter than the "View all" beside the
- * timeline. Weight on a control is a claim about consequence.
+ * Locks deploys by hand. The reason is required: the banner shows it to
+ * whoever meets the refusal next.
  */
 function LockControl({ onSetLock }: { onSetLock: SetLock }) {
   const [open, setOpen] = useState(false);
@@ -1124,25 +736,7 @@ function LockControl({ onSetLock }: { onSetLock: SetLock }) {
   );
 }
 
-/**
- * Which prerequisite is unmet, rather than that one is.
- *
- * `prerequisitesMet` is a boolean derived from "every catalogued row met", so
- * the screen was showing the conclusion with the evidence thrown away — "A
- * prerequisite is unmet" on the one screen where the operator is asking *which*
- * is a dead end, and the App will not deploy until it is answered.
- *
- * A native `<details>` rather than the `Collapsible` the panels above use: this
- * is three lines of text with no initial state to derive and no animation worth
- * the state to drive it, and the element does the whole job — including opening
- * before hydration, which matters on the one card a reader is staring at while
- * the rest of the page is still arriving.
- *
- * The remediation is deliberately not here. §13 composes the change that clears
- * a row from the manifest and the boundary, which the Targets screen has and
- * this one does not; a thinner generator here would be a second answer to a
- * question that already has one. So it names the blockage and points there.
- */
+/** Names each unmet prerequisite. The Targets screen composes the fix. */
 function Prerequisites({
   met,
   unmet,
@@ -1206,18 +800,7 @@ function Prerequisites({
   );
 }
 
-/**
- * Deploy on push, on or off (§15).
- *
- * **Optimistic, and it says so when it was wrong.** The press flips the label
- * immediately and puts it back if the command refuses — a switch that waits for
- * a round trip before moving reads as broken, and this one is cheap to undo.
- *
- * No confirmation. Turning it *on* is the direction with consequences, and the
- * consequence is a deploy that would have happened anyway the moment somebody
- * pressed Deploy — §15's dispatcher calls the same `deployApp`, so nothing here
- * can do something the button above it could not.
- */
+/** Optimistic: the label flips at once and reverts if the command refuses. */
 function AutoDeployToggle({
   autoDeploy,
   onSetAutoDeploy,
@@ -1251,8 +834,7 @@ function AutoDeployToggle({
         type="button"
         onClick={flip}
         disabled={saving}
-        // `switch`, not `aria-pressed`: this is a state that stays on, not a
-        // press that happened, and the two are read out differently.
+        // A standing state, which screen readers announce as a switch.
         role="switch"
         aria-checked={on}
         className={cn(
@@ -1263,12 +845,8 @@ function AutoDeployToggle({
             : 'border-border text-muted-foreground hover:border-primary hover:text-foreground',
         )}
       >
-        {/*
-          The track and its thumb — the same two elements every switch in every
-          product is, at the size this row's type is set in. `transform` and
-          `background-color` only: both are compositor-cheap, and the label
-          beside them never moves, so the row does not reflow on a press.
-        */}
+        {/* The track and thumb animate only transform and background-color,
+            so a press never reflows the row. */}
         <span
           aria-hidden="true"
           className={cn(
@@ -1295,19 +873,8 @@ function AutoDeployToggle({
 }
 
 /**
- * Which route this App builds on (§4, §16).
- *
- * A grid of `Choice` tiles rather than a dropdown — the same primitive the
- * Target picker in the create flow uses for "pick one of a few rich options",
- * because a native `<select>` cannot wear a logo, a level badge, and a
- * refusal sentence the way a disabled tile can. One extra tile, "Rank order",
- * answers `route: null` — the App's default, back to the installation's own
- * arrangement.
- *
- * **Optimistic, and it says so when it was wrong** — the same posture
- * {@link AutoDeployToggle} takes: the press selects its tile immediately and
- * reverts if `setAppBuildRoute` refuses, with its sentence shown beneath the
- * grid.
+ * The "Rank order" tile sends `null`. Optimistic, like
+ * {@link AutoDeployToggle}: the tile reverts if the command refuses.
  */
 function BuildRoutePicker({
   buildRoute,
@@ -1395,13 +962,6 @@ function BuildRoutePicker({
   );
 }
 
-/**
- * A section's label, and its one action where it has one.
- *
- * `action` is optional because not every section does something: the timeline
- * is read by clicking its own entries, and a "View all" beside it would be a
- * button whose absence of a destination the reader discovers by pressing it.
- */
 function SectionHeader({
   eyebrow,
   title,
@@ -1419,13 +979,7 @@ function SectionHeader({
         <Eyebrow>{eyebrow}</Eyebrow>
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       </div>
-      {/*
-        Both, or neither. Rendering the verb on `action` alone is what made
-        buttons on this screen do nothing when pressed: `Add Component` never
-        had a handler at all, and the runtime card's own verb loses one
-        whenever the Component has no release to open. A section that cannot
-        answer its verb does not offer it.
-      */}
+      {/* Both or neither: a verb with no handler is a dead button. */}
       {action && onAction ? (
         <Button
           variant="outline"
@@ -1440,7 +994,6 @@ function SectionHeader({
   );
 }
 
-/** One row of a peer section — a badge, two lines, and an affordance. */
 function Row({
   badge,
   title,
@@ -1454,12 +1007,8 @@ function Row({
   detail: string;
   trailing?: ReactNode;
   /**
-   * Make the row itself the act of picking it.
-   *
-   * The badge and the two lines become the button and `trailing` stays outside
-   * it, because a row's own act sits there — nesting one button inside another
-   * is not something a browser renders, so the region that selects has to stop
-   * short of it.
+   * Makes the badge and text one button. `trailing` stays outside it, since a
+   * button cannot nest another.
    */
   onSelect?: () => void;
   selected?: boolean;
@@ -1493,12 +1042,7 @@ function Row({
       ) : (
         body
       )}
-      {/*
-        The chevron is a claim that pressing the row goes somewhere, so it is
-        drawn only where the row can be pressed. It used to be the default on
-        every row with no trailing control — config keys, job runs — each of
-        which advertised a navigation it did not have.
-      */}
+      {/* The chevron promises a destination, so only a pressable row draws one. */}
       {trailing ??
         (onSelect ? (
           <ChevronRight
@@ -1510,30 +1054,6 @@ function Row({
   );
 }
 
-/**
- * Every Component of this App, and every act that changes one.
- *
- * **The acts are what this list is for.** Reach, a move, an upload, a new
- * Component, a Datastore attached — all of them write a row that the next
- * release picks up, which is what puts this card on Config beside the source,
- * the builder and the variables rather than on Overview beside the picture.
- *
- * It still selects, and still marks what is selected. The Component this
- * card's siblings are about is the one the config keys below it belong to, and
- * a screen listing a second Component's keys with nothing saying whose they
- * are is worse than one that cannot list them. The picture on Overview is the
- * other end of the same selection — both write it, neither owns it.
- */
-/**
- * What one Component's row says, now that the row knows where it is.
- *
- * The hero states the placement of the *selected* Component, so on an App with
- * three of them the other two's placement and address were unobtainable without
- * pressing each row in turn — which is the one thing a list of Components exists
- * to spare a reader. Each of the three new facts is stated only where the
- * Component has it: one that has never been placed has no Target, a job has no
- * address, and neither should read as a blank where a value goes.
- */
 function componentDetail(component: ComponentView): string {
   const parts = [
     component.phase,
@@ -1546,7 +1066,6 @@ function componentDetail(component: ComponentView): string {
   return parts.join(' · ');
 }
 
-/** One labelled fact in the strip under the diagram. */
 function Fact({
   label,
   value,
@@ -1565,23 +1084,8 @@ function Fact({
 }
 
 /**
- * The Component the picture is pointed at, in words.
- *
- * What is here is exactly what the box above cannot fit and the hero does not
- * say. The hero is about the *App as it is running* — its phase, its address,
- * the commit that is serving — and three of its five lines happen to be this
- * Component's; these four are the ones that are only ever this Component's, and
- * they were readable before only as a `·`-joined sentence on a row.
- *
- * Read-only, deliberately. Every act that used to sit on that row writes
- * something that takes effect on the next release, and those all live on the
- * Config tab now — one place per act, and the picture is not it.
- *
- * The caller keys this on the Component's id, so choosing another box remounts
- * it and the strip rises rather than swapping its words in place. That is the
- * one animation on this card that marks a *change* rather than an arrival: four
- * values silently becoming four other values is the jarring change §7 of the
- * motion vocabulary exists to bridge.
+ * The caller keys this on the Component's id, so a new selection remounts it
+ * and the strip rises again.
  */
 function SelectedComponent({ component }: { component: ComponentView }) {
   return (
@@ -1633,7 +1137,6 @@ function Components({
   archiveSourced?: boolean;
   onStageArchive?: StageArchive;
   onUploadArchive?: SubmitUpload;
-  /** The row this screen's runtime, config and placement are about. */
   selectedId?: string;
   onSetReach?: SetReach;
   onSelectComponent?: (component: string) => void;
@@ -1641,31 +1144,17 @@ function Components({
   onMoveComponent?: MoveComponent;
   onUnplaceComponent?: UnplaceComponent;
   targets?: readonly TargetListItem[];
-  /**
-   * Every Datastore this App reads through, plus the unattached ones it could
-   * (§11). One line under the Components rather than a card beside them: a
-   * Datastore is not a peer of the thing this screen is a list of, and the
-   * card that said it was took half the width to state at most a handful of
-   * names.
-   */
+  /** Every Datastore this App reads through, plus the unattached ones. */
   datastores?: readonly DatastoreView[];
-  /** Where a Datastore's name goes when it is pressed — its own screen. */
+  /** Opens a Datastore's own screen. */
   onNavigate?: (path: string) => void;
   onAttachDatastore?: AttachDatastore;
 }) {
-  /*
-    Two disclosures rather than one, because they are two acts on the same row
-    and neither is a mode of the other: reach is written on the Component and
-    takes effect on the next release, and a move is written on the placement and
-    takes effect now. One `editing` slot shared between them would make opening
-    Move look like cancelling Reach.
-  */
+  // Separate slots, so opening Move does not cancel Reach.
   const [editing, setEditing] = useState<string | null>(null);
   const [placing, setPlacing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  // Both, or the row shows neither: a Component can be moved and the pair it
-  // left retired, and half of that pair of acts is a screen that can strand a
-  // workload it cannot then tear down.
+  // Both or neither: a move without Unplace strands the pair it left.
   const movable =
     onMoveComponent && onUnplaceComponent && targets.length > 0
       ? { onMoveComponent, onUnplaceComponent }
@@ -1673,16 +1162,6 @@ function Components({
 
   return (
     <Card>
-      {/*
-        The verb, with the handler that answers it — the both-or-neither rule
-        `SectionHeader` enforces, satisfied rather than dodged. An App gains its
-        second Component here because this is the list of what it has: §2's "one
-        App to many Components" had exactly one door, the create flow, and a
-        `job` beside a `service` was reachable only by posting to the command
-        endpoint. The form is on this screen rather than behind a route for the
-        same reason `ReachEditor` is: what it writes is a row this card is
-        already showing.
-      */}
       <SectionHeader
         eyebrow="App structure"
         title="Components"
@@ -1700,10 +1179,6 @@ function Components({
             onDone={() => setAdding(false)}
           />
         ) : null}
-        {/* The length guard every sibling card has. A brand-new App rendered
-            an empty card under a dead button. The second sentence follows the
-            verb: where one is offered it is the answer, and where none is —
-            the fixture screens, which wire no acts — the create flow is. */}
         {components.length === 0 ? (
           <EmptyState title="This App has no Components yet.">
             A Component is what gets built and placed.{' '}
@@ -1713,15 +1188,8 @@ function Components({
           </EmptyState>
         ) : null}
         {components.map((component) => {
-          /*
-            A first placement is not a move. `deployApp` writes `placedTargetId`
-            while it is NULL (`src/commands/apps/deploy.ts:529-534`), which is
-            how a Component the Components card just added gets placed at all —
-            so offering Move on one that has never been placed would be a second
-            answer to which Target it lives on, and `placeComponent` would be
-            the act that decided it. A pair that still serves is the evidence
-            there is a placement to move.
-          */
+          // Offered only where a pair serves: the first Deploy writes a first
+          // placement.
           const moves =
             movable && (component.serving?.length ?? 0) > 0 ? movable : null;
           return (
@@ -1805,17 +1273,8 @@ function Components({
 }
 
 /**
- * The Datastores this App reads through, and the picker that attaches one more.
- *
- * One line, not a section. What an App owns of a Datastore is the attachment;
- * everything else — creating, detaching, destroying, and the object itself —
- * is the ledger's, one press away through the name.
- *
- * The picker lists only unattached stores because those are the only ones
- * `attachDatastore` accepts, and it is withheld entirely where there are none
- * to pick: a select with nothing in it is the dead control the both-or-neither
- * rule exists to prevent. Every other refusal is core's — placement and the
- * one-per-engine rule are its to state, not this screen's to predict.
+ * The picker offers only unattached stores. Other refusals come back from
+ * `attachDatastore`.
  */
 function DatastoreLine({
   datastores,
@@ -1910,28 +1369,8 @@ function DatastoreLine({
 }
 
 /**
- * Declaring one more Component of this App (§2).
- *
- * **A name, a kind, and — for a job — a schedule.** Everything else a
- * `components` row carries either has a command-side default or is decided by
- * the kind, and {@link CreateComponent} argues that at the seam. The kind tiles
- * are the creation flow's own, so a developer meets the three kinds once and in
- * the same words rather than per screen.
- *
- * **What it writes is a row, not a release.** `createComponent` inserts the
- * Component and stops: nothing is built, nothing is placed, and no Target is
- * serving it — placement is what the first Deploy writes
- * (`src/commands/apps/deploy.ts:529-534`). So the sentence on success names the
- * two things that have not happened yet and points at the button that does
- * them, for the reason {@link ReachEditor}'s does: a screen reading "done" over
- * an act the platform has not been asked for is the one failure a form of this
- * shape can produce.
- *
- * Exported, and `kind` is the disclosure's opening selection rather than a
- * fixed one, because `test/harness/dom.ts` cannot press a tile — the job branch
- * of this form has copy of its own, and a test that could only reach the
- * default would be asserting that a service renders while the conditional field
- * goes unread.
+ * Writes the Component row only: the first Deploy builds and places it.
+ * `kind` sets the opening tile, since the test DOM shim cannot press one.
  */
 export function NewComponentForm({
   onCreateComponent,
@@ -1961,9 +1400,7 @@ export function NewComponentForm({
       const result = await onCreateComponent({
         name: created,
         kind,
-        // Absent for every other kind, and for a job that names no schedule:
-        // the command's union is `.strict()`, and an unscheduled job is one
-        // that says nothing rather than one that says empty.
+        // Only a job takes `schedule`, and an empty string is not a cron expression.
         ...(kind === 'job' && schedule.trim() !== ''
           ? { schedule: schedule.trim() }
           : {}),
@@ -2003,12 +1440,6 @@ export function NewComponentForm({
           />
         ))}
       </div>
-      {/*
-        §2: "`schedule` is a field on a job, not a kind." Asked only where the
-        kind has an answer for it, which is the same thing `ReachEditor` does
-        with `auth` at `reach: none` — a refusal said by not asking rather than
-        after the press.
-      */}
       {kind === 'job' ? (
         <Field
           name="component-schedule"
@@ -2019,14 +1450,6 @@ export function NewComponentForm({
           hint="Five cron fields. Leave it empty for a job that only runs when something asks it to — an unscheduled job is placed suspended."
         />
       ) : null}
-      {/*
-        The other half of "one App to many Components": an App is one scope, so
-        a second Component builds the same image as its sibling, and the
-        entrypoint is what makes it a different workload. Asked at creation
-        rather than only after it, because a Component created to run
-        differently that cannot say so exists as a duplicate of its sibling
-        until somebody edits it.
-      */}
       <Field
         name="component-entrypoint"
         label="Entrypoint"
@@ -2068,24 +1491,8 @@ export function NewComponentForm({
 }
 
 /**
- * Changing how a Component is reached (§9).
- *
- * Reach and auth are one decision, so they are one form and one save — the same
- * shape the creation flow states them in, and literally the same tiles, so a
- * developer meets the grid once. `auth` disappears at `reach: none` there and
- * here, which is `AUTH_NEEDS_A_ROUTE` said by not asking rather than by
- * refusing after the press.
- *
- * **What it saves is a Component, not a release.** The chart renders the route,
- * the DNS annotations and the filter from values written at deploy time, so the
- * only honest thing this form can do when it succeeds is name the Targets whose
- * release still places the old answer and point at Deploy. Anything that read
- * as "done" would be a screen claiming an outcome the platform has not been
- * asked for yet.
- *
- * Exported because it is behind a disclosure: the sentence above is the whole
- * claim this form makes, and a test that could only reach the button would be
- * asserting that something opens rather than what it says when it does.
+ * Saves the Component only: the chart renders reach at deploy time. Exported
+ * because it sits behind a disclosure the test DOM shim cannot open.
  */
 export function ReachEditor({
   component,
@@ -2112,9 +1519,7 @@ export function ReachEditor({
       const result = await onSetReach({
         componentId: component.id,
         reach,
-        // §9's grid: a Component with no route has nothing to authenticate in
-        // front of, so `none` is not a choice being made for the operator — it
-        // is the only cell that row has.
+        // `reach: none` has no route to authenticate in front of.
         auth: reach === 'none' ? 'none' : auth,
       });
       setOutcome(
@@ -2190,35 +1595,8 @@ export function ReachEditor({
 }
 
 /**
- * Moving this Component to another Target, and retiring what it has left (§3,
- * §10).
- *
- * **The move is one post, never two.** `placeComponent` demands the keys that
- * will not follow *as part of the act* — its `supply` field exists so that
- * "demands them before the move commits" is true from the developer's side too
- * (`src/commands/components/place.ts:54-60`). So a refusal here opens a form
- * and the press that follows it is the same call again with `supply` filled
- * in. A `setConfig` pass followed by a retry would write those values at a
- * placement that does not exist yet, which is the shape core refuses.
- *
- * **The old pair keeps serving, and the screen says so.** A move writes the
- * new placement and leaves the row it moved away from alone, deliberately —
- * that is why every pair is listed here with its own Unplace. §13's rule is
- * "never destroy as a side effect of something else", and the move is
- * something else; retiring the old address is its own act, asked for by name.
- *
- * **What it does not do is a release.** Nothing is placed on the new Target
- * until Deploy runs, which is why the success sentence names Deploy and names
- * Rebuild: the artifact travels as it is where the new placement takes the
- * built shape (`takesShape`, which consults the adapter's whole accept list),
- * and where it does not,
- * `createDeploy` refuses with "this placement needs a rebuild" (§3) and
- * Rebuild in the header is the answer to it. Neither happens here — a form that
- * deployed as well would be substituting one act for the other, which
- * `deployApp`'s own header (`src/commands/apps/deploy.ts:1-43`) forbids.
- *
- * Exported for the reason {@link ReachEditor} is: it is behind a disclosure,
- * and `test/harness/dom.ts` cannot press the button that opens it.
+ * A refused move retries as the same call with `supply` filled in. Exported
+ * because the test DOM shim cannot open its disclosure.
  */
 export function PlacementEditor({
   component,
@@ -2254,13 +1632,6 @@ export function PlacementEditor({
     | null
   >(null);
 
-  /*
-    The Targets that take this kind, and no others. `kinds` is the adapter's own
-    answer (`KINDS_BY_ADAPTER`), so a `static` surface offered for a job would be
-    a tile whose only outcome is a deploy that cannot be admitted — §3 lists a
-    non-candidate with its reason where it is *choosing between* Targets, and
-    this list is one Component's placement rather than that step.
-  */
   const offered = targets.filter((target) =>
     target.kinds.includes(component.kind),
   );
@@ -2320,12 +1691,7 @@ export function PlacementEditor({
     <div className="flex flex-col gap-3 border-b border-border-soft py-3 last:border-b-0">
       <div className="flex flex-col gap-1.5">
         <Eyebrow>Still serving</Eyebrow>
-        {/*
-          One control per pair, because that is what the command takes. A move
-          leaves two rows answering and `unplaceComponent` retires one of them
-          by (Component, Target) — a single button could not say which, which is
-          the reason the command has had no control at all until now.
-        */}
+        {/* One control per pair: `unplaceComponent` retires by (Component, Target). */}
         {serving.map((pair) => (
           <div key={pair.targetId} className="flex items-center gap-2 text-xs">
             <span className="font-mono">{pair.label}</span>
@@ -2423,21 +1789,8 @@ export function PlacementEditor({
 }
 
 /**
- * The keys that will not follow, as a form rather than as a dead end (§10).
- *
- * §10's carve-out is the boundary: "core never retrieves, therefore core cannot
- * migrate config between stores", so a move to a Target behind a different
- * store of record cannot carry the values and `placeComponent` refuses naming
- * them. That refusal is not an error to be stuck behind — it is a question, and
- * the only screen that can answer it is the one the operator is on.
- *
- * The sentence above the fields is core's own, unedited, because it says what
- * the fields cannot: which store cannot be reached, and that no value is being
- * read back to be shown here.
- *
- * Its own component, and exported, so that the refusal state is renderable
- * without pressing anything — the DOM shim cannot press, and this is the arm of
- * the move that most needs asserting.
+ * Asks for the values a move cannot carry, under core's own refusal sentence.
+ * Exported so tests can render the refusal without a press.
  */
 export function SupplyDemand({
   message,
@@ -2484,20 +1837,8 @@ export function SupplyDemand({
 }
 
 /**
- * Where this App is built from (§5, §15) — the repository, the scope inside it,
- * and the `spindrift.yaml` that governs the build.
- *
- * **It reads its own row.** `getAppSource` asks the repository host for one
- * file, and the workspace re-reads itself every two seconds while a release is
- * in flight; folding this into that read would spend a rate limit on an answer
- * nobody asked for again. `null` cadence — once per visit to this tab, the same
- * trade `Releases` makes for its rows.
- *
- * **A failed read takes nothing off the screen.** The card is rendered on what
- * came back and nothing else: an App with no source (an uploaded archive) and
- * a read still in flight both render nothing, and a repository host that would
- * not answer renders the two facts Spindrift holds itself with the reason
- * beside the third.
+ * Reads once per visit: `getAppSource` calls the repository host, and the
+ * workspace read repeats every two seconds while a release is in flight.
  */
 function SourceSection({ app }: { app: string }) {
   const read = useRead([['getAppSource', { app }]], null, [app]);
@@ -2505,9 +1846,7 @@ function SourceSection({ app }: { app: string }) {
   if (source === null) return null;
 
   const { manifest } = source;
-  // The file at the commit that is governing, never at the branch tip: it is
-  // the revision `getAppSource` read, and a link to `main` would open a
-  // different document the day after somebody pushes.
+  // Pinned to the commit `getAppSource` read, so the link survives a push.
   const manifestUrl =
     source.url === null || source.commit === null
       ? null
@@ -2548,13 +1887,7 @@ function SourceSection({ app }: { app: string }) {
         />
         <Row
           badge={
-            /*
-              Three words for three states, because two of them would make the
-              unread one a claim. A file that is there means this App is
-              declared; a scope without one means detection decides; a read that
-              could not happen means neither is known, and saying "detected"
-              there would be this screen guessing on somebody's behalf.
-            */
+            /* An unread file is "unknown": "detected" would be a guess. */
             <Badge tone={manifest.state === 'present' ? 'accent' : 'idle'}>
               {manifest.state === 'present'
                 ? 'declared'
@@ -2597,44 +1930,8 @@ function SourceSection({ app }: { app: string }) {
 }
 
 /**
- * The selected Component's environment configuration (§10).
- *
- * Keys only, ever — the same posture core's config commands take, kept all
- * the way to the screen: nothing here has ever been handed a value, so there
- * is nothing here that could show one by accident.
- * "Set variable" is the one form underneath, because `setConfig` upserts —
- * naming a key that already exists overwrites it, so add and edit are one
- * act, not two the operator has to choose between.
- *
- * The Component is named above the list because config is scoped to one
- * (Component, Target) pair and this App may have several: a heading that said
- * only "Config" was the same list claiming to be the App's.
- */
-/**
- * The App's own address (§9).
- *
- * §9's naming is two layers and only one of them is a decision. The canonical
- * always resolves and nobody picks it — on a Target that names its own
- * workloads it *is* the platform's name. The vanity is the name a developer
- * shares, and until this section existed there was nowhere in the product to
- * choose one: `setAppVanity` and `setAppZone` were registered commands with no
- * hand reaching them.
- *
- * **Three tiles, and the apex is one of them.** The stored value is one DNS
- * label or the literal `@`, and a text field that silently accepts `@` is a
- * puzzle rather than a control — the one non-label choice is the one people
- * most want, so it is a thing to press. `@` never appears on screen; it is only
- * what this sends.
- *
- * **Two writes, zone first.** The zone is a separate column and a separate
- * command, and it is the one that can be refused — a zone that cannot serve a
- * placed Component's reach is not a pin `setAppZone` will take. Landing the
- * label into a zone that is about to be refused would leave two half-applied
- * facts, so the label only goes after the zone lands.
- *
- * **Nothing here changes what is serving.** The name is attached to the Target
- * and the record is published during a deploy, so setting it is a statement
- * about the next one. Said, rather than left to be discovered.
+ * The App's vanity name. `@` is the zone apex and never shows on screen; the
+ * record publishes on the next deploy.
  */
 function DomainSection({
   domain,
@@ -2682,13 +1979,6 @@ function DomainSection({
     <Card>
       <SectionHeader eyebrow="App address" title="Domain" />
       <CardContent className="flex flex-col gap-4">
-        {/*
-          Stated before the control, because it is the difference between a
-          name that will be published and one that will not. §9 puts the
-          shared name on the App and the reconciler refuses to guess which of
-          two serving Components it means — so this is not advice, it is what
-          is happening.
-        */}
         {domain.ambiguous ? (
           <p className="rounded-md border border-destructive bg-destructive-soft px-3 py-2.5 text-sm text-destructive">
             Nothing is published under a name of your own. More than one
@@ -2704,13 +1994,7 @@ function DomainSection({
             note="Only the address the Target mints."
             onClick={() => setChoice('none')}
           />
-          {/*
-            The one tile that carries a warning, because it is the one choice
-            that is not fully reversible from here. A record at a zone apex is
-            published once and never re-pointed or withdrawn — see `isApexName`
-            for why — so choosing it commits the bare domain to this App until
-            somebody edits DNS by hand.
-          */}
+          {/* An apex record is published once and never re-pointed; see `isApexName`. */}
           <Choice
             selected={choice === 'apex'}
             title="The domain itself"
@@ -2742,11 +2026,6 @@ function DomainSection({
           />
         ) : null}
 
-        {/*
-          Offered only where there is a choice to make. One zone is not a
-          question, and a select with one option is a control that teaches
-          somebody the word "zone" for nothing.
-        */}
         {domain.zones.length > 1 && choice !== 'none' ? (
           <Field
             name="zone"
@@ -2778,17 +2057,7 @@ function DomainSection({
             {saving ? 'Saving…' : 'Save domain'}
           </Button>
           <p className="text-xs text-muted-foreground">
-            {/*
-              The record is published by a deploy, not by this button —
-              the name is attached during apply and the DNS write happens in the
-              deploy loop. A control that let somebody walk away believing the
-              name was live would be the screen lying by omission.
-
-              And it promises nothing while more than one Component serves: the
-              banner above says that name will not be published, so a sentence
-              here saying the App answers on it is the same screen arguing with
-              itself two inches apart.
-            */}
+            {/* The deploy loop writes the DNS record, not this button. */}
             {preview === null
               ? 'This App answers on the address its Target mints.'
               : domain.ambiguous
@@ -2806,12 +2075,6 @@ function DomainSection({
           </p>
         ) : null}
 
-        {/*
-          Said where the name is chosen rather than where it is lost. An App has
-          one Component when it is created and grows a second later, so the
-          person who set this name is not the person who will be looking at the
-          Components list when it stops being published.
-        */}
         {!domain.ambiguous && domain.servedBy !== null && choice !== 'none' ? (
           <p className="text-xs text-muted-foreground">
             Carried by {domain.servedBy}, while it is the only Component this
@@ -2830,7 +2093,7 @@ function ConfigSection({
   onSetConfig,
 }: {
   configKeys: readonly string[];
-  /** Whose keys these are. Absent for an App with no Components yet. */
+  /** Absent for an App with no Components yet. */
   component?: string;
   onSetConfig?: SetConfig;
 }) {
@@ -2898,11 +2161,7 @@ function ConfigSection({
   );
 }
 
-/**
- * Setting one variable — write-only in, so the value field always starts
- * blank, even for a key that already has one (§10: nothing above the store
- * has ever been allowed to read it back).
- */
+/** Starts blank even for an existing key: a value is never read back. */
 function ConfigVarForm({
   onSetConfig,
   onDone,
@@ -2988,17 +2247,8 @@ function ConfigVarForm({
 }
 
 /**
- * Removing one variable, and nothing else.
- *
- * `setConfig` takes the key alone — unlike `replaceConfig`'s upload, a
- * removal never asks this button to restate the values of the keys it is
- * leaving alone, which is the whole reason deleting one key does not mean
- * retyping every other one. No local confirmation state: the button has
- * nowhere on the row to show one, so a refusal is reported to the section
- * above instead of being lost.
- *
- * Exported for `test/web/views.test.tsx`, which calls it directly to prove
- * what pressing it sends — the same reason `DeleteAppButton` is.
+ * Removes one key. A refusal goes to `onError`, since the row has no room to
+ * show one. Exported so tests can call it directly.
  */
 export function DeleteConfigVarButton({
   configKey,
@@ -3033,22 +2283,7 @@ const MARKER_TONE = {
   info: 'border-border bg-card',
 } as const satisfies Record<ActivityEntry['status'], string>;
 
-/**
- * The timeline, and a way in from every line of it.
- *
- * A **timeline, not a list** — the rows are joined by a rule the markers sit
- * on, because these entries are one sequence and stacked cards said they were
- * unrelated events that happened to be near each other. The connector is what
- * carries the reading down the column, and the newest checkpoint is at the top
- * where the last thing that happened belongs.
- *
- * The stage each row belongs to is on the row, and it is load-bearing rather
- * than decorative: **Build and Deploy are separate stages**, so a column of red
- * has to say which of the two went red. `attempt_events` constrains every row
- * to exactly one attempt, so the lane is always knowable and every entry has
- * somewhere to go — `/deploys/:id` or `/builds/:id`. An entry that led nowhere
- * would be the one thing on this screen a reader could not act on.
- */
+/** The checkpoint timeline, newest first. */
 function Activity({
   entries,
   onNavigate,
@@ -3091,22 +2326,12 @@ function Activity({
           </EmptyState>
         ) : (
           <ol className="relative flex flex-col">
-            {/*
-              One rule behind every marker, stopped short at both ends so the
-              sequence reads as bounded rather than continuing off the card
-              into checkpoints that are not shown.
-            */}
             <span
               aria-hidden="true"
               className="absolute left-[5px] top-3 bottom-3 w-px bg-border-soft"
             />
-            {/*
-              Keyed by position rather than by content. Every part of the old
-              key was displayed text, so two checkpoints that read alike — the
-              ordinary case for one attempt reported twice a minute apart —
-              collided. This list is server-derived, newest-first, read-only and
-              holds no per-row state, so position is a stable identity for it.
-            */}
+            {/* Keyed by position: two checkpoints can read alike, and rows
+                hold no state. */}
             {entries.map((entry, index) => (
               <ActivityRow key={index} entry={entry} onNavigate={onNavigate} />
             ))}
@@ -3133,11 +2358,7 @@ function ActivityRow({
 
   const body = (
     <>
-      {/*
-        The marker sits on the rule rather than beside it — `bg-card` on an
-        `info` dot is what punches it through the line, so a checkpoint reads
-        as a point on the sequence instead of a bullet next to one.
-      */}
+      {/* The bg-card fill on an info marker hides the rule behind it. */}
       <span
         aria-hidden="true"
         className={cn(
@@ -3184,19 +2405,8 @@ function ActivityRow({
 }
 
 /**
- * A Component's output surface — one of §17's three, kept honestly distinct.
- *
- * §17 draws two lines this branch exists to hold. **A job is not a stream but a
- * list of executions**: an execution terminates, so it is attempt-shaped, and
- * the tail pipe covers services only. And a **`static` Target gets an honest
- * empty state** rather than a disabled tab, because there is no process to
- * follow rather than a stream that happens to be quiet.
- *
- * For the one case that *is* a stream, the view **follows the Component**:
- * Deploys are markers on it, never a filter, which is the only shape that lets
- * a human read across a rollback boundary. Its reach is stated — §17 makes
- * `logHistory` a duration rather than a capability, so a Target never lacks
- * logs, it only has a shorter memory, and saying how short is the whole point.
+ * A service's output is a stream with Deploys as markers, a job's is a list of
+ * runs, and a Component with no process gets an empty state.
  */
 function Runtime({
   view,
@@ -3208,45 +2418,23 @@ function Runtime({
   executionLines,
 }: {
   view: WorkspaceView;
-  /**
-   * Whose output this is. An App has as many runtimes as it has Components and
-   * this card shows one of them, so the card says which — "Recent runs" over an
-   * App with a service and two jobs names none of them.
-   */
   component?: string;
   onNavigate?: (path: string) => void;
-  /**
-   * Start one run (§17). Absent where the screen has no act wired — the
-   * fixture renders, and any Component that is not a placed job.
-   */
   onRun?: RunJob;
-  /**
-   * Bounce the service (§6). Absent where the screen has no act wired, and
-   * for any Component that is not a placed service — only the stream branch
-   * has a process to bounce, so only it renders the control.
-   */
   onRestart?: RestartService;
   /**
-   * Follow one run's output, or nothing when the name is `null`.
-   *
-   * The lines come back as {@link executionLines} rather than through this
-   * callback, because the socket outlives any one render and the screen above
-   * owns it — the same split the service tail already has.
+   * `null` stops following. Lines arrive as `executionLines`, since the screen
+   * above owns the socket.
    */
   onFollowExecution?: (execution: string | null) => void;
   executionLines?: readonly LogLine[];
 }) {
   const runtime = view.runtime;
   const latestDeployId = view.latestDeployId;
-  /** Which run's output is open. One at a time: this is a list, not a tree. */
   const [following, setFollowing] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  /**
-   * This run's parameters, as typed (§17's one-off script with an argument).
-   * A row with no name is a row the operator has not filled in, not a variable
-   * called nothing, so it is left out rather than refused.
-   */
+  // A row with no name is unfilled, so `start` skips it.
   const [parameters, setParameters] = useState<
     readonly { id: string; key: string; value: string }[]
   >([]);
@@ -3315,13 +2503,7 @@ function Runtime({
           </EmptyState>
         ) : runtime.kind === 'executions' ? (
           <>
-            {/*
-              §17's other half of `apply` for a job: the chart renders a
-              CronJob that is triggered by nothing, so an unscheduled job is
-              only ever run because somebody asked. The button is what asking
-              is, and it sits with the runs rather than beside Deploy because
-              running is not deploying — nothing about what is placed changes.
-            */}
+            {/* Run now sits with the runs: running changes nothing that is placed. */}
             {onRun ? (
               <div className="flex flex-col gap-2 pb-2">
                 <div className="flex flex-wrap items-center gap-3">
@@ -3350,12 +2532,8 @@ function Runtime({
                     <p className="text-xs text-destructive">{runError}</p>
                   ) : null}
                 </div>
-                {/*
-                  `ConfigVarForm`'s grid, minus the password field: a parameter
-                  is an argument to one run, not a secret — a secret goes
-                  through config, and a name config already delivers is what
-                  `runComponent` refuses.
-                */}
+                {/* A parameter is not a secret, so the value is plain text.
+                    `runComponent` refuses a name that config already sets. */}
                 {parameters.map((parameter) => (
                   <div
                     key={parameter.id}
@@ -3398,12 +2576,7 @@ function Runtime({
                 ))}
               </div>
             ) : null}
-            {/*
-              A read that failed keeps this arm so the button above stays
-              pressable, and says why here. Rendering the empty-list sentence
-              instead would claim the job has never run when what happened is
-              that nobody could find out.
-            */}
+            {/* A failed read says why, so it does not claim the job never ran. */}
             {runtime.because ? (
               <EmptyState title="These runs could not be read.">
                 {runtime.because}
@@ -3415,11 +2588,7 @@ function Runtime({
             ) : null}
             {runtime.executions.map((execution) => (
               <div key={execution.name}>
-                {/*
-                  A run's logs are read by naming the run, so the row is what
-                  names it. Pressing it again closes the pane rather than
-                  leaving the screen holding a socket nobody is reading.
-                */}
+                {/* Pressing the open run again closes the pane and its socket. */}
                 <button
                   type="button"
                   className="w-full text-left"
@@ -3442,17 +2611,8 @@ function Runtime({
                 ) : null}
               </div>
             ))}
-            {/*
-              What this number is, and nothing more. It is the page size the
-              screen asks for, which on `kubernetes` also happens to be the
-              chart's `successfulJobsHistoryLimit` and on `cloudrun` is not the
-              retention of anything — saying "the last N are kept" there sends
-              an operator looking for a run that `gcloud` still has.
-
-              Not shown at all on a failed read: nothing was shown, so a caption
-              claiming ten of anything is the empty-list lie the sentence above
-              it exists to avoid.
-            */}
+            {/* `retained` is the page size asked for, not a retention promise:
+                Cloud Run keeps its own history. */}
             {runtime.because ? null : (
               <p className="pt-2 text-xs text-muted-foreground">
                 Showing the last {runtime.retained} runs. The history lives on
@@ -3462,13 +2622,8 @@ function Runtime({
           </>
         ) : (
           <>
-            {/*
-              §6's one act on a running process. It sits with the output rather
-              than beside Deploy for the reason Run now sits with the runs:
-              restarting is not deploying — nothing about what is placed
-              changes, the platform replaces the process it already holds — and
-              the sentence it writes lands on this release's own timeline.
-            */}
+            {/* Restart sits with the output: it replaces the process and changes
+                nothing that is placed. */}
             {onRestart ? (
               <div className="flex items-center gap-3 pb-2">
                 <Button
@@ -3497,29 +2652,12 @@ function Runtime({
 }
 
 /**
- * How many lines of a live tail the page holds.
- *
- * `app.tsx` appends every socket page to `runtime.lines` and never drops one,
- * so a chatty service grew this array — and the DOM under it — for as long as
- * the workspace stayed open. The cap is a window on the end of the stream,
- * which is what a tail is; the history behind it lives on the Target, and this
- * card already says how far back that reaches.
+ * `runtime.lines` grows for as long as the screen is open, so the pane renders
+ * only this many of the newest.
  */
 const TAIL_LINES = 2_000;
 
-/**
- * The live tail: following, capped, and honest about the cap.
- *
- * Both `LogPane` mounts on this screen omitted `follow`, which is the flag that
- * makes the pane auto-scroll *and* the flag that gives it a maximum height — so
- * the one genuinely streaming surface in the product never showed its newest
- * line and pushed the whole page down instead of scrolling inside itself. The
- * two are one flag on purpose: a pane with no bottom has nothing to follow to.
- *
- * The "showing the last N" line is the same admission `Transcript` makes on the
- * build log. A pane that silently drops the beginning of a stream is a pane
- * that has answered "the error is not in the logs" for somebody.
- */
+/** `follow` scrolls to the newest line and caps the pane's height. */
 function FollowedLog({ lines }: { lines: readonly LogLine[] }) {
   const dropped = Math.max(0, lines.length - TAIL_LINES);
   return (
@@ -3554,41 +2692,12 @@ const EXECUTION_TONE = {
 } as const;
 
 /**
- * A refreshed workspace, keeping what the socket knows and the read does not.
+ * Keeps what the socket knows across a refresh: the read returns `stream` with
+ * no lines for any placed Component. Lines survive for the same Component and
+ * Target, and a `none` also needs the same Deploy and phase.
  *
- * Two things, for one reason: `getAppWorkspace` never asks the adapter. It
- * answers `stream` for any placed Component and hands back an empty first page,
- * because tailing at read time is the socket's whole job — so on both counts
- * the read is the weaker source about the same pair, and taking `runtime`
- * wholesale lets it win every tick.
- *
- * The lines are the obvious half: every line after the first arrived over the
- * socket and lives in this screen's state, so a refresh that took `runtime`
- * whole would wipe the log every few seconds.
- *
- * A `none` is the other. It is the answer for a Component that is placed and
- * not running — no pods, a Target that runs nothing — and it can only come from
- * the socket, so a refresh used to put `stream` back and the effect resubscribe
- * to be told `none` again. The card swapped its title and its body, from the
- * reason to an empty log and back, for as long as the screen was open.
- *
- * Both are kept only where the two reads are about the same Component on the
- * same Target. The selection can move while a refresh is in flight, and a
- * Component's output rendered under another Component's name is a worse answer
- * than the empty card the next socket page fills. A `none` is held to more than
- * that — the release has to be the same one, in the same phase — because it is
- * a claim about what is running, and a Deploy is what changes that.
- *
- * ponytail: a runtime that recovers without moving either — pods coming back on
- * a release that stayed LIVE — keeps saying `none` until the selection changes
- * or the page is re-opened. Closing that means the pane subscribing on the
- * Component and Target it is about rather than on the read's own answer to the
- * question the socket exists to answer, and the server holding the socket open
- * through a `none` instead of closing it.
- *
- * Exported for `test/web/workspace-refresh.test.ts`: this is where the
- * selection and the socket meet, and reaching it through the mounted screen
- * means pressing a row, which the DOM shim does not simulate.
+ * ponytail: a runtime that recovers on the same LIVE release keeps saying
+ * `none` until the selection changes or the page reloads.
  */
 export function refreshedWorkspace(
   current: WorkspaceView,
@@ -3622,30 +2731,8 @@ export function refreshedWorkspace(
 }
 
 /**
- * The Target a press on Deploy has to name, or nothing where it must not.
- *
- * Placement is a fact `placeComponent` or a first deploy writes, so a Component
- * that has done neither has none to read back and `deployApp` refuses rather
- * than guessing (`src/commands/apps/deploy.ts:390-395`). That never mattered
- * while every Component was declared by the create flow, which places as it
- * creates — and it matters for every Component the Components card adds, because
- * `createComponent` deliberately writes no placement.
- *
- * `targetId` is the *selected* Component's placement of record
- * (`src/commands/apps/workspace.ts:129`), so its absence is the whole test, and
- * a sibling's row is where the answer comes from: an App's Components are placed
- * one Target apiece and a `job` added beside a `service` joins the Target that
- * service is on. What travels is the `<vessel>/<adapter>` spelling the row
- * already states, which `deployApp` resolves (`deploy.ts:352-362`).
- *
- * **Never for a Component that has a placement.** A Target named against one is
- * a move, and moves go through `placeComponent` — `deployApp` refuses the
- * disagreement (`deploy.ts:379-386`) rather than landing somewhere new, and this
- * side does not put it in the position of having to.
- *
- * Exported for `test/web/component-create.test.ts`, for the reason
- * {@link refreshedWorkspace} is: reaching it through the mounted screen means
- * pressing Deploy, which the DOM shim does not simulate.
+ * An unplaced Component deploys to a sibling's Target, since `deployApp`
+ * refuses to guess one. A placed Component names none: that would be a move.
  */
 export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
   if (view.targetId !== undefined) return undefined;
@@ -3653,42 +2740,14 @@ export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
     ?.target;
 }
 
-/**
- * One typed entrypoint, as an argv.
- *
- * ponytail: splits on whitespace and nothing else, so `sh -c "a b"` arrives as
- * four words rather than three. The case this field exists for is `node
- * job.js` — a monolith's second Component naming its own entrypoint — and a
- * shell-quoting parser here would be a second, worse `shlex` in front of a
- * command that stores whatever list it is given. Give it a real argv editor the
- * day somebody needs a quoted argument.
- *
- * Exported for `test/web/component-create.test.ts`, which is where the split is
- * pinned: the schema refuses an empty string inside the list, so a form that
- * produced one would be refused after the press rather than before it.
- */
+/** ponytail: splits on whitespace only, so a quoted argument is split too. */
 export function argvOf(entrypoint: string): string[] {
   return entrypoint.trim().split(/\s+/);
 }
 
 /**
- * What the Components card's form posts, composed per kind.
- *
- * `createComponentInput` is a `.strict()` discriminated union
- * (`src/commands/components/create.ts:68-98`), so this is a branch rather than
- * one object with optional fields: `schedule` reaching a service is a
- * validation failure, not a field the handler ignores.
- *
- * `reach`, `auth` and `expose` are the schema's own defaults, restated here
- * because `InputOf` reads a command's schema *output* — the same reason the
- * Datastore ledger's `handleCreate` restates `storageGiB`, and the same care:
- * no form offers any of the three, so this is the one place they are named, and
- * naming them here is what keeps the form from having a second opinion.
- *
- * Exported for `test/web/component-create.test.ts`, for the reason
- * {@link refreshedWorkspace} is: what is under test is which fields a kind
- * sends, and reaching it through the mounted screen means pressing a tile,
- * which the DOM shim does not simulate.
+ * Restates the schema defaults for `reach`, `auth` and `expose`, since
+ * `InputOf` is the schema's output type.
  */
 export function componentCreation(
   appId: string,
@@ -3704,10 +2763,6 @@ export function componentCreation(
     name: create.name,
     reach: 'private',
     auth: 'proxy',
-    // Absent rather than null for the image's own entrypoint, the same way an
-    // unscheduled job omits `schedule`: the command reads both as "nothing was
-    // said", and only one of the two spellings survives a `.strict()` union
-    // gaining a field this form does not offer.
     ...(create.command === undefined ? {} : { command: create.command }),
   } as const;
   switch (create.kind) {
@@ -3719,28 +2774,15 @@ export function componentCreation(
       return {
         ...common,
         kind: 'job',
-        // Absent rather than empty for an unscheduled job — §7 renders that as
-        // a suspended CronJob, and `''` is not a five-field cron expression.
+        // Omitted for an unscheduled job, which deploys as a suspended CronJob.
         ...(create.schedule === undefined ? {} : { schedule: create.schedule }),
       };
   }
 }
 
 /**
- * The keys a refused move demands, read off the refusal rather than out of it.
- *
- * `placeComponent` names them twice: in §10's sentence, which is written for a
- * person, and as `issues` at `supply.<KEY>`, which is written for this. Only
- * the second is safe to build a form from — the first is prose, and a form
- * assembled by splitting prose breaks the day somebody improves the wording.
- *
- * Every other refusal answers `[]`, which is what makes the empty case the
- * test: a move refused for a reason that is not a demand is a sentence to
- * read, not a form to fill.
- *
- * Exported for `test/web/component-move.test.ts`, for the reason
- * {@link refreshedWorkspace} is: reaching it through the mounted screen means
- * pressing Move, which the DOM shim does not simulate.
+ * Reads the demanded keys from `issues` at `supply.<KEY>`, never from the
+ * message. Every other refusal gives `[]`.
  */
 export function demandedKeys(failure: TransportFailure): readonly string[] {
   return (failure.issues ?? [])
@@ -3748,13 +2790,8 @@ export function demandedKeys(failure: TransportFailure): readonly string[] {
     .map((issue) => issue.path.slice('supply.'.length));
 }
 /**
- * The workspace screen (§18) — one App, the Component of it being looked at,
- * and everything an operator can do to either.
- *
- * `appName` empty is its own answer rather than a read: `/apps/` names no App,
- * and asking the server about the empty name would be a round trip to be told
- * what the path already says. It is split off around the read so the read's
- * hooks are unconditional.
+ * An empty `appName` is answered before `AppWorkspace`, so its hooks run
+ * unconditionally.
  */
 export function WorkspaceScreen({
   appName,
@@ -3783,62 +2820,20 @@ function AppWorkspace({
   onNavigate: (path: string) => void;
 }) {
   const [deploying, setDeploying] = useState(false);
-  /**
-   * Which Component the screen is showing, or `null` for the App's first.
-   *
-   * Held here rather than in the URL: picking a Component is inspection within
-   * one screen, the same call the object explorers make. It is `null` rather
-   * than the first Component's name because the server answers that question —
-   * a client that named a default would be a second answer to it, wrong for
-   * every App whose Components are not in the order this guessed.
-   */
+  // `null` lets the server pick the App's first Component.
   const [component, setComponent] = useState<string | null>(null);
-  /**
-   * Which run's output is open, and the lines read so far (§17).
-   *
-   * Held here rather than in the card because the socket is: a job's tail is
-   * one run's, so switching runs is a different subscription and the lines
-   * start again — which is why they are cleared when the name changes rather
-   * than appended to whatever the last run said.
-   */
   const [following, setFollowing] = useState<string | null>(null);
   const [runLines, setRunLines] = useState<readonly LogLine[]>([]);
 
-  // There is no workspace left to stand on once the App is gone.
   const deletion = useAppDeletion(() => onNavigate('/apps'));
 
-  /**
-   * The Targets a move can name (§3).
-   *
-   * Read once beside the workspace rather than folded into it: `getAppWorkspace`
-   * answers about one App, and the installation's Targets are not one App's
-   * fact — the Targets screen reads the same list. A failure is left where it
-   * lands and never rendered, and the consequence is stated where it shows: the
-   * Move control is not offered over a list this screen has not got, rather
-   * than offered over an empty one.
-   */
+  // A failed read leaves this empty, which hides Move.
   const targetList = useRead([['listTargets', {}]], null);
   const targets =
     targetList.type === 'success' ? targetList.value[0].targets : [];
 
-  /**
-   * Keep the workspace current while something is moving.
-   *
-   * The attempt screen has the event stream; this screen has no such edge — it
-   * read once at mount and then sat on whatever the phase was at that instant,
-   * so a deploy started from here converged entirely off-screen. §18 puts the
-   * running App first, and an App-first screen that cannot notice its App
-   * coming up is the one that most needs to.
-   *
-   * Two cadences for the same reason the reconciler has two: while a release is
-   * in flight the reader is watching, and once it settles the read is only
-   * catching acts from elsewhere.
-   *
-   * The selection is named on every read, or it would put the App's first
-   * Component back on screen every few seconds — and it is in `deps`, so a
-   * response still in flight when the selection moves is dropped rather than
-   * put on screen under a Component this screen has left.
-   */
+  // The selection is sent on every read and is in `deps`, so a response for a
+  // Component the screen has left is dropped.
   const read = useRead(
     [
       [
@@ -3907,9 +2902,6 @@ function AppWorkspace({
     );
   }, [runtime?.componentId, runtime?.targetId]);
 
-  // A job's runs are read the same way a service's output is — one socket, one
-  // cursor — with the run named. §17's two surfaces stay distinct in what they
-  // are subscribed to, not in how they are transported.
   const runs = view?.runtime.kind === 'executions' ? view.runtime : null;
   useEffect(() => {
     setRunLines([]);
@@ -3922,11 +2914,8 @@ function AppWorkspace({
         execution: following,
       },
       (page) => {
-        // The two non-stream frames are exactly the cases criterion 4 fails in
-        // — `pods/log` not granted, the pods garbage collected, Cloud Logging
-        // refusing — and dropping them made those look identical to a run that
-        // printed nothing. They are the only thing this pane has to say, so
-        // they replace it rather than being appended to it.
+        // `none` and `error` replace the pane, so unreadable logs never look
+        // like a run that printed nothing.
         if (page.kind === 'none') {
           setRunLines([{ text: page.because }]);
           return;
@@ -3967,43 +2956,29 @@ function AppWorkspace({
 
   const workspace = read.value[0].workspace;
 
-  // `rebuild` is passed explicitly rather than defaulted from a bare click
-  // handler: a click hands its event to the first parameter, and an event is
-  // truthy, so `onClick={handleDeploy}` would silently rebuild every press.
+  // Never pass this as a click handler: the event would arrive as a truthy
+  // `rebuild`.
   const handleDeploy = async (rebuild: boolean) => {
     const firstPlacement = targetForFirstDeploy(workspace);
     setDeploying(true);
     try {
-      // By id where the workspace knows one: `apps` does not constrain `name`,
-      // and the command refuses a name two Apps answer to rather than guessing.
+      // By id where known: two Apps can share a name.
       const result = await command('deployApp', {
         name: workspace.appId ?? appName,
         rebuild,
-        // A deploy is a press on one Component, and the header these buttons
-        // sit in reads the selected Component's kind, phase and placement — so
-        // it is that Component's release they start, not the App's first one's.
+        // Deploys the selected Component, the one the header describes.
         ...(workspace.componentId === undefined
           ? {}
           : { component: workspace.componentId }),
-        // The Target a Component deploying for the first time is placed on, and
-        // nothing at all for one that is already placed. See
-        // {@link targetForFirstDeploy}.
         ...(firstPlacement === undefined ? {} : { target: firstPlacement }),
       });
       if (result.ok) {
-        // Both arms navigate. §4 makes "a Build started" a different act from
-        // "an intent was written", not a lesser one — it has a durable id and a
-        // live event stream — so the press lands on the attempt it started
-        // rather than leaving the operator on the screen they pressed from,
-        // wondering whether anything happened.
         onNavigate(
           result.value.deployId === null
             ? `/builds/${result.value.buildId}`
             : `/deploys/${result.value.deployId}`,
         );
       } else {
-        // The sentence the command refused with, unedited — a disconnected
-        // Target, a signature that did not verify. Nothing is retried behind it.
         notify({
           tone: 'destructive',
           title: 'Deploy refused',
@@ -4021,9 +2996,6 @@ function AppWorkspace({
     }
   };
 
-  // §9: the row is written and the release is not, so the workspace is re-read
-  // rather than patched in place — `Deploy` next to a Component whose reach
-  // just changed has to be reading the same row the next intent will pin.
   const handleSetReach: SetReach = async (change) => {
     try {
       const result = await command('setComponentReach', change);
@@ -4038,10 +3010,7 @@ function AppWorkspace({
     }
   };
 
-  // Deploy on push (§15). No re-read of the workspace: the toggle already
-  // holds the answer it just wrote, and the reload `handleSetReach` needs is
-  // because reach changes a *derived* row. This changes exactly the field the
-  // control is showing.
+  // No re-read: the toggle already shows the value it wrote.
   const handleSetAutoDeploy: SetAutoDeploy = async (autoDeploy) => {
     const appId = workspace.appId;
     if (appId === undefined) {
@@ -4063,9 +3032,7 @@ function AppWorkspace({
     }
   };
 
-  // The hold (§6). Re-read, unlike the switch above: the banner, the pending
-  // line and the Deploy button's refusal all derive from the lock, and the
-  // control that changed it is not the one showing it.
+  // Re-read: the banner, the pending line and Deploy all derive from the lock.
   const handleSetLock: SetLock = async (reason) => {
     const appId = workspace.appId;
     if (appId === undefined) {
@@ -4085,17 +3052,8 @@ function AppWorkspace({
     }
   };
 
-  // Which route this App builds on (§4, §16). No re-read, for the same reason
-  // `handleSetAutoDeploy` needs none: the picker already holds the answer it
-  // just wrote, and this changes exactly the field it is showing.
-  /**
-   * Two writes, and the zone goes first.
-   *
-   * `setAppZone` is the one that can be refused — it will not pin a zone that
-   * cannot serve a placed Component's reach — so a label written before it
-   * would land in a zone the next call rejects, leaving the App carrying half
-   * an answer nobody gave.
-   */
+  // The zone goes first: `setAppZone` can refuse, and a label written before
+  // it would leave half an answer.
   const handleSetAppDomain: SetDomain = async ({ label, zone }) => {
     const appId = workspace.appId;
     if (appId === undefined) {
@@ -4117,6 +3075,7 @@ function AppWorkspace({
     }
   };
 
+  // No re-read: the picker already shows the value it wrote.
   const handleSetAppBuildRoute: SetBuildRoute = async (route) => {
     const appId = workspace.appId;
     if (appId === undefined) {
@@ -4136,13 +3095,8 @@ function AppWorkspace({
     }
   };
 
-  // Bytes to the depot, then a Build row that spends the digest.
-  //
-  // Two calls rather than one because they are two different things: staging is
-  // the only thing that sees the bytes and so the only thing that can digest
-  // them (§16), and `uploadArchive` "never reads the bundle" for exactly that
-  // reason. A staged bundle nobody wrote a Build for is a harmless orphan the
-  // depot sweeps; a Build row naming bytes that never landed would not be.
+  // Two calls: staging is the only step that sees the bytes, so it digests
+  // them, and `uploadArchive` spends the digest.
   const handleStageArchive: StageArchive = async (file) => {
     const response = await fetch(UPLOAD_PATH, {
       method: 'POST',
@@ -4152,23 +3106,18 @@ function AppWorkspace({
     const body = (await response.json()) as
       | { ok: true; value: StagedUpload }
       | { ok: false; failure: { message: string } };
-    // The boundary's own sentence — it names what arrived, which is the whole
-    // reason the refusal happens there rather than in a runner log.
     if (!body.ok) throw new Error(body.failure.message);
     return body.value;
   };
 
   const handleUploadArchive: SubmitUpload = async (request) => {
     try {
-      // §5's scope. The control does not offer it: every archive the browser
-      // sends is the whole bundle, and a subpath is a repo-shaped question.
+      // A browser upload is the bundle itself, so its subpath is always `.`.
       const result = await command('uploadArchive', {
         ...request,
         subpath: '.',
       });
       if (!result.ok) return { ok: false, message: result.failure.message };
-      // Land on the attempt this started, the way `handleDeploy` does — a press
-      // that produced a durable id should not leave the operator wondering.
       onNavigate(`/builds/${result.value.buildId}`);
       return { ok: true };
     } catch (cause: unknown) {
@@ -4179,11 +3128,6 @@ function AppWorkspace({
     }
   };
 
-  // The pair this workspace is showing (§10) — bound here, once, so `SetConfig`
-  // itself does not have to carry it on every call. Re-read on success for the
-  // same reason `handleSetReach` is: `configKeys` is a row this act just
-  // changed, and a key that was just deleted has to actually leave the list
-  // rather than being patched out by a guess about what the write did.
   const handleSetConfig: SetConfig = async (change) => {
     const { componentId, targetId } = workspace;
     if (componentId === undefined || targetId === undefined) {
@@ -4216,28 +3160,12 @@ function AppWorkspace({
     }
   };
 
-  /**
-   * Show another Component of this App.
-   *
-   * The open run tail is dropped with the same press: an execution name belongs
-   * to the Component that produced it, so carrying one across the selection
-   * would subscribe to a run the newly selected Component has never had.
-   */
+  // A run name belongs to the old Component, so the open tail closes.
   const handleSelectComponent = (name: string) => {
     setFollowing(null);
     setComponent(name);
   };
 
-  /**
-   * Add a Component to this App (§2), then re-read: the card that opened this
-   * form is the list the new row belongs in, and a Component that does not
-   * appear reads as a press that did nothing.
-   *
-   * Nothing else is written. `createComponent` leaves `placedTargetId` NULL and
-   * the first Deploy fills it (`src/commands/apps/deploy.ts:529-534`), which is
-   * why this handler does not follow up with a placement of its own — two acts
-   * would be two answers to which Target this Component lives on.
-   */
   const handleCreateComponent: CreateComponent = async (create) => {
     const appId = workspace.appId;
     if (appId === undefined) {
@@ -4262,22 +3190,6 @@ function AppWorkspace({
     }
   };
 
-  /**
-   * Move a Component to another Target (§3, §10), then re-read: the placement
-   * this screen states, the pairs still serving and the config keys are all
-   * rows this act just changed.
-   *
-   * **One post, with whatever the form supplied on it.** The retry after a
-   * demand is this same call again, not a `setConfig` pass followed by a second
-   * attempt — `placeComponent` takes `supply` precisely so the move and the
-   * values it demands commit together, and a two-step version would write those
-   * values at a placement that does not exist yet.
-   *
-   * No deploy follows. The artifact travels on the next press of Deploy and on
-   * nothing else: §3 makes a cross-shape move a rebuild, and deciding that here
-   * would be the substitution `deployApp` refuses to make on the operator's
-   * behalf.
-   */
   const handleMoveComponent: MoveComponent = async (move) => {
     try {
       const result = await command('placeComponent', {
@@ -4306,14 +3218,7 @@ function AppWorkspace({
     }
   };
 
-  /**
-   * Retire one pair that still serves (§6, §13), then re-read.
-   *
-   * The teardown is the thing being asked for by name — `unplaceComponent`'s
-   * own header argues why that is §13's exception rather than a violation of
-   * it — so there is no confirmation here that the command does not have:
-   * pressing Unplace on a named pair is the confirmation.
-   */
+  // No confirmation: Unplace on a named pair is the request.
   const handleUnplaceComponent: UnplaceComponent = async (pair) => {
     try {
       const result = await command('unplaceComponent', pair);
@@ -4329,11 +3234,6 @@ function AppWorkspace({
     }
   };
 
-  /**
-   * Start one run (§17), then re-read: the list on the screen was written
-   * before the run existed, and a run that does not appear reads as a press
-   * that did nothing.
-   */
   const handleRunJob: RunJob = async (env) => {
     if (runs?.componentId === undefined || runs.targetId === undefined) {
       return { ok: false, message: 'This job has not been placed on a Target' };
@@ -4356,11 +3256,6 @@ function AppWorkspace({
     }
   };
 
-  /**
-   * Bounce the placed service (§6), then re-read: the checkpoint it wrote is
-   * on the timeline this screen shows, and a press that left the screen
-   * unchanged reads as a press that did nothing.
-   */
   const handleRestartService: RestartService = async () => {
     if (runtime === null) {
       return {
@@ -4384,13 +3279,6 @@ function AppWorkspace({
     }
   };
 
-  /*
-    The one Datastore act an App has (§11). `handleSetConfig`'s shape: the App
-    the screen is showing is bound here so the card does not restate it, the
-    command's own refusal is passed through unedited, and the workspace is
-    re-read on success rather than patched — `attachedTo` is a row this act
-    just changed.
-  */
   const handleAttachDatastore: AttachDatastore = async (datastoreId) => {
     const appId = workspace.appId;
     if (appId === undefined) {

@@ -1,26 +1,6 @@
 /**
- * What an App's address says before anything is serving it (§9, §21).
- *
- * §21 wants an App to carry a lowest-precedence route from the moment it
- * exists, so a name Spindrift has minted resolves to a page that says where the
- * App is up to rather than to a connection error. `controlPlane.hostname` is
- * the field that makes one process able to serve both surfaces — a request for
- * this installation's own UI and a request for one of its Apps arrive on the
- * same listener and are told apart by nothing else.
- *
- * **Precedence is the edge's, not this file's.** In the cluster the Apps'
- * Gateway holds one wildcard listener per zone, and Gateway API orders matching
- * routes by hostname specificity — an exact hostname beats `*.zone`. So the
- * route that carries traffic here is the one no deployed Component has claimed,
- * and a Component going live takes its own name back without anything here
- * being told. Inside this process the same thing holds for a different reason:
- * `{@link STATUS_PATH}` is a wildcard, and `Bun.serve` matches every exact path
- * in the table ahead of it.
- *
- * **It answers 503, not 200.** Every state this page reports is an address that
- * is not serving what a caller asked for, and the honest status code for that
- * is the one that says so — a monitor that treats this page as the App being up
- * would be wrong in exactly the case the page exists to describe.
+ * The page an App's address shows before anything serves it. Exact routes win
+ * over this wildcard, both at the Gateway and in `Bun.serve`.
  */
 import { desc, eq } from 'drizzle-orm';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
@@ -34,23 +14,12 @@ import {
 } from '../domain/naming.ts';
 import { PRODUCT_NAME } from './brand.ts';
 
-/**
- * The lowest-precedence path in the table.
- *
- * A hand-authored route, which `routes.ts` asks to be a decision made on
- * purpose: this is the eleventh kind, and it is the only one that reads the
- * `Host` header rather than the path.
- */
+/** Matched after every exact path; the page is chosen by the `Host` header. */
 export const STATUS_PATH = '/*';
 
 export interface StatusRouteDeps {
   readonly db: Database;
-  /**
-   * Current as of this request, for the same reason every other route that
-   * reads the manifest takes it as a call rather than a value: `dns.zones` and
-   * `controlPlane.hostname` decide which names this page answers for, and a
-   * process-lifetime copy would go stale the moment an operator adds a zone.
-   */
+  /** Called per request: the zones and hostname it reads change at runtime. */
   current(): Promise<{ readonly manifest: InstallationManifest }>;
 }
 
@@ -61,13 +30,8 @@ export function statusRoutes(deps: StatusRouteDeps) {
 }
 
 /**
- * Where an address is up to.
- *
- * `unrouted` is the state that looks impossible and is not: a Component whose
- * newest Deploy is `LIVE` should be holding its own exact route, so a request
- * that arrived at the wildcard instead means the route is gone while the record
- * still points here. Reporting it as "live" would be this page contradicting
- * the request that reached it.
+ * `unrouted`: the newest Deploy is `LIVE`, yet the request reached this
+ * wildcard, so the Component's exact route is gone.
  */
 type Standing =
   | 'unclaimed'
@@ -76,7 +40,6 @@ type Standing =
   | 'failed'
   | 'unrouted';
 
-/** What the page says, per state. */
 const SAID: Record<Standing, { title: string; detail: string }> = {
   unclaimed: {
     title: 'No app here',
@@ -110,8 +73,7 @@ async function statusResponse(
   const { manifest } = await deps.current();
   const host = hostOf(request);
 
-  // The control plane's own name reaching a wildcard means a path that is not
-  // in the table — a 404 for the console, not a status page about an App.
+  // The control plane's own name here is a console path missing from the table.
   if (host === '' || host === manifest.controlPlane.hostname.toLowerCase()) {
     return new Response('not found\n', { status: 404 });
   }
@@ -120,7 +82,6 @@ async function statusResponse(
   return page(host, standing);
 }
 
-/** The requested name, lowercased and without its port. */
 function hostOf(request: Request): string {
   return (request.headers.get('host') ?? '').split(':')[0]!.toLowerCase();
 }
@@ -130,10 +91,8 @@ async function standingFor(
   zones: DnsZones,
   host: string,
 ): Promise<Standing> {
-  // ponytail: every Component's names are minted and compared in memory, which
-  // is one query and no index for as long as an installation's Components fit
-  // in a page. The upgrade path is storing the hostnames the chart is already
-  // handed and looking this up by one of them.
+  // ponytail: names are minted and compared in memory, one unindexed query.
+  // The upgrade path stores the chart's hostnames and looks this up by one.
   const placed = await db
     .select({
       id: components.id,
@@ -163,13 +122,8 @@ async function standingFor(
 }
 
 /**
- * Every name this Component could be reached at, from the same primitives the
- * deploy loop mints the real ones with.
- *
- * Deliberately not `hostnameFor`: that answers what core hands an adapter, and
- * returns an empty canonical for the backends that name their own workloads.
- * The question here is the other one — which Component a caller is asking
- * about — and a name the platform ended up serving is still that Component's.
+ * Minted from the naming primitives, not `hostnameFor`, which returns an empty
+ * canonical for backends that name their own workloads.
  */
 function namesFor(
   row: {
@@ -193,15 +147,8 @@ function namesFor(
 }
 
 /**
- * The page.
- *
- * Server-rendered and self-contained: it is served to whoever asks, with no
- * session, so it loads nothing from the client bundle and says nothing an
- * operator would mind a stranger reading — a name, and whether it is serving.
- *
- * The refresh is a `meta` tag rather than script because this page has no
- * bundle to put script in, and because the state it is waiting for changes on
- * the order of seconds. It is set only where there is something to wait for.
+ * Served to anyone without a session, so it loads no bundle and shows only the
+ * name and its state. With no script, a `meta` tag does the refresh.
  */
 function page(host: string, standing: Standing): Response {
   const { title, detail } = SAID[standing];
@@ -242,6 +189,7 @@ small { color: #a892bf; }
 `;
 
   return new Response(body, {
+    // 503 for every other state: the address is not serving what was asked.
     status: standing === 'unclaimed' ? 404 : 503,
     headers: {
       'content-type': 'text/html; charset=utf-8',

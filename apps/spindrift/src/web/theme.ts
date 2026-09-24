@@ -1,12 +1,6 @@
 /**
- * Theme selection: the chosen dark direction by default, with OS or explicit
- * light available when the operator asks for it.
- *
- * The stylesheet already answers `prefers-color-scheme`, so `system` is not a
- * third theme — it is the absence of the attribute, which is why choosing it
- * removes `data-theme` rather than computing a value and writing it back.
- * Computing it would freeze the page at whatever the OS said at load, and the
- * OS is allowed to change its mind at sunset.
+ * Theme selection, dark by default. `system` removes `data-theme` so the
+ * stylesheet's `prefers-color-scheme` keeps following the OS.
  */
 import { useCallback, useSyncExternalStore } from 'react';
 
@@ -25,7 +19,7 @@ function read(): Theme {
   return isTheme(stored) ? stored : 'dark';
 }
 
-/** The server render has no `localStorage`, and no reader to have a preference. */
+/** A server render has no `localStorage`. */
 function readOnServer(): Theme {
   return 'dark';
 }

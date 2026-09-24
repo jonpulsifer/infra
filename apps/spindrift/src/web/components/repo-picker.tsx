@@ -1,25 +1,7 @@
 /**
- * The repository picker for the creation flow's Source step (§20, Task 24).
- *
- * **It lists the grant, not the database.** `listRepositories` answers with two
- * lists on one response — the durable connections Spindrift holds rows for, and
- * the repositories GitHub currently grants this installation — and a picker
- * showing only the first is a picker that reads "No repositories available" on
- * a fresh install where the operator has already granted five. So the two are
- * merged here, and every row says which of the three it is, because they are
- * three different things to press: one already has an App deploying from it,
- * one is connected and has none, and one is offered by GitHub and connects when
- * the App is created.
- *
- * Selecting writes nothing either way. Reading a repository is
- * `inspectRepository`, which writes nothing at all; Deploy is the committing
- * act, and it is there that a grant-only repository gets its row and its
- * configuration pull request.
- *
- * The filter is a client-side substring match against fullName. It is fast
- * enough for the single-operator scale v1 targets, and the picker never
- * fetches — the lists arrive as props from the same API call that populated the
- * creation flow.
+ * The creation flow's repository picker. It merges the repositories GitHub
+ * grants with those already connected, so a fresh install lists its grant.
+ * Selecting writes nothing; Deploy connects a grant-only repository.
  */
 import { GitBranch, Search } from 'lucide-react';
 import { useState } from 'react';
@@ -30,21 +12,18 @@ import type {
 import { Badge } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 
-/** What one row is, in the operator's terms. */
 export type RepositoryChoiceState =
   /** An App already deploys from it. */
   | 'deploys'
-  /** Spindrift holds a row for it and nothing deploys from it yet. */
+  /** Connected, and nothing deploys from it yet. */
   | 'connected'
-  /** GitHub grants it and Spindrift holds no row: Deploy connects it. */
+  /** Granted by GitHub and not connected: Deploy connects it. */
   | 'grant-only';
 
-/** One repository, as a row an operator can read the state of. */
 export interface RepositoryChoice {
   readonly fullName: string;
   readonly defaultBranch: string;
-  /** Carried from the response rather than templated: the host is the
-   * installation's, and this component has no way to know it. */
+  /** From the response, since only the installation knows its host. */
   readonly cloneUrl: string;
   readonly state: RepositoryChoiceState;
 }
@@ -58,15 +37,7 @@ const STATE_BADGE = {
   { tone: 'success' | 'accent' | 'idle'; label: string }
 >;
 
-/**
- * The grant and the connections, as one list.
- *
- * A connection knows whether an App deploys from it and a grant entry knows
- * whether a row exists, which are two different facts about two different
- * lists — so a row's state is derived from which list it came from and the
- * fact that list actually holds, and neither boolean is ever read off the
- * other's row.
- */
+/** A connection's row wins over the grant entry for the same repository. */
 export function repositoryChoices(
   connections: readonly RepositoryOptionView[],
   grant: readonly GrantedRepositoryView[],

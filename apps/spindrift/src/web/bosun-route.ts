@@ -1,32 +1,7 @@
 /**
- * The bosun poll surface, mounted (Task: bosun build route).
- *
- * `src/adapters/build/bosun.ts` writes an intent into the outbox and never
- * calls out again — bosun's warm-pool daemon is on a host this process
- * cannot dial, so the only way to hand it work is to let it come and ask.
- * These three routes are what it asks: claim something to build, keep a
- * claim alive, and report what happened. `src/storage/build-outbox.ts` is
- * the store underneath all three; nothing here holds outbox state of its
- * own.
- *
- * **A deliberate exception to `dispatch.ts`'s "session-authenticated only,
- * never a token."** That rule exists because a token is what turns an
- * internal protocol into an API somebody scripts against — but a bosun host
- * cannot present a browser session, the same reason `webhook-route.ts` is
- * the other named exception. It follows that route's posture exactly: the
- * shared secret arrives as an installation Secret key
- * ({@link BOSUN_SECRET_VAR}), read once at boot, and its absence refuses
- * every request before anything below runs — an installation nobody has
- * configured a secret for has nothing here for a poller to prove.
- *
- * **The claim endpoint long-polls.** A bosun host would otherwise have to
- * busy-loop `POST`ing every second to notice new work; instead this route
- * holds the connection, re-checking on a short interval, and answers `204`
- * once its own budget runs out so the host can immediately ask again. The
- * pacing is injectable for the same reason every build route's own polling
- * is (`adapters/build/route.ts`'s `Deadline`, reused here rather than
- * reimplemented): a test that actually waited out a 25-second window would
- * be a test nobody could run twice in a row.
+ * The routes a bosun host polls, since this process cannot dial it: claim a
+ * build, heartbeat the claim, report the result. A shared bearer secret stands
+ * in for a browser session; with none configured, every call is refused.
  */
 import { z } from 'zod';
 import { deadlineFrom, type Sleeper } from '../adapters/build/route.ts';
@@ -40,22 +15,18 @@ export const BOSUN_CLAIM_PATH = '/internal/bosun/claim';
 export const BOSUN_HEARTBEAT_PATH = '/internal/bosun/requests/:id/heartbeat';
 export const BOSUN_RESULT_PATH = '/internal/bosun/requests/:id/result';
 
-/** Every route this file mounts, for `routes.ts`'s table. */
 export const BOSUN_PATHS = [
   BOSUN_CLAIM_PATH,
   BOSUN_HEARTBEAT_PATH,
   BOSUN_RESULT_PATH,
 ] as const;
 
-/**
- * Where the shared secret arrives — mirrors `serve.ts`'s
- * `ENROLMENT_TOKEN_VAR`: an installation Secret key, read once at boot, never
- * from the manifest an operator authors and hands around.
- */
+/** An installation Secret key read at boot, never from the manifest. */
 export const BOSUN_SECRET_VAR = 'SPINDRIFT_BOSUN_SECRET';
 
-/** How long the claim endpoint holds a connection open with nothing to hand out. */
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
+// A claim with nothing to hand out holds the connection this long, then answers
+// 204 so the host asks again.
 const DEFAULT_POLL_TIMEOUT_MS = 25_000;
 
 /** A result's log, capped so one runaway build cannot fill the outbox table. */
@@ -105,25 +76,8 @@ function refuse(status: number, code: string, message: string): Response {
 }
 
 /**
- * The `:id` segment, read from the URL rather than from Bun's `.params`.
- *
- * Bun's router only populates `.params` on a request it matched itself, which
- * a direct call to a handler — every test in `test/web/bosun-route.test.ts`
- * — never goes through. Parsing the path here instead makes a handler
- * callable identically in production (mounted by `Bun.serve`) and in a unit
- * test (called directly against a manufactured `Request`); the pattern in
- * {@link BOSUN_HEARTBEAT_PATH} and {@link BOSUN_RESULT_PATH} still tells
- * `Bun.serve` which requests reach these handlers at all.
- */
-/**
- * The claim this call is made under, from `?claimant=`.
- *
- * A query parameter and not a body field: {@link resultBodySchema} is
- * `.strict()` and the heartbeat posts no body at all, so this is the one place
- * a token can cross without changing either shape. `undefined` for an absent or
- * empty value — a bosun host that reached production before the Spindrift that
- * mints claimants sends `''`, and `src/storage/build-outbox.ts` reads that as
- * "did not ask to be fenced" rather than as a mismatch.
+ * A query parameter, because the result body is strict and a heartbeat has
+ * none. Absent or empty means the host did not ask to be fenced.
  */
 function claimantFromQuery(url: URL, call: string): string | undefined {
   const claimant = url.searchParams.get('claimant')?.trim() || undefined;
@@ -131,6 +85,10 @@ function claimantFromQuery(url: URL, call: string): string | undefined {
   return claimant;
 }
 
+/**
+ * Parsed from the URL: Bun fills `.params` only on a request its router
+ * matched, and tests call these handlers directly.
+ */
 function idFromPath(pathname: string): string | null {
   const match =
     /^\/internal\/bosun\/requests\/([^/]+)\/(?:heartbeat|result)$/.exec(
@@ -173,9 +131,7 @@ async function handleClaim(
   }
   const denied = checkAuth(request, deps);
   if (denied) return denied;
-  // A live bosun host asking is the fact worth recording, independent of
-  // whether this particular poll finds anything to hand out — that is what
-  // lets Settings→Connections tell "declared but unserved" from "serving".
+  // Any authenticated poll marks the host live, whether or not it finds work.
   recordClaimPoll(deps.clock.now());
 
   const parsed = claimBodySchema.safeParse(await readJsonBody(request));
@@ -192,9 +148,7 @@ async function handleClaim(
   });
 
   for (;;) {
-    // Reclamation runs on every pass, not on a separate timer: a lease that
-    // expired between two long-polls is reclaimed the moment anything next
-    // asks for work, which is the only time reclaiming it matters.
+    // Expired leases come back on each pass, the only time a free lease matters.
     await outbox.reclaimExpired();
     const claimed = await outbox.claim(parsed.data.classes);
     if (claimed !== null) {

@@ -1,11 +1,6 @@
 /**
- * Button — the shadcn primitive, with this installation's palette.
- *
- * `asChild` is the one piece of Radix worth taking here: a link that looks like
- * a button should still be an `<a>`, and `Slot` merges the button's props onto
- * whatever child it is given rather than wrapping it. An `<a>` inside a
- * `<button>` is the alternative, and it is not focusable, not middle-clickable,
- * and not valid HTML.
+ * The shadcn button. `asChild` merges its props onto the child through `Slot`,
+ * so a link styled as a button stays an `<a>`.
  */
 import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
@@ -15,9 +10,6 @@ import { cn } from './utils.ts';
 const button = cva(
   cn(
     'inline-flex items-center justify-center gap-2 whitespace-nowrap',
-    // Feedback lands on the press, not on the release. A control that waits
-    // for `click` to acknowledge a finger already on it reads as a control
-    // that did not notice, and this is the one component every screen presses.
     'rounded-sm font-medium transition duration-100 ease-out',
     'active:scale-[0.97]',
     'disabled:pointer-events-none disabled:opacity-50',
@@ -30,12 +22,8 @@ const button = cva(
         outline:
           'border border-border bg-card text-subtle hover:border-primary hover:text-foreground',
         ghost: 'text-subtle hover:bg-secondary hover:text-foreground',
-        // A different shape from `default`, not only a different hue: with
-        // pink as the accent, `--bad` and `--accent` sit within 1.24:1 of each
-        // other's luminance and both take the same near-white/near-black
-        // label, so two solid fills read as the same kind of button. Soft
-        // fill at rest, solid only on press, is what still separates Delete
-        // from Deploy at a glance.
+        // Soft fill at rest: the destructive and accent colours are too close
+        // in luminance to tell apart as solid fills.
         destructive:
           'border border-destructive bg-destructive-soft text-destructive hover:bg-destructive hover:text-background',
         link: 'text-accent-foreground underline-offset-4 hover:underline',

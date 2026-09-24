@@ -1,32 +1,6 @@
 /**
- * `/mcp` — the command registry, served over the Model Context Protocol.
- *
- * This is the second transport onto the same command layer, and it adds no
- * decision of its own: `tools/list` is `commandRegistry` with each Zod input
- * rendered as JSON Schema, and `tools/call` is {@link dispatch}. §21's "a later
- * thin API or CLI can wrap them without reconstructing the domain from UI
- * handlers" is the sentence this file is the first proof of — every act it
- * exposes was already an act, and there is no command here that the browser
- * does not have.
- *
- * **Generated, exactly as `dispatch.ts` is.** The tool list is built from
- * `commandNames` and nothing else, so a tool that is not a command cannot be
- * written, and a command added to the registry is reachable here the moment it
- * is reachable there. There is no allow-list to keep in step, which is
- * deliberate: an allow-list is a second list, and a second list is the thing
- * `registry.ts` exists to abolish.
- *
- * **Its own credential, read from its own header.** {@link McpRouteDeps} takes
- * an `authenticate` that resolves `Authorization: Bearer` against `agent` rows
- * only (`src/auth/session.ts`). It is not `DispatchDeps.authenticate` and must
- * never become it: a resolver that fell back from bearer to cookie would make
- * a browser cookie sitting in an agent's config file work, and that value
- * losing `HttpOnly`, `Secure` and `SameSite=Lax` the moment it is copied out of
- * a browser is the whole reason agent tokens exist.
- *
- * Stateless streamable HTTP: one JSON-RPC request in, one JSON response out.
- * No sessions, no SSE. Same shape `apps/wiki/functions/mcp.ts` serves the wiki
- * with, for the same reason — it is the least protocol that works.
+ * The command registry over MCP, as stateless streamable HTTP: one JSON-RPC
+ * request in, one JSON response out. Tools come from `commandNames` alone.
  */
 
 import { z } from 'zod';
@@ -42,59 +16,27 @@ import { MACHINE_NAME } from './brand.ts';
 
 export const MCP_PATH = '/mcp';
 
-/** The protocol revision this endpoint speaks. */
 const PROTOCOL_VERSION = '2025-06-18';
 
 export interface McpRouteDeps {
   /**
-   * Who is calling, from `Authorization: Bearer` and nowhere else.
-   *
-   * The same `RequestAuthentication` shape the dispatch surface uses, so a
-   * `forbidden` verdict — a Gateway identity that is asserted but unlinked —
-   * reads the same here as there.
+   * `Authorization: Bearer` against agent rows only. Never accept the session
+   * cookie: pasted into a config file, it loses `HttpOnly` and `Secure`.
    */
   authenticate(request: Request): Promise<RequestAuthentication>;
   context(principal: Principal): CommandContext | Promise<CommandContext>;
 }
 
-/**
- * One tool per command.
- *
- * Built once at module load: the registry is a module-level constant and
- * `z.toJSONSchema` is pure, so re-deriving this per request would be work with
- * no possible new answer.
- *
- * The description is the input schema's own, where a command's author wrote
- * one. Where none exists the name is the honest fallback — a made-up sentence
- * here would be a second description of the command living somewhere its author
- * will never look, and a wrong one is worse for a model than a terse one.
- */
 const TOOLS = commandNames.map((name) => ({
   name,
   description: commandRegistry[name].input.description ?? name,
   inputSchema: {
-    /**
-     * MCP requires every `inputSchema` to be an object schema, and a few
-     * commands take a discriminated union — `createComponent` and
-     * `connectTarget` — which Zod renders as a bare `oneOf` with no top-level
-     * `type`. A client that insists on the spec drops those two tools, and it
-     * is right to.
-     *
-     * `type` and `oneOf` are independent keywords that must both hold, and
-     * every variant of those unions is itself an object, so asserting it here
-     * narrows nothing and makes the document say what is already true. The
-     * spread runs second so a schema that already declares its own `type`
-     * keeps it.
-     */
+    // MCP requires an object schema, and Zod renders a discriminated union as a
+    // bare `oneOf`. Spread second, so a schema's own `type` wins.
     type: 'object',
     ...z.toJSONSchema(commandRegistry[name].input, {
-      // The registry's schemas are written for `safeParse`, not for
-      // publication: some carry transforms and defaults that have no JSON
-      // Schema equivalent. Emitting the closest input-side shape keeps one
-      // unrepresentable field from taking the whole tool list down, and
-      // `dispatch` still validates for real — a model that sends the wrong
-      // thing gets INVALID_INPUT naming the failing fields, which is the same
-      // answer the browser gets.
+      // Transforms have no JSON Schema form. `any` keeps one such field from
+      // failing the tool list, and `dispatch` still validates the input.
       io: 'input',
       unrepresentable: 'any',
     }),
@@ -114,16 +56,13 @@ export function mcpRoutes(
 
 async function handle(request: Request, deps: McpRouteDeps): Promise<Response> {
   if (request.method !== 'POST') {
-    // Clients probe with GET before opening an SSE stream; this endpoint has
-    // none, and every tool here is an act besides.
+    // Clients probe with GET for an SSE stream, which this endpoint lacks.
     return new Response(`${MACHINE_NAME} MCP: POST JSON-RPC here\n`, {
       status: 405,
     });
   }
 
-  // Authenticate before reading the body: an anonymous caller should not be
-  // able to make this process parse arbitrary JSON, and it costs nothing to
-  // ask first.
+  // Before the body, so an anonymous caller cannot make this parse JSON.
   const authentication = await deps.authenticate(request);
   if (authentication.kind === 'anonymous') {
     return rpcError(
@@ -168,11 +107,8 @@ async function handle(request: Request, deps: McpRouteDeps): Promise<Response> {
         rpc.params?.arguments ?? {},
         await deps.context(principal),
       );
-      // A refusal is a tool result, not a protocol error: the model is meant to
-      // read the sentence and act on it — deploy a Build that has not
-      // succeeded, delete an App that is locked — exactly as an operator reads
-      // it off a disabled button. A JSON-RPC error would hide that sentence
-      // behind a transport fault the model cannot do anything with.
+      // A refusal goes back as a tool result so the model can read the sentence
+      // and act on it. A JSON-RPC error would hide it.
       return reply({
         isError: !result.ok,
         content: [
@@ -194,7 +130,6 @@ async function handle(request: Request, deps: McpRouteDeps): Promise<Response> {
   }
 }
 
-/** Exported for the test that asserts tools and commands are the same set. */
 export const mcpToolNames: readonly CommandName[] = TOOLS.map(
   (tool) => tool.name,
 );

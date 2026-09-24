@@ -1,16 +1,6 @@
 /**
- * The dense checklist — one line per resource or build step, and no tree.
- *
- * §18 settled this against a chip grid: "a dense list reads as one rollout with
- * parts, which is what it is. **Per-resource detail is one line, no tree.**"
- * The grid lost because it made four resources look like four things happening
- * rather than one thing arriving, and a tree lost because the nesting a
- * Kubernetes rollout actually has is the platform's business, not the
- * developer's.
- *
- * One component serves both build steps and deployed resources on purpose.
- * They are the same shape — a name, a state, and one line of platform words —
- * and giving them two components is how they drift apart.
+ * One line per build step or deployed resource, with no tree, so a rollout
+ * reads as one thing arriving. Steps and resources share it to stay alike.
  */
 import type { ChecklistItem } from '../../commands/views.ts';
 import { cn } from '../ui/utils.ts';

@@ -1,25 +1,7 @@
 /**
- * The red block: what failed, who it indicts, and what core actually saw.
- *
- * Four things in a fixed order, each of them settled rather than chosen:
- *
- * 1. **The reason, in the domain's own vocabulary.** §6's eight reasons are a
- *    closed set precisely so a failure has an identity a test can key on and a
- *    human can search for. Rewording `ARTIFACT_UNAVAILABLE` into friendlier
- *    prose would spend that.
- * 2. **The blame chip** (§18), which is what stops a developer debugging code
- *    that is fine.
- * 3. **The previous-release line**, when one is still up. §18: "the red screen
- *    says the previous release is still serving", and that "changed the feel of
- *    failure more than anything else". §6 guarantees it is true — exposure is
- *    never mutated by a failed deploy.
- * 4. **The evidence, collapsed** — and only when there is some. §6 reads pods
- *    and events once on red and persists what it found, because the platform
- *    will not keep it. It is behind a disclosure because it is the second
- *    question, never the first. A failure core decided for itself never reached
- *    a platform to read, so `evidence` is null and the disclosure is absent:
- *    offering "show what Spindrift found" over an empty pane promises an answer
- *    that was never recorded.
+ * The failure block: the reason code verbatim, the blame chip, whether the
+ * previous release still serves, and the evidence persisted at failure.
+ * Evidence is null when the failure never reached a platform.
  */
 import { useState } from 'react';
 import { reasonCovers } from '../../adapters/deploy/contract.ts';
@@ -84,26 +66,9 @@ export function DiagnosisPanel({
 }
 
 /**
- * The amber block: a release that succeeded and no longer agrees with reality.
- *
- * Deliberately not the red one. §6 calls drift "information, not an alarm", and
- * on this screen the distinction is load-bearing — a red panel over a release
- * that is still serving traffic would say an outage that is not happening.
- *
- * The two arms it renders are the two ways a converged release stops being
- * converged, and they want opposite first sentences. A digest mismatch means
- * **something else is serving**: somebody applied around Spindrift, and the
- * question is which artifact won. A refusal means **nothing new can serve at
- * all**: the delivery object is failing every reconcile behind a previous
- * release that is still up, so the App looks fine and has been frozen since.
- * That second arm is the one nothing surfaced before — it has no digest to
- * report, because no new digest ever landed — and it is the reason `detail`
- * carries the platform's own sentence rather than a phrase composed here. The
- * sentence names the value the chart rejected; a paraphrase would not.
- *
- * The button is §6's "one-click re-converge", and it is the same redeploy act
- * as everywhere else — drift is never corrected on Spindrift's own initiative,
- * so the affordance is a person pressing the ordinary path.
+ * A live release that no longer matches what runs. With no `detail`, something
+ * else is serving; with one, the platform refuses every reconcile and `detail`
+ * is its own sentence. Nothing corrects drift automatically.
  */
 export function DriftPanel({
   drift,

@@ -1,21 +1,6 @@
 /**
- * The authenticated browser streams (§17): terminating attempt events,
- * non-terminating runtime output, and a Function's non-terminating log tail.
- * Their routes, cursors, and payloads remain distinct so build output can
- * never be presented as application stdout.
- *
- * The Function stream is the odd one out: `deployer.tail` is already an
- * async generator with its own cadence, so its socket runs that generator
- * directly from `open` rather than joining the shared 750ms `pump` the other
- * two kinds share — there is no page to poll for.
- *
- * `ATTEMPT_STREAM_PATH`, `RUNTIME_STREAM_PATH`, `STREAM_PATHS`, and the
- * message types live in `./stream-path.ts` and are re-exported below rather
- * than defined here, because those are the only edge `stream-client.ts`
- * needs into this file — everything else here pulls in `db/schema.ts`,
- * `db/notify.ts`, and `drizzle-orm` as values, which drags the whole
- * database layer into the browser bundle. `test/web/client-bundle.test.ts`
- * guards against that edge coming back.
+ * The authenticated browser streams: attempt events, runtime output and a
+ * Function's log tail. Separate routes keep build output apart from stdout.
  */
 import { and, eq } from 'drizzle-orm';
 import type {
@@ -72,10 +57,7 @@ export {
 
 export interface StreamDeps {
   authenticate(request: Request): Promise<RequestAuthentication>;
-  /**
-   * Assembled per connection, and current as of it — the same reason the
-   * command boundary's is asynchronous: configuration is the UI's to drive.
-   */
+  /** Called per connection: configuration changes at runtime. */
   context(principal: Principal): CommandContext | Promise<CommandContext>;
 }
 
@@ -87,7 +69,6 @@ interface AttemptSocketData {
   readonly deployId?: number;
   cursor: AttemptLogCursor | null;
   closed: boolean;
-  /** Tear down the in-process event subscription (Transport shape). */
   unsubscribe: (() => void) | null;
 }
 
@@ -149,10 +130,8 @@ async function authenticate(
 }
 
 /**
- * The attempt a request names, checked the way every read of it is checked:
- * the session first, then that the Build exists and the Deploy, if named, is
- * one of its. Shared by the upgrade and the plain-text document so the two
- * cannot disagree about what a session may read.
+ * Checks the session, then that the Build exists and a named Deploy is one of
+ * its. Shared by the upgrade and the text document.
  */
 async function resolveAttempt(
   request: Request,
@@ -239,13 +218,7 @@ async function upgradeAttempt(
     : refusal(400, 'MALFORMED_REQUEST', 'WebSocket upgrade failed');
 }
 
-/**
- * The attempt log as one `text/plain` document (§21: transport, no domain
- * logic). The same rows the socket pumps, read to the end through the same
- * reader, one log line per line and each status event as a bracketed line so
- * the document still says where each leg ended. Behind {@link resolveAttempt}
- * exactly as the upgrade is, so the `<a>` in the log pane is the whole client.
- */
+/** The rows the attempt socket pumps, read to the end as one document. */
 export function attemptLogTextRoutes(
   deps: StreamDeps,
 ): Record<string, (request: Request) => Promise<Response>> {
@@ -312,32 +285,9 @@ async function upgradeRuntime(
   const componentId = url.searchParams.get('componentId');
   const targetId = url.searchParams.get('targetId');
   const after = url.searchParams.get('after');
-  /** Which run, for the one kind whose output belongs to a run (§17). */
   const execution = url.searchParams.get('execution');
-  // This value is concatenated into a query language on the far side — a Cloud
-  // Logging filter, a label selector — so it is checked here, at the one place
-  // it enters from a browser, rather than escaped at each of them. Unchecked it
-  // is a read of the whole vessel's project: `AND` binds tighter than `OR`, so
-  // `a" OR timestamp>="2020-01-01T00:00:00Z` makes a filter that matches every
-  // entry the project has, other Apps' output and audit logs included, and the
-  // lines land in the run pane of whoever asked.
-  //
-  // One DNS label — §9's {@link isLabel}, rather than a sixth copy of the same
-  // grammar — because that is what everything Spindrift starts is called: a
-  // Cloud Run execution name *is* validated as a label, and the Jobs this
-  // adapter creates are named from a release name already shortened to 63.
-  //
-  // It is deliberately narrower than Kubernetes. A Job name is a DNS
-  // *subdomain* — dots are legal, and the ceiling is 253 — and `executions()`
-  // lists by label, so a foreign Job named `blog.nightly-1` can reach the
-  // Recent runs card and be refused when its row is clicked. That is the trade
-  // taken: a name Spindrift cannot have produced does not get to widen a
-  // browser-controlled string on its way into two query languages, and a run
-  // whose logs will not open is a smaller failure than one that opens
-  // everyone's. Widening it means escaping at each concatenation site instead.
-  //
-  // `?execution=` is an empty string rather than `null`, which passes the "name
-  // one" guard below, so it is refused here.
+  // Concatenated unescaped into a logging filter and a label selector, so it
+  // must be one DNS label. An empty `?execution=` is refused here too.
   if (execution !== null && !isLabel(execution)) {
     return refusal(400, 'MALFORMED_REQUEST', 'that is not a run name');
   }
@@ -362,8 +312,6 @@ async function upgradeRuntime(
   const [target] = await authenticated.context.db
     .select({ target: targets, vessel: vessels })
     .from(targets)
-    // The boundary carries where this Target is, which the tail needs as much
-    // as the surface's own facts.
     .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(targets.id, targetId))
     .limit(1);
@@ -371,11 +319,7 @@ async function upgradeRuntime(
     return refusal(404, 'NOT_FOUND', 'the Component or Target does not exist');
   }
   const { target: surface, vessel } = target;
-  // §17: a job has executions rather than a runtime tail, and the refusal that
-  // used to end here is now answered by the executions it names — one of them
-  // is the subject. Without one there is still nothing to follow: a job is not
-  // running most of the time, and merging every run's output into one stream
-  // would answer a question nobody asked.
+  // A job's output belongs to its runs, so the caller must name one.
   if (component.kind === 'job' && execution === null) {
     return refusal(
       409,
@@ -383,9 +327,7 @@ async function upgradeRuntime(
       'a job has executions rather than a runtime tail: name one to read it',
     );
   }
-  // And the other direction: a service has one output and it is not a run's.
-  // Serving a named execution here would hand back the Component's whole tail
-  // under a name that had been silently dropped.
+  // Only a job has runs; a service would silently ignore the name.
   if (component.kind !== 'job' && execution !== null) {
     return refusal(
       409,
@@ -503,8 +445,7 @@ export async function readStreamPage(
     });
   }
   if (data.kind === 'function') {
-    // A function-log socket runs its own `tail` loop from `open`; there is no
-    // page to read.
+    // A function-log socket runs its own `tail` loop from `open`.
     throw new Error(`readStreamPage does not serve ${data.kind} sockets`);
   }
 
@@ -537,14 +478,12 @@ export async function readStreamPage(
 
 export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
   open(socket) {
-    // A function-log socket has no page to pump — it drives the deployer's
-    // own `tail` generator for as long as the connection lives.
+    // Relays the deployer's own `tail` generator in place of the pump.
     if (socket.data.kind === 'function') {
       void tailFunctionLogs(socket.data, socket);
       return;
     }
-    // Subscribe to in-process wake-ups so the pump fires immediately when
-    // the web process itself writes an event (Transport shape).
+    // Wakes the pump at once when this process writes an event.
     if (socket.data.kind === 'attempt') {
       socket.data.unsubscribe = onAttemptEvent(
         socket.data.componentId,
@@ -554,8 +493,7 @@ export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
     void pump(socket);
   },
   message() {
-    // The streams are server-to-client only: a cursor is established by the
-    // authenticated URL, so nothing a client sends here is read.
+    // Server-to-client only: the cursor comes from the authenticated URL.
   },
   close(socket) {
     socket.data.closed = true;
@@ -568,11 +506,7 @@ export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
   },
 };
 
-/**
- * The function-log socket's whole life: relay `deployer.tail` until the
- * caller aborts or the generator ends, one message per log line so a slow
- * consumer never waits on a batch.
- */
+/** One message per log line, until the caller aborts or the generator ends. */
 async function tailFunctionLogs(
   data: FunctionSocketData,
   socket: Bun.ServerWebSocket<StreamSocketData>,
@@ -605,9 +539,7 @@ async function tailFunctionLogs(
 async function pump(
   socket: Bun.ServerWebSocket<StreamSocketData>,
 ): Promise<void> {
-  // A function-log socket never reaches `pump` — `open` routes it elsewhere —
-  // but the type is shared, so this narrows the rest of the function back to
-  // the two kinds `readStreamPage` serves.
+  // `open` routes function-log sockets elsewhere; this narrows the type.
   if (socket.data.kind === 'function') return;
   if (socket.data.closed) return;
   try {
@@ -630,9 +562,7 @@ async function pump(
       socket.close(1011, 'stream read failed');
       return;
     } else if (page.kind === 'function-log') {
-      // Unreachable: `socket.data.kind !== 'function'` here, so
-      // `readStreamPage` never returns this page. Typed out rather than
-      // asserted away, so a future page kind cannot fall through silently.
+      // Unreachable; thrown so this kind never reaches the `stream` branch.
       throw new Error('a runtime/attempt pump received a function-log page');
     } else {
       socket.data.cursor = page.cursor;
