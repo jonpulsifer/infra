@@ -1,105 +1,117 @@
 ---
 title: Repair a kiosk
-description: Check and repair the Cage and Firefox kiosks on homepi4 and weatherpi4, which show hub.lolwtf.ca.
+description: Check the Weather Hub kiosks on homepi4 and weatherpi4, restart them after an error page or a deploy, and start one that shows a blank screen.
 ---
 
-This runbook covers the Raspberry Pi kiosk hosts `homepi4` and `weatherpi4`. Both use `nix/services/kiosk.nix` with `container = false` and point Firefox directly at `https://hub.lolwtf.ca` — there is no local container on either host today. The display stack is **Cage on Wayland**; Firefox runs in kiosk/private-window mode against that URL.
+This runbook checks and repairs the kiosks on [homepi4](../hosts/homepi4.md) and [weatherpi4](../hosts/weatherpi4.md). Use it when a kiosk shows an error page, a blank screen or an old hub. A kiosk is a Raspberry Pi 4 with a display that shows the [Weather Hub](../apps/hub.md) full-screen. The `cage-tty1` service runs Cage, a Wayland compositor for one app, and Cage runs Firefox in kiosk mode. Firefox opens `hubUrl` in `nix/lib/fleet.nix`.
 
-## Quick checks
+> [!WARNING]
+> This runbook starts and restarts the kiosk service by hand. It is an exception to the GitOps rule because NixOS does not restart the service after a deploy, and nothing restarts it after Firefox exits.
 
-Check Cage and Firefox:
+## Before you start
 
-```bash
-nix run .#<host> -- systemctl --no-pager --full status cage-tty1.service
-nix run .#<host> -- pgrep -a firefox
-```
+- Get SSH access to homepi4 and weatherpi4 as `jawn`.
+- Set `<target>` to `homepi4.<tailnet>` or `weatherpi4.<tailnet>`. `<tailnet>` is the `tailnet` key in `terraform/network/tailscale/fleet.tf.json`. homepi4 also answers at `homepi4-wifi.lolwtf.ca`.
 
-Expected:
+## Check the kiosk
 
-- `cage-tty1.service` is `active (running)`
-- Cage runs `/nix/store/...-kiosk-firefox`
-- Firefox runs with `--kiosk --private-window https://hub.lolwtf.ca`
+1. Read the state of the kiosk service.
 
-Check that the remote hub is reachable from the host:
+   ```bash
+   ssh <target> systemctl is-active cage-tty1.service
+   ```
 
-```bash
-nix run .#<host> -- curl -sk -o /dev/null -w '%{http_code}\n' https://hub.lolwtf.ca
-```
+   Result: The command prints `active`.
 
-Expected HTTP status is `200`.
+2. Read the Firefox command line.
 
-## If the screen shows Firefox "Oops"
+   ```bash
+   ssh <target> pgrep -a firefox
+   ```
 
-Both hosts point straight at the remote `https://hub.lolwtf.ca` — there is no local container and no readiness wait before Firefox launches, so "Oops" here almost always means the host couldn't reach that URL (Wi-Fi, DNS, or the hub itself) when Cage started.
+   Result: The command prints a line that ends with `--kiosk --private-window https://hub.lolwtf.ca`.
 
-Confirm reachability:
+3. Make sure the host reaches the hub.
 
-```bash
-nix run .#<host> -- curl -sk -o /dev/null -w '%{http_code}\n' https://hub.lolwtf.ca
-```
+   ```bash
+   ssh <target> "curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 https://hub.lolwtf.ca"
+   ```
 
-If it now answers `200`, restart Cage so Firefox reloads:
+   Result: The command prints `200`.
 
-```bash
-nix run .#<host> -- sudo systemctl restart cage-tty1.service
-```
+## Restart the kiosk
 
-Verify Firefox relaunched:
+If the screen shows a Firefox error page, do this procedure.
 
-```bash
-nix run .#<host> -- pgrep -a firefox
-```
+> [!NOTE]
+> Firefox loads the hub once, when Cage starts. If the hub does not answer then, Firefox shows its error page until the service restarts.
 
-## If Cage is inactive
+1. Do step 3 of [Check the kiosk](#check-the-kiosk). If the result is not `200`, see [If something goes wrong](#if-something-goes-wrong).
+2. Restart the kiosk service.
 
-Check whether it is enabled and part of the graphical target:
+   ```bash
+   ssh <target> sudo systemctl restart cage-tty1.service
+   ```
 
-```bash
-nix run .#<host> -- systemctl is-enabled cage-tty1.service
-nix run .#<host> -- readlink -f /etc/systemd/system/default.target
-nix run .#<host> -- systemctl --no-pager list-dependencies graphical.target
-```
+3. Do steps 1 and 2 of [Check the kiosk](#check-the-kiosk).
 
-Start it manually if needed:
+## Start a stopped kiosk
 
-```bash
-nix run .#<host> -- sudo systemctl start cage-tty1.service
-```
+If the screen is blank or shows a text console, do this procedure. When Firefox exits, the kiosk service stops and does not restart.
 
-If this happens immediately after `nixos-rebuild switch`, note that NixOS may report:
+1. Make sure the kiosk service starts at boot.
 
-```text
-NOT restarting the following changed units: cage-tty1.service
-```
+   ```bash
+   ssh <target> systemctl is-enabled cage-tty1.service
+   ```
 
-In that case, restart Cage once:
+   Result: The command prints `enabled`.
 
-```bash
-nix run .#<host> -- sudo systemctl restart cage-tty1.service
-```
+2. Make sure the host boots to the graphical target.
 
-## Deploying changes
+   ```bash
+   ssh <target> readlink -f /etc/systemd/system/default.target
+   ```
 
-Build before switching:
+   Result: The command prints a path that ends with `graphical.target`.
 
-```bash
-nix build .#nixosConfigurations.<host>.config.system.build.toplevel --no-link
-```
+3. Start the kiosk service.
 
-Switch a kiosk host:
+   ```bash
+   ssh <target> sudo systemctl start cage-tty1.service
+   ```
 
-```bash
-nixos-rebuild switch --flake .#<host> --target-host <host> --sudo
-```
+4. Do steps 1 and 2 of [Check the kiosk](#check-the-kiosk).
+5. If the service stops again, read its log.
 
-For `weatherpi4` over Tailscale:
+   ```bash
+   ssh <target> journalctl -u cage-tty1.service -n 50 --no-pager
+   ```
 
-```bash
-nixos-rebuild switch --flake .#weatherpi4 --target-host weatherpi4.pirate-musical.ts.net --sudo
-```
+   Result: The command prints the last 50 lines of the service log. Find the line where Firefox or Cage exits.
 
-After a switch, check whether Cage was restarted. If the switch output says it was not restarted, run:
+## Deploy a kiosk change
 
-```bash
-nix run .#<host> -- sudo systemctl restart cage-tty1.service
-```
+The Pi 4 hosts have no auto-upgrade. A change to `nix/services/kiosk.nix` or `nix/profiles/pi4-kiosk.nix` reaches a kiosk only when you deploy it.
+
+1. Deploy the host with `switch`, as in [Deploy a NixOS host](deploy-a-nixos-host.md).
+
+   Result: If the change touches the kiosk, the output lists `cage-tty1.service` after `NOT restarting the following changed units:`.
+
+2. If the output lists `cage-tty1.service`, do step 2 of [Restart the kiosk](#restart-the-kiosk).
+
+## If something goes wrong
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| Step 3 of [Check the kiosk](#check-the-kiosk) prints a code other than `200`, or nothing. | The host has no network, or the hub is down. | Open `https://hub.lolwtf.ca` from another client. If it fails, run `kubectl --context offsite -n hub get pods`. If it works, examine the Wi-Fi of the host. |
+| The kiosk shows the old hub after a hub deploy. | The page reloads for a new build at most once every 5 minutes. | Wait 5 minutes. If the kiosk still shows the old hub, do [Restart the kiosk](#restart-the-kiosk). |
+| SSH to `homepi4.lolwtf.ca` fails or times out. | That name is the address of the Ethernet port, and homepi4 uses Wi-Fi. | Use the tailnet name or `homepi4-wifi.lolwtf.ca`. |
+| weatherpi4 does not answer on a `lolwtf.ca` name. | No `lolwtf.ca` record names weatherpi4. | Use the tailnet name. |
+| Step 1 or 2 of [Start a stopped kiosk](#start-a-stopped-kiosk) prints a different result. | The deployed configuration has no kiosk. | Deploy the host from `main`, as in [Deploy a NixOS host](deploy-a-nixos-host.md). |
+| The kiosk service stops again after a start. | Firefox or Cage exits. | Read the log in step 5 of [Start a stopped kiosk](#start-a-stopped-kiosk). |
+
+## Related
+
+- [Weather Hub](../apps/hub.md)
+- [Deploy a NixOS host](deploy-a-nixos-host.md)

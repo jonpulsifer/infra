@@ -1,10 +1,9 @@
 ---
 title: capsule
-description: "A Raspberry Pi 5 on NVMe that is one of the lab's two DNS sinkhole resolvers and NTS-backed NTP servers."
+description: A Raspberry Pi 5 on NVMe that is one of the two lab DNS resolvers and time servers.
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 5 Model B Rev 1.1 (8 GB)
-  year: "~2023"
   serial: d9c81ac9b4823886
   revision: d04171
   cpu: BCM2712, Cortex-A76 (4c)
@@ -14,10 +13,19 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-LAN CoreDNS sinkhole, rooted on the NVMe through the retained `NIXOS_DNS`/`FW_DNS` filesystem layout. It shares `nix/services/coredns-sinkhole.nix` with [spore](spore.md). Config: `nix/hosts/capsule.nix`.
+capsule is a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. With [spore](spore.md), it serves [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time). `nix/hosts/capsule.nix` configures it.
 
-Redundant LAN NTP server paired with [spore](spore.md) (`nix/services/ntp-server.nix`). Chrony uses authenticated NTS upstreams (`time.nrc.ca`, `time.chu.nrc.ca`), polls Spore, and serves UDP/123 to routed `10.0.0.0/8` clients. If all upstream time disappears, orphan mode elects one Pi to preserve a common timebase at stratum 10.
+## What it runs
 
-Verify with `chronyc tracking`, `chronyc sources -v`, and `chronyc authdata`.
+- CoreDNS from `nix/services/coredns-sinkhole.nix`
+- chrony from `nix/services/ntp-server.nix`
 
-Reached as `capsule.lolwtf.ca`. `dns.lolwtf.ca` publishes capsule and spore as the resolver pair; `time.lolwtf.ca` publishes the same hosts as the redundant NTP pair.
+`clusters/folly/monitoring/capsule.yaml` declares the alerts `CapsuleCoreDnsDown` and `CapsuleChronyDown`.
+
+## Reach
+
+Reach it at `capsule.lolwtf.ca` or [`capsule.<tailnet>`](index.md#reach-a-host).
+
+## Quirks
+
+- `nix/hosts/capsule.nix` forces the file system labels `NIXOS_DNS` and `FW_DNS`, which the NVMe carries. If they change, the host does not find its root and firmware partitions at boot.

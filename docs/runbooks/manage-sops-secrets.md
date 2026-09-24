@@ -1,131 +1,222 @@
 ---
 title: Manage SOPS secrets
-description: Where the operator and host age keys live, and how to encrypt, add hosts to, rotate and debug SOPS files.
+description: Restore the operator age key, edit or add a SOPS file of encrypted secrets, give a NixOS host its own SOPS file, add a harmonia cache key, and rotate the operator key.
 ---
 
-Use this when working with sops-nix-encrypted per-host secrets in this repo: adding a new SOPS-managed host, generating or rotating a harmonia binary-cache keypair, decrypting/re-encrypting a `nix/secrets/*.sops.yaml`, or chasing decryption errors. The flow that bites first-timers hardest is the **two-stage recipient setup** — the operator's age key is the only recipient until the host has booted once, then the host's own `ssh-to-age` recipient gets added; the section below walks through it.
+SOPS encrypts the secrets in the `*.sops.yaml` files under `clusters/` and `nix/secrets/`. The operator key, the owner's age key, is a recipient of every SOPS file. Use this runbook to restore that key, edit or add a secret, give a new host its own SOPS file, add a harmonia cache key, or rotate the key after an exposure.
 
-## Where the keys live
+> [!WARNING]
+> [Rotate the operator key](#rotate-the-operator-key) changes live state by hand. It is an exception to the GitOps rule because git does not declare the Flux `sops-age` Secret.
 
-The operator's age keypair — the one that encrypts and decrypts on the dev machine — sits at `~/.config/age/keys.txt` (mode 600), not at the sops binary's default of `~/.config/sops/age/keys.txt`. The `age` binary's own config dir happens to be where this repo's setup landed; the sops binary's default never has. If `sops -d` errors with `failed to load age identities`, the key is either missing or `SOPS_AGE_KEY_FILE` isn't pointing at it.
+## Before you start
 
-The plaintext `AGE-SECRET-KEY-1A...` line is in 1Password (homelab vault, item **"sops homelab age key"**) as the recovery path for a wiped dev machine. To restore, run:
+- `mise` installs `sops`, `age`, `op`, `kubectl` and `flux`. Sign in to 1Password with `op`.
+- A host procedure needs `nix` and SSH access to the host as `jawn`.
+- A rotation needs the `folly` and `offsite` kubectl contexts.
+- In each shell, set the key path.
 
-```bash
-op item get "sops homelab age key" --vault homelab --fields notesPlain
-# or fetch the secret and write it:
-mkdir -p ~/.config/age
-install -m 600 <(op item get "sops homelab age key" --vault homelab --fields notesPlain) ~/.config/age/keys.txt
-```
+  ```bash
+  export SOPS_AGE_KEY_FILE=~/.config/age/keys.txt
+  ```
 
-Each host's own decryption key is **derived from its ed25519 SSH host key** via `ssh-to-age`, NOT a separately-stored file. `nix/system/sops.nix` tells sops-nix to use `sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ]` — a compromised host only exposes secrets scoped to itself, no shared fleet-wide age key. The matching recipient is listed in `nix/secrets/<host>.sops.yaml` once the host has booted (see the two-stage flow below).
+## Restore the operator key
 
-The harmonia binary-cache keypair is a Nix-format `nix-store --generate-binary-cache-key` pair. Private half goes into the host's sops file under `harmonia-cache-key`; public half is committed in the clear at `nix/secrets/<host>-harmonia-cache.pub` and is what clients pin in their `nix.settings.trusted-public-keys`. 1Password homelab vault item **"<host> harmonia cache key"** holds the plaintext copy as a backup.
+1. Write the key from 1Password to the key file.
 
-## Decrypt, edit, re-encrypt
+   ```bash
+   mkdir -p ~/.config/age
+   install -m 600 <(op item get "sops homelab age key" --vault homelab --fields notesPlain | grep -o 'AGE-SECRET-KEY-1[A-Z0-9]*') ~/.config/age/keys.txt
+   ```
 
-```bash
-# Decrypt a sops file to stdout
-SOPS_AGE_KEY_FILE=~/.config/age/keys.txt sops -d nix/secrets/<host>.sops.yaml
+2. Make sure that the key is the operator key.
 
-# Edit in place (decrypts to a temp file, re-encrypts on save)
-SOPS_AGE_KEY_FILE=~/.config/age/keys.txt sops nix/secrets/<host>.sops.yaml
+   ```bash
+   age-keygen -y ~/.config/age/keys.txt
+   ```
 
-# Encrypt an existing plaintext file in place
-SOPS_AGE_KEY_FILE=~/.config/age/keys.txt sops -e -i nix/secrets/<host>.sops.yaml
-```
+   Result: The command prints the `age1` key that each rule in `.sops.yaml` lists first.
 
-If `sops` isn't on `PATH`, the nix dev shell is one wrapper away: `nix develop -c sops -d nix/secrets/<host>.sops.yaml`. `op` and `age` are normal binaries via `mise`; no special nix shell needed.
+## Edit a secret
 
-## Add a new SOPS-managed host (the two-stage flow)
+1. Open the file in your editor. `sops` encrypts it again when you close the editor.
 
-### Stage 1: provision the encrypted file with the operator key only
+   ```bash
+   sops <file>
+   ```
 
-Add a `creation_rule` to `.sops.yaml` keyed to the new file's path. The new rule's recipient list is just the operator's age public key — the host's ed25519 doesn't exist yet, so it can't be a recipient:
+## Add a SOPS file
 
-```yaml
-- path_regex: nix/secrets/<host>\.sops\.ya?ml
-  key_groups:
-    - age:
-        - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
-```
+> [!WARNING]
+> A plaintext file in git exposes the secret. Encrypt a new file before you run `git add`.
 
-Generate the secret material (harmonia keypair example):
+1. Write the file in plaintext at a path that a rule in `.sops.yaml` matches.
+2. Encrypt the file in place.
 
-```bash
-nix-store --generate-binary-cache-key <host>.lolwtf.ca-1 \
-  /tmp/<host>-cache.priv /tmp/<host>-cache.pub
-```
+   ```bash
+   sops -e -i <file>
+   ```
 
-Write the plaintext file at `nix/secrets/<host>.sops.yaml` with the secret value under its key (e.g. `harmonia-cache-key`), then encrypt it. The `path_regex` matches on the file's path, so the rule applies:
+   Result: The secret values start with `ENC[`.
 
-```bash
-SOPS_AGE_KEY_FILE=~/.config/age/keys.txt sops -e -i nix/secrets/<host>.sops.yaml
-```
+## Add a SOPS file for a host
 
-Commit the encrypted file plus the in-the-clear `.pub`. The `*.pub` gitignore (in `~/.config/git/ignore` globally) blocks the public key — override per-file: `git add -f nix/secrets/<host>-harmonia-cache.pub`.
+The SSH host key exists only after the first boot.
 
-An operator-only file is buildable but not decryptable by the host: the host does not possess the operator identity. Boot with a configuration that does not declare load-bearing secrets from this file. That first boot generates `/etc/ssh/ssh_host_ed25519_key`, which supplies the host identity for stage 2.
+### Before the first boot
 
-### Stage 2: add the host's age recipient after the first successful boot
+1. Add this rule to `.sops.yaml`, with the operator recipient from another rule.
 
-Once the host is up and has its ed25519 host key, derive the age pubkey and add it as a second recipient:
+   ```yaml
+     - path_regex: nix/secrets/<host>\.sops\.ya?ml
+       key_groups:
+         - age:
+             - <operator recipient>
+   ```
 
-```bash
-ssh <host>.lolwtf.ca cat /etc/ssh/ssh_host_ed25519_key.pub | ssh-to-age
-# returns an age1... string
+2. Write the secrets to `nix/secrets/<host>.sops.yaml` as `<key>: <value>` lines.
+3. Encrypt the file, as [Add a SOPS file](#add-a-sops-file) describes.
 
-SOPS_AGE_KEY_FILE=~/.config/age/keys.txt sops -r --add-age <pubkey> nix/secrets/<host>.sops.yaml
-```
+> [!CAUTION]
+> If the host configuration declares a secret from the file now, the deploy fails.
 
-Wire the host's flake entry: `imports = [ ./nix/system/sops.nix ]; sops.defaultSopsFile = ./nix/secrets/<host>.sops.yaml; sops.secrets."<key>" = { };`. Commit the re-encrypted file and configuration together. From here, sops-nix on the host decrypts on its own; the operator key remains a recipient for the dev-machine path but is not load-bearing for activation.
+4. Commit the file and the rule.
 
-The two-stage gap is the price of not distributing a fleet-wide age key onto every host. Skipping it (adding the host key speculatively) is a hard fail — `ssh-to-age` against a not-yet-generated key returns nothing, and the host activation errors with "no matching recipient".
+### After the first boot
 
-A full wipe that replaces `/etc/ssh/ssh_host_ed25519_key` also replaces the host's SOPS identity. The existing file cannot be decrypted by the new key until an operator repeats stage 2 and re-encrypts it to the new recipient.
+> [!CAUTION]
+> A reinstall makes a new SSH host key. After a reinstall, do these steps again.
 
-## Decryption failure triage
+1. Get the host recipient.
 
-### "failed to load age identities"
+   ```bash
+   ssh <host>.lolwtf.ca cat /etc/ssh/ssh_host_ed25519_key.pub | nix run nixpkgs#ssh-to-age
+   ```
 
-`SOPS_AGE_KEY_FILE` is unset or the file at that path is wrong. Either `export SOPS_AGE_KEY_FILE=~/.config/age/keys.txt` or symlink: `mkdir -p ~/.config/sops/age && ln -sf ~/.config/age/keys.txt ~/.config/sops/age/keys.txt`.
+   Result: The command prints an `age1` public key.
 
-Verify the file is `mode 0600` — `sops` will refuse anything more permissive. Wrong perms: `chmod 600 ~/.config/age/keys.txt`.
+2. Add the key and a comment to the host rule in `.sops.yaml`.
 
-### "no matching creation rules found"
+   ```yaml
+             # <host> (ssh-to-age of its ed25519 host key)
+             - age1...
+   ```
 
-The sops file's path doesn't match any `path_regex` in `.sops.yaml`, OR the file was originally created against a different rule (encryption time matters; the current `.sops.yaml` only governs new files). Recreate the file from plaintext against the current rule.
+3. Encrypt the file to the recipients of the rule.
 
-### "Failed to get the data key required to decrypt"
+   ```bash
+   sops updatekeys -y nix/secrets/<host>.sops.yaml
+   ```
 
-Your key isn't a recipient of this file. List the unencrypted recipient metadata with `rg '^ +recipient:' <file>` and confirm yours is there. If it is not, add the intended recipient and rotate the file.
+   Result: The command prints `synced with new keys`.
 
-### sops-nix activation error on a host
+4. In `nix/hosts/<host>.nix`, add `../system/sops.nix` to `imports`.
+5. Add these lines to the file, with one `sops.secrets` line for each key.
 
-"no matching recipient" or "decryption failed" on `nixos-rebuild switch`: the host's ed25519-derived age pubkey isn't in the sops file. Run stage 2 above.
+   ```nix
+   sops.defaultSopsFile = ../secrets/<host>.sops.yaml;
+   sops.secrets."<key>" = { };
+   ```
 
-### "kms key creation failed" / age decrypt errors after `sops` upgrade
+6. Commit the changes.
+7. Deploy the host, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
 
-A pinned sops version may not support the latest age format. Run `sops --version` on the dev machine; if it's drifted, `nix develop` pins it to a known-good version.
+## Add a harmonia cache key
 
-## Rotate the operator age key
+harmonia, the Nix binary cache server on a build host, signs the store paths it serves with this key.
 
-This is the "I need to re-encrypt every `.sops.yaml`" operation. Touch lightly.
+1. Make a temporary directory.
 
-Generate a new keypair: `age-keygen -o ~/.config/age/keys.new.txt` (output prints the public half; chmod 600 the file).
+   ```bash
+   dir=$(mktemp -d)
+   ```
 
-For every existing sops file, add the new public key as a recipient and remove the old one: `sops -r --add-age <new pubkey> --remove-age <old pubkey> nix/secrets/<host>.sops.yaml`. Use `rg '^ +recipient:' <file>` to enumerate current recipients from the unencrypted metadata.
+2. Make the key pair in the directory.
 
-Replace `~/.config/age/keys.txt` with `~/.config/age/keys.new.txt` and update the 1Password item "sops homelab age key" with the new private half.
+   ```bash
+   nix-store --generate-binary-cache-key <host>.lolwtf.ca-1 "$dir/cache.priv" "$dir/cache.pub"
+   ```
 
-The old key should be kept in 1Password (disabled/revoked but recoverable) for at least one full deploy cycle, in case a host's first boot is still mid-flight with the old key as the only working recipient.
+3. Add the content of `cache.priv` to the host SOPS file as `harmonia-cache-key`.
+4. Put the content of `cache.priv` in a new `homelab` item, `<host> harmonia cache key`.
+5. Copy `cache.pub` to `nix/secrets/<host>-harmonia-cache.pub`.
 
-## 1Password discipline
+> [!NOTE]
+> `dotfiles/.config/git/ignore` ignores `*.pub`.
 
-New long-lived operational secret (operator key, harmonia cache key, cloud account key): commit a 1Password item in the same PR, in the **homelab** vault, with the title `<thing> (<host>, if scoped)`. Examples that already exist: "sops homelab age key", "forge harmonia cache key", "unifi-terraform", "unifi-terraform (offsite)", "hermes api server key", "GitHub - rowbutt".
+6. Add the public key file to git.
 
-A Tailscale OAuth client secret used for durable host enrollment is a long-lived operational secret. `terraform/network/tailscale/oauth_clients.tf` creates and escrows it in 1Password; the host consumes an encrypted copy from its own `nix/secrets/*.sops.yaml`.
+   ```bash
+   git add -f nix/secrets/<host>-harmonia-cache.pub
+   ```
 
-Per-host short-lived tokens (sessions, OAuth codes, expiring Tailscale auth keys) do not go in 1Password — they live only in the relevant `*.sops.yaml`.
+7. Delete the temporary directory.
 
-If a secret is in 1Password but not findable by `op item list --vault homelab | grep <name>`, it's in the wrong vault or the title drifted. Search the live vault list before assuming it's missing.
+   ```bash
+   rm -r "$dir"
+   ```
+
+## Rotate the operator key
+
+> [!WARNING]
+> Old commits stay readable with the old key. Step 11 replaces each exposed value.
+
+1. Make a new key.
+
+   ```bash
+   age-keygen -o ~/.config/age/keys.new.txt
+   ```
+
+   Result: The command prints `Public key:` and the new public key.
+
+2. In `.sops.yaml`, add the new public key after the old key in each rule.
+3. Encrypt every SOPS file to both keys.
+
+   ```bash
+   git ls-files 'clusters/*.sops.yaml' 'nix/secrets/*.sops.yaml' | xargs -n1 sops updatekeys -y
+   ```
+
+   Result: The command prints `synced with new keys` for each file.
+
+4. Merge the change.
+5. Replace the Flux key. Do steps 5 and 6 for `folly`, then for `offsite`.
+
+   ```bash
+   kubectl --context <cluster> -n flux-system create secret generic sops-age --from-file=age.agekey="$HOME/.config/age/keys.new.txt" --dry-run=client -o yaml | kubectl --context <cluster> replace -f -
+   ```
+
+   Result: The command prints `secret/sops-age replaced`.
+
+6. Reconcile the `config` Flux Kustomization and its source.
+
+   ```bash
+   flux --context <cluster> reconcile kustomization config --with-source
+   ```
+
+   Result: The command prints `applied revision` and the commit of `main`.
+
+7. Replace your key file.
+
+   ```bash
+   mv ~/.config/age/keys.new.txt ~/.config/age/keys.txt
+   ```
+
+8. Put the new private key in the 1Password item `sops homelab age key`.
+9. In `.sops.yaml`, remove the old key from each rule.
+10. Do steps 3 and 4 again.
+11. Replace each value in the SOPS files with a new one from its source.
+
+## If something goes wrong
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| `sops` prints `failed to load age identities`. | `sops` finds no key file. | Set `SOPS_AGE_KEY_FILE`, or restore the operator key. |
+| `sops` prints `no identity matched any of the recipients`. | Your key is not a recipient of the file. | Compare `grep recipient: <file>` with the output of `age-keygen -y ~/.config/age/keys.txt`. |
+| `sops` prints `no matching creation rules found`. | No rule in `.sops.yaml` matches the path. | Move the file, or add a rule. |
+| The host deploy fails in `sops-install-secrets`. | The host recipient is not in the file. | Do [After the first boot](#after-the-first-boot). |
+| A Flux Kustomization reports a SOPS decryption error. | The `sops-age` Secret has no key for the file. | Do step 5 of [Rotate the operator key](#rotate-the-operator-key) with `~/.config/age/keys.txt`. |
+
+## Related
+
+- [Secrets](../platform/secrets.md)
+- [Add a Kubernetes node](add-a-kubernetes-node.md)
+- [PKI](../platform/pki.md)

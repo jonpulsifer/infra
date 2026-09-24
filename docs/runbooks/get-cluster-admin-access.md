@@ -1,46 +1,128 @@
 ---
 title: Get cluster admin access
-description: "How kubectl reaches folly and offsite: eight-hour JIT tokens for day-to-day admin, a break-glass certificate, and withdrawing access."
+description: Get kubectl access to folly and offsite with eight-hour tokens, use the break-glass certificate when tokens fail, and withdraw access through git.
 ---
 
-Every context in `~/.kube/config` authenticates with a **short-lived token minted on demand**, not with a stored credential. `kubectl` runs `kube-jit-token`, which asks the control plane for an eight-hour ServiceAccount token and hands it back; kubectl caches it until it is nearly expired and then asks again. Nothing long-lived is written to the workstation.
+Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, or to withdraw it. Each kubectl context uses an eight-hour token for the `operator` ServiceAccount in `kube-system`, which has the `cluster-admin` ClusterRole. `kube-jit-token` mints the token over SSH on the control plane when kubectl needs one. The kubeconfig also holds a break-glass client certificate for each cluster, an emergency credential that works when tokens fail.
+
+## Before you start
+
+- You need SSH access as `jawn` to the control planes, [optiplex](../hosts/optiplex.md) and [retrofit](../hosts/retrofit.md).
+- Install the dotfiles, so that `update-kubeconfigs` and `kube-jit-token` are in `~/.local/bin`.
+- You need `kubectl` and `jq`.
+
+`<site>` is `folly` or `offsite`.
 
 ## Get a kubeconfig
 
-```bash
-update-kubeconfigs
-```
+1. Write the kubeconfig.
 
-It fetches each cluster's CA and API server address over ssh, points the context at the JIT credential, and keeps the fetched `cluster-admin` certificate beside it as `<cluster>-breakglass`. It backs up the existing file first.
+   ```bash
+   update-kubeconfigs
+   ```
 
-The identity behind the token is the `operator` ServiceAccount in `kube-system`, declared in `clusters/base/operator-rbac.yaml` and bound to the `cluster-admin` ClusterRole on both clusters.
+   Result: `[SUCCESS] Successfully updated kubeconfig at <path>`, and the contexts `folly` and `offsite`. The old file is at `~/.kube/config.backup.<time>`.
 
-## When the token path is broken
+2. Make sure that the token works on each cluster.
 
-```bash
-kubectl --context folly --user folly-breakglass get nodes
-```
+   ```bash
+   kubectl --context <site> get nodes
+   ```
 
-The break-glass user is the `O=system:masters` certificate the control plane issues to itself. X.509 is a separate authenticator from the token chain, so it keeps working when the ServiceAccount, its binding, or the TokenRequest path is what is broken. It is not the daily driver because the apiserver cannot revoke a certificate and RBAC cannot bound `system:masters`.
+   Result: Each node shows `Ready`.
 
-If that certificate has expired too, `update-kubeconfigs` fetches a fresh one — certmgr renews the host's copy 72 hours before it lapses, checking hourly.
+## Use the break-glass certificate
 
-The last resort is the control plane itself: `ssh optiplex.lolwtf.ca` (folly) or `ssh retrofit.lolwtf.ca` (offsite), then `sudo kubectl`.
+If `kube-jit-token` fails, do this procedure.
+
+> [!NOTE]
+> The break-glass user is the `O=system:masters` client certificate of the control plane. The API server checks it with a different authenticator from tokens, so it works when the ServiceAccount, its binding or the token API fails.
+
+1. Run the kubectl command that failed with `--user <site>-breakglass`.
+
+   ```bash
+   kubectl --context <site> --user <site>-breakglass get nodes
+   ```
+
+   Result: Each node shows `Ready`.
+
+2. If the certificate has expired, run `update-kubeconfigs` again.
+3. If both users fail, run kubectl on the control plane.
+
+   ```bash
+   ssh optiplex.lolwtf.ca sudo kubectl get nodes   # folly
+   ssh retrofit.lolwtf.ca sudo kubectl get nodes   # offsite
+   ```
+
+   Result: Each node shows `Ready`.
 
 ## Withdraw access
 
-```bash
-kubectl delete clusterrolebinding operator
-```
+Use this procedure if you lose a workstation or an SSH key that can reach the control planes.
 
-Tokens already minted stay valid for the rest of their eight hours, but authorization is checked per request, so the binding going away stops them. Deleting the ServiceAccount invalidates them outright — `--service-account-lookup` defaults on, so the apiserver checks that the account still exists on every request.
+> [!WARNING]
+> A lost workstation also holds the break-glass certificates. The API server cannot revoke a certificate. Only a rotation of the cluster CA withdraws them, as [PKI](../platform/pki.md) describes.
 
-This is the thing the old arrangement could not do. A `system:masters` certificate is unrevokable: the apiserver supports no CRL and no OCSP, so the only way to withdraw one is to rotate the cluster CA and every leaf under it.
+> [!NOTE]
+> The `config` Flux Kustomization applies `clusters/base/operator-rbac.yaml` to both clusters. If you delete the binding with `kubectl`, Flux creates it again.
 
-## How it is put together
+1. Remove `operator-rbac.yaml` from `resources` in `clusters/base/kustomization.yaml`.
+2. Merge the change through a pull request.
+3. On each cluster, fetch the merge commit with the break-glass user.
 
-`dotfiles/.local/bin/kube-jit-token` is the credential plugin. It takes a control-plane host, a ServiceAccount, a namespace and a TTL, mints through `kubectl create token` over ssh, and prints an `ExecCredential`. The apiserver refuses a TTL under ten minutes.
+   ```bash
+   flux --context <site> --user <site>-breakglass reconcile source git infra -n flux-system
+   ```
 
-The credential that actually reaches the cluster is **ssh**, which is already the operator's root of trust and is already revocable. A stolen laptop with no ssh key mints nothing.
+   Result: `✔ fetched revision refs/heads/main@sha1:<sha>`.
 
-`clusters/base/operator-rbac.yaml` is the identity, applied to both clusters through [How changes ship](../platform/how-changes-ship.md). See [Secrets and PKI](../platform/secrets-and-pki.md) for the certificate chain the break-glass user rides on.
+4. Apply the `config` Flux Kustomization.
+
+   ```bash
+   flux --context <site> --user <site>-breakglass reconcile kustomization config -n flux-system
+   ```
+
+   Result: `✔ applied revision refs/heads/main@sha1:<sha>`.
+
+5. Make sure that Flux deleted the ServiceAccount.
+
+   ```bash
+   kubectl --context <site> --user <site>-breakglass get serviceaccount operator -n kube-system
+   ```
+
+   Result: `Error from server (NotFound): serviceaccounts "operator" not found`.
+
+> [!NOTE]
+> `nix/system/user.nix` gives the `jawn` user the keys of `https://github.com/jonpulsifer.keys` (the `keys` flake input). It gives the `rowbutt` user, the host user for [Rowbutt](../apps/mate.md), the keys of `https://github.com/rowbutt.keys` (`rowbuttkeys`). Both users are in `wheel`, and `nix/profiles/fleet.nix` gives `wheel` passwordless sudo.
+
+6. Remove the lost SSH key from the GitHub account that holds it.
+7. Update the `keys` and `rowbuttkeys` flake inputs.
+
+   ```bash
+   nix flake update keys rowbuttkeys
+   ```
+
+   Result: `• Updated input` for each input whose keys changed.
+
+8. Merge the change through a pull request.
+9. Deploy the control planes, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
+
+> [!NOTE]
+> The other hosts remove the key at their next auto-upgrade from `main`. A host that sets `system.autoUpgrade.enable = false` keeps the key until you deploy it.
+
+10. Deploy each host that sets `system.autoUpgrade.enable = false`.
+11. To restore access, revert the change from step 1.
+
+## If something goes wrong
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| `update-kubeconfigs` prints `Failed to fetch kubeconfig from <site>`. | SSH to the control plane failed. | Make sure that `ssh <address> true` works for the address that the script prints. |
+| The script connects to a wrong address. | `get_cluster_ip` in `dotfiles/.local/bin/update-kubeconfigs` holds its own copy of each `API_SERVER_IP`. | Make it match `API_SERVER_IP` in `clusters/<site>/config/cluster-topology.json`. |
+| kubectl prints `kube-jit-token: minting through <address> failed`. | SSH or `sudo` on the control plane failed. | Read the rest of the message. Use the break-glass certificate. |
+| The `operator` binding comes back after you delete it. | Flux applies `clusters/base/operator-rbac.yaml`. | Remove it in git, as [Withdraw access](#withdraw-access) describes. |
+
+## Related
+
+- [Kubernetes](../platform/kubernetes.md)
+- [PKI](../platform/pki.md): the cluster CAs.

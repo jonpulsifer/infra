@@ -1,51 +1,78 @@
 ---
 title: Connect an agent to the wiki
-description: Point Claude or any MCP client at wiki.lolwtf.ca/mcp, a public read-only server with list, search and read tools.
+description: Add the wiki's public, read-only MCP endpoint to Claude or another MCP client, and check that it answers.
 ---
 
-The wiki serves itself over the Model Context Protocol at `https://wiki.lolwtf.ca/mcp`, so an agent that has never seen this repo can read the homelab documentation. Public and read-only, exactly like the site.
+This runbook adds the [wiki](../apps/wiki.md) to an agent through the Model Context Protocol (MCP), which lets an agent call tools on a server. Use it to give a new agent read access to the wiki, or when an agent cannot read it. The endpoint is `https://wiki.lolwtf.ca/mcp`. It is public and read-only, and it needs no token.
 
-## Connect
+| Tool | Returns |
+| --- | --- |
+| `list_pages` | Every page by section, with its path and description |
+| `search` | The 8 pages that match best, each with an excerpt |
+| `read_page` | One page as Markdown, by path such as `apps/wiki`, by URL, by title, or by a relative link from another page |
 
-Anything that speaks remote MCP over HTTP takes the URL directly. No token, no OAuth, no tailnet.
+## Before you start
 
-Claude Desktop: **Settings → Connectors → Add custom connector**, URL `https://wiki.lolwtf.ca/mcp`.
+- You need an MCP client that connects to remote servers over HTTP.
+- To check the endpoint, you need `curl` and `jq`.
 
-Claude Code: `claude mcp add --transport http homelab-wiki https://wiki.lolwtf.ca/mcp`
+## Connect a client
 
-Anything reading a JSON config file:
+1. If the client is Claude Code, add the server.
 
-```json
-{
-  "mcpServers": {
-    "homelab-wiki": { "type": "http", "url": "https://wiki.lolwtf.ca/mcp" }
-  }
-}
-```
+   ```bash
+   claude mcp add --transport http homelab-wiki https://wiki.lolwtf.ca/mcp
+   ```
 
-## The tools
+   Result: The command prints `Added HTTP MCP server homelab-wiki with URL: https://wiki.lolwtf.ca/mcp to local config`.
 
-- `list_pages` — every page and its url. The cheapest way for an agent to learn what is documented.
-- `search` — full-text across every page, best matches with surrounding context.
-- `read_page` — one page in full, by name (`platform/kubernetes`) or url path.
+2. If the client is Claude Desktop, open Settings > Connectors. Select Add custom connector. Enter the name `homelab-wiki` and the URL `https://wiki.lolwtf.ca/mcp`.
+3. If the client reads a JSON config file, add this server to the file.
 
-## Check it by hand
+   ```json
+   {
+     "mcpServers": {
+       "homelab-wiki": { "type": "http", "url": "https://wiki.lolwtf.ca/mcp" }
+     }
+   }
+   ```
 
-```shell
-curl -s https://wiki.lolwtf.ca/mcp -H 'content-type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '.result.tools[].name'
-```
+4. Start a new session in the client.
+5. Tell the agent to list the wiki pages.
 
-Expect `list_pages`, `search`, `read_page`. A `405` means the request was not a POST; this endpoint has no SSE stream to open.
+   Result: The agent calls `list_pages` and shows the pages by section.
 
-## If it misbehaves
+## Check the endpoint
 
-**Tools answer but the content is stale.** The endpoint reads `pages.json`, emitted by `apps/wiki/build.ts` alongside the rendered pages, so it is exactly as current as the site. Check that the `wiki` workflow ran on the merge.
+1. List the tools.
 
-**Every `tools/call` fails.** The function fetches `/pages.json` from the site's own assets — load `https://wiki.lolwtf.ca/pages.json` in a browser. Empty or missing means the build, not the endpoint, is broken.
+   ```bash
+   curl -s https://wiki.lolwtf.ca/mcp -H 'content-type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq -r '.result.tools[].name'
+   ```
 
-**Nothing responds at all.** It is a Cloudflare Pages Function on the same project as the wiki (`apps/wiki/functions/mcp.ts`), deployed by `.github/workflows/wiki.yml`. If the site is up and `/mcp` is not, the Function failed to compile — read that workflow's deploy step.
+   Result: The command prints `list_pages`, `search` and `read_page`, one on each line.
 
-## Changing it
+2. Read one page.
 
-The endpoint is one file, `apps/wiki/functions/mcp.ts`, with tests in `apps/wiki/test/mcp.test.ts` run by `bun run test`. Adding a tool means adding it to `TOOLS` and to `call()`. It runs on the public internet with no authentication, so it only ever reads what this public site already publishes.
+   ```bash
+   curl -s https://wiki.lolwtf.ca/mcp -H 'content-type: application/json' \
+     -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_page","arguments":{"page":"apps/wiki"}}}' \
+     | jq -r '.result.content[0].text' | head -2
+   ```
+
+   Result: The command prints `# Wiki` and `https://wiki.lolwtf.ca/apps/wiki/`.
+
+## If something goes wrong
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| The endpoint returns `405`. | The request is not a POST. The endpoint accepts only POST. | Send JSON-RPC requests with POST. |
+| A tool returns old content. | The `wiki` workflow did not deploy the last change on `main`. | Read the last run of `.github/workflows/wiki.yml` on `main`. |
+| `tools/list` answers, and every `tools/call` fails. | `pages.json` is empty or missing. | Open `https://wiki.lolwtf.ca/pages.json`. If it is empty or missing, read the Build step of the `wiki` workflow. |
+| The site answers, and `/mcp` does not. | The Pages Function did not deploy. | Read the Deploy step of the `wiki` workflow. |
+
+## Related
+
+- [Wiki](../apps/wiki.md)
+- [Connect an agent to kthx](connect-an-agent-to-kthx.md)

@@ -3,7 +3,7 @@ title: Deploy a NixOS host
 description: Deploy the NixOS configuration of a host from your machine or from GitHub Actions, or restore the previous generation.
 ---
 
-Use this runbook to deploy a host before its daily auto-upgrade, or to restore the previous generation.
+Use this runbook to deploy a host before its daily auto-upgrade, to restore the previous generation, or to rename the partitions of a Kubernetes node.
 
 ## Before you start
 
@@ -26,7 +26,7 @@ Use this runbook to deploy a host before its daily auto-upgrade, or to restore t
 ## Deploy a change
 
 > [!CAUTION]
-> Auto-upgrade rebuilds each host from `main` once a day and removes a change deployed from a branch. The Pi 4 and Pi Zero hosts have no auto-upgrade.
+> Auto-upgrade rebuilds each host from `main` once a day and removes a change deployed from a branch. The Pi 4 hosts have no auto-upgrade.
 
 1. Deploy the configuration.
 
@@ -52,7 +52,7 @@ Use this runbook to deploy a host before its daily auto-upgrade, or to restore t
 
 ## Deploy from GitHub Actions
 
-The `nixos-deploy` workflow builds and deploys a Pi 4 or Pi Zero host.
+The `nixos-deploy` workflow builds and deploys a Pi 4 host. Its `tag:ci` identity reaches only `tag:pi4` devices, so it cannot deploy the Pi Zero hosts that it lists. No Pi Zero runs its NixOS config.
 
 1. Run the workflow.
 
@@ -74,6 +74,38 @@ The `nixos-deploy` workflow builds and deploys a Pi 4 or Pi Zero host.
 
 3. Do steps 2 and 3 of [Deploy a change](#deploy-a-change).
 
+## Rename the partitions of a Kubernetes node
+
+A Kubernetes node mounts its partitions by GPT name, such as `disk-main-nixos`. A node whose partitions have other names does not boot the current configuration. Do this procedure before you deploy such a node.
+
+> [!WARNING]
+> This procedure changes live state by hand. It is an exception to the GitOps rule because the partition names are on the disk, outside the NixOS closure.
+
+1. Read the partition names of the node.
+
+   ```bash
+   ssh <target> 'sudo bash -s' < nix/scripts/disko-partlabel-check.sh
+   ```
+
+   Result: The script prints `>> Verdict:` and `already migrated`, `migration needed` or `manual review needed`.
+
+2. If the verdict is `manual review needed`, stop. Compare the disk with `nix/disko/default.nix`.
+3. If the verdict is `migration needed`, make sure that the node runs a known-good generation.
+
+> [!NOTE]
+> Without `--apply`, the script shows the new names and changes nothing.
+
+4. Rename the partitions.
+
+   ```bash
+   ssh <target> 'sudo bash -s -- --apply --yes' < nix/scripts/disko-partlabel-migrate.sh
+   ```
+
+   Result: The script prints `>> Done.` or `>> GPT updated on disk`.
+
+5. Reboot the node.
+6. Do step 3 of [Deploy a change](#deploy-a-change).
+
 ## Restore the previous generation
 
 1. If the host boots, roll back.
@@ -94,6 +126,7 @@ The `nixos-deploy` workflow builds and deploys a Pi 4 or Pi Zero host.
 | A deployed change is gone. | Auto-upgrade rebuilt the host from `main`. | Merge the change. |
 | A systemd unit failed. | The change broke the unit. | Run `ssh <target> journalctl -u <unit> -n 80 --no-pager`. |
 | `nixos-rebuild` prints `did you forget to use --ask-sudo-password?`. | A remote command failed. | Read the lines above that message. |
+| A Kubernetes node stops at the emergency shell during boot. | Its partitions do not have their GPT names. | Boot the previous generation. Then [rename the partitions](#rename-the-partitions-of-a-kubernetes-node). |
 | The rollback finds no earlier generation. | `nix.gc` in `nix/system/nixos.nix` deleted it. | Deploy the last good commit. |
 
 ## Related
