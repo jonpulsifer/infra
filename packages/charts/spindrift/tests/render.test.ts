@@ -356,13 +356,13 @@ describe('the credential is the only copy of the federation', () => {
   });
 });
 
-describe('the relying party is the front door', () => {
-  const envOf = (objects: RenderedObject[], name: string) =>
-    one(objects, 'Deployment', name).spec.template.spec.containers[0].env as {
-      name: string;
-      value?: string;
-    }[];
+const envOf = (objects: RenderedObject[], name: string) =>
+  one(objects, 'Deployment', name).spec.template.spec.containers[0].env as {
+    name: string;
+    value?: string;
+  }[];
 
+describe('the relying party is the front door', () => {
   test('is the hostname this release serves, not a manifest key', async () => {
     const objects = await render({ hostname: 'spindrift.example.test' });
     // One value, so there is nothing for a second copy to disagree with: the
@@ -388,6 +388,31 @@ describe('the relying party is the front door', () => {
     expect(
       envOf(objects, 'spindrift-web').some(
         (item) => item.name === 'SPINDRIFT_HOSTNAME',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('the machine routes answer on the Service', () => {
+  test('the web process is told the Service in front of it', async () => {
+    const objects = await render({
+      reconciler: { enabled: true },
+      fullnameOverride: 'kthx',
+      namespaceOverride: 'platform',
+    });
+    const service = one(objects, 'Service', 'kthx');
+    const web = envOf(objects, 'kthx-web');
+    expect(web).toContainEqual({
+      name: 'SPINDRIFT_SERVICE_NAME',
+      value: service.metadata.name,
+    });
+    expect(web).toContainEqual({
+      name: 'SPINDRIFT_SERVICE_NAMESPACE',
+      value: service.metadata.namespace,
+    });
+    expect(
+      envOf(objects, 'kthx-reconciler').some((item) =>
+        item.name.startsWith('SPINDRIFT_SERVICE_'),
       ),
     ).toBe(false);
   });

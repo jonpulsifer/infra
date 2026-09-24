@@ -24,6 +24,7 @@ import {
 import {
   HOSTNAME_VAR,
   type InstallationManifest,
+  PUBLIC_HOSTNAME_VAR,
   parseManifest,
   resolveManifest,
   VERSION_VAR,
@@ -64,6 +65,8 @@ export const FIXTURE_DEPLOYMENT_ENV: Record<string, string> = {
   // reason: the chart renders it from the one `hostname` that also renders the
   // Gateway and the HTTPRoute, so no authored document carries it.
   [HOSTNAME_VAR]: 'spindrift.example.test',
+  // The tunnel's name for the machine routes, in the fixture's public zone.
+  [PUBLIC_HOSTNAME_VAR]: 'spindrift-control.example.test',
   // What the fixture deployment runs: the chart renders it from the image
   // digest CD pinned, and a command answering the footer forwards it. Set so a
   // test can tell a forwarded value from a hard-coded null.

@@ -83,7 +83,9 @@ import {
   coreMintsCanonical,
   displayUrl,
   hostnameFor,
+  installationHostnames,
   isApexName,
+  ownHostnameMintedIn,
   servesNetwork,
 } from '../domain/naming.ts';
 import {
@@ -461,6 +463,20 @@ export async function runAttempt(
     await soleServingComponent(context, subject),
   );
   const targetRef = deployTargetOf(subject.target, subject.vessel);
+
+  // What `setAppVanity` refuses, for the names it never sees: a canonical
+  // `<app>-<component>`, and a vanity label stored before it refused any.
+  const shadowed = ownHostnameMintedIn(
+    desired.hostname,
+    installationHostnames(context.manifest.controlPlane),
+  );
+  if (shadowed !== null) {
+    return settle(context, subject, desired, {
+      phase: 'FAILED',
+      reason: 'REJECTED',
+      detail: `${shadowed} is this installation's own address, so no App is served on it — rename the Component or change the App's vanity name`,
+    });
+  }
 
   let lost = false;
   let cancelledBy: string | null = null;

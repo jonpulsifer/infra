@@ -39,7 +39,11 @@ const clock: Clock = { now: () => FROZEN };
 
 function context(): CommandContext {
   return {
-    principal: { id: crypto.randomUUID(), displayName: 'Operator' },
+    principal: {
+      id: crypto.randomUUID(),
+      displayName: 'Operator',
+      kind: 'human',
+    },
     clock,
     db: database().db,
     manifest,

@@ -96,18 +96,21 @@ async function pendingDeploy(
     kind?: 'service' | 'job';
     /** The cadence the Component declares — the desired half of §6's drift. */
     schedule?: string;
+    /** The two halves of the canonical name core mints. */
+    appName?: string;
+    componentName?: string;
   } = {},
 ) {
   const db = database().db;
   const [app] = await db
     .insert(apps)
-    .values({ name: 'shop', sourceKind: 'archive' })
+    .values({ name: options.appName ?? 'shop', sourceKind: 'archive' })
     .returning();
   const [component] = await db
     .insert(components)
     .values({
       appId: app!.id,
-      name: 'web',
+      name: options.componentName ?? 'web',
       kind: options.kind ?? 'service',
       expose: true,
       reach: options.reach ?? 'private',
@@ -559,6 +562,61 @@ describe('§9: one vanity name, and never two claimants', () => {
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
       `shop.${zoneFor('public', manifest.dns.zones)}`,
     );
+  });
+});
+
+describe("§9: no App is served on the installation's own names", () => {
+  const expectRejected = async (deployId: number, name: string) => {
+    const row = await deployRow(deployId);
+    expect(row?.phase).toBe('FAILED');
+    expect(row?.reason).toBe('REJECTED');
+    expect(row?.detail).toContain(name);
+  };
+
+  test('a stored vanity label that mints the control plane never reaches the adapter', async () => {
+    // Written straight to the row, as one stored before `setAppVanity` refused it.
+    const { app, deploy } = await pendingDeploy({
+      reach: 'public',
+      auth: 'none',
+    });
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'spindrift' })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    expect(adapter.applied).toHaveLength(0);
+    await expectRejected(deploy.id, manifest.controlPlane.hostname);
+  });
+
+  test('a canonical name that is the public hostname is refused the same way', async () => {
+    const { deploy } = await pendingDeploy({
+      reach: 'public',
+      auth: 'none',
+      appName: 'spindrift',
+      componentName: 'control',
+    });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    expect(adapter.applied).toHaveLength(0);
+    await expectRejected(deploy.id, manifest.controlPlane.publicHostname!);
+  });
+
+  test('the same names in a zone the installation is not served in deploy', async () => {
+    const { deploy } = await pendingDeploy({
+      appName: 'spindrift',
+      componentName: 'control',
+    });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    expect(adapter.applied).toHaveLength(1);
+    expect((await deployRow(deploy.id))?.phase).toBe('LIVE');
   });
 });
 

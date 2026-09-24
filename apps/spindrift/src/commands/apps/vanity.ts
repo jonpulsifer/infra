@@ -21,7 +21,11 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { apps } from '../../db/schema.ts';
-import { isVanityLabel } from '../../domain/naming.ts';
+import {
+  installationHostnames,
+  isVanityLabel,
+  ownHostnameClaimedBy,
+} from '../../domain/naming.ts';
 import { type Command, failed, ok } from '../types.ts';
 import { namesUnder, placementsFor } from './names.ts';
 
@@ -64,6 +68,23 @@ export const setAppVanity: Command<
   if (input.label !== null && !isVanityLabel(input.label)) {
     const rule =
       'must be a single lowercase DNS label, or @ for the zone itself';
+    return failed('INVALID_INPUT', `'${input.label}' ${rule}`, [
+      { path: 'label', message: rule },
+    ]);
+  }
+
+  // An App's exact-hostname route outranks the control plane's at the gateway,
+  // so a label that mints one of its names would take that name's traffic.
+  const taken =
+    input.label === null
+      ? null
+      : ownHostnameClaimedBy(
+          input.label,
+          context.manifest.dns.zones,
+          installationHostnames(context.manifest.controlPlane),
+        );
+  if (taken !== null) {
+    const rule = `would take ${taken}, which this installation serves itself on`;
     return failed('INVALID_INPUT', `'${input.label}' ${rule}`, [
       { path: 'label', message: rule },
     ]);

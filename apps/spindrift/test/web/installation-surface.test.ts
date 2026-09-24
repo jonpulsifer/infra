@@ -52,6 +52,7 @@ const resolved = await fixtureManifest();
 const OPERATOR: Principal = {
   id: crypto.randomUUID(),
   displayName: 'Operator',
+  kind: 'human',
 };
 
 const FROZEN = new Date('2024-06-01T00:00:00.000Z');

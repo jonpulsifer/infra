@@ -88,6 +88,20 @@ describe('the authenticated Gateway trust boundary', () => {
       (await resolveManifest(manifest, {})).controlPlane.version,
     ).toBeNull();
   });
+
+  test('the public hostname is a deployment fact, lowercased, and unset is null', async () => {
+    const manifest = parseManifest(fixtureText, FIXTURE);
+    expect(
+      (
+        await resolveManifest(manifest, {
+          SPINDRIFT_PUBLIC_HOSTNAME: ' Spindrift-Control.Example.Test ',
+        })
+      ).controlPlane.publicHostname,
+    ).toBe('spindrift-control.example.test');
+    expect(
+      (await resolveManifest(manifest, {})).controlPlane.publicHostname,
+    ).toBeNull();
+  });
 });
 
 describe('boot fails loudly', () => {

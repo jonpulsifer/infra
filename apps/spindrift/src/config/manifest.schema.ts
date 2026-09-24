@@ -1071,6 +1071,11 @@ export type InstallationManifest = AuthoredManifest & {
      */
     readonly hostname: string;
     /**
+     * The second name the machine routes answer on, or `null`. Lowercased,
+     * because it is compared against `Host` and against minted names.
+     */
+    readonly publicHostname: string | null;
+    /**
      * What this process is running, as the deployment states it —
      * `SPINDRIFT_VERSION`, the same value telemetry reports as
      * `service.version`. Digest-pinned delivery means a browser cannot
