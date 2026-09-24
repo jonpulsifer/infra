@@ -1,93 +1,7 @@
 /**
- * `POST /api/build` — "build me a website for …".
- *
- * One sentence in, one complete HTML document out, streamed. It answers on the
- * identity host alone, because it is the only surface here where the caller is
- * a *person*: every call spends the operator's subscription and writes a row
- * under a login, and neither has a meaning for an anonymous visitor.
- *
- * Four things about the upstream are not preferences.
- *
- * **Streaming is mandatory.** Measured on this base: four models asked for a
- * whole page without `stream` returned zero bytes at a 420 s timeout, and the
- * same four streamed a first byte in under five seconds. A non-streamed build
- * is not slower, it never arrives.
- *
- * **The response opens when the request is accepted, not when the model
- * writes.** Held to the first content byte it was 71-95 s of empty socket,
- * measured twice in production against the real model, and a browser abandons a
- * `fetch` long before that: it rejects with a `TypeError` whose message is its
- * own and not this server's. "It could not be written / Load failed" on
- * somebody's screen was exactly that — a 200 that arrived after nobody was
- * listening any more. So everything decided cheaply and without the upstream
- * stays a status (the body, the login, the origin, a site too big to hand back,
- * the in-flight slot, the day's budget) and the moment those pass the answer is
- * 200 and a stream. After that **nothing is a status**: an unreachable base, a
- * refusal, a model that spends its whole ceiling reasoning and writes nothing,
- * both models failing — all of it is a frame on a response that is already
- * open.
- *
- * **A reasoning model is working, not idle, and the page is told so.** A frame
- * goes out the moment the request is accepted and another every
- * {@link WAITING_MS} the model stays quiet, so this connection is never idle
- * for longer than a second and the screen can narrate the wait instead of
- * spinning through it. That, rather than `server.timeout`, is now what stands
- * between a slow model and a socket closed with no status, no body and no log
- * line.
- *
- * **Nothing the model says is trusted.** The name comment is absent on about
- * one prompt in six on the fallback model, so it is parsed, validated against
- * the same rules a claim enforces, and replaced by a slug of what the person
- * typed. The document is taken as the `<!doctype` … `</html>` span or refused;
- * an answer is not a file merely because a model ended it with one.
- *
- * ## The frames
- *
- * One JSON object a line, newline-terminated, `application/x-ndjson`, in this
- * order. The page after this file builds against exactly this and nothing else:
- *
- * ```
- * {"t":"accepted"}                                   once, first, before anything is dialled
- * {"t":"thinking","model":"kimi-k2.7-code","ms":0}   asked, nothing written yet; once a second until it
- *                                                    writes, and again with a new model for the fallback
- * {"t":"start","model":"kimi-k2.7-code"}             its first content byte arrived; at most one per response
- * {"t":"writing","chars":2140}                       raw characters written; at most one every 250 ms, and
- *                                                    once a second even when a model has gone quiet
- * {"t":"done","build":"<uuid>","name":"pulsifer-woodworking","site":null,"available":true,"yours":null,
- *  "url":"https://…","unchanged":false,"document":"<!doctype html>…"}
- * {"t":"error","code":"AI_UPSTREAM","message":"the ai upstream did not answer"}
- * ```
- *
- * "Once a second" is a floor of {@link WAITING_MS} between two frames and a
- * ceiling of that plus one {@link PROGRESS_MS} tick, so nothing downstream
- * should watchdog this at a flat second and call 1.2 s a dropped connection.
- *
- * `accepted` carries nothing, because it *is* the acknowledgement: the cheap
- * gates passed and this response is 200 whatever happens next. `thinking` names
- * the model being waited on and the milliseconds since `accepted`, so a screen
- * counts this server's clock rather than its own, and a change of `model`
- * between two of them **is** the fallback signal — there is no separate frame
- * for it. `writing` counts raw model output, the name comment included and
- * before {@link documentIn} takes the span, so it is progress and not a
- * document length.
- *
- * `done` and `error` are terminal and mutually exclusive: exactly one of them
- * ends any response that had a stream at all, nothing follows it, and a body
- * that ends with neither is a caller who went away. The one `done` that is not
- * the shape above is `unchanged:true` — a change whose answer is byte-for-byte
- * what the site already serves — which carries only `build:null`, `name`,
- * `site` and `unchanged`, because there is nothing to publish and no row was
- * written. An `error` carries `{code,message}`, the same pair and the same
- * fixed sentence per code a status body would have carried: `AI_UPSTREAM`,
- * `NO_DOCUMENT`, `TOO_LARGE`, `STORAGE_FAILURE`, and `AI_BUDGET` for a day that
- * filled between the check and the attempt, which only two pods can arrange.
- *
- * Nothing here claims a name and nothing here publishes. The page confirms the
- * name with the person and then uses `POST /api/sites` and
- * `POST /api/sites/:name/releases` — identity already made the browser an
- * authenticated caller, so every bound those routes carry applies unchanged
- * instead of being re-established by a second publishing seam that would miss
- * the next one added.
+ * `POST /api/build`: one sentence in, one HTML document out, streamed as ndjson.
+ * Identity host only: every call spends the operator's AI plan under a login.
+ * It never claims or publishes; the page does that through the sites API.
  */
 import { createHash } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
@@ -109,103 +23,47 @@ import { nameProblem, RESERVED_NAMES } from './names.ts';
 import { ensureRelease, releaseDir } from './releases.ts';
 import { type Ctx, nameStanding, opensSite } from './sites.ts';
 
-/** A sentence about a business, not a document paste. */
+/** Room to describe a business, too small for a pasted document. */
 export const MAX_ASK_CHARS = 4000;
 /** Far more than any legal `{ask, site}` body, far less than the server's cap. */
 const MAX_BUILD_BODY_BYTES = 64 * 1024;
-/** A one-page site. Past this the answer is not a page, it is a transcript. */
+/** A one-page site; a larger answer is refused. */
 export const MAX_DOCUMENT_BYTES = 512 * 1024;
 /**
- * What one login may spend on the builder in a UTC day, whichever runs out
- * first.
- *
- * Rate limits, not a spend control. The upstream plan is flat rate and reports
- * `cost: "0"` on every call, so neither number is money: what they bound is a
- * page left reloading in somebody's pocket and a key somebody else is holding.
- * Sixty pages is one every ten minutes of a waking day, which nobody reaches
- * by describing a business; the token half is the backstop for the failure
- * this base actually has, a model that spends its whole ceiling reasoning and
- * writes nothing, which costs what a page costs and produces none.
- *
- * **Nothing bounds the total across logins.** `build_usage` is keyed by login,
- * and the in-flight counters below bound how many run at once rather than how
- * many run in a day, so the ceiling for the whole tailnet is sixty pages times
- * the number of people the `policy.hujson` grant lets through — a household.
- * Growing that grant grows the day, and there is no second number here that
- * would stop it.
+ * Per login per UTC day, whichever runs out first. Rate limits only: the plan is
+ * flat-rate. Nothing bounds the total across logins. 60 is a page every ten
+ * minutes of a waking day; the token cap catches a model that reasons away its
+ * ceiling.
  */
 export const MAX_BUILD_REQUESTS_DAY = 60;
 export const MAX_BUILD_TOKENS_DAY = 1_000_000;
 /**
- * How long a model may think before it has written anything, and how long a
- * gap in its writing may be.
- *
- * Measured in production on the model this runs: 71.9 s and 94.7 s to the first
- * content byte. Ninety seconds sat *inside* that range — it would have cut the
- * second of those a breath before it answered and spent the fallback's whole
- * generation to get a page the primary was already writing. There is nothing
- * left to be impatient for now that the wait is narrated a second at a time, so
- * the deadline goes past the measured worst case instead of through the middle
- * of it. Under twelve concurrent generations a single turn ran 149 s end to
- * end, which is the number this is set against.
+ * How long a model may think before its first byte. Set above the 149 s one
+ * turn took under twelve concurrent generations.
  */
 const FIRST_BYTE_MS = 150_000;
 /**
- * How long the upstream has to answer with headers at all.
- *
- * A separate, much shorter clock than {@link FIRST_BYTE_MS}, because the two
- * silences mean opposite things. A model that has sent headers and is quiet is
- * thinking, and the measured wait for its first word is 71-95 s. A base that
- * has not sent headers is not thinking — it is a name that does not resolve or
- * a host that is not listening, and no amount of waiting improves it.
- *
- * One clock for both made a mis-set `KTHX_AI_URL` take 268 s to say so: 133 s
- * on the primary and 135 s again on the fallback, every second of it narrated
- * to somebody watching a page claim it was writing. Measured on this base,
- * headers arrive in well under a second even when the first word is a minute
- * and a half behind them.
+ * Headers arrive in under a second even from a thinking model, so a missing
+ * header means a bad base URL. Much shorter than {@link FIRST_BYTE_MS}.
  */
 export const HEADERS_MS = 20_000;
 const GAP_MS = 60_000;
 /**
- * Bun's connection idle timeout for this route, in seconds.
- *
- * The belt, not the braces: {@link WAITING_MS} is what actually keeps this
- * socket busy, and this is what remains true if a later edit takes the
- * heartbeat out or the process is too busy to run a timer. Set near Bun's own
- * ceiling of 255 s because the alternative is the process-wide floor of 30 s,
- * and every measured number about this route — 71-95 s to a first content byte,
- * 30-150 s end to end — is longer than that.
+ * Seconds; a backstop for the {@link WAITING_MS} heartbeat, near Bun's 255 s
+ * ceiling. The process-wide 30 s is shorter than this route's waits.
  */
 const IDLE_SECONDS = 240;
 /** How often a page is told how far along it is. */
 const PROGRESS_MS = 250;
 /**
- * How often a connection with nothing to report says something anyway.
- *
- * This route goes quiet in two different ways and neither of them is idleness:
- * before a model's first content byte, where production measured 71.9 s and
- * 94.7 s of empty socket, and in a gap between one word of an answer and the
- * next, which may run to {@link GAP_MS}. A browser gives up on the first long
- * before the model does and rejects the `fetch` with a sentence of its own
- * making. One line a second costs about forty bytes, keeps every timer between
- * here and the phone satisfied, and turns the wait into something the page can
- * say out loud.
+ * A browser abandons a silent `fetch` long before a model's first byte, so a
+ * quiet connection sends a frame this often.
  */
 const WAITING_MS = 1_000;
-/** Whole-page generations in flight, process-wide and per person. */
+/** Whole-page generations in flight, process-wide. */
 const MAX_IN_FLIGHT = 4;
 
-/**
- * What the model is told, once.
- *
- * Measured against six prompts a non-technical person would type: 6/6 valid
- * names and 6/6 clean single documents on the default model, and every model
- * that answered at all obeyed the no-external-URLs and no-invented-facts rules.
- * The reserved names are rendered from {@link RESERVED_NAMES} rather than typed
- * out again — a prompt that lists a different set is a proposal the claim
- * refuses, which costs the person a name they were already shown.
- */
+/** Lists {@link RESERVED_NAMES}, so the model avoids names a claim refuses. */
 const SYSTEM = `You build small, complete websites as ONE self-contained HTML document.
 
 Your answer is exactly two things, in this order and nothing else:
@@ -230,9 +88,6 @@ Hard rules for the document:
 When asked to change something, return the WHOLE answer again — the name comment and the whole document — with
 only that change applied.`;
 
-// --- the budget -------------------------------------------------------------
-
-/** What this login has spent today: `{requests, tokens}`, both numbers. */
 export async function buildUsage(
   ctx: Ctx,
   login: string,
@@ -248,13 +103,7 @@ export async function buildUsage(
   };
 }
 
-/**
- * Count one attempt against the day, or say the day is spent.
- *
- * One statement, for the reason `ai_usage` is: the row is created at 1 or
- * incremented only while both ceilings still hold, so two calls in flight
- * cannot both read the last one as free.
- */
+/** One statement, so concurrent calls cannot both take the last attempt. */
 async function spendRequest(
   ctx: Ctx,
   login: string,
@@ -280,15 +129,7 @@ function bill(ctx: Ctx, login: string, day: string, tokens: number): void {
   `.catch((cause: unknown) => logCause(ctx.id, 'billing build tokens', cause));
 }
 
-/**
- * The attempt this call spent, given back — only when the fault was ours.
- *
- * The same rule `/api/ai` refunds under, and for the same reason: an upstream
- * 401, a 403 or any 5xx is a credential or a base URL this deployment owes the
- * upstream, and a person who asked for sixty pages did not get one of them. An
- * upstream that answered is never refunded, because the day is the only ceiling
- * on outbound calls there is.
- */
+/** Only for deployment faults, the same rule `/api/ai` refunds under. */
 function refundRequest(ctx: Ctx, login: string, day: string): void {
   void ctx.sql`
     update build_usage set requests = greatest(requests - 1, 0)
@@ -298,18 +139,12 @@ function refundRequest(ctx: Ctx, login: string, day: string): void {
   );
 }
 
-// --- what comes back --------------------------------------------------------
-
 const DOCTYPE = /<!doctype\s+html/i;
 const CLOSE = '</html>';
 
 /**
- * The document inside an answer, or why there is not one.
- *
- * The model's answer is prose that is *supposed* to be a file, which is not the
- * same thing: a stray sentence before the doctype, a markdown fence after the
- * close, a model that narrated instead. Taking the span rather than the whole
- * answer is what makes a chatty model publishable and a silent one refused.
+ * Takes the `<!doctype` … `</html>` span, dropping any prose or markdown fence
+ * a model wrote around the document.
  */
 export function documentIn(text: string): string | 'NO_DOCUMENT' | 'TOO_LARGE' {
   const start = text.search(DOCTYPE);
@@ -317,8 +152,7 @@ export function documentIn(text: string): string | 'NO_DOCUMENT' | 'TOO_LARGE' {
   const end = text.toLowerCase().lastIndexOf(CLOSE);
   if (end < start) return 'NO_DOCUMENT';
   const document = text.slice(start, end + CLOSE.length);
-  // Refused rather than cut: a truncated document is a broken page that looks
-  // like a published one.
+  // Refused, never truncated: a cut document is a broken page.
   return Buffer.byteLength(document) > MAX_DOCUMENT_BYTES
     ? 'TOO_LARGE'
     : document;
@@ -327,26 +161,15 @@ export function documentIn(text: string): string | 'NO_DOCUMENT' | 'TOO_LARGE' {
 const NAME_COMMENT = /^\s*<!--\s*kthx-name:\s*([^\s>]+)\s*-->/;
 
 /**
- * The name the model proposed, or one made from what the person typed.
- *
- * Never trusted to be there: the fallback model dropped the comment entirely on
- * one of six measured prompts, and a model that forgets the protocol must not
- * be a dead end on somebody's screen. Validated against the same
- * {@link nameProblem} a claim runs, so the name the page offers is one the
- * claim will actually take.
+ * The model's name comment may be missing or invalid, so it passes the claim's
+ * {@link nameProblem} or falls back to a slug of what the person typed.
  */
 export function nameIn(text: string, ask: string): string {
   const proposed = NAME_COMMENT.exec(text)?.[1]?.trim().toLowerCase() ?? '';
   return nameProblem(proposed) === null ? proposed : slugOf(ask);
 }
 
-/**
- * A name out of a sentence.
- *
- * Cut on a hyphen rather than at 40 characters, so the fallback reads as words
- * somebody wrote rather than one sliced in half. It is a fallback and not a
- * proposal: the page shows it with the URL it becomes and a way to change it.
- */
+/** Cut at a hyphen within 40 characters, so the slug ends on a word boundary. */
 export function slugOf(ask: string): string {
   const words = ask
     .toLowerCase()
@@ -356,18 +179,13 @@ export function slugOf(ask: string): string {
     words.length <= 40 ? words : words.slice(0, 41).replace(/-[^-]*$/, '');
   const trimmed = cut.replace(/-+$/, '');
   if (nameProblem(trimmed) === null) return trimmed;
-  // A sentence with no letters in it, or one that slugged to a reserved word.
+  // The ask had no usable letters, or slugged to a reserved name.
   return `site-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /**
- * The content deltas out of a streamed answer, and the usage at the end of it.
- *
- * Line-buffered because a `data:` frame is split across TCP chunks as often as
- * not and half a JSON object parses as nothing at all. Only `content` is read:
- * every model on this base but one puts its reasoning in `reasoning_content`,
- * and an answer built out of both would carry a model's thinking into somebody's
- * published page.
+ * Line-buffered, because a `data:` frame often spans TCP chunks. Only `content`
+ * is read, so a model's `reasoning_content` never reaches a page.
  */
 class Deltas {
   private held = '';
@@ -408,64 +226,44 @@ class Deltas {
   }
 }
 
-// --- the upstream -----------------------------------------------------------
-
 /**
- * The upstream's session id for this person.
- *
- * The Go base answers `400 MissingSessionID` without one. Hashed because the
- * value lands in a third party's logs and the input here is somebody's email
- * address, which is no more their business than a site's token would be.
+ * The Go base answers `400 MissingSessionID` without one. Hashed, because the
+ * login is an email address and this appears in a third party's logs.
  */
 function sessionOf(login: string): string {
   const digest = createHash('sha256').update(login).digest('hex');
   return `kthx-build-${digest.slice(0, 32)}`;
 }
 
-/** A model that started writing: the first of the answer, and the rest to come. */
+/** A model that has written its first content. */
 interface Writing {
   readonly model: string;
-  /** Everything written so far, first content delta included. */
   text: string;
   readonly deltas: Deltas;
   readonly body: ReadableStreamDefaultReader<Uint8Array>;
-  /** Stop the upstream and the deadline, and charge the day once, never zero. */
+  /** Stops the upstream and charges the day once, never zero. */
   settle(): void;
-  /** Extend the deadline, called on every chunk. */
+  /** Extends the gap deadline; called on every chunk. */
   tick(): void;
 }
 
 type Attempt = Writing | { readonly code: Code };
 
-/**
- * Everything the stream needs that the request itself already settled.
- *
- * Carried as one value because by the time a model is asked anything the
- * response is open and this is all that is left of the request: passing six
- * loose arguments through the hand-off is how one of them ends up being the
- * wrong person's.
- */
+/** What the stream keeps of the request once the response is open. */
 interface Job {
   readonly login: string;
-  /** The UTC day every attempt of this build is counted against. */
+  /** Every attempt of this build counts against this UTC day. */
   readonly day: string;
-  /** The site a change is about, or `null` for a page with no name yet. */
+  /** `null` for a new page with no name yet. */
   readonly site: string | null;
-  /** What the person typed. */
   readonly ask: string;
-  /** The document a change is being made to, or `null` for a new page. */
+  /** The document being changed, or `null` for a new page. */
   readonly base: string | null;
 }
 
 /**
- * One model, asked, and read until it writes something.
- *
- * Everything before the first content delta is this function's problem, so its
- * caller has one thing to decide — whether to try the next model — rather than
- * a taxonomy of upstream faults: a refusal, an upstream that cannot be reached,
- * a model that spends its whole ceiling reasoning and emits no content at all,
- * which measured, four models on this base do exactly that. None of them is a
- * status any more; the response was open before this was called.
+ * Asks one model and reads until it writes content. Any earlier failure comes
+ * back as a code, so the caller only decides whether to try the next model.
  */
 async function dispatch(
   ctx: Ctx,
@@ -480,11 +278,8 @@ async function dispatch(
     logCause(ctx.id, 'the build upstream', new Error('KTHX_AI_KEY is not set'));
     return { code: 'AI_UPSTREAM' };
   }
-  // The ledger is the only thing bounding what this key spends, so an attempt
-  // it cannot count is an attempt that does not run. Caught rather than thrown
-  // because the caller is a stream: an exception here would reach the page as
-  // "the ai upstream did not answer", which would send somebody to press the
-  // button again against a control database that is the thing that is down.
+  // An attempt the ledger cannot count does not run. It reports
+  // `STORAGE_FAILURE`, so nobody retries against a down database.
   const counted = await spendRequest(ctx, login, day).catch(
     (cause: unknown) => {
       logCause(ctx.id, 'counting a build attempt', cause);
@@ -496,24 +291,14 @@ async function dispatch(
 
   const ceiling = ctx.config.aiBuildMaxTokens;
   const upstream = new AbortController();
-  // Headers first, on the short clock. It is replaced by the long one the
-  // moment they arrive, so a model may then think for as long as a model does.
   let deadline: ReturnType<typeof setTimeout> | undefined = setTimeout(
     () => upstream.abort(),
     HEADERS_MS,
   );
   let done = false;
   const deltas = new Deltas();
-  /**
-   * The day, charged exactly once, with what the upstream actually did.
-   *
-   * The argument is the whole of it, and `/api/ai` is where the lesson was
-   * learned: everything that fails before a body is open — an unreachable
-   * base, a 401 on a key with no credit, a 503 — cost the operator nothing and
-   * is billed nothing. Billing the ceiling there charged sixteen thousand
-   * tokens for an outage the person did not cause, and thirty-one of those
-   * close a day that never wrote a page.
-   */
+  // Charges the day once. A failure before a body opens costs the operator
+  // nothing and is billed nothing.
   const settle = (tokens: number): void => {
     if (done) return;
     done = true;
@@ -521,39 +306,15 @@ async function dispatch(
     upstream.abort();
     bill(ctx, login, day, tokens);
   };
-  /**
-   * What an upstream that opened a body is billed: never zero.
-   *
-   * Usage arrives in the frame before `[DONE]` and a stream that ends any
-   * other way carries none, so without the floor a model that reasoned for its
-   * whole ceiling and wrote nothing — measured, four on this base do — would
-   * be free, and so would every stream a reader walked away from.
-   *
-   * **A phone that backgrounds itself mid-generation is billed the ceiling,
-   * deliberately.** It is the common way this ends — the wait is 30-150 s and
-   * this page is used one-handed — and it is tempting to make it free. Two
-   * things settle it against that. There is no honest smaller number: the
-   * upstream generated, the usage frame never arrives, and anything else here
-   * would be a guess dressed as a measurement. And the harm the refund would
-   * avoid is already bounded elsewhere: an abandoned build breaks the model
-   * loop, so it spends one attempt and one ceiling, and
-   * {@link MAX_BUILD_REQUESTS_DAY} × ceiling — 60 × 16 000 — is under
-   * {@link MAX_BUILD_TOKENS_DAY}. Sixty abandoned builds cannot close the
-   * token day before the request day it already closed. Raising
-   * `KTHX_AI_BUILD_MAX_TOKENS` past ~16 600 is what would change that, and it
-   * is the ceiling to re-read this paragraph against.
-   */
+  // Usage comes only in the last frame, so any other end bills the ceiling. The
+  // request day runs out first while `KTHX_AI_BUILD_MAX_TOKENS` ≤ 16 666.
   const spent = (): number => deltas.tokens ?? ceiling;
   const tick = (): void => {
     clearTimeout(deadline);
     deadline = setTimeout(() => upstream.abort(), GAP_MS);
   };
-  // A page that was closed while a model was thinking holds this person's one
-  // in-flight slot until the first-byte deadline otherwise, so the next thing they
-  // do after reopening the tab is read "one at a time". Checked as well as
-  // listened for: a listener added to a signal that has already fired never
-  // runs, which is how a closed tab paid for a whole second generation on the
-  // fallback model.
+  // A closed page must not hold the person's slot until the first-byte deadline.
+  // Checked as well as listened for: a listener on a fired signal never runs.
   if (gone.aborted) upstream.abort();
   gone.addEventListener('abort', () => upstream.abort(), { once: true });
 
@@ -561,7 +322,7 @@ async function dispatch(
   try {
     answer = await fetch(`${ctx.config.aiUrl}/chat/completions`, {
       method: 'POST',
-      // Built from nothing: no header a caller sent reaches the upstream.
+      // Built from scratch: no caller header reaches the upstream.
       headers: {
         authorization: `Bearer ${key}`,
         'content-type': 'application/json',
@@ -572,50 +333,29 @@ async function dispatch(
         model,
         messages,
         max_tokens: ceiling,
+        // Unstreamed, models on this base send nothing before a 420 s timeout.
         stream: true,
         stream_options: { include_usage: true },
       }),
       signal: upstream.signal,
     });
   } catch (cause) {
-    // Nothing was opened, so nothing is billed. Unreachable is the same fault
-    // as a 503 and the attempt goes back with it — unless the caller is what
-    // went away, which is nobody's deployment fault and must not be free: an
-    // abort loop that got its attempt back would dial the upstream all day
-    // under a budget that never moved.
+    // Nothing opened, so nothing is billed. The attempt is refunded unless the
+    // caller aborted, or an abort loop could dial the upstream for free.
     settle(0);
     if (!gone.aborted) refundRequest(ctx, login, day);
     logCause(ctx.id, `the build upstream on ${model}`, cause);
     return { code: 'AI_UPSTREAM' };
   }
 
-  // Headers are in: the base is real and listening, and what is left to wait
-  // for is a model, on the clock a model needs.
   clearTimeout(deadline);
   deadline = setTimeout(() => upstream.abort(), FIRST_BYTE_MS);
 
   if (!answer.ok) {
     void answer.body?.cancel();
-    // It refused before writing anything, so there are no tokens to charge.
     settle(0);
-    // Whose fault it was decides whether the attempt comes back, and it is the
-    // rule `/api/ai` was hardened to after the first version turned out to be
-    // exploitable in production. 401, 403 and every 5xx are a credential or a
-    // base URL this deployment owes the upstream. Every other 4xx is about the
-    // body — here, one built around a document this route sent — and it keeps
-    // the attempt it spent, because a refusal that is free to earn is one that
-    // can be asked for forever, and the sixty a day is the only ceiling on
-    // outbound calls there is.
-    //
-    // Two of those 4xx are this deployment's here and are not on `/api/ai`,
-    // because that route forwards a path the caller picked and this one builds
-    // the whole URL out of `KTHX_AI_URL`. A **404** is therefore only ever a
-    // mis-set base — measured, a wrong path on this upstream answers 404 with
-    // a marketing page rather than a 5xx — and thirty presses against one
-    // would close a day in which nobody wrote a page, which is the exact end
-    // state this rule exists to prevent, moved from the token column to the
-    // request column. A **429** is the plan's concurrency, not the sentence
-    // somebody typed: nothing in this body is the caller's to change.
+    // As on `/api/ai`, 401, 403 and 5xx are refunded. So are 404, since this
+    // route builds every URL from `KTHX_AI_URL`, and 429, the plan's concurrency.
     const ours =
       answer.status === 401 ||
       answer.status === 403 ||
@@ -632,12 +372,7 @@ async function dispatch(
   }
 
   if (answer.body === null) {
-    // Nothing was opened, so nothing is billed — the same rule as an
-    // unreachable base. The floor above it is for an upstream that *opened a
-    // body* and said nothing through it; a 2xx with no stream behind it is
-    // this deployment's upstream misbehaving on a URL and a model that are
-    // both its own, and charging both the ceiling and the attempt for a
-    // generation that never started is that rule applied backwards.
+    // A 2xx with no body generated nothing: no tokens, and the attempt refunded.
     settle(0);
     refundRequest(ctx, login, day);
     logCause(
@@ -649,28 +384,17 @@ async function dispatch(
   }
 
   const body = answer.body.getReader();
-  // Whether one byte ever came over the wire. A body that *closes* without any
-  // is the bodiless answer above arriving the way `fetch` actually hands one
-  // over — an empty stream rather than a null — and a clean close with nothing
-  // in it is an upstream that generated nothing, so it is billed nothing and
-  // the attempt goes back with it. Once a byte has arrived the floor applies: a
-  // model that spends its whole ceiling reasoning still sends
-  // `reasoning_content` frames, and that is compute somebody's subscription
-  // paid for whether or not a page came out of it.
+  // `fetch` may deliver a bodiless answer as an empty stream; closing before any
+  // byte is refunded like a null body.
+  // After the first byte the floor applies: reasoning frames are paid compute.
   let arrived = false;
   for (;;) {
     let chunk: Awaited<ReturnType<typeof body.read>>;
     try {
       chunk = await body.read();
     } catch (cause) {
-      // A read that rejects is not a clean close, and it bills the floor even
-      // with nothing yet on the wire. Two things reach here: the caller hung up
-      // (which pays, or an abort loop is free to dial the upstream all day),
-      // and the first-byte deadline cut a model that has flushed nothing —
-      // which on this base is what a model *working* looks like, measured up to
-      // 161 s to a first byte with the whole ceiling being spent on reasoning
-      // behind it. Silence is not proof that nothing was generated; a body that
-      // closed empty is.
+      // A rejected read bills the floor even with nothing received: the caller
+      // hung up, or the deadline cut a model that may still have been reasoning.
       settle(spent());
       logCause(ctx.id, `reading from ${model}`, cause);
       return { code: 'AI_UPSTREAM' };
@@ -686,8 +410,8 @@ async function dispatch(
         );
         return { code: 'AI_UPSTREAM' };
       }
-      // It answered, and wrote nothing. The attempt is not refunded: it reached
-      // the upstream and spent the operator's quota to say nothing.
+      // It answered with no content. The attempt reached the upstream, so it
+      // stays spent.
       settle(spent());
       return { code: 'AI_UPSTREAM' };
     }
@@ -707,14 +431,7 @@ async function dispatch(
   }
 }
 
-// --- the route --------------------------------------------------------------
-
-/**
- * Dispatch under `/api/build`, with `segments` the split pathname.
- *
- * The caller has already refused every host but the identity one, so this file
- * never has to ask which door it is behind — only who came through it.
- */
+/** The dispatcher admits only the identity host, so this checks only the login. */
 export async function buildApi(
   request: Request,
   ctx: Ctx,
@@ -729,9 +446,8 @@ export async function buildApi(
   }
   if (segments.length !== 3) return refuse('NOT_FOUND', ctx.id);
   if (request.method !== 'POST') return refuse('METHOD_NOT_ALLOWED', ctx.id);
-  // An identity header is set by the proxy on whatever reaches it, so the
-  // credential is ambient the moment a browser is on this host: without this a
-  // foreign page spends somebody's whole day from their own address bar.
+  // The proxy sets the identity header on every request, so the credential is
+  // ambient; without this a foreign page could spend the person's day.
   if (!sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
   }
@@ -739,7 +455,7 @@ export async function buildApi(
   return build(request, ctx, login);
 }
 
-/** One draft, to its own author. Anyone else is told there is nothing here. */
+/** Only to its author; anyone else gets a 404. */
 async function draft(ctx: Ctx, login: string, id: string): Promise<Response> {
   const [row] = (await ctx.sql`
     select id, name, ask, site, document, at from builds
@@ -790,9 +506,7 @@ async function build(
     base = opened.document;
   }
 
-  // One page at a time per person, and four in this process: a whole-page
-  // generation is a minute of somebody else's compute, and a phone with two
-  // tabs open must not be two of them.
+  // One page at a time per person, so a phone with two tabs runs one generation.
   const slot = enter([
     [`build:${login}`, 1],
     ['build:*', MAX_IN_FLIGHT],
@@ -801,25 +515,13 @@ async function build(
     return refuse('RATE_LIMITED', ctx.id, { 'retry-after': '60' });
   }
 
-  // The slot has exactly one owner at a time. Until the response opens it
-  // belongs to this scope, and `finally` gives it back however the scope ends —
-  // including through an exception, which is not hypothetical: the budget below
-  // reads the control database, a CNPG failover rejects that await, and the
-  // release used to be skipped. One of those left that login reading "one at a
-  // time" for the life of the pod and four of them closed the builder for
-  // everybody. After the hand-off the stream owns it and gives it back when it
-  // ends, so this must not release it twice.
+  // This scope owns the slot until the hand-off, then the stream does. `finally`
+  // releases it on every early exit, a failed budget read included.
   let handed = false;
   const day = utcDay();
   try {
-    // The last thing that can still be a status, and the reason it is a read
-    // rather than the spend itself: the attempt is counted inside `dispatch`
-    // under the one statement that cannot let two callers both read the last
-    // one as free, and counting it here as well would halve the day. The
-    // per-login slot above is what keeps this read and that spend from crossing
-    // inside this process. Two pods can still cross, and the loser is told in a
-    // frame instead of a status — which is the rule this whole route now runs
-    // on.
+    // Only a read: `dispatch` spends the attempt, and spending here too would
+    // halve the day. The per-login slot keeps the read and the spend in order.
     const already = await buildUsage(ctx, login, day);
     if (
       already.requests >= MAX_BUILD_REQUESTS_DAY ||
@@ -829,9 +531,6 @@ async function build(
         'retry-after': String(secondsToMidnight()),
       });
     }
-    // Belt for the heartbeat: a connection here is written to every second, so
-    // it should never go idle at all, and the process-wide floor of 30 s is
-    // under every measured number this route has.
     ctx.server?.timeout(request, IDLE_SECONDS);
     handed = true;
     return streamed(request, ctx, { login, day, site: named, ask, base }, slot);
@@ -840,16 +539,14 @@ async function build(
   }
 }
 
-/** What the model is asked, new or changed. */
 function conversation(
   ask: string,
   base: string | null,
 ): { role: string; content: string }[] {
   const system = { role: 'system', content: SYSTEM };
   if (base === null) return [system, { role: 'user', content: ask }];
-  // One user turn rather than a replayed assistant turn: the instruction has to
-  // come before thirty kilobytes of HTML or it is read last, and a two-message
-  // history is a shape some models on this base refuse outright.
+  // One user turn: the instruction must come before the HTML, and some models
+  // here refuse a replayed assistant turn.
   return [
     system,
     {
@@ -859,7 +556,6 @@ function conversation(
   ];
 }
 
-/** The site a refine is about, and the document it is changing. */
 async function changeable(
   ctx: Ctx,
   name: string,
@@ -898,34 +594,23 @@ async function changeable(
 
   const dir = releaseDir(ctx.config.sitesDir, name, row.serving);
   const entries = await readdir(dir, { recursive: true }).catch(() => null);
-  // Exactly one file, and it is the page. A site with assets was not written
-  // here, and publishing one file over it would leave every image of it in a
-  // release nobody is looking at.
+  // Only a single-page site: publishing one file over a site with assets would
+  // strand its images in an old release.
   if (entries === null || entries.length !== 1 || entries[0] !== 'index.html') {
     return { code: 'NOT_FOUND' };
   }
   const page = Bun.file(join(dir, 'index.html'));
-  // The same cap the answer is held to, applied to the question. The release
-  // route takes 32 MiB unpacked, which is sixty-four of these, and a document
-  // that size is one press of "Change it" reading thirty megabytes into this
-  // pod and posting it to the upstream once per model — for a refusal the
-  // caller now keeps, because a 4xx the body earned is no longer refunded.
+  // The answer's cap, applied to the question: a release may hold 32 MiB, and
+  // this page is posted to the upstream once per model.
   if (page.size > MAX_DOCUMENT_BYTES) return { code: 'TOO_LARGE' };
   const document = await page.text().catch(() => null);
   return document === null ? { code: 'BUSY' } : { document };
 }
 
 /**
- * The answer, from the moment the request is accepted to the row that survives
- * a closed tab.
- *
- * The status is 200 before any model has been asked anything, so nothing below
- * may be a status: a base that cannot be reached, a model that refuses, a model
- * that stops mid-document, an answer with no document in it and a client that
- * navigated away are all one frame or one silence. What must still happen on
- * every one of those paths is `settle`, which charges the day exactly once, and
- * `slot()`, which belongs to this stream from the moment it is constructed and
- * to nothing else.
+ * The status is 200 before any model is asked, so later failures are frames:
+ * `accepted`, `thinking` each second (a new `model` is the fallback), `start`,
+ * `writing`, then one terminal `done` or `error`. Every path runs `slot()`.
  */
 function streamed(
   request: Request,
@@ -941,9 +626,8 @@ function streamed(
   const messages = conversation(job.ask, job.base);
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      // A frame written to a reader that has gone is not an error to handle,
-      // it is the ordinary end of a page somebody closed. Everything after it
-      // still has to run: the day is charged and the slot given back below.
+      // A reader that went away is the normal end of a closed page; the cleanup
+      // below still runs.
       let writable = true;
       const send = (frame: Record<string, unknown>): void => {
         if (!writable) return;
@@ -955,36 +639,19 @@ function streamed(
       };
 
       const opened = Date.now();
-      /** When anything last went out, which is what both silences are measured from. */
+      /** When a frame last went out; both silences are measured from it. */
       let told = opened;
-      /** The model being waited on, named in every frame of its silence. */
       let asking: string | null = null;
-      /** The model that started writing, and everything it has written. */
       let writing: Writing | null = null;
-      // The one timer that keeps this connection from ever being quiet, in
-      // either of the two ways it goes quiet — before a model's first content
-      // byte, and in a gap between one word of its answer and the next. Neither
-      // is idleness: the upstream is generating through both, and a socket that
-      // says so is one no browser, proxy or idle timer walks away from. It
-      // writes nothing while chunks are arriving, because `told` moves every
-      // PROGRESS_MS down there.
-      //
-      // It ticks at the progress cadence and speaks at the waiting one on
-      // purpose. Ticking at WAITING_MS instead would halve the rate whenever a
-      // tick landed a millisecond early — the guard would skip it and the next
-      // word would be two seconds later — and a heartbeat whose interval is
-      // really "one or two seconds, depending" is one nothing downstream can be
-      // sized against.
+      // Speaks after WAITING_MS of silence so no idle timer drops the socket. It
+      // ticks at PROGRESS_MS, so an early tick cannot stretch a gap to 2 s.
       const heartbeat = setInterval(() => {
         if (Date.now() - told < WAITING_MS) return;
         if (writing !== null) {
           told = Date.now();
           send({ t: 'writing', chars: writing.text.length });
         } else if (asking !== null) {
-          // Never a `thinking` frame with a null model: `asking` is unset only
-          // in the window before the first model is asked, which closes with no
-          // await in it, and a frame naming nobody is one the page would have
-          // to have a sentence for.
+          // `asking` is null only before the first model is asked.
           told = Date.now();
           send({ t: 'thinking', model: asking, ms: told - opened });
         }
@@ -996,12 +663,8 @@ function streamed(
         send({ t: 'accepted' });
         let last: Code = 'AI_UPSTREAM';
         for (const model of models) {
-          // A caller who has gone away must not start new work on the
-          // operator's account. The abort listener inside `dispatch` cannot
-          // cover this: for the fallback the signal has already fired, and a
-          // listener added after that never runs — which is how a closed tab
-          // paid for a second whole generation, streamed into a response
-          // nothing was reading.
+          // A caller who left must not start the fallback: the listener in
+          // `dispatch` is added after the abort and never runs.
           if (request.signal.aborted) break;
           asking = model;
           told = Date.now();
@@ -1014,26 +677,18 @@ function streamed(
             request.signal,
           );
           if (!('code' in attempt)) {
-            // Taken and announced with no await between them, so the heartbeat
-            // cannot put a `writing` frame in front of the `start` that
-            // explains it.
+            // No await between these, so no `writing` frame precedes `start`.
             writing = attempt;
             told = Date.now();
             send({ t: 'start', model: attempt.model });
             break;
           }
           last = attempt.code;
-          // A day that is spent is spent for the fallback too, and a control
-          // database that would not count this attempt will not count the next
-          // one either.
+          // A spent day or a down database fails the fallback too.
           if (last === 'AI_BUDGET' || last === 'STORAGE_FAILURE') break;
         }
         if (writing === null) {
-          // Every way of never getting a word out of either model, arriving on
-          // a response that has been open and talking since the first
-          // millisecond. There is no status left to send and nothing to
-          // publish, so the page is told which refusal it was in the one frame
-          // it can still read.
+          // Neither model wrote; a frame is the only way left to say why.
           send({ t: 'error', ...problem(last) });
           return;
         }
@@ -1051,7 +706,7 @@ function streamed(
         send(await ending(ctx, job, writing.text));
       } catch (cause) {
         logCause(ctx.id, 'reading a build', cause);
-        // A page that was told nothing is a page that spins forever.
+        // Without a terminal frame the page spins forever.
         send({ t: 'error', ...problem('AI_UPSTREAM') });
       } finally {
         clearInterval(heartbeat);
@@ -1077,11 +732,8 @@ function streamed(
 }
 
 /**
- * The last frame: a document and a name, a refusal, or nothing to publish.
- *
- * A database that will not take the row is its own frame rather than the
- * upstream's: the page was written, and telling somebody the writer failed
- * would send them to write it again.
+ * A failed insert is `STORAGE_FAILURE`, so nobody regenerates a page that was
+ * written.
  */
 async function ending(
   ctx: Ctx,
@@ -1093,31 +745,19 @@ async function ending(
   if (document === 'NO_DOCUMENT' || document === 'TOO_LARGE') {
     return { t: 'error', ...problem(document) };
   }
-  // A release that changes nothing is still a release: it takes a number, it
-  // takes a slot, and it makes the next rollback one step further away.
+  // An identical release would still take a number and push rollbacks back.
   if (base !== null && document === base) {
     return { t: 'done', build: null, name: site, site, unchanged: true };
   }
 
   const name = site ?? nameIn(text, ask);
-  // Asked of the same routine `GET /api/names/:name` answers with, so the page
-  // is told the same thing whichever way it asks — and told it about *this*
-  // person: a name he already holds is not a name that belongs to somebody
-  // else, and offering it to him as one is what spent the first address.
+  // The same answer as `GET /api/names/:name`, for this person: a name they
+  // already hold is theirs, not taken.
   const standing = site === null ? await nameStanding(ctx, name) : null;
   const id = crypto.randomUUID();
   try {
-    // Written the moment there is a document and before anything is claimed,
-    // because a claim is a real Postgres database and a person confirms the
-    // name first: the minutes between "here is your page" and "put it online"
-    // are the ones a phone locks in, and they survive here.
-    //
-    // A tab discarded *while* a model is writing is not one of them, and no
-    // row can make it one. The generation stops when the socket does, by
-    // design — the alternative is finishing a page for nobody on the
-    // operator's subscription — so there is nothing complete to keep and a
-    // partial document is not a site. What was typed is the browser's to hold
-    // on to; this table holds pages.
+    // Kept before any claim, so the page survives a phone locking while the
+    // person confirms the name.
     await ctx.sql`
       insert into builds (id, owner_login, site, name, ask, document)
       values (${id}, ${login}, ${site}, ${name}, ${ask}, ${document})
@@ -1131,13 +771,10 @@ async function ending(
     build: id,
     name,
     site,
-    // Meaningless for a refine, and null rather than false so a page cannot
-    // read "this name is taken" off a site it already owns.
+    // `null` for a refine, so a page cannot read "taken" off its own site.
     available: standing?.available ?? null,
-    // `empty` is an address of his with nothing on it — the claim a failed
-    // upload stranded, which the page finishes rather than renaming — and
-    // `live` is a website of his, which is a different sentence again and
-    // never "somebody else has it".
+    // `empty` is this person's name with nothing published, which the page
+    // finishes; `live` is their published site.
     yours: standing?.yours ?? null,
     url: siteUrl(ctx.config.zone, name, ctx.port),
     unchanged: false,

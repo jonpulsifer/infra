@@ -1,11 +1,6 @@
 /**
- * The three things that make the CLI fun and have to stay harmless: colour, the
- * once-a-day update check, and `kthx upgrade`.
- *
- * The check is the one with teeth. It runs beside every command, so most of
- * what is asserted here is the same claim from different angles — it cannot
- * outlast its cap, cannot change what the command prints, and cannot change
- * what it exits with.
+ * CLI colour, the daily update check and `kthx upgrade`. The check runs beside
+ * every command, so it may not outlast its cap or change output or exit code.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
@@ -23,7 +18,6 @@ import { updateNudge, upgrade } from '../cli/upgrade.ts';
 const APP = join(import.meta.dir, '..');
 const CLI = join(APP, 'cli', 'main.ts');
 
-/** stdout claiming to be a terminal for the length of one call. */
 function asTty<T>(run: () => T): T {
   const was = process.stdout.isTTY;
   process.stdout.isTTY = true;
@@ -34,7 +28,6 @@ function asTty<T>(run: () => T): T {
   }
 }
 
-/** stdout claiming to be a pipe, whatever the test runner is attached to. */
 function asPipe<T>(run: () => T): T {
   const was = process.stdout.isTTY;
   process.stdout.isTTY = false;
@@ -45,7 +38,7 @@ function asPipe<T>(run: () => T): T {
   }
 }
 
-/** `env` in place for the length of one call, and exactly those keys restored. */
+/** An undefined value unsets the key for the call. */
 function withEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
   const was = Object.fromEntries(
     Object.keys(env).map((key) => [key, process.env[key]]),
@@ -125,15 +118,11 @@ describe('paint', () => {
   });
 });
 
-// --- the update check -------------------------------------------------------
-
-/** An apex that accepts the connection and never answers it. */
 const silent = Bun.serve({
   port: 0,
   fetch: () => new Promise<Response>(() => {}),
 });
 
-/** An apex that answers a build id, and counts how often it is asked. */
 let asked = 0;
 const talkative = Bun.serve({
   port: 0,
@@ -181,7 +170,6 @@ describe('the update check', () => {
       build: '9.9.9+ffffffffffff',
     });
 
-    // Within the day the answer comes from the file, not the apex.
     await expect(ask()).resolves.toBe('  update available — kthx upgrade');
     expect(asked).toBe(1);
   });
@@ -233,17 +221,16 @@ describe('the update check', () => {
   });
 
   test('an apex that never answers costs the cap once a day, not once a command', async () => {
-    // The measurement the check exists to bound: a connection accepted and
-    // never answered. It has to end, near the 1.5 s cap, resolving `null`
-    // rather than throwing — a rejection here would take the command with it.
+    // Past the 1.5 s cap the check resolves null, since a rejection would fail
+    // the command.
     const started = Date.now();
     await expect(ask({ origin: silent.url.origin })).resolves.toBeNull();
     const took = Date.now() - started;
     expect(took).toBeGreaterThan(1000);
     expect(took).toBeLessThan(3000);
 
-    // Silence is an answer and is remembered like one: a machine with no route
-    // to the apex waits once, not on every command it types that day.
+    // A timeout is cached as `build: null`, so later commands that day skip
+    // the wait.
     expect(JSON.parse(readFileSync(cache(), 'utf8'))).toMatchObject({
       build: null,
     });
@@ -252,8 +239,6 @@ describe('the update check', () => {
     expect(Date.now() - again).toBeLessThan(500);
   }, 10_000);
 });
-
-// --- the command line -------------------------------------------------------
 
 describe('the CLI', () => {
   const run = (args: string[], env: Record<string, string> = {}) =>
@@ -278,7 +263,7 @@ describe('the CLI', () => {
     expect(out).toContain('█');
     expect(out).toContain('usage: kthx');
     expect(out).toContain('upgrade');
-    // Not a terminal: not one escape code, banner included.
+    // stdout is a pipe, so even the banner has no escape codes.
     expect(out).not.toContain('\x1b');
   }, 30_000);
 
@@ -301,15 +286,12 @@ describe('the CLI', () => {
     ]);
     expect(code).toBe(0);
     expect(out).toContain('no tokens for');
-    // Over a pipe the check is skipped outright, so the silent apex costs
-    // nothing at all — the cap is what bounds it when stdout is a terminal.
+    // Over a pipe the check is skipped; the bound allows for process startup.
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 30_000);
 });
 
-// --- upgrade ----------------------------------------------------------------
-
-/** A tarball `bun add -g` installs, built around the packed bundle. */
+/** A package directory around the packed bundle, for `bun pm pack`. */
 function tarballOf(bundle: string, version: string, build: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'kthx-tgz-'));
   writeFileSync(join(dir, 'kthx.js'), bundle);
@@ -332,9 +314,7 @@ function tarballOf(bundle: string, version: string, build: string): string {
 
 describe('kthx upgrade', () => {
   test('replaces an existing global install, and --version says so', async () => {
-    // The install line the apex documents, end to end: a real `bun run pack`, a
-    // real `bun add -g` into a `BUN_INSTALL` of its own, and the tarball the
-    // apex serves put over the top of it.
+    // The documented `bun add -g` install end to end, in its own BUN_INSTALL.
     await Bun.$`bun run pack`.cwd(APP).quiet();
     const bundle = readFileSync(join(APP, 'dist', 'kthx.js'), 'utf8');
     const mine = JSON.parse(

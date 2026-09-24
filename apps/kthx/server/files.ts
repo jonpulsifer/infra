@@ -1,22 +1,7 @@
 /**
- * `/api/files` and `/files/*`: a site's own store of arbitrary bytes.
- *
- * Anyone on the site origin may put a file there — the same trust as `/api/db`
- * — with two things holding the zone up under it. **The ownership floor**: a
- * path belongs to the visitor id that created it, and only that visitor or the
- * site's bearer may overwrite or delete it, so a public store is not a public
- * defacement surface. **The content-type allowlist**: images, audio, video,
- * PDF, JSON and three text types, and nothing else — no HTML, no SVG, no
- * JavaScript, no XML — because every one of those is script on a site's own
- * origin, and a visitor who could upload one could write the site.
- *
- * The rest is the shape of the store: bytes live beside the release directories
- * on the same volume, never inside one, and are written through to the depot
- * so a lost volume rehydrates them the way it rehydrates a release. The
- * metadata rows are in the *control* database rather than the site's, because
- * the files budget is measured beside `pg_database_size` rather than inside it
- * — and because `/files/*` then keeps serving while a site's own database is
- * being provisioned or repaired.
+ * `/api/files` and `/files/*`: a site's file store. Anyone on the site origin
+ * may upload; only the creating visitor or the site's bearer may replace or
+ * delete a path. Rows live in the control database; bytes go through to the depot.
  */
 import { mkdir, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -33,7 +18,7 @@ export const MAX_FILES = 1000;
 
 /** How many bodies may be arriving at once, process-wide. */
 const MAX_PUTS = 8;
-/** How many of a site's depot objects its teardown removes at once. */
+/** Concurrent depot deletes during a site teardown. */
 const DELETE_WIDTH = 16;
 /** The same deadline a release body gets. */
 const BODY_TIMEOUT_MS = 120_000;
@@ -45,7 +30,10 @@ const MAX_SEGMENT_BYTES = 128;
 /** A media type as RFC 9110 writes one, bounded so a header cannot be smuggled. */
 const MEDIA_TYPE = /^[a-z0-9!#$&^_.+-]{1,64}\/[a-z0-9!#$&^_.+-]{1,64}$/;
 
-/** Types with no top-level rule of their own. */
+/**
+ * Never HTML, SVG, JavaScript or XML: served from the site origin, those run
+ * script as the site.
+ */
 const ALLOWED_TYPES: ReadonlySet<string> = new Set([
   'application/pdf',
   'application/json',
@@ -54,14 +42,14 @@ const ALLOWED_TYPES: ReadonlySet<string> = new Set([
   'text/markdown',
 ]);
 
-/** Whole families that are bytes a browser renders and never executes. */
+/** Families a browser renders and never executes. */
 const ALLOWED_FAMILIES: ReadonlySet<string> = new Set([
   'image',
   'audio',
   'video',
 ]);
 
-/** Rendered rather than downloaded — everything else is an attachment. */
+/** Everything else is served as an attachment. */
 function inline(type: string): boolean {
   const family = type.split('/')[0] ?? '';
   return (
@@ -72,27 +60,19 @@ function inline(type: string): boolean {
 }
 
 /**
- * The media type this upload declares, normalised, or `null` for one this
- * store does not take.
- *
- * The header is the only thing that ever decides a stored type — nothing here
- * sniffs the bytes, and `nosniff` on the way out means the browser does not
- * either. So a `.html` uploaded as `text/plain` is served as text and is not a
- * page, which is the property the allowlist exists to keep.
+ * Only the header decides the stored type. Nothing sniffs the bytes and
+ * `nosniff` stops the browser, so a `.html` sent as `text/plain` stays text.
  */
 export function allowedType(header: string | null): string | null {
   const media = (header ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
   if (!MEDIA_TYPE.test(media)) return null;
   const [family = '', subtype = ''] = media.split('/');
-  // A rule rather than a list, because `image/svg+xml` is not the only spelling
-  // of it: anything XML-ish inside an allowed family is a document with script
-  // in it, and a list of one is a typo away from taking the thing it refuses.
+  // Any SVG or `+xml` subtype can carry script, whatever its family.
   if (subtype.includes('svg') || subtype.endsWith('+xml')) return null;
   if (ALLOWED_TYPES.has(media)) return media;
   return ALLOWED_FAMILIES.has(family) ? media : null;
 }
 
-/** Whether this is a path a file may have. */
 export function legalPath(path: string): boolean {
   if (path.length === 0 || path.length > MAX_PATH_CHARS) return false;
   if (!PATH.test(path)) return false;
@@ -113,23 +93,21 @@ interface FileRow {
   readonly updated_at: Date;
 }
 
-/** What a listing answers with, and nothing more. */
 type Listed = Omit<FileRow, 'owner' | 'sha256'>;
 
-/** What a `PUT` has to put back when it cannot finish. */
+/** What a failed `PUT` restores. */
 type Existing = Omit<FileRow, 'path'>;
 
-/** Where a site's files live: beside its release directories, never inside one. */
+/** Beside the site's release directories, never inside one. */
 export function filesDir(sitesDir: string, site: string): string {
   return join(sitesDir, site, 'files');
 }
 
-/** The depot object a file is written through to. */
 function objectName(site: string, path: string): string {
   return `files/${site}/${path}`;
 }
 
-/** What a site's files weigh, for `usage.files_bytes`. */
+/** For `usage.files_bytes`. */
 export async function filesBytes(sql: SQL, site: string): Promise<number> {
   const [row] = (await sql`
     select coalesce(sum(size), 0)::bigint as bytes from files where site = ${site}
@@ -138,19 +116,16 @@ export async function filesBytes(sql: SQL, site: string): Promise<number> {
 }
 
 /**
- * Every file a site has, gone: the rows, the depot objects, and — with the
- * release directories, by the caller — the bytes on the volume.
- *
- * The objects are named from the rows rather than listed from the bucket, which
- * is why the rows are read before they are deleted.
+ * Object names come from the rows, so the rows are read before they are
+ * deleted. The caller removes the bytes on the volume.
  */
 export async function dropFiles(ctx: Ctx, site: string): Promise<void> {
   const rows = (await ctx.sql`
     select path from files where site = ${site}
   `) as { path: string }[];
   await ctx.sql`delete from files where site = ${site}`;
-  // In batches, because a site at the file ceiling is a thousand round trips to
-  // the depot: one at a time is minutes inside a request the edge gives 100 s.
+  // Batched: a full site is a thousand depot deletes, inside a request the edge
+  // cuts off at 100 s.
   for (let at = 0; at < rows.length; at += DELETE_WIDTH) {
     await Promise.all(
       rows.slice(at, at + DELETE_WIDTH).map((row) =>
@@ -162,11 +137,9 @@ export async function dropFiles(ctx: Ctx, site: string): Promise<void> {
   }
 }
 
-// --- the in-flight bounds ---------------------------------------------------
-
 let putting = 0;
 
-/** One of the process-wide `PUT` slots, or `null` when they are all held. */
+/** `null` when every process-wide `PUT` slot is held. */
 function takePut(): (() => void) | null {
   if (putting >= MAX_PUTS) return null;
   putting += 1;
@@ -179,10 +152,8 @@ function takePut(): (() => void) | null {
 }
 
 /**
- * Bytes a site has accepted but not yet recorded, counted against its budget.
- *
- * Without this the quota is read before the row is written, so the eight `PUT`s
- * this process permits at once could each pass a check the others invalidate.
+ * Bytes accepted but not yet recorded, counted against the site's budget so
+ * concurrent `PUT`s cannot each pass a quota check the others invalidate.
  */
 const pending = new Map<string, number>();
 
@@ -198,18 +169,9 @@ function reserve(site: string, size: number): () => void {
   };
 }
 
-/**
- * One writer per path at a time.
- *
- * The ownership floor is read and then acted on, and the bytes and the row it
- * describes have to agree; a second `PUT` to the same path in between would
- * leave a file whose stored digest is somebody else's.
- *
- * ponytail: in-process, which is sound because there is one replica by
- * construction — the sites volume and the realtime fan-out both assume it, as
- * does every rate limit here. A second replica wants `select … for update` on
- * the row instead.
- */
+/** One writer per path, so the ownership check, the bytes and the row agree. */
+// ponytail: in-process, sound while the server runs one replica; a second
+// replica needs `select … for update` on the row.
 const held = new Map<string, Promise<unknown>>();
 
 async function underLock<T>(key: string, act: () => Promise<T>): Promise<T> {
@@ -226,9 +188,7 @@ async function underLock<T>(key: string, act: () => Promise<T>): Promise<T> {
   }
 }
 
-// --- /api/files -------------------------------------------------------------
-
-/** Dispatch under `/api/files`. `path` is the decoded pathname. */
+/** `path` is the decoded pathname. */
 export async function filesApi(
   request: Request,
   ctx: Ctx,
@@ -249,8 +209,7 @@ export async function filesApi(
 }
 
 async function list(ctx: Ctx, site: string): Promise<Response> {
-  // Not `owner`: a listing is public on the site origin, and a visitor id is
-  // the one column here that names somebody.
+  // No `owner`: the listing is public, and a visitor id identifies a person.
   const rows = (await ctx.sql`
     select path, size, type, updated_at from files
     where site = ${site} order by path
@@ -292,8 +251,7 @@ async function put(
   const slot = takePut();
   if (slot === null) return refuse('BUSY', ctx.id);
   try {
-    // Bun's connection idle timeout is 10 s, which a 25 MiB body over a phone
-    // does not fit inside.
+    // The server's 30 s idle timeout is too short for a 25 MiB body over a phone.
     ctx.server?.timeout(request, BODY_TIMEOUT_MS / 1000 + 10);
     let bytes: Uint8Array | null;
     try {
@@ -312,7 +270,6 @@ async function put(
   }
 }
 
-/** The body in hand: who owns the path, whether it fits, and then the bytes. */
 async function store(
   ctx: Ctx,
   site: string,
@@ -343,11 +300,8 @@ async function store(
   const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
   const release = reserve(site, bytes.byteLength);
   const target = join(filesDir(ctx.config.sitesDir, site), path);
-  // The row goes first and is put back if the bytes do not land. The other
-  // order breaks on a database blip between two writes that did land: the row
-  // then names the old digest and the old type over the new bytes, which is a
-  // strong etag lying to every cache that honours it and a `content-type` that
-  // no longer describes what `/files/*` serves.
+  // The row goes first and is restored if the bytes fail. Bytes first would, on
+  // a database error, leave the old etag and type describing the new bytes.
   try {
     await ctx.sql`
       insert into files (site, path, owner, size, type, sha256, updated_at)
@@ -361,9 +315,8 @@ async function store(
     await ctx.depot.put(objectName(site, path), bytes);
   } catch (cause) {
     await undo(ctx, site, path, existing, target);
-    // A path that names a directory, or that walks through a file as if it were
-    // one, is the caller's to fix and repeats for free. It is a 400, not a 500,
-    // and not a stack in the operator's log every time.
+    // A path that names a directory, or runs through a file, is the caller's
+    // error: a 400 with no log line.
     if (COLLIDES.has(errno(cause))) return refuse('INVALID_PATH', ctx.id);
     logCause(ctx.id, `storing files/${site}/${path}`, cause);
     return refuse('STORAGE_FAILURE', ctx.id);
@@ -383,24 +336,15 @@ async function store(
   );
 }
 
-/** `write` failing because the path is already something else on the volume. */
+/** `write` fails with these when the path is already something else on disk. */
 const COLLIDES: ReadonlySet<string> = new Set(['EISDIR', 'ENOTDIR', 'EEXIST']);
 
-/** The errno a filesystem refusal carries, or `''` for anything else. */
 function errno(cause: unknown): string {
   return typeof cause === 'object' && cause !== null && 'code' in cause
     ? String((cause as { code: unknown }).code)
     : '';
 }
 
-/**
- * The row back to the bytes it described, and the bytes that were to replace
- * them gone from the volume.
- *
- * This is what pays for writing the row first: the worst a failed `PUT` leaves
- * is a row that briefly names bytes which never landed, which `serveFile`
- * already answers as a 404.
- */
 async function undo(
   ctx: Ctx,
   site: string,
@@ -425,12 +369,8 @@ async function undo(
 }
 
 /**
- * Bytes onto the volume, whole or not at all.
- *
- * A temp name and a rename, so a reader either finds the previous file or finds
- * this one — never half of it. The temp sits at the top of the site's files
- * directory, where no legal path can collide with it: a path segment may not
- * begin with a dot.
+ * Temp file and rename, so a reader sees the old file or the new one. The temp
+ * name starts with a dot, which no legal path segment can.
  */
 async function write(
   sitesDir: string,
@@ -461,7 +401,7 @@ async function remove(
     const [row] = (await ctx.sql`
       select owner from files where site = ${site} and path = ${path} limit 1
     `) as { owner: string }[];
-    // A path that is not there is the outcome the caller asked for.
+    // Deleting a missing path succeeds.
     if (row === undefined) return empty(ctx.id);
     if (row.owner !== me.id && !owner) return refuse('FORBIDDEN', ctx.id);
 
@@ -470,22 +410,16 @@ async function remove(
       force: true,
     }).catch(() => undefined);
     await ctx.depot.delete(objectName(site, path)).catch((cause: unknown) => {
-      // The row is gone, so nothing serves these bytes; the object is litter
-      // rather than an exposure.
+      // The row is gone, so a leftover object is never served.
       logCause(ctx.id, `deleting ${objectName(site, path)}`, cause);
     });
     return empty(ctx.id);
   });
 }
 
-// --- /files/<path> ----------------------------------------------------------
-
 /**
- * The bytes themselves, to anyone, with no cookie and no session.
- *
- * `nosniff` and the stored type are the whole of the safety here: the allowlist
- * has already refused everything that could be a document, and anything not
- * meant to be rendered is handed over as an attachment.
+ * Public, with no cookie. Safety rests on `nosniff` and the stored type: the
+ * allowlist refused documents, and anything not rendered is an attachment.
  */
 export async function serveFile(
   request: Request,
@@ -497,7 +431,7 @@ export async function serveFile(
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
   const file = path.slice('/files/'.length);
-  // A path no upload could have taken is a miss, not a lecture.
+  // A path no upload could have taken is a plain 404.
   if (!legalPath(file)) return refuse('NOT_FOUND', ctx.id);
 
   const [row] = (await ctx.sql`
@@ -531,8 +465,7 @@ export async function serveFile(
       ctx.depot.locate(objectName(site, file)),
       MAX_FILE_BYTES,
     );
-    // A row with no bytes anywhere is a file that is gone; saying so is the
-    // only honest answer, and the log carries which one it was.
+    // A row with no bytes anywhere is a lost file.
     if (bytes === null) {
       logCause(
         ctx.id,

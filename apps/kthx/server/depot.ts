@@ -1,15 +1,7 @@
 /**
- * The depot: where a release's tar.gz is durable, and where a lost volume
- * refills from.
- *
- * The sites volume is a single-replica local-path PVC. Losing it must cost
- * latency and never data, which is the whole reason a release is uploaded here
- * before it is unpacked: the directory under `/sites` is a cache of this
- * object, and a release row names the object rather than the directory.
- *
- * Objects are content-addressed (`releases/<sha256>.tar.gz`), so re-uploading
- * the same bundle stores nothing new and two sites shipping identical bytes
- * share one object.
+ * The depot holds each release's tar.gz durably; the local sites volume is a
+ * cache that refills from it. Objects are content-addressed, so identical
+ * bundles share one object.
  */
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -21,39 +13,32 @@ import {
   uploadToGcsBucket,
 } from '@repo/archive/gcs';
 
-/** The contract's deadline on the depot write inside an upload. */
+/** Bounds the depot write inside an upload request. */
 const PUT_TIMEOUT_MS = 60_000;
 
 export interface Depot {
-  /** Store these bytes at this object name; answers the location for the row. */
+  /** Answers the location to store in the row. */
   put(objectName: string, bytes: Uint8Array): Promise<string>;
-  /** The bytes at a stored location, or `null` when the depot no longer holds them. */
+  /** `null` when the depot no longer holds the object. */
   get(location: string, maxBytes: number): Promise<Uint8Array | null>;
   /**
-   * Where an object name lives here, without storing anything.
-   *
-   * A release row keeps the `location` {@link put} answered — v1's objects live
-   * in another bucket and only the row knows. A file's object is derived from
-   * its site and path instead, so the metadata row carries no location and this
-   * is what turns one back into something {@link get} reads.
+   * A location for {@link get}, for file rows, which store no location. Release
+   * rows keep what {@link put} answered, which may name another bucket.
    */
   locate(objectName: string): string;
-  /** Remove an object; already gone is the outcome, not a failure. */
+  /** An object that is already gone is not an error. */
   delete(objectName: string): Promise<void>;
 }
 
 /**
- * The bucket, reached with the pod's workload identity — no stored credential
- * and no signed URL, because a V4 signature would want
- * `iam.serviceAccounts.signBlob` on top of object access the process already
- * has.
+ * Uses the pod's workload identity. No signed URLs: a V4 signature would need
+ * `iam.serviceAccounts.signBlob` as well as object access.
  */
 export function bucketDepot(
   bucket: string,
   env: Record<string, string | undefined> = Bun.env,
 ): Depot {
-  // Re-read per call rather than captured at boot: the credential is a
-  // projected volume the kubelet owns and rewrites.
+  // Read per call: the kubelet rewrites the projected credential volume.
   const federationOf = async () => {
     const federation = await loadDeploymentFederation(env);
     if (federation === null) {
@@ -97,15 +82,7 @@ export function bucketDepot(
   };
 }
 
-/**
- * The same depot on this disk, for a run with no bucket: `bun run server` on a
- * laptop, and the test suite.
- *
- * Not a fallback the deployment can reach by accident — `KTHX_BUCKET` unset in
- * the cluster is a misconfiguration the chart does not permit — but the
- * rehydrate path has to be exercised by something, and a real second location
- * scheme exercises it better than a mock of the first.
- */
+/** For local runs and tests; the chart requires `KTHX_BUCKET`. */
 export function diskDepot(root: string): Depot {
   return {
     async put(objectName, bytes) {
@@ -136,7 +113,7 @@ async function localBytes(
   return new Uint8Array(await file.arrayBuffer());
 }
 
-/** Hold a stream, refusing past the ceiling rather than after it. */
+/** Cancels the stream as soon as it passes `maxBytes`. */
 async function drain(
   stream: ReadableStream<Uint8Array>,
   maxBytes: number,

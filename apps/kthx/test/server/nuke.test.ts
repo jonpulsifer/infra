@@ -1,14 +1,6 @@
 /**
- * `DELETE /api/sites`: every site on the zone, gone, and every name free.
- *
- * The claims worth the most here are the two a demo depends on — a nuked name
- * can be claimed again, which a per-site delete deliberately does not allow —
- * and the one that keeps it from being a way to empty the zone by accident:
- * it opens for a named person the identity proxy vouched for and for nobody
- * else, which is why there is no guessing to rate limit.
- *
- * The 404 a deployment that names no operator answers is in `sites.test.ts`,
- * whose harness names none.
+ * `DELETE /api/sites`: every site gone and every name free, for a login the
+ * identity proxy vouched for. The no-operator 404 is in `sites.test.ts`.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -17,7 +9,7 @@ import { readConfig } from '../../server/env.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const IDENTITY = 'ops.kthx-tailnet.test';
-/** The proxy pod, which is the only peer allowed to speak for a person. */
+/** The proxy pod, the only peer allowed to speak for a person. */
 const PROXY = '10.42.0.7';
 const OPERATOR = 'operator@example.test';
 const SOMEBODY = 'somebody@example.test';
@@ -28,11 +20,7 @@ const kthx = withServer({
   adminLogins: [OPERATOR],
 });
 
-/**
- * A socket peer, the way Bun hands one to the handler. A request with no peer
- * is a handler called directly, which the resolver reads as a test harness
- * rather than a network and would therefore believe any header it was given.
- */
+/** Every test needs a peer: without one the handler believes every header. */
 function peer(address: string): Bun.Server<unknown> {
   return {
     requestIP: () => ({ address, port: 1, family: 'IPv4' }),
@@ -74,7 +62,7 @@ async function claimed(label: string): Promise<Site> {
   };
 }
 
-/** A release on the volume, so the nuke has bytes to take as well as rows. */
+/** So the nuke has bytes on the volume to take as well as rows. */
 async function publish(site: Site): Promise<void> {
   const uploaded = await kthx().fetch(
     ask(`/api/sites/${site.name}/releases`, {
@@ -90,14 +78,11 @@ async function publish(site: Site): Promise<void> {
 }
 
 /**
- * The nuke, as a person on the tailnet. `null` is a caller the proxy vouched
- * for nobody as; `from` is the peer, so a test can send the header from
- * somewhere this deployment does not believe.
+ * `null` is a caller the proxy vouched for as nobody; `from` is the peer, so a
+ * test can send the header from somewhere this deployment does not believe.
  */
 function nuke(login: string | null = OPERATOR, from = PROXY) {
-  // No `address`: that sets `cf-connecting-ip`, and a private host answers 404
-  // to anything carrying one — the tunnel never carries these names, so such a
-  // request is an edge that misrouted.
+  // No `address`: a private host answers 404 to any `cf-connecting-ip`.
   return kthx().fetch(
     ask('/api/sites', {
       method: 'DELETE',
@@ -123,7 +108,7 @@ describe('the nuke', () => {
     const first = await claimed('one');
     const second = await claimed('two');
     await publish(first);
-    // A document, so the site database is not merely provisioned but written to.
+    // So the site database is written to, not merely provisioned.
     const wrote = await kthx().fetch(
       ask('/api/db/notes', {
         host: first.host,
@@ -143,7 +128,6 @@ describe('the nuke', () => {
     expect(answer.status).toBe(200);
     expect(await answer.json()).toEqual({ deleted: 2, failed: 0 });
 
-    // Nothing in the rows, nothing in the cluster, nothing on the volume.
     const listed = await kthx().fetch(
       ask('/api/sites', { address: address() }),
     );
@@ -160,7 +144,7 @@ describe('the nuke', () => {
       ).exists(),
     ).toBe(false);
 
-    // The point of a hard delete: the name is claimable, not 410 forever.
+    // A hard delete frees the name instead of answering 410.
     const again = await claim(first.name);
     expect(again.status).toBe(201);
     expect((await kthx().fetch(ask('/', { host: first.host }))).status).toBe(
@@ -174,7 +158,7 @@ describe('the nuke', () => {
       ask(`/api/sites/${site.name}`, { method: 'DELETE', token: site.token }),
     );
     expect(removed.status).toBe(204);
-    // A soft delete keeps the name: that is what makes it answer 410.
+    // A soft delete keeps the row, so the name answers 410 and cannot be claimed.
     expect((await claim(site.name)).status).toBe(409);
 
     expect(await (await nuke()).json()).toEqual({ deleted: 1, failed: 0 });
@@ -189,8 +173,7 @@ describe('the nuke', () => {
     expect(other.status).toBe(403);
     expect((await other.json()).code).toBe('FORBIDDEN');
 
-    // Nobody was vouched for: 401 rather than 403, because nothing was
-    // offered — the same distinction every other route makes.
+    // Nobody was vouched for: 401, since nothing was offered.
     const anonymous = await nuke(null);
     expect(anonymous.status).toBe(401);
     expect((await anonymous.json()).code).toBe('UNAUTHENTICATED');
@@ -200,8 +183,7 @@ describe('the nuke', () => {
 
   test('is not opened by a site bearer, on any door', async () => {
     const site = await claimed('bearer');
-    // A bearer opens one site. There is no bearer that opens the zone any
-    // more, which is the point: there is nothing to hold, lose or guess.
+    // A bearer opens one site; none opens the zone.
     const refused = await kthx().fetch(
       ask('/api/sites', {
         method: 'DELETE',
@@ -215,8 +197,8 @@ describe('the nuke', () => {
 
   test('is not opened by a peer this deployment does not believe', async () => {
     const site = await claimed('forged');
-    // The header is the proxy's to set. From anywhere else it is a client's,
-    // and the caller is nobody.
+    // From any peer but the proxy the header is the client's, and the caller
+    // is nobody.
     const refused = await nuke(OPERATOR, '198.51.100.9');
     expect(refused.status).toBe(401);
     expect(await inPostgres(site.name)).toBe(true);
@@ -249,9 +231,8 @@ describe('who the environment names', () => {
   });
 
   test('is a list of addresses, folded and trimmed, and empty means nobody', () => {
-    // Folded because the header is compared against it and a login's case is
-    // not the caller's to decide; empty entries dropped so a trailing comma is
-    // not an operator called "".
+    // Folded, since a login's case is not the caller's to decide; empty entries
+    // are dropped, so a trailing comma names no operator.
     expect(readConfig(env(' Operator@Example.test , ')).adminLogins).toEqual([
       'operator@example.test',
     ]);

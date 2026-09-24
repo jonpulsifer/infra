@@ -1,11 +1,6 @@
 /**
  * A database per site: that a claim makes one, that one site's role cannot
- * reach another's, and what `/api/db` does on top.
- *
- * Real Postgres throughout, because every claim worth testing here is a claim
- * about Postgres: that `REVOKE CONNECT` is the boundary, that `data || $1` is
- * one statement, that `pg_database_size` is the meter, that jsonb containment
- * does not match a scalar stored inside an array.
+ * reach another's, and what `/api/db` does on top. Real Postgres throughout.
  */
 import { describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
@@ -60,7 +55,6 @@ function write(
   });
 }
 
-/** The documents a query answered with. */
 async function found(
   site: Site,
   collection: string,
@@ -103,12 +97,10 @@ describe('provisioning', () => {
     `) as { provisioned_at: Date | null }[];
     expect(row?.provisioned_at).not.toBeNull();
 
-    // The site's own role reaches its own documents…
     expect((await at(a, '/api/db')).status).toBe(200);
 
-    // …and nothing else's. This is the whole boundary: `REVOKE CONNECT, TEMP
-    // … FROM PUBLIC` plus one `GRANT CONNECT` is what stands between two
-    // strangers' data, and a database ACL is not copied from the template.
+    // The boundary is `REVOKE CONNECT, TEMP … FROM PUBLIC` plus one `GRANT
+    // CONNECT`; a database ACL is not copied from the template.
     const url = new URL(kthx().config.databaseUrl);
     url.search = '';
     url.pathname = `/${b.name}`;
@@ -125,7 +117,7 @@ describe('provisioning', () => {
 
   test('a site whose row has no database yet is 503, and is repaired', async () => {
     const site = await claimed('unprovisioned');
-    // The state a claim that died between its row and its database leaves.
+    // As a claim that died between its row and its database leaves it.
     await kthx().sql`
       update sites set provisioned_at = null where name = ${site.name}
     `;
@@ -133,7 +125,7 @@ describe('provisioning', () => {
     expect(busy.status).toBe(503);
     expect(((await busy.json()) as { code: string }).code).toBe('BUSY');
 
-    // The refusal kicked off the repair; the next call finds it done.
+    // The refusal started the repair; a later call finds it done.
     for (let i = 0; i < 50; i += 1) {
       if ((await at(site, '/api/db')).status === 200) break;
       await Bun.sleep(20);
@@ -155,7 +147,6 @@ describe('provisioning', () => {
           or exists (select 1 from pg_roles where rolname = ${site.name}) as any
     `) as { any: boolean }[];
     expect(left?.any).toBe(false);
-    // The name stays taken and every backend on it is 410.
     expect((await at(site, '/api/db')).status).toBe(410);
   });
 
@@ -165,10 +156,8 @@ describe('provisioning', () => {
       ask(`/api/sites/${site.name}`, { method: 'DELETE', token: site.token }),
     );
 
-    // The state a `drop()` that threw between its two statements leaves: the
-    // database gone, the role still there. A handler that read a live row just
-    // before the delete now connects, gets 3D000, and asks for a repair —
-    // `leaving` is already cleared, so only the row keeps this honest.
+    // As a `drop()` that threw between its statements leaves it: database gone,
+    // role kept. `leaving` is cleared, so only the row prevents a rebuild.
     const password = sitePassword(kthx().config.pgKey, site.name);
     await kthx().sql.unsafe(
       `create role "${site.name}" login password '${password}'`,
@@ -187,9 +176,7 @@ describe('provisioning', () => {
     const site = await claimed('orphan');
     await kthx().sql`delete from sites where name = ${site.name}`;
 
-    // Confined to this file's names: the production call sweeps the cluster,
-    // which is correct there and would take another agent's test databases
-    // here.
+    // Confined to this file's names: an unfiltered sweep takes the cluster.
     const ours = kthx().name('');
     const dropped = await kthx().pg.sweep((name) => name.startsWith(ours));
     expect(dropped).toContain(site.name);
@@ -199,12 +186,10 @@ describe('provisioning', () => {
           or exists (select 1 from pg_roles where rolname = ${site.name}) as any
     `) as { any: boolean }[];
     expect(left?.any).toBe(false);
-    // The control connection is still the control connection.
     expect((await kthx().sql`select 1 as ok`)[0]).toEqual({ ok: 1 });
 
-    // A login that is not a site's, whose name a site could have had. The
-    // sweep is the one unconditional destructive path in the process, so what
-    // makes a role a site's is membership of the group role, not its shape.
+    // A non-site login with a site-shaped name: only group membership makes a
+    // role a site's.
     const bystander = `${ours}keepme`;
     await kthx().sql.unsafe(`create role "${bystander}" login`);
     const second = await kthx().pg.sweep((name) => name.startsWith(ours));
@@ -217,9 +202,8 @@ describe('provisioning', () => {
 
   test('a name that is already a database is taken even with no row', async () => {
     const site = await claimed('residue');
-    // What a claim that failed after `CREATE DATABASE` leaves behind: the row
-    // is gone, the database is not. Handing the name out again would hand over
-    // its documents.
+    // As a claim that failed after `CREATE DATABASE` leaves it: no row, but a
+    // database whose documents the name would hand over.
     await kthx().sql`delete from sites where name = ${site.name}`;
     const again = await kthx().fetch(
       ask('/api/sites', {
@@ -289,7 +273,6 @@ describe('documents', () => {
     ]);
     expect(items.map((item) => item.id)).toEqual(['one', 'two']);
 
-    // One id already taken means none of them land.
     const clash = await write(site, 'POST', '/api/db/rows', [
       { id: 'three', n: 3 },
       { id: 'one', n: 9 },
@@ -325,11 +308,9 @@ describe('documents', () => {
       })
     ).json()) as Record<string, unknown>;
     expect(merged.a).toBe(2);
-    // A nested object in the patch replaces the stored one whole…
+    // Nested objects replace whole, and null is stored as a value.
     expect(merged.nested).toEqual({ keep: false });
-    // …a null is stored as a value, not as a delete…
     expect(merged.nulled).toBeNull();
-    // …and a key the patch does not mention is kept.
     expect(merged.gone).toBe('yes');
     expect(merged.etag).not.toBe(created.etag);
     expect(merged.created_at).toBe(created.created_at);
@@ -351,7 +332,7 @@ describe('documents', () => {
       await write(site, 'POST', '/api/db/notes', { id: 'x', n: 0 })
     ).json()) as { etag: string };
 
-    // The quoted form the etag header carries and the bare one the body does.
+    // Quoted as in the etag header, and bare as in the body.
     const stale = await write(
       site,
       'PATCH',
@@ -373,7 +354,6 @@ describe('documents', () => {
     );
     expect(fresh.status).toBe(200);
     const now = (await fresh.json()) as { etag: string };
-    // The etag that just won is no longer the current one.
     expect(
       (
         await write(
@@ -409,7 +389,6 @@ describe('documents', () => {
     );
     expect(reserved.status).toBe(201);
 
-    // A DELETE that names a version it does not have keeps the document.
     expect(
       (
         await at(site, '/api/db/notes/x', {
@@ -426,7 +405,6 @@ describe('documents', () => {
         })
       ).status,
     ).toBe(204);
-    // Deleting what is not there, with no precondition, is still 204.
     expect(
       (await at(site, '/api/db/notes/x', { method: 'DELETE' })).status,
     ).toBe(204);
@@ -441,7 +419,6 @@ describe('documents', () => {
     const document = (await over.json()) as Record<string, unknown>;
     expect(document.a).toBeUndefined();
     expect(document.b).toBe(2);
-    // `If-Match` on a document that is not there is 412, not 404.
     expect(
       (
         await write(
@@ -481,7 +458,6 @@ describe('documents', () => {
     expect((await write(site, 'POST', '/api/db/NOPE', { a: 1 })).status).toBe(
       400,
     );
-    // A write that does not declare JSON is not read at all.
     expect(
       (
         await at(site, '/api/db/notes', {
@@ -503,7 +479,6 @@ describe('documents', () => {
       ],
     });
 
-    // Dropping one is the owner's, and only the owner's.
     expect((await at(site, '/api/db/a', { method: 'DELETE' })).status).toBe(
       401,
     );
@@ -522,7 +497,6 @@ describe('documents', () => {
 });
 
 describe('queries', () => {
-  /** One collection every operator is asked about. */
   async function fixture(): Promise<Site> {
     const site = await claimed('query');
     await seed(site, 'items', [
@@ -542,8 +516,7 @@ describe('queries', () => {
     expect(
       ids(await found(site, 'items', { where: { 'meta.rank': 1 } })),
     ).toEqual(['b']);
-    // A scalar stored inside an array is not that scalar: `data @> {tags:"x"}`
-    // is true for `["x","y"]`, and the exact half is what refuses it.
+    // `data @> {tags:"x"}` is true for `["x","y"]`; the exact check refuses it.
     expect(await found(site, 'items', { where: { tags: 'x' } })).toEqual([]);
     expect(
       ids(await found(site, 'items', { where: { tags: ['x', 'y'] } })),
@@ -583,22 +556,20 @@ describe('queries', () => {
     expect(
       ids(await found(site, 'items', { where: { name: { $like: 'A%' } } })),
     ).toEqual(['a']);
-    // Case-insensitive, and an absent field never matches either of them.
+    // An absent field never matches either.
     expect(
       ids(await found(site, 'items', { where: { name: { $ilike: 'g%' } } })),
     ).toEqual(['c']);
     expect(
       await found(site, 'items', { where: { nothing: { $like: '%' } } }),
     ).toEqual([]);
-    // A JSON null counts as present, which is why `$exists:false` is not a
-    // way to find one.
+    // A JSON null counts as present.
     expect(
       ids(await found(site, 'items', { where: { empty: { $exists: true } } })),
     ).toEqual(['c']);
     expect(
       ids(await found(site, 'items', { where: { tags: { $exists: false } } })),
     ).toEqual(['c']);
-    // Two keys AND together.
     expect(
       ids(
         await found(site, 'items', {
@@ -626,8 +597,8 @@ describe('queries', () => {
         })
       ).length,
     ).toBe(3);
-    // Written in one statement, so every `created_at` is the same instant and
-    // the tiebreak is what makes the order a fact rather than a guess.
+    // One statement gives every row the same `created_at`, so only the
+    // tiebreak orders them.
     expect(
       (await found(site, 'items', { orderBy: 'created_at desc' })).map(
         (i) => i.id,
@@ -693,7 +664,7 @@ describe('queries', () => {
         JSON.stringify(query),
       ]);
     }
-    // The table is still there, which is the point of the third one.
+    // The injection attempt above dropped nothing.
     expect(await found(site, 'items', {})).toHaveLength(3);
   });
 });
@@ -704,8 +675,7 @@ describe('quotas', () => {
     const made = await write(site, 'POST', '/api/db/notes', { id: 'x', a: 1 });
     expect(made.status).toBe(201);
 
-    // The empty clone is ~8 MiB, so any ceiling under that is "full". The
-    // ceiling is config rather than a constant exactly so this can be asked.
+    // An empty clone is several MiB, so this ceiling is already full.
     (kthx().config as { maxDbBytes: number }).maxDbBytes = 1;
     for (const attempt of [
       write(site, 'POST', '/api/db/notes', { b: 1 }),
@@ -718,7 +688,6 @@ describe('quotas', () => {
         'SITE_FULL',
       );
     }
-    // Reads and deletes are the way out of it.
     expect((await at(site, '/api/db/notes/x')).status).toBe(200);
     expect(
       (await at(site, '/api/db/notes/x', { method: 'DELETE' })).status,
@@ -747,7 +716,7 @@ describe('quotas', () => {
     expect(
       (await write(site, 'POST', '/api/db/notes', { id: 'x', a: 1 })).status,
     ).toBe(201);
-    // Under the ceiling on its own; over it once merged into what is stored.
+    // Under the ceiling alone, over it once merged into what is stored.
     const grown = await write(site, 'PATCH', '/api/db/notes/x', {
       big: 'y'.repeat(1024 * 1000),
       more: 'z'.repeat(60_000),
@@ -763,7 +732,7 @@ describe('quotas', () => {
     const body = new ReadableStream<Uint8Array>({
       pull(controller) {
         pulls += 1;
-        // Far past the ceiling: what must not happen is all of it arriving.
+        // Far past the ceiling, and it must not all be read.
         if (pulls > 200) controller.close();
         else controller.enqueue(chunk);
       },
@@ -777,7 +746,7 @@ describe('quotas', () => {
     });
     const response = await kthx().fetch(request);
     expect(response.status).toBe(413);
-    // 2 MiB is nine of these chunks; the rest of the stream was never taken.
+    // The 2 MiB ceiling is crossed on the ninth chunk; the rest is never read.
     expect(pulls).toBeLessThan(16);
   });
 });
@@ -802,10 +771,8 @@ describe('the visitor', () => {
     expect(((await again.json()) as { id: string }).id).toBe(body.id);
     expect(again.headers.get('set-cookie')).toBeNull();
 
-    // A cookie a sibling host handed out is real, correctly signed, and still
-    // not this site's: the site name is inside the signature. That, and a
-    // tampered one, are replaced rather than believed — which is what makes a
-    // visitor id a bound rather than a suggestion.
+    // A sibling host's correctly signed cookie is still not this site's: the
+    // site name is signed. It and a tampered one are replaced.
     const elsewhere = await at(b, '/api/me');
     const theirs = (await elsewhere.json()) as { id: string };
     const theirCookie = (elsewhere.headers.get('set-cookie') ?? '').split(
@@ -853,7 +820,6 @@ describe('the visitor', () => {
       },
     );
     expect(own.status).toBe(201);
-    // A read is not a write and is not guarded.
     expect(
       (
         await at(site, '/api/db', {
@@ -861,7 +827,7 @@ describe('the visitor', () => {
         })
       ).status,
     ).toBe(200);
-    // The owner's bearer is not a browser and is trusted without an Origin.
+    // The owner's bearer is trusted without an `Origin`.
     expect(
       (
         await write(

@@ -1,25 +1,7 @@
 /**
- * One private schema, one private sites directory, and the real handler over
- * both.
- *
- * The control database is real Postgres because everything interesting about a
- * release — the number it takes under a lock, the row that decides what serves
- * — is a claim about transactions that a fake store cannot falsify. It is
- * isolated by schema rather than by database so tests can run beside another
- * agent's on the same server: the schema name carries a unique prefix and is
- * dropped afterwards, and `search_path` travels in the connection handshake so
- * every session in the pool lands in it.
- *
- * A **site** database cannot be isolated that way — a site *is* a database and
- * a role, both cluster-wide names — so every name a test claims carries the
- * same prefix ({@link Harness.name}), the template and the group role are
- * named after it too, and everything with that prefix is dropped when the file
- * is done. Two agents running this suite at once therefore never see each
- * other's databases, roles, or template.
- *
- * The depot is the on-disk one for the same reason the database is real: the
- * rehydrate path is real code, and a second location scheme exercises it
- * better than a mock of the first.
+ * The real handler over a private schema in real Postgres and a private sites
+ * directory. Site databases and roles are cluster-wide, so they carry a
+ * per-file prefix and are dropped when the file is done.
  */
 import { afterAll, afterEach, beforeEach } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -45,35 +27,23 @@ function serverUrl(): string {
   return url;
 }
 
-/** A legal bare identifier that no other run can guess or collide with. */
 function schemaName(): string {
   return `kthx_test_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
-/**
- * The prefix this file's databases, roles and site names all start with.
- *
- * Alphanumeric and leading with a letter, so it is legal as a kthx name, as a
- * Postgres identifier, and as the head of `template_…` and `…_site`.
- */
+/** Starts with a letter: legal as a kthx name and a Postgres identifier. */
 function prefixName(): string {
   return `t${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`;
 }
 
 let admin: SQL | null = null;
 
-/**
- * The one session that creates and drops schemas, databases and roles.
- *
- * Shared because it holds no isolated state, and never closed because it lives
- * exactly as long as the test process.
- */
+/** Never closed: it lives as long as the test process. */
 function adminSession(): SQL {
   admin ??= new SQL(serverUrl(), { max: 1 });
   return admin;
 }
 
-/** Everything named for this prefix, gone. */
 async function dropPrefixed(prefix: string): Promise<void> {
   const sql = adminSession();
   const databases = (await sql`
@@ -100,9 +70,8 @@ export interface Harness {
   readonly config: Config;
   /** A site name only this file can claim. */
   name(label: string): string;
-  /** The whole server, from `Host` to bytes. */
   fetch(request: Request, server?: Bun.Server<unknown>): Promise<Response>;
-  /** The same server on a real port, for the tests that need a socket. */
+  /** The same server on a real port, for tests that need a socket. */
   listen(): Bun.Server<unknown>;
 }
 
@@ -122,10 +91,8 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
     const sitesDir = await mkdtemp(join(tmpdir(), 'kthx-sites-'));
     const config: Config = {
       zone: ZONE,
-      // The apex answers claims itself unless a test says otherwise.
       controlHost: null,
-      // No identity host is the kill switch, and the shape production had
-      // before there was one: the header is read nowhere.
+      // With no identity host, the identity header is read nowhere.
       identityHost: null,
       identityHeader: 'tailscale-user-login',
       bucket: null,
@@ -134,14 +101,12 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       meKey: 'k'.repeat(32),
       mePreviousKey: null,
       pgKey: 'p'.repeat(32),
-      // No nuke unless a test asks for one, which is production's shape too.
       adminLogins: [],
       pgPrefix: prefix,
       maxDbBytes: 256 * 1024 * 1024,
       maxCollections: 256,
-      // Nowhere by default, and nowhere that resolves: a test that means to
-      // call the AI upstream points this at its own stub, and one that does not
-      // must fail on DNS rather than sit on the 90 s first-byte deadline.
+      // Unresolvable, so a stray upstream call fails on DNS instead of waiting
+      // out the 90 s first-byte deadline.
       aiUrl: 'http://upstream.invalid/v1',
       aiKey: 'stub',
       aiModel: 'test-model',
@@ -149,9 +114,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       aiMaxTokens: 4096,
       aiBuildMaxTokens: 4096,
       aiBuildModel: 'test-model',
-      // No fallback by default: a test that means to exercise the second model
-      // says so, and one that does not must not quietly make two upstream calls
-      // for every refusal it asserts on.
+      // Off, so a refusal under test makes one upstream call, not two.
       aiBuildFallbackModel: null,
       trustedProxies: [],
       tailnetProxies: [],
@@ -175,8 +138,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       sitesDir,
       config,
       name: (label) => `${prefix}-${label}`,
-      // The handler answers `undefined` only for a socket it upgraded, which
-      // needs a real server and therefore `listen()`.
+      // `undefined` only answers an upgraded socket, which needs `listen()`.
       fetch: (request, on) =>
         fetch(request, on ?? server ?? undefined) as Promise<Response>,
       listen() {
@@ -190,7 +152,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       async close() {
         server?.stop(true);
         await fetch.close();
-        // Exactly the site databases this test made, named by its own rows.
+        // Only the site databases this test's rows name.
         const rows = (await sql`select name from sites`) as { name: string }[];
         for (const row of rows) {
           await pg.drop(row.name).catch(() => {});
@@ -210,8 +172,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
     await finished?.close();
   });
 
-  // The template and the group role outlive a single test — a `CREATE
-  // DATABASE` per test is cheap only because the template is made once.
+  // The template and group role outlive each test, so a claim stays cheap.
   afterAll(async () => {
     await dropPrefixed(prefix);
   });
@@ -224,7 +185,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
   };
 }
 
-/** A request as it arrives from the Gateway: a `Host`, and an address. */
+/** A request as it arrives from the Gateway. */
 export function ask(
   path: string,
   init: RequestInit & {

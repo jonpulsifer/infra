@@ -1,7 +1,4 @@
-/**
- * The client against a `Bun.serve` that speaks the contract: what it sends,
- * what it writes down, and how it fails.
- */
+/** The CLI against a stub server: what it sends, stores and fails with. */
 import {
   afterAll,
   afterEach,
@@ -50,15 +47,13 @@ let n = 0;
 /** How many claims to answer TAKEN before accepting one. */
 let refuseClaims = 0;
 
-/** The operator key this stub answers `DELETE /api/sites` for. */
-/** Every site the stub had when it was last nuked. */
+/** How many sites the last nuke deleted, or `null` before one. */
 let nuked: number | null = null;
-/** What the stub answers the nuke with: a deployment that has no operator, or
- *  a host that cannot know who is calling, both answer 404. */
+/** False answers the nuke with 404, as a host with no operator does. */
 let nukeOpens = true;
 
 const SKILL = '# kthx\n\nthe apex copy\n';
-/** The apex having no reference to hand, so the packed copy is the answer. */
+/** `/skill.md` answers 503, so the CLI falls back to its packed copy. */
 let skillDown = false;
 
 const stub = Bun.serve({
@@ -203,7 +198,6 @@ function site(files: Record<string, string> = { 'index.html': '<h1>hi</h1>' }) {
   return dir;
 }
 
-/** Everything a command printed, so a listing can be read back. */
 async function capture(run: () => Promise<unknown>): Promise<string> {
   const lines: string[] = [];
   const printed = console.log;
@@ -230,8 +224,7 @@ beforeEach(() => {
   refuseClaims = 0;
   skillDown = false;
 });
-// Every command writes `kthx.json` relative to where it runs, so no test may
-// leave the process standing somewhere else.
+// Commands write `kthx.json` relative to the working directory.
 afterEach(() => process.chdir(cwd));
 
 describe('deploy', () => {
@@ -256,7 +249,6 @@ describe('deploy', () => {
     expect(uploads[0]!.filename).toBe('site.tar.gz');
     expect(uploads[0]!.paths).toEqual(['/app.js', '/index.html']);
 
-    // The second deploy reuses the name and claims nothing.
     const second = await deploy('.');
     expect(second.n).toBe(2);
     expect(calls.filter((call) => call.path === '/api/sites')).toHaveLength(1);
@@ -293,7 +285,6 @@ describe('deploy', () => {
       code: 'NAMED',
     });
 
-    // A name this machine already holds a token for is reused, not re-claimed.
     const again = site();
     process.chdir(again);
     await deploy('.', { name: 'notes' });
@@ -308,7 +299,7 @@ describe('deploy', () => {
       readFileSync(join(project, 'kthx.json'), 'utf8'),
     );
     expect(name).toMatch(NAME);
-    // The name lives in the project, never in the directory a build rewrites.
+    // Never in the build output, which a build rewrites.
     expect(() => statSync(join(project, 'dist', 'kthx.json'))).toThrow();
     expect(uploads[0]!.paths).toEqual(['/index.html']);
     expect(uploads[0]!.name).toBe(name);
@@ -354,8 +345,6 @@ describe('init', () => {
     await init(dir, { name: 'notes' });
     expect(readFileSync(join(dir, 'index.html'), 'utf8')).toBe('<h1>mine</h1>');
 
-    // An apex with no reference to hand still leaves one behind: the copy this
-    // build was packed with.
     const offline = mkdtempSync(join(tmpdir(), 'kthx-init-'));
     writeFileSync(join(offline, 'kthx.json'), '{"name":"notes"}');
     skillDown = true;
@@ -416,8 +405,7 @@ describe('rollback, release, ls and rm', () => {
         (call) => call.method === 'DELETE' && call.path === '/api/sites',
       );
 
-    // Anything but NUKE, and a `prompt` with no terminal to ask on, delete
-    // nothing — `--yes` is the only way past it without typing.
+    // A `null` prompt means no terminal; only `--yes` skips typing NUKE.
     await nuke({}, () => 'nope');
     await nuke({}, () => null);
     expect(sent()).toHaveLength(0);
@@ -428,8 +416,7 @@ describe('rollback, release, ls and rm', () => {
     expect(nuked).toBe(1);
     expect(sent()).toHaveLength(1);
 
-    // Every token this machine held opens a name anyone may now claim, so the
-    // store is emptied the way `rm` empties the one entry it invalidated.
+    // Every stored token now names a claimable site, so the store is emptied.
     expect(
       JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
     ).toEqual({});
@@ -439,10 +426,8 @@ describe('rollback, release, ls and rm', () => {
     const dir = site();
     process.chdir(dir);
     await deploy('.', { name: 'notes' });
-    // 404 is the honest answer both for a deployment that names no operator
-    // and for the far likelier case: pointed at a host that cannot know who is
-    // calling. Relaying it as `there is nothing here` would send a person
-    // looking for a typo in the URL.
+    // A 404 means the deployment names no operator; the CLI says where the
+    // nuke opens.
     nukeOpens = false;
     await expect(nuke({ yes: true })).rejects.toMatchObject({
       code: 'NO_NUKE',
@@ -463,15 +448,12 @@ describe('rollback, release, ls and rm', () => {
     await deploy('.', { name: 'notes' });
     process.chdir(site());
     await deploy('.', { name: 'other' });
-    // A directory that is not a site: the question is "which did I claim?",
-    // and sites.json is the answer.
     process.chdir(site());
 
     const printed = await capture(() => ls('.'));
     expect(printed).toContain('notes');
     expect(printed).toContain('other');
     expect(printed).toContain('https://notes.kthx.test');
-    // One GET for each site, and the public directory is not asked for.
     expect(
       calls.filter(
         (call) => call.method === 'GET' && call.path.startsWith('/api/sites/'),
@@ -499,8 +481,8 @@ describe('rollback, release, ls and rm', () => {
   });
 
   test('refuses a kthx.json that names something no site can be called', async () => {
-    // The file is committed and cloned; the string in it becomes a host to open
-    // and a path to call, so it is checked before either is built.
+    // The file is committed and cloned, and its name becomes a host and a path,
+    // so it is checked before either is built.
     for (const [name, code] of [
       ['evil.example/#', 'INVALID_NAME'],
       ['ab', 'INVALID_NAME'],

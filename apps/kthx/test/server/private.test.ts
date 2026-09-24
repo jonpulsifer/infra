@@ -1,7 +1,6 @@
 /**
- * A deployment with a private host: the public apex reads the directory and
- * refuses the rest, the private host is the whole control API, and a site host
- * is public either way.
+ * A deployment with a private host: the public apex only lists the directory,
+ * the private host has the control API, and site hosts stay public.
  */
 import { describe, expect, test } from 'bun:test';
 import { tarGz } from '../../cli/tar.ts';

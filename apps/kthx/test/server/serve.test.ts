@@ -28,13 +28,11 @@ function bundle(files: Record<string, string>): Uint8Array<ArrayBuffer> {
   );
 }
 
-/** A claimed name serving these files. */
 async function published(
   files: Record<string, string>,
   label = 'notes',
 ): Promise<{ name: string; token: string; host: string }> {
-  // Prefixed: a claim makes a Postgres database and role of this name on a
-  // server this suite shares.
+  // Prefixed: a claim makes a database and role on a shared Postgres server.
   const name = kthx().name(label);
   const claimed = await kthx()
     .fetch(
@@ -66,8 +64,7 @@ describe('the url a name gets', () => {
   test('is https in the zone, and reachable on a local run', () => {
     expect(siteUrl('kthx.dev')).toBe('https://kthx.dev');
     expect(siteUrl('kthx.dev', 'notes', '8080')).toBe('https://notes.kthx.dev');
-    // Nothing terminates TLS in front of a local zone, and a URL without the
-    // port it is listening on is one nobody can open.
+    // Nothing terminates TLS for a local zone, and the URL needs its port.
     expect(siteUrl('kthx.localhost', 'notes', '4321')).toBe(
       'http://notes.kthx.localhost:4321',
     );
@@ -84,9 +81,7 @@ describe('the apex', () => {
     expect(landing.headers.get('cache-control')).toBe('no-cache');
     const html = await landing.text();
     expect(html).toContain('<!doctype html>');
-    // The asset on disk is still v1's, because the apex Spindrift serves reads
-    // the same file; this process rewrites it as it serves. Every swap has to
-    // land: one that stops matching leaves v1's copy on a v2 page in silence.
+    // The v2 API and install line, with nothing of the retired `/kthx/sites`.
     expect(html).toContain('const API = "/api/sites"');
     expect(html).toContain('"/api/sdk.js"');
     expect(html).toContain('bun add -g https://kthx.dev/cli/kthx.tgz');
@@ -112,8 +107,7 @@ describe('the apex', () => {
     const icon = await get(ZONE, '/favicon.ico');
     expect(icon.status).toBe(200);
     expect(icon.headers.get('content-type')).toBe('image/x-icon');
-    // Built into the process, not served out of a release: it caches like the
-    // SDK rather than revalidating on every page load of every site.
+    // Built into the process, so it caches like the SDK.
     expect(icon.headers.get('cache-control')).toBe('public, max-age=300');
   });
 
@@ -134,19 +128,15 @@ describe('the apex', () => {
     await rm(dist, { recursive: true, force: true });
     expect((await get(ZONE, '/cli/kthx.tgz')).status).toBe(404);
 
-    // The whole install line, end to end. `bun add -g <url>` reads exactly
-    // this tarball, so it has to carry one runnable file and a manifest with no
-    // dependencies at all: `@repo/archive` and `@repo/kthx` are `workspace:*`,
-    // which `bun pm pack` rewrites to a version the public registry has never
-    // heard of, and an install of that resolves nothing.
+    // `bun add -g <url>` needs one runnable file and no dependencies: a
+    // `workspace:*` dependency packs to a version no registry has.
     await Bun.$`bun run pack`.cwd(join(import.meta.dir, '..', '..')).quiet();
     const tarball = await get(ZONE, '/cli/kthx.tgz');
     expect(tarball.status).toBe(200);
     expect(tarball.headers.get('content-type')).toBe('application/gzip');
     expect(tarball.headers.get('cache-control')).toBe('public, max-age=300');
 
-    // The two headers the installed CLI's update check reads. `HEAD` is what it
-    // actually sends, and it must carry both without the body.
+    // The installed CLI's update check sends `HEAD` and reads both headers.
     const build = tarball.headers.get('x-kthx-build');
     const etag = tarball.headers.get('etag');
     expect(build).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{12}$/);
@@ -156,8 +146,7 @@ describe('the apex', () => {
     expect(head.headers.get('x-kthx-build')).toBe(build);
     expect(head.headers.get('etag')).toBe(etag);
     expect(head.headers.get('content-type')).toBe('application/gzip');
-    // The body is not asserted: this calls the handler directly, and dropping
-    // it for a HEAD is `Bun.serve`'s job rather than this code's.
+    // The body is not asserted: dropping it for a HEAD is `Bun.serve`'s job.
 
     const cached = await get(ZONE, '/cli/kthx.tgz', {
       headers: { 'if-none-match': etag ?? '' },
@@ -180,9 +169,8 @@ describe('the apex', () => {
     expect(manifest.bin).toEqual({ kthx: 'kthx.js' });
     expect(manifest.dependencies).toBeUndefined();
 
-    // `version.json` rides along in the tarball so an installed copy knows which
-    // build it is without asking. It has to be the build the header names, or
-    // the update check nags for ever.
+    // `version.json` must name the build the header does, or the update check
+    // nags forever.
     const bin = join(kthx().sitesDir, 'kthx.js');
     await writeFile(bin, text('kthx.js'));
     await writeFile(
@@ -248,7 +236,7 @@ describe('a site', () => {
     const first = await get(site.host, '/');
     expect(await first.text()).toBe('v1');
     const before = first.headers.get('etag') ?? '';
-    // Nothing may hold the old bytes: the etag is the whole freshness story.
+    // The etag alone decides freshness.
     expect(first.headers.get('cache-control')).toBe('no-cache');
 
     const uploaded = await kthx().fetch(
@@ -261,8 +249,7 @@ describe('a site', () => {
     );
     expect(uploaded.status).toBe(201);
 
-    // The conditional request a browser makes with what it has cached: the
-    // release moved, so it is answered with the new bytes rather than a 304.
+    // The release moved, so a browser's conditional request gets the new bytes.
     const after = await get(site.host, '/', {
       headers: { 'if-none-match': before },
     });
@@ -322,8 +309,8 @@ describe('a site', () => {
     expect(linked.status).toBe(404);
     expect(await linked.text()).not.toContain('not yours');
 
-    // A literal `..` is normalised away by the URL parser; a percent-encoded
-    // one survives it and is what the decoded-path guard is for.
+    // The URL parser normalises a literal `..` away; the decoded-path guard
+    // catches a percent-encoded one.
     for (const path of [
       '/../secret.txt',
       '/a/../../secret.txt',

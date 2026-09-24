@@ -1,12 +1,7 @@
 /**
- * The kthx server: one Bun process, behind the Gateway, answering the apex and
- * every site host.
- *
- * Dispatch is by `Host` before it is by path, because the same `/` means the
- * landing page on `kthx.dev` and a site's `index.html` on `notes.kthx.dev`.
- * Nothing is minted per site — no route, no record, no certificate: the
- * wildcard for the zone reaches this process, and a name is live the moment its
- * row says which release it serves.
+ * The kthx server. It dispatches by `Host` before path: `/` is the landing page
+ * on the apex and a site's `index.html` on a site host. Nothing is minted per
+ * site; the zone's wildcard reaches this process.
  */
 
 import { join } from 'node:path';
@@ -51,12 +46,11 @@ import {
   sitesApi,
 } from './sites.ts';
 
-/** The one sentence a v1 site's old calls get. No shim: they fail loudly. */
 const RETIRED = 'the /_/ API is retired; use /api/ — https://kthx.dev/skill.md';
 
 const READ_METHODS = new Set(['GET', 'HEAD']);
 
-/** The server-wide body ceiling; every route caps below it. */
+/** Every route caps its body below this. */
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
 function asset(path: string, type: string, cacheControl: string): Response {
@@ -69,28 +63,13 @@ function asset(path: string, type: string, cacheControl: string): Response {
   });
 }
 
-/** The one apex page, read once. This process is the only one serving it. */
+/** Read once: the file does not change under a running process. */
 let landing: Promise<string> | null = null;
 
 /**
- * The page is told four things a browser cannot see: the zone, because on a
- * private host `location.hostname` is not it; whether this host may claim — on
- * the public apex of a deployment with a private host the claim deck is hidden
- * rather than left to fail; whether this caller opens the zone, which is what
- * decides whether the nuke exists as far as the page is concerned; and whether
- * this is the tailnet door, which is where the builder — "build me a website
- * for …" — is a section of this page and nowhere else is.
- *
- * The login goes in the tag with it so the first paint already knows whether
- * there is anybody to greet: a page that asked `/api/whoami` first would show
- * its "sign in" sentence to everybody for a round trip. It is escaped because
- * it is a header value — the proxy sets it, but the proxy is not what this
- * file is defending against.
- *
- * `data-admin` and `data-identity` are hints and not the check. Each route
- * makes the same decision again from the same request, so a hand-typed
- * `DELETE`, or a `POST /api/build` from a browser that never got the
- * attribute, is refused exactly the same way.
+ * Tells the page what a browser cannot see: the zone (a private host's name is
+ * not it), claim and admin rights, and the tailnet login. These are hints only;
+ * every route decides again from the request.
  */
 async function landingHtml(
   zone: string,
@@ -110,23 +89,9 @@ async function landingHtml(
 }
 
 /**
- * The page without the builder, for the doors that do not have one.
- *
- * `html[data-identity]` is what shows the component, so hiding it costs a
- * selector — but the markup, its rules and thirty-five kilobytes of its script
- * still went to every anonymous visitor on the public apex, who cannot reach
- * `POST /api/build` and has nobody to be. Roughly doubling a page nobody asked
- * for is a strange thing to send over a tunnel.
- *
- * The regions are fenced in `landing.html` rather than split into a second
- * file: one page is what the owner asked for, and two files drift. The fence
- * is spelled the same in all three comment syntaxes the file uses, so one
- * expression clears markup, rules and script alike.
- *
- * Cut once and kept, like the page it is cut from: both are read at boot and
- * never change under a running process.
+ * A builder fence post in `landing.html`, in any of its three comment syntaxes,
+ * so one expression strips the builder's markup, rules and script.
  */
-/** One fence post, in any of the three comment syntaxes this file uses. */
 const POST = String.raw`[/<]\*?!?-{0,2}\s*builder:%s\s*-{0,2}\*?/?>?`;
 const FENCE = new RegExp(`${POST.replace('%s', '(?:start|end)')}\n?`, 'g');
 const BUILDER = new RegExp(
@@ -137,19 +102,19 @@ const BUILDER = new RegExp(
 let cut: Promise<string> | undefined;
 let kept: Promise<string> | undefined;
 
-/** Without the builder, for a door that has none. */
+/** The page without the builder, for doors that cannot use it. */
 function slim(full: Promise<string>): Promise<string> {
   cut ??= full.then((text) => text.replace(BUILDER, '').replace(FENCE, ''));
   return cut;
 }
 
-/** With it, and without the fence — scaffolding is nobody's to download. */
+/** The page with the builder, fences removed. */
 function whole(full: Promise<string>): Promise<string> {
   kept ??= full.then((text) => text.replace(FENCE, ''));
   return kept;
 }
 
-/** Safe inside a double-quoted attribute, which is the only place this goes. */
+/** For a double-quoted attribute: the login comes from a request header. */
 function attribute(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -158,27 +123,13 @@ function attribute(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
-/**
- * The CLI, as the tarball `bun add -g` installs from.
- *
- * Built into the image by `apps/kthx/pack.ts`, so the command line a site's
- * owner installs is always the one this server answers. A checkout that has
- * not run `bun run pack` has no tarball and says so rather than serving a file
- * that is not there.
- */
+/** The CLI tarball `bun add -g` installs, built into the image by `pack.ts`. */
 const TARBALL = join(import.meta.dir, '..', 'dist', 'kthx.tgz');
 const TARBALL_VERSION = join(import.meta.dir, '..', 'dist', 'version.json');
 
 /**
- * The tarball's identity, hashed once per file rather than once per request:
- * nothing in a running image changes it, and a checkout that repacks between
- * requests is keyed out by size and mtime rather than served a stale digest.
- *
- * `x-kthx-build` is what an installed CLI compares itself against with one
- * `HEAD`, and it is the id `pack.ts` wrote *into* the tarball as well, so the
- * two are the same bytes rather than two guesses at the same thing. The etag is
- * the digest of what is served, which is what a cache wants and a build id is
- * not.
+ * `build` is the id `pack.ts` wrote into the tarball; an installed CLI compares
+ * it with one `HEAD`. The etag is the digest of the bytes served.
  */
 interface Tarball {
   readonly etag: string;
@@ -229,8 +180,6 @@ async function tarball(request: Request, id: string): Promise<Response> {
   return new Response(Bun.file(TARBALL), { headers });
 }
 
-// --- the apex ---------------------------------------------------------------
-
 async function apex(
   request: Request,
   ctx: Ctx,
@@ -238,16 +187,14 @@ async function apex(
 ): Promise<Response> {
   const segments = path.split('/');
   if (segments[1] === 'api' && segments[2] === 'sites') {
-    // With a private host configured, the public apex reads the directory and
-    // nothing else: claiming and everything behind a bearer answer there.
+    // With a private host configured, the public apex only lists the directory.
     const directory = request.method === 'GET' && segments.length === 3;
     if (!ctx.caller.control && !directory) return refuse('PRIVATE', ctx.id);
     return (
       (await sitesApi(request, ctx, segments)) ?? refuse('NOT_FOUND', ctx.id)
     );
   }
-  // Ahead of the `/api/*` catch-all below, which is where every path this
-  // server does not have goes to die.
+  // Before the `/api/*` catch-all below.
   if (segments[1] === 'api' && segments[2] === 'names') {
     if (!READ_METHODS.has(request.method)) {
       return refuse('METHOD_NOT_ALLOWED', ctx.id);
@@ -256,9 +203,7 @@ async function apex(
     if (asked === '') return refuse('NOT_FOUND', ctx.id);
     return nameStatus(ctx, asked);
   }
-  // The builder answers on the identity host and nowhere else — not 403, not
-  // 401: on every other door it is a path this server does not have, because
-  // there is no credential that would open it there.
+  // 404 on every other door: no credential would open the builder there.
   if (segments[1] === 'api' && segments[2] === 'build') {
     if (ctx.caller.door !== 'identity') return refuse('NOT_FOUND', ctx.id);
     return buildApi(request, ctx, segments);
@@ -267,15 +212,12 @@ async function apex(
     if (!READ_METHODS.has(request.method)) {
       return refuse('METHOD_NOT_ALLOWED', ctx.id);
     }
-    // Nowhere but the identity host has anything to answer with, so this is
-    // 401 on the public apex and on the control host by construction rather
-    // than by a rule of its own.
+    // Only the identity host sets a login, so every other door answers 401.
     return ctx.caller.login === null
       ? refuse('UNAUTHENTICATED', ctx.id)
       : ok({ login: ctx.caller.login }, ctx.id);
   }
-  // The v1 API. Gone rather than moved: its key→JSON plane had no real users,
-  // and a shim would be a second contract to keep alive.
+  // The retired v1 API, with no shim.
   if (path === '/kthx' || path.startsWith('/kthx/')) {
     return refuse('GONE', ctx.id);
   }
@@ -290,10 +232,8 @@ async function apex(
     });
   }
   if (path === '/api' && READ_METHODS.has(request.method)) {
-    // What a site host's `/api` says about itself, said about the zone. The
-    // command line asks this to build a site's address, because the origin it
-    // was pointed at is not always the zone — and a file in the project must
-    // not be what decides where a bearer is sent.
+    // The CLI builds site addresses from this: its origin may not be the zone,
+    // and a project file must not decide where a bearer is sent.
     const url = siteUrl(ctx.config.zone, undefined, ctx.port);
     return ok({ zone: ctx.config.zone, url, docs: `${url}/skill.md` }, ctx.id);
   }
@@ -337,8 +277,6 @@ async function apex(
   return notHere(ctx.host, ctx.config.zone, 404, ctx.id, ctx.port);
 }
 
-// --- a site host ------------------------------------------------------------
-
 interface Serving {
   readonly deleted_at: Date | null;
   readonly provisioned_at: Date | null;
@@ -355,8 +293,7 @@ async function site(
   name: string,
   path: string,
 ): Promise<Response | undefined> {
-  // `/_/` is retired on every name in the zone, claimed or not: it is a
-  // statement about the API, not about this site.
+  // Retired on every name in the zone, claimed or not.
   if (path === '/_' || path.startsWith('/_/')) {
     return Response.json(
       { code: 'GONE', message: RETIRED },
@@ -380,8 +317,7 @@ async function site(
     path === '/files' ||
     path.startsWith('/files/');
 
-  // Every static byte costs this read, so a database that is briefly away must
-  // read as "not here yet" rather than as a JSON 500 in the middle of a page.
+  // A database blip on a page request answers the 503 page, not a JSON 500.
   let row: Serving | undefined;
   try {
     [row] = (await ctx.sql`
@@ -432,21 +368,6 @@ async function site(
   return answered ?? page(404);
 }
 
-/**
- * What `/api` on a site answers.
- *
- * The order matters. `/api/sdk.js` is the one path here that is cacheable and
- * must never carry a cookie, so it is served before anything that mints one.
- * The same-site guard comes next, because `kthx.dev` is not on the Public
- * Suffix List and `SameSite=Lax` therefore separates none of these hosts from
- * one another. Then provisioning: a name has a row before it has a database,
- * and a backend that would reach for one answers 503 rather than 500 while it
- * catches up.
- *
- * `files` sits ahead of the provisioning wait on purpose: its rows are in the
- * control database, so a site's bytes keep being served while its own database
- * is being made or repaired.
- */
 async function siteApi(
   request: Request,
   ctx: Ctx,
@@ -455,6 +376,7 @@ async function siteApi(
   row: Serving,
 ): Promise<Response | undefined> {
   const read = READ_METHODS.has(request.method);
+  // Cacheable, so it is served before anything that sets a cookie.
   if (path === '/api/sdk.js' && read) {
     return asset(
       SDK_PATH,
@@ -463,16 +385,15 @@ async function siteApi(
     );
   }
 
-  // Public bytes: no cookie is minted on them, because a `set-cookie` would
-  // take every one out of the edge cache, and no same-site guard either —
-  // there is nothing here a foreign page could not fetch as an image anyway.
+  // Public bytes: a cookie would defeat the edge cache, and any page may fetch
+  // them anyway. Rows live in the control database, so no provisioning wait.
   if (path === '/files' || path.startsWith('/files/')) {
     return serveFile(request, ctx, name, path);
   }
 
   const owner = opensSite(ctx.caller, row);
-  // The upgrade is a `GET` and is guarded all the same: a socket is a write
-  // channel, and a foreign page opening one is exactly what this stops.
+  // `SameSite=Lax` cannot separate sites: the zone is not on the Public Suffix
+  // List. The `/api/ws` GET is guarded too, since a socket is a write channel.
   const guarded = request.method !== 'GET' || path === '/api/ws';
   if (guarded && !owner && !sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
@@ -495,8 +416,8 @@ async function siteApi(
   }
 
   if (row.provisioned_at === null) {
-    // Idempotent, deduplicated, and not waited for: the caller is told to come
-    // back, and the site is repaired by the time it does.
+    // A site row exists before its database. Repair is deduplicated per name;
+    // the caller gets BUSY and retries.
     void ctx.pg.repair(name).catch((cause: unknown) => {
       logCause(ctx.id, `repairing ${name}`, cause);
     });
@@ -536,7 +457,7 @@ async function siteApi(
   const segments = path.split('/');
 
   if (path === '/api/mcp') {
-    // No stream to open, so nothing but `POST` is a message.
+    // This endpoint opens no stream, so only `POST` carries a message.
     if (request.method !== 'POST') return refuse('METHOD_NOT_ALLOWED', ctx.id);
     if (!owner) {
       return refuse(
@@ -546,15 +467,13 @@ async function siteApi(
         ctx.id,
       );
     }
-    // The bucket is spent inside, per tool: a `tools/list` or a `db_query` is
-    // a read, and the contract leaves reads unmetered over every transport.
-    // No cookie: this surface has a bearer, and a visitor id it never uses.
+    // Buckets are spent per tool inside, where reads stay free. No cookie:
+    // every caller here holds a bearer.
     return mcpApi(request, ctx, name);
   }
 
   if (segments[2] === 'db') {
-    // A bulk `POST` is one unit, and `POST …/query` is a read spelled with a
-    // body — neither is the thing the write buckets are counting.
+    // A bulk `POST` is one unit; `POST …/query` is a read with a body.
     const metered =
       !READ_METHODS.has(request.method) && segments[4] !== 'query';
     const refusal = charge(ctx, name, me, owner, address, metered);
@@ -562,21 +481,17 @@ async function siteApi(
     return cookied(await dbApi(request, ctx, name, segments, owner), me);
   }
   if (segments[2] === 'ai') {
-    // The two GETs here — `usage` and the model list — are this server's own
-    // numbers, reach no upstream and cost nothing. Charging them would leave a
-    // foreign page able to spend a victim site's day on a `no-cors` GET, which
-    // carries no `Origin` for the guard above to catch.
+    // GETs reach no upstream. Charging them would let a foreign page spend a
+    // site's day with a `no-cors` GET, which carries no `Origin` to guard on.
     const refusal = read ? null : charge(ctx, name, me, owner, address, true);
     if (refusal !== null) return refusal;
-    // A model thinks for longer than Bun's 10 s connection idle timeout, which
-    // would otherwise cut a streaming completion off mid-answer.
+    // A model can think past the server's 30 s idle timeout mid-stream.
     ctx.server?.timeout(request, AI_IDLE_SECONDS);
     return cookied(await aiApi(request, ctx, name, segments, address), me);
   }
   return refuse('NOT_FOUND', ctx.id);
 }
 
-/** Set the cookie on the responses that may carry one, and never cache them. */
 function cookied(response: Response, me: Me): Response {
   if (me.setCookie === null) return response;
   response.headers.append('set-cookie', me.setCookie);
@@ -585,14 +500,8 @@ function cookied(response: Response, me: Me): Response {
 }
 
 /**
- * Spend the write buckets, or say why not.
- *
- * `metered` is the caller's to decide, because it is not the same question on
- * every backend: reads and `POST …/query` are free on `/api/db` (a bulk `POST`
- * is one unit), a `GET /api/files` is a listing, and every `/api/ai` call costs
- * the operator money and is charged whatever its method. An owner bearer skips
- * the visitor and address buckets and never the site one, so a token that leaks
- * cannot outrun the site's own ceiling.
+ * An owner bearer skips the visitor and address buckets but never the site one,
+ * so a leaked token cannot outrun the site's ceiling.
  */
 function charge(
   ctx: Ctx,
@@ -604,8 +513,8 @@ function charge(
 ): Response | null {
   if (!metered) return null;
   const spent = spendAll([
-    // A request that arrived without a cookie is keyed by the two things it
-    // did have: the cookie it is about to receive is not a fresh allowance.
+    // A cookieless request skips this bucket: a fresh cookie is no fresh
+    // allowance.
     [
       writes.visitor,
       owner || me.setCookie !== null ? null : `${name}:${me.id}`,
@@ -616,7 +525,6 @@ function charge(
   return spent ? refuse('RATE_LIMITED', ctx.id, { 'retry-after': '60' }) : null;
 }
 
-/** The socket a tab opens, once it is inside both of the upgrade's caps. */
 function upgrade(
   request: Request,
   ctx: Ctx,
@@ -642,15 +550,12 @@ function upgrade(
   return upgraded ? undefined : refuse('MALFORMED_REQUEST', ctx.id);
 }
 
-// --- the process ------------------------------------------------------------
-
-/** The server as a function, plus the pools it opened along the way. */
 export interface Kthx {
   (
     request: Request,
     server?: Bun.Server<unknown>,
   ): Promise<Response | undefined>;
-  /** Closes every site pool. The control connection is the caller's. */
+  /** Closes site pools; the control connection belongs to the caller. */
   close(): Promise<void>;
 }
 
@@ -667,15 +572,12 @@ export function handler(
     const id = requestId();
     const host = hostOf(request);
     const caller = callerOf(request, server, config, host);
-    // Both private hosts answer the apex, because neither is in the zone and
-    // the control API is what both are for.
+    // Private hosts are outside the zone and always answer as the apex.
     const name = caller.door === 'public' ? siteOf(host, config.zone) : '';
-    // A host outside the zone reached this process by mistake or on purpose;
-    // either way it learns nothing about what is behind it.
+    // A host outside the zone learns nothing about what is behind it.
     if (name === null) return refuse('NOT_FOUND', id);
-    // Nor does a request for a private host that came through Cloudflare:
-    // the tunnel never carries those names, so this is an edge misrouted, and
-    // it gets the answer a host outside the zone gets.
+    // The tunnel never carries private names, so one arriving through
+    // Cloudflare is misrouted.
     if (caller.door !== 'public' && request.headers.has('cf-connecting-ip')) {
       return refuse('NOT_FOUND', id);
     }
@@ -712,7 +614,6 @@ export function handler(
   return kthx;
 }
 
-/** Once a day: databases and roles no live site row names any more. */
 const SWEEP_MS = 24 * 60 * 60 * 1000;
 
 export async function start(): Promise<Bun.Server<unknown>> {
@@ -722,7 +623,7 @@ export async function start(): Promise<Bun.Server<unknown>> {
   if (ran.length > 0) console.log(`migrated: ${ran.join(', ')}`);
 
   const pg = new Pg(config, sql);
-  // The template and the group role, before a claim can want them.
+  // Before serving: every claim needs the template and the group role.
   await pg.bootstrap();
 
   const depot =
@@ -733,21 +634,17 @@ export async function start(): Promise<Bun.Server<unknown>> {
 
   const server = Bun.serve({
     port: config.port,
-    // Raised per request for an upload; this is the floor every other route
-    // lives inside.
+    // Seconds. Uploads, builds and AI calls raise it per request.
     idleTimeout: 30,
-    // The contract's server-wide ceiling. Bun's default is 128 MiB, which is
-    // four times what the largest route here takes and is buffered before any
-    // handler sees a byte.
+    // Bun buffers a body before a handler sees it; its default cap is 128 MiB.
     maxRequestBodySize: MAX_BODY_BYTES,
     fetch,
     websocket,
   });
   console.log(`kthx serving ${config.zone} on :${server.port}`);
 
-  // Not awaited: after a restore or a `KTHX_PG_KEY` rotation every site needs
-  // its role's password re-applied, and a site that is asked for first is
-  // repaired on the way in anyway. Serving must not wait on the whole estate.
+  // Not awaited: after a restore or `KTHX_PG_KEY` rotation, a site that is
+  // asked for first is repaired on the way in.
   void pg
     .repairAll()
     .then((failed) => {

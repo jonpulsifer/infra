@@ -1,10 +1,6 @@
 /**
- * `/api/ws`: the collection frames a write fans out, and the rooms that never
- * touch the database.
- *
- * A real `Bun.serve` rather than the handler on its own, because an upgrade is
- * the one thing a bare `fetch` cannot do — and because the caps this exercises
- * are counted in the socket's `open` and `close`, not in the handler.
+ * `/api/ws` collection frames and rooms, over a real `Bun.serve`: a bare
+ * `fetch` cannot upgrade, and the socket caps are counted in `open` and `close`.
  */
 import { describe, expect, test } from 'bun:test';
 import { MAX_SOCKETS_PER_VISITOR } from '../../server/realtime.ts';
@@ -44,13 +40,12 @@ async function claimed(label: string): Promise<Site> {
   };
 }
 
-/** A socket on this site, with every frame it was sent. */
 async function open(site: Site, cookie?: string) {
   const server = kthx().listen();
   const socket = new WebSocket(
     `ws://${server.url.host}/api/ws`,
-    // Bun's client sends these as request headers, which is how the server
-    // sees the `Host` a Gateway would have set.
+    // Bun's WebSocket takes request headers, so `host` stands in for the one a
+    // Gateway sets.
     {
       headers: {
         host: site.host,
@@ -67,7 +62,7 @@ async function open(site: Site, cookie?: string) {
   return { socket, frames };
 }
 
-/** Fan-out is asynchronous; wait for it rather than guess at it. */
+/** Fan-out is asynchronous, so poll up to 3 s for `count` frames. */
 async function delivered(frames: unknown[], count: number): Promise<void> {
   const deadline = Date.now() + 3000;
   while (frames.length < count && Date.now() < deadline) await Bun.sleep(5);
@@ -89,8 +84,8 @@ describe('collection frames', () => {
     const site = await claimed('feed');
     const tab = await open(site);
     tab.socket.send(JSON.stringify({ t: 'sub', collection: 'notes' }));
-    // The subscription is handled on the server before the write arrives only
-    // if it got there first; the write is a separate connection, so wait.
+    // The write goes over a separate connection, so give `sub` time to arrive
+    // first.
     await Bun.sleep(50);
 
     const created = (await (
@@ -113,7 +108,7 @@ describe('collection frames', () => {
       id: 'x',
       etag: created.etag,
     });
-    // The document rides along while it is small.
+    // A document up to MAX_FRAME_DOC_BYTES rides in the frame.
     expect((tab.frames[0] as { doc: { n: number } }).doc.n).toBe(1);
     expect((tab.frames[1] as { doc: { n: number } }).doc.n).toBe(2);
     expect(tab.frames[2]).toEqual({
@@ -122,7 +117,6 @@ describe('collection frames', () => {
       id: 'x',
     });
 
-    // `unsub` stops it.
     tab.socket.send(JSON.stringify({ t: 'unsub', collection: 'notes' }));
     await Bun.sleep(50);
     await write(site, 'POST', '/api/db/notes', { n: 3 });
@@ -142,8 +136,8 @@ describe('collection frames', () => {
 
   test('one visitor gets eight sockets and no more', async () => {
     const site = await claimed('sockets');
-    // Every socket is the same visitor only if they carry the same cookie;
-    // without one each upgrade mints a new id, which is its own allowance.
+    // Without a shared cookie, each upgrade mints a new visitor with its own
+    // allowance.
     const first = await kthx().fetch(ask('/api/me', { host: site.host }));
     const cookie = (first.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
 
@@ -181,7 +175,7 @@ describe('rooms', () => {
     b.socket.close();
     await delivered(a.frames, 4);
 
-    // Neither socket sent a cookie, so each was given an id on upgrade.
+    // With no cookie, each socket is given a new visitor id on upgrade.
     const [A] = (a.frames[0] as { peers: string[] }).peers;
     const B = (a.frames[1] as { peer: string }).peer;
     expect(A).toMatch(/^[0-9a-f-]{36}$/);
