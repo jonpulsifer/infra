@@ -38,6 +38,8 @@ describe("a valid tree", () => {
     const rail = html.slice(html.indexOf('<aside class="toc"'));
     expect(rail).toContain('<a href="#install-1">Install</a>');
     expect(rail).toContain('class="sub"');
+    expect(html).toContain('<h4 id="deep-detail">');
+    expect(rail).not.toContain("deep-detail");
   });
 
   test("alerts become callouts and plain quotes stay quotes", async () => {
@@ -52,6 +54,19 @@ describe("a valid tree", () => {
     const html = await s.read("apps/kthx/index.html");
     expect(html).toContain("<code>&lt;host&gt;.lolwtf.ca</code>");
     expect(html).toContain("raw &lt;b&gt;tags&lt;/b&gt; stay text &amp; escaped");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt; stays text");
+    expect(html).not.toContain("<img src=x");
+  });
+
+  test("angle-bracket autolinks become links", async () => {
+    const html = await s.read("apps/kthx/index.html");
+    expect(html).toContain('<a href="https://example.com/docs" rel="noopener">https://example.com/docs</a>');
+  });
+
+  test("a linked image links where the link goes, without nesting anchors", async () => {
+    const net = await s.read("platform/network/index.html");
+    expect(net).toContain('<a href="/runbooks/deploy-a-nixos-host/"><img src="/assets/network.svg" alt="Deploy steps"');
+    expect(net).not.toMatch(/<a [^>]*>(?:(?!<\/a>).)*<a /s);
   });
 
   test("links resolve to pages, anchors, assets and GitHub", async () => {
@@ -130,7 +145,52 @@ describe("a valid tree", () => {
     expect(await s.read("404.html")).toContain("Not found");
     const graph = await s.json("graph.json");
     expect(graph.links.length).toBeGreaterThan(0);
+    expect(graph.links.flat().every((i: number) => i >= 0 && i < graph.nodes.length)).toBe(true);
     expect(await s.read("client.js")).toContain("search.json");
+  });
+
+  test("urls lists every page, anchor and asset the site serves", () => {
+    expect(s.urls).toContain("/apps/kthx/");
+    expect(s.urls).toContain("/apps/kthx/#before-you-start");
+    expect(s.urls).toContain("/");
+    expect(s.urls).toContain("/assets/network.svg");
+    expect(s.urls).toContain("/pages.json");
+    expect(s.urls).not.toContain("/assets/network.d2");
+    expect(s.urls.some((u) => u.startsWith("/agents/"))).toBe(false);
+  });
+});
+
+describe("titles and descriptions are escaped everywhere", () => {
+  const title = 'Rowbutt <b>"&';
+  const description = "A <i>bot</i> & 'more'";
+  let s: Awaited<ReturnType<typeof site>>;
+  beforeAll(async () => {
+    s = await site({
+      "apps/mate.md": page(`title: '${title.replace(/'/g, "''")}'\ndescription: "${description}"\nstatus: parked`, "See [kthx](kthx.md).\n"),
+    });
+  });
+  afterAll(() => s.cleanup());
+
+  test("in the page, the sidebar, cards and backlinks", async () => {
+    expect(s.errors).toEqual([]);
+    const t = "Rowbutt &lt;b&gt;&quot;&amp;";
+    const d = "A &lt;i&gt;bot&lt;/i&gt; &amp; &#39;more&#39;";
+    const mate = await s.read("apps/mate/index.html");
+    expect(mate).toContain(`<title>${t} · infra wiki</title>`);
+    expect(mate).toContain(`<meta name="description" content="${d}">`);
+    expect(mate).toContain(`<h1>${t}</h1><p class="lead">${d}</p>`);
+    expect(mate).toContain(`<a href="/apps/mate/" aria-current="page">${t}</a>`);
+    const home = await s.read("index.html");
+    expect(home).toContain(`<span class="card-title">${t}</span>`);
+    expect(home).toContain(`<span class="card-desc">${d}</span>`);
+    const kthx = await s.read("apps/kthx/index.html");
+    expect(kthx).toContain(`<li><a href="/apps/mate/">${t}</a><span>${d}</span></li>`);
+    for (const html of [mate, home, kthx]) expect(html).not.toContain("<b>");
+  });
+
+  test("raw in search.json, which the client renders as text", async () => {
+    const index = await s.json("search.json");
+    expect(index.find((p: { u: string }) => p.u === "/apps/mate/")).toMatchObject({ t: title, d: description });
   });
 });
 
@@ -182,6 +242,37 @@ describe("validation", () => {
       "docs/apps/mate.md: kthx.md#missing: no heading #missing in apps/kthx.md",
       "docs/apps/mate.md: #here: no heading #here in apps/mate.md",
     ]);
+  });
+
+  test("links take http(s) or mailto, images http(s)", async () => {
+    const errors = await errorsFor({
+      "apps/mate.md": page(
+        "title: Rowbutt\ndescription: Bot.",
+        "[a](javascript:alert(1)) ![b](javascript:alert(2)) ![c](mailto:x@y.z) [d](mailto:x@y.z) [e](https://x.y)\n",
+      ),
+    });
+    expect(errors).toEqual([
+      "docs/apps/mate.md: javascript:alert(1): links take http(s) or mailto URLs or relative paths",
+      "docs/apps/mate.md: javascript:alert(2): images take http(s) URLs or relative paths",
+      "docs/apps/mate.md: mailto:x@y.z: images take http(s) URLs or relative paths",
+    ]);
+  });
+
+  test("Logseq [[links]] fail outside code", async () => {
+    const errors = await errorsFor({
+      "apps/mate.md": page("title: Rowbutt\ndescription: Bot.", "See [[Runbooks/Deploy]]. Code `[[ -f x ]]` is fine.\n"),
+    });
+    expect(errors).toEqual(["docs/apps/mate.md: [[Page]] is Logseq syntax; link the page by its relative .md path"]);
+  });
+
+  test("a section index is a path, so no page hides under it", async () => {
+    const nav = (await Bun.file(`${import.meta.dir}/fixtures/docs/nav.yaml`).text()).replace(
+      "    index: platform/index.md",
+      "    index: {path: platform/index.md, children: [platform/extra.md]}",
+    );
+    const errors = await errorsFor({ "nav.yaml": nav, "platform/extra.md": page("title: Extra\ndescription: x.") });
+    expect(errors).toContain("docs/nav.yaml: Platform index must be a path; put children under an item instead");
+    expect(errors).toContain("docs/platform/extra.md: not in nav.yaml, so no reader can reach it");
   });
 
   test("an H1 in the body fails, ATX or setext", async () => {

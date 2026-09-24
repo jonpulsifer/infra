@@ -22,8 +22,12 @@ frontmatter and Markdown body, orders the site by `docs/nav.yaml`, and writes
   `read_page` and `search`.
 
 The build fails, listing every problem, when a page lacks a title or
-description, is missing from `nav.yaml`, has an H1 in its body, or links to a
-page, anchor, image or repo path that does not exist.
+description, is missing from `nav.yaml`, has an H1 in its body, uses a Logseq
+`[[link]]`, links with a scheme other than http(s) or mailto, or links to a
+page, anchor, image or repo path that does not exist. `--manifest=FILE` also
+writes every URL the site serves, anchors included; the docs contract
+(`.github/scripts/docs-contract.sh`) resolves references from the rest of the
+repo against it.
 
 ## Usage
 

@@ -85,6 +85,6 @@ An image with `deploy` targets in `.github/containers.json` doesn't wait for a R
 
 ## Docs publish
 
-`wiki.yml` builds `docs/` with the Bun SSG in `apps/wiki` (`bun run build` → `dist/`) on every push and PR touching `docs/**`, `apps/wiki/**`, or the workflow itself. On `main` it additionally runs `bun x wrangler pages deploy dist --project-name=infra-wiki` to Cloudflare Pages (project and DNS Terraform-managed in `terraform/network/cloudflare/`). A docs page goes live at wiki.lolwtf.ca the moment its PR merges to `main` — there's no separate publish step.
+`wiki.yml` runs the docs contract, the `apps/wiki` tests and the build (`bun run build` → `dist/`) on any change that can break a page or a reference into the wiki. On `main` it additionally runs `bun x wrangler pages deploy dist --project-name=infra-wiki` to Cloudflare Pages (project and DNS Terraform-managed in `terraform/network/cloudflare/`). A docs page goes live at wiki.lolwtf.ca the moment its PR merges to `main` — there's no separate publish step.
 
 Validate before opening a docs PR: [Test a change](../runbooks/test-a-change.md).
