@@ -1,83 +1,66 @@
 # rackstat
 
-Rack-top homelab status for [Tronbyt][tronbyt]: a Go aggregator that condenses
-Prometheus, Flux, and network probes into one JSON snapshot, plus a
-[Pixlet][pixlet] app that renders it on the display sitting on the rack.
+rackstat is the rack status display on the [Tronbyt][tronbyt]: a Go aggregator
+that condenses Prometheus, Flux and TCP probes into one JSON snapshot, and a
+[Pixlet][pixlet] app, `rackstat.star`, that renders it. See
+[Tidbyt apps](https://wiki.lolwtf.ca/apps/tidbyt/).
 
 ![rackstat](./rackstat.webp)
 
-Supports 2x (128×64) displays:
-
 ![rackstat @2x](./rackstat@2x.webp)
 
-## Design
+## Run
 
-The display answers one question from six feet away: *is anything wrong, and
-if so, where do I start looking?* Pages are state-driven — when alerts fire or
-a node/probe is down, an alert page preempts the rotation and problem rows
-blink; otherwise a calm summary, node grid, GitOps state, network probes, and
-a 24h CPU sparkline rotate.
-
-Every page header carries a clock rendered in-cluster. A frozen clock means
-the renderer (or the cluster under it) is down — a built-in dead man's switch.
-
-## Aggregator
-
-Serves `/api/rackstat` and `/healthz` on `:8080`, caching snapshots for 15s.
-
-| File | Holds |
-| --- | --- |
-| `main.go` | config, the HTTP handler, the snapshot cache, and the fan-out across sources |
-| `prom.go` | the `promSource` port and its HTTP adapter |
-| `fleet.go` | node and alert modelling — samples in, `[]Node`/`[]Alert` out |
-| `kube.go` | the in-cluster REST client for the Flux CRDs |
-
-`promSource` is what the fleet modelling reads through, so it can be exercised
-from sample literals; `go test ./...` covers both that and the HTTP adapter.
-
-Sources, each degrading independently:
-
-- **Prometheus** — node up/temp/CPU/mem from the `node-exporter` job (k8s
-  nodes and bare hosts), firing alerts (excluding the always-firing
-  Watchdog/InfoInhibitor), k8s readiness from kube-state-metrics, and a 24h
-  cluster CPU history. Fleet membership comes from Prometheus targets, so
-  hosts never need to be hardcoded.
-- **Kubernetes API** — Flux Kustomization/HelmRelease readiness and the last
-  applied revision, read straight from the CRDs (Flux metrics are not scraped
-  into Prometheus). Needs the read-only `rackstat-flux-reader` ClusterRole.
-- **TCP probes** — `PROBES=name=host:port,...`: WAN, the offsite cluster over
-  the Site Magic tunnel, and a local LB VIP. Probing the data path catches
-  "BGP session up but routes not programmed" failures that state metrics miss.
-
-| Env | Default | Purpose |
-| --- | --- | --- |
-| `PROM_URL` | `http://prom-stack-kube-prometheus-prometheus.monitoring.svc:9090` | Prometheus base URL |
-| `PROBES` | _(none)_ | comma-separated `name=host:port` TCP probes |
-| `CLUSTER_NAME` | `folly` | reported in the snapshot |
-| `ROOT_KUSTOMIZATION` | `apps` | whose `lastAppliedRevision` is "the repo" |
-| `CACHE_TTL` | `15s` | snapshot cache |
-| `LISTEN_ADDR` | `:8080` | listen address |
-
-Deployed by Flux from `clusters/folly/apps/tronbyt/` (RBAC, Deployment,
-Service) in the tronbyt namespace, next to the server that renders the app.
-
-## Development
+The aggregator serves `/api/rackstat` and `/healthz`.
 
 ```bash
-# aggregator against live Prometheus
 kubectl --context folly -n monitoring port-forward svc/prom-stack-kube-prometheus-prometheus 9090 &
-PROM_URL=http://127.0.0.1:9090 PROBES="wan=1.1.1.1:443" go run .
+PROM_URL=http://127.0.0.1:9090 PROBES="wan=example.com:443" go run .
+```
 
-# pixlet app against the checked-in sample
+Render the app against `sample_results.json`. The sample has a far-future
+`generated_at`, two hosts down and firing alerts, so a preview shows the alert
+page and no STALE banner.
+
+```bash
 python3 -m http.server 8080 &
 pixlet render rackstat.star api_url=http://127.0.0.1:8080/sample_results.json --format gif -o preview.gif
 pixlet render -2 rackstat.star api_url=http://127.0.0.1:8080/sample_results.json --format gif -o preview@2x.gif
 ```
 
-The checked-in `sample_results.json` is a live capture with its
-`generated_at` pinned far in the future so previews don't render the STALE
-banner; it includes two down hosts and firing alerts, so previews demo the
-alert-first path.
+`mise install` at the repo root supplies `pixlet`.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PROM_URL` | `http://prom-stack-kube-prometheus-prometheus.monitoring.svc:9090` | Prometheus base URL |
+| `PROBES` | none | Comma-separated `name=host:port` TCP probes |
+| `CLUSTER_NAME` | `folly` | The cluster name in the snapshot |
+| `ROOT_KUSTOMIZATION` | `apps` | The Flux Kustomization whose `lastAppliedRevision` is the repo revision |
+| `CACHE_TTL` | `15s` | How long the snapshot is cached |
+| `LISTEN_ADDR` | `:8080` | Listen address |
+
+Each source fails on its own, and the snapshot keeps the others. Prometheus
+supplies the nodes, alerts and CPU history, and its targets decide which hosts
+appear. The Kubernetes API supplies the Flux readiness, because Prometheus does
+not scrape Flux. `prom.go` puts Prometheus behind the `promSource` interface, so
+the tests in `fleet_test.go` use sample values.
+
+## Test
+
+```bash
+go test -race ./...
+```
+
+`.github/workflows/rackstat.yml` runs `go vet` and `go test -race` on each Go
+change, and `.github/workflows/pixlet-preview.yml` renders a changed `.star`
+file on the pull request.
+
+## Deploy
+
+`.github/workflows/containers.yml` publishes `ghcr.io/jonpulsifer/rackstat`.
+Flux applies `clusters/folly/apps/tronbyt/`, which holds the aggregator, its
+read-only `rackstat-flux-reader` ClusterRole, and the Tronbyt server that runs
+the app.
 
 [tronbyt]: https://github.com/tronbyt/tronbyt-server
 [pixlet]: https://github.com/tronbyt/pixlet

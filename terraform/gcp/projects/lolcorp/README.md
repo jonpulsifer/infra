@@ -1,3 +1,23 @@
+# lolcorp
+
+OpenTofu root for the `lolcorp` GCP project, which runs the audit-log anomaly pipeline. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+The organization's audit-log sink publishes to the `audit-log-ingest` topic here. Pub/Sub pushes each entry to the `audit-pipeline` Cloud Run service, which writes anomalies to BigQuery. `sql/` holds the scheduled BQML queries, and `audit-pipeline/` holds the service source.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/gcp/projects/lolcorp init -backend=false
+tofu -chdir=terraform/gcp/projects/lolcorp validate
+TF_DIR=terraform/gcp/projects/lolcorp mise run tf:plan
+```
+
+A local plan needs Google credentials with access to the project and the state bucket. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/lolcorp`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

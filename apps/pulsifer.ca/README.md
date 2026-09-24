@@ -1,21 +1,26 @@
 # pulsifer.ca
 
-hi, this is my personal website, available at https://pulsifer.ca
+The personal website at https://pulsifer.ca: a Hugo site styled with Tailwind
+CSS v4. See [pulsifer.ca](https://wiki.lolwtf.ca/apps/pulsifer-ca/).
 
-## hugo + tailwind
+## Run
 
-this site is built using https://gohugo.io and published to GitHub pages.
-styles are Tailwind CSS v4, compiled by the standalone CLI into
-`assets/css/built.css` (gitignored) — the source of truth is `css/main.css`
-and the layouts in `themes/wip/`.
+Run these tasks in this directory. `mise install` supplies the pinned `hugo`,
+`tailwindcss`, `pandoc` and `typst`.
 
-### contributing
+```bash
+mise install
+mise run serve       # compile the CSS and the CV, then serve on http://localhost:1313
+mise run css-watch   # in a second shell, when you edit styles
+mise run build       # the production build, into public/
+mise run cv          # content/cv.md to static/cv.pdf
+```
 
-1. `mise install` in this directory (provides pinned `hugo` and `tailwindcss`)
-1. `mise run serve` — compiles CSS and runs the dev server
-1. editing styles? run `mise run css-watch` in a second terminal
-1. view your changes at http://localhost:1313
-1. `mise run build` for the full production build
-1. commit your changes
-1. open a pr
-1. :godmode:
+The Tailwind CLI compiles `css/main.css` into `assets/css/built.css`, which git
+ignores. The layouts are in `themes/wip/`. `mise run cv` gets its fonts from
+the flake's nixpkgs, so it needs Nix.
+
+## Deploy
+
+`.github/workflows/pulsifer-ca.yml` runs `mise run build` and, on `main`,
+publishes `public/` to GitHub Pages.

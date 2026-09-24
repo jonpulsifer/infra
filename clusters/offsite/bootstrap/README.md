@@ -1,12 +1,22 @@
-# offsite bootstrap (Flux + node labels)
+# offsite bootstrap
 
-Terraform root module that bootstraps FluxCD on the **offsite** cluster and
-labels offsite nodes. Was previously `terraform/k8s/`.
+The OpenTofu root that installs CoreDNS and Flux on the offsite cluster and labels its nodes. [Kubernetes](https://wiki.lolwtf.ca/platform/kubernetes/) describes what it creates.
 
-> Offsite is currently offline. Do not run `terraform init`/`validate`/`plan`
-> against this module locally without a kube context for offsite.
+It calls `terraform/modules/flux-bootstrap` with `flux-values.yaml`, which points Flux at `clusters/offsite/flux-system`. `node-labels.tf` sets each node's role and `bgp-enabled` labels. State is in `gs://homelab-ng/clusters/offsite/bootstrap`.
 
-State: `gs://homelab-ng/clusters/offsite/bootstrap`
+## Develop
+
+```bash
+tofu -chdir=clusters/offsite/bootstrap init -backend=false
+tofu -chdir=clusters/offsite/bootstrap validate
+tofu -chdir=clusters/offsite/bootstrap test
+```
+
+`bootstrap.tftest.hcl` runs against mock providers and needs no cluster access. CI runs the same three commands.
+
+## Deploy
+
+Atlantis applies this root from the PR, as [Apply an OpenTofu change](https://wiki.lolwtf.ca/runbooks/apply-an-opentofu-change/) describes. A change to `flux-values.yaml` alone does not autoplan, so comment `atlantis plan -d clusters/offsite/bootstrap` on the PR. Comment `atlantis apply` before you merge. A merge without an apply does not change the cluster.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

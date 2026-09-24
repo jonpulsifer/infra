@@ -1,3 +1,21 @@
+# google-workspace
+
+OpenTofu root for the `pulsifer.ca` Google Workspace: the domain and its `pulsifer.dev` alias, the users, and the `cloud` group. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/google-workspace init -backend=false
+tofu -chdir=terraform/google-workspace validate
+TF_DIR=terraform/google-workspace mise run tf:plan
+```
+
+Outside Atlantis, the providers impersonate `terraform@homelab-ng.iam.gserviceaccount.com`, so your Google account needs Service Account Token Creator on it. The 1Password provider reads `OP_SERVICE_ACCOUNT_TOKEN`. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/workspace`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

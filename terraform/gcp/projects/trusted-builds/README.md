@@ -1,21 +1,26 @@
 # trusted-builds
 
-`trusted-builds` is the artifacts project every Spindrift vessel's supply
-chain runs through: a KMS key signs, a Binary Authorization attestor checks
-admission against the signature, and an Artifact Registry repository
-(`artifact-registry.tf`) stages what Cloud Run pulls. The chain itself is
-`terraform/modules/spindrift-supply-chain`, called from `supply-chain.tf`;
-the principal lists it takes — who signs, who verifies, who reads and writes
-the repository — are declared as locals in `locals.tf` so an operator reading
-the root sees who may sign without chasing the module. `outputs.tf` hands the
-attestor id to the bluenose vessel root and the signer/registry pair to the
-installation manifest's `supplyChain` block.
+OpenTofu root for `trusted-builds`, the GCP project that builds, signs and stores kthx artifacts for every vessel. See [kthx security](https://wiki.lolwtf.ca/apps/kthx/security/) on the wiki.
 
-The KMS ring and key are live in this project and in no state file, so
-`supply-chain.tf` adopts them with `import` blocks rather than creating them.
-GCP never deletes a ring or a key: creating fresh ones under these names
-collides, and any other name is a new signing key, which means a new public
-half for the cluster admission policy to pin.
+`supply-chain.tf` calls `terraform/modules/spindrift-supply-chain` for the KMS signing key, the Binary Authorization attestor and their grants. `locals.tf` declares who may sign, verify, read and write. The root also holds the Artifact Registry repository, the Developer Connect link to GitHub and the build seal key. A new Developer Connect connection needs the one-time step in [Authorize Developer Connect](https://wiki.lolwtf.ca/runbooks/authorize-developer-connect/).
+
+`supply-chain.tf` imports the live KMS key ring and key. Keep their names. GCP never deletes a ring or a key, so a new name is a new signing key whose public key the admission policy does not pin.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/gcp/projects/trusted-builds init -backend=false
+tofu -chdir=terraform/gcp/projects/trusted-builds validate
+TF_DIR=terraform/gcp/projects/trusted-builds mise run tf:plan
+```
+
+A local plan impersonates `terraform@homelab-ng.iam.gserviceaccount.com`, so your Google account needs Service Account Token Creator on it. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/trusted-builds`.
+
+After an apply, copy the `supply_chain_manifest_block` output into the kthx installation manifest. If the attestor ID changes, update it in `terraform/gcp/projects/bluenose/vessel.tf`.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

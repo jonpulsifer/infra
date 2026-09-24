@@ -1,71 +1,62 @@
 # dotfiles
 
-`mise bootstrap` — shell environment, editor, multiplexer, git, AI agents, SSH, and security tooling,
-on macOS, Linux/NixOS and Windows.
-One unified config; **work** (`MISE_ENV=work`) overrides git identity (MoonPay git URL rewrites, work signingkey);
-**personal** is the default.
-
-## Philosophy
-
-These dotfiles manage **configuration, user CLI tooling, and AI agent skills** across macOS, Linux/NixOS and Windows.
-
-- **Homebrew (macOS):** Core shell utilities (`eza`, `fzf`, `neovim`, `bat`, `ripgrep`, `fd`, `git-delta`, `jq`, `gh`, `btop`, `sd`), Casks (`docker-desktop`, `1password-cli`, `claude-code`, `secretive`), and fonts.
-- **Nix (Linux/NixOS):** System closure and daemons; home-manager-managed shell tooling for the `jawn` user (`eza`, `fzf`, `neovim`, `bat`, `ripgrep`, `fd`, `delta`, `jq`, `gh`, `btop`, `sd`, `1password-cli`) plus zsh plugins (`pure`, `fzf-tab`, `autosuggestions`, `syntax-highlighting`, `kube-ps1`) — see `nix/home/jawn.nix`.
-- **Mise (Cross-platform):** Runtimes (`bun`, `node`), K8s/Cloud tools (`kubectl`, `helm`, `k9s`), AI agent CLIs, macOS-only zsh plugins (`http:` backend), and task orchestrator (`mise bootstrap`).
-- **WinGet (Windows):** PowerShell 7, Windows Terminal, Git, WSL, 1Password, VS Code and the OS settings, declared as a DSC v3 configuration in `windows/configuration.winget`. Windows Terminal and WSL come from the Store (`source: msstore`), which keeps them updated on their own; the rest come from the community source. The Nerd Font and vibranceGUI are in neither catalogue, so each has its own installer. `Install-VibranceGui.ps1` checks a pinned SHA256, and `Install-NerdFont.ps1` pins a release version. The CLI tools on Windows come from mise, and `windows/Install-Modules.ps1` installs the PowerShell modules pinned in `windows/modules.psd1`. The shell tooling that Homebrew and home-manager provide elsewhere carries a per-tool `os = ["windows"]` filter in `mise-global-config.toml`.
+The shell, editor, terminal multiplexer, git, SSH and agent configuration for
+macOS, Linux, NixOS and Windows. `mise run bootstrap` installs it. The personal
+identity is the default. `MISE_ENV=work` loads the work git identity from
+`mise.work.toml`.
 
 ## Install
+
+On macOS or Linux, from a clone of this repo:
 
 ```bash
 curl https://mise.run | sh
 mise trust -y dotfiles/mise.toml
-mise bootstrap        # automatically detects OS and runs bootstrap:macos or bootstrap:linux
+mise run --cd dotfiles bootstrap
 ```
 
-Work machine: `export MISE_ENV=work` first (or `mise bootstrap -E work`) to load
-`mise.work.toml`'s identity overrides and activate `.config/git/config.work`.
+On a work machine, set `MISE_ENV=work` first.
 
-### Windows
+On macOS, install [Homebrew](https://brew.sh/) first. `bootstrap` installs the
+`Brewfile` and then links the files into `$HOME`. On Linux, it only links the
+files. Each NixOS activation runs `bootstrap` through
+`nix/system/mise-dotfiles.nix`, and `nix/home/jawn.nix` installs the shell
+tools.
 
-One line, in any PowerShell — it moves itself onto PowerShell 7 if it starts in 5.1:
+On Windows, run this in any PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1 | iex
 ```
 
-It applies `windows/configuration.winget`, sparse-clones this repo to
-`%USERPROFILE%\src\github.com\jonpulsifer\infra`, and runs `mise run bootstrap`, which routes to
-`bootstrap:windows`. Add `-WithWsl` to install WSL and import a NixOS distro too.
+The script applies `windows/configuration.winget`, makes a sparse clone of this
+repo in `%USERPROFILE%\src\github.com\jonpulsifer\infra`, and runs
+`bootstrap`. To also install WSL and a NixOS distro, pass `-WithWsl`:
 
-Windows keeps its own clone. Nothing symlinks across the WSL boundary in either direction —
-see [Install a Windows desktop](../docs/runbooks/install-a-windows-desktop.md) for why.
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1))) -WithWsl
+```
 
-On NixOS hosts this all runs automatically on every activation
-(`nix/system/mise-dotfiles.nix`) via `mise run bootstrap`.
-
-### macOS
-
-Install [Homebrew](https://brew.sh/) first. `mise bootstrap` runs `brew bundle install --no-upgrade --file Brewfile`
-followed by `scripts/deploy-dotfiles.sh` to symlink configurations into `$HOME`.
+Windows keeps its own clone, and no link crosses the WSL boundary. See
+[Install a Windows desktop](https://wiki.lolwtf.ca/runbooks/install-a-windows-desktop/).
 
 ## Layout
 
-| Path | Purpose |
-|------|---------|
-| `mise.toml` | Task orchestration (`bootstrap`, `bootstrap:macos`, `bootstrap:linux`, `dotfiles:deploy`), `[vars]` (personal identity) |
-| `mise.work.toml` | Work-identity `[vars]` overrides, loaded via `MISE_ENV=work` |
-| `mise-global-config.toml` | Deployed to `~/.config/mise/config.toml` — global tool versions + pinned zsh plugins (`http:` backend) |
-| `scripts/deploy-dotfiles.sh` | Atomic symlink deployer for `$HOME` |
-| `.config/git/config` & `.config/git/config.work` | Git settings + native `[includeIf]` for MoonPay repositories |
-| `.config/zsh/.zshrc` | Zsh environment with runtime OS and `MISE_ENV` checks |
-| `.local/bin/` | Shell helpers (`yeet`, `tm`, …) |
-| `skills/` | Agent skills source deployed to `~/.agents/skills`, `~/.claude/skills`, and `~/.gemini/config/skills` |
-| `windows/` | The Windows side: installer, winget desired state, PowerShell profile fragments, Terminal settings |
+- `mise.toml` holds the tasks and the personal identity. `mise.work.toml`
+  overrides the identity.
+- `mise-global-config.toml` becomes `~/.config/mise/config.toml`. It holds the
+  global tools, and on Windows the shell tools that Homebrew and home-manager
+  install elsewhere.
+- `scripts/deploy-dotfiles.sh` and `windows/deploy-dotfiles.ps1` make the links.
+- `skills/` is linked into the skills directory of each agent CLI.
+- `windows/` holds the Windows installer, the winget configuration, the
+  PowerShell profile and the Terminal settings.
 
-## Validation
+## Test
 
 ```bash
-mise run check   # format check, shellcheck, and PSScriptAnalyzer
+mise run --cd dotfiles dotfiles:check   # print each link and change nothing
+mise run check                          # at the repo root: shfmt, shellcheck and PSScriptAnalyzer
 ```
 
 ## Credits

@@ -1,67 +1,24 @@
-# UniFi network
+# folly UniFi
 
-Terraform for the primary UniFi side of the homelab: networks/VLANs, WLANs,
-WAN, client QoS, DNS, firewall policies, and the folly gateway's BGP/FRR config
-(`unifi_bgp`, sourced from `bgp-folly.conf`).
+OpenTofu root for the folly UniFi gateway. See [Network](https://wiki.lolwtf.ca/platform/network/) on the wiki, and [Routing and firewall](https://wiki.lolwtf.ca/platform/network/routing-and-firewall/) for the BGP routes and zone policies.
 
-The offsite UniFi console is managed separately under `network/unifi/offsite/`.
+It declares the networks and VLANs, WLANs, WAN, client QoS, DHCP reservations, DNS records, the `Lab` firewall zone and its policies, and the gateway's BGP config.
 
-## BGP topology
+`topology.tf` reads both sites' `cluster-topology.json` and folly's `lab-topology.json`. `clients.yaml` holds the DHCP reservations, and a plan fails if its host addresses disagree with `lab-topology.json`. `bgp-folly.conf` is the FRR config for the gateway. Read the comment above `locals` in `firewall.tf` before you change a cross-site policy.
 
-Each site runs Cilium (ASN 64513) on its k8s nodes, peering **eBGP** with the
-local UniFi gateway (ASN 64512) to announce its pod and LoadBalancer IP pools.
+## Develop
 
-There is a **single inter-site data plane**: the Site Magic WireGuard tunnel
-(`wgsts1000`). Two control-plane protocols run over it, but both next-hops
-resolve *through that same tunnel*, so they are not separate paths:
-
-- **iBGP between the gateways** (sourced from the LAN router-ids via
-  `update-source`) is the **only** way the Cilium LoadBalancer `/32` VIPs (from
-  the `*.64/26` pools) and the pod CIDRs (`10.100.0.0/20` / `10.101.0.0/20`)
-  cross the sites — OSPF/Site Magic does not carry them.
-- **OSPF (Site Magic)** carries the subnets each gateway's Site Magic config
-  lists and wins the RIB for them — folly advertises `10.3.0.0/26` and
-  `10.13.37.0/28`, and installs `10.89.0.0/28` and `192.168.1.0/24` from
-  offsite; the iBGP copy of the node subnet is an inactive
-  (recursive-next-hop) backup.
-
-Because there is only one tunnel, cross-site **reachability does not depend on
-which protocol wins the RIB** — it depends on the **gateway firewall**. The
-folly gateway isolates its k8s network in a custom **`Lab`** zone
-(`firewall.tf`), and it picks a forward chain from the **destination's** zone
-while deciding the source zone by ingress interface.
-
-A zone holds only the subnets of *declared* networks, so the BGP-learned LB VIP
-pool and pod CIDR are in no zone. That makes the two halves of each cross-site
-policy behave differently: the **pod CIDRs and LB VIP pools are load-bearing as
-sources** — omit them and pod-sourced packets hit the `Lab → Vpn` chain's
-closing `DROP` — while as **destinations** only the node CIDR dispatches, and
-traffic to a VIP or pod takes the `→ WAN` fall-through instead. See the comment
-above `locals` in `firewall.tf`; `docs/platform/network/routing-and-firewall.md`
-carries the full reasoning and why closing the inbound gap is not worth it.
-
-The offsite console has **no custom firewall policies** — its k8s network sits
-in the default `Internal` zone, whose predefined `Internal ⇄ Vpn` rules already
-permit the traffic.
-
-```mermaid
-flowchart LR
-    subgraph folly["folly site (default)"]
-        direction TB
-        udm["UDM Pro<br/>ASN 64512<br/>router-id 10.3.0.1"]
-        fnodes["Cilium nodes (ASN 64513)<br/>10.3.0.10 / .11 / .12<br/>pods 10.100.0.0/20<br/>LB VIPs 10.3.0.64/26"]
-        fnodes -->|eBGP| udm
-    end
-
-    subgraph offsite["offsite site"]
-        direction TB
-        ucg["UCG Max<br/>ASN 64512<br/>router-id 10.89.0.1<br/>network/unifi/offsite"]
-        onodes["Cilium nodes (ASN 64513)<br/>10.89.0.10 / .11<br/>pods 10.101.0.0/20<br/>LB VIPs 10.89.0.64/26"]
-        onodes -->|eBGP| ucg
-    end
-
-    udm <-->|"Site Magic WireGuard tunnel (wgsts1000) — one data plane<br/>iBGP: LB VIP /32s + pod CIDRs (BGP-only) + node subnets<br/>OSPF: each gateway's listed subnets (wins RIB)<br/>cross-site reachability gated by the gateway firewall, not protocol choice"| ucg
+```bash
+tofu -chdir=terraform/network/unifi/folly init -backend=false
+tofu -chdir=terraform/network/unifi/folly validate
+TF_DIR=terraform/network/unifi/folly mise run tf:plan
 ```
+
+A local plan needs Google credentials for the state bucket and `OP_SERVICE_ACCOUNT_TOKEN`; `versions.tf` names the 1Password item. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes a `.tf` or `.conf` file in it. A change to only `clients.yaml` or `lab-topology.json` does not autoplan, so comment `atlantis plan -d terraform/network/unifi/folly`. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/unifi`.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

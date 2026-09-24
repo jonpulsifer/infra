@@ -1,24 +1,17 @@
 # @repo/archive
 
-The bytes half of a deploy, with no app behind it: what an uploaded archive is
-(`archive-format.ts`), what a bundle holds (`bundle.ts`), how a process with no
-stored credential reaches a bucket (`federation.ts`,
-`federation-credential.ts`, `gcs.ts`), and the base64url codec both sides of a
-digest use (`bytes.ts`).
+Archive code shared by the two halves of [kthx](https://wiki.lolwtf.ca/apps/kthx/). It converts uploads to gzipped tar, reads files out of a bundle, reads and writes GCS objects through workload identity federation with no stored key, and encodes base64url.
 
-Two hosts stage and read the same gzipped tars out of the same GCS depot —
-`apps/spindrift` for an App's source, `apps/kthx` for a site's release — and a
-second copy of a tar writer, a ZIP transcoder or a token exchange is a second
-place for them to disagree about what a staged bundle is.
+`apps/kthx` stages site releases with it and `apps/spindrift` stages built-app sources, so both apps use one archive format. Code that reads a kthx manifest or database stays in the app that owns it. The subpath exports in `package.json` are the public modules.
 
-What is deliberately **not** here: anything that names a §6 verdict, a
-manifest, or a database. `bundleFailure` stays in
-`apps/spindrift/src/adapters/deploy/static/bundle.ts` and `stageArchiveBytes`
-stays in `apps/spindrift/src/storage/archives.ts` for that reason — both read
-this app's contract, and a package that imported it would put Spindrift in
-every host that installs this.
+## Develop
 
-The `§` numbers in these files' prose cite Spindrift's spec, because that is
-where the invariants were first written down. They are provenance, not a
-dependency: nothing here imports, reads or needs that spec, and a host with no
-Apps at all gets the same behaviour.
+```bash
+bun run --cwd packages/archive test
+bun run --cwd packages/archive typecheck
+bun run --cwd packages/archive lint
+```
+
+## Deploy
+
+The package has no manifests of its own. The `apps/kthx` and `apps/spindrift` images copy it in and import it at run time.

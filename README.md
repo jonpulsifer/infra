@@ -1,78 +1,60 @@
-# 🏠 Homelab Infrastructure
+# infra
 
-Infrastructure-as-code for a multi-layer homelab: NixOS bare metal, two
-Kubernetes clusters, an OpenTofu-managed cloud and network fabric, and
-GitOps-driven application deployments.
-
-**📖 Full documentation: [wiki.lolwtf.ca](https://wiki.lolwtf.ca)** — built from
-[`docs/`](./docs) in this repo and published on every merge to `main`.
+Infrastructure as code for a homelab: NixOS hosts, two Kubernetes clusters,
+OpenTofu for the cloud and the network, and first-party apps. The
+[wiki](https://wiki.lolwtf.ca) documents it. Its source is [`docs/`](./docs),
+and each merge to `main` publishes it.
 
 ## Layout
 
 | Path | What lives here |
 | --- | --- |
-| [`nix/`](./nix) | NixOS configuration for every host, plus image builds. Hosts are declared in [`flake.nix`](./flake.nix). |
-| [`clusters/`](./clusters) | Kubernetes manifests for `folly` (primary) and `offsite` (backup), with `base/` shared between them. |
-| [`terraform/`](./terraform) | OpenTofu root modules — network fabric under `network/`, cloud and identity alongside it, reusable modules in `modules/`. |
-| [`apps/`](./apps) | Deployable first-party services. |
-| [`packages/`](./packages) | Reusable building blocks, including the Helm charts Flux consumes. |
+| [`nix/`](./nix) | NixOS configuration for every host, and image builds. [`flake.nix`](./flake.nix) declares the hosts. |
+| [`clusters/`](./clusters) | Kubernetes manifests for the `folly` (on-site) and `offsite` (remote-site) clusters. `base/` holds what both clusters run. |
+| [`terraform/`](./terraform) | OpenTofu root modules. The network is under `network/`, and reusable modules are in `modules/`. |
+| [`apps/`](./apps) | First-party services and tools. |
+| [`packages/`](./packages) | Shared libraries, and the Helm charts that Flux installs. |
 | [`images/`](./images) | Base and tool OCI images. |
-| [`dotfiles/`](./dotfiles) | mise-managed dotfiles, carried onto NixOS hosts by the system closure. |
-| [`docs/`](./docs) | The Markdown pages published as the wiki. |
+| [`dotfiles/`](./dotfiles) | Shell, editor and agent configuration. NixOS hosts install it on each activation. |
+| [`docs/`](./docs) | The wiki pages. |
 
-## Getting started
-
-Tooling comes from [`mise`](https://mise.jdx.dev). Nix-specific workflows come
-from the flake.
+## Get started
 
 ```bash
-mise install      # portable tooling: OpenTofu, kubectl, flux, sops, helm, …
-mise tasks ls     # every task this repo defines
-nix develop       # Nix dev shell: nixos-rebuild and friends
+mise install        # OpenTofu, kubectl, flux, sops, helm and the other tools
+mise tasks ls       # every task in this repo
+mise run devshell   # the Nix dev shell, for nixos-rebuild and host builds
+bun install         # the Bun workspace in apps/ and packages/
 ```
 
-`mise` is the source of truth for commands — prefer `mise run <task>` over raw
-invocations, since the task encodes the correct binary and flags. Note that the
-Terraform binary here is **`tofu`** (OpenTofu); the directory keeps the name
+When a mise task exists, use `mise run <task>`. The task has the correct binary
+and flags. The Terraform binary is `tofu` (OpenTofu), in the directory
 `terraform/`.
+
+## Validate a change
+
+```bash
+HOST=<host> mise run nix:build   # build the closure of one host without deploying it
+mise run nix:check               # evaluate every host
+mise run tf:validate             # validate the OpenTofu roots
+mise run ts:check                # typecheck and lint the Bun workspace
+mise run docs:check              # build the wiki and check links into it
+```
+
+[Test a change](https://wiki.lolwtf.ca/runbooks/test-a-change/) has the rest.
 
 ## How changes ship
 
-This repo is GitOps-first. Author desired state in git and let the operators
-apply it — do not mutate live infrastructure by hand.
+Change the desired state in git. Do not change live infrastructure by hand.
 
-| Layer | Applies via |
+| Layer | Applies through |
 | --- | --- |
-| OpenTofu | **Atlantis** on the PR — autoplan on changed roots, comment `atlantis apply` |
-| Kubernetes | **Flux** on merge to `main` |
-| NixOS | `nixos-rebuild`, and each host's auto-upgrade from `main` |
+| OpenTofu | Atlantis on the pull request. It plans each changed root, and the comment `atlantis apply` applies it. |
+| Kubernetes | Flux, on merge to `main` |
+| NixOS | `nixos-rebuild`, and the auto-upgrade from `main` |
 
-A host config deployed from a branch reverts on the next auto-upgrade. Merge
-promptly.
-
-See [How changes ship](./docs/platform/how-changes-ship.md) for the detail,
-and [`AGENTS.md`](./AGENTS.md) if you are an agent working in this repo.
-
-## Common tasks
-
-```bash
-# Build a host configuration without deploying
-nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
-
-# See every flake output, including image builds
-nix flake show
-
-# Validate everything CI validates
-mise run tf:validate
-nix flake check
-```
-
-Deploy procedures, cluster operations, and incident runbooks live in the
-[Runbooks](https://wiki.lolwtf.ca/runbooks/).
-
-## Security
-
-Secrets are SOPS-encrypted in-repo with age, sourced from 1Password, and
-decrypted on NixOS hosts by sops-nix using each host's own SSH host key.
-OpenBao runs in the folly cluster with Raft storage and GCP KMS auto-unseal.
-Network segmentation is enforced by UniFi; Tailscale provides the overlay.
+Auto-upgrade rebuilds a host from `main` and removes a configuration deployed
+from a branch, so merge a deployed branch promptly.
+[How changes ship](https://wiki.lolwtf.ca/platform/how-changes-ship/) has the
+detail, and [Secrets](https://wiki.lolwtf.ca/platform/secrets/) explains the
+SOPS files. Agents read [`AGENTS.md`](./AGENTS.md) first.
