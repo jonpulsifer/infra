@@ -1,18 +1,6 @@
 /**
- * `resolveComponentPlacement` — where can this Component go, and where can it
- * not (§3).
- *
- * The command is thin because §3 makes it thin. All it does is *derive* the
- * requirements — from the Component's kind, its exposure setting, and the
- * Datastores attached to its App — and hand them to the filter in
- * `domain/placement.ts`. There is nothing here for a developer to fill in,
- * because §3 states plainly that "there is no requirements language and the
- * developer types nothing."
- *
- * It is a **query**: nothing is written. §3 puts resolution before the build so
- * that "nowhere fits" is a returnable answer rather than a deploy that fails
- * later, and an act that recorded a placement would make asking the question
- * change the App.
+ * `resolveComponentPlacement`: which connected Targets this Component can go on,
+ * and why the others are excluded. A query; nothing is written.
  */
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -45,15 +33,14 @@ export type ResolveComponentPlacementInput = z.infer<
   typeof resolveComponentPlacementInput
 >;
 
-/** One Target the UI renders, candidate or not. */
 export interface PlacementOption {
   readonly targetId: string;
-  /** `<vessel>/<adapter>` — the two facts that identify this Target. */
+  /** `<vessel>/<adapter>`. */
   readonly name: string;
   readonly rank: number;
-  /** Candidates are selectable; non-candidates are listed and disabled (§3). */
+  /** Candidates are selectable; non-candidates are listed and disabled. */
   readonly candidate: boolean;
-  /** What a Build for this placement would produce. Only for candidates. */
+  /** What a Build here would produce; `null` for a non-candidate. */
   readonly artifactType: ArtifactType | null;
   readonly reasons: readonly Exclusion[];
   readonly detail: readonly string[];
@@ -61,9 +48,9 @@ export interface PlacementOption {
 
 export interface ResolveComponentPlacementResult {
   readonly componentId: string;
-  /** `null` is a real answer: §3 insists "nowhere fits" be expressible. */
+  /** `null` when nowhere fits. */
   readonly suggestedTargetId: string | null;
-  /** Every Target, in rank order, candidates and non-candidates alike. */
+  /** Every connected Target in rank order, candidate or not. */
   readonly options: readonly PlacementOption[];
 }
 
@@ -84,16 +71,13 @@ export const resolveComponentPlacement: Command<
     );
   }
 
-  // With the boundary, because half of what names a Target lives there.
   const connected = await context.db.query.targets.findMany({
     where: (targets, { eq }) => eq(targets.status, 'connected'),
     with: { vessel: true },
   });
 
-  // The datastore anchors to its vessel, and placement compares Target ids —
-  // a developer picks a Target, not a boundary — so the derivation gains a
-  // hop: vessel → its kubernetes surface → that Target's id. A left join on
-  // the literal adapter, because only the cluster-local case ever reads it.
+  // A datastore anchors to a vessel and placement compares Target ids, so left
+  // join the vessel's kubernetes Target, which only a cluster vessel needs.
   const attached = await context.db
     .select({
       name: datastores.name,
@@ -121,11 +105,8 @@ export const resolveComponentPlacement: Command<
         (datastore): RequiredDatastore => ({
           name: datastore.name,
           engine: datastore.engine,
-          // §11: "In-cluster datastores stay cluster-local in v1." A managed
-          // cloud database is reachable from anywhere its vessel's project is;
-          // one running in a cluster is reachable from that cluster only —
-          // and a cluster vessel has exactly one kubernetes surface, so the
-          // joined id is never null on this arm.
+          // An in-cluster datastore is reachable from its cluster only. A
+          // cluster vessel has one kubernetes Target, so this is never null.
           clusterLocalTargetId:
             datastore.vesselKind === 'cluster'
               ? datastore.clusterTargetId
@@ -175,18 +156,8 @@ export const resolveComponentPlacement: Command<
 };
 
 /**
- * Derive what the App needs (§3).
- *
- * Deliberately narrow today. Architecture, GPU, persistence, and resource asks
- * are all outputs of detection (§5), which arrives with the build pipeline; until
- * then they take the values that exclude no Target, so placement never rejects a
- * Target for a requirement nothing has actually established. The three
- * requirements that *are* known at this point — kind, exposure, and attached
- * Datastores — are the three §3 and §11 name as decisive.
- *
- * A job's `schedule` joins them: it is authored, not detected, and a Target
- * with nothing to fire it on that cadence is a non-candidate rather than a
- * Deploy that is refused after a build.
+ * Platform, GPU, persistence and resources take values that exclude no Target,
+ * so none is rejected on a requirement nothing has established.
  */
 function derive(
   context: CommandContext,
@@ -207,8 +178,7 @@ function derive(
     gpu: false,
     persistence: false,
     datastores: attached,
-    // §10: one store per installation, and the reach rule binds it to the
-    // Target a Component is placed on.
+    // One secret store per installation.
     secretStore: context.manifest.secretStore.adapter,
   };
 }

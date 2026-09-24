@@ -1,26 +1,6 @@
 /**
- * `listArtifacts` — what the Builds produced, as its own noun (§4, §16).
- *
- * The right-hand term of *Source + Build = Artifact* and the left-hand term of
- * *Artifact + Config = Deploy*. A Build is the act and carries a status, a
- * runner and a log; an Artifact is the immutable thing that act left behind,
- * and it is what a Deploy actually places. One Build → one Artifact → many
- * Deploys (§2), which is what makes rollback-without-rebuild possible and what
- * makes this listing different from the Builds ledger rather than a second view
- * of it.
- *
- * **A row exists once there is a digest**, which is also how §4's supplied
- * artifact appears here: an uploaded archive of finished output is recorded
- * with the staged digest and no route ever ran, so it is an Artifact with no
- * Build behind it. `supplied` marks it rather than hiding it.
- *
- * `deploys` is the count of placements, because the question an Artifact
- * ledger is opened to answer is which of these is actually running somewhere.
- * It is one grouped query over the page rather than one per row.
- *
- * Provenance is reported as the normalized level core verified plus whether
- * core signed it — the full envelope lives on the Build, where the evidence
- * that produced it is.
+ * `listArtifacts`: Builds that recorded an artifact digest, newest first, with
+ * how many Deploys placed each. Uploaded finished output is marked `supplied`.
  */
 import { count, desc, inArray, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -38,7 +18,6 @@ export const listArtifactsInput = z
 
 export type ListArtifactsInput = z.infer<typeof listArtifactsInput>;
 
-/** One built artifact, as the Artifacts ledger reads it. */
 export interface ArtifactView {
   readonly digest: string;
   readonly type: string;
@@ -46,25 +25,23 @@ export interface ArtifactView {
   readonly refs: readonly string[];
   readonly app: string;
   readonly component: string;
-  /** The Build that produced it — the act behind the noun. */
   readonly buildId: number;
-  /** The Source it was built from, or `null` where none was recorded. */
+  /** The source bundle's digest, or `null` where none was recorded. */
   readonly sourceDigest: string | null;
   readonly commit: string;
-  /** The concrete SLSA level core verified, or `null` where it verified none. */
+  /** The SLSA build level core verified, or `null` where it verified none. */
   readonly provenanceLevel: number | null;
-  /** Whether core's own cosign record exists (§16). */
+  /** Whether core's own cosign signature is recorded. */
   readonly signed: boolean;
-  /** §4's supplied artifact: finished output no builder ran over. */
+  /** Uploaded finished output that no builder ran over. */
   readonly supplied: boolean;
-  /** How many Deploys have placed it. */
   readonly deploys: number;
   readonly at: string;
 }
 
 export interface ListArtifactsResult {
   readonly artifacts: readonly ArtifactView[];
-  /** What the page is capped at, so a full page reads as one rather than as all. */
+  /** The cap, so a caller can tell a full page from the full list. */
   readonly limit: number;
 }
 

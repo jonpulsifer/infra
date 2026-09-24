@@ -1,31 +1,6 @@
 /**
- * `placeComponent` — commit a Component's move to a Target (§3, §10).
- *
- * Placement itself is a filter and a query (`resolveComponentPlacement`, §3):
- * nothing is written by asking where a Component *can* go. This is the act that
- * follows it, and it exists because of one line in §10: "**Place names the keys
- * that will not follow and demands them before the move commits.**"
- *
- * So the whole command is that sentence:
- *
- * 1. Work out what moving does to configuration (`migrationFor`).
- * 2. Carry the pinned references that can be carried — the same store of record
- *    on both sides makes a re-placement free, and free means the reference
- *    moves while no value does.
- * 3. **Refuse, naming the keys**, when something cannot be carried and was not
- *    supplied. Not a warning: §10 wants "a re-placement never comes up green and
- *    unconfigured", and a warning is a thing that gets clicked through.
- * 4. **Write the placement.** The desired row for (Component, Target) is what
- *    `deployApp` reads as where this Component now lives, so a move that wrote
- *    no row was a move nothing could see: the next deploy still resolved the
- *    old Target, refused the new one as "placed elsewhere — move it first",
- *    and pointed back at the command that had already run. The old pair's row
- *    stays — what is live there keeps serving until `unplaceComponent`
- *    retires it.
- *
- * `createDeploy` refuses on the same condition, because a developer who skipped
- * Place and deployed straight at the new Target would otherwise get exactly the
- * green-and-unconfigured release this command exists to prevent.
+ * Moves a Component to a Target. It carries the references a shared store allows,
+ * refuses while any key that cannot follow is unsupplied, then writes the placement.
  */
 
 import { eq } from 'drizzle-orm';
@@ -51,13 +26,7 @@ export const placeComponentInput = z
   .object({
     componentId: z.uuid(),
     targetId: z.uuid(),
-    /**
-     * Values for the keys that will not follow, supplied as part of the move.
-     *
-     * Part of *this* act rather than a separate call the caller is trusted to
-     * make first: "demands them before the move commits" is only true if the
-     * move and the supply are one transaction from the developer's side.
-     */
+    /** Values for the keys that will not follow, supplied in the same call. */
     supply: z
       .array(
         z
@@ -76,9 +45,9 @@ export const placeComponentInput = z
 export type PlaceComponentInput = z.infer<typeof placeComponentInput>;
 
 export interface PlaceComponentResult extends ConfigChangeResult {
-  /** The Target the configuration was carried from, if any. */
+  /** Null when nothing was configured on another Target. */
   readonly carriedFrom: string | null;
-  /** Keys whose pinned references moved as they were — no value crossed. */
+  /** Keys whose pinned references moved; no value crossed. */
   readonly carried: readonly string[];
 }
 
@@ -104,13 +73,8 @@ export const placeComponent: Command<
       .from(targets)
       .innerJoin(vessels, eq(vessels.id, targets.vesselId))
       .where(eq(targets.id, input.targetId));
-    // The keys structurally as well as in the sentence. A caller that has to
-    // *collect* them — the workspace's move form, which re-posts this same
-    // command with `supply` filled in — would otherwise have to parse them back
-    // out of prose written for a person, and the field they belong against is
-    // what `issues` says: `connectTarget` already refuses this way
-    // (`targets/connect.ts:318-328`). The sentence is unchanged; this is the
-    // same refusal addressed to the form as well as to the reader.
+    // The keys go in the issues as well as the sentence, so the move form can
+    // collect them without parsing prose.
     return failed(
       'NOT_DEPLOYABLE',
       demandSentence(
@@ -126,19 +90,12 @@ export const placeComponent: Command<
 
   const carried = await carryReferences(context, subject, migration.follows);
 
-  // The supplied values go through the ordinary write path, so a key demanded
-  // by a move is pinned, audited, and deployed exactly like one a developer
-  // typed into the config screen. A second path here would be a second way for
-  // a value to reach the store.
+  // Supplied values take the ordinary write path: pinned, audited and deployed.
   const applied = await applyConfigChange(context, subject, input.supply, []);
   if (!applied.ok) return applied;
 
-  // The move itself, committed last so a refusal above leaves the placement
-  // where it was. Two writes in one transaction: the pair's desired row, which
-  // is what the loops act on, and `placedTargetId`, the placement of record —
-  // this command is the only one that *moves* it. The old pair's desired row
-  // stays: what is live there keeps serving until `unplaceComponent` retires
-  // it.
+  // Committed last, so a refusal above leaves the placement where it was. The old
+  // pair's desired row stays, serving until `unplaceComponent` retires it.
   const now = context.clock.now();
   await context.db.transaction(async (tx) => {
     await tx

@@ -1,19 +1,6 @@
 /**
- * `detachDatastore` — unbind a Datastore from its App (§11).
- *
- * §2: "deleting an App detaches its Datastores and never cascades." Detachment
- * is `app_id = null` and the row survives, which is the whole reason the
- * column is nullable — a Datastore outlives every App that was ever attached
- * to it.
- *
- * **Destroys nothing**, and that is the point rather than an omission. §13's
- * rule is that nothing is torn down as a side effect of something else, and
- * "stop using this database" is not "delete this database": the operator who
- * wants the storage gone says `destroyDatastore`, by name, and this command
- * refuses to do it for them.
- *
- * Idempotent. Detaching what is already detached is what a retried request
- * looks like, and there is nothing about it to report as an error.
+ * `detachDatastore` unbinds a Datastore from its App and destroys nothing: the
+ * row outlives the App. Detaching a detached Datastore is not an error.
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';

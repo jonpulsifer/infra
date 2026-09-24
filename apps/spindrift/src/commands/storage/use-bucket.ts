@@ -1,32 +1,6 @@
 /**
- * `useSourceBucket` — stage sources to this bucket, and optionally to it first.
- *
- * §4 stages an uploaded archive and a repository's source in a first-party
- * bucket before any builder can fetch it, and §20 puts the list of those
- * buckets in the installation manifest. Between those two facts there was no
- * act: the creation flow rendered `sources.buckets` as a `<select>` with a
- * "Custom bucket…" option, which let a developer type a bucket that was not
- * declared anywhere and stage a build into it. That is configuration entered
- * on a deploy form, which is the shape §20 exists to prevent.
- *
- * So adding a bucket is its own act, and it is one act rather than two:
- * *stage to this bucket*, and optionally *stage to it first*. Naming an
- * already-declared bucket with `makeDefault` is how the default moves, which
- * is why this is not called `addSourceBucket` — the add is idempotent and the
- * interesting half is often the other one.
- *
- * **It verifies before it writes.** A bucket the controller cannot write to is
- * not a configuration mistake that shows up in configuration; it is a build
- * that dies at staging, minutes later, with a message about a signed URL. The
- * check is the same `testBucketPermissions` runs, and refusing here costs the
- * operator one sentence instead of one failed deploy.
- *
- * **Named cost, inherited from `configureInstallation`:** the manifest has no
- * revision column, so this read-modify-write loses a concurrent edit whole.
- * That comment is not copied here to be waved at — it is the reason this
- * command changes exactly two keys and validates the whole document on the way
- * back out, so the edit it might lose is always somebody else's *other* key
- * rather than a document this act half-rewrote.
+ * `useSourceBucket`: add a bucket that sources stage to, and optionally make it
+ * the default. The bucket must prove writable before the manifest changes.
  */
 import { z } from 'zod';
 import {
@@ -44,11 +18,8 @@ import { type Command, failed, ok } from '../types.ts';
 export const useSourceBucketInput = z
   .object({
     /**
-     * A Cloud Storage bucket name, in Cloud Storage's own terms.
-     *
-     * Checked here rather than left to the far side because the far side's
-     * refusal for a malformed name is a `404` that reads identically to a
-     * bucket somebody else owns, and those two want different sentences.
+     * Validated here because Cloud Storage answers a malformed name with the
+     * same 404 as a bucket owned by someone else.
      */
     bucketName: z
       .string()
@@ -59,7 +30,6 @@ export const useSourceBucketInput = z
         /^[a-z0-9][a-z0-9._-]*[a-z0-9]$/,
         'must be a Cloud Storage bucket name: lowercase letters, digits, dots, hyphens and underscores',
       ),
-    /** Whether this becomes the bucket a new staging picks by default. */
     makeDefault: z.boolean().default(false),
   })
   .strict();
@@ -69,9 +39,8 @@ export type UseSourceBucketInput = z.infer<typeof useSourceBucketInput>;
 export interface UseSourceBucketResult {
   readonly buckets: readonly string[];
   readonly defaultBucket: string;
-  /** Where the bucket lives, as the far side reported it. */
   readonly location: string;
-  /** What the controller's federated identity may do there. */
+  /** What the controller's federated identity may do on the bucket. */
   readonly permissions: readonly string[];
 }
 
@@ -120,10 +89,7 @@ export const useSourceBucket: Command<
   const buckets = stored.sources.buckets.includes(input.bucketName)
     ? stored.sources.buckets
     : [...stored.sources.buckets, input.bucketName];
-  // Which bucket a staging picks is a property of the home vessel, so making
-  // one the default is a write to that vessel rather than to `sources`. The
-  // list and the choice therefore move in one document, which is what keeps a
-  // default that is not among the buckets unrepresentable.
+  // The default bucket is a setting on the home vessel.
   const shared = sharedServicesOf(stored);
   const sourceBucket = input.makeDefault
     ? input.bucketName
@@ -141,10 +107,8 @@ export const useSourceBucket: Command<
 
   let updated: AuthoredManifest;
   try {
-    // Validated on the way out even though only two keys moved: the document
-    // that gets written is the one that has to be valid, and a stored manifest
-    // that was already drifting from the schema must not be made durable again
-    // by an act that never looked at the rest of it.
+    // Last write wins, since the stored manifest has no revision. Validating the
+    // whole document keeps an already invalid one from being rewritten.
     updated = validateManifest(next, 'the updated manifest');
   } catch (cause) {
     if (cause instanceof ManifestError) {

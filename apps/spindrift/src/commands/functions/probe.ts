@@ -1,10 +1,6 @@
 /**
- * `probeFunction` — is a Function answering yet.
- *
- * A separate command from `getFunction` rather than a field on it: readiness
- * is not a row property, it is the answer to a `fetch` made right now, and a
- * screen that polls it wants exactly that call and nothing else the row read
- * would also do.
+ * `probeFunction` fetches a deployed Function's URL now to see whether it
+ * answers.
  */
 import { z } from 'zod';
 import type { FunctionProbe } from '../../functions/readiness.ts';

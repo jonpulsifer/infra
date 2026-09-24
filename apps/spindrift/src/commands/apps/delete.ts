@@ -1,60 +1,7 @@
 /**
- * `deleteApp` — remove an App and everything that is only ever its own (§2).
- *
- * §2 already settles what deletion means: it "detaches its Datastores and never
- * cascades to them (§2, §11) but does cascade to its own Components, Builds,
- * Deploys, and config items — none of those are reattachable." So the shape of
- * this command is not a question about the model. What is a question is the two
- * things a delete can do that nobody asked for, and both are answered the same
- * way — by saying so first.
- *
- * **It is review-then-confirm, like `replaceConfig`.** The first call writes
- * nothing and returns what the delete would do: the Components that go, the
- * Datastores that survive detached, and — the half that matters — the live
- * workloads it tears down. The second call, with `confirm`, does it. An act
- * that removes a Component's whole build and deploy history on the first call is
- * one nobody can look at before it happens, which is the same argument §10 makes
- * about a bulk paste.
- *
- * **It tears the workloads down**, and that is `unplaceComponent`'s exception to
- * §13 rather than a violation of it: §13's rule is "never destroy as a side
- * effect of *something else*", and an operator who confirms a delete having just
- * been shown the running workloads by name has asked for those workloads to go.
- * The alternative is a `kind: job` Component with a `schedule` firing on every
- * tick, forever, billed in a vessel project nobody is watching, whose only
- * record is a dialog somebody has to act on by hand. So the review names every
- * live workload before anything happens, and each entry says whether it keeps
- * *acting* (`StrandedWorkload.firing`) and whether tearing it down spends its
- * address for good (`StrandedWorkload.nameSpent`, true on static hosting) —
- * those sentences are what the confirmation is for.
- *
- * **What it tears down is not what it names.** The review names the phases in
- * which something is up there answering; the teardown addresses the newest
- * non-orphaned Deploy per placement that carries a `ref` at all, which is
- * `unplaceComponent`'s rule and the reason a FAILED Deploy's half-made resource
- * is not left behind billing.
- *
- * **It sweeps the App's own container too.** A ref names one placement, so
- * `destroy` alone never reached the thing an adapter had to make for the App
- * itself — the Kubernetes namespace, which Flux's own documentation says "will
- * not be garbage collected". §6's optional `sweepApp` is that seam, called once
- * per Target after its placements are gone, and skipped where a second App of
- * the same name shares the container.
- *
- * **A teardown the platform refuses does not fail the delete.** Same argument as
- * `retainedSecrets` below: the operator asked for the App to be gone, an
- * unreachable Target is not a reason to keep the rows, and `destroy` is
- * contracted idempotent so nothing is lost by having tried. Those workloads are
- * named in `retainedWorkloads` — genuinely stranded, and now the short list of
- * what is left to do by hand rather than all of it.
- *
- * **It does reap the config store**, and that is not the same thing. §10's
- * store items are per-key material this App put there and nothing else will ever
- * read — a pin whose row is gone is unreachable, not merely unmanaged — so
- * leaving them is a leak rather than a workload. A key the store refuses to
- * destroy is named in `retainedSecrets` rather than failing the delete: the rows
- * are already gone by then, and a refusal at that point would report a delete
- * that happened as one that did not.
+ * `deleteApp`: removes an App with its Components, Builds, Deploys and config;
+ * its Datastores survive, detached. Without `confirm` it only reports effects.
+ * A teardown or reap the far side refuses is reported and does not fail it.
  */
 import { and, desc, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
@@ -88,12 +35,8 @@ export const deleteAppInput = z
     /** The App's id, or its name where that names exactly one App. */
     name: z.string().trim().min(1),
     /**
-     * False — the default — reviews and deletes nothing.
-     *
-     * The two calls are independent: the second re-reads the App and recomputes
-     * what it is about to tear down, so a deploy that went live between them is
-     * torn down and named rather than left behind under a review that said
-     * there was nothing running.
+     * False reviews and deletes nothing. A confirming call recomputes the
+     * teardown, so a deploy that went live after the review still goes.
      */
     confirm: z.boolean().default(false),
   })
@@ -101,55 +44,31 @@ export const deleteAppInput = z
 
 export type DeleteAppInput = z.infer<typeof deleteAppInput>;
 
-/** One live workload — what confirming this delete tears down (§13's grammar). */
+/** One live workload that confirming this delete tears down. */
 export interface StrandedWorkload {
   readonly deployId: string;
   readonly component: string;
-  /** Where it is running, and where the teardown is addressed. */
   readonly target: string;
   readonly url: string | null;
-  /**
-   * Whether this workload keeps *acting* rather than merely sitting.
-   *
-   * A service left running is inert until something calls it; a `kind: job`
-   * Component with a `schedule` has a Cloud Scheduler job in front of it that
-   * fires on every tick forever, billed in a vessel project nobody is watching
-   * — the cost that makes tearing it down the right default, and the one a
-   * refused teardown leaves behind. Derived from the Component, not the Deploy:
-   * the cadence lives on `components.schedule`, and it is what fires regardless
-   * of which Build is live.
-   */
+  /** A scheduled job, which keeps firing and billing until torn down. */
   readonly firing: boolean;
   /**
-   * Whether the name this workload holds is spent permanently.
-   *
-   * Static hosting site ids are global and never given back: "Deleting a site
-   * is a permanent action. If you delete a site, Firebase doesn't maintain
-   * records of deployed files or deployment history, and the `SITE_ID` cannot
-   * be reactivated by you or anyone else." So the teardown this delete performs
-   * costs that name for good, and neither this App nor any other can ever
-   * deploy under it again. Said in the review rather than after, because it is
-   * the one consequence of confirming that undoing the delete does not answer.
-   *
-   * Derived from the Target's adapter: it is a fact about the platform the
-   * workload sits on, not about the Deploy.
+   * Static hosting site ids are global and can never be reused once deleted,
+   * so the teardown spends the name for good.
    */
   readonly nameSpent: boolean;
 }
 
-/** What deleting this App does, whether or not it has been done yet. */
 export interface DeleteAppEffects {
   readonly appId: string;
   readonly name: string;
-  /** Gone with the App — a Component is not a thing that reattaches (§2). */
   readonly components: readonly string[];
   readonly builds: number;
   readonly deploys: number;
-  /** Live workloads, torn down on confirm — the point of the confirmation. */
+  /** Live workloads, torn down on confirm. */
   readonly stranded: readonly StrandedWorkload[];
-  /** §11: these survive, detached. The App owned the attachment, not the data. */
   readonly detachedDatastores: readonly string[];
-  /** §10 config keys, as `component/KEY`, whose store items this reaps. */
+  /** As `component/KEY`; confirming reaps their store items. */
   readonly configKeys: readonly string[];
 }
 
@@ -157,18 +76,11 @@ export type DeleteAppResult =
   | ({ readonly deleted: false } & DeleteAppEffects)
   | ({
       readonly deleted: true;
-      /**
-       * Store items that outlived their rows because the store refused to
-       * destroy them. Empty is the ordinary answer; a non-empty list is
-       * material somebody has to remove in the store's own console.
-       */
+      /** Store items the store refused to destroy, to remove by hand. */
       readonly retainedSecrets: readonly string[];
       /**
-       * What outlived its rows because the far side refused to remove it —
-       * `<what> on <target> — <why>`, one per refused workload teardown and one
-       * per refused `sweepApp`. Empty is the ordinary answer; a non-empty list
-       * is what is genuinely stranded and has to be removed on the Target by
-       * hand.
+       * `<what> on <target> — <why>` for each refused teardown or `sweepApp`,
+       * left on the Target to remove by hand.
        */
       readonly retainedWorkloads: readonly string[];
     } & DeleteAppEffects);
@@ -177,10 +89,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
   input,
   context,
 ) => {
-  // `apps` carries no unique constraint on `name`, so a name is not an
-  // identifier — the same reason `deployApp` reads every match rather than
-  // `findFirst`. Guessing which of two Apps to deploy is recoverable; guessing
-  // which of two to delete is not.
+  // `apps.name` has no unique constraint, so an ambiguous name is refused.
   const isUuid = z.uuid().safeParse(input.name).success;
   const matches = await context.db
     .select()
@@ -232,10 +141,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
           .from(deploys)
           .where(inArray(deploys.componentId, componentIds));
 
-  // Read before write, for the same reason `disconnectTarget` does: the rows to
-  // name are exactly the rows about to stop being observable, and reading them
-  // afterwards would return nothing at all. Whole Target and vessel rows,
-  // because what is read here is also what the teardown is addressed with.
+  // Full Target and vessel rows, because the teardown is addressed from them.
   const live =
     componentIds.length === 0
       ? []
@@ -265,18 +171,12 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
           )
           .orderBy(desc(deploys.id));
 
-  // What the review names: the phases in which something is actually up there
-  // answering (§13's grammar).
   const strandable = live.filter((deploy) =>
     STRANDABLE_PHASES.some((phase) => phase === deploy.phase),
   );
 
-  // What the teardown addresses, which is not the same list. `ref` persists
-  // through a failed re-attempt (`settle`, `deploy-loop.ts`), so the newest
-  // non-orphaned Deploy that ever recorded one is the pair's current address
-  // whatever its own terminal phase says — the same rule `unplaceComponent`
-  // reads it by, and the reason a FAILED Deploy's half-made resource is not
-  // left behind. Newest first, so the first row per pair wins.
+  // Per placement, the newest Deploy with a `ref` wins, whatever its phase:
+  // `ref` survives a failed re-attempt, so a FAILED Deploy's resource goes too.
   const addresses = new Map<string, (typeof live)[number]>();
   for (const deploy of live) {
     if (deploy.ref === null) continue;
@@ -289,10 +189,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     .from(datastores)
     .where(eq(datastores.appId, app.id));
 
-  // The scope a store item is reachable at is derived from rows this delete is
-  // about to remove, so it is resolved now and used after. `secret_ref` and
-  // `build_secret` both pin versions in a store; §10's website exception is a
-  // plain column, and it goes with the row.
+  // Only these kinds pin versions in a store; the others live in the row.
   const pinned =
     componentIds.length === 0
       ? []
@@ -338,13 +235,11 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     return ok({ deleted: false, ...effects });
   }
 
-  // Resolved before the rows go, used after they have: `configSubject` reads the
-  // Component and Target this scope is named from.
+  // Resolved before the rows go: `configSubject` reads the Component and Target.
   const scopes = await reapableScopes(context, pinned, nameOf);
 
-  // Torn down before the rows go, so a crash between the two leaves a retryable
-  // delete rather than an orphan nothing names any more. `destroy` is contracted
-  // idempotent, so the retry costs nothing.
+  // Torn down before the rows go, so a crash leaves a retryable delete.
+  // `destroy` is idempotent, so the retry costs nothing.
   const retainedWorkloads: string[] = [];
   for (const deploy of addresses.values()) {
     const refusal = await teardown(context, deploy);
@@ -357,34 +252,26 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
       );
       continue;
     }
-    // §9: withdraw whatever vanity record this placement earned. Idempotent
-    // and best-effort, the same reasoning `unplaceComponent` states: the
-    // workload is already gone, and a stray record is a smaller problem than
-    // reporting a delete that happened as one that did not.
     try {
       await context.adapters
         .dns?.()
         ?.withdraw(dnsHandleFor(app.name, deploy.component));
     } catch {
-      // Left to converge next time something else publishes or withdraws
-      // this handle.
+      // Best-effort: the workload is gone, and a stray record must not fail
+      // the delete.
     }
   }
 
-  // Then the App-scoped container each Target made, which no ref names — the
-  // Kubernetes namespace being the whole of it today (§6's `sweepApp`). After
-  // the placements, because it is what they were in. Every Target this App was
-  // ever placed on, not only the ones still holding a ref: a Component removed
-  // from a Target earlier still left the namespace there.
+  // Then each Target's App-scoped container, such as a Kubernetes namespace,
+  // which no ref names. It goes after the placements because they live in it.
   const sameName = await context.db
     .select({ id: apps.id })
     .from(apps)
     .where(and(eq(apps.name, app.name), ne(apps.id, app.id)));
   for (const target of sweepable(live)) {
     const refusal =
-      // A namespace is named for the App, so two Apps of the same name share
-      // one. Sweeping this one's would take the other's workloads with it —
-      // the same reason a name is not an identifier here.
+      // Two Apps of the same name share the container, so sweeping it would
+      // take the other App's workloads.
       sameName.length > 0
         ? `${sameName.length} other App answers to '${app.name}', so its container is shared and was left in place`
         : await sweep(context, target, app.name);
@@ -398,13 +285,8 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     }
   }
 
-  // Ordered rather than left to the cascade. Two of these foreign keys are
-  // `restrict` — `deploys.build_id` and `component_target_desired.desired_*` —
-  // and Postgres enforces a `restrict` the moment the referenced row is deleted,
-  // including when the referencing row is being deleted by the same cascade. So
-  // the referencing rows go first, by hand; `components`, `config_items`,
-  // `config_audit_events`, and `attempt_events` still cascade off the App, and
-  // `datastores.app_id` still goes null (§11).
+  // `deploys.build_id` and the desired row's ids are `restrict`, which Postgres
+  // enforces even inside a cascade, so the referencing rows go first.
   await context.db.transaction(async (tx) => {
     if (componentIds.length > 0) {
       await tx
@@ -426,8 +308,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
         continue;
       }
       try {
-        // Retention zero: every version, not the tail past the depth §10 keeps
-        // for a rollback. There is nothing left to roll back to.
+        // Retention zero reaps every version; nothing is left to roll back to.
         await reapKey(scope.subject, key, 0);
       } catch {
         retainedSecrets.push(`${scope.component}/${key}`);
@@ -439,18 +320,8 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
 };
 
 /**
- * Tear one workload down, answering with why not rather than throwing.
- *
- * §6 contracts `apply` not to throw and says nothing of the kind about
- * `destroy`, so the fault is the far side's to report — but here it is reported
- * *and the delete continues*, unlike `unplaceComponent` where the refusal is the
- * whole answer. The App is going either way; an unreachable Target is a thing to
- * name, not a veto on a delete the operator confirmed.
- *
- * Exported for `deleteComponent` (`../components/delete.ts`), which tears
- * down exactly the same shape of row for exactly the same reason — a second
- * copy of this would only be a second place for the reasoning to drift from
- * this one's.
+ * Tears one workload down and returns why it could not, or `null`. It never
+ * throws, so a refusing Target cannot stop a confirmed delete.
  */
 export async function teardown(
   context: CommandContext,
@@ -477,7 +348,7 @@ export async function teardown(
   }
 }
 
-/** One Target this App was placed on, once each — what `sweepApp` addresses. */
+/** One row per Target the App's Deploys are on, which `sweepApp` addresses. */
 function sweepable(
   live: readonly {
     targetId: string;
@@ -493,11 +364,8 @@ function sweepable(
 }
 
 /**
- * Sweep one Target's App-scoped container, answering with why not.
- *
- * Same contract as {@link teardown} and for the same reason: the App is going
- * either way, so a Target that refuses is a thing to name rather than a veto.
- * An adapter with no `sweepApp` made no such container and answers `null`.
+ * Sweeps one Target's App-scoped container, with the contract of {@link teardown}.
+ * An adapter with no `sweepApp` made no container and answers `null`.
  */
 async function sweep(
   context: CommandContext,
@@ -525,23 +393,15 @@ async function sweep(
 
 /** One (Component, Target) scope's keys, with the store to reap them from. */
 export interface ReapableScope {
-  /** `null` when this scope reaches no store — its keys are simply retained. */
+  /** `null` when this scope reaches no store, so its keys are reported retained. */
   readonly subject: ConfigSubject | null;
-  /** The Component's name, for the sentence a retained key is reported in. */
   readonly component: string;
   readonly keys: readonly string[];
 }
 
 /**
- * Group the pinned keys by scope and resolve each scope's store, before the rows
- * that name the scope are deleted.
- *
- * A scope that resolves to a failure — a Target that reaches no store this
- * installation can write to — is kept with `reap: null` rather than dropped, so
- * its keys are reported as retained instead of silently forgotten.
- *
- * Exported alongside {@link teardown} for `deleteComponent`, over exactly the
- * one scope its single Component ever has.
+ * Groups pinned keys by scope and resolves each scope's store before the delete
+ * removes the rows that name it. A scope with no store keeps `subject: null`.
  */
 export async function reapableScopes(
   context: CommandContext,

@@ -1,17 +1,7 @@
 /**
- * The Target row behind a vessel's datastore surface (§11).
- *
- * A Datastore is anchored to its vessel, but an adapter call still needs a
- * Target: the connection an adapter addresses and the adapter key itself both
- * live on the surface row. This is the one hop from boundary to surface —
- * `DATASTORE_SURFACE_BY_VESSEL_KIND` says which adapter can host a database on
- * a vessel of this kind, and `(vessel_id, adapter)` is unique, so the answer
- * is at most one row.
- *
- * `undefined` twice over, deliberately collapsed: a vessel kind that hosts no
- * database at all, and a vessel of a hosting kind whose surface was never
- * probed into existence. Both mean the same thing to every caller — there is
- * nothing here to provision into, tear down through, or offer.
+ * The Target row an adapter call reaches a vessel's datastore surface through.
+ * `undefined` when the vessel kind hosts no database or its surface was never
+ * probed.
  */
 import type { Database } from '../../db/client.ts';
 import type { VesselKind } from '../../domain/vessel.ts';

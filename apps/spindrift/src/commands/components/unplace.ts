@@ -1,41 +1,6 @@
 /**
- * `unplaceComponent` — stop a specific (Component, Target) placement (75, §6,
- * §13).
- *
- * Two things left a Component's old address firing after it moved: nothing
- * called `DeployAdapter.destroy` when a Target changed, and nothing called it
- * when a `job` became a `service` and the ref that used to answer for it
- * became an orphan under `jobs/<id>`. Both are the same gap — a caller for a
- * verb every adapter already implements — and this is that caller.
- *
- * **This is the deliberate exception to §13's rule, not a violation of it.**
- * `disconnectTarget` and `deleteApp` both refuse to call the adapter, and both
- * say why in the same words: tearing down a running workload is not what
- * "disconnect this Target" or "delete this record" asked for, and doing it as
- * an automatic side effect of a record-level act would be the most destructive
- * possible reading of a request that did not ask for one. Neither of those
- * commands' subject is "stop this placement" — their subject is the Target row
- * or the App row, and the workload is collateral they are careful not to touch.
- * This command's *entire subject* is the placement itself. An operator who
- * calls `unplaceComponent` is not tidying bookkeeping and getting a surprise
- * teardown; the teardown is the thing they asked for by name. §13's rule is
- * "never destroy as a side effect of something else"; this is not a side
- * effect.
- *
- * **Idempotent in the two ways that matter.** `DeployAdapter.destroy` is
- * contracted to succeed against a ref the platform has already removed — this
- * command relies on exactly that rather than re-deriving it. And a pair with
- * no live ref at all (never successfully deployed, or already unplaced by an
- * adapter call that ran and then failed to write back) costs no adapter call:
- * there is nothing to destroy, so nothing is asked to. Calling this command a
- * second time on a pair it already retracted is answered with `NOT_FOUND` —
- * there is no longer a placement to stop, which is the honest reading of "do
- * it again" once the first call deleted the row that named it.
- *
- * **A destroy the platform refuses leaves everything as it was.** The adapter
- * call happens before any row is touched, so a thrown error returns a failure
- * with nothing to unwind: the placement is still there, the old Deploy is
- * still live, and pressing the button again is the retry.
+ * Stops one Component@Target placement: destroys its workload, then retracts the
+ * rows. A destroy that throws leaves every row as it was, for a retry.
  */
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -67,13 +32,7 @@ export type UnplaceComponentInput = z.infer<typeof unplaceComponentInput>;
 export interface UnplaceComponentResult {
   readonly componentId: string;
   readonly targetId: string;
-  /**
-   * Whether a live ref was found and handed to `destroy`.
-   *
-   * `false` means the placement was retracted with no adapter call — it had
-   * never produced a ref, or every Deploy that had one was already orphaned.
-   * Either way the row this command exists to remove is gone.
-   */
+  /** `false` when the pair had no live ref, so no adapter call was made. */
   readonly destroyed: boolean;
 }
 
@@ -91,15 +50,12 @@ export const unplaceComponent: Command<
       `there is no Component with id ${input.componentId}`,
     );
   }
-  // §9's handle is `<App>-<Component>`, and this row carries only its own
-  // half — read once, ahead of the destroy it may follow, rather than inside
-  // the branch that needs it.
   const [app] = await context.db
     .select({ name: apps.name })
     .from(apps)
     .where(eq(apps.id, component.appId));
 
-  // With the boundary, because half of what names a Target lives there.
+  // With its vessel, because part of a Target's label lives there.
   const target = await context.db.query.targets.findFirst({
     where: (targets, { eq }) => eq(targets.id, input.targetId),
     with: { vessel: true },
@@ -124,14 +80,8 @@ export const unplaceComponent: Command<
     );
   }
 
-  // The newest Deploy for this pair that still names a live ref — `ref`
-  // persists through a failed re-attempt (`settle`, `deploy-loop.ts`), so the
-  // newest row that ever recorded one is the workload's current address,
-  // whatever that row's own terminal phase now says. Already-orphaned rows are
-  // excluded: `disconnectTarget` or an earlier `unplaceComponent` already
-  // decided this pair's platform-side story, and re-destroying a ref this
-  // command no longer owns would be exactly the "our side, not the far side"
-  // fake §Testing warns against, aimed at production.
+  // The newest non-orphaned Deploy's ref: a failed attempt keeps the ref it had.
+  // Orphaned rows belong to an earlier disconnect or unplace.
   const [live] = await context.db
     .select({ ref: deploys.ref, vessel: vessels })
     .from(deploys)
@@ -165,11 +115,8 @@ export const unplaceComponent: Command<
         `this installation has no ${target.adapter} adapter`,
       );
     }
-    // §6 contracts `apply` not to throw; it says nothing of the kind about
-    // `destroy`, because a fault tearing something down is the far side's to
-    // report honestly rather than core's to paper over. Caught here, before
-    // any row is touched, so a refusal leaves the placement exactly as
-    // findable as it was for a retry.
+    // Caught before any row is touched, so a failed destroy leaves the placement
+    // in place for a retry.
     try {
       await adapter.destroy(deployTargetOf(target, live.vessel), ref);
     } catch (cause) {
@@ -179,35 +126,25 @@ export const unplaceComponent: Command<
       );
     }
 
-    // §9: withdraw whatever vanity record this placement earned, on every
-    // successful destroy rather than only on a platform-named Target's —
-    // `withdraw` is idempotent, so a cluster Target (which never had one
-    // published under this handle) costs one harmless round trip rather than
-    // a branch on the Target's adapter. Best-effort: the workload is already
-    // gone, and a stray record is a smaller problem than reporting a teardown
-    // that happened as one that failed.
+    // `withdraw` is idempotent, so it runs after every destroy, even where no
+    // record was published. Best effort: the workload is already gone.
     try {
       await context.adapters
         .dns?.()
         ?.withdraw(dnsHandleFor(app!.name, component.name));
     } catch {
-      // Left to converge next time something else publishes or withdraws
-      // this handle; nothing here is retryable on its own.
+      // Converges the next time this handle is published or withdrawn.
     }
   }
 
   const now = context.clock.now();
   await context.db.transaction(async (tx) => {
-    // Same ordering `deleteApp` uses and the same reason: nothing else
-    // references this row, so it goes first and cleanly, while the Deploys it
-    // pointed at stay as history.
+    // Nothing references this row, so it goes first; the Deploys stay as history.
     await tx
       .delete(componentTargetDesired)
       .where(eq(componentTargetDesired.id, desired.id));
-    // The placement of record clears only when the pair being retired *is* it.
-    // Unplacing the old pair after a move is retirement of what still served
-    // there, and the Component's home — wherever `placeComponent` put it —
-    // is not this command's to touch.
+    // Clears only when this pair is the placement of record. Retiring an old pair
+    // after a move leaves the Component where it now is.
     await tx
       .update(components)
       .set({ placedTargetId: null, updatedAt: now })

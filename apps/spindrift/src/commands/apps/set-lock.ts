@@ -1,35 +1,7 @@
 /**
- * `setAppLock` — hold every new Deploy of an App, or let them through again
- * (§6).
- *
- * The lock is what the App has been missing between a rollback and the next
- * push. `rollbackDeploy` places an older Build and stops; the next adopted
- * commit — a Renovate merge at 03:00 — goes back through `dispatchAutoDeploys`
- * with nothing in between where the operator says the cause is fixed. So a
- * rollback sets this, and this is how it is cleared. It also covers "nothing
- * changes here over the weekend" without turning `autoDeploy` off and
- * forgetting to turn it back on.
- *
- * **Locking is a hold, not a deploy.** Like `setAppAutoDeploy`, it changes
- * nothing about what is running; it changes what `checkDeployable` answers
- * next time, which is the one gate every intent passes — a press, a push, a
- * config change. A rollback is the one act that goes through regardless,
- * because a rollback is the operator asking for exactly the thing the lock
- * exists to protect.
- *
- * **Unlocking resumes the push the lock held back.** A push to a locked App
- * is skipped before anything is built (`dispatchAutoDeploys`), and the loop
- * never re-offers that commit: every later pass calls it `unchanged`. So for
- * an `autoDeploy` App whose adopted commit is not what its newest Build was
- * made from, unlocking dispatches `deployApp` for that commit under
- * `AUTO_DEPLOY_PRINCIPAL` — the same act the push would have taken — and
- * says what came of it in `resumed`. Not for a commit that is already built:
- * after a rollback, main is still at the commit that was rolled away from,
- * and redeploying it on unlock would undo the rollback the lock protected.
- *
- * Columns, not a noun (§1). `reason: null` unlocks; anything else locks with
- * that sentence, overwriting a lock already there — the operator who rewrites
- * the reason has read the old one.
+ * `setAppLock`: holds every new Deploy of an App, or releases the hold. A lock
+ * refuses every intent except a rollback. Unlocking dispatches the adopted
+ * commit a push skipped while locked.
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -60,22 +32,16 @@ export type SetAppLockInput = z.infer<typeof setAppLockInput>;
 
 export interface SetAppLockResult {
   readonly appId: string;
-  /** What the App is now held with, or `null` for nothing. */
+  /** The hold's reason, or `null` when unlocked. */
   readonly reason: string | null;
   /**
-   * The push an unlock resumed, with `deployApp`'s own answer — a refusal
-   * included, so the screen can say why nothing is coming. `null` when there
-   * was nothing to resume: a lock being set, a manual App, or an adopted
-   * commit the newest Build already names.
+   * The push an unlock resumed, with `deployApp`'s answer, refusal included.
+   * `null` when there was nothing to resume.
    */
   readonly resumed: AutoDeployAttempt | null;
 }
 
-/**
- * Write the lock. Shared with `rollbackDeploy`, which is the other writer,
- * so the two cannot disagree about which columns a lock is — and which takes
- * a transaction, because its hold belongs with its intent.
- */
+/** Also used by `rollbackDeploy`, inside the transaction writing its intent. */
 export async function lockApp(
   db: Pick<Database, 'update'>,
   appId: string,
@@ -90,12 +56,8 @@ export async function lockApp(
 }
 
 /**
- * The act the lock held back, taken now — or `null` when there was none.
- *
- * The comparison is the dispatcher's: the adopted commit against the primary
- * Component's newest Build, rerun suffix stripped (`deployApp`), because the
- * primary Component is what a push deploys and the newest Build is what it
- * would have written.
+ * Dispatches the push the lock held back, or answers `null` when there was none.
+ * Compares the adopted commit with the primary Component's newest Build.
  */
 async function resumeHeldPush(
   appId: string,
@@ -123,6 +85,7 @@ async function resumeHeldPush(
   const adopted = app?.repository?.authoritativeCommit ?? null;
   if (app === undefined || !app.autoDeploy || adopted === null) return null;
   const built = app.components[0]?.builds[0]?.commit.split('#')[0] ?? null;
+  // Already built: after a rollback, redeploying it would undo the rollback.
   if (built === adopted) return null;
 
   const result = await deployApp(

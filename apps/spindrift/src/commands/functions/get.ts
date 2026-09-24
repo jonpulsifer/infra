@@ -1,8 +1,6 @@
 /**
- * `getFunction` — one Function's own screen: the ledger row plus its source.
- *
- * The environment comes back as key names only: the values are write-only, so
- * the envelope is opened to learn what is set and never to say what it holds.
+ * `getFunction` answers one Function with its source. Environment values are
+ * write-only, so only the key names come back.
  */
 import { z } from 'zod';
 import { type Command, failed, ok } from '../types.ts';

@@ -1,23 +1,7 @@
 /**
- * `getAppSource` — the repository, the scope, and the `spindrift.yaml` that
- * governs how one App is built (§5, §15).
- *
- * Every fact here was already in the database or one file read away, and none
- * of it reached a screen: the workspace knew which Target an App runs on and
- * said nothing about where its code comes from, so "which directory of which
- * repo is this, and is there a Spindrift file in it" was a question answered by
- * opening GitHub.
- *
- * **Its own command rather than more of `getAppWorkspace`.** The manifest arm
- * is a live read against the repository host, and the workspace re-reads itself
- * every two seconds while a release is in flight — folding this in would spend
- * a rate limit on an answer nobody asked for again. The Config tab reads this
- * once when it opens, the way `Releases` fetches its own rows.
- *
- * **Read at the adopted commit, never at the branch head.** §15 makes
- * `authoritative_commit` the configuration Spindrift has actually adopted, so
- * that is the commit whose file is governing right now. Reading the head would
- * show a file that has not taken effect yet as though it had.
+ * `getAppSource`: the repository, subpath and config file one App builds from.
+ * Kept out of the polled workspace read because it calls the repository host.
+ * The file is read at the adopted commit, whose config is the one in effect.
  */
 import { z } from 'zod';
 import type { RepositoryHost } from '../../domain/repository.ts';
@@ -28,13 +12,12 @@ import type { AppManifestView, AppSourceView } from '../views.ts';
 
 export const getAppSourceInput = z
   .object({
-    /** The App, by name or by id — the same handle `getAppWorkspace` takes. */
+    /** The App, by name or by id. */
     app: z.string().min(1),
   })
   .strict();
 export type GetAppSourceInput = z.infer<typeof getAppSourceInput>;
 
-/** What the manifest is read against. The stored row, narrowed to what is used. */
 interface ConnectedRepository {
   readonly fullName: string;
   readonly installationId: string;
@@ -56,8 +39,7 @@ export const getAppSource: Command<
   });
 
   if (!app) return failed('NOT_FOUND', `App '${input.app}' not found`);
-  // An uploaded archive has no repository, no scope and no Spindrift file, so
-  // every field below would be an absence dressed as an answer (§2, §4).
+  // An archive App has no repository, subpath or config file.
   if (app.sourceKind !== 'repo') return ok({ source: null });
 
   const subpath = app.sourceRepoSubpath ?? '.';
@@ -85,12 +67,8 @@ export const getAppSource: Command<
 };
 
 /**
- * The scope's Spindrift file, or the reason there is no answer about it.
- *
- * Nothing here throws and nothing here fails the command. Where this App is
- * built from is a fact Spindrift holds itself; the file is a fact it has to ask
- * someone else for, and a repository host having a bad minute is not a reason
- * to take the rest of the card off the screen.
+ * The config file, or why it could not be read. It never throws, so a
+ * repository host outage cannot fail the command.
  */
 async function manifestAt(
   host: RepositoryHost | null,

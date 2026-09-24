@@ -1,37 +1,7 @@
 /**
- * `cancelDeploy` — stop an intent that has not landed (§6).
- *
- * A wrong press used to wait behind the in-flight attempt for up to the
- * adapter's whole convergence budget before the correcting intent was even
- * claimed. This is the operator's way out, and it is two different acts under
- * one name, because §6 puts the two halves of a Deploy in two places:
- *
- * - **A `PENDING` intent is a row and nothing else.** Nothing is streaming into
- *   it, so this command fails it here, under the same `FOR UPDATE` on the
- *   Component@Target desired row that `placeIntent` and `claimNextDeploy` take
- *   — a claim cannot land between the read and the write. The intent moved the
- *   desired pointer when it was written, so cancelling it moves the pointer
- *   back to the release before it: `deployApp` reads that pointer to decide a
- *   Build is "already desired", and a cancelled intent left in it would refuse
- *   the very redeploy the operator presses next. A rollback intent also set
- *   the App's lock on the way in (`rollbackDeploy`), with a sentence saying
- *   the rollback happened; cancelled unclaimed, it did not, so the lock goes
- *   back with the pointer.
- *
- * - **An `APPLYING` or `WAITING` attempt is a generator in one reconciler
- *   process**, and only that process can end it. This command stamps the
- *   request and who made it; the attempt reads it at its next event, returns
- *   the stream so the adapter's own `finally` runs, and settles `FAILED` with
- *   "cancelled by …" (`deploy-loop.ts`). The row is still in flight when this
- *   returns, and the screen says a cancel is pending rather than done.
- *
- * `LIVE` and `FAILED` refuse. Cancelling a live release is a rollback with the
- * wrong word on it, and `rollbackDeploy` is one press away. Checked again
- * under the lock: `settle` writes its verdict fenced on the attempt, not under
- * this lock, so an attempt can land between the first read and the second.
- *
- * No `reason`, for the reason `cancelBuild` gives none: §6's set indicts a
- * developer or the platform, and a cancellation indicts neither.
+ * `cancelDeploy` fails a PENDING intent under the desired row's lock and moves
+ * the pointer back, or asks an in-flight attempt to stop at its next event.
+ * LIVE and FAILED refuse: cancelling a live release would be a rollback.
  */
 import { and, desc, eq, gte, isNotNull, isNull, lt, not } from 'drizzle-orm';
 import { z } from 'zod';
@@ -51,13 +21,12 @@ export type CancelDeployInput = z.infer<typeof cancelDeployInput>;
 export interface CancelDeployResult {
   readonly deployId: number;
   /**
-   * What the row says now. `FAILED` for an intent this command ended itself;
-   * the in-flight phase for one the attempt has been asked to end.
+   * FAILED when this ended the intent; the in-flight phase when the attempt was
+   * asked to end.
    */
   readonly phase: 'FAILED' | 'APPLYING' | 'WAITING';
 }
 
-/** The refusal for a Deploy that has already reached a verdict. */
 function settled(
   id: number,
   phase: 'LIVE' | 'FAILED',
@@ -95,8 +64,8 @@ export const cancelDeploy: Command<
   const by = context.principal.displayName;
 
   const outcome = await context.db.transaction(async (tx): Promise<Outcome> => {
-    // The lock the claim takes. Held, a reconciler claiming this pair
-    // waits here, so the phase read next is the phase written against.
+    // The lock a claim takes, so no claim lands between this read and the
+    // write.
     const [desired] = await tx
       .select()
       .from(componentTargetDesired)
@@ -108,6 +77,8 @@ export const cancelDeploy: Command<
       )
       .for('update');
 
+    // Read again: settle writes its verdict fenced on the attempt, not under
+    // this lock.
     const [current] = await tx
       .select({ phase: deploys.phase })
       .from(deploys)
@@ -136,11 +107,8 @@ export const cancelDeploy: Command<
       })
       .where(eq(deploys.id, deploy.id));
 
-    // The pointer moves back only if this intent is what it names; an
-    // older intent still queued behind a newer one never held it. What it
-    // goes back to is the newest earlier Deploy that ever held it — every
-    // row except the ones this same branch failed before they were
-    // claimed, which is what `attempt_id IS NULL` beside the request says.
+    // Back to the newest earlier Deploy not cancelled before a claim; left
+    // here, deployApp would refuse the next redeploy as already desired.
     if (desired?.desiredDeployId === deploy.id) {
       const [previous] = await tx
         .select({ id: deploys.id, buildId: deploys.buildId })
@@ -169,16 +137,8 @@ export const cancelDeploy: Command<
         })
         .where(eq(componentTargetDesired.id, desired.id));
 
-      // A rollback is an intent naming a Build older than the one it
-      // displaced — `rollbackDeploy`'s own admission rule — and it locked the
-      // App the moment it was written. The release that was serving is what
-      // the pointer just went back to, so a lock written no earlier than this
-      // intent describes a rollback that never landed, and goes with it.
-      // What this cannot reach: `rollbackDeploy` writes the lock after
-      // `placeIntent`'s transaction commits, so a cancel that lands between
-      // the two writes clears nothing and the lock arrives afterwards; and an
-      // operator's own hold set later than the rollback is indistinguishable
-      // from it here and is cleared with it.
+      // An older Build than the one behind it means a rollback, which locked
+      // the App. Locks no older than the intent go, an operator's included.
       if (previous !== undefined && deploy.buildId < previous.buildId) {
         await tx
           .update(apps)

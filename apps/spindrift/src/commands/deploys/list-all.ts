@@ -1,4 +1,4 @@
-/** `listAllDeploys` — the global artifact-placement ledger, newest first. */
+/** `listAllDeploys` lists every release across all Apps, newest first. */
 import { z } from 'zod';
 import { type Command, ok } from '../types.ts';
 import type { DeployLedgerItem } from '../views.ts';

@@ -1,52 +1,7 @@
 /**
- * `adoptBuild` — a Component runs an artifact a sibling Component of the same
- * App already produced, without building it a second time (§2, §4, §16).
- *
- * The monolith case: `web` builds the image, `worker` and `cleanup` run it under
- * their own commands. That needs no new noun, because **there is no artifacts
- * table** — an Artifact is a `builds` row with a non-null `artifactDigest`
- * (`src/commands/artifacts/list.ts:76-77`), which is §2's "Source and Artifact
- * are derived, not stored" read literally. So adopting one is inserting a
- * `builds` row that names the same digest for a different Component, and that is
- * the shape `uploadArchive`'s supplied arm already writes
- * (`src/commands/apps/upload-archive.ts:132-171`): a pre-digested Build born
- * `SUCCEEDED` with no adapter looked up. This is a third caller of it.
- *
- * **A copy, not a pointer.** `createDeploy` refuses a Build belonging to another
- * Component (`src/commands/deploys/create.ts:370-375`) and that guard stays
- * untouched — a Deploy names a Build, a Build names a Component, and the
- * reconciler joins straight through both
- * (`src/reconciler/deploy-loop.ts:643-660`). Letting one Component's Deploy point
- * at another's Build makes that chain stop meaning anything; copying the row
- * keeps every link in it true. Which is also why the reconciler needs *zero*
- * changes: `desiredStateFor` reads `artifactType` / `artifactDigest` /
- * `artifactRefs` (`src/reconciler/deploy-loop.ts:305-309`) and never asks who
- * produced them.
- *
- * **The provenance columns are copied, and that is honest rather than a
- * loophole.** `checkDeployable` re-verifies the recorded signature against the
- * recorded digest and compares `verifiedBuildLevel` with the Target's policy
- * (`src/commands/deploys/create.ts:400-431`). An attestation is a statement about
- * a digest, and this is the same digest — dropping them would only make the
- * adopted Build undeployable anywhere with a policy, which is a worse lie than
- * carrying them. Both gates then re-run in full at the destination, so a Target
- * with a *higher* threshold than the source's still refuses.
- *
- * **The registry path stays the source's.** `artifactRefs` reads
- * `{registry}/{app}/{sourceComponent}` (`src/domain/artifact-name.ts:77-92`), so
- * the adopter's image lives under its sibling's repository. That address is real
- * and pullable, and `artifactAddress` / `pullableFrom`
- * (`src/domain/desired-state.ts:83-113`) work on any address the Target reaches.
- * Re-pushing under the adopter's own path is refused for the reason
- * `src/domain/source.ts:82-90` already gives — it "would need a registry push
- * core does not do and a digest core did not compute". One digest at one address
- * is the honest statement of what sharing is.
- *
- * **Same App only.** Decided 2026-08-12. The App is what carries the source
- * (`apps.sourceRepoUrl` / `sourceRepoSubpath`, `src/db/schema.ts:466-468`), so an
- * artifact adopted from outside it has a lineage no App can be asked about, and
- * the Artifacts ledger becomes a registry. The monolith case is one App by
- * construction, so the restriction costs nothing it was for.
+ * `adoptBuild`: copies a sibling Component's succeeded Build, provenance and
+ * registry address included, so a Component runs that artifact without a
+ * rebuild. Both Components must be in one App, which carries the source.
  */
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -55,7 +10,7 @@ import { type Command, failed, ok } from '../types.ts';
 
 export const adoptBuildInput = z
   .object({
-    /** The Component that will run the artifact — the adopter. */
+    /** The Component that will run the artifact. */
     componentId: z.uuid(),
     /** The sibling's Build whose artifact is being adopted. */
     fromBuildId: z.number().int().positive(),
@@ -65,9 +20,8 @@ export const adoptBuildInput = z
 export type AdoptBuildInput = z.infer<typeof adoptBuildInput>;
 
 export interface AdoptBuildResult {
-  /** The adopter's own Build, which is what a Deploy may now name. */
+  /** The adopter's own Build, which a Deploy may now name. */
   readonly buildId: number;
-  /** The one digest both Builds describe, echoed so a caller can correlate. */
   readonly artifactDigest: string;
 }
 
@@ -86,8 +40,7 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
     );
   }
 
-  // With the Component, because the App is the half of the source that decides
-  // whether this adoption is allowed at all.
+  // With the Component, whose App decides whether adoption is allowed.
   const source = await context.db.query.builds.findFirst({
     where: (build, { eq: eqOp }) => eqOp(build.id, input.fromBuildId),
     with: { component: true },
@@ -100,8 +53,6 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
   }
 
   if (source.component.appId !== component.appId) {
-    // By id, both of them: the operator picked a Build out of a list and the
-    // only useful sentence names the two things that disagree.
     return failed(
       'INVALID_INPUT',
       `Build ${source.id} belongs to Component ${source.component.id}, which is in a different App than Component ${component.id} — an artifact can only be adopted within one App`,
@@ -109,9 +60,6 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
     );
   }
 
-  // §4: "a build records an artifact rather than deploying one." A Build that has
-  // not succeeded has no artifact to adopt, which is the same fact
-  // `checkDeployable` refuses a placement with, said in the same sentence.
   if (source.status !== 'SUCCEEDED' || source.artifactDigest === null) {
     return failed(
       'NOT_DEPLOYABLE',
@@ -125,10 +73,8 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
     .insert(builds)
     .values({
       componentId: component.id,
-      // Everything below is the source Build's, unchanged. The commit included:
-      // §2 keys a Build on (component, commit, target-shape) and the commit is
-      // the input this artifact came out of — rewriting it here would make the
-      // adopter's ledger row unjoinable to the source it actually ran.
+      // A copy: `createDeploy` refuses another Component's Build. The commit
+      // is kept too, so the row joins to the source it ran.
       commit: source.commit,
       commitMessage: source.commitMessage,
       commitAuthor: source.commitAuthor,
@@ -141,48 +87,26 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
       bundleLocation: source.bundleLocation,
       bundleSubpath: source.bundleSubpath,
       status: 'SUCCEEDED',
+      // Same digest, same attestation; `checkDeployable` re-checks both at
+      // the destination.
       verifiedBuildLevel: source.verifiedBuildLevel,
       signature: source.signature,
       provenance: source.provenance,
-      // Carried, not nulled. `artifacts/list.ts:114` reads a null runner on a
-      // SUCCEEDED Build as §4's *supplied* artifact — uploaded finished output no
-      // builder ran over — and `builds/view.ts:45-51` reads the same pair to
-      // decide whether there is a build to project at all. Nulling it here would
-      // file a built artifact under "nobody built this", which is a claim about
-      // provenance and not a cosmetic one. The runner named it produced these
-      // bytes; this row describes those bytes; so it is the true answer. An
-      // adopted *supplied* artifact carries the null forward for the same reason
-      // and stays supplied, which it is.
+      // Carried: a null runner on a succeeded Build marks a supplied artifact,
+      // so nulling it would misfile a built one.
       runner: source.runner,
-      // Deliberately not carried: `runUrl`, `logFidelity`, `dispatchId`,
-      // `leasedAt` and the attempt events address one execution on one backend.
-      // This row is not that execution — the source Build is, and it is still in
-      // the ledger with all of it attached.
+      // Execution columns such as `runUrl` and `dispatchId` stay on the source.
       createdAt: context.clock.now(),
     })
-    // §2's key is (component, commit, target-shape), so adopting twice lands on
-    // the row the first adoption wrote. There is nothing new to write for it, and
-    // writing anyway is how a re-adoption blanks the refs of a Build something is
-    // already deployed from — the argument `uploadArchive` makes at
-    // `src/commands/apps/upload-archive.ts:160-164`, for the same key.
+    // A repeat adoption hits the key the first one wrote. Never overwrite: a
+    // Deploy may already name that row.
     .onConflictDoNothing()
     .returning();
 
   if (row !== undefined) return ok({ buildId: row.id, artifactDigest });
 
-  // `DO NOTHING` wrote nothing, so something already holds this key. Which of the
-  // two things it is decides the answer, and only the digest can tell them apart:
-  //
-  // - **The same artifact** — this adoption already happened (or the caller named
-  //   this Component's own Build). Answering with it is idempotent and true.
-  // - **A different one** — this Component built that commit itself, or is
-  //   building it right now. Two digests for one commit is not a contradiction
-  //   — bases move, timestamps differ, a rotated build secret rebuilds
-  //   differently (story 112); the digest is the artifact's identity and the
-  //   commit is not. What stays out of the question is overwriting: it would
-  //   blank a Build in flight, or retarget one a Deploy names. And answering
-  //   with the row would hand back an artifact that was not the one asked for.
-  //   So it is refused, naming the row in the way.
+  // Something holds this key. The same digest is a repeat adoption; another is
+  // this Component's own Build of that commit, refused so it is not retargeted.
   const [existing] = await context.db
     .select()
     .from(builds)

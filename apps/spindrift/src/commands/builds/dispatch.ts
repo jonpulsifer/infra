@@ -1,27 +1,7 @@
 /**
- * `dispatchBuild` — run one source through one build route (§4).
- *
- * §4: "**Build is always separate from Deploy**... a build records an artifact
- * rather than deploying one, so a late-finishing older build moves nothing.
- * There is no `SUPERSEDED` verdict to explain."
- *
- * That sentence is the design of this file. What it does when a build succeeds is
- * write a digest onto a Build row — and nothing else. It does not touch the
- * desired row, it does not create a Deploy, and it does not compare itself
- * against any other Build. **A build that finishes last is a build that finishes
- * last**, and the reason that costs nothing is that finishing has no effect on
- * what is live. Making a Deploy is a separate act somebody takes deliberately.
- *
- * Two more §4 terms are structural here rather than documented:
- *
- * - **The bundle digest is a parameter on every route.** It comes off the Build
- *   row and goes into {@link BuildSource}, which requires it, so a route cannot
- *   be handed a source without one (§16's join).
- * - **Logs are read, not pushed.** The adapter yields events and this loop writes
- *   them to the attempt log; nothing is exposed for a builder to post back to.
- *   Whatever fidelity the route declared is what lands, and the route's name and
- *   fidelity are recorded on the Build so an operator can see why a log is thin
- *   rather than reading it as a bug.
+ * Runs one Build through one build route. Success writes a digest onto the Build
+ * and nothing else, so a late build moves nothing live. Logs are read from the
+ * route's events; nothing is exposed for a builder to post back to.
  */
 import { and, eq, gte, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
@@ -78,38 +58,21 @@ import {
   ok,
 } from '../types.ts';
 
-/**
- * §4's per-App build limit.
- *
- * A constant rather than a manifest value: it exists to stop one App's push
- * loop from taking every runner an installation has, and the number that does
- * that is a property of "how many is obviously too many" rather than of any
- * particular installation. It becomes configuration the first time an operator
- * has a reason to disagree with it.
- */
+/** Stops one App's push loop from taking every runner an installation has. */
 export const CONCURRENT_BUILDS_PER_APP = 3;
 
-/** Duration after which a RUNNING build's dispatch lease is considered expired. */
+/** A RUNNING build whose lease is older than this reads as abandoned. */
 export const DISPATCH_LEASE_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
- * How often a live attempt renews its lease. A quarter of the timeout, so a
- * renewal can miss twice — a slow query, a paused replica — before the row
- * reads as abandoned.
+ * A quarter of the timeout, so a renewal can miss twice before the row reads as
+ * abandoned.
  */
 export const DISPATCH_LEASE_REFRESH_MS = DISPATCH_LEASE_TIMEOUT_MS / 4;
 
 /**
- * How a refused row's next attempt is paced (story 101).
- *
- * The first refusal costs one second, which a developer watching the screen
- * never notices; each one after doubles it, so a row that cannot currently
- * succeed converges on one attempt per cap interval instead of one per tick.
- * The cap is five minutes — the low end of the ticket's bound — because the
- * `waits` refusals are cleared by operator acts, and an operator who just
- * configured federation should not stare at a fixed Build for a quarter hour.
- * A fresh press resets the clock (`deployApp`'s re-arm), so the developer
- * always has an immediate path.
+ * The first refusal waits a second and each one after doubles it, up to five
+ * minutes, so an operator's fix is picked up soon. A fresh press resets the clock.
  */
 export const DISPATCH_BACKOFF_BASE_MS = 1_000;
 export const DISPATCH_BACKOFF_CAP_MS = 5 * 60 * 1000;
@@ -124,35 +87,19 @@ export function dispatchBackoffMs(attempts: number): number {
 
 export const dispatchBuildInput = z
   .object({
-    /** The Build row to run. It already carries the source and the shape. */
     buildId: z.number().int().positive(),
-    /**
-     * Which route to run it on. §4 makes the set of routes an installation's
-     * configuration rather than a closed vocabulary, so this is a name core does
-     * not interpret — it hands it to the registry and reports what comes back.
-     */
+    /** A route name core does not interpret: the registry resolves it. */
     route: z.string().trim().min(1),
     /**
-     * The Target this build's placement resolved to, where the artifact's
-     * contents depend on it.
-     *
-     * Only a `website` needs it, and only because §10 scopes configuration to
-     * (Component, Target) while §2 keys a Build on (Component, commit,
-     * target-shape). For everything else configuration is delivered at runtime
-     * and the shape is the whole of what a build depends on, so this is absent
-     * and nothing reads it.
-     *
-     * **The known limit, stated rather than worked around**: two Targets of the
-     * same shape with different website build arguments want two artifacts and
-     * the Build key cannot tell them apart. The second dispatch collides on the
-     * unique key rather than silently serving the first one's values.
+     * The placement this build is for: its minimum build level, build secrets and
+     * a website's build args. Defaults to the only placement when there is one.
+     * The Build key has no Target, so same-shape Targets with different website
+     * build args share one artifact.
      */
     placementTargetId: z.uuid().optional(),
     /**
-     * Optional durable identity for this dispatch attempt/lease. When omitted,
-     * a unique ID is generated for the claim. A UUID and nothing looser: the
-     * routes name their far side by it — the bosun outbox row's primary key,
-     * the in-cluster Job's name — and either rejects anything else.
+     * Generated when omitted. A UUID, because routes name their far side by it:
+     * the outbox row's key, the in-cluster Job's name.
      */
     dispatchId: z.uuid().optional(),
   })
@@ -163,11 +110,10 @@ export type DispatchBuildInput = z.infer<typeof dispatchBuildInput>;
 export interface DispatchBuildResult {
   readonly buildId: number;
   readonly status: 'SUCCEEDED' | 'FAILED';
-  /** Set when the build succeeded. */
+  /** Null unless the build succeeded. */
   readonly artifactDigest: string | null;
-  /** The route that ran, as recorded on the Build (§4). */
+  /** The route that ran. */
   readonly runner: string;
-  /** The durable dispatch identity for this run. */
   readonly dispatchId: string;
 }
 
@@ -176,23 +122,6 @@ export type BuildDispatchContext = Pick<
   'db' | 'adapters' | 'clock' | 'manifest'
 >;
 
-/**
- * Why this Target will not take a build from this route, or `null`.
- *
- * §16: "each Target has a minimum build level defaulting to L2 plus an ordered
- * list of build routes: **the level is a threshold, then admin rank wins**."
- * The rank half belongs to whoever *chooses* a route; by the time a route has
- * been named the only question left is the threshold, which is the Target's.
- *
- * Checked here rather than left to admission because the failure is cheaper and
- * far more legible now: refusing to start costs nothing, while an artifact
- * built below a Target's minimum is a green build followed by a deploy that a
- * policy engine rejects for reasons nobody reading the build log can see.
- *
- * A dispatch that names no placement is not checked, because there is no Target
- * whose threshold could apply — which is also why a build for a shape rather
- * than for a Target is legitimate (§2).
- */
 interface TargetBuildPolicy {
   readonly name: string;
   readonly minimumLevel: 1 | 2 | 3;
@@ -222,6 +151,10 @@ async function targetBuildPolicy(
   };
 }
 
+/**
+ * Checked before starting: a build below the Target's minimum level would succeed
+ * and then be refused at admission. With no placement named, there is no threshold.
+ */
 function routeRefusedByTarget(
   policy: TargetBuildPolicy | null,
   adapter: BuildAdapter,
@@ -237,24 +170,8 @@ function routeRefusedByTarget(
 }
 
 /**
- * The stored bundle address, turned into one a builder can actually fetch.
- *
- * A depot address is `gs://bucket/object`: durable, shared between replicas,
- * and unresolvable by anything without a Google credential — which every
- * builder §15 stages for is, because the hosted route's runner is a machine on
- * the public internet. So it is exchanged here for a short-TTL V4 signed URL.
- *
- * **A failure to mint one is a refusal, not a warning.** Dispatching anyway
- * hands a route an address it cannot resolve, so the workflow fails at its first
- * step and sends the developer to debug a Dockerfile over a location Spindrift
- * itself made unusable. A refusal costs one dispatch and says the true thing.
- *
- * An `https://` location is already fetchable and passes through untouched.
- * **Anything else is refused here rather than forwarded.** An `upload://` handle
- * is honest about being unfetchable, but forwarding it means the honesty arrives
- * as `curl: (1) Protocol "upload" not supported or disabled in libcurl` on a
- * hosted runner, after a dispatch — a CI log the operator has to read for a
- * refusal this function makes for free.
+ * A `gs://` depot address becomes a short-lived signed URL, because a hosted
+ * runner holds no cloud credential. Any other unfetchable location is refused.
  */
 async function fetchableBundleLocation(
   context: Pick<BuildDispatchContext, 'manifest'>,
@@ -263,9 +180,7 @@ async function fetchableBundleLocation(
 ): Promise<CommandResult<string>> {
   if (parseGcsLocation(location) === null) {
     if (isFetchableBundleLocation(location)) return ok(location);
-    // The remedy differs by source, because re-staging does: a repository can be
-    // fetched again at the same commit, while the bytes behind an archive only
-    // ever existed as what a developer uploaded.
+    // A repository can be staged again; an archive can only be uploaded again.
     const remedy =
       app.sourceKind === 'repo'
         ? `deploy ${app.name} again to stage a fresh bundle from its repository`
@@ -288,8 +203,8 @@ async function fetchableBundleLocation(
     return ok(await signedObjectUrl({ location, federation }));
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
-    // The object path, never the URL: a signed URL is a bearer capability and
-    // this sentence lands on the operator-visible attempt log.
+    // The object path, never the URL: a signed URL is a bearer capability, and
+    // this sentence reaches the attempt log.
     return failed(
       'NOT_BUILDABLE',
       `could not mint a signed URL for the staged bundle at ${location}, so no route could fetch it: ${detail}`,
@@ -298,35 +213,8 @@ async function fetchableBundleLocation(
 }
 
 /**
- * Where a `files` build lifts its site out of, at this build's own commit.
- *
- * §5 makes a scope's `spindrift.yaml` the home of record — "once it is on the
- * default branch it wins over detection" — and the repo loop parses one per
- * commit without storing what it read. So this asks the same file the same
- * question at the commit being built, rather than reading a column that would
- * describe whichever commit last wrote it.
- *
- * **Every unknown answers `null`, and `null` ships the scope as it stands** —
- * which is exactly what a `files` build did before this field existed. A scope
- * with no Spindrift file, a file that no longer parses, an installation with no
- * repository integration, an uploaded archive, a repository the host would not
- * answer for: none of them is a reason to fail a build that would otherwise
- * have succeeded, and all of them are reasons to lift nothing.
- *
- * The Dockerfile arm has no output directory *by construction* rather than by
- * omission: a scope that builds itself from a Dockerfile renders a server, and
- * §5 gives it no field to name a directory with.
- */
-/**
- * Which framework a `vercel-output` build declares, read at this build's commit.
- *
- * The same shape as {@link outputDirectoryFor} and one difference that matters:
- * `null` here is fatal rather than benign. A missing output directory means
- * "ship the scope", which is a real answer; a missing framework means the
- * platform's builder would be told nothing, and it does not guess — it builds
- * the project as "Other", copies the tree to `static/`, and emits no functions.
- * That is a build that succeeds and serves an SSR app's sources, so
- * `dispatchBuild` refuses on `null` instead of running one.
+ * `null` is fatal: with no framework named, the platform builds the scope as
+ * plain files and serves an SSR app's sources, so dispatch refuses it.
  */
 async function vercelFrameworkFor(
   context: Pick<CommandContext, 'adapters'>,
@@ -365,6 +253,10 @@ async function vercelFrameworkFor(
   return vercelFrameworkOf(manifest);
 }
 
+/**
+ * Read from the scope's `SPINDRIFT_FILE` at this build's commit. Every unknown
+ * answers `null`, which ships the scope as it stands.
+ */
 async function outputDirectoryFor(
   context: Pick<CommandContext, 'adapters'>,
   input: {
@@ -376,12 +268,8 @@ async function outputDirectoryFor(
     } | null;
   },
 ): Promise<string | null> {
-  // An image is the tree's own build product, so there is nothing to lift out
-  // of it and the question does not arise.
   if (input.artifactType !== 'files') return null;
-  // An upload carries no repository to read a file out of. A supplied artifact
-  // is finished output already (§4), and an uploaded *source* archive has no
-  // default branch for §5's file to have won on.
+  // An upload has no repository to read the file from.
   if (input.source.kind !== 'repo') return null;
   if (input.repository === null) return null;
   const host = context.adapters.repository();
@@ -416,82 +304,31 @@ async function outputDirectoryFor(
 }
 
 /**
- * How a dispatch refusal is recorded, and why there are exactly two ways.
- *
- * Everything below the Build row's own existence is refused *before* the claim
- * transaction, which means the refusal is returned to `runBuildPass` — and
- * `runBuildPass` is `if (result.ok) dispatched += 1`. It keeps the successes and
- * drops everything else. A refusal that only returns therefore reaches nobody,
- * and the Build sits PENDING being refused again every second in silence.
- *
- * What separates the two arms is not severity, it is **whether a later tick can
- * clear it**:
- *
- * - `closes` — the refusal is a fact about this row. A location no route can
- *   fetch, a name no registry will accept, a bundle that was never staged: no
- *   tick makes any of those legal, so the Build is failed with §6's reason and
- *   the sentence goes on the attempt log. Retrying it once a second forever is
- *   the alternative, and it is not one.
- * - `waits` — the refusal is a fact about the *installation*. Federation that
- *   is not configured, a route this installation does not have, a Target
- *   threshold no configured route meets: configuring the thing is a thing an
- *   operator can do, and the next tick should then work without anybody
- *   pressing Deploy again. So the Build stays PENDING — and says what it is
- *   waiting on, which is the half that was missing.
- *
- * That gap cost real time. Build 13 sat PENDING for two hours over a missing
- * `roles/iam.serviceAccountTokenCreator` binding while
- * {@link fetchableBundleLocation} composed the true sentence once a second and
- * threw it away every time; it was finally named by reading Terraform, not by
- * anything Spindrift said. The sentence existed. Nobody could see it.
- *
- * Repeat suppression is what makes the `waits` arm bearable at 1Hz, and it is
- * keyed on `builds.dispatchWaitingOn` — the row is already in hand, so an
- * unchanged refusal costs no query and writes nothing. A *changed* one writes,
- * because a refusal that has changed is news.
+ * `runBuildPass` drops every refusal, so each one is recorded. `closes` fails the
+ * Build over a fact about the row; `waits` keeps it PENDING for an operator's fix.
  */
 type RefusalDisposition =
   | { readonly kind: 'closes'; readonly reason: FailureReason }
   | { readonly kind: 'waits' };
 
-/** Everything {@link refuseDispatch} needs to know about the Build it is refusing. */
 export interface RefusalSubject {
   readonly attempt: BuildAttemptRef;
   /** `builds.dispatchWaitingOn` as it stands, for suppressing a repeat. */
   readonly waitingOn: string | null;
   /** `builds.dispatchAttempts` as it stands, for pacing the next attempt. */
   readonly attempts: number;
-  /**
-   * The claim this refusal is being made under, when it is made after one.
-   *
-   * Almost every refusal in this file happens before the claim and has no
-   * dispatch id to carry — but one does not: an unfetchable bundle location is
-   * only discovered after the row is `RUNNING`, and closing it out is then a
-   * terminal write like any other. Present means "fence this on my claim".
-   */
+  /** Set for a refusal made after the claim, so its write is fenced on it. */
   readonly dispatchId?: string;
 }
 
-/**
- * What an attempt says when the row it was settling is no longer its to settle.
- *
- * Unlike the lost claim at the *top* of a dispatch — which writes nothing,
- * because another replica is filling that Build's log right now — this one is
- * worth a line: this attempt ran a whole build and streamed its events onto the
- * log, so a run that simply stopped mid-stream with no ending is a log that
- * reads as a hang.
- */
+/** Logged, so a run that lost its claim mid-stream does not read as a hang. */
 const LOST_CLAIM_SENTENCE =
   'this dispatch lost its claim to another reconciler and wrote nothing; ' +
   'the attempt that holds the claim reports what happened';
 
 /**
- * End an attempt whose fenced write matched no row.
- *
- * `failed` and not `ok`, and that is load-bearing: `runBuildPass` keys
- * auto-deploy off `result.value.status === 'SUCCEEDED'`, so an attempt that
- * refused to write its verdict and still returned one would ship the artifact
- * of a build somebody else has already superseded.
+ * `failed`, never `ok`: `runBuildPass` auto-deploys on a SUCCEEDED result, which
+ * would ship a build another attempt has superseded.
  */
 async function lostClaim<Output>(
   context: Pick<BuildDispatchContext, 'db'>,
@@ -529,18 +366,8 @@ async function refuseDispatch<Output>(
 }
 
 /**
- * Fail a Build out for a refusal no later tick can clear, and say why.
- *
- * The `closes` half of {@link refuseDispatch}, exported for the same reason
- * {@link recordDispatchWait} is: one refusal of this class is made before
- * `dispatchBuild` is ever called. `runBuildPass` holds a Build to the shape its
- * placement of record takes, and a Build produced for a placement the Component
- * has since moved off is a fact about that row — no configuration makes it
- * legal, and the remediation §3 prescribes is a rebuild, not a wait.
- *
- * Answers whether the verdict landed. `false` means the fenced write matched no
- * row, so this attempt no longer holds the Build and has no verdict to give;
- * nothing is written, and the caller says so its own way.
+ * Exported for `runBuildPass`, which closes a Build whose shape its placement no
+ * longer takes. Returns `false` when the fenced write matched no row.
  */
 export async function recordDispatchClose(
   context: Pick<BuildDispatchContext, 'db'>,
@@ -548,15 +375,11 @@ export async function recordDispatchClose(
   sentence: string,
   reason: FailureReason,
 ): Promise<boolean> {
-  // The row first, the log second, because a refusal made under a claim can
-  // find the row already gone: writing the sentence before knowing whether
-  // this attempt still holds the row would put a verdict on somebody else's
-  // attempt log.
+  // The row before the log: a refusal under a claim may find the row gone, and
+  // its sentence must not land on another attempt's log.
   const closed = await context.db
     .update(builds)
-    // Cleared with the same statement that ends the wait: a FAILED Build is
-    // not waiting on anything, and leaving the sentence behind would read as
-    // though it were.
+    // A FAILED Build is waiting on nothing.
     .set({ status: 'FAILED', dispatchWaitingOn: null })
     .where(
       subject.dispatchId === undefined
@@ -583,24 +406,8 @@ export async function recordDispatchClose(
 }
 
 /**
- * Say once, on the attempt log, what a PENDING Build is waiting for — and pace
- * when the loop may try it again.
- *
- * Exported because one refusal of this class is made before `dispatchBuild` is
- * ever called: `runBuildPass` selects a route for the Target and skips the
- * Build when there is none, so the sentence has to be written from there. It is
- * the same disposition and the same suppression, which is why it is the same
- * function rather than a second one that drifts.
- *
- * No status event is written: the Build has not failed and its phase has not
- * moved. It is PENDING, which is what it was, and the log now says why it
- * still is.
- *
- * The row is written even when the sentence is a repeat, because every refusal
- * advances the backoff clock (story 101): `dispatchAttempts` counts up and
- * `nextDispatchAt` moves out exponentially, which is what caps a refusal the
- * loop would otherwise re-make every tick. What stays suppressed is the log
- * line — the sentence belongs on the attempt log exactly once.
+ * Logs a new sentence once and advances the backoff on every call. Exported for
+ * `runBuildPass`, which refuses a Build with no placement or no admitted route.
  */
 export async function recordDispatchWait(
   context: Pick<BuildDispatchContext, 'db' | 'clock'>,
@@ -664,8 +471,7 @@ export const dispatchBuild = async (
     app.repositoryId === null
       ? []
       : await context.db
-          // `installationId` rides along for `outputDirectoryFor`, which reads
-          // this build's commit as the installation that owns the repository.
+          // `installationId` rides along for the file reads at this build's commit.
           .select({
             fullName: repositories.fullName,
             installationId: repositories.installationId,
@@ -674,9 +480,8 @@ export const dispatchBuild = async (
           .where(eq(repositories.id, app.repositoryId))
           .limit(1);
 
-  // §4's supplied artifact: an archive of finished output already *is* the
-  // artifact, digested over the bundle core staged. There is no route to run and
-  // running one would produce a second digest over the same bytes.
+  // A supplied artifact is already the artifact. Running a route would digest the
+  // same bytes a second time.
   if (build.status === 'SUCCEEDED' && build.artifactDigest !== null) {
     return ok({
       buildId: build.id,
@@ -687,12 +492,8 @@ export const dispatchBuild = async (
     });
   }
 
-  // Everything from here down can refuse, and every refusal below is made
-  // before the claim — so every one of them is dropped by `runBuildPass` unless
-  // it is written somewhere first. See {@link refuseDispatch}: the App and the
-  // Component are known by now, which is all an attempt reference needs, so the
-  // subject is assembled once and each refusal only has to say which of the two
-  // dispositions it is.
+  // Every refusal below goes through `refuseDispatch`, because `runBuildPass`
+  // drops an unrecorded one.
   const subject: RefusalSubject = {
     attempt: {
       appId: app.id,
@@ -704,10 +505,8 @@ export const dispatchBuild = async (
   };
 
   if (build.bundleDigest === null) {
-    // §16: "the bundle digest must be a build parameter on every route, or the
-    // correlation between a source receipt and a provenance document has no
-    // join." A Build without one cannot be dispatched at all — and no tick
-    // stages one, because staging happens where the Build is created.
+    // The bundle digest joins the source receipt to the provenance, and no tick
+    // stages one: staging happens where the Build is created.
     return refuseDispatch(
       context,
       subject,
@@ -719,9 +518,7 @@ export const dispatchBuild = async (
 
   const adapter = context.adapters.build(input.route);
   if (adapter === null) {
-    // The route set is §4's installation configuration, so this names a
-    // prerequisite rather than a defect: an operator who configures the route
-    // gets this Build dispatched on the next tick.
+    // A missing route is configuration, so the next tick dispatches once it exists.
     return refuseDispatch(
       context,
       subject,
@@ -731,8 +528,7 @@ export const dispatchBuild = async (
     );
   }
 
-  // Target binding: if a Component has multiple placements, dispatch must name an explicit placementTargetId.
-  // If there is only one placement, default to it.
+  // With several placements, dispatch must name one; with one, it is the default.
   const placements = await context.db
     .select({ targetId: componentTargetDesired.targetId })
     .from(componentTargetDesired)
@@ -744,10 +540,7 @@ export const dispatchBuild = async (
       placements.length > 0 &&
       !placements.some((p) => p.targetId === effectiveTargetId)
     ) {
-      // Placements are rows an operator edits, so this is `waits` for the same
-      // reason a missing route is: it is not reachable from the loop at all
-      // (the loop dispatches the placement it read), and where it does arrive
-      // the remedy is a placement, not a rebuild.
+      // `waits`: the remedy is a placement, not a rebuild.
       return refuseDispatch(
         context,
         subject,
@@ -770,14 +563,8 @@ export const dispatchBuild = async (
     }
   }
 
-  // §16: "the level is a threshold, then admin rank wins." The threshold half
-  // is the Target's, so it is only checkable where a placement is named — and
-  // where one is, a route below it is refused here rather than producing an
-  // artifact the Target would refuse to admit anyway.
-  //
-  // `waits`, because both halves of the comparison are configuration: the
-  // Target's threshold and the set of routes this installation offers. Lowering
-  // one or adding a better route makes the next tick work.
+  // The Target's minimum level applies only where a placement is named. `waits`,
+  // because the threshold and the offered routes are both configuration.
   const targetPolicy = await targetBuildPolicy(context, effectiveTargetId);
   const refusal = routeRefusedByTarget(targetPolicy, adapter);
   if (refusal !== null) {
@@ -786,10 +573,7 @@ export const dispatchBuild = async (
     });
   }
 
-  // The staged bundle's own columns, not the artifact's. §15 stages a bundle for
-  // either builder — a repo commit and an upload alike — and a Build that has
-  // not run has no artifact refs to borrow an address from, so a missing
-  // location is what would otherwise reach a route as an empty URL.
+  // A missing location would reach a route as an empty URL.
   if (build.bundleLocation === null) {
     return refuseDispatch(
       context,
@@ -802,47 +586,12 @@ export const dispatchBuild = async (
 
   const attempt = subject.attempt;
 
-  /**
-   * §16 names one registry per installation — "every artifact is pushed to and
-   * pulled from" it — and a Build is keyed on a *shape*, not on a Target (§2),
-   * so there is no Target here to read a reachable registry off. That is the
-   * right way round: whether a Target can reach the registry is a placement
-   * filter (§3's `reachableRegistries`), applied before the build, not a choice
-   * the build makes. An adapter never picks its own destination (§4).
-   *
-   * What §16 names is a **namespace**, so a repository is composed under it
-   * here. Refused rather than projected when a name cannot be a path segment:
-   * the registry would answer `NAME_INVALID` at the last step of the build, and
-   * projecting instead would push two Components to one repository. Recorded
-   * and closed out like an unfetchable location, because a name is a column on
-   * these rows and no later tick makes it legal — an operator renaming the App
-   * or the Component is what clears it.
-   *
-   * Ahead of the signed URL deliberately: a bearer capability minted for a
-   * Build that cannot be dispatched is one that exists for no reason.
-   */
+  // A Build is keyed on a shape, not a Target, so its destinations are the
+  // installation's registries. A route never picks its own.
   const allRegistries = context.manifest.supplyChain.registry;
   /**
-   * The registries **this route** can publish to, which is not always all of
-   * them (§13).
-   *
-   * §16 pushes every artifact to every registry, and that reads as unconditional
-   * until you ask what authorizes each push. §13 answers "the route that makes
-   * it", and the three routes do not reach the same set: the hosted run logs
-   * into GHCR and federates to the artifact registry, while the cloud builder's
-   * metadata token is good for one vendor's registries and nothing else.
-   *
-   * `buildctl` exports every reference in one operation, so an unauthorized
-   * destination is not a destination that gets skipped — it is a `401` that
-   * fails the whole export, with the image built and nothing published
-   * anywhere. Narrowing is what makes a cloud build land in the artifact
-   * registry by default instead of failing at the last step, and stored
-   * credentials widen it back for a host no federation reaches.
-   *
-   * The consequence is deliberate and is the one an App choosing a route signs
-   * up for: an artifact in fewer registries is an artifact fewer Targets can
-   * pull. `setAppBuildRoute` refuses that combination up front rather than
-   * letting a green Build discover it at the deploy.
+   * Only the registries this route can authorize a push to: one unauthorized
+   * destination fails the whole export. Stored credentials widen the set.
    */
   const storedHosts = new Set(
     (await context.adapters.registryCredentials?.()?.list())?.map(
@@ -864,8 +613,7 @@ export const dispatchBuild = async (
         'so a build on it would have nowhere to put the artifact. Store a ' +
         'registry credential for one of them, or build on a route whose own ' +
         'identity reaches one.',
-      // Both halves are configuration an operator can supply, and the next tick
-      // then works without anyone pressing Deploy again.
+      // Both halves are configuration an operator can supply.
       { kind: 'waits' },
     );
   }
@@ -879,34 +627,23 @@ export const dispatchBuild = async (
       `App "${app.name}" / Component "${component.name}" cannot name a ` +
       `repository under ${registries.join(' or ')}: a registry ` +
       `path segment is lowercase alphanumerics separated by "-", "_" or "."`;
-    // §6's table covers "invalid spec" here, which is what a name no registry
-    // will accept is — and it blames the developer, who is the one who can
-    // rename the thing.
+    // A name no registry accepts is an invalid spec, and the developer can rename it.
     return refuseDispatch(context, subject, 'NOT_BUILDABLE', sentence, {
       kind: 'closes',
       reason: 'REJECTED',
     });
   }
 
-  // The stored location, not yet a fetchable one. Everything between here and
-  // the claim only reads the source's shape — kind, commit, subpath — so the
-  // signed URL it does not carry is not missed, and minting one this early is
-  // what story 101's incident was made of: a signature spent, then a refusal
-  // that was knowable for free. The URL is minted after the claim, below.
+  // The stored location, not a fetchable one: the signed URL is minted after the
+  // claim, so a refused attempt spends no signature.
   const source: Source =
     app.sourceKind === 'repo'
       ? {
           kind: 'repo',
           url: repository?.fullName ?? app.sourceRepoUrl ?? '',
-          // The real commit, never the row's `<commit>#<millis>` rerun key: this
-          // is a git ref the source is read at — `vercelFrameworkFor` and
-          // `outputDirectoryFor` fetch `package.json`/`spindrift.yaml` from the
-          // repository at it — and the far side cannot resolve one with a suffix,
-          // so a suffixed ref reads as "no framework" and refuses every rerun of
-          // a Vercel-built App. The suffix is a uniqueness device on the Build
-          // row alone (`sourceForRerun`), and never a fact about the source.
+          // The real commit, never the row's `<commit>#<millis>` rerun key: files
+          // are read at this ref, and the far side cannot resolve a suffixed one.
           commit: build.commit.split('#')[0] ?? build.commit,
-          // §5: an App is repo plus subpath, and the developer named it there.
           subpath: app.sourceRepoSubpath ?? '.',
           location: build.bundleLocation,
         }
@@ -915,54 +652,18 @@ export const dispatchBuild = async (
           digest: build.bundleDigest,
           location: build.bundleLocation,
           contents: 'source',
-          // Per Build: the unwrap is a fact about the bytes that were uploaded.
+          // Per Build, because the unwrap depends on the uploaded bytes.
           subpath: build.bundleSubpath ?? '.',
         };
 
   /**
-   * The stored registry credentials the destinations of this build need (§16).
-   *
-   * §13 wants every push authorized by the route that makes it, and where that
-   * works this is empty and nothing is handed over. What it covers is the gap
-   * federation cannot: Docker Hub trusts no federated identity, so a push there
-   * either carries a token or fails at the last step of a green build.
-   *
-   * Opened here and nowhere else. The plaintext exists for the length of this
-   * request, reaches exactly one route, and is never written to the Build row,
-   * the attempt log, or an event — `dispatchWaitingOn` below carries sentences
-   * an operator reads, and none of them can name a secret because none of them
-   * is composed from one.
+   * Opened here only. Plaintext credentials reach exactly one route and are never
+   * written to the Build row, the attempt log or an event.
    */
   const credentials = context.adapters.registryCredentials?.() ?? null;
   /**
-   * **The hosts this route cannot authorize on its own — every destination
-   * instead, on a route that has somewhere safe to carry a credential.**
-   *
-   * `selfAuthorizedRegistries` answers for the identity that *dispatches* the
-   * run, not for wherever the run ends up executing. §15 lets the hosted route
-   * hand the run to whichever repository was connected, and that repository's
-   * own token is not the token that self-authorized `ghcr.io` above: an
-   * org-owned repository's token never writes another owner's namespace, and a
-   * user repository's token is refused on a package this installation's stored
-   * credential already owns (ticket 136). A route that can carry a credential
-   * (`carriesHeldSecret`) is asked about every destination for exactly that
-   * reason — the stored credential rides along wherever one exists, and the
-   * workflow logs in with it *after* the run's own token
-   * (`spindrift-build.yml`'s "Log in with sealed credentials"), so it wins
-   * where both exist and costs nothing extra where the run's own token was
-   * already enough.
-   *
-   * A route with nowhere to carry one keeps asking only about what it cannot
-   * reach on its own — handing it a credential it is refused below for buys
-   * nothing.
-   *
-   * That is not hypothetical. The installation holds a GHCR credential as a
-   * `registry_credentials` row (`storage/registry-credentials.ts`), so
-   * `authFor` answers for `ghcr.io` whenever one is stored. Asking about every
-   * destination on a route that could not carry one would produce it on every
-   * hosted build and fire the refusal below each time — on the route whose own
-   * workflow logs into GHCR with the run's token and needs nothing from here
-   * when the run stays where that token is good.
+   * A route that carries credentials asks for every destination, since the run's
+   * own token may not write there. Others ask only for hosts they cannot authorize.
    */
   const destinationHosts = [...new Set(destinations.map(registryHostOf))];
   const unauthorizedHosts = destinationHosts.filter(
@@ -973,11 +674,8 @@ export const dispatchBuild = async (
       adapter.carriesHeldSecret ? destinationHosts : unauthorizedHosts,
     )) ?? [];
 
-  // A route that cannot carry one is refused **before** the claim, so nothing
-  // is dispatched that would fail at the push — or, worse, put the credential
-  // where the route puts its inputs. `waits`, because both halves are
-  // configuration: admitting a different route on the Target, or forgetting a
-  // credential this registry did not need, makes the next tick work.
+  // Refused before the claim, so no credential goes where the route puts its
+  // inputs. `waits`: a different route or a removed credential clears it.
   if (registryAuth.length > 0 && !adapter.carriesHeldSecret) {
     const hosts = registryAuth.map((one) => one.host).join(', ');
     return refuseDispatch(
@@ -993,12 +691,8 @@ export const dispatchBuild = async (
     );
   }
 
-  // The Component's declared build secrets (story 112), gated by the same
-  // capability the registry credential is — what makes a route safe to hand
-  // one makes it safe to hand the other. Names are read first and the
-  // capability refused on them alone, so no plaintext is ever resolved for a
-  // route that could not be handed it; a route that has nowhere safe to carry
-  // one refuses the build at dispatch rather than running it without.
+  // Build secrets need the same capability as a registry credential. Names are
+  // checked first, so no plaintext is resolved for a route that cannot carry it.
   const buildSecretNames =
     effectiveTargetId === undefined
       ? []
@@ -1016,10 +710,7 @@ export const dispatchBuild = async (
       { kind: 'waits' },
     );
   }
-  // Opened here and nowhere else, exactly as the registry credential is: the
-  // plaintext exists for the length of this request, reaches exactly one
-  // route, and is never written to the Build row, the attempt log, or an
-  // event. What the row records is the *names*, below.
+  // Opened here only, like the registry credential. The row records the names.
   let buildSecrets: BuildSpec['buildSecrets'] = [];
   if (buildSecretNames.length > 0 && effectiveTargetId !== undefined) {
     const resolved = await resolveBuildSecrets(
@@ -1049,31 +740,19 @@ export const dispatchBuild = async (
     registryAuth,
     buildSecrets,
     /**
-     * §12 counts tags, so a push that carried only the implicit `:latest` would
-     * leave retention nothing to act on and a rollback depth of one.
+     * Retention counts tags, so a push carrying only the implicit `:latest` would
+     * leave a rollback depth of one.
      */
     tags: artifactTags(build.bundleDigest),
     /**
-     * §4: "a website's build-time config is passed as build arguments as
-     * ordinary rows, not fetched from a store — whatever a website bakes
-     * becomes public anyway, so no builder ever holds a store credential."
-     *
-     * Read here rather than by the route, so that the one place a value
-     * reaches a builder is the one place the contract says it may.
+     * Read here, never by the route, so a value reaches a builder in one place.
+     * A website's build args are plain rows, never store values.
      */
     buildArgs:
       effectiveTargetId === undefined || !isBuildTimeConfig(component.kind)
         ? {}
         : await readBuildArgs(context.db, component.id, effectiveTargetId),
-    /**
-     * §3, story 42: a website placed on a static Target is the files its build
-     * leaves behind, not the tree that produced them.
-     *
-     * Read here, from this build's own commit, for the reason the field's
-     * documentation gives: the answer lives in the scope's `spindrift.yaml`
-     * and moves with the tree, so the only correct time to ask is while
-     * composing the spec for one commit.
-     */
+    /** A website on a static Target ships the files its build leaves behind. */
     outputDirectory: await outputDirectoryFor(context, {
       artifactType: build.artifactType,
       source,
@@ -1086,12 +765,8 @@ export const dispatchBuild = async (
     }),
   };
 
-  // §3: the shape was resolved before this build, and this is the one shape
-  // that cannot be built from the shape alone. Refused here rather than in the
-  // runner because the alternative is not a red build — it is a green one that
-  // served the sources, which nobody reading a successful run would think to
-  // check. `waits` rather than `closes`: adding the missing dependency is a
-  // thing a developer does that makes the next tick work.
+  // Refused here: with no framework the build goes green and serves the sources.
+  // `waits`, because adding the dependency makes the next tick work.
   if (spec.artifactType === 'vercel-output' && spec.vercelFramework === null) {
     return refuseDispatch(
       context,
@@ -1138,25 +813,15 @@ export const dispatchBuild = async (
         logFidelity: adapter.logFidelity,
         dispatchId,
         leasedAt: now,
-        // A previous attempt's address, where the row kept one, names a run
-        // this attempt is not. `cancelBuild` hands the column to the route,
-        // so until this run is discovered it names nothing rather than the
-        // run that already ended.
+        // Cleared until this run is discovered, because `cancelBuild` hands the
+        // column to the route.
         runUrl: null,
-        // Story 112: which secrets this run could read — names only, written
-        // at the claim so a build that fails still records what it held. A
-        // provenance that does not mention a credential the build had is a
-        // provenance that overclaims.
+        // Names only, at the claim, so a failed build still records what it held.
         buildSecretNames,
-        // The wait is over, so what it was waiting on stops being true. Cleared
-        // here rather than left to age out, so that a Build whose lease expires
-        // and is refused again reports it again instead of being suppressed
-        // against a sentence from a previous attempt.
+        // Cleared so a Build refused again after its lease expires reports the
+        // refusal again instead of suppressing it.
         dispatchWaitingOn: null,
-        // The backoff clock ends with the wait it was pacing (story 101): a
-        // claimed Build is being tried, and a stale next-attempt time left
-        // behind would hold a re-armed row hostage to refusals it already
-        // cleared.
+        // The backoff ends with the wait it paced.
         dispatchAttempts: 0,
         nextDispatchAt: null,
       })
@@ -1187,11 +852,8 @@ export const dispatchBuild = async (
   });
 
   if (claimResult.type === 'CONCURRENCY_EXCEEDED') {
-    // `waits`, and the one refusal in this file that clears itself: the
-    // prerequisite is a free slot, which a running sibling gives up on its own.
-    // Recorded anyway, because "PENDING and not moving" looks identical to the
-    // developer whether the cause is a queue or a missing IAM binding, and the
-    // difference is the whole of what they want to know.
+    // The one `waits` that clears itself when a sibling finishes. Recorded anyway,
+    // because a queue and a missing binding look the same from PENDING.
     return refuseDispatch(
       context,
       subject,
@@ -1229,10 +891,7 @@ export const dispatchBuild = async (
         dispatchId: current.dispatchId ?? dispatchId,
       });
     }
-    // Deliberately not recorded. Losing the claim is not a refusal to report to
-    // anybody: another replica won the same row and is writing that Build's log
-    // right now, so a line here would say "not dispatched" underneath the events
-    // of the dispatch that did happen.
+    // Not recorded: another replica won this row and is writing its log now.
     reconcilerDispatchAttempts.add(1, { outcome: 'lost' });
     return failed(
       'NOT_BUILDABLE',
@@ -1242,40 +901,23 @@ export const dispatchBuild = async (
 
   const activeDispatchId = claimResult.dispatchId;
 
-  // Every write from here down touches a row this attempt claimed, so every one
-  // of them carries the claim. `dispatchId` is a fencing token: matching zero
-  // rows *is* the refusal, the same discipline `deployApp`'s re-arm takes
-  // against a live lease. Without it a claim reclaimed under a long build came
-  // back minutes later and wrote its verdict over the attempt that had replaced
-  // it — a red build going green, or a green one going red, with nothing in
-  // either log to say which run wrote it.
+  // Every write from here carries the claim. `dispatchId` is a fencing token:
+  // matching zero rows means another attempt has replaced this one.
   const mine = and(
     eq(builds.id, build.id),
     eq(builds.dispatchId, activeDispatchId),
   );
 
-  // The durable address becomes a fetchable one here — after every refusal and
-  // after the claim, so it is the **last** thing an attempt acquires (story
-  // 101). A signed URL is a bearer capability with a TTL in minutes: minting
-  // at dispatch keeps it off the Build row, off the attempt log, and out of
-  // any window between staging and running; minting after the claim means a
-  // refused attempt — a missing route, a shape the Target refuses, a full
-  // concurrency slot, a lost claim — spends no STS exchange and no SignBlob.
-  // The incident behind that ordering spent 84,729 SignBlob calls in a day on
-  // attempts that then refused for free.
+  // Minted after every refusal and the claim, so a refused attempt spends no STS
+  // exchange or SignBlob, and the bearer URL stays off the row and the log.
   const fetchable = await fetchableBundleLocation(
     context,
     app,
     build.bundleLocation,
   );
   if (!fetchable.ok) {
-    // Which arm is decided by the location rather than by the error. Where the
-    // location itself is the problem it is a column on this row and no later
-    // tick makes it fetchable, so the Build is closed out — §6's
-    // `ARTIFACT_UNAVAILABLE` is the platform-blamed reason for an object that
-    // is not there to be fetched. (The claim above marked the row RUNNING;
-    // `refuseDispatch` settles it FAILED, which is the same terminal write a
-    // red build lands.)
+    // A location no route can fetch is a fact about this row, so the Build is
+    // closed out, and `refuseDispatch` settles the claimed row as FAILED.
     if (!isFetchableBundleLocation(build.bundleLocation)) {
       return refuseDispatch(
         context,
@@ -1285,12 +927,8 @@ export const dispatchBuild = async (
         { kind: 'closes', reason: 'ARTIFACT_UNAVAILABLE' },
       );
     }
-    // The other refusals are about this installation's federation rather than
-    // about this row, so the Build waits: configuring federation is a thing an
-    // operator can do that makes a later tick work. The claim this attempt
-    // took is released in the same write — nothing ran under it — and the
-    // release is fenced on the dispatch id, so a row another replica has since
-    // claimed is left alone.
+    // Federation problems wait for an operator. The claim is released in the same
+    // write, fenced on the dispatch id so another replica's claim is left alone.
     const sentence = fetchable.failure.message;
     if (subject.waitingOn !== sentence) {
       await recordBuildEvent(context.db, subject.attempt, {
@@ -1323,14 +961,8 @@ export const dispatchBuild = async (
   };
   reconcilerDispatchAttempts.add(1, { outcome: 'dispatched' });
 
-  // The lease is a liveness signal for this process, not a clock on the
-  // build: a route's budget is 45 minutes against a 10-minute lease, and a
-  // quiet far side — a cold `RUN npm ci`, a bosun host that reports nothing
-  // until it posts — yields no event to renew on. Renewed on a timer instead,
-  // so a row whose lease has expired is one whose process is gone, which is
-  // the only case the re-claim and `cancelBuild` are allowed to treat it as.
-  // Fire-and-forget under the claim: a renewal that fails is one the next
-  // tick makes again, and one that lands after the verdict matches no row.
+  // Renewed on a timer, because a quiet far side may send no event for longer
+  // than the lease. A renewal that lands after the verdict matches no row.
   const renewal = setInterval(() => {
     void context.db
       .update(builds)
@@ -1340,23 +972,18 @@ export const dispatchBuild = async (
   }, DISPATCH_LEASE_REFRESH_MS);
 
   try {
-    // The claim's id goes with the build so the route names its far side by
-    // it — which is what lets `cancelBuild` reach that far side from the row.
+    // The route names its far side by the claim's id, so `cancelBuild` can reach it.
     const stream = adapter.build(buildSource, spec, activeDispatchId);
     let next = await stream.next();
     while (!next.done) {
       const event = next.value;
-      // Where the run can be watched is a fact about the Build, not a line in
-      // its log — and it is written as soon as the route reports it so the
-      // screen can offer it *during* the run, which is the whole of its value
-      // on a `LIVE_STATUS` route whose text arrives only at the end.
+      // Written when reported, so the screen can offer it during the run.
       if (event.type === 'runner') {
         await context.db.update(builds).set({ runUrl: event.url }).where(mine);
         next = await stream.next();
         continue;
       }
-      // §6's one attempt-scoped log: build events and deploy events land on the
-      // same stream for the same attempt, so the UI subscribes once.
+      // Build and deploy events share one attempt log, so the UI subscribes once.
       await recordBuildEvent(
         context.db,
         attempt,
@@ -1373,10 +1000,8 @@ export const dispatchBuild = async (
     const result = next.value;
 
     if (result.status === 'FAILED') {
-      // The row before the log line, everywhere below: the fenced write is what
-      // decides whether this attempt gets to have a verdict at all, and a status
-      // event written first would land on the log of the attempt that replaced
-      // it.
+      // The row before the log, everywhere below: the fenced write decides whether
+      // this attempt has a verdict at all.
       const settled = await context.db
         .update(builds)
         .set({ status: 'FAILED' })
@@ -1403,9 +1028,8 @@ export const dispatchBuild = async (
       backend: adapter.name,
       expectedBuilderId: adapter.provenanceBuilderId,
       maximumLevel: adapter.buildLevel,
-      // A shape-only Build has no Target policy yet. It is assessed at the
-      // route's achieved level and every actual Deploy checks the Target's current
-      // threshold again, which is what makes a later policy raise prospective.
+      // A shape-only Build has no Target policy yet. Every Deploy checks the
+      // Target's threshold again.
       minimumLevel: targetPolicy?.minimumLevel ?? 1,
       source: buildSource,
     });

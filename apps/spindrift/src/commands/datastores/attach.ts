@@ -1,34 +1,7 @@
 /**
- * `attachDatastore` — bind an existing Datastore to an App (§11).
- *
- * §11 makes a Datastore "top-level and attached, not a field, forced by
- * reattachment to a different App", so attachment is its own act and this is
- * it. One column changes.
- *
- * **No adapter call, and nothing reaches a running container.** Attaching does
- * not restart anything: the connection is rendered into the workload's
- * environment by the deploy path, so the App picks it up on its **next
- * Deploy** and not before. That is the same promise config makes (§10) and it
- * is deliberate — an attach that silently rolled every Component would be a
- * destructive act hiding behind a bookkeeping verb.
- *
- * **Every refusal that could leave an App un-deployable lives here**, because
- * this is the last moment at which the state can be prevented rather than
- * diagnosed. Refusing at deploy time instead would leave a developer with an
- * App that cannot be released and no verb that undoes the reason:
- *
- * - *Already attached elsewhere.* A Datastore has one App. Reattachment is
- *   detach-then-attach, which is two deliberate acts rather than one that
- *   silently steals a database out from under another App.
- * - *A second store of the same engine.* Both would claim the same variable —
- *   the name is fixed by engine, `DATABASE_URL` for postgres and `REDIS_URL`
- *   for valkey — and the second would win by ordering. There is no field to
- *   rename either, by design.
- * - *A cluster-local Datastore under an App placed somewhere else.* §11:
- *   "In-cluster datastores stay cluster-local in v1." The refusal is worded in
- *   the placement screen's own words, because a developer told one thing when
- *   they picked a Target and something else when they attached a database is
- *   being told about two different systems.
+ * `attachDatastore` binds an existing Datastore to an App. Nothing restarts:
+ * the App gets the connection on its next Deploy. Every refusal that would
+ * leave the App undeployable is made here, where it can still be prevented.
  */
 import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
@@ -49,19 +22,11 @@ export type AttachDatastoreInput = z.infer<typeof attachDatastoreInput>;
 export interface AttachDatastoreResult {
   readonly datastoreId: string;
   readonly appId: string;
-  /** The variable the connection will arrive as, so the caller can say so. */
+  /** The engine fixes the variable the connection arrives as. */
   readonly engine: 'postgres' | 'valkey';
 }
 
-/**
- * Placement's sentence for a cluster-local store, resolved once.
- *
- * `sentence` takes the derived requirements because most of its branches read
- * them; this branch reads none of the three, so the values below are inert and
- * exist only to satisfy the shape. Calling it anyway is the point — the words
- * a developer reads here are the same string the placement screen shows, kept
- * in one place rather than typed twice.
- */
+/** Placement's own sentence; this branch of `sentence` ignores the rest. */
 const CLUSTER_LOCAL = sentence('DATASTORE_IS_CLUSTER_LOCAL', {
   kind: 'service',
   reach: 'none',
@@ -91,8 +56,7 @@ export const attachDatastore: Command<
     return failed('NOT_FOUND', `there is no App with id ${input.appId}`);
   }
 
-  // Attaching where it already is changes nothing and refusing would make the
-  // retry of a dropped response an error.
+  // Idempotent, so retrying a dropped response is not an error.
   if (datastore.appId === app.id) {
     return ok({
       datastoreId: datastore.id,
@@ -124,14 +88,8 @@ export const attachDatastore: Command<
     );
   }
 
-  // Cluster-local is a property of where the Datastore sits, derived exactly
-  // as `resolveComponentPlacement` derives it: a managed cloud database is
-  // reachable from anywhere its project is, one running in a cluster is
-  // reachable from that cluster only. "This boundary is a cluster" is the
-  // vessel's kind, stated directly rather than inferred back off a surface's
-  // adapter. The join compares boundaries, not surface rows — the conceptually
-  // right test, and an inner join so an unplaced Component (NULL
-  // placedTargetId) constrains nothing, exactly as before.
+  // A cluster vessel's Datastore is reachable from that vessel only. The inner
+  // join skips unplaced Components, which constrain nothing.
   if (datastore.vessel.kind === 'cluster') {
     const [elsewhere] = await context.db
       .select({

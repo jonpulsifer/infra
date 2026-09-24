@@ -1,26 +1,7 @@
 /**
- * `inspectRepository` — read a repository and say what is deployable in it.
- *
- * This command writes nothing. It exists so that connecting a repository can be
- * a thing a developer *reads and confirms* rather than a form they fill in:
- * §5's ladder already knows how to turn one directory into one Component
- * proposal, and until now the only caller that could have asked it was a test.
- *
- * Two properties make it safe to run on a keystroke:
- *
- * - **It is pinned to a commit.** The default branch's head is resolved once and
- *   every read is against that sha, so what the screen shows and what
- *   `connectRepository` later writes are statements about the same code — even
- *   if somebody pushes in between, in which case the connect re-resolves and
- *   re-detects rather than writing a stale answer.
- * - **It is one tree read plus a handful of blobs.** No clone, no checkout, no
- *   builder. `gitHubTree` caches both, so inspecting five scopes in a monorepo
- *   costs one listing, not five.
- *
- * The unhappy path is a first-class result rather than an error: §5 makes "I do
- * not know how to build this" an outcome, and a repository where nothing is
- * recognized answers with an empty `scopes` and the reason each candidate was
- * passed over.
+ * `inspectRepository` reads a repository and proposes what is deployable in it,
+ * writing nothing. Every read is pinned to the default branch head, and a scope
+ * nothing recognizes comes back `unsupported` with the reason.
  */
 import { z } from 'zod';
 import type { ComponentKind } from '../../domain/desired-state.ts';
@@ -31,13 +12,12 @@ import { gitHubTree } from '../../domain/detection/tree.ts';
 import { type Command, failed, ok } from '../types.ts';
 import { unreadable } from './access.ts';
 
-/** `owner/name` — the only handle the repository API takes. */
 const fullName = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/, 'must be owner/name');
 
-/** §5's named scope: a repo-relative directory, `.` for the root. */
+/** A repo-relative directory, `.` for the root. */
 const scopePath = z
   .string()
   .trim()
@@ -51,8 +31,7 @@ export const inspectRepositoryInput = z
   .object({
     fullName,
     /**
-     * Directories to inspect. Omitted means: look at the root, and if the root
-     * is not itself an App, discover what is below it.
+     * Omitted means the root, or what is below it when the root is not an App.
      */
     scopes: z.array(scopePath).max(24).optional(),
   })
@@ -60,40 +39,23 @@ export const inspectRepositoryInput = z
 
 export type InspectRepositoryInput = z.infer<typeof inspectRepositoryInput>;
 
-/** What one directory turned out to be. */
 export type InspectedScope =
   | {
       readonly scope: string;
       readonly outcome: 'detected';
       readonly kind: ComponentKind;
-      /** Why detection says so, in words a person reads on the screen. */
       readonly reason: string;
       readonly frontend: 'railpack' | 'dockerfile';
       /** Set only for the `dockerfile` frontend. */
       readonly dockerfile: string | null;
-      /**
-       * The zero-config build command, when the ladder proposed one.
-       *
-       * Carried for the same reason `outputDirectory` is: together they are the
-       * whole of a `railpack` build, and the creation screen writes the
-       * `spindrift.yaml` this scope will get *out of this view*. A field left
-       * out here is a field the preview would have to invent.
-       */
+      /** Null when the ladder proposed none. */
       readonly buildCommand: string | null;
       /** Where a static rendering would lift files from, when there is one. */
       readonly outputDirectory: string | null;
       readonly watchPaths: readonly string[];
-      /** True when an in-repo `spindrift.yaml` already settled this (§5). */
+      /** True when an in-repo `spindrift.yaml` already settled this. */
       readonly configured: boolean;
-      /**
-       * The kinds detection ruled out, each with the sentence that ruled it
-       * out (§3, §5).
-       *
-       * Carried rather than dropped because correcting a proposal should be
-       * reading rather than guessing: the creation flow renders these as
-       * disabled options wearing their reason, which is the only thing that
-       * makes "that is not what this is" a decision somebody can make.
-       */
+      /** Each kind detection ruled out, with the sentence that ruled it out. */
       readonly unavailable: Readonly<Partial<Record<ComponentKind, string>>>;
     }
   | {
@@ -109,12 +71,7 @@ export interface InspectRepositoryResult {
   readonly commit: string;
   readonly scopes: readonly InspectedScope[];
   /**
-   * Whether this installation can open the configuration PR at all.
-   *
-   * §15 makes the pinned reusable workflow part of the transaction, so an
-   * installation without one has nothing to connect a repository *to*. Said
-   * here, on the screen that is about to offer the button, rather than
-   * discovered by the button not working.
+   * False without a reusable build workflow, which the configuration PR needs.
    */
   readonly canConnect: boolean;
 }

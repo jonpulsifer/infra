@@ -37,16 +37,7 @@ import {
   withRemediations,
 } from './remediation.ts';
 
-/**
- * The three requirements placement is derived from (§3).
- *
- * Optional, and their absence is not a default: a caller that does not say what
- * it is placing gets no `options` at all. The alternative — resolving against a
- * plausible-looking workload — is what made this command answer for a
- * `service`/`private`/`proxy` App no matter what the caller was actually
- * creating, so a `website` was offered Targets that were candidates for
- * something else.
- */
+/** Placement `options` are listed only when all three are given. */
 export const listTargetsInput = z.object({
   kind: componentKind.optional(),
   reach: reach.optional(),
@@ -55,22 +46,8 @@ export const listTargetsInput = z.object({
 export type ListTargetsInput = z.infer<typeof listTargetsInput>;
 
 /**
- * The naming boundary a Target's canonical names would live under (§9).
- *
- * Not a minted name — neither call site here has an App or a Component yet,
- * so there is nothing to run `hostnameFor` on. This states the zone the mint
- * would land in, which is the honest thing the Targets screen and the Place
- * step can say before that: `<app>-<component>` is not known, but the zone it
- * would be joined to is.
- *
- * `null` is not "unknown" — it is the correct answer for `cloudrun` and
- * `static`. `coreMintsCanonical` is false for both: the platform mints its
- * own workload address, and inventing a Spindrift-owned suffix beside it
- * would show a naming pattern no Deploy on that Target will ever use. Every
- * caller must render `null` as "the platform names its own" rather than
- * fall back to a suffix — a fallback here is exactly the bug this replaced
- * (`*.<target>.apps.internal`, a zone that appeared nowhere else in the
- * repo).
+ * The zones this Target's canonical names would join. `null` where the platform
+ * names its own workloads or no zone serves the Target's reach.
  */
 function canonicalBoundary(
   adapter: TargetAdapter,
@@ -78,17 +55,11 @@ function canonicalBoundary(
   reaches: readonly Reach[] | null,
 ): string | null {
   if (!coreMintsCanonical(adapter)) return null;
-  // Only the zones this Target could actually mint into. A zone serving a reach
-  // this Target does not is not a boundary a name here will ever land on, and
-  // naming it would promise an address no Deploy on this Target can produce —
-  // which is the same lie the fallback suffix above was.
+  // Unknown reach matches every zone.
   const served = zones.filter((zone) =>
     zone.reaches.some((reach) => reaches?.includes(reach) ?? true),
   );
   if (served.length === 0) return null;
-  // The reach is stated only where the zone narrows it. A zone serving every
-  // reach this Target has adds nothing by saying so, and an installation that
-  // points one zone at both is the common case.
   return served
     .map((zone) =>
       zone.reaches.length === 1
@@ -98,7 +69,6 @@ function canonicalBoundary(
     .join(' · ');
 }
 
-/** A Target row with the boundary it sits on, as {@link editStart} reads it. */
 type SurfaceOnVessel = OnboardingTargetRow & {
   readonly vessel: OnboardingTargetRow['vessel'] & {
     readonly location: VesselLocation | null;
@@ -107,14 +77,7 @@ type SurfaceOnVessel = OnboardingTargetRow & {
   };
 };
 
-/**
- * The facts a cloud edit has to restate — see `TargetListItem.edit`.
- *
- * Read off the boundary and off its runtime surface, because that is where
- * `connectTarget` put them: one act supplied them once and fanned them out, so
- * an edit that re-runs the act has to hand them all back or the act deletes
- * them.
- */
+/** Facts an edit must hand back, or re-running `connectTarget` drops them. */
 function carriedFacts(
   vessel: SurfaceOnVessel['vessel'],
   onVessel: readonly SurfaceOnVessel[],
@@ -140,27 +103,8 @@ function carriedFacts(
 }
 
 /**
- * Where an edit of this Target's connection starts — `TargetListItem.edit`.
- *
- * A cluster's values come from this Target alone, which is the whole difference
- * between an edit and a connect: `connectionProposal` prefers a healthy donor
- * of the same adapter, and given a list of one there is only this row to read.
- * A donor's values on an edit screen would be the second cluster's address
- * problem with the Targets the other way round.
- *
- * A cloud edit reads this boundary's surfaces **together**, because one connect
- * writes them together: the region and the runtime endpoint are on `cloudrun`
- * and the hosting endpoint on `static`, so an edit opened from either that read
- * only itself would drop the other one's fact. Behind them come the
- * installation's other cloud Targets, because those three values are
- * installation-wide rather than this project's — and that is what makes the
- * edit usable as the re-probe: a vessel whose runtime surface the last probe
- * did not find has no `cloudrun` row of its own to read an endpoint off.
- *
- * Offered only for a surface the boundary's connect act probes for. Editing is
- * that act run again, so a surface outside its list is one this form would not
- * write — and a control that does not touch the row it hangs off is worse than
- * none.
+ * Editing re-runs `connectTarget`, so only a surface it probes is editable. A
+ * cluster edit reads only this Target, never another cluster's values.
  */
 function editStart(
   target: SurfaceOnVessel,
@@ -173,8 +117,6 @@ function editStart(
   const onVessel = allTargets.filter(
     (row) => row.vessel.id === target.vessel.id,
   );
-  // The address is the vessel's, not the surface's — which is exactly why an
-  // edit may state it where a proposal may not.
   if (location.kind === 'cluster') {
     return {
       kind: 'cluster',
@@ -190,10 +132,7 @@ function editStart(
     };
   }
   if (location.kind === 'cloudflare-account') {
-    // No `carried`: those four facts are a cloud project's — a runtime service
-    // account, a log reach, and the two endpoints its surfaces split between
-    // them. This boundary has one surface holding one endpoint, so the proposal
-    // already carries everything an edit has to hand back.
+    // One surface holds the one endpoint, so the proposal carries everything.
     return {
       kind: 'cloudflare-account',
       account: location.account,
@@ -204,11 +143,8 @@ function editStart(
     kind: 'gcp-project',
     project: location.project,
     carried: carriedFacts(target.vessel, onVessel),
-    // This boundary's own surfaces first, the installation's others behind
-    // them: a region and two API endpoints are installation-wide facts a
-    // fresh connect already carries from any working cloud Target, so the
-    // vessel whose runtime surface is not registered *yet* is exactly the
-    // case where another project's are the right thing to offer.
+    // This vessel's surfaces first. Region and endpoints are installation-wide,
+    // so other projects fill in for a surface this vessel lacks.
     proposal: connectionProposal(
       [
         ...onVessel,
@@ -219,12 +155,6 @@ function editStart(
   };
 }
 
-/**
- * One boundary and every surface registered on it, as a remediation reads it.
- *
- * By vessel id rather than by name for the same reason the Target rows join on
- * it: the name is what a screen shows and the id is what the row is keyed on.
- */
 function boundaryOf(
   vessel: { readonly id: string; readonly name: string },
   location: VesselLocation | null,
@@ -237,7 +167,6 @@ function boundaryOf(
   };
 }
 
-/** A checklist row on its way to a screen, with the change that clears it. */
 function checklistView(
   items: readonly {
     readonly name: PrerequisiteRowView['name'];
@@ -259,13 +188,9 @@ function checklistView(
 export interface ListTargetsResult {
   readonly targets: readonly TargetListItem[];
   readonly options: readonly TargetOptionView[];
-  /** Connect acts this installation is waiting on — the onboarding surface. */
+  /** Connect acts this installation is waiting on. */
   readonly pending: readonly PendingTargetConnection[];
-  /**
-   * The boundaries themselves, with the checklist that is theirs rather than a
-   * surface's. In declaration order, so the two the installation is built on
-   * read where the manifest put them.
-   */
+  /** Each vessel with its own checklist, oldest first. */
   readonly vessels: readonly VesselListItem[];
 }
 
@@ -274,8 +199,6 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
   context,
 ) => {
   const allTargets = await context.db.query.targets.findMany({
-    // The boundary comes with every surface: it is half of what an adapter is
-    // handed, and it is what groups these rows into connect acts.
     with: { vessel: true },
     orderBy: (targets, { asc }) => [asc(targets.rank)],
   });
@@ -344,9 +267,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
     const isHealthy = target.health === 'healthy';
 
     if (requirements === null) {
-      // Nothing to place, so nothing to say about placement. The Targets screen
-      // reads `targets` and never `options`, which is why this is silence
-      // rather than a guess.
+      // Nothing to place, so no options.
     } else if (isConnected && isHealthy) {
       const placementTarget = placementTargetOf(target, {
         artifactTypes:
@@ -440,16 +361,12 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         name: vessel.name,
         kind: vessel.kind,
         roles,
-        // Derived here rather than stored, exactly as a Target's is: the
-        // catalogue can gain a row in a release, and a stored verdict would
-        // keep reading healthy against a question nobody had asked yet.
+        // Derived on read: a release can add checklist rows a stored verdict
+        // would miss.
         health: deriveVesselHealth(prerequisites, vessel.kind, roles),
         prerequisites: checklistView(
           withRemediations(
             prerequisites,
-            // No adapter: these rows belong to the boundary rather than to any
-            // surface on it, and answering one with a runtime's service name
-            // would be the duplication the vessel noun exists to remove.
             remediationSubject(
               context.manifest,
               boundaryOf(vessel, vessel.location, allTargets),

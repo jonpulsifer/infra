@@ -1,24 +1,7 @@
 /**
- * `getDatastore` — one Datastore, and what its backend says about it (§11).
- *
- * `listDatastores` answers "what storage exists"; this answers "what is this
- * one, actually". The split is the same one Builds and Deploys already have —
- * a ledger of rows and a screen per object — and a Datastore earns it for the
- * reason §11 makes it top-level: it is a thing an operator diagnoses, not a
- * field on the App that happens to read it.
- *
- * **The document comes from the far side, never from core.** `describe` returns
- * the object the API server holds, so what a reader sees is what the operator
- * is reconciling — spec, defaults it filled in, and the `status` that is the
- * only place a stuck Datastore's reason is written. Core could not compose an
- * equivalent even if it wanted to: `createDatastore` states "no size on the
- * row", so a manifest rendered here would state a `storageGiB` nothing stored.
- *
- * **A backend that cannot be reached does not take the screen down.** Every
- * stored fact is answered first and the read is wrapped, because the state
- * where a Target is unreachable is exactly the state where the rest of this is
- * worth reading. The failure travels as `objectError` — a sentence, beside the
- * facts — rather than as this command's refusal.
+ * `getDatastore` answers one Datastore's stored facts and the document its
+ * backend holds. An unreachable backend leaves the facts readable and reports
+ * the failure as `objectError`.
  */
 import { z } from 'zod';
 import type { Datastore, Vessel } from '../../db/schema.ts';
@@ -63,8 +46,7 @@ export const getDatastore: Command<
   const read = await describeDatastore(row, context);
 
   return ok({
-    // Named field by field, never spread — `listDatastores`' rule, for the
-    // `connection_ref` column it exists to keep on this side of the seam.
+    // Named fields only: a spread would ship connection_ref to the browser.
     datastore: {
       id: row.id,
       name: row.name,
@@ -87,22 +69,14 @@ export const getDatastore: Command<
 type Described = Pick<DatastoreDetailView, 'object' | 'objectError'>;
 
 /**
- * The backend's document, or the reason there is not one.
- *
- * Every "there is nothing to read" case answers `object: null` with no
- * sentence, because none of them is a fault: an `external` Datastore was never
- * provisioned, a `managed` one mid-provision has no handle yet, a disconnected
- * Target has nothing to ask, and the cloud backend implements no `describe` at
- * all. Only a call that threw produces `objectError`.
+ * The backend's document. `object: null` with no error when there is nothing to
+ * ask; only a call that threw sets `objectError`.
  */
 async function describeDatastore(
   row: Datastore & { readonly vessel: Vessel },
   context: CommandContext,
 ): Promise<Described> {
   if (row.ref === null) return { object: null };
-  // The boundary holds the Datastore; the surface is what an adapter call is
-  // addressed through. One hop, the same one `listDatastores` and
-  // `destroyDatastore` make.
   const target = await datastoreSurfaceTargetOf(context.db, row.vessel);
   if (target === undefined) return { object: null };
   if (!hasTargetConnection(target) || !hasVesselLocation(row.vessel)) {
@@ -118,8 +92,7 @@ async function describeDatastore(
       row.ref,
     );
     if (object === null || object === undefined) return { object: null };
-    // Two-space, because this is read rather than parsed — the one place in
-    // core where the indentation is the point.
+    // Two-space: this is shown to a reader, not parsed.
     return { object: JSON.stringify(object, null, 2) };
   } catch (cause) {
     return {

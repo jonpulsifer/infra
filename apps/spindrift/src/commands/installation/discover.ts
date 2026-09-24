@@ -1,37 +1,7 @@
 /**
- * `discoverInstallationFacts` — ask the cloud for what an operator types (§20).
- *
- * §20 makes the manifest the one place a value naming this installation lives,
- * and a good half of those values are facts the pod's own federated identity
- * can simply be asked for. This command asks, and answers as **proposals
- * against manifest paths** rather than as a shaped result object.
- *
- * **Paths, not field names, and that is load-bearing.** The settings surface
- * names no manifest key on purpose — `web/views/auth/installation.tsx` says why:
- * the schema is losing keys to the chart and gaining others, and a hand-listed
- * form absorbs neither. A discovery result that carried named fields would put
- * the list back, one layer down. So each answer carries `path` — the segments
- * `forms/document.ts` already edits a document by — and the screen applies a
- * chosen value with `withValueAt` without knowing what it just set.
- *
- * **Every answer has two arms, and a refusal is never an empty list.** That is
- * `adapters/cloud-discovery.ts`'s rule, carried through unchanged: a project
- * with no buckets is `found` with no candidates, and a project whose Storage API
- * is switched off is `unavailable` with a sentence saying so. Flattening those
- * would put a blank on a confirmation screen that reads exactly like a
- * confirmed answer, which is the failure this whole path exists to remove.
- *
- * **Staged, because the calls are not all free.** With no project named, only
- * the project list is fetched and everything below it says so — a stated fact,
- * not an empty answer. With a project, its buckets and its key locations are
- * fetched in parallel, each folded on its own so one refused API cannot turn two
- * good answers into three refusals. The signer needs a location as well, because
- * Cloud KMS lists key rings per concrete location and fanning out over every
- * location a project offers is forty calls behind one button.
- *
- * Server-only imports are deliberately absent, for the reason
- * `installation/get.ts` names: the browser bundle reaches this layer's types,
- * and a command that pulls in a database module breaks the client build.
+ * `discoverInstallationFacts` asks the cloud for manifest values an operator
+ * would otherwise type, and proposes each at its manifest path. The browser
+ * bundle imports this module, so it takes no server-only import.
  */
 
 import type { FederationConfig } from '@repo/archive/federation';
@@ -44,12 +14,9 @@ import { type Command, failed, ok } from '../types.ts';
 
 export const discoverInstallationFactsInput = z
   .object({
-    /**
-     * Which project to look inside. Absent on the first pass, when the answer
-     * to "which project" is itself one of the things being discovered.
-     */
+    /** Absent on the first pass, while the project is being discovered. */
     project: z.string().trim().min(1).optional(),
-    /** Which key location to list signing keys from. See the note above. */
+    /** Cloud KMS lists key rings per location, so one must be named. */
     kmsLocation: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -60,59 +27,27 @@ export type DiscoverInstallationFactsInput = z.infer<
 
 /** One value an operator may confirm: what they read, and what gets written. */
 export interface DiscoveredCandidate {
-  /** What the operator reads. */
   readonly label: string;
   /**
-   * What is written at the fact's path when this candidate is chosen, verbatim.
-   *
-   * Carried rather than derived because the two are not always the same shape:
-   * `sources.buckets` is a list and takes `[name]`, while the home vessel's
-   * `shared.sourceBucket` takes the same name bare. A screen deriving that
-   * would be a screen with an opinion about the schema, which is exactly what
-   * it must not have.
+   * Written verbatim at the fact's path: `sources.buckets` takes `[name]`,
+   * while `shared.sourceBucket` takes the name bare.
    */
   readonly value: unknown;
 }
 
 /**
- * The step a path takes to reach the vessel `installation.homeVessel` names.
- *
- * A stand-in for that entry's position rather than the position itself. Three of
- * these facts are properties of one *vessel* — the home vessel is an entry in
- * `vessels` — and an index computed where the answer was produced is an index
- * the document may have moved since: the settings form removes array entries,
- * and adopting a declaration replaces the array whole. A value written at a
- * stale index lands on whichever boundary slid into it, and `location.project`
- * carries no refinement that would refuse it.
- *
- * {@link placementOf} resolves it against the document being edited, at the
- * moment a candidate is confirmed. Unambiguous as a string because the segment
- * before it names an array, and an array is never keyed by a name.
+ * Stands in for the home vessel's index in `vessels`, which can move while the
+ * form edits the array. {@link placementOf} resolves it at confirm time.
  */
 export const HOME_VESSEL = 'homeVessel';
 
 /** One manifest path, and what discovery could say about it. */
 export type DiscoveredFact = {
-  /**
-   * Where the chosen value belongs, as `forms/document.ts` addresses it, with
-   * {@link HOME_VESSEL} standing in for a position only the document can give.
-   *
-   * Numbers as well as keys, because `withValueAt` already distinguishes the
-   * two — a numeric step indexes an array and a string step keys an object — so
-   * this is the path type that layer has, not a second one beside it.
-   */
+  /** May hold {@link HOME_VESSEL}, which {@link placementOf} resolves. */
   readonly path: readonly (string | number)[];
 } & Discovered<DiscoveredCandidate>;
 
-/**
- * Where a discovered value goes in this document — `null` for one that declares
- * no home vessel to put it on.
- *
- * The whole of what {@link HOME_VESSEL} costs, and it is here rather than on the
- * screen for the reason the panel states about itself: resolving a pointer to a
- * position is knowledge about this schema, and a panel that held any would be
- * the panel that stops working when a key moves.
- */
+/** Resolves {@link HOME_VESSEL} in `document`; `null` without a home vessel. */
 export function placementOf(
   fact: DiscoveredFact,
   document: unknown,
@@ -123,7 +58,6 @@ export function placementOf(
   return home === null ? null : ['vessels', home, ...rest];
 }
 
-/** Where the vessel this document's `homeVessel` names sits in its `vessels`. */
 function homeVesselIndex(document: unknown): number | null {
   const doc = document as {
     installation?: { homeVessel?: unknown };
@@ -139,24 +73,13 @@ function homeVesselIndex(document: unknown): number | null {
 }
 
 export interface DiscoverInstallationFactsResult {
-  /** In display order. Empty is not a state this command can produce. */
+  /** In display order. */
   readonly facts: readonly DiscoveredFact[];
 }
 
 /**
- * The project in an impersonated service account's own address.
- *
- * ponytail: a heuristic, and marked as one. It reads
- * `…@<project>.iam.gserviceaccount.com` out of the impersonation URL the
- * deployment's credential already carries, which costs no API call and is right
- * for every installation whose controller identity lives in its own home
- * vessel. An installation that impersonates an identity from somewhere else gets
- * a wrong suggestion — which is why it is only ever `suggested`, never asserted
- * as the answer. A URL that does not match at all yields nothing rather than a
- * fragment of one.
- *
- * The bounds are GCP's own for a project id: 6 to 30 characters, opening with a
- * letter — so one leading `[a-z]` and 5 to 29 after it.
+ * ponytail: a heuristic, only ever suggested: an identity from another project
+ * yields a wrong one. GCP project ids are 6 to 30 characters, letter first.
  */
 const SERVICE_ACCOUNT_PROJECT =
   /@([a-z][a-z0-9-]{5,29})\.iam\.gserviceaccount\.com/;
@@ -165,11 +88,6 @@ export const discoverInstallationFacts: Command<
   DiscoverInstallationFactsInput,
   DiscoverInstallationFactsResult
 > = async (input, context) => {
-  // Refused before anything is asked, and asserted by the test that no request
-  // was made: an installation with no federation has no cloud identity at all,
-  // which is a fact about the installation rather than a failed probe. Mirrors
-  // `storage/test-bucket.ts`, and `NOT_DEPLOYABLE` is the code for exactly this
-  // — the caller is told about the world, not asked to fix a field.
   if (context.manifest.cloud.federation === null) {
     return failed(
       'NOT_DEPLOYABLE',
@@ -185,9 +103,8 @@ export const discoverInstallationFacts: Command<
   }
 
   const { project, kmsLocation } = input;
-  // Three independent reads, each folded into its own answer. Never one
-  // `try` and never one rejection path: `GcpDiscovery` returns its failures,
-  // so a single catch here would silently turn two good answers into refusals.
+  // GcpDiscovery returns failures instead of throwing, so each read stands
+  // alone.
   const [projects, buckets, signers] = await Promise.all([
     discovery.projects(),
     project === undefined
@@ -199,9 +116,6 @@ export const discoverInstallationFacts: Command<
   ]);
 
   const suggestedVessel = credentialProject(context.manifest.cloud.federation);
-  // Three of the five facts are the home vessel's own properties, so they are
-  // addressed through {@link HOME_VESSEL} rather than through the position that
-  // vessel holds in the document this process happens to be holding.
   return ok({
     facts: [
       withSuggestion(
@@ -217,9 +131,8 @@ export const discoverInstallationFacts: Command<
         projects,
         plain,
       ),
-      // The same one read, answered against both keys: a bucket chosen for one
-      // and not the other leaves a manifest whose staging bucket is not among
-      // its buckets, which validates and then stages nowhere.
+      // One read answers both bucket paths: a sourceBucket not among
+      // sources.buckets validates and then stages nowhere.
       mapped(['sources', 'buckets'], buckets, (name) => ({
         label: name,
         value: [name],
@@ -234,18 +147,10 @@ export const discoverInstallationFacts: Command<
   });
 };
 
-/** A candidate whose written value is the string the operator read. */
 function plain(value: string): DiscoveredCandidate {
   return { label: value, value };
 }
 
-/**
- * A fact that was not asked about because the question needs a project first.
- *
- * Stated rather than probed, which is the posture `listSourceBuckets.canVerify`
- * already takes: an answer nobody asked for is not the same as an answer that
- * came back empty, and saying which is which is the whole job here.
- */
 function needsProject(what: string): Promise<Discovered<string>> {
   return Promise.resolve({
     kind: 'unavailable',
@@ -254,13 +159,8 @@ function needsProject(what: string): Promise<Discovered<string>> {
 }
 
 /**
- * Signing keys, or the sentence naming what is missing before they can be read.
- *
- * The extra call in the second arm earns its place twice: it tells the operator
- * which locations they may name, and its own refusal is the honest reason the
- * signer could not be read — a Cloud KMS that answers nothing here would
- * otherwise be reported as "name a location", sending them to supply an input
- * that was never the problem.
+ * Signing keys, or why they cannot be read yet. Without a location, the key
+ * locations call lists the choices, and its refusal is the real reason.
  */
 async function signingKeysIn(
   discovery: GcpDiscovery,
@@ -279,7 +179,6 @@ async function signingKeysIn(
   };
 }
 
-/** One read, against one manifest path, in whichever arm it came back in. */
 function mapped(
   path: readonly (string | number)[],
   discovered: Discovered<string>,
@@ -295,20 +194,8 @@ function mapped(
 }
 
 /**
- * Fold the credential's own answer in ahead of whatever the listing said.
- *
- * A suggestion this installation carries is worth more than a list it may not
- * have permission to read, and it is the likely live case: an identity granted
- * on one bucket and one key is not usually granted `projects.list`. So a
- * suggestion turns a refusal into an answer, and joins a listing it is already
- * part of without being repeated.
- *
- * This is the one place the two arms are crossed — a refused listing comes out
- * `found` — so the candidate carries where it came from in the text an operator
- * reads. Without that, a `403` on `projects.list` is indistinguishable on the
- * screen from a project the cloud confirmed, which is the laundering this whole
- * path exists to prevent. It leads the list rather than merging into it, so the
- * labelled one is the one shown and the one marked as the suggestion.
+ * Puts the credential's own project first. It can turn a refused listing into
+ * an answer, so its label names where it came from.
  */
 function withSuggestion(
   fact: DiscoveredFact,
@@ -327,13 +214,7 @@ function withSuggestion(
   };
 }
 
-/**
- * The project this installation's own identity lives in, if the credential says.
- *
- * Labelled with its provenance, not with the bare id: what is written is the
- * project, but what is read is where the answer came from — this deployment's
- * own credential rather than anything the cloud was asked.
- */
+/** The project this deployment's own identity lives in, labelled as such. */
 function credentialProject(
   federation: FederationConfig,
 ): DiscoveredCandidate | null {

@@ -1,17 +1,7 @@
 /**
- * `runFunction` — preview a handler in the sandbox, with no row written and no
- * deploy. `functions/contract.ts` admits Functions on a trusted-author basis,
- * so the preview stops a runaway loop, not a hostile author.
- *
- * `name` is how a Run reaches the saved environment: the values are
- * write-only, so the browser cannot send them and the handler would otherwise
- * see an `env` the deployed function does not have. A name with no row — a
- * function being written for the first time — runs with an empty one.
- *
- * The source is the editor's, not the row's, on purpose: a Run exists to try
- * unsaved code against the real values before a Save. That hands the values
- * to whatever the operator wrote, which under v1's single trust level is the
- * person who set them — `functions/env.ts` says the same from the other side.
+ * `runFunction` previews unsaved source in the sandbox with the saved
+ * Function's environment, writing nothing. Functions are trusted-author, so the
+ * sandbox stops a runaway loop, not a hostile author.
  */
 import { z } from 'zod';
 import type { PreviewResult } from '../../functions/contract.ts';
@@ -20,7 +10,10 @@ import { type Command, ok } from '../types.ts';
 
 export const runFunctionInput = z
   .object({
-    /** The saved function whose environment this Run reads. */
+    /**
+     * The saved Function whose environment this Run reads; without one, env is
+     * empty.
+     */
     name: z.string().optional(),
     source: z.string().min(1),
     request: z

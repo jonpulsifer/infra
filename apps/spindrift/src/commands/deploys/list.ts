@@ -1,19 +1,7 @@
 /**
- * `listDeploys` — the releases of one App, newest first (§2, §6).
- *
- * §2 makes "one Build → many Deploys" the thing that "makes rollback-without-
- * rebuild possible", and §6 makes a rollback "an ordinary deploy — a newer
- * intent row pointing at an older Build". Both sentences are about a *set* of
- * releases, and neither is reachable from a screen that shows only the newest
- * one: choosing the older Build means reading the release that named it.
- *
- * Each row is atomic in the sense that matters here — a Deploy row is written
- * once and never edited into a different release. Its Build, its commit, and
- * the config document it pinned (§10) are what it delivered, so a row is a
- * durable answer to "what was live then" rather than a view of what is live
- * now. `current` is the one field that is *not* on the row: which release
- * should be running is the desired row's answer (§6), and a LIVE Deploy that a
- * newer intent superseded is still LIVE.
+ * `listDeploys` lists one App's releases, newest first. A Deploy row is never
+ * edited, so each row says what was live then; only `current` comes from the
+ * desired row.
  */
 import { inArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -23,7 +11,7 @@ import { principalLabels } from '../principals.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 import type { DeployLedgerItem, DeployPhase } from '../views.ts';
 
-/** How many releases a list answers with before it is a data-export problem. */
+/** The most releases one page returns; past that is a data export. */
 export const RELEASE_PAGE = 25;
 
 export const listDeploysInput = z
@@ -67,17 +55,15 @@ export const listDeploys: Command<ListDeploysInput, ListDeploysResult> = async (
   return ok(page);
 };
 
-/**
- * One cursor page of releases across a set of Components, newest first.
- *
- * Exported so the App-scoped and global ledgers share the projection that
- * decides which release is current and rollbackable.
- */
 export interface ReleasePage {
   readonly deploys: readonly DeployLedgerItem[];
   readonly nextBefore: number | null;
 }
 
+/**
+ * One cursor page of releases, shared by the App and global ledgers. `null`
+ * lists every Component.
+ */
 export async function releasesOf(
   context: CommandContext,
   componentIds: readonly string[] | null,
@@ -114,9 +100,7 @@ export async function releasesOf(
   if (rows.length === 0) return { deploys: [], nextBefore: null };
   const page = rows.slice(0, limit);
 
-  // One read of every desired row these releases touch. `current` and
-  // `rollbackable` are both questions about §6's check-and-set, and asking the
-  // database once per release would be the same answer fetched N times.
+  // One read of the desired rows for the whole page, not one per release.
   const listedComponentIds = [...new Set(page.map((row) => row.componentId))];
   const desiredRows = await context.db.query.componentTargetDesired.findMany({
     where: (rowsTable) => inArray(rowsTable.componentId, listedComponentIds),
@@ -152,11 +136,8 @@ export async function releasesOf(
       current,
       configVersion: row.configVersion,
       ...(by === undefined ? {} : { requestedBy: by }),
-      // The same comparison `rollbackDeploy` makes under the lock, so the
-      // affordance appears only where the act would be accepted. It can still
-      // refuse for a reason this list cannot see — a disconnected Target, a
-      // signature that no longer verifies — and that refusal is a sentence the
-      // operator reads, not something to pre-empt by hiding the button.
+      // The comparison rollbackDeploy makes under the lock. Its other refusals,
+      // such as a disconnected Target, reach the operator as its sentence.
       rollbackable:
         !current &&
         here?.desiredBuildId != null &&

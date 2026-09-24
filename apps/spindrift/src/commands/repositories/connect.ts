@@ -1,20 +1,7 @@
 /**
- * `connectRepository` — turn on Git integration for one repository (§15).
- *
- * §15 makes this act one thing an operator reviews: "**One human-editable
- * configuration PR per repository is the transaction**." So the command writes
- * one `repositories` row, opens one pull request, and stops. In particular it
- * **adopts nothing** — `authoritativeCommit` stays null until the repo loop
- * reads a default-branch commit, which is what makes user story 19 ("only the
- * default-branch merge becomes authoritative") a property of the schema rather
- * than of anybody's discipline. The result says so out loud.
- *
- * Connecting twice is the same act twice. The row is keyed on the repository's
- * full name and re-adopted rather than duplicated, and the configuration branch
- * is force-updated to the newly composed transaction — a second connection is
- * somebody correcting the first, and leaving the old branch in place would
- * leave them reviewing a pull request that no longer says what Spindrift
- * thinks.
+ * `connectRepository` writes one `repositories` row and opens one configuration
+ * pull request. It adopts nothing; the repo loop or creation adopts the default
+ * branch afterwards. Connecting again re-adopts the row and rewrites the branch.
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -35,13 +22,12 @@ import {
 import { type Command, failed, ok } from '../types.ts';
 import { unreadable } from './access.ts';
 
-/** `owner/name` — the only handle the repository API takes. */
 const fullName = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/, 'must be owner/name');
 
-/** §5's named scope: a repo-relative directory, `.` for the root. */
+/** A repo-relative directory, `.` for the root. */
 const scopePath = z
   .string()
   .trim()
@@ -51,13 +37,8 @@ const scopePath = z
     'must stay inside the repository',
   );
 
-/** §2: "kind = service | website | job". */
 const componentKind = z.enum(['service', 'website', 'job']);
 
-/**
- * The operator's build selection. The command turns it into §5's canonical
- * proposal; the browser never constructs domain state.
- */
 const operatorBuild = z.discriminatedUnion('frontend', [
   z.object({
     frontend: z.literal('dockerfile'),
@@ -74,28 +55,11 @@ export const connectRepositoryInput = z
   .object({
     fullName,
     /**
-     * Which directories the transaction covers, and nothing about them.
-     *
-     * §5's ladder is what turns a directory into a proposal, and it runs
-     * **here**, against the commit this connect resolves — not in the browser.
-     * The screen has already shown the operator what detection found; sending
-     * that answer back to be written would make the browser the author of
-     * domain state and would write whatever was on screen when the tab was
-     * opened, which is not necessarily what is on the default branch now.
-     *
-     * Omitted entirely means the same thing `inspectRepository` means by it:
-     * the root, or what is below it when the root is not itself an App.
+     * Detection runs here, against the commit this connect resolves. Omitted
+     * means the root, or what is below it when the root is not an App.
      */
     scopes: z.array(scopePath).min(1).max(24).optional(),
-    /**
-     * The escape hatch (story 32): assert the proposal instead of detecting it.
-     *
-     * Kept separate from `scopes` rather than making every field optional on
-     * one shape, because these two are different acts. One says "connect what
-     * you found"; the other says "I know better than the detector, and here is
-     * what to write". A half-filled mixture of the two is not a third act, and
-     * the schema declines to represent it.
-     */
+    /** Asserts the proposal instead of detecting it. */
     overrides: z
       .array(
         z.object({
@@ -116,32 +80,17 @@ export interface ConnectRepositoryResult {
   readonly repositoryId: string;
   readonly fullName: string;
   readonly defaultBranch: string;
-  /** The configuration pull request an operator now has to merge, or null if PR creation failed. */
+  /** The configuration pull request to merge; null when opening it failed. */
   readonly pullRequest: number | null;
-  /**
-   * Why `pullRequest` is null, when it is. The repository stays connected
-   * either way — the repo loop reads the default branch, not the PR — but a
-   * connection whose PR silently never opened reads exactly like one whose PR
-   * opened fine, and the operator deserves the difference.
-   */
+  /** Why `pullRequest` is null. The repository stays connected either way. */
   readonly pullRequestError: string | null;
-  /** Always null: nothing is authoritative before that merge (§15). */
+  /** Always null: this command adopts nothing. */
   readonly authoritativeCommit: null;
 }
 
 /**
- * What the transaction will carry: detection's answer, or the operator's.
- *
- * The two arms are the two acts the input schema separates. An override is
- * written exactly as asserted and marked `operator`, so the pull request's
- * "proposed by" column tells a reviewer that a human, not the detector, chose
- * this — which is the difference that matters when the review is about whether
- * to trust it.
- *
- * Unsupported scopes are dropped rather than refused. A monorepo with nine
- * directories and two Apps is the ordinary case, and failing the connect
- * because seven of them are libraries would make discovery useless. The caller
- * refuses only when *nothing* survived.
+ * Detection's proposals, or the operator's overrides marked `operator`. Scopes
+ * detection cannot build are dropped; the caller refuses when none survive.
  */
 async function configurationScopes(
   input: ConnectRepositoryInput,
@@ -154,11 +103,7 @@ async function configurationScopes(
   readonly commit: string | null;
 }> {
   if (input.overrides !== undefined) {
-    // No commit is resolved on this path, and that is not an optimization: an
-    // asserted proposal is a statement about what the operator wants written,
-    // not about what is currently on the branch. Reading the repository to
-    // write it would add a way for this act to fail that has nothing to do
-    // with what it does.
+    // An override states what to write, so the branch is not read.
     return {
       commit: null,
       scopes: input.overrides.map(({ scope, kind, build, watchPaths }) => ({
@@ -183,10 +128,7 @@ async function configurationScopes(
     };
   }
 
-  // Resolved here rather than taken as a parameter, because it is what
-  // detection reads and what the pull request will be a statement about. A
-  // repository that moved between the operator seeing the inspection and
-  // pressing the button is connected against what is on the branch **now**.
+  // Resolved now, so a branch that moved since the inspection is read as it is.
   const commit = await host.branchHead(ref, input.fullName, defaultBranch);
   const found = await scanRepository(
     gitHubTree(host, ref, input.fullName, commit),
@@ -221,14 +163,8 @@ export const connectRepository: Command<
     );
   }
 
-  // §15's transaction carries one CI caller, and the caller has to name the
-  // manifest's reusable workflow. An installation that has not published one has no
-  // configuration PR to open — refused here rather than opened without the
-  // caller, because a repository connected without a build route is connected
-  // to nothing. The manifest schema says this refusal out loud ("null means
-  // repositories cannot be connected"), and `inspectRepository` answers
-  // `canConnect: false` for the same reason, so the button that reaches this
-  // path is already disabled.
+  // The configuration PR's CI caller names this workflow; without one there is
+  // no build route to connect to, and inspectRepository says so up front.
   const buildWorkflow = context.manifest.github?.buildWorkflow ?? null;
   if (buildWorkflow === null) {
     return failed(
@@ -237,13 +173,7 @@ export const connectRepository: Command<
     );
   }
 
-  // Every read below refuses through the one taxonomy (`access.ts`): §15's
-  // lost-access rule reaches back to here — a repository the App cannot see is
-  // a fact about the world, reported as a refusal the operator can act on,
-  // never an exception the dispatch surface turns into a 500 — and the other
-  // two codes are not that fact. The creation wizard reaches this command with
-  // a repository it has just read successfully, so an hour's quota answering
-  // "cannot reach" would contradict the screen that offered the button.
+  // Each read refuses through `unreadable`: lost access is a refusal, not a 500.
   let ref: ReturnType<typeof repositoryRefOf>;
   try {
     ref = await host.installationFor(input.fullName);
@@ -251,12 +181,8 @@ export const connectRepository: Command<
     return unreadable(input.fullName, cause);
   }
 
-  // The name the host answers with is the row's key, not the one typed. The
-  // host is case-insensitive and follows a rename; the `repositories` unique
-  // index is neither, and the repo loop rewrites `full_name` to the host's
-  // spelling on its next pass — so a row keyed on the typed spelling would be
-  // a second row for the same repository, and the one the loop then cannot
-  // rename onto.
+  // Keyed on the host's spelling, which the repo loop also writes: the host
+  // ignores case and follows renames, and the unique index does neither.
   let fullName: string;
   let defaultBranch: string;
   try {
@@ -279,11 +205,7 @@ export const connectRepository: Command<
   }
 
   if (scopes.length === 0) {
-    // Nothing is written, deliberately. A `repositories` row with no scope is a
-    // connection to nothing: the repo loop would adopt it, find no App, and
-    // reconcile forever over a repository that cannot produce a Build. §5 makes
-    // "I do not know how to build this" an outcome to state, and this is where
-    // it gets stated — before a row exists rather than after.
+    // No row: the repo loop would reconcile a scopeless one forever.
     const at = commit === null ? '' : ` at ${commit.slice(0, 7)}`;
     return failed(
       'NOT_DEPLOYABLE',
@@ -306,13 +228,8 @@ export const connectRepository: Command<
       set: {
         installationId: ref.installationId,
         defaultBranch,
-        // Everything above this line has already read the repository — the
-        // installation, its facts, and a whole tree scan — so a freeze standing
-        // on the row is a statement about the world that this command has just
-        // disproved. Left in place it outlives the connect by a whole repo-loop
-        // interval, with the Repositories screen reading "connection lost" over
-        // a connection that plainly works and the creation wizard refusing on
-        // the same stale fact.
+        // The reads above just proved access, so any freeze is cleared now
+        // instead of lasting a repo-loop interval.
         access: 'active',
         frozenReason: null,
         frozenAt: null,
@@ -340,10 +257,7 @@ export const connectRepository: Command<
       .set({ configPullRequest: opened.number, updatedAt: now })
       .where(eq(repositories.id, row!.id));
   } catch (cause) {
-    // Fail open: the repository stays connected and the repo loop still adopts
-    // its default branch; only the PR is lost, and the result says which and
-    // why rather than leaving `pullRequest: null` to mean three different
-    // things.
+    // Fail open: the repository stays connected, and the result says why.
     pullRequestError = cause instanceof Error ? cause.message : String(cause);
   }
 

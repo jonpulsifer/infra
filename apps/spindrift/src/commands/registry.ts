@@ -1,29 +1,7 @@
 /**
- * The command registry: every command that exists, by name, with the schema
- * its input must satisfy.
- *
- * This object is the **single source the browser dispatch endpoint is
- * generated from**. §21 declines to declare an external API, and a React
- * client still needs a boundary to call across, so the boundary is one
- * generated dispatch point rather than hand-authored routes: adding an entry
- * here is the whole of adding a route, and a route that is not a command cannot
- * be written at all, because there is no place to write one. That is the whole
- * reason the registry exists rather than each page importing the command it
- * wants.
- *
- * It is also the **only** list of commands — no barrel beside it re-exporting
- * the same set. The invariant that has teeth is "no dispatchable name the
- * command layer does not back", and the `satisfies` clause below is what holds
- * it: an entry whose `handler` is not a {@link Command} does not type-check.
- * Its mirror — a handler that exists and is not registered — is unreachable
- * rather than wrong, and no list can catch it: a second list only ever noticed
- * the case where you remembered one of the two. `create-app.ts` is the standing
- * proof, a command that has never been dispatchable and never tripped anything.
- *
- * The HTTP endpoint is not here — Task 38 owns it, and it is deliberately a
- * thin wrapper: read a name and a JSON body, call {@link dispatch}, render the
- * result. §21's "no route may contain domain logic" is met by there being
- * nothing left for a route to decide.
+ * The command registry: every dispatchable command by name, with its input
+ * schema. The browser dispatch endpoint is generated from it, so a route that
+ * is not a command cannot exist.
  */
 import type { z } from 'zod';
 import {
@@ -190,17 +168,14 @@ import {
   failed,
 } from './types.ts';
 
-/** What the dispatch surface needs to know about one command. */
 export interface CommandDescriptor<Input, Output> {
   /** Validates untrusted input before the handler ever sees it. */
   readonly input: z.ZodType<Input>;
   readonly handler: Command<Input, Output>;
 }
 
-/** A descriptor of unknown input and output — what the registry holds. */
 export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 
-/** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
   mintAgentToken: { input: mintAgentTokenInput, handler: mintAgentToken },
   listAgentTokens: { input: listAgentTokensInput, handler: listAgentTokens },
@@ -379,26 +354,19 @@ export const commandRegistry = {
   },
 } as const satisfies Readonly<Record<string, AnyCommandDescriptor>>;
 
-/** The closed set of dispatchable names. */
 export type CommandName = keyof typeof commandRegistry;
 
-/** The names, in a form route generation can iterate. */
 export const commandNames: readonly CommandName[] = Object.keys(
   commandRegistry,
 ) as CommandName[];
 
-/** Whether an untrusted string names a command. */
 export function isCommandName(name: string): name is CommandName {
   return Object.hasOwn(commandRegistry, name);
 }
 
 /**
- * Run a named command against untrusted input.
- *
- * This is the entirety of what dispatch does, kept transport-free on purpose:
- * validate, then hand the parsed input to the handler. Anything a transport
- * adds — sessions, JSON decoding, status codes — sits above it and adds no
- * decision of its own.
+ * Validate, then run. Sessions, JSON decoding and status codes stay with the
+ * transport.
  */
 export async function dispatch(
   name: string,
@@ -412,10 +380,7 @@ export async function dispatch(
   const descriptor: AnyCommandDescriptor = commandRegistry[name];
   const parsed = descriptor.input.safeParse(input);
   if (!parsed.success) {
-    // Screens surface this sentence verbatim to an operator mid-flow, so the
-    // command's camelCase name stays out of it — unlike the refusal above,
-    // whose only reader is the programmer who typed the name. The issues
-    // carry the fields that failed.
+    // Operators read this verbatim, so the camelCase command name stays out.
     return failed(
       'INVALID_INPUT',
       'the input given to this command is not valid',
@@ -426,7 +391,6 @@ export async function dispatch(
   return descriptor.handler(parsed.data, context);
 }
 
-/** Zod's issues, flattened to the field-level detail a UI renders. */
 function issuesOf(error: z.ZodError): readonly CommandIssue[] {
   return error.issues.map((issue) => ({
     path: issue.path.map(String).join('.'),
