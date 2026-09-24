@@ -460,8 +460,8 @@ def page_phone(st, ctx):
                     status_dot("ok" if line["trunk"] else "down", lit, ctx),
                 ],
             ))
-        return framed("PHONE", COLOR_OK if all_ok else COLOR_BAD, ctx, render.Box(
-            padding = 2 * scale,
+        return framed("PHONE", COLOR_OK if all_ok else COLOR_BAD, ctx, render.Padding(
+            pad = (2 * scale, 0, 2 * scale, 0),
             child = render.Column(expanded = True, main_align = "space_evenly", children = rows),
         ))
 
