@@ -1,7 +1,6 @@
 ---
-# The TestRun the CronJob recreates on schedule. It is data, not a declared
-# resource: a TestRun runs once on creation, so declaring it directly would
-# make Flux's drift correction the scheduler.
+# The TestRun the CronJob recreates. Declared directly, it would run only when
+# Flux recreated it.
 apiVersion: v1
 kind: ConfigMap
 metadata:

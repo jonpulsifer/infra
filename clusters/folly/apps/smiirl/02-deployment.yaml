@@ -8,8 +8,7 @@ metadata:
     app.kubernetes.io/part-of: smiirl
 spec:
   replicas: 1
-  # number.json on the PVC is the single source of truth; two pods would race
-  # the rename.
+  # Two pods would race the rename of number.json on the shared PVC.
   strategy:
     type: Recreate
   selector:

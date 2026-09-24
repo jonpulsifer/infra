@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: netbench
     app.kubernetes.io/part-of: netbench
   annotations:
-    # Restart when the targets ConfigMap changes (netbench reads it at startup).
+    # netbench reads the targets ConfigMap only at startup.
     reloader.stakater.com/auto: "true"
 spec:
   replicas: 1

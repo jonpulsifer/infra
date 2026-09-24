@@ -49,23 +49,17 @@ spec:
       exporters:
         debug:
           verbosity: basic
-        # Traces ship to the local Tempo single-binary. Both clusters run
-        # their own Tempo, so the collector never crosses the WAN for traces.
+        # Each cluster runs its own Tempo, so traces never cross the WAN.
         otlp/tempo:
           endpoint: tempo.monitoring.svc.cluster.local:4317
           tls:
             insecure: true
-        # Metrics are exposed for Prometheus to scrape via the
-        # opentelemetry-collector ServiceMonitor.
         prometheus:
           endpoint: 0.0.0.0:8889
       service:
         telemetry:
           metrics:
-            # Collector 0.156.0 (chart 0.165.0) dropped the flat `address`
-            # form in favour of the OpenTelemetry `readers` shape. This is
-            # self-telemetry only — the data-pipeline prometheus exporter
-            # below (port 8889) is untouched.
+            # Self-telemetry only. The collector rejects the flat `address` form.
             readers:
               - pull:
                   exporter:
@@ -96,8 +90,7 @@ spec:
         containerPort: 4318
         servicePort: 4318
         protocol: TCP
-      # Named "monitoring" (not "metrics") to match the port name the
-      # opentelemetry-collector-servicemonitor.yaml endpoint selects.
+      # The ServiceMonitor selects this port by name.
       monitoring:
         enabled: true
         containerPort: 8888

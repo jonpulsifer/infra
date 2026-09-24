@@ -1,15 +1,6 @@
 ---
-# The identity a sandbox debugs the cluster with. It is deliberately not the
-# identity mate mints sandboxes with: `rbac.yaml` beside this is scoped to the
-# handful of calls `apps/mate/src/sandboxes.ts` makes and is bound to a
-# namespace, while this one is estate-wide and read-mostly. Keeping them apart
-# means widening what an agent can see never widens what mate itself can do.
-#
-# No token is written for this ServiceAccount and none should be. mate asks
-# the apiserver for a bound one per turn through TokenRequest, hands it to the
-# sandbox as a kubeconfig, and the apiserver stops honouring it when it
-# expires — so there is no long-lived credential to leak, and nothing to
-# rotate.
+# The identity a sandbox debugs the cluster with, apart from mate's own. mate
+# mints a bound token per turn; never write a long-lived one.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -20,9 +11,8 @@ metadata:
     app.kubernetes.io/part-of: mate
 automountServiceAccountToken: false
 ---
-# Reads everything but Secrets and changes nothing. pods/exec still reaches
-# any pod's mounted Secrets and token: defence in depth, not a boundary. No
-# deny in RBAC, so core omits `secrets` and an unnamed group is unreadable.
+# Reads everything but Secrets, yet pods/exec reaches any pod's mounted Secrets
+# and token. RBAC has no deny, so core omits `secrets` and each group is listed.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -97,17 +87,13 @@ rules:
       - wgpolicyk8s.io
     resources: ["*"]
     verbs: ["get", "list", "watch"]
-  # Reading a crashlooping container's last words is most of diagnosis.
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get", "list"]
-  # Both verbs for the reason `rbac.yaml` gives about mate's own exec: a
-  # WebSocket exec client sends a GET, and a `create`-only rule answers 403.
+  # A WebSocket exec client sends a GET, which a `create`-only rule answers 403.
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["get", "create"]
-  # Non-mutating and genuinely useful: "may this identity do X" is how an
-  # agent checks itself before reporting a permission problem as an outage.
   - apiGroups: ["authorization.k8s.io"]
     resources: ["selfsubjectaccessreviews", "selfsubjectrulesreviews"]
     verbs: ["create"]

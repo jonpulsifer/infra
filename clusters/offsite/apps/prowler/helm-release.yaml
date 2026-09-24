@@ -19,9 +19,7 @@ spec:
     hostname: prowler.${SECRET_DOMAIN}
     envFromSecret: prowler-env
     gcp:
-      # The pool trusts this cluster's own SA-token issuer
-      # (https://oidc.lolwtf.ca/${CLUSTER_NAME}), so the projected token needs
-      # no credential behind it. `prowler-scanner` holds the org-level read
-      # roles; see terraform/gcp/projects/homelab-ng/prowler.tf.
+      # The pool trusts this cluster's SA-token issuer, so the projected token
+      # needs no credential. Roles: terraform/gcp/projects/homelab-ng/prowler.tf.
       audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/${CLUSTER_NAME}
       impersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/prowler-scanner@homelab-ng.iam.gserviceaccount.com:generateAccessToken

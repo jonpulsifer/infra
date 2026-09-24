@@ -17,16 +17,8 @@ data:
         try_files $uri $uri/ =404;
       }
     }
-  # Everything this page reports is read from inside the sandbox at startup.
-  # The interesting lines are the ones that differ from the node: a kernel the
-  # pod does not share with its host, a vCPU count and memory size set by the
-  # VMM rather than by the node's capacity, and an empty DMI tree — Cloud
-  # Hypervisor boots the guest kernel directly, so the guest has no firmware to
-  # describe itself with.
-  #
-  # Shell variables are written bare on purpose. Flux postBuild substitutes
-  # $-brace references before this ConfigMap is applied, so a $-brace here
-  # would reach the container already emptied.
+  # Shell variables stay bare: Flux substitutes $-brace references before
+  # apply, so one here would reach the container empty.
   render.sh: |-
     set -eu
     kernel=$(uname -r)

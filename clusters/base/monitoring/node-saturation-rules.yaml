@@ -1,7 +1,4 @@
 ---
-# Each cluster deploys over 160 alert rules and not one of the others looks at
-# whether a node is saturated — which is how a process leak on a CI host ran
-# for nine hours without anyone noticing.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -14,15 +11,9 @@ spec:
   groups:
     - name: node-saturation
       rules:
-        # Runnable work per core. Load rather than utilisation on purpose: a CI
-        # host pegged at 100% with load ~= cores is working, not drowning.
-        #
-        # The shape is dictated by two quirks of this cluster, both verified
-        # against live Prometheus: node_load5 and node_cpu_seconds_total carry
-        # different label sets, so an unqualified division silently matched
-        # only 4 of 12 hosts; and four lab hosts are scraped twice, so counting
-        # cpu series without collapsing (instance, cpu) first doubled their
-        # core count. This resolves to exactly one series per host.
+        # Load per core, not utilisation: a CI host at 100% with load near its
+        # core count is fine. `on (instance)` aligns the two metrics' label sets;
+        # the inner count collapses hosts scraped twice.
         - alert: NodeLoadHigh
           expr: |
             max by (instance) (node_load5)

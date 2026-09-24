@@ -10,11 +10,8 @@ spec:
       kind: HTTPRoute
       namespace: spindrift-apps
   to:
-    # `-authz` is the shim the ExternalAuth filter points at (see the
-    # HelmRelease beside this). `oauth2-proxy` stays granted because a Target's
-    # `platform.externalAuth` lives in Spindrift's own durable row, not in the
-    # declaration — an installation still naming the port-80 Service keeps
-    # resolving until an operator repoints it.
+    # The ExternalAuth filter targets `-authz`. `oauth2-proxy` stays for stored
+    # Targets whose `platform.externalAuth` still names the port-80 Service.
     - group: ""
       kind: Service
       name: oauth2-proxy

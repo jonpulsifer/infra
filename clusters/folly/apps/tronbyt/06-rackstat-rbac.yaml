@@ -8,8 +8,6 @@ metadata:
     app.kubernetes.io/name: rackstat
     app.kubernetes.io/part-of: tronbyt
 ---
-# rackstat reads Flux CRD status directly because gotk_* metrics are not
-# scraped into Prometheus. Read-only, cluster-wide.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -1,17 +1,6 @@
 ---
-# VictoriaLogs' write endpoint, published for the log shippers that run
-# outside the cluster — today the Windows desktops' Vector agents, which have
-# no way to reach a ClusterIP.
-#
-# Only /insert is routed. VictoriaLogs single-node has no authentication of
-# any kind, so routing the whole service would hand every client on every
-# internal VLAN read access to all cluster logs at /select/logsql/query. The
-# path match makes the exposed surface write-only; reads stay inside the
-# cluster, where Grafana's datasource already reaches the Service directly.
-#
-# external-dns publishes this name at the gateway's RFC1918 address, the same
-# as every other route here, so it resolves publicly and answers only on the
-# LAN.
+# VictoriaLogs' write endpoint for log shippers outside the cluster. The name
+# resolves to the gateway's private address, so it answers only on the LAN.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
 metadata:
@@ -24,6 +13,8 @@ spec:
   hostnames:
     - logs.${SECRET_DOMAIN}
   rules:
+    # Only /insert: VictoriaLogs has no authentication, so /select would give
+    # every LAN client read access to all logs.
     - matches:
         - path:
             type: PathPrefix

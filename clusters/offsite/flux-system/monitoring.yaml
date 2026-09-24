@@ -13,10 +13,8 @@ spec:
     name: infra
   dependsOn:
     - name: storage
-    # base/monitoring holds a raw ServiceMonitor. Flux dry-runs every object
-    # in a Kustomization before applying any, so without the CRD already on
-    # the cluster this one is refused whole — including the
-    # kube-prometheus-stack HelmRelease that would supply the CRD.
+    # Raw monitoring.coreos.com objects need their CRDs first, or the dry-run
+    # refuses the whole Kustomization, the HelmRelease that installs them too.
     - name: monitoring-crds
   decryption:
     provider: sops

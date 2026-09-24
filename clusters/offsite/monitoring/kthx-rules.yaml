@@ -1,7 +1,5 @@
 ---
-# kthx has no outbound notification of its own, and its whole surface is public:
-# a name that stops answering is somebody else's broken link, not a lab service
-# nobody notices. These three cover the ways it stops answering.
+# kthx sends no notification of its own, and every name it serves is public.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -14,10 +12,8 @@ spec:
   groups:
     - name: kthx
       rules:
-        # Single replica by construction, `Recreate` strategy, ReadWriteOnce
-        # volume — so "no available replica" is the whole zone down, not a
-        # degraded one. The second arm is the case the first cannot see: a
-        # Deployment that has been deleted exports no series at all.
+        # One replica, Recreate, RWO: no available replica is the whole zone
+        # down. `absent` covers a deleted Deployment.
         - alert: KthxServerDown
           expr: |
             kube_deployment_status_replicas_available{namespace="kthx",deployment="kthx"} == 0
@@ -29,10 +25,8 @@ spec:
             message: "kthx.dev has no serving pod"
             description: "The kthx Deployment has no available replica, so every kthx.dev name is answered by the gateway's 503. A `Recreate` rollout takes the old pod down first, so a few minutes of this is a normal deploy; ten is not."
 
-        # The CNPG instance's own exporter, which only exists once the PodMonitor
-        # is being scraped — so `absent` here covers the instance being gone, the
-        # scrape being broken, and the PodMonitor never having been selected.
-        # `/api/db` on every site is what this outage looks like from outside.
+        # `absent` covers a gone instance, a broken scrape and an unselected
+        # PodMonitor.
         - alert: KthxDatabaseDown
           expr: |
             cnpg_collector_up{namespace="kthx"} == 0
@@ -44,12 +38,8 @@ spec:
             message: "The kthx Postgres instance is not reporting"
             description: "`cnpg_collector_up` for the kthx-db cluster is 0 or missing: the instance is down, or the PodMonitor it exports through is not being scraped. Site databases are unreachable while this holds; static bytes still serve."
 
-        # `local-path` is a directory on a node's disk, so nothing enforces the
-        # 20Gi the claim asks for and `kubelet_volume_stats_*` does not exist for
-        # it — the requested size is a budget, and this alert is what makes it
-        # one. Databases only; WAL and the catalog are on top, so real headroom
-        # is smaller than this reads. `NodeFilesystemAlmostOutOfSpace` covers the
-        # disk itself, far too late to be the first warning.
+        # local-path enforces no size and has no kubelet_volume_stats_*, so this
+        # alert is the claim's only budget. WAL and the catalog sit on top.
         - alert: KthxDatabaseVolumeFilling
           expr: |
             sum(cnpg_pg_database_size_bytes{namespace="kthx"})
@@ -63,15 +53,8 @@ spec:
             message: "kthx site databases are past 80% of the kthx-db volume"
             description: "Site databases sum to more than 80% of what the kthx-db claim asks for. Each site is capped at 256 MiB, so this is site count, not one runaway: expand the claim (allowed live) or delete dead sites."
 
-        # The claim above is the only budget the sites volume has, and nothing
-        # enforces it: `local-path` hands out a directory on `/mnt/disks`, so
-        # the process reading `/sites` sees that whole filesystem — shared with
-        # kthx-db, tempo, prometheus, atlantis-data and every valkey. The
-        # server's own eviction of unguaranteed release directories is keyed off
-        # the same reading, so it does not fire until the disk itself is 80%
-        # used. This is the warning that arrives first, and node-exporter is the
-        # only thing that can see it: `kubelet_volume_stats_*` does not exist
-        # for hostPath volumes.
+        # The sites volume sees all of /mnt/disks, shared with other claims, and
+        # the server evicts only past 80% used. hostPath has no volume stats.
         - alert: KthxSitesDiskFilling
           expr: |
             node_filesystem_avail_bytes{instance="oldschool",mountpoint="/mnt/disks"}
@@ -85,23 +68,8 @@ spec:
             message: "oldschool /mnt/disks is under 25% free"
             description: "Every local-path volume on oldschool lives here, and the one that grows from anonymous public uploads is the kthx sites volume. Measure that directory first, then the other claims on this disk. At 20% free the server starts evicting release directories that are neither serving nor previous; at 5% NodeFilesystemAlmostOutOfSpace fires and every workload on the node is already in trouble."
 
-        # A dump that never runs is indistinguishable from one that runs, until
-        # a restore is needed. Two failure modes have no other signal: the
-        # upload needs `storage.buckets.get`, which `roles/storage.objectAdmin`
-        # does not grant, and the dump client major is pinned in the chart while
-        # the server major comes from the operator defaulting webhook.
-        #
-        # Measured on the CronJob's last success, not on a failed Job object.
-        # A failed Job is an artifact that outlives the problem — it is kept by
-        # count, so once the dumps recover the last failures stay and an alert
-        # keyed on them never clears. Worse, the loudest failure of all leaves
-        # no failed Job to key on: a CronJob that stops firing writes nothing.
-        # Staleness sees both, and clears itself the night a dump succeeds.
-        #
-        # The `absent` arm is the one that matters most: no series at all means
-        # the CronJob has never succeeded, was deleted, or kube-state-metrics
-        # is not reporting — each of which is a backup this cluster does not
-        # have, and none of which the first arm can see.
+        # Keyed on the last success: failed Jobs outlive a fix, and a CronJob that
+        # stops firing leaves none. `absent` means it never succeeded or is gone.
         - alert: KthxBackupFailing
           expr: |
             (time() - kube_cronjob_status_last_successful_time{namespace="kthx",cronjob="kthx-db-backup"} > 36 * 3600)

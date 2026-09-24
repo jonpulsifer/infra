@@ -46,7 +46,7 @@ spec:
     - advertisementType: CiliumPodIPPool
       selector:
         matchExpressions:
-          # announce all pod ip pools
+          # Matches every pool: none carries bgp=lol.
           - { key: bgp, operator: NotIn, values: [lol] }
 ---
 apiVersion: cilium.io/v2alpha1
@@ -65,5 +65,5 @@ spec:
           - LoadBalancerIP
       selector:
         matchExpressions:
-          # announce all services on the node
+          # Matches every Service: none carries bgp=lol.
           - { key: bgp, operator: NotIn, values: [lol] }

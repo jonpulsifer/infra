@@ -16,14 +16,11 @@ spec:
         app.kubernetes.io/name: iperf3
         app.kubernetes.io/part-of: netbench
     spec:
-      # hostNetwork makes every node reachable at <node-ip>:5201 on its VLAN,
-      # so netbench's static DNS targets resolve and traffic traverses the real
-      # wire (inter-node), the VLAN router (inter-LAN), and the site tunnel
-      # (cross-cluster) rather than the Cilium overlay.
+      # Each node serves at <node-ip>:5201, so tests cross the real wire, the
+      # VLAN router and the site tunnel, not the Cilium overlay.
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       automountServiceAccountToken: false
-      # Run a server on every node, including any tainted/control-plane nodes.
       tolerations:
         - operator: Exists
       securityContext:

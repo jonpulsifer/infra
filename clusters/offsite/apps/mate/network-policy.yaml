@@ -1,15 +1,6 @@
 ---
-# The bot pod's egress allow-list. It selects mate itself by its app label, so
-# it says nothing about the sandboxes that share this namespace: those carry
-# `app.kubernetes.io/name: mate-sandbox` and are selected by
-# `sandbox-network-policy.yaml`. The two selectors never overlap, so neither
-# policy widens the other — and mate's own pod is reachable from a sandbox
-# exactly like any other pod in the cluster, which costs nothing: it listens
-# only for the readiness probe.
-#
-# Cilium enforces policy per direction, so a rule set with no `ingress:`
-# leaves ingress unenforced: the kubelet's readiness probe on /healthz keeps
-# working, and nothing else reaches a pod that listens only for that probe.
+# Egress for the bot pod only; sandbox-network-policy.yaml covers sandboxes.
+# No ingress rules, so Cilium leaves ingress unenforced for the readiness probe.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -23,10 +14,8 @@ spec:
     matchLabels:
       app.kubernetes.io/name: mate
   egress:
-    # `toFQDNs` is enforced by Cilium's DNS proxy, which only sees a lookup
-    # that this rule's `rules.dns` sends through it. Without the matchPattern
-    # the names below never resolve to an allowed identity and every Discord
-    # connection fails closed.
+    # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
+    # rule; without it every connection below fails closed.
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: kube-system
@@ -40,11 +29,8 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
-    # discord.com carries the REST API and the gateway lookup;
-    # gateway.discord.gg is what that lookup returns. The wildcard is for
-    # resuming: Discord hands back a region-specific `resume_gateway_url`
-    # (gateway-us-east1-b.discord.gg and friends), and a resume that cannot
-    # connect spends an identify from the daily budget instead.
+    # The wildcard covers the regional `resume_gateway_url`; a failed resume
+    # spends an identify from the daily budget.
     - toFQDNs:
         - matchName: discord.com
         - matchName: gateway.discord.gg
@@ -53,15 +39,7 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # slack.com carries the whole Web API, including the call that opens a
-    # Socket Mode connection. That call answers with a `wss://` url on a host
-    # mate is told at connect time rather than one it can name ahead: the
-    # answer observed is wss-primary.slack.com, Slack documents a backup
-    # beside it, and a wildcard inside the leftmost label is the narrowest
-    # rule that reaches both — it matches one subdomain level whose name
-    # starts with `wss-` and nothing else under slack.com, which is why the
-    # API host is still named exactly. A connection that cannot be opened is
-    # a surface that never delivers a message, silently.
+    # Socket Mode hands out a `wss-*` host at connect time, primary or backup.
     - toFQDNs:
         - matchName: slack.com
         - matchPattern: "wss-*.slack.com"
@@ -69,35 +47,20 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # api.github.com, and only it: minting an installation access token is a
-    # REST call (`POST /app/installations/{id}/access_tokens`) and every REST
-    # call goes to this one host. github.com is deliberately absent — cloning
-    # and pushing are the sandbox's work, on the sandbox's own policy, and mate
-    # never moves a commit itself. This is the only GitHub name mate's egress
-    # carries, and dropping it fails every mint closed in the quietest way
-    # there is: the lookup still resolves, the address maps to an identity no
-    # rule allows, and the connection hangs instead of answering.
+    # Token mints only; mate never clones or pushes. Without it a mint hangs
+    # instead of failing.
     - toFQDNs:
         - matchName: api.github.com
       toPorts:
         - ports:
             - port: "443"
               protocol: TCP
-    # Sandboxes are minted, watched and exec'd into through the API server,
-    # which mate reaches by the address in KUBERNETES_SERVICE_HOST — an IP,
-    # never a name, so this cannot be an FQDN rule.
+    # mate reaches the API server by the IP in KUBERNETES_SERVICE_HOST, so no
+    # FQDN rule can.
     - toEntities:
         - kube-apiserver
-    # The OTLP collector, and nothing else in `monitoring`. mate's metrics —
-    # the identify budget, sandboxes live, turns, teardowns, spend — are the
-    # only way to answer "is mate alive and what is it doing" without opening
-    # Discord, and this one destination is what carries them out of the pod;
-    # the alerts in ../../monitoring/mate-rules.yaml read what arrives. It is
-    # named by the collector's own pod labels rather than by its namespace,
-    # because the namespace also holds Prometheus, Alertmanager, VictoriaLogs
-    # and Grafana, and mate has no business reaching any of them. Cilium
-    # translates the ClusterIP to its backend before the egress verdict, so
-    # the pod selector is what matches and no address appears here.
+    # The OTLP collector alone, by pod labels: the rest of `monitoring` is
+    # closed. Cilium resolves the ClusterIP to a backend before the verdict.
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: monitoring

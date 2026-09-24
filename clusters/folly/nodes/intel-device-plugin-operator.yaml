@@ -17,23 +17,14 @@ spec:
     - name: node-feature-discovery
   values:
     fullnameOverride: intel-device-plugin-operator
-    # Only riptide's UHD 630 exists here, and GpuDevicePlugin is the only CR.
-    # Without this the operator runs watches for all eight device types.
+    # Only the GPU plugin runs here; otherwise the operator watches all eight
+    # device types.
     manager:
       devices:
         gpu: true
-  # manager.devices only ever reaches the operator's --devices= argument. The
-  # chart writes all eighteen webhooks regardless, so seventeen of them name
-  # paths this operator does not serve. Two are pod-scoped and fail open, which
-  # means every pod created anywhere in the cluster pays two admission
-  # round-trips that the API server then logs as failures; the rest are
-  # failurePolicy Fail on CR paths, so creating one of those device plugins
-  # today would be rejected rather than simply ignored.
-  #
-  # Keyed by name rather than list index, so a chart bump cannot silently
-  # re-point a delete at the wrong webhook, and a name that stops existing is
-  # tolerated instead of wedging the release. Delete the matching pair of
-  # entries here if another device is ever enabled above.
+  # The chart renders every device's webhooks whatever manager.devices says, so
+  # these patches delete the unused ones by name. Remove a device's pair here
+  # when enabling it above.
   postRenderers:
     - kustomize:
         patches:

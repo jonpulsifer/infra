@@ -1,9 +1,6 @@
 ---
-# mate's own namespace, apart from the platform's `agents-sandbox`: that one is
-# `privileged` for the sandbox controller, and nothing mate runs needs it. The
-# bot is one non-root Bun process, so `restricted` is what it needs today. The
-# sandboxes that will share this namespace may force the level down once the
-# harness is known; until then this is the provisional ruling.
+# Apart from `agents-sandbox`, which is privileged for the sandbox controller.
+# The bot and its sandboxes need no privilege.
 apiVersion: v1
 kind: Namespace
 metadata:

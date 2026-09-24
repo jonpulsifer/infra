@@ -15,11 +15,8 @@ spec:
       labels: *labels
     spec:
       automountServiceAccountToken: false
-      # Kubernetes injects Docker-link-style env vars for every Service in the
-      # namespace, named `<SVCNAME>_PORT`. Our Service is named "tronbyt", so
-      # it collides with the app's own `TRONBYT_PORT` config var (the app's
-      # listen port), overriding it with a `tcp://<ip>:8000` URL instead of a
-      # bare port and crashing with "too many colons in address".
+      # A service link sets TRONBYT_PORT to tcp://<ip>:8000, which overrides the
+      # app's listen port and crashes it with "too many colons in address".
       enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
@@ -50,18 +47,14 @@ spec:
           volumeMounts:
             - name: tronbyt-data
               mountPath: /app/data
-          # First boot checks out ~1000 system apps onto the NFS-backed PVC,
-          # which can take over a minute; give it a generous startup budget
-          # so liveness doesn't kill it mid-checkout (subsequent boots reuse
-          # the checkout via `git fetch` and are much faster).
+          # First boot checks out ~1000 system apps onto NFS, which can take
+          # over a minute.
           startupProbe:
             httpGet:
               path: /health
               port: 8000
             periodSeconds: 10
             failureThreshold: 30
-          # Per https://tronbyt.com/device-notes/#liveness-probe: httpGet on
-          # /health, port 8000.
           livenessProbe:
             httpGet:
               path: /health
@@ -78,18 +71,12 @@ spec:
           resources:
             requests:
               memory: 64Mi
-              # p99 sits at 56m, so the old 50m under-declared what this
-              # actually takes and the scheduler packed the node accordingly.
+              # p99 use is 56m.
               cpu: 100m
             limits:
               memory: 256Mi
-              # No CPU limit on purpose. Average draw is well under half the
-              # 500m this used to carry, but the work is bursty enough to spend
-              # the quota inside a single CFS period, so it was throttled 64% of
-              # periods while looking idle. CPU is compressible — the request
-              # already guarantees a share under contention, and a limit only
-              # buys throttling. Memory keeps its limit; that one is not
-              # compressible.
+              # No CPU limit: bursts would exhaust a CFS period's quota and
+              # throttle even at low average use.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

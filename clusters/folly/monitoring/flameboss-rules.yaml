@@ -1,21 +1,5 @@
-# Alerts on a cook.
-#
-# Everything here reads the series apps/flameboss exports from the controller's
-# `temps` uplinks (see flameboss.yaml). Two of those series exist to make these
-# expressions honest:
-#
-#   - `flameboss_cook_active` is 1 only while telemetry is arriving, and the
-#     cook's series disappear entirely half an hour after the last reading. A
-#     cold pit therefore never graphs or alerts as a live cook, and the silence
-#     alert resolves on its own instead of firing until someone acknowledges a
-#     barbecue that has been put away.
-#   - `flameboss_pit_reached_target` latches once the pit has come within 5F of
-#     set during this cook. Without it every alert about the pit being below set
-#     would fire on the way up from ambient, which is every cook.
-#
-# Thresholds are in Fahrenheit and are meant to be edited: they are one cook's
-# tolerances, not a law. 203F is the pull point for a brisket or a butt; a
-# chicken wants 165F and a rib roast half that.
+# Cook alerts on the series apps/flameboss exports. Thresholds are in Fahrenheit.
+# Below-set alerts require pit_reached_target, so the ramp from ambient is quiet.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -28,9 +12,8 @@ spec:
   groups:
     - name: flameboss
       rules:
-        # The "there is a cook" notification. `pit_reached_target == 0` is what
-        # keeps it to the start of a fire: a cook whose pit is already settled
-        # is one this exporter joined late, not one that just started.
+        # pit_reached_target latches once the pit is within 5F of set; == 0 skips
+        # a settled cook the exporter joined late.
         - alert: FlameBossCookStarted
           expr: |
             flameboss_cook_active == 1
@@ -44,9 +27,8 @@ spec:
             description: "Telemetry is arriving and the pit has not reached its set temperature yet, so the fire is coming up. The dashboard is Grafana -> Flame Boss; the cook's own log is at https://myflameboss.com/en/cooks. This clears itself once the pit settles."
 
         - alert: FlameBossPitBelowTarget
-          # The deficit leads the expression because `and` takes its value
-          # from the left-hand side, and this alert's whole message is that
-          # number. Written the other way round it reads "Pit is 1F below set".
+          # The deficit leads because `and` keeps the left side's value, which
+          # the message prints.
           expr: |
             (flameboss_pit_target_fahrenheit - flameboss_pit_temp_fahrenheit) > 25
               and flameboss_cook_active == 1
@@ -91,9 +73,7 @@ spec:
             message: "Pit probe is unplugged on Flame Boss {{ $labels.device }}"
             description: "The controller regulates the blower from the pit probe, so without it there is no control loop -- only a fan and a guess. Reseat the probe."
 
-        # 203F is where a brisket or a pork butt gives up. This one is meant to
-        # keep nagging: it stays firing until the meat comes off and the cook
-        # ends, which is the point.
+        # The brisket and pork butt pull point. It fires until the cook ends.
         - alert: FlameBossMeatProbeAtTarget
           expr: |
             flameboss_probe_temp_fahrenheit >= 203
@@ -116,12 +96,8 @@ spec:
             message: "Probe {{ $labels.probe }} is at {{ $value | printf \"%.0f\" }}F on Flame Boss {{ $labels.device }}"
             description: "Through the stall and at the usual wrap point, and done for anything poultry. FlameBossMeatProbeAtTarget follows at 203F."
 
-        # The controller's own alarms. These fire at what is set on the
-        # controller rather than at a threshold written here, which is the
-        # point of reading them. They are additive for now: the threshold
-        # alerts above still fire beside them, because a silenced fallback is
-        # only safe once a real cook has shown these uplinks arrive live
-        # rather than only in the burst a controller sends when it reconnects.
+        # The controller's own alarms. The threshold alerts stay until a cook shows
+        # these arrive live, not only in the burst sent on reconnect.
         - alert: FlameBossMeatDone
           expr: |
             flameboss_meat_alarm_triggered == 1
@@ -161,10 +137,8 @@ spec:
             message: "Flame Boss {{ $labels.device }} says close the vent"
             description: "The controller has held the pit above set for a long time with the blower idle, which it can only fix by starving the fire of air it is not blowing. Close the top vent a little."
 
-        # Silence, which is either the cook ending or the controller losing
-        # power or wifi in the middle of one. The series carrying this
-        # expression is dropped half an hour after the last reading, and that is
-        # what resolves the alert.
+        # The exporter drops this series 30 minutes after the last reading,
+        # which resolves the alert.
         - alert: FlameBossCookSilent
           expr: flameboss_cook_active == 0
           for: 5m

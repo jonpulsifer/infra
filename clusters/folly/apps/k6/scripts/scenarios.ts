@@ -2,8 +2,7 @@ import { check } from 'k6';
 import http from 'k6/http';
 import type { Options } from 'k6/options';
 
-// URLs arrive from the TestRun's runner env so the zone names stay in
-// cluster-settings; this file never names a host.
+// The TestRun's runner env sets these, so this file names no host.
 const targets = {
   app: __ENV.TARGET_APP_URL,
   control_plane: __ENV.TARGET_CONTROL_PLANE_URL,

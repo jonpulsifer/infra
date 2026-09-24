@@ -1,14 +1,5 @@
-# Cluster CoreDNS losing its API-server watches is invisible from the outside:
-# it keeps serving whatever snapshot it holds, stays Ready (the kubernetes
-# plugin reports ready once and never again), and Postgres-shaped symptoms show
-# up in workloads days later. Observed live: offsite's CoreDNS lost its watches
-# on a CA rotation and answered from a six-day-old snapshot until restarted.
-#
-# The signal is client-go's own request metric, which the kubernetes plugin
-# exports: a transport-level failure — TLS refusal included — is recorded with
-# `code="<error>"`. A healthy CoreDNS logs a handful of these over weeks; a
-# wedged one fails its watch reconnects continuously for as long as it is
-# wedged, which is what the `for:` filters on.
+# A CoreDNS that loses its API-server watches stays Ready on a stale snapshot.
+# `code="<error>"` is a transport failure; a wedged CoreDNS logs them nonstop.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

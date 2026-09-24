@@ -1,11 +1,6 @@
 ---
-# Its own Kustomization rather than a directory added to the operator's, for the
-# reason `gcp-secret-manager` and `onepassword-connect` each have one: the
-# operator installs the CRDs, and a `ClusterSecretStore` in the same apply is
-# dry-run against a kind that does not exist yet.
-#
-# It also depends on `spindrift-target`, which declares the namespace this
-# store's RoleBinding lives in.
+# Its own Kustomization: a ClusterSecretStore cannot dry-run in the apply that
+# installs its CRD.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

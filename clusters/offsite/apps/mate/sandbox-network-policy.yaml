@@ -1,54 +1,7 @@
 ---
-# What a sandbox may reach. A sandbox runs agent-authored commands with every
-# permission auto-allowed and the OpenCode key in its environment, so egress is
-# the only boundary around what those commands can talk to — kata-clh isolates
-# the kernel, not the network — and there was no policy on these pods at all
-# until this one.
-#
-# Three rules allow, in widening order:
-#   - `opencode.ai`, the Go base the harness prompts, and `models.opencode.ai`,
-#     the catalogue it fetches at start — a sandbox that cannot reach the second
-#     never finishes `session/new` — plus two GitHub names. `github.com` is the
-#     init container's shallow clone of the public repo, and is also the whole
-#     of a `git push`: smart HTTP never leaves the host it cloned from.
-#     `api.github.com` is the separate host every REST call goes to, opening a
-#     pull request among them, so an agent handed a credential can finish the
-#     loop its checkout starts. The credential itself arrives as a file mate
-#     stamps into the pod — an installation token mate mints per turn from an
-#     App key that stays in mate's pod — so nothing here asks 1Password for a
-#     GitHub credential, and the 1Password Connect server the in-cluster rule
-#     below can reach is on no path a git command takes. The GitHub names left
-#     out are deliberate:
-#     `codeload.github.com`, `objects.githubusercontent.com` and
-#     `uploads.github.com` move tarballs and release assets, a file-shaped way
-#     out of here that a commit and a pull request never need. npm is absent
-#     for a related reason: the checkout's own `.opencode/package.json` fires
-#     hundreds of npm requests per start, `OPENCODE_DISABLE_PROJECT_CONFIG` is
-#     what stops it, and this is the second lock on that door.
-#   - cluster DNS, which `toFQDNs` cannot work without. The lookup itself is not
-#     restricted: `matchPattern: "*"` lets CoreDNS resolve and forward any name,
-#     so DNS is a name-shaped channel out of here that the four entries above
-#     do not close. It is the same trade the bot policy makes, and narrowing it
-#     is a `matchName` list rather than a rewrite.
-#   - every pod in every namespace, on every port. This is the widest line in
-#     the file and it is wider than the three destinations that motivate it
-#     (kthx, Spindrift's MCP, a CNPG Postgres): unauthenticated in-cluster
-#     surfaces such as VictoriaLogs and Prometheus are in reach too. Trading
-#     that away is one field — an `In` set of namespaces in place of `Exists`.
-#
-# The denied half is unconditional. The LAN, the UniFi console, spore, the node
-# addresses, the API server and the cloud metadata address are all `world` or a
-# reserved identity to Cilium, and no rule here names any of them. Nothing on
-# host network is reachable either, whatever Service fronts it: those endpoints
-# carry the `host` or `remote-node` identity, which a label selector cannot
-# select. No CIDR appears in this file at all. The sandbox holds no
-# service-account token, so the API server is refused twice over.
-#
-# No `ingress:` rule, deliberately. Cilium enforces policy per direction, so a
-# rule set with egress only leaves ingress unenforced — and nothing needs an
-# ingress rule: mate drives the harness through `pods/exec` on the API server,
-# which never touches the pod network, and `kubectl port-forward` is dead under
-# kata-clh regardless.
+# The only network boundary for agent commands, which run auto-allowed; kata-clh
+# isolates the kernel, not the network. No ingress rules, so Cilium leaves
+# ingress unenforced; mate reaches the harness through pods/exec.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -58,21 +11,14 @@ metadata:
     app.kubernetes.io/name: mate-sandbox
     app.kubernetes.io/part-of: mate
 spec:
-  # The label `apps/mate/src/sandboxes.ts` stamps on every Sandbox and on its
-  # pod template. One label, not the four beside it: the sandbox controller adds
-  # labels of its own and mate's thread labels vary per thread, so naming more
-  # of them only adds ways for this selector to match nothing — and a policy
-  # that selects nothing fails open, back to a sandbox with the whole LAN in
-  # reach.
+  # Only the label sandboxes.ts stamps: other labels vary, and a selector that
+  # matches nothing fails open.
   endpointSelector:
     matchLabels:
       app.kubernetes.io/name: mate-sandbox
   egress:
-    # `toFQDNs` is enforced against names Cilium's DNS proxy has seen resolved,
-    # and the proxy only sees a lookup that a rule like this one sends through
-    # it. Drop this rule or narrow its `matchPattern` past the four names below
-    # and they never map to an allowed identity: the sandbox comes up, the clone
-    # and the model call both fail closed, and the thread gets a plain error.
+    # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
+    # rule. The open pattern leaves DNS itself as a way out.
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: kube-system
@@ -86,6 +32,8 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
+    # models.opencode.ai serves the catalogue `session/new` waits on. No
+    # tarball, release-asset or npm hosts: a push and a pull request need none.
     - toFQDNs:
         - matchName: opencode.ai
         - matchName: models.opencode.ai
@@ -95,42 +43,22 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # In-cluster destinations by identity rather than by address, because there
-    # is no address to write: Cilium translates a ClusterIP to its backend in
-    # the pod's own egress path before taking the policy verdict, and CIDR
-    # selectors do not match in-cluster endpoints in the first place, so a rule
-    # naming the Service range would be a no-op. The namespace label has to be
-    # named: an empty selector would mean the `mate` namespace and nothing else.
+    # Every pod in every namespace on every port, unauthenticated ones such as
+    # Prometheus included. An empty selector would mean this namespace only.
     - toEndpoints:
         - matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
               operator: Exists
-    # This cluster's own apiserver, as an entity rather than an address. It is
-    # not a pod and not a ClusterIP backend, so neither selector above reaches
-    # it; `kube-apiserver` is the identity Cilium gives it whatever address it
-    # answers on. What the agent does with it is `sandbox-rbac.yaml`'s to say —
-    # read all but Secrets and write nothing with its own token, but exec into
-    # any pod, and so into that pod's mounted Secrets and token.
+    # Not a pod or ClusterIP backend, so only the entity reaches it. What the
+    # agent may do there is sandbox-rbac.yaml's.
     - toEntities:
         - kube-apiserver
       toPorts:
         - ports:
             - port: "6443"
               protocol: TCP
-    # The fleet itself: SSH to any host, and the other cluster's apiserver.
-    # `CILIUM_NATIVE_ROUTING_CIDR` is the estate's own routable range from
-    # `cluster-topology.json` rather than a subnet written down twice, and it
-    # is the only declared value that spans both sites — folly's nodes are not
-    # in this cluster's ConfigMap, and a literal for them here would be exactly
-    # the hardcoded network fact the repo forbids.
-    #
-    # Two ports and no more. This is what makes the agent an SRE companion
-    # rather than a chat window: it can read a journal on the host that is
-    # actually broken. The identity it logs in as is `rowbutt`, which is in
-    # `wheel` on every host with `wheelNeedsPassword = false` — so a turn that
-    # reaches this rule is a turn that can do anything on any box. That is the
-    # deliberate shape of this agent, written down here because the policy is
-    # where somebody will look for the blast radius.
+    # Both sites' hosts: SSH as `rowbutt`, which has passwordless sudo on each,
+    # and the apiservers. Login stays off while MATE_SSH_KEY_FILE is unset.
     - toCIDRSet:
         - cidr: ${CILIUM_NATIVE_ROUTING_CIDR}
       toPorts:

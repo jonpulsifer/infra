@@ -12,20 +12,10 @@ spec:
     kind: GitRepository
     name: infra
   dependsOn:
-    # The operator installs `postgresql.cnpg.io/v1`, and this overlay reaches
-    # that kind indirectly: Spindrift's own release renders a CNPG Cluster
-    # (`packages/charts/spindrift/templates/database.yaml`). Nothing here
-    # declares the kind directly, so it is helm-controller rather than the
-    # Kustomization dry-run that meets a missing CRD — the install fails, burns
-    # its remediation retries, and then sits failed until someone forces it.
-    # While the operator lived inside `apps` that ordering was Flux's problem to
-    # solve within one Kustomization; now that it is its own, this is what says
-    # the operator is there first.
+    # packages/charts/spindrift renders a CNPG Cluster. helm-controller, not the
+    # dry-run, meets a missing CRD, and the install fails past its retries.
     - name: cloudnative-pg
-    # Same shape for the Sandbox-family kinds (`agents.x-k8s.io`,
-    # `extensions.agents.x-k8s.io`). The CRDs are what the dry-run needs; the
-    # controller being down does not refuse an apply, so this stops at the
-    # CRD Kustomization rather than freezing every app behind the controller.
+    # The CRDs only: the dry-run needs them, and a down controller refuses no apply.
     - name: agent-sandbox-crds
   decryption:
     provider: sops

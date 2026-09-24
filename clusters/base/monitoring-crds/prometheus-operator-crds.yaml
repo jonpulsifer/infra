@@ -1,27 +1,11 @@
 ---
-# The Prometheus Operator's CRDs, installed ahead of the monitoring
-# Kustomization rather than inside it.
-#
-# Flux server-side dry-runs every object in a Kustomization before applying
-# any of them. `base/monitoring` holds both a raw ServiceMonitor and the
-# kube-prometheus-stack HelmRelease that would create the ServiceMonitor CRD,
-# so on a cluster that does not already have that CRD the dry-run fails, the
-# whole Kustomization is refused, and the chart that would resolve it never
-# installs. Splitting the CRDs into a Kustomization `monitoring` dependsOn is
-# what breaks the cycle.
-#
-# appVersion tracks kube-prometheus-stack's: 32.0.0 and 91.x are both
-# prometheus-operator v0.94.0, and this chart's CRDs are byte-identical to the
-# ones that chart bundles. They must move together — offsite takes its CRDs
-# from here and its operator from there, so a version apart means an operator
-# reading a schema it was not built against.
+# Outside `monitoring`, whose dry-run fails on its own ServiceMonitor until
+# these CRDs exist.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: prometheus-operator-crds
-  # flux-system, not monitoring: what this installs is cluster-scoped, and
-  # the monitoring namespace is created by `base/monitoring` — the very
-  # Kustomization that runs after this one.
+  # The CRDs are cluster-scoped, and `monitoring` creates its namespace later.
   namespace: flux-system
 spec:
   interval: 1h0m0s
@@ -29,6 +13,8 @@ spec:
   chart:
     spec:
       chart: prometheus-operator-crds
+      # Same operator (v0.94.0) as kube-prometheus-stack 91.x, whose operator on
+      # offsite reads these CRDs; bump the two together.
       version: 32.0.0
       sourceRef:
         kind: HelmRepository
@@ -39,8 +25,7 @@ spec:
     remediation:
       retries: 5
   upgrade:
-    # CRD schema updates are additive; replacing lets a field land without
-    # a by-hand delete of resources the operator is actively using.
+    # Replaces CRDs in place, so a new field lands without deleting live resources.
     crds: CreateReplace
     remediation:
       retries: 5

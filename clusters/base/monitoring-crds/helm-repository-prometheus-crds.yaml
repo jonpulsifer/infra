@@ -1,11 +1,6 @@
 ---
-# Deliberately a second HelmRepository for the same URL as
-# `base/monitoring/helm-repository-prometheus.yaml`, under its own name.
-#
-# `monitoring` dependsOn `monitoring-crds`, so anything `monitoring-crds`
-# needs must exist before `monitoring` has reconciled even once. Pointing at
-# the `prometheus` HelmRepository — which `monitoring` owns — would invert
-# that and deadlock the pair on a cluster building from nothing.
+# A second repository for the same URL: `monitoring` owns `prometheus` and
+# depends on this Kustomization, so sharing it deadlocks a fresh cluster.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:

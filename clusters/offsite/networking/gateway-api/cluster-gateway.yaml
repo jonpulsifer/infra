@@ -22,15 +22,8 @@ spec:
                   - agents-sandbox
         kinds:
           - kind: HTTPRoute
-    # The authenticated edge. oauth2-proxy answers on a name in the App zone
-    # (`SPINDRIFT_DOMAIN`, see `clusters/base/cluster-settings.yaml`), and its
-    # HTTPRoute lives in its own namespace, so this listener names both: the
-    # exact hostname, and the one namespace allowed to attach to it. The
-    # cert-manager gateway-shim issues the certificate from the annotation at
-    # the top of this Gateway; the `letsencrypt-production` issuer's DNS-01
-    # solver covers the zone. external-dns reads the route and publishes the
-    # name at this Gateway's own address, unproxied — an RFC1918 address is the
-    # reach boundary, so nothing more has to be attached to keep it one.
+    # oauth2-proxy's host is in the App zone (SPINDRIFT_DOMAIN), and its route
+    # lives in its own namespace, so this listener names both.
     - name: oauth2-tls
       protocol: HTTPS
       port: 443
@@ -47,10 +40,8 @@ spec:
               kubernetes.io/metadata.name: oauth2-proxy
         kinds:
           - kind: HTTPRoute
-    # Prowler authenticates its own users, so unlike the oauth2 listener above
-    # this one fronts the app directly. Its route lives in the app's namespace,
-    # which the selector names — a listener with no `allowedRoutes` admits only
-    # `default`, where the media routes below sit.
+    # Prowler authenticates its own users. A listener with no `allowedRoutes`
+    # admits only `default`, so this one names prowler's namespace.
     - name: prowler-tls
       protocol: HTTPS
       port: 443

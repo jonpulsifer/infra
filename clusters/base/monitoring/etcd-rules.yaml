@@ -1,24 +1,6 @@
-# The control plane's disk is the failure nobody sees. When it saturates, etcd
-# applies go from ~20ms to tens of seconds, and every single-replica controller
-# on the cluster dies at once: those that lease-elect lose the lease, and those
-# that call the API server once at startup and exit on failure simply exit.
-# Measured on folly 2026-08-20, a ~10-hour window at p99 60s took down
-# node-feature-discovery, the NFS provisioner, cert-manager, cnpg and four Flux
-# controllers, and nothing paged — the pods recovered on backoff, so
-# KubePodCrashLooping never held its 15 minutes.
-#
-# The chart's own etcd rules stay disabled (kubeEtcd.enabled=false) because
-# etcd listens on loopback and there is nothing to scrape. This needs no new
-# target: every API server already exports the latency of its own etcd calls,
-# which is the symptom that matters and the one a client actually feels.
-#
-# Threshold: a healthy member serves in tens of milliseconds and folly sits at
-# ~20ms. The incident held 60s. 1s is far enough above normal not to flap and
-# far enough below an outage to fire while there is still time to look.
-#
-# `cluster` is an external label, attached when the alert is sent to
-# Alertmanager rather than present on the series, so it identifies the alert
-# downstream but cannot be templated into an annotation here.
+# Slow etcd crashes single-replica controllers, which recover on backoff before
+# KubePodCrashLooping's 15m holds. etcd listens on loopback, so this reads the
+# API server's etcd latency.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -31,6 +13,7 @@ spec:
     - name: etcd-latency
       rules:
         - alert: EtcdRequestsSlow
+          # A healthy member answers in tens of milliseconds; 1s fires before an outage.
           expr: histogram_quantile(0.99, sum by (instance, le) (rate(etcd_request_duration_seconds_bucket[5m]))) > 1
           for: 15m
           labels:

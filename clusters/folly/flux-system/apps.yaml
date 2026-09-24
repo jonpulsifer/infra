@@ -12,18 +12,11 @@ spec:
     kind: GitRepository
     name: infra
   dependsOn:
-    # The operator installs `postgresql.cnpg.io/v1` and this overlay declares
-    # Cluster objects of that kind. While the operator lived inside `apps` the
-    # ordering was Flux's problem to solve within one Kustomization; now that it
-    # is its own, the CRD can be absent when `apps` first applies — and Flux
-    # dry-runs every object in a Kustomization before applying any, so one
-    # unknown kind refuses the whole overlay rather than just itself.
+    # Flux dry-runs every object before applying any, so one missing CRD, such
+    # as the CNPG Cluster kind, refuses the whole overlay.
     - name: cloudnative-pg
     - name: monitoring
-    # Same shape for the Sandbox-family kinds (`agents.x-k8s.io`,
-    # `extensions.agents.x-k8s.io`). The CRDs are what the dry-run needs; the
-    # controller being down does not refuse an apply, so this stops at the
-    # CRD Kustomization rather than freezing every app behind the controller.
+    # The CRDs only: the dry-run needs the Sandbox kinds, not their controller.
     - name: agent-sandbox-crds
   decryption:
     provider: sops

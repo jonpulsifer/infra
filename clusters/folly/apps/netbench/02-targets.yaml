@@ -7,10 +7,8 @@ metadata:
     app.kubernetes.io/name: netbench
     app.kubernetes.io/part-of: netbench
 data:
-  # The browser sends a target *name*; netbench maps it to host/port here.
-  # Hosts use <name>.lolwtf.ca so this isn't brittle to IP changes. The node
-  # and cross-cluster servers are the clusters/base/apps/iperf3 DaemonSet
-  # (hostNetwork :5201); the lan servers are NixOS services.iperf3 on the Pis.
+  # The browser sends a target name, and netbench resolves it only through
+  # this list.
   targets.json: |-
     [
       { "name": "optiplex",   "host": "optiplex.lolwtf.ca",   "port": 5201, "category": "node",          "description": "folly k8s node (DaemonSet)" },
