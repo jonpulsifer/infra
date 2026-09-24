@@ -9,8 +9,8 @@
 #      render-config script over its own mounts, with a dummy for every PBX_*
 #      value the pod's env provides;
 #   3. every PJSIP object the config declares loads, the modules a call needs
-#      run, nothing logs an error against a shipped config file, and the
-#      dialplan reloads clean;
+#      run and the ones no call may use do not, nothing logs an error against
+#      a shipped config file, and the dialplan reloads clean;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
 #      0 through the `_[*0-9]!` pattern to its own voip.ms trunk;
 #   5. nothing reachable from a context an inbound call starts in dials a
@@ -45,6 +45,8 @@ REQUIRED_MODULES=(
   pbx_config.so app_dial.so app_stack.so res_prometheus.so
   codec_g722.so codec_ulaw.so
 )
+# A shell or dial tone, one dialplan line away from a caller.
+FORBIDDEN_MODULES=(app_disa.so app_system.so func_shell.so)
 
 WORK=""
 ASTERISK_PID=""
@@ -449,6 +451,12 @@ check_boot_log() {
     ast "module show like $mod" | grep -E "^${mod}[[:space:]].*[[:space:]]Running[[:space:]]" >/dev/null || missing+=("$mod")
   done
   if ((${#missing[@]})); then fail "required modules are not running" "${missing[@]}"; fi
+
+  local loaded=()
+  for mod in "${FORBIDDEN_MODULES[@]}"; do
+    if ast "module show like $mod" | grep -E "^${mod}[[:space:]]" >/dev/null; then loaded+=("$mod"); fi
+  done
+  if ((${#loaded[@]})); then fail "modules no call may use are loaded" "${loaded[@]}"; fi
 }
 
 # --- PJSIP: declared vs loaded --------------------------------------------
