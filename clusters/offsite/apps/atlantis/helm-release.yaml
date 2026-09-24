@@ -93,6 +93,9 @@ spec:
           - run: /home/atlantis/plan-hook.sh
             description: Plan Hook
             commands: plan
+          - run: /home/atlantis/apply-hook.sh
+            description: Apply Hook
+            commands: apply
       workflows:
         default:
           plan:
@@ -120,7 +123,7 @@ spec:
     hideUnchangedPlanComments: true
     podTemplate:
       annotations:
-        configmap.reloader.stakater.com/reload: kubeconfig-hook,plan-hook,policies
+        configmap.reloader.stakater.com/reload: kubeconfig-hook,plan-hook,apply-hook,policies
     ingress:
       enabled: true
       annotations:
@@ -144,6 +147,10 @@ spec:
         configMap:
           name: plan-hook
           defaultMode: 0777
+      - name: apply-hook
+        configMap:
+          name: apply-hook
+          defaultMode: 0555
       - name: kubeconfig-hook
         configMap:
           name: kubeconfig-hook
@@ -158,6 +165,10 @@ spec:
       - name: plan-hook
         mountPath: /home/atlantis/plan-hook.sh
         subPath: plan-hook.sh
+        readOnly: true
+      - name: apply-hook
+        mountPath: /home/atlantis/apply-hook.sh
+        subPath: apply-hook.sh
         readOnly: true
       - name: kubeconfig-hook
         mountPath: /home/atlantis/kubeconfig-hook.sh
