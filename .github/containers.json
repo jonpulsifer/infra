@@ -12,7 +12,6 @@
     "kthx",
     "mate",
     "mate-sandbox",
-    "slingshot",
     "smiirl",
     "spindrift",
     "spindrift-demo",
@@ -61,6 +60,7 @@
     "openclaw",
     "workstation",
     "hermes",
-    "clankerbanker"
+    "clankerbanker",
+    "slingshot"
   ]
 }

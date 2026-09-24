@@ -118,7 +118,7 @@ Use this procedure if you lose a workstation or an SSH key that can reach the co
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | `update-kubeconfigs` prints `Failed to fetch kubeconfig from <site>`. | SSH to the control plane failed. | Make sure that `ssh <address> true` works for the address that the script prints. |
-| The script connects to a wrong address. | `get_cluster_ip` in `dotfiles/.local/bin/update-kubeconfigs` holds its own copy of each `API_SERVER_IP`. | Make it match `API_SERVER_IP` in `clusters/<site>/config/cluster-topology.json`. |
+| The script connects to a wrong address. | The script reads `API_SERVER_IP` from `clusters/<site>/config/cluster-topology.json` in the checkout that it is linked from, and that checkout is out of date. | Pull the checkout, or set `INFRA_DIR` to an up-to-date one. |
 | kubectl prints `kube-jit-token: minting through <address> failed`. | SSH or `sudo` on the control plane failed. | Read the rest of the message. Use the break-glass certificate. |
 | The `operator` binding comes back after you delete it. | Flux applies `clusters/base/operator-rbac.yaml`. | Remove it in git, as [Withdraw access](#withdraw-access) describes. |
 

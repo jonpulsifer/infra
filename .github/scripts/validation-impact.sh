@@ -42,7 +42,7 @@ targets() {
       clusters/folly/config/lab-topology.json | terraform/network/unifi/folly/clients.yaml)
         target_set["terraform:terraform/network/unifi/folly"]=1
         ;;
-      *.tf | */.terraform.lock.hcl)
+      *.tf | *.tftest.hcl | */.terraform.lock.hcl)
         target=$(terraform_root_for_path "$path" || true)
         [[ -n "${target:-}" ]] && target_set["$target"]=1
         ;;

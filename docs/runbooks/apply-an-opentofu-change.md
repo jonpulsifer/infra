@@ -23,7 +23,7 @@ Use this runbook to change the OpenTofu code in `terraform/` or `clusters/<site>
    git diff --name-only main...HEAD | .github/scripts/validation-impact.sh targets
    ```
 
-   Result: One `terraform:<dir>` line for each root or module that the change affects. A change to only a `.tftest.hcl` file prints no line.
+   Result: One `terraform:<dir>` line for each root or module that the change affects.
 
 2. If a directory is a module, find the roots that call it.
 

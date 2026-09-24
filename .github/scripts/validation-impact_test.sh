@@ -45,6 +45,10 @@ assert_targets 'a bootstrap Terraform file validates its bootstrap root' \
   'clusters/offsite/bootstrap/bootstrap.tf' \
   'terraform:clusters/offsite/bootstrap'
 
+assert_targets 'a Terraform test file validates its root' \
+  'clusters/folly/bootstrap/bootstrap.tftest.hcl' \
+  'terraform:clusters/folly/bootstrap'
+
 roots=$("$script" terraform-roots)
 for root in clusters/folly/bootstrap clusters/offsite/bootstrap; do
   if ! grep -qxF "$root" <<<"$roots"; then

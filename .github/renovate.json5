@@ -360,7 +360,7 @@
       // joining the toolset group above: these two carry pins the whole repo
       // depends on, and any one tool whose release breaks the image build
       // would otherwise hold them red indefinitely.
-      description: 'opentofu: the repo pin and the sandbox image move together',
+      description: 'opentofu: the repo pin, the Atlantis image and the sandbox image move together',
       matchDepNames: ['opentofu', 'opentofu/opentofu'],
       groupName: 'opentofu',
       groupSlug: 'opentofu',
