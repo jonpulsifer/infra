@@ -1,8 +1,5 @@
 # syntax=docker/dockerfile:1
-#
-# Static site demo — build dist/ with build-time git facts, then serve the
-# folder with bun.  The toolchain stays in the builder stage; the runtime
-# image only carries the static files and a bun binary to serve them.
+# Static site demo: builds dist/ with build-time git facts, then serves it with bun.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:ea7d0133c47e062b7754da987c05d4d1206e0a9e357a49679271d071f48e65e2 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local
@@ -19,9 +16,7 @@ COPY . .
 RUN cd apps/spindrift-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
 
 FROM cgr.dev/chainguard/node:latest@sha256:3d462c24088fa9189404fc19b837f6b39636671571491c9c5dd7b75e3e2df550 AS runner
-# Redeclare so the commit the builder baked is visible to the running image
-# as an env var the server reports on every page — the dynamic fact that
-# says "this is build X" without you opening the UI.
+# ARGs are scoped to a stage; redeclare it so serve.ts can report SPINDRIFT_BUILD.
 ARG BUILD_COMMIT=unknown
 ENV NODE_ENV=production \
   PORT=3000 \

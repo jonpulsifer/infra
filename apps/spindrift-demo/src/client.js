@@ -1,5 +1,3 @@
-/* ── spray canvas ────────────────────────────────────────────────────────── */
-
 const canvas = document.getElementById('spray');
 const ctx = canvas.getContext('2d');
 
@@ -55,16 +53,6 @@ function frame() {
 }
 frame();
 
-/* ── runtime info ───────────────────────────────────────────────────────────
- *
- * The "better info": three real panels instead of a mock fleet and a typed
- * deploy log. Runtime answers which host this landed on and how long it has
- * been alive; Environment shows the platform-provided vars changing under a
- * redeploy; Client shows what the browser carries. All three move while the
- * page is open, and they reset across a restart — the thing a demo owes you
- * if it is going to prove the work is dynamic.
- */
-
 const rt = window.SpinRuntime;
 const runtimePanel = document.getElementById('runtime-panel');
 const environmentPanel = document.querySelector('.envbook');
@@ -74,8 +62,6 @@ if (rt) {
   if (environmentPanel) rt.renderEnv(environmentPanel);
   if (clientPanel) rt.renderClient(clientPanel);
 }
-
-/* ── render time ─────────────────────────────────────────────────────────── */
 
 const renderMs = Math.round(performance.now());
 document.getElementById('render-ms').textContent = renderMs;

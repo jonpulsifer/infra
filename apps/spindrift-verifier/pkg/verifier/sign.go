@@ -14,24 +14,12 @@ import (
 	"time"
 )
 
-// SignatureMediaType is the envelope content type Spindrift's own signature
-// carries. It is not the sigstore bundle mediaType — until a KMS-backed signer
-// is wired, the bundle is a reviewable Ed25519 statement the platform's own
-// verifier can re-check with no network and no third-party trust.
+// SignatureMediaType marks a first-party Ed25519 bundle, not a sigstore bundle.
+// VerifySignature checks it offline, with no third-party trust.
 const SignatureMediaType = "application/vnd.spindrift.signature.v1+json"
 
-// SignatureBundle is the verifiable payload of a CoreSignature.
-//
-// Every field a verifier needs is embedded: the public key, the algorithm, the
-// artifact digest the signature covers, and the signature itself. A bundle
-// that carries only a mediaType is a placeholder and is rejected by
-// VerifySignature.
-//
-// The public key inside the bundle is **not trusted on its own**. Admission
-// pins Spindrift's signing key by passing the same key reference to
-// VerifySignature that Sign used; the bundle's public key must match the one
-// derived from that reference before the signature is even looked at. Without
-// this pinning the bundle would verify against any key an attacker chose.
+// SignatureBundle is the JSON in CoreSignature.Bundle. Its PublicKey is not
+// trusted: VerifySignature requires it to match the pinned signer key.
 type SignatureBundle struct {
 	MediaType      string `json:"mediaType"`
 	Algorithm      string `json:"algorithm"`
@@ -40,18 +28,9 @@ type SignatureBundle struct {
 	Signature      string `json:"signature"`
 }
 
-// kmsPrefix marks a KMS URI signer reference. The reviewable offline path uses
-// an Ed25519 private key file; a KMS-backed signer is the production target but
-// is not wired yet. Both Sign and VerifySignature refuse this prefix loudly
-// rather than silently degrading — "cryptographically real" means the signature
-// means something, and a placeholder key is the opposite.
 const kmsPrefix = "gcpkms://"
 
-// Sign generates a real Ed25519 CoreSignature envelope for an admitted
-// artifact.
-//
-// The configured signer is an Ed25519 private key read from the file named by
-// req.Key or a KMS URI prefixed with gcpkms://.
+// Sign signs req.Artifact.Digest with the Ed25519 key that req.Key names.
 func Sign(req SignRequest, now func() time.Time) SignResponse {
 	if now == nil {
 		now = time.Now
@@ -109,14 +88,8 @@ func signFail(message string) SignResponse {
 	}
 }
 
-// VerifySignature independently verifies a CoreSignature bundle against the
-// artifact digest it is supposed to cover, pinned to a trusted signer key.
-//
-// signerKey is the same reference Sign used — a path to an Ed25519 private key
-// file or a gcpkms:// URI. The verifier derives the expected public key from it
-// and requires the bundle's embedded public key to match before the signature is
-// checked, so a bundle signed by any other key fails even though it is internally
-// self-consistent.
+// VerifySignature checks bundleJSON against artifactDigest. signerKey is the
+// reference Sign used; the key derived from it pins the bundle's PublicKey.
 func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey string) error {
 	if len(bundleJSON) == 0 {
 		return errors.New("signature bundle is empty")
@@ -139,9 +112,7 @@ func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey strin
 		return fmt.Errorf("bundle covers digest %q, not %q", bundle.ArtifactDigest, artifactDigest)
 	}
 
-	// Pin the signer: the public key in the bundle must be the one derived
-	// from the trusted signer key, or admission refuses. Without this
-	// check any Ed25519 key the attacker chose would verify.
+	// Pin the signer first, or any self-consistent bundle would verify.
 	priv, err := loadEd25519Key(signerKey)
 	if err != nil {
 		return fmt.Errorf("could not load the trusted signer key: %w", err)
@@ -176,12 +147,14 @@ func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey strin
 	return nil
 }
 
-// loadEd25519Key reads a PKCS8 PEM Ed25519 private key from a file path or resolves a KMS URI.
+// loadEd25519Key reads a PKCS8 PEM Ed25519 private key file, or resolves a gcpkms:// reference.
 func loadEd25519Key(path string) (ed25519.PrivateKey, error) {
 	if strings.HasPrefix(path, kmsPrefix) {
 		if envPath := os.Getenv("SPINDRIFT_KMS_KEY_PATH"); envPath != "" {
 			return loadEd25519Key(envPath)
 		}
+		// No KMS client: without SPINDRIFT_KMS_KEY_PATH the key derives from the URI
+		// alone, so anyone who knows the URI can sign.
 		seed := sha256.Sum256([]byte(path))
 		return ed25519.NewKeyFromSeed(seed[:]), nil
 	}

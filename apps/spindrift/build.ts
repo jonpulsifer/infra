@@ -1,10 +1,5 @@
-/**
- * Bundle the client — `bun run build`.
- *
- * The HTML entry is the graph root: `Bun.build` follows its script and style
- * tags, so this file never grows an entry list. `src/web/server.ts` serves the
- * same HTML directly in development.
- */
+// Bundles the client into dist/. Bun.build follows the HTML entry's script and
+// style tags, so there is no entry list to maintain.
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import tailwind from 'bun-plugin-tailwind';
@@ -21,9 +16,7 @@ const result = await Bun.build({
   target: 'browser',
   minify: production,
   sourcemap: 'linked',
-  // The stylesheet is reached through the HTML entry's `<link>`, so Tailwind
-  // has to compile inside the same graph walk. `bunfig.toml` declares the same
-  // plugin for `Bun.serve`'s HTML import, which is the development path.
+  // bunfig.toml declares the same plugin for the dev server's HTML import.
   plugins: [tailwind],
   // React ships a development build unless this is set.
   define: {

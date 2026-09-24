@@ -10,9 +10,8 @@ import (
 	"testing"
 )
 
-// signedStatement returns the statement bytes, a base64 Ed25519 signature
-// over those bytes, and the builder's base64 SPKI public key — the three
-// things a real backend's provenance carries for cryptographic authenticity.
+// signedStatement returns the statement bytes, a base64 Ed25519 signature over
+// them, and the base64 SPKI public key that verifies it.
 func signedStatement(t *testing.T, statement map[string]interface{}) (json.RawMessage, string, string) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -72,8 +71,6 @@ func TestVerify_TamperedProvenanceRejected(t *testing.T) {
 	stmt := statementWithSubject(testBundle, testDigest)
 	stmtBytes, sig, pub := signedStatement(t, stmt)
 
-	// Mutate the statement after it was signed — the signature no longer
-	// covers what is being admitted.
 	var mutated map[string]interface{}
 	if err := json.Unmarshal(stmtBytes, &mutated); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -108,8 +105,6 @@ func TestVerify_TamperedProvenanceRejected(t *testing.T) {
 func TestVerify_ProvenanceSignedByWrongKeyRejected(t *testing.T) {
 	stmt := statementWithSubject(testBundle, testDigest)
 	stmtBytes, sig, _ := signedStatement(t, stmt)
-	// A different builder key is configured as the expected one; the
-	// statement was signed by the first key, so authenticity fails.
 	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
 	otherDER, _ := x509.MarshalPKIXPublicKey(otherPub)
 
@@ -165,8 +160,7 @@ func TestVerify_InflatedClaimedLevelCapped(t *testing.T) {
 	req := VerificationRequest{
 		Artifact: Artifact{Digest: testDigest, Refs: []string{"r@" + testDigest}},
 		Provenance: Provenance{
-			Statement: stmtBytes,
-			// The backend claims L3, but this route's profile only permits L2.
+			Statement:    stmtBytes,
 			ClaimedLevel: 3,
 			Signature:    sig,
 		},

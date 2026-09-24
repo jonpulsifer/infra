@@ -1,38 +1,7 @@
 /**
- * WebAuthn verification, with no dependency and no CBOR (Task 37).
- *
- * §"First run and identity" wants a passkey enrolled against a token that
- * shipped with the installation. That is a small amount of cryptography and a
- * large amount of format, and this file exists to keep the second from
- * requiring a parser nobody in this repo wants to own.
- *
- * **Why there is no CBOR.** The classic shape of this code parses the
- * `attestationObject` — a CBOR map wrapping the authenticator data, wrapping in
- * turn a COSE-encoded public key — which is two decoders written to read one
- * key. The browser will hand over both halves already decoded:
- * `AuthenticatorAttestationResponse.getPublicKey()` returns the key as SPKI,
- * which is what `crypto.subtle.importKey` takes, and `getAuthenticatorData()`
- * returns the authenticator data on its own. So the client sends those, and
- * what is left here is a flat binary header and a signature check.
- *
- * **Why trusting the browser's parse is sound.** It costs exactly one thing:
- * attestation is not verified. That is deliberate and it is not a shortcut —
- * §"First run" story 1 makes the *enrolment token* the trust anchor for a first
- * credential, and an attestation statement proves the make and model of an
- * authenticator, never that the person holding the token meant to enrol it. A
- * single-operator installation gets nothing from the statement it would pay a
- * CBOR parser for. Everything an attacker could gain by lying about the public
- * key here requires already holding the token, at which point they can simply
- * enrol their own.
- *
- * What *is* verified, on every ceremony: the challenge was the one this server
- * issued, the origin is this installation's, the relying party is this
- * installation's, a human was present, and — for a sign-in — the signature is
- * the credential's over exactly the bytes that were sent.
- *
- * Nothing here reads the database or the clock. The rejections are a closed
- * union for the same reason §6's failure reasons are: a refusal has to have an
- * identity a test can key on.
+ * WebAuthn verification without CBOR: the browser sends the SPKI key from
+ * `getPublicKey()` and the raw authenticator data. Attestation is not verified;
+ * the enrolment token is what a first passkey is trusted on.
  */
 import { type Bytes, base64urlDecode, equalBytes } from '@repo/archive/bytes';
 
@@ -43,34 +12,19 @@ export {
 } from '@repo/archive/bytes';
 
 /**
- * The two COSE algorithms this installation enrols.
- *
- * `-7` (ES256) is what every platform authenticator produces; `-257` (RS256) is
- * what Windows Hello has historically produced. Ed25519 (`-8`) is legal
- * WebAuthn and deliberately absent: it would be a third key-import path to keep
- * correct for no credential anyone here can currently enrol, and an algorithm
- * that arrives unsupported is refused loudly rather than handed to WebCrypto to
- * fail obscurely.
+ * COSE ids: ES256 for platform authenticators, RS256 for Windows Hello. Any
+ * other algorithm, Ed25519 included, is refused before it reaches WebCrypto.
  */
 export const ES256 = -7;
 export const RS256 = -257;
 
 export type WebAuthnAlgorithm = typeof ES256 | typeof RS256;
 
-/** The algorithms offered in a `PublicKeyCredentialCreationOptions`. */
 export const SUPPORTED_ALGORITHMS: readonly WebAuthnAlgorithm[] = [
   ES256,
   RS256,
 ];
 
-/**
- * Why a ceremony was refused.
- *
- * Closed, and split finer than "invalid": `RELYING_PARTY_MISMATCH` and
- * `SIGNATURE_INVALID` are different events — the first is a genuine signature
- * aimed at someone else, the second is not a signature at all — and collapsing
- * them would make the one log line an operator reads say less than it knows.
- */
 export type WebAuthnRejection =
   | 'CLIENT_DATA_MALFORMED'
   | 'CLIENT_DATA_WRONG_TYPE'
@@ -83,7 +37,6 @@ export type WebAuthnRejection =
   | 'UNSUPPORTED_ALGORITHM'
   | 'SIGNATURE_INVALID';
 
-/** A ceremony either held or names why it did not. */
 export type CeremonyResult =
   | { readonly ok: true; readonly signCount: number }
   | { readonly ok: false; readonly rejection: WebAuthnRejection };
@@ -91,8 +44,6 @@ export type CeremonyResult =
 type Checked =
   | { readonly ok: true }
   | { readonly ok: false; readonly rejection: WebAuthnRejection };
-
-// --- clientDataJSON ----------------------------------------------------------
 
 export type CeremonyType = 'webauthn.create' | 'webauthn.get';
 
@@ -104,13 +55,6 @@ export interface ClientDataExpectation {
   readonly origin: string;
 }
 
-/**
- * Check the three facts `clientDataJSON` carries.
- *
- * The challenge comparison is over decoded bytes rather than strings: base64url
- * has no canonical padding and a browser is entitled to differ from us on it,
- * so comparing the text would reject a correct ceremony over a `=`.
- */
 export function verifyClientData(expectation: ClientDataExpectation): Checked {
   let parsed: { type?: unknown; challenge?: unknown; origin?: unknown };
   try {
@@ -132,6 +76,8 @@ export function verifyClientData(expectation: ClientDataExpectation): Checked {
     return { ok: false, rejection: 'CLIENT_DATA_MALFORMED' };
   }
 
+  // Compared as bytes: base64url padding is not canonical, so equal
+  // challenges can differ as text.
   const offered = base64urlDecode(parsed.challenge);
   const issued = base64urlDecode(expectation.challenge);
   if (offered === null || issued === null || !equalBytes(offered, issued)) {
@@ -143,8 +89,6 @@ export function verifyClientData(expectation: ClientDataExpectation): Checked {
 
   return { ok: true };
 }
-
-// --- authenticatorData -------------------------------------------------------
 
 /** The fixed header: 32 bytes of RP hash, one of flags, four of counter. */
 const AUTHENTICATOR_DATA_HEADER = 37;
@@ -158,11 +102,7 @@ export interface AuthenticatorData {
   readonly signCount: number;
 }
 
-/**
- * Read the header. Anything after it — attested credential data, extensions —
- * is not read, because nothing here needs it once the public key arrives
- * separately.
- */
+/** Reads only the header; the public key arrives separately. */
 export function parseAuthenticatorData(bytes: Bytes): AuthenticatorData | null {
   if (bytes.length < AUTHENTICATOR_DATA_HEADER) return null;
   const flags = bytes[32]!;
@@ -178,14 +118,8 @@ export function parseAuthenticatorData(bytes: Bytes): AuthenticatorData | null {
 }
 
 /**
- * Whether an authenticator's counter moved the way it must have.
- *
- * A synced passkey — which is what §"First run" asks the operator to enrol —
- * reports zero forever: it exists on more than one device on purpose, so there
- * is nothing for a counter to mean. Requiring the counter to advance would
- * therefore reject every passkey ever presented. The clone check only binds
- * when the authenticator is actually counting, which is the whole of what the
- * counter can honestly tell us.
+ * A synced passkey reports a counter of zero forever, so the clone check binds
+ * only once an authenticator counts.
  */
 export function isNewerSignCount(stored: number, offered: number): boolean {
   if (stored === 0 && offered === 0) return true;
@@ -247,15 +181,12 @@ async function verifyCeremonyEnvelope(args: {
   return { ok: true, authData, clientBytes, parsed };
 }
 
-/** What both ceremonies are checked against. */
 export interface ExpectedCeremony {
   /** The challenge this server issued, base64url. */
   readonly challenge: string;
   readonly origin: string;
   readonly rpId: string;
 }
-
-// --- registration ------------------------------------------------------------
 
 export interface RegistrationCeremony {
   /** `AuthenticatorAttestationResponse.getAuthenticatorData()`, base64url. */
@@ -264,13 +195,7 @@ export interface RegistrationCeremony {
   readonly expected: ExpectedCeremony;
 }
 
-/**
- * Verify an enrolment ceremony.
- *
- * Synchronous in shape but async in fact only because the relying-party check
- * hashes a string — there is no signature here to verify, by design: see this
- * module's header on why attestation is not read.
- */
+/** Attestation is not read, so there is no signature to verify here. */
 export async function verifyRegistration(
   ceremony: RegistrationCeremony,
 ): Promise<CeremonyResult> {
@@ -284,13 +209,10 @@ export async function verifyRegistration(
   return { ok: true, signCount: envelope.parsed.signCount };
 }
 
-// --- assertion ---------------------------------------------------------------
-
-/** The stored halves of a credential an assertion is checked against. */
 export interface StoredCredential {
-  /** The SPKI public key the browser handed over at enrolment, base64url. */
+  /** SPKI from `getPublicKey()` at enrolment, base64url. */
   readonly publicKey: string;
-  /** The COSE algorithm id it was enrolled with. */
+  /** COSE algorithm id. */
   readonly algorithm: number;
 }
 
@@ -303,12 +225,8 @@ export interface AssertionCeremony {
 }
 
 /**
- * Verify a sign-in ceremony, signature and all.
- *
- * The signature covers `authenticatorData || SHA-256(clientDataJSON)`, which is
- * why neither half can be swapped after the fact: re-pointing a captured
- * signature at a different relying party changes the authenticator data, and
- * replaying it against a different challenge changes the client-data hash.
+ * The signature covers `authenticatorData || SHA-256(clientDataJSON)`, binding
+ * it to both the relying party and the challenge.
  */
 export async function verifyAssertion(
   ceremony: AssertionCeremony,
@@ -376,9 +294,7 @@ async function verifySignature(
       );
     }
 
-    // ES256. An authenticator emits the DER `SEQUENCE`; WebCrypto takes raw
-    // `r || s`. Converting is not optional and is the whole reason
-    // {@link derToRawEcdsa} exists.
+    // Authenticators emit DER; WebCrypto verifies ES256 as raw `r || s`.
     const raw = derToRawEcdsa(signature);
     if (raw === null) return false;
 
@@ -396,29 +312,22 @@ async function verifySignature(
       signed,
     );
   } catch {
-    // A key that will not import is a credential that cannot have made this
-    // signature, which is the same answer as a signature that does not verify.
+    // A key that will not import cannot have made this signature.
     return false;
   }
 }
 
-/** P-256: `r` and `s` are 32 bytes each once the DER framing is off. */
+/** P-256 `r` and `s` are 32 bytes each once the DER framing is off. */
 const P256_COORDINATE = 32;
 
 /**
- * `SEQUENCE { INTEGER r, INTEGER s }` → `r || s`, both left-padded to 32 bytes.
- *
- * DER integers are signed and minimally encoded, so a coordinate whose top bit
- * is set gains a leading zero byte and one with leading zeroes loses them —
- * which is why this pads and trims rather than slicing at fixed offsets.
- * Returns `null` rather than throwing on anything malformed; the caller's
- * answer for both is the same.
+ * DER `SEQUENCE { INTEGER r, INTEGER s }` to raw `r || s`. DER integers are
+ * signed and minimal, so each may carry a zero sign byte or lack leading zeros.
  */
 export function derToRawEcdsa(der: Bytes): Bytes | null {
   if (der.length < 8 || der[0] !== 0x30) return null;
 
-  // The length byte is short-form for any P-256 signature (well under 128
-  // bytes), so a long-form length here is not a signature we made.
+  // A P-256 signature is under 128 bytes, so its DER length is short-form.
   if (der[1]! !== der.length - 2) return null;
 
   const raw = new Uint8Array(P256_COORDINATE * 2);
@@ -432,8 +341,6 @@ export function derToRawEcdsa(der: Bytes): Bytes | null {
     if (end > der.length) return null;
 
     let value = der.slice(start, end);
-    // Strip DER's sign byte, then reject anything still too wide to be a
-    // coordinate.
     while (value.length > P256_COORDINATE && value[0] === 0) {
       value = value.slice(1);
     }

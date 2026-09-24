@@ -1,8 +1,4 @@
-/* ── load time ───────────────────────────────────────────────────────────── */
-
 document.getElementById('load-time').textContent = new Date().toISOString();
-
-/* ── spray canvas ────────────────────────────────────────────────────────── */
 
 const canvas = document.getElementById('spray');
 const ctx = canvas.getContext('2d');
@@ -59,13 +55,6 @@ function frame() {
 }
 frame();
 
-/* ── runtime info ───────────────────────────────────────────────────────────
- *
- * Plain has no server, so runtime.js answers the platform from the URL and
- * honestly reports that the environment is unreadable. The Client panel is
- * the one that moves for this scope.
- */
-
 const rt = window.SpinRuntime;
 const runtimePanel = document.getElementById('runtime-panel');
 const environmentPanel = document.querySelector('.envbook');
@@ -75,8 +64,6 @@ if (rt) {
   if (environmentPanel) rt.renderEnv(environmentPanel);
   if (clientPanel) rt.renderClient(clientPanel);
 }
-
-/* ── render time ─────────────────────────────────────────────────────────── */
 
 const renderMs = Math.round(performance.now());
 document.getElementById('render-ms').textContent = renderMs;

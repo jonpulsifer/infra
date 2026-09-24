@@ -1,16 +1,5 @@
-/**
- * A service with no Dockerfile, which is the whole point.
- *
- * `buildkit.ts` switches frontends on `[ -f Dockerfile ]` in the scope, so
- * this directory staying Dockerfile-free is what routes it through railpack.
- * It is also self-contained — no workspace dependency, no root lockfile —
- * because the zero-config arm builds with the *scope* as its context, not the
- * repository root.
- *
- * Node built-ins only, deliberately. A dependency here would prove railpack
- * can install one, but it would also make the demo fail for a reason that has
- * nothing to do with Spindrift the first time a registry is slow.
- */
+// No Dockerfile, so this directory builds through railpack with itself as the
+// context. Node built-ins only: no workspace package or root lockfile is in reach.
 
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -19,7 +8,7 @@ import { hostname } from 'node:os';
 const port = Number(process.env.PORT) || 3000;
 const startedAt = new Date();
 
-/** What the build wrote, or null if the build phase never ran. */
+/** null when the build phase never ran. */
 function buildStamp() {
   try {
     return JSON.parse(
@@ -30,7 +19,7 @@ function buildStamp() {
   }
 }
 
-/** Which hosting platform this is, in its own words (same detection as serve.ts). */
+// Same checks, in the same order, as detectPlatform in ../serve.ts.
 function detectPlatform() {
   const e = process.env;
   if (e.VERCEL || e.VERCEL_ENV)
@@ -72,7 +61,7 @@ function detectPlatform() {
   return { id: 'unknown', name: 'Unknown host', by: '—' };
 }
 
-/** Platform vars whose values are safe to print (no secrets). */
+// Only these values are printed; /env lists every other variable by name alone.
 const SAFE_ENV = new Set([
   'K_SERVICE',
   'K_CONFIGURATION',
@@ -117,8 +106,6 @@ const routes = {
       service: 'spindrift-demo-railpack',
       builtBy: 'railpack (no Dockerfile in this scope)',
       build: stamp ?? 'MISSING — `npm run build` never ran',
-      // The dynamic facts the static demo shows on a page; here on JSON so a
-      // probe or a curl sees the same evidence a browser would.
       runtime: {
         platformId: platform.id,
         platform: platform.name,
@@ -130,8 +117,6 @@ const routes = {
       },
     };
   },
-  // A liveness answer that is cheap and says nothing else, so a probe pointed
-  // at it does not depend on the build having succeeded.
   '/healthz': () => ({ ok: true, since: startedAt.toISOString() }),
   '/env': () => envView(),
 };

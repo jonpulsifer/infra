@@ -2,7 +2,7 @@ package verifier
 
 import "encoding/json"
 
-// VerificationRequest represents the v1 verification request payload.
+// VerificationRequest is the v1 input to Verify.
 type VerificationRequest struct {
 	Version      string       `json:"version"`
 	Artifact     Artifact     `json:"artifact"`
@@ -10,34 +10,24 @@ type VerificationRequest struct {
 	Expectations Expectations `json:"expectations"`
 }
 
-// Artifact describes the target artifact.
 type Artifact struct {
 	Digest string   `json:"digest"`
 	Refs   []string `json:"refs,omitempty"`
 }
 
-// Provenance holds the raw in-toto statement, the backend's signature over
-// that statement, and the claimed build level.
-//
-// Statement is the isolation claim being verified; Signature is the backend's
-// Ed25519 signature over the exact statement bytes, proving the statement is
-// authentic and untampered. A statement with no signature is accepted only by
-// routes that configured no BuilderPublicKey — nobody claimed cryptographic
-// authenticity, so none is checked.
+// Provenance holds an in-toto statement and the backend's base64 Ed25519 signature
+// over its exact bytes, which Verify requires when BuilderPublicKey is set.
 type Provenance struct {
 	Statement    json.RawMessage `json:"statement"`
 	Signature    string          `json:"signature,omitempty"`
 	ClaimedLevel int             `json:"claimedLevel"`
 }
 
-// Expectations describes the target expectations for verification.
 type Expectations struct {
 	Backend           string `json:"backend"`
 	ExpectedBuilderID string `json:"expectedBuilderId"`
-	// BuilderPublicKey, when set, is the base64 SPKI public key the backend's
-	// provenance signature must verify against. A route that sets this rejects
-	// any statement whose signature is absent or does not verify — the
-	// cryptographic authenticity half of admission.
+	// Base64 SPKI Ed25519 key. When set, a statement whose signature is absent or
+	// does not verify against it is rejected.
 	BuilderPublicKey string `json:"builderPublicKey,omitempty"`
 	MinimumLevel     int    `json:"minimumLevel"`
 	MaximumLevel     int    `json:"maximumLevel"`
@@ -45,7 +35,7 @@ type Expectations struct {
 	BundleDigest     string `json:"bundleDigest"`
 }
 
-// VerificationResponse is the versioned JSON result returned by verification.
+// VerificationResponse is Verify's result. Code and Message are set only on failure.
 type VerificationResponse struct {
 	Version    string                       `json:"version"`
 	OK         bool                         `json:"ok"`
@@ -66,14 +56,12 @@ type BackendProvenanceAssessment struct {
 	Envelope       json.RawMessage `json:"envelope"`
 }
 
-// SignRequest represents a request to produce a core signature for an admitted artifact.
 type SignRequest struct {
 	Version  string   `json:"version"`
 	Artifact Artifact `json:"artifact"`
-	Key      string   `json:"key"`
+	Key      string   `json:"key"` // PEM key file path or gcpkms:// reference
 }
 
-// SignResponse represents the JSON output from a signing request.
 type SignResponse struct {
 	Version   string         `json:"version"`
 	OK        bool           `json:"ok"`
@@ -82,7 +70,7 @@ type SignResponse struct {
 	Signature *CoreSignature `json:"signature,omitempty"`
 }
 
-// CoreSignature represents the KMS signature envelope.
+// CoreSignature records a signature; Bundle is a SignatureBundle.
 type CoreSignature struct {
 	ArtifactDigest string          `json:"artifactDigest"`
 	Signer         string          `json:"signer"`

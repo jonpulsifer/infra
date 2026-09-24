@@ -10,7 +10,6 @@ export type MigrationOptions = {
   migrationsFolder?: string;
 };
 
-/** Apply every committed migration to `client`'s database, in order. */
 export async function applyMigrations(
   client: SQL,
   options: MigrationOptions = {},

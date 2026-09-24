@@ -1,35 +1,14 @@
-/**
- * Enough of the Valkey wire protocol for both entrypoints of this scope.
- *
- * Its own file so it can be checked without starting a server: `server.js`
- * listens at import, and a parser whose only exercise is "the page looked
- * right" is a parser nobody notices breaking until the demo is in front of
- * someone. `resp.test.js` runs on `node --test` — a built-in, so this scope
- * stays dependency-free like its neighbours.
- *
- * `job.js` imports it too, which is the shape of the whole scope: one image,
- * one module graph, two Components that differ by their entrypoint and by
- * nothing else.
- */
+// Enough of the Valkey wire protocol (RESP) for server.js and job.js.
 
-/** One RESP array, which is the only way a command is sent. */
+/** Commands always go out as a RESP array of bulk strings. */
 export const encode = (args) =>
   `*${args.length}\r\n${args
     .map((arg) => `$${Buffer.byteLength(String(arg))}\r\n${arg}\r\n`)
     .join('')}`;
 
 /**
- * Parse one reply starting at `at`, or `null` if the buffer is short.
- *
- * That `null` is the whole reason this is a parser rather than a `split`.
- * `GET` answers with a bulk string that may be `$-1` for a missing key and
- * `LRANGE` with an array of them, so a twenty-entry list does not arrive in
- * one chunk — it arrives in as many as the network felt like. A reader that
- * assumed otherwise works on a laptop and truncates on a busy cluster, which
- * is the kind of bug that looks like "the demo is flaky".
- *
- * Errors come back as `Error` values rather than throwing, so a caller reading
- * several replies can finish reading before deciding what to do about one.
+ * Parses one reply at `at`, or returns `null` while the buffer holds only part of it.
+ * A nil reply is `{ value: null }`; an error reply is an `Error` value, not a throw.
  */
 export function parse(buffer, at = 0) {
   const end = buffer.indexOf('\r\n', at);
@@ -65,7 +44,10 @@ export function parse(buffer, at = 0) {
   return { value: new Error(`unreadable reply: ${kind}${head}`), at: next };
 }
 
-/** Send commands down one socket, resolve with their replies in order. */
+/**
+ * Pipelines commands on one socket and resolves with their replies in order.
+ * Rejects if any reply is an error, or when the socket idles for 5 s.
+ */
 export function talk(connect, url, commands) {
   const { hostname: host, port } = new URL(url);
   return new Promise((resolve, reject) => {
@@ -81,7 +63,7 @@ export function talk(connect, url, commands) {
       let cursor = 0;
       for (let index = 0; index < commands.length; index += 1) {
         const reply = parse(buffer, cursor);
-        if (reply === null) return; // short — wait for the rest
+        if (reply === null) return; // partial reply: wait for more data
         replies.push(reply.value);
         cursor = reply.at;
       }

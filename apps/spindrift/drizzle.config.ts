@@ -1,8 +1,3 @@
-/**
- * drizzle-kit configuration: reads `src/db/schema.ts`, writes migrations to
- * `src/db/migrations/`. Only `drizzle-kit generate` is expected to run
- * against this file directly — the app itself never imports it.
- */
 import { defineConfig } from 'drizzle-kit';
 
 const databaseUrl = process.env.DATABASE_URL;

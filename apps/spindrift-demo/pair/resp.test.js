@@ -1,11 +1,3 @@
-/**
- * The one thing here that can be wrong without looking wrong.
- *
- * `node --test`, so the scope keeps its no-dependency rule. The cases that
- * matter are the short-buffer ones: everything else is a `split` with extra
- * steps, and a reader that mishandles a reply arriving in two chunks produces
- * a page that is silently missing rows rather than one that fails.
- */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { encode, parse } from './resp.js';
@@ -21,8 +13,6 @@ test('reads the simple replies', () => {
 });
 
 test('a missing key is null, not an empty string', () => {
-  // `GET` on a key nothing wrote. Rendering "" as a count of runs would be a
-  // page claiming zero runs when the truth is nothing has ever written.
   assert.equal(parse('$-1\r\n').value, null);
 });
 
@@ -39,9 +29,6 @@ test('reads an array of bulk strings, and reports where it ended', () => {
 });
 
 test('a short buffer is null at every truncation point', () => {
-  // The real failure mode, enumerated: a twenty-entry LRANGE arrives in
-  // however many chunks the network chose, so every prefix of a reply has to
-  // read as "not yet" rather than as a shorter reply.
   const complete = '*2\r\n$1\r\na\r\n$12\r\nhello world!\r\n';
   for (let cut = 1; cut < complete.length; cut += 1) {
     assert.equal(
@@ -54,7 +41,6 @@ test('a short buffer is null at every truncation point', () => {
 });
 
 test('reads several replies in sequence from one buffer', () => {
-  // What `talk` does: GET then LRANGE, pipelined, arriving together.
   const buffer = '$1\r\n7\r\n*1\r\n$2\r\nhi\r\n';
   const first = parse(buffer, 0);
   assert.equal(first.value, '7');

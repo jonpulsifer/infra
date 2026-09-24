@@ -1,26 +1,6 @@
 /**
- * Spindrift's own store (§12 State: "One Postgres... Kubernetes-objects-as-
- * database, git, and split stores are rejected; the transactional
- * requirement rules out JSON files and anything eventually consistent").
- *
- * This file is the whole schema; `drizzle-kit generate` reads it to produce
- * `db/migrations/0000_init.sql`, which is what actually ships.
- *
- * Object model (§2): five nouns, two authored by a human (`App`, `Datastore`).
- * `Target` and `User` are admin-surface nouns a developer never creates.
- * `Build` and `Component` round out the five. The names `service`, `unit`,
- * and `deployment` are forbidden as table or type names here — they are
- * lost to collisions elsewhere in this repo's world (§2) — so the noun for
- * "one artifact on one Target" is `deploys`, not `deployments`, and a
- * Component's `kind` may hold the *value* `'service'` (the spec's own
- * vocabulary) without the table or enum being named after it.
- *
- * Concurrency and rollback (§6, §12) rest on a transactional row, not a
- * token: `componentTargetDesired` is that row, one per (Component, Target),
- * locked with `SELECT ... FOR UPDATE` to make two concurrent deploys an
- * atomic check-and-set. `Build.id` is a `bigserial` on purpose — its total
- * order is the mechanism rollback compares against ("a newer intent row
- * pointing at an older Build"), which an unordered id could not give it.
+ * The Postgres schema; `db/migrations/` is hand-written to match it. No table
+ * or type is named service, unit or deployment.
  */
 import { relations, sql } from 'drizzle-orm';
 import {
@@ -64,29 +44,8 @@ import type { CoreSignature } from '../supply-chain/sign.ts';
 import type { BackendProvenanceAssessment } from '../supply-chain/verify.ts';
 
 /**
- * A `jsonb` column that stores a JSON **document**, not a JSON string.
- *
- * Drizzle's own `jsonb` encoder hands the driver `JSON.stringify(value)`, and
- * Bun's SQL client serialises a JS string bound to a `jsonb` parameter *as a
- * JSON string*. The document is therefore encoded twice, and the column holds a
- * scalar: `jsonb_typeof(...)` is `'string'` and `draft->>'appName'` is `NULL`.
- *
- * Nothing caught it because the read path is symmetric — Bun parses the `jsonb`
- * back to a JS string and the decoder parses that — so the application always
- * got its object back. What it costs is every SQL-side use of the document: a
- * predicate, a GIN index, a generated column, or a data migration reading inside
- * one of these columns matches nothing rather than erroring.
- *
- * Passing the value through untouched is the fix; Bun binds objects and arrays
- * to `jsonb` correctly on its own. `null` never reaches {@link toDriver} —
- * Drizzle emits SQL `NULL` for it — so a nullable column still stores SQL `NULL`
- * rather than a JSON `null`, and `IS NULL` keeps meaning what it meant.
- *
- * {@link fromDriver} still parses a string so that rows written before
- * `0016_jsonb_documents` read correctly during a rollout, when the new image and
- * the un-migrated rows overlap. It is the same decode Drizzle already did. The
- * one thing it forbids is a column whose document is legitimately a JSON string;
- * none is, and a scalar in a `jsonb` column here would be a modelling mistake.
+ * A jsonb column holding a document. Drizzle's jsonb stringifies, and Bun binds
+ * a string as a JSON string, so the column would hold a scalar.
  */
 const jsonbDocument = customType<{ data: unknown; driverData: unknown }>({
   dataType() {
@@ -96,97 +55,47 @@ const jsonbDocument = customType<{ data: unknown; driverData: unknown }>({
     return value;
   },
   fromDriver(value) {
+    // A string is a double-encoded row written before jsonbDocument existed,
+    // so no column may store a bare JSON string.
     return typeof value === 'string' ? JSON.parse(value) : value;
   },
 });
 
-// --- Enums -----------------------------------------------------------------
-//
-// Where an enum's values are also a contract vocabulary, the enum is built
-// from the contract's own tuple rather than restating it. §6 asks for **one
-// shared vocabulary**, and two spellings of one closed set is what a
-// translation table between them is made of.
-
-/** §2: "source = repo(url, subpath) | archive(upload)". */
 export const appSourceKind = pgEnum('app_source_kind', ['repo', 'archive']);
 
 /**
- * §15: "Lost access **freezes source-driven changes and never destroys a
- * Deploy**."
- *
- * Two states, and the pair is the whole point. `frozen` has to be a value a
- * query can select on, because the alternative to a state is an action — and
- * the only actions available to code that has just lost read access to a
- * repository are to do nothing quietly or to tear something down. The first is
- * indistinguishable from a repository nobody pushes to, and the second is the
- * outage §15 forbids.
+ * `frozen`: access lost; source-driven changes stop, no Deploy is torn down.
  */
 export const repositoryAccess = pgEnum('repository_access', [
   'active',
   'frozen',
 ]);
 
-/** §2: "kind = service | website | job". */
 export const componentKind = pgEnum('component_kind', [
   'service',
   'website',
   'job',
 ]);
 
-/**
- * §9's exposure, as the two independent facts it always was: where a request can
- * come from, and whether something authenticates it.
- *
- * The three states it replaces picked three of the six cells, and both omitted
- * routed ones are things people ask for — RFC1918-without-auth is the dashboard
- * you do not want to log into on your own network, and tunnel-with-auth is
- * sharing something with people who are not on your tailnet.
- *
- * Both are shared by a Component's authored setting and a Deploy's rendered
- * `DesiredState` (§6) — one vocabulary, not two.
- */
+/** Where a request may come from; {@link authMode} covers authentication. */
 export const reachState = pgEnum('reach_state', ['none', 'private', 'public']);
 
-/** Whether the Target's native authenticated edge stands in front (§9). */
+/** `proxy`: the Target's authenticated edge stands in front. */
 export const authMode = pgEnum('auth_mode', ['none', 'proxy']);
 
-/**
- * §6 `DesiredState.artifact.type`, plus the shape an edge platform's own
- * function format is.
- *
- * `vercel-output` is a third *shape* rather than a flavour of `files` because
- * §2 keys a Build on the target shape: a `.vercel/output` tree and a directory
- * of static files are both "a tar in a registry" and are not interchangeable.
- * The type is what lets an adapter that serves several shapes pick the right
- * rendering (`takesShape`), and what makes a `vercel-output` tar refusable on
- * a host that serves bare files instead of served as though it fit.
- */
 export const artifactType = pgEnum('artifact_type', [
   'image',
   'files',
   'vercel-output',
 ]);
 
-/**
- * §4: "Concurrency: no ordinal... a build records an artifact rather than
- * deploying one." Build has no `SUPERSEDED` verdict; this is the plain
- * lifecycle of a single build attempt.
- */
 export const buildStatus = pgEnum('build_status', ['PENDING', ...BUILD_STATES]);
 
-/** §4: "a declared `logFidelity` of `LIVE_TEXT | LIVE_STATUS | ON_COMPLETION`." */
 export const logFidelity = pgEnum('log_fidelity', LOG_FIDELITIES);
 
 /**
- * The bosun build outbox's own lifecycle — not {@link buildStatus}, and not
- * built from a shared contract tuple the way that one is from
- * {@link BUILD_STATES}. A `build_requests` row is core's *outbox entry*, one
- * layer below a Build: `PENDING` until a bosun host claims it, `CLAIMED` for
- * the life of its lease, `DONE` once a result has landed (win or lose). The
- * one place this vocabulary is read outside this file is
- * `src/storage/build-outbox.ts`, and it reads it off `BuildRequest['state']`
- * rather than restating the tuple — kept here, beside the table, because
- * nothing outside the outbox needs to name these three states.
+ * A build_requests row: PENDING until a bosun host claims it, CLAIMED while
+ * leased, DONE once a result is written or the request is cancelled.
  */
 export const BUILD_REQUEST_STATES = ['PENDING', 'CLAIMED', 'DONE'] as const;
 
@@ -195,45 +104,27 @@ export const buildRequestState = pgEnum(
   BUILD_REQUEST_STATES,
 );
 
-/** §6: "PENDING -> APPLYING -> WAITING -> LIVE | FAILED". */
 export const deployPhase = pgEnum('deploy_phase', DEPLOY_PHASES);
 
-/**
- * §6: the closed reason set a `FAILED` Deploy carries. "One shared
- * vocabulary": Build and Deploy attempts both write reasons from this set
- * into `attemptEvents`, so a reason never needs a second table to mean the
- * same thing twice.
- */
 export const deployReason = pgEnum('deploy_reason', FAILURE_REASONS);
 
-/**
- * §6: "`blame` is the most useful thing the UI knows." `TIMEOUT` carries no
- * blame, hence nullable everywhere this is used.
- */
+/** Null for TIMEOUT, which indicts nobody. */
 export const blame = pgEnum('blame', BLAMES);
 
-/**
- * §11: "for two wire protocols". Named for what this platform runs behind each
- * — CloudNativePG or Cloud SQL, the Valkey operator or Memorystore for Valkey —
- * rather than for the protocol's older namesake, so an engine value never names
- * a product no Target here can provision.
- */
 export const datastoreEngine = pgEnum('datastore_engine', [
   'postgres',
   'valkey',
 ]);
 
-/** §11: "Two provenances, differing only in who authors the URL." */
+/** `managed`: this platform authors the URL. `external`: the developer does. */
 export const datastoreProvenance = pgEnum('datastore_provenance', [
   'managed',
   'external',
 ]);
 
 /**
- * §6/§13: "`Target`... has exactly one adapter type." Values mirror
- * `targetAdapterSchema` in `src/config/manifest.schema.ts`; kept as an
- * independent enum here so the data layer does not import the config layer
- * for a handful of string literals.
+ * Mirrors targetAdapterSchema in `src/config/manifest.schema.ts`, which the
+ * data layer does not import.
  */
 export const targetAdapter = pgEnum('target_adapter', [
   'kubernetes',
@@ -244,76 +135,36 @@ export const targetAdapter = pgEnum('target_adapter', [
 ]);
 
 /**
- * The tenancy boundary a Target is a surface on — `VesselKind` in
- * `src/domain/vessel.ts`.
- *
- * A different axis from {@link targetAdapter}, which names the runtime, and a
- * narrower one than it looks: this decides the shape of `vessels.location` and
- * nothing else. Which runtimes are on a boundary is the set of Targets that
- * reference it, established by probing at connect — so nothing reads this
- * column to learn what a vessel carries, and nothing reads an adapter back to
- * this column either. Kept as an independent enum here for the reason the
- * adapter one is.
+ * Decides only the shape of `vessels.location`. The runtimes a vessel carries
+ * are the Targets that reference it.
  */
 export const vesselKind = pgEnum('vessel_kind', VESSEL_KINDS);
 
-/**
- * §13: "Disconnect always works: live Deploys go `orphaned`... reconnect
- * re-adopts via `observe`." The Target row itself just remembers which of
- * those two states it is in.
- */
 export const targetStatus = pgEnum('target_status', [
   'connected',
   'disconnected',
 ]);
 
-/**
- * §13: "Connect always succeeds; health is a standing prerequisite checklist."
- * Two states rather than three — a declared connection starts unhealthy with
- * an awaiting-inspection reason, and the target loop replaces that provisional
- * checklist with observations.
- */
+/** A declared connection starts unhealthy until the target loop inspects it. */
 export const targetHealth = pgEnum('target_health', ['healthy', 'unhealthy']);
 
-/**
- * §10: "One mechanism, no secret/non-secret classification... Narrow
- * exception: a website's build-time config... lives as ordinary rows." A
- * `secret_ref` row is write-only (a pointer into the connected store); a
- * `plain` row is the narrow exception, holding a real value because it was
- * always going to be public once baked into the site.
- */
 export const configItemKind = pgEnum('config_item_kind', [
+  // A write-only pointer into the connected store, never a value.
   'secret_ref',
+  // Holds the value: website build-time config, public once built.
   'plain',
-  /**
-   * Story 112: a credential the *build* needs and the runtime must not hold —
-   * a private package token being the ordinary case. The same two pin columns
-   * as `secret_ref`, but a different actor resolves it (core, at dispatch,
-   * against the store), on a different clock (a rotation reaches the next
-   * build, never a running pod), with a different failure (a dispatch refusal,
-   * not a pod that will not start). Kept out of the pinned config document, so
-   * rotating one never mints a Deploy.
-   */
+  // Resolved by core at dispatch for the build only, never held by the runtime.
+  // Kept out of the pinned config, so rotating one never mints a Deploy.
   'build_secret',
 ]);
 
-/**
- * §6: "One attempt-scoped event log... Build and Deploy both write to it."
- * `attemptKind` says which of the two subjects an event belongs to.
- */
 export const attemptKind = pgEnum('attempt_kind', ['build', 'deploy']);
 
-/**
- * §6: "carrying log lines and status events `{phase, resource?, reason?,
- * blame?}`." A row is one or the other.
- */
 export const attemptEventType = pgEnum('attempt_event_type', ['log', 'status']);
 
 /**
- * Which WebAuthn ceremony a challenge was issued for. The two are not
- * interchangeable — a `create` response answering a `get` challenge is the
- * ceremony confusion `src/auth/webauthn.ts` refuses — so the purpose travels
- * with the challenge rather than being inferred from which endpoint replies.
+ * The ceremony a challenge was issued for. A response to another ceremony's
+ * challenge is refused.
  */
 export const webauthnPurpose = pgEnum('webauthn_purpose', [
   'enrol',
@@ -322,20 +173,9 @@ export const webauthnPurpose = pgEnum('webauthn_purpose', [
   'add_passkey',
 ]);
 
-// --- Installation ----------------------------------------------------------
-
 /**
- * The one installation this control plane represents.
- *
- * The manifest is ordinary configuration, not a credential, and §12 makes
- * Postgres its durable store. A deployment declaration reconciles into this
- * row at process start; without one, every process can recover the same last
- * validated value from the database.
- *
- * The **authored** document, never the resolved one. What the deployment
- * already declares — its federation credential — is read from the deployment on
- * every load and is not representable here, so this row cannot hold a copy that
- * disagrees with the pod it is running in.
+ * Singleton holding the authored manifest, never the resolved one: the
+ * federation credential is read from the deployment on every load.
  */
 export const installation = pgTable(
   'installation',
@@ -349,53 +189,29 @@ export const installation = pgTable(
   (table) => [check('installation_singleton', sql`${table.id} = 1`)],
 );
 
-// --- Repository ------------------------------------------------------------
-
 /**
- * One connected repository (§15).
- *
- * Not one of §2's five nouns, and deliberately not folded into `apps`: a
- * repository is reached through one App *installation*, has one default branch,
- * and can lose access — three facts that belong to the repository and would have
- * to be repeated on, and kept consistent across, every App that names it. A
- * monorepo with four Apps in four subpaths is one row here and four there.
- *
- * **No per-repository credential column.** What is stored here is the
- * installation identity GitHub reported. The installation-level OAuth
- * credential lives in the encrypted singleton below, so connecting a second
- * repository never copies or specializes a bearer token.
+ * One connected repository, shared by every App in it. No credential column:
+ * tokens are minted per installation from the {@link githubApp} key.
  */
 export const repositories = pgTable(
   'repositories',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    /** `owner/name` — the only handle the repository API takes. */
+    /** `owner/name`. */
     fullName: text('full_name').notNull(),
-    /**
-     * Which installation of the GitHub App reaches it. A string because the
-     * far side's numeric id is an opaque handle here, not an integer core does
-     * arithmetic on.
-     */
+    /** GitHub's numeric installation id, kept as an opaque string. */
     installationId: text('installation_id').notNull(),
-    /** §15: only the default branch is authoritative, so it is stored, not assumed. */
     defaultBranch: text('default_branch').notNull(),
     /**
-     * §15: "**only its default-branch merge push becomes authoritative**."
-     *
-     * This is the commit whose configuration Spindrift has adopted — never a PR
-     * head, never a branch tip it merely observed. It stays null until a
-     * default-branch commit has actually been reconciled, which is what makes
-     * "an unmerged PR changes nothing" a fact about a column rather than a
-     * promise about a code path.
+     * The adopted default-branch commit; null until one has been reconciled.
+     * Never a PR head or a branch tip.
      */
     authoritativeCommit: text('authoritative_commit'),
-    /** The configuration pull request this connection opened, once it exists. */
+    /** Null until the config pull request is opened. */
     configPullRequest: integer('config_pull_request'),
     access: repositoryAccess('access').notNull().default('active'),
-    /** Set exactly when `access = 'frozen'`; the sentence an operator reads. */
     frozenReason: text('frozen_reason'),
     frozenAt: timestamp('frozen_at', { withTimezone: true }),
-    /** When the repo loop last completed a pass against it. */
     reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -405,9 +221,8 @@ export const repositories = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // Connecting a repository twice must re-adopt the existing row rather than
-    // produce a second one: two rows for one repository would each reconcile it,
-    // and the loop would race itself over one authoritative commit.
+    // Connecting a repository twice re-adopts this row. Two rows would race
+    // each other over one authoritative commit.
     unique('repositories_full_name_unique').on(table.fullName),
     check(
       'repositories_frozen_has_reason',
@@ -417,23 +232,8 @@ export const repositories = pgTable(
 );
 
 /**
- * The GitHub App this installation speaks as.
- *
- * One row because a Spindrift installation has one repository connector, just
- * as it has one installation manifest. Written once by the manifest-flow
- * conversion (`web/github-setup-route.ts`); replacing it is a deliberate act,
- * never a side effect of re-running the create flow.
- *
- * The private key is recoverable by design — every installation token is
- * minted from it — so unlike a session token it cannot be hashed. It is an
- * AES-GCM envelope whose key lives in the installation Secret, exactly the
- * posture the OAuth credential row had. It is read **per mint**, never
- * captured at registry construction: the row starts empty and is populated
- * mid-flight by the setup flow while the pod keeps running.
- *
- * `encryptedWebhookSecret` is nullable because the conversion response types
- * `webhook_secret` as `string | null`; a null keeps the refuse-all-deliveries
- * posture rather than sealing a null and crashing signature verification.
+ * The private key is sealed, not hashed, since tokens are minted from it. Read
+ * it per mint: setup fills this row while the pod runs.
  */
 export const githubApp = pgTable(
   'github_app',
@@ -443,6 +243,7 @@ export const githubApp = pgTable(
     slug: text('slug').notNull(),
     clientId: text('client_id').notNull(),
     encryptedPrivateKey: text('encrypted_private_key').notNull(),
+    /** Null refuses webhook deliveries unless the environment supplies one. */
     encryptedWebhookSecret: text('encrypted_webhook_secret'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -454,99 +255,42 @@ export const githubApp = pgTable(
   (table) => [check('github_app_singleton', sql`${table.id} = 1`)],
 );
 
-// --- App and Component -------------------------------------------------
-
-/**
- * §2: "App <- authored... immutable vessel reference, domain, config." One
- * App owns many Components. Deleting an App detaches its Datastores and
- * never cascades to them (§2, §11) but does cascade to its own Components,
- * Builds, Deploys, and config items — none of those are reattachable.
- */
+/** Deleting an App deletes its Components but only detaches its Datastores. */
 export const apps = pgTable(
   'apps',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     sourceKind: appSourceKind('source_kind').notNull(),
-    /** Set when `sourceKind = 'repo'`. */
+    /** Repo Apps only. */
     sourceRepoUrl: text('source_repo_url'),
-    /** Set when `sourceKind = 'repo'`; the scope is named, never searched (§5). */
+    /** Repo Apps only: the named scope, never searched for. */
     sourceRepoSubpath: text('source_repo_subpath'),
     /**
-     * The connected repository this App's scope lives in, when there is one.
-     *
-     * Nullable because an archive App has no repository and a repo App may have
-     * been created before anyone connected its repository — §15 makes Git
-     * integration a thing an operator turns on, not a precondition of authoring.
-     * `restrict` rather than `cascade`: disconnecting a repository must never be
-     * a way to delete an App, which is the same rule §15 states about Deploys.
+     * Null for an archive App or an unconnected repository. `restrict`:
+     * disconnecting a repository never deletes an App.
      */
     repositoryId: uuid('repository_id').references(() => repositories.id, {
       onDelete: 'restrict',
     }),
-    /** Set when `sourceKind = 'archive'`: the uploaded bundle's digest. */
+    /** Archive Apps only: the uploaded bundle's digest. */
     sourceArchiveDigest: text('source_archive_digest'),
     /**
-     * The build route this App has asked to build on, or null for no opinion.
-     *
-     * §16 settles route selection as "the level is a threshold, then admin rank
-     * wins", and this is the App's say inside that — it narrows the candidates
-     * rather than overriding the threshold, so a route below the Target's minimum
-     * is refused here exactly as it is refused anywhere else. Naming one is not a
-     * way around a policy; it is a way to pick among the routes that already
-     * cleared it.
-     *
-     * Null is not "no route". It is the state every App is in until someone says
-     * otherwise, and it means rank order picks — which is the whole of the
-     * behaviour before this column existed.
-     *
-     * A plain string and not a reference: §4 makes the set of routes an
-     * installation's configuration, so a name here may well name a route that has
-     * been retired. That is not an error and never was — `buildRouteCandidates`
-     * already reports a named-but-absent route as unavailable, which is the
-     * honest reading and the one an operator can act on.
+     * Null lets rank order pick. A name narrows the candidates, never below a
+     * Target's minimum; a retired one reads as unavailable.
      */
     buildRoute: text('build_route'),
     /**
-     * Opt in to a Deploy dispatched from a push, with no operator at the
-     * keyboard (§15's webhook, `src/reconciler/auto-deploy.ts`).
-     *
-     * `false` by default and on every App that predates this column: auto-deploy
-     * changes what is live without being asked at that moment, so an App gets it
-     * only by a developer turning it on, never by upgrading Spindrift.
+     * A push deploys with no operator present. Off by default: it changes what
+     * is live without anyone asking.
      */
     autoDeploy: boolean('auto_deploy').notNull().default(false),
     /**
-     * The zone from `dns.zones` this App's names are minted in, or null for the
-     * installation's default (§9).
-     *
-     * Null is not "no zone". It is the state every App is in until someone says
-     * otherwise, and it means the first zone serving the Component's reach wins —
-     * which is the whole of the behaviour before this column existed, when reach
-     * named the zone directly.
-     *
-     * A plain string and not a reference, for the same reason `buildRoute` above
-     * is one: the set of zones is the installation's configuration, so a name here
-     * may name a zone that has since been retired or one that no longer serves
-     * this Component's reach. `zoneFor` treats it as a preference and falls
-     * through to a zone that can serve the reach, so a retired pin degrades to the
-     * default rather than to a Component with no address.
-     *
-     * On the App and not on the Component, because §9 makes a hostname a property
-     * of the App — "moving an App between backends is one record re-point" only
-     * holds if the name outlives the releases under it, and a Component-level zone
-     * would let one App answer on two domains with no name that covers it.
+     * A `dns.zones` entry for this App's names; null for the default. `zoneFor`
+     * falls back to a zone serving the reach.
      */
     zone: text('zone'),
-    /**
-     * **No vessel column, deliberately.** An App has placements, and each
-     * placement's Target is a surface on a vessel — that is the boundary the App
-     * is in, and it is derivable. A column here could only be a second, unchecked
-     * answer to the same question; the one that existed was written from
-     * `cloud.homeVesselProject` at creation and read by nothing but two labels.
-     * See `0025_drop_app_vessel_ref.sql`.
-     */
-    /** §9: the flat single-label vanity name, if the developer chose one. */
+    /** A flat single-label name, if the developer chose one. */
     vanityDomain: text('vanity_domain'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -555,14 +299,7 @@ export const apps = pgTable(
       .notNull()
       .defaultNow(),
     /**
-     * A hold on every new Deploy of this App, with the sentence an operator
-     * reads (§6). Set exactly when `lockedAt` is.
-     *
-     * Columns rather than a noun, for §1's concept count. One reader —
-     * `checkDeployable` — refuses with the reason; `rollbackDeploy` is the one
-     * act that goes through regardless, and sets it on the way, so the next
-     * adopted push does not quietly re-dispatch what was just rolled away from.
-     * `setAppLock` writes and clears it by hand.
+     * Blocks new Deploys of this App, except `rollbackDeploy`, which sets it.
      */
     lockReason: text('lock_reason'),
     lockedAt: timestamp('locked_at', { withTimezone: true }),
@@ -577,11 +314,6 @@ export const apps = pgTable(
   ],
 );
 
-/**
- * §2: "`schedule` is a field on a job, not a kind. `expose` is a field on a
- * service." Both stay nullable columns on the one Component table rather
- * than becoming separate nouns.
- */
 export const components = pgTable(
   'components',
   {
@@ -591,46 +323,18 @@ export const components = pgTable(
       .references(() => apps.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     kind: componentKind('kind').notNull(),
-    /** Service only: an unexposed service is a queue worker (§2). */
+    /** Service only: an unexposed service is a queue worker. */
     expose: boolean('expose'),
     /** Job only: a cron expression. */
     schedule: text('schedule'),
-    /**
-     * The entrypoint this Component runs the image with, and the arguments it
-     * runs it with — `null` for the image's own, which is what every row
-     * written before these columns existed means.
-     *
-     * Nullable for the same reason `expose` and `schedule` above are: a field
-     * that only some Components state, on the one Component table. Not
-     * per-kind, though — a monolith's `web`, `worker` and `cleanup` are one
-     * image run three ways, so a service and a job both have one.
-     *
-     * `jsonb` rather than `text[]` because an argv is a document core never
-     * predicates on, and because that is what the pinned copy in
-     * `deploys.desired` already is — one encoding for the two places the same
-     * list lives, rather than an array here and a JSON list there.
-     */
+    /** Null runs the image's own entrypoint and arguments. */
     command: jsonbDocument('command').$type<string[]>(),
     args: jsonbDocument('args').$type<string[]>(),
-    /**
-     * §9: network-serving Components carry a reach and an auth. The default is
-     * the old `private` state, unchanged in meaning — reachable on the
-     * operator's own network, behind the Target's authenticated edge.
-     */
     reach: reachState('reach').notNull().default('private'),
     auth: authMode('auth').notNull().default('proxy'),
     /**
-     * The placement of record: the Target this Component lives on, as a stored
-     * fact rather than an inference over `componentTargetDesired`.
-     *
-     * The newest desired row could not answer this — every intent bumps its
-     * pair's `updatedAt`, so a rollback or config-set addressed at a retired
-     * pair made the old row newest and every reader followed it back. Only
-     * `placeComponent` moves this; the first act that places a Component with
-     * none (a creation draft, a first deploy) establishes it; and
-     * `unplaceComponent` clears it when the pair it retires is this one.
-     * Desired rows for other Targets are what still serves there, not where
-     * the Component is.
+     * The Target this Component is placed on. The newest desired row cannot
+     * answer that: any intent on a retired pair makes that row newest.
      */
     placedTargetId: uuid('placed_target_id').references(() => targets.id, {
       onDelete: 'set null',
@@ -647,13 +351,9 @@ export const components = pgTable(
   ],
 );
 
-// --- Build and Deploy ----------------------------------------------------
-
 /**
- * §2: "one per (Component, commit, target-shape)". §6: "Build's id IS the
- * total order" — a `bigserial`, not a `uuid`, is what makes an id
- * comparable at all, which rollback depends on ("a newer intent row
- * pointing at an older Build").
+ * One per (Component, commit, target shape). The id is a bigserial because
+ * rollback compares Build ids as a total order.
  */
 export const builds = pgTable(
   'builds',
@@ -663,164 +363,78 @@ export const builds = pgTable(
       .notNull()
       .references(() => components.id, { onDelete: 'cascade' }),
     commit: text('commit').notNull(),
-    /**
-     * §3: "Resolution runs before the build and outputs placement plus
-     * artifact shape, which is why Build's key includes target-shape."
-     */
     targetShape: text('target_shape').notNull().$type<ArtifactType>(),
     artifactType: artifactType('artifact_type').notNull(),
-    /** Set once the build produces a digestible artifact. */
+    /** Null until the build produces an artifact. */
     artifactDigest: text('artifact_digest'),
     artifactRefs: jsonbDocument('artifact_refs').$type<string[]>(),
     status: buildStatus('status').notNull().default('PENDING'),
-    /** §4: the base image digest this build started from, for provenance. */
+    /** The base image digest this build started from, for provenance. */
     baseDigest: text('base_digest'),
-    /** §4: "The build backend and its fidelity are visible on the Build." */
     runner: text('runner'),
     logFidelity: logFidelity('log_fidelity'),
     /**
-     * Where this build can be watched on the backend that is running it.
-     *
-     * A column rather than a log line because of *when* it is needed. §4's
-     * `LIVE_STATUS` means the text does not arrive until the run is over, so
-     * the log is empty during the exact window a developer wants to go look —
-     * a link inside it would land with the thing it was meant to substitute
-     * for. Written when the run is discovered, it is readable for the whole of
-     * the run.
-     *
-     * Null for a route that has no such place, which is the honest answer for
-     * an in-cluster build and not a missing value to paper over.
+     * Where the run can be watched; null for a route with none. A column
+     * because LIVE_STATUS logs arrive only once the run ends.
      */
     runUrl: text('run_url'),
     /**
-     * The sentence dispatch last refused this Build with, while it is still
-     * PENDING.
-     *
-     * A refusal an operator can clear — no federation, no route, a Target
-     * threshold no configured route meets — leaves the Build PENDING on
-     * purpose, so that configuring the thing makes the next tick work without
-     * anybody pressing Deploy again. The build loop runs once a second, so the
-     * refusal recurs at that rate, and the sentence belongs on the attempt log
-     * exactly once rather than once per tick.
-     *
-     * This column is what makes "exactly once" free. The Build row is already
-     * selected at the top of every dispatch, so comparing against it costs no
-     * query, and a refusal that has not changed writes nothing at all. It is a
-     * ledger of what was last said, not the place it was said: the operator
-     * reads the attempt log.
-     *
-     * Null whenever the Build is not waiting — never dispatched, claimed, or
-     * closed out.
+     * The last refusal sentence while PENDING, so a refusal repeated every tick
+     * is logged once. Null when the Build is not waiting.
      */
     dispatchWaitingOn: text('dispatch_waiting_on'),
     /**
-     * Whether this Build's artifact is to be placed the moment it succeeds.
-     *
-     * True for the one caller that asked for a Build *and* meant a release:
-     * §15's dispatcher, which builds an adopted commit because a push means
-     * "this commit". Nothing else does — the workspace's Rebuild is the act
-     * that builds without deploying, and inferring this from `apps.auto_deploy`
-     * instead would make that press ship to production, which is exactly the
-     * substitution `deployApp`'s header forbids.
-     *
-     * A recorded fact rather than a derived one because the two moments are far
-     * apart: whoever asked is gone by the time the build loop has a verdict, and
-     * an App's opt-in can be flipped in between. What was asked for does not
-     * change when the flag does.
+     * Deploy the artifact when this Build succeeds. Recorded at request time,
+     * because the App's `autoDeploy` can change before the verdict.
      */
     deployOnSuccess: boolean('deploy_on_success').notNull().default(false),
-    /** §4: durable identity for the dispatch attempt running or that ran this build. */
+    /** Identity of the dispatch attempt that holds or held this Build. */
     dispatchId: text('dispatch_id'),
-    /** Timestamp when the current runner claimed the dispatch lease. */
     leasedAt: timestamp('leased_at', { withTimezone: true }),
     /**
-     * How many times dispatch has refused this row in a row.
-     *
-     * The clock behind the loop's backoff, and a fact worth keeping on its own:
-     * a wedged row that has been refused ten thousand times looks exactly like
-     * one refused twice unless somebody counts. Reset to zero by a successful
-     * claim and by the acts that re-arm a Build — a fresh press means "try now".
+     * Consecutive dispatch refusals, which drive backoff. A successful claim or
+     * a fresh press resets it.
      */
     dispatchAttempts: integer('dispatch_attempts').notNull().default(0),
     /**
-     * The earliest the build loop may try this row again, or null for "now".
-     *
-     * What turns a refusal into a wait instead of a 1Hz retry: each refused
-     * attempt pushes this out exponentially (capped — see `dispatchBackoffMs`),
-     * so a Build that cannot currently succeed costs a handful of attempts per
-     * cap interval rather than one per tick. An incident spent 84k signed-URL
-     * mints in a day on exactly that difference.
+     * The earliest the build loop may retry; null means now. Each refusal
+     * pushes it out exponentially, capped by `dispatchBackoffMs`.
      */
     nextDispatchAt: timestamp('next_dispatch_at', { withTimezone: true }),
-    /** §16: the backend envelope plus the facts core verified from it. */
+    /** The backend envelope plus the facts core verified from it. */
     provenance:
       jsonbDocument('provenance').$type<BackendProvenanceAssessment>(),
-    /**
-     * The concrete achieved level, normalized for policy queries.
-     *
-     * It is deliberately beside the full envelope: deploy admission must compare
-     * every new intent with the Target's current threshold without teaching SQL
-     * the shape of a SLSA document.
-     */
+    /** The verified SLSA build level that deploy admission checks. */
     verifiedBuildLevel: integer('verified_build_level'),
-    /** Core's one cosign record, written only after provenance passes (§16). */
+    /** Core's cosign record, written only after provenance passes. */
     signature: jsonbDocument('signature').$type<CoreSignature>(),
-    /**
-     * The unsigned BuildKit materials document attached to the artifact.
-     *
-     * Raw evidence dies with the registry object; this durable reference and the
-     * normalized `baseDigest` preserve what core derived from it.
-     */
+    /** The unsigned BuildKit materials document attached to the artifact. */
     buildkitProvenanceRef: text('buildkit_provenance_ref'),
-    /** SPDX evidence attached to the artifact; deliberately not assessed in v1. */
+    /** SPDX evidence attached to the artifact; not assessed. */
     sbomRef: text('sbom_ref'),
     /**
-     * The build secrets this build could read — names only, never values and
-     * never store references (story 112). The names have to be recorded: a
-     * build that held a credential its record does not mention is a build whose
-     * provenance overclaims, and "this build could read `NPM_TOKEN`" is the
-     * fact somebody reproducing it needs. The store reference stays out
-     * because this row's provenance travels into conversations a registry
-     * object starts, and a reference there is a map of where this installation
-     * keeps its credentials.
-     *
-     * Written at dispatch, before the route runs, so a failed build records
-     * what it could read too.
+     * Names only, never values or store refs. Written at dispatch, before the
+     * route runs, so a failed build records them too.
      */
     buildSecretNames: jsonbDocument('build_secret_names').$type<string[]>(),
-    /**
-     * §4/§32: "The bundle digest must be a build parameter on every route,"
-     * the join between a source receipt and its provenance document.
-     */
+    /** Passed to every build route; joins the source receipt to provenance. */
     bundleDigest: text('bundle_digest'),
     /**
-     * Where the staged bundle is fetched from (§15: "fetches the exact commit
-     * once and stages an immutable source bundle for either builder").
-     *
-     * Beside the digest rather than folded into `artifactRefs`: those are
-     * addresses the *artifact* can be pulled by, and a bundle that has not been
-     * built yet has no artifact. Conflating them makes a source upload's
-     * location vanish the moment it is not a supplied artifact.
+     * Where the staged source bundle is fetched from. Not in `artifactRefs`,
+     * which address the built artifact.
      */
     bundleLocation: text('bundle_location'),
     /**
-     * §5's named scope for this bundle, after a lone top-level directory has
-     * been unwrapped.
-     *
-     * Per Build rather than per App because the unwrap is a fact about the bytes
-     * that were uploaded, and two uploads to one App may wrap differently. A
-     * repo App keeps its scope on the App, where the developer named it.
+     * The scope after a lone top-level directory is unwrapped. Per Build,
+     * because two uploads to one App can wrap differently.
      */
     bundleSubpath: text('bundle_subpath'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
     /**
-     * What the far side said about `commit` beyond its sha, kept from §15's
-     * one fetch: the headline (first line, trimmed, at most 200 characters —
-     * `commitHeadlineOf` in `domain/source-bundle.ts`), the author's login or
-     * name, and the authored instant. All null for an archive, and for a Build
-     * staged before the columns existed.
+     * The commit's headline (see `commitHeadlineOf`), author login or name, and
+     * authored time. Null for an archive.
      */
     commitMessage: text('commit_message'),
     commitAuthor: text('commit_author'),
@@ -836,10 +450,8 @@ export const builds = pgTable(
 );
 
 /**
- * §2: "one Build → many Deploys — this is what makes two runtimes cost no
- * new concept and what makes rollback-without-rebuild possible." §10:
- * `configVersion` lives here as a field, "scoped to (Component, Target)",
- * which is what makes a Deploy "exactly Heroku's Release."
+ * One placement of a Build on a Target. A rollback places an older Build again
+ * without rebuilding it.
  */
 export const deploys = pgTable('deploys', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -853,118 +465,42 @@ export const deploys = pgTable('deploys', {
     .notNull()
     .references(() => builds.id, { onDelete: 'restrict' }),
   phase: deployPhase('phase').notNull().default('PENDING'),
-  /** Set only when `phase = 'failed'`. */
+  /** Set on a FAILED Deploy, and on a LIVE one the soak marked faulty. */
   reason: deployReason('reason'),
-  /** Set only when `phase = 'failed'`; null exactly when `reason = 'timeout'`. */
+  /** Set with `reason`, except null for TIMEOUT. */
   blame: blame('blame'),
-  /** §6: "`FAILED` carries a closed reason set plus free-text `detail`." */
   detail: text('detail'),
-  /** §6: "and a raw `debug` payload." */
   debug: jsonbDocument('debug'),
   /**
-   * §6: the adapter's own handle on what `apply` placed — "opaque to core,
-   * which stores it and hands it back to `observe` and `destroy`." This column
-   * is that storage. Null until an `apply` places something.
+   * The adapter's opaque handle on what `apply` placed, handed back to
+   * `observe` and `destroy`. Null until `apply` places something.
    */
   ref: text('ref'),
   url: text('url'),
-  /**
-   * §10: "a hash over a document of pinned version references."
-   *
-   * Kept beside {@link deploys.desired} rather than recomputed from it: this is
-   * a materialized hash the UI reads on every list, not a second statement of
-   * what is delivered.
-   */
+  /** A hash over the pinned version references, stored for list reads. */
   configVersion: text('config_version'),
   /**
-   * **What this intent places**, captured when it was written (§6, §10).
-   *
-   * `NOT NULL`, and that is the whole design. A Deploy whose meaning has to be
-   * reassembled from Component and config rows that have moved since is not an
-   * intent — it is a query, and it answers with today's shape under yesterday's
-   * artifact. §10 already made this argument for config alone: "re-deriving it
-   * from current config items would make every rollback come up with *today's*
-   * config." The argument was never specific to config.
-   *
-   * **What is pinned here and what a rollback replays are two questions**, and
-   * this column only answers the first. Every field is captured, because an
-   * intent has to record what it placed; which of them a *later* rollback
-   * composes a new intent from is {@link DesiredDocument}'s to state, and it
-   * does — a rollback restores how the artifact ran and never where it
-   * answered. The two were conflated once, with this comment claiming the
-   * whole document replays and `rollbackDeploy` replaying only config.
-   *
-   * So this column **replaces** `config_document`, `reach` and `auth`, which
-   * pinned three fields of one document and left the rest to be re-read. Two
-   * places holding one fact is two places for them to disagree.
-   *
-   * References, never values — the same posture as `sessions.tokenHash`: a
-   * database that cannot produce a credential is a database whose disclosure
-   * does not produce one either. See {@link DesiredDocument} for the three
-   * fields this deliberately does not carry.
+   * What this intent placed, captured when written; {@link DesiredDocument}
+   * says which fields a later rollback replays. References only, never values.
    */
   desired: jsonbDocument('desired').$type<DesiredDocument>().notNull(),
   /**
-   * §13: "Disconnect always works: live Deploys go `orphaned`, workloads keep
-   * running." Set when the Target this Deploy sits on was disconnected, and
-   * cleared when a reconnect re-adopts it via `observe`.
-   *
-   * A timestamp beside the phase rather than a sixth phase value: the phases
-   * are the platform's verdict on a rollout (§6), and an orphaned workload is
-   * still whatever the platform last said it was — what changed is that
-   * Spindrift can no longer see it. `deployState` in `src/domain/target.ts`
-   * reads the two together.
+   * Set when this Deploy's Target is disconnected; cleared when a reconnect
+   * re-adopts it via `observe`. `deployState` reads it with the phase.
    */
   orphanedAt: timestamp('orphaned_at', { withTimezone: true }),
-  /**
-   * §6: "**Drift is detected and surfaced, never silently corrected** — a
-   * visible state with a one-click re-converge."
-   *
-   * *Visible* is what makes this a column. A loop that noticed drift and only
-   * returned it would surface it to nobody: the UI reads rows, and a fact that
-   * lives for the length of one pass is a fact the screen can never show.
-   * Cleared when what is running matches again, so a drift that somebody fixed
-   * out of band stops being reported without anyone having to dismiss it.
-   */
+  /** Set while what runs differs from this release; cleared once it matches. */
   driftedAt: timestamp('drifted_at', { withTimezone: true }),
-  /**
-   * The digest `observe` last reported as actually serving.
-   *
-   * Stored beside the drift flag rather than derived from it because "what is
-   * running instead" is the first question anyone asks, and by the time they
-   * ask, the answer is one poll interval old at best.
-   */
+  /** The digest `observe` last reported as serving. */
   observedDigest: text('observed_digest'),
   /**
-   * Why the platform will not converge on this release, in its own words.
-   *
-   * The digest answers "what is running instead"; this answers the case where
-   * the digest is not the question. A delivery object can fail every reconcile
-   * while the last good release keeps serving the desired digest — a chart
-   * whose contract moved out from under stored values does exactly that — and
-   * a drift flag with no sentence beside it tells an operator that something
-   * is wrong without telling them it is unfixable by waiting.
-   *
-   * Not `detail`, which §6 reserves for a `FAILED` verdict. This Deploy did not
-   * fail: it reached `LIVE` and the platform has since stopped agreeing.
+   * Why the platform will not converge on this release, in its words. Not
+   * `detail`, which is for FAILED; this Deploy reached LIVE.
    */
   driftDetail: text('drift_detail'),
   /**
-   * Durable identity for the attempt that holds this Deploy's claim.
-   *
-   * The deploy side's answer to {@link builds.dispatchId}, under the deploy
-   * side's own noun — §6 calls one run of the adapter an *attempt*. Minted by
-   * `claimNextDeploy` in the same `UPDATE` that moves the row to `APPLYING`,
-   * carried in memory for the length of the apply, and required by every write
-   * that settles the row. The claim's lock is released when its transaction
-   * commits (`src/reconciler/deploy-loop.ts`'s header says so deliberately), so
-   * this column is the only thing that distinguishes the attempt that still
-   * holds the lease from one whose lease was reclaimed under it while a
-   * ten-minute upload was still running.
-   *
-   * Nullable because a row that has never been claimed has no attempt, and
-   * unindexed on purpose: every write that reads it already has the primary key
-   * in its predicate, so this is a filter on a row that is already located.
+   * The attempt holding this Deploy's claim, minted by `claimNextDeploy`. Every
+   * settling write must match it, because a lease can be reclaimed mid-apply.
    */
   attemptId: text('attempt_id'),
   createdAt: timestamp('created_at', { withTimezone: true })
@@ -974,57 +510,31 @@ export const deploys = pgTable('deploys', {
     .notNull()
     .defaultNow(),
   /**
-   * Who asked for this Deploy: the principal's id, written by `placeIntent`.
-   *
-   * `AUTO_DEPLOY_PRINCIPAL.id` for a push, a `users` row for a press — which
-   * is the whole question this answers ("did I press that, or did a push do
-   * it?"). Config changes and creation drafts were attributed already; the
-   * more consequential act was not. Null on every row written before the
-   * column existed, and left that way: nobody this can name asked for them.
+   * Who asked: `AUTO_DEPLOY_PRINCIPAL.id` for a push, a user id for a press.
+   * Null when unrecorded.
    */
   requestedBy: text('requested_by'),
   /**
-   * An operator asked for this Deploy to stop, and when.
-   *
-   * A request rather than a verdict: `cancelDeploy` stamps it and the attempt
-   * holding the claim is what ends the stream and writes `FAILED`, because the
-   * generator is in that process and nowhere else (`deploy-loop.ts`). Only a
-   * `PENDING` intent — nothing streaming into it — is failed by the command
-   * itself. Left set on the finished row so the screen can say who ended it.
+   * A request: the attempt holding the claim ends the stream and writes FAILED.
+   * `cancelDeploy` fails a PENDING intent itself.
    */
   cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
-  /** The principal behind {@link deploys.cancelRequestedAt}, for the sentence. */
   cancelRequestedBy: text('cancel_requested_by'),
   /**
-   * When the post-`LIVE` soak looked and found nothing wrong.
-   *
-   * §6 makes `LIVE` the platform's readiness verdict and forbids core
-   * reimplementing readiness — not judging what happens after it. One
-   * `observe` at least `DEPLOY_SOAK_MS` after the verdict is that judgement,
-   * and this column is what makes it happen once: null while the window is
-   * open, and the release is never re-judged after either stamp is written.
+   * When the soak, one `observe` at least `DEPLOY_SOAK_MS` after LIVE, found
+   * nothing wrong. Null while the window is open; a release is judged once.
    */
   soakedAt: timestamp('soaked_at', { withTimezone: true }),
   /**
-   * The soak found the platform reporting this release failed after readiness.
-   *
-   * A timestamp beside the phase and not a sixth phase value, for the reason
-   * {@link deploys.orphanedAt} is: the phase stays the platform's verdict on
-   * the rollout, and the desired pointer still names this release. What is
-   * added is a verdict *after* readiness, with `reason`, `blame`, `detail` and
-   * `debug` filled the way a red attempt fills them — the one case those four
-   * columns carry a value on a `LIVE` row.
+   * The soak saw the platform report this release failed after readiness. The
+   * phase stays LIVE, with `reason`, `blame`, `detail` and `debug` filled.
    */
   faultyAt: timestamp('faulty_at', { withTimezone: true }),
 });
 
 /**
- * §6/§12: "Concurrency and rollback rest on a transactional row, not a
- * token": `Component@Target.desired`, "one row: which artifact should be
- * live here." A locking read (`SELECT ... FOR UPDATE`) on this row is the
- * atomic check-and-set that makes two concurrent deploys resolve safely,
- * and "rollback is an ordinary deploy" — a newer `desiredDeployId` pointing
- * at an older `desiredBuildId`.
+ * Which Build should be live on one (Component, Target). `SELECT ... FOR
+ * UPDATE` on this row makes concurrent deploys an atomic check-and-set.
  */
 export const componentTargetDesired = pgTable(
   'component_target_desired',
@@ -1050,10 +560,6 @@ export const componentTargetDesired = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // The task's hard requirement: a UNIQUE key on (component_id, target_id),
-    // kept as its own named constraint rather than folded into a composite
-    // primary key so a catalog query for a UNIQUE constraint finds exactly
-    // that.
     unique('component_target_desired_pair_unique').on(
       table.componentId,
       table.targetId,
@@ -1061,13 +567,9 @@ export const componentTargetDesired = pgTable(
   ],
 );
 
-// --- Datastore -------------------------------------------------------------
-
 /**
- * §11: "Top-level and attached, not a field, forced by reattachment to a
- * different App." `appId` is nullable because "deleting an App detaches its
- * Datastores and never cascades" (§2) — detachment is `appId = null`, the
- * row survives.
+ * Top-level so it can be reattached to another App. Deleting an App sets
+ * `appId` null and the row survives.
  */
 export const datastores = pgTable(
   'datastores',
@@ -1078,90 +580,34 @@ export const datastores = pgTable(
     provenance: datastoreProvenance('provenance').notNull(),
     appId: uuid('app_id').references(() => apps.id, { onDelete: 'set null' }),
     /**
-     * The boundary the Datastore lives in, not the surface it was asked for
-     * through. What a database actually occupies is the vessel — the cluster,
-     * or the project and its VPC — and two surfaces of one boundary would each
-     * provision into the same place. §11's "delivery follows the Datastore's
-     * placement" still holds: delivery resolves the vessel's hosting surface
-     * at read time. `restrict` because removing a boundary must never be a way
-     * to delete the Datastores in it.
+     * The vessel, not a surface: two surfaces of one vessel provision into the
+     * same place. `restrict`: removing a vessel never deletes its Datastores.
      */
     vesselId: uuid('vessel_id')
       .notNull()
       .references(() => vessels.id, { onDelete: 'restrict' }),
     /**
-     * The adapter's own handle on what it provisioned, opaque to core exactly
-     * like `deploys.ref` (`adapters/datastore/contract.ts`: `DatastoreRef`).
-     *
-     * Stored rather than recomputed because `observe` and `destroy` both take
-     * it as an argument and there is nowhere else to keep it. Re-deriving it
-     * would mean core knowing that the Kubernetes adapter spells a handle
-     * `<engine>/<namespace>/<name>` — a format that file declares opaque, and
-     * that the cloud adapter does not share.
-     *
-     * Null until `provision` returns, which is what makes an `external`
-     * Datastore — nothing was provisioned, so there is no handle — and a
-     * `managed` row whose provision failed look the same to every reader that
-     * has to decide whether an adapter call is owed.
+     * The adapter's opaque handle, which `observe` and `destroy` take. Null
+     * until `provision` returns, and always for an external Datastore.
      */
     ref: text('ref'),
     /**
-     * §6's verdict on the datastore, in §6's own vocabulary.
-     *
-     * The same enum a Deploy carries, for the reason `contract.ts` already
-     * argues for `DatastoreState`: "one shared vocabulary, not one per
-     * contract — the user sees a single timeline and must not meet two
-     * vocabularies along it."
-     *
-     * `PENDING` by default because the row is written *before* `provision` is
-     * called — a name collision has to hit the unique key below before
-     * anything exists in the cluster to collide with.
+     * PENDING by default: the row is written before `provision`, so a name
+     * collision hits the unique key before anything exists to collide with.
      */
     phase: deployPhase('phase').notNull().default('PENDING'),
-    /**
-     * The operator's sentence, as the datastore loop last read it.
-     *
-     * The one column a stuck datastore is diagnosed from: `phase` says
-     * WAITING, and only this says whether that is a PVC nobody can bind or an
-     * image still pulling. No `reason` beside it — a `FailureReason` with no
-     * consumer would be a third column that can only agree with the second.
-     */
+    /** The operator's sentence, as the datastore loop last read it. */
     detail: text('detail'),
-    /**
-     * §11: "an in-cluster secret reference in-cluster... a pinned store
-     * reference everywhere else." Never a copy of the credential itself.
-     */
+    /** A secret reference, never the credential. */
     connectionRef: text('connection_ref'),
     /**
-     * What the far side was last told to admit, never a desired value.
-     *
-     * The network boundary around a Datastore is one ingress exception naming
-     * the attached App's namespace, and the datastore loop writes it — not
-     * `attachDatastore`, because `appId`'s `onDelete: 'set null'` above means
-     * an App delete detaches with no command in the path at all. The loop
-     * converges however `app_id` changed, and this column is what tells it
-     * whether there is anything to converge: a pass compares the namespace the
-     * row's App occupies against this, and calls the adapter when the two
-     * disagree — or when `permittedAt` below says it is time to say the same
-     * thing again. Without it every pass would rewrite every policy forever.
-     *
-     * Text and deliberately not a reference to `apps`: a foreign key would be
-     * cascade-nulled by the very App delete this column exists to notice, and
-     * what it records is a fact about the *cluster* — the thing an operator
-     * asking "why can't my App reach its database" needs to see.
+     * The namespace last admitted, re-asserted when it differs from the App's.
+     * Text, not a foreign key an App delete would null.
      */
     permittedNamespace: text('permitted_namespace'),
     /**
-     * When the far side was last told, which is what makes the loop converge.
-     *
-     * The column above is a memory, and a memory alone cannot notice the
-     * policy being deleted out from under it — a `kubectl delete netpol`
-     * during triage, a namespace recreated. Desired and remembered still
-     * agree, so no later pass writes the exception again and the App is denied
-     * its own store permanently and silently; Flux owns the floor, not the
-     * exception, so nothing else puts it back. This is the second half of the
-     * comparison: past a slow re-assert cadence the loop says it again even
-     * when nothing changed.
+     * When the admit was last written. The loop rewrites it after an interval,
+     * since a deleted policy leaves both columns agreeing.
      */
     permittedAt: timestamp('permitted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -1172,45 +618,15 @@ export const datastores = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // Two Datastores named `primary` in one vessel are one object on the far
-    // side: every adapter names what it provisions after the Datastore, and a
-    // server-side apply of the second silently adopts the first. Destroying
-    // either then deletes the other's storage. The constraint is here rather
-    // than as a check in `createDatastore` because the race between two
-    // concurrent creates is exactly what an application-level check cannot
-    // win.
-    //
-    // Scoped to the vessel, not the installation: two clusters each holding a
-    // `primary` are two objects that never meet. And to the vessel rather than
-    // one of its surfaces, because the object lives in the boundary — two
-    // Datastores of one name are refused even across two surfaces of one
-    // vessel, which would otherwise be two rows for one database.
+    // Adapters name objects after the Datastore, so two of one name in a vessel
+    // are one object. A constraint, since an app-level check loses the race.
     unique('datastores_vessel_name_unique').on(table.vesselId, table.name),
   ],
 );
 
-// --- Target and User ---------------------------------------------------
-
 /**
- * §13: "`Target` keeps its name, stays flat, and has exactly one adapter
- * type."
- *
- * §3's four capability provenances are not four columns. Only the two that
- * are facts about *this* Target are stored — what was `discovered`, and the
- * one `asserted` value — because from-the-adapter-type is a property of the
- * code and `derived` is a conclusion core redraws from the other two every
- * time it reads them. Storing a derived value is storing something that can
- * be stale in a way nothing will notice.
- */
-/**
- * The tenancy boundary Targets are surfaces on (§13, §14).
- *
- * One row per place things deploy into — a cluster, a cloud project, later
- * whatever other tenancy container a provider offers. What lives here is every
- * fact that is
- * true of the boundary rather than of one runtime on it, which is what makes it
- * impossible for two surfaces to disagree about one of them. See
- * `src/domain/vessel.ts` for why this noun exists after §13 declined it.
+ * The tenancy boundary Targets are surfaces on: a cluster or a cloud project.
+ * Facts true of the boundary live here, so two surfaces cannot disagree.
  */
 export const vessels = pgTable(
   'vessels',
@@ -1219,51 +635,26 @@ export const vessels = pgTable(
     name: text('name').notNull(),
     kind: vesselKind('kind').notNull(),
     /**
-     * Where the boundary is, in its own kind's terms. Never a credential.
-     *
-     * Null for the same reason `targets.connection` is null: the manifest seeds
-     * a vessel's identity and rank without necessarily stating how to reach it,
-     * and that half-ready state is one §13 intends to be visible rather than
-     * one to fabricate a value for. A Target is addressable exactly when its
-     * own connection **and** its vessel's location are both present.
+     * Where the boundary is, in its kind's terms; never a credential. A Target
+     * is addressable only once its connection and this are both set.
      */
     location: jsonbDocument('location').$type<VesselLocation>(),
-    /** §33's reachability input, stated once for every surface on this vessel. */
+    /** Reachability input shared by every surface on this vessel. */
     servedHosts: text('served_hosts').array(),
-    /** §3, and boundary-shaped for the same reason. */
     reachableRegistries: text('reachable_registries').array(),
     /**
-     * The standing checklist for the boundary itself, as
-     * `VESSEL_PREREQUISITES_BY_KIND_AND_ROLE` decides its rows.
-     *
-     * Not a second copy of a Target's: these are the four facts that are true of
-     * one boundary and of no runtime on it — the source bucket, the store
-     * container, the artifacts project and the signer. Null means never
-     * assessed, which is a different state from assessed-and-empty: an app
-     * vessel is asked nothing and so stores an empty list once the loop has been
-     * past it.
-     *
-     * Health is not a column. It is every catalogued row met, derived at read
-     * time for the reason `target-loop.ts` gives — a stored derivation can be
-     * stale in a way nothing notices.
+     * The boundary's own checklist. Null: never assessed; empty: assessed with
+     * nothing asked. Health is derived from it on read.
      */
     prerequisites:
       jsonbDocument('prerequisites').$type<
         readonly VesselPrerequisiteResult[]
       >(),
     /**
-     * What the same pass read *in* the boundary — its zones, its Workers
-     * subdomain, its Pages projects.
-     *
-     * Not a checklist and deliberately not merged into one: a prerequisite is
-     * a verdict on whether this installation can use the boundary, and this is
-     * the inventory an operator reads to know what is in it. Null means never
-     * assessed, on the same terms as the column above; a field inside it that
-     * is null means that one read established nothing, which
-     * `CloudflareAccountDiscovery` keeps apart from an empty listing.
+     * Inventory found in the boundary (zones, Workers subdomain, Pages
+     * projects). Null: never assessed; a null field: that read found nothing.
      */
     discovery: jsonbDocument('discovery').$type<VesselDiscovery>(),
-    /** When the standing pass last ran against this boundary. */
     inspectedAt: timestamp('inspected_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -1273,73 +664,48 @@ export const vessels = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // Connect is idempotent by name at the vessel level too: reconnecting a
-    // project must reuse its vessel rather than minting a second one that its
-    // surfaces would then be split across.
+    // Reconnecting a project reuses its vessel by name instead of splitting its
+    // surfaces across two.
     unique('vessels_name_unique').on(table.name),
   ],
 );
 
+/**
+ * Only discovered and asserted capabilities are stored. Derived ones are
+ * recomputed on read, since a stored derivation goes stale unnoticed.
+ */
 export const targets = pgTable(
   'targets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     adapter: targetAdapter('adapter').notNull(),
-    /**
-     * The boundary this Target is a surface on.
-     *
-     * `restrict` rather than `cascade`, matching `apps.repositoryId`: removing
-     * a vessel must never be a way to delete the Targets that reference it,
-     * and a vessel with live surfaces is not a vessel anyone meant to drop.
-     */
+    /** `restrict`: removing a vessel never deletes its Targets. */
     vesselId: uuid('vessel_id')
       .notNull()
       .references(() => vessels.id, { onDelete: 'restrict' }),
     status: targetStatus('status').notNull().default('connected'),
-    /** §13: "set a global ordered rank across Targets." */
     rank: integer('rank').notNull(),
     /**
-     * The **surface** half of how this Target is reached —
-     * `TargetConnection` in `src/domain/target.ts`. Never a credential: §13
-     * settles one auth mode, "native OIDC federation, nothing stored."
-     *
-     * Only facts true of this runtime and not of its neighbours on the same
-     * vessel: a region, an API root, a namespace, a delivery flavour. Where the
-     * boundary *is*, and what it can reach, belong to {@link vessels} — the
-     * adapter still receives one flat view, composed by `deployTargetOf`.
-     *
-     * Null means the manifest has established the Target's identity and rank,
-     * but neither desired state nor an operator has supplied connection facts.
+     * The surface half of how this Target is reached; never a credential. Null
+     * until the manifest or an operator supplies connection facts.
      */
     connection: jsonbDocument('connection').$type<TargetConnection>(),
-    /** §13: the standing checklist's last verdict. */
     health: targetHealth('health').notNull(),
-    /** One `PrerequisiteResult` per item, with the sentence behind each. */
     prerequisites:
       jsonbDocument('prerequisites').$type<readonly PrerequisiteResult[]>(),
-    /** §3's discovered half, as the adapter last reported it. */
+    /** Discovered capabilities, as the adapter last reported them. */
     discovery: jsonbDocument('discovery').$type<TargetDiscovery>(),
-    /** When the one loop (§13) last ran against this Target. */
     inspectedAt: timestamp('inspected_at', { withTimezone: true }),
     /**
-     * §3's assertions, both for the reason §3 gives for the one it started
-     * with: "no cluster API reports whether a tunnel exists." Nothing reports
-     * whether an operator wired an authenticating proxy in front of you either,
-     * so auth is the same shape.
-     *
-     * `reaches` widens what `publicExposure` said. Null on either means nobody
-     * has stated it, and {@link ASSERTED_REACHES_BY_ADAPTER} supplies what the
-     * adapter can be held to without an operator's word.
+     * Operator assertions: nothing reports a tunnel or an authenticating proxy.
+     * Null is unstated; `ASSERTED_REACHES_BY_ADAPTER` supplies the default.
      */
     reaches: reachState('reaches').array(),
     /**
-     * Which reaches this Target's authenticated edge can stand in front of —
-     * **not** whether it has one. An edge whose audience is one person can
-     * honestly authenticate a `private` route and cannot honestly authenticate
-     * a `public` one, and that is a difference only an operator knows.
+     * Which reaches the authenticated edge can front, not whether it exists.
      */
     authReaches: reachState('auth_reaches').array(),
-    /** §4/§13: "a Target to declare a minimum SLSA Build Level." */
+    /** Minimum SLSA build level for a Deploy here; null means the default. */
     minBuildLevel: integer('min_build_level'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -1349,22 +715,15 @@ export const targets = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // **A Target is its vessel and its surface**, and that pair is naturally
-    // unique — a boundary carries one runtime of each kind. So there is no name
-    // to construct, none to collide, and none to rename when a vessel turns out
-    // to carry a surface nobody knew about. Connect is idempotent by this pair
-    // for the reason it used to be idempotent by name: reconnecting re-adopts
-    // rather than registering a second Target competing for the same workloads.
+    // A vessel carries one runtime per adapter, so reconnecting re-adopts this
+    // pair instead of adding a Target that competes for its workloads.
     unique('targets_vessel_adapter_unique').on(table.vesselId, table.adapter),
   ],
 );
 
 /**
- * §"First run and identity": an operator enrolls a passkey and gets a fully
- * privileged account; there is no role table in v1 because every enrolled
- * user is that one privileged kind. `gatewayIdentity` is the optional
- * linked identity from the front-door Gateway, kept distinct from
- * Spindrift's own user model on purpose.
+ * No role table: every enrolled user is fully privileged. `gatewayIdentity` is
+ * the optional linked identity from the trusted Gateway.
  */
 export const users = pgTable(
   'users',
@@ -1377,19 +736,14 @@ export const users = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // One trusted identity cannot name two internal users, even if v1 normally
-    // has only the operator. Keep the invariant where later multi-user work
-    // cannot accidentally weaken it.
+    // One trusted identity cannot name two users.
     unique('users_gateway_identity_unique').on(table.gatewayIdentity),
   ],
 );
 
 /**
- * One in-progress Source → Component → Place → Configure → Review flow.
- *
- * The JSON document is replaced atomically under `revision`; a stale browser
- * cannot silently overwrite a newer tab. Ownership is the authenticated User,
- * not a browser token, so a refreshed session resumes the same identity.
+ * One in-progress creation flow. The document is replaced atomically under
+ * `revision`, so a stale tab cannot overwrite a newer one.
  */
 export const creationDrafts = pgTable('creation_drafts', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -1410,17 +764,8 @@ export const creationDrafts = pgTable('creation_drafts', {
 });
 
 /**
- * One enrolled passkey (§"First run and identity" story 1).
- *
- * Both stored halves come from the browser's own parse of the attestation
- * response — `publicKey` is SPKI from `getPublicKey()`, `algorithm` is the COSE
- * id it reported — which is what lets `src/auth/webauthn.ts` exist without a
- * CBOR decoder. That module's header carries why that is sound; the short form
- * is that the enrolment token is the trust anchor, not the authenticator.
- *
- * `signCount` is stored because WebAuthn defines a clone check over it, and is
- * expected to stay `0` forever: a synced passkey has nothing to count. The
- * check binds only when an authenticator is actually counting.
+ * Both stored halves come from the browser's own attestation parse, so no CBOR
+ * decoder is needed; the enrolment token is the trust anchor.
  */
 export const credentials = pgTable(
   'credentials',
@@ -1431,10 +776,13 @@ export const credentials = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     /** The credential id the authenticator minted, base64url. */
     credentialId: text('credential_id').notNull(),
-    /** SPKI, base64url. A public key: this is not a secret. */
+    /** SPKI, base64url. Not a secret. */
     publicKey: text('public_key').notNull(),
-    /** COSE algorithm id — `-7` (ES256) or `-257` (RS256). */
+    /** COSE algorithm id: -7 (ES256) or -257 (RS256). */
     algorithm: integer('algorithm').notNull(),
+    /**
+     * Stays 0 for a synced passkey; the clone check binds only if it counts.
+     */
     signCount: bigint('sign_count', { mode: 'number' }).notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -1442,22 +790,14 @@ export const credentials = pgTable(
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   },
   (table) => [
-    // A credential id is the handle a sign-in arrives with, so it must name at
-    // most one row — a duplicate would make "whose passkey is this" ambiguous
-    // at exactly the moment it has to be answered.
+    // A sign-in arrives with the credential id, so it names at most one row.
     unique('credentials_credential_id_unique').on(table.credentialId),
   ],
 );
 
 /**
- * §"First run and identity" story 3: "an opaque session that lasts a day, so
- * that a stolen browser artifact is not a permanent credential."
- *
- * **The token is not here.** Only its SHA-256 is, which is the same posture
- * §10 takes with config values and for the same reason: a database that cannot
- * produce a credential is a database whose disclosure does not produce one
- * either. A session is looked up by hashing what the cookie presented, never by
- * comparing against something stored.
+ * Only the token's SHA-256 is stored, so a leaked database yields no
+ * credential. A lookup hashes the presented token.
  */
 export const sessions = pgTable(
   'sessions',
@@ -1469,11 +809,8 @@ export const sessions = pgTable(
     /** SHA-256 of the opaque token value, base64url. Never the value itself. */
     tokenHash: text('token_hash').notNull(),
     /**
-     * Which credential this row is: a browser cookie or an agent bearer token.
-     *
-     * The two are the same mechanism and must never be the same key. Every read
-     * filters on it, so a value lifted out of one surface is not accepted at
-     * the other — see `src/auth/session.ts`.
+     * A browser cookie or an agent bearer token. Every read filters on it, so a
+     * value from one surface is refused at the other.
      */
     kind: text('kind')
       .$type<'browser' | 'agent'>()
@@ -1484,21 +821,8 @@ export const sessions = pgTable(
       .defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     /**
-     * When this credential was last presented, and what presented it.
-     *
-     * Written on the agent path only. A browser session is looked up on every
-     * request the UI makes, and stamping it would be a write per page view for
-     * a row nothing lists; an agent token is long-lived, lives in a file on a
-     * machine, and is listed precisely so it can be revoked — which is a
-     * decision an operator cannot make from a mint date alone.
-     *
-     * Null is "never presented", which is a real state and the one worth
-     * finding: a token minted and never used is the one to revoke first.
-     *
-     * The two strings are what the caller *said*, not what was observed —
-     * `X-Forwarded-For`'s first hop and `User-Agent`, both self-reported and
-     * both spoofable by whoever holds the token. They tell one machine from
-     * another; they prove nothing, and nothing may authorise on them.
+     * Agent path only; null means never presented. IP (first X-Forwarded-For
+     * hop) and agent are self-reported: never authorize on them.
      */
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     lastUsedIp: text('last_used_ip'),
@@ -1508,20 +832,8 @@ export const sessions = pgTable(
 );
 
 /**
- * §"First run and identity" story 2: "the enrolment token consumed on use, so
- * that the window in which anyone else could claim my installation closes the
- * moment I finish."
- *
- * Consumption is a row rather than a flag on a token, because Spindrift never
- * held the token in the first place — it arrives in the installation Secret and
- * is read from the environment. What core owns is the *fact that this one has
- * been spent*, and the unique index is what makes spending it twice impossible
- * rather than merely checked.
- *
- * Story 4 falls out of the same row: recovery is "rotate the token and replace
- * every passkey", so a token whose hash is not already here is a new token, and
- * consuming it clears the credentials that came before it. Rotating the Secret
- * *is* the recovery, with no second act to remember.
+ * Spent enrolment tokens by hash; the unique index blocks a second spend. A new
+ * hash is a rotated token, and spending it replaces every passkey.
  */
 export const enrolments = pgTable(
   'enrolments',
@@ -1540,18 +852,12 @@ export const enrolments = pgTable(
 );
 
 /**
- * A challenge issued for one WebAuthn ceremony, and spent by it.
- *
- * A table rather than a signed cookie, because the property being bought is
- * single use: a cookie proves the server issued the challenge and cannot prove
- * it has not already been answered. Deleting the row on use is what makes a
- * captured ceremony worthless the second time, and it is checkable at the same
- * seam every other claim here is.
+ * Single-use WebAuthn challenges. A signed cookie cannot prove a challenge is
+ * unanswered; deleting the row on use can.
  */
 export const webauthnChallenges = pgTable('webauthn_challenges', {
   /** The random value, base64url. */
   challenge: text('challenge').primaryKey(),
-  /** Which ceremony it was issued for: an enrolment or a sign-in. */
   purpose: webauthnPurpose('purpose').notNull(),
   /**
    * Credential changes bind their challenge to the authenticated User.
@@ -1564,15 +870,9 @@ export const webauthnChallenges = pgTable('webauthn_challenges', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
-// --- Config -----------------------------------------------------------------
-
 /**
- * §10: "One store per Target, per-key, pinned... One secret per variable,
- * not a blob." §2: "config is stored scoped by an environment key pinned to
- * one value, so environments and previews can arrive later without a
- * migration." The column exists now; the check constraint pins it to the
- * one value v1 ever writes, so a later migration only has to relax the
- * constraint, not add the column.
+ * Config is scoped by environment, and a CHECK pins it to this one value, so
+ * adding environments means relaxing the constraint, not adding a column.
  */
 export const PINNED_ENVIRONMENT = 'default';
 
@@ -1590,24 +890,16 @@ export const configItems = pgTable(
     key: text('key').notNull(),
     kind: configItemKind('kind').notNull().default('secret_ref'),
     /**
-     * §10: "Values are write-only." Set only when `kind = 'secret_ref'`: the
-     * store's own name for the item, exactly as `put` minted it — a pointer
-     * into the connected store, never a value.
+     * `secret_ref` only: the store's name for the item, as `put` minted it. A
+     * pointer, never a value.
      */
     storeRef: text('store_ref'),
     /**
-     * The version pinned, beside the item it is a version of.
-     *
-     * Two columns rather than one encoded reference because §10's pin is the
-     * half that has to be *compared*: `configVersion` is a hash over these, a
-     * reaper reads them to know what is still delivered, and a delimiter chosen
-     * here would be a delimiter some store's item name is allowed to contain.
+     * The pinned version. Its own column because `configVersion` hashes it and
+     * any delimiter could appear in a store's item name.
      */
     storeVersion: text('store_version'),
-    /**
-     * §10: the narrow website exception — set only when `kind = 'plain'`,
-     * because a website's build-time config "becomes public either way."
-     */
+    /** `plain` only: website build-time config, public once built. */
     plainValue: text('plain_value'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -1623,9 +915,7 @@ export const configItems = pgTable(
       table.environment,
       table.key,
     ),
-    // A bound parameter is not legal inside a CHECK constraint's DDL, hence
-    // `sql.raw` rather than the usual interpolation — this must be a SQL
-    // literal, not a query argument.
+    // A bound parameter is illegal in CHECK DDL, so this must be a SQL literal.
     check(
       'config_items_environment_pinned',
       sql`${table.environment} = ${sql.raw(`'${PINNED_ENVIRONMENT}'`)}`,
@@ -1633,21 +923,9 @@ export const configItems = pgTable(
   ],
 );
 
-/**
- * §10: "auditing is metadata-only" — story 80's "who changed which key when,
- * so that history is useful without becoming a secret store".
- *
- * A second table rather than an `updatedBy` column on the item, because the
- * question is a history and a column answers only the last edit. **There is no
- * value column and there is no room for one**: what a row says is that a key
- * changed, not what it changed to or from — core could not fill a value column
- * if it wanted to, since it never reads one back (§10).
- *
- * `userId` survives the user: an audit trail that deleted itself when an
- * operator was removed would lose exactly the history somebody is looking for.
- */
 export const configAction = pgEnum('config_action', ['set', 'removed']);
 
+/** Who changed which key, when. No value column: core never reads one back. */
 export const configAuditEvents = pgTable('config_audit_events', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   componentId: uuid('component_id')
@@ -1660,28 +938,16 @@ export const configAuditEvents = pgTable('config_audit_events', {
   action: configAction('action').notNull(),
   /** Who acted. Null once that user is gone; the fact of the change remains. */
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
-  /** Kept beside the id so the trail reads as "who, which key, when". */
+  /** Kept so the trail still names a deleted user. */
   displayName: text('display_name'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
 
-// --- Attempt log -------------------------------------------------------
-
 /**
- * §6: "One attempt-scoped event log keyed by (App, Component, attempt),
- * carrying log lines and status events `{phase, resource?, reason?,
- * blame?}`. Build and Deploy both write to it; the UI subscribes once."
- *
- * This task owns the table only. Task 11 owns the domain code that writes
- * to it and may extend it with a follow-up migration; the columns below are
- * the shared shape the spec names, not the final word on it.
- *
- * Exactly one of `buildId` / `deployId` is set per row — which attempt this
- * event belongs to — enforced by the check constraint below rather than by
- * two separate tables, because the log itself is one stream (§6: "the UI
- * subscribes once").
+ * Log lines and status events of Build and Deploy attempts, in one stream.
+ * Exactly one of `buildId` and `deployId` is set.
  */
 export const attemptEvents = pgTable(
   'attempt_events',
@@ -1707,7 +973,6 @@ export const attemptEvents = pgTable(
     line: text('line'),
     /** Set when `eventType = 'status'`. Free text: Build and Deploy phases differ. */
     phase: text('phase'),
-    /** §6: "`resource?` is what buys the per-resource feel at three fidelities." */
     resource: text('resource'),
     reason: deployReason('reason'),
     blame: blame('blame'),
@@ -1725,7 +990,7 @@ export const attemptEvents = pgTable(
       sql`(${table.attemptKind} = 'build' and ${table.buildId} is not null) or (${table.attemptKind} = 'deploy' and ${table.deployId} is not null)`,
     ),
     // One partial index per leg: every log read and the ceiling's seed COUNT
-    // walk a single leg in `id` order (`domain/attempt-log.ts`).
+    // walk one leg in `id` order.
     index('attempt_events_build_id_id_idx')
       .on(table.buildId, table.id)
       .where(sql`${table.buildId} is not null`),
@@ -1736,28 +1001,13 @@ export const attemptEvents = pgTable(
 );
 
 /**
- * One registry's push credential, sealed (§16).
- *
- * **Keyed on the host and not on the declared namespace**, because the host is
- * what the credential is actually for: a registry login authenticates a
- * *registry*, and the Docker config a builder reads has one `auths` entry per
- * host. Keying on the namespace would let an operator set two different
- * credentials for `ghcr.io/a` and `ghcr.io/b` and then silently honour one of
- * them, which is a promise the mechanism cannot keep.
- *
- * `secret` is a `credential-envelope.ts` envelope, never the token — the same
- * boundary and the same keyring the GitHub OAuth row uses, so a rotation
- * covers both. Nothing above the seam returns it: it is opened at dispatch and
- * handed to the route that pushes, and no command reads it back.
- *
- * The username is plain because it is not a secret and is the half an operator
- * has to be able to see to know which account is configured — Docker Hub and
- * Artifact Registry both take a fixed one (`_json_key`, `oauth2accesstoken`)
- * and a listing that hid it would make a wrong one undiagnosable.
+ * One registry's push credential, keyed on host because a registry login and
+ * the Docker config's `auths` are per host. Opened only at dispatch.
  */
 export const registryCredentials = pgTable('registry_credentials', {
   /** The registry host, exactly as `registryHostOf` reads it off a namespace. */
   host: text('host').primaryKey(),
+  /** Plain: not a secret, and an operator needs it to see the account. */
   username: text('username').notNull(),
   /** The sealed envelope. Never plaintext, and never returned by a command. */
   secret: text('secret').notNull(),
@@ -1770,26 +1020,8 @@ export const registryCredentials = pgTable('registry_credentials', {
 });
 
 /**
- * The bosun build route's outbox (Task: bosun build route).
- *
- * Bosun is a warm-pool microVM runner daemon this process cannot reach — it
- * long-polls in, rather than being dialed the way the in-cluster Job or the
- * hosted dispatch are. An outbox row is the queue entry that makes that
- * direction of contact possible: `enqueue` writes one, a bosun host claims it
- * over `POST /internal/bosun/claim`, and `complete` is the same row's last
- * write. `src/storage/build-outbox.ts` is the seam; this table is only ever
- * read or written through it.
- *
- * `lease_expires` is what makes a claim revocable without a second actor —
- * `builds.leased_at` is the precedent (a claimed dispatch that stops
- * heartbeating is eventually reclaimed), except here reclamation is a plain
- * `UPDATE ... WHERE state = 'CLAIMED' AND lease_expires < now()` rather than a
- * comparison against a fixed timeout, because the poller extends it itself on
- * every heartbeat.
- *
- * `result` lands only once, `iff state != 'DONE'` — a late result from a
- * lease-expired claimant that got superseded still lands if nothing else
- * claimed the row in between, because a real result beats a rerun.
+ * The bosun build route's outbox. Bosun long-polls in to claim rows, since this
+ * process cannot reach it. Accessed only through `src/storage/build-outbox.ts`.
  */
 export const buildRequests = pgTable(
   'build_requests',
@@ -1800,24 +1032,17 @@ export const buildRequests = pgTable(
     /** The composed request document, handed back to the claimant verbatim. */
     request: jsonbDocument('request').notNull(),
     state: buildRequestState('state').notNull().default('PENDING'),
+    /** Extended by each heartbeat; a CLAIMED row past it can be reclaimed. */
     leaseExpires: timestamp('lease_expires', { withTimezone: true }),
     /**
-     * Which claimant holds the lease, minted by `claim` and handed back in the
-     * claim response.
-     *
-     * A lease says *when* a claim expires; this says *whose* it is. Without it
-     * `heartbeat` and `complete` key on the request id alone, so a bosun host
-     * whose lease was already reclaimed can keep extending — or land a result
-     * on — a request another host is now running. Same shape as
-     * {@link builds.dispatchId}, one seam further out.
-     *
-     * Nullable, and read as "absent" rather than "mismatch" when a caller sends
-     * none: bosun ships on each host's NixOS auto-upgrade while Spindrift ships
-     * as a pinned image digest, so the two halves reach production on
-     * independent clocks and a claimant-less call has to keep working.
+     * The lease holder; `heartbeat` and `complete` must match it. A call with
+     * none is still served, as bosun and this image ship independently.
      */
     claimant: text('claimant'),
-    /** `null` until `complete` writes it; also `null` for a cancelled request. */
+    /**
+     * Null until `complete` writes it, and for a cancelled request. A late
+     * result is still written while the row is not DONE.
+     */
     result: jsonbDocument('result'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -1837,21 +1062,8 @@ export const buildRequests = pgTable(
 );
 
 /**
- * A Functions row: one author-written `fetch` handler and where it last
- * deployed to (`functions/contract.ts`).
- *
- * `target` is `text` with a CHECK rather than a `pgEnum`, because the set of
- * targets is the deployers' — `FunctionDeployers` in the contract — and an
- * enum would turn a removed deployer into a migration. The CHECK enforces the
- * same membership without that coupling.
- *
- * `error` lives on the row, not a side table: a Save that deployed nothing
- * still saved, so the failure is state on the thing that failed to deploy, not
- * a reason the save itself is unavailable.
- *
- * `env` is the whole environment map as one sealed envelope (`functions/
- * env.ts`), `null` when the function has no values. Write-only: a deploy opens
- * it, no read path hands a value to a browser.
+ * An author-written `fetch` handler. `target` is text with a CHECK over
+ * `FUNCTION_TARGETS`, because a Postgres enum value cannot be dropped.
  */
 export const functions = pgTable(
   'functions',
@@ -1860,9 +1072,13 @@ export const functions = pgTable(
     name: text('name').notNull().unique(),
     target: text('target').notNull(),
     source: text('source').notNull(),
+    /**
+     * Env map as one sealed envelope, null if empty; only a deploy opens it.
+     */
     env: text('env'),
     url: text('url'),
     deployedAt: timestamp('deployed_at', { withTimezone: true }),
+    /** Set when a saved function failed to deploy; the save still stands. */
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -1872,9 +1088,7 @@ export const functions = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // A bound parameter is not legal inside a CHECK constraint's DDL (see
-    // `config_items_environment_pinned` above), hence `sql.raw` over the
-    // joined literal rather than the usual interpolation.
+    // Bound parameters are illegal in CHECK DDL, hence `sql.raw` over literals.
     check(
       'functions_target',
       sql`${table.target} in (${sql.raw(
@@ -1885,37 +1099,8 @@ export const functions = pgTable(
 );
 
 /**
- * The commit → bundle index over the source depot (§15).
- *
- * §15 stages "one immutable bundle" per commit, and `canonicalGzip`
- * (`@repo/archive/archive-format`) is what makes the digest a function of the
- * commit rather than of the repository host's compressor. Together those two
- * mean the depot already *is* a cache: the same commit always names the same
- * object. What it had no way to answer was "have I staged this one before" —
- * the only memory was `builds.bundle_location` on the previous Build of the
- * same Component, which `sourceForRerun` correctly refuses to trust for an
- * ephemeral bundle it cannot prove still exists. So one push to a repository
- * hosting N Apps fetched the same tarball N times.
- *
- * This is that memory, and it is deliberately only an *index*: the bucket
- * stays the source of truth. A row is a hint that an object existed, never a
- * promise that it still does — the bucket's lifecycle rule expires an
- * `ephemeral/` bundle 30 days after it was written and tells nothing here.
- * `src/storage/bundle-cache.ts` is the only reader, and it verifies every hit
- * against the depot before returning it. A miss, for any reason at all, falls
- * through to the fetch that used to happen unconditionally.
- *
- * Keyed on `(repository, commit)` because that pair is what a caller has
- * before any bytes exist. Both `stageRepository` callers resolve a full sha
- * first (`src/commands/apps/deploy.ts`, `creation-drafts/lifecycle.ts`), and
- * `stageSourceBundle` refuses a fetch whose resolved revision disagrees — so a
- * row is only ever written under a commit the far side confirmed.
- *
- * That pair is only the whole key while a bundle is the tree and nothing else.
- * §15 stages a `git archive` of one commit, which carries no history, no tags
- * and no other ref — so a second bundle *kind* that did would be a different
- * object at the same commit, and this key would have to grow a column to tell
- * them apart. Nothing today produces one.
+ * Commit-to-bundle index over the source depot. A hint only: the bucket expires
+ * ephemeral bundles, so `src/storage/bundle-cache.ts` checks every hit.
  */
 export const sourceBundles = pgTable(
   'source_bundles',
@@ -1927,18 +1112,11 @@ export const sourceBundles = pgTable(
     digest: text('digest').notNull(),
     /** The `gs://` object this pair last staged to. */
     location: text('location').notNull(),
-    /**
-     * When the bytes were last fetched from the repository host — not when the
-     * row was last read. Nothing reads it to decide a hit (the depot decides
-     * that); it is here so an operator can see how old the newest copy is.
-     */
+    /** Last fetch from the host. Informational: the depot decides a hit. */
     stagedAt: timestamp('staged_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
-    /**
-     * The same three `builds` keeps, so a cache hit lands them on a sibling
-     * App's Build exactly as the fetch that wrote this row did.
-     */
+    /** Copied onto a sibling App's Build on a cache hit. */
     commitMessage: text('commit_message'),
     commitAuthor: text('commit_author'),
     commitAuthoredAt: timestamp('commit_authored_at', { withTimezone: true }),
@@ -1950,8 +1128,6 @@ export const sourceBundles = pgTable(
     }),
   ],
 );
-
-// --- Relations (query-builder convenience; no schema effect) ---------------
 
 export const appsRelations = relations(apps, ({ one, many }) => ({
   components: many(components),
@@ -2092,8 +1268,6 @@ export const attemptEventsRelations = relations(attemptEvents, ({ one }) => ({
     references: [deploys.id],
   }),
 }));
-
-// --- Row types ---------------------------------------------------------
 
 export type App = typeof apps.$inferSelect;
 export type NewApp = typeof apps.$inferInsert;

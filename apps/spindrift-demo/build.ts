@@ -1,16 +1,9 @@
-/**
- * spindrift-demo build — inject build-time vars into the static site.
- *
- * Reads git commit/branch, stamps the current time, replaces placeholders in
- * the HTML template, and copies everything to dist/.
- */
+// Builds dist/ from src/, stamping the commit, branch and build time into index.html.
 import { readFile, mkdir, rm, cp } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const SRC = join(import.meta.dir, 'src');
 const OUT = join(import.meta.dir, 'dist');
-
-// ── build-time facts ────────────────────────────────────────────────────────
 
 const commit =
   Bun.env.BUILD_COMMIT ||
@@ -34,8 +27,6 @@ const branch =
 
 const stamp = Bun.env.BUILD_TIME || new Date().toISOString();
 
-// ── inject ──────────────────────────────────────────────────────────────────
-
 let html = await readFile(join(SRC, 'index.html'), 'utf-8');
 html = html.replace('<!--BUILD_COMMIT-->', escapeHtml(commit));
 html = html.replace('<!--BUILD_BRANCH-->', escapeHtml(branch));
@@ -54,8 +45,6 @@ function escapeHtml(value: string): string {
       })[char]!,
   );
 }
-
-// ── emit ────────────────────────────────────────────────────────────────────
 
 await rm(OUT, { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });

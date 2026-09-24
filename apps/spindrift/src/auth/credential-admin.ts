@@ -1,11 +1,6 @@
 /**
- * Passkey-rooted credential administration.
- *
- * A session identifies the User, but it does not authorize changing how that
- * User authenticates. Every change spends a separate, User-bound WebAuthn
- * assertion issued for `credential_admin`. Adding a passkey then issues a
- * second User-bound registration challenge, so the two browser ceremonies
- * cannot be separated and claimed by another session.
+ * Credential administration. A session alone cannot change how a User signs in:
+ * every change spends a fresh User-bound passkey assertion.
  */
 import { and, eq, sql } from 'drizzle-orm';
 import type { Principal } from '../commands/types.ts';
@@ -84,7 +79,6 @@ export async function credentialSettings(
   };
 }
 
-/** Begin the fresh assertion common to every credential mutation. */
 export async function beginCredentialChange(
   deps: CredentialAdminDeps,
   principal: Principal,
@@ -108,7 +102,6 @@ async function authorizeChange(
   });
 }
 
-/** Verify a fresh root passkey, then authorize one new registration. */
 export async function beginAddPasskey(
   deps: CredentialAdminDeps,
   principal: Principal,
@@ -127,7 +120,6 @@ export async function beginAddPasskey(
   });
 }
 
-/** Complete the registration authorized by {@link beginAddPasskey}. */
 export async function completeAddPasskey(
   deps: CredentialAdminDeps,
   principal: Principal,
@@ -199,7 +191,6 @@ export async function completeAddPasskey(
   });
 }
 
-/** Remove one passkey without ever removing the final account root. */
 export async function removePasskey(
   deps: CredentialAdminDeps,
   principal: Principal,
@@ -212,8 +203,7 @@ export async function removePasskey(
   if (!authorized.ok) return authorized;
 
   return deps.db.transaction(async (tx) => {
-    // Serialize credential removals for this User. Without the lock, two
-    // requests could both count two passkeys and each remove one.
+    // Locks the User row so two removals cannot both see two passkeys.
     await tx.execute(
       sql`select id from ${users} where ${users.id} = ${principal.id} for update`,
     );
@@ -246,7 +236,6 @@ export async function removePasskey(
   });
 }
 
-/** Link the trusted assertion on this request after a fresh root assertion. */
 export async function linkGatewayIdentity(
   deps: CredentialAdminDeps,
   principal: Principal,
@@ -265,7 +254,6 @@ export async function linkGatewayIdentity(
   return authOk(principal);
 }
 
-/** Remove the external convenience credential after a fresh root assertion. */
 export async function unlinkGatewayIdentity(
   deps: CredentialAdminDeps,
   principal: Principal,

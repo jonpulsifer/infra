@@ -13,8 +13,6 @@ import (
 	"testing"
 )
 
-// writeEd25519Key writes a PKCS8 PEM Ed25519 private key to a temp file and
-// returns its path. The signer reads the same encoding in production.
 func writeEd25519Key(t *testing.T) string {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -82,7 +80,6 @@ func TestSign_RealEd25519ProducesVerifiableBundle(t *testing.T) {
 		t.Errorf("the placeholder mediaType must not survive a real signature")
 	}
 
-	// The signature must be a 64-byte Ed25519 signature.
 	sig, err := base64.StdEncoding.DecodeString(bundle.Signature)
 	if err != nil {
 		t.Fatalf("signature is not base64: %v", err)
@@ -147,9 +144,7 @@ func TestSign_WrongDigestFailsVerification(t *testing.T) {
 }
 
 func TestSign_BundleFromAnotherSignerIsRefusedAtAdmission(t *testing.T) {
-	// A bundle signed by a different key. It is internally self-consistent
-	// — the signature verifies under its own public key — but admission
-	// refuses because the public key is not Spindrift's trusted signer.
+	// The bundle verifies under its own embedded key; only the pin refuses it.
 	otherKey := writeEd25519Key(t)
 	trustedKey := writeEd25519Key(t)
 	resp := Sign(SignRequest{
