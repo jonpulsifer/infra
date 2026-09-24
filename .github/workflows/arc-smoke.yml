@@ -1,16 +1,7 @@
 name: ARC Smoke
 
-# The self-hosted scale sets run, but no workflow targets them, so nothing
-# proves they can carry a job. This is that proof, on demand.
-#
-# Two things worth proving, because they are the two that were broken:
-#   - the runner reaches a Docker daemon at all (containerMode: dind)
-#   - a `services:` container is reachable on the job's own localhost, which
-#     is what typescript.yml's postgres needs and what a node-level Docker
-#     socket could never deliver
-#
-# `services:` failing to come up fails the job before any step runs, so the
-# service block is itself half the assertion.
+# Proves on demand that a self-hosted scale set can run a job: the runner
+# reaches its dind daemon, and a `services:` container answers on localhost.
 
 on:
   workflow_dispatch:
@@ -30,6 +21,7 @@ jobs:
   dind:
     runs-on: ${{ inputs.cluster }}
     timeout-minutes: 10
+    # A service that never turns healthy fails the job before any step runs.
     services:
       postgres:
         image: postgres:18-alpine

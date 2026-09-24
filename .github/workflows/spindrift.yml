@@ -1,22 +1,6 @@
-# Spindrift's build caller for this repository (spec §4, §15).
-#
-# The same thin caller Spindrift writes into every connected repository, except
-# that this one is committed by hand — because an uploaded archive has no
-# repository of its own and builds here, where the reusable workflow lives.
-#
-# **It is a caller and not the reusable workflow itself, deliberately.** The
-# dispatch API only accepts a ref a workflow file can be read from, so
-# dispatching the reusable workflow directly would run whatever is on the
-# default branch and quietly discard the commit pin §15 requires. A caller keeps
-# the pin where a caller always keeps it: in the `uses:`.
-#
-# The pin here is `./` rather than a ref, and that is stronger rather than
-# weaker — a local reference resolves to the same commit as this file, so the
-# machinery that runs is by construction the machinery that was reviewed
-# alongside it. A connected repository cannot do that, which is why its caller
-# names the manifest's `buildWorkflow` instead — ordinarily `@main`, so a
-# merge here reaches its next dispatch immediately rather than at whatever
-# commit was current when it connected.
+# The build caller for this repository, where uploaded archives build. A direct
+# dispatch of the reusable workflow would run the default branch; the local
+# `uses:` runs it at this file's own commit.
 name: spindrift
 run-name: spindrift ${{ inputs.correlation }}
 
@@ -40,14 +24,8 @@ permissions:
 jobs:
   build:
     uses: ./.github/workflows/spindrift-build.yml
-    # A `workflow_call` passes no secret it is not told to, even locally — so
-    # without this, `SPINDRIFT_BUILD_SEAL_KEY` set on this repository would sit
-    # unreachable one `uses:` away from the step that needs it. `inherit`
-    # rather than naming it: this repository is the only caller of its own
-    # build workflow that can hold the key at all (a connected repository's
-    # generated caller passes no secrets — see `buildWorkflowCaller`), so there
-    # is nothing here `inherit` could leak that this repository does not
-    # already hold.
+    # workflow_call passes only the secrets it is given, including the optional
+    # SPINDRIFT_BUILD_SEAL_KEY. `inherit` is safe: the callee is in this repo.
     secrets: inherit
     with:
       spec: ${{ inputs.spec }}

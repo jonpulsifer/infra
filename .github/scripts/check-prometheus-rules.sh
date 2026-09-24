@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# Lints every PrometheusRule both clusters actually deploy, and runs the unit
-# tests written beside them.
-#
-# A PrometheusRule is applied whether or not its expression matches anything,
-# and a rule that matches nothing looks exactly like a fleet with nothing
-# wrong. promtool is the only thing that reads these expressions before
-# Prometheus does.
+# Lints every PrometheusRule both clusters deploy, and runs the unit tests
+# written beside them.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,11 +9,8 @@ cd "$ROOT"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# Rendered rather than read from disk: base/monitoring reaches both clusters
-# through their overlays, and only the rendered stream says what each one ends
-# up with. Each overlay gets its own directory — a shared rule that grows a
-# per-cluster `patches:` entry is two different rules with one metadata.name,
-# and one flat directory would lint only whichever was written last.
+# One directory per overlay: a per-cluster patch makes two rules with one
+# metadata.name, and a shared directory would keep only the last one written.
 for overlay in clusters/folly/monitoring clusters/offsite/monitoring; do
   site="$(basename "$(dirname "$overlay")")"
   mkdir -p "$WORK/$site"
@@ -39,11 +31,8 @@ fi
 
 promtool check rules "$WORK"/*/*.yaml
 
-# `rule_files` in a test is resolved relative to the test file, so the tests
-# are copied next to the rules they name. A test beside a shared rule runs
-# once per cluster, which is what checks it against both renders; a test
-# beside a rule only one cluster deploys runs only in that cluster's
-# directory, because the file it names does not exist in the other.
+# promtool resolves `rule_files` relative to the test file, so each test is
+# copied beside the rendered rules. A base test runs against both clusters.
 for dir in "$WORK"/*/; do
   site="$(basename "$dir")"
   cp clusters/base/monitoring/*_test.yaml "$dir"

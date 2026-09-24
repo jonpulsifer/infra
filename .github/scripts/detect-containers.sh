@@ -1,42 +1,7 @@
 #!/usr/bin/env bash
-# Discovers buildable container images and outputs a GitHub Actions matrix.
-#
-# For each directory under apps/ and images/ that contains a Dockerfile:
-#   - If build.json exists: use it (supports multiple images, custom context/args)
-#   - Otherwise: image name = directory basename, context = directory
-#
-# Every produced image must be classified in .github/containers.json, either in
-# "build" (published) or "ignore" (has a Dockerfile, intentionally not built
-# here). An unclassified image fails CI, so a new app can't be silently
-# published or silently dropped. Only "build" images end up in the matrix.
-#
-# build.json format (array of build objects):
-#   [{ "image": "name", "context": ".", "file": "path/Dockerfile",
-#      "build-args": "KEY=val", "platforms": "linux/amd64,linux/arm64",
-#      "no-cache-filters": "stage", "gcp-credentials": true,
-#      "watch": ["extra/path"] }]
-# All fields except "image" are optional.
-#
-# An image's own build needs live here rather than in the workflow. A matrix
-# job that branches on `matrix.image == 'x'` is a generic job that has to be
-# edited every time an app grows a requirement — and the branch lands two files
-# away from the Dockerfile that needs it.
-#
-# `gcp-credentials` asks for the workload-identity federation the workflow then
-# mounts as the `gcp_credentials` build secret, which is the id the requesting
-# Dockerfile's `--mount=type=secret` names.
-#
-# Input:  CHANGED_FILES env var — newline-separated list of changed file paths
-#         BUILD_IMAGES env var — space-separated images to build whatever
-#           changed. The reconcile path names the images it found stale this
-#           way; a `workflow_dispatch` names the ones an operator asked for.
-# Output: has_changes and matrix written to GITHUB_OUTPUT
-#
-# `--watches` instead prints `<image><TAB><path>` for every buildable image and
-# exits. The staleness check needs to know which paths feed which image, and
-# that map is derived here — from build.json, with the directory as the default
-# — so it is published from here rather than parsed a second time somewhere
-# else and left to drift.
+# Writes the build matrix of the containers.json "build" images whose watched paths
+# changed or that BUILD_IMAGES names; an unclassified Dockerfile image fails.
+# `--watches` prints `<image><TAB><path>` for every build image instead.
 
 set -euo pipefail
 
@@ -54,11 +19,8 @@ manifest=".github/containers.json"
 
 mapfile -t changed_files <<<"${CHANGED_FILES:-}"
 read -r -a forced_images <<<"${BUILD_IMAGES:-}"
-# tj-actions' safe_output escapes the newline separator, so every element but
-# the last arrives with a trailing backslash. The per-path prefix globs below
-# tolerated that; the exact-match rebuild-all grep did not, which silently
-# killed rebuild-on-workflow-change. Strip it regardless of the action's
-# current escaping mood.
+# tj-actions' safe_output leaves a trailing backslash on every path but the
+# last, which breaks the exact-match grep below.
 changed_files=("${changed_files[@]%\\}")
 
 # A change to the workflow, this script, or the allowlist rebuilds every image.
@@ -70,8 +32,8 @@ if printf '%s\n' "${changed_files[@]}" | grep -qxF \
   rebuild_all=true
 fi
 
-# Membership sets from the allowlist: is_build (publish) and is_classified
-# (build ∪ ignore — anything an unclassified-image check should accept).
+# Every image must be in "build" or "ignore", so a new app is never published
+# or dropped silently.
 declare -A is_build is_classified
 while IFS= read -r img; do
   is_build[$img]=1
@@ -81,7 +43,6 @@ done \
 while IFS= read -r img; do is_classified[$img]=1; done \
   < <(jq -r '.ignore[]' "$manifest")
 
-# Returns 0 if any changed file lives under $1
 path_changed() {
   local watch="$1" f
   for f in "${changed_files[@]}"; do
@@ -93,17 +54,14 @@ path_changed() {
 includes='[]'
 declare -A unclassified
 
-# Prune `fixtures` directories: test fixtures (e.g. apps/<x>/test/fixtures/...)
-# contain Dockerfiles that are inputs to a project's own tests, not buildable
-# images owned by this workflow.
+# A Dockerfile under a fixtures directory is a test input.
 mapfile -t dockerfiles < <(find apps images -path '*/fixtures' -prune -o -name "Dockerfile" -print | sort)
 
 for dockerfile in "${dockerfiles[@]}"; do
   dir=$(dirname "$dockerfile")
   base=$(basename "$dir")
 
-  # A directory without build.json is the default case of one with a single,
-  # empty entry: image=basename, context=dir, watch=dir.
+  # No build.json means one empty entry: image=basename, context=dir, watch=dir.
   if [[ -f "$dir/build.json" ]]; then
     mapfile -t entries < <(jq -c '.[]' "$dir/build.json")
   else
@@ -114,7 +72,6 @@ for dockerfile in "${dockerfiles[@]}"; do
     image=$(jq -r --arg b "$base" '.image // $b' <<<"$entry")
 
     [[ -n "${is_classified[$image]:-}" ]] || unclassified[$image]=1
-    # Only allowlisted images are eligible for the build matrix.
     [[ -n "${is_build[$image]:-}" ]] || continue
 
     mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<<"$entry")
@@ -131,15 +88,14 @@ for dockerfile in "${dockerfiles[@]}"; do
     build_args=$(jq -r '."build-args" // ""' <<<"$entry")
     platforms=$(jq -r '.platforms   // ""' <<<"$entry")
     no_cache_filters=$(jq -r '."no-cache-filters" // ""' <<<"$entry")
-    # Emitted as a string rather than a boolean so every matrix field is one
-    # kind of thing and the workflow tests them all the same way — `!= ''`.
+    # A string, so the workflow tests every matrix field with `!= ''`. When set,
+    # the workflow mounts GCP credentials as the `gcp_credentials` build secret.
     gcp_credentials=$(jq -r 'if ."gcp-credentials" then "true" else "" end' <<<"$entry")
     deploy_manifests=$(jq -c --arg img "$image" '.deploy[$img] // []' "$manifest")
 
     should_build="$rebuild_all"
-    # An image named outright builds whatever changed. That is the reconcile
-    # path's whole mechanism: it decides staleness elsewhere and says so here,
-    # rather than teaching this script a second reason to build.
+    # An image in BUILD_IMAGES builds whatever changed. The stale-image pass and
+    # a workflow_dispatch name images this way.
     if [[ "$should_build" != "true" ]]; then
       for forced in ${forced_images[@]+"${forced_images[@]}"}; do
         if [[ "$forced" == "$image" ]]; then

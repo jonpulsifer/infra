@@ -1,18 +1,9 @@
 name: nix-images
-# Container images built by Nix rather than by a Dockerfile.
-#
-# containers.yml cannot carry these: it is a `docker/build-push-action` matrix
-# discovered by finding Dockerfiles, and its selective-delivery step is welded
-# to that matrix. This builds the derivation, pushes it, and checks the pin —
-# it does not reimplement the digest rewrite, because that step and
-# .github/scripts/cd-digest-update.sh are one program split across two files
-# and a second copy of it would drift from the original the first time either
-# moved.
+# Builds and pushes the container images that Nix builds, and checks that every
+# manifest pins the built tag. Digest rewrites stay in containers.yml.
 on:
   push:
     branches: [main]
-    # Spelled out twice. GitHub Actions does not resolve YAML anchors in a
-    # workflow file — an alias here is a parse error, not a shorthand.
     paths:
       - nix/images/asterisk.nix
       - nix/hosts/default.nix
@@ -29,8 +20,7 @@ on:
       - .github/workflows/nix-images.yml
   workflow_dispatch:
 
-# Same reasoning as containers.yml: a pending run that gets evicted builds
-# nothing and says so only by leaving a pin stale forever.
+# An evicted pending run builds nothing, so runs queue.
 concurrency:
   group: nix-images-${{ github.ref }}
   queue: max
@@ -65,17 +55,8 @@ jobs:
           echo "name=$(nix eval --raw .#asterisk-image.imageName)" >>"$GITHUB_OUTPUT"
           echo "tag=$(nix eval --raw .#asterisk-image.imageTag)" >>"$GITHUB_OUTPUT"
 
-      # This image is pinned by tag rather than by digest, because the
-      # selective-delivery machinery lives in the other workflow. That is only
-      # honest while the tag is content-addressed and something checks it.
-      #
-      # The first version of this guard compared the Asterisk *version*, which
-      # does not move when only the contents change: adding darkhttpd
-      # republished 22.8.2, the node kept its cached copy under
-      # IfNotPresent, and the sidecar failed with `exec: "/bin/darkhttpd": no
-      # such file or directory` against an image that contained it. The tag now
-      # hashes the closure, so any change produces a new one and this step
-      # fails the pull request until every manifest names it.
+      # Manifests pin this image by tag. The tag hashes the image contents, so a
+      # change fails this step until every manifest names the new tag.
       - name: Every manifest must pin the tag that was just built
         env:
           IMAGE: ${{ steps.build.outputs.name }}
@@ -106,8 +87,7 @@ jobs:
           printf 'pinned at %s in: %s\n' "${TAG}" "${manifests[*]}"
 
       - name: Login to GitHub Container Registry
-        # Pull requests build to validate and never publish, exactly as
-        # containers.yml treats them.
+        # Pull requests build without publishing.
         if: github.event_name != 'pull_request'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:

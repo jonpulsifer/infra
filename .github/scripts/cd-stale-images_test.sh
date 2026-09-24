@@ -1,21 +1,6 @@
 #!/usr/bin/env bash
-# Covers what the reconcile path decides: whether a pinned build is behind the
-# newest commit that touched the image it belongs to, and which images that
-# makes stale.
-#
-# Nothing here reaches the network. The commit graph is a real repository on
-# disk, because every verdict is an ancestry question and a fixture that fakes
-# `git` would be testing the fixture. The registry read and the watch map are
-# stubs, injected through the same environment variables the workflow leaves
-# unset.
-#
-# The cases that matter are the ones where the obvious reading is wrong, in
-# either direction. A pin must read `current` although it is old when a build
-# is already queued on its delivery branch, or when its provenance cannot be
-# read — that is how a daily rebuild becomes a daily rebuild *forever*. A pin
-# must read `stale` although a sibling pin is current when an image's deploy
-# targets have diverged — that is the permanently stale pin this whole path
-# exists to end. Neither is assumed.
+# Tests cd-stale-images.sh against a real commit graph on disk. The registry
+# read and the watch map are stubs set through the script's override variables.
 
 set -euo pipefail
 
@@ -40,8 +25,6 @@ assert_equal() {
   fi
 }
 
-# --- a repository with a real history ---------------------------------------
-
 repo="$work/repo"
 mkdir -p "$repo"
 cd "$repo"
@@ -63,8 +46,6 @@ bar_only=$(commit apps/bar/main.ts 'bar one')
 latest_foo=$(commit apps/foo/other.ts 'foo two')
 untouched=$(commit docs/notes.md 'docs only')
 
-# --- newest ------------------------------------------------------------------
-
 assert_equal 'newest names the last commit touching a path' \
   "$latest_foo" "$("$script" newest apps/foo)"
 
@@ -76,8 +57,6 @@ assert_equal 'newest spans every path an image watches' \
 
 assert_equal 'newest is silent about a path no commit ever touched' \
   '' "$("$script" newest apps/nothing)"
-
-# --- verdict -----------------------------------------------------------------
 
 assert_equal 'a pin strictly behind the newest input commit is stale' \
   stale "$("$script" verdict "$first" "$latest_foo")"
@@ -101,16 +80,12 @@ assert_equal 'a pin on a commit this checkout does not have is unknown' \
   unknown \
   "$("$script" verdict 0000000000000000000000000000000000000000 "$latest_foo" 2>/dev/null)"
 
-# --- stubs for the whole-image pass -----------------------------------------
-
 fixtures="$work/fixtures"
 mkdir -p "$fixtures"/{pins,queued,revision}
 export FIXTURES="$fixtures"
 
-# `pins`, `pins-at` and `revision`, driven by files so each case can set up the
-# registry and the delivery branch it needs. The argument positions are the
-# real script's: `pins <image> <manifest>...`, `pins-at <ref> <image>
-# <manifest>...`, `revision <repository> <digest>`.
+# Answers `pins`, `pins-at` and `revision` from fixture files, with the real
+# script's argument positions.
 cat >"$work/cd-digest-update.sh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -149,9 +124,8 @@ export DETECT_CONTAINERS="$work/detect-containers.sh"
 export CONTAINERS_MANIFEST="$work/containers.json"
 export REGISTRY_OWNER=tester
 
-# One digest per build, so an image is never accidentally asserted against
-# another image's provenance. `foo` watches apps/foo, whose newest commit is
-# $latest_foo; `bar` watches apps/bar, whose newest is $bar_only.
+# One digest per build. The newest input commit of foo is $latest_foo, and of
+# bar is $bar_only.
 foo_old='sha256:1111111111111111111111111111111111111111111111111111111111111111'
 foo_new='sha256:2222222222222222222222222222222222222222222222222222222222222222'
 bar_new='sha256:4444444444444444444444444444444444444444444444444444444444444444'
@@ -165,40 +139,30 @@ reset_fixtures() {
   : >"$fixtures/revision/$unlabelled"
 }
 
-# An image pinned at a build of a commit older than the last one to touch it is
-# exactly the dropped build this exists to find — and its up-to-date neighbour
-# in the same pass is not dragged along with it.
+# bar is current in the same pass and must not be named with foo.
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
 printf '%s\n' "$bar_new" >"$fixtures/pins/bar"
 assert_equal 'an image pinned behind its newest input commit is named' \
   foo "$("$script" stale 2>/dev/null)"
 
-# The steady state, which is most days: nothing to do, and nothing printed.
 reset_fixtures
 printf '%s\n' "$foo_new" >"$fixtures/pins/foo"
 printf '%s\n' "$bar_new" >"$fixtures/pins/bar"
 assert_equal 'an image pinned at its newest input commit is left alone' \
   '' "$("$script" stale 2>/dev/null)"
 
-# Deploy targets drift apart: a run that dropped one of an image's manifests
-# leaves the other pinned at the newest build. The current sibling must not
-# vouch for the target left behind, or the permanently stale pin is invisible
-# to the pass built to find it.
 reset_fixtures
 printf '%s\n%s\n' "$foo_old" "$foo_new" >"$fixtures/pins/foo"
 assert_equal 'a main pin behind names the image although another main pin is current' \
   foo "$("$script" stale foo 2>/dev/null)"
 
-# A build that already ran and is waiting on its delivery pull request has got
-# here first. Rebuilding on top of it would be the daily-churn failure.
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
 printf '%s\n' "$foo_new" >"$fixtures/queued/foo"
 assert_equal 'a newer digest queued but not merged counts as current' \
   '' "$("$script" stale foo 2>/dev/null)"
 
-# No revision label means no proof, and no proof means no rebuild.
 reset_fixtures
 printf '%s\n' "$unlabelled" >"$fixtures/pins/foo"
 assert_equal 'a pin whose provenance cannot be read is never rebuilt' \
@@ -208,27 +172,22 @@ warning=$("$script" stale foo 2>&1 >/dev/null)
 grep -q '^::warning::' <<<"$warning" \
   || fail 'an unreadable pin should warn rather than pass in silence'
 
-# One unreadable digest alongside one that is behind is still not proof: the
-# unreadable one could be the newer build.
+# The unreadable digest could be the newer build.
 reset_fixtures
 printf '%s\n%s\n' "$foo_old" "$unlabelled" >"$fixtures/pins/foo"
 assert_equal 'a single unreadable candidate withdraws the whole verdict' \
   '' "$("$script" stale foo 2>/dev/null)"
 
-# Nothing pins an image with no deploy target, so it has no staleness to read.
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/orphan"
 assert_equal 'an image nothing deploys is not stale' \
   '' "$("$script" stale orphan 2>/dev/null)"
 
-# A manifest that pins no digest at all cannot roll, and saying so is more use
-# than rebuilding into a file that will never carry the result.
 reset_fixtures
 assert_equal 'an image whose manifests pin nothing is reported, not rebuilt' \
   '' "$("$script" stale foo 2>/dev/null)"
 
-# A shallow checkout can name a newest commit, and it would be the wrong one.
-# Refusing there is what keeps the schedule from rebuilding the world.
+# A shallow clone's newest commit depends on the fetch depth.
 shallow="$work/shallow"
 git clone -q --depth 1 "file://$repo" "$shallow"
 cd "$shallow"
@@ -238,12 +197,8 @@ assert_equal 'a shallow checkout names no newest commit' \
   '' "$("$script" newest apps/foo 2>/dev/null)"
 cd "$repo"
 
-# Depth is not what the guard is for; a truncated graph is. This clone is deep
-# enough to hold both commits as objects — the older one arrives as another
-# branch's tip — and still has no path between them, because main's history
-# stops at a graft two commits down. `merge-base` then answers "not an
-# ancestor" about a commit that is one, and without the guard the pin that is
-# genuinely behind reads as current and is never rebuilt.
+# Both commits exist, the older as another branch's tip, but main's history
+# stops at a graft, so merge-base finds no path between them.
 git -C "$repo" branch -q built-here "$first"
 truncated="$work/truncated"
 git clone -q --depth 2 --no-single-branch "file://$repo" "$truncated"

@@ -1,15 +1,11 @@
 name: kustomize
 
-# One step, one small toolchain, and a path filter that fires on exactly the
-# cluster changes worth rendering. `runner` is a dispatch escape hatch onto
-# the self-hosted ARC pools; the merge path runs hosted.
+# The `runner` input moves a dispatch onto a self-hosted ARC pool.
 on:
   push:
     branches: [main]
     paths:
-      # Every cluster path, not a list of the ones someone remembered. The
-      # enumerated form had drifted to a third of what Flux reconciles, so a
-      # broken networking, storage, nodes or platform overlay merged green.
+      # All of clusters/, so no overlay merges unrendered.
       - 'clusters/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'
@@ -17,9 +13,6 @@ on:
       - '.github/workflows/kustomize.yml'
   pull_request:
     paths:
-      # Every cluster path, not a list of the ones someone remembered. The
-      # enumerated form had drifted to a third of what Flux reconciles, so a
-      # broken networking, storage, nodes or platform overlay merged green.
       - 'clusters/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'
@@ -39,8 +32,6 @@ jobs:
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # helm templates the in-repo charts the rendered HelmReleases name; yq
-      # pulls each release's values back out of the rendered stream.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           install_args: helm kubectl yq promtool

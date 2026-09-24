@@ -22,7 +22,6 @@ on:
       - '**/Dockerfile'
 
 jobs:
-  # ── Config (IaC misconfiguration) scanning ──────────────────────────
   changed-config:
     name: Changed Config Dirs
     runs-on: ubuntu-latest
@@ -89,7 +88,6 @@ jobs:
             cat trivy-config.txt
           fi
 
-  # ── Filesystem (dependency CVE) scanning ────────────────────────────
   changed-fs:
     name: Changed Filesystem Dirs
     runs-on: ubuntu-latest

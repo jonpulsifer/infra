@@ -1,28 +1,8 @@
 name: Container Benchmark
 
-# One identical cold docker build — apps/spindrift/Dockerfile, the heaviest
-# first-party image — on every runner label under test. The engine is dockerd's
-# embedded BuildKit (DOCKER_BUILDKIT=1) on every label, deliberately: buildx
-# plugin versions vary by label, the embedded engine is the common denominator,
-# and Cloud Build's docker builder runs the same way — so a difference in these
-# numbers is the machine and its network, not the toolchain.
-#
-# `--no-cache --pull` plus the prune step make cold mean cold everywhere: a
-# skiff of a persisting class mounts the docker data-root the previous run left
-# behind, and without the prune its "cold" build would start with every base
-# layer already on disk — an advantage the hosted runner never has.
-#
-# `skiff-ubuntu-bench` has no host. It wants 4 vCPU / 16 GiB with a 20 G
-# workspace, and no class in nix/hosts/ declares that shape — the two skiff
-# labels the fleet serves carry 6 G and 4 G workspaces, which is the size a
-# cold docker build does not fit in and is exactly what this benchmark
-# measures. Dispatching the skiff arm queues until a host declares the class;
-# the last numbers it produced are in apps/bosun/README.md.
-#
-# The Cloud Build leg is not here. GCB builds are submitted out-of-band from a
-# staged GCS source (an in-workflow submit would need cloudbuild grants the WIF
-# identity does not carry, and would time the runner's uplink instead of the
-# service); its timing comes from the Build resource's own clock.
+# One cold docker build of apps/spindrift/Dockerfile per runner label, on
+# dockerd's embedded BuildKit, the engine every label shares. No host declares
+# the skiff-ubuntu-bench class, so that arm queues until one does.
 
 on:
   workflow_dispatch:
@@ -76,6 +56,7 @@ jobs:
           printf 'memory     %s\n' "$(awk '/MemTotal/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo)"
           printf 'uptime     %ss\n' "$(cut -d' ' -f1 /proc/uptime)"
           docker info --format 'storage    {{.Driver}}' || true
+      # A persisting skiff class keeps the previous run's docker data-root.
       - name: Make cold mean cold
         run: docker system prune -af >/dev/null 2>&1 || true
       - name: Cold build

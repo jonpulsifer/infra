@@ -36,18 +36,8 @@ jobs:
       - id: changed-paths
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
-          # The `clusters/` paths are here because spindrift's conformance
-          # tests read those declarations rather than a fixture: `charts.app`,
-          # a Target's delivery `sourceRef`, an `OCIRepository` tag, and the
-          # sources the DNS controller runs are all things the suite asserts
-          # and all things that change only there.
-          # `turbo.json`'s `spindrift#test` and `spindrift#test:chart-pins`
-          # inputs together name the same files — a path missing from all
-          # three lists is a guard that cannot run in CI.
-          # The root `mise.toml`, the sandbox image's copy of its tool list and
-          # `dotfiles/skills/` are here for the same reason: mate's tests
-          # assert against all three, and each is a file nobody would think of
-          # as TypeScript while editing it.
+          # The clusters/, mise.toml and dotfiles/skills/ paths are test inputs.
+          # Keep them in step with the spindrift and mate test inputs in turbo.json.
           files: |
             apps/clankerbanker/**
             apps/hub/**
@@ -114,8 +104,6 @@ jobs:
   validate:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-    # Hosted on the merge path. `runner` is a dispatch escape hatch onto the
-    # self-hosted ARC pools, and the way this suite gets A/B'd against them.
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -124,35 +112,19 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: 1
       TURBO_TELEMETRY_DISABLED: 1
-      # spindrift's tests fake the far side of an adapter, never the database.
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/spindrift
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # Turbo's remote cache, served out of GitHub's own cache service by a
-      # localhost proxy. It replaces an `actions/cache` step that tarred the
-      # whole of `.turbo` under a key ending in `github.sha` — a key that can
-      # never hit, so every run wrote a fresh ~580 MB entry and read back some
-      # older branch's snapshot. A hash that snapshot did not happen to contain
-      # was a miss even when this repo's own CI had already computed it, which
-      # is how a PR touching only one app came to re-run spindrift's suite.
-      # Content-addressed per task hash instead: one small entry each, evicted
-      # one at a time rather than as an indivisible 580 MB block, and readable
-      # from any branch. Nothing leaves GitHub.
-      #
-      # `use-relative-cache-path` makes the archive path — which GitHub folds
-      # into the cache version — independent of the runner's temp directory, so
-      # the hosted pool and the self-hosted ARC pools share one set of entries.
       - name: Turbo remote cache
         uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
         with:
           provider: github
+          # GitHub folds the archive path into the cache version, so a relative
+          # path lets hosted and ARC runners share entries.
           use-relative-cache-path: true
-      # A `services:` container blocks every step in the job — including
-      # Checkout — behind its health check, even though nothing before `Test`
-      # touches the database. Starting it here instead lets it boot in the
-      # background across auth/setup/cache/install/lint/typecheck/build, so by
-      # the time `Wait for Postgres` runs it is normally already healthy.
+      # A `services:` container holds every step behind its health check. Started
+      # here, Postgres boots while the setup steps run.
       - name: Start Postgres
         run: |
           docker rm -f spindrift-test-db >/dev/null 2>&1 || true
@@ -189,22 +161,13 @@ jobs:
       - name: Cache Bun store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          # A runner that relocates bun's store exports BUN_INSTALL_CACHE_DIR;
-          # the cache step must follow it or it caches an empty directory. On
-          # a hosted runner the env is unset and this is the usual path.
+          # Follow a relocated bun store, or this caches an empty directory.
           path: ${{ env.BUN_INSTALL_CACHE_DIR || '~/.bun/install/cache' }}
           key: bun-store-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
             bun-store-${{ runner.os }}-
-      # The App chart's goldens run `helm template` under `bun test`, where the
-      # chart lives (packages/charts). spindrift's own suite templates the same
-      # chart to assert what the record `reach` publishes ends up being, so the
-      # binary is a requirement of both packages rather than one.
-      # yq is named for the same reason: spindrift's declaration-arm suite
-      # executes the shipped "Choose the frontend" script, which calls yq. A
-      # hosted runner preinstalls one and passed by accident; every other label
-      # this repo owns boots the slim actions-runner image, which does not, so
-      # the tool has to be asked for rather than assumed.
+      # apps/spindrift and packages/charts tests run `helm template`, and apps/spindrift
+      # runs the "Choose the frontend" step of spindrift-build.yml, which calls yq.
       - name: Set up Helm and yq
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
