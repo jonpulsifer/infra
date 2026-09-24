@@ -25,9 +25,8 @@ subjects:
   - kind: ServiceAccount
     name: k6-cron
 ---
-# The k6-operator has no scheduler: a TestRun runs once when created. This
-# recreates it daily. A breached threshold exits the runner non-zero, fails
-# its Job (backoffLimit 0), and the stock KubeJobFailed alert pages Discord.
+# A TestRun runs once, on creation, so this recreates it daily. A breached
+# threshold fails the runner Job, and KubeJobFailed alerts on it.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

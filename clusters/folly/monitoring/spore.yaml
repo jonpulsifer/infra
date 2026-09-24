@@ -1,9 +1,5 @@
-# Service-level monitoring for spore, the NFS + PXE (TFTP/HTTP) server and
-# the signed rackpi5 native-boot publisher
-# (nix/hosts/spore.nix). Node-level metrics (node_nfsd_*, /nfs/data
-# filesystem, systemd unit states) arrive via local-node-exporters.yaml;
-# this file scrapes the nginx exporter for the PXE HTTP endpoint and CoreDNS,
-# and carries the NFS/PXE/DNS/application alert rules.
+# Service monitoring for spore (nix/hosts/spore.nix): its nginx and CoreDNS
+# exporters and its service alerts. Node metrics come from local-node-exporters.yaml.
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:

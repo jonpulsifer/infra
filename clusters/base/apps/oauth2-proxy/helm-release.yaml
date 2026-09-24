@@ -34,59 +34,13 @@ spec:
     extraArgs:
       provider: github
       github-user: jonpulsifer
-      # `read:org` is not optional beside `github-user`. Restricting to a user
-      # makes the provider enumerate the caller's organizations before it
-      # decides, and GitHub refuses that read under `user:email` alone:
-      #
-      #   403 You need at least read:org scope or user scope to list your
-      #   organizations.
-      #
-      # The proxy turns that refusal into a 500 on `/oauth2/callback`, so the
-      # sign-in fails *after* the operator has already approved on github.com —
-      # far enough from the cause that the log line is the only thing naming it.
+      # `github-user` makes the provider list the caller's orgs, which GitHub
+      # refuses without `read:org`; the callback then answers 500.
       scope: user:email read:org
-      # `reverse-proxy` and `trusted-proxy-ip` are both deliberately absent.
-      #
-      # No CIDR names the gateway, because the gateway does not have one
-      # address. What oauth2-proxy sees is whatever Cilium's datapath left on
-      # the connection, and that varies with where the answering replica sits:
-      # one host, probing both replicas in the same breath, is seen as its node
-      # address by the replica on the other node and as that node's
-      # `cilium_host` router address by the replica beside it. Through the
-      # gateway the hop is seen as an address in the pod CIDR belonging to no
-      # pod at all. Only the first of those is inside `${K8S_NODE_CIDR}`, so
-      # naming it made two byte-identical replicas answer one request two ways
-      # — one composed an origin out of a client-supplied `X-Forwarded-Host`
-      # and logged it as the request's host, the other ignored it.
-      #
-      # Widening to the pod CIDR would make them agree by putting every pod in
-      # the cluster inside the trust boundary: any pod can reach this Service
-      # directly, so `X-Forwarded-Host` would become a header anything in the
-      # cluster can set. Consistency is not worth that.
-      #
-      # Trusting nothing loses no behaviour, because nothing on the way in
-      # composes `X-Forwarded-Host` or `X-Forwarded-Uri`. Envoy's ext_authz
-      # client carries no header a route's `allowedHeaders` has not named,
-      # beyond the `Host`, method and path it includes on its own, and
-      # `packages/charts/spindrift-app/templates/httproute.yaml` names neither
-      # of those two — on the check's way to port 80 and on its way through the
-      # shim below alike. `redirect-url` further down is absolute, so
-      # `getOAuthRedirectURI` returns it without consulting either.
-      #
-      # It does change one thing, and the change is in the log rather than the
-      # decision. `pkg/validation` installs
-      # `logger.SetGetClientFunc(ip.GetClientString(…))` only under
-      # `reverse-proxy`, so with the flag gone the client column falls back to
-      # the logger's own default of `r.RemoteAddr`: `10.101.1.197:41234` with
-      # the ephemeral port on it rather than `10.101.1.197`, and `X-Real-IP` no
-      # longer consulted there. It names the same hop either way, and that hop
-      # was never the browser.
-      #
-      # They have to go together. `reverse-proxy: "true"` left on its own is not
-      # the cautious half of this: `oauthproxy.go`'s `buildTrustedProxyNetSet`
-      # substitutes `0.0.0.0/0, ::/0` when `--trusted-proxy-ip` is empty, so the
-      # flag alone trusts every caller rather than none.
+      # No `reverse-proxy`: alone it trusts X-Forwarded-* from every caller, and
+      # the gateway hop has no stable source IP, and the pod CIDR would trust every pod.
       redirect-url: https://oauth2.${SECRET_DOMAIN}/oauth2/callback
+      # Also the only gate on `?rd=`, so a caller may return to any host in the zone.
       whitelist-domain: .${SECRET_DOMAIN}
       cookie-domain: .${SECRET_DOMAIN}
       cookie-httponly: "true"
@@ -97,39 +51,8 @@ spec:
       ping-path: ""
       ready-path: ""
 
-    # The ext_authz shim, and the whole reason it exists.
-    #
-    # oauth2-proxy needs an absolute origin to send the browser back to after
-    # sign-in. Behind the ExternalAuth filter it is shown the App's `Host` but
-    # no origin it will use: `pkg/app/redirect/getters.go` reaches
-    # `getXForwardedHeadersRedirect` only when `req.Host != GetRequestHost(req)`,
-    # and with nothing setting `X-Forwarded-Host` those are the same string by
-    # construction. It falls through to `getURIRedirect` and answers with a bare
-    # path, which the callback host then resolves against *itself*.
-    #
-    # Gateway API's ExternalAuth filter has no field that injects a header into
-    # its check request — `allowedHeaders` permits, it does not create — so the
-    # origin is composed one hop later instead. nginx listens on 4181, builds
-    # `X-Auth-Request-Redirect` out of the `Host` Envoy's ext_authz client
-    # already forwards, and proxies to oauth2-proxy on 4180.
-    # `getXAuthRequestRedirect` is consulted ahead of the `X-Forwarded-*` pair
-    # and carries no trusted-proxy gate, so it answers on every request rather
-    # than on the subset that arrives from a trusted address.
-    #
-    # `proxy_set_header` replaces, so a browser cannot smuggle its own
-    # `X-Auth-Request-Redirect` through this hop. The filter not listing that
-    # header in `allowedHeaders` is the other half of the same guard;
-    # `packages/charts/spindrift-app/tests/render.test.ts` pins both.
-    #
-    # `?rd=` is covered by neither. `getRdQuerystringRedirect` runs first, reads
-    # the query string of the request as it arrives, and is gated only by
-    # `whitelist-domain` — so a caller can still pick any host in this zone as
-    # its own post-sign-in destination.
-    #
-    # Only the check path goes through the shim. oauth2-proxy's own endpoints
-    # stay on port 80: `getXAuthRequestRedirect` does not strip the proxy
-    # prefix, so an origin injected in front of `/oauth2/start` points the proxy
-    # at itself.
+    # ExternalAuth cannot add a header to its check, so this nginx sets
+    # X-Auth-Request-Redirect from Host; without it sign-in returns to oauth2.*.
     extraContainers:
       - name: authz-shim
         image: docker.io/nginxinc/nginx-unprivileged:1.31-alpine@sha256:6a23acdfca2b9cfbcec61419e3f1426bcbedb91362f2f19306a8567423bb4612
@@ -166,8 +89,7 @@ spec:
       - name: authz-shim
         configMap:
           name: oauth2-proxy-authz
-      # nginx writes a pid file and creates its temp paths at startup, and the
-      # root filesystem is read-only, so both are pointed here.
+      # nginx's pid file and temp paths; the root filesystem is read-only.
       - name: authz-tmp
         emptyDir: {}
 
@@ -177,10 +99,8 @@ spec:
         metadata:
           name: oauth2-proxy-authz
         data:
-          # nginx's `$var` passes through Flux's postBuild substitution
-          # untouched — only `${var}` is a substitution token. The nginx config
-          # in `clusters/folly/apps/dump` renders `$uri` through the same
-          # mechanism and arrives intact.
+          # Flux substitutes only the braced form, so nginx's `$var` arrives intact.
+          # proxy_set_header replaces, so a browser cannot supply its own redirect.
           nginx.conf: |
             worker_processes 1;
             pid /tmp/nginx.pid;
@@ -211,8 +131,8 @@ spec:
                 }
               }
             }
-      # The filter's backendRef. `service.portNumber` is a single port, so the
-      # shim's is its own Service over the same pods.
+      # The filter's backendRef; `service.portNumber` is one port. Only checks
+      # come here: the injected origin on /oauth2/start would point at the proxy.
       - apiVersion: v1
         kind: Service
         metadata:

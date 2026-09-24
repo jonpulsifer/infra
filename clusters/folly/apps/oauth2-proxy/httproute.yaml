@@ -12,11 +12,8 @@ spec:
   hostnames:
     - "oauth2.${SECRET_DOMAIN}"
   rules:
-    # The whole hostname, for the reason the offsite route carries in full
-    # (`clusters/offsite/apps/oauth2-proxy/httproute.yaml`): a browser can
-    # arrive here on a path that belongs to an App, and a route matching only
-    # `/oauth2` leaves Envoy answering 404 to something the proxy could answer
-    # honestly. Nothing widens — the proxy's only upstream is `static://200`.
+    # Every path: a browser can land here on an App's path, which the proxy
+    # answers and Envoy would 404. The proxy's only upstream is static://200.
     - matches:
         - path:
             type: PathPrefix

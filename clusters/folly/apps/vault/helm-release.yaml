@@ -13,7 +13,7 @@ spec:
         kind: HelmRepository
         name: openbao
   values:
-    # No workloads use agent injection; avoid deploying the Vault-compatible injector.
+    # No workload uses agent injection.
     injector:
       enabled: false
     server:

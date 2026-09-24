@@ -35,11 +35,8 @@ spec:
               value: http://prom-stack-kube-prometheus-prometheus.monitoring.svc:9090
             - name: CLUSTER_NAME
               value: ${CLUSTER_NAME}
-            # wan: Cloudflare DNS; offsite: offsite k8s API VIP over the Site
-            # Magic tunnel (clusters/offsite/config/cluster-topology.json —
-            # not substitutable here because Flux only loads the local
-            # cluster's topology ConfigMap); lb: the Grafana LB VIP, which
-            # exercises the Cilium BGP -> UDM route programming path.
+            # offsite is its API VIP, literal because Flux substitutes only this
+            # cluster's topology. lb is Grafana's VIP, a route the UDM learns by BGP.
             - name: PROBES
               value: wan=1.1.1.1:443,offsite=10.89.0.10:6443,lb=10.3.0.66:443
             - name: ROOT_KUSTOMIZATION

@@ -1,11 +1,6 @@
 ---
-# Two distinct endpoints on the same collector, both named to match
-# opentelemetry-collector.yaml's `ports:` block:
-#   - `monitoring` (8888): the collector's own self-telemetry.
-#   - `prom-metrics` (8889): the data-pipeline `prometheus` exporter — every
-#     OTLP metric a workload (e.g. Spindrift) sends the collector. Without
-#     this second endpoint those metrics reach the collector but no
-#     Prometheus ever scrapes them out of it.
+# `monitoring` (8888) is the collector's own telemetry; `prom-metrics` (8889)
+# is the OTLP metrics workloads send it. Both name ports in opentelemetry-collector.yaml.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

@@ -1,7 +1,6 @@
 ---
-# The log store both clusters write to. Vector ships kubernetes_logs and
-# journald here over the Loki push protocol, which VictoriaLogs accepts at
-# /insert/loki/api/v1/push, so the agents keep their existing stream labels.
+# The log store both clusters write to. Vector pushes here over the Loki
+# protocol, which VictoriaLogs accepts under /insert.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -30,7 +29,7 @@ spec:
     # Without this the chart names everything victoria-logs-victoria-logs-single-*.
     fullnameOverride: victoria-logs
     server:
-      # Months. Loki retained until the disk filled; this bounds it instead.
+      # A bare number is months.
       retentionPeriod: 1
       persistentVolume:
         enabled: true

@@ -1,6 +1,6 @@
 ---
-# Tempo receives OTLP traces from the local OpenTelemetry Collector. Traces
-# stay on folly; folly's Grafana reads them in-cluster.
+# Tempo stores OTLP traces from the local OpenTelemetry Collector for this
+# cluster's Grafana.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -36,9 +36,7 @@ spec:
               endpoint: 0.0.0.0:4317
             http:
               endpoint: 0.0.0.0:4318
-      # storage.trace defaults to backend: local, local.path: /var/tempo/traces,
-      # wal.path: /var/tempo/wal — exactly the local single-binary intent here,
-      # both under the persistence PVC's /var/tempo mount. No override needed.
+      # The default local trace storage and WAL sit under the PVC's /var/tempo.
     service:
       type: ClusterIP
     persistence:

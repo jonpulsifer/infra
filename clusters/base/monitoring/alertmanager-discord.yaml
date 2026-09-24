@@ -1,14 +1,6 @@
 ---
-# One Discord webhook serves both clusters; the `cluster` external label on
-# every alert is what tells the messages apart, so there is nothing per-site
-# here and this lives in base rather than beside each HelmRelease.
-#
-# The receiver lives in an AlertmanagerConfig rather than the HelmRelease's
-# inline `alertmanager.config`, because the operator parses that inline config
-# with its own Go types before generating the running one, and its discordConfig
-# has no `webhook_url_file` — it rejects the whole document and silently keeps
-# serving the last config it accepted. `apiURL` below is the operator's own
-# secret reference, so the URL still never appears in git.
+# An AlertmanagerConfig, not inline `alertmanager.config`: the operator rejects
+# discord `webhook_url_file` there and silently keeps its last accepted config.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -25,21 +17,12 @@ spec:
   data:
     - secretKey: webhook-url
       remoteRef:
-        # Item id rather than title, so renaming the item in 1Password cannot
-        # quietly stop alert delivery.
+        # An item id, so renaming the 1Password item cannot stop delivery.
         key: aujvxijpz3oi25ccfdynev5sb4
         property: password
 ---
-# The operator merges this as the FIRST sub-route of the HelmRelease's
-# top-level route and forces `continue: true` on it, so it is evaluated before
-# that route's own entries and does not stop them matching. The always-firing
-# plumbing alerts therefore have to be excluded here: relying on a later route
-# to swallow them first does not work, they just land in both receivers.
-# Watchdog certifies the pipeline is alive and InfoInhibitor only exists as an
-# inhibition source — neither says anything about the fleet.
-#
-# Matching everything else only works because alertmanagerConfigMatcherStrategy
-# is None; the default would pin this to alerts labelled namespace=monitoring.
+# The operator makes this the first sub-route with `continue: true`, so the
+# always-firing Watchdog and InfoInhibitor must be excluded here.
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -49,6 +32,7 @@ metadata:
     alertmanagerConfig: discord
 spec:
   route:
+    # Matches every namespace only while alertmanagerConfigMatcherStrategy is None.
     receiver: discord
     matchers:
       - name: alertname

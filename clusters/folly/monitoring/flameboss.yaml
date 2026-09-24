@@ -1,15 +1,5 @@
-# The barbecue, as a monitoring target.
-#
-# The Flame Boss controller publishes to Flame Boss's own cloud MQTT brokers,
-# never to the lab, so the only way to graph a cook is to be a client of that
-# cloud. apps/flameboss is that client: it follows the controller to whichever
-# server it is currently on and exports its `temps` uplinks as Prometheus
-# series, which is what makes a cook something Alertmanager can read. The
-# alerts are in flameboss-rules.yaml; the dashboard is in grafana-dashboards/.
-#
-# It lives in `monitoring` rather than an app namespace of its own because it
-# is an exporter — nothing else consumes it, and the ServiceMonitor,
-# PrometheusRule and dashboard that make it useful are all here.
+# The Flame Boss exporter. The controller publishes only to Flame Boss's cloud
+# MQTT, so apps/flameboss subscribes there and exports the readings.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -17,10 +7,8 @@ metadata:
   namespace: monitoring
 type: Opaque
 stringData:
-  # Flux substitutes these from the `cluster-secrets` Secret; the plaintext
-  # lives only in clusters/folly/config/cluster-secrets.sops.yaml. The username
-  # is the `T-<user_id>` form from myflameboss.com/users/dev, and the exporter
-  # reads the account id out of it rather than keeping a third value in step.
+  # The T-<user_id> username from myflameboss.com/users/dev; the exporter reads
+  # the account id out of it.
   username: ${SECRET_FLAMEBOSS_USERNAME}
   password: ${SECRET_FLAMEBOSS_PASSWORD}
 ---
@@ -34,8 +22,7 @@ metadata:
     app.kubernetes.io/part-of: monitoring
 spec:
   replicas: 1
-  # One MQTT client. A second pod would announce the same account, hold its own
-  # connections, and export the same cook twice under two instance labels.
+  # A second pod would export the same cook twice under two instance labels.
   strategy:
     type: Recreate
   selector:
@@ -48,12 +35,8 @@ spec:
         app.kubernetes.io/part-of: monitoring
     spec:
       automountServiceAccountToken: false
-      # Off, because the Service in front of this pod is called `flameboss` and
-      # the link variables Kubernetes injects for it are named after it:
-      # `FLAMEBOSS_PORT=tcp://10.10.22.180:8080` landed on top of the exporter's
-      # own `FLAMEBOSS_PORT` and the process exited on "not a number". The pod
-      # reaches the Flame Boss cloud and nothing in the cluster, so it has no
-      # use for any of them.
+      # A service link sets FLAMEBOSS_PORT to a tcp:// URL, which the exporter
+      # reads as its MQTT port and exits on.
       enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
@@ -134,9 +117,8 @@ metadata:
     release: prom-stack
 spec:
   jobLabel: jobLabel
-  # The controller publishes about once a minute while it holds a steady pit,
-  # and far more often while the fire is moving. A 30s scrape is one sample per
-  # reading at worst and never the limiting factor on the graph.
+  # At a steady pit the controller publishes about once a minute, so 30s samples
+  # every reading.
   endpoints:
     - port: http-metrics
       interval: 30s

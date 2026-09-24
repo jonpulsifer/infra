@@ -1,21 +1,6 @@
 ---
-# The edge Spindrift's Apps are served on, separate from `cluster-gateway` and
-# from the control plane's own `spindrift-gateway`.
-#
-# Its own Gateway rather than a listener on a shared one. App traffic is
-# developer-controlled and arrives from the internet through the tunnel, so it
-# gets its own Envoy listener set and its own load-balancer address: an App
-# cannot crowd the media stack's edge, and it cannot crowd the operator UI that
-# is supposed to still answer when an App is melting down.
-#
-# It lives in `spindrift-apps`, beside the workloads it serves. That costs
-# nothing the App chart's NetworkPolicy was buying: same-namespace siblings are
-# already an unconditional exception there, because a release's own pods are the
-# one caller that cannot be named ahead of time.
-#
-# It is a vessel resource all the same — the App chart renders a route and
-# nothing else, so no release owns the gateway, the certificate, or the address,
-# and a `destroy()` cannot take them with it.
+# The App edge: its own Gateway and LB address, so App traffic cannot crowd
+# `cluster-gateway` or the control plane's `spindrift-gateway`.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: Gateway
 metadata:
@@ -25,28 +10,15 @@ metadata:
     cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
 spec:
   gatewayClassName: cilium
-  # Pinned, because the Target's `platform.dns.privateAddress` is the literal
-  # address every `reach: private` App publishes an A record to. An address the
-  # pool reassigns on a rebuild would silently point a whole zone at nothing.
-  #
-  # If the implementation will not honour the request it is required to report
-  # `Programmed=False` with reason `AddressNotAssigned` and assign nothing —
-  # so this fails as a gateway that does not come up, which is visible, rather
-  # than as a zone pointed at an address serving somebody else.
+  # Pinned: every `reach: private` App's A record names this address
+  # (`platform.dns.privateAddress`).
   addresses:
     - type: IPAddress
       value: 10.89.0.69
-  # Every listener admits routes by namespace label, never by name. An App's
-  # route renders into the App's own namespace, which Spindrift creates with
-  # the release and stamps `app.kubernetes.io/part-of: spindrift`
-  # (`apps/spindrift/src/adapters/deploy/kubernetes/index.ts`); `spindrift-apps`
-  # carries the same label for the status route. A name list here would have
-  # to be edited for every App, and a route a listener does not admit is
-  # `Accepted=False` at the gateway while the deploy reads LIVE.
+  # Listeners admit routes by namespace label; a route none admits is
+  # `Accepted=False` while the deploy reads LIVE.
   listeners:
-    # The tunnel's origin, and so the only leg `reach: public` travels. Plain
-    # HTTP is correct here: the leg is inside the cluster and Cloudflare
-    # terminates TLS at the edge.
+    # The tunnel's origin; Cloudflare terminates TLS at the edge.
     - name: http-gateway
       protocol: HTTP
       port: 80
@@ -58,14 +30,8 @@ spec:
               app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
-    # One wildcard for every App name Spindrift mints, rather than a listener
-    # per App: the App chart renders a route and nothing else, so there is no
-    # release that could own a listener or a certificate. cert-manager's
-    # gateway-shim issues it by DNS-01 from the annotation at the top of this
-    # Gateway. A wildcard binds exactly one label, which is why App names are
-    # flat — `plainboi-web` is covered, `web.plainboi` is not. The authenticated
-    # edge a `reach: private` App redirects to answers on `cluster-gateway`, so
-    # no route of oauth2-proxy's attaches here.
+    # A wildcard binds one label, so App names are flat: `plainboi-web`, not
+    # `web.plainboi`. cert-manager issues it from the annotation above.
     - name: spindrift-apps-tls
       protocol: HTTPS
       port: 443
@@ -82,11 +48,8 @@ spec:
               app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
-    # The second zone the installation manifest mints in, and the one that is
-    # also the hand-managed flat space. A listener here serves only the names
-    # that route to it: `cluster-gateway` keeps its own `*.${SECRET_DOMAIN}`
-    # listener on its own address, and which of the two a name reaches is
-    # decided per record by the App chart's DNSEndpoint, never by this wildcard.
+    # The App chart's DNSEndpoint decides per record whether a name reaches this
+    # listener or `cluster-gateway`'s own wildcard.
     - name: spindrift-apps-tls-secret-domain
       protocol: HTTPS
       port: 443
@@ -103,10 +66,7 @@ spec:
               app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
-    # A public-only zone (`reaches: [public]` in the manifest), so every name on
-    # this listener arrives through the tunnel and none of them is ever an
-    # RFC1918 A record. `auth: proxy` on a public App is the cell §9 already
-    # refuses.
+    # Public-only: names arrive through the tunnel, never as RFC1918 records.
     - name: spindrift-apps-tls-wishin
       protocol: HTTPS
       port: 443
@@ -123,9 +83,8 @@ spec:
               app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
-    # Public-only like wishin.app. The App at this zone's apex rides the
-    # `http-gateway` listener above, which names no hostname; a wildcard never
-    # matches the apex, and TLS for it is terminated at the edge.
+    # Public-only. The apex App rides `http-gateway`: a wildcard never matches
+    # the apex, and the edge terminates its TLS.
     - name: spindrift-apps-tls-clankerbanker
       protocol: HTTPS
       port: 443

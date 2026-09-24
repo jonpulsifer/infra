@@ -1,19 +1,6 @@
 ---
-# Every line of the office phone runs through the folly PBX
-# (clusters/folly/apps/pbx), and every way it breaks is silent from the desk:
-# the handset shows nothing until someone calls and it does not ring. These
-# three watch it from the outside in — the PBX itself, each of its four trunks
-# to the carrier, each of the four lines on the handset.
-#
-# PBXDown is the one the other two lean on. Asterisk exports its own series,
-# so when the pod is gone there is nothing left for a `!= 1` or `!= 2` to
-# compare, and those alerts read a dead PBX exactly like a healthy one. The
-# `absent()` half is what catches that.
-#
-# Five minutes on every alert. A PBX rollout drops the handset's registration
-# until its next REGISTER, which is at most a minute with every line
-# re-registering every 60s; the trunks re-register within seconds of boot.
-# Neither should page.
+# Office phone alerts: the PBX, its carrier trunks and the handset lines. Every
+# alert waits five minutes, because a PBX rollout drops the handset for up to a minute.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -26,8 +13,8 @@ spec:
     - name: pbx
       rules:
         - alert: PBXDown
-          # `sum by` gives both halves the same label set, so one alert covers
-          # "scraped and failing" and "not there at all".
+          # `sum by` gives both halves one label set. Asterisk exports the other
+          # alerts' series, so only absent() sees a PBX that is gone.
           expr: sum by (namespace, job) (up{namespace="pbx", job="pbx-metrics"}) == 0 or absent(up{namespace="pbx", job="pbx-metrics"})
           for: 5m
           labels:

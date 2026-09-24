@@ -7,10 +7,8 @@ metadata:
     cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
 spec:
   gatewayClassName: cilium
-  # Pinned, because the lab CoreDNS (nix/services/coredns-sinkhole.nix) hands
-  # the counter this literal address for api.smiirl.com; an address the pool
-  # reassigns on a rebuild would strand the device. Free in this cluster's
-  # `LB_RANGE` (`cluster-topology.json`).
+  # Pinned: the lab CoreDNS (nix/services/coredns-sinkhole.nix) answers
+  # api.smiirl.com with this literal. It must stay free inside LB_RANGE.
   addresses:
     - type: IPAddress
       value: 10.3.0.84
@@ -45,10 +43,8 @@ spec:
           - kind: Secret
             name: *counter
 ---
-# The device hostname goes straight to the app, which answers it the way the
-# cloud does (a boot-time GET /number and GET / included) and never offers the
-# page or its writable /api on it, since every iot-VLAN client resolves this
-# name.
+# Every iot-VLAN client resolves this name, so the app serves only the firmware
+# routes on it, never the page or the writable /api.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
 metadata:
@@ -60,8 +56,7 @@ spec:
   hostnames:
     - api.smiirl.com
   rules:
-    - # The number poll is held up to 12 s in the app; Envoy's default route
-      # timeout is 15 s, too close for comfort on a slow round trip.
+    - # The app holds a poll up to 12 s; Envoy's 15 s default is too tight.
       timeouts:
         request: 30s
         backendRequest: 30s

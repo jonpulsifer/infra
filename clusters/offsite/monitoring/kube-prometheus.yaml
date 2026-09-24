@@ -1,8 +1,6 @@
 ---
-# Offsite's own Prometheus + Grafana + Alertmanager. Only Grafana is exposed
-# (ingress to grafana-offsite.lolwtf.ca); Prometheus and Alertmanager are
-# ClusterIP-only. This keeps all metric, log, and trace traffic on the local
-# network — nothing crosses the satellite link to folly except the Grafana UI.
+# Offsite's own Prometheus, Grafana and Alertmanager. Only Grafana has an
+# ingress, so metrics, logs and traces stay on this site.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -28,9 +26,7 @@ spec:
     remediation:
       retries: 5
   values:
-    # The CRDs come from the monitoring-crds Kustomization this one dependsOn,
-    # so they already exist and belong to another release by the time this
-    # installs. Leaving this true makes Helm refuse to adopt them.
+    # The monitoring-crds Kustomization owns the CRDs; Helm refuses to adopt them.
     crds:
       enabled: false
     defaultRules:
@@ -39,9 +35,8 @@ spec:
         kubeControllerManager: false
         kubeProxy: false
         kubeSchedulerAlerting: false
-    # Kubelet carries cAdvisor, so every container_* series and with it the
-    # whole k8s-resources dashboard set depends on this being scraped. It also
-    # backs the KubeletDown rule, which defaultRules leaves on.
+    # cAdvisor rides the kubelet scrape: every container_* series and the
+    # KubeletDown rule need it.
     kubelet:
       enabled: true
     kubeControllerManager:
@@ -56,15 +51,11 @@ spec:
         enabled: false
       prometheusSpec:
         serviceDiscoveryRole: EndpointSlice
-        # Same window as folly so a query spans both sites the same way.
-        # 30d here measures ~10GiB against retrofit's 350G of free space; the
-        # size arm matches folly's for one number to reason about, not because
-        # this disk is tight.
+        # Same retention as folly, so a query spans both sites alike.
         retention: 30d
         retentionSize: 16GB
-        # `cluster` is what tells the two sites apart once alerts land in one
-        # Discord channel, and it is the variable every multi-cluster dashboard
-        # in the chart groups on.
+        # Tells the sites apart in the shared Discord channel and in the
+        # multi-cluster dashboards.
         externalLabels:
           cluster: ${CLUSTER_NAME}
         storageSpec:
@@ -75,21 +66,11 @@ spec:
               resources:
                 requests:
                   storage: 25Gi
-        # Pick up the opentelemetry-collector ServiceMonitor from base/monitoring
-        # and any ServiceMonitors this chart ships, via the release label.
         serviceMonitorSelectorNilUsesShards: false
-        # PodMonitors are selected by existing, not by carrying `release:
-        # prom-stack`. CloudNativePG renders the PodMonitor for a Cluster with
-        # `enablePodMonitor` itself and offers nowhere to add a label to it, so
-        # with the chart's default selector every CNPG instance in this cluster
-        # is scraped by nothing — and the alert that says the database is gone
-        # is indistinguishable from the metric never arriving.
+        # Select every PodMonitor: CNPG renders its own with no way to add
+        # `release: prom-stack`.
         podMonitorSelectorNilUsesHelmValues: false
     alertmanager:
-      # The chart's stock route sends everything to a receiver named "null",
-      # which accepts alerts and discards them. Without this block the whole
-      # pipeline runs and notifies nobody. Offsite has no Alertmanager ingress,
-      # so Discord is the only way an alert from here reaches anyone.
       config:
         route:
           group_by: [cluster, namespace, alertname]
@@ -99,9 +80,8 @@ spec:
           # Anything the AlertmanagerConfig sub-route does not take lands here.
           receiver: "null"
           routes:
-            # Watchdog fires forever by design — it means the pipeline is alive.
-            # Delivering it twice a day trains the channel to ignore itself, and
-            # its absence is the signal, which Discord cannot show anyway.
+            # Watchdog always fires; its absence is the signal, which Discord
+            # cannot show.
             - receiver: "null"
               matchers:
                 - alertname = "Watchdog"
@@ -119,9 +99,8 @@ spec:
             equal: [namespace]
           - target_matchers: [alertname = "InfoInhibitor"]
       alertmanagerSpec:
-        # The Discord receiver is an AlertmanagerConfig in base/monitoring. The
-        # operator merges only the ones it can select, and the chart's default
-        # selector is empty, which selects nothing.
+        # The Discord receiver is an AlertmanagerConfig in base/monitoring; the
+        # chart's default selector selects none.
         alertmanagerConfigSelector:
           matchLabels:
             alertmanagerConfig: discord
@@ -148,14 +127,8 @@ spec:
           orgId: 1
           version: 1
           jsonData:
-            # Every Vector sink writes with tenant_id "1", which VictoriaLogs
-            # reads as the AccountID header. A query that sends no header gets
-            # tenant 0, so without this Grafana reads an account nothing
-            # writes to and every log panel is empty while the store is full.
-            # Measured on folly: 13,459 entries in one hour under AccountID 1,
-            # 36 under 0, which is all Grafana could see.
-            #
-            # Strings, not numbers. The plugin rejects integers here.
+            # Vector writes tenant 1; without this header a query reads tenant 0
+            # and every panel is empty. Strings: the plugin rejects integers.
             multitenancyHeaders:
               AccountID: "1"
               ProjectID: "0"
@@ -191,31 +164,21 @@ spec:
         storageClassName: local-path
         size: 1Gi
     kube-state-metrics:
-      # Turns Gateway API generations into series; the config and the alerts
-      # that read them are in ../../base/monitoring/gateway-api-generation.yaml.
+      # Config and alerts: ../../base/monitoring/gateway-api-generation.yaml.
       customResourceState:
         enabled: true
         create: false
         name: kube-state-metrics-gateway-api
       rbac:
-        # The chart grants the built-in collectors' RBAC and nothing else, so a
-        # custom-resource-state config with no matching rule here starts clean
-        # and exports an empty set. GatewayAPIMetricsMissing is what catches
-        # that.
+        # The chart grants only the built-in collectors' RBAC; without these
+        # rules the custom config exports nothing.
         extraRules:
           - apiGroups: [gateway.networking.k8s.io]
             resources: [gateways, httproutes]
             verbs: [list, watch]
     prometheus-node-exporter:
-      # A host service that wants metrics scraped drops a .prom file in
-      # /var/lib/prometheus-node-exporter-text-files, and this picks it up
-      # labelled with the node it came from -- the same drop box folly uses.
-      # That is how a host service with no listener in-cluster Prometheus can
-      # reach gets its metrics scraped.
-      #
-      # Reached through the host-root mount the chart already makes, so this
-      # needs no extra volume. extraArgs REPLACES the chart's defaults, so the
-      # two filesystem excludes below are the chart's own and must stay.
+      # Host services drop .prom files in the textfile directory. extraArgs
+      # replaces the chart defaults, so keep its two filesystem excludes.
       extraArgs:
         - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
         - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$

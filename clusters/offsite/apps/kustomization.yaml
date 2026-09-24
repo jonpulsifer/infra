@@ -29,8 +29,8 @@ patches:
       - op: replace
         path: /spec/upgrade
         value: { cleanupOnFail: true, remediation: { retries: 5 } }
-  # chart.spec.interval only exists on HelmRepository-backed HelmReleases;
-  # OCIRepository-backed ones (chartRef) are labeled to skip it.
+  # chart.spec.interval exists only on chart.spec releases; chartRef-backed
+  # ones carry this label to skip it.
   - target:
       group: helm.toolkit.fluxcd.io
       version: v2

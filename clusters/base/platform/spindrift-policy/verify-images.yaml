@@ -21,8 +21,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-              # The shared namespace and every per-App one: Spindrift names an
-              # App's namespace `app-<app>` (`appNamespace` on the Target).
+              # Per-App namespaces are named `app-<app>`.
               namespaces:
                 - spindrift-apps
                 - "app-*"
@@ -41,24 +40,11 @@ spec:
             - count: 1
               entries:
                 - keys:
-                    # sha512, because that is what the key is:
-                    # `google_kms_crypto_key.signer` is
-                    # `RSA_SIGN_PKCS1_4096_SHA512`
-                    # (terraform/gcp/projects/trusted-builds/kms.tf), so cosign
-                    # hashes with SHA-512 and a verifier told sha256 is
-                    # verifying with the wrong digest.
+                    # The KMS signer is RSA_SIGN_PKCS1_4096_SHA512, declared in
+                    # terraform/modules/spindrift-supply-chain/kms.tf.
                     signatureAlgorithm: sha512
-                    # There is no public transparency log in this trust model —
-                    # the signer is a KMS key whose public half is pinned right
-                    # below, and the build workflow signs with
-                    # `--tlog-upload=false` for the same reason core's own
-                    # signer does. Left at the default, Kyverno looks for a
-                    # Rekor entry that by construction does not exist and
-                    # refuses every signature.
-                    #
-                    # Under `rekor`, and `ctlog` is a different thing: `ctlog`
-                    # carries `ignoreSCT` for certificate timestamps, which a
-                    # keyed signature has none of.
+                    # Builds sign with `--tlog-upload=false`, so no Rekor entry
+                    # exists and the default refuses every signature.
                     rekor:
                       ignoreTlog: true
                     publicKeys: |-

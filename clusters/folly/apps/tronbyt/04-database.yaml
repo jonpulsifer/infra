@@ -12,10 +12,9 @@ spec:
       owner: tronbyt
       secret:
         name: tronbyt-db
-  # Declaring nothing here left the instance BestEffort, which is the first QoS
-  # class the kubelet evicts under node memory pressure — an unhelpful property
-  # for the thing holding the data. Sized off observed use: 11m CPU and a 91Mi
-  # working set peak over 6h. No CPU limit, same reasoning as the app.
+  # Requests keep the database out of BestEffort, which the kubelet evicts
+  # first. No CPU limit, as with the app.
+  # Sized to observed peaks of 11m CPU and 91Mi.
   resources:
     requests:
       cpu: 50m

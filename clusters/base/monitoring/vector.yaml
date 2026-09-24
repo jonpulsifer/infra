@@ -61,31 +61,14 @@ spec:
           type: journald
           journal_directory: /var/log/journal
       transforms:
-        # VictoriaLogs reads the log line from `_msg`. Both sources put it in
-        # `message`, so without this every entry it stores carries the literal
-        # "missing _msg field; see ..." placeholder as its line and the real
-        # text is only reachable by naming the `message` field in the query.
-        #
-        # One per source rather than one shared transform: each sink below
-        # labels its own stream, and a single transform feeding both would
-        # hand every journald line to the sink that stamps job=kubernetes.
+        # VictoriaLogs reads the line from `_msg`; both sources write `message`.
+        # One transform per source, so each sink labels only its own stream.
         kubernetes_message:
           type: remap
           inputs:
             - kubernetes_logs
-          # The PBX logs every SIP message it sends and receives, decrypted —
-          # which is the point, and also means the two secrets SIP carries
-          # would be stored here verbatim: the SRTP master key in every SDP's
-          # `a=crypto ... inline:` attribute, and the digest response in every
-          # `Authorization` header. Storing the keys would undo the media
-          # encryption for anyone who can read this store. Both are cut here,
-          # before the sink, and the rest of the message — SDP, headers, the
-          # nonce a challenge carries — is kept for debugging.
-          #
-          # Scoped to the pbx namespace, so a regex never touches any other
-          # workload's lines. No `$` anywhere in the program: this file is
-          # substituted by Flux, and a `$` in a VRL replacement is exactly what
-          # its envsubst would eat.
+          # Redacts the SRTP keys and SIP digest responses the PBX logs in clear.
+          # Keep `$` out of the program: Flux substitution runs over this file.
           source: |
             ._msg = del(.message)
             if .kubernetes.pod_namespace == "pbx" && is_string(._msg) {
@@ -99,9 +82,7 @@ spec:
           source: |
             ._msg = del(.message)
       sinks:
-        # The loki sink appends /loki/api/v1/push to endpoint itself, so this
-        # stops at /insert. Spelling the full path here posts it twice and
-        # VictoriaLogs answers 400 unsupported path.
+        # The loki sink appends /loki/api/v1/push itself; a full path gets a 400.
         victoria_logs_kubernetes:
           type: loki
           inputs:

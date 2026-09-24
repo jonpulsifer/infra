@@ -8,18 +8,8 @@ metadata:
     app.kubernetes.io/part-of: jellyfin
 spec:
   replicas: 1
-  # riptide advertises exactly one gpu.intel.com/i915, and the container below
-  # claims it. A surging replacement is scheduled before the old pod releases
-  # its claim, so the new one can never be placed and the rollout deadlocks —
-  # the old pod keeps the device it is no longer able to use.
-  #
-  # `maxSurge: 0` rather than `type: Recreate`, which says the same thing about
-  # one replica and cannot be applied here: the live object carries the
-  # `rollingUpdate` block the API server defaulted, owned by a field manager
-  # this apply is not, so a `Recreate` patch merges into an object holding both
-  # and the API refuses it — `rollingUpdate: Forbidden ... when strategy type is
-  # 'Recreate'`. That is a dry-run failure, so Flux stops applying the whole
-  # Kustomization rather than only this file.
+  # riptide has one gpu.intel.com/i915, so a surge pod cannot schedule while the
+  # old pod holds it. Recreate fails: SSA cannot prune the defaulted rollingUpdate.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -75,10 +65,7 @@ spec:
           hostPath:
             path: /mnt/disks/media
             type: DirectoryOrCreate
-      # No /dev/dri hostPath: the gpu.intel.com/i915 limit above already has the
-      # device plugin inject the render node. Bind-mounting the whole directory
-      # on top of that also drags in /dev/dri/by-path, where a dangling
-      # simple-framebuffer symlink survives the handover to i915 at boot and
-      # fails container creation outright.
+      # No /dev/dri hostPath: the device plugin injects the render node, and
+      # a dangling symlink in /dev/dri/by-path fails container creation.
       nodeSelector:
         intel.feature.node.kubernetes.io/gpu: "true"

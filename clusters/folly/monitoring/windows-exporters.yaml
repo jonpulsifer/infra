@@ -1,11 +1,6 @@
 ---
-# The Windows desktops, scraped the same way the bare NixOS hosts are: a
-# hand-written EndpointSlice standing in for the endpoints a Service would
-# otherwise get from pod selection.
-#
-# Addresses come from the lab-topology ConfigMap, which is also what
-# terraform/network/unifi/folly/windows-hosts.tf reserves them from, so the
-# DHCP reservation and the scrape target cannot drift apart.
+# The Windows desktops, scraped through a hand-written EndpointSlice. Addresses
+# come from lab-topology, as in terraform/network/unifi/folly/windows-hosts.tf.
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
@@ -19,10 +14,8 @@ ports:
   - name: http-metrics
     port: 9182
     protocol: TCP
-  # OhmGraphite, which reads the motherboard and GPU sensors through
-  # LibreHardwareMonitor. windows_exporter cannot: its thermalzone collector
-  # only sees ACPI zones, which on a desktop board is one number that means
-  # nothing. Separate port because it is a separate service.
+  # OhmGraphite, for motherboard and GPU sensors: windows_exporter's
+  # thermalzone collector sees only ACPI zones.
   - name: sensors
     port: 4445
     protocol: TCP
@@ -63,9 +56,8 @@ spec:
   jobLabel: jobLabel
   endpoints:
     - port: http-metrics
-      # A desktop scrape is heavier than a Pi's — the service collector alone
-      # is a few thousand series — and nothing here needs sub-minute
-      # resolution.
+      # The service collector alone is a few thousand series, and nothing here
+      # needs sub-minute resolution.
       interval: 60s
       scrapeTimeout: 30s
       relabelings:
@@ -73,8 +65,7 @@ spec:
           sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
           targetLabel: instance
     - port: sensors
-      # OhmGraphite polls the sensors on scrape rather than in the background,
-      # and reading a SuperIO chip is not instant.
+      # OhmGraphite reads the sensors on scrape, and a SuperIO read is slow.
       interval: 60s
       scrapeTimeout: 30s
       relabelings:
@@ -99,15 +90,11 @@ metadata:
 spec:
   groups:
     - name: windows-exporters
-      # Deliberately no target-missing alert. These are desktops: powering one
-      # off is the normal case, and an alert that fires every night is an
-      # alert nobody reads. What is worth knowing is stated while the machine
-      # is up, so every rule here resolves on its own when the host goes away.
+      # No target-missing alert: a powered-off desktop is normal, so every rule
+      # resolves when the host goes away.
       rules:
-        # Scoped to lettered volumes. The logical_disk collector also emits
-        # HarddiskVolumeN for the EFI system and recovery partitions, which are
-        # sized to their contents and sit permanently near full — unfiltered,
-        # they fire this alert forever on every host.
+        # Lettered volumes only: the EFI and recovery partitions (HarddiskVolumeN)
+        # sit near full permanently.
         - alert: WindowsDiskFillingUp
           expr: |
             windows_logical_disk_free_bytes{volume=~"[A-Z]:"}
@@ -140,9 +127,8 @@ spec:
             message: "{{ $labels.instance }} has {{ $value | humanizePercentage }} of RAM available"
             description: "Sustained low available memory. Check the process collector or Task Manager for a leak."
 
-        # A collector that fails returns nothing rather than erroring the
-        # scrape, so the metrics it owns simply vanish and every rule built on
-        # them goes quiet. This is the only thing that notices.
+        # A failing collector drops its metrics without failing the scrape, so
+        # the rules built on them go quiet.
         - alert: WindowsCollectorFailing
           expr: windows_exporter_collector_success == 0
           for: 15m
@@ -153,13 +139,8 @@ spec:
             description: "Usually a missing or corrupted performance counter. `lodctr /R` from an elevated prompt rebuilds the counter registry."
 
     - name: windows-sensors
-      # These read OhmGraphite, which names every series
-      # ohm_<hardwaretype>_<unit> and labels it with the LibreHardwareMonitor
-      # hardware and sensor strings (OhmGraphite/PrometheusCollection.cs).
-      # An NVIDIA card is hardware type `gpunvidia`; AMD and Intel are
-      # `gpuamd` and `gpuintel`, hence the regex rather than one name. Until
-      # OhmGraphite is installed on a host these series do not exist and
-      # nothing here can fire.
+      # OhmGraphite names series ohm_<hardwaretype>_<unit>; the GPU types are
+      # gpunvidia, gpuamd and gpuintel.
       rules:
         - alert: WindowsCpuTempHigh
           expr: max by (instance) (ohm_cpu_celsius{sensor=~"CPU Package|CPU Core.*"}) > 90
@@ -192,13 +173,8 @@ spec:
             message: "{{ $labels.instance }} fan {{ $labels.sensor }} reads 0 RPM while the CPU is above 70C"
             description: "Zero RPM is normal in a semi-passive curve, so this only fires once the CPU is already hot."
 
-        # The bundled LibreHardwareMonitor still calls a drive HDD, whatever
-        # it actually is, so the family is ohm_hdd_celsius and not the
-        # ohm_storage_celsius today's upstream enum would suggest. Matched as
-        # a name regex so an OhmGraphite bump onto a newer library does not
-        # silently stop this firing. The sensor filter matters too: the same
-        # family carries each drive's static Critical and Warning thresholds
-        # as sensors, which are 85-90 and would trip this constantly.
+        # The bundled LibreHardwareMonitor names every drive hdd; newer ones say
+        # storage. The sensor filter skips the static threshold sensors.
         - alert: WindowsStorageTempHigh
           expr: |
             max by (instance, hardware) (

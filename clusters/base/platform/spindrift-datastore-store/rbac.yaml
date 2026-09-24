@@ -1,18 +1,6 @@
 ---
-# What lets a datastore credential cross a namespace, and the one place in this
-# design where something is granted `secrets`.
-#
-# **It is not Spindrift.** That distinction is the whole point: §11's rule is
-# that Spindrift never holds a copy of a datastore credential, and it still does
-# not. This grant belongs to external-secrets, which mirrors the operator's
-# Secret into the App's namespace and keeps mirroring it — so a rotation
-# CloudNativePG performs reaches the next pod with no Deploy, and the value
-# never passes through Spindrift on the way.
-#
-# Scoped to `spindrift-datastores` and nothing else. RBAC matches `resourceNames`
-# literally and the Secret names are derived from Datastore names typed at
-# runtime, so this could not have named them; what bounds it instead is the
-# namespace, which holds datastore credentials and no other kind of secret.
+# Secret names come from Datastore names chosen at runtime, so the namespace
+# bounds this grant, not `resourceNames`.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -27,9 +15,7 @@ rules:
       - get
       - list
       - watch
-  # Required for the provider's own validation: external-secrets asks what it is
-  # allowed to do before it tries, and a store whose identity cannot ask reports
-  # itself invalid rather than failing on first fetch.
+  # Store validation asks what it may do; without this the store reports invalid.
   - apiGroups:
       - authorization.k8s.io
     resources:

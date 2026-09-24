@@ -16,6 +16,6 @@ spec:
   blocks:
     - cidr: ${LB_RANGE}
   serviceSelector:
-    # give all load balancers and gateways an IP from the blocks above
+    # Selects every Service: nothing is labelled debug=lol.
     matchExpressions:
       - { key: debug, operator: NotIn, values: [lol] }

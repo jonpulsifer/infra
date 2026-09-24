@@ -1,5 +1,5 @@
 ---
-# Connect server: same Secret as ESO client auth; uses key 1password-credentials.json only.
+# The Connect server. Its Secret also holds the token the ClusterSecretStore uses.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:

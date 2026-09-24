@@ -5,21 +5,8 @@ metadata:
   name: gvisor
 handler: runsc
 ---
-# Each kata pod is a microVM, so the node pays for a guest kernel and a VMM
-# process on top of the containers themselves. podFixed keeps the scheduler
-# honest about that; without it a node packs kata pods as if they were free and
-# goes to memory pressure.
-#
-# kata-clh's number is measured on oldschool rather than estimated: a live
-# mate sandbox takes about 1 GiB of the node's memory while its own pod
-# cgroup reports 600-720 MiB of working set. The difference is the VMM, and
-# it sits outside the pod's cgroup, so what this does not claim is memory the
-# kubelet cannot see anywhere. kata's is still an estimate, because nothing
-# runs under it.
-#
-# kata runs QEMU; kata-clh runs Cloud Hypervisor. Same kata stack, same KVM,
-# same guest image — a different VMM process around it. Both handlers are
-# registered on every node by nix/services/k8s/kata.nix.
+# podFixed charges each microVM's guest kernel and VMM, which run outside the
+# pod cgroup. nix/services/k8s/kata.nix registers both handlers on every node.
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
@@ -28,6 +15,7 @@ handler: kata
 overhead:
   podFixed:
     cpu: 250m
+    # An estimate: no workload runs under the QEMU handler.
     memory: 192Mi
 ---
 apiVersion: node.k8s.io/v1
@@ -38,4 +26,5 @@ handler: kata-clh
 overhead:
   podFixed:
     cpu: 250m
+    # A sandbox takes about 1 GiB of node memory against 600-720 MiB in its cgroup.
     memory: 384Mi

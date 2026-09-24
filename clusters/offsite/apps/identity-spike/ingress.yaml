@@ -1,8 +1,6 @@
 ---
-# `tls.hosts[0]`'s first label is the tailnet hostname the operator claims, so
-# this answers at https://identity-spike.pirate-musical.ts.net. No Funnel
-# annotation: identity headers are tailnet-only and a funnelled request carries
-# none.
+# The first label of tls.hosts[0] is the tailnet hostname. No Funnel: a
+# funnelled request carries no identity headers.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

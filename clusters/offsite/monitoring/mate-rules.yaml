@@ -1,62 +1,8 @@
 ---
-# mate answers one human in one Discord guild and has no other surface, so
-# nothing about it is noticed by being used. These are the alerts that say
-# "mate is alive and this is what it is doing" without opening Discord.
-#
-# Two families of series feed them. `kube_*` comes from kube-state-metrics and
-# exists whether or not mate's own telemetry works, which is why the death of
-# the process is read there. `mate_*` comes from mate's OpenTelemetry SDK
-# (apps/mate/src/telemetry.ts) through the opentelemetry-collector's
-# `prom-metrics` exporter (../../base/monitoring/opentelemetry-collector.yaml,
-# scraped by the ServiceMonitor beside it), so those series carry the
-# collector's `namespace="monitoring"` and mate's own name as `exported_job`.
-# Nothing here matches on either: the `mate_` prefix is already unique, and a
-# label matcher that a future collector config could drop would make these
-# alerts silently blind rather than loudly wrong.
-#
-# Two consequences of reading mate through the collector, both load-bearing:
-#
-#   - `pod` and `instance` on a `mate_*` series are the *collector's*, and they
-#     change every time that pod is replaced. Any expression that compares a
-#     series to its own past (`unless … offset`, `and … offset`) must therefore
-#     match with `ignoring(pod, instance)`, or a collector roll makes the two
-#     sides of the comparison different series: the `unless` arms would stop
-#     subtracting and report a lifetime counter as if it were this window's,
-#     and the `and` arms would simply go blind. Every such comparison below
-#     carries that modifier. The rest of the label set (`job`, `namespace`,
-#     `exported_job`, `otel_scope_name`, `container`, `endpoint`, `service`)
-#     is stable across a roll and is left to match.
-#   - Those same labels ride into the notification, so every alert here that
-#     does not aggregate arrives tagged with the collector's identity and
-#     groups under `namespace="monitoring"`, while MateDown groups under
-#     `namespace="mate"`. Alertmanager groups by `cluster, namespace,
-#     alertname` and no inhibit rule crosses alertnames, so this costs a
-#     reader a moment rather than an alert. It is not papered over with a
-#     `namespace: mate` label, which would claim a collector pod lives in
-#     mate's namespace.
-#
-# Two rules the repo has paid for, applied throughout:
-#
-#   - Key on recency, never on a retained failed object. The counters below
-#     are read through `increase()` over a window, so a burst that stops
-#     clears itself; nothing reads the existence of a failed thing.
-#   - A Prometheus restart resets every `for:` timer, so "0 active" can be a
-#     lie for as long as the longest `for:` here. Where the condition is
-#     "this has held for a while", it is written as a range aggregation
-#     (`min_over_time`) rather than a long `for:`, which survives the restart
-#     because it reads the stored samples instead of the evaluator's memory.
-#
-# The counters carry a second arm wherever a single occurrence matters. The
-# collector expires a series five minutes after the last OTLP point, so a mate
-# that is down for longer loses its series and a label set that has never
-# fired before is *born* at 1 rather than rising from 0. `increase()` is
-# last-minus-first over what it can see, so that first failure after a restart
-# reads as 0. The `unless … offset` arm is that birth, and it clears one
-# window later.
-#
-# Alertmanager sends everything but Watchdog/InfoInhibitor to the Discord
-# receiver in ../../base/monitoring/alertmanager-discord.yaml, so these land in
-# the same guild mate serves, in the channel that webhook belongs to.
+# mate_* series come through the OTel collector, whose pod and instance labels
+# change on each roll, so every offset comparison ignores them. An `unless …
+# offset` arm catches a counter's first point, which is born at 1.
+# They carry namespace=monitoring and mate's name as exported_job, so match on the mate_ prefix alone.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -69,16 +15,8 @@ spec:
   groups:
     - name: mate
       rules:
-        # One replica, `Recreate`, and a readiness probe that is 503 for as
-        # long as the gateway is not connected — so this single expression
-        # covers the pod being gone, the image failing, a crash loop and the
-        # /healthz flip on a dropped WebSocket. The deliberate case is the
-        # identify-budget guard sleeping to the daily reset: mate is healthy,
-        # refusing to spend an IDENTIFY, and correctly not ready. That is
-        # still an outage from the thread's side, so it alerts.
-        #
-        # The second arm is the case the first cannot see: a deleted
-        # Deployment exports no series at all.
+        # Readiness is 503 whenever the gateway is down, the identify-budget
+        # guard's sleep included. `absent` covers a deleted Deployment.
         - alert: MateDown
           expr: |
             kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} == 0
@@ -90,17 +28,8 @@ spec:
             message: "Rowbutt is not connected to Discord"
             description: "mate has had no ready pod for ten minutes, so a mention in the homelab guild gets no thread and a live thread gets no answer. A `Recreate` roll takes the only pod down first, so a couple of minutes of this is a normal deploy. Read the pod: `kubectl --context offsite logs -n mate deploy/mate`. If the last line is the budget guard sleeping to the reset, mate is protecting the IDENTIFY budget and will come back on its own; if it is a close code, MateGatewayFatalClose says which."
 
-        # The deadman for everything below: mate is running and ready, and its
-        # metrics are not arriving. `mate_sandboxes_live` is the right probe
-        # because it is an observable gauge with an unconditional callback — it
-        # reports on every collection whether or not a thread is open, so its
-        # absence is the pipeline, never the workload being idle.
-        #
-        # Guarded on the Deployment so a dead mate pages once as MateDown
-        # rather than twice. What is left is the path itself: the SDK failing
-        # to start, the egress rule in
-        # ../../apps/mate/network-policy.yaml not reaching the collector, the
-        # collector down, or its ServiceMonitor unselected.
+        # mate_sandboxes_live reports on every collection, so its absence is the
+        # pipeline. Guarded on the Deployment so a dead mate pages only MateDown.
         - alert: MateNotReporting
           expr: |
             absent(mate_sandboxes_live)
@@ -113,17 +42,8 @@ spec:
             message: "mate is up but its metrics have stopped arriving"
             description: "mate has a ready pod and no `mate_*` series for fifteen minutes, so every other alert in this group is blind. Check mate's own log line for the endpoint (`metrics exporting`), then the collector: `kubectl --context offsite logs -n monitoring deploy/opentelemetry-collector`. A silent drop with the process healthy is usually the CiliumNetworkPolicy — mate is allowed exactly one destination in the monitoring namespace."
 
-        # 4004, 4010-4014: authentication failed, invalid shard, sharding
-        # required, invalid API version, invalid intents, disallowed intents.
-        # Every one is a configuration error that no reconnect can fix, so
-        # mate counts the close and exits rather than burning the identify
-        # budget retrying. A recurrence means something changed underneath
-        # mate — a rotated token, a revoked intent, a gateway version sunset.
-        #
-        # `fatal` is the label rather than a list of codes, so this expression
-        # cannot drift from FATAL_CLOSE_CODES in apps/mate/src/gateway.ts; the
-        # firing alert still carries `code`. The process flushes the counter
-        # before it exits, which is the only reason this can fire at all.
+        # Close codes no reconnect fixes, so mate exits. `fatal` follows
+        # FATAL_CLOSE_CODES in apps/mate/src/gateway.ts.
         - alert: MateGatewayFatalClose
           expr: |
             increase(mate_gateway_closes_total{fatal="true"}[1h]) > 0
@@ -139,32 +59,8 @@ spec:
             message: "Discord closed mate's gateway with code {{ $labels.code }}"
             description: "A close code mate treats as a configuration error, so it exited instead of reconnecting and will crash-loop until the cause is fixed. 4004 is the token — check whether `rowbutt discord bot token` was rotated in 1Password and whether the mate-discord ExternalSecret carried it through. 4013/4014 are the intents, which live in apps/mate/src/gateway.ts and in the developer portal; Message Content is privileged and can be revoked there without anything in git changing."
 
-        # Two is MATE_MAX_CONCURRENT on the Deployment, and the queue is FIFO
-        # behind it, so at the cap the next thread is told to wait. The window
-        # has to outlast a quiet teardown or it catches threads behaving
-        # exactly as configured: a thread goes quiet MATE_QUIET_MINUTES — 30 —
-        # after its last turn, so three quarters of an hour without the count
-        # ever dipping is either two genuinely busy threads or sandboxes that
-        # are not being reaped.
-        #
-        # `min_over_time` rather than `for: 45m` on purpose: this reads the
-        # stored samples, so a Prometheus restart inside the window does not
-        # put the clock back to zero. The other two arms are what make the
-        # window mean something. The instant one keeps a stale series from
-        # firing it — without it a mate that went down at the cap would alert
-        # off the samples it left behind. The `offset 45m` one requires the
-        # window to be *full*: a range selector only sees the samples that
-        # exist, so five minutes after a fresh scrape target appears
-        # `min_over_time` is already satisfied by five minutes of data.
-        #
-        # The `offset` arm matches `ignoring(pod, instance)` for the reason in
-        # the header. The trade that buys: for the three quarters of an hour
-        # after a collector roll, `min_over_time` still only sees the new
-        # series' samples, so the "held continuously" claim rests on the
-        # instant arm and on the `offset` arm's single sample either side of
-        # the gap. That is the right way round — the alternative is being
-        # certain of nothing at all for that long after every collector
-        # restart.
+        # 2 is MATE_MAX_CONCURRENT; 45m outlasts the 30-minute quiet teardown.
+        # min_over_time survives a restart; the offset arm demands a full window.
         - alert: MateSandboxesAtCap
           expr: |
             mate_sandboxes_live >= 2
@@ -178,12 +74,8 @@ spec:
             message: "mate has been at its sandbox cap for three quarters of an hour"
             description: "Both sandbox slots have been held continuously for forty-five minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is two busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
 
-        # A turn that ends `error` is the harness or the provider failing; one
-        # that ends `sandbox-died` is the pod going away underneath a running
-        # turn. Both put a plain sentence in the thread, so one is a bad
-        # minute rather than an incident — three inside half an hour is the
-        # provider, the model id or the image, and mate will keep spending
-        # turns from the daily budget on it.
+        # `error` is the harness or provider, `sandbox-died` the pod lost
+        # mid-turn. Three in half an hour is the provider, the model or the image.
         - alert: MateTurnsFailing
           expr: |
             sum(increase(mate_turns_ended_total{reason=~"error|sandbox-died"}[30m])) > 2
@@ -199,12 +91,8 @@ spec:
             message: "mate turns are failing"
             description: "More than two turns ended in an error or a dead sandbox in the last thirty minutes. `error` is what the harness reported over ACP — the OpenCode Go key, the model id in MATE_SANDBOX_MODEL, or a region gate on the model. `sandbox-died` is the pod: read `kubectl --context offsite describe sandbox -n mate` and the node's pressure before blaming the harness."
 
-        # The failure nothing else can see. A mint that fails leaves no
-        # sandbox, so the teardown that follows records none, and the turn
-        # never starts so no turn is counted either: without this counter a
-        # thread that can never get a sandbox is invisible outside Discord.
-        # `attach-failed` is the other half — the Sandbox exists and went
-        # Ready, and the ACP session could not be opened in it.
+        # A failed mint leaves no sandbox and no turn, so only this sees it.
+        # `attach-failed`: the Sandbox went Ready but ACP could not open.
         - alert: MateSandboxMintFailing
           expr: |
             sum(increase(mate_mints_total{result=~"mint-failed|attach-failed"}[30m])) > 2
@@ -220,30 +108,8 @@ spec:
             message: "mate cannot give a thread a sandbox"
             description: "More than two mints or attaches failed in the last thirty minutes, so a human asking mate a question is getting a plain refusal instead of an answer. A mint failure is the Sandbox never going Ready — the harness image digest, the kata-clh runtime class, or the namespace's restricted PSA. An attach failure is `pods/exec` into a Ready pod, which is the Role in ../../apps/mate/rbac.yaml or the harness not starting inside the sandbox."
 
-        # The credential nothing exercises until a human wants something from
-        # it — which is why mate exercises it on its own. A real end-to-end
-        # mint, JWT to installation to token, runs at boot and again on a
-        # timer rather than being inferred from how the last turn went, and
-        # this gauge is that result: 1 for a key that became a token, 0 for a
-        # key that could not. A sandbox
-        # holding no usable token still clones, still answers and still runs
-        # every command the agent writes: what it cannot do is push, so the
-        # turn ends one step short of the pull request it was for and says
-        # nothing about why. That is the failure this whole group exists for,
-        # and ten minutes is short enough to catch it inside one turn.
-        #
-        # Guarded on the Deployment for the reason MateNotReporting is: the
-        # collector holds a `mate_*` series for five minutes after the last
-        # point, so a mate that died holding a 0 would page here as well as
-        # under MateDown. The guard costs nothing in the case that matters,
-        # because a mate that cannot mint a token is otherwise perfectly
-        # healthy and its pod is Ready throughout.
-        #
-        # A mate that has no App configured at all is not a broken credential
-        # and reports nothing rather than 0 — the same honesty the
-        # identify-budget gauges practise, where a reading that is no longer a
-        # fact is withheld instead of held. So this cannot fire at a mate that
-        # was never asked to hold a GitHub identity.
+        # mate test-mints at boot and on a timer; 0 means turns cannot push. No
+        # App means no series. Guarded on the Deployment as MateNotReporting is.
         - alert: MateGitHubCredentialBroken
           expr: |
             mate_github_app_ready == 0
@@ -256,28 +122,8 @@ spec:
             message: "mate cannot mint a GitHub token"
             description: "mate has held an unusable GitHub App credential for ten minutes, so every sandbox it stamps gets a token that cannot push and every turn meant to end in a pull request ends one step short instead. mate says which half failed on the way up: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. A key that does not parse is the `mate-github-app` Secret and the ExternalSecret that fills it; a key that parses and is refused is the App — MATE_GITHUB_APP_ID on the Deployment, or the installation on `jonpulsifer/infra` having been removed. The runbook at https://wiki.lolwtf.ca/runbooks/repair-the-rowbutt-github-credential/ walks both."
 
-        # The intermittent half of the same credential. The gauge above is the
-        # state mate is in right now; this counts the mints that failed while
-        # that state reads fine — GitHub answering 5xx, a clock far enough out
-        # that the signed JWT is refused, an App being reinstalled underneath a
-        # running mate. Neither alert can stand in for the other: a credential
-        # that is broken continuously never produces a burst, and a burst that
-        # ends leaves the gauge back at 1.
-        #
-        # `result!="ok"` rather than a list of reasons, for the reason
-        # MateGatewayFatalClose matches on `fatal` rather than on close codes:
-        # the expression cannot drift from what mate actually records, and a
-        # reason added later is counted without an edit here. It is a contract
-        # on the instrument rather than a convenience — success is spelled
-        # `ok`, everything else is a failure — and the test beside this file
-        # holds mate to it with an `ok` series that climbs throughout.
-        #
-        # Two, where the mint and turn alerts above ask for three. A GitHub
-        # mint is one per turn against a daily budget of 120, so three failures
-        # inside half an hour is a burst this workload cannot make; two is the
-        # smallest number that is not one bad minute.
-        #
-        # The second arm is the birth described in the header.
+        # Failures while the gauge above reads 1. `result!="ok"` is the metric's
+        # contract. Two: at one mint per turn, three in 30m is out of reach.
         - alert: MateGitHubTokenMintFailing
           expr: |
             sum(increase(mate_github_token_mints_total{result!="ok"}[30m])) > 1
@@ -293,26 +139,8 @@ spec:
             message: "mate is failing to mint GitHub tokens"
             description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. The runbook at https://wiki.lolwtf.ca/runbooks/repair-the-rowbutt-github-credential/ has the checks."
 
-        # The pool is the sandbox mate keeps warm so the next thread is handed
-        # one instead of waiting out a cold start for it (MATE_SPARES on the
-        # Deployment, MATE_MAX_CONCURRENT beside it). A pool that has stopped
-        # refilling is the failure nothing else here can see: every thread
-        # still gets its answer, at the tens of seconds the pool was turned on
-        # to remove, so it shows up on the mint-duration panels and in nobody's
-        # alerts.
-        #
-        # A sweep runs every five minutes and mints inside the pass, so twenty
-        # minutes short is four passes that could not fix it — no room on the
-        # node, an apiserver refusing the object, or a spare that stopped being
-        # Ready and could not be taken away.
-        #
-        # `max_over_time` on the left is what makes the window mean something:
-        # one sample of a full pool inside it clears the alert, and the newest
-        # sample is in the range, so it carries the instant reading too. The
-        # `offset` arm requires the window to be full, for the reason it is on
-        # MateSandboxesAtCap. Both numbers report zero until the first sweep
-        # says otherwise, so a mate with no pool configured — and a mate that
-        # has only just started — cannot fire this.
+        # A sweep runs every five minutes, so 20m is four that could not refill.
+        # Both read 0 until the first sweep, so a mate with no pool cannot fire.
         - alert: MateWarmPoolShort
           expr: |
             max_over_time(mate_spares_ready[20m])
@@ -326,19 +154,8 @@ spec:
             message: "mate is not keeping a sandbox warm"
             description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so every thread has been paying the full cold start again — tens of seconds of a line saying `booting the sandbox` before a word of the answer. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
 
-        # mate refuses a turn past 120 in a rolling day and says so in the
-        # thread (MATE_MAX_TURNS_PER_DAY). 96 is 80% of that, so this fires
-        # while there is still a day's quarter left to spend rather than after
-        # the first human is turned away.
-        #
-        # This is a rolling 24h over the stored samples, which is deliberately
-        # *not* the window mate itself enforces: `dayTurns` in
-        # apps/mate/src/threads.ts is an in-memory array, so every restart —
-        # including each image-digest CD roll — empties mate's own budget back
-        # to zero. `increase()` reads a restart as a counter reset and keeps
-        # counting, so this can fire at 96 on a day mate believes it has
-        # served far fewer. That divergence is the signal, not a fault: it is
-        # the only place the real spend of a rolling day is visible.
+        # 96 is 80% of MATE_MAX_TURNS_PER_DAY. mate's own count resets on each
+        # restart and this rolling 24h does not, so the two can disagree.
         - alert: MateTurnBudgetNearlySpent
           expr: increase(mate_turns_total[24h]) > 96
           for: 0m
@@ -348,17 +165,8 @@ spec:
             message: "mate has spent most of its daily turn budget"
             description: "More than 96 of the 120 turns allowed in a rolling day have been taken. Past 120 every thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
 
-        # The only spend mate can see: the per-turn USD step the harness
-        # reports over ACP, summed over a rolling day. The first measured turn
-        # cost $0.002178, so a full 120-turn day is about $0.26 and this
-        # threshold is roughly twice that — $0.50/day is $15/month, the top of
-        # what this lab spends on a service. It cannot trip on volume alone,
-        # because the turn budget caps volume first; it trips when the price
-        # per turn moves, which is what a changed model id looks like.
-        #
-        # Honest about what this is: OpenCode Go bills a flat rate, and the
-        # figure over ACP is a list-price shadow of it. It is an early warning
-        # that something changed, not an invoice.
+        # About twice a full 120-turn day at list price. The turn cap bounds
+        # volume, so this trips when the price per turn moves.
         - alert: MateSpendAboveBudget
           expr: sum(increase(mate_turn_cost_usd_sum[24h])) > 0.5
           for: 0m
@@ -368,18 +176,8 @@ spec:
             message: "mate's reported spend is above its daily budget"
             description: "The turns of the last rolling day report more than $0.50 of model spend, against a measured $0.002178 for a real turn. Volume is capped at 120 turns/day, so this is the price per turn moving: check MATE_SANDBOX_MODEL on the mate Deployment and what the harness is actually being handed. The number is OpenCode Go's list-price shadow on a flat-rate plan, not a bill."
 
-        # Discord allows 1000 IDENTIFYs per app per day and resets the token
-        # on exhaustion. mate keeps a fifth of that as a reserve and sleeps to
-        # the reset rather than spend into it, which is an outage with no
-        # other warning; this fires at twice the reserve, while there is still
-        # room to find out why it is reconnecting.
-        #
-        # The gauge is only written when mate reads /gateway/bot, which is at
-        # startup and before each IDENTIFY, and it stops reporting once
-        # Discord's own `reset_after` has elapsed — past that the budget has
-        # reset and the last reading is no longer a fact. So this cannot get
-        # stuck firing at a number that has since healed, and `absent` is the
-        # normal state of a bot that has been connected all day.
+        # mate sleeps to the reset below a 20% reserve; this fires at 40%. The
+        # gauge goes absent once `reset_after` passes.
         - alert: MateIdentifyBudgetLow
           expr: |
             mate_discord_session_start_remaining

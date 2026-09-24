@@ -1,19 +1,13 @@
 ---
-# Unit test for pbx-rules.yaml, run by `mise run k8s:check-rules` against the
-# rendered PrometheusRule. Not a manifest: kustomization.yaml does not list it.
-#
-# What these cases prove, beyond the expressions parsing:
-#   - a PBX rollout, which drops the handset for up to a minute, pages nobody;
-#   - a PBX that is simply gone — no series at all — still alerts, which is the
-#     case every `!=` comparison in this file is blind to;
-#   - the trunk alert tells a rejected registration from a lost one.
+# promtool tests for pbx-rules.yaml, run by `mise run k8s:check-rules`.
+# rule_files names the rendered PrometheusRule; kustomization.yaml omits this file.
 rule_files:
   - pbx.yaml
 
 evaluation_interval: 1m
 
 tests:
-  # Healthy throughout, except a two-minute handset gap: a pod rollout.
+  # Healthy except a three-minute handset gap, as in a pod rollout.
   - interval: 1m
     input_series:
       - series: 'up{namespace="pbx", job="pbx-metrics", instance="10.100.2.210:8088"}'
@@ -43,7 +37,7 @@ tests:
       - series: 'asterisk_endpoints_state{namespace="pbx", job="pbx-metrics", resource="line4", id="PJSIP/line4"}'
         values: 2x5 1x25
     alert_rule_test:
-      # Three minutes in to each fault: pending, not yet firing.
+      # Two minutes into the fault: pending, not yet firing.
       - eval_time: 8m
         alertname: PBXTrunkNotRegistered
         exp_alerts: []
@@ -72,7 +66,7 @@ tests:
               message: "Office handset line4 is not registered to the PBX"
               description: "That line of the office SPA504G has not been registered for five minutes, so its DID rings nobody. Every line down at once is the phone itself — power, network, or its profile, which is what points it at the PBX. https://wiki.lolwtf.ca/runbooks/operate-the-office-phone/"
 
-  # The PBX is gone entirely: not a single series. Every `!=` above is silent.
+  # No PBX series at all: only the absent() arm fires.
   - interval: 1m
     input_series:
       - series: 'up{namespace="monitoring", job="unrelated"}'

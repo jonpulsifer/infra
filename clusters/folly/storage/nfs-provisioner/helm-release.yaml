@@ -1,20 +1,7 @@
 ---
-# nfs-subdir-external-provisioner
-#
-# Adds an `nfs` StorageClass to the cluster, backed by spore. NixOS owns the
-# backing mount, export, and required directories in nix/services/nfs-server.nix.
-# The static `spore` PV uses /nfs/data/k8s/; this provisioner creates per-PVC
-# subdirectories under /nfs/data/k8s-provisioned/, keeping the two paths
-# isolated.
-#
-# Any PVC like:
-#   kind: PersistentVolumeClaim
-#   spec:
-#     storageClassName: nfs
-#     accessModes: ["ReadWriteMany"]
-#     resources: { requests: { storage: 10Gi } }
-# will be bound and have a subdir auto-created under
-# /nfs/data/k8s-provisioned/<namespace>-<pvc-name>-<pv-hash>/.
+# The `nfs` StorageClass: one subdirectory per PVC under spore's
+# /nfs/data/k8s-provisioned, apart from the static spore PV's /nfs/data/k8s.
+# nix/services/nfs-server.nix owns the mount and export.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -33,8 +20,6 @@ spec:
         namespace: flux-system
       interval: 10m0s
   values:
-    # Provisioner identity. The leader-election lease name must be unique per
-    # provisioner if you ever run more than one (e.g. per cluster).
     replicaCount: 1
     leaderElection:
       enabled: true
@@ -43,35 +28,26 @@ spec:
     nfs:
       server: ${SPORE_IP}
       path: /nfs/data/k8s-provisioned
-      # Dynamic volumes explicitly use NFSv3. The static PV leaves protocol
-      # negotiation to kubelet and carries no mountOptions.
       mountOptions:
         - hard
         - nfsvers=3
         - timeo=600
         - retrans=2
         - noatime
-    # StorageClass. defaultClass=false so we do NOT displace `local-path` as
-    # the cluster default — dump, hermes-config, and many other workloads are
-    # happy on local-path and would break if the default flipped.
+    # local-path stays the cluster default.
     storageClass:
       create: true
       name: nfs
       defaultClass: false
-      # Retain keeps the subdir around if the PVC is deleted. archiveOnDelete
-      # additionally renames it to archived-<n> so a recreate-with-same-name
-      # doesn't lose data. Set reclaimPolicy: Delete + archiveOnDelete: false
-      # to wipe on PVC delete (NOT recommended for shared/agent data).
+      # Retain keeps a deleted PVC's subdirectory; archiveOnDelete applies only
+      # under reclaimPolicy Delete.
       reclaimPolicy: Retain
       archiveOnDelete: true
       allowVolumeExpansion: true
-    # RBAC. The chart creates a ServiceAccount named after the release; bind
-    # the cluster role the chart ships (nfs-provisioner-runner).
     rbac:
       create: true
     serviceAccount:
       create: true
-    # Restrict to a single namespace, not the whole cluster-wide default.
     podSecurityContext:
       fsGroup: 65534
       runAsUser: 65534

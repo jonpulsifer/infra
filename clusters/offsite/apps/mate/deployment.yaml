@@ -1,8 +1,6 @@
 ---
-# mate: the Discord gateway Rowbutt connects through, one Bun process from
-# `apps/mate`. It carries the ServiceAccount that mints Sandboxes and the
-# egress policy that goes with holding a token, and answers each thread from a
-# Sandbox of its own.
+# mate: the Discord gateway Rowbutt connects through (`apps/mate`). It answers
+# each thread from a Sandbox of its own.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,13 +11,8 @@ metadata:
     app.kubernetes.io/part-of: mate
 spec:
   replicas: 1
-  # Recreate is load-bearing, not tidy, and both surfaces need it for opposite
-  # reasons. Discord delivers every event to every gateway session on a token,
-  # so a RollingUpdate's overlap would have two mate pods replying to the same
-  # message. Slack does the inverse: it splits payloads across an app's
-  # connections, so an overlap would have each pod receive a random half and
-  # mate would look like it was ignoring people. The `hello` frame's
-  # connection count is what says so in the log if it ever happens.
+  # No rollout overlap: Discord sends every event to each session on a token,
+  # and Slack splits events across an app's connections.
   strategy:
     type: Recreate
   selector:
@@ -31,17 +24,12 @@ spec:
         app.kubernetes.io/name: mate
         app.kubernetes.io/part-of: mate
       annotations:
-        # The chat tokens are env vars, which a running container never
-        # re-reads, and the GitHub App key is a mounted file, which the kubelet
-        # replaces on its own schedule rather than mate's. Reloader rolls the
-        # pod when any of these ExternalSecrets writes a rotated value, so
-        # rotation is one Recreate roll instead of waiting for Discord to close
-        # the stale session with 4004, or for a mint to fail on a retired key.
+        # The tokens are env vars and the App key file refreshes on the kubelet's
+        # schedule, so Reloader rolls the pod when one of these Secrets rotates.
         secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app
     spec:
-      # The token is what mints Sandboxes and opens `pods/exec`; `rbac.yaml`
-      # scopes it to this namespace, and `network-policy.yaml` is what makes
-      # holding it safe.
+      # This token mints Sandboxes and execs into them. rbac.yaml scopes it and
+      # network-policy.yaml limits its egress.
       serviceAccountName: mate
       automountServiceAccountToken: true
       securityContext:
@@ -52,10 +40,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mate
-          # The containers workflow rewrites this digest on every mate build
-          # that lands on main (`.github/containers.json`, `deploy.mate`). The
-          # rewrite anchors on the full `ghcr.io/…/mate…@sha256:` string, so
-          # this stays one literal and never a split repository/tag pair.
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # whole `ghcr.io/…/mate…@sha256:` string, so keep it one literal.
           image: ghcr.io/jonpulsifer/mate:latest@sha256:3983b821ded21def13c4d7e94fe821118dac41f4fab72e7e6bb5f77b42d3275c
           imagePullPolicy: IfNotPresent
           ports:
@@ -68,28 +54,16 @@ spec:
                 secretKeyRef:
                   name: mate-discord
                   key: DISCORD_TOKEN
-            # The homelab guild, the one allowlisted user, and the channels a
-            # mention may start a thread in (#general and the General voice
-            # channel — harmless in the allowlist).
+            # The homelab guild, the one allowed user, and the channels a mention
+            # may open a thread in (#general and the General voice channel).
             - name: MATE_GUILD_ID
               value: "1509024936717455381"
             - name: MATE_ALLOWED_USER_IDS
               value: "308072071949320204"
             - name: MATE_ALLOWED_CHANNEL_IDS
               value: "1509024937422356532,1509024937422356533"
-            # The Slack half. It is opt-in: with neither token set mate
-            # answers on Discord alone, and with only one of them set it
-            # refuses to start rather than run half a surface. The thread
-            # contract is the same one — a mention opens a thread, the thread
-            # is the session, one allowlisted human — and the caps above are
-            # shared across both, because this is one process.
-            #
-            # `optional: true` is what keeps that promise on a cluster: a
-            # required secretKeyRef holds the pod in CreateContainerConfigError
-            # until the Secret exists, and with `strategy: Recreate` the pod
-            # answering on Discord is already gone by then. Unset instead of
-            # missing is what mate reads as "Slack is off"; reloader rolls the
-            # pod once the ExternalSecret writes the Secret.
+            # Slack needs both tokens; one alone stops mate from booting. `optional`
+            # keeps a missing Secret from holding the pod in CreateContainerConfigError.
             - name: MATE_SLACK_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -102,181 +76,58 @@ spec:
                   name: mate-slack
                   key: MATE_SLACK_APP_TOKEN
                   optional: true
-            # The workspace, the one allowlisted human, and the channels a
-            # mention may start a thread in (#general and #chatops).
+            # The workspace, the one allowed user, and #general and #chatops.
             - name: MATE_SLACK_TEAM_ID
               value: TAR78LS82
             - name: MATE_SLACK_ALLOWED_USER_IDS
               value: UAR78LSKC
             - name: MATE_SLACK_ALLOWED_CHANNEL_IDS
               value: CARBAMA05,C062BS4GADR
-            # The thread contract's numbers: one turn capped at 45 minutes,
-            # quiet 30 minutes after it, 30 turns per thread, 120 per day, 2
-            # threads at once, and one sandbox kept warm for the next one.
-            #
-            # Both clocks answer to a ceiling that is not a knob: a sandbox
-            # carries `spec.shutdownTime` two hours out and the controller
-            # deletes it at that moment whatever is streaming. A turn is
-            # capped at 45 of those 120 minutes and quiet at 30, so neither
-            # clock comes within an hour of the ceiling. mate refuses to boot
-            # on a MATE_TURN_MINUTES that does reach it.
-            #
-            # Quiet is what generosity costs. Teardown is total — the Sandbox
-            # goes, and with it the /workspace clone, every uncommitted edit
-            # and the harness's own state — so this is how long work survives
-            # someone stepping away, and equally how long that thread holds
-            # one of the two slots below. Archiving the Discord thread hands
-            # the slot back early; a Slack thread cannot be archived, so there
-            # these 30 minutes are the only release.
-            #
-            # That 2 is capacity and not policy: a sandbox will not schedule
-            # on a control-plane node, and offsite has exactly one other node
-            # for them to land on. It is a cap on threads rather than on
-            # sandboxes — the warm spare below is a third one — and what the
-            # node can carry is measured against it there.
+            # shutdownTime is never more than two hours out, so mate refuses a turn cap
+            # of 120 minutes or more, and 55 or more while the GitHub App is set.
             - name: MATE_TURN_MINUTES
               value: "45"
+            # Teardown deletes the sandbox and its uncommitted work. A Slack thread
+            # cannot be archived, so quiet is the only way it frees its slot.
             - name: MATE_QUIET_MINUTES
               value: "30"
             - name: MATE_MAX_TURNS_PER_THREAD
               value: "30"
             - name: MATE_MAX_TURNS_PER_DAY
               value: "120"
+            # Capacity: sandboxes do not schedule on the control plane, and offsite
+            # has one other node.
             - name: MATE_MAX_CONCURRENT
               value: "2"
-            # One sandbox is kept warm for whoever asks next, because the
-            # wait it removes is the whole of the cold start. A fresh mint on
-            # oldschool measures 46.8 s; a thread handed a warm one pays a
-            # relabel and a shallow fetch instead. What survives either way
-            # is the ACP attach, measured at 4.9 s, and the harness's own
-            # time to first token, 4.4 s over nine turns — so this shortens
-            # the wait rather than removing it.
-            #
-            # What it costs is a whole sandbox's room on the node for as long
-            # as mate is up: one live sandbox measures about 1 GiB of
-            # oldschool's memory. With the cap above that is three sandboxes
-            # at peak rather than two, because the replacement is minted the
-            # moment a thread takes the one that was warm. Memory is the
-            # comfortable half of that — 6626Mi of oldschool's 15772Mi
-            # allocatable at the peak — and CPU is what binds first: a sandbox
-            # requests 500m, so three of them commit 3157m of its 4000m and
-            # leave 843m for anything else that has to land there.
-            #
-            # A spare carries a half-hour `shutdownTime` that only mate's
-            # own sweep renews, so a mate that stops hands it back, and a
-            # roll discards the spare it inherits rather than serving a
-            # thread from an image, model or checkout that has moved on. One
-            # that stops being Ready is condemned on the next sweep and
-            # replaced, because no thread can be handed it.
+            # A warm spare skips the cold mint. At peak (two threads plus the spare)
+            # oldschool's CPU requests reach 3157m of 4000m.
             - name: MATE_SPARES
               value: "1"
             - name: MATE_PORT
               value: "8080"
-            # The cluster's OTLP collector, whose prometheus exporter this
-            # cluster's Prometheus scrapes. Unset — a workstation run, or
-            # `bun test` — registers no SDK at all and every instrument stays
-            # the no-op it is born as. `network-policy.yaml` is what lets this
-            # one destination be reached.
+            # Unset, mate registers no OTel SDK.
             - name: MATE_OTEL_ENDPOINT
               value: http://opentelemetry-collector.monitoring.svc.cluster.local:4318
-            # `kube` puts a real Sandbox behind every thread: mate mints one
-            # per thread, execs `opencode acp` in its pod and streams the turn
-            # back. The other value is `stub`, an in-process reply with no
-            # cluster behind it, and reverting this one word is the rollback —
-            # the bot keeps answering and sandboxes stop being minted.
-            # `sandbox-network-policy.yaml` is what makes the flip safe: a
-            # sandbox runs agent-authored commands with every permission
-            # auto-allowed, and that policy is its only network boundary.
+            # `kube` mints a Sandbox per thread; `stub` replies in-process and is
+            # the rollback.
             - name: MATE_SANDBOXES
               value: kube
-            # The harness image every sandbox runs, built by CD from
-            # `images/mate-sandbox/`. It carries a digest for the same reason
-            # the image above does, and more urgently: this is the image that
-            # runs agent code with every permission auto-allowed, so a mutable
-            # tag is not good enough. The digest is also what makes the
-            # `deploy.mate-sandbox` entry safe — the rewrite anchors on
-            # `ghcr.io/…/mate-sandbox…@sha256:` and falls back to an
-            # unanchored sed when the image is named without a digest beside
-            # it, which would stamp this digest over mate's own.
+            # Digest-pinned: this image runs agent code with every permission
+            # auto-allowed. CD anchors on the image name beside the digest.
             - name: MATE_SANDBOX_IMAGE
               value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:59d63f1ddf065486a4e34e48cea2d36b44071fdc9f7b6db2d75d610bcb6a2a1c
-            # mate's GitHub credential: the private key of the
-            # `clanky-bot[bot]` App, mounted from the `mate-github-app`
-            # Secret at the path below. mate signs a
-            # JWT with it and mints an installation access token once per turn,
-            # then stamps that token into the sandbox pod. The sandbox holds a
-            # token and never the key, so what a sandbox can leak is a
-            # credential that expires 60 minutes after it was minted and that
-            # the next turn replaces anyway.
-            #
-            # What the token carries is the App's installation identity —
-            # `clanky-bot[bot]` on `jonpulsifer/infra` alone, contents and
-            # pull requests writable — and not a human's, which is the whole
-            # reason for the App. `jonpulsifer` is both an Atlantis allowed
-            # user and an Atlantis policy-set owner, so a pull-request comment
-            # made as that account clears the policy gate and starts a
-            # Terraform apply that merges itself to `main`; the bot's slug is
-            # in neither list, so the same comment from a sandbox does nothing.
-            #
-            # Unsetting MATE_GITHUB_APP_ID is the rollback. mate mints nothing,
-            # stamps nothing, and a sandbox comes up with no GitHub credential
-            # at all: the init container's clone of the public repo still
-            # works, and a push or a pull request does not.
-            #
-            # The App's numeric id, which signs the JWT a mint starts from.
-            # GitHub also accepts the App's client id in that claim; the
-            # number is what mate validates, so a client id pasted here is
-            # the degraded state rather than a working one.
+            # The numeric App id, not the client id. mate mints a 1-hour token per
+            # turn from the key; a sandbox never holds the key.
             - name: MATE_GITHUB_APP_ID
               value: "5027196"
             - name: MATE_GITHUB_APP_KEY_FILE
               value: /var/run/mate/github-app/private-key
-            # MATE_CONNECT_SECRET is deliberately not set, and that is what
-            # takes 1Password out of the sandbox. It used to arrive because
-            # the GitHub token was read from a vault at push time; mate mints
-            # that token now, so the sandbox's Connect credential unlocks a
-            # vault holding nothing it needs — and a credential an
-            # auto-allowing agent can read, for no purpose, is only a
-            # liability. Setting this to `mate-onepassword` hands it back, for
-            # a sandbox whose vault has been stocked with something the agent
-            # is meant to read.
-            #
-            # What makes the agent an SRE companion rather than a code-writing
-            # one: the ServiceAccount it debugs this cluster as, declared in
-            # `sandbox-rbac.yaml`. mate mints a bound token for it per turn
-            # through TokenRequest and hands the sandbox a kubeconfig; nothing
-            # long-lived is written for it anywhere. Unsetting this is the
-            # rollback and a sandbox goes back to having no cluster access.
-            #
-            # That account reads everything this cluster holds but Secrets,
-            # and can exec into any pod, which reaches that pod's mounted
-            # Secrets and token, and through a privileged pod's token every
-            # Secret. Exec is deliberate — an agent that cannot open a shell
-            # in a broken pod cannot do the job this is for — so leaving
-            # Secrets out of the read grant is defence in depth, and the
-            # boundary that remains is time: the token lasts one turn.
+            # Reads all but Secrets and can exec into any pod, which reaches its
+            # mounted Secrets. mate mints a bound token per turn (sandbox-rbac.yaml).
             - name: MATE_SANDBOX_KUBE_SA
               value: mate-sandbox-debug
-            # The SSH key a sandbox logs into hosts with, mounted from the
-            # `mate-sandbox-ssh` Secret and stamped into the pod per turn the
-            # same way. The identity is `rowbutt`, which `nix/system/user.nix`
-            # puts in `wheel` on every host while `nix/profiles/fleet.nix`
-            # sets `wheelNeedsPassword = false` — so a turn holding this can
-            # do anything on any box in the fleet, including the node its own
-            # sandbox runs on. This agent is a proxy for its operator and is
-            # built to have that reach; it is written down here because the
-            # Deployment is where somebody counts the blast radius.
-            #
-            # MATE_SSH_KEY_FILE is deliberately unset, which is what leaves
-            # host login switched off: mate reads no key, stamps none, and a
-            # turn gets neither the key nor the client config beside it. The
-            # code path is whole and tested; turning it on is this variable, a
-            # Secret volume at the path it names, and an ExternalSecret to
-            # fill it.
-            # Gateway session info (session id, resume URL, sequence) lands
-            # here so a container restart inside the same pod resumes instead
-            # of spending an identify from the daily budget. An emptyDir is
-            # exactly that scope: it outlives the container, not the pod.
+            # On the emptyDir, so a container restart resumes the gateway session
+            # instead of spending an identify from the daily budget.
             - name: MATE_SESSION_FILE
               value: /tmp/session.json
             # readOnlyRootFilesystem: /tmp (below) is the only writable path.
@@ -287,21 +138,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            # `readOnlyRootFilesystem: true` below does not reach this: it
-            # makes the container's own filesystem read-only and says nothing
-            # about a volume mounted over a path in it, and the kubelet mounts
-            # a secret volume read-only in any case — `readOnly: true` here is
-            # saying so rather than arranging it. The volume carries no
-            # `defaultMode` on purpose: the pod sets no `fsGroup`, so the key
-            # file is owned by root, and tightening it to 0400 would take it
-            # away from uid 65532, the only uid here that has to read it.
             - name: github-app
               mountPath: /var/run/mate/github-app
               readOnly: true
-          # Readiness only. /healthz is 503 whenever the gateway is not
-          # connected, and that is deliberate during the identify-budget
-          # guard's sleeps — a liveness probe on it would kill the process for
-          # doing exactly what it should and burn the budget it is protecting.
+          # No liveness probe: /healthz is 503 while the identify-budget guard
+          # sleeps, and a restart would burn the budget it protects.
           readinessProbe:
             httpGet:
               path: /healthz
@@ -325,14 +166,8 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        # `optional: true` for the reason the Slack tokens above carry it: a
-        # required secret volume holds the pod in CreateContainerConfigError
-        # until the Secret exists, and under `strategy: Recreate` the pod that
-        # was answering is already gone by then. While the 1Password item
-        # behind `mate-github-app` is still a placeholder the mount is simply
-        # empty, mate finds no key where MATE_GITHUB_APP_KEY_FILE points and
-        # mints nothing, and the bot keeps answering; reloader rolls the pod
-        # when the Secret finally lands.
+        # `optional`: with no Secret the mount is empty and mate mints nothing.
+        # No defaultMode: the key is root-owned and 0400 hides it from uid 65532.
         - name: github-app
           secret:
             secretName: mate-github-app

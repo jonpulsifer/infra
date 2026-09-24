@@ -7,22 +7,14 @@ metadata:
   name: cluster-settings
   namespace: flux-system
 data:
-  # 1Password "oauth2-proxy: folly" — the App whose callback is on
-  # oauth2.${SECRET_DOMAIN}.
+  # 1Password item "oauth2-proxy: folly", the OAuth app for this cluster's
+  # oauth2 host.
   OAUTH2_PROXY_ITEM: iy4vkwkvbfhvm4kd2g6slnxlca
 
-  # The office handset. A network fact, which normally belongs in
-  # cluster-topology.json — but that ConfigMap describes the cluster, and this
-  # is a desk phone on Management. It lives here because the folly apps
-  # Kustomization substitutes this ConfigMap and does not substitute
-  # lab-topology.json, and because the PBX NetworkPolicy has to name the one
-  # host it may ring.
-  #
-  # terraform/network/unifi/folly/clients.yaml holds the reservation this
-  # mirrors, and voip.tf fails its plan if the two ever disagree.
+  # The handset the PBX NetworkPolicy may ring. The apps Kustomization cannot read
+  # lab-topology.json; voip.tf fails its plan if this and clients.yaml differ.
   CATHY_IP: 10.1.0.151
 
-  # The PBX's LoadBalancer address. Pinned rather than assigned because two
-  # things outside this cluster hold it: the handset's SIP registration and the
-  # provisioning URL it resyncs against, both edited by hand on a desk phone.
+  # Pinned: the handset's SIP registration and provisioning URL hold this
+  # address, set by hand on the phone.
   PBX_SIP_VIP: 10.3.0.100
