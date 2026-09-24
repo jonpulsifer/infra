@@ -39,7 +39,7 @@ The counter runs Smiirl's stock firmware and polls `GET /<mac>/number` on `api.s
 
 The counter is on folly's `iot` network, where DHCP gives capsule and spore as DNS servers. CoreDNS on those hosts answers `api.smiirl.com`, `smiirl.lolwtf.ca` and `counter.lolwtf.ca` with the address of the app's Gateway. `nix/services/coredns-sinkhole.nix` and `clusters/folly/apps/smiirl/04-gateway.yaml` must name the same address, and it must be free in `LB_RANGE` in `clusters/folly/config/cluster-topology.json`.
 
-`robocalls` counts, with a LogsQL query in `apps/smiirl/vlogs.go`, the lines VictoriaLogs holds for `namespace="pbx"`, `container="asterisk"` whose message contains `pbx-event kind=screened` since midnight in `TZ`. It reads `victoria-logs-server.monitoring.svc.cluster.local:9428` directly, in the same cluster, with no [Gateway route](../platform/observability.md) exposing it further.
+`robocalls` counts, with a LogsQL query in `apps/smiirl/vlogs.go`, the lines VictoriaLogs holds for `namespace="pbx"`, `container="asterisk"` whose message contains `pbx-event kind=screened` since midnight in `TZ`, excluding the root console's verbose echo of that same `Log()` call. It reads `victoria-logs-server.monitoring.svc.cluster.local:9428` directly, in the same cluster, with no [Gateway route](../platform/observability.md) exposing it further.
 
 ## Operate
 

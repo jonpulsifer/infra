@@ -19,8 +19,11 @@ const vlogsAccountID = "1"
 
 // The shared dialplan event contract (docs/apps/pbx.md): a screened call logs
 // one NOTICE line whose message contains this phrase. No other kind value
-// starts with "screened", so the plain substring is unambiguous.
-const screenedStream = `{namespace="pbx",container="asterisk"} "pbx-event kind=screened"`
+// starts with "screened", so the plain substring is unambiguous. Root console
+// verbosity also echoes the Log() call itself as a `-- Executing [...]`
+// verbose line carrying the same substituted args, so the exclusion is
+// needed to keep the count at one hit per call, not two.
+const screenedStream = `{namespace="pbx",container="asterisk"} "pbx-event kind=screened" -"Executing"`
 
 // Cheap and in-cluster, so it can refresh far more often than the GitHub search.
 var robocallsEvery = time.Minute
