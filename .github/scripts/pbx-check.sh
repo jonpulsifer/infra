@@ -7,12 +7,15 @@
 #      the Deployment's image tag pins;
 #   2. the config renders the way the pod renders it — the overlay's own
 #      render-config script over its own mounts, with a dummy for every PBX_*
-#      value the pod's env provides;
+#      value the pod's env provides, and again with every optional secret
+#      dropped, since a 1Password item that does not exist yet must still
+#      boot;
 #   3. every PJSIP object the config declares loads, the modules a call needs
-#      run, nothing logs an error against a shipped config file, and the
-#      dialplan reloads clean;
+#      run and are not noloaded, nothing logs an error against a shipped
+#      config file, and the dialplan reloads clean;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
-#      0 through the `_[*0-9]!` pattern to its own voip.ms trunk;
+#      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, and nothing
+#      else rings a line HANDSET does not name;
 #   5. nothing reachable from a context an inbound call starts in dials a
 #      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk).
 #
@@ -41,7 +44,9 @@ HANDSET_PATTERN='_[*0-9]!'
 GOLDEN_NUMBERS=(911 933 6135550123 16135550123 '*97' 0)
 REQUIRED_MODULES=(
   res_pjsip.so chan_pjsip.so res_pjsip_session.so res_pjsip_sdp_rtp.so
-  res_pjsip_outbound_registration.so res_srtp.so res_rtp_asterisk.so
+  res_pjsip_outbound_registration.so res_pjsip_endpoint_identifier_user.so
+  res_pjsip_outbound_authenticator_digest.so res_pjsip_registrar.so
+  res_srtp.so res_rtp_asterisk.so
   pbx_config.so app_dial.so app_stack.so res_prometheus.so
   codec_g722.so codec_ulaw.so
 )
@@ -142,7 +147,8 @@ dummy_for() {
 doc() { KIND="$1" NAME="$2" yq 'select(.kind == strenv(KIND) and .metadata.name == strenv(NAME))' "$STREAM"; }
 
 render() {
-  local site=$1 keys
+  local site=$1 mode=${2:-full} keys
+  [[ $mode == full ]] && HAS_OPTIONAL=0
   STREAM="$SITE_DIR/kustomize.yaml"
   if ! kubectl kustomize "clusters/$site/apps/pbx" >"$STREAM" 2>"$SITE_DIR/kustomize.err"; then
     fail "kubectl kustomize clusters/$site/apps/pbx" "$(cat "$SITE_DIR/kustomize.err")"
@@ -185,12 +191,24 @@ render() {
     mkdir -p "$SITE_DIR/root$mount"
     rewrites+=("$mount")
     cm=$(V="$volume" yq '.volumes[] | select(.name == strenv(V)) | .configMap.name // ""' "$pod")
-    [[ -n $cm ]] || continue
-    doc ConfigMap "$cm" >"$SITE_DIR/doc.yaml"
-    while IFS= read -r key; do
-      # yq ends every string with a newline of its own.
-      K="$key" yq '.data[strenv(K)]' "$SITE_DIR/doc.yaml" | head -c -1 >"$SITE_DIR/root$mount/$key"
-    done < <(yq '.data // {} | keys | .[]' "$SITE_DIR/doc.yaml")
+    if [[ -n $cm ]]; then
+      doc ConfigMap "$cm" >"$SITE_DIR/doc.yaml"
+      while IFS= read -r key; do
+        # yq ends every string with a newline of its own.
+        K="$key" yq '.data[strenv(K)]' "$SITE_DIR/doc.yaml" | head -c -1 >"$SITE_DIR/root$mount/$key"
+      done < <(yq '.data // {} | keys | .[]' "$SITE_DIR/doc.yaml")
+      continue
+    fi
+    # An emptyDir is where render-config writes its output, not an input this
+    # check populates. Anything else (a Secret, a projected volume) is an
+    # input this check cannot model; leaving it an empty directory would let
+    # render-config either fail confusingly or silently skip what it expected
+    # there, so this fails loudly instead of skipping it.
+    if [[ $(V="$volume" yq '.volumes[] | select(.name == strenv(V)) | has("emptyDir")' "$pod") == true ]]; then
+      continue
+    fi
+    fail "render-config mounts $mount from volume '$volume', which is not a ConfigMap or emptyDir; this check cannot model it"
+    return 1
   done < <(yq '.volumeMounts[] | [.mountPath, .name] | @tsv' "$init")
 
   ETC="$SITE_DIR/root/etc/asterisk"
@@ -202,8 +220,8 @@ render() {
   # The pod's env: envFrom in order, then env. A ConfigMap literal is used as
   # is unless Flux would have substituted it; a Secret key gets a dummy.
   local -A env=()
-  local cm_name secret_name k v
-  while IFS=$'\t' read -r cm_name secret_name; do
+  local cm_name secret_name secret_optional k v
+  while IFS=$'\t' read -r cm_name secret_name secret_optional; do
     if [[ $cm_name != - ]]; then
       doc ConfigMap "$cm_name" >"$SITE_DIR/doc.yaml"
       [[ -s $SITE_DIR/doc.yaml ]] || warn "$site: render-config reads ConfigMap $cm_name, which is not in the render"
@@ -213,6 +231,9 @@ render() {
         env[$k]=$v
       done < <(yq '.data // {} | to_entries | .[] | [.key, .value] | @tsv' "$SITE_DIR/doc.yaml")
     elif [[ $secret_name != - ]]; then
+      # Degraded mode models the item this Secret comes from not existing yet:
+      # drop the whole source, not just its keys, the way ESO would.
+      if [[ $mode == degraded && $secret_optional == true ]]; then continue; fi
       N="$secret_name" yq 'select(.kind == "ExternalSecret" and (.spec.target.name // .metadata.name) == strenv(N))' "$STREAM" >"$SITE_DIR/doc.yaml"
       if [[ -s $SITE_DIR/doc.yaml ]]; then
         if [[ $(yq '.spec | has("dataFrom")' "$SITE_DIR/doc.yaml") == true ]]; then
@@ -225,8 +246,9 @@ render() {
         keys=$(yq '(.data // {}) + (.stringData // {}) | keys | .[]' "$SITE_DIR/doc.yaml")
       fi
       for k in $keys; do env[$k]=$(dummy_for "$k"); done
+      [[ $mode == full && $secret_optional == true && -n $keys ]] && HAS_OPTIONAL=1
     fi
-  done < <(yq '(.envFrom // [])[] | [(.configMapRef.name // "-"), (.secretRef.name // "-")] | @tsv' "$init")
+  done < <(yq '(.envFrom // [])[] | [(.configMapRef.name // "-"), (.secretRef.name // "-"), (.secretRef.optional // false)] | @tsv' "$init")
   while IFS=$'\t' read -r k v; do
     [[ -n $k ]] || continue
     env[$k]=${v:-$(dummy_for "$k")}
@@ -309,6 +331,23 @@ localize() {
   printf '\n#include "pbx-check.conf"\n' >>"$ETC/extensions.conf"
 
   assert_loopback
+}
+
+# A noload here is silent: the module just is not there, and nothing a boot
+# logs counts it. res_pjsip*/chan_pjsip* are how a handset registers, gets
+# identified and answers voip.ms's digest challenge, so any of them missing
+# breaks a real call while every check here keeps passing.
+check_no_pjsip_noload() {
+  local offenders
+  offenders=$(awk '
+    /^[[:space:]]*noload[[:space:]]*=/ {
+      mod = $0
+      sub(/^[[:space:]]*noload[[:space:]]*=[[:space:]]*/, "", mod)
+      sub(/[[:space:]]*;.*/, "", mod)
+      if (mod ~ /^(res_pjsip|chan_pjsip)/) print FILENAME ":" FNR ": " $0
+    }
+  ' "$ETC/modules.conf" 2>/dev/null)
+  [[ -z $offenders ]] || fail "modules.conf noloads a PJSIP module a handset call needs" "${offenders//$ETC\//}"
 }
 
 # Every SIP and HTTP URI and every host-bearing key must name loopback, or
@@ -536,10 +575,12 @@ check_pjsip_objects() {
 endpoint_param() { awk -v key="$2" '$1 == key && $2 == ":" { $1 = ""; $2 = ""; sub(/^ +/, ""); print; exit }' <<<"$1"; }
 
 check_reload_and_handsets() {
-  local site=$1 ep show ctx trunk
+  local site=$1 ep show ctx trunk handset
   local -a lines=() trunks=() roots=(from-voipms)
+  local -A shows=()
   for ep in $ENDPOINTS; do
     show=$(ast "pjsip show endpoint $ep")
+    shows[$ep]=$show
     ctx=$(endpoint_param "$show" context)
     if [[ $ctx == "$HANDSET_CONTEXT" ]]; then
       trunk=$(endpoint_param "$show" TRUNK)
@@ -553,6 +594,21 @@ check_reload_and_handsets() {
     fi
   done
   INBOUND_ROOTS="${roots[*]}"
+
+  # The reverse of the TRUNK check above: every endpoint that is not itself a
+  # handset line must ring one of the declared lines, or ring none. A caller's
+  # own DID set as HANDSET would let that caller originate an outbound call on
+  # whatever endpoint names it — toll fraud a golden-number Dial never sees,
+  # since it originates on the handset side, not the trunk side.
+  local lines_nl
+  lines_nl=$(printf '%s\n' "${lines[@]}")
+  for ep in $ENDPOINTS; do
+    grep -qxF "$ep" <<<"$lines_nl" && continue
+    handset=$(endpoint_param "${shows[$ep]}" HANDSET)
+    if [[ -n $handset ]] && ! grep -qxF "$handset" <<<"$lines_nl"; then
+      fail "endpoint $ep rings HANDSET='$handset', which is not a declared handset line"
+    fi
+  done
 
   local i
   : >"$ETC/pbx-check.conf"
@@ -643,16 +699,39 @@ check_site() {
   SITE_DIR="$WORK/$site"
   mkdir -p "$SITE_DIR"
   say "==> $site"
-  render "$site" || return 1
+  render "$site" full || return 1
   localize || return 1
+  check_no_pjsip_noload
   boot || return 1
   say "    booted ($ISOLATION)"
+  run_checks "$site"
+  stop_asterisk
+
+  if ((HAS_OPTIONAL)); then
+    SITE_DIR="$WORK/$site-degraded"
+    mkdir -p "$SITE_DIR"
+    say "==> $site (degraded: optional secrets absent)"
+    if render "$site" degraded && localize; then
+      check_no_pjsip_noload
+      if boot; then
+        say "    booted ($ISOLATION)"
+        run_checks "$site"
+      fi
+    fi
+    stop_asterisk
+  fi
+
+  ((SITE_FAILURES == 0))
+}
+
+# The checks a boot must pass, whether it ran with every optional secret
+# present or with them dropped entirely.
+run_checks() {
+  local site=$1
   check_boot_log
   check_pjsip_objects
   check_reload_and_handsets "$site"
   check_inbound
-  stop_asterisk
-  ((SITE_FAILURES == 0))
 }
 
 main() {
