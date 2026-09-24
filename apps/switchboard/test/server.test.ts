@@ -48,6 +48,10 @@ function clock(startMs: number) {
   return { fn: () => now, set: (ms: number) => (now = ms) };
 }
 
+// Outside quiet hours (23:00-08:00 UTC in baseConfig), so tests that do not
+// exercise quiet hours themselves are not at the mercy of the wall clock.
+const DAYTIME = new Date('2026-01-01T12:00:00Z').getTime();
+
 describe('GET /healthz', () => {
   test('answers ok with no auth', async () => {
     const { log } = fakeLog();
@@ -221,7 +225,7 @@ describe('POST /alertmanager', () => {
   test('a critical firing alert places one call', async () => {
     const calls = mockElevenLabs(ok);
     const { log } = fakeLog();
-    const app = createApp({ config: baseConfig, log });
+    const app = createApp({ config: baseConfig, log, now: () => DAYTIME });
     const res = await send(app, { alerts: [critical('fp1')] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, action: 'called' });
@@ -255,7 +259,7 @@ describe('POST /alertmanager', () => {
   test('dedupes by fingerprint: a repeated notification calls only once', async () => {
     const calls = mockElevenLabs(ok);
     const { log } = fakeLog();
-    const app = createApp({ config: baseConfig, log });
+    const app = createApp({ config: baseConfig, log, now: () => DAYTIME });
     await send(app, { alerts: [critical('fp1')] });
     const second = await send(app, { alerts: [critical('fp1')] });
     expect(await second.json()).toMatchObject({
@@ -267,7 +271,11 @@ describe('POST /alertmanager', () => {
   test('a resolved alert clears the dedupe, so a re-fire can page again', async () => {
     const calls = mockElevenLabs(ok);
     const { log } = fakeLog();
-    const app = createApp({ config: { ...baseConfig, cooldownMs: 0 }, log });
+    const app = createApp({
+      config: { ...baseConfig, cooldownMs: 0 },
+      log,
+      now: () => DAYTIME,
+    });
     await send(app, { alerts: [critical('fp1')] });
     await send(app, {
       alerts: [
@@ -286,7 +294,11 @@ describe('POST /alertmanager', () => {
   test('a failed call is not deduped, so the next notification can retry', async () => {
     const calls = mockElevenLabs(failing);
     const { log } = fakeLog();
-    const app = createApp({ config: { ...baseConfig, cooldownMs: 0 }, log });
+    const app = createApp({
+      config: { ...baseConfig, cooldownMs: 0 },
+      log,
+      now: () => DAYTIME,
+    });
     const first = await send(app, { alerts: [critical('fp1')] });
     expect(await first.json()).toMatchObject({ action: 'call-failed' });
     const second = await send(app, { alerts: [critical('fp1')] });
