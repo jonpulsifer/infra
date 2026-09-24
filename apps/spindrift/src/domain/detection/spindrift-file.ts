@@ -1,9 +1,6 @@
 /**
- * The authoritative, in-repo projection of one scope's detection config (§5).
- *
- * This boundary is intentionally strict. Once `spindrift.yaml` exists the repo
- * is the source of truth, so malformed or unknown input must stop
- * reconciliation rather than quietly falling through to a fresh guess.
+ * Parses a scope's `spindrift.yaml`. Once it exists the file is the source of
+ * truth, so malformed or unknown input stops reconciliation.
  */
 import { z } from 'zod';
 import type { DetectionProposal } from './ladder.ts';

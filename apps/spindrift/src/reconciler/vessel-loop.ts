@@ -1,28 +1,6 @@
 /**
- * The Vessel loop — the standing checklist for a boundary rather than for a
- * surface on one (§13, §14).
- *
- * §13's checklist was written about a Target, and this installation depends on
- * four facts that are not any Target's: the bucket a build stages into before a
- * placement is even known, the artifacts project shared across every vessel, the
- * one store of record every Target reads a copy of, and the signer core calls.
- * They belong to the vessel `installation.homeVessel` names, and until this loop
- * ran nothing checked any of them — the failure mode `cloud-discovery.ts` names:
- *
- * > A mistyped project or bucket is invisible until a build stages a source
- * > archive and fails on a signed URL.
- *
- * A separate loop from the Target one rather than a second pass inside it,
- * because it asks entirely different far sides — Cloud Storage, Resource
- * Manager, Cloud KMS and the secret store — rather than a deploy adapter. §13's
- * "one loop, not two" is an argument about health and capabilities being one
- * question of one adapter, and that argument does not reach across the seam.
- *
- * **What it asks is the catalogue, and nothing else.**
- * `VESSEL_PREREQUISITES_BY_KIND_AND_ROLE` decides which rows a vessel gets, so
- * an app vessel is asked nothing and stores an empty checklist — never a green
- * row for something nobody checked. It stores what was observed and never what
- * was concluded: health is derived at read time, exactly as a Target's is.
+ * Refreshes each vessel's prerequisite checklist and discovery. A vessel is
+ * asked only what `VESSEL_PREREQUISITES_BY_KIND_AND_ROLE` assigns it.
  */
 import { eq } from 'drizzle-orm';
 import type { Discovered } from '../adapters/cloud-discovery.ts';
@@ -46,7 +24,6 @@ import {
 } from '../domain/vessel.ts';
 import { reconcilerLoopDuration } from '../telemetry/index.ts';
 
-/** What the loop needs. No principal: nobody asked for it to run. */
 export interface VesselLoopContext {
   readonly db: Database;
   readonly adapters: Pick<
@@ -57,60 +34,32 @@ export interface VesselLoopContext {
   readonly manifest: InstallationManifest;
 }
 
-/**
- * A KMS key reference as `supplyChain.signer` carries it, split into the two
- * segments Cloud KMS lists keys by.
- *
- * Parsed rather than asked for separately: the manifest already names the key in
- * full, and a second pair of keys beside it would be two values that can
- * disagree about one.
- */
+// The project and location Cloud KMS lists keys by, parsed from the signer.
 const SIGNER_REFERENCE =
   /^gcpkms:\/\/projects\/([^/]+)\/locations\/([^/]+)\/keyRings\//;
 
-/**
- * The scope a store reachability probe reads under.
- *
- * A listing rather than a write, and of a key that has never been written: both
- * stores answer an absent item with an empty list and answer an unreachable
- * endpoint, a refused credential or a container that does not exist by throwing.
- * That difference is the whole probe — it exercises the exact path core writes
- * over, credential included, without putting anything in the store.
- */
+// Lists a key never written: both stores answer an absent item with an empty
+// list and throw when unreachable or refused, so the probe writes nothing.
 const STORE_PROBE = {
   scope: { app: 'spindrift', component: 'checklist', target: 'vessel' },
   key: 'REACHABILITY',
 } as const;
 
-/** One vessel's checklist, and the row it was written to. */
 export interface VesselRefresh {
   readonly vesselId: string;
   readonly vessel: string;
   readonly health: 'healthy' | 'unhealthy';
-  /** Set when this pass changed what the boundary reports. */
+  /** Set only when this pass changed a previously assessed health. */
   readonly healthChangedFrom?: 'healthy' | 'unhealthy';
 }
 
-/** What one pass established about a boundary: the verdict and the inventory. */
 export interface VesselInspection {
   readonly prerequisites: readonly VesselPrerequisiteResult[];
-  /** `null` for a boundary whose kind has no account-wide listing to read. */
+  /** `null` when the vessel's kind has no account-wide listing. */
   readonly discovery: VesselDiscovery | null;
 }
 
-/**
- * Ask one boundary the questions its kind and roles put to it.
- *
- * Two independent questions, concurrently: whether this installation can use
- * the boundary (the checklist) and what is in it (the inventory). They are not
- * one call because they are not one verdict — an account with no zones is
- * perfectly usable, and a checklist row saying otherwise would be a rule nobody
- * wrote.
- *
- * Never throws, for the reason `inspectTarget` does not: the far sides here are
- * other people's APIs, and one refusing must produce an unmet row with its
- * sentence rather than stop the pass.
- */
+/** Never throws: a refusing API yields an unmet row, and the pass goes on. */
 export async function inspectVessel(
   context: VesselLoopContext,
   vessel: Pick<Vessel, 'name' | 'kind' | 'location'>,
@@ -124,14 +73,8 @@ export async function inspectVessel(
 }
 
 /**
- * What the boundary holds, as its own credential can see it.
- *
- * `null` rather than an empty document for every kind that has none: a cluster
- * and a cloud project are read by the checklist above and by the Target loop,
- * and neither has an account-wide inventory this shape would carry. A stored
- * `null` there is "there is nothing of this kind to read", which is a different
- * fact from a Cloudflare account whose reads were all refused — that one stores
- * a document with three null fields and three sentences.
+ * `null` for every kind but a Cloudflare account. An unreadable account yields
+ * null fields with the reason, never `null`.
  */
 export async function readVesselDiscovery(
   adapters: Pick<AdapterRegistry, 'cloudflare'>,
@@ -155,7 +98,6 @@ export async function readVesselDiscovery(
   });
 }
 
-/** The inventory of an account nothing could ask, with the fault stated. */
 function unreadableAccount(detail: string): VesselDiscovery {
   return {
     kind: 'cloudflare-account',
@@ -166,7 +108,6 @@ function unreadableAccount(detail: string): VesselDiscovery {
   };
 }
 
-/** §13's checklist, one noun up — the four facts a home vessel owes. */
 async function checklistOf(
   context: VesselLoopContext,
   vessel: Pick<Vessel, 'name' | 'kind' | 'location'>,
@@ -185,9 +126,7 @@ async function checklistOf(
   }
   const location = vessel.location;
   if (location === null || location.kind !== 'gcp-project') {
-    // The catalogue only asks these of a `gcp-project`, so this is a boundary
-    // whose row does not yet say where it is — the half-ready state §13 intends
-    // to be visible rather than one to fabricate a project id for.
+    // Only a GCP project is asked these, so this row does not yet state one.
     return unreachableVesselPrerequisites(
       `${vessel.name} states no project, so its shared services could not be looked for`,
       vessel.kind,
@@ -197,9 +136,8 @@ async function checklistOf(
 
   const shared = sharedServicesOf(context.manifest);
   const signer = SIGNER_REFERENCE.exec(context.manifest.supplyChain.signer);
-  // Four independent reads, each folded into its own row. Never one `try` and
-  // never one rejection path: `GcpDiscovery` returns its failures, so a single
-  // catch would turn three good answers into four refusals.
+  // `GcpDiscovery` returns failures instead of throwing, so each read folds
+  // into its own row.
   const [buckets, projects, keys, store] = await Promise.all([
     discovery.buckets(location.project),
     discovery.projects(),
@@ -235,22 +173,13 @@ async function checklistOf(
   return asked.map((name) => answers[name]);
 }
 
-/** A read that was never made, in the arm a refused one comes back in. */
 function notAskable(reason: string): Promise<Discovered<string>> {
   return Promise.resolve({ kind: 'unavailable', reason });
 }
 
 /**
- * One checklist row from one listing.
- *
- * The two arms stay apart all the way to the row: an established absence says
- * the value is not there, and a refused read says nothing was established.
- * Collapsing them would report a mistyped bucket and an unreachable API with the
- * same sentence, which is the laundering `cloud-discovery.ts` exists to prevent.
- *
- * `assessed` is that same split as a field rather than as prose, so a reader
- * downstream keeps it without matching on the sentence: a refused listing must
- * not produce a stanza declaring a bucket nobody established was missing.
+ * A refused read (`assessed: false`) stays apart from an established absence,
+ * so a mistyped bucket and an unreachable API never read the same.
  */
 function holds(
   name: VesselPrerequisite,
@@ -266,7 +195,6 @@ function holds(
     : { name, met: false, detail: absent };
 }
 
-/** Whether the configured store answered at all. */
 async function storeReach(
   store: SecretStore | null,
 ): Promise<VesselPrerequisiteResult> {
@@ -283,9 +211,7 @@ async function storeReach(
     await store.versions(STORE_PROBE.scope, STORE_PROBE.key);
     return { name: 'SECRET_STORE', met: true };
   } catch (cause) {
-    // Both stores answer an absent item with an empty list and throw for
-    // everything else, so a throw here is the store declining to be read
-    // rather than a fact about what is in it.
+    // A throw is the store declining to be read, not a fact about its contents.
     return {
       name: 'SECRET_STORE',
       met: false,
@@ -296,12 +222,8 @@ async function storeReach(
 }
 
 /**
- * One pass over every vessel.
- *
- * Every one of them, not only the two the installation is built on: an app
- * vessel is asked nothing, so its pass is one write of an empty checklist, and
- * that empty list is what makes "assessed and asked nothing" a different stored
- * state from "never assessed".
+ * Every vessel: an app vessel stores an empty checklist, which reads as
+ * assessed and asked nothing, where `null` is never assessed.
  */
 export async function refreshAllVessels(
   context: VesselLoopContext,
@@ -315,9 +237,7 @@ export async function refreshAllVessels(
       vessel.prerequisites === null
         ? null
         : deriveVesselHealth(vessel.prerequisites, vessel.kind, roles);
-    // Sequential rather than concurrent, exactly as the Target loop is: the far
-    // sides are other people's control planes, and a fleet refreshing in
-    // lockstep is a thundering herd against every one of them at once.
+    // Sequential, so a fleet refresh never herds every control plane at once.
     const { prerequisites, discovery } = await inspectVessel(
       context,
       vessel,
@@ -342,14 +262,12 @@ export async function refreshAllVessels(
   return refreshed;
 }
 
-/** How often the loop runs, and how to stop it. */
 export interface VesselLoopOptions {
   readonly intervalMs: number;
   readonly signal?: AbortSignal;
   readonly onPass?: (refreshed: readonly VesselRefresh[]) => void;
 }
 
-/** Run the loop until aborted. Poll, not watch — see `target-loop.ts`. */
 export async function runVesselLoop(
   context: VesselLoopContext,
   options: VesselLoopOptions,
@@ -366,7 +284,6 @@ export async function runVesselLoop(
   }
 }
 
-/** A sleep that wakes early on abort rather than holding the loop open. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);

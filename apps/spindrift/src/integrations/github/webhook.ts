@@ -1,81 +1,43 @@
 /**
- * The signed repository webhook (§15, §21).
- *
- * §21 names this one of the only externally reachable endpoints, and §15 pairs
- * it with periodic default-branch reconciliation so "a missed delivery
- * self-heals". Those two sentences set the whole posture of this module:
- *
- * - **The signature is the authentication, so it is checked before anything is
- *   parsed.** The body is untrusted bytes until the HMAC matches; parsing first
- *   would run a JSON decoder on whatever the internet sent.
- * - **A delivery is a hint, never a fact.** Nothing here writes. It classifies
- *   one delivery into {@link WebhookDelivery} and hands it to the repo loop,
- *   which does the same work whether it was woken by a delivery or by its own
- *   timer. That is what makes the loop the correctness path and this the
- *   latency optimization — the same shape the deploy loop takes with
- *   `LISTEN`/`NOTIFY`.
- * - **Everything unrecognized is `ignored`, with a reason.** A repository host
- *   sends events nobody subscribed to and adds new ones over time; a parser
- *   that threw on those would turn a product decision made elsewhere into a
- *   `500` on this installation's public endpoint.
+ * The signed repository webhook: verifies a delivery, then classifies it for
+ * the repo loop. An unrecognized event is `ignored` with a reason, never thrown.
  */
 
-/** The header carrying the HMAC over the raw body. */
 export const SIGNATURE_HEADER = 'X-Hub-Signature-256';
-/** The header naming which event was delivered. */
 export const EVENT_HEADER = 'X-GitHub-Event';
 
-/**
- * What one delivery means to Spindrift.
- *
- * Three kinds and a fourth that means nothing, chosen because §15 gives exactly
- * three things a delivery can tell this system: the default branch moved,
- * access went away, or access came back.
- */
 export type WebhookDelivery =
   | {
-      /** A push to some ref. Whether it is *the* ref is the loop's question. */
+      /** Any ref; the loop decides whether it is the default branch. */
       readonly kind: 'push';
       /** `owner/name`. */
       readonly repository: string;
-      /** The full ref, e.g. `refs/heads/main`. */
+      /** The full ref, such as `refs/heads/main`. */
       readonly ref: string;
-      /** The repository's default branch as the delivery reported it. */
       readonly defaultBranch: string;
       /** The commit the ref now points at. */
       readonly head: string;
     }
   | {
-      /**
-       * The App lost access to one or more repositories: the installation was
-       * deleted or suspended, or repositories were removed from a
-       * selected-repository App.
-       */
       readonly kind: 'accessLost';
       readonly installationId: string;
-      /**
-       * The repositories named by the delivery. Empty means *every* repository
-       * of that installation, which is what a deletion or suspension is — the
-       * delivery names an installation, not a list.
-       */
+      /** Empty means every repository of the installation. */
       readonly repositories: readonly string[];
-      /** The sentence an operator reads on the frozen repository. */
+      /** Shown to the operator on the frozen repository. */
       readonly detail: string;
     }
   | {
-      /** Access came back: an unsuspend, or repositories added. */
       readonly kind: 'accessRestored';
       readonly installationId: string;
-      /** Empty means every repository of that installation. */
+      /** Empty means every repository of the installation. */
       readonly repositories: readonly string[];
     }
   | {
       readonly kind: 'ignored';
-      /** Why nothing was derived from it, for a log line. */
+      /** For a log line. */
       readonly reason: string;
     };
 
-/** Why a delivery was refused before it was parsed. */
 export type WebhookRejectionCode =
   | 'SIGNATURE_MISSING'
   | 'SIGNATURE_MALFORMED'
@@ -84,13 +46,8 @@ export type WebhookRejectionCode =
   | 'BODY_MALFORMED';
 
 /**
- * A delivery that will not be interpreted.
- *
- * Distinct from an `ignored` delivery, and the distinction is the security
- * boundary: `ignored` means "authenticated, and nothing to do"; this means "not
- * authenticated, or not a request at all". The endpoint answers `202` to the
- * first and `4xx` to the second, and conflating them would make an attacker's
- * unsigned body indistinguishable from a `ping`.
+ * An unauthenticated or malformed delivery, answered `4xx`. An `ignored`
+ * delivery was authenticated and is answered `202`.
  */
 export class WebhookRejected extends Error {
   override readonly name = 'WebhookRejected';
@@ -115,11 +72,8 @@ function hexToBytes(hex: string): Uint8Array | null {
 }
 
 /**
- * Compare two byte strings without leaking where they diverge.
- *
- * The length is compared first and separately, which does leak *that* — but the
- * length of a SHA-256 HMAC is a constant an attacker already knows, and the
- * alternative (padding to a fixed width) would compare bytes that mean nothing.
+ * Constant time over equal lengths. The early length check leaks only the size
+ * of a SHA-256 HMAC, which is public.
  */
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
@@ -131,12 +85,8 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * Check the HMAC over the **raw body bytes**.
- *
- * Bytes, not a string, and not a re-serialized object: the signature covers
- * exactly what was sent, and any round trip through a parser is a chance to
- * canonicalize a byte the sender did not. A caller that has already parsed the
- * body has already lost the ability to verify it.
+ * Checks the HMAC over the raw bytes, since a parser round trip can change a
+ * byte the sender signed.
  */
 export async function verifyWebhookSignature(
   body: Uint8Array,
@@ -182,7 +132,6 @@ export async function verifyWebhookSignature(
   }
 }
 
-/** The fields this module reads out of a delivery, all optional until checked. */
 interface DeliveryBody {
   action?: string;
   ref?: string;
@@ -206,14 +155,7 @@ function namesOf(
     .filter((name): name is string => name !== undefined);
 }
 
-/**
- * Interpret one **already verified** delivery.
- *
- * Separate from verification so the ordering is visible at the call site rather
- * than trusted to a flag: {@link handleWebhookDelivery} is the composed form,
- * and this is what a test drives when it is asserting classification rather
- * than authentication.
- */
+/** Trusts its input; {@link handleWebhookDelivery} verifies first. */
 export function parseWebhookDelivery(
   event: string,
   body: unknown,
@@ -303,19 +245,13 @@ export function parseWebhookDelivery(
   return { kind: 'ignored', reason: `${event} is not subscribed to` };
 }
 
-/** One raw delivery, exactly as it arrived. */
 export interface RawDelivery {
   readonly event: string | null;
   readonly signature: string | null;
   readonly body: Uint8Array;
 }
 
-/**
- * Verify, then interpret. The order is the whole contract.
- *
- * The body is decoded only after the HMAC over its bytes matched, so the JSON
- * parser never runs on unauthenticated input.
- */
+/** Verifies first, so the JSON parser never sees unauthenticated input. */
 export async function handleWebhookDelivery(
   delivery: RawDelivery,
   secret: string,

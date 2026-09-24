@@ -1,36 +1,11 @@
 /**
- * Which directory a scope's Dockerfile builds from (§5).
- *
- * Two conventions share one instruction set. A monorepo Dockerfile is written
- * against the root that `docker build -f apps/x/Dockerfile .` gives it —
- * `COPY . .` then a path *into* the app — while a standalone repository's
- * Dockerfile is written against its own directory (`COPY go.mod ./` with
- * go.mod beside it), and keeps that shape when the repository is vendored
- * under a subpath. Handing either kind the other's context fails deep inside
- * the build on a path that names neither convention.
- *
- * The file itself is the tiebreak: a COPY/ADD source that resolves beside the
- * Dockerfile and not at the repository root is a Dockerfile naming its own
- * directory. Anything the rule cannot read — stage copies, URLs, globs,
- * variables — decides nothing, so the answer only ever moves off the root
- * convention on positive evidence.
- *
- * The build routes run the same rule in shell: `DOCKERFILE_CONTEXT_PROBE` in
- * `adapters/build/buildkit.ts`, carried verbatim by the hosted workflow. This
- * is the inspect-time mirror that puts the same answer in the operator's
- * sentence, and `test/adapters/dockerfile-context-arm.test.ts` holds the two
- * halves to one answer — what the operator reads at connect time must be what
- * the build then does.
+ * Which directory a scope's Dockerfile builds from: the scope when a COPY/ADD
+ * source exists beside it and not at the root, else the root. Keep it in step
+ * with `DOCKERFILE_CONTEXT_PROBE` in `adapters/build/buildkit.ts`.
  */
 import type { SourceTree } from './tree.ts';
 
-/**
- * The COPY/ADD sources of a Dockerfile that could decide its context.
- *
- * One line is one instruction: a source hidden behind a `\` continuation is
- * simply not seen, which errs toward the root convention rather than toward a
- * different answer than the shell probe would give — both read line-wise.
- */
+/** Line by line, like the shell probe, so a source after a line continuation is not seen. */
 export function contextSources(dockerfile: string): readonly string[] {
   const sources: string[] = [];
   for (const line of dockerfile.split('\n')) {
@@ -57,10 +32,7 @@ export function contextSources(dockerfile: string): readonly string[] {
         continue;
       }
       const source = token.startsWith('./') ? token.slice(2) : token;
-      // `COPY ./ <dest>` names the whole context, like `.` — an empty source
-      // resolves to a directory both roots have, which the shell probes read
-      // as no evidence. Passing it on would say the scope copies ""
-      // from beside itself.
+      // `COPY ./ <dest>` names the whole context, like `.`, so it is no evidence.
       if (source === '') continue;
       sources.push(source);
     }
@@ -76,7 +48,7 @@ export type DockerfileBuildContext =
       readonly copies: string;
     };
 
-/** Decide the context for the Dockerfile at `prefix`, `.` meaning the root. */
+/** `prefix` is the Dockerfile's directory; `.` means the root. */
 export async function dockerfileBuildContext(
   tree: SourceTree,
   prefix: string,

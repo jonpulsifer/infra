@@ -1,28 +1,6 @@
 /**
- * Deploying a function to Cloud Run functions (gen2).
- *
- * The archive holds three files — the author's `index.mjs`, the Functions
- * Framework shim from `shim.ts`, and a manifest — uploaded to the vessel's own
- * source bucket under its digest. The digest is the object name, so an
- * unchanged function re-uploads to the same place instead of leaving one object
- * per deploy behind.
- *
- * **Public by the Service's own field, not by an IAM binding.** A function is a
- * Cloud Run Service underneath, and this installation's org policy admits no
- * `allUsers` principal — so openness is `invokerIamDisabled` on the Service, the
- * same lever `cloudrun/service.ts` pulls for a public Component.
- *
- * `tail` polls Cloud Logging rather than streaming: the API has no watch, and a
- * function's entries are ordinary `cloud_run_revision` entries — which is why
- * the reading helpers are the deploy adapter's, in `cloudrun/logs.ts`.
- *
- * The function's environment is `serviceConfig.environmentVariables` — plain
- * environment on the Service, so anyone who can read the project reads the
- * values. It is always sent, empty map included, because an absent field on a
- * PATCH under this update mask would leave a removed variable in place.
- *
- * ponytail: no min instances. That is a field on `serviceConfig` when a
- * function needs one.
+ * Deploys a function to Cloud Run functions (gen2): the author's module, the
+ * Functions Framework shim and a manifest, zipped and staged by digest.
  */
 
 import type { Fetcher, TokenProvider } from '../adapters/deploy/cloud/http.ts';
@@ -51,16 +29,9 @@ const DEFAULT_LOGS_ENDPOINT = 'https://logging.googleapis.com';
 /** The runtime the shim is written against. */
 const RUNTIME = 'nodejs22';
 
-/** How often the build operation is asked whether it is finished. */
 const OPERATION_POLL_MS = 3_000;
 
-/**
- * How long a deploy is waited on.
- *
- * A gen2 deploy is a container build, so the ceiling is minutes rather than
- * seconds — but it is a ceiling, because the alternative to giving up is a
- * request that never answers.
- */
+/** A gen2 deploy is a container build, so it takes minutes. */
 const OPERATION_TIMEOUT_MS = 10 * 60 * 1_000;
 
 const LOG_POLL_MS = 2_000;
@@ -72,25 +43,21 @@ export interface CloudRunFunctionsOptions {
   readonly token: TokenProvider;
   readonly project: string;
   readonly region: string;
-  /** Where the source archive is staged for the build. */
   readonly sourceBucket: string;
   readonly runtimeServiceAccount?: string;
   readonly functionsEndpoint?: string;
   readonly runEndpoint?: string;
   readonly storageEndpoint?: string;
   readonly logsEndpoint?: string;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-/** One function, as much of the v2 resource as this reads. */
 interface CloudFunction {
   readonly url?: string;
   readonly serviceConfig?: { readonly uri?: string };
 }
 
-/** The long-running operation a write answers with. */
 interface FunctionOperation {
   readonly name?: string;
   readonly done?: boolean;
@@ -139,7 +106,10 @@ export class CloudRunFunctions implements FunctionDeployer {
       },
       serviceConfig: {
         ingressSettings: 'ALLOW_ALL',
+        // Plain env: anyone who can read the project reads it. Sent even when
+        // empty, or a PATCH under this mask keeps a removed variable.
         environmentVariables: env,
+        // ponytail: no min instances; add one here when a function needs it.
         maxInstanceCount: 2,
         availableMemory: '256Mi',
         timeoutSeconds: 60,
@@ -150,9 +120,8 @@ export class CloudRunFunctions implements FunctionDeployer {
       labels: { 'spindrift-function': name },
     };
 
-    // Read before write: the API has separate verbs for the first deploy and
-    // every one after it, and a create against an existing function is an
-    // `ALREADY_EXISTS` rather than an update.
+    // Create and update are separate verbs; a create on an existing function is
+    // `ALREADY_EXISTS`.
     const functions = this.http(
       this.options.functionsEndpoint ?? DEFAULT_FUNCTIONS_ENDPOINT,
     );
@@ -205,9 +174,8 @@ export class CloudRunFunctions implements FunctionDeployer {
 
   async remove(name: string): Promise<void> {
     const id = workloadName(name);
-    // The operation is not waited on: the function is gone from the API's point
-    // of view as soon as the delete is accepted, and a caller removing a row
-    // has nothing to do with the minutes the teardown takes.
+    // Not waited on: the function is gone from the API once the delete is
+    // accepted.
     const deleted = await this.http(
       this.options.functionsEndpoint ?? DEFAULT_FUNCTIONS_ENDPOINT,
     ).json({
@@ -219,6 +187,7 @@ export class CloudRunFunctions implements FunctionDeployer {
     throw new FunctionDeployError(`removing ${id} failed: ${deleted.message}`);
   }
 
+  /** Polls: the Logging REST API has no streaming read. */
   async *tail(
     name: string,
     signal: AbortSignal,
@@ -248,8 +217,7 @@ export class CloudRunFunctions implements FunctionDeployer {
         for (const entry of page.value.entries ?? []) {
           const record = cloudLogRecord(entry);
           if (record === null) continue;
-          // The filter is inclusive of its own timestamp, so the entry that set
-          // the cursor comes back on every poll until something newer does.
+          // The `>=` filter returns the cursor's own entry on every poll.
           if (
             after !== null &&
             (record.at < after.at ||
@@ -270,7 +238,6 @@ export class CloudRunFunctions implements FunctionDeployer {
     }
   }
 
-  /** `projects/<p>/locations/<r>` — the parent every call hangs off. */
   private parent(): string {
     return `projects/${this.options.project}/locations/${this.options.region}`;
   }
@@ -291,7 +258,6 @@ export class CloudRunFunctions implements FunctionDeployer {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  /** Poll the build operation until it is finished, or give up saying so. */
   private async settle(
     functions: CloudHttp,
     started: FunctionOperation,
@@ -330,7 +296,10 @@ export class CloudRunFunctions implements FunctionDeployer {
     return operation;
   }
 
-  /** Take the invoker check off the Service the function runs as (§9). */
+  /**
+   * Public through the Service's own `invokerIamDisabled`, since org policy can
+   * forbid an `allUsers` binding.
+   */
   private async open(id: string): Promise<void> {
     const opened = await this.http(
       this.options.runEndpoint ?? DEFAULT_RUN_ENDPOINT,
@@ -347,7 +316,6 @@ export class CloudRunFunctions implements FunctionDeployer {
     }
   }
 
-  /** The address, when the operation's own response did not carry one. */
   private async address(
     functions: CloudHttp,
     id: string,

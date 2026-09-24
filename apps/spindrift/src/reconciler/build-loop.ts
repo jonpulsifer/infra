@@ -1,9 +1,6 @@
 /**
- * Durable Build convergence.
- *
- * Review writes a PENDING Build and returns immediately so the browser can
- * open the real status surface. This loop owns the long-running runner stream;
- * an HTTP request never has to stay open for the duration of a build.
+ * Dispatches PENDING Builds and runs each runner stream to completion, so no
+ * HTTP request stays open for a build.
  */
 import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
 import {
@@ -26,13 +23,8 @@ import {
 } from '../telemetry/index.ts';
 import { AUTO_DEPLOY_PRINCIPAL } from './auto-deploy.ts';
 
-/**
- * How often to look for a Build to dispatch.
- *
- * Both ends are the wait between pressing Deploy and a runner starting, and the
- * scan itself is one indexed `select` over `PENDING` rows — so idle is seconds,
- * not the tens of seconds a cheaper-looking number would cost every developer.
- */
+// Idle is seconds: it is the wait between pressing Deploy and a runner
+// starting, and a scan is one indexed select over PENDING rows.
 export const DEFAULT_BUILD_INTERVALS = {
   activeMs: 500,
   idleMs: 1_500,
@@ -47,38 +39,20 @@ export interface BuildLoopOptions {
   readonly onPass?: () => void;
 }
 
-/** Run every dispatchable PENDING Build once; atomic claiming prevents doubles. */
 export async function runBuildPass(
   context: BuildDispatchContext,
 ): Promise<number> {
-  // One row per PENDING Build: the placement of record is a stored fact on the
-  // Component (`placedTargetId`), so there is nothing to rank or dedupe — the
-  // old pair's desired row a move leaves behind is what still serves there,
-  // never a second candidate. Left joins, because an unplaced Component's
-  // Build is a refusal this loop owes a sentence, not a row to drop.
+  // Left joins: an unplaced Component's Build still needs a refusal recorded.
   const rows = await context.db
     .select({
       buildId: builds.id,
       targetId: targets.id,
-      // Carried for the refusal below, which needs an attempt reference and
-      // cannot get one from `dispatchBuild` — it never reaches it.
       appId: components.appId,
       componentId: components.id,
-      // Whether a Build that succeeds here is one a push asked for — a fact
-      // the Build itself records, because whoever asked is long gone by the
-      // time there is a verdict. See the dispatch below.
       deployOnSuccess: builds.deployOnSuccess,
       waitingOn: builds.dispatchWaitingOn,
-      // Carried so every refusal below can advance the backoff clock without
-      // a second read — the same reason `waitingOn` rides along.
       attempts: builds.dispatchAttempts,
-      // For the pickup-latency metric below — every row here is PENDING by
-      // the `where` clause, so this is the age of a Build still waiting to be
-      // claimed.
       createdAt: builds.createdAt,
-      // For holding the Build to the placement's shape: what this Build
-      // produces, what the Component is, and enough of the Target to derive
-      // the shape it takes.
       targetShape: builds.targetShape,
       kind: components.kind,
       adapter: targets.adapter,
@@ -91,9 +65,8 @@ export async function runBuildPass(
     .where(
       and(
         eq(builds.status, 'PENDING'),
-        // The backoff clock (story 101): a row a recent attempt refused is not
-        // looked at again until its wait is up, so a Build that cannot
-        // currently succeed costs attempts per cap interval, not per tick.
+        // A refused row waits out its backoff, so a Build that cannot succeed
+        // costs one attempt per backoff interval, not one per tick.
         or(
           isNull(builds.nextDispatchAt),
           lte(builds.nextDispatchAt, context.clock?.now() ?? new Date()),
@@ -105,10 +78,7 @@ export async function runBuildPass(
   let dispatched = 0;
   for (const row of rows) {
     if (row.targetId === null || row.adapter === null || row.vessel === null) {
-      // Nowhere to bind: the Component is placed on no Target, so there is no
-      // route or policy to evaluate this Build against. It stays PENDING and
-      // says so — placing the Component is the operator act that makes the
-      // next tick work.
+      // Stays PENDING and says why; placing the Component unblocks it.
       await recordDispatchWait(
         context,
         {
@@ -131,23 +101,8 @@ export async function runBuildPass(
       },
     };
     if (!takesShape(row.kind, row.targetShape, placement)) {
-      // The placement of record does not take what this Build produces —
-      // it was staged for a placement the Component has since moved off.
-      // Binding it anywhere else would evaluate route and policy against a
-      // Target the artifact can never land on. Membership, not equality with
-      // the shape a fresh build here would take (`takesShape`): a `files`
-      // Build placed on Vercel dispatches, because Vercel serves the shape it
-      // produces.
-      //
-      // **Closed, not waited on**, and that is `refuseDispatch`'s own test
-      // rather than a severity judgement: a wait is a fact about the
-      // installation that configuring something clears, and this is a fact
-      // about this row that nothing clears. §3 prescribes a rebuild for a move
-      // across shapes, `deployApp` stages one the moment the newest Build is
-      // terminal, and it derives its shape from the placement of record — so
-      // failing this row is what makes the remediation reachable. Waiting
-      // instead is what left Build 44 queued for nine days under a sentence
-      // that was already the whole truth.
+      // Staged for a placement the Component has since left. Closed at once:
+      // no configuration change clears a shape mismatch, only a rebuild.
       const shapeTaken = artifactTypeFor(row.kind, placement);
       await recordDispatchClose(
         context,
@@ -161,24 +116,14 @@ export async function runBuildPass(
           attempts: row.attempts,
         },
         `this Build produces a ${row.targetShape} artifact and the Target this Component is placed on takes another (${targetLabel({ vessel: row.vessel, adapter: row.adapter })} takes ${shapeTaken}), so nothing can run it`,
-        // §6's "invalid spec": the artifact this Build would produce is one the
-        // Target would refuse to admit, and moving the Component is the act
-        // that made it so.
         'REJECTED',
       );
       continue;
     }
     const selection = await buildRouteFor(row.targetId, context, row.appId);
     if (selection.route === null) {
-      // A Target whose policy no available route satisfies. Configuring a
-      // route is an operator act that makes the next tick work, so the Build
-      // stays PENDING — and says so once, because a Build PENDING forever with
-      // nothing anywhere saying why is the failure worth spending a row on.
-      //
-      // Every candidate's own sentence is carried, because since an App may
-      // name its route the general sentence is no longer the whole truth: "this
-      // Target does not admit this route" is a thing the developer did and can
-      // undo, and it reads nothing like an installation that configured none.
+      // Stays PENDING until a route qualifies. Each candidate's reason is
+      // carried, because an App may name a route the Target does not admit.
       const reasons = selection.candidates
         .filter((candidate) => !candidate.eligible)
         .map((candidate) => `${candidate.route} (${candidate.reason})`)
@@ -201,9 +146,7 @@ export async function runBuildPass(
       continue;
     }
     const route = selection.route;
-    // `dispatchBuild` runs the whole attempt — including the adapter's build
-    // stream — to completion before returning, so timing this call is timing
-    // the build itself, not the loop's own bookkeeping around it.
+    // `dispatchBuild` runs the whole build, so this times the build.
     const startedAt = Date.now();
     const result = await dispatchBuild(
       {
@@ -213,9 +156,7 @@ export async function runBuildPass(
       },
       context,
     );
-    // The verdict, so a red build is a series an alert can name — the same
-    // shape the deploy loop records its phase under. `refused` is an attempt
-    // that reached no verdict: a wait, a close, or a lost claim.
+    // `refused`: an attempt with no verdict (a wait, a close, a lost claim).
     reconcilerAttemptDuration.record((Date.now() - startedAt) / 1000, {
       kind: 'build',
       outcome: result.ok ? result.value.status : 'refused',
@@ -227,25 +168,8 @@ export async function runBuildPass(
         { kind: 'build' },
       );
 
-      // **The second half of a push.** §15's dispatcher asks for the *build*
-      // act, because a push means "this commit" and the artifact already on
-      // hand is the previous one's. That leaves the artifact this Build just
-      // produced with nothing to place it — the workspace's Rebuild has an
-      // operator who presses Deploy next, and a push has nobody.
-      //
-      // `createDeploy` rather than `deployApp`, because there is no act left to
-      // choose: this Build is the subject, and it just succeeded. `deployApp`
-      // would re-derive "the App's newest Build" from the database, which is a
-      // different row whenever a later push has already queued one — and would
-      // then place *that* artifact, or silently place nothing at all. §6's
-      // check-and-set is what has to be preserved here, not the act-chooser
-      // above it, and `createDeploy` is the pair that implements it —
-      // `checkDeployable` then `placeIntent` — which `placeComponent`,
-      // `setConfig` and `rollbackDeploy` all reach the same way.
-      //
-      // `deployOnSuccess` and not `apps.autoDeploy`: the flag says the App
-      // deploys on push, not that this Build came from one, and keying on it
-      // would make an operator's Rebuild press ship to production.
+      // `deployOnSuccess`, not `apps.autoDeploy`, so a Rebuild never ships
+      // itself; `createDeploy`, since `deployApp` may pick a later Build.
       if (row.deployOnSuccess && result.value.status === 'SUCCEEDED') {
         const placed = await createDeploy(
           {
@@ -256,10 +180,7 @@ export async function runBuildPass(
           { ...context, principal: AUTO_DEPLOY_PRINCIPAL },
         );
         if (!placed.ok) {
-          // Onto this Build's own attempt log, because that is the screen the
-          // push sent the developer to. A green build whose deploy was refused
-          // and said so nowhere is the same silence ticket 132 is about, one
-          // seam further along.
+          // On this Build's attempt log, where a push sends the developer.
           await recordBuildEvent(
             context.db,
             {
@@ -277,9 +198,7 @@ export async function runBuildPass(
       }
     }
   }
-  // Every Build this pass looked at — one row each, all of them PENDING by
-  // the `where` clause — the backlog this pass found, whether or not it
-  // managed to dispatch all of it.
+  // The backlog this pass found, dispatched or not.
   reconcilerQueueDepth.record(rows.length, { kind: 'build' });
   return dispatched;
 }

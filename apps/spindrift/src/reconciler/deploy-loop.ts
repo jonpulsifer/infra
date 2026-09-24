@@ -1,42 +1,7 @@
 /**
- * The deploy loop (§6, Task 20).
- *
- * §6 puts reconciliation in core, above the adapter seam: the verbs are one-shot
- * and imperative, "every backend self-heals below the seam, so an adapter never
- * holds a workload up". This file is that above — the thing that decides *when*
- * to act and *when* to look.
- *
- * **Poll, not watch.** Three reasons, and only the first is about Kubernetes:
- * one of the three backends has a watch and the other two do not, so an
- * event-driven seam would have two shapes; a watch held across a WAN tunnel
- * dies while still looking connected, which is the one failure mode a
- * convergence loop must not have; and hand-rolled watch bookkeeping in
- * TypeScript with no informer is real work for no gain at this scale.
- *
- * **Two cadences, not one.** Looking for work is one cheap indexed `select`, so
- * it runs every second or two — a developer who pressed Deploy is waiting, and
- * the interval before pickup is the largest number they experience. Looking at
- * what has already converged costs one adapter round trip per live release, so
- * drift detection runs on its own far slower clock
- * ({@link DEFAULT_DRIFT_INTERVAL_MS}). Binding the two together made every
- * pickup wait out a drift interval, which is the wait this split removes.
- *
- * **Claiming is `FOR UPDATE SKIP LOCKED`, and the claim is a leased phase.**
- * The lock on the Component@Target desired-state row is held only long enough
- * to move a Deploy to `APPLYING`; it is not held across the apply. Holding a
- * database transaction open for the length of a call to somebody else's
- * control plane would put a rollout's duration inside a lock. The phase and its
- * timestamp survive the process, and an abandoned claim becomes eligible after
- * the adapter convergence budget.
- *
- * **`LISTEN`/`NOTIFY` is an optimization and never the delivery path.** It is
- * free with the Postgres already required and it cuts intent-to-pickup latency
- * from one interval to nearly nothing — but `NOTIFY` is *lost* when no listener
- * is connected, so a loop that depended on it would silently stop converging
- * across a `reconciler` restart. Everything here is correct with every
- * notification dropped: the wake-up only shortens a sleep, and
- * `test/reconciler/deploy-loop.test.ts` runs the whole convergence with
- * notifications disabled to keep that true.
+ * Claims Deploy intents, runs each through its adapter to a verdict, and reads
+ * converged releases back for drift and soak. It polls; an optional `wakeup`
+ * can only shorten a sleep.
  */
 import {
   and,
@@ -104,71 +69,34 @@ import {
   reconcilerQueueDepth,
 } from '../telemetry/index.ts';
 
-/** What the loop needs. No principal: nobody asked for it to run. */
 export interface DeployLoopContext {
   readonly db: Database;
-  /**
-   * `dns` alongside `deploy`: a LIVE verdict on a platform-named Target earns
-   * a vanity record the way a cluster Target already earns one through its
-   * own release (§9), and `settle` is what converges or withdraws it.
-   */
+  /** `dns` publishes vanity records for platform-named Targets. */
   readonly adapters: Pick<AdapterRegistry, 'deploy' | 'dns'>;
   readonly clock: Clock;
   readonly manifest: InstallationManifest;
 }
 
-/**
- * The phases that mean something is still owed work (§6).
- *
- * `PENDING` is here alongside §6's two in-flight phases because an intent nobody
- * has claimed is the most urgent thing there is — it is a developer waiting.
- * `APPLYING` and `WAITING` appear *between* passes only when an attempt did not
- * finish inside one: a reconciler that died mid-apply leaves exactly that, and
- * the fast cadence is how it gets picked back up rather than sitting for the
- * converged interval.
- */
+// `PENDING` is a developer waiting. `APPLYING` and `WAITING` outlive a pass
+// only when a reconciler died mid-attempt.
 const UNSETTLED: readonly DeployPhase[] = ['PENDING', 'APPLYING', 'WAITING'];
 const IN_FLIGHT: readonly DeployPhase[] = ['APPLYING', 'WAITING'];
 
-/** A crashed worker's phase remains durable, then becomes safely reclaimable. */
+/** An in-flight phase untouched for this long is reclaimable. */
 export const DEFAULT_CLAIM_TIMEOUT_MS = 15 * 60_000;
 
-/**
- * How often a running attempt says it is still there.
- *
- * The reclaim compares `updatedAt` against {@link DEFAULT_CLAIM_TIMEOUT_MS},
- * and the adapters that take longest emit nothing but `log` events while they
- * work — a sequential per-file upload writes no row update for its whole
- * duration, so a healthy twenty-minute apply looked exactly like a dead pod.
- * A timer refreshes the column the reclaim already reads, which covers the case
- * absorbing more event types cannot: a single hung HTTP call emits nothing at
- * all, and a `setInterval` keeps ticking through an `await` that never returns.
- *
- * Mirrors bosun's own `buildHeartbeatInterval` (`apps/bosun/spindrift.go`),
- * which keeps an outbox claim's lease alive the same way.
- */
+// Keeps `updated_at` moving while an adapter emits only logs, which write no
+// row, so a slow but healthy apply is not reclaimed.
 export const DEPLOY_HEARTBEAT_MS = 60_000;
 
-/**
- * The longest an attempt may keep refreshing its lease.
- *
- * Three times the adapters' own convergence deadline (their `DEFAULT_TIMEOUT_MS`
- * is ten minutes), and the cap is the whole point: an unbounded heartbeat is
- * exactly the hang it was meant to survive, because a call that never returns
- * would keep refreshing the lease forever and turn a self-healing stall into a
- * permanent one. Past this the lease ages out over the following
- * {@link DEFAULT_CLAIM_TIMEOUT_MS} and another reconciler takes the row, so a
- * hung apply is somebody else's again forty-five minutes after it was claimed —
- * which is safe only because {@link deploys.attemptId} stops the abandoned
- * attempt from writing anything when it finally comes back.
- */
+// Three times the adapters' ten-minute convergence deadline. Past it the lease
+// stops renewing, so a hung call is reclaimed; `attempt_id` fences its writes.
 export const DEPLOY_ATTEMPT_MAX_MS = 30 * 60_000;
 
-/** How often to look for claimable work, given what is in flight (§6). */
 export interface LoopIntervals {
-  /** While an attempt is converging. Short, and bounded by the attempt. */
+  /** While anything is unsettled. */
   readonly fastMs: number;
-  /** With nothing unsettled. Still seconds: this is time-to-pickup. */
+  /** Otherwise. Still seconds, because this is time to pickup. */
   readonly slowMs: number;
 }
 
@@ -177,50 +105,15 @@ export const DEFAULT_INTERVALS: LoopIntervals = {
   slowMs: 2_000,
 };
 
-/**
- * How often converged releases are re-read to notice drift (§6).
- *
- * Minutes, and deliberately unrelated to {@link LoopIntervals}: §6 is explicit
- * that drift is "information, not an alarm", and one adapter round trip per
- * live release is not something to spend every second. Polling for *work* is a
- * `select`, so it stays fast; polling the platform is a network call, so it
- * stays slow.
- */
+// Minutes: a drift pass costs one adapter round trip per live release.
 export const DEFAULT_DRIFT_INTERVAL_MS = 5 * 60_000;
 
-/**
- * How long a `LIVE` release is left alone before its soak is judged.
- *
- * §6 makes `LIVE` the platform's readiness verdict and the attempt ends there —
- * so a workload that passes readiness and crashes two minutes later is a green
- * Deploy with a drift flag some minutes late and no blame. §6 forbids core
- * *reimplementing* readiness, not judging what happens after it: one look at
- * least this long after the verdict, and a `FAILED` observation then is a
- * `faulty` release, with the reason and blame the adapter could name
- * (`judgeSoak`).
- *
- * A floor and not a schedule. The look is taken by the drift pass, so it lands
- * on the first observing pass past the window — at least this long after
- * `LIVE`, and up to one {@link DEFAULT_DRIFT_INTERVAL_MS} later.
- * ponytail: a soak that must land closer to the window needs the pass to pull
- * the next observation forward to the earliest open window, which is one more
- * select per pass; add it if the drift interval ever stops being acceptable.
- */
+// The first drift pass at least this long after `LIVE` judges the soak, so the
+// judgement can arrive up to one drift interval late.
+// ponytail: pull the next observation forward to the earliest open window, at
+// one more select per pass, if that lateness ever matters.
 export const DEPLOY_SOAK_MS = 2 * 60_000;
 
-/**
- * The interval to wait before looking for work again.
- *
- * Fast while something is unsettled, and only a little slower when nothing is:
- * both ends of this are the latency a developer feels between pressing a button
- * and something happening.
- *
- * **The phases must come from the database, not from what the last pass
- * returned.** A pass only ever returns terminal outcomes — an attempt runs to
- * `LIVE` or `FAILED` inside it — so deciding from those would mean the fast
- * cadence never once fired, and the adaptive interval would be a fixed one
- * wearing a switch.
- */
 export function intervalFor(
   phases: readonly DeployPhase[],
   intervals: LoopIntervals = DEFAULT_INTERVALS,
@@ -231,11 +124,8 @@ export function intervalFor(
 }
 
 /**
- * The phases of everything still owed work, straight from the database.
- *
- * Read after a pass rather than derived from it, so an intent that arrived while
- * the pass was running is picked up on the fast cadence instead of waiting out a
- * converged interval.
+ * Read after each pass: a pass returns only terminal outcomes, and an intent
+ * may have arrived while it ran.
  */
 export async function unsettledPhases(
   context: DeployLoopContext,
@@ -248,12 +138,8 @@ export async function unsettledPhases(
 }
 
 /**
- * Take one eligible Deploy and mark it `APPLYING`, or return `null`.
- *
- * `SKIP LOCKED` on the durable Component@Target row lets more than one
- * `reconciler` run without either waiting on the other or picking a newer intent
- * for the same workload. In-flight phases are leases: a recent one blocks the
- * pair, while an old one is safe to retry through the idempotent adapter seam.
+ * The row lock lasts only until `APPLYING` is written. The phase is then a
+ * lease that blocks the pair until it goes stale, and a stale one is retried.
  */
 export async function claimNextDeploy(
   context: DeployLoopContext,
@@ -281,8 +167,7 @@ export async function claimNextDeploy(
               lte(deploys.updatedAt, staleBefore),
             ),
           ),
-          // A recent in-flight Deploy owns this Component@Target. Newer intents
-          // wait rather than racing it, and a stale phase can be retried.
+          // A recent in-flight Deploy owns this Component@Target.
           notExists(
             tx
               .select({ id: activeDeploys.id })
@@ -298,21 +183,16 @@ export async function claimNextDeploy(
           ),
         ),
       )
-      // Oldest intent first: a queue that reordered itself would make two
-      // deploys of one Component@Target land in an order nobody asked for.
+      // Oldest first, so intents for one Component@Target apply in order.
       .orderBy(asc(deploys.id))
       .limit(1)
-      // Lock the pair's durable desired row rather than only one Deploy row.
-      // Concurrent replicas then skip the whole pair, not merely its oldest
-      // intent and move on to a newer one for the same workload.
+      // Locks the pair's desired row, so a replica skips the whole pair and
+      // never claims a newer intent for the same workload.
       .for('update', { of: componentTargetDesired, skipLocked: true });
 
     if (row === undefined) return null;
 
-    // Only a fresh `PENDING` intent is a "pickup" in the sense a developer
-    // feels — a reclaimed stale `APPLYING`/`WAITING` lease is a retry, and
-    // timing it against the original Deploy would report the crashed
-    // reconciler's downtime as latency this one caused.
+    // Only a fresh `PENDING` counts as pickup; a reclaimed lease is a retry.
     if (row.deploy.phase === 'PENDING') {
       reconcilerPickupLatency.record(
         (now.getTime() - row.deploy.createdAt.getTime()) / 1000,
@@ -320,10 +200,8 @@ export async function claimNextDeploy(
       );
     }
 
-    // The claim mints the attempt's identity in the same statement that takes
-    // the row — the lock dies with this transaction, so this column is what is
-    // left to tell the holder from a predecessor whose lease was reclaimed
-    // under it. `builds.dispatch_id` is the same idiom on the build side.
+    // The lock ends with this transaction; the attempt id then tells the holder
+    // from a predecessor whose lease was reclaimed.
     const attemptId = crypto.randomUUID();
     await tx
       .update(deploys)
@@ -339,64 +217,39 @@ export async function claimNextDeploy(
   });
 }
 
-/** Everything one attempt needs, read once. */
 interface AttemptSubject {
   readonly deploy: Deploy;
   readonly app: typeof apps.$inferSelect;
   readonly component: typeof components.$inferSelect;
   readonly build: typeof builds.$inferSelect;
   readonly target: TargetWithConnection<typeof targets.$inferSelect>;
-  /** The boundary the Target is a surface on — half of what the adapter gets. */
   readonly vessel: typeof vessels.$inferSelect & VesselRef;
   readonly adapter: DeployAdapter;
 }
 
-/**
- * Assemble the neutral `DesiredState` core hands the adapter (§6).
- *
- * "**Core describes; the adapter renders.**" Nothing here is a Kubernetes field,
- * a Cloud Run field, or a hosting field — this is the vocabulary all three are
- * rendered from, and a field this function cannot fill is a field core does not
- * get to describe.
- */
+/** Backend-neutral: every adapter renders its own resources from this. */
 export function desiredStateFor(
   subject: AttemptSubject,
   manifest: InstallationManifest,
   /**
-   * Whether this Component may carry the App's vanity name.
-   *
-   * §9 puts the vanity name on the **App** — "the name a developer shares" — and
-   * the canonical name on each Component. An App with two network-serving
-   * Components therefore has one vanity name and two claimants, and handing it to
-   * both puts the same hostname on two HTTPRoutes: a collision the platform
-   * resolves arbitrarily, which is worse than not having the name at all.
-   *
-   * So it goes to a sole network-serving Component and otherwise to none. Picking
-   * a winner among several would be a policy §9 does not state, and the developer
-   * is the one who knows which of their Components is the front door.
+   * The App's vanity name goes only to its sole network-serving Component: two
+   * claimants would put one hostname on two routes.
    */
   vanityIsUnambiguous: boolean,
 ): DesiredState {
   const { deploy, app, build, target } = subject;
   return {
-    // The row's own key, which is why it is not in the pinned document.
     deploy: String(deploy.id),
-    // Everything this intent asked for, exactly as it asked for it. Nothing
-    // here re-reads `components`: an attempt that did would deliver a shape
-    // nobody asked for, and a rollback would come back up with yesterday's
-    // artifact under today's kind, exposure and schedule.
+    // What this intent pinned, never re-read from `components`, so an edit
+    // made after the intent cannot change what it places.
     ...deploy.desired,
-    // Carried by the Build, which is immutable once `SUCCEEDED` — and a Deploy
-    // cannot be written naming one that is not (`checkDeployable`).
+    // Immutable: `checkDeployable` admits only a `SUCCEEDED` Build.
     artifact: {
       type: build.artifactType,
       digest: build.artifactDigest ?? '',
       refs: build.artifactRefs ?? [],
     },
-    // Derived, not pinned: a name is a property of the App rather than of a
-    // release. §9 makes moving an App between backends "one record re-point",
-    // which only holds if the name outlives the releases under it — so a
-    // rollback must not take back the address somebody bookmarked.
+    // Derived from the App, so a rollback never takes back a bookmarked name.
     hostname: hostnameFor({
       app: app.name,
       component: deploy.desired.component,
@@ -409,40 +262,16 @@ export function desiredStateFor(
   };
 }
 
-/** What one attempt did. */
 export interface AttemptOutcome {
   readonly deployId: number;
-  /**
-   * `LOST` is not a phase the row ever carries: it is this attempt saying the
-   * verdict it arrived at was not its to write, because the claim it started
-   * under had already been reclaimed. Reported rather than swallowed so a
-   * rollout that produces losers is visible — a loser is the fence working, not
-   * an error, which is why it settles nothing and pages nobody.
-   */
+  /** `LOST`: the claim was reclaimed, so this attempt wrote no verdict. */
   readonly phase: 'LIVE' | 'FAILED' | 'LOST';
   readonly url: string | null;
 }
 
 /**
- * Run one claimed Deploy to a terminal verdict.
- *
- * **Phases come from the adapter, never from core's own opinion** (§6: "phase
- * transitions come from the controller or platform API — never Spindrift
- * reimplementing readiness"). Every status event the adapter yields is written to
- * both the Deploy row and the attempt log, so what the UI reads is what the
- * platform said, in the order it said it.
- *
- * `apply` does not throw by contract, but an adapter is code and code throws. A
- * thrown error becomes `INTERNAL` — blamed on the platform by §6's table — rather
- * than escaping into the loop, because an attempt that ends by crashing the
- * reconciler is an attempt that stays `APPLYING` forever.
- *
- * **The claim is carried, not assumed.** A heartbeat keeps
- * {@link deploys.updatedAt} moving so a long apply does not self-qualify for
- * reclaim, and every write below is fenced on the attempt id the claim minted.
- * The moment a heartbeat matches no row this attempt has been superseded, so it
- * abandons the stream rather than finishing an apply somebody else is already
- * redoing.
+ * Phases come only from the adapter, and a throw becomes an `INTERNAL` verdict.
+ * Every write is fenced on the claim's attempt id; a lost lease abandons.
  */
 export async function runAttempt(
   context: DeployLoopContext,
@@ -464,8 +293,8 @@ export async function runAttempt(
   );
   const targetRef = deployTargetOf(subject.target, subject.vessel);
 
-  // What `setAppVanity` refuses, for the names it never sees: a canonical
-  // `<app>-<component>`, and a vanity label stored before it refused any.
+  // The reservation `setAppVanity` enforces, for names it never checks:
+  // canonical names, and vanity labels stored without that check.
   const shadowed = ownHostnameMintedIn(
     desired.hostname,
     installationHostnames(context.manifest.controlPlane),
@@ -482,23 +311,14 @@ export async function runAttempt(
   let cancelledBy: string | null = null;
   const refreshUntil = context.clock.now().getTime() + DEPLOY_ATTEMPT_MAX_MS;
   const heartbeat = setInterval(() => {
-    // The tick has two jobs and the cap ends only one of them. Refreshing
-    // `updated_at` is what keeps a slow-but-healthy apply out of the reclaim,
-    // and past the cap that stops: a heartbeat which outlived every deadline is
-    // a hang, and renewing it forever would make the stall permanent instead of
-    // self-healing. Asking whether the row is still ours does *not* stop, and
-    // the ticks past the cap are the only ones that can ever answer no — a
-    // reclaim needs DEFAULT_CLAIM_TIMEOUT_MS of silence, so it cannot happen
-    // until long after the last refresh. Ending the timer at the cap left this
-    // attempt streaming into a log somebody else now owns for the rest of its
-    // life; keeping it alive read-only is how `lost` gets to fire.
+    // Past the cap the lease stops renewing, but the ownership check goes on:
+    // only those later ticks can see a reclaim and set `lost`.
     const refreshLease = context.clock.now().getTime() < refreshUntil;
     void heartbeatAttempt(context, deploy.id, attemptId, refreshLease).then(
       (held) => {
         if (!held) lost = true;
       },
-      // A database that refused this one write is not the same fact as a lease
-      // somebody else holds, and the next tick asks again.
+      // A failed write is not a lost lease; the next tick asks again.
       () => {},
     );
   }, DEPLOY_HEARTBEAT_MS);
@@ -509,10 +329,7 @@ export async function runAttempt(
     let next = await stream.next();
     while (!next.done) {
       if (lost) {
-        // `return` rather than dropping the generator on the floor: it runs the
-        // adapter's own `finally` blocks, and the verdict handed in is the
-        // value the generator returns to nobody — this attempt has already lost
-        // the right to write one.
+        // `return` runs the adapter's `finally` blocks; its verdict is unused.
         await stream.return({
           phase: 'FAILED',
           reason: 'INTERNAL',
@@ -520,21 +337,12 @@ export async function runAttempt(
         });
         return abandon(context, attempt);
       }
-      // Asked per event, because between events is the only place this can
-      // act: `stream.return` cannot interrupt a `next()` in flight, so the
-      // heartbeat tick has no way to end a hung call and does not pretend to.
-      // A chatty adapter is cancelled at its next event; an adapter that never
-      // yields is ended by the lease cap, like the reclaim above.
+      // Checked per event: `stream.return` cannot interrupt a pending `next()`,
+      // so an adapter that never yields is ended only by the lease cap.
       cancelledBy ??= await cancelRequestOn(context, deploy.id, attemptId);
       if (cancelledBy !== null) {
-        // The same tear-down the reclaim takes, and it is the only one core
-        // has: the adapter's `finally` blocks run, and what the platform does
-        // next is the platform's. `kubernetes` and `cloudrun` apply under the
-        // Component's own name, so the next intent converges over whatever
-        // this one left. `vercel` and `cloudflare-pages` mint a deployment per
-        // create with nothing to converge on (contract.ts, `apply`): a cancel
-        // there stops Spindrift watching, and the platform may still finish
-        // the deployment on its own.
+        // The reclaim's tear-down. An adapter that mints a deployment per
+        // create stops watching it, and the platform may still finish it.
         await stream.return({
           phase: 'FAILED',
           reason: 'INTERNAL',
@@ -559,18 +367,11 @@ export async function runAttempt(
   return settle(context, subject, desired, verdict);
 }
 
-/** What the attempt log says when a reclaim, not a platform, ended an attempt. */
 const RECLAIMED_SENTENCE =
   'this attempt lost its claim to another reconciler and wrote nothing; ' +
   'the attempt that holds the claim reports what happened';
 
-/**
- * Say on the attempt log that this attempt is not the one settling the row.
- *
- * Said rather than swallowed: an attempt that stopped mid-apply and left no
- * line reads, from the log, as a rollout that simply stopped — and the whole
- * value of the fence is that the silence it prevents is a wrong verdict.
- */
+/** Logged, so a fenced-out attempt does not read as a rollout that stopped. */
 async function abandon(
   context: DeployLoopContext,
   attempt: { appId: string; componentId: string; deployId: number },
@@ -582,17 +383,13 @@ async function abandon(
   return { deployId: attempt.deployId, phase: 'LOST', url: null };
 }
 
-/** The one sentence a cancelled Deploy carries, on the row and on the log. */
 function cancelledSentence(by: string): string {
   return `cancelled by ${by}`;
 }
 
 /**
- * Who asked this attempt to stop, or `null` while nobody has.
- *
- * Read through the same fence every other read of the row takes: a request
- * stamped on a row this attempt no longer holds is the reclaiming attempt's to
- * honour, and answering it here would have two attempts tearing down one apply.
+ * Who asked this attempt to stop, or `null`. Fenced: a request on a reclaimed
+ * row is the new holder's to honour.
  */
 async function cancelRequestOn(
   context: DeployLoopContext,
@@ -608,17 +405,7 @@ async function cancelRequestOn(
   return row?.by ?? null;
 }
 
-/**
- * Settle a cancelled attempt: `FAILED`, with who asked and nothing else.
- *
- * No `reason`, for the reason `cancelBuild` gives none: §6's closed set
- * indicts a developer or the platform, and a cancellation indicts neither — so
- * nothing derives a blame from it either. The detail carries the sentence and
- * the log carries it again, which is where a reader looking for "why did this
- * stop" already looks. Fenced like every other settle, so an attempt whose
- * lease was reclaimed while it was being cancelled abandons instead of writing
- * a verdict over the holder's.
- */
+/** No `reason` or blame: a cancellation indicts neither side. */
 async function settleCancelled(
   context: DeployLoopContext,
   subject: AttemptSubject,
@@ -656,17 +443,8 @@ async function settleCancelled(
 }
 
 /**
- * Report whether the attempt still holds the claim, optionally saying so first.
- *
- * Exported apart from the timer that calls it so the part with a decision in it
- * is testable under an injected clock, while the untestable `setInterval` stays
- * the two lines around it. `false` means the row has moved on — either its
- * `attempt_id` is somebody else's now, or the Deploy is gone.
- *
- * `refreshLease` is the half {@link DEPLOY_ATTEMPT_MAX_MS} takes away. Read-only
- * it answers the same question without renewing a lease the cap has decided
- * should expire, which is what lets an attempt past the cap still find out it
- * was reclaimed.
+ * `false` when the Deploy is gone or another attempt holds it. With
+ * `refreshLease` off it only checks, for an attempt past the lease cap.
  */
 export async function heartbeatAttempt(
   context: DeployLoopContext,
@@ -686,12 +464,6 @@ export async function heartbeatAttempt(
   return held.length > 0;
 }
 
-/**
- * Whether this Component is the only network-serving one its App has.
- *
- * A job serves nothing, and an unexposed service is a queue worker (§2), so
- * neither can claim the App's front-door name.
- */
 async function soleServingComponent(
   context: DeployLoopContext,
   subject: AttemptSubject,
@@ -709,7 +481,6 @@ async function soleServingComponent(
   return serving.length === 1 && serving[0]?.id === subject.component.id;
 }
 
-/** Write one adapter event to the log, and its phase to the row. */
 async function absorb(
   context: DeployLoopContext,
   attempt: { appId: string; componentId: string; deployId: number },
@@ -733,9 +504,8 @@ async function absorb(
     ...(event.reason === undefined ? {} : { reason: event.reason }),
   });
 
-  // Only the non-terminal phases are taken from the stream. The terminal one is
-  // written once, with the verdict, so a stream that yields FAILED and then
-  // returns LIVE cannot leave the row disagreeing with the verdict.
+  // Only non-terminal phases come from the stream; the terminal one is written
+  // once, with the verdict, so the row cannot disagree with it.
   if (event.phase === 'APPLYING' || event.phase === 'WAITING') {
     await context.db
       .update(deploys)
@@ -745,27 +515,16 @@ async function absorb(
 }
 
 /**
- * The row, and only while this attempt still holds it.
- *
- * Every write an attempt makes to its own Deploy row goes through this. Zero
- * rows matched **is** the refusal — the same discipline `deployApp`'s re-arm
- * takes against a live build lease, and the same shape `dispatch.ts` already
- * releases a claim under. A caller with no attempt id holds nothing, and the
- * empty string it falls back to is a value no claim ever mints — so it matches
- * no row, which is the right answer rather than an accident of SQL's `= NULL`.
+ * Every write an attempt makes to its Deploy row goes through this; zero rows
+ * matched is the refusal. No claim mints `''`, so a null id matches no row.
  */
 function fencedOn(deployId: number, attemptId: string | null) {
   return and(eq(deploys.id, deployId), eq(deploys.attemptId, attemptId ?? ''));
 }
 
 /**
- * Persist the terminal verdict, and the diagnosis if there is one.
- *
- * Both writes are fenced on the attempt id the claim minted ({@link fencedOn}),
- * and matching zero rows ends the attempt in {@link abandon} instead of in a
- * verdict. This is the write the whole fence exists for: an attempt whose lease
- * was reclaimed mid-apply used to arrive here minutes after another reconciler
- * had already placed the same workload, and write `LIVE` over its `FAILED`.
+ * Fenced ({@link fencedOn}): a reclaimed attempt ends in {@link abandon} and
+ * cannot write its verdict over the holder's.
  */
 async function settle(
   context: DeployLoopContext,
@@ -783,25 +542,12 @@ async function settle(
   };
 
   if (verdict.phase === 'LIVE') {
-    // §9: where the platform names its own, the canonical comes back across the
-    // seam. Where core minted one, the adapter has nothing to add and core's
-    // name stands.
+    // A platform that names its own address returns it; else core's stands.
     const canonicalUrl =
       verdict.url ?? displayUrl({ canonical: desired.hostname.canonical });
 
-    // And the vanity is the name §9 says a developer shares, so it is the one
-    // every screen reading this row prints — the App list, the workspace
-    // headline, a Deploy's own page. The canonical stays underneath it and is
-    // what the row falls back to.
-    //
-    // Only where this deploy is what publishes the name, which is the same
-    // condition `publishVanityRecord` below applies: a cluster renders the
-    // vanity into its own release (`values.ts` hands the chart both names), and
-    // a platform-named Target needs an `address` for a record to point at —
-    // one that reports none (§6's contract: Firebase Hosting, Cloud Run) leaves
-    // the name unpointed, and the attempt log says to point it by hand. Naming
-    // it as this release's address there would put a name nothing serves on the
-    // row an operator scans for what is up.
+    // Screens print the vanity, but only where this deploy publishes it: a
+    // cluster release, or a Target that reported an `address` to point it at.
     const publishesVanity =
       coreMintsCanonical(subject.target.adapter) ||
       verdict.address !== undefined;
@@ -818,7 +564,7 @@ async function settle(
         blame: null,
         detail: null,
         debug: null,
-        // A deploy that just landed is by definition what was asked for. Left
+        // A deploy that was just applied is what was asked for. Left
         // set, a previous attempt's drift would follow the new release around.
         driftedAt: null,
         observedDigest: desired.artifact.digest,
@@ -833,9 +579,7 @@ async function settle(
       phase: 'LIVE',
     });
 
-    // §9: a cluster Target already publishes its own record as part of the
-    // release the App chart renders — the only Targets left owing one are the
-    // platform-named ones, exactly `!coreMintsCanonical`.
+    // A cluster release publishes its own record; other Targets need one here.
     if (!coreMintsCanonical(subject.target.adapter)) {
       await publishVanityRecord(context, attempt, desired, verdict);
     }
@@ -844,8 +588,7 @@ async function settle(
   }
 
   const diagnosis = diagnosisOf(verdict);
-  // §12: the platform will not keep this. Cluster events expire in about an
-  // hour, so what is written here is the only copy that will exist tomorrow.
+  // Cluster events expire in about an hour, so this is the only lasting copy.
   const settled = await context.db
     .update(deploys)
     .set({
@@ -863,21 +606,11 @@ async function settle(
     reason: verdict.reason,
   });
 
-  // Nothing here touches `exposure` — §9: "exposure never mutates on red." The
-  // previous release is still serving, and quietly making it unreachable would
-  // turn one failed deploy into an outage.
+  // `exposure` is never touched on red: the previous release is still serving.
   return { deployId, phase: 'FAILED', url: null };
 }
 
-/**
- * Converge or withdraw the vanity record a platform-named Target's LIVE
- * verdict earns (§9).
- *
- * **Never turns a LIVE deploy FAILED.** The workload is up — a DNS write that
- * fails is a fact for the attempt log, the way every other non-terminal event
- * `absorb` writes is, not a reason to tell the operator their deploy did not
- * work.
- */
+/** Never fails a LIVE deploy: a DNS error goes to the attempt log. */
 async function publishVanityRecord(
   context: DeployLoopContext,
   attempt: { appId: string; componentId: string; deployId: number },
@@ -897,17 +630,13 @@ async function publishVanityRecord(
 
   const handle = dnsHandleFor(desired.app, desired.component);
 
-  // A cleared or newly ambiguous vanity (`soleServingComponent`) takes its
-  // record with it. Idempotent when nothing was ever published under this
-  // handle — the ordinary case for every Component that never had one.
+  // A cleared or ambiguous vanity withdraws its record; idempotent when none
+  // was published.
   if (desired.hostname.vanity === undefined) {
     try {
       await dns.withdraw(handle);
-      // Said rather than done in silence. This removes the record Spindrift
-      // *states*; whether the record itself goes depends on external-dns
-      // owning it, and it never owns one at a zone apex (`isApexName`). An App
-      // that was on a bare domain leaves that name resolving to wherever it
-      // last pointed, and a silent success read as though it had not.
+      // External-dns never owns an apex record (`isApexName`), so a bare domain
+      // keeps resolving after this.
       await recordDeployEvent(context.db, attempt, {
         type: 'log',
         line:
@@ -941,11 +670,8 @@ async function publishVanityRecord(
       target: verdict.address.target,
       proxied: verdict.address.proxied,
     });
-    // An apex is create-once, so "published" is only true the first time. On
-    // every deploy after it, external-dns has no ownership marker for the name
-    // and drops the update — the record keeps pointing wherever it first went.
-    // Reporting a re-point that did not happen is the whole of what makes this
-    // dangerous, since every other surface says the deploy worked.
+    // An apex is create-once: external-dns has no ownership marker for it and
+    // drops every later update.
     const apex = isApexName(
       desired.hostname.vanity,
       context.manifest.dns.zones,
@@ -967,49 +693,31 @@ async function publishVanityRecord(
   }
 }
 
-/** One pass of `observe` over what has converged, to notice drift (§6). */
 export interface DriftReport {
   readonly deployId: number;
   readonly drifted: boolean;
   readonly observedDigest: string | null;
-  /** Why the platform will not converge, when that is what drifted. */
+  /** Why the platform will not converge, when that is the drift. */
   readonly driftDetail: string | null;
 }
 
 /**
- * Look at what is actually running, and say so.
- *
- * **Never corrects anything.** §6: "drift is detected and surfaced, never
- * silently corrected — a visible state with a one-click re-converge." The
- * re-converge is an ordinary Deploy somebody presses, so this function returns a
- * report and writes no desired state. A loop that healed drift on its own would
- * also happily undo a deliberate manual change during an incident.
+ * Reports drift and never corrects it: re-converging is a Deploy somebody
+ * presses, so a deliberate manual change survives.
  */
 export async function observeConverged(
   context: DeployLoopContext,
 ): Promise<readonly DriftReport[]> {
   const now = context.clock.now();
-  // The release each placement's desired row names, not every row that reached
-  // LIVE. `phase` is the platform's verdict on one attempt and is never edited
-  // afterwards, so "a LIVE Deploy that a newer intent superseded is still LIVE"
-  // (`commands/deploys/list.ts`) — and a superseded row's own Build is by
-  // construction not what is serving, because something newer replaced it.
-  // Observing one asks the platform what is running and compares it against a
-  // release that stopped being desired, which is drift every time and forever:
-  // an installation's drift count grew by one on every redeploy and named
-  // releases nobody had asked for since. `componentTargetDesired` is §6's own
-  // answer to which release should be running, and it is one row per pair.
-  //
-  // It also bounds the fan-out below, which is the same fact from the other
-  // side: one round trip per placement rather than one per release ever made.
+  // Only the release each pair's desired row names: a superseded row stays LIVE
+  // but is not what serves, and would read as drift forever.
   const live = await context.db
     .select({ deploy: deploys })
     .from(componentTargetDesired)
     .innerJoin(deploys, eq(deploys.id, componentTargetDesired.desiredDeployId))
     .where(eq(deploys.phase, 'LIVE'));
 
-  // One adapter round trip each, and they do not depend on one another — so
-  // the pass costs the slowest Target rather than the sum of every Target.
+  // Concurrent, so the pass costs the slowest Target.
   // ponytail: unbounded fan-out, add a concurrency cap if an installation ever
   // carries enough placements to make that a thundering herd.
   const reports = (
@@ -1020,7 +728,6 @@ export async function observeConverged(
   return reports;
 }
 
-/** Read one converged release back off its platform, and say what it found. */
 async function observeOne(
   context: DeployLoopContext,
   deploy: Deploy,
@@ -1037,18 +744,13 @@ async function observeOne(
       deploy.ref,
     );
   } catch {
-    // A Target that cannot be reached is not a Target that has drifted. Saying
-    // "drifted" here would turn every uplink blip into a false alarm about
-    // something a developer did.
+    // An unreachable Target has not drifted.
     return null;
   }
   const observed = state?.artifactDigest ?? null;
 
-  // The soak, judged off the read this pass already paid for. Measured from
-  // the row's last write, which for a release that just landed is the `LIVE`
-  // verdict; the drift write below can move it, so a finding inside the
-  // window errs toward judging later, never sooner. Before that write, so
-  // this pass judges against the window as it stood when the pass began.
+  // Measured from the row's last write, the `LIVE` verdict for a fresh release.
+  // Judged before the drift write below moves it.
   if (
     deploy.soakedAt === null &&
     deploy.faultyAt === null &&
@@ -1057,11 +759,8 @@ async function observeOne(
     await judgeSoak(context, subject, state, now);
   }
 
-  // The cadence half of the same comparison, where the backend reports one.
-  // Read off the Component rather than the Deploy: `schedule` is what the
-  // developer declares now, and a cadence they changed since this Deploy is a
-  // difference the platform is meant to be asked to converge on, not one this
-  // pass should paper over.
+  // The Component's current schedule, so a cadence changed since this Deploy
+  // reads as drift.
   const scheduleArgs = {
     desiredSchedule: subject.component.schedule,
     ...(state?.schedule === undefined
@@ -1076,25 +775,15 @@ async function observeOne(
     ...(state === null ? {} : { observedPhase: state.phase }),
   });
 
-  // The platform's own sentence, kept only while it is the reason. §12's
-  // argument for storing a diagnosis applies here for the same cause: a
-  // Helm error naming the value that no longer renders is not recoverable
-  // from anywhere once the object is reconciled again.
-  //
-  // A stopped schedule gets core's sentence rather than the platform's,
-  // because the platform said nothing — the finding *is* the absence, and
-  // "nothing fires this any more" is only a sentence somebody holding the
-  // declaration can write.
+  // The platform's sentence while it is the reason, since it is gone once the
+  // object reconciles. A stopped schedule gets core's; the platform said none.
   const driftDetail = !drifted
     ? null
     : state?.phase === 'FAILED'
       ? (state.detail ?? null)
       : scheduleDrift(scheduleArgs);
 
-  // §6 wants drift to be "a visible state", and visible means a row: the UI
-  // reads rows, so a finding that lived only for the length of this pass
-  // would be surfaced to nobody. Cleared when it matches again, so drift
-  // somebody fixed out of band stops being reported without a dismissal.
+  // Stored for the UI, and cleared once the release matches again.
   if (
     drifted !== (deploy.driftedAt !== null) ||
     observed !== deploy.observedDigest ||
@@ -1119,30 +808,12 @@ async function observeOne(
   };
 }
 
-/** Core's sentence for a faulty release whose platform gave none. */
 const FAULTY_SENTENCE =
   'the platform reports this release failed after it had passed readiness';
 
 /**
- * Judge one release's soak off the observation the drift pass already took.
- *
- * The platform reporting `FAILED` on the object that still carries this
- * release's digest is the whole test. A digest that has moved on belongs to a
- * newer release, which is judged on its own row; nothing there, or a platform
- * that says it is fine, closes the window with `soakedAt`. Either stamp is
- * written once and never revisited, so a release that goes bad an hour later
- * is drift (information, §6) rather than a fault with a blame.
- *
- * An object mid-rollout under this release's digest — a restart, a reconcile
- * the controller has not finished — is neither verdict, so nothing is stamped
- * and the next observing pass judges instead: the window's own "errs toward
- * judging later" rule, applied to the phase as well as the clock.
- *
- * The verdict is written the way `settle` writes a red one — the blame is
- * §6's derivation from the reason, the observation is the `debug` payload —
- * but the phase stays `LIVE`: the rollout landed, and the desired pointer
- * still names this release. Said on the attempt log too, so the timeline
- * carries it.
+ * `FAILED` on the object still carrying this release's digest is faulty, and
+ * anything else has soaked. Either stamp is final; the phase stays `LIVE`.
  */
 async function judgeSoak(
   context: DeployLoopContext,
@@ -1151,6 +822,7 @@ async function judgeSoak(
   now: Date,
 ): Promise<void> {
   const { deploy } = subject;
+  // Mid-rollout is neither verdict; the next observing pass judges.
   if (state?.phase === 'APPLYING' || state?.phase === 'WAITING') return;
   if (
     state === null ||
@@ -1164,12 +836,7 @@ async function judgeSoak(
     return;
   }
 
-  // The reason is the adapter's or nobody's. `observe` names one where the
-  // platform or the adapter's read on red could; where neither did, no row of
-  // §6's table is guessed — every row but `TIMEOUT` indicts somebody, and an
-  // image that stopped pulling recorded as the developer's `UNHEALTHY` is the
-  // misdirection §6 calls `ARTIFACT_UNAVAILABLE` the hardest-justified blame
-  // to get right. What is known is written: the platform's sentence, no blame.
+  // Never guessed: every reason but `TIMEOUT` blames somebody.
   const reason = state.reason ?? null;
   const diagnosis = {
     reason,
@@ -1205,7 +872,7 @@ async function judgeSoak(
   });
 }
 
-/** Read everything one Deploy refers to, or `null` if it is not runnable. */
+/** `null` when the Deploy is not runnable. */
 async function subjectOf(
   context: DeployLoopContext,
   deploy: Deploy,
@@ -1223,18 +890,14 @@ async function subjectOf(
     .innerJoin(apps, eq(components.appId, apps.id))
     .innerJoin(builds, eq(deploys.buildId, builds.id))
     .innerJoin(targets, eq(deploys.targetId, targets.id))
-    // Inner, not left: `vesselId` is NOT NULL, so a Target with no vessel is
-    // not a state that exists — and joining it here is what lets one read
-    // assemble everything the adapter is handed.
+    // `vesselId` is NOT NULL, so the inner join drops nothing.
     .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(deploys.id, deploy.id));
 
   if (row === undefined) return null;
   const target = row.target;
   const vessel = row.vessel;
-  // Addressable means both halves: the surface's own facts and the boundary's
-  // location. They are written by one act, so disagreeing is not a state that
-  // occurs — but nothing enforces that, so it is checked rather than assumed.
+  // One act writes both halves, but nothing enforces that.
   if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) return null;
 
   const adapter = context.adapters.deploy(target.adapter);
@@ -1249,72 +912,30 @@ async function subjectOf(
   };
 }
 
-/** How the loop runs, and how to stop it. */
 export interface DeployLoopOptions {
   readonly intervals?: LoopIntervals;
-  /** Overrides {@link DEFAULT_DRIFT_INTERVAL_MS}, for a test that cannot wait. */
   readonly driftIntervalMs?: number;
   readonly signal?: AbortSignal;
-  /**
-   * An optional early wake-up — the `LISTEN/NOTIFY` leg.
-   *
-   * Resolves when something says an intent was written. **Purely an
-   * optimization**: it can only shorten a sleep, never extend one, and a loop
-   * that never sees a notification still converges on the poll interval. Omit it
-   * and everything still works, only slower — which is exactly what the test
-   * with notifications disabled asserts.
-   */
+  /** An early wake-up, such as `LISTEN`/`NOTIFY`; it only shortens a sleep. */
   readonly wakeup?: (signal: AbortSignal) => Promise<void>;
   readonly onPass?: (pass: LoopPass) => void;
 }
 
-/** What one pass did, for whatever an installation wires to it. */
 export interface LoopPass {
   readonly applied: readonly AttemptOutcome[];
   readonly drift: readonly DriftReport[];
-  /**
-   * What is still owed work when the pass ended, read from the database.
-   *
-   * This — not {@link applied} — is what sets the next interval. A pass returns
-   * terminal outcomes only, so choosing from those could never select the fast
-   * cadence.
-   */
+  /** Read from the database after the pass; this sets the next interval. */
   readonly unsettled: readonly DeployPhase[];
 }
 
-/** What one pass is asked to do beyond claiming work. */
 export interface DeployPassOptions {
-  /**
-   * Whether to re-read converged releases for drift.
-   *
-   * The loop passes `false` on most ticks, because looking for work and looking
-   * for drift are different costs on different clocks
-   * ({@link DEFAULT_DRIFT_INTERVAL_MS}). Defaults to `true`, so a caller that
-   * wants one complete pass gets one.
-   */
+  /** The loop passes `false` except on the drift interval. */
   readonly observe?: boolean;
 }
 
 /**
- * Claim every eligible intent, run them all, then optionally look for drift.
- *
- * **Claim in rounds, run each round together.** Claiming is a short transaction
- * and applying is somebody else's control plane taking minutes, so the two are
- * not interleaved: everything claimable is marked `APPLYING` up front and those
- * attempts then run concurrently. Applying them one after another made a second
- * App's deploy wait out the first App's whole rollout — two unrelated workloads,
- * on two unrelated Targets, serialised by nothing but the shape of a `for` loop.
- *
- * Concurrency within a round is safe by the same rule that makes claiming safe:
- * `claimNextDeploy` refuses a Component@Target that already has an in-flight
- * Deploy, so a round holds at most one attempt per workload and no two attempts
- * are ever placing the same thing.
- *
- * That refusal is also why the rounds repeat. Two queued intents for **one**
- * Component@Target must still land in order, and the second only becomes
- * claimable once the first is settled — so the pass keeps claiming until a round
- * comes back empty. The wall clock is the deepest single queue rather than the
- * sum of everything pending.
+ * Claims in rounds and runs each round concurrently, at most one attempt per
+ * Component@Target. Rounds repeat so one pair's queued intents apply in order.
  */
 export async function runDeployPass(
   context: DeployLoopContext,
@@ -1333,9 +954,7 @@ export async function runDeployPass(
     // Component@Targets are pending at once. Add a pool if that stops holding.
     const outcomes = await Promise.all(
       claimed.map(async (deploy) => {
-        // `runAttempt` runs the adapter's whole apply stream to a terminal
-        // verdict before returning, so this is the deploy's real duration —
-        // not the loop's own bookkeeping around it.
+        // `runAttempt` runs the whole apply, so this is the deploy's duration.
         const startedAt = Date.now();
         const outcome = await runAttempt(context, deploy);
         reconcilerAttemptDuration.record((Date.now() - startedAt) / 1000, {
@@ -1350,11 +969,7 @@ export async function runDeployPass(
     }
   }
 
-  // `null` rather than `[]` when skipped, so a fast tick that does not
-  // observe cannot be mistaken for one that observed zero drifted releases —
-  // §6 wants drift reported on its own slow clock, and recording a false zero
-  // between drift-observing passes would erase the last real count from
-  // anyone scraping between them.
+  // `null` when skipped, so a tick that did not observe records no false zero.
   const driftReports =
     options.observe === false ? null : await observeConverged(context);
   if (driftReports !== null) {
@@ -1373,15 +988,14 @@ export async function runDeployPass(
   };
 }
 
-/** Run until aborted. */
+// Polls: a watch across a WAN tunnel can die while still looking connected.
 export async function runDeployLoop(
   context: DeployLoopContext,
   options: DeployLoopOptions = {},
 ): Promise<void> {
   const intervals = options.intervals ?? DEFAULT_INTERVALS;
   const driftMs = options.driftIntervalMs ?? DEFAULT_DRIFT_INTERVAL_MS;
-  // Zero, so the first pass observes: a reconciler that just started has no
-  // idea what the platforms are holding, and that is the moment to find out.
+  // Zero, so the first pass observes.
   let nextDriftAt = 0;
 
   while (!options.signal?.aborted) {
@@ -1389,9 +1003,7 @@ export async function runDeployLoop(
     const observe = startedAt >= nextDriftAt;
     if (observe) nextDriftAt = startedAt + driftMs;
 
-    // Wall-clock, not `context.clock` — this measures how long the pass
-    // actually took to run, which is a fact about the machine rather than
-    // about the domain time the injected clock stands in for during tests.
+    // Wall clock: `context.clock` is domain time, which tests inject.
     const passWallStartedAt = Date.now();
     const pass = await runDeployPass(context, { observe });
     reconcilerLoopDuration.record((Date.now() - passWallStartedAt) / 1000, {
@@ -1404,7 +1016,6 @@ export async function runDeployLoop(
   }
 }
 
-/** A sleep that wakes early on abort, or on a notification if one is wired. */
 function sleep(ms: number, options: DeployLoopOptions): Promise<void> {
   return new Promise((resolve) => {
     const controller = new AbortController();
@@ -1415,8 +1026,7 @@ function sleep(ms: number, options: DeployLoopOptions): Promise<void> {
     };
     const timer = setTimeout(done, ms);
     options.signal?.addEventListener('abort', done, { once: true });
-    // A rejected wake-up is a dropped notification, which the poll below already
-    // tolerates — so it is swallowed rather than allowed to fail a pass.
+    // A rejected wake-up is a dropped notification, which the poll tolerates.
     options.wakeup?.(controller.signal).then(done, () => {});
   });
 }

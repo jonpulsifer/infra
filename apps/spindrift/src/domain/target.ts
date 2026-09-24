@@ -1,30 +1,7 @@
 /**
- * The Target (§13).
- *
- * "**`Target` keeps its name, stays flat, and has exactly one adapter type** —
- * forced, because placement determines artifact shape, so a single 'Cloud'
- * Target would leave a website ambiguous between the two renderings. Splitting
- * them is what makes picking the static Target *mean* public."
- *
- * Flat is the whole design. There is no `Provider` noun above this, and §13 says
- * why one would earn nothing: **the connect act is credential-shaped though the
- * noun is flat**, so one "connect a cloud project" registers both of that
- * project's Targets and the shared thing between them is an argument to a
- * command, not an entity.
- *
- * **The name is the one clause that did not survive.** §60 gave the boundary a
- * row, which made the name a string built out of two columns beside it; a Target
- * is `(vessel, adapter)` and carries no third field. See {@link TargetIdentity}
- * for why constructing one was worse than merely redundant.
- *
- * Two states this file owns:
- *
- * - **Health is a standing checklist, not a connect-time verdict.** Connect
- *   always succeeds; an unmet item makes the Target a non-candidate with a
- *   stated reason. See `capabilities.ts` for the checklist itself.
- * - **Disconnect strands rather than stops.** "Disconnect always works: live
- *   Deploys go `orphaned`, workloads keep running, reconnect re-adopts via
- *   `observe`, and the confirmation names what it strands."
+ * The Target: one adapter on one vessel, identified by that pair. Health is a
+ * standing checklist, and disconnect orphans live Deploys while their workloads
+ * keep running.
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
 import { isLabel } from './naming.ts';
@@ -36,17 +13,8 @@ import {
 } from './vessel.ts';
 
 /**
- * How to reach one Target, in whatever terms its adapter needs.
- *
- * Adapter-specific by necessity — a cluster is an API server and a cloud Target
- * is a project — and therefore a discriminated union rather than a bag of
- * nullable columns: a `cloudrun` Target with an API server is not a state the
- * domain has a name for. Core stores this and hands it to the adapter; core
- * never parses a backend's own naming out of it.
- *
- * **No credential is here, in any variant.** §13: "One auth mode — native OIDC
- * federation, nothing stored." A field for a token is a field something will
- * eventually put a token in.
+ * Adapter-specific connection facts, stored by core and handed to the adapter
+ * unparsed. No variant holds a credential.
  */
 export type TargetConnection =
   | KubernetesConnection
@@ -55,214 +23,95 @@ export type TargetConnection =
   | VercelConnection
   | CloudflarePagesConnection;
 
-/** A stored Target after its operator has supplied adapter connection facts. */
 export type TargetWithConnection<
   T extends { connection: TargetConnection | null },
 > = T & { readonly connection: TargetConnection };
 
-/** Refine a manifest seed away from Targets an adapter can actually address. */
 export function hasTargetConnection<
   T extends { connection: TargetConnection | null },
 >(target: T): target is TargetWithConnection<T> {
   return target.connection !== null;
 }
 
-/**
- * How a Cloud Run Target is reached (§13, §14).
- *
- * **`endpoint` is not the analogue of {@link KubernetesConnection.apiServer}
- * it first looks like, and that took a wrong shape shipping to notice.** A
- * cluster's `apiServer` genuinely varies per installation — two clusters are
- * two different control planes. `run.googleapis.com` is not: every connected
- * project sits behind the *same* control API, because Google runs one of it.
- * What looked like connection material was a vendor constant wearing a
- * manifest field's clothes. So this stays optional rather than required, for
- * exactly the reason `apiServer` must not: an installation behind a perimeter
- * or a mirror is real and needs to say so, but the ordinary installation has
- * nothing to say here at all. Absent means the adapter's own default applies
- * — see `DEFAULT_ENDPOINT` in `adapters/deploy/cloudrun/index.ts`, resolved
- * there rather than in this file because `src/domain/` is backend-neutral and
- * a vendor's own hostname is exactly the kind of fact it must not know.
- *
- * **No credential here either** (§13). What authorizes a call is minted per
- * request by whatever federates.
- */
 export interface CloudRunConnection {
   adapter: 'cloudrun';
   region: string;
   /**
-   * The runtime's API root, without a trailing slash. Optional override; see
-   * the interface doc above for why this is a vendor constant rather than an
-   * installation fact.
+   * API root without a trailing slash. Absent uses the adapter's default; set it
+   * only behind a perimeter or a mirror.
    */
   endpoint?: string;
   /**
-   * The binary-authorization API root, where this project's admission policy is
-   * read from (§16: "one signature, two verifiers").
-   *
-   * Optional, and absent means **not known** rather than absent-so-fine: with
-   * nowhere to look, `verifiedDeploy` derives `false`, which is the direction a
-   * claim about verification has to fail in.
-   *
-   * **Deliberately carries no default, unlike {@link endpoint} above.** The two
-   * look alike — both name a Google API root — but presence here is a second
-   * signal doing double duty: `useProjectAdmissionPolicy` in the deploy
-   * adapter reads `policyEndpoint !== undefined` to decide whether this
-   * project's admission policy applies at all. A compiled-in default would
-   * make every Cloud Run Target start submitting to binary authorization
-   * whether the operator installed it or not, which is the opposite of
-   * "not known".
+   * The binary authorization API root. No default: its presence turns on the
+   * project's admission policy, and absent means verification is not known.
    */
   policyEndpoint?: string;
   /**
-   * The identity a revision runs as (§13, §14).
-   *
-   * Connection material rather than a manifest-wide value, for the same reason
-   * `project` is: it is a fact about this Target's project, and two connected
-   * projects have different ones.
-   *
-   * **Absent is a footgun rather than a default**, and the reason it is still
-   * optional is that only the runtime can supply the alternative. Omit it and
-   * Cloud Run runs the revision as the project's default compute account —
-   * which the controller has no `iam.serviceAccounts.actAs` on, because nobody
-   * granted it any, so the apply is refused with an IAM sentence naming an
-   * account the operator never chose. Naming the account here is what turns
-   * that into a deliberate choice; `bluenose` already has a `spindrift-runtime`
-   * account and the `actAs` grant for exactly this.
+   * The identity a revision runs as. Absent, Cloud Run uses the default compute
+   * account, which the controller cannot `actAs`, so the apply is refused.
    */
   serviceAccount?: string;
-  /** §18: how far back a tail can honestly reach, in seconds. */
+  /** How far back a tail can reach, in seconds. */
   logHistorySeconds?: number;
 }
 
-/**
- * How a static-hosting Target is reached (§13, §14).
- *
- * No region: the hosting product serves one site from its own edge rather than
- * from a location an operator picks, so there is nothing here for a region to
- * name. No log history either — §17 gives static hosting an honest empty state
- * rather than a duration, because there is no runtime to have produced output.
- *
- * `endpoint` is optional for the same reason {@link CloudRunConnection.endpoint}
- * is: Firebase Hosting's API root is one hostname for every project, not a
- * per-installation fact, so the adapter's own default applies when this is
- * absent — see `DEFAULT_ENDPOINT` in `adapters/deploy/static/index.ts`.
- */
 export interface StaticConnection {
   adapter: 'static';
-  /** The hosting product's API root, without a trailing slash. Optional override. */
+  /** API root without a trailing slash; absent uses the adapter's default. */
   endpoint?: string;
 }
 
 /**
- * How a Vercel Target is reached (§13).
- *
- * The same shape `StaticConnection` has, for the same reason: an edge platform
- * serves one site from its own network rather than from a region an operator
- * picks, and there is no runtime whose output a tail could reach back into.
- *
- * **No credential here either** (§13's rule), though this is the one backend
- * where what authorizes a call is not federated: Vercel has no inbound OIDC to
- * exchange a projected token for, so the bearer is an installation-Secret
- * value read per request — `SPINDRIFT_VERCEL_TOKEN` in `adapters/registry.ts`,
- * exactly where the 1Password Connect token already lives. A field for it here
- * would put one copy per Target in the database, which is the thing the rule is
- * actually about.
- *
- * `endpoint` is optional for the same reason {@link CloudRunConnection.endpoint}
- * is: Vercel's API root is one hostname for every team, not a per-installation
- * fact, so the adapter's own default applies when this is absent — see
- * `DEFAULT_ENDPOINT` in `adapters/deploy/vercel/index.ts`.
+ * The platform has no inbound OIDC, so its bearer token is an installation
+ * Secret read per request, never stored per Target.
  */
 export interface VercelConnection {
   adapter: 'vercel';
-  /** The platform's API root, without a trailing slash. Optional override. */
+  /** API root without a trailing slash; absent uses the adapter's default. */
   endpoint?: string;
 }
 
 /**
- * How a Cloudflare Pages Target is reached (§13, §14).
- *
- * The same one field its two siblings carry, for the same reasons: no region,
- * because the product serves one site from its own network; and no log history,
- * because §17 gives static hosting an honest empty state rather than a duration.
- *
- * **No credential here either**, and the same exception {@link VercelConnection}
- * documents applies for the same reason — this platform has no inbound OIDC to
- * exchange a projected token for, so the bearer is an installation-Secret value
- * read per request (`SPINDRIFT_CLOUDFLARE_TOKEN` in `adapters/registry.ts`).
- *
- * **The production branch is not here.** A project has one, and the adapter
- * reads it back off the project it ensures rather than being told — an operator
- * who states it can state it wrong, and the API already knows the answer.
- *
- * `endpoint` is optional for the same reason {@link CloudRunConnection.endpoint}
- * is: Cloudflare's API root is one hostname for every account, not a
- * per-installation fact, so the adapter's own default applies when this is
- * absent — see `DEFAULT_ENDPOINT` in `adapters/deploy/pages/index.ts`.
+ * The bearer token is an installation Secret, as for Vercel. The production
+ * branch is read back off the project, never stated here.
  */
 export interface CloudflarePagesConnection {
   adapter: 'cloudflare-pages';
-  /** The platform's API root, without a trailing slash. Optional override. */
+  /** API root without a trailing slash; absent uses the adapter's default. */
   endpoint?: string;
 }
 
 /**
- * How a Kubernetes Target is reached, and by which GitOps operator.
- *
- * §6: **the Target declares the delivery flavour.** "The GitOps operator *is*
- * the pluggable machinery, so Spindrift applies a `HelmRelease` or an Argo
- * `Application` **through the API**" — which is why the flavour is connection
- * material rather than an installation-wide setting: two clusters may run
- * different operators and neither is more correct.
- *
- * Everything below the flavour is an operator's statement about their own
- * cluster. None of it is a credential (§13), and none of it is interpreted
- * here: core stores it and hands it to the adapter, which is the only thing
- * that knows what a `GitRepository` is.
+ * The delivery flavour is per Target: two clusters may run different GitOps
+ * operators. Core stores the rest unparsed for the adapter.
  */
 export interface KubernetesConnection {
   adapter: 'kubernetes';
   /**
-   * Where releases placed before per-App namespaces still live, and the
-   * namespace the connect probe reads this cluster's prerequisites in.
-   *
-   * No new release lands here. A Deploy carries its own namespace in its ref,
-   * so the ones already placed keep resolving to this one until each is
-   * redeployed into {@link appNamespaceFor}'s answer.
+   * The namespace the connect probe reads, and whose admission labels App
+   * namespaces copy. New releases go to {@link appNamespaceFor}'s namespace.
    */
   namespace: string;
-  /** §20's pattern for an App's own namespace, containing `{app}`. */
+  /** The pattern for an App's own namespace, containing `{app}`. */
   appNamespace?: string;
-  /** Where Datastores are provisioned. Never an App's namespace (§11). */
+  /** Where Datastores are provisioned; never an App's namespace. */
   datastoreNamespace?: string;
   delivery: KubernetesDelivery;
   /**
-   * §18: "how far back a tail can honestly reach", in seconds. Stated rather
-   * than discovered, because the log store is beside the cluster and not in it.
+   * How far back a tail can reach, in seconds. Stated, because the log store is
+   * outside the cluster.
    */
   logHistorySeconds?: number;
   /**
-   * §7's per-Target chart-values field: the operator's half of the value
-   * contract. Untyped here on purpose — the chart's classes are the adapter's
-   * knowledge, and the boundary between what an operator may write and what
-   * Spindrift writes is enforced where this is saved, not where it is stored.
+   * The operator's half of the chart value contract, untyped here. What an
+   * operator may write is enforced where it is saved.
    */
   chartValues?: Record<string, unknown>;
 }
 
 /**
- * The two delivery flavours §6 names, each carrying what its operator needs.
- *
- * A direct apply and a Flux Kustomization are designed-for and deferred — note
- * the inversion §6 records: applying manifests directly is the *expensive*
- * flavour, being the only one with no controller to report status.
- *
- * **Both carry the chart's source**, because the App chart is fetched from an
- * object the Target already carries — a pinned OCI artifact or a repository it
- * trusts (§7). That makes "this source object exists in this cluster" a Target
- * prerequisite, and the prerequisite is checkable exactly because the reference
- * is here.
+ * Both carry the chart's source object, which makes its presence in the cluster
+ * a checkable prerequisite.
  */
 export const KUBERNETES_DELIVERY_FLAVOURS = [
   'flux-helmrelease',
@@ -278,18 +127,13 @@ export type KubernetesDelivery =
       flavour: 'flux-helmrelease';
       /** Namespace the `HelmRelease` object itself is created in. */
       namespace: string;
-      /**
-       * The Flux source object the App chart is fetched from — an
-       * `OCIRepository` or a `GitRepository`, decided by the installation's
-       * own `charts.app` reference rather than restated here.
-       */
+      /** An `OCIRepository` or `GitRepository`, per the installation's `charts.app`. */
       sourceRef: { name: string; namespace: string };
     }
   | {
       flavour: 'argo-application';
       /** Namespace the Argo `Application` object is created in. */
       namespace: string;
-      /** The Argo project the Application belongs to. */
       project: string;
       /** The repository the App chart is fetched from, and at which revision. */
       repoUrl: string;
@@ -298,30 +142,13 @@ export type KubernetesDelivery =
       server: string;
     };
 
-/**
- * What the deploy contract's verbs need to name one Target (§6).
- *
- * Identity plus how to reach it. The identity is the vessel and the surface —
- * see {@link TargetIdentity} — which is what an adapter puts in a sentence when
- * it has to name the Target it was handed.
- */
 export interface DeployTargetRef extends TargetIdentity {
   readonly connection: AdapterConnection;
 }
 
-/**
- * The flat connection an adapter receives — surface facts plus its vessel's.
- *
- * **This is why splitting the row did not move the adapter seam.** An adapter
- * has always been handed one object carrying everything it needs to reach a
- * Target, and it still is; core assembles it from two rows instead of one.
- * Neither `DeployAdapter` nor any conformance test knows the difference, which
- * is what made normalizing the storage affordable.
- */
+/** The flat connection an adapter receives: surface facts plus its vessel's. */
 export type AdapterConnection =
-  // Both surfaces on a gcp-project boundary receive the vessel's network from
-  // the same {@link addressOf} spread; only `cloudrun` reads it, but typing
-  // both keeps the type honest about what the composition puts there.
+  // Both project surfaces receive the vessel's network; only `cloudrun` reads it.
   | (KubernetesConnection & VesselFacts & { apiServer: string })
   | (CloudRunConnection &
       VesselFacts & { project: string; network?: GcpProjectNetwork })
@@ -336,14 +163,6 @@ interface VesselFacts {
   reachableRegistries?: readonly string[];
 }
 
-/**
- * One adapter's arm of the flat view.
- *
- * Each adapter narrows `DeployTarget.connection` to its own arm before reading
- * it, exactly as it did when the connection was one row — the discriminant is
- * still `adapter`, and the shape it selects now simply includes the vessel's
- * contribution.
- */
 export type KubernetesAdapterConnection = Extract<
   AdapterConnection,
   { adapter: 'kubernetes' }
@@ -366,31 +185,16 @@ export type CloudflarePagesAdapterConnection = Extract<
 >;
 
 /**
- * The pattern an App's namespace is named by when the installation states none.
- *
- * A default rather than a required field, because making it required would
- * invalidate every stored manifest and re-seed the installation from its
- * mounted declaration — losing whatever was configured through the UI, which on
- * a live installation is its connected Targets.
+ * A default, not a required field: requiring it would invalidate every stored
+ * manifest and re-seed the installation, losing UI-connected Targets.
  */
 const DEFAULT_APP_NAMESPACE = 'app-{app}';
 
-/** Where Datastores go when the installation states nothing, for that reason. */
 const DEFAULT_DATASTORE_NAMESPACE = 'spindrift-datastores';
 
 /**
- * The namespace one App's resources live in.
- *
- * Named for the App rather than shared, which is what makes the chart's
- * `NetworkPolicy` isolate something: its `podSelector: {}` allow means "the
- * siblings in my namespace", and with every App in one namespace that was every
- * App on the cluster.
- *
- * **Not validated here.** An App name is already a DNS label by the time it
- * reaches a Target, and the pattern is refused at the manifest boundary if it
- * cannot vary by App. What this cannot check is a pattern whose *result* is too
- * long, which is why {@link appNamespaceFor} is used through
- * {@link namespaceRefusal} on the write path.
+ * Per App, so the chart's same-namespace `podSelector: {}` allow covers only that
+ * App. Length is checked on the write path by {@link namespaceRefusal}.
  */
 export function appNamespaceFor(
   connection: Pick<KubernetesConnection, 'appNamespace'>,
@@ -402,7 +206,6 @@ export function appNamespaceFor(
   );
 }
 
-/** Where this Target's Datastores are provisioned — never an App's namespace. */
 export function datastoreNamespaceFor(
   connection: Pick<KubernetesConnection, 'datastoreNamespace'>,
 ): string {
@@ -410,12 +213,8 @@ export function datastoreNamespaceFor(
 }
 
 /**
- * Why this App cannot have a namespace, or `null` when it can.
- *
- * A namespace is one DNS label capped at 63 characters, and both halves of the
- * name are things a human chose — an installation's pattern and an App's name —
- * so a combination that is not legal is refused with both of them named rather
- * than truncated into something the operator will not find with `kubectl`.
+ * `null` when the namespace is one legal DNS label. Otherwise it is refused with
+ * both names, never truncated into a namespace the operator cannot find.
  */
 export function namespaceRefusal(
   connection: Pick<KubernetesConnection, 'appNamespace'>,
@@ -427,7 +226,7 @@ export function namespaceRefusal(
     : `App '${app}' under this installation's namespace pattern is '${namespace}', which is not one DNS label of at most 63 characters`;
 }
 
-/** The Vessel columns {@link deployTargetOf} reads, without importing the row. */
+/** The vessel columns {@link deployTargetOf} reads. */
 export interface VesselRef {
   readonly name: string;
   readonly location: VesselLocation;
@@ -435,29 +234,14 @@ export interface VesselRef {
   readonly reachableRegistries: readonly string[] | null;
 }
 
-/**
- * Whether a vessel has been told where it is.
- *
- * The mirror of {@link hasTargetConnection}, and used beside it: a Target is
- * addressable exactly when the surface carries its own facts *and* the boundary
- * carries its location. Both are set by the same act, so in practice they agree
- * — but the types do not know that, and a guard is cheaper than an invariant
- * nobody checks.
- */
+/** Mirrors {@link hasTargetConnection}: a Target is addressable when both hold. */
 export function hasVesselLocation<
   T extends { location: VesselLocation | null },
 >(vessel: T): vessel is T & VesselRef {
   return vessel.location !== null;
 }
 
-/**
- * The narrow view of a Target row the adapter contract takes.
- *
- * Composes the surface's connection with its vessel's location and reach. The
- * vessel is a parameter rather than something this reads, because a domain
- * function that queried would be a domain function the database could break —
- * every caller already joins the row it needs.
- */
+/** Composes the surface's connection with its vessel's location and reach. */
 export function deployTargetOf(
   target: {
     adapter: TargetAdapter;
@@ -476,11 +260,7 @@ export function deployTargetOf(
   return {
     vessel: vessel.name,
     adapter: target.adapter,
-    // The union is discriminated on `adapter`, and the surface half already
-    // carries it, so the spread lands in exactly one arm. The cast is what
-    // {@link unstatedAddress} exists to check: `where` is the boundary's own
-    // kind's address, and only the compiler is told it is the one this arm
-    // needs.
+    // The cast asserts `where` is this arm's address; `unstatedAddress` checks it.
     connection: {
       ...target.connection,
       ...reach,
@@ -489,7 +269,6 @@ export function deployTargetOf(
   };
 }
 
-/** The one address a boundary of this kind states, in its own kind's terms. */
 function addressOf(
   location: VesselLocation,
 ): Record<string, string | GcpProjectNetwork> {
@@ -497,9 +276,7 @@ function addressOf(
     case 'cluster':
       return { apiServer: location.apiServer };
     case 'gcp-project':
-      // The network rides along with the address: it is the same kind of
-      // boundary fact, and the surface that reads it (`cloudrun`'s discover)
-      // derives a capability from its presence rather than probing for one.
+      // `cloudrun` discovery derives a capability from the network's presence.
       return {
         project: location.project,
         ...(location.network === undefined
@@ -513,13 +290,7 @@ function addressOf(
   }
 }
 
-/**
- * The field name each surface's arm of {@link AdapterConnection} requires.
- *
- * Keyed by adapter rather than derived from a Target's vessel, because that is
- * the direction the question runs: the surface needs one address and the
- * boundary either stated that one or stated another kind's.
- */
+/** The address field each arm of {@link AdapterConnection} requires. */
 const ADDRESS_BY_ADAPTER = {
   kubernetes: 'apiServer',
   cloudrun: 'project',
@@ -529,30 +300,13 @@ const ADDRESS_BY_ADAPTER = {
 } as const satisfies Record<TargetAdapter, string>;
 
 /**
- * The address this surface needs that its vessel's location does not state.
- *
- * `null` when {@link deployTargetOf} composed a whole connection, which is the
- * ordinary case. Each arm of {@link AdapterConnection} requires exactly one
- * address — `apiServer` for `kubernetes`, `project` for both cloud surfaces —
- * and a boundary states only its own kind's, so a surface on a boundary of the
- * other shape composes to a connection with a hole where its address goes.
- *
- * **That pairing is a document somebody may write, deliberately.** Which
- * runtimes a boundary carries is established by probing it rather than by a
- * table of surfaces per kind, so the manifest no longer refuses a project that
- * runs a cluster — it just has no way to address one yet. What must not happen
- * is an adapter being handed the hole: Cloud Run would request
- * `projects/undefined` on every pass of the loop and report a sentence with
- * `undefined` in it to the operator. So this is an unmet checklist item
- * instead, which is §3's grammar for exactly this — a stated reason a Target is
- * a non-candidate.
+ * `null` when the connection is whole. A surface on a vessel of another kind has
+ * no address, reported as an unmet checklist item so no adapter gets the hole.
  */
 export function unstatedAddress(target: DeployTargetRef): string | null {
   const { connection } = target;
   const address = ADDRESS_BY_ADAPTER[target.adapter];
-  // `in` rather than a property read: the arm the compiler picked is the one
-  // the cast asserted, so the key is only actually there when the boundary's
-  // location was the matching shape.
+  // The key exists only when the vessel's location matched this arm.
   const stated =
     address in connection &&
     (connection as unknown as Record<string, unknown>)[address] !== '';
@@ -561,44 +315,25 @@ export function unstatedAddress(target: DeployTargetRef): string | null {
 }
 
 /**
- * Whether the Target passes §13's standing checklist.
- *
- * Two states, not three. A manifest-seeded Target starts unhealthy with every
- * prerequisite carrying the reason that it has not been connected. The connect
- * act replaces that checklist with one real inspection before it returns, so
- * there is no `unknown` for the UI to render as a shrug.
+ * No `unknown`: connect replaces a seeded Target's checklist with a real
+ * inspection before it returns.
  */
 export type TargetHealth = 'healthy' | 'unhealthy';
 
 /**
- * Why a Deploy is no longer core's to manage.
- *
- * §13: disconnect leaves live Deploys `orphaned` and "workloads keep running".
- * That is deliberately **not** a sixth {@link DeployPhase}: the phases are the
- * platform's verdict on a rollout (§6), and a workload that is still perfectly
- * live has no new verdict — what changed is that Spindrift stopped being able to
- * observe it. So orphaning is a core-side timestamp beside the phase, and
- * `deployState` below is the one place the two are read together.
+ * Orphaning and faults are core-side timestamps beside the phase, not phases:
+ * the rollout's verdict does not change.
  */
 export type DeployState = 'orphaned' | 'live' | 'faulty' | 'pending' | 'failed';
 
-/** The three fields {@link deployState} reads. */
 export interface DeployStateInput {
   phase: 'PENDING' | 'APPLYING' | 'WAITING' | 'LIVE' | 'FAILED';
   orphanedAt: Date | null;
-  /** The soak's verdict after readiness — the same timestamp-beside-phase shape. */
+  /** The soak's verdict after readiness. */
   faultyAt: Date | null;
 }
 
-/**
- * What the UI shows for one Deploy.
- *
- * Orphaning wins over the phase, because it is the more recent fact: a Deploy
- * that reads `LIVE` on a disconnected Target is telling the truth about the last
- * thing Spindrift saw and nothing about what is running now. A fault is read
- * the same way: `LIVE` is still the rollout's verdict, and `faulty` is what the
- * platform said about it afterwards.
- */
+/** Orphaning is the most recent fact and wins; a fault overrides `LIVE`. */
 export function deployState(deploy: DeployStateInput): DeployState {
   if (deploy.orphanedAt !== null) return 'orphaned';
   switch (deploy.phase) {
@@ -614,48 +349,21 @@ export function deployState(deploy: DeployStateInput): DeployState {
 /** The Deploy phases a disconnect strands — anything that reached the Target. */
 export const STRANDABLE_PHASES = ['APPLYING', 'WAITING', 'LIVE'] as const;
 
-/**
- * What identifies one Target: the boundary it is on, and the runtime it is.
- *
- * There is no third field, and that is the point. A Target used to carry a
- * constructed `name` — the vessel's, plus the adapter as a suffix where the
- * vessel had siblings to tell apart — and that name was decorative the moment
- * §60 gave the boundary a row of its own. Constructing it was worse than
- * redundant: the suffix appeared only where a vessel carried more than one
- * surface, so a vessel *discovering* a second surface would have had to rename
- * the first, and a Target cannot be renamed.
- *
- * The pair is naturally unique — a boundary carries one runtime of each kind —
- * so it is the unique index too (`targets_vessel_adapter_unique`).
- */
+/** Unique as a pair: a vessel carries one runtime of each kind. */
 export interface TargetIdentity {
   readonly vessel: string;
   readonly adapter: TargetAdapter;
 }
 
 /**
- * One Target, spelled for a human: `<vessel>/<adapter>`.
- *
- * Two segments where there was one, and legible in a way the flat name was not:
- * `bluenose` is visibly a boundary and `bluenose/cloudrun` is visibly a surface
- * on it, rather than two sibling strings that read as peers.
- *
- * **Nothing parses this back out.** It is written into sentences and into store
- * item names; every act that addresses a Target takes its id, or its vessel and
- * adapter as two fields.
+ * `<vessel>/<adapter>`, for humans. Nothing parses it back: every act takes the
+ * id, or the vessel and adapter as two fields.
  */
 export function targetLabel(target: TargetIdentity): string {
   return `${target.vessel}/${target.adapter}`;
 }
 
-/**
- * {@link targetLabel} over a `targets` row with its vessel joined.
- *
- * The join is the point: a Target row on its own cannot say what it is, because
- * half of what names it lives on the boundary. `'none'` is the answer for an
- * absent row — a Component that has never been placed has no Target, which is a
- * fact rather than a missing lookup.
- */
+/** `'none'` for an absent row: a Component never placed has no Target. */
 export function targetRowLabel(
   target:
     | { adapter: TargetAdapter; vessel: { name: string } }
@@ -668,19 +376,8 @@ export function targetRowLabel(
 }
 
 /**
- * Where a Datastore lives, spelled for a human.
- *
- * A Datastore is anchored to its vessel, but the sentence a reader knows is
- * still `<vessel>/<adapter>` — the boundary plus the one surface on it that
- * hosts databases, resolved through the same two-row table every adapter
- * lookup reads. For every installation that exists this is byte-identical to
- * labelling the Target the row used to reference.
- *
- * The bare-name fallback should be unreachable: `createDatastore` refuses a
- * vessel whose kind has no hosting surface before any row exists to label.
- * If it is ever hit, the label quietly loses its `/adapter` suffix — a
- * display degradation, deliberately not a throw, because a labelling helper
- * that crashes a screen over one malformed row hides every other row with it.
+ * Falls back to the bare vessel name, never a throw, so one malformed row
+ * cannot crash a screen.
  */
 export function datastoreVesselLabel(vessel: {
   readonly name: string;

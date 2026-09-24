@@ -1,40 +1,7 @@
 /**
- * One unmet prerequisite, opened as a pull request against the infrastructure
- * repository.
- *
- * `config-pr.ts` already does this shape one noun over, and the rules its
- * header states transfer without change:
- *
- * - **Nothing here is authoritative.** This module opens a pull request and
- *   returns its number. It writes no checklist row, no Target and no vessel,
- *   and it does not mark anything met — an unmerged pull request changes
- *   nothing about a boundary, and the standing loop is what will notice when a
- *   merged one has been applied.
- * - **One pull request is one prerequisite's change and nothing else.** A
- *   change that also enabled a second service, or tidied the file it landed
- *   in, is a review about something other than the row it came from.
- * - **Human-editable.** The stanza is what an operator would have written, in
- *   the file it belongs in, so the review is about the change rather than about
- *   the tool that produced it.
- *
- * **Appending, not templating.** The destination file usually exists and
- * already holds resources; this reads it at the base commit and adds the stanza
- * to the end. A file that is not there is created holding the stanza alone,
- * which is the only case where this module writes a whole file — and it never
- * creates a *root*: a boundary that declares none produces
- * `RemediationDestination`'s `absent` arm and no pull request at all, because
- * a root has a backend, a provider and a version pin that nothing here
- * observed.
- *
- * **And appending is checked before it is done.** A file that already declares
- * what the stanza declares is a file that already owns the fact, and adding a
- * second declaration is drift where the labels differ and a root that does not
- * parse where they match. That is not hypothetical against this repository: the
- * bucket, the enabled services and the bound roles a generated stanza names are
- * all declared in the roots the vessels point at. So the read this module
- * already makes is used for something, and {@link AlreadyDeclaredError} is the
- * answer — a refusal naming the file, rather than a pull request whose plan
- * errors.
+ * One unmet prerequisite, opened as a pull request that appends a Terraform
+ * stanza to a file in the infrastructure repository. It never creates a root,
+ * and refuses when the file already declares what the stanza would.
  */
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import type { GeneratedRemediation } from '../../domain/remediation.ts';
@@ -43,21 +10,11 @@ import type {
   RepositoryWriter,
 } from '../../domain/repository.ts';
 
-/** Where a remediation branch is cut, one directory per boundary. */
 export const REMEDIATION_BRANCH_PREFIX = 'spindrift/remediate';
 
 /**
- * The branch one prerequisite's change is opened from.
- *
- * The surface is in the name, and leaving it out was a collision rather than a
- * cosmetic gap: `PREREQUISITES_BY_ADAPTER` puts `PLATFORM_API` and
- * `OIDC_FEDERATION` on both cloud surfaces of one vessel, so a `gcp-project`
- * routinely has two unmet rows of the same name that want different stanzas —
- * one enabling Cloud Run, one Firebase Hosting. Sharing a branch, the second
- * open force-pushes over the first and the repository host answers the second
- * pull request with the first one's number, so an operator is told a change was
- * opened that no longer exists anywhere. `null` for a row that belongs to the
- * boundary itself, which has no surface to name.
+ * Names the surface, since one vessel can have the same unmet row on two
+ * surfaces, and a shared branch would force-push over the first change.
  */
 export function remediationBranch(
   vessel: string,
@@ -69,25 +26,22 @@ export function remediationBranch(
   return `${REMEDIATION_BRANCH_PREFIX}/${vessel}-${surface}${row}`;
 }
 
-/** The composed change, before anything has been sent anywhere. */
 export interface RemediationTransaction {
   readonly branch: string;
   readonly title: string;
   readonly body: string;
   readonly commitMessage: string;
-  /** Repository-relative path the stanza is added to. */
+  /** Repository-relative. */
   readonly path: string;
   readonly stanza: string;
-  /** What the destination must not already declare — see `remediation.ts`. */
+  /** Facts the destination must not already declare. */
   readonly declares: readonly string[];
 }
 
-/** The boundary and, where the row is on one, the surface — in one phrase. */
 function subjectOf(vessel: string, adapter: TargetAdapter | null): string {
   return adapter === null ? vessel : `${vessel}’s ${adapter} surface`;
 }
 
-/** What the pull request says, in the order an operator reads it. */
 function pullRequestBody(input: {
   readonly subject: string;
   readonly prerequisite: string;
@@ -105,16 +59,12 @@ The only file touched is \`${input.path}\`, and the only thing added to it is th
 }
 
 /**
- * Compose the change. Pure: nothing is sent, so a test can read exactly what
- * would be written before deciding whether a far side is involved.
- *
- * Refuses a remediation whose destination is a root that is not declared, for
- * the reason the destination has two arms at all — there is no path to write
- * to, and inventing one is what this whole module declines to do.
+ * Pure: nothing is sent. Throws when the boundary declares no Terraform root,
+ * since there is no file to write to.
  */
 export function remediationTransaction(input: {
   readonly vessel: string;
-  /** The surface the row is on, `null` for a row that is the boundary's own. */
+  /** `null` for a row that belongs to the boundary itself. */
   readonly adapter: TargetAdapter | null;
   readonly prerequisite: string;
   readonly remediation: GeneratedRemediation;
@@ -142,10 +92,6 @@ export function remediationTransaction(input: {
   };
 }
 
-/**
- * What opening the change needs: the writer, plus the two reads that find the
- * base commit and whatever the destination file already holds.
- */
 export type RemediationHost = RepositoryWriter & {
   branchHead(
     ref: RepositoryRef,
@@ -160,17 +106,14 @@ export type RemediationHost = RepositoryWriter & {
   ): Promise<string | null>;
 };
 
-/** Where the opened pull request can be found, and what it did. */
 export interface OpenedRemediationPullRequest {
   readonly number: number;
   readonly branch: string;
   readonly commit: string;
   readonly path: string;
-  /** True when the destination file did not exist and this created it. */
   readonly createdFile: boolean;
 }
 
-/** The destination already owns this fact, so there is nothing to add. */
 export class AlreadyDeclaredError extends Error {
   constructor(
     readonly path: string,
@@ -183,29 +126,14 @@ export class AlreadyDeclaredError extends Error {
   }
 }
 
-/** The stanza added to whatever the file already held, with one blank line. */
 function appended(existing: string | null, stanza: string): string {
   if (existing === null || existing.trim() === '') return stanza;
   return `${existing.replace(/\n+$/, '')}\n\n${stanza}`;
 }
 
 /**
- * Whichever fact the destination already holds, or `null` for a file with none
- * of them.
- *
- * Two distinct failures, and this refuses ahead of both. Where the resource
- * *address* repeats, the appended file is a `Duplicate resource configuration`
- * that fails to parse — so the pull request Spindrift just opened breaks the
- * plan for every other change queued against that root, and the row can never
- * go green because nothing can be applied. Where only the value repeats, it
- * parses and is worse: two resources managing one API enablement or one
- * binding, which is exactly the drift `AGENTS.md` prohibits and which applies
- * cleanly enough that nobody catches it.
- *
- * Re-opening the same row after a merge that has not been applied yet lands
- * here too, and it is the same answer: the base branch now carries the stanza,
- * the row is still red because Atlantis has not run, and appending a second
- * copy is not what moves it.
+ * A repeated resource address breaks the plan for the whole root, and a
+ * repeated value applies as two resources managing one thing.
  */
 function alreadyDeclared(
   existing: string | null,
@@ -215,13 +143,6 @@ function alreadyDeclared(
   return declares.find((fact) => existing.includes(fact)) ?? null;
 }
 
-/**
- * Write the change to a branch and open the pull request for it.
- *
- * The base is the default branch, read here rather than taken as a parameter,
- * for the reason `config-pr.ts` gives: the branch must not be cut from a ref
- * other than the one whose merge is what will be applied.
- */
 export async function openRemediationPullRequest(
   host: RemediationHost,
   ref: RepositoryRef,

@@ -1,35 +1,14 @@
 /**
- * The repository host, as core names it (§15).
- *
- * §15 settles one host — "reuse the existing selected-repository GitHub App" —
- * but core still declares the far side rather than importing it, for the same
- * reason `target.ts` declares `TargetConnection` instead of speaking any
- * cluster's API: the command layer and the repo loop are the two things §20's
- * extraction contract has to keep portable, and neither of them should know
- * what a GitHub App is. `src/integrations/github/` implements these interfaces;
- * nothing in `src/commands/` or `src/reconciler/` imports it.
- *
- * **The reference grants nothing.** Core holds and passes around
- * {@link RepositoryRef}—an installation identity, which is a string in a
- * database column. The encrypted installation-level credential stays inside
- * the host and is resolved at the moment of use; no repository command can
- * receive or return it.
+ * The repository host as core names it. Core holds only a {@link RepositoryRef};
+ * the installation credential stays inside the host, resolved at use, and no
+ * repository command receives or returns it.
  */
 
-/**
- * How core names one installation of whatever integration reaches a repository.
- *
- * A single field, and it stays an object anyway: what a host needs to reach a
- * repository is the kind of thing that grows (an enterprise's own endpoint, a
- * second app), and a bare string would make every one of those a change at
- * every call site.
- */
 export interface RepositoryRef {
   /** Opaque to core; meaningful only to the host that issued it. */
   readonly installationId: string;
 }
 
-/** One repository the authorized account can reach through an installation. */
 export interface AvailableRepository {
   /** Stable far-side repository identity, useful as a UI selection key. */
   readonly repositoryId: string;
@@ -40,11 +19,8 @@ export interface AvailableRepository {
 }
 
 /**
- * The browser-safe state of the installation's repository authorization.
- *
- * `authorized` means an App identity exists — the manifest-flow conversion
- * has written the singleton row — and names the App rather than a user,
- * because installation tokens act as the App's bot identity.
+ * `authorized` names the App, not a user, because installation tokens act as
+ * the App's bot identity.
  */
 export type RepositoryAuthorizationStatus =
   | { readonly state: 'unauthorized' }
@@ -60,10 +36,8 @@ export class RepositoryAuthorizationRequiredError extends Error {
 }
 
 /**
- * The manifest-flow form that creates the App identity (§A of the migration
- * design): one POST, straight from the operator's browser to the repository
- * host, carrying the manifest document and returning to the setup route with
- * a conversion code.
+ * The manifest-flow form that creates the App identity: one POST from the
+ * operator's browser to the host, returning to the setup route with a code.
  */
 export interface RepositoryAuthorizationSetup {
   /** Where the form POSTs — the host's create-from-manifest page, `state` included. */
@@ -72,13 +46,7 @@ export interface RepositoryAuthorizationSetup {
   readonly manifest: string;
 }
 
-/**
- * The optional identity half of a repository integration.
- *
- * Kept beside, not inside, {@link RepositoryHost}: reconciliation only needs
- * repository operations and should not gain identity ceremony methods merely
- * because the concrete GitHub adapter implements both.
- */
+/** The optional identity half of a repository integration. */
 export interface RepositoryAuthorization {
   status(): Promise<RepositoryAuthorizationStatus>;
   /** The create-the-App form, bound to the acting operator for CSRF. */
@@ -87,56 +55,36 @@ export interface RepositoryAuthorization {
   installationFor(fullName: string): Promise<RepositoryRef>;
 }
 
-/** What reconciliation reads (§15). */
 export interface RepositoryReader {
   /**
-   * The repository's own facts. §15 reads the default branch, never assumes it.
-   *
-   * `fullName` is what the host calls the repository **now**. A renamed
-   * repository still answers under its old name, so a caller addressing it
-   * that way cannot tell from the call succeeding — only from the name coming
-   * back different. The repo loop compares the two and follows the rename.
+   * Returns the current `fullName`: a renamed repository still answers under its
+   * old name, so only the returned name reveals the rename.
    */
   repository(
     ref: RepositoryRef,
     fullName: string,
   ): Promise<{ readonly defaultBranch: string; readonly fullName: string }>;
-  /** The commit a branch currently points at. */
   branchHead(
     ref: RepositoryRef,
     fullName: string,
     branch: string,
   ): Promise<string>;
-  /** One file at one exact commit, or `null` when it is not there. */
+  /** `null` when the file is not at that commit. */
   readFile(
     ref: RepositoryRef,
     fullName: string,
     commit: string,
     path: string,
   ): Promise<string | null>;
-  /**
-   * Every file at one exact commit, root-relative.
-   *
-   * Detection needs to know what is in a directory before anything has been
-   * checked out (§5), and this is the one call that answers it. Files only:
-   * a tree's directories are implied by the paths inside them, and core has no
-   * use for an entry that names a container rather than content.
-   */
+  /** Every file path at one commit, root-relative; directories are implied. */
   treePaths(
     ref: RepositoryRef,
     fullName: string,
     commit: string,
   ): Promise<readonly string[]>;
   /**
-   * Whether one pull request is still open (ticket 136).
-   *
-   * `repositories.config_pull_request` is written once, when the configuration
-   * transaction opens the PR, and otherwise trusted — so a PR closed without
-   * merging leaves the row claiming "still open" forever, with nothing that
-   * ever asks again. This is that ask. A pull request that no longer exists —
-   * deleted, or a fork whose branch is gone — answers `'closed'` rather than
-   * throwing: it is exactly as unmergeable as one a human closed by hand, and
-   * the column exists to say whether there is still something to merge.
+   * A pull request that no longer exists answers `'closed'`, never throws: it is
+   * as unmergeable as one closed by hand.
    */
   pullRequestState(
     ref: RepositoryRef,
@@ -146,13 +94,8 @@ export interface RepositoryReader {
 }
 
 /**
- * What opening the configuration pull request writes (§15).
- *
- * Git's own object model rather than a "put this file" verb, because §15 makes
- * the whole PR one transaction: blobs, one tree over the default branch's, one
- * commit, one branch, one pull request. A per-file write verb would make the
- * transaction a sequence of commits and give a partially written configuration
- * a way to exist.
+ * Git's object model, so the configuration PR is one transaction and a
+ * partially written configuration never exists.
  */
 export interface RepositoryWriter {
   /** The tree one commit points at. */
@@ -174,7 +117,6 @@ export interface RepositoryWriter {
     baseTree: string,
     entries: readonly { readonly path: string; readonly blob: string }[],
   ): Promise<string>;
-  /** One commit over one tree. */
   createCommit(
     ref: RepositoryRef,
     fullName: string,
@@ -191,7 +133,6 @@ export interface RepositoryWriter {
     branch: string,
     commit: string,
   ): Promise<void>;
-  /** Open the pull request and return its number. */
   openPullRequest(
     ref: RepositoryRef,
     fullName: string,
@@ -204,18 +145,14 @@ export interface RepositoryWriter {
   ): Promise<number>;
 }
 
-/** Everything one repository host does. */
 export interface RepositoryHost extends RepositoryReader, RepositoryWriter {
   /**
-   * Resolve the opaque installation covering a repository.
-   *
-   * Optional because non-GitHub/fake repository hosts can operate from an
-   * already persisted reference. Connecting a new repository requires it.
+   * Optional: a fake or non-GitHub host works from an already stored reference.
+   * Connecting a new repository requires it.
    */
   installationFor?(fullName: string): Promise<RepositoryRef>;
 }
 
-/** The reference for a stored repository row. */
 export function repositoryRefOf(row: {
   readonly installationId: string;
 }): RepositoryRef {
@@ -223,12 +160,8 @@ export function repositoryRefOf(row: {
 }
 
 /**
- * Where a repository is cloned from.
- *
- * `webBaseUrl` is the repository host's web origin, which §20 keeps in the
- * installation manifest because an enterprise deployment serves its own. A
- * template with the public host written into it is a clone URL that is right
- * here by accident and wrong for every other installation.
+ * `webBaseUrl` comes from the installation manifest, since an enterprise host
+ * serves its own origin.
  */
 export function cloneUrlFor(webBaseUrl: string, fullName: string): string {
   return `${webBaseUrl}/${fullName}.git`;

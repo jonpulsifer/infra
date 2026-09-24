@@ -1,8 +1,6 @@
 /**
- * A derived supply-chain posture (§16).
- *
- * Posture is neither persisted nor scored. It explains the evidence behind one
- * Deploy in the two groups the product settled: enforced and not known.
+ * The evidence behind one LIVE Deploy, split into enforced and not known.
+ * Derived, never stored or scored.
  */
 import type { BuildLevel } from '../adapters/build/contract.ts';
 import type { DeployPhase } from '../adapters/deploy/contract.ts';
@@ -61,8 +59,7 @@ export function policyDrift(input: {
 }
 
 export function postureFor(input: PostureInput): Posture | null {
-  // Posture explains an admission that happened. Red and in-flight attempts
-  // use the diagnosis surface and never get a second assessment UI.
+  // Only a LIVE Deploy has an admission to explain; others get a diagnosis.
   if (input.phase !== 'LIVE') return null;
 
   const enforced: PostureItem[] = [];

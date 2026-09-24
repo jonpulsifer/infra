@@ -1,11 +1,6 @@
 /**
- * Credential-less Google Cloud Storage (GCS) operations using Workload Identity
- * Federation (§13).
- *
- * What this app asks of a bucket beyond the object calls themselves — putting
- * bytes in it, reading them back, asking whether one is still there are all
- * `@repo/archive/gcs`, because the kthx server makes the same calls against the
- * same API and there is one way to make them.
+ * GCS bucket checks over Workload Identity Federation. Object calls live in
+ * `@repo/archive/gcs`.
  */
 import {
   FederationError,
@@ -25,7 +20,7 @@ export interface TestBucketPermissionsResult {
   readonly permissions: readonly string[];
 }
 
-/** Test GCS bucket access using WIF token exchange (§13). */
+/** Proves only a bucket read; the permissions it returns are assumed. */
 export async function testGcsBucketPermissions({
   bucketName,
   federation,

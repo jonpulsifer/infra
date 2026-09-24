@@ -1,34 +1,7 @@
 /**
- * The Vessel — the tenancy boundary a Target is a surface on (§13, §14).
- *
- * §13 declined a second noun above `Target`: "the connect act is
- * credential-shaped though the noun is flat, so one 'connect a cloud project'
- * registers both of that project's Targets and the shared thing between them is
- * an argument to a command, not an entity."
- *
- * That reasoning holds for the *split* and not for the absence of the noun. A
- * cloud project genuinely is two Targets, because placement determines artifact
- * shape and a single "Cloud" Target would leave a website ambiguous between the
- * Cloud Run rendering and the static one. What follows from that is
- * **Target = Vessel × runtime surface**, not that the vessel does not exist —
- * and the vessel did exist, spelled as a name prefix that four separate places
- * sliced back off:
- *
- * - the fan-out that minted `<project>-cloudrun` and `<project>-static`,
- * - `cloudProjectOf` in `target-onboarding.ts`, recovering it for the UI,
- * - a `superRefine` in the manifest schema validating the convention,
- * - and `project` / `servedHosts` duplicated across both connections, where two
- *   surfaces of one boundary could state different values for one fact.
- *
- * The forcing argument is what comes next. Every backend worth adding is a
- * boundary hosting several runtimes: an edge platform's account serves static
- * sites *and* runs functions, and both are one tenancy boundary with one
- * credential. So the suffix convention gets load-bearing rather than cheaper.
- *
- * **The adapter seam does not move.** `deployTargetOf` composes the flat
- * `TargetConnection` an adapter already receives out of two rows instead of one,
- * so `DeployAdapter`, `DeployTarget`, and every conformance test are untouched.
- * This is a core-side normalization, not a change to §6's contract.
+ * The Vessel: the tenancy boundary, reached with one credential, that a Target
+ * is one runtime surface on. Deploy adapters never see the row:
+ * `deployTargetOf` folds its facts into the `AdapterConnection` they receive.
  */
 import type {
   AuthoredManifest,
@@ -37,19 +10,8 @@ import type {
 import type { Remediation } from './remediation.ts';
 
 /**
- * What kind of boundary this is.
- *
- * **The discriminant {@link VesselLocation} needs, and nothing else.** It says
- * which shape "where this boundary is" has — `{ apiServer }`, `{ project }`,
- * later `{ host }` — and it decides no behaviour: it does not say which
- * surfaces a vessel carries, it is not reversible from an adapter, and it gates
- * no manifest entry. Which surfaces are on a vessel is what its Targets say,
- * established by probing the boundary rather than read out of its kind.
- *
- * Named for the tenancy container itself rather than for the adapter that
- * drives a surface on it, because those are different axes. Every future value
- * is vendor-shaped in the same way, naming one provider's tenancy container,
- * which is what makes them additive.
+ * The discriminant of {@link VesselLocation}, and nothing else. Which surfaces
+ * a vessel carries comes from probing it, never from its kind.
  */
 export const VESSEL_KINDS = [
   'cluster',
@@ -61,52 +23,23 @@ export const VESSEL_KINDS = [
 export type VesselKind = (typeof VESSEL_KINDS)[number];
 
 /**
- * The surfaces a connect act probes a vessel of this kind **for**.
- *
- * A list of questions, not an answer. An entry here means "ask this boundary
- * whether it carries this runtime"; what it carries is whatever the probe
- * established, and the Target rows are where that lands. So a project whose
- * Cloud Run API is switched off is probed for `cloudrun` and has none, and the
- * same surface may appear under two kinds without either becoming ambiguous —
- * a probe answers per vessel, and a table cannot.
- *
- * Adding a backend is adding a row and nothing else in this file.
+ * The surfaces a connect act asks a vessel of this kind about. The probe's
+ * answer, not this table, decides which Targets exist.
  */
 export const PROBED_SURFACES_BY_VESSEL_KIND = {
   cluster: ['kubernetes'],
   'gcp-project': ['cloudrun', 'static'],
-  // One today. The file header's "an edge platform's account serves static
-  // sites *and* runs functions" is this boundary, and the second surface is a
-  // row here on the day a build route emits `.vercel/output` with functions in
-  // it — which is what the deploy adapter is already shaped to hand over.
   'vercel-team': ['vercel'],
-  // The same shape one vendor over, and the same one-today. This account also
-  // runs Workers and containers, and each is a row here rather than a second
-  // vessel, because all of them are reached with the one account credential —
-  // which is why the connect act reads the whole account (`VesselDiscovery`)
-  // even while only one of its surfaces is a Target something is placed on.
   'cloudflare-account': ['cloudflare-pages'],
 } as const satisfies Record<VesselKind, readonly TargetAdapter[]>;
 
-/** What one connect act asks a vessel of this kind about. */
 export function surfacesToProbe(kind: VesselKind): readonly TargetAdapter[] {
   return PROBED_SURFACES_BY_VESSEL_KIND[kind];
 }
 
 /**
- * The surface on a vessel of this kind that can host a database (§11).
- *
- * A Datastore is anchored to its vessel, but the adapter that provisions and
- * observes it is still keyed by `TargetAdapter` — a Target has exactly one
- * adapter type, and that reasoning holds (`adapters/datastore/contract.ts`).
- * This two-row table beside the one above is the whole bridge: every consumer
- * that must go from "the boundary a Datastore lives in" to "the Target row
- * whose connection an adapter call needs" reads it here, so the mapping cannot
- * drift between them.
- *
- * `Partial` because it is a fact that some vessel kinds host no database at
- * all: an edge platform's account has nowhere to put a volume, and an absent
- * entry is `createDatastore`'s refusal rather than a lookup error.
+ * The surface a Datastore on a vessel of this kind is provisioned through. A
+ * kind missing here hosts no Datastore.
  */
 export const DATASTORE_SURFACE_BY_VESSEL_KIND: Partial<
   Record<VesselKind, TargetAdapter>
@@ -116,27 +49,14 @@ export const DATASTORE_SURFACE_BY_VESSEL_KIND: Partial<
 };
 
 /**
- * What one vessel is to this installation, as opposed to what it is made of.
- *
- * The second axis of the prerequisite catalogue below. `kind` says what shape a
- * boundary's address has; this says what the installation asks of it — and the
- * two are independent, which is why they are two axes rather than more kinds.
- *
- * A vessel can hold more than one role: nothing stops an installation whose
- * control plane runs on the same boundary its shared services live in, and a
- * scalar role would have to pick one and drop the other's rows.
+ * What the installation asks of a vessel, independent of its kind. One vessel
+ * can hold several roles.
  */
 export const VESSEL_ROLES = ['home', 'controlPlane', 'app'] as const;
 
 export type VesselRole = (typeof VESSEL_ROLES)[number];
 
-/**
- * Which roles this installation's manifest puts on one vessel, by name.
- *
- * `app` is the answer for everything the two pointers do not name — not an
- * absence, because an ordinary deploy boundary is a role rather than the lack of
- * one, and the catalogue has to be able to key off it.
- */
+/** `app` means neither installation pointer names the vessel. */
 export function vesselRolesOf(
   manifest: Pick<AuthoredManifest, 'installation'>,
   vessel: string,
@@ -149,17 +69,7 @@ export function vesselRolesOf(
   return roles.length === 0 ? ['app'] : roles;
 }
 
-/**
- * Every prerequisite a vessel can be asked about, as distinct from a surface on
- * one (§13's checklist is `PREREQUISITES` in `capabilities.ts`).
- *
- * These are the four the home vessel exists to hold, and none of them belongs to
- * a Target: a source bucket is where a build's bytes are staged before any
- * placement is known, an artifacts project is shared across every vessel (§14),
- * the store of record is one place whatever reaches it, and the signer is a key
- * core calls rather than a Target does. Assessing them on a Target would put the
- * same row on three screens and let them disagree.
- */
+/** Prerequisites of the boundary itself, which belong to no Target on it. */
 export const VESSEL_PREREQUISITES = [
   'SOURCE_BUCKET',
   'SECRET_STORE',
@@ -170,19 +80,8 @@ export const VESSEL_PREREQUISITES = [
 export type VesselPrerequisite = (typeof VESSEL_PREREQUISITES)[number];
 
 /**
- * The checklist one vessel is assessed against, by kind **and** role.
- *
- * `PREREQUISITES_BY_ADAPTER` keys off adapter for the reason `capabilities.ts`
- * states — "a checklist row that can never fail is a row that teaches a reader
- * the wrong thing about what was checked" — and the same argument runs one axis
- * over. An app vessel has no source bucket, no store container and no signer of
- * its own; showing it four permanently-green rows would say those were checked
- * when nothing looked.
- *
- * Kind matters as well as role because every one of these reads is a cloud API
- * call. A cluster that somehow held the shared services would be assessed
- * against nothing rather than against four questions no code here knows how to
- * ask it — which is the honest answer until something does.
+ * Only a cloud project home is asked anything; nothing here can read these from
+ * another kind. An empty row keeps a check nobody ran from reading as passed.
  */
 export const VESSEL_PREREQUISITES_BY_KIND_AND_ROLE = {
   cluster: { home: [], controlPlane: [], app: [] },
@@ -191,25 +90,14 @@ export const VESSEL_PREREQUISITES_BY_KIND_AND_ROLE = {
     controlPlane: [],
     app: [],
   },
-  // The shared services are cloud objects and nothing here knows how to ask an
-  // edge platform for them, so an installation cannot make this boundary its
-  // home. Empty rather than four permanently-red rows: see the header above.
   'vercel-team': { home: [], controlPlane: [], app: [] },
-  // Empty for the identical reason, one vendor over.
   'cloudflare-account': { home: [], controlPlane: [], app: [] },
 } as const satisfies Record<
   VesselKind,
   Record<VesselRole, readonly VesselPrerequisite[]>
 >;
 
-/**
- * What a vessel of this kind in these roles is asked, in display order.
- *
- * The union over its roles rather than one row, so a boundary that is both the
- * home and the control plane is asked everything either role owes. Ordered by
- * {@link VESSEL_PREREQUISITES} so two vessels never show the same rows in
- * different orders.
- */
+/** The union over every role, in {@link VESSEL_PREREQUISITES} order. */
 export function vesselPrerequisitesFor(
   kind: VesselKind,
   roles: readonly VesselRole[],
@@ -222,36 +110,20 @@ export function vesselPrerequisitesFor(
   return VESSEL_PREREQUISITES.filter((name) => asked.has(name));
 }
 
-/** One checklist item on a vessel, and the sentence behind an unmet one. */
 export interface VesselPrerequisiteResult {
   readonly name: VesselPrerequisite;
   readonly met: boolean;
-  /** Why it is unmet. §3's grammar: an exclusion carries its reason. */
+  /** Why it is unmet. */
   readonly detail?: string;
   /**
-   * Whether a read reached a verdict on this row — a Target's `assessed` one
-   * noun up, and load-bearing for the same reason.
-   *
-   * `false` is `Discovered`'s `unavailable` arm arriving here intact: a refused
-   * or unreachable listing establishes nothing, and `holds` keeps it apart from
-   * an established absence precisely so that nothing downstream can treat a
-   * boundary that would not answer as a boundary that answered no.
+   * `false` when the read was refused or unreachable. That establishes nothing,
+   * so never read it as an absence.
    */
   readonly assessed?: boolean;
-  /**
-   * What would clear it, as Terraform — a Target's `remediation` one noun up,
-   * and composed at read time for the same reason.
-   */
+  /** The Terraform that would clear it. */
   readonly remediation?: Remediation;
 }
 
-/**
- * The checklist for a vessel nothing could be asked about.
- *
- * The vessel-level twin of `unreachablePrerequisites`: an installation with no
- * federation, or a process with no cloud client, produces every catalogued row
- * unmet with the fault stated rather than no rows at all.
- */
 export function unreachableVesselPrerequisites(
   detail: string,
   kind: VesselKind,
@@ -266,12 +138,8 @@ export function unreachableVesselPrerequisites(
 }
 
 /**
- * Healthy is every catalogued item met — including the vacuous case.
- *
- * An app vessel is asked nothing and is therefore healthy, which is the right
- * answer rather than a loophole: it holds nothing this installation depends on,
- * so there is nothing about it that can be broken here. The Targets on it carry
- * their own checklist and fail on their own terms.
+ * An app vessel is asked nothing, so it is always healthy. The Targets on it
+ * carry their own checklist.
  */
 export function deriveVesselHealth(
   prerequisites: readonly VesselPrerequisiteResult[],
@@ -287,18 +155,8 @@ export function deriveVesselHealth(
 }
 
 /**
- * What one probe established about one surface on one vessel.
- *
- * Three arms rather than a boolean, and the third is the load-bearing one: a
- * read either produced an answer or it did not, exactly as
- * `adapters/cloud-discovery.ts` splits `found` from `unavailable`. `absent`
- * says *this boundary does not carry this runtime* — a fact an operator can act
- * on, and the one answer that withholds a Target. `undetermined` says nothing
- * was established, which is what a `403`, a disabled federation or a failed
- * read produce, and it registers the Target unhealthy with the sentence
- * attached: rendering a confident absence off a refused read would tell an
- * operator their project has no Cloud Run when all that happened is nobody
- * could look.
+ * `absent` is established and withholds the Target. `undetermined` (a 403, no
+ * federation, a failed read) establishes nothing and registers it unhealthy.
  */
 export type SurfaceProbe =
   | { readonly kind: 'carried' }
@@ -306,14 +164,7 @@ export type SurfaceProbe =
   | { readonly kind: 'undetermined'; readonly detail: string };
 
 /**
- * Where the boundary is, in its own kind's terms.
- *
- * A discriminated union rather than nullable columns, for the reason
- * `TargetConnection` gives: a `cluster` with a project id is not a state the
- * domain has a name for.
- *
- * **No credential, in either arm** (§13). What authorizes a call is minted per
- * request by whatever federates.
+ * No credential in any arm: each call is authorized per request by federation.
  */
 export type VesselLocation =
   | ClusterLocation
@@ -323,36 +174,22 @@ export type VesselLocation =
 
 export interface ClusterLocation {
   kind: 'cluster';
-  /** The API server endpoint. §13's prerequisite is OIDC against it. */
   apiServer: string;
 }
 
 export interface GcpProjectLocation {
   kind: 'gcp-project';
-  /** The project every surface on this vessel deploys into (§14). */
   project: string;
   /**
-   * The network a Datastore on this vessel is reached over, when it has one.
-   *
-   * Absent is valid and is not an unmet prerequisite: a project serving only
-   * Cloud Run and Firebase Hosting needs no network at all — what absence
-   * means is that this vessel cannot host a Datastore, which is a capability
-   * (§20: "Capabilities are things a Target may lack, shown and explained").
-   *
-   * Seeded from the installation manifest like every other boundary fact
-   * (§20), never probed: which network a datastore belongs on is a choice the
-   * operator makes in Terraform, and a probe would guess it.
+   * Absent means the vessel cannot host a Datastore, which is not an unmet
+   * prerequisite. Seeded from the manifest, never probed.
    */
   network?: GcpProjectNetwork;
 }
 
 /**
- * The consumer side of a cloud Datastore's reachability, as two facts.
- *
- * **No subnet, deliberately.** The service connection policies Terraform
- * creates name their subnets, and the producer draws endpoints from them;
- * a subnet here would be a second place to state the same fact and the only
- * place it could be wrong.
+ * No subnet: the service connection policies Terraform creates already name
+ * theirs, and the producer draws endpoints from them.
  */
 export interface GcpProjectNetwork {
   /** The consumer network a PSC endpoint is created in. */
@@ -363,118 +200,60 @@ export interface GcpProjectNetwork {
 
 export interface VercelTeamLocation {
   kind: 'vercel-team';
-  /**
-   * The team or account every surface on this vessel deploys into.
-   *
-   * Not spelled `project`, though the field one arm up is: a Vercel project is
-   * one site inside this boundary — the adapter creates one per Component —
-   * and reusing the word would make the tenancy boundary and the thing placed
-   * on it the same noun.
-   */
+  /** The team or account. A Vercel project is one site inside it. */
   team: string;
 }
 
-/**
- * A Cloudflare account, the tenancy container its hosting products sit in.
- *
- * The peer of {@link VercelTeamLocation} one vendor over, and it carries the
- * same one fact for the same reason: the account id is not a secret and is the
- * only half of the credential pair that says *which* boundary this is, so it is
- * the only half that lives on a row.
- */
+/** Only the account id lives on the row; the token is the secret half. */
 export interface CloudflareAccountLocation {
   kind: 'cloudflare-account';
-  /** The account every surface on this vessel deploys into. */
   account: string;
   /**
-   * The API root this account is reached at, without a trailing slash.
-   *
-   * Optional, and ordinarily absent: one hostname answers for every account,
-   * so `adapters/cloudflare.ts` applies its own default. It is on the boundary
-   * rather than on a surface because every surface on this account reaches the
-   * *same* root — Pages, Workers and the zone listing are three paths under one
-   * host — and a perimeter or a mirror in front of it is in front of all three.
-   * The Pages Target keeps its own `endpoint` for the adapter contract; one
-   * connect act writes both from one field.
+   * The API root, without a trailing slash; absent means the adapter default.
+   * On the boundary because every surface on the account shares one root.
    */
   endpoint?: string;
 }
 
 /**
- * What a pass read off the boundary itself, as opposed to off a surface on it.
- *
- * The vessel's half of `TargetDiscovery`, and it exists for the reason that one
- * does: an operator's next question after "is this connected" is "what is in
- * it", and until this column nothing about a Cloudflare account was legible
- * beyond its id. Zones and Workers are the two facts that are the *account's*
- * rather than any one surface's — a zone is not Pages' and not Workers', it is
- * the account's — so putting them on a Target would be the same drift the
- * Vessel noun was introduced to stop.
- *
- * A union with one arm today, discriminated the same way `VesselLocation` is:
- * a cluster and a cloud project are read by the loops that already read them,
- * and neither has an account-wide listing this shape would carry.
+ * What a pass read off the boundary itself. Zones and Workers belong to the
+ * account, not to any one Target on it.
  */
 export type VesselDiscovery = CloudflareAccountDiscovery;
 
-/** One zone a Cloudflare account's token can see. */
 export interface CloudflareZone {
   readonly name: string;
-  /** What `workers/domains` and every record call address it by. */
   readonly id: string;
-  /** The platform's own word — `active`, `pending`, `moved`. */
+  /** The platform's value: `active`, `pending`, `moved`. */
   readonly status: string;
 }
 
 /**
- * What one Cloudflare account carries, as its own token could see it.
+ * A `null` field means the read established nothing, and
+ * {@link CloudflareAccountDiscovery.unreadable} says why. An empty array means
+ * the listing answered with nothing in it.
  *
- * **`null` in any field means the read established nothing**, and
- * {@link CloudflareAccountDiscovery.unreadable} carries which read and why. An
- * empty array is the other answer entirely: the listing answered and there was
- * nothing in it. That is `cloud-discovery.ts`'s `found`/`unavailable` split
- * kept intact one noun up — a refused token must not render as an account with
- * no zones, which is exactly the sentence that sends an operator to create a
- * zone they already have.
- *
- * ponytail: one null-and-a-sentence per read. Split `absent` from
- * `undetermined` into arms of their own the day something branches on it
- * rather than displays it.
+ * ponytail: one null and a sentence per read. Split absent from undetermined
+ * when something branches on it.
  */
 export interface CloudflareAccountDiscovery {
   readonly kind: 'cloudflare-account';
   /**
-   * The account's own display name, as the platform states it — the vessel's
-   * name is the operator's label for the connection, and the two need not
-   * agree. `null` when the read was refused or the build predates the field;
-   * a missing pretty name is a cosmetic gap, never an `unreadable` entry.
+   * The platform's display name, which need not match the vessel name. A
+   * missing one is cosmetic, never an `unreadable` entry.
    */
   readonly accountName?: string | null;
-  /** Every zone in this account, whatever surface serves it. */
   readonly zones: readonly CloudflareZone[] | null;
   /** This account's `workers.dev` subdomain, when Workers is switched on. */
   readonly workersSubdomain: string | null;
-  /** Pages projects by name — the surface's own inventory, listed once here. */
   readonly pagesProjects: readonly string[] | null;
   /** Why a field above is `null`, keyed by the field. Absent when all read. */
   readonly unreadable?: Readonly<Record<string, string>>;
 }
 
 /**
- * Which of the installation's declared zones this account can actually serve.
- *
- * `dns.zones` is the installation's naming policy (§9) and says nothing about
- * which provider answers for each entry — an installation with a private zone
- * on a resolver of its own and a public one on Cloudflare declares both, in
- * whatever order suits its defaults. Taking the head of that list as *the*
- * Cloudflare zone is a coin flip that fails at deploy time with the platform
- * refusing a zone it has never heard of.
- *
- * So the probe decides among what the manifest declared: the first declared
- * zone this account carries. **Nothing was established falls back to the head**
- * rather than to nothing — a probe that could not run must not be the reason a
- * deploy stops, and the platform's own refusal is still there behind it with a
- * better sentence than this could write.
+ * The first declared zone this account carries. An unread listing falls back to
+ * the first declared zone, so a failed probe never blocks a deploy on its own.
  */
 export function servableZone(
   declared: readonly string[],
@@ -486,54 +265,30 @@ export function servableZone(
 }
 
 /**
- * The Vessel row, as the domain reads it.
- *
- * Everything here is a fact about the boundary — true for every surface on it,
- * and therefore impossible for two of them to disagree about. A fact that is
- * true of one surface and not another belongs on the Target.
- *
- * **There is no `surfaces` here.** Which runtimes this boundary carries is the
- * set of Targets that reference it, and a second copy of that would be a copy
- * the two can disagree about.
+ * Only facts true of every surface on the boundary. Which surfaces it carries
+ * is the set of Targets referencing it, never a field here.
  */
 export interface Vessel {
   readonly id: string;
   readonly name: string;
-  /** {@link VESSEL_KINDS} — the shape of {@link location}, and nothing else. */
   readonly kind: VesselKind;
   readonly location: VesselLocation;
-  /**
-   * §33's static reachability input. A property of the network the boundary
-   * sits on, which is why it is stated once here rather than per surface.
-   */
+  /** Hosts the boundary's network serves itself, such as a registry mirror. */
   readonly servedHosts: readonly string[];
   /**
-   * §3, and boundary-shaped for the same reason.
-   *
-   * An entry is a bare host (`ghcr.io`) or a host/namespace (`ghcr.io/owner`),
-   * and both spellings are accepted everywhere this is read —
-   * {@link import('./desired-state.ts').pullableFrom} is the one predicate
-   * that decides it, for both a Build's pull address and, before a Build
-   * exists, the registry namespace itself.
+   * A bare host (`ghcr.io`) or a host/namespace (`ghcr.io/owner`);
+   * {@link import('./desired-state.ts').pullableFrom} decides a match.
    */
   readonly reachableRegistries: readonly string[];
 }
 
-/**
- * Reconcile what two surfaces of one boundary each claimed about it.
- *
- * Used by the backfill and by manifest seeding, which are the two paths where a
- * per-surface statement of a boundary fact still arrives. The union rather than
- * a winner: today the two *can* disagree, and silently taking one would be the
- * bug this noun exists to prevent. Callers log when the inputs differ.
- */
+/** The union, never a winner: picking one claim would hide a disagreement. */
 export function unionOfClaims(
   claims: readonly (readonly string[] | undefined)[],
 ): string[] {
   return [...new Set(claims.flatMap((claim) => claim ?? []))].sort();
 }
 
-/** Whether two surfaces stated different things about one boundary fact. */
 export function claimsDisagree(
   claims: readonly (readonly string[] | undefined)[],
 ): boolean {

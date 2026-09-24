@@ -1,36 +1,7 @@
 /**
- * Handing a hosted runner a URL it can fetch, without giving it a credential.
- *
- * §15 stages one immutable bundle "for either builder", and the hosted route's
- * builder is a GitHub-hosted runner: a machine on the public internet with no
- * standing relationship to this installation's cloud project. It cannot read
- * `gs://` and it holds nothing that would let it authenticate to GCS. So the
- * durable object address has to be turned into something `curl` resolves, and
- * the reusable workflow — named by the manifest, not composed at dispatch —
- * already does exactly one thing with what it is handed:
- * `curl --fail --location "$LOCATION"`.
- *
- * A **V4 signed URL** is what fits that sentence. It is a bearer capability and
- * that is the accepted tradeoff, bounded two ways: the TTL is minutes, and the
- * URL is minted at dispatch rather than stored, so nothing durable holds one.
- *
- * **There is no private key here, and that is the whole point of §13.** V4
- * signing normally means a service-account key file; instead the string-to-sign
- * goes to IAM's `signBlob`, authorized by the *federated* token — the one from
- * before impersonation. Signing as the impersonated token would instead require
- * the service account to hold a token-creator role on *itself*, which is a
- * separate grant nothing else in this installation needs.
- *
- * **That costs a grant, and it is not the one impersonation needs.** `signBlob`
- * checks `iam.serviceAccounts.signBlob`, which lives in
- * `roles/iam.serviceAccountTokenCreator`. Impersonation checks
- * `iam.serviceAccounts.getAccessToken`, which `roles/iam.workloadIdentityUser`
- * also carries. So an installation whose federated principal holds only
- * `workloadIdentityUser` reaches every other cloud API and is refused here
- * alone — deploys work, and builds from a `gs://` bundle never dispatch. The
- * principal needs `roles/iam.serviceAccountTokenCreator` on the impersonated
- * service account; `terraform/gcp/projects/bluenose/iam.tf` is where this
- * installation grants it.
+ * V4 signed URLs, so a hosted runner can `curl` a depot object with no
+ * credential. Signing uses IAM `signBlob`, which needs the federated principal
+ * to hold `roles/iam.serviceAccountTokenCreator` on the impersonated account.
  */
 import {
   FederationError,
@@ -39,55 +10,33 @@ import {
 } from '@repo/archive/federation';
 import { type GcsObject, parseGcsLocation } from '@repo/archive/gcs';
 
-// The splitter moved to `@repo/archive/gcs`, beside the object calls it feeds,
-// so the kthx server can read a stored `gs://` address without a second copy.
-// Re-exported because signing is still where this app's callers look for it.
 export { type GcsObject, parseGcsLocation };
 
-/** Where a signed URL points. GCS serves signed requests on this host. */
 const STORAGE_HOST = 'storage.googleapis.com';
 
-/** The only V4 algorithm GCS accepts, and the one `signBlob` produces. */
+/** RSA, because `signBlob` signs with the service account's RSA key. */
 const ALGORITHM = 'GOOG4-RSA-SHA256';
 
-/** V4's request scope. GCS takes `auto` for the region on a signed GET. */
+/** GCS takes `auto` as the region. */
 const SCOPE_SUFFIX = 'auto/storage/goog4_request';
 
 /**
- * How long a minted URL stays good.
- *
- * Fifteen minutes is ample for a runner to pull a source bundle and short
- * enough that a URL leaked through a workflow run's outputs is a capability
- * that has already expired by the time anyone reads it. Not a tuning knob.
+ * Ample for a runner to pull a bundle, and a URL leaked in run output has
+ * expired by the time anyone reads it.
  */
 export const SIGNED_URL_TTL_SECONDS = 900;
 
 export interface SignedUrlInput {
-  /** The object to sign a GET for, as `gs://bucket/object`. */
+  /** `gs://bucket/object`. */
   readonly location: string;
   readonly federation: FederationOptions;
   readonly ttlSeconds?: number;
-  /** Injected so a test can sign at a fixed instant. */
   readonly now?: () => Date;
 }
 
 /**
- * The address a staged bundle is actually fetched from.
- *
- * A depot object is exchanged for a signed URL; anything else — an `https://`
- * bundle, a registry reference — is already whatever its own fetcher expects
- * and comes back untouched. Every `files` deploy backend reads the same depot
- * for the same reason, and one function is what stops three of them from
- * disagreeing about how a `gs://` address becomes bytes.
- *
- * Throws {@link FederationError}, including for an installation that
- * configured no federation at all: it is the same "this installation cannot
- * reach its cloud" as every other refusal here, and a caller that turns one
- * into its own verdict turns them all into it.
- *
- * **The caller must keep naming `location`, never what comes back.** A signed
- * URL is a bearer capability; the object address is the thing an operator can
- * be told about.
+ * Signs a `gs://` location and returns anything else as is. Show operators
+ * `location`, never the result: a signed URL is a bearer capability.
  */
 export async function fetchableBundleUrl(
   location: string,
@@ -107,13 +56,7 @@ export async function fetchableBundleUrl(
   });
 }
 
-/**
- * Mint a short-TTL V4 signed URL for one GCS object.
- *
- * Throws {@link FederationError} — the same type every other federated call
- * raises — so a caller that already handles "this installation could not reach
- * its cloud" handles this too.
- */
+/** Throws {@link FederationError}, like every other federated call. */
 export async function signedObjectUrl({
   location,
   federation,
@@ -133,8 +76,7 @@ export async function signedObjectUrl({
   const datestamp = timestamp.slice(0, 8);
   const scope = `${datestamp}/${SCOPE_SUFFIX}`;
 
-  // Signed headers are `host` alone. Adding any other header would oblige the
-  // runner to send it, and the runner is a `curl` invocation we do not control.
+  // Only `host` is signed: the runner's `curl` would have to send any other.
   const query = canonicalQuery({
     'X-Goog-Algorithm': ALGORITHM,
     'X-Goog-Credential': `${signer}/${scope}`,
@@ -151,8 +93,7 @@ export async function signedObjectUrl({
     `host:${STORAGE_HOST}`,
     '',
     'host',
-    // The body is not signed: GCS names this literal for a GET, and a runner
-    // sends no body to hash anyway.
+    // GCS's literal for a payload left out of the signature.
     'UNSIGNED-PAYLOAD',
   ].join('\n');
 
@@ -168,15 +109,8 @@ export async function signedObjectUrl({
 }
 
 /**
- * The service account a signature is made in the name of.
- *
- * Read off `impersonationUrl` because that is where the installation already
- * names it — §13 shapes the federation block after an `external_account`
- * document, and the impersonation URL is that document's service-account field.
- * A `null` impersonation URL means the installation reaches its cloud as the
- * federated identity directly, and a federated identity is not a service
- * account: it has no key GCS can verify a signature against, so there is
- * nothing to sign with and saying so is the only honest answer.
+ * The account named in `impersonationUrl`. Without one there is no service
+ * account whose key GCS could verify a signature against.
  */
 function signingServiceAccount(federation: FederationOptions): string {
   const url = federation.impersonationUrl;
@@ -202,8 +136,8 @@ async function signBlob(
   serviceAccount: string,
   payload: string,
 ): Promise<string> {
-  // Deliberately not `federation` as given: the token wanted here is the
-  // federated one, before impersonation. See this file's header.
+  // The federated token: signing as the impersonated account would need a
+  // token-creator grant on itself.
   const getToken = workloadIdentityToken({
     ...federation,
     impersonationUrl: null,
@@ -254,11 +188,8 @@ function canonicalQuery(params: Record<string, string>): string {
 }
 
 /**
- * Percent-encode one query key or value.
- *
- * `encodeURIComponent` leaves `!'()*` alone and V4 requires them encoded, so
- * they are finished by hand. Everything outside the unreserved set must be
- * escaped or the signature covers a different string than the URL carries.
+ * `encodeURIComponent` leaves `!'()*` alone; V4 needs them escaped, or the
+ * signature covers a different string than the URL carries.
  */
 function encodeComponent(value: string): string {
   return encodeURIComponent(value).replace(
@@ -267,12 +198,12 @@ function encodeComponent(value: string): string {
   );
 }
 
-/** The same encoding, except `/` stays a separator because this is a path. */
+/** As {@link encodeComponent}, but `/` stays a path separator. */
 function encodePath(value: string): string {
   return value.split('/').map(encodeComponent).join('/');
 }
 
-/** `YYYYMMDDTHHMMSSZ`, which is the only timestamp form V4 accepts. */
+/** `YYYYMMDDTHHMMSSZ`, the only timestamp form V4 accepts. */
 function basicIso(at: Date): string {
   return `${at.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`;
 }

@@ -1,26 +1,17 @@
 /**
- * A store-only ZIP writer — enough of the format to hand Cloud Build a source
- * archive, and nothing else.
+ * A store-only ZIP writer, enough to hand Cloud Build a source archive. Every
+ * entry carries one fixed DOS timestamp, so the same files give the same bytes
+ * and the same digest, which names the uploaded object.
  *
- * No dependency, because the whole need is three small files with no
- * compression: method 0 means the bytes are copied verbatim and the only real
- * work is the CRC-32 the reader checks them against.
- *
- * **Deterministic on purpose.** Every entry carries the same fixed DOS
- * timestamp, so the same sources produce the same bytes and therefore the same
- * digest — which is what lets the object name be the digest and an unchanged
- * function re-upload to the same place instead of accumulating one object per
- * deploy.
- *
- * ponytail: store-only, no Zip64. A function whose archive passes 4 GiB has a
- * different problem; add deflate and Zip64 headers if one ever does.
+ * ponytail: store-only, no Zip64; add deflate and Zip64 headers if an archive
+ * ever nears 4 GiB.
  */
 
 /** 1980-01-01 00:00, the earliest a DOS timestamp can say. */
 const DOS_DATE = 0x0021;
 const DOS_TIME = 0x0000;
 
-/** Bit 11: the name is UTF-8 rather than the format's ancient default. */
+/** Bit 11: the name is UTF-8, not the format's default code page. */
 const UTF8_NAME = 0x0800;
 
 const CRC_TABLE = (() => {
@@ -43,7 +34,6 @@ function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** One archive, in the order the files were given. */
 export function zip(
   files: readonly { name: string; bytes: Uint8Array }[],
 ): Uint8Array {

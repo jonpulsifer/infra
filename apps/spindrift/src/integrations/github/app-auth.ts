@@ -1,26 +1,7 @@
 /**
  * The GitHub App's own authentication: JWT signing and installation tokens.
- *
- * The App's private key is the only long-lived credential, and it never
- * leaves. Everything else is minted from it per call — an App JWT good for
- * minutes, an installation token good for an hour — so the thing core passes
- * around as a "credential" is an `InstallationRef`, which is a number in a
- * database column and grants nothing on its own.
- *
- * **Identity is resolved per mint, never captured at construction**, from two
- * places in order: the installation Secret (`SPINDRIFT_GITHUB_APP_ID` +
- * `SPINDRIFT_GITHUB_APP_PRIVATE_KEY` — the adopt path for an App that already
- * exists, registered by hand with no conversion response to seal), then the
- * sealed `github_app` row the manifest-flow conversion writes. The row starts
- * empty and is populated mid-flight by the setup route while the pod keeps
- * running; a construction-time capture would keep answering "no App identity"
- * until a restart nobody was told to run. This mirrors the per-call pattern
- * every other sealed row in this process already follows.
- *
- * The key arrives PKCS#1 (`BEGIN RSA PRIVATE KEY` is what the conversion
- * endpoint and GitHub's key generator emit) or PKCS#8. WebCrypto imports only
- * PKCS#8, so `node:crypto`'s `createPrivateKey` parses whichever arrived and
- * re-exports PKCS#8 DER — no operator ceremony, no openssl incantation.
+ * Identity is read per mint, from the installation Secret first and then the
+ * sealed `github_app` row, which the setup route fills while the pod runs.
  */
 import { createPrivateKey } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -35,34 +16,25 @@ import { type Fetcher, GitHubHttp } from './http.ts';
 
 const SINGLETON_ID = 1;
 
-/**
- * An App JWT is valid for ten minutes at most; nine leaves room for the clock
- * skew the far side tolerates without landing on its own limit.
- */
+/** GitHub caps an App JWT at ten minutes; nine leaves room for clock skew. */
 const APP_JWT_LIFETIME_SECONDS = 9 * 60;
 
 /**
- * How long before an installation token expires it stops being reused.
- *
- * A token that expires mid-request is a `401` that reads exactly like lost
- * access, which is the one misclassification this integration must not make —
- * so the margin is generous rather than tight.
+ * A token that expires mid-request returns a `401` that reads as lost access,
+ * so a cached token is replaced this long before it expires.
  */
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
-/** How long a manifest-flow `state` nonce stays presentable. */
 const SETUP_STATE_LIFETIME_MS = 15 * 60 * 1000;
 
-/** What the conversion endpoint answers with — the only place the key is plaintext. */
 const conversionResponse = z.object({
   id: z.number().int().positive(),
   slug: z.string().min(1),
   client_id: z.string().min(1),
   pem: z.string().min(1),
   /**
-   * Typed `string | null` by the REST schema. Null is handled as the
-   * refuse-all-deliveries posture — the same behaviour as no App existing at
-   * all — not sealed and later crashed on, and not a failed setup.
+   * GitHub types this `string | null`. Null is stored as no secret, which
+   * refuses every delivery.
    */
   webhook_secret: z.string().min(1).nullable().catch(null),
 });
@@ -71,7 +43,7 @@ const setupState = z
   .object({ userId: z.string().min(1), issuedAt: z.number().int() })
   .strict();
 
-/** Raised when the setup route must refuse rather than convert. */
+/** `status` is the HTTP status the setup route answers with. */
 export class GitHubAppSetupError extends Error {
   override readonly name = 'GitHubAppSetupError';
   constructor(
@@ -82,34 +54,17 @@ export class GitHubAppSetupError extends Error {
   }
 }
 
-/** The public half of the App identity — never the key. */
 export interface GitHubAppIdentity {
   readonly appId: string;
   readonly slug: string;
   readonly clientId: string;
 }
 
-// --- The adopt-existing path: identity from the installation Secret --------
-//
-// An App that already exists was registered by hand, so there is no
-// conversion response to seal: the operator pastes its id and private key
-// into the installation Secret instead, and these take precedence over any
-// sealed `github_app` row. Both must be set for the pair to count — half a
-// pair is a misconfiguration, and it reads as "no App identity" rather than
-// as an identity with a guessed half.
-
-/** Numeric App id of an adopted App. */
 export const GITHUB_APP_ID_VAR = 'SPINDRIFT_GITHUB_APP_ID';
-/** The adopted App's private key, PEM — PKCS#1 (GitHub's own export) or PKCS#8. */
+/** PEM, PKCS#1 or PKCS#8. */
 export const GITHUB_APP_PRIVATE_KEY_VAR = 'SPINDRIFT_GITHUB_APP_PRIVATE_KEY';
-/**
- * The App-level webhook secret, for an adopted App whose webhook the operator
- * configures directly in GitHub's settings. Absent keeps the
- * refuse-all-deliveries posture.
- */
 export const GITHUB_WEBHOOK_SECRET_VAR = 'SPINDRIFT_GITHUB_WEBHOOK_SECRET';
 
-/** Whether the installation Secret supplies an adopted App identity. */
 export function hasGitHubAppEnvIdentity(
   env: Record<string, string | undefined>,
 ): boolean {
@@ -121,38 +76,25 @@ export function hasGitHubAppEnvIdentity(
 export interface GitHubAppAuthOptions {
   readonly db: Database;
   readonly clock: Clock;
-  /**
-   * Opens the sealed `github_app` row. `null` disables the conversion-stored
-   * path entirely — an adopted identity from the environment needs no keyring.
-   */
+  /** `null` disables the sealed-row path; an adopted App needs no keyring. */
   readonly keyring: CredentialKeyring | null;
-  /** Where the adopt-path variables are read from. Always passed explicitly. */
   readonly env: Record<string, string | undefined>;
-  /** Base URL of the repository host's REST API, without a trailing slash. */
+  /** No trailing slash. */
   readonly apiBaseUrl: string;
-  /** The host's web origin — where the manifest-POST form targets. */
+  /** GitHub's web origin, which the manifest form posts to. */
   readonly webBaseUrl: string;
-  /** The control plane's own origin, for the manifest's redirect/setup URLs. */
   readonly controlPlaneHostname: string;
-  /** Pre-fills the suggested App name on the creation page. */
   readonly installationName: string;
-  /**
-   * The adopted App's slug — public, declared in the manifest so the install
-   * link (`…/apps/<slug>/installations/new`) can be composed. The
-   * manifest-flow conversion stores its own slug and ignores this.
-   */
+  /** Read only on the adopt path; the manifest flow stores GitHub's slug. */
   readonly appSlug?: string | null;
   /**
-   * Where the created App's webhooks are delivered — the tunnel hostname's
-   * full URL, never the control plane's LAN name, which GitHub's delivery
-   * servers cannot reach. Null declares no webhook at all.
+   * Must be reachable from GitHub: the tunnel URL, never the LAN name. `null`
+   * declares no webhook.
    */
   readonly webhookUrl: string | null;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
 
-/** A minted installation access token and the moment it stops working. */
 interface InstallationToken {
   readonly token: string;
   readonly expiresAt: Date;
@@ -169,23 +111,13 @@ function encodeJson(value: unknown): string {
   return base64url(new TextEncoder().encode(JSON.stringify(value)));
 }
 
-/** Whichever PEM arrived, as the PKCS#8 DER WebCrypto imports. */
+/** GitHub issues PKCS#1 keys; WebCrypto imports only PKCS#8. */
 function pkcs8Der(pem: string): Uint8Array {
   return new Uint8Array(
     createPrivateKey(pem).export({ type: 'pkcs8', format: 'der' }),
   );
 }
 
-/**
- * Everything minted from the App's sealed identity.
- *
- * One object rather than a function per call because the two caches — the
- * imported signing key and the per-installation token — are what keep a loop
- * over a dozen repositories from minting a dozen JWTs a minute, and a cache
- * that is not owned by something is a module-level global. Both caches key on
- * what they were minted *from*, so a replaced key or a re-created App
- * invalidates them without a restart.
- */
 export class GitHubAppAuth {
   private readonly tokens = new Map<string, InstallationToken>();
   private signingKey: { ciphertext: string; key: Promise<CryptoKey> } | null =
@@ -193,13 +125,6 @@ export class GitHubAppAuth {
 
   constructor(private readonly options: GitHubAppAuthOptions) {}
 
-  /**
-   * The adopted identity from the installation Secret, or `null`.
-   *
-   * `iss` on a JWT may be the client id or the app id; an adopted App's
-   * Secret carries only the id, so the id is the issuer. The slug is public
-   * display-and-links material and comes from the manifest (`appSlug`).
-   */
   private envIdentity(): (GitHubAppIdentity & { pem: string }) | null {
     const appId = this.options.env[GITHUB_APP_ID_VAR]?.trim();
     const pem = this.options.env[GITHUB_APP_PRIVATE_KEY_VAR]?.trim();
@@ -207,12 +132,13 @@ export class GitHubAppAuth {
     return {
       appId,
       slug: this.options.appSlug?.trim() || `app-${appId}`,
+      // GitHub accepts the App id as a JWT `iss`, and the Secret has no client id.
       clientId: appId,
       pem,
     };
   }
 
-  /** The identity's public half, or `null` before the App exists. */
+  /** `null` until an App exists. */
   async identity(): Promise<GitHubAppIdentity | null> {
     const adopted = this.envIdentity();
     if (adopted !== null) {
@@ -239,11 +165,8 @@ export class GitHubAppAuth {
   }
 
   /**
-   * Combined App/installation identity recorded on source receipts.
-   *
-   * Read through `identity()`, which knows both homes an App id lives in — an
-   * adopted App has no sealed row, and a receipt that only consulted the row
-   * failed a staging fetch that had already succeeded.
+   * The subject recorded on source receipts. It reads `identity()` because an
+   * adopted App has no row.
    */
   async principalSubject(ref: InstallationRef): Promise<string> {
     const identity = await this.identity();
@@ -255,11 +178,6 @@ export class GitHubAppAuth {
     return `installation:${ref.installationId}/app:${identity.appId}`;
   }
 
-  /**
-   * The App's own JWT: proves *which App is asking*, and nothing about a
-   * repository. Presented to the token endpoint and to the two enumeration
-   * endpoints that identify the App itself.
-   */
   async appJwt(): Promise<string> {
     const adopted = this.envIdentity();
     let issuer: string;
@@ -275,8 +193,7 @@ export class GitHubAppAuth {
       );
     }
     const issuedAt = Math.floor(this.options.clock.now().getTime() / 1000);
-    // Backdating by a minute is the documented remedy for the far side's clock
-    // running slightly behind this one, which it rejects outright.
+    // Backdated a minute: GitHub rejects an `iat` ahead of its own clock.
     const claims = {
       iat: issuedAt - 60,
       exp: issuedAt + APP_JWT_LIFETIME_SECONDS,
@@ -291,30 +208,17 @@ export class GitHubAppAuth {
     return `${signingInput}.${base64url(new Uint8Array(signature))}`;
   }
 
-  /** A JWT `Authorization` value, for the App-identifying endpoints. */
   async appAuthorization(): Promise<string> {
     return `Bearer ${await this.appJwt()}`;
   }
 
-  /**
-   * A bearer value for one installation, minted or reused.
-   *
-   * Returned as a full `Authorization` value rather than a bare token so that
-   * no caller has to know the scheme — and so that grepping this package for a
-   * token-shaped string finds this method rather than a dozen call sites.
-   */
   async authorization(ref: InstallationRef): Promise<string> {
     return `Bearer ${await this.installationToken(ref)}`;
   }
 
   /**
-   * A `401` on an installation token: drop the cached value and say retry.
-   *
-   * The transport retries a send at most once, so the sequence is bounded —
-   * the retried request mints fresh, and a second `401` classifies as
-   * `ACCESS_LOST` like any other. Nothing durable is deleted, because nothing
-   * durable was spent: an installation token is an hour-lived mint, not the
-   * credential Device Flow used to erase here.
+   * Drops the cached token a `401` refused. The transport re-sends once, so a
+   * second `401` classifies as `ACCESS_LOST`.
    */
   rejectedAuthorization(ref: InstallationRef, authorization: string): 'retry' {
     const cached = this.tokens.get(ref.installationId);
@@ -355,22 +259,12 @@ export class GitHubAppAuth {
     return token.token;
   }
 
-  // --- The manifest flow, which is how the identity above comes to exist ---
-
   /**
-   * The create-the-App form for one operator.
-   *
-   * The `state` nonce is the keyring sealing `{userId, issuedAt}` rather than
-   * a stored row: the callback opens it, checks the same operator is behind
-   * the session, and refuses anything older than its window. The conversion
-   * code itself is single-use on the far side, and conversion is refused
-   * outright once a row exists, so a replay buys nothing.
+   * The create-the-App form. The `state` nonce seals the operator and issue
+   * time, and the callback checks both.
    */
   async setup(userId: string): Promise<{ action: string; manifest: string }> {
     if (this.options.keyring === null) {
-      // Unreachable through the UI — with no keyring and no adopted identity
-      // the connector is `unavailable` — but this method must not silently
-      // hand out a form whose conversion could never seal anything.
       throw new GitHubAppSetupError(
         503,
         'this installation has no credential keyring, so it has nowhere to seal an App key',
@@ -411,13 +305,8 @@ export class GitHubAppAuth {
   }
 
   /**
-   * The `code=` leg of the setup route: convert, seal, store — once.
-   *
-   * Replacing an existing App identity is a deliberate, re-auth-gated act,
-   * not a side effect of resubmitting the create flow, so an existing row
-   * refuses the conversion before the far side is ever asked. The `pem` is
-   * sealed immediately and never rendered back; `client_secret` is discarded —
-   * nothing in this process makes user-to-server calls.
+   * An existing row refuses before GitHub is asked. `client_secret` is dropped
+   * because nothing here makes user-to-server calls.
    */
   async convertManifestCode(input: {
     readonly code: string;
@@ -492,7 +381,6 @@ export class GitHubAppAuth {
       .onConflictDoNothing({ target: githubApp.id })
       .returning();
     if (row === undefined) {
-      // Two conversions raced; the first one's identity stands.
       throw new GitHubAppSetupError(
         409,
         'an App identity was stored while this conversion ran; the existing one stands',
@@ -537,8 +425,8 @@ export class GitHubAppAuth {
   }
 
   private async row() {
-    // No keyring means the sealed columns can never be opened, so a row is a
-    // credential this process cannot use — absent, not half-present.
+    // Without a keyring the sealed columns cannot be opened, so the row
+    // counts as absent.
     if (this.options.keyring === null) return null;
     const row = await this.options.db.query.githubApp.findFirst({
       where: (app, { eq: equal }) => equal(app.id, SINGLETON_ID),
@@ -556,12 +444,7 @@ export class GitHubAppAuth {
     return row;
   }
 
-  /**
-   * The sealed key's plaintext, with the keyring-rotation rewrite on the way
-   * through — an envelope sealed under a legacy keyring key is re-sealed
-   * under the active one, which is what keeps additive rotation able to
-   * finish.
-   */
+  /** Re-seals a key sealed under a legacy keyring key, so rotation can finish. */
   private async openSealedKey(ciphertext: string): Promise<string> {
     const keyring = this.options.keyring;
     if (keyring === null) {
@@ -586,9 +469,8 @@ export class GitHubAppAuth {
   }
 
   /**
-   * The imported signing key, cached against the material it came from — the
-   * env PEM itself on the adopt path, the envelope's ciphertext on the
-   * sealed path — so a replaced key misses the cache and imports fresh.
+   * Cached on the material it came from, the env PEM or the sealed
+   * ciphertext, so a replaced key misses the cache.
    */
   private key(
     cacheKey: string,
@@ -609,15 +491,8 @@ export class GitHubAppAuth {
 }
 
 /**
- * The App-level webhook secret, read per delivery.
- *
- * A standalone reader rather than a method because the webhook route is wired
- * before any registry exists and must see an App created mid-flight without a
- * restart. The installation Secret wins — an adopted App's webhook is
- * configured directly in GitHub's settings and its secret pasted beside the
- * key — and the sealed row answers for a manifest-created App. `null` — no
- * secret anywhere, or a conversion whose response carried none — is the
- * refuse-all-deliveries posture the route already has for it.
+ * Read per delivery, so the webhook route sees an App created after boot. The
+ * installation Secret wins over the sealed row; `null` refuses every delivery.
  */
 export async function githubAppWebhookSecret(
   db: Database,

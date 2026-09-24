@@ -1,8 +1,6 @@
 /**
- * Production bootstrap for the reconciler process.
- *
- * Kept out of `main.ts` so startup can be integration-tested without importing
- * a module that installs process signal handlers as a side effect.
+ * Production bootstrap for the reconciler process. Kept out of `main.ts` so a
+ * test can start it without installing signal handlers.
  */
 import type { SQL } from 'bun';
 import { createAdapterRegistry } from '../adapters/registry.ts';
@@ -22,25 +20,18 @@ type Env = Record<string, string | undefined>;
 export interface StartReconcilerOptions {
   readonly signal: AbortSignal;
   readonly env?: Env;
-  /**
-   * A caller-supplied client is already owned by that caller. Production omits
-   * it and this function closes the client it creates during shutdown.
-   */
+  /** The caller owns a supplied client; this closes only one it created. */
   readonly client?: SQL;
   readonly clock?: Clock;
-  /** Far-side seam for integration tests; production constructs the registry. */
+  /** Injected for tests; production builds the registry from the manifest. */
   readonly createAdapters?: (manifest: InstallationManifest) => AdapterRegistry;
   readonly onStarted?: (manifest: InstallationManifest) => void;
   readonly onEvent?: (event: ReconcilerProcessEvent) => void;
-  /** Forwarded to the manifest loop; production takes its default. */
   readonly manifestIntervalMs?: number;
 }
 
 import { initTelemetry } from '../telemetry/index.ts';
 
-/**
- * Load durable installation state, construct adapters, and run until shutdown.
- */
 export async function startReconciler(
   options: StartReconcilerOptions,
 ): Promise<void> {
@@ -60,14 +51,8 @@ export async function startReconciler(
         createAdapterRegistry({ manifest, env, db, clock }),
     });
 
-    /**
-     * The configuration the loops run against, current as of the last refresh.
-     *
-     * `loadStoredManifest` seeds and reconciles, so it runs once at startup;
-     * every read after it is `currentStoredManifest`, which the manifest store
-     * exports for exactly this — asking whether configuration changed without
-     * paying for a transaction to answer.
-     */
+    // `loadStoredManifest` seeds and reconciles, so it runs once; refresh reads
+    // with `currentStoredManifest`, which needs no transaction.
     let current = assemble(await loadStoredManifest(db, env));
 
     await restoreDeclaredTargetConnections(
@@ -80,12 +65,8 @@ export async function startReconciler(
       {
         db,
         clock,
-        // Getters, so a loop holding this object for the life of the process
-        // reads what `refresh` last put in `current` rather than what the
-        // process booted with. The adapters are the half that matters: the
-        // build route bakes in `supplyChain.signer` and `attestor` at
-        // assembly, which is how a Build went out naming an attestor added to
-        // the manifest minutes earlier and skipped the step on the empty value.
+        // Getters, so long-lived loops see what `refresh` last assembled.
+        // Adapters bake in manifest values such as `supplyChain.signer`.
         get manifest() {
           return current.manifest;
         },
@@ -94,8 +75,8 @@ export async function startReconciler(
         },
         refresh: async () => {
           const stored = await currentStoredManifest(db, env);
-          // Rebuilt only where the document actually changed, so an unchanged
-          // installation costs one `select` per tick and nothing else.
+          // Reassembled only on change: an unchanged installation costs one
+          // select per tick.
           if (stored === null || Bun.deepEquals(stored, current.manifest, true))
             return;
           current = assemble(stored);
