@@ -1,0 +1,43 @@
+---
+# RBAC has no deny, so this keeps sandbox-rbac.yaml's cluster-wide pods/exec
+# out of `mate`. CONNECT covers both the SPDY POST and the WebSocket GET.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: mate-sandbox-fence
+  labels:
+    app.kubernetes.io/name: mate-sandbox
+    app.kubernetes.io/part-of: mate
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CONNECT"]
+        resources: ["pods/exec", "pods/attach", "pods/portforward"]
+  # Only the sandbox identity into `mate` is evaluated, so no failure here can
+  # touch mate's own exec into its sandboxes.
+  matchConditions:
+    - name: sandbox-debug-into-mate
+      expression: >-
+        request.namespace == "mate" &&
+        request.userInfo.username == "system:serviceaccount:mate:mate-sandbox-debug"
+  validations:
+    - expression: "false"
+      reason: Forbidden
+      message: >-
+        mate-sandbox-debug cannot exec, attach or port-forward into the mate
+        namespace, which holds mate's credentials and every sandbox.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: mate-sandbox-fence
+  labels:
+    app.kubernetes.io/name: mate-sandbox
+    app.kubernetes.io/part-of: mate
+spec:
+  policyName: mate-sandbox-fence
+  validationActions: [Deny]
+  matchResources: {}

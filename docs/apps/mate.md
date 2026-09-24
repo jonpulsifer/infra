@@ -25,10 +25,10 @@ The agent runs every command without approval.
 | --- | --- |
 | Repository | `main`, with `AGENTS.md` and the repository skills |
 | GitHub | Pushes branches and opens pull requests as `clanky-bot[bot]`. Its comments can plan OpenTofu changes through Atlantis. |
-| offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod |
+| offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod but mate's own namespace |
 | Hosts | None. `rowbutt`, the host user for Rowbutt, is in `wheel` on every host, and the sandbox has no SSH key for it. |
 
-With `pods/exec`, the agent can read the credentials in any pod, such as the Atlantis pod, so it can get cluster-admin. The owner accepts this risk.
+With `pods/exec`, the agent can read the credentials in any pod outside `mate`, such as the Atlantis pod, so it can get cluster-admin. The owner accepts this risk. [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox.
 
 ## Limits
 
@@ -38,7 +38,7 @@ With `pods/exec`, the agent can read the credentials in any pod, such as the Atl
 
 ## How it works
 
-mate is one Bun process with no ingress. For each thread, it creates a `Sandbox` object, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md). Each turn gets short-lived GitHub and cluster tokens. [How Rowbutt works](mate/how-it-works.md) has the details.
+mate is one Bun process, and its ingress admits only the node it runs on. For each thread, it creates a `Sandbox` object, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md). Each turn gets short-lived GitHub and cluster tokens. [How Rowbutt works](mate/how-it-works.md) has the details.
 
 ## Operate
 

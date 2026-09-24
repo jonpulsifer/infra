@@ -9,6 +9,7 @@ resources:
   - identity-spike
   - kthx
   - mate
+  - mate/fence
   - pbx
   - prowler
   - spindrift
