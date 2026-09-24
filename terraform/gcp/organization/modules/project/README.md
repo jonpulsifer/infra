@@ -1,3 +1,16 @@
+# project
+
+Module that creates one GCP project in a folder with a deletion lien, and turns on Compute Engine and OS Login metadata when `compute` is true. `terraform/gcp/organization/projects.tf` calls it for each project. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/gcp/organization/modules/project init -backend=false
+tofu -chdir=terraform/gcp/organization/modules/project validate
+```
+
+`mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/gcp/organization` when this module changes.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

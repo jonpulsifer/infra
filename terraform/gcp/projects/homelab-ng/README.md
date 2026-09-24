@@ -1,3 +1,23 @@
+# homelab-ng
+
+OpenTofu root for `homelab-ng`, the lab's main GCP project. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+It holds the `homelab-ng` bucket, which stores every root's OpenTofu state, and the `oldboy` VM. It also holds the workload identity pools that GitHub Actions, Vercel and the clusters federate through, and the service accounts they impersonate.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/gcp/projects/homelab-ng init -backend=false
+tofu -chdir=terraform/gcp/projects/homelab-ng validate
+TF_DIR=terraform/gcp/projects/homelab-ng mise run tf:plan
+```
+
+A local plan impersonates `terraform@homelab-ng.iam.gserviceaccount.com`, so your Google account needs Service Account Token Creator on it. The Cloudflare provider reads its token from 1Password through `OP_SERVICE_ACCOUNT_TOKEN`. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/homelab-ng`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

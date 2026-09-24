@@ -1,13 +1,17 @@
 # vessel-network
 
-A vessel's private network boundary: VPC, subnet, and Private Service
-Connect — two service connection policies (Cloud SQL, Memorystore for
-Valkey) that authorize each producer to create its endpoint in the vessel
-subnet. Optional per vessel — a vessel serving only Cloud Run and Firebase
-Hosting needs none of this.
+Module for a vessel's private network: a VPC, a subnet, and Private Service Connect policies that let Cloud SQL and Memorystore for Valkey create endpoints in the subnet. `terraform/gcp/projects/bluenose/vessel.tf` calls it. See [kthx built apps](https://wiki.lolwtf.ca/apps/kthx/built-apps/) on the wiki.
 
-The outputs are the two facts the installation manifest's
-`location.network` block carries for the vessel (§20's hand-copy route).
+A vessel that serves only Cloud Run and Firebase Hosting does not need this module. The two outputs are the vessel's `location.network` block in the kthx installation manifest.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/modules/vessel-network init -backend=false
+tofu -chdir=terraform/modules/vessel-network validate
+```
+
+`mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/gcp/projects/bluenose` when this module changes.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

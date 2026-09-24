@@ -1,67 +1,34 @@
 # spindrift-supply-chain
 
-The supply chain one artifacts project holds for every Spindrift vessel: the
-KMS signing key, the Binary Authorization attestor with its
-container-analysis note, the build/log/occurrence project grants, and the
-reader/writer members on an Artifact Registry repository the caller names.
-The repository itself is an input, never created here — it may be shared
-with non-Spindrift consumers, so it stays declared where it lives.
+Module for the kthx supply chain in one artifacts project. See [kthx security](https://wiki.lolwtf.ca/apps/kthx/security/) on the wiki.
 
-Two postures:
+It declares the KMS signing key, the Binary Authorization attestor and its Container Analysis note, and grants on them and on an Artifact Registry repository that the caller passes in. `terraform/gcp/projects/trusted-builds/supply-chain.tf` calls it.
 
-- **Auto (all defaults).** The module provisions the key ring, signer key,
-  attestor, note, and every grant. Its `attestor` output is what
-  `terraform/modules/spindrift-vessel`'s `attestor` variable takes;
-  `signer_uri` and `registry_namespace` are what the installation manifest's
-  `supplyChain` block names.
-- **Bring your own.** Pass `signer_key` (full crypto key resource id) and/or
-  `attestor` (`projects/*/attestors/*`). The module creates neither but
-  still attaches every grant that coherently can attach to the provided
-  resource: key grants attach by resource id, so a bring-your-own key still
-  gets its `signerVerifier`/`viewer` members. What the caller arranges
-  instead:
-  - **Own key, another project:** the controller's project-scope
-    `roles/cloudkms.viewer` (the SIGNER_KEY probe) only covers this module's
-    project — mirror it where the key lives. The identity running the plan
-    also needs `roles/cloudkms.viewer` on the key, for the latest-version
-    read the attestor makes.
-  - **Own attestor:** all attestor- and note-side IAM lives with it —
-    `attestorsViewer` for the attesters, `attestorsVerifier` for each
-    vessel's Binary Authorization service agent, `notes.attacher` for the
-    attesters and `notes.occurrences.viewer` for the agents on its note
-    (including the attestor project's own agent — on a created attestor the
-    module composes that grant itself).
-    If its occurrences record outside this module's project, mirror the
-    `occurrences.editor` grant there too.
-  - **Own attestor, created key:** the registration is the caller's, and the
-    module hands over everything it takes — `signer_key_version_uri` as the
-    public key id, `signer_public_key_pem`, and
-    `signer_public_key_algorithm`. Only when both the key and the attestor
-    are brought do those outputs go null.
+With the defaults, the module creates the key ring, the signer key, the attestor and the note. Pass `signer_key`, `attestor` or both to use your own, and the module creates neither. It still grants on a key you pass, by resource ID. `examples/` has a validating caller for each combination.
 
-Every grant is an additive `*_iam_member`; the module never owns the full
-policy on the key, attestor, or note, so nothing brought in is stomped.
+When you pass your own resources, you arrange these grants:
 
-Nothing carries `prevent_destroy` — this module is the rebuild surface, and
-teardown must stay cheap. GCP itself refuses to delete KMS rings and keys: a
-destroy orphans them, and a rebuild in the same project either imports the
-orphans or picks fresh `key_ring_name`/`signer_key_name` values.
+- Key in another project: grant the controller `roles/cloudkms.viewer` in that project. The identity that plans also needs `roles/cloudkms.viewer` on the key.
+- Your own attestor: attesters need `attestorsViewer` and `notes.attacher`, and each vessel's Binary Authorization agent needs `attestorsVerifier` and `notes.occurrences.viewer`. If occurrences record in another project, grant `occurrences.editor` there.
+- Your own attestor with a created key: register the key from the `signer_key_version_uri`, `signer_public_key_pem` and `signer_public_key_algorithm` outputs.
 
-The very first apply on a fresh key can fail reading its public half — the
-version can still be `PENDING_GENERATION` when the attestor registration
-reads it. The second apply converges; that retry is the procedure, not a
-defect.
+## Rules
 
-`examples/` holds one validating caller per posture: `auto`,
-`bring-your-own`, and the two mixed postures `byo-key` and `byo-attestor`.
+- Every grant is an additive `*_iam_member`, so the module never replaces a policy on the key, attestor or note.
+- Declare the principal lists as locals in the calling root. Enable `cloudkms`, `binaryauthorization`, `containeranalysis`, `artifactregistry` and `cloudbuild` in that root's `services.tf`.
+- Nothing has `prevent_destroy`. GCP never deletes a KMS ring or key, so a destroy orphans them. A rebuild in the same project imports them or sets new `key_ring_name` and `signer_key_name` values.
+- The first apply on a new key can fail while the key version is `PENDING_GENERATION`. Apply again.
 
-Pass `attester_principals` (and the other principal lists) as locals
-declared in the calling root, for the same reason `spindrift-vessel` takes
-`services` and `controller_roles` from the root's files: the root is where
-an operator looks to see who may sign, and where generated remediation
-stanzas grep. Required APIs (`cloudkms`, `binaryauthorization`,
-`containeranalysis`, `artifactregistry`, `cloudbuild`) stay in the root's
-`services.tf` for the same reason.
+## Develop
+
+```bash
+tofu -chdir=terraform/modules/spindrift-supply-chain init -backend=false
+tofu -chdir=terraform/modules/spindrift-supply-chain validate
+tofu -chdir=terraform/modules/spindrift-supply-chain/examples/auto init -backend=false
+tofu -chdir=terraform/modules/spindrift-supply-chain/examples/auto validate
+```
+
+`mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/gcp/projects/trusted-builds` when this module changes.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

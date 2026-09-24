@@ -1,3 +1,21 @@
+# kubesec
+
+OpenTofu root for the `kubesec` GCP project, which holds the `cloud-lab` static website bucket. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/gcp/projects/kubesec init -backend=false
+tofu -chdir=terraform/gcp/projects/kubesec validate
+TF_DIR=terraform/gcp/projects/kubesec mise run tf:plan
+```
+
+A local plan needs Google credentials with access to the project and the state bucket. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/lab`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

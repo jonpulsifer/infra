@@ -1,3 +1,18 @@
+# tunnel
+
+Module for one Cloudflare Tunnel: the tunnel, its ingress config, and a CNAME record for each ingress hostname that is not a wildcard and has `publish_record` set. `lolwtf.ca.tf` and `spindrift.tf` in `terraform/network/cloudflare/` call it. See [Ingress and DNS](https://wiki.lolwtf.ca/platform/network/ingress-and-dns/) on the wiki.
+
+The sensitive `cloudflare_tunnel_token` output is the token that `cloudflared` connects with.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/network/cloudflare/modules/tunnel init -backend=false
+tofu -chdir=terraform/network/cloudflare/modules/tunnel validate
+```
+
+`mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/network/cloudflare` when this module changes.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
