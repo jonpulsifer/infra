@@ -15,11 +15,14 @@
 #      config file, and the dialplan reloads clean;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
 #      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, nothing
-#      else rings a line HANDSET does not name, and on folly a 911 sets
+#      else rings a line HANDSET does not name, every exact code beside that
+#      pattern is a star code into [toybox], and on folly a 911 sets
 #      GLOBAL(LAST911);
 #   5. nothing reachable from a context an inbound call starts in dials a
 #      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk);
-#   6. a site with [pbx-event] logs the line Grafana and the smiirl parse;
+#   6. a site with [pbx-event] logs the line Grafana and the smiirl parse, and
+#      the asterisk container's preStop hangs up the spam and troll groups and
+#      nothing else;
 #   7. on folly, line 1's trunk is never screened, an open line, a contact and
 #      a 911 callback ring unanswered, a stranger on a screened line hears the
 #      press-5 prompt, and every prompt the dialplan plays is in the ConfigMap
@@ -713,6 +716,37 @@ check_reload_and_handsets() {
   if [[ $site == folly ]] && ! ast 'dialplan show globals' | grep -E '^[[:space:]]*LAST911=[0-9]+[[:space:]]*$' >/dev/null; then
     fail "a 911 from the handset did not set GLOBAL(LAST911), so a callback from 911 would be screened"
   fi
+  check_handset_codes "${lines[0]}"
+}
+
+# Every exact extension in the handset context is a star code into [toybox]:
+# a code that starts with a digit would take a number away from the trunk.
+check_handset_codes() {
+  local line=$1 code log="$SITE_DIR/asterisk.log" i
+  local -a codes=() wrong=()
+  mapfile -t codes < <(ast "dialplan show $HANDSET_CONTEXT" | awk -v c="[ Context '$HANDSET_CONTEXT'" -v p="$HANDSET_PATTERN" '
+    index($0, c) == 1 { inside = 1; next }
+    /^\[ / { inside = 0 }
+    inside && match($0, /^  '\''[^'\'']*'\''/) { e = substr($0, RSTART + 3, RLENGTH - 4); if (e != p) print e }
+  ')
+  ((${#codes[@]})) || return 0
+  for code in "${codes[@]}"; do
+    [[ $code == \** ]] || wrong+=("$code does not start with *")
+    ast "channel originate Local/$code@pbx-check-$line/n application Wait 1" >/dev/null
+  done
+  for code in "${codes[@]}"; do
+    for ((i = 0; i < 50; i++)); do
+      grep -F "(\"Local/$code@pbx-check-$line-" "$log" | grep -F '@toybox:1] ' >/dev/null && break
+      sleep 0.1
+    done
+    ((i < 50)) || wrong+=("$code never reached [toybox]")
+  done
+  ast 'channel request hangup all' >/dev/null || true
+  if ((${#wrong[@]})); then
+    fail "handset codes must be star codes that land in [toybox]" "${wrong[@]}"
+  else
+    say "    ${#codes[@]} handset codes reach [toybox], none of them a number"
+  fi
 }
 
 # --- the pbx-event log contract ----------------------------------------------
@@ -725,10 +759,11 @@ EVENT_PROBE_WANT='pbx-event kind=screened line=line4 caller=16135550123 secs=3 s
 
 check_events() {
   has_context pbx-event || return 0
-  local log="$SITE_DIR/asterisk.log" got="" i
+  local log="$SITE_DIR/asterisk.log" got="" offset i
+  offset=$(wc -c <"$log")
   ast 'channel originate Local/s@pbx-check-event/n application Wait 1' >/dev/null
   for ((i = 0; i < 50; i++)); do
-    got=$(grep -F '] NOTICE[' "$log" | grep -oE 'pbx-event kind=.*$' | tail -n 1 || true)
+    got=$(tail -c +"$((offset + 1))" "$log" | grep -F '] NOTICE[' | grep -oE 'pbx-event kind=.*$' | head -n 1 || true)
     [[ -n $got ]] && break
     sleep 0.1
   done
