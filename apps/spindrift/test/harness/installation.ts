@@ -26,6 +26,7 @@ import {
   type InstallationManifest,
   PUBLIC_HOSTNAME_VAR,
   parseManifest,
+  RESERVED_HOSTNAMES_VAR,
   resolveManifest,
   VERSION_VAR,
 } from '../../src/config/manifest.ts';
@@ -67,6 +68,8 @@ export const FIXTURE_DEPLOYMENT_ENV: Record<string, string> = {
   [HOSTNAME_VAR]: 'spindrift.example.test',
   // The tunnel's name for the machine routes, in the fixture's public zone.
   [PUBLIC_HOSTNAME_VAR]: 'spindrift-control.example.test',
+  // Another workload's name on the Apps gateway, in the same zone.
+  [RESERVED_HOSTNAMES_VAR]: 'kthx.example.test',
   // What the fixture deployment runs: the chart renders it from the image
   // digest CD pinned, and a command answering the footer forwards it. Set so a
   // test can tell a forwarded value from a hard-coded null.

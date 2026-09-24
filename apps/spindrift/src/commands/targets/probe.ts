@@ -50,6 +50,14 @@ export const probeCluster: Command<
   ProbeClusterInput,
   ProbeClusterResult
 > = async (input, context) => {
+  // The probe presents the controller's own token to `apiServer`.
+  if (context.principal.kind !== 'human') {
+    return failed(
+      'FORBIDDEN',
+      'an agent token cannot probe a cluster — sign in and connect it from Targets',
+    );
+  }
+
   const adapter = context.adapters.deploy('kubernetes');
   if (adapter?.probe === undefined) {
     // §3's disabled-with-reasons grammar rather than a new failure code: an

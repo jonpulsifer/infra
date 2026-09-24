@@ -606,6 +606,26 @@ describe("§9: no App is served on the installation's own names", () => {
     await expectRejected(deploy.id, manifest.controlPlane.publicHostname!);
   });
 
+  test('a stored vanity label that mints a reserved hostname is refused the same way', async () => {
+    const { app, deploy } = await pendingDeploy({
+      reach: 'public',
+      auth: 'none',
+    });
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'kthx' })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    expect(adapter.applied).toHaveLength(0);
+    await expectRejected(
+      deploy.id,
+      manifest.controlPlane.reservedHostnames[0]!,
+    );
+  });
+
   test('the same names in a zone the installation is not served in deploy', async () => {
     const { deploy } = await pendingDeploy({
       appName: 'spindrift',

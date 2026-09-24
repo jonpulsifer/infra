@@ -1075,6 +1075,8 @@ export type InstallationManifest = AuthoredManifest & {
      * because it is compared against `Host` and against minted names.
      */
     readonly publicHostname: string | null;
+    /** Names another workload serves on the Apps gateway. Lowercased. */
+    readonly reservedHostnames: readonly string[];
     /**
      * What this process is running, as the deployment states it —
      * `SPINDRIFT_VERSION`, the same value telemetry reports as

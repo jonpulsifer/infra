@@ -95,13 +95,14 @@ describe('setAppVanity', () => {
     expect(row?.vanityDomain).toBeNull();
   });
 
-  test("refuses a label that would take the installation's own names, in any zone", async () => {
+  test("refuses a label that would take the installation's own or reserved names, in any zone", async () => {
     const { appId } = await seed();
-    // Neither mints a clash in this App's own zone today; a zone declared
+    // None mints a clash in this App's own zone today; a zone declared
     // later, or a reach flipped to public, would.
     for (const [label, taken] of [
       ['spindrift', manifest.controlPlane.hostname],
       ['spindrift-control', manifest.controlPlane.publicHostname],
+      ['kthx', manifest.controlPlane.reservedHostnames[0]],
     ] as const) {
       const result = await setAppVanity({ appId, label }, context());
       expect(result.ok).toBe(false);

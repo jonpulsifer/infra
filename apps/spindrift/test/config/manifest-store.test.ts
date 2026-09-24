@@ -664,6 +664,7 @@ describe('the stored installation manifest', () => {
       controlPlane: {
         hostname: UNSERVED_HOSTNAME,
         publicHostname: null,
+        reservedHostnames: [],
         version: null,
       },
     });

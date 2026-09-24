@@ -474,7 +474,7 @@ export async function runAttempt(
     return settle(context, subject, desired, {
       phase: 'FAILED',
       reason: 'REJECTED',
-      detail: `${shadowed} is this installation's own address, so no App is served on it — rename the Component or change the App's vanity name`,
+      detail: `${shadowed} is reserved by this installation, so no App is served on it — rename the Component or change the App's vanity name`,
     });
   }
 

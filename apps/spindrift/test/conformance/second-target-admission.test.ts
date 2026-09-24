@@ -128,7 +128,11 @@ function harnessRegistry(
 
 function context(adapters: AdapterRegistry): CommandContext {
   return {
-    principal: { id: crypto.randomUUID(), displayName: 'Operator' },
+    principal: {
+      id: crypto.randomUUID(),
+      displayName: 'Operator',
+      kind: 'human',
+    },
     clock,
     db: database().db,
     adapters,

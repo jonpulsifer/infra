@@ -50,6 +50,10 @@ spec:
     env:
       - name: SPINDRIFT_PUBLIC_HOSTNAME
         value: spindrift-control.${SPINDRIFT_DOMAIN}
+      # kthx quick sites' `control.host`, served on the same Apps gateway, so
+      # no App may take it.
+      - name: SPINDRIFT_RESERVED_HOSTNAMES
+        value: kthx.${SECRET_DOMAIN}
     # The Secret carries only the one-time enrolment token and optional
     # integration credentials.
     envFromSecret: spindrift-env

@@ -176,10 +176,13 @@ export function isVanityLabel(value: string): boolean {
 export function installationHostnames(controlPlane: {
   readonly hostname: string;
   readonly publicHostname: string | null;
+  readonly reservedHostnames: readonly string[];
 }): string[] {
-  return [controlPlane.hostname, controlPlane.publicHostname].flatMap((host) =>
-    host ? [host.toLowerCase()] : [],
-  );
+  return [
+    controlPlane.hostname,
+    controlPlane.publicHostname,
+    ...controlPlane.reservedHostnames,
+  ].flatMap((host) => (host ? [host.toLowerCase()] : []));
 }
 
 /**

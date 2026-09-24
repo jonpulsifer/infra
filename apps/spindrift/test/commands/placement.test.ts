@@ -72,7 +72,11 @@ function fakes() {
 
 function context(registry: AdapterRegistry): CommandContext {
   return {
-    principal: { id: crypto.randomUUID(), displayName: 'Operator' },
+    principal: {
+      id: crypto.randomUUID(),
+      displayName: 'Operator',
+      kind: 'human',
+    },
     clock,
     db: database().db,
     adapters: registry,
