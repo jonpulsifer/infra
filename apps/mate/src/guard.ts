@@ -1,16 +1,7 @@
 /**
- * The identify-budget guard.
- *
- * Discord allows 1000 IDENTIFYs per app per 24 h and, on exhaustion, resets
- * the bot token. `@discordjs/ws` only refuses to *start* at `remaining < 1`:
- * its internal reconnect path re-identifies without re-reading the budget,
- * it keeps no reserve, and it throws instead of waiting for the window to
- * reset. This throttler is the one seam the shard calls before every IDENTIFY
- * and never before a RESUME, so the three gaps close here.
- *
- * Nothing but an abort or a breach may leave `waitForIdentify` by throwing:
- * the shard treats any other rejection as a reason to reconnect and identify
- * inside its catch, then identifies again on the way out.
+ * Discord resets the bot token when the daily IDENTIFY budget runs out, and
+ * `@discordjs/ws` checks it only at startup. The shard calls this throttler
+ * before every IDENTIFY and never before a RESUME.
  */
 import type { APIGatewaySessionStartLimit } from 'discord-api-types/v10';
 import type { Clock } from './clock.ts';
@@ -54,6 +45,8 @@ export class IdentifyBudget {
     return this.identifies.length;
   }
 
+  // Throw only on abort or breach: the shard answers any other rejection by
+  // reconnecting and identifying again.
   async waitForIdentify(_shardId: number, signal: AbortSignal): Promise<void> {
     const { clock, log } = this.opts;
     this.prune();
@@ -72,7 +65,6 @@ export class IdentifyBudget {
     this.identifies.push(clock.now());
   }
 
-  /** Resolves once the daily budget is above the reserve, sleeping to the reset if not. */
   async waitForBudget(signal: AbortSignal): Promise<void> {
     const { clock, log } = this.opts;
     let retry = FETCH_RETRY_MS;

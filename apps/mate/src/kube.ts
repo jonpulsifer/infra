@@ -1,8 +1,6 @@
 /**
- * The slice of the Kubernetes API mate uses, on Bun's own `fetch` and
- * `WebSocket`: credentials from the pod's ServiceAccount mount or a
- * workstation kubeconfig, every request bounded, and a `pods/exec` stream
- * whose `v4.channel.k8s.io` byte framing becomes plain stdin/stdout streams.
+ * The Kubernetes API calls mate makes, on Bun's `fetch` and `WebSocket`, with
+ * `pods/exec` framing (`v4.channel.k8s.io`) turned into stdin/stdout streams.
  */
 import { dirname, resolve } from 'node:path';
 
@@ -297,7 +295,6 @@ export async function kubeconfigConfig(
   };
 }
 
-/** The pod's own ServiceAccount when there is one, else the workstation's kubeconfig. */
 export async function discoverKube(
   env: Env = process.env,
 ): Promise<KubeConfig> {
@@ -309,11 +306,8 @@ export async function discoverKube(
   return kubeconfigConfig(path, env.MATE_KUBE_CONTEXT?.trim() || undefined);
 }
 
-/**
- * Bun's WebSocket takes protocols, headers and TLS as a second options
- * argument, but `lib.dom`'s two-overload declaration wins over bun-types
- * whenever the DOM lib is loaded, which it is here for `@discordjs/*`.
- */
+// Bun's WebSocket takes an options argument, but `lib.dom`'s declaration wins
+// over bun-types, and the DOM lib is loaded for `@discordjs/*`.
 type BunWebSocket = new (
   url: string | URL,
   options: Bun.WebSocketOptions,
@@ -460,8 +454,8 @@ export class Kube {
       switch (bytes[0]) {
         case 1:
           if (payload.length > 0) {
-            // A cancelled reader makes enqueue throw, and this is an event
-            // handler: whatever the harness says next is moot either way.
+            // enqueue throws once the reader is cancelled, and nothing reads
+            // stdout after that.
             try {
               stdoutController.enqueue(payload);
             } catch {}
@@ -521,12 +515,9 @@ export class Kube {
     };
   }
 
-  /**
-   * A refused upgrade reaches Bun's WebSocket as a bare close, so the plain
-   * GET on the same URL fetches the apiserver's answer: 403 names the missing
-   * RBAC, 404 says the pod is gone, and 400 "Upgrade request required" means
-   * the pod is there and the fault lies elsewhere.
-   */
+  // Bun reports a refused upgrade as a bare close, so a plain GET on the same
+  // URL fetches the reason: 403 is missing RBAC, 404 a gone pod, and 400
+  // "Upgrade request required" a live pod with the fault elsewhere.
   private async explainExec(url: URL, reason: string): Promise<string> {
     try {
       const response = await this.request(url.pathname + url.search);

@@ -1,8 +1,6 @@
 /**
- * One ACP conversation with a harness on the far end of an exec stream:
- * initialize, open or load a session, run a turn with its updates folded
- * into the reply sink, cancel. Permission requests are answered allow —
- * the sandbox is the boundary, not the prompt.
+ * One ACP conversation with a harness over an exec stream. Every permission
+ * request is allowed, because the sandbox is the security boundary.
  */
 import * as acp from '@agentclientprotocol/sdk';
 import type { ExecClose, ExecStream } from './kube.ts';
@@ -19,29 +17,21 @@ const CANCEL_GRACE_MS = 10_000;
 export interface TurnSummary {
   stopReason: acp.StopReason;
   cost: acp.Cost | null;
-  /** This turn's share of the session total above, when the baseline is known. */
+  /** This turn's USD cost, or null when unknown. */
   costUsd: number | null;
   tools: number;
   firstTextMs: number | null;
 }
 
-/**
- * ACP's own tool statuses as a surface reads them. `pending` is a call the
- * harness has announced and not started, which is indistinguishable from
- * running to anything mate paints — and Slack's card has no pending.
- */
+// `pending` shows as in progress: Slack's card has no pending state.
 function toolState(status: acp.ToolCallStatus | undefined): ToolState {
   if (status === 'completed') return 'complete';
   if (status === 'failed') return 'error';
   return 'in_progress';
 }
 
-/**
- * Folds a turn's `session/update` stream into the sink: the answer text, the
- * status line, and each tool call in its own right for a surface that renders
- * them. The two renderings of the same news go out together — which of them a
- * human sees is the canvas's to decide, not this.
- */
+// Tool news goes out both as the status line and as tool updates; each
+// surface picks which one to render.
 class Turn {
   private readonly tools = new Map<string, ToolCall>();
   private status: string | null = null;
@@ -82,8 +72,8 @@ class Turn {
         this.tool({
           id: update.toolCallId,
           title: update.title ?? known?.title ?? 'tool',
-          // An update that names no status changes none: a completed call
-          // does not start running again because its output arrived late.
+          // No status means unchanged, so late output cannot reopen a
+          // completed call.
           state: update.status
             ? toolState(update.status)
             : (known?.state ?? 'in_progress'),
@@ -99,7 +89,6 @@ class Turn {
     this.refreshStatus();
   }
 
-  /** One tool call, remembered and sent on only when it actually moved. */
   private tool(call: ToolCall): void {
     const known = this.tools.get(call.id);
     this.tools.set(call.id, call);
@@ -141,11 +130,8 @@ export class AcpClient {
   private readonly conn: acp.ClientSideConnection;
   private turn: Turn | null = null;
   private closedNow: ExecClose | null = null;
-  /**
-   * ACP reports cost as the session's running total, so a turn's own cost is
-   * the step. A loaded session starts with an unknown total — its first turn
-   * reports no cost rather than the whole of someone else's session.
-   */
+  // ACP reports cost as the session's running total. null after a load: the
+  // baseline is unknown, so the next turn reports no cost.
   private sessionUsd: number | null = null;
   readonly closed: Promise<ExecClose>;
 
@@ -202,9 +188,8 @@ export class AcpClient {
   }
 
   /**
-   * Runs one turn. A harness-side failure is a result the thread can show;
-   * the stream dying under the turn throws `StreamClosed`, which the thread
-   * engine reads as a dead sandbox.
+   * A harness failure returns an error result; a dead stream throws
+   * `StreamClosed`.
    */
   async prompt(
     sessionId: string,

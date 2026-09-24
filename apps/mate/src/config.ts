@@ -1,10 +1,7 @@
 import { TTL_MS } from './sandboxes.ts';
 
-/**
- * The longest turn a GitHub App credential can carry. GitHub's installation
- * tokens live sixty minutes; five of those are the margin the token cache
- * holds back so a turn never starts on a token that cannot outlast it.
- */
+// Installation tokens live 60 minutes, less the 5 the token cache reserves
+// for the final push.
 const APP_TURN_CAP_MS = 55 * 60_000;
 
 export class ConfigError extends Error {
@@ -36,26 +33,15 @@ export interface SlackConfig {
   readonly allowedChannelIds: ReadonlySet<string>;
 }
 
-/** What answers a thread: the in-process stub, or real Sandboxes on the cluster. */
 export type SandboxesChoice =
   | { readonly mode: 'stub' }
   | {
       readonly mode: 'kube';
       readonly sandbox: SandboxConfig;
-      /**
-       * Beside `sandbox` rather than inside it, and that placement is the
-       * whole security property: `sandboxManifest` takes a `SandboxConfig`
-       * and turns it into a pod spec, so anything reachable from there can
-       * be spread into a pod by an edit that meant no harm. The App's key
-       * is not reachable from there.
-       */
+      // Outside `sandbox`: `sandboxManifest` turns a `SandboxConfig` into a pod
+      // spec, so no secret may be reachable from it.
       readonly githubApp: GithubAppConfig | null;
-      /**
-       * Where mate's own pod holds the SSH private key a sandbox logs into
-       * hosts with, or `null` for no host access. Beside `githubApp` and for
-       * the same reason: `sandboxManifest` never sees it, so no edit there
-       * can put a private key into a pod spec.
-       */
+      /** `null` for no host access. Outside `sandbox`, as `githubApp` is. */
       readonly sshKeyFile: string | null;
     };
 
@@ -70,65 +56,31 @@ export interface SandboxConfig {
   readonly checkoutRepo: string;
   readonly checkoutRef: string;
   readonly model: string;
-  /** How long one turn may run before the harness call is abandoned. */
   readonly turnTimeoutMs: number;
-  /**
-   * How many sandboxes are kept warm ahead of the threads that will ask for
-   * one. Zero is the pool switched off, and that is what mate runs with
-   * unless its Deployment says otherwise: a spare holds a whole sandbox's
-   * memory while it waits, out of the same room on the node that
-   * `MATE_MAX_CONCURRENT` is already spending.
-   */
+  /** 0, the default, is off: an idle spare holds a full sandbox's memory. */
   readonly spares: number;
-  /**
-   * The 1Password Connect address and token a sandbox is handed, or `null`
-   * when it is handed neither. This is no longer how the GitHub credential
-   * arrives — mate mints that itself — so it is off unless somebody names a
-   * Secret, and what it is for is whatever else the sandbox's own vault is
-   * stocked with.
-   */
+  /** `null`, the default, gives the sandbox no 1Password Connect access. */
   readonly vault: VaultConfig | null;
-  /**
-   * Whether the pod gets a git credential helper and somewhere for a token
-   * to land. It follows the App being configured, because the helper reads a
-   * file only mate writes: with no App nothing ever writes it, and a helper
-   * pointing at a file that will never exist is worse than no helper at all.
-   */
+  /** Follows the App: without one, nothing writes the file the helper reads. */
   readonly github: boolean;
   /**
-   * The ServiceAccount a sandbox debugs the cluster as, or `null` for a
-   * sandbox with no cluster access at all — which is the default and the
-   * rollback. mate mints a bound token for it per turn; the account itself is
-   * declared in `sandbox-rbac.yaml` and is not the one mate runs as.
+   * `null`, the default, gives no cluster access. A separate account from
+   * mate's, in `sandbox-rbac.yaml`.
    */
   readonly kubeServiceAccount: string | null;
 }
 
-/**
- * What a sandbox needs to read a secret at the moment it needs it: the
- * in-cluster 1Password Connect API and the Secret holding the token that
- * reaches it. The vault those claims name is the boundary — a sandbox runs
- * agent-authored commands with every permission auto-allowed, so whatever is
- * in that vault is readable by whatever the agent decides to run.
- */
+// The vault is the boundary: the agent's commands are auto-allowed, so it can
+// read anything the vault holds.
 export interface VaultConfig {
   readonly connectHost: string;
   /** The Secret holding the Connect token as `OP_CONNECT_TOKEN`. */
   readonly connectSecret: string;
 }
 
-/**
- * The GitHub App mate mints a sandbox's token from. mate holds the key and
- * the sandbox never does, which is the point: an installation token lives an
- * hour and names one repository, and the key that makes them lives on the
- * other side of a `pods/exec`.
- *
- * `keyFile` rather than the PEM itself, because a mounted file keeps the key
- * out of mate's own `/proc/self/environ` — where an env var would sit for
- * anything that can read the process to find.
- */
 export interface GithubAppConfig {
   readonly appId: string;
+  // A file, since an env var would expose the key in `/proc/self/environ`.
   readonly keyFile: string;
   /** Parsed from the checkout, so the App is never pointed at a repo nobody clones. */
   readonly owner: string;
@@ -178,7 +130,7 @@ function slackIds(env: Env, key: string): ReadonlySet<string> {
   return set;
 }
 
-/** `min` is 1 for every cap, and 0 for the one setting whose off position is a number. */
+// `min` is 0 only for a setting where 0 means off.
 function integer(env: Env, key: string, fallback: number, min = 1): number {
   const raw = env[key]?.trim();
   if (!raw) return fallback;
@@ -195,12 +147,6 @@ function text(env: Env, key: string, fallback: string): string {
   return env[key]?.trim() || fallback;
 }
 
-/**
- * Off unless a Secret is named. Nothing the sandbox needs depends on this any
- * more — the GitHub token arrives from mate — so it is switched on only where
- * somebody has stocked the sandbox's vault with something and wants the agent
- * able to read it.
- */
 function vault(env: Env): VaultConfig | null {
   const connectSecret = env.MATE_CONNECT_SECRET?.trim();
   if (!connectSecret) return null;
@@ -214,23 +160,8 @@ function vault(env: Env): VaultConfig | null {
   };
 }
 
-/**
- * Off unless an app id is set, which is the rollback: with it unset mate
- * mints nothing, a sandbox gets no credential helper and no token file, and
- * threads carry on answering questions they can answer without pushing.
- *
- * Neither a malformed id nor an unreadable key is a `ConfigError`, and that is
- * deliberate rather than lax. mate runs one replica under
- * `strategy: Recreate`, so refusing to boot over the credential for a side
- * feature takes both chat surfaces down with it — a typo in this one value
- * would be a chat outage. Every such failure is caught where the App is
- * opened, and says so through `mate_github_app_ready`, which an alert watches:
- * loud, and survivable.
- *
- * The checkout is the exception and stays fatal. It is not about the App —
- * mate cannot clone from a URL it cannot parse either, so a sandbox built on
- * one is useless whether or not it could push.
- */
+// A bad App id or key is not a `ConfigError`, since the one replica failing to
+// boot would take both chat surfaces down. A non-GitHub checkout URL is one.
 function githubApp(env: Env, checkoutRepo: string): GithubAppConfig | null {
   const appId = env.MATE_GITHUB_APP_ID?.trim();
   if (!appId) return null;
@@ -251,11 +182,6 @@ function githubApp(env: Env, checkoutRepo: string): GithubAppConfig | null {
   };
 }
 
-/**
- * The owner and repository a checkout URL names. It is read from the checkout
- * rather than configured twice, so the App can only ever mint for the
- * repository the sandbox actually clones.
- */
 export function repoSlug(url: string): { owner: string; repo: string } | null {
   const match = /github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(
     url.trim(),
@@ -267,18 +193,13 @@ export function repoSlug(url: string): { owner: string; repo: string } | null {
 
 export function readSandboxConfig(env: Env): SandboxConfig {
   const turnTimeoutMs = integer(env, 'MATE_TURN_MINUTES', 45) * 60_000;
-  // TTL_MS is the furthest out mate ever sets `spec.shutdownTime`, so a cap
-  // at or past it promises a turn a window no sandbox lives long enough to
-  // give.
+  // No sandbox lives past TTL_MS, so a longer turn could never finish.
   if (turnTimeoutMs >= TTL_MS) {
     throw new ConfigError(
       `MATE_TURN_MINUTES must be under the sandbox TTL of ${TTL_MS / 60_000} minutes, got ${turnTimeoutMs / 60_000}`,
     );
   }
-  // A GitHub App installation token lives an hour and is minted at the start
-  // of a turn, so a turn allowed to run longer than one can outlive its own
-  // credential and fail its push at the end, having done the work. The margin
-  // is what the token cache already reserves.
+  // A longer turn could outlive its token and fail the final push.
   if (env.MATE_GITHUB_APP_ID?.trim() && turnTimeoutMs >= APP_TURN_CAP_MS) {
     throw new ConfigError(
       `MATE_TURN_MINUTES must be under ${APP_TURN_CAP_MS / 60_000} minutes while a GitHub App is configured, got ${turnTimeoutMs / 60_000}`,
@@ -319,10 +240,7 @@ function sandboxes(env: Env): SandboxesChoice {
   throw new ConfigError(`MATE_SANDBOXES must be stub or kube, got ${mode}`);
 }
 
-/**
- * Off unless both tokens are set, so the surface is opt-in: half a Slack
- * configuration is a mistake worth refusing rather than half a bot.
- */
+// Opt-in; setting only one of the two tokens is a `ConfigError`.
 function slack(env: Env): SlackConfig | null {
   const bot = env.MATE_SLACK_BOT_TOKEN?.trim();
   const app = env.MATE_SLACK_APP_TOKEN?.trim();

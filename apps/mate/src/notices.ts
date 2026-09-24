@@ -1,8 +1,6 @@
 /**
- * Every line mate posts that is not an answer. They live together because the
- * transcript replay has to tell them apart from mate's own replies: a fresh
- * harness is handed the thread's history, and mate's own bookkeeping is not
- * part of the conversation.
+ * Every line mate posts that is not an answer, kept together so the transcript
+ * replay can leave them out of the history a fresh harness is handed.
  */
 import { NO_REPLY, STOPPED } from './reply.ts';
 import type { MintStep } from './sandbox.ts';
@@ -24,13 +22,6 @@ export const DAY_SPENT = '🛑 the daily budget of';
 export const NEVER_STARTED =
   '🔄 mate restarted before this could start — ask again';
 
-/**
- * What each step of a mint is, in the words of the human waiting on it. They
- * are the acknowledgment mate holds while a thread has nothing else to show:
- * `progress.ts` rewrites one line through them, and which of them a thread
- * sees is which wait it is paying — a fresh boot, its own sandbox waking, or
- * a warm one being handed over.
- */
 export const MINT_STEPS: Record<MintStep, string> = {
   reusing: "⏳ waking this thread's sandbox",
   adopting: '⏳ grabbing a warm sandbox',
@@ -39,7 +30,6 @@ export const MINT_STEPS: Record<MintStep, string> = {
   booting: '⏳ booting a sandbox and cloning the repo',
 };
 
-/** The step after every mint, and the last thing said before the turn itself. */
 export const ATTACHING = '🔌 connecting to the agent';
 
 const PREFIXES: readonly string[] = [
@@ -48,8 +38,7 @@ const PREFIXES: readonly string[] = [
   NEVER_STARTED,
   WAITING,
   ATTACHING,
-  // Spread rather than listed, so a step added to the mint cannot be left out
-  // of the filter and read back to a fresh harness as something mate said.
+  // Spread, so a new mint step is filtered too.
   ...Object.values(MINT_STEPS),
   STOPPED_WAITING,
   MINT_FAILED,

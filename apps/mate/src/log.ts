@@ -23,7 +23,6 @@ export const jsonLog: Log = {
 
 export const silentLog: Log = { info() {}, warn() {}, error() {} };
 
-/** One plain sentence out of whatever was thrown, never a stack. */
 export function plain(error: unknown): string {
   const text =
     error instanceof Error ? error.message : String(error ?? 'unknown error');

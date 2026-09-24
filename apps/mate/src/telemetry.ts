@@ -1,16 +1,6 @@
 /**
- * The metrics SDK, and the only thing in mate that registers one.
- *
- * `metrics.ts` mints nothing until an instrument is first used, so the single
- * rule this file exists to keep is that `startTelemetry` runs before the first
- * thread transition: an OpenTelemetry instrument minted before a
- * MeterProvider is registered stays a no-op for the life of the process and
- * never says so.
- *
- * With no endpoint configured nothing is registered at all — the API's global
- * meter stays the no-op one and every record is a cheap nothing. That is what
- * `bun test` and a workstation run get, and it is why neither needs a
- * collector.
+ * Registers the metrics SDK; nothing else in mate does. With no OTLP endpoint
+ * nothing is registered and every record is a no-op.
  */
 import { metrics } from '@opentelemetry/api';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
@@ -24,50 +14,28 @@ import {
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import type { Log } from './log.ts';
 
-/**
- * `service.name` and nothing else. The collector's prometheus exporter turns
- * it into the `exported_job` label and would turn a `service.instance.id`
- * into a second one — which would give every pod its own series and make
- * `increase()` across a roll read as a fresh counter instead of a reset.
- */
+// The only resource attribute: the exporter would make `service.instance.id` a
+// label, splitting every pod into its own series.
 export const SERVICE_NAME = 'mate';
 
 export const EXPORT_INTERVAL_MS = 15_000;
 export const EXPORT_TIMEOUT_MS = 5_000;
 
-/**
- * A mint waits on a kata VM booting, an image landing and a shallow clone
- * finishing, and gives up at `READY_TIMEOUT_MS`, five minutes. The edges
- * crowd the seconds because that is the range the answer lives in and a
- * bucket spanning 5 s to 15 s would report its own edges: `histogram_quantile`
- * interpolates inside whichever bucket it lands in, so every mint from six
- * seconds to fourteen would read the same p50 of ten. The top edge is the
- * timeout — nothing past it is ever recorded, and without it a mint that
- * nearly hit it would read as two minutes.
- */
+// Dense in the seconds, because `histogram_quantile` interpolates within a
+// bucket. The top edge is `READY_TIMEOUT_MS`.
 export const MINT_BOUNDARIES = [
   2_000, 3_000, 5_000, 7_500, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000,
 ];
 
-/**
- * An attach is two calls to the API server and then an ACP handshake against
- * a VM that is already up, so it belongs to a different decade of the clock
- * than the mint does: the question is whether it costs a quarter second or
- * two, not whether it costs ten seconds or a hundred. The top edge is far
- * past any healthy attach and is only there to keep one that is nearly out
- * of harness timeout from reading as a minute.
- */
+// An attach is two API calls and an ACP handshake on a running VM. The top
+// edge covers the attach timeouts, so a near-timeout attach does not read as
+// a minute.
 export const ATTACH_BOUNDARIES = [
   100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 150_000,
 ];
 
-/**
- * The SDK's default buckets stop at 10 000, which is fine for milliseconds
- * only if nothing takes longer than ten seconds — the first measured round
- * trip took 7.65 s to its first token, so every real sample would pile into
- * the last two buckets. The cost histogram is worse: a turn measured
- * $0.002178, and the default boundaries start at 5.
- */
+// The SDK's default buckets stop at 10 000, too low for these milliseconds,
+// and start at 5, far above a turn's cost in USD.
 const VIEWS: ViewOptions[] = [
   {
     instrumentName: 'mate_turn_first_token_milliseconds',

@@ -6,11 +6,8 @@ type Commands = Pick<
   'getGlobalCommands' | 'bulkOverwriteGlobalCommands'
 >;
 
-/**
- * Global application commands belong to the application, not to the process
- * that registered them, so whatever the previous tenant of this token left
- * behind still shows in the guild until it is overwritten. mate has none.
- */
+// Global commands belong to the application, so any a previous user of this
+// token registered stay in the guild until overwritten. mate has none.
 export async function clearGlobalCommands(
   api: Commands,
   applicationId: string,

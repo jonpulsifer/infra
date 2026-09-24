@@ -6,19 +6,14 @@ import {
 import type { SessionStartLimit } from './guard.ts';
 import type { SandboxSource, StopReason } from './sandbox.ts';
 
-/** How a turn ended, `sandbox-died` being the one the harness never reports. */
+/** `sandbox-died` is the one end the harness never reports. */
 export type TurnEnd = StopReason | 'sandbox-died';
 
-/** How far getting a thread a usable sandbox got. */
 export type MintResult = 'ok' | 'mint-failed' | 'attach-failed';
 
 /**
- * The durations behind one `minted` call, present only for the steps that
- * finished. A step that gives up takes its own timeout rather than its own
- * time, so letting a failure in would move these quantiles by an amount that
- * says nothing about how long a usable sandbox takes to arrive;
- * `mate_mints_total` is where failures are counted. There is no sample at all
- * when nothing was timed.
+ * Only steps that finished are timed, since a failed step's time is its
+ * timeout. `mate_mints_total` counts failures.
  */
 export interface MintSample {
   source: SandboxSource;
@@ -26,10 +21,7 @@ export interface MintSample {
   attachMs?: number | null;
 }
 
-/**
- * Why a sandbox went away. The hard `shutdownTime` TTL is not here: the
- * controller enforces it, and mate only ever sees its result.
- */
+/** No TTL reason: the controller enforces `shutdownTime` out of mate's sight. */
 export type TeardownReason =
   | 'quiet'
   | 'archived'
@@ -47,27 +39,13 @@ export interface Instruments {
   gatewayClosed(code: number, fatal: boolean): void;
   sandboxesLive(count: number): void;
   queueDepth(depth: number): void;
-  /**
-   * The warm pool as the sweep left it: what a thread could be handed right
-   * now against what `MATE_SPARES` asks for. Both numbers rather than one,
-   * because the pool being short is only worth knowing against the size it is
-   * meant to be, and that size is a knob on the Deployment.
-   */
+  /** Both, because a short pool matters only against its configured size. */
   spares(ready: number, wanted: number): void;
   minted(result: MintResult, sample?: MintSample): void;
-  /**
-   * Whether mate can mint a GitHub token right now, as the boot preflight and
-   * its re-check last found. It reports nothing at all where no App is
-   * configured: unsetting `MATE_GITHUB_APP_ID` is the documented rollback, and
-   * a gauge that read 0 in that state would make the rollback ship a
-   * permanently firing critical alert. Downstream that absence looks like
-   * `absent()`, exactly as the identify-budget gauges above go quiet rather
-   * than hold a reading that has stopped being true.
-   */
+  /** `null` (no App) reports nothing, since a 0 would fire the alert forever. */
   githubAppReady(ready: boolean | null): void;
-  /** One attempt to mint a turn's token; `ok` is the only non-failure spelling. */
+  /** `ok` is the only non-failure result. */
   githubTokenMinted(result: string): void;
-  /** One attempt to write a minted token into its sandbox. */
   githubTokenStamped(result: string): void;
   turnStarted(): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
@@ -76,59 +54,33 @@ export interface Instruments {
 
 let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
 
-/**
- * The levels the observable gauges report, kept out here so re-minting an
- * instrument does not lose what it was last told.
- */
+// Module state, so re-minted instruments keep the last readings.
 let latest: { limit: SessionStartLimit; readAt: number } | null = null;
 /** `null` until a preflight has run, and for good where no App is configured. */
 let appReady: boolean | null = null;
 let live = 0;
 let queued = 0;
-/**
- * Reported whether or not a pool is configured: with `MATE_SPARES` unset the
- * sweep never says anything and these stay at nothing wanted and nothing
- * held, which is the reading, and which is what keeps an alert comparing the
- * two quiet on a mate that was never asked for a pool.
- */
+// With no pool configured both stay 0, which keeps a ready-versus-wanted alert
+// quiet.
 let pool = { ready: 0, wanted: 0 };
 
 /**
- * Built on first use rather than at import so nothing is minted before a
- * metrics SDK is registered: an instrument created earlier is a no-op forever,
- * and never says so. With no SDK, the API's global meter is itself a no-op,
- * which is the stub.
- *
- * The instruments are re-minted when the global MeterProvider changes, so a
- * call that lands before `startTelemetry` costs nothing but that one record —
- * the metrics API keeps no proxy provider that re-binds on registration, the
- * way the trace and log APIs do, so without this a single early caller would
- * silently disable every instrument for the life of the process.
- *
- * Names are spelled the way Prometheus will hold them rather than in
- * OpenTelemetry's dotted style. The collector's prometheus exporter rewrites a
- * dotted name and appends the unit and `_total` on the way out, and an alert
- * can only be written against the name that survives that. Spelling them here
- * removes the guess — a name that already ends in its unit or in `total` is
- * not given a second one, so `mate_turns_total` reads the same whether the
- * exporter normalises or passes the name through. The one instrument whose
- * unit has no Prometheus spelling, USD, therefore declares no unit at all.
+ * Re-mints when the global MeterProvider changes: the metrics API has no proxy
+ * provider, so an instrument minted before the SDK stays a no-op.
  */
 export function getInstruments(): Instruments {
   const provider = metrics.getMeterProvider();
   if (cached?.provider === provider) return cached.instruments;
+  // Names already carry their Prometheus unit and `_total`, so the collector's
+  // exporter passes them through as alerts spell them.
   const meter = provider.getMeter('mate');
   const observe = (
     gauge: ObservableGauge,
     pick: (l: SessionStartLimit) => number,
   ) =>
     gauge.addCallback((result) => {
-      // Discord's `reset_after` is exactly how long the reading stays a fact:
-      // past it the daily budget has reset and mate, still connected, has had
-      // no reason to look again. Reporting the old number past that point
-      // would leave an alert on the reserve firing against a budget that is
-      // no longer low, with nothing able to clear it. Stopping is the honest
-      // reading, and downstream it looks like `absent()`.
+      // Past `reset_after` the budget has reset, so a stale low reading would
+      // keep a reserve alert firing.
       if (!latest) return;
       if (Date.now() - latest.readAt >= latest.limit.reset_after) return;
       result.observe(pick(latest.limit));
@@ -179,6 +131,7 @@ export function getInstruments(): Instruments {
     'mate_turn_first_token_milliseconds',
     { unit: 'ms' },
   );
+  // USD has no Prometheus unit, so this declares none.
   const cost = meter.createHistogram('mate_turn_cost_usd');
   const mintDuration = meter.createHistogram(
     'mate_mint_duration_milliseconds',

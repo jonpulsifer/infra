@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# mate: one Bun process, no build step. `deps` resolves the runtime's
-# dependencies from the repo's lockfile and the source is copied out of the
-# pruned tree exactly as committed. Runs as uid 65532 with nothing writable
-# but what the manifest mounts.
+# mate: one Bun process that runs its source as committed, with no build step.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:ea7d0133c47e062b7754da987c05d4d1206e0a9e357a49679271d071f48e65e2 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
