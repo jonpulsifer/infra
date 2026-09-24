@@ -35,7 +35,7 @@ The browser polls the feed every 2 seconds and keeps a local copy. One Firestore
 
 The Vercel project `slingshot` reaches Firestore through Workload Identity Federation, with no service account key. Vercel's OIDC token for the project maps to a principal in the `homelab` pool, and that principal has `roles/datastore.user` in `homelab-ng`.
 
-The Vercel project lives only in the Vercel dashboard, because no OpenTofu root uses the Vercel provider. The CNAME for `slingshot.lolwtf.ca` lives only in the Cloudflare dashboard, and `terraform/network/cloudflare/lolwtf.ca.tf` does not declare it. CI publishes the image `ghcr.io/jonpulsifer/slingshot`, and nothing runs it.
+The Vercel project lives only in the Vercel dashboard, because no OpenTofu root uses the Vercel provider. The CNAME for `slingshot.lolwtf.ca` lives only in the Cloudflare dashboard, and `terraform/network/cloudflare/lolwtf.ca.tf` does not declare it. `.github/containers.json` lists `slingshot` under `ignore`, so CI publishes no image for it.
 
 ## Operate
 

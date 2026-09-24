@@ -41,7 +41,7 @@ A path that no workflow lists runs no checks, and its PR still passes. `.github/
 - Give a deployed image `deploy` targets, or nothing deploys it.
 - Keep the `CD_APP_ID` variable and `CD_APP_PRIVATE_KEY` secret set, or `GITHUB_TOKEN` opens the digest PR, which runs no checks and never merges.
 - Keep the CD App's `<slug>[bot]` login in [`only-me.rego`](opentofu.md#rules), or Atlantis blocks every digest PR.
-- Test each new Go module in `go.yml` or its own workflow, or no CI runs its tests. `apps/netbench`, `apps/orgpolicyauditor` and `terraform/gcp/projects/lolcorp/audit-pipeline` have none.
+- Test each new Go module in `go.yml` or its own workflow, or no CI runs its tests. `apps/orgpolicyauditor` and `terraform/gcp/projects/lolcorp/audit-pipeline` have none.
 - Bump an OCI chart's `version` and its OCIRepository `ref.tag` together, or the tests in `apps/spindrift/test/conformance/` fail.
 - Make a new OCI chart public on GHCR after its first push, or its OCIRepository fails to pull.
 

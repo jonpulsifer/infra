@@ -9,17 +9,14 @@ on:
       target:
         description: 'Runner target to test (all runs every label below in a parallel matrix)'
         type: choice
-        # skiff-nixos is left out: it has no FHS, so setup-bun's download cannot run there.
         options:
           - all
           - infra-offsite
           - infra-folly
-          - skiff-offsite
-          - skiff-folly
           - ubuntu-latest
         default: all
       waves:
-        description: 'Identical jobs fired at the chosen label at once. 1 measures a runner; >1 measures the pool — a hosted label queues past its concurrency cap while the fleet answers from warm slots, which is the whole argument for keeping skiffs booted'
+        description: 'Identical jobs fired at the chosen label at once. 1 measures a runner; >1 measures the pool, which queues jobs past its concurrency cap'
         type: choice
         options:
           - '1'
@@ -51,14 +48,11 @@ jobs:
       - id: set-runners
         run: |
           if [ "${{ inputs.target }}" = "all" ]; then
-            echo 'runners=["infra-offsite", "infra-folly", "skiff-offsite", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'runners=["infra-offsite", "infra-folly", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           else
             echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
           fi
-          # A JSON array [1..waves]. The matrix multiplies it against the label
-          # list, so `waves: 8` on `skiff-offsite` fires eight identical jobs at
-          # the fleet's shared pool at once. `skiff-folly` is parked at warm 0,
-          # so a wave there measures cold boots, not a pool.
+          # A JSON array [1..waves]; the matrix multiplies it by the label list.
           seq 1 "${{ inputs.waves }}" | jq -cs '.' | sed 's/^/waves=/' >> "$GITHUB_OUTPUT"
 
   # A near-empty job on each label: its timing is the cost to acquire a runner,

@@ -26,7 +26,7 @@ Use this runbook before you open a pull request. It gives the local command for 
 | One directory under `clusters/<site>/` with a `kustomization.yaml` | `kubectl kustomize clusters/<site>/<dir>` | None |
 | `clusters/<site>/config/cluster-topology.json` | `conftest verify -p .github/policy`, then the `conftest test` command in `topology-contract.yml` | `topology-contract.yml` |
 | A `.tf` or `.terraform.lock.hcl` file | The local checks in [Apply an OpenTofu change](apply-an-opentofu-change.md) | `terraform.yml` |
-| A `.tftest.hcl` file | `mise run tf:init`, then `tofu -chdir=<root> test` | `terraform.yml`, only if a `.tf` file of the root also changes |
+| A `.tftest.hcl` file | `mise run tf:init`, then `tofu -chdir=<root> test` | `terraform.yml` |
 | TypeScript in `apps/` or `packages/` | `mise run ts:check`, then `bun run test` | `typescript.yml`, if its `changed-files` list names the path |
 | A Go module in `apps/` | `go -C apps/<app> vet ./...`, then `go -C apps/<app> test ./...` | `go.yml`, `rackstat.yml` or `view-counter.yml`, if one of them lists the module |
 | `apps/fml-pki/` or `terraform/pki/certs/` | `mise run pki:verify` | `go.yml` |
@@ -52,7 +52,7 @@ Use this runbook before you open a pull request. It gives the local command for 
    git diff --name-only main...HEAD | .github/scripts/validation-impact.sh targets
    ```
 
-   Result: `nix:flake-check`, one `terraform:<dir>` line for each root or module that the change affects, or no output. A `.tftest.hcl` file prints no line.
+   Result: `nix:flake-check`, one `terraform:<dir>` line for each root or module that the change affects, or no output.
 
 3. For each row of the table that matches a changed file, run its command from the repository root.
 

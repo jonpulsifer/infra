@@ -13,7 +13,7 @@ OpenTofu is the open-source fork of Terraform. The lab uses it to declare the ne
 | Module | Shared code that roots call | `terraform/modules/`, and a `modules/` directory in some roots |
 | State | One object for each root in the `homelab-ng` bucket | The `prefix` in the root's `backend` block, which often differs from the root's path |
 | Atlantis | Plans, applies and merges PRs | `clusters/offsite/apps/atlantis/` |
-| CI | Runs `tofu validate` and `tofu test` in each directory with a changed `.tf` file, and `tofu fmt -check` | `.github/workflows/terraform.yml` |
+| CI | Runs `tofu validate` and `tofu test` in each directory with a changed `.tf` or `.tftest.hcl` file, and `tofu fmt -check` | `.github/workflows/terraform.yml` |
 
 ## Atlantis
 
@@ -30,7 +30,6 @@ A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR
 - Add every GitHub identity that opens PRs to `atlantis_users` in `only-me.rego`. `atlantis/plan` is a required check on every PR, so a PR from an unlisted GitHub identity is blocked.
 - Read network facts through `terraform/modules/cluster-topology`, which reads the [topology files](../reference/topology.md).
 - Keep `terraform/pki` on OpenTofu. Its `opentofu/tls` provider is only on the OpenTofu registry.
-- After a change to only a `.tftest.hcl` file, run `tofu test` in its root. CI runs no test for it.
 
 ## Where it lives
 

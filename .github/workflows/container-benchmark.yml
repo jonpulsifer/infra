@@ -1,64 +1,27 @@
 name: Container Benchmark
 
-# One cold docker build of apps/spindrift/Dockerfile per runner label, on
-# dockerd's embedded BuildKit, the engine every label shares. No host declares
-# the skiff-ubuntu-bench class, so that arm queues until one does.
+# One cold docker build of apps/spindrift/Dockerfile on dockerd's embedded
+# BuildKit.
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: 'Runner label to test'
-        type: choice
-        options:
-          - both
-          - ubuntu-latest
-          - skiff-ubuntu-bench
-        default: ubuntu-latest
 
 permissions:
   contents: read
 
 jobs:
-  configure:
-    runs-on: ubuntu-latest
-    outputs:
-      runners: ${{ steps.set.outputs.runners }}
-    steps:
-      - id: set
-        run: |
-          # skiff-ubuntu-bench is 4 vCPU / 16 GiB with a 20 G workspace -- a cold
-          # docker build does not fit in the 6 G a shared slot carries, which is
-          # what this label is sized for and why no current host declares it.
-          if [ "${{ inputs.target }}" = "both" ]; then
-            echo 'runners=["ubuntu-latest", "skiff-ubuntu-bench"]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
-          fi
-
   build:
-    needs: configure
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: ${{ fromJson(needs.configure.outputs.runners) }}
-    name: build (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: What am I
         run: |
-          printf 'label      %s\n' '${{ matrix.runner }}'
           printf 'kernel     %s\n' "$(uname -r)"
           printf 'cores      %s\n' "$(nproc)"
           printf 'memory     %s\n' "$(awk '/MemTotal/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo)"
-          printf 'uptime     %ss\n' "$(cut -d' ' -f1 /proc/uptime)"
           docker info --format 'storage    {{.Driver}}' || true
-      # A persisting skiff class keeps the previous run's docker data-root.
-      - name: Make cold mean cold
-        run: docker system prune -af >/dev/null 2>&1 || true
       - name: Cold build
         env:
           DOCKER_BUILDKIT: '1'

@@ -43,9 +43,7 @@ beyond them.
   `topology.tf`.
 - `terraform/pki` uses the `opentofu/tls` provider for `max_path_length`, and
   the `terraform` binary cannot install that provider.
-- CI runs `tofu test` in each directory with a changed `.tf` file. After a
-  change to only a `.tftest.hcl` file, run `tofu test` in its root, because CI
-  runs no test for it. The `.tftest.hcl` files are in
-  `clusters/<site>/bootstrap/`.
+- CI runs `tofu test` in each directory with a changed `.tf` or `.tftest.hcl`
+  file. The `.tftest.hcl` files are in `clusters/<site>/bootstrap/`.
 - For a change to Kubernetes or Argo CD authentication, also use the
   `kubernetes-gitops` skill.
