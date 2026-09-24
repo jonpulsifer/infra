@@ -1,19 +1,10 @@
-# ---------------------------------------------------------------------------
-# GitHub Actions workload identity federation.
-#
-# Lets the nixos-deploy workflow (.github/workflows/nixos-deploy.yaml) join
-# the tailnet using a GitHub Actions OIDC token exchanged for a short-lived
-# Tailscale auth key — no long-lived OAuth secret stored in GitHub. Scoped to
-# tag:ci, which the ACL (policy.hujson) only allows to reach tag:pi4 over
-# SSH.
-# ---------------------------------------------------------------------------
+# nixos-deploy.yaml trades its GitHub OIDC token for a short-lived auth key.
+# policy.hujson lets tag:ci reach only tag:pi4, over SSH.
 
 resource "tailscale_federated_identity" "github_actions_nixos_deploy" {
   description = "github-actions nixos-deploy workflow"
   issuer      = "https://token.actions.githubusercontent.com"
-  # Locked to main: a workflow_dispatch run against any other ref won't match
-  # this subject, so the tailnet join fails (Tailscale-side auth error, not a
-  # GitHub-side one) rather than deploying from an unmerged branch.
+  # Locked to main: a dispatch from any other ref fails the tailnet join.
   subject = "repo:jonpulsifer@5461940/infra@952814997:ref:refs/heads/main"
   scopes  = ["auth_keys"]
   tags    = ["tag:ci"]
@@ -22,8 +13,7 @@ resource "tailscale_federated_identity" "github_actions_nixos_deploy" {
     job_workflow_ref = "jonpulsifer/infra/.github/workflows/nixos-deploy.yaml@refs/heads/main"
   }
 
-  # tag:ci must exist in the ACL's tagOwners before the API will let this
-  # identity claim it (see the same note on tailscale_device_tags.devices).
+  # The API rejects tag:ci until the ACL's tagOwners lists it.
   depends_on = [tailscale_acl.this]
 }
 

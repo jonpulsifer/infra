@@ -1,6 +1,5 @@
-# The default posture: the module provisions the key, attestor, note, and
-# every grant. Values are placeholders; a real root declares the principal
-# lists as locals in its own iam.tf.
+# Default posture: the module provisions the key, attestor, note and every grant.
+# Values are placeholders.
 
 module "supply_chain" {
   source = "../.."
@@ -18,8 +17,7 @@ module "supply_chain" {
 
   attestor_viewers = ["serviceAccount:terraform@admin-project.iam.gserviceaccount.com"]
 
-  # Empty on first bootstrap; each vessel's Binary Authorization service
-  # agent joins once its vessel enables the API.
+  # Empty on first bootstrap; a vessel's agent joins once that vessel enables the API.
   verifier_agents = ["serviceAccount:service-000000000000@gcp-sa-binaryauthorization.iam.gserviceaccount.com"]
 
   registry_readers = [

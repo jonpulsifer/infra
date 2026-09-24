@@ -43,8 +43,6 @@ module "bluenose" {
   }
 }
 
-# bluenose is an existing empty project shell. Adopt it into the project
-# factory before the module moves it to Production and enables billing.
 import {
   to = module.bluenose.google_project.project
   id = "bluenose"

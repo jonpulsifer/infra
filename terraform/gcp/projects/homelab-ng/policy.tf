@@ -1,4 +1,4 @@
-# allUsers needs this :(
+# allUsers grants need this.
 resource "google_org_policy_policy" "allow_all_domains" {
   name   = "projects/${local.project}/policies/iam.allowedPolicyMemberDomains"
   parent = "projects/${local.project}"
@@ -141,7 +141,7 @@ resource "google_org_policy_policy" "allowed_workload_identity_providers" {
         allowed_values = [
           "is:https://token.actions.githubusercontent.com",
           "is:https://oidc.vercel.com/jonpulsifer",
-          # Cluster SA issuers (terraform/pki; served via Cloudflare Pages)
+          # Cluster ServiceAccount token issuers, from terraform/pki.
           "is:https://oidc.lolwtf.ca/folly",
           "is:https://oidc.lolwtf.ca/offsite"
         ]

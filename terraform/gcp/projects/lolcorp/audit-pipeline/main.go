@@ -28,7 +28,6 @@ var benignMethods = map[string]bool{
 	"cloudresourcemanager.projects.get": true,
 }
 
-// PubSubEnvelope is the push message wrapper from Pub/Sub.
 type PubSubEnvelope struct {
 	Message struct {
 		Data        string `json:"data"`
@@ -180,7 +179,6 @@ func auditHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// toTOON serializes an AuditEntry into TOON (Text Object Oriented Notation) format.
 func toTOON(a AuditEntry) string {
 	var b strings.Builder
 	b.WriteString("[AuditEntry]\n")

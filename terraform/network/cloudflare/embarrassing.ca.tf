@@ -40,16 +40,8 @@ resource "cloudflare_zone_setting" "embarrassing_ca" {
   value      = each.value
 }
 
-# Nothing Spindrift mints is written here. The apex is the App's vanity `@`,
-# and the App publishes its own record for it — the chart's DNSEndpoint on a
-# cluster Target, a DNSEndpoint on the control-plane cluster for a Target the
-# platform names (`apps/spindrift/src/adapters/dns/`) — so Terraform holds no
-# project name, tunnel id or address that a deploy could move. What is declared
-# beside the zone is zone-level routing only: `www` is a redirect to the apex,
-# not a second name the App answers on, because an App has one vanity name and
-# a site that answers on two is a site whose links point two ways. The record
-# exists only so the edge has something to fire the redirect on; its target is
-# the zone itself, which is not a thing Spindrift chose.
+# The App publishes its own apex record through a DNSEndpoint, so no address a
+# deploy can move lives here. This record exists only for the www redirect.
 resource "cloudflare_dns_record" "www_embarrassing_ca" {
   zone_id = cloudflare_zone.embarrassing_ca.id
   comment = "terraform managed"

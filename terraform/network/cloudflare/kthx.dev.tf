@@ -1,19 +1,8 @@
-# The zone for quick static sites: the apex is the landing page and
-# `<name>.kthx.dev` is a site, both served by the Spindrift control plane
-# through the Apps tunnel (`spindrift.tf`). The zone already exists in the
-# account — this adopts it rather than creating it, via the `import` block
-# below. Its id is looked up by name so the adoption does not hardcode an
-# opaque Cloudflare identifier. The two steps this root cannot do are at the
-# registrar, by hand: point the NS records at `name_servers` below, then
-# publish the `ds_record` output so DNSSEC leaves pending.
+# Quick static sites: the apex is the landing page and each `<name>.kthx.dev` is a site.
+# At the registrar, by hand: set NS to the name_servers output, then publish ds_record.
 
-# Two of these settings are caching decisions. `always_online` is off because
-# it has nothing to serve: a site here is a name the Internet Archive has
-# never crawled, so the feature can only turn a down origin into a 404 from
-# somebody else's cache. `browser_cache_ttl = 0` is "Respect Existing Headers":
-# the zone default of four hours otherwise overrides the origin's `max-age`
-# on every extension Cloudflare caches by default, so a 60-second asset TTL
-# reaches browsers as 14400.
+# always_online is off: the Internet Archive has never crawled these names.
+# browser_cache_ttl 0 respects origin headers; the 4h default overrides max-age.
 locals {
   kthx_dev_zone_settings = {
     always_online            = "off"
@@ -44,9 +33,7 @@ resource "cloudflare_zone" "kthx_dev" {
   }
   name = "kthx.dev"
 
-  # Adopted rather than created: its records predate Terraform knowing about
-  # the zone, and Terraform has no plan entry for any of them. Removing this
-  # file would destroy a zone whose contents it never managed.
+  # Adopted zone: a destroy would take records this root never managed.
   lifecycle {
     prevent_destroy = true
   }
@@ -64,9 +51,8 @@ resource "cloudflare_zone_setting" "kthx_dev" {
   value      = each.value
 }
 
-# The apex and wildcard records live beside the Apps tunnel (`spindrift.tf`,
-# `kthx_apex` and `kthx_sites_wildcard`). `www` is a redirect to the apex,
-# not a site name.
+# The apex and wildcard records are kthx_apex and kthx_sites_wildcard in
+# spindrift.tf. www only redirects to the apex.
 resource "cloudflare_dns_record" "www_kthx_dev" {
   zone_id = cloudflare_zone.kthx_dev.id
   comment = "terraform managed"
@@ -77,21 +63,8 @@ resource "cloudflare_dns_record" "www_kthx_dev" {
   ttl     = 1
 }
 
-# Cloudflare caches by extension and never caches HTML on its own, so every
-# site document pays a full origin round-trip. These rules cache what the
-# origin says is cacheable and keep the data plane out of it. Cache rules
-# stack and the last match wins per setting, so the bypass rule is last —
-# which is also why it has to spell out that `/api/sdk.js` is not data.
-#
-# Neither rule carries a real host test: the ruleset is scoped to this zone, so
-# both already cover the apex and every `*.kthx.dev` site host. The apex needs
-# rule 1 as much as a site host does — `/skill.md` and `/cli/kthx.tgz` are
-# apex-only and neither extension is on Cloudflare's default cached list — and
-# needs rule 2 for `/api/sites…`. The landing page's own `no-cache` is what
-# keeps it revalidated under `respect_origin`. `/kthx/` is the one exception:
-# that path only ever existed on the apex, and it goes when the retired v1 API
-# does. The bare `/api` is spelled out because `starts_with(…, "/api")` would
-# also swallow `/apifoo`.
+# Cloudflare never caches HTML by default. Rules stack and the last match wins
+# per setting, so the bypass rule goes last and must exempt the SDK.
 resource "cloudflare_ruleset" "kthx_dev_cache" {
   zone_id     = cloudflare_zone.kthx_dev.id
   name        = "cache"
@@ -119,6 +92,8 @@ resource "cloudflare_ruleset" "kthx_dev_cache" {
         }
       }
     },
+    # Bare /api is spelled out: starts_with "/api" also matches "/apifoo".
+    # /kthx/ is the retired v1 API path; the server answers it with 410.
     {
       description = "the data plane and the API are never cached; the SDK is not data"
       expression  = "((http.request.uri.path eq \"/api\" or starts_with(http.request.uri.path, \"/api/\")) and http.request.uri.path ne \"/api/sdk.js\") or starts_with(http.request.uri.path, \"/files/\") or (starts_with(http.request.uri.path, \"/_/\") and http.request.uri.path ne \"/_/sdk.js\") or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"

@@ -1,4 +1,4 @@
-# bigquery exports from google workspace needs this :(
+# Google Workspace BigQuery exports need this.
 resource "google_org_policy_policy" "allow_all_domains" {
   name   = "projects/${local.project}/policies/iam.allowedPolicyMemberDomains"
   parent = "projects/${local.project}"
@@ -10,7 +10,7 @@ resource "google_org_policy_policy" "allow_all_domains" {
   }
 }
 
-# bigquery exports from google workspace needs this :(
+# Google Workspace BigQuery exports need this.
 resource "google_org_policy_policy" "allowed_locations" {
   name   = "projects/${local.project}/policies/gcp.resourceLocations"
   parent = "projects/${local.project}"

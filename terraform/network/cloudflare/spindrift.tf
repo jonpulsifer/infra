@@ -1,7 +1,5 @@
-# How a `reach: public` App name arrives at the cluster. The origin is the
-# Apps' own Gateway service, not the cluster's shared one: App traffic gets its
-# own Envoy listener set and its own load-balancer address, so a public App
-# cannot crowd the edge the media stack or the operator UI answer on.
+# Public App names reach the cluster here. The origin is the Apps' own Gateway,
+# with its own listeners and address, so App traffic cannot crowd the shared one.
 module "tunnel_spindrift" {
   source     = "./modules/tunnel"
   account_id = local.fml_account_id
@@ -10,12 +8,8 @@ module "tunnel_spindrift" {
   config = {
     ingress = [
       {
-        # The bosun outbox, and only it. tender long-polls this path from
-        # GCE — the control plane's own hostname is a LAN record a cloud
-        # host cannot reach — bearer-authed by SPINDRIFT_BOSUN_SECRET.
-        # Path-scoped so the session-authed rest of the control plane stays
-        # off the internet; everything else on this hostname falls through
-        # to the wildcard and 404s at the Apps gateway.
+        # Only the bosun outbox, bearer-authed by SPINDRIFT_BOSUN_SECRET. Other paths reach the
+        # control plane through the wildcard, and it serves only its machine routes on this host.
         hostname = "spindrift-control.${cloudflare_zone.lolwtf_dev.name}"
         path     = "^/internal/bosun/"
         service  = "http://spindrift.spindrift.svc.cluster.local:3000"
@@ -30,12 +24,8 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.lolwtf_dev.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
-      # The other two zones a `reach: public` App can be minted in. A wildcard
-      # ingress rule is routing and nothing else: the module publishes no record
-      # for one (see its `cloudflare_dns_record.cf`), so only a name some other
-      # controller has pointed at this tunnel ever arrives here. That is what
-      # makes a catch-all over the hand-managed zone safe — `wiki`, `tf` and
-      # `folly` are records aimed elsewhere and never reach this tunnel.
+      # Wildcard rules only route: the module publishes no record for them, so
+      # hand-managed names that point elsewhere never reach this tunnel.
       {
         hostname = "*.${cloudflare_zone.lolwtf_ca.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
@@ -44,10 +34,7 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.wishin_app.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
-      # kthx.dev: the apex is the landing page and every `<name>.kthx.dev` is
-      # a site, both answered by the control plane behind the Apps gateway.
-      # The module publishes records into lolwtf.dev only, so the apex record
-      # is `kthx_apex` below, beside the zone's wildcard.
+      # The module publishes into lolwtf.dev only; kthx_apex below is this record.
       {
         hostname       = cloudflare_zone.kthx_dev.name
         service        = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
@@ -57,9 +44,7 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.kthx_dev.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
-      # A cluster-served apex. `*.<zone>` never matches the zone itself, so the
-      # apex is its own rule; the record is the App's vanity `@`, which
-      # Spindrift's DNSEndpoint publishes, so this rule publishes none.
+      # `*.<zone>` never matches the apex. The App's DNSEndpoint publishes its record.
       {
         hostname       = cloudflare_zone.clankerbanker_ca.name
         service        = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
@@ -69,9 +54,8 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.clankerbanker_ca.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
-      # No rule for embarrassing.ca: the manifest serves that zone off Vercel
-      # and Cloudflare Pages, which are their own edge. A rule here would
-      # forward it to a cluster gateway holding no listener for it.
+      # No embarrassing.ca rule: Vercel and Cloudflare Pages serve that zone, and
+      # no cluster gateway listens for it.
       {
         service = "http_status:404"
       }
@@ -79,24 +63,8 @@ module "tunnel_spindrift" {
   }
 }
 
-# Every name in the zone dedicated to generated App names, pointed at the
-# tunnel.
-#
-# The module publishes no record for a wildcard ingress rule and is right not
-# to for the zones it shares with hand-managed names — see its
-# `cloudflare_dns_record.cf`. This zone is the one exception, and the reason is
-# that the objection does not hold here: the control plane holds a
-# lowest-precedence route over `*.lolwtf.dev`
-# (`clusters/offsite/apps/spindrift/status-route.yaml`), so a name nothing
-# serves reaches a page that says so rather than a bare 404, and an App's
-# address answers from the moment the App exists rather than from its first
-# successful deploy. A Component that is serving takes the name back at the
-# gateway, where its own exact-hostname route outranks the wildcard.
-#
-# Nothing in this zone is hand-managed, so a catch-all here can only ever
-# answer for a name Spindrift itself would mint. `spindrift-control` keeps its
-# own record above it: an exact name outranks a wildcard in DNS as it does at
-# the gateway.
+# A wildcard is safe here: nothing in this zone is hand-managed. Unserved names reach
+# the status route in clusters/offsite/apps/spindrift; exact records outrank this one.
 resource "cloudflare_dns_record" "spindrift_apps_wildcard" {
   zone_id = cloudflare_zone.lolwtf_dev.id
   comment = "terraform managed"
@@ -107,9 +75,7 @@ resource "cloudflare_dns_record" "spindrift_apps_wildcard" {
   ttl     = 1
 }
 
-# kthx.dev is the second dedicated zone: nothing in it is hand-managed, every
-# name is a site the control plane serves, so the objection to a wildcard
-# record does not apply here either.
+# Nothing in kthx.dev is hand-managed either: every name is a site.
 resource "cloudflare_dns_record" "kthx_sites_wildcard" {
   zone_id = cloudflare_zone.kthx_dev.id
   comment = "terraform managed"
@@ -120,8 +86,7 @@ resource "cloudflare_dns_record" "kthx_sites_wildcard" {
   ttl     = 1
 }
 
-# `*.<zone>` never matches the zone itself, so the landing page's apex gets
-# its own record.
+# `*.<zone>` never matches the apex, so the landing page gets its own record.
 resource "cloudflare_dns_record" "kthx_apex" {
   zone_id = cloudflare_zone.kthx_dev.id
   comment = "terraform managed"
@@ -132,9 +97,8 @@ resource "cloudflare_dns_record" "kthx_apex" {
   ttl     = 1
 }
 
-# Atlantis already authenticates this root to 1Password. Escrow the generated
-# tunnel credential directly into the homelab vault so External Secrets can
-# deliver it to offsite without a decrypted value entering git.
+# External Secrets delivers the tunnel token from 1Password, so no decrypted
+# value enters git.
 resource "onepassword_item" "spindrift_cloudflared" {
   vault    = local.vault_id
   title    = "spindrift cloudflared"
@@ -154,26 +118,10 @@ resource "onepassword_item" "spindrift_cloudflared" {
   ]
 }
 
-# Access carries no application over this zone. A Component states its own
-# audience: `reach: private` publishes an RFC1918 address, so the record type
-# is the boundary and no policy has to hold it, and `auth: proxy` is enforced
-# in-cluster by the ExternalAuth filter on the route. An Access application
-# over the whole zone would add a second prompt in front of the first for a
-# Component that already authenticates, and hold nothing closed for one that
-# deliberately does not.
+# No Access application on this zone: `reach: private` records hold RFC1918
+# addresses, and the route's ExternalAuth filter enforces `auth: proxy`.
 
-# Spindrift's Functions own a second family of names in this zone, minted by
-# the platform controller itself rather than by this root: Workers scripts
-# named `fn-*` and Workers custom domains `<name>.fn.lolwtf.dev`. The
-# wildcard CNAME above answers single-label names only — `*.lolwtf.dev` —
-# so a two-label custom domain under `fn.` never resolves through it and can
-# never collide with `spindrift_apps_wildcard`. The custom-domain record
-# itself is a Cloudflare-owned side effect of the Workers custom-domain API:
-# nothing here declares it, and this root manages none of it.
-#
-# The controller reaches these APIs with the installation's existing
-# Workers-scoped bearer (`cloudflareToken` in
-# apps/spindrift/src/adapters/registry.ts), never a DNS credential. The
-# operator widens that token's scopes by hand to cover them:
-#   Account           → Workers Scripts Edit, Workers Tail Read
-#   Zone (lolwtf.dev) → Workers Routes Edit, SSL and Certificates Edit, Zone Read
+# The controller mints Workers scripts `fn-*` and custom domains `<name>.fn.lolwtf.dev`
+# outside this root; the single-label wildcard above never matches them.
+# Its Workers token scopes, set by hand: Account Workers Scripts Edit and Workers Tail
+# Read; Zone lolwtf.dev Workers Routes Edit, SSL and Certificates Edit, Zone Read.

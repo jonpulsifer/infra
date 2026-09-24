@@ -21,10 +21,8 @@ output "sa_signer_certs" {
 
 output "sa_signer_chains" {
   description = "Signer -> cluster CA -> FML intermediate chains (PEM), for kube-apiserver --service-account-key-file."
-  # Certs are public, but the intermediate's PEM transits the 1P data source,
-  # whose values are provider-marked sensitive — tofu therefore requires the
-  # flag. Goes away once the chain certs are committed under certs/ and only
-  # ca.key is read from 1Password.
+  # Public certs, but the intermediate comes from a 1Password data source that
+  # the provider marks sensitive, so tofu requires the flag.
   sensitive = true
   value = { for c in local.clusters : c => join("", [
     tls_locally_signed_cert.sa_signer[c].cert_pem,

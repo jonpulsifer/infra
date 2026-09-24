@@ -1,6 +1,5 @@
-# Mixed posture one: an existing key signs, the module still provisions the
-# attestor and note and registers the provided key's latest version on them.
-# The identity running the plan needs `roles/cloudkms.viewer` on the key.
+# An existing key signs; the module provisions the attestor and note and registers the key's
+# latest version. The identity running the plan needs roles/cloudkms.viewer on the key.
 
 module "supply_chain" {
   source = "../.."

@@ -1,7 +1,6 @@
 locals {
   lan_cidr = "192.168.1.1/24"
-  # node_cidr keeps the gateway-host (.1) form the UniFi network subnet expects;
-  # cidrhost() masks host bits so the static_records/dhcp ranges below are unchanged.
+  # UniFi expects gateway-host (.1) CIDRs for network subnets.
   node_cidr = "${cidrhost(local.topology.K8S_NODE_CIDR, 1)}/${split("/", local.topology.K8S_NODE_CIDR)[1]}"
 }
 

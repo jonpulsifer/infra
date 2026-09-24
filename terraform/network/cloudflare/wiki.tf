@@ -1,6 +1,5 @@
-# Wiki: the docs/ Markdown tree is built by .github/workflows/wiki.yml and
-# direct-uploaded here with `wrangler pages deploy` (needs the
-# CLOUDFLARE_API_TOKEN Actions secret, scoped to Pages:Edit).
+# .github/workflows/wiki.yml builds docs/ and uploads it with `wrangler pages deploy`,
+# using the CLOUDFLARE_API_TOKEN Actions secret scoped to Pages:Edit.
 resource "cloudflare_pages_project" "wiki" {
   account_id        = local.fml_account_id
   name              = "infra-wiki"
