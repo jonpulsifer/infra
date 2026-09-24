@@ -96,6 +96,7 @@ export default function Dashboard() {
                   label={station.name}
                   observation={station.observation}
                   history={station.history}
+                  burn={station.burn}
                   now={now}
                   index={index}
                   accent={stationAccent(index)}

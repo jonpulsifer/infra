@@ -1,10 +1,10 @@
 ---
 title: Tidbyt apps
-description: Four Pixlet apps, rackstat, tempest, wishin and callerid, that the Tronbyt server on folly renders for the lab's Tidbyt pixel displays.
+description: Five Pixlet apps, rackstat, tempest, wishin, callerid and burnsafe, that the Tronbyt server on folly renders for the lab's Tidbyt pixel displays.
 status: live
 ---
 
-The Tidbyt apps are four Pixlet apps, rackstat, tempest, wishin and callerid, that draw screens on the lab's Tidbyt displays for the owner. A Tidbyt is an LED display of 64 by 32 pixels, and Pixlet renders its Starlark apps. Tronbyt, a self-hosted Tidbyt server on the folly [Kubernetes](../platform/kubernetes.md) cluster, renders the installed apps and serves the images to each display.
+The Tidbyt apps are five Pixlet apps, rackstat, tempest, wishin, callerid and burnsafe, that draw screens on the lab's Tidbyt displays for the owner. A Tidbyt is an LED display of 64 by 32 pixels, and Pixlet renders its Starlark apps. Tronbyt, a self-hosted Tidbyt server on the folly [Kubernetes](../platform/kubernetes.md) cluster, renders the installed apps and serves the images to each display.
 
 ## Apps
 
@@ -14,6 +14,7 @@ The Tidbyt apps are four Pixlet apps, rackstat, tempest, wishin and callerid, th
 | `apps/tempest/` | One Tempest weather station: current conditions, a 3-day forecast and a 24-hour temperature graph | WeatherFlow's forecast API, with a station ID and token set in Tronbyt |
 | `apps/wishin/` | The gift, user and claimed counts of wishin.app | `https://www.wishin.app/api/stats` |
 | `apps/callerid/` | An incoming call: a name or number, a SPAM screen, or a troll screen | A `name`/`number`/`verdict` config passed in by whatever pushes to it |
+| `apps/burnsafe/` | Today's Nova Scotia fire restriction for two counties, Colchester for folly and Halifax for offsite by default | The county table on `https://novascotia.ca/burnsafe/`, which has no API |
 
 `apps/wishin/` holds only the display app. wishin.app, a gift wishlist site, is a separate project on Vercel.
 
@@ -49,7 +50,7 @@ No alert rule is specific to the displays or Tronbyt. The default kube-prometheu
 
 ## Reference
 
-- Source: `apps/rackstat/`, `apps/tempest/`, `apps/wishin/` and `apps/callerid/`
+- Source: `apps/rackstat/`, `apps/tempest/`, `apps/wishin/`, `apps/callerid/` and `apps/burnsafe/`
 - Manifests: `clusters/folly/apps/tronbyt/`
 - Images: `ghcr.io/jonpulsifer/rackstat` and `ghcr.io/tronbyt/server`
 - Previews: `.github/workflows/pixlet-preview.yml`

@@ -22,12 +22,16 @@ In production, the server reads these variables:
 | --- | --- |
 | `TEMPESTWX_TOKENS` | WeatherFlow API tokens. The server polls each station these tokens reach. |
 | `TEMPESTWX_IGNORE_STATIONS` | Optional. Comma-separated station ids to skip. |
+| `BURNSAFE_COUNTIES` | Optional. `<station id>=<county>` pairs, comma-separated. Each mapped station shows that county's fire restriction. |
 
 ## Code
 
 - `app/services/weather.server.ts` polls the latest observation of each station
   every 30 seconds and keeps a snapshot in memory. Clients read it from
   `/api/weather`.
+- `app/services/burnsafe.server.ts` reads `https://novascotia.ca/burnsafe/`
+  every 10 minutes. The page has no API, so `app/lib/burnsafe.ts` parses its
+  county table.
 - `app/lib/weatherflow/history.ts` reduces the device observations of the last
   24 hours to lows, highs and a temperature series. The rows are positional
   arrays, and the field order depends on the device type.

@@ -1,5 +1,7 @@
 // Shared types for the WeatherFlow Tempest REST API and the /api/weather snapshot.
 
+import type { BurnRestriction } from '~/lib/burnsafe';
+
 export type BarometricTrend = 'rising' | 'falling' | 'steady';
 
 export type StationObservation = {
@@ -59,6 +61,9 @@ export type StationSnapshot = {
   // Absent until the first history fetch arrives, and kept when a later one fails.
   history?: StationHistory;
   error?: string; // set when the most recent poll for this station failed
+  // Today's burning restriction where the station stands, when BURNSAFE_COUNTIES
+  // names an area for it.
+  burn?: BurnRestriction;
 };
 
 export type WeatherSnapshot = {
