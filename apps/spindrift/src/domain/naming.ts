@@ -173,6 +173,44 @@ export function isVanityLabel(value: string): boolean {
   return value === APEX || isLabel(value);
 }
 
+export function installationHostnames(controlPlane: {
+  readonly hostname: string;
+  readonly publicHostname: string | null;
+}): string[] {
+  return [controlPlane.hostname, controlPlane.publicHostname].flatMap((host) =>
+    host ? [host.toLowerCase()] : [],
+  );
+}
+
+/**
+ * By first label rather than per zone, so a zone declared later cannot turn an
+ * accepted label into the control plane's name.
+ */
+export function ownHostnameClaimedBy(
+  label: string,
+  zones: DnsZones,
+  own: readonly string[],
+): string | null {
+  return (
+    own.find((host) =>
+      label === APEX
+        ? zones.some((zone) => zone.name.toLowerCase() === host)
+        : host.split('.')[0] === label,
+    ) ?? null
+  );
+}
+
+export function ownHostnameMintedIn(
+  hostname: Hostname,
+  own: readonly string[],
+): string | null {
+  return (
+    [hostname.canonical, hostname.vanity].find(
+      (name) => name !== undefined && own.includes(name.toLowerCase()),
+    ) ?? null
+  );
+}
+
 /**
  * §9's flat single-label vanity name, in the zone for its Component's reach.
  *

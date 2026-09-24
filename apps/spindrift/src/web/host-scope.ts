@@ -9,9 +9,6 @@ import { HEALTH_PATH, READY_PATH } from './routes.ts';
 import { STATUS_PATH } from './status-route.ts';
 import { WEBHOOK_PATH } from './webhook-route.ts';
 
-/** The public name the tunnel forwards the webhook, bosun, and MCP on. */
-export const PUBLIC_HOSTNAME_VAR = 'SPINDRIFT_PUBLIC_HOSTNAME';
-
 export interface ServedHosts {
   /** Every route answers here. */
   readonly controlPlane: string;

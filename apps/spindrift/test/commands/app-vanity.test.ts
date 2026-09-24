@@ -95,6 +95,63 @@ describe('setAppVanity', () => {
     expect(row?.vanityDomain).toBeNull();
   });
 
+  test("refuses a label that would take the installation's own names, in any zone", async () => {
+    const { appId } = await seed();
+    // Neither mints a clash in this App's own zone today; a zone declared
+    // later, or a reach flipped to public, would.
+    for (const [label, taken] of [
+      ['spindrift', manifest.controlPlane.hostname],
+      ['spindrift-control', manifest.controlPlane.publicHostname],
+    ] as const) {
+      const result = await setAppVanity({ appId, label }, context());
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('unreachable');
+      expect(result.failure.code).toBe('INVALID_INPUT');
+      expect(result.failure.message).toContain(taken!);
+      expect(result.failure.issues).toEqual([
+        { path: 'label', message: expect.stringContaining(taken!) },
+      ]);
+    }
+
+    const [row] = await database()
+      .db.select({ vanityDomain: apps.vanityDomain })
+      .from(apps)
+      .where(eq(apps.id, appId));
+    expect(row?.vanityDomain).toBeNull();
+  });
+
+  test('refuses the apex of a zone that is one of those names', async () => {
+    const { appId } = await seed();
+    const own = manifest.controlPlane.hostname;
+    const result = await setAppVanity(
+      { appId, label: '@' },
+      {
+        ...context(),
+        manifest: {
+          ...manifest,
+          dns: {
+            zones: [
+              ...manifest.dns.zones,
+              { name: own, reaches: ['private', 'public'] },
+            ],
+          },
+        },
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.failure.message).toContain(own);
+  });
+
+  test('a label that only starts with one of them is its own name', async () => {
+    const { appId } = await seed();
+    const result = await setAppVanity(
+      { appId, label: 'spindrift-shop' },
+      context(),
+    );
+    expect(result.ok).toBe(true);
+  });
+
   test('writes the label and previews the canonical and vanity names side by side', async () => {
     const { appId } = await seed();
     const result = await setAppVanity({ appId, label: 'shop' }, context());

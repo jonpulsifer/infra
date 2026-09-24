@@ -31,6 +31,9 @@ export const TRUSTED_GATEWAY_BOUNDARY_VAR =
  */
 export const HOSTNAME_VAR = 'SPINDRIFT_HOSTNAME';
 
+/** The public name a tunnel forwards the machine routes on. */
+export const PUBLIC_HOSTNAME_VAR = 'SPINDRIFT_PUBLIC_HOSTNAME';
+
 /**
  * What this deployment is running. The same variable `telemetry/index.ts`
  * reports as `service.version`, read here so the UI and the traces name one
@@ -321,6 +324,7 @@ export async function resolveManifest(
     boundary: { trustedGateway: env[TRUSTED_GATEWAY_BOUNDARY_VAR] === 'true' },
     controlPlane: {
       hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME,
+      publicHostname: env[PUBLIC_HOSTNAME_VAR]?.trim().toLowerCase() || null,
       version: env[VERSION_VAR]?.trim() || null,
     },
   };
