@@ -638,6 +638,7 @@ check_reload_and_handsets() {
       fail "${trunks[i]} sets SCREEN=yes, but line1 dials 911 on it, so a callback from 911 would be screened"
     fi
   done
+  printf '%s\n' "${HOLD_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
   if [[ $site == folly ]]; then
     printf '%s\n' "${INBOUND_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
   fi
@@ -738,6 +739,62 @@ check_events() {
   fi
 }
 
+# --- preStop -----------------------------------------------------------------
+
+# One held call in each group: preStop must hang up spam and troll and leave
+# the screen call, like any real call, to drain.
+HOLD_PROBE_CONTEXT=(
+  '[pbx-check-hold]'
+  'exten => spam,1,Set(GROUP()=spam)'
+  ' same => n,Wait(30)'
+  'exten => troll,1,Set(GROUP()=troll)'
+  ' same => n,Wait(30)'
+  'exten => screen,1,Set(GROUP(screen)=line4)'
+  ' same => n,Wait(30)'
+)
+
+held_groups() { ast 'group show channels' | awk '$1 ~ /\// && NF >= 2 { print $2 }' | sort | paste -sd' '; }
+
+check_prestop() {
+  local pod="$SITE_DIR/pod.yaml" script="$SITE_DIR/prestop.sh" command path mount volume cm groups="" probe i
+  command=$(yq '.containers[] | select(.name == "asterisk") | (.lifecycle.preStop.exec.command // []) | join(" ")' "$pod")
+  if [[ ! $command =~ ^/bin/bash\ (/[^ ]+)$ ]]; then
+    fail "the asterisk container's preStop is '${command:-missing}', not '/bin/bash <script>'; a held stranger would stall every rollout"
+    return
+  fi
+  path=${BASH_REMATCH[1]}
+  : >"$script"
+  while IFS=$'\t' read -r mount volume; do
+    [[ $path == "$mount"/* ]] || continue
+    cm=$(V="$volume" yq '.volumes[] | select(.name == strenv(V)) | .configMap.name // ""' "$pod")
+    [[ -n $cm ]] && doc ConfigMap "$cm" | K="${path#"$mount"/}" yq '.data[strenv(K)] // ""' >"$script"
+  done < <(yq '.containers[] | select(.name == "asterisk") | (.volumeMounts // [])[] | [.mountPath, .name] | @tsv' "$pod")
+  if [[ ! -s $script || $(head -c 2 "$script") != '#!' ]]; then
+    fail "preStop runs $path, which no ConfigMap the asterisk container mounts provides"
+    return
+  fi
+
+  for probe in spam troll screen; do
+    ast "channel originate Local/$probe@pbx-check-hold/n application Wait 30" >/dev/null
+  done
+  for ((i = 0; i < 50; i++)); do
+    [[ $(held_groups) == "line4 spam troll" ]] && break
+    sleep 0.1
+  done
+  ASTERISK="$ASTERISK" ASTERISK_CONF="$ETC/asterisk.conf" bash "$script" >/dev/null 2>&1 || true
+  for ((i = 0; i < 50; i++)); do
+    groups=$(held_groups)
+    [[ $groups == line4 ]] && break
+    sleep 0.1
+  done
+  ast 'channel request hangup all' >/dev/null || true
+  if [[ $groups == line4 ]]; then
+    say "    preStop hangs up the spam and troll groups and leaves other calls to drain"
+  else
+    fail "preStop should leave only the screen call up; the groups still up are: ${groups:-none}"
+  fi
+}
+
 # --- inbound ---------------------------------------------------------------
 
 # folly's inbound routes, each driven by a caller the check fakes: an open line
@@ -767,29 +824,33 @@ INBOUND_PROBE_CONTEXT=(
   ' same => n,Goto(from-voipms,s,1)'
 )
 
-# Places probe $1 and fails unless its Executing lines hold $2 and not $3.
+# Places probe $1 and fails if its Executing lines hold $2, or miss any of the
+# rest. The last is the route's final step, so it is the one waited for.
 expect_route() {
-  local name=$1 want=$2 refuse=$3 seen="" i
+  local name=$1 refuse=$2 seen="" want i
+  shift 2
   ast "channel originate Local/$name@pbx-check-inbound/n application Wait 1" >/dev/null
   for ((i = 0; i < 50; i++)); do
     seen=$(grep -F "(\"Local/$name@pbx-check-inbound-" "$SITE_DIR/asterisk.log" || true)
-    [[ $seen == *"$want"* ]] && break
+    [[ $seen == *"${!#}"* ]] && break
     sleep 0.1
   done
-  if [[ $seen != *"$want"* ]]; then
-    fail "inbound probe '$name' never ran $want"
-  elif [[ -n $refuse && $seen == *"$refuse"* ]]; then
-    fail "inbound probe '$name' ran $refuse"
-  fi
+  for want in "$@"; do
+    [[ $seen == *"$want"* ]] || fail "inbound probe '$name' never ran $want"
+  done
+  if [[ $seen == *"$refuse"* ]]; then fail "inbound probe '$name' ran $refuse"; fi
 }
 
 check_inbound_routes() {
   [[ $1 == folly ]] || return 0
-  local before=$SITE_FAILURES
-  expect_route open '"PJSIP/line1,25' '] Answer("'
-  expect_route callback '"PJSIP/line4,25' '] Answer("'
-  expect_route contact '"NOTICE,pbx-event kind=contact line=line4 caller=16135550104"' '] Answer("'
-  expect_route stranger '"DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6"' '"PJSIP/line4,25'
+  local before=$SITE_FAILURES answer='] Answer("'
+  expect_route open "$answer" '"PJSIP/line1,25,b(handset-leg^s^1())"'
+  expect_route callback "$answer" '"PJSIP/line4,25,b(handset-leg^s^1())"'
+  expect_route contact "$answer" \
+    '"NOTICE,pbx-event kind=contact line=line4 caller=16135550104"' \
+    '"CALLERID(name)=[OK] Pbx Check"' \
+    '"PJSIP/line4,25,b(handset-leg^s^1(Friend))"'
+  expect_route stranger '"PJSIP/line4,' "$answer" '"DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6"'
   ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5"
 }
 
@@ -869,6 +930,7 @@ run_checks() {
   check_pjsip_objects
   check_reload_and_handsets "$site"
   check_events
+  check_prestop
   check_inbound_routes "$site"
   check_inbound
 }

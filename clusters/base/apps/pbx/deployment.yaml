@@ -88,6 +88,16 @@ spec:
             - {name: spool, mountPath: /var/spool/asterisk}
             - {name: cache, mountPath: /var/cache/asterisk}
             - {name: db, mountPath: /var/lib/asterisk-db}
+            - name: base-templates
+              mountPath: /templates/base
+              readOnly: true
+          # Before the drain below: a stranger held in a spam sink or on the
+          # troll line would otherwise keep the old pod, and the handset's 911,
+          # waiting out the whole grace period.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/bash", "/templates/base/hangup-strangers.sh"]
           # /metrics answering is a weaker claim than "calls work", but it is
           # the only one a probe can make without placing one. Registration
           # state is an alert on the scraped metrics, not a probe.
