@@ -81,6 +81,15 @@ export const configureInstallation: Command<
   ConfigureInstallationInput,
   ConfigureInstallationResult
 > = async (input, context) => {
+  // The document carries `auth.gateway`, which decides who counts as a human
+  // at the next boot, so a bearer credential must not be able to write it.
+  if (context.principal.kind !== 'human') {
+    return failed(
+      'FORBIDDEN',
+      'an agent token cannot change the installation — sign in and save it from Settings',
+    );
+  }
+
   let manifest: AuthoredManifest;
   try {
     manifest =

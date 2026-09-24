@@ -119,7 +119,7 @@ describe('this surface has its own key', () => {
   });
 });
 
-describe('an agent token cannot mint its own successor', () => {
+describe('an agent token cannot widen its own standing', () => {
   const agent: McpRouteDeps = {
     authenticate: async () => ({
       kind: 'authenticated',
@@ -140,6 +140,18 @@ describe('an agent token cannot mint its own successor', () => {
       message:
         'an agent token cannot mint another — sign in and mint one from Settings',
     });
+  });
+
+  test('configureInstallation is refused, so it cannot rewrite auth.gateway', async () => {
+    const response = await handler(agent)(
+      rpc('tools/call', {
+        name: 'configureInstallation',
+        arguments: { manifest: {} },
+      }),
+    );
+    const { result } = await response.json();
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text).code).toBe('FORBIDDEN');
   });
 });
 

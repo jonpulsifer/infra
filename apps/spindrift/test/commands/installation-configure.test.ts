@@ -31,7 +31,11 @@ const clock: Clock = { now: () => FROZEN };
 
 function context(): CommandContext {
   return {
-    principal: { id: crypto.randomUUID(), displayName: 'Operator' },
+    principal: {
+      id: crypto.randomUUID(),
+      displayName: 'Operator',
+      kind: 'human',
+    },
     clock,
     db: database().db,
     manifest: resolved,
@@ -168,6 +172,36 @@ describe('configuring an installation', () => {
 
     expect(result.ok).toBe(true);
     expect((await storedManifest())?.auth.gateway).toEqual(gateway);
+  });
+
+  test('refuses every principal that did not arrive as a human', async () => {
+    await seed();
+    const before = await storedManifest();
+    // What the write would buy an agent: a Gateway reading a header it can
+    // send itself, honoured as a human from the next boot on.
+    const gateway = {
+      adapterKey: 'front-door',
+      issuer: 'https://issuer.example.test',
+      subjectHeader: 'x-agent-says-so',
+    };
+
+    for (const kind of ['agent', undefined] as const) {
+      const base = context();
+      const result = await configureInstallation(
+        { manifest: { ...manifest, auth: { gateway } } },
+        {
+          ...base,
+          principal: { id: base.principal.id, displayName: 'Agent', kind },
+          manifest: { ...resolved, boundary: { trustedGateway: true } },
+        },
+      );
+
+      expect({ kind, result }).toMatchObject({
+        kind,
+        result: { ok: false, failure: { code: 'FORBIDDEN' } },
+      });
+    }
+    expect(await storedManifest()).toEqual(before);
   });
 
   test('refuses a store whose adapter has no address to assume', async () => {
