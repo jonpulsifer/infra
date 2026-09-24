@@ -1,0 +1,48 @@
+---
+title: PBX
+description: Two Asterisk phone switches, one on folly for the four lines of the office phone and one on offsite that connects callers to an ElevenLabs voice agent.
+status: live
+---
+
+The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it carries the four lines of the office phone, cathy, a Cisco SPA504G, to voip.ms, the SIP carrier. On offsite, it answers one voip.ms number and hands each caller to an ElevenLabs voice agent, which the ElevenLabs dashboard configures outside git.
+
+## Use it
+
+| Surface | Address | Who can reach it |
+| --- | --- | --- |
+| SIP, folly | `PBX_SIP_VIP`, port 5060 | The office phone only, from `CATHY_IP` |
+| Provisioning profile, folly | `/cathy.xml` over HTTP at `PBX_SIP_VIP` | The office phone only, from `CATHY_IP` |
+| Phone number, offsite | The agent's voip.ms number | Any caller |
+
+The folly PBX carries each of the four office-phone lines to its own voip.ms sub-account. The offsite PBX opens both of its SIP connections outbound: a registration to voip.ms and calls to ElevenLabs. [Operate the office phone](../runbooks/operate-the-office-phone.md) checks, changes and debugs the office phone.
+
+## Limits
+
+- Every office-phone line, 911 included, depends on folly.
+
+## How it works
+
+Both sites run the Deployment in `clusters/base/apps/pbx/`, with one replica. An init container renders the Asterisk config and fills in the `PBX_*` values from the ConfigMap `pbx-env` and the Secret `pbx-secrets`. External Secrets reads the voip.ms and ElevenLabs credentials from 1Password. Each site's trunks and dialplan are `config/pjsip.conf` and `config/extensions.conf` in its own overlay.
+
+A change to a config file in git rolls the pod, because each generated ConfigMap name has a content hash. A change to `CATHY_IP` or `PBX_SIP_VIP` in cluster-settings does not. Restart the `pbx` Deployment after it. Reloader restarts the pod when `pbx-secrets` changes.
+
+The folly PBX registers each sub-account over TLS and requires SRTP for media. A sidecar serves the provisioning profile from `provision/cathy.xml`.
+
+Asterisk logs every SIP message. Vector removes the SRTP keys and digest responses before VictoriaLogs stores the logs.
+
+## Operate
+
+| Alert | Meaning | Runbook |
+| --- | --- | --- |
+| `PBXDown` | Prometheus has had no metrics from the folly PBX for 5 minutes. | [Operate the office phone](../runbooks/operate-the-office-phone.md) |
+| `PBXTrunkNotRegistered` | A voip.ms sub-account has not been registered for 5 minutes. | [Operate the office phone](../runbooks/operate-the-office-phone.md) |
+| `PBXHandsetOffline` | An office-phone line has not been registered to the PBX for 5 minutes. | [Operate the office phone](../runbooks/operate-the-office-phone.md) |
+
+No alerts watch the offsite PBX.
+
+## Reference
+
+- Manifests: `clusters/base/apps/pbx/`, `clusters/folly/apps/pbx/` and `clusters/offsite/apps/pbx/`
+- Image: `nix/images/asterisk.nix`, built by `.github/workflows/nix-images.yml` and published as `ghcr.io/jonpulsifer/asterisk`
+- Alerts: `clusters/folly/monitoring/pbx-rules.yaml`
+- Addresses: `CATHY_IP` and `PBX_SIP_VIP` in `clusters/folly/config/cluster-settings.yaml`, a divergence that [Topology](../reference/topology.md#rules) records

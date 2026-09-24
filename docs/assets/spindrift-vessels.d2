@@ -1,19 +1,9 @@
-# Spindrift's vessels and the cloud they federate into.
-#
-# A Vessel is the boundary that admits a call or refuses it. A Target is one
-# runtime surface on a vessel, and a Target is what a Component is placed on.
-# Terraform owns every boundary and Flux owns each cluster's platform
-# prerequisites; Spindrift only places workloads inside one.
-#
-# Labels stay short on purpose — the prose on docs/apps/kthx/built-apps.md
-# carries the sentences, this carries the shape. Edges stay few for the same
-# reason: the ownership story belongs in the prose beside it rather than drawn
-# as an arrow every box, which is what turned an earlier revision into
-# spaghetti.
+# kthx built apps: the Vessels, their Targets, and the GCP projects the
+# engine federates into.
 
 vars: {
   d2-config: {
-    layout-engine: dagre
+    layout-engine: elk
     theme-id: 0
     dark-theme-id: 200
     pad: 20
@@ -22,7 +12,7 @@ vars: {
 
 direction: down
 
-control: "Spindrift — a platform workload on offsite, never its own App" {
+control: "kthx engine — a Flux-managed workload on offsite" {
   style.fill-pattern: dots
   grid-columns: 3
   web: web
@@ -30,50 +20,59 @@ control: "Spindrift — a platform workload on offsite, never its own App" {
   db: Postgres {shape: cylinder}
 }
 
-cloud: "The cloud underneath — bluenose and trusted-builds" {
+cloud: "GCP — bluenose and trusted-builds" {
   grid-columns: 3
-  kms: "KMS signer (trusted-builds)\ncore signs one digest" {shape: hexagon}
-  reg: "registry (trusted-builds)\npull-only for vessels" {shape: cylinder}
-  sm: "Secret Manager (bluenose)\nthe one store of record" {shape: cylinder}
+  kms: "KMS signer (trusted-builds)\nsigns each image digest" {shape: hexagon}
+  reg: "Artifact Registry repository i (trusted-builds)\nVessels can only pull" {shape: cylinder}
+  sm: "Secret Manager (bluenose)\nApp config" {shape: cylinder}
 }
 
-targets: Targets {
-  grid-columns: 4
+# The grid fills column by column, so this order puts the three Targets that
+# GCP feeds on the first row.
+targets: "Targets on each Vessel" {
+  grid-columns: 3
 
-  fk: "folly/kubernetes" {
+  fk: "folly cluster: kubernetes" {
     grid-columns: 1
-    ns: HelmRelease → spindrift-apps
+    ns: "HelmRelease or Argo CD Application → app-<app>"
     kyverno: Kyverno {shape: hexagon}
-    ess: gcpsm store
+    ess: gcp-secret-manager store
   }
-  ok: "offsite/kubernetes" {
+  st: "bluenose project: static" {
     grid-columns: 1
-    ns: HelmRelease → spindrift-apps
-    kyverno: Kyverno {shape: hexagon}
-    ess: gcpsm store
+    site: Firebase Hosting release
   }
-  cr: "bluenose/cloudrun" {
+  ok: "offsite cluster: kubernetes" {
+    grid-columns: 1
+    ns: "HelmRelease or Argo CD Application → app-<app>"
+    kyverno: Kyverno {shape: hexagon}
+    ess: gcp-secret-manager store
+  }
+  vc: "Vercel team: vercel" {
+    grid-columns: 1
+    dep: prebuilt deployment
+  }
+  cr: "bluenose project: cloudrun" {
     grid-columns: 1
     svc: Service revision
     ba: Binary Authorization {shape: hexagon}
-    ref: secretKeyRef, resolved in-project
+    ref: secret reference, resolved in-project
   }
-  st: "bluenose/static" {
+  cf: "Cloudflare account: cloudflare-pages" {
     grid-columns: 1
-    site: version → release
-    none: reaches no store {style.stroke-dash: 4}
+    dep: Pages deployment
   }
 }
 
-control -> cloud.sm: put → a pinned reference comes back
-control -> cloud.kms: verify → sign → record
-control -> cloud: every call federates through fml-pool {style.stroke-dash: 4}
-control -> targets: "place — cluster API · runtime API · five static calls" {style.bold: true}
+control -> cloud.sm: writes config, keeps a pinned reference
+control -> cloud.kms: verifies provenance, then signs
+control -> cloud: federates through fml-pool {style.stroke-dash: 4}
+control -> targets: "deploys through the cluster, runtime and edge APIs" {style.bold: true}
 
 cloud.reg -> targets.fk.kyverno
 cloud.reg -> targets.ok.kyverno
 cloud.reg -> targets.cr.ba
 
-cloud.sm -> targets.fk.ess: one store
-cloud.sm -> targets.ok.ess: two paths
-cloud.sm -> targets.cr.ref: native, third path
+cloud.sm -> targets.fk.ess
+cloud.sm -> targets.ok.ess
+cloud.sm -> targets.cr.ref
