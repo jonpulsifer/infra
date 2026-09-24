@@ -10,7 +10,8 @@ metadata:
 
 # NixOS Deploy
 
-Canonical human runbook: `docs/runbooks/deploy-a-nixos-host.md`. Layer
+Canonical human runbook: `docs/runbooks/deploy-a-nixos-host.md`. New x86
+Kubernetes node: `docs/runbooks/add-a-kubernetes-node.md`. Layer
 background: `docs/platform/nixos.md`. Host inventory:
 `docs/hosts/index.md`. This file holds only the agent-specific guidance.
 
@@ -31,8 +32,8 @@ background: `docs/platform/nixos.md`. Host inventory:
 - **A branch deploy is temporary.** Hosts auto-upgrade from `main` daily at
   03:37, so an unmerged config silently reverts. Merge promptly or treat the
   deploy as a test.
-- Every host, k8s nodes included, is declared in `nix/hosts/` and registered in `nix/hosts/default.nix`.
-  Only the Pis and the GCE VM have a `nix/hosts/<name>.nix`.
+- Every host, k8s nodes included, has a `nix/hosts/<name>.nix` and an entry
+  in `nix/hosts/default.nix`.
 - `radiopi0` and `blinkypi0` are armv6l with no binary cache and
   `system.autoUpgrade` disabled — they cross-build on `forge` (aarch64) and are
   pushed with `--target-host`. Never try to build them on-device.

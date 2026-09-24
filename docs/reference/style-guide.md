@@ -3,63 +3,60 @@ title: Style guide
 description: The rules for writing and reviewing wiki pages, runbooks and code comments in this repository.
 ---
 
-This guide is the rule book for wiki pages and code comments in this repository. Writers follow it, and reviewers check each change against it.
+Writers and reviewers apply these rules to wiki pages and code comments. The readers are the owner, then agents, then the public.
 
-## Who reads the wiki
-
-The readers are the owner first, then agents, then the public. Agents read it through the wiki's [Model Context Protocol server](../runbooks/connect-an-agent-to-the-wiki.md).
-
-Readers forget details between visits, so every page follows one rule. Its first paragraph says what the thing is and who uses it. Define each term the first time a page uses it.
-
-The wiki is public. Never put a decrypted secret on a page.
+Open every page with what the thing is and who uses it. Define each lab-specific term on first use. The wiki is public, so never put a decrypted secret on a page.
 
 ## Sections
 
-| Section | Directory | What goes there |
+| Directory | What goes there |
+| --- | --- |
+| `docs/apps/` | One page per running first-party service |
+| `docs/platform/` | Shared systems that apps and hosts depend on |
+| `docs/hosts/` | One sheet per machine |
+| `docs/runbooks/` | Step-by-step procedures |
+| `docs/reference/` | Lookup pages |
+
+File names are lowercase kebab-case. List every page in `docs/nav.yaml`, or the build fails.
+
+| Page | File name | Title |
 | --- | --- | --- |
-| Apps | `docs/apps/` | One page for each first-party service that runs |
-| Platform | `docs/platform/` | The shared systems that apps and hosts depend on |
-| Hosts | `docs/hosts/` | One sheet for each machine |
-| Runbooks | `docs/runbooks/` | Step-by-step procedures |
-| Reference | `docs/reference/` | Lookup pages, such as this guide |
+| App | Its directory under `apps/` | The name people see (`mate.md` is Rowbutt) |
+| Host | The host name | The host name |
+| Runbook | The title in kebab-case | An imperative verb first, as in Deploy a NixOS host |
 
-File names are lowercase kebab-case. `docs/nav.yaml` lists every page, and the build fails on a page it does not list.
+The product in `apps/spindrift/` is kthx. Write `spindrift` only as a path.
 
-An app page's file name is its directory under `apps/`, and its title is the name people see, so `docs/apps/mate.md` is titled Rowbutt. The product in `apps/spindrift/` is kthx, and that directory name appears only as a path.
-
-A host sheet's file name and title are the host name. A runbook title starts with an imperative verb, as in Deploy a NixOS host, and its file name is the title in kebab-case.
-
-Document what runs today. A parked app gets a short page with `status: parked`. The build accepts the `status` values in `STATUSES` in `apps/wiki/build.ts`.
+Document what runs today. A parked app gets a short page with `status: parked`. `STATUSES` in `apps/wiki/build.ts` lists the valid `status` values.
 
 ## Voice
 
-Write short, plain sentences in the present tense, about 25 words at most on concept pages. Reviewers reject the patterns below, and this page alone may quote them.
+Keep sentences to about 25 words. Pages have word budgets: app page 400, platform page 450, runbook 800, host sheet 120. Frontmatter and code blocks do not count. Split a page that exceeds its budget.
 
-| Rule | Write this | Not this |
-| --- | --- | --- |
-| Say what it is | Flux applies it on merge to `main`. | "This is not X. It's Y.", "Not a X. Not a Y. A Z.", "rather than" |
-| Start with the claim | State it. | "Here's the thing", "Let me be clear", "What most people get wrong", "Think about it:" |
-| Use colons for lists, labels and quotes | A separate agent grades it. | "The detail that makes it work: a separate agent grades it." |
-| Prefer is and has | The page lists the alerts. | "serves as a centralized hub", "plays a vital role", "stands as a testament" |
-| Cut trailing -ing clauses | The check fails. | "…, highlighting the need for review" |
-| Cut asides about the text | Delete them. | "The key point is", "As you can see", "In other words" |
-| Name the source | Link it. | "Experts agree", "studies show" |
-| Repeat the right word | node, node | node, machine, box |
-| Write complete sentences | It is small, fast and local. | "Small. And fast. And local.", a question you answer yourself |
-| End on the last concrete point | The last fact or step. | "In conclusion", "Ultimately", a closing metaphor |
-| Plain formatting | A heading over a real section. | Emoji in headings, bold in a sentence, bold as a heading |
-| Present tense | Hosts rebuild from `main`. | "formerly", "used to be", "previously", "no longer", "migrated from" |
-| No process diary | The current fact. | Dates, "measured on riptide", incidents, PR or ticket numbers, `§N`, `.agent/` paths |
-| One sentence of why, after the fact | The fact. One reason. | A paragraph of rationale |
-| Point at the tree | The services are in `apps/`. | A list of the directories in `apps/` |
-| Name the source-of-truth key | The key in `clusters/<site>/config/cluster-topology.json`. | An IP, CIDR or ASN copied from it |
-| Literal words | boundary, record, applies | "door", "seam", "hold latch", "desk", "outer ring", "stamp", "lands", "wedge" |
-| No intensifiers or stock frames | Drop them. | "whole", "exactly", "actually", "simply", "deliberately", "on purpose", "honest", "load-bearing", "fully capable", "self-healing", "entirely", "is what makes", "never … only …" |
-| "Operator" is the human | Flux applies it. | "The operator applies it," for a controller |
+Reviewers reject the patterns below. Only this page may quote them.
+
+| Rule | Reject |
+| --- | --- |
+| Say what it is | "This is not X. It's Y.", "Not a X. Not a Y. A Z.", "rather than" |
+| Start with the claim | "Here's the thing", "Let me be clear", "What most people get wrong", "Think about it:", "The key point is", "As you can see", "In other words" |
+| Use colons for lists, labels and quotes | "The detail that makes it work: a separate agent grades it." |
+| Prefer is and has | "serves as a centralized hub", "plays a vital role", "stands as a testament" |
+| Cut trailing -ing clauses | "…, highlighting the need for review" |
+| Name the source | "Experts agree", "studies show" |
+| Repeat the right word | node, machine and box for one thing |
+| Write complete sentences | "Small. And fast. And local.", a question you answer yourself |
+| End on the last concrete point | "In conclusion", "Ultimately", a closing metaphor |
+| Plain formatting | Emoji in headings, bold in a sentence, bold as a heading |
+| Present tense, no process diary | "formerly", "used to be", "previously", "no longer", "migrated from", dates, "measured on riptide", incidents, PR or ticket numbers, `§N`, `.agent/` paths |
+| At most one sentence of why, after the fact | A paragraph of rationale |
+| Point at the tree and the source-of-truth key | A list of the `apps/` directories, or an IP, CIDR or ASN copied from `clusters/<site>/config/cluster-topology.json` |
+| Literal words, such as boundary and applies | "door", "seam", "hold latch", "desk", "outer ring", "stamp", "lands", "wedge" |
+| No intensifiers or stock frames | "whole", "exactly", "actually", "simply", "deliberately", "on purpose", "honest", "load-bearing", "fully capable", "self-healing", "entirely", "is what makes", "never … only …" |
+| "Operator" is the human | "The operator applies it" for a controller |
 
 ## Page templates
 
-Copy the skeleton for the page type and replace each `<placeholder>`. Leave out a section that has nothing to say. The runbook skeleton is under [Runbooks](#runbooks).
+Copy the skeleton, replace each `<placeholder>`, and leave out empty sections. The runbook skeleton is under [Runbooks](#runbooks).
 
 ### App page
 
@@ -153,24 +150,23 @@ specs:
 
 Runbooks follow [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/) as guidance.
 
-- Keep procedural sentences to 20 words or fewer and descriptive sentences to 25 or fewer.
-- Write one instruction in each sentence.
-- Use the imperative and the active voice. Keep "the" and "a".
+- Keep steps to 20 words or fewer and other sentences to 25 or fewer.
+- Write one instruction in each sentence, in the imperative and the active voice. Keep "the" and "a".
 - Put the condition first: "If the pod restarts, read its logs."
 - Write "make sure" in place of "verify", "ensure" and "confirm".
-- Do not use phrasal verbs such as "set up" or "turn off". Do not use -ing verb forms or contractions in steps.
-- Technical verbs are allowed: run, commit, push, merge, deploy, apply, reconcile, build, restart, delete, open, select, enter, sign in, copy, paste, wait.
+- Do not use phrasal verbs such as "set up". In steps, do not use -ing verb forms or contractions.
+- Technical verbs such as run, commit, deploy, apply, reconcile, restart and sign in are allowed.
 - Put a notice before the step it applies to.
 - After a step that prints output, add a result line.
-- Keep reasons out of steps. Put them in the purpose sentence or a notice.
+- Put reasons in the purpose sentence or a notice, not in steps.
 
 | Notice | Use it for |
 | --- | --- |
 | `[!WARNING]` | Data loss, credential exposure, or damage you cannot undo |
 | `[!CAUTION]` | An outage, or a failure you can recover from |
-| `[!NOTE]` | Information. A note never gives an instruction. |
+| `[!NOTE]` | Information, never an instruction |
 
-A runbook has these sections in this order: a purpose sentence, Before you start, one or more procedures, If something goes wrong, and Related. A runbook that changes live state by hand has a WARNING after the purpose sentence. The WARNING names the exception to the [GitOps rule](../platform/how-changes-ship.md), which forbids changes to live infrastructure by hand.
+A runbook has every skeleton section, in order. It has the WARNING only if it changes live state by hand, which breaks the [GitOps rule](../platform/how-changes-ship.md).
 
 ````markdown
 ---
@@ -207,10 +203,10 @@ description: <What the procedure does, in one sentence.>
 
 ## Code comments
 
-Keep a comment only for a constraint the code cannot show. Such a constraint is a protocol or vendor quirk, a unit, an ordering, a security boundary, or the reason for a specific value.
+Comment only on a constraint the code cannot show: a protocol or vendor quirk, a unit, an ordering, a security boundary, or the reason for a value.
 
 - Put the comment at the line it constrains, in two lines or fewer.
 - Keep a module header to three lines that say what the module is.
-- Write in the present tense. Leave out history, dates, incidents, PR or ticket numbers, `§` references and `.agent/` paths.
+- Follow the present-tense rule in [Voice](#voice).
 - Do not use banners or Markdown.
-- Never edit a comment that a tool reads. These include lint and compiler directives such as `biome-ignore`, `@ts-expect-error` and `shellcheck disable`, build tags, `# renovate:` annotations, shebangs and `BEGIN_TF_DOCS` markers.
+- Never edit a comment that a tool reads: lint and compiler directives such as `biome-ignore`, `@ts-expect-error` and `shellcheck disable`, build tags, `# renovate:` annotations, shebangs and `BEGIN_TF_DOCS` markers.

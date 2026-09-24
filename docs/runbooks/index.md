@@ -8,6 +8,7 @@ Operational procedures for when things misbehave. These pages are served from Cl
 ## The runbooks
 
 - [Deploy a NixOS host](deploy-a-nixos-host.md) — build, deploy, verify, and roll back NixOS hosts
+- [Add a Kubernetes node](add-a-kubernetes-node.md) — declare and install a new x86_64 node
 - [Apply a Terraform change](apply-a-terraform-change.md) — Atlantis-first OpenTofu workflow and local validation
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md) — inspect Flux, reconcile resources, and handle SOPS safely
 - [Operate Postgres](operate-postgres.md) — reach a CloudNativePG database through `kubectl cnpg`, and check whether it has a backup

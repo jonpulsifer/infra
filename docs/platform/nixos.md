@@ -116,4 +116,4 @@ CI additionally builds full closures for a subset (`.github/workflows/nix-ci.yam
 
 ## Not here
 
-The `nixos-rebuild` commands, rollback, adding a Kubernetes node and the auto-upgrade caveat are in [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md). Build commands are in [Test a change](../runbooks/test-a-change.md).
+The `nixos-rebuild` commands, rollback and the auto-upgrade caveat are in [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md). Adding a Kubernetes node is in [Add a Kubernetes node](../runbooks/add-a-kubernetes-node.md). Build commands are in [Test a change](../runbooks/test-a-change.md).

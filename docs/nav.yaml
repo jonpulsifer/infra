@@ -38,6 +38,7 @@ sections:
       - group: Hosts
         items:
           - runbooks/deploy-a-nixos-host.md
+          - runbooks/add-a-kubernetes-node.md
           - runbooks/repair-a-kiosk.md
           - runbooks/install-a-windows-desktop.md
           - runbooks/install-windows-monitoring.md
