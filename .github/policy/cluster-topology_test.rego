@@ -1,9 +1,5 @@
 package main
 
-# Exercises the topology-contract seam: ConfigMap documents in, deny messages
-# out. Mirrors the fixtures the bash predecessor built with `jq` on the real
-# accepted ConfigMaps.
-
 import rego.v1
 
 folly := {
@@ -55,8 +51,7 @@ with_fact(doc, key, value) := result if {
 }
 
 without_fact(doc, key) := result if {
-	# object.union deep-merges nested objects, so it cannot express deletion;
-	# rebuild "data" explicitly instead of unioning away the key.
+	# object.union deep-merges, so it cannot delete a key.
 	result := {
 		"apiVersion": doc.apiVersion,
 		"kind": doc.kind,

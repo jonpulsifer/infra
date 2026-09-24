@@ -19,7 +19,6 @@ jq = "latest"
 k9s = "latest"
 kubectl = "latest"
 kustomize = "latest"
-# Provides pwsh so the Windows dotfiles can be linted on a Linux runner.
 powershell = "latest"
 promtool = "latest"
 rust = "1.98.1"
@@ -27,8 +26,7 @@ shellcheck = "latest"
 shfmt = "latest"
 sops = "latest"
 yq = "latest"
-# tofu is the apply-path binary (Atlantis runs ATLANTIS_DEFAULT_TF_DISTRIBUTION=opentofu);
-# terraform stays installed for anything not yet migrated.
+# Atlantis applies with OpenTofu; run tofu locally to match.
 opentofu = "1.12.6"
 terraform = "latest"
 terraform-docs = "latest"
@@ -56,8 +54,7 @@ run = "tofu fmt -recursive"
 
 [tasks."rust:test"]
 description = "Differential tests for the FML derivation spec (apps/fml-derive-rs)"
-# Through the nix dev shell: mise's rust ships no C toolchain, and rustc needs
-# a linker.
+# rustc needs a C linker; mise's rust has none, the nix dev shell does.
 run = "nix develop -c cargo test --locked --manifest-path apps/fml-derive-rs/Cargo.toml"
 
 [tasks."validation-impact:test"]
@@ -126,9 +123,8 @@ run = "bun run --cwd apps/wiki build"
 
 [tasks."docs:diagrams"]
 description = "Render every *.d2 to the *.svg committed beside it"
-# Each file carries its own layout engine and themes in a `d2-config` var, so
-# this loop needs no per-file flags. The SVGs are committed because the wiki
-# build and the spindrift image build both consume them and neither has d2.
+# Per-file render settings belong in the file's `d2-config` var. The SVGs are
+# committed because the wiki and apps/spindrift builds use them and have no d2.
 run = "bash -lc 'find . -name node_modules -prune -o -name .git -prune -o -name \"*.d2\" -print | while read -r f; do d2 --omit-version --no-xml-tag \"$f\" \"${f%.d2}.svg\"; done'"
 
 [tasks."pki:verify"]
@@ -141,8 +137,7 @@ run = "go -C apps/fml-ceremony test ./cutover/ -v"
 
 [tasks."pki:crosscheck"]
 description = "Differential-check the Go derivation against the independent Rust one, byte for byte"
-# The Rust binary goes through the nix dev shell for a linker; the Go test then
-# runs it directly. FML_DERIVE_RS is what un-skips the harness.
+# nix develop supplies the linker. The Go test skips unless FML_DERIVE_RS is set.
 run = """
 nix develop -c cargo build --release --locked --manifest-path apps/fml-derive-rs/Cargo.toml
 FML_DERIVE_RS="$PWD/apps/fml-derive-rs/target/release/fml-derive" \
@@ -163,15 +158,11 @@ run = [
   "bash -lc 'if [ -z \"$TF_DIR\" ]; then echo \"Set TF_DIR, e.g. TF_DIR=unifi mise run tf:plan\"; exit 1; fi; tofu -chdir=\"$TF_DIR\" init -input=false && tofu -chdir=\"$TF_DIR\" plan'",
 ]
 
-# helper: find bash/sh scripts (excludes python, etc.)
-# Paths are repo-relative: scoping this to dotfiles/ left the repo's own
-# scripts/ unlinted, which is invisible because an empty match still exits 0.
-# The shebang is matched loosely for the same reason: a script written to `sh`
-# rather than `bash` was skipped by a pattern that only knew the one, and the
-# script that went unchecked was the one handling a credential.
 [tasks._scripts]
 description = "List shell scripts in this repo"
 hide = true
+# A script outside these paths or without an sh/bash shebang is never checked,
+# and nothing reports it.
 run = """
 grep -rlE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' dotfiles/.local/bin/* dotfiles/scripts/* scripts/* .github/scripts/* images/*/gh 2>/dev/null
 """
@@ -196,8 +187,8 @@ mise run _scripts | xargs shellcheck
 
 [tasks."lint:ps"]
 description = "Lint PowerShell with PSScriptAnalyzer"
-# The aqua-installed pwsh is a framework-dependent .NET build that wants libicu,
-# which NixOS does not put where it looks. Linting needs no locale data.
+# pwsh aborts with "Couldn't find a valid ICU package" on NixOS. Linting needs
+# no locale data.
 env = { DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1" }
 run = "pwsh -NoProfile -File dotfiles/windows/Invoke-Lint.ps1"
 

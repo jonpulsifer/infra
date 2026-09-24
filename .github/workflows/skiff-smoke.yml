@@ -1,19 +1,8 @@
 name: Skiff Smoke
 
-# A skiff is an ephemeral microVM that serves exactly one job and halts. This
-# is the proof that it can carry one, on demand.
-#
-# What is worth asserting is what a skiff does differently from the ARC
-# runners, and each of these was a live question while the hull was built:
-#   - the guest's /nix/store is the host's, shared read-only over virtiofs,
-#     with a writable overlay on top, so `nix` works with a warm store
-#   - nix-ld resolves the FHS interpreter that downloaded release binaries ask
-#     for, which is the exact failure the ARC image documents
-#   - docker is socket-activated rather than started at boot, so the first
-#     command that needs it is also what starts it
-#
-# The runner deregisters itself afterwards and the skiff powers off; bosun
-# notices the VMM exit and boots a replacement. Nothing here cleans up.
+# Proves on demand that a skiff, a microVM that serves one job, can run a job.
+# The runner deregisters and the skiff powers off afterwards, so nothing here
+# cleans up.
 
 on:
   workflow_dispatch:
@@ -28,11 +17,8 @@ permissions:
 
 jobs:
   skiff:
-    # The NixOS family's assertions; the Ubuntu family has its own job below.
-    # Keyed on the NixOS family rather than on "not skiff-ubuntu": every other
-    # class boots the Ubuntu hull, and naming one of them something that does
-    # not start with `skiff-ubuntu` -- `skiff-offsite` did -- silently sent it
-    # here, to assertions about a /nix/store its guest does not have.
+    # Keyed on the skiff-nixos prefix, because every other class boots the
+    # Ubuntu hull whatever its label.
     if: ${{ startsWith(inputs.label, 'skiff-nixos') }}
     runs-on: ${{ inputs.label }}
     timeout-minutes: 10
@@ -63,10 +49,8 @@ jobs:
           tr ' ' '\n' < /proc/cmdline | grep '^bosun\.'
           test "$(systemd-detect-virt)" = kvm
 
-  # The Ubuntu hull is the ubuntu-latest-fidelity family: an FHS guest with
-  # no Nix in it, flattened from the same runner image ARC runs. What is
-  # worth asserting is exactly that fidelity — plus the same docker and
-  # identity guarantees every skiff makes.
+  # The Ubuntu hull is an FHS guest with no Nix, flattened from the ARC runner
+  # image. This job checks that fidelity and the docker and identity basics.
   skiff-ubuntu:
     if: ${{ !startsWith(inputs.label, 'skiff-nixos') }}
     runs-on: ${{ inputs.label }}

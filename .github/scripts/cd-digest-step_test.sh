@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-# Runs the continuous-delivery digest step end to end against a local remote.
-#
-# `cd-digest-update_test.sh` covers what the script decides. This covers what
-# the step *asks* it, which is where the interesting failure was: the guard was
-# correct and the step handed it half its inputs, so an older run still won. A
-# unit test cannot see that — only running the step can — so the step body is
-# read out of the workflow with `yq` rather than copied here, and this test
-# fails the moment the two disagree.
-#
-# Nothing here reaches the network. The git remote is a bare repository on
-# disk, reached through an `insteadOf` rewrite of the github.com URL the step
-# pushes to, and `gh` and `curl` are stubs on PATH. The curl stub speaks enough
-# of the registry API to exercise the real `revision` read — index, platform
-# manifest, config blob, label — because that read is what the guard believes.
+# Runs the containers.yml digest step end to end, read out of the workflow with
+# yq. The remote is a bare repository on disk, and `gh` and `curl` are stubs.
 
 set -euo pipefail
 
@@ -23,8 +11,7 @@ step_name='Update manifest digest for selective continuous delivery'
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# Isolated so the test cannot read — or write — the developer's git config, and
-# so the URL rewrite below is scoped to this run.
+# Keeps the developer's git config out, and the URL rewrite below in this run.
 export GIT_CONFIG_GLOBAL="$work/gitconfig"
 export GIT_CONFIG_SYSTEM=/dev/null
 : >"$GIT_CONFIG_GLOBAL"
@@ -42,31 +29,22 @@ assert_equal() {
   fi
 }
 
-# --- the step, read out of the workflow -------------------------------------
-
 step="$work/step.sh"
 export STEP_NAME="$step_name"
 yq -r '.jobs.build.steps[] | select(.name == strenv(STEP_NAME)) | .run' "$workflow" >"$step"
 [ -s "$step" ] || fail "no step named '$step_name' in $workflow"
 
-# The step's environment is declared in YAML and supplied here by hand, so a
-# new variable added there without being set here would silently run the step
-# with it unset. Comparing the two lists makes that a failed test instead.
-# `GITHUB_REPOSITORY`, `RUNNER_TEMP` and the rest come from the runner, not
-# from the step, so they are not in this list.
+# run_step supplies the step's env by hand, so a variable added to the YAML
+# fails here instead of running unset. Runner variables are not in the list.
 declared=$(yq -r '.jobs.build.steps[] | select(.name == strenv(STEP_NAME)) | .env | keys | sort | .[]' "$workflow")
 assert_equal 'the step declares exactly the environment this test supplies' \
   $'BUILT_COMMIT\nCD_ACTOR\nDIGEST\nGH_TOKEN\nIMAGE_NAME\nMANIFESTS\nREGISTRY_REPOSITORY' \
   "$declared"
 
-# --- stubs ------------------------------------------------------------------
-
 stubs="$work/stubs"
 mkdir -p "$stubs"
 
-# Every `gh` call the step makes, recorded so the assertions can read them.
-# `pr list` answers with nothing, which is the step's "no pull request open
-# yet" branch.
+# Logs every call. An empty `pr list` answer means no pull request is open yet.
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
@@ -77,9 +55,8 @@ esac
 exit 0
 STUB
 
-# The registry, as far as `revision` is concerned. The fixture file maps a
-# digest to the commit its build came from; a digest that is not in it answers
-# 404, which is what an unreadable pin looks like.
+# The fixture maps a digest to its build commit. An unknown digest fails as an
+# HTTP error, which is how an unreadable pin looks.
 cat >"$stubs/curl" <<'STUB'
 #!/usr/bin/env bash
 url="${!#}"
@@ -114,8 +91,6 @@ export PATH="$stubs:$PATH"
 export REGISTRY_FIXTURE="$work/registry"
 : >"$REGISTRY_FIXTURE"
 publish() { printf '%s %s\n' "$1" "$2" >>"$REGISTRY_FIXTURE"; }
-
-# --- the repository ---------------------------------------------------------
 
 manifest=clusters/offsite/apps/mate/deployment.yaml
 remote="$work/remote.git"
@@ -172,8 +147,8 @@ repository=jonpulsifer/infra
 git config --global \
   "url.file://$remote.insteadOf" "https://x-access-token:$token@github.com/$repository.git"
 
-# Runs the step the way the job does: a depth-1 checkout of the built commit,
-# the matrix values in the environment, everything else left to the step.
+# Like the job: a depth-1 checkout of the built commit, with the matrix values
+# in the environment.
 run_step() {
   local built="$1" built_digest="$2" image="${3:-mate}" manifests="${4:-}"
   local wt="$work/run"
@@ -205,16 +180,8 @@ queued_digest() {
   git -C "$remote" show "$branch:$manifest" 2>/dev/null | grep -oE 'sha256:[0-9a-f]{64}' || true
 }
 
-# --- the regression this guard exists for -----------------------------------
-#
-# `main` still pins the first build, because neither digest pull request has
-# merged. The newer commit's run lands first; then the older commit's run is
-# re-run, which is the documented recovery for a run cancelled before its jobs
-# started. Reading only what `main` pins, the older run sees a first-build
-# commit it is not an ancestor of, writes, and its force-push replaces the
-# newer digest on the shared branch — so the open pull request goes on to merge
-# the older build.
-
+# main pins the first build and no digest pull request has merged. The newer
+# run queues first; a rerun of the older commit must not replace its digest.
 run_step "$c2" "$d2" >"$work/log.c2" 2>&1 || fail "the newer run failed: $(cat "$work/log.c2")"
 assert_equal 'the newer run queues its digest' "$d2" "$(queued_digest)"
 
@@ -224,25 +191,16 @@ assert_equal 'a rerun of an older commit does not clobber a newer digest already
 grep -q '::notice::' "$work/log.c1" \
   || fail 'the rerun skipped without saying so'
 
-# The other order: nothing queued, then the newer build arrives and must win.
 git -C "$remote" update-ref -d "refs/heads/$branch"
 run_step "$c1" "$d1" >"$work/log.c1b" 2>&1 || fail "the first run failed: $(cat "$work/log.c1b")"
 assert_equal 'the first run queues its digest' "$d1" "$(queued_digest)"
 run_step "$c2" "$d2" >"$work/log.c2b" 2>&1 || fail "the newer run failed: $(cat "$work/log.c2b")"
 assert_equal 'a newer build replaces an older digest already queued' "$d2" "$(queued_digest)"
 
-# --- the pull request is a one-line change against current main -------------
-
 assert_equal 'the delivery branch sits directly on current main' \
   "$(git -C "$remote" rev-parse main)" "$(git -C "$remote" rev-parse "$branch^")"
 assert_equal 'the delivery branch changes exactly the deploy target' \
   "$manifest" "$(git -C "$remote" diff --name-only "main..$branch")"
-
-# --- a pin whose provenance cannot be read is still overwritten -------------
-#
-# Skip only on proof: an unreadable queued digest is a digest nobody recorded
-# the provenance of, and refusing to write over it would wedge this image's
-# delivery with no recovery but editing the branch by hand.
 
 unknown=$(digest 9)
 git -C "$remote" update-ref -d "refs/heads/$branch"
@@ -260,12 +218,8 @@ assert_equal 'a queued digest with no readable provenance does not block deliver
 grep -q '::warning::Cannot tell which commit' "$work/log.unknown" \
   || fail 'the unreadable pin was passed over without a warning'
 
-# --- main moved the deploy target since this commit was built ---------------
-#
-# The step rewrites main's copy of the manifest, so the file it must edit is
-# the one main names today. Taking the target list from the built commit names
-# a path main no longer has, and the step fails — every time, for every rerun.
-
+# The step edits main's copy of the manifest, so its targets come from main's
+# deploy map and not from the built commit's.
 git -C "$remote" update-ref -d "refs/heads/$branch"
 renamed=clusters/offsite/apps/mate/workload.yaml
 git -C "$seed" mv "$manifest" "$renamed"
@@ -275,14 +229,11 @@ git -C "$seed" add -A
 git -C "$seed" commit -q -m 'move the deployment manifest'
 git -C "$seed" push -q origin main
 
-# Deliberately the *old* target list, which is what the matrix of a run built
-# before the rename carries.
+# The old target list, as the matrix of a run built before the rename has it.
 run_step "$c2" "$d2" mate "[\"$manifest\"]" >"$work/log.renamed" 2>&1 \
   || fail "a target renamed on main failed the step: $(cat "$work/log.renamed")"
 assert_equal 'a target renamed on main since the build is followed, not refused' \
   "$d2" "$(git -C "$remote" show "$branch:$renamed" | grep -oE 'sha256:[0-9a-f]{64}')"
-
-# --- main dropped the image from its deploy map -----------------------------
 
 jq 'del(.deploy.mate)' "$seed/.github/containers.json" >"$work/map"
 mv "$work/map" "$seed/.github/containers.json"

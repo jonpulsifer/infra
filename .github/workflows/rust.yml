@@ -1,15 +1,8 @@
 name: rust
 
-# apps/fml-derive-rs is an independent second implementation of the FML
-# derivation spec. Routing in this repo is an allow-list: without an entry
-# here a Rust change runs no jobs at all and still reports green, which for a
-# differential check is worse than having no second implementation.
-#
-# apps/fml-ceremony is in the filters too, and deliberately. The differential
-# only means anything if it runs when *either* side moves, and the Go side is
-# the side that changes. go.yml runs `go test ./...` over apps/fml-ceremony,
-# where the differential skips itself for want of a Rust binary; the crosscheck
-# job below is the one that actually runs it.
+# apps/fml-derive-rs is a second implementation of the FML derivation. The
+# filters include apps/fml-ceremony so the differential runs when either side
+# changes; under go.yml it skips itself for want of a Rust binary.
 
 on:
   push:
@@ -39,12 +32,10 @@ jobs:
         working-directory: apps/fml-derive-rs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # rust-toolchain.toml pins the compiler; the runner's preinstalled rustup
-      # honours it, so there is no toolchain action to keep up to date.
+      # The runner's rustup follows rust-toolchain.toml, so no toolchain action.
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
-      # --locked: a differential check that floats its own primitives is not a
-      # check. Cargo.lock is committed for exactly this.
+      # --locked: a differential must not float its own dependencies.
       - run: cargo test --locked
 
   crosscheck:
@@ -57,8 +48,8 @@ jobs:
           go-version-file: apps/fml-ceremony/go.mod
           cache: false
       - run: cargo build --release --locked --manifest-path apps/fml-derive-rs/Cargo.toml
-      # The mise task `pki:crosscheck` is the same two commands through the nix
-      # dev shell, which is only there for a linker the runner already has.
+      # `mise run pki:crosscheck` without its nix dev shell, which only supplies
+      # a linker the runner already has.
       - name: derivation differential
         env:
           FML_DERIVE_RS: ${{ github.workspace }}/apps/fml-derive-rs/target/release/fml-derive

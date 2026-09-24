@@ -25,11 +25,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    # Native aarch64 runner: cloudpi4/homepi4/weatherpi4 build natively as
-    # aarch64-linux (same as nixos-aarch64 in nix-ci.yaml); radiopi0 (armv6l)
-    # cross-compiles from aarch64-linux (nix/hardware/pi0.nix sets
-    # nixpkgs.buildPlatform/hostPlatform). Both want this runner, avoiding
-    # slow qemu emulation either way.
+    # The pi4 hosts build natively on aarch64, and radiopi0 cross-compiles from
+    # aarch64-linux, so neither needs qemu.
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -52,9 +49,8 @@ jobs:
       - name: Build ${{ inputs.host }}
         run: nix build .#nixosConfigurations.${{ inputs.host }}.config.system.build.toplevel
 
-      # OIDC workload identity federation (terraform/network/tailscale/github_actions.tf) —
-      # exchanges this job's GitHub-issued OIDC token for a short-lived,
-      # tag:ci-scoped auth key. No long-lived Tailscale secret in GitHub.
+      # Trades the job's GitHub OIDC token for a short-lived tag:ci auth key, as
+      # declared in terraform/network/tailscale/github_actions.tf.
       - name: Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
@@ -69,8 +65,8 @@ jobs:
 
       - name: Deploy ${{ inputs.host }}
         env:
-          # These hosts are only ever reached over the tailnet; accept the
-          # host key on first contact instead of prompting.
+          # The hosts are reached only over the tailnet, so a new host key is
+          # accepted on first contact.
           NIX_SSHOPTS: -o StrictHostKeyChecking=accept-new
         run: |
           nix shell --inputs-from . nixpkgs#nixos-rebuild-ng -c \

@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Firing alerts from every cluster's Alertmanager, read through the
-# kube-apiserver service proxy — no port-forward, no ingress, no extra creds.
-#
-#   mise run alerts            # every alert, every cluster
-#   mise run alerts jellyfin   # case-insensitive substring over the whole row
-#
-# Clusters come from clusters/*/ so a new site needs no edit here.
+# Lists every cluster's Alertmanager alerts through the kube-apiserver service
+# proxy. `mise run alerts [filter]` keeps rows that match the filter with grep -i.
+# Each clusters/<site>/ directory name is also its kubectl context.
 set -euo pipefail
 
 readonly PROXY=/api/v1/namespaces/monitoring/services/prom-stack-kube-prometheus-alertmanager:9093/proxy/api/v2/alerts

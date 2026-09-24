@@ -7,12 +7,9 @@ on:
     paths:
       - 'docs/**'
       - 'apps/wiki/**'
-      # Diagrams the wiki serves at /assets/; they live with the spindrift
-      # client because its Docker build prunes to that package. See
-      # apps/wiki/build.ts.
+      # The wiki serves these diagrams at /assets/.
       - 'apps/spindrift/src/web/client/diagrams/**'
-      # The contract checks every reference into the wiki from these, and the
-      # wiki keeps no redirects, so a rename anywhere has to run it.
+      # The docs contract checks wiki links in these, and the wiki keeps no redirects.
       - '**/*.md'
       - '.agents/**'
       - 'clusters/**/monitoring/**'
@@ -24,12 +21,9 @@ on:
     paths:
       - 'docs/**'
       - 'apps/wiki/**'
-      # Diagrams the wiki serves at /assets/; they live with the spindrift
-      # client because its Docker build prunes to that package. See
-      # apps/wiki/build.ts.
+      # The wiki serves these diagrams at /assets/.
       - 'apps/spindrift/src/web/client/diagrams/**'
-      # The contract checks every reference into the wiki from these, and the
-      # wiki keeps no redirects, so a rename anywhere has to run it.
+      # The docs contract checks wiki links in these, and the wiki keeps no redirects.
       - '**/*.md'
       - '.agents/**'
       - 'clusters/**/monitoring/**'
@@ -53,15 +47,12 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          # The renderer needs Bun.markdown; pin to the workspace's Bun.
+          # The renderer calls Bun.markdown, so it runs on the workspace's Bun.
           bun-version-file: package.json
 
       - name: Install
         run: bun install --frozen-lockfile
 
-      # Gates the deploy below: the renderer's own validation, every referenced
-      # repo path exists, no past-tense archaeology, and every reference into
-      # the wiki resolves. See AGENTS.md "Writing rule".
       - name: Docs contract
         run: bash .github/scripts/docs-contract.sh
 

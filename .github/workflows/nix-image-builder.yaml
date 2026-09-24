@@ -18,15 +18,11 @@ on:
           - blinkypi0
           - wsl
 concurrency:
-  # Keyed by image, not just ref: these are independent artifacts going to
-  # independent destinations, so dispatching a second one must not cancel the
-  # first.
+  # Keyed by image, so dispatching a second image does not cancel the first.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.image }}
   cancel-in-progress: true
 jobs:
   build:
-    # Build Raspberry Pi images on the native ARM runner. The other image
-    # targets are x86_64 NixOS configurations and use the standard runner.
     runs-on: ${{ (contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' || inputs.image == 'blinkypi0') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -53,9 +49,6 @@ jobs:
 
       - name: Build WSL tarball
         if: ${{ inputs.image == 'wsl' }}
-        # Dotfiles ship in-repo (dotfiles/) and are applied by
-        # nix/system/mise-dotfiles.nix from the system closure on first boot, so
-        # the tarball needs no build-time dotfiles seeding.
         run: sudo ./result/bin/nixos-wsl-tarball-builder ./nixos.wsl
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -69,10 +62,8 @@ jobs:
         with:
           path: result
           glob: "*.raw.tar.gz"
-          # nixpkgs names every googleComputeImage tarball the same thing, so
-          # anything sharing a prefix clobbers its siblings. gce and oldboy
-          # share the bucket root; a target that needs its own image gets its
-          # own prefix.
+          # nixpkgs gives every googleComputeImage tarball one name, so gce and
+          # oldboy overwrite each other here. A separate image needs a prefix.
           destination: homelab-ng-free
           parent: false
           gzip: false

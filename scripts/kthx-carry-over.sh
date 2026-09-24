@@ -1,44 +1,7 @@
 #!/usr/bin/env bash
-# Carry the v1 kthx rows into the v2 control database. One shot, by hand, once.
-#
-# Prints the plan; does nothing until `--apply`. Idempotent either way: every
-# insert is ON CONFLICT DO NOTHING and every copy is --no-clobber, so a run that
-# stopped half way is finished by running it again.
-#
-# WHY THIS IS NOT A JOB
-#
-# The rows live in Spindrift's own control database (`spindrift-db`, namespace
-# `spindrift`) and have to land in `kthx-db`, namespace `kthx`. A `secretKeyRef`
-# does not cross a namespace, so a Job in either namespace can hold exactly one
-# of the two credentials. The gap that closes for a Datastore --
-# `clusters/base/platform/spindrift-datastore-store/` -- is pinned to
-# `remoteNamespace: spindrift-datastores`, so reaching `spindrift-db-app` would
-# take a second ClusterSecretStore plus a Role granting external-secrets
-# `get secrets` over the whole `spindrift` namespace, permanently, to move
-# thirteen rows once.
-#
-# The bucket half cannot be a Job either, and that one is deliberate: the kthx
-# service account holds `roles/storage.objectAdmin` on `bluenose-kthx` and
-# nothing else. It has no read on `bluenose-spindrift-source` and is not getting
-# one -- that bucket holds every vessel's source archives, private repos
-# included, and kthx is a public anonymous-write zone
-# (`terraform/gcp/projects/bluenose/iam.tf`). So the objects are copied by an
-# operator who can see both buckets, which is what makes the rewritten
-# `location` readable afterwards.
-#
-# WHAT IS NOT CARRIED
-#
-# `kthx_kv`. The v1 key->JSON plane is retired; v2's `/api/db` is collections in
-# a database per site and nothing translates between the two. `/_/*` answers
-# 410. The table is dropped by the Spindrift migration in the deletion PR.
-#
-# PREREQUISITES
-#
-# - `kubectl` with the `cnpg` plugin, and a context that reaches offsite.
-# - `gcloud`, authenticated as somebody who can read `bluenose-spindrift-source`
-#   and write `bluenose-kthx`. Neither service account can do both.
-# - The kthx server has booted at least once: it applies its own migrations at
-#   start-up, and there is nothing to insert into until it has.
+# Copies the v1 kthx sites, releases and release objects into the v2 control
+# database and depot bucket. Prints the plan; `--apply` runs it. A rerun is safe:
+# inserts are ON CONFLICT DO NOTHING and copies are --no-clobber.
 set -euo pipefail
 
 CONTEXT=${KTHX_CONTEXT:-offsite}
@@ -66,12 +29,10 @@ die() {
   exit 1
 }
 
-# Spliced into SQL text below, so it is checked rather than trusted. Google's
-# own bucket-name grammar, which has no quote in it.
+# Spliced into SQL below, so it must be a GCS bucket name, which has no quote.
 [[ $BUCKET =~ ^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$ ]] || die "$BUCKET is not a bucket name"
 
-# `-i=false -t=false`: no stdin to forward and no TTY to allocate, which is what
-# lets the output be captured. `-Atq` is one bare value per line.
+# `-i=false -t=false` lets the output be captured; `-Atq` prints bare values.
 source_psql() {
   kubectl cnpg psql -i=false -t=false --context "$CONTEXT" -n "$SOURCE_NAMESPACE" \
     "$SOURCE_CLUSTER" -- -d "$SOURCE_DATABASE" -Atq -v ON_ERROR_STOP=1 -c "$1"
@@ -82,10 +43,7 @@ target_psql() {
     "$TARGET_CLUSTER" -- -d "$TARGET_DATABASE" -Atq -v ON_ERROR_STOP=1 -c "$1"
 }
 
-# --- pre-flight -------------------------------------------------------------
-
-# Two different failures, so two different messages: `[[ ]]` swallows a non-zero
-# status, and an unreachable cluster reads exactly like an un-migrated one.
+# Captured first: inside `[[ ]]` an unreachable cluster would read as un-migrated.
 booted=$(target_psql "select to_regclass('public.sites') is not null") \
   || die "cannot reach $TARGET_CLUSTER in $TARGET_NAMESPACE on context $CONTEXT"
 [[ $booted == t ]] \
@@ -97,37 +55,28 @@ if [[ -z $names ]]; then
   exit 0
 fi
 
-# A carried name becomes a DATABASE and a LOGIN role the first time the site is
-# touched. Anything already wearing that name in the target cluster would make
-# the server's provisioning adopt an object it did not create, so this refuses
-# rather than discovering it later.
+# Each carried name becomes a database and a login role on first touch, and
+# provisioning would adopt an existing object with that name.
 collisions=$(target_psql "
   select datname from pg_database where datname in ($names)
   union
   select rolname from pg_roles where rolname in ($names)")
 [[ -z $collisions ]] || die "the target cluster already holds: $(tr '\n' ' ' <<<"$collisions")"
 
-# --- the plan ---------------------------------------------------------------
-
-# One line per distinct release object: where it is now, and the digest that
-# names it in the kthx depot. v1 stores `sha256:<hex>`; v2 stores the bare hex.
-# Tab separated with the digest first: a v1 object name can carry a space
-# (`x-filename` was taken unsanitised), and the address has to be the unsplit
-# remainder of the line.
+# v1 digests carry a `sha256:` prefix and v2 stores bare hex. Tab-separated,
+# digest first, so a v1 location that contains a space reads as one field.
 copies=$(source_psql "
   select distinct regexp_replace(digest, '^sha256:', '') || E'\t' || location
   from kthx_releases order by 1")
 
+# `provisioned_at` stays null, so the server creates each live site's database
+# and role on first touch or at start-up. Deleted sites never get one.
 sites_sql=$(source_psql "
   select format(
     'insert into sites (name, token_hash, serving, held, created_at, deleted_at) values (%L,%L,%L,%L,%L,%L) on conflict (name) do nothing;',
     name, token_hash, serving, held, created_at, deleted_at)
   from kthx_sites order by name")
 
-# `provisioned_at` is deliberately left null: it is what makes the server create
-# each site's database and role on first touch (or at its next start-up), which
-# is the same repair path a restore uses. The soft-deleted names keep their
-# `deleted_at`, stay taken, and are never given a database.
 releases_sql=$(source_psql "
   select format(
     'insert into releases (site, n, digest, size, location, at) values (%L,%L,%L,%L,%L,%L) on conflict (site, n) do nothing;',
@@ -144,9 +93,7 @@ while IFS=$'\t' read -r hex location; do
   echo "gcloud storage cp --no-clobber $location gs://$BUCKET/releases/$hex.tar.gz"
 done <<<"$copies"
 
-# The plan is what gets pasted into a transcript, so it shows which names, which
-# release and which object -- not the insert text, which carries every site's
-# `token_hash`.
+# Never print the insert text: it carries every site's `token_hash`.
 echo
 echo "# sites to insert into $TARGET_DATABASE (name | serving | held | state)"
 source_psql "
@@ -166,16 +113,15 @@ if ! "$apply"; then
   exit 0
 fi
 
-# --- apply ------------------------------------------------------------------
-
 echo
+# Runs as a person: no service account can read the source archives and write
+# the depot, and the kthx account must never read private-repo sources.
 while IFS=$'\t' read -r hex location; do
   [[ -n $location ]] || continue
   gcloud storage cp --no-clobber "$location" "gs://$BUCKET/releases/$hex.tar.gz"
 done <<<"$copies"
 
-# One `-c` string is one implicit transaction, so the sites land before the
-# releases that reference them or neither lands at all.
+# One `-c` string runs as one transaction, so no release lands without its site.
 target_psql "$sites_sql
 $releases_sql"
 
@@ -187,11 +133,8 @@ target_psql "select
   || ' releases=' || (select count(*) from releases)
   || ' awaiting-database=' || (select count(*) from sites where deleted_at is null and provisioned_at is null)"
 
-# v2's `readTree` is stricter than anything v1 applied on the way in (it refuses
-# a control byte in a name, and a path that is both a file and a directory), so
-# a carried object can be one this boundary would not have written. That failure
-# surfaces as a 503 on the site host and nowhere else, so read it back here
-# rather than leaving it for a visitor to find.
+# v2 refuses some archives v1 accepted, and the only symptom is a 503 on the
+# site host.
 echo
 echo "# carried sites, as the zone answers them"
 while read -r name; do

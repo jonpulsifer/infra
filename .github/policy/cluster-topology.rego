@@ -1,10 +1,7 @@
 package main
 
-# Validates the cluster-topology ConfigMap contract. The JSON files remain the
-# source of truth; this policy only turns their facts into actionable denials.
-#
-# Expects `input` to be the conftest --combine shape: an array of
-# {"contents": <ConfigMap>, "path": <file path>}.
+# Checks the cluster-topology ConfigMap contract. `input` is the conftest
+# --combine shape: an array of {"contents": <ConfigMap>, "path": <file path>}.
 
 import rego.v1
 
@@ -26,8 +23,7 @@ required_keys := {
 
 cidr_keys := {"K8S_NODE_CIDR", "CILIUM_POD_CIDR", "SERVICE_CIDR", "CILIUM_NATIVE_ROUTING_CIDR", "LB_RANGE"}
 
-# range_kind maps the diagnostic name (matching the bash predecessor's
-# variable names) to the fact it reads.
+# Keys are the range names that the overlap denial prints.
 range_kind := {
 	"node_cidrs": "K8S_NODE_CIDR",
 	"pod_cidrs": "CILIUM_POD_CIDR",
@@ -70,9 +66,7 @@ cidr_mask(prefix) := m if {
 	m := bits.lsh(bits.rsh(4294967295, 32 - prefix), 32 - prefix)
 }
 
-# is_canonical_cidr holds when the address portion of the CIDR is exactly its
-# own network address (i.e. the host bits are zero), matching the bash
-# predecessor's `cidr_range` validity check.
+# Holds when the host bits of the address are zero.
 is_canonical_cidr(cidr) if {
 	parts := split(cidr, "/")
 	count(parts) == 2
@@ -115,8 +109,7 @@ is_flux_configmap(i) if {
 	d.metadata.namespace == "flux-system"
 }
 
-# has_flat_string_data gates every fact-level check below, mirroring the bash
-# predecessor's `continue` after a malformed `data` map.
+# Gates every fact-level check below.
 has_flat_string_data(i) if {
 	d := docs[i].contents
 	is_object(d.data)
@@ -134,8 +127,6 @@ all_facts_present(i) if {
 }
 
 dns_entries(facts) := split(facts.CLUSTER_DNS, ",")
-
-# --- per-document structural checks -----------------------------------------
 
 deny contains msg if {
 	some i, _ in docs
@@ -157,8 +148,6 @@ deny contains msg if {
 	not fact_ok(facts, key)
 	msg := sprintf("%s: %s is required", [doc_path(i), key])
 }
-
-# --- per-document fact checks (only once every required fact is present) ---
 
 deny contains msg if {
 	some i, _ in docs
@@ -273,8 +262,6 @@ deny contains msg if {
 	not net.cidr_contains(facts.CILIUM_NATIVE_ROUTING_CIDR, facts[key])
 	msg := sprintf("%s: CILIUM_NATIVE_ROUTING_CIDR must contain %s", [doc_path(i), key])
 }
-
-# --- cross-document contract (only once every document is well-formed) -----
 
 deny contains msg if {
 	some i, _ in docs

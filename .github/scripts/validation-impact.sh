@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Maps changed repository paths to the existing validation targets that own
-# their meaning. This is deliberately the public seam: callers supply paths
-# on stdin and consume one stable target per line on stdout.
+# Maps changed paths on stdin to validation targets, one per line on stdout.
 
 set -euo pipefail
 
@@ -55,8 +53,7 @@ targets() {
 }
 
 terraform_roots() {
-  # A backend declaration distinguishes independently validated roots from
-  # reusable modules beneath terraform/modules.
+  # A backend block marks a root; modules have none.
   grep -rl --include='*.tf' 'backend "' terraform clusters/*/bootstrap | xargs -r -n1 dirname | sort -u
 }
 

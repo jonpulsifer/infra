@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
-# SessionStart hook for Claude Code on the web.
-#
-# Bootstraps the curated validation toolchain (via mise) so linters, terraform
-# validate, and tests work out of the box in a freshly-cloned web container.
-# Web-only, synchronous, idempotent — safe to re-run.
+# SessionStart hook for Claude Code on the web: installs the validation
+# toolchain through mise in a fresh container. Safe to re-run.
 set -euo pipefail
 
-# Only run in the remote (Claude Code on the web) environment.
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
 export MISE_YES=1
 
-# 1. Install mise if it isn't already on PATH.
 if ! command -v mise >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
   if ! command -v mise >/dev/null 2>&1; then
@@ -23,9 +18,7 @@ if ! command -v mise >/dev/null 2>&1; then
 fi
 export PATH="$HOME/.local/bin:$PATH"
 
-# 2. Install the curated set of validation tools. These are pinned unversioned
-#    in mise.toml, so 'latest' matches the repo defaults. (go/bun/node already
-#    ship in the container; nix and the heavier CLIs are intentionally skipped.)
+# The web container ships go, bun and node; nix and the heavier CLIs are skipped.
 echo "==> installing curated tools via mise"
 mise install \
   opentofu \
@@ -36,10 +29,8 @@ mise install \
   kustomize \
   helm
 
-# 3. Install the 1Password CLI (op) straight from 1Password's CDN.
-#    mise's op backends don't work in the scoped web env (the vfox plugin needs
-#    an out-of-scope GitHub clone; aqua can't resolve versions for it), so we
-#    pull the official zip instead. Skipped if op is already present.
+# mise's op backends fail in the scoped web env: the vfox plugin needs a GitHub
+# clone outside the scope, and aqua can't resolve op versions.
 if ! command -v op >/dev/null 2>&1; then
   echo "==> installing 1Password CLI (op)"
   case "$(uname -m)" in
@@ -66,15 +57,12 @@ if ! command -v op >/dev/null 2>&1; then
   fi
 fi
 
-# 4. Persist PATH + mise settings into the session.
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   {
     # shellcheck disable=SC2016  # written literally so it expands in the session shell, not here
     echo 'export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"'
     echo 'export MISE_YES=1'
-    # Don't let `mise run <task>` auto-install the full mise.toml toolchain
-    # (gcloud, k9s, the out-of-scope 1password vfox plugin, …). Tasks use the
-    # curated tools installed above; anything else is installed on demand.
+    # Stops `mise run` from installing the whole mise.toml toolchain.
     echo 'export MISE_TASK_RUN_AUTO_INSTALL=0'
   } >>"$CLAUDE_ENV_FILE"
 fi

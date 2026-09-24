@@ -1,19 +1,7 @@
 name: shell
 
-# The repo's own scripts/ was linted nowhere. dotfiles.yml runs the only
-# shellcheck in CI, gated on 'dotfiles/**' and grepping 'dotfiles/.local/bin/*'
-# by hand -- so scripts/alerts.sh and scripts/pki/* were never checked, and
-# neither was dotfiles/scripts/. An empty match exits 0, which is why the gap
-# never announced itself.
-#
-# So: one job that runs the mise tasks, on every path that feeds them. mise is
-# the command source of truth, and a second hand-rolled glob in YAML is how the
-# two drifted apart in the first place.
-#
-# .github/scripts/ is in that list because `mise run lint` already globs it,
-# and CI routing is an allow-list: a path no workflow claims runs no jobs at
-# all and still reports green, so the scripts CI itself depends on were the
-# ones nothing checked.
+# Runs the mise shell checks. CI routing is an allow-list, so a script path
+# missing from the filter below is never checked in CI.
 
 on:
   push:
@@ -43,8 +31,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
-          # Only shfmt is needed beyond the apt shellcheck above; installing the
-          # whole [tools] table here would pull kubectl, tofu and gcloud for a
+          # Only shfmt: all of [tools] would pull kubectl, tofu and gcloud into a
           # lint job.
           install_args: shfmt
       - name: Format and lint

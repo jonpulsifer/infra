@@ -57,8 +57,7 @@
     };
   };
 
-  # Add a host: one file in nix/hosts/ and one entry in nix/hosts/default.nix.
-  # Nothing below needs touching — every output is derived from that registry.
+  # Hosts are declared in nix/hosts/default.nix; every per-host output below derives from it.
   outputs =
     inputs@{ nixpkgs, ... }:
     let

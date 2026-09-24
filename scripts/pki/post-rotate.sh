@@ -1,25 +1,7 @@
 #!/usr/bin/env bash
-# Post-apply glue for terraform/pki cluster CA and signer (re)issuance.
-#
-# After `atlantis apply` creates/rotates the per-cluster CAs or SA token
-# signers, this script:
-#   1. writes the public cert material to terraform/pki/certs/ (committed);
-#      replaced CA and signer certs are kept as *-prev.pem for trust overlap,
-#      each cluster CA gets a current-plus-previous *-ca-bundle.pem, and a
-#      *-ca-chain.pem carrying the cluster CA up to the self-signed root,
-#   2. sops-encrypts each cluster CA and signer private key into the matching
-#      control-plane host's nix/secrets/<host>.sops.yaml — plaintext never
-#      touches disk,
-#   3. regenerates terraform/pki/oidc/<cluster>/{jwks.json,openid-configuration.json}
-#      via apps/fml-pki, and rewrites the one committed certificate copy that
-#      lives outside certs/, clusters/offsite/apps/spindrift/ca-bundle.yaml.
-#
-# Commit the result and let Atlantis upload the refreshed documents, then deploy
-# the control planes per docs/runbooks/apply-a-kubernetes-change.md. Requires:
-# tofu, sops (>= 3.9 for --filename-override), jq and go. All certificate
-# handling goes through apps/fml-pki, so there is no openssl or python
-# dependency. Run from anywhere in the repo; needs op auth only indirectly (tofu
-# reads state, not 1P).
+# Writes the committed certificates, SOPS-encrypted keys and OIDC documents for
+# each named cluster from terraform/pki state, after Atlantis issues or rotates
+# its CA or SA token signer. Rotation steps: terraform/pki/README.md.
 
 set -euo pipefail
 
@@ -32,8 +14,7 @@ if (($# == 0)); then
   exit 2
 fi
 
-# Preflight, because this script writes certificates and rewrites SOPS files as
-# it goes: discovering a missing tool halfway leaves certs/ half-updated.
+# Check every tool first: a failure halfway leaves certs/ half-updated.
 missing=()
 for tool in tofu sops jq go; do
   command -v "$tool" >/dev/null || missing+=("$tool")
@@ -45,7 +26,6 @@ if ((${#missing[@]})); then
   exit 1
 fi
 
-# cluster -> control-plane host (sops secret target)
 declare -A control_plane=(
   [folly]="optiplex"
   [offsite]="retrofit"
@@ -58,6 +38,7 @@ mkdir -p "$certs_dir"
 jq -er '.fml_root_cert.value' <<<"$outputs" >"$certs_dir/fml-root.pem"
 jq -er '.fml_intermediate_cert.value' <<<"$outputs" >"$certs_dir/fml-intermediate.pem"
 
+# Private keys go to sops and fml-pki on stdin; plaintext never touches disk.
 sops_set_key() {
   secret_file=$1
   secret_name=$2
@@ -68,18 +49,12 @@ sops_set_key() {
     | sops set --value-stdin "$secret_file" "[\"$secret_name\"]"
 }
 
-# All certificate maths lives in the Go tool; "-" reads the PEM on stdin so a
-# Terraform output never needs a temp file.
 fml_pki() {
   go -C "$repo_root/apps/fml-pki" run . "$@"
 }
 
-# Overlap is keyed on the public key, not the certificate. A certificate can be
-# reissued for the same key — a corrected constraint, a longer validity — and
-# nothing that trusted the old one needs to keep trusting it, because the new
-# one verifies every signature the old one did. Keying on the whole
-# certificate turns those reissues into fake rotations: a *-prev.pem nobody
-# needs, and a duplicate signer that publishes the same JWKS kid twice.
+# Overlap is keyed on the public key: a same-key reissue needs no *-prev.pem,
+# and a duplicate signer would publish the same JWKS kid twice.
 cert_key_id() {
   fml_pki spki -
 }
@@ -114,8 +89,7 @@ for cluster in "$@"; do
   verify_key_pair cluster_ca_certs cluster_ca_private_keys "$cluster"
   verify_key_pair sa_signer_certs sa_signer_private_keys "$cluster"
 
-  # Preserve the old CA before replacement. Consumers stage ca-bundle.pem,
-  # rotate every leaf, and only then retire ca-prev.pem in a later commit.
+  # ca-bundle.pem trusts the previous CA too, so old leaves verify until reissued.
   new_ca="$(jq -er ".cluster_ca_certs.value.\"$cluster\"" <<<"$outputs")"
   new_ca_key_id="$(printf '%s\n' "$new_ca" | cert_key_id)"
   current_ca_key_id="$([[ -s $ca_pem ]] && cert_key_id <"$ca_pem" || true)"
@@ -134,18 +108,11 @@ for cluster in "$@"; do
     cat "$ca_prev_pem" >>"$ca_bundle_pem"
   fi
 
-  # The chain file is what kube-controller-manager publishes to every pod as
-  # ca.crt via --root-ca-file. The cluster CA is not self-signed, so on its own
-  # an OpenSSL client cannot build a path out of it and fails with "unable to
-  # get issuer certificate" — which is how Vector lost the API server.
-  #
-  # Deliberately a separate file from ca-bundle.pem. That one is the rotation
-  # overlap set and feeds services.kubernetes.caFile, which also backs
-  # clientCaFile and kubeletClientCaFile: putting the FML anchors there would
-  # let anything issued under the FML Root authenticate to the API server.
+  # Pods get this as ca.crt; OpenSSL clients need a path to the self-signed root.
+  # Keep the anchors out of ca-bundle.pem: it is also the API server's client CA.
   cat "$ca_pem" "$certs_dir/fml-intermediate.pem" "$certs_dir/fml-root.pem" >"$ca_chain_pem"
 
-  # Preserve a replaced signer cert for JWKS overlap during rotation.
+  # The replaced signer stays in the JWKS so the tokens it signed still verify.
   new_signer="$(jq -er ".sa_signer_certs.value.\"$cluster\"" <<<"$outputs")"
   new_signer_key_id="$(printf '%s\n' "$new_signer" | cert_key_id)"
   current_signer_key_id="$([[ -s $signer_pem ]] && cert_key_id <"$signer_pem" || true)"
@@ -159,7 +126,6 @@ for cluster in "$@"; do
     rm "$prev_pem"
   fi
 
-  # Drop the overlap cert once it has expired.
   if [[ -s $prev_pem ]] && fml_pki expired "$prev_pem"; then
     echo "==> $cluster: previous signer expired; removing $prev_pem" >&2
     rm "$prev_pem"
@@ -171,6 +137,7 @@ for cluster in "$@"; do
     sops_set_key "$secret_file" "k8s-cluster-ca-key" cluster_ca_private_keys "$cluster"
     sops_set_key "$secret_file" "k8s-sa-signing-key" sa_signer_private_keys "$cluster"
   else
+    # Reading stdin, sops needs --filename-override (3.9+) to match a creation rule.
     encrypted="$(
       jq -n \
         --argjson cluster_ca_key "$(jq -c ".cluster_ca_private_keys.value.\"$cluster\"" <<<"$outputs")" \
@@ -199,13 +166,8 @@ for cluster in "$@"; do
   done
 done
 
-# The only committed copy of certificate material outside certs/. Spindrift
-# reaches a peer cluster's API server over plain fetch, so NODE_EXTRA_CA_CERTS
-# is its whole trust input, and its runtime will not treat an issuing CA as an
-# anchor -- the peer needs a path all the way to a self-signed root. That makes
-# it this cluster's own CA followed by the peer's chain file. Regenerated here
-# because a hand-copied certificate follows nothing: it survives every rotation
-# unchanged and expires on a date nobody is watching.
+# NODE_EXTRA_CA_CERTS reads one file and needs a path to a self-signed root, so
+# this is offsite's CA plus folly's chain, which ends in the shared FML root.
 spindrift_bundle="$repo_root/clusters/offsite/apps/spindrift/ca-bundle.yaml"
 if [[ -s $spindrift_bundle ]] \
   && [[ -s $certs_dir/offsite-ca.pem ]] \

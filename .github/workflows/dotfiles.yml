@@ -20,10 +20,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install mise
         run: curl -fsSL https://mise.run | sh
-      # Resolves every link source and fails on a missing one. Not
-      # `mise dotfiles apply`: this repo deploys through
-      # scripts/deploy-dotfiles.sh, and with no [dotfiles] section in
-      # mise.toml that command has nothing to check and exits 0 regardless.
+      # Fails on a missing link source. `mise dotfiles apply` exits 0 here,
+      # because dotfiles/mise.toml has no [dotfiles] section.
       - name: Dotfiles link check
         run: |
           export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
@@ -35,10 +33,7 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           cd dotfiles
           grep -rl '^#!/usr/bin/env bash' .local/bin/* scripts/* | xargs shellcheck
-      # pwsh comes from mise (aqua:PowerShell/PowerShell), so the Windows
-      # dotfiles get linted on the Linux runner alongside the bash ones.
-      # The aqua build is framework-dependent and wants libicu for locale data
-      # it does not need here.
+      # mise's pwsh build wants libicu unless globalization is invariant.
       - name: PSScriptAnalyzer
         env:
           DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: '1'

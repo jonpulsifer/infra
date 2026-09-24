@@ -1,38 +1,13 @@
 #!/usr/bin/env bash
-# Renders the shared app seams for both cluster adapters plus each cluster's
-# monitoring overlay without touching live state, then templates every
-# in-repo chart the rendered HelmReleases name,
-# using the values those HelmReleases set.
-#
-# Rendering the kustomizations alone proves the overlays compose; it says
-# nothing about whether the charts they point at can render. A chart guard
-# (`{{ fail }}`) or any other template error only surfaced at Flux reconcile
-# time, which is downtime rather than a red check. The values are the input
-# that matters: a chart templated with its own `values.yaml` defaults would
-# miss a key that only a cluster's HelmRelease declares.
+# Renders every Flux Kustomization path in clusters/, templates each in-repo
+# chart a rendered HelmRelease names with that release's values, and checks the
+# oauth2-proxy cookie scope and ext_authz redirect.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# Each entry is a path some Flux Kustomization names, so an overlay that is its
-# own `spec.path` belongs here in its own right — being under `clusters/*/apps`
-# does not mean the aggregate overlay includes it. oauth2-proxy is exactly that
-# case, and it was rendered by nothing until it was listed.
-# Every path a Flux Kustomization in this repo names, derived rather than
-# listed.
-#
-# This was a hand-maintained array, and it had drifted to 11 of the 46 paths the
-# two clusters actually reconcile. Everything else — kyverno,
-# external-secrets-operator, onepassword-connect, both `flux-system` overlays,
-# every `networking` overlay, folly's `storage` and `nodes` — was rendered by
-# nothing and merged green. The array's own comment records oauth2-proxy and
-# cloudnative-pg being missed the same way; the lesson kept being applied to one
-# directory at a time instead of to the list.
-#
-# A path is included when a `Kustomization` declares it and the directory is in
-# this repo. Paths from other sources (upstream `k8s/`, `config/crd/...`) are
-# not ours to render.
+# Every Flux Kustomization spec.path that is a directory in this repo.
 mapfile -t OVERLAYS < <(
   grep -rl 'kustomize.toolkit.fluxcd.io' clusters/ --include='*.yaml' \
     | xargs -r yq eval-all 'select(.kind == "Kustomization") | .spec.path' \
@@ -50,8 +25,7 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# ns/name of every HelmRelease this run actually templated, so the coverage
-# check below can name the ones it never reached.
+# ns/name of every HelmRelease templated, for the coverage check at the end.
 covered="$WORK/covered"
 : >"$covered"
 
@@ -99,10 +73,8 @@ template_releases() {
 
     printf '%s/%s\n' "$ns" "$name" >>"$covered"
 
-    # Flux substitutes ${VAR} postbuild variables from cluster ConfigMaps and
-    # Secrets. Helm does not interpret ${...}, so an unsubstituted value is an
-    # ordinary string here and renders fine — the guards this check exists to
-    # catch are about which keys are declared, not what they expand to.
+    # Flux postBuild variables are unsubstituted here, and Helm renders them as
+    # plain strings.
     if helm template "$release" "$chart" \
       --namespace "$target" \
       --values "$values" \
@@ -118,21 +90,8 @@ template_releases() {
   done <"$list"
 }
 
-# A sign-in that starts at one host and calls back at another needs both hosts
-# inside the cookie's scope, or the browser carries neither cookie across:
-# the CSRF cookie is written where the flow starts and read at the callback,
-# and the session cookie is written at the callback and read back at the App.
-#
-# So oauth2-proxy's `cookie-domain` must cover the host in its own
-# `redirect-url`. That single rule catches both ways this has actually broken:
-# an absent or null `cookie-domain`, which leaves every cookie host-only and
-# unreadable one hop later; and a `cookie-domain` naming the *other* cluster's
-# apex, which a strategic merge produces silently the moment an overlay omits
-# the key (see `clusters/offsite/apps/oauth2-proxy/helm-release-patch.yaml`).
-#
-# Flux has not substituted its `${VAR}` postbuild values at this point, and that
-# is what makes the second case visible: comparing the literal tokens is exactly
-# how `.${SECRET_DOMAIN}` under `oauth2.${SPINDRIFT_DOMAIN}` fails to match.
+# oauth2-proxy's cookie-domain must cover its redirect-url host, or neither
+# cookie crosses between the sign-in host, the callback and the App.
 cookie_checks=0
 cookie_scope_contract() {
   local rendered="$1" overlay="$2"
@@ -144,10 +103,12 @@ cookie_scope_contract() {
 
     host="${url#*://}"
     host="${host%%/*}"
+    # Compared before Flux substitution, so a base domain variable left in place
+    # by an overlay that omits cookie-domain does not match.
     rest="${host%"$domain"}"
 
-    # `rest` empty means cookie-domain equals the callback host exactly: a
-    # host-only cookie the App can never read, which is the loop, not a fix.
+    # An empty `rest` means cookie-domain is the callback host: a host-only cookie
+    # the App cannot read.
     if [ -z "$domain" ] || [ "$rest" = "$host" ] || [ -z "$rest" ]; then
       printf '  FAILED %s/%s (%s): cookie-domain "%s" does not cover the redirect-url host "%s"\n' \
         "$ns" "$name" "$overlay" "$domain" "$host"
@@ -155,10 +116,8 @@ cookie_scope_contract() {
     else
       printf '  cookie scope %s/%s: "%s" covers "%s"\n' "$ns" "$name" "$domain" "$host"
     fi
-    # `extraArgs` is a map for oauth2-proxy and a sequence for external-dns and
-    # cert-manager. Indexing a sequence by name is a hard yq error rather than an
-    # empty result, so the shape is checked before the key — nothing caught that
-    # while those overlays were rendered by nobody.
+    # extraArgs is a sequence in some charts, and indexing a sequence by name is
+    # a yq error, so the type is checked first.
   done < <(yq eval-all '
     select(.kind == "HelmRelease")
     | select(.spec.values.extraArgs | type == "!!map")
@@ -171,20 +130,8 @@ cookie_scope_contract() {
   ' "$rendered")
 }
 
-# Where the browser is sent after it signs in.
-#
-# Nothing on the ExternalAuth check path hands oauth2-proxy an origin: the
-# filter has no field that injects a header, and the `Host` Envoy forwards is
-# equal to the one the proxy already has, which is the comparison
-# `getXForwardedHeadersRedirect` refuses on. The proxy then answers with a bare
-# path, and the callback — on a different host — resolves it against itself. So
-# the origin is composed by the shim beside the proxy, and this is the assertion
-# that it still is.
-#
-# The failure it catches is silent: the check keeps passing, every App keeps
-# serving, and only a browser completing a sign-in lands on the wrong host.
-# `proxy_set_header` is named rather than any header directive because
-# replacing, not appending, is what stops a client's own copy at this hop.
+# ExternalAuth hands oauth2-proxy no origin, so the nginx shim beside it sets
+# X-Auth-Request-Redirect, or a sign-in ends on the callback host.
 authz_checks=0
 authz_redirect_contract() {
   local rendered="$1" overlay="$2"
@@ -200,14 +147,12 @@ authz_redirect_contract() {
   grep -q '[^[:space:]]' "$conf" || return 0
   authz_checks=$((authz_checks + 1))
 
+  # proxy_set_header replaces a copy of the header sent by the client.
   target="$(sed -n \
     's/^[[:space:]]*proxy_set_header[[:space:]]\{1,\}X-Auth-Request-Redirect[[:space:]]\{1,\}\(.*\);[[:space:]]*$/\1/p' \
     "$conf")"
 
-  # Absolute, and built from the host the request arrived on. Anything else —
-  # a dropped scheme, a bare `$request_uri`, a deleted directive — is the
-  # host-relative target this whole arrangement exists to replace.
-  #
+  # The target must be absolute and built from the request's own host.
   # shellcheck disable=SC2016  # `$http_host` is nginx's variable, not the shell's
   case "$target" in
     'https://$http_host'*)
@@ -222,11 +167,8 @@ authz_redirect_contract() {
   esac
 }
 
-# Flux generates a kustomization for a directory that has none, so a path with
-# only plain manifests in it still renders. `kubectl kustomize` refuses one, so
-# the same thing is done here against a copy rather than skipping the directory
-# — which is how `cert-manager/issuers` and `external-dns/endpoints` would
-# otherwise stay unrendered.
+# Flux generates a kustomization for a directory without one, and kubectl
+# kustomize does not, so this writes one into a copy.
 render_overlay() {
   local overlay="$1" out="$2" copy
   if [[ -f $overlay/kustomization.yaml || -f $overlay/kustomization.yml ]]; then
@@ -236,10 +178,8 @@ render_overlay() {
   copy="$WORK/gen-${overlay//\//_}"
   mkdir -p "$copy"
   cp -r "$overlay"/. "$copy"/
-  # Every manifest listed by name rather than `kustomize create --autodetect`,
-  # which silently drops a file it cannot parse — the render then succeeds while
-  # quietly missing that resource, which is worse than not rendering at all. A
-  # file that is listed and unparseable fails the build, which is the point.
+  # Each file is listed by name: `kustomize create --autodetect` silently drops a
+  # file it cannot parse.
   {
     printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n'
     (cd "$copy" && find . -type f \( -name '*.yaml' -o -name '*.yml' \) \
@@ -258,8 +198,7 @@ for overlay in "${OVERLAYS[@]}"; do
   authz_redirect_contract "$rendered" "$overlay"
 done
 
-# Same silence problem as the cookie contract below: an `extraObjects` rename
-# or a deleted ConfigMap would leave nothing to check and read green.
+# A renamed extraObjects entry or a deleted ConfigMap would leave nothing to check.
 if [ "$authz_checks" -eq 0 ]; then
   printf '\nNo rendered HelmRelease carries an extraObjects ConfigMap with an\n'
   printf 'nginx.conf, so the ext_authz redirect contract checked nothing. Either\n'
@@ -267,9 +206,7 @@ if [ "$authz_checks" -eq 0 ]; then
   failures=$((failures + 1))
 fi
 
-# The contract above has to have looked at something. `redirect-url` is what
-# selects a release into it, so a rename or a deleted key would otherwise turn
-# the whole check into silence that reads green.
+# A renamed or deleted redirect-url key would leave nothing to check.
 if [ "$cookie_checks" -eq 0 ]; then
   printf '\nNo rendered HelmRelease declares extraArgs.redirect-url, so the cookie\n'
   printf 'scope contract checked nothing. Either the key moved or an overlay is\n'
@@ -277,9 +214,6 @@ if [ "$cookie_checks" -eq 0 ]; then
   failures=$((failures + 1))
 fi
 
-# A HelmRelease that names an in-repo chart but lives outside the overlays above
-# is exactly the gap this script closes, so it is an error rather than silence:
-# either the overlay belongs in OVERLAYS, or the chart is no longer reachable.
 declared="$WORK/declared"
 : >"$declared"
 while IFS= read -r file; do
