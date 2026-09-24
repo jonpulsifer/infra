@@ -7,22 +7,14 @@
 }:
 let
   user = config.users.users.jawn;
-  # Dotfiles live in this monorepo under dotfiles/. Carry just that subtree into the
-  # system closure via the flake source so mise applies from a local store path — no
-  # network clone, no build-time seeding, and it self-heals on every activation.
+  # Only dotfiles/ enters the closure, so mise applies from a store path with no network clone.
   dotfilesSource = builtins.path {
     path = "${inputs.self}/dotfiles";
     name = "mise-dotfiles";
   };
-  # Prebuilt binary via the overlay nix/system/user.nix applies system-wide (both modules
-  # are imported together on every host that has either) — not the from-source jdx/mise
-  # flake input.
   mise = pkgs.mise;
-  # The dotfiles templates key WSL detection off WSL_DISTRO_NAME. WSL sets it for every
-  # session it launches, but activation runs outside one, so on the WSL image
-  # (wsl.enable, only defined when nixos-wsl is imported) supply it ourselves. The
-  # templates only test non-emptiness; the real distro name is chosen at `wsl --import`
-  # time and unknowable here, hence the placeholder fallback.
+  # The templates detect WSL by a non-empty WSL_DISTRO_NAME, which activation does not inherit, so the
+  # WSL image sets a placeholder. wsl.enable exists only when nixos-wsl is imported.
   isWsl = config.wsl.enable or false;
   wslEnv = lib.optionalString isWsl ''WSL_DISTRO_NAME="''${WSL_DISTRO_NAME:-NixOS}" '';
   preserveEnv = "HOME,MISE_YES" + lib.optionalString isWsl ",WSL_DISTRO_NAME";
@@ -33,10 +25,8 @@ lib.mkIf (config.homelab.fleet.miseDotfiles && (user.isNormalUser or false)) {
       "users"
       "groups"
     ];
-    # `|| true` on purpose: a dotfiles problem must not fail an activation and
-    # strand the host. stderr is deliberately *not* discarded, though -- it was,
-    # and a bootstrap that failed every run left no trace anywhere, which is
-    # how the home-manager collision above went unnoticed.
+    # A dotfiles failure must not fail activation and strand the host. Keep stderr so a failing
+    # bootstrap leaves a trace.
     text = ''
       HOME="${user.home}" MISE_YES=1 ${wslEnv}\
       ${pkgs.sudo}/bin/sudo --preserve-env=${preserveEnv} -u ${user.name} \

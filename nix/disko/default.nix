@@ -23,15 +23,13 @@ in
     };
   };
 
-  # GPT, EFI-only. disko owns the partitioning and generates fileSystems
-  # (by-partlabel: /dev/disk/by-partlabel/disk-main-{ESP,nixos,storage}).
+  # disko generates fileSystems that mount by partlabel: disk-main-{ESP,nixos,storage}.
   config.disko.devices.disk.main = {
     type = "disk";
     device = cfg.device;
     content = {
       type = "gpt";
       partitions = {
-        # EFI system partition; systemd-boot is installed here.
         ESP = {
           priority = 1;
           size = "512M";
@@ -43,7 +41,6 @@ in
             mountOptions = [ "umask=0077" ];
           };
         };
-        # Root.
         nixos = {
           priority = 2;
           size = cfg.rootSize;
@@ -53,7 +50,6 @@ in
             mountpoint = "/";
           };
         };
-        # Bulk storage fills the remainder of the disk.
         storage = {
           priority = 3;
           size = "100%";

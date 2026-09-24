@@ -11,8 +11,7 @@
     ../hardware/x86
   ];
 
-  # A PXE boot needs all three artifacts together, so publish them as one
-  # derivation the registry can name like any other `artifact`.
+  # PXE needs all three files, so `artifact` names them as one derivation.
   system.build.netbootBundle = pkgs.symlinkJoin {
     name = "netboot";
     paths = with config.system.build; [
@@ -24,7 +23,7 @@
   };
 
   users.users = {
-    # Remove initialHashedPassword for root and nixos
+    # Drop the installer profile's empty passwords.
     root.initialHashedPassword = lib.mkForce null;
     nixos.initialHashedPassword = lib.mkForce null;
   };
@@ -36,9 +35,8 @@
   networking.hostName = "nixos-netboot";
   networking.wireless.enable = true;
 
-  # why is this a thing that exists
+  # The installer profile permits root SSH login.
   services.openssh.settings.PermitRootLogin = lib.mkForce "no";
 
-  # auto log me in
   services.getty.autologinUser = lib.mkForce config.users.users.jawn.name;
 }

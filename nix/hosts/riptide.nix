@@ -9,13 +9,8 @@
 
   services.k8s.clusterCa.enable = true;
 
-  # simpledrm claims card0 early in boot and i915 replaces it with card1 a
-  # second later, but udev leaves
-  # /dev/dri/by-path/pci-...-platform-simple-framebuffer.0-card pointing at the
-  # card0 that no longer exists. runc cannot recreate a symlink whose target is
-  # missing, so every container handed the DRI directory — which is what the
-  # Intel device plugin does for a gpu.intel.com/i915 claim — dies in
-  # CreateContainerError. Prune the danglers before kubelet can start a pod.
+  # When i915 replaces simpledrm's card0, udev leaves a dangling by-path link to it. runc cannot recreate
+  # a dangling link, so every gpu.intel.com/i915 container fails with CreateContainerError.
   systemd.services.prune-dri-by-path = {
     description = "Remove dangling /dev/dri/by-path symlinks left by the simpledrm handover";
     wantedBy = [ "multi-user.target" ];
@@ -39,8 +34,7 @@
 
   sops.defaultSopsFile = ../secrets/riptide.sops.yaml;
 
-  # bosun no longer runs here, and nothing prunes the drop box: a leftover
-  # bosun.prom keeps exporting the pool it last saw, frozen, forever.
+  # bosun does not run here, and nothing else deletes its textfile, which would export a frozen pool.
   systemd.tmpfiles.rules = [
     "r /var/lib/prometheus-node-exporter-text-files/bosun.prom"
   ];

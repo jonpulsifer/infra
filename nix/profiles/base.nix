@@ -1,9 +1,5 @@
-# The floor every NixOS closure in this repo shares — hosts and images alike.
-#
-# Holds the compatibility baseline plus the option surface that ../profiles/fleet.nix
-# implements. Options are declared here rather than in fleet.nix so that image
-# configurations, which take the floor but not the full host baseline, can still
-# reference them (nix/images/wsl.nix imports mise-dotfiles without the baseline).
+# The floor every NixOS closure shares, hosts and images alike. It declares the homelab.fleet
+# options so images without ./fleet.nix can still set them (nix/images/wsl.nix imports mise-dotfiles).
 { lib, ... }:
 {
   options.homelab.fleet = {

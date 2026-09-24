@@ -1,11 +1,5 @@
-# spore is an NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, DNS,
-# and NTP. Its network identity comes from clusters/folly/config/lab-topology.json;
-# clients.yaml retains the matching DHCP reservation.
-#
-# The single NVMe carries firmware + a capped root partition + NFS data. The
-# sd-image module's default expandOnBoot would grow root across the whole disk,
-# so the first-boot service below grows root to a fixed cap and gives the disk
-# tail to a labeled ext4 partition mounted at /nfs/data.
+# spore: NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, DNS and NTP.
+# First boot grows root to a fixed cap and gives the disk tail to the nfs-data partition at /nfs/data.
 {
   config,
   pkgs,
@@ -21,8 +15,7 @@
     ../services/spore-native-boot.nix
   ];
 
-  # Alpine ran this HAT's NVMe at Gen 3; retain that operating mode instead of
-  # nvme-hat.nix's conservative Gen 2 default.
+  # This board and drive run stable at Gen 3, above nvme-hat.nix's Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
     enable = true;
     value = 3;
@@ -30,16 +23,14 @@
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
-  # Root is capped at 32G and every daily auto-upgrade generation drags a
-  # fresh rackpi5 native-boot image along (~1G delta), so the fleet's
-  # weekly/30d GC keeps a month of images and fills the disk.
+  # Root is capped at 32G and each daily generation carries a ~1G rackpi5 boot image, so the
+  # fleet's 30d GC fills the disk.
   nix.gc = {
     dates = "daily";
     options = "--delete-older-than 7d";
   };
 
-  # Signed native-boot publishing for rackpi5. The cross-host target is wired
-  # in nix/lib/registry.nix, where rackpi5's piBootImg derivation is in scope.
+  # The rackpi5 target is wired in nix/lib/registry.nix, where its piBootImg is in scope.
   services.spore.enable = true;
 
   sdImage.expandOnBoot = false;

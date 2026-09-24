@@ -1,7 +1,5 @@
-# optiplex: folly control-plane node, rooted on a SATA disk.
-#
-# Runs the repo-managed FML cluster CA, so it carries both the service-account
-# signing key and the cluster CA private key from sops.
+# optiplex: folly control-plane node, rooted on a SATA disk. It runs the FML cluster CA,
+# so sops delivers both the service-account signing key and the cluster CA key.
 { ... }:
 {
   imports = [

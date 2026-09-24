@@ -1,11 +1,5 @@
-# The baseline every deployed host gets, applied unconditionally by
-# nix/lib/mkHost.nix. Hosts diverge by setting a `homelab.fleet.*` option, not
-# by omitting an import — an absent capability is visible in the host file
-# rather than inferred from what it forgot to pull in.
-#
-# Image configurations that deliberately want less than this (nix/images/wsl.nix,
-# nix/images/container.nix) take ./base.nix from mkImage and compose their own
-# narrow import list instead.
+# The baseline every deployed host gets, applied by nix/lib/mkHost.nix. Hosts diverge through
+# `homelab.fleet.*` options. Images such as wsl and container take only ./base.nix.
 {
   config,
   lib,
@@ -40,12 +34,8 @@
   i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
   time.timeZone = lib.mkDefault "Canada/Atlantic";
 
-  # Recoverability for headless hosts:
-  # - emergencyAccess: the systemd initrd's root account is locked by default, so
-  #   a failed early mount strands you with "root account is locked" at the
-  #   console. A password hash here makes the initrd emergency shell reachable.
-  # - enableEmergencyMode = false: in stage 2, don't hang at an emergency prompt
-  #   nobody can reach on a failed *non-essential* mount; continue booting.
+  # The systemd initrd locks root, so a hash makes its emergency shell reachable. In stage 2, keep
+  # booting past a failed non-essential mount instead of waiting at a prompt on a headless host.
   boot.initrd.systemd.emergencyAccess = lib.mkDefault "$6$O2c3xQdTDkatgXua$9v3NubfrpZsTK7i5AiufpgB0j4Xt1lv2PTEtpzAb0Vh5sKIeXs9S8cohd2XgTe2NYZNeRxW3Q0xvU9.26Lucp1";
   systemd.enableEmergencyMode = lib.mkDefault false;
 
@@ -60,23 +50,16 @@
   services.prometheus.exporters.node = {
     enable = lib.mkDefault config.homelab.fleet.metrics;
     openFirewall = true;
-    # Unit-state metrics so Prometheus can alert on the services these hosts
-    # exist to run (nfsd/dnsmasq/nginx on spore, coredns on the resolvers, ...).
-    # Scoped with an include regex: the full systemd collector emits ~5
-    # series per unit and these are small Pis.
+    # Unit state for the services these hosts run. The include regex limits series: the full
+    # collector emits about 5 per unit, and these are small Pis.
     enabledCollectors = [ "systemd" ];
     extraFlags = [
       "--collector.systemd.unit-include=(nfs-server|nfs-mountd|rpc-statd|dnsmasq|nginx|spore-native-boot-rackpi5|coredns|chronyd|tailscaled|ddnsd|sshd|harmonia|docker)\\.service"
     ];
   };
 
-  # The docker package ships its own docker.socket with
-  # ListenStream=/run/docker.sock, and virtualisation.docker layers a NixOS
-  # drop-in on top that sets ListenStream again. systemd treats ListenStream as
-  # a list, so the drop-in appends instead of replacing: two listeners on one
-  # path, and the second bind fails with EADDRINUSE. The leading "" is
-  # systemd's list-reset — the same idiom the module already uses for
-  # docker.service's ExecStart.
+  # docker.socket already listens on /run/docker.sock and ListenStream is a list, so the NixOS drop-in
+  # adds a second bind that fails with EADDRINUSE. The leading "" resets the list.
   virtualisation.docker.listenOptions = [
     ""
     "/run/docker.sock"

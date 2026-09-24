@@ -1,8 +1,5 @@
-# Eval-time assertions over the whole fleet: this is where a cross-host
-# coupling gets stated instead of left to convention.
-#
-# These run inside `nix flake check` in seconds and need no builder and no
-# hardware. A failing one throws at evaluation with the offending hosts named.
+# Eval-time assertions across the fleet, for couplings that cross hosts or modules.
+# They run in `nix flake check` without a builder, and a failure names the offending hosts.
 {
   lib,
   pkgs,
@@ -23,17 +20,8 @@ let
   namesWhere = pred: attrs: lib.attrNames (lib.filterAttrs (_: pred) attrs);
 in
 {
-  # Every configuration in the registry still evaluates. Naming it as a check
-  # makes it something you can run on its own, not just a side effect of
-  # `nix flake check` walking nixosConfigurations.
-  #
-  # `unsafeDiscardOutputDependency` is what keeps this a *check* and not a
-  # fleet build. A bare `drvPath` carries a string context that means "build
-  # this derivation and its entire closure", so naming every host's toplevel
-  # here would make the check depend on ~15k derivations across both
-  # architectures — an x86 runner then fails on the first aarch64-only build.
-  # Discarding that context keeps the dependency on the `.drv` file, which
-  # still forces each host to instantiate: exactly the evaluation this asserts.
+  # A bare drvPath would make this check build every host's closure, and an x86 runner fails on the
+  # first aarch64 build. unsafeDiscardOutputDependency keeps only the .drv, so each host still evaluates.
   fleet-hosts-evaluate = pkgs.runCommand "check-fleet-hosts-evaluate" {
     drvPaths = lib.concatStringsSep "\n" (
       lib.mapAttrsToList (
@@ -42,9 +30,8 @@ in
     );
   } "touch $out";
 
-  # The repo-managed cluster CA consumes Terraform PKI outputs by path. Nix
-  # path interpolation is lazy, so a missing cert for a cluster that has not
-  # turned clusterCa on yet fails nothing until the day it does.
+  # The cluster CA reads Terraform PKI outputs by path, and path interpolation is lazy: a missing
+  # cert fails nothing until a host enables clusterCa.
   k8s-cluster-ca-certs =
     let
       missing = lib.unique (
@@ -76,10 +63,7 @@ in
     require "k8s-control-plane-sa-signing-key" (missing == [ ])
       "control-plane nodes without sops.secrets.\"k8s-sa-signing-key\": ${lib.concatStringsSep ", " missing}";
 
-  # Spore's recovery paths cross several modules. Keep the high-risk seams as
-  # one eval-time contract so a future refactor cannot silently restore a
-  # mutable squashfs URL, hard-couple nginx to signing, close TFTP data ports,
-  # or let first-boot registration/NFS race storage setup.
+  # spore's recovery path spans several modules; each entry asserts a coupling a refactor could silently break.
   spore-reliability =
     let
       publisher = spore.systemd.services."spore-native-boot-rackpi5";

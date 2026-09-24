@@ -1,7 +1,5 @@
-# Raspberry Pi 4 driving a full-screen dashboard on an attached display.
-#
-# Hosts using this supply only their wireless networks and whether the kiosk's
-# container port binds publicly.
+# Raspberry Pi 4 driving a full-screen dashboard on an attached display. Hosts add their
+# wireless networks and, optionally, services.kiosk.public.
 { ... }:
 let
   fleet = import ../lib/fleet.nix;

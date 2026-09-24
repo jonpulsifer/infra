@@ -1,10 +1,5 @@
-# `nix run` entry points for reaching the fleet over the tailnet.
-#
-#   nix run .        -- uptime      run on every deploy host, output prefixed
-#   nix run .#forge  -- journalctl  one host, with a pty
-#
-# Both resolve hosts through MagicDNS, so they only work from a machine on the
-# tailnet.
+# `nix run . -- <cmd>` runs a command on every deploy host; `nix run .#<host> -- <cmd>` opens a pty on one.
+# Both resolve hosts through MagicDNS, so they work only from the tailnet.
 {
   mkApps =
     { pkgs, deployHosts }:

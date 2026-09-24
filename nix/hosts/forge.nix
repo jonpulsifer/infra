@@ -1,8 +1,5 @@
-# forge: NVMe-rooted aarch64 build host. Runs `services.buildHost` (Nix remote
-# builder, docker + buildx for native arm64 OCI, and harmonia for a local arm64
-# binary cache fronted by nginx on the lab VLAN).
-#
-# Spore publishes the signed rackpi5 RAM image used by forge's EEPROM fallback.
+# forge: NVMe-rooted aarch64 build host: Nix remote builder, native arm64 OCI builds, and a
+# harmonia cache for the Pi fleet. Its EEPROM falls back to the rackpi5 RAM image spore publishes.
 { config, ... }:
 let
   fleet = import ../lib/fleet.nix;
@@ -19,15 +16,12 @@ in
     enable = true;
     ociBuilder = true;
     binaryCache = "harmonia";
-    # sops-nix's default secret path; build-host's harmonia config reads from
-    # here, fed by sops.secrets."harmonia-cache-key" below.
+    # sops-nix's default path for sops.secrets."harmonia-cache-key" below.
     binaryCacheSigningKeyPath = "/run/secrets/harmonia-cache-key";
   };
 
   sops.defaultSopsFile = ../secrets/forge.sops.yaml;
-  # harmonia's binary-cache signing key. Public half is committed in the clear
-  # at nix/secrets/forge-harmonia-cache.pub so clients can pin it in their
-  # `trusted-public-keys`.
+  # harmonia's signing key. Clients pin the public half, nix/secrets/forge-harmonia-cache.pub.
   sops.secrets."harmonia-cache-key" = { };
   sops.secrets."tailscale-auth-key" = { };
 
@@ -39,9 +33,7 @@ in
     };
   };
 
-  # Front harmonia (bound to 127.0.0.1:5000 by build-host.nix) on the lab VLAN
-  # so the rest of the Pi fleet can pull from it without a new DNS record.
-  # nginx is not in the fleet baseline -- only spore and forge run it today.
+  # Serves harmonia (127.0.0.1:5000, from build-host.nix) to the Pi fleet on the lab VLAN.
   services.nginx = {
     enable = true;
     virtualHosts."forge.${fleet.dnsZone}" = {
@@ -63,8 +55,6 @@ in
     };
   };
 
-  # The NVMe is dedicated to root; no third partition (unlike spore, which
-  # reserves the disk tail for /nfs/data). Standard sd-image expandOnBoot
-  # grows the root to fill the disk on first boot.
+  # Root takes the whole NVMe; spore instead keeps the disk tail for /nfs/data.
   sdImage.expandOnBoot = true;
 }

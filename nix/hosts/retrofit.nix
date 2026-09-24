@@ -1,7 +1,5 @@
-# retrofit: offsite control-plane node.
-#
-# Runs the repo-managed FML cluster CA, so it carries both the service-account
-# signing key and the cluster CA private key from sops.
+# retrofit: offsite control-plane node. It runs the FML cluster CA, so sops delivers
+# both the service-account signing key and the cluster CA key.
 { ... }:
 {
   imports = [
