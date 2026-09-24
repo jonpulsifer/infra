@@ -38,6 +38,6 @@ spec:
       spec:
         containers:
           - name: runner
-            image: ghcr.io/jonpulsifer/actions-runner:latest@sha256:fcf729e182c654d19e52c05d4268406549d83d7b7e519ed5af82b7ff5f3a3485
+            image: ghcr.io/jonpulsifer/actions-runner:latest@sha256:428ac7ff17846eb2c6b0bd4d71f899cad7b0d9f7cc53d80a881c7db5d3c37389
             command: ["/home/runner/run.sh"]
 
