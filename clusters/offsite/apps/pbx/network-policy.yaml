@@ -25,7 +25,10 @@ spec:
             dns:
               - matchPattern: "*.voip.ms"
               - matchPattern: voip.ms
-              - matchPattern: "*.elevenlabs.io"
+              # A bare `*` matches one DNS label. Their SIP host has two
+              # (sip.rtc.elevenlabs.io), so `**` — matching any number of
+              # labels — is what actually lets the lookup through.
+              - matchPattern: "**.elevenlabs.io"
     - toFQDNs:
         - matchPattern: "*.voip.ms"
         - matchName: voip.ms
@@ -36,8 +39,14 @@ spec:
     # 5061 for TLS, which is the transport the endpoint pins. 5060/TCP is
     # allowed alongside it so a fallback to their TCP port does not need a
     # policy change at the moment someone is debugging a handshake.
+    #
+    # A follow-up request such as their BYE goes to the Contact host from
+    # their response, one label under a different domain
+    # (<id>.hosts.rtc.elevenlabs.io) — the DNS rule above resolves it, but
+    # toFQDNs enforces destinations independently and needs its own entry.
     - toFQDNs:
         - matchName: sip.rtc.elevenlabs.io
+        - matchPattern: "*.hosts.rtc.elevenlabs.io"
       toPorts:
         - ports:
             - {port: "5061", protocol: TCP}
@@ -45,7 +54,11 @@ spec:
     # Media, from both far ends. See the same rule in folly's policy: an SDP
     # body names a host nothing here ever resolved, so no FQDN rule can cover
     # it, and without this the call connects and carries silence.
+    #
+    # ElevenLabs' media servers pick from a wider range than our own; rtp.conf
+    # still pins this pod's own RTP sockets to 10000-20000, so this widens
+    # only the destination port the far end may answer from.
     - toEntities: [world]
       toPorts:
         - ports:
-            - {port: "10000", endPort: 20000, protocol: UDP}
+            - {port: "10000", endPort: 60000, protocol: UDP}

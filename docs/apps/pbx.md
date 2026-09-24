@@ -1,10 +1,10 @@
 ---
 title: PBX
-description: Two Asterisk phone switches, one on folly for the four lines of the office phone and one on offsite that connects callers to an ElevenLabs voice agent.
+description: Two Asterisk phone switches, one on folly for the four lines of the office phone and one on offsite, parked, for an ElevenLabs voice agent.
 status: live
 ---
 
-The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it carries the four lines of the office phone, cathy, a Cisco SPA504G, to voip.ms, the SIP carrier. On offsite, it answers one voip.ms number and hands each caller to an ElevenLabs voice agent, which the ElevenLabs dashboard configures outside git.
+The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it carries the four lines of the office phone, cathy, a Cisco SPA504G, to voip.ms, the SIP carrier. On offsite, it hands one voip.ms number to an ElevenLabs voice agent, which the ElevenLabs dashboard assigns outside git, but the pod stays parked at zero replicas today.
 
 ## Use it
 
@@ -12,17 +12,18 @@ The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it
 | --- | --- | --- |
 | SIP, folly | `PBX_SIP_VIP`, port 5060 | The office phone only, from `CATHY_IP` |
 | Provisioning profile, folly | `/cathy.xml` over HTTP at `PBX_SIP_VIP` | The office phone only, from `CATHY_IP` |
-| Phone number, offsite | The agent's voip.ms number | Any caller |
+| Phone number, offsite | The agent's voip.ms number | Nobody — the pod is parked |
 
 The folly PBX carries each of the four office-phone lines to its own voip.ms sub-account. The offsite PBX opens both of its SIP connections outbound: a registration to voip.ms and calls to ElevenLabs. [Operate the office phone](../runbooks/operate-the-office-phone.md) checks, changes and debugs the office phone.
 
 ## Limits
 
 - Every office-phone line, 911 included, depends on folly.
+- The offsite PBX stays parked until its trunk proves TLS and the owner asks for that DID to ring.
 
 ## How it works
 
-Both sites run the Deployment in `clusters/base/apps/pbx/`, with one replica. An init container renders the Asterisk config and fills in the `PBX_*` values from the ConfigMap `pbx-env` and the Secret `pbx-secrets`. External Secrets reads the voip.ms and ElevenLabs credentials from 1Password. Each site's trunks and dialplan are `config/pjsip.conf` and `config/extensions.conf` in its own overlay.
+Both sites run the Deployment in `clusters/base/apps/pbx/`, with one replica; offsite's own overlay patches that to zero while it is parked. An init container renders the Asterisk config and fills in the `PBX_*` values from the ConfigMap `pbx-env` and the Secret `pbx-secrets`. External Secrets reads the voip.ms and ElevenLabs credentials from 1Password. Each site's trunks and dialplan are `config/pjsip.conf` and `config/extensions.conf` in its own overlay.
 
 A change to a config file in git rolls the pod, because each generated ConfigMap name has a content hash. A change to `CATHY_IP` or `PBX_SIP_VIP` in cluster-settings does not. Restart the `pbx` Deployment after it. Reloader restarts the pod when `pbx-secrets` changes.
 

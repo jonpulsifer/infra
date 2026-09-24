@@ -8,6 +8,19 @@ resources:
 
 namespace: pbx
 
+patches:
+  # Parked. The trunk still needs TLS to voip.ms proven live, and the owner
+  # has not asked for DID #2 to ring anyone yet. Everything else here keeps
+  # reconciling — the ExternalSecret still syncs and a config change still
+  # validates — so removing this patch is the whole way to bring it back.
+  - target:
+      kind: Deployment
+      name: pbx
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 0
+
 configMapGenerator:
   # The non-secret half of the trunk. No ${...} of its own, so unlike pbx-site
   # this one is left in Flux's substitution path.
