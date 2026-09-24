@@ -67,13 +67,21 @@ spec:
           type: remap
           inputs:
             - kubernetes_logs
-          # Redacts the SRTP keys and SIP digest responses the PBX logs in clear.
+          # Redacts secrets the pbx and elevenlabs namespaces log in clear: SRTP
+          # keys, SIP digest responses, bearer tokens, the ElevenLabs API key
+          # header, JSON password fields and Discord webhook URLs.
           # Keep `$` out of the program: Flux substitution runs over this file.
           source: |
             ._msg = del(.message)
-            if .kubernetes.pod_namespace == "pbx" && is_string(._msg) {
-              ._msg = replace(string!(._msg), r'inline:\S+', "inline:<redacted>")
-              ._msg = replace(string!(._msg), r'^(Proxy-)?Authorization:.*', "Authorization: <redacted>")
+            if (.kubernetes.pod_namespace == "pbx" || .kubernetes.pod_namespace == "elevenlabs") && is_string(._msg) {
+              msg = string!(._msg)
+              msg = replace(msg, r'inline:\S+', "inline:<redacted>")
+              msg = replace(msg, r'(Proxy-)?Authorization:.*', "Authorization: <redacted>")
+              msg = replace(msg, r'(?i)Bearer\s+\S+', "Bearer <redacted>")
+              msg = replace(msg, r'(?i)xi-api-key:\s*\S+', "xi-api-key: <redacted>")
+              msg = replace(msg, r'"password"\s*:\s*"[^"]*"', "\"password\":\"<redacted>\"")
+              msg = replace(msg, r'https://discord\.com/api/webhooks/\S+', "https://discord.com/api/webhooks/<redacted>")
+              ._msg = msg
             }
         journald_message:
           type: remap
@@ -112,3 +120,157 @@ spec:
             job: "systemd-journal"
             cluster: "${CLUSTER_NAME}"
             host: "{{`{{ host }}`}}"
+      # Vector's own unit tests for the redaction above. Run them with
+      # `nix shell nixpkgs#vector -c vector test <(yq '.spec.values.customConfig' clusters/base/monitoring/vector.yaml)`.
+      tests:
+        - name: redacts an SRTP inline key in pbx SDP
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:AbCdEf0123456789ABCDEFabcdef01234567890123456789ABCD"
+              kubernetes.pod_namespace: pbx
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(contains(msg, "inline:<redacted>"))
+                    assert!(!contains(msg, "AbCdEf0123456789"))
+
+        - name: redacts a SIP digest Authorization header at line start
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: 'Authorization: Digest username="168847",response="deadbeef"'
+              kubernetes.pod_namespace: pbx
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    assert_eq!(._msg, "Authorization: <redacted>")
+
+        - name: redacts a Proxy-Authorization header
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: 'Proxy-Authorization: Digest response="deadbeef"'
+              kubernetes.pod_namespace: pbx
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    assert_eq!(._msg, "Authorization: <redacted>")
+
+        - name: redacts a bearer token in an Authorization header, elevenlabs namespace
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: "tronbyt push failed: POST /v0/devices/abc/push_app 401 Authorization: Bearer sk_live_abcdef0123456789"
+              kubernetes.pod_namespace: elevenlabs
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(!contains(msg, "sk_live_abcdef0123456789"))
+                    assert!(contains(msg, "Authorization: <redacted>"))
+
+        - name: redacts a bare, lowercase bearer token with no Authorization prefix
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: 'tronbyt client sent header set: {"authorization": "bearer sk_live_abcdef0123456789"}'
+              kubernetes.pod_namespace: elevenlabs
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(!contains(msg, "sk_live_abcdef0123456789"))
+                    assert!(contains(msg, "Bearer <redacted>"))
+
+        - name: redacts an xi-api-key header regardless of case
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: "curl -H 'Xi-Api-Key: sk_abcdef0123456789' https://api.elevenlabs.io/v1/convai/phone-numbers/xyz"
+              kubernetes.pod_namespace: elevenlabs
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(!contains(msg, "sk_abcdef0123456789"))
+                    assert!(contains(msg, "xi-api-key: <redacted>"))
+
+        - name: redacts a JSON password field in a trunk PATCH body
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: 'PATCH body: {"inbound_trunk_config":{"credentials":{"username":"pbx-folly","password":"hunter2hunter2"}}}'
+              kubernetes.pod_namespace: elevenlabs
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(!contains(msg, "hunter2hunter2"))
+                    assert!(contains(msg, "\"password\":\"<redacted>\""))
+                    assert!(contains(msg, "\"username\":\"pbx-folly\""))
+
+        - name: redacts a Discord webhook URL
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: "posting recap to https://discord.com/api/webhooks/123456789012345678/AbCdEf-ghIJKL_mnopqrstuvwxyz0123456789"
+              kubernetes.pod_namespace: elevenlabs
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(!contains(msg, "AbCdEf-ghIJKL_mnopqrstuvwxyz0123456789"))
+                    assert!(contains(msg, "https://discord.com/api/webhooks/<redacted>"))
+
+        - name: leaves other namespaces unredacted
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: 'Authorization: Bearer sk_live_abcdef0123456789'
+              kubernetes.pod_namespace: default
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    assert_eq!(._msg, "Authorization: Bearer sk_live_abcdef0123456789")
+
+        - name: journald messages are copied to _msg unchanged
+          input:
+            insert_at: journald_message
+            type: log
+            log_fields:
+              message: "a plain systemd line"
+          outputs:
+            - extract_from: journald_message
+              conditions:
+                - type: vrl
+                  source: |
+                    assert_eq!(._msg, "a plain systemd line")
