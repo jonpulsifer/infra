@@ -1,18 +1,5 @@
-/**
- * The property the settings form is built on (ticket 32 slice 1).
- *
- * The claim is not "this renders nicely". It is that **the set of editable keys
- * is the schema's set, derived, and never a list somebody maintains** — because
- * the manifest is actively losing keys to the chart and will gain others from
- * discovery, and a hand-listed form absorbs neither of those by failing. It
- * absorbs them by editing a key that no longer exists, or by never offering one
- * that appeared, and nothing notices until an installation is misconfigured.
- *
- * So the assertions here are equalities against
- * `installationManifestSchema` itself, plus the same equality over synthetic
- * schemas that gain and lose a key — which is the shape of the change that is
- * happening to the real one right now.
- */
+// The settings form derives its keys from the manifest schema, so a key the
+// schema gains or drops needs no edit to the form.
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { installationManifestSchema } from '../../src/config/manifest.schema.ts';
@@ -34,7 +21,6 @@ import {
   humanize,
 } from '../../src/web/forms/schema.ts';
 
-/** The keys the schema itself declares, read the way a parser would. */
 function schemaKeys(schema: z.ZodType): string[] {
   const shape = (
     schema as unknown as { def: { shape: Record<string, unknown> } }
@@ -50,25 +36,17 @@ function field(fields: readonly FormField[], key: string): FormField {
 
 describe('the form is the schema', () => {
   test('offers exactly the keys the manifest schema declares', () => {
-    // Set equality in one assertion, not two subset checks: a key the form
-    // offers that the schema does not have and a key the schema has that the
-    // form does not offer are the same drift seen from two sides.
     expect(manifestFields().map((each) => each.key)).toEqual(
       schemaKeys(installationManifestSchema),
     );
   });
 
   test('offers them in the schema’s own order', () => {
-    // §16 makes array order meaningful in this document, and an operator
-    // reading a form expects the order the manifest is written in.
     const [first] = manifestFields();
     expect(first?.key).toBe(schemaKeys(installationManifestSchema)[0]);
   });
 
   test('drops a key the schema drops, with no edit here', () => {
-    // Ticket 33 is removing deployment facts from the manifest as this lands.
-    // This is that change, in miniature: the same derivation over a schema
-    // with a key and without it.
     const before = z.object({ kept: z.string(), leaving: z.string() });
     const after = z.object({ kept: z.string() });
 
@@ -107,8 +85,7 @@ describe('what a field knows about itself', () => {
     const auth = field(fields, 'auth').node;
     expect(auth.kind).toBe('object');
     if (auth.kind !== 'object') return;
-    // `auth.gateway` is `null` when passkeys are the only path — a
-    // configuration an operator chooses, so the form has to be able to say it.
+    // `auth.gateway` is null when passkeys are the only sign-in path.
     expect(field(auth.fields, 'gateway').nullable).toBe(true);
     expect(field(fields, 'installation').nullable).toBe(false);
     expect(field(fields, 'installation').optional).toBe(false);
@@ -141,8 +118,6 @@ describe('what a field knows about itself', () => {
     expect(element.kind).toBe('union');
     if (element.kind !== 'union') return;
     expect(element.discriminator).toBe('adapter');
-    // Every arm names itself with the literal it pins, so the selector reads
-    // as the vocabulary rather than as "Option 2".
     expect(element.variants.every((variant) => variant.tag !== null)).toBe(
       true,
     );
@@ -157,9 +132,8 @@ describe('what a field knows about itself', () => {
   });
 
   test('a url is a url in either spelling the schema uses', () => {
-    // `z.url()` states the format on the definition; `z.string().url()` states
-    // it in a check. The manifest schema uses both, and reading only one of
-    // them offers a plain text box for half the URLs in the document.
+    // `z.url()` puts the format on the definition and `z.string().url()` in a
+    // check. The manifest schema uses both.
     expect(describeSchema(z.url())).toEqual({ kind: 'string', format: 'url' });
     expect(describeSchema(z.string().url())).toEqual({
       kind: 'string',
@@ -168,9 +142,7 @@ describe('what a field knows about itself', () => {
   });
 
   test('a shape this module cannot read says so rather than disappearing', () => {
-    // The failure mode that matters. A reflection miss must be visible, because
-    // a field that silently vanished is a key an operator cannot configure and
-    // has no way to notice.
+    // A field that silently vanished would be a key nobody could configure.
     const node = describeSchema(z.map(z.string(), z.string()));
     expect(node.kind).toBe('unsupported');
   });
@@ -181,11 +153,7 @@ describe('what a field knows about itself', () => {
   });
 
   test('a one-or-many key is the list it always was', () => {
-    // `supplyChain.registry` accepts a bare string so that documents written
-    // before it took several keep parsing, and transforms either spelling into
-    // a list. Read as the union it is declared as, that key answered
-    // `unsupported` — so the one manifest value an operator is most likely to
-    // be asked for first was the one value no form could edit. It is the list.
+    // `supplyChain.registry` accepts a string or a list and transforms both to a list.
     const supplyChain = field(fields, 'supplyChain').node;
     if (supplyChain.kind !== 'object')
       throw new Error('supplyChain is not an object');
@@ -197,9 +165,7 @@ describe('what a field knows about itself', () => {
   });
 
   test('an untagged union of unrelated shapes is left alone', () => {
-    // The collapse above recognises one shape and must not become "pick an
-    // arm". Two arms that are not each other's element stay a union, which the
-    // union control renders as honestly as it can rather than guessing.
+    // Only a union of a type and a list of it collapses to a list.
     const node = describeSchema(z.union([z.string(), z.array(z.number())]));
     expect(node.kind).toBe('union');
   });
@@ -222,8 +188,8 @@ describe('editing the document', () => {
   });
 
   test('a key this build does not render survives the edit', () => {
-    // The property that makes an older UI safe against a newer server: the
-    // schema decides what is editable, never what is kept.
+    // The schema decides what is editable, never what is kept, so an older UI
+    // cannot drop a newer server's keys.
     const before = { known: 'one', unknown: 'kept' };
     const after = withValueAt(before, ['known'], 'two');
     expect(valueAt(after, ['unknown'])).toBe('kept');

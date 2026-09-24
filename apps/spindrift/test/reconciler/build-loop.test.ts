@@ -1,12 +1,6 @@
 /**
- * Which placement `runBuildPass` binds a Build's dispatch to.
- *
- * A moved Component deliberately keeps the old pair's desired row until what
- * still serves there is retired, so the rows alone cannot say where a Build
- * belongs. The loop binds every Build to the placement of record —
- * `components.placedTargetId`, the stored fact `placeComponent` moves — and
- * where that placement does not take the Build's shape, says so instead of
- * dispatching anywhere.
+ * `runBuildPass` binds each Build to `components.placedTargetId`, because a
+ * moved Component keeps its old desired row until what serves there is retired.
  */
 import { describe, expect, spyOn, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -45,7 +39,7 @@ const clock: Clock = { now: () => FROZEN };
 
 const BUNDLE_DIGEST = `sha256:${'c'.repeat(64)}`;
 
-/** The build side registered under the fixture's `hosted` route name. */
+/** Registers `route` under the fixture's `hosted` build route name. */
 function registryOf(route: FakeBuildAdapter): AdapterRegistry {
   return {
     deploy: (adapter) =>
@@ -125,9 +119,8 @@ async function movedWebsite() {
     )
     .returning();
 
-  // The move's residue: the old pair's row survives so unplacement can retire
-  // what still serves there, the new pair has its own row, and the placement
-  // of record — the fact the move wrote — names the static Target.
+  // After the move both desired rows remain, and `placedTargetId` names the
+  // static Target.
   await db.insert(componentTargetDesired).values({
     componentId: component!.id,
     targetId: runtimeTarget!.id,
@@ -143,7 +136,7 @@ async function movedWebsite() {
     .set({ placedTargetId: staticTarget!.id })
     .where(eq(components.id, component!.id));
 
-  // The rebuild the move remediation staged: a files Build, PENDING.
+  // The files rebuild the move staged.
   const [build] = await db
     .insert(builds)
     .values({
@@ -180,10 +173,8 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
       await movedWebsite();
     const db = database().db;
 
-    // The old Target's policy admits no configured route. Bound there, this
-    // Build would sit PENDING behind that Target's threshold — so a dispatch
-    // that succeeds is a dispatch whose route and policy were evaluated
-    // against the new Target.
+    // No configured route meets the old Target's policy, so a dispatch that
+    // succeeds was checked against the new Target.
     await db
       .update(targets)
       .set({ minBuildLevel: 3 })
@@ -220,9 +211,8 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
   });
 
   test('a files Build placed on Vercel dispatches — the accept list, not the preferred shape', async () => {
-    // Vercel prefers `vercel-output` for a website and still serves plain
-    // `files`, so a `files` Build staged before a move onto Vercel is not a
-    // stranded shape — it dispatches and the artifact it produces will land.
+    // Vercel prefers `vercel-output` for a website but also serves `files`, so
+    // a `files` Build staged before the move still dispatches.
     const { component, staticTarget, build } = await movedWebsite();
     const db = database().db;
 
@@ -266,10 +256,8 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
       await movedWebsite();
     const db = database().db;
 
-    // Move the Component back onto the image Target: the files Build now
-    // belongs to a placement the Component no longer holds. Binding it to the
-    // image Target anyway would evaluate policy against a Target the artifact
-    // can never land on.
+    // Back on the image Target, no placement the Component holds takes the
+    // files Build.
     await db
       .delete(componentTargetDesired)
       .where(eq(componentTargetDesired.targetId, staticTarget.id));
@@ -282,14 +270,14 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     expect(await runBuildPass(context(registryOf(route)))).toBe(0);
 
     const row = await buildRow(build.id);
-    // Failed, not queued: no configuration makes this row legal, and the
-    // rebuild §3 prescribes is what `deployApp` stages once it is terminal.
+    // No configuration makes this row legal, so it fails, and `deployApp`
+    // stages the rebuild once it is terminal.
     expect(row.status).toBe('FAILED');
     expect(route.built).toHaveLength(0);
     expect(row.dispatchWaitingOn).toBeNull();
 
-    // The sentence goes where the operator reads it, since the row no longer
-    // carries one.
+    // A failed row carries no waiting sentence, so the reason goes to the
+    // attempt log.
     const log = await db
       .select()
       .from(attemptEvents)
@@ -306,8 +294,8 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     const { component, build } = await movedWebsite();
     const db = database().db;
 
-    // Unplacement clears the fact. The desired rows that remain are what
-    // still serves, never a place to bind a Build to.
+    // The desired rows that remain are what still serves, never a place to
+    // bind a Build.
     await db
       .update(components)
       .set({ placedTargetId: null })
@@ -357,8 +345,8 @@ describe('the attempt histogram', () => {
       .set({ placedTargetId: null })
       .where(eq(components.id, component.id));
 
-    // Nowhere to bind is refused before `dispatchBuild`, and recorded by
-    // nothing: the histogram is the attempt's duration, and there was none.
+    // Refused before `dispatchBuild`, so there is no attempt duration to
+    // record.
     expect(await outcomesOf(new FakeBuildAdapter())).toEqual([]);
   });
 });

@@ -1,27 +1,6 @@
-/**
- * What the creation screen does with what detection found, mounted.
- *
- * These are claims about the screen's *behaviour* rather than its markup, and
- * behaviour here is one effect and one command call: the wizard opens claiming
- * a kind, and until something asks `inspectRepository` that claim is the
- * default nobody chose. A static render cannot observe an effect, so this file
- * mounts the screen and answers its one read.
- *
- * Four properties, and they are the four ways this went wrong before:
- *
- * 1. **It asks.** A draft carries `detection` from the moment it exists, with
- *    the sentence "until detection says otherwise" — so a screen that never
- *    asks renders a claim about a repository nobody read.
- * 2. **It offers everything it was told.** `inspectRepository` answers about
- *    every directory it looked at, unsupported ones included with the reason,
- *    and §5 makes that a list for a human to choose from.
- * 3. **It does not choose.** One candidate is a proposal; two is a question,
- *    and taking the alphabetically first is a decision nobody can see being
- *    made.
- * 4. **It does not re-choose.** The same read runs on every reopen of a
- *    durable draft, and applying its proposal a second time reverts — durably,
- *    through the save that follows — what somebody already corrected.
- */
+// Mounted, because detection runs from an effect. The creation screen asks
+// `inspectRepository` on open, lists every directory it read, picks none of
+// several, and does not re-apply a proposal when a draft is reopened.
 import {
   afterAll,
   beforeAll,
@@ -78,11 +57,9 @@ const unsupported = (scope: string, detail: string): InspectedScope => ({
   detail,
 });
 
-/** What `inspectRepository` answers, per test. */
+// What `inspectRepository` answers.
 let scopes: readonly InspectedScope[] = [];
-/** Every command the screen called, in order. */
 let called: string[] = [];
-/** Every draft the screen wrote back, in order. */
 let saved: Draft[] = [];
 
 let dom: DomShim;
@@ -107,8 +84,7 @@ beforeAll(() => {
         };
       }
       if (name === 'saveCreationDraft') {
-        // Recorded rather than counted: what the screen decided on its own is
-        // only visible in what it wrote back.
+        // What the screen decided alone shows only in what it wrote back.
         saved.push((JSON.parse(init.body) as { draft: Draft }).draft);
         return {
           json: async () => ({
@@ -117,8 +93,7 @@ beforeAll(() => {
           }),
         };
       }
-      // `listTargets` re-resolves placement whenever a detection moves the
-      // kind. Answering with the same options keeps that off these assertions.
+      // `listTargets` re-resolves placement when detection moves the kind.
       return {
         json: async () => ({ ok: true, value: { options: TARGET_OPTIONS } }),
       };
@@ -177,7 +152,6 @@ describe('the screen reads the repository it opens on', () => {
     const screen = await mount(clean);
 
     expect(called).toContain('inspectRepository');
-    // And the answer replaces the default the draft was carrying.
     expect(screen.text()).toContain('astro');
     expect(screen.text()).not.toContain('until detection says otherwise');
 
@@ -204,28 +178,21 @@ describe('the screen reads the repository it opens on', () => {
   });
 
   test('a draft nobody has pointed anywhere reads nothing, and asks', async () => {
-    // The guarantee `startCreationDraft` buys by no longer preselecting the
-    // alphabetically-first active repository. A draft used to open naming a
-    // repository nobody chose and reading it before anybody pressed anything,
-    // which is what made every row below read as an answer to a question that
-    // had not been asked.
+    // `startCreationDraft` preselects no repository.
     const screen = await mount({
       ...clean,
       source: { kind: 'repo', repo: '', url: '', subpath: '.' },
     });
 
     expect(called).not.toContain('inspectRepository');
-    // And what is on screen is the question, not a card of consequences.
     const text = screen.text();
     expect(text).toContain('Import your code');
     // Both tiles are on this page, so the header names neither.
     expect(text).toContain('Upload an archive');
-    // No card of consequences, and nothing to press: not one of the four rows
-    // is on screen, and neither is the button that would create an App.
+    // None of the plan rows is on screen yet.
     for (const row of ['Code', 'Type', 'Where it runs']) {
       expect(text).not.toContain(row);
     }
-    // And no directory field, because there is no tree to name a path in yet.
     expect(text).not.toContain('Root directory');
 
     screen.unmount();
@@ -258,11 +225,8 @@ describe('every directory it read is on the screen', () => {
     for (const scope of ['apps/hub', 'apps/ddnsd', 'apps/site']) {
       expect(text).toContain(scope);
     }
-    // The one it could not make sense of is here too, wearing what it found
-    // instead of a sentence about the repository as a whole.
     expect(text).toContain('no package.json, go.mod or Dockerfile');
-    // And nothing was chosen: the alphabetically first candidate is not the
-    // answer, and Deploy waits for one.
+    // Not even the alphabetically first candidate is chosen.
     expect(text).toContain('Nothing is chosen to deploy from example/almanac');
     expect(text).toContain('to fix above');
 
@@ -288,7 +252,7 @@ describe('every directory it read is on the screen', () => {
 
     expect(text).toContain('go.mod is in this directory');
     expect(text).not.toContain('Nothing is chosen');
-    // The Component the proposal names, taken from the scope it was found in.
+    // The proposed Component is named after its scope.
     expect(text).toContain('only');
 
     screen.unmount();
@@ -308,9 +272,7 @@ describe('every directory it read is on the screen', () => {
     });
     const text = screen.text();
 
-    // The detail, not a generic sentence about the repository — and the row
-    // opens itself so the list it refers to is on screen rather than behind an
-    // Edit button.
+    // The row opens itself, so the directory list is on screen.
     expect(text).toContain('does not know how to build . in example/almanac');
     expect(text).toContain('just prose in this directory.');
     expect(text).toContain('Directories in this repo');
@@ -342,16 +304,8 @@ describe('every directory it read is on the screen', () => {
   });
 });
 
-/**
- * Reopening a draft is not correcting it.
- *
- * Drafts are durable rows reachable by URL (`/apps/new/:draftId`), so the read
- * that fills in a fresh draft runs again on every reload and every back
- * navigation. Applying its proposal the second time reverts what somebody
- * already decided — and the save that follows every action makes the reversion
- * permanent, which is what turns a cosmetic flicker into a draft that deploys a
- * different directory than the one on screen.
- */
+// Drafts reopen by URL, so the read that fills a fresh draft runs again.
+// Re-applying its proposal would revert, and then save, what someone decided.
 describe('a draft somebody already answered', () => {
   test('a corrected kind and a typed Component survive the read on open', async () => {
     scopes = [
@@ -377,27 +331,19 @@ describe('a draft somebody already answered', () => {
       },
     });
 
-    // It still asks — the directories stay on screen to choose from.
     expect(called).toContain('inspectRepository');
-    // The corrected kind is still on the Type row, wearing the badge that says
-    // somebody moved it.
     const text = screen.text();
     expect(text).toContain('TypeJob');
     expect(text).toContain('corrected');
-    // And the typed Component name is still `api-worker` rather than `api`.
-    // Applying this read would have renamed it after the scope *and* written —
-    // see the `detect` arm of `draftReducer` — so a save that never happened is
-    // what says the name somebody typed is still theirs.
+    // Applying the read would rename `api-worker` after the scope and save, so
+    // no save means the typed name stands.
     expect(saved).toEqual([]);
 
     screen.unmount();
   });
 
   test('a directory the operator typed is not swapped for the one candidate', async () => {
-    // The sole-candidate proposal is the right answer for a draft nobody has
-    // answered. Here somebody named `apps/ddnsd` — a directory this read has
-    // nothing to say about — and moving them to `apps/hub` would deploy
-    // somewhere they never asked for.
+    // The sole candidate is proposed only for a draft nobody has answered.
     scopes = [
       detected('apps/hub', 'service', 'Bun — a start script is declared'),
     ];
@@ -420,11 +366,8 @@ describe('a draft somebody already answered', () => {
   });
 
   test('but choosing another repository is not a reopen', async () => {
-    // The guard is durable state, which is what makes it survive the reload it
-    // exists for — and what made it survive the picker. A second repository
-    // arrived already answered by the first one's read, so nothing was applied
-    // to it: the kind, the sentence and the ruled-out kinds stayed the previous
-    // repository's, with no blocker and Deploy enabled.
+    // The guard is stored on the draft, so it must reset with the repository or
+    // the new repository's read would apply nothing.
     const answered = draftReducer(clean, {
       type: 'detect',
       scope: 'apps/api',
@@ -450,8 +393,7 @@ describe('a draft somebody already answered', () => {
   });
 
   test('a reason read elsewhere says which directory it is about', async () => {
-    // The draft names `docs` and the sentence under Component was read in
-    // `apps/api`. Rendering it bare would describe a directory nobody named.
+    // The draft names `docs`, but the reason was read in `apps/api`.
     scopes = [
       detected('apps/api', 'service', 'Bun — a start script is declared'),
     ];
@@ -481,17 +423,8 @@ describe('a draft somebody already answered', () => {
   });
 });
 
-/**
- * A read about one directory answers about that directory.
- *
- * This is the settled-subpath path — `onBlur`/Enter on the root directory
- * field — and the property is the whole of it: whatever comes back is about
- * the path that was named, so the reason on screen can never be a sentence
- * about somewhere else. The decision is exercised here rather than through the
- * mounted screen because the DOM shim deliberately has no event system
- * (`test/harness/dom.ts`); the request shape and the decision are what a
- * settled edit *is*.
- */
+// A settled edit to the root directory field reads that one path. Tested as a
+// decision, because the DOM shim has no event system.
 describe('a read about one directory', () => {
   const repo: Draft = {
     ...clean,
@@ -574,9 +507,7 @@ describe('a read about one directory', () => {
   });
 
   test('a sole candidate elsewhere is not an answer about the named directory', () => {
-    // The snap-back: with one candidate in the repository, a settled edit to a
-    // directory detection cannot build used to fall through to the candidate
-    // and rewrite the path out from under whoever typed it.
+    // Falling through to the sole candidate would rewrite the typed path.
     const found = [unsupported('docs', 'just prose in this directory.')];
 
     expect(

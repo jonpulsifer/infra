@@ -1,14 +1,3 @@
-/**
- * The shape of an App, as boxes and the wires between them.
- *
- * The rendering is a `div` per node and a `path` per edge, and neither is worth
- * a test. What is worth one is the layout: it decides how many wires exist and
- * what each says, and both answers come from rules in §3 and §11 that a later
- * edit can invert without anything failing to render.
- *
- * Boxes that overlap, wires that point at nothing, and a label wider than the
- * gap it is centred in are all bugs that look like a picture.
- */
 import { describe, expect, test } from 'bun:test';
 import type { ComponentView, DatastoreView } from '../../src/commands/views.ts';
 import { INGRESS, topology } from '../../src/web/components/topology.tsx';
@@ -45,7 +34,6 @@ function datastore(
   } as DatastoreView;
 }
 
-/** Do two boxes share any area? */
 function overlaps(
   a: { x: number; y: number; width: number; height: number },
   b: { x: number; y: number; width: number; height: number },
@@ -60,16 +48,13 @@ function overlaps(
 
 describe('what gets drawn', () => {
   test('a Component nothing can reach has no ingress at all', () => {
-    // §3's `reach: none` is not "an address nobody uses" — there is no address.
-    // Drawing the Internet beside a `job` would be a wire that does not exist.
+    // `reach: none` means the Component has no address at all.
     const { nodes, edges } = topology([component('worker')], []);
     expect(nodes.some((node) => node.id === INGRESS)).toBe(false);
     expect(edges).toHaveLength(0);
   });
 
   test('and the lane it would have taken is not left empty', () => {
-    // The whole reason the lane is computed rather than fixed: a three-column
-    // grid gives an unexposed single-Component App two columns of whitespace.
     const solo = topology([component('worker')], []);
     const exposed = topology([component('web', { reach: 'public' })], []);
     expect(solo.nodes[0]!.x).toBe(0);
@@ -103,9 +88,8 @@ describe('what gets drawn', () => {
 
 describe('a Datastore is attached to the App, not to one Component', () => {
   test('so every Component gets a wire to it', () => {
-    // §11's column is `datastores.appId`. The variable lands in every
-    // Component of the App, and a wire to only the first would be a picture
-    // that says the worker cannot reach the database.
+    // A Datastore attaches by `datastores.appId`, so its variable lands in
+    // every Component of the App.
     const { edges } = topology(
       [component('web'), component('worker')],
       [datastore('primary')],
@@ -129,8 +113,6 @@ describe('a Datastore is attached to the App, not to one Component', () => {
   });
 
   test('an external store is dashed and a managed one is not', () => {
-    // The only encoding in the picture that a reader cannot infer, which is
-    // why it is also the only one the caption explains.
     const managed = topology([component('web')], [datastore('primary')]);
     expect(managed.edges[0]!.dashed).toBe(false);
 
@@ -142,8 +124,6 @@ describe('a Datastore is attached to the App, not to one Component', () => {
   });
 
   test('two Components sharing one store is two wires converging', () => {
-    // The fact a table of attachments structurally cannot show, and the
-    // reason this component exists at all.
     const { edges } = topology(
       [component('web'), component('worker')],
       [datastore('cache', { engine: 'valkey' })],
@@ -201,9 +181,8 @@ describe('the geometry holds', () => {
   });
 
   test('every label fits the gap it is centred in', () => {
-    // A label is painted on the wire layer and the node cards paint over it,
-    // so one wider than its gap is clipped at both ends rather than crowded.
-    // ~5.6px per character at the 10px mono the label is set in.
+    // Node cards paint over the wire layer, so a label wider than its gap is
+    // clipped. 5.6px is one character of the 10px mono the label is set in.
     const byId = new Map(busy.nodes.map((node) => [node.id, node]));
     for (const edge of busy.edges) {
       const from = byId.get(edge.from)!;
@@ -214,9 +193,7 @@ describe('the geometry holds', () => {
   });
 
   test('the longest variable either engine can produce still fits', () => {
-    // The gap is sized for a fixed vocabulary, so the test names it: if a
-    // third engine arrives with a longer variable, this fails rather than
-    // shipping a clipped label.
+    // The gap is sized for this list; a new engine's variable belongs in it.
     const worst = topology([component('web')], [datastore('primary')]);
     const [from, to] = [worst.nodes[0]!, worst.nodes[1]!];
     const gap = to.x - (from.x + from.width);
@@ -227,8 +204,8 @@ describe('the geometry holds', () => {
 });
 
 describe('the highlight only fires where it separates something', () => {
-  // The rule the picture is read by: a wire is emphasised *against* other
-  // wires, so a colour every wire wears distinguishes nothing.
+  // The component's `emphasise` condition, minus its focus check; it is not
+  // exported.
   const touches = (edge: { from: string; to: string }, id: string) =>
     edge.from === id || edge.to === id;
   const emphasises = (
@@ -239,8 +216,6 @@ describe('the highlight only fires where it separates something', () => {
     !edges.every((edge) => touches(edge, id));
 
   test('the one-Component App lights nothing, because every wire is its own', () => {
-    // The common App, and the case a naive "does it touch the selection"
-    // check turns into a canvas of solid accent.
     const { edges } = topology(
       [component('web', { reach: 'public' })],
       [datastore('primary')],
@@ -249,8 +224,6 @@ describe('the highlight only fires where it separates something', () => {
   });
 
   test('a Component with no wires at all lights nothing either', () => {
-    // Dimming every wire on the canvas to announce that this box has none of
-    // them is a picture of the wrong thing.
     const { edges } = topology(
       [component('web', { reach: 'public' }), component('worker')],
       [],

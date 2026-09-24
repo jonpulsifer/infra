@@ -57,8 +57,7 @@ describe('archive upload endpoint', () => {
     expect(body.value.location).toMatch(/^upload:\/\/[0-9a-f]{64}$/);
     expect(body.value.size).toBe(payload.byteLength);
 
-    // Byte-for-byte, because the format was already the one every route opens
-    // and a needless re-pack would change the digest of an unchanged upload.
+    // A re-pack would change the digest of an unchanged upload.
     const staged = await readStagedArchive(body.value.digest);
     expect(staged).not.toBeNull();
     expect(Buffer.from(staged!).equals(Buffer.from(payload))).toBe(true);
@@ -82,15 +81,14 @@ describe('archive upload endpoint', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.ok).toBe(true);
-    // Renamed, because the staged object is no longer a ZIP and the depot names
-    // it by this extension.
+    // The depot names the object by this extension.
     expect(body.value.filename).toBe('sample.tar.gz');
 
     const staged = await readStagedArchive(body.value.digest);
     expect(staged).not.toBeNull();
     expect(sniffArchiveFormat(staged!)).toBe('gzip');
-    // The digest names what is in the depot, not what was uploaded — the build
-    // hull re-checks it with `sha256sum` before it extracts.
+    // Digest and size are of the staged tar, which the build hull checks with
+    // `sha256sum` before it extracts.
     expect(body.value.size).toBe(staged!.byteLength);
     expect(new TextDecoder().decode(gunzipSync(staged!))).toContain(
       'index.html',
@@ -98,9 +96,6 @@ describe('archive upload endpoint', () => {
   });
 
   test('refuses bytes no build route could open, at the boundary', async () => {
-    // The whole defect in one request: a file named `.zip` that is not one.
-    // This used to stage, sign, dispatch, and fail inside a runner as
-    // ARTIFACT_UNAVAILABLE.
     const request = new Request('http://localhost/internal/upload', {
       method: 'POST',
       headers: { 'x-filename': 'site.zip' },

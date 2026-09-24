@@ -1,18 +1,9 @@
 import { expect, test } from 'bun:test';
 
 /**
- * The web process has to end when Kubernetes asks it to.
- *
- * `initTelemetry` registers a SIGTERM handler to flush the exporter, and
- * registering one replaces the signal's default disposition — nothing ends the
- * process once the handler returns, and `Bun.serve` holds the loop open. The
- * pod then sat for the full 30s grace period and left on a SIGKILL, which put
- * a second copy of a single-replica process beside the old one for the whole
- * window. `web` keeps its rate-limit buckets and its bundle cache in its own
- * memory, so two of it is two of both.
- *
- * Driven as a subprocess, because the assertion is that the process exits and
- * a test runner cannot make that claim about itself.
+ * A SIGTERM listener replaces the default disposition and `Bun.serve` holds the
+ * loop open, so the handler has to exit the process itself. Run as a subprocess
+ * because a test runner cannot assert its own exit.
  */
 test('a served process with a telemetry-style SIGTERM handler exits on SIGTERM', async () => {
   const child = Bun.spawn(

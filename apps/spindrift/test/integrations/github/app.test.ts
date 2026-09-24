@@ -1,17 +1,6 @@
 /**
- * The GitHub App integration (Task 24, §15).
- *
- * Two claims §15 makes are properties of this file rather than of anybody's
- * discipline, and both are asserted here:
- *
- * - **"Storing no token."** What leaves this module — a `FetchedCommit`
- *   staged by `src/domain/source-bundle.ts` — carries no bearer credential.
- * - **Lost access is a state, not a fault.** A selected-repository App can be
- *   un-selected at any time, and the response is a `404` indistinguishable from
- *   a repository that never existed. So `ACCESS_LOST` has to cover `401`, `403`
- *   and `404`, and a rate limit must *not* be mistaken for it — freezing a
- *   repository because an hour's quota ran out would turn a delay into an
- *   operator incident.
+ * The GitHub App client. Nothing it returns carries a bearer credential, and
+ * `ACCESS_LOST` covers a `401`, `403` or `404` but never a rate limit.
  */
 import { describe, expect, test } from 'bun:test';
 import { stageSourceBundle } from '../../../src/domain/source-bundle.ts';
@@ -44,8 +33,7 @@ describe('reading a repository', () => {
     const { app: github } = await app(fake);
     fake.rename('example/renamed');
 
-    // The old name still answers — the host redirects it — and the body is
-    // the only place the rename shows, which is why the name is returned.
+    // GitHub redirects the old name; only the body shows the rename.
     await expect(
       github.repository({ installationId: fake.installationId }, 'example/app'),
     ).resolves.toEqual({ defaultBranch: 'main', fullName: 'example/renamed' });
@@ -85,7 +73,6 @@ describe('fetching one exact commit', () => {
       kind: 'githubApp',
       subject: `installation:${fake.installationId}`,
     });
-    // §15: "fetches the exact commit **once**".
     expect(fake.tarballs).toEqual([commit]);
   });
 
@@ -94,8 +81,7 @@ describe('fetching one exact commit', () => {
     const commit = fake.commitFiles('main', { 'README.md': 'hello' });
     const { app: github } = await app(fake);
 
-    // Asking by branch name is what `stageSourceBundle`'s mismatch check exists
-    // to catch. It can only catch it if this reports what actually resolved.
+    // Only a resolved sha lets `stageSourceBundle` catch a branch name.
     const fetched = await github.fetchExactCommit({
       repository: fake.fullName,
       commit: 'main',
@@ -217,8 +203,7 @@ describe('what the far side refusing means', () => {
     const fake = new FakeGitHub();
     const { app: github } = await app(fake);
 
-    // `readFile` tolerates a 404 and everything else does not. A repository
-    // that answers 404 for *itself* must not be readable as "no such file".
+    // Only `readFile` tolerates a 404; a repository's own 404 is lost access.
     await expect(
       github.repository(
         { installationId: fake.installationId },
@@ -228,15 +213,7 @@ describe('what the far side refusing means', () => {
   });
 });
 
-/**
- * Content negotiation, asserted against the fake directly.
- *
- * Two endpoints here serve something other than plain JSON, and the client gets
- * one media type wrong in each direction — so these assert the *host's* half of
- * the contract, not the client's. A fake that answered everything to everyone
- * would make the client's half untestable, which is exactly how `jobLog` shipped
- * asking for `text/plain` and failed every build in production.
- */
+/** The fake's content negotiation, matching the real API's refusals. */
 describe('the media types this host serves', () => {
   function get(fake: FakeGitHub, path: string, accept: string) {
     return fake.fetch(
@@ -264,8 +241,7 @@ describe('the media types this host serves', () => {
       'application/vnd.github+json',
     );
 
-    // 404 because no run was dispatched — which is the point: negotiation let
-    // this through, and the endpoint got as far as looking the job up.
+    // No run was dispatched, so a 404 means negotiation let the request through.
     expect(answered.status).toBe(404);
   });
 
@@ -277,8 +253,7 @@ describe('the media types this host serves', () => {
     const raw = await get(fake, path, 'application/vnd.github.raw');
     expect(await raw.text()).toBe('version: 1');
 
-    // The default media type answers metadata, so a caller that dropped the raw
-    // override would parse a JSON envelope as if it were the file.
+    // The default media type answers with a JSON metadata envelope.
     const envelope = await get(fake, path, 'application/vnd.github+json');
     expect(await envelope.json()).toMatchObject({ encoding: 'base64' });
   });
@@ -299,9 +274,8 @@ describe('which installations this App operates for', () => {
   });
 
   test('a stranger account is refused, never operated on', async () => {
-    // A public App can be installed by anyone. Naming the accounts this
-    // installation recognises turns everyone else's grant into the same
-    // refusal a missing repository gets — filtered, not merely unrendered.
+    // Anyone can install a public App; an unrecognized account gets the same
+    // refusal as a missing repository.
     const fake = new FakeGitHub({ accountLogin: 'a-stranger' });
     const github = new GitHubApp({
       baseUrl: fake.baseUrl,
@@ -380,8 +354,7 @@ describe('what one exact commit says beyond its sha', () => {
       credential: { installationId: fake.installationId },
     });
 
-    // The whole message: reducing it to a headline is core's call, not the
-    // integration's, so a second host reports the same thing.
+    // The whole message; core decides the headline.
     expect(fetched.message).toBe(
       'fix(web): stop the header wrapping\n\nBody text.',
     );

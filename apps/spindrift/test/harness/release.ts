@@ -1,16 +1,6 @@
 /**
- * A release document for fixtures that insert a Deploy row directly.
- *
- * `deploys.desired` is `NOT NULL` because an intent whose meaning has to be
- * reassembled from rows that have moved since is not an intent. That is a real
- * constraint rather than a formality, so a fixture has to state one — and most
- * fixtures do not care what is in it, which is what this is for.
- *
- * Anything a test *asserts* on — the names that build a hostname, the reach a
- * route is rendered at, the config a delivery carries — is passed as an override
- * rather than defaulted here, because a default that silently disagreed with the
- * `components` row a test also inserted would make the test pass for the wrong
- * reason.
+ * A release document for fixtures that insert a Deploy row directly. Pass what
+ * a test asserts on as an override, so it agrees with the rows the test inserts.
  */
 
 import type { DesiredDocument } from '../../src/domain/desired-state.ts';

@@ -1,37 +1,23 @@
-/**
- * A fake bosun outbox (Task: bosun build route).
- *
- * § Testing: "Fake the far side, not our side." `BosunOutbox` is the seam
- * `src/adapters/build/bosun.ts` polls through; this is the pool that never
- * answers on its own — a test scripts exactly what `get` reports on each
- * poll, the same way `FakeBuildAdapter` scripts a route's result.
- */
+/** A `BosunOutbox` whose `get` replays a scripted state per poll. */
 import type {
   BosunOutbox,
   BosunOutboxState,
 } from '../../../src/adapters/build/bosun.ts';
 
 export interface FakeBosunOutboxOptions {
-  /**
-   * What `get` reports, in poll order, for the one request this fake ever
-   * hands out. The last entry repeats once the script is exhausted — a poll
-   * loop that ran one iteration longer than expected should not fall off the
-   * end of the script into `undefined`.
-   */
+  /** What `get` reports, in poll order. The last entry repeats once exhausted. */
   readonly states?: readonly BosunOutboxState[];
 }
 
 const NEVER_CLAIMED: BosunOutboxState = { state: 'PENDING', result: null };
 
 export class FakeBosunOutbox implements BosunOutbox {
-  /** Every `enqueue`, in call order. */
   readonly enqueued: { id?: string; class: string; request: unknown }[] = [];
-  /** Every id `cancel` was called with, in call order. */
   readonly cancelled: string[] = [];
 
   private readonly states: readonly BosunOutboxState[];
   private reads = 0;
-  /** The one row this fake holds — named by the caller when it names one. */
+  /** The one request this fake holds; `enqueue` renames it when given an id. */
   private id: string;
 
   constructor(options: FakeBosunOutboxOptions = {}) {

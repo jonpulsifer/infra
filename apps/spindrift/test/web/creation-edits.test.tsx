@@ -1,12 +1,5 @@
-/**
- * Editing a draft cannot strand, mislead, or silently drop what was typed.
- *
- * The defects here are one family: state the screen holds and state the server
- * holds drifting apart with no way back. Each one is observed at the seam it
- * lives at — the Deploy sequence as a decision, the recovery through the
- * mounted screen's own effect, the read failure as a prerequisite — because the
- * DOM shim has no event system and typing is not something a test can do here.
- */
+// Draft edits and the server's draft must not drift apart. The DOM shim has no
+// event system, so each case is tested as a decision or through a mounted effect.
 import {
   afterAll,
   beforeAll,
@@ -68,9 +61,6 @@ describe('Deploy after a save that failed', () => {
   });
 
   test('answers with what failed, and creates nothing', async () => {
-    // The press used to clear the refusal, await the chain, and return — so the
-    // one sentence explaining why nothing happened was erased by the act that
-    // did nothing.
     const outcome = await deployDraft(steps(REFUSED));
 
     expect(outcome).toEqual({
@@ -82,8 +72,7 @@ describe('Deploy after a save that failed', () => {
   });
 
   test('flushes the pending write before deciding', async () => {
-    // The debounce means the last edit may still be in a timer. Completing
-    // before it lands creates an App from the answer before the last one.
+    // The last edit may still be waiting in the debounce timer.
     await deployDraft(steps(null));
 
     expect(held.flushed).toBe(1);
@@ -101,11 +90,8 @@ describe('Deploy after a save that failed', () => {
   });
 
   test('a stale revision is the press to recover from, not one to report', async () => {
-    // The press finds it whenever the last edit had already been saved: the
-    // flush sends nothing, so completing is the first thing carrying the
-    // revision the other tab superseded. Reported, it renders the server's
-    // own "reload it before saving" with no control that reloads, and every
-    // press after it fails identically.
+    // With the last edit already saved the flush sends nothing, so completing is
+    // the first request to carry the superseded revision.
     const outcome = await deployDraft({
       flush: async () => {},
       unsaved: () => null,
@@ -122,9 +108,7 @@ describe('Deploy after a save that failed', () => {
   });
 
   test('a completion that never answered says the App may exist', async () => {
-    // A dropped connection or a proxy's own error page: `command` throws
-    // rather than resolving, and the press used to leave the button disabled
-    // reading "Creating…" with nothing on screen and no way back.
+    // `command` throws when the server did not answer, so the App may exist.
     const outcome = await deployDraft({
       flush: async () => {},
       unsaved: () => null,
@@ -144,15 +128,12 @@ describe('Deploy after a save that failed', () => {
   });
 });
 
-/** What `inspectRepository` answers with, per test. */
+// What `inspectRepository` answers with.
 let scopes: readonly InspectedScope[] = [];
-/** Command names to refuse once, and with what. */
 let refuse = new Map<string, TransportFailure>();
-/** Every command the screen called, in order. */
 let called: string[] = [];
-/** Every draft the screen wrote back. */
 let saved: Draft[] = [];
-/** What `getCreationDraft` answers a resync with. */
+// What `getCreationDraft` answers a resync with.
 let stored: Draft = INITIAL_DRAFT;
 
 let dom: DomShim;
@@ -259,7 +240,7 @@ async function mount(draft: Draft) {
   await act(async () => {});
   return {
     text: () => container.textContent,
-    /** Let the trailing debounce fire and its save land. */
+    // Lets the trailing debounce fire and its save land.
     settleWrites: () =>
       act(async () => {
         await new Promise((done) => setTimeout(done, WRITE_DELAY + 60));
@@ -284,9 +265,7 @@ const detected = (scope: string): InspectedScope => ({
 
 describe('an edit the server refused as stale', () => {
   test('re-reads the draft and says another tab won', async () => {
-    // The revision guard makes one refused save refuse every save after it:
-    // the tab holds a version that no longer exists, so the next keystroke is
-    // refused for the same reason, forever.
+    // Without a re-read, every later save would carry the same stale revision.
     scopes = [detected('apps/only')];
     stored = { ...repoDraft, appName: 'renamed-elsewhere' };
     refuse.set('saveCreationDraft', {
@@ -297,17 +276,15 @@ describe('an edit the server refused as stale', () => {
     const screen = await mount(repoDraft);
     await screen.settleWrites();
 
-    // One write attempt, not one per state change on the way in.
     expect(called.filter((call) => call === 'saveCreationDraft')).toHaveLength(
       1,
     );
     expect(called).toContain('getCreationDraft');
-    // The server's draft is on screen, and the screen says why it moved.
     expect(screen.text()).toContain('renamed-elsewhere');
     expect(screen.text()).toContain('This draft was edited somewhere else');
     expect(screen.text()).toContain('STALE_EDIT');
-    // And no draft of this tab's reached the server, so what is on screen is
-    // the other tab's version rather than a merge of the two.
+    // Nothing from this tab reached the server, so the screen shows the other
+    // tab's draft, not a merge.
     expect(saved).toEqual([]);
 
     screen.unmount();
@@ -316,9 +293,7 @@ describe('an edit the server refused as stale', () => {
 
 describe('a repository nothing could be read from', () => {
   test('blocks Deploy rather than staying deployable on a stale claim', async () => {
-    // Everything under Source is the draft's opening claim until something has
-    // read the repository — a kind nothing checked, a directory nothing looked
-    // in. Deploying that builds a guess.
+    // Until the repository is read, Source holds only the draft's opening guess.
     refuse.set('inspectRepository', {
       code: 'NOT_FOUND',
       message: 'no repository example/almanac is available to this operator',
@@ -333,8 +308,7 @@ describe('a repository nothing could be read from', () => {
   });
 
   test('a repository that was read and holds nothing buildable does not', async () => {
-    // The other half of the same split: this one was read, and §5 keeps the
-    // assertion path open — name the directory, pick the kind.
+    // This one was read, so the operator can still name a directory and pick a kind.
     scopes = [{ scope: '.', outcome: 'unsupported', detail: 'just prose.' }];
 
     const screen = await mount(repoDraft);
@@ -347,13 +321,7 @@ describe('a repository nothing could be read from', () => {
   });
 });
 
-/**
- * How long the sentence a read left stays on screen.
- *
- * The blocker above is derived from it, so this is what decides whether a
- * repository nothing could read keeps Deploy off. Exercised as the decision it
- * is: the shim has no event system, and every one of these is an edit.
- */
+// The Deploy blocker above derives from this sentence.
 describe('the sentence a read left', () => {
   const unread: DetectionTrouble = {
     kind: 'unread',
@@ -362,10 +330,8 @@ describe('the sentence a read left', () => {
   };
 
   test('survives an edit that cannot have made the repository readable', () => {
-    // Both of these used to clear it, and neither reads anything: the
-    // directory field re-reads on blur, and the tile is the same source again.
-    // Cleared, Deploy is enabled on a kind nothing checked in a tree nothing
-    // looked in — which is the whole of what the blocker exists to stop.
+    // Neither edit reads anything: the directory field re-reads on blur, and the
+    // tile is the same source again.
     const typed = draftReducer(repoDraft, {
       type: 'subpath',
       subpath: 'apps/a',
@@ -396,8 +362,7 @@ describe('the sentence a read left', () => {
   });
 
   test('one about a directory goes when the directory does', () => {
-    // The other half: this one *was* read, and it is a statement about
-    // `docs` — which the next keystroke in that field makes untrue.
+    // This one was read and is about `docs`, so changing the directory clears it.
     const about: DetectionTrouble = {
       kind: 'unsupported',
       repo: 'example/almanac',
@@ -414,8 +379,6 @@ describe('the sentence a read left', () => {
 
 describe('the Code row', () => {
   test('opens while nothing has answered which directory to deploy', async () => {
-    // The repository is chosen and the directory is not, which is the state a
-    // fresh draft opens in — the question is the row, so the row is open.
     scopes = [detected('apps/one'), detected('apps/two')];
 
     const screen = await mount(repoDraft);
@@ -426,7 +389,6 @@ describe('the Code row', () => {
   });
 
   test('collapses once the directory is somebody’s answer', async () => {
-    // Settled, so the alternatives are noise.
     scopes = [detected('apps/one'), detected('apps/two')];
 
     const screen = await mount({

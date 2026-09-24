@@ -1,10 +1,3 @@
-/**
- * The retry policy the source fetch opts into (`src/integrations/github/http.ts`).
- *
- * `GitHubHttp` classifies a refusal and deliberately does not act on it. These
- * tests are about the one place that acts: what is worth asking again, and the
- * one thing that never is.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   GitHubAccessError,
@@ -12,7 +5,7 @@ import {
   TRANSIENT_ATTEMPTS,
 } from '../../../src/integrations/github/http.ts';
 
-/** No real waiting; the delays are policy, the retrying is the behaviour. */
+/** Records each delay without waiting. */
 const slept: number[] = [];
 const sleep = async (ms: number) => {
   slept.push(ms);
@@ -48,8 +41,7 @@ describe('retryTransient', () => {
   });
 
   test('a reset connection is retried, though it never became a status', async () => {
-    // The failure this exists for: `fetch` throws partway through a large
-    // archive, so there is no response to classify and no loop above to wait.
+    // `fetch` can throw mid-archive, leaving no response to classify.
     let calls = 0;
     const result = await retryTransient(async () => {
       calls += 1;

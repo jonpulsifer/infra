@@ -1,14 +1,4 @@
-/**
- * `/readyz` — whether this pod can currently reach the database.
- *
- * `test/web/routes.test.ts` proves the route-table *shape*, and does it with a
- * `db` Proxy that throws on any access precisely so those tests never touch a
- * real connection. This file is the complement: it is the one place that
- * calls the readiness handler for real, against a healthy Postgres and
- * against one that cannot be reached — because the whole point of `/readyz`
- * is telling those two states apart, and a route-table test that never
- * invokes a handler could not prove that either way.
- */
+// The readiness handler against a live Postgres and an unreachable one.
 import { describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
 import type { EnrolmentDeps } from '../../src/auth/enrol.ts';
@@ -20,7 +10,7 @@ import { withIsolatedDatabase } from '../harness/db.ts';
 
 const database = withIsolatedDatabase();
 
-/** A stand-in for the client, so this file never depends on a build having run. */
+// A stand-in, so this file never needs a client build.
 const CLIENT = { '/': new Response('the client document') };
 
 const noSession = {
@@ -44,7 +34,6 @@ function authDeps(db: Database): EnrolmentDeps & GatewayDeps {
   };
 }
 
-/** Inert: `/readyz` never routes a delivery, so reaching these is the bug. */
 function noWebhook(db: Database): WebhookRouteDeps {
   return {
     db,
@@ -56,7 +45,6 @@ function noWebhook(db: Database): WebhookRouteDeps {
   };
 }
 
-/** Inert: `/readyz` never routes a claim, so reaching these is the bug. */
 function noBosun(db: Database) {
   return {
     db,
@@ -100,9 +88,7 @@ describe('/readyz', () => {
   });
 
   test('answers 503 when the database cannot be reached', async () => {
-    // Port 1 is a reserved port nothing listens on. Bun's default connection
-    // timeout is 30s, which is far longer than a test should wait to prove a
-    // negative, so it is cut down to keep this fast rather than flaky.
+    // Nothing listens on port 1. connectionTimeout is in seconds; Bun's default is 30.
     const client = new SQL(
       'postgres://postgres:postgres@127.0.0.1:1/spindrift',
       {

@@ -10,23 +10,12 @@ import {
 import { reconcilerLoopCounter } from '../../src/telemetry/index.ts';
 
 /**
- * The metrics API has no proxy provider — trace and logs each keep one — so an
- * instrument minted before a MeterProvider is registered used to stay a no-op
- * for the life of the process. Silently: `initTelemetry` still logged success
- * and traces and logs still flowed. Both entrypoints import `initTelemetry`
- * from the telemetry module, so the module body always evaluated first, so
- * every Spindrift metric was dead and every alert reading one could not fire.
- *
- * This drives the registration through the same global the entrypoints use,
- * rather than through the module's import order, so it holds wherever in the
- * suite it runs — by which point some other file has usually started a
- * reconciler and registered a provider of its own.
+ * The metrics API has no proxy provider, so an instrument minted before a
+ * MeterProvider is registered has to re-mint once one is.
  */
 test('an instrument minted before a provider records once one is registered', async () => {
-  // Whatever the suite left registered — usually a real provider, because some
-  // earlier file started a reconciler. Put it back on the way out, and put
-  // nothing back if there was nothing, so a later `initTelemetry` still wins
-  // the slot.
+  // Restore the suite's provider afterwards, or leave the slot empty if there
+  // was none, so a later `initTelemetry` can still register.
   const previous = metrics.getMeterProvider();
   metrics.disable();
   const unregistered = metrics.getMeterProvider();
@@ -42,7 +31,6 @@ test('an instrument minted before a provider records once one is registered', as
   const provider = new MeterProvider({ readers: [reader] });
 
   try {
-    // Against the no-op provider: nowhere to land, and no error either.
     reconcilerLoopCounter.add(1);
 
     expect(metrics.setGlobalMeterProvider(provider)).toBe(true);
@@ -59,8 +47,6 @@ test('an instrument minted before a provider records once one is registered', as
       throw new Error('reconciler_loop_total exported no sum');
     }
     // 2, not 3: the add before registration went to the no-op and is gone.
-    // What this asserts is that the instrument re-minted rather than staying
-    // the no-op it was born as.
     expect(exported.dataPoints.map((point) => point.value)).toEqual([2]);
   } finally {
     await provider.shutdown();

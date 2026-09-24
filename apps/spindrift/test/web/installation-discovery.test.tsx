@@ -1,26 +1,5 @@
-/**
- * Cloud facts shown for confirmation rather than typed.
- *
- * Four claims:
- *
- * 1. **The panel is on the settings surface.** The whole criterion is that an
- *    operator confirms rather than types, and a panel nothing mounts confirms
- *    nothing. Asserted against the real `InstallationSettingsView`, so removing
- *    the element fails here rather than passing quietly.
- * 2. **The two arms read as two different things.** A field the cloud could not
- *    answer shows the sentence saying why; a field it answered with nothing
- *    shows that it is empty. A panel that rendered a refusal as a blank would be
- *    the original defect wearing a UI.
- * 3. **Nothing here names a manifest key.** The headings are the schema's own
- *    keys humanized, and applying a candidate writes at the path the command
- *    gave — so a key leaving the schema leaves this panel too, rather than
- *    leaving a control for a field that no longer exists.
- * 4. **The request carries the narrowing the operator typed, and every way of
- *    failing comes back as a sentence.** This repo has no DOM, so the assertion
- *    is against `askInstallationCloud` and `DiscoveryRefusal` directly — the two
- *    pieces the panel is a shell around — with `fetch` stubbed beneath the real
- *    typed client.
- */
+// The discovery panel shows cloud facts to confirm, not type. Headings are
+// humanized schema keys, and a value lands at the path the command gave.
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type {
@@ -42,9 +21,7 @@ import { fixtureManifest } from '../harness/installation.ts';
 
 const FACTS: readonly DiscoveredFact[] = [
   {
-    // The home vessel's own project, addressed by the pointer that names it —
-    // three of the five facts are that boundary's properties now, and the
-    // position it holds is the document's to give at the moment of the press.
+    // Addressed through the home-vessel pointer; the document resolves its position.
     path: ['vessels', HOME_VESSEL, 'location', 'project'],
     kind: 'found',
     candidates: [{ label: 'example-home', value: 'example-home' }],
@@ -82,8 +59,6 @@ describe('what the panel shows', () => {
   });
 
   test('an honest empty says so rather than showing nothing', () => {
-    // The whole claim, on the screen: this reads differently from the row above
-    // it, and neither reads like a blank field waiting to be typed in.
     expect(markup).toContain('Nothing of this kind exists here');
   });
 
@@ -105,9 +80,7 @@ describe('confirming a value edits the document at the path it came with', () =>
 
   test('the value lands at the path, and nothing else moves', () => {
     const fact = FACTS[0]!;
-    // `candidates` is only reachable on the arm that has one — which is the
-    // property the command's two arms exist for, asserted here by the compiler
-    // rather than by an expectation.
+    // Only the `found` arm has `candidates`, and the compiler holds that.
     if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
     expect(applyDiscovered(document, fact, fact.candidates[0]!)).toEqual({
       installation: { homeVessel: 'home' },
@@ -120,10 +93,8 @@ describe('confirming a value edits the document at the path it came with', () =>
   });
 
   test('the vessel is found by name, not at the position the answer carried', () => {
-    // An entry removed between the ask and the press moves every entry after
-    // it. A position carried from the server would then address whichever
-    // boundary slid into it, and `location.project` has no refinement that
-    // would refuse the value.
+    // An entry removed between the ask and the press shifts positions, and
+    // `location.project` has no refinement to refuse a misplaced value.
     const fact = FACTS[0]!;
     if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
     const shifted = { ...document, vessels: [document.vessels[1]!] };
@@ -142,9 +113,6 @@ describe('confirming a value edits the document at the path it came with', () =>
   });
 
   test('an unwritable answer is said in place of its candidates', () => {
-    // Offering a value that cannot land is a button whose only outcome is a
-    // refusal, so the reason takes the place of the candidates rather than
-    // greying them.
     const fact = FACTS[0]!;
     if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
 
@@ -160,9 +128,8 @@ describe('confirming a value edits the document at the path it came with', () =>
   });
 
   test('a list-valued key takes the shape its candidate carried', () => {
-    // The reason a candidate carries a value at all: `sources.buckets` is a
-    // list and the home vessel's `shared.sourceBucket` is not, and a panel
-    // deriving that would be a panel with an opinion about the schema.
+    // A candidate carries its own value: `sources.buckets` is a list and the
+    // home vessel's `shared.sourceBucket` is not.
     const bucket: DiscoveredCandidate = {
       label: 'a-bucket',
       value: ['a-bucket'],
@@ -201,10 +168,7 @@ describe('a row is a reconciliation, not a row of buttons', () => {
   }
 
   test('confirming a value is visible, because the row reads the document', () => {
-    // The defect this replaces: the selected style came from `fact.suggested`,
-    // a property of the *server's* answer that is identical before and after a
-    // press. An operator confirmed a discovered project and every pixel on the
-    // screen stayed where it was.
+    // The pressed state reads the document, not `fact.suggested`, which a press never changes.
     const before = row(withProject('typed-by-hand'));
     const after = row(withProject('example-home'));
     expect(before).not.toEqual(after);
@@ -219,18 +183,13 @@ describe('a row is a reconciliation, not a row of buttons', () => {
   });
 
   test('the whole path is on the row, because the tail is ambiguous', () => {
-    // Two of the five answers humanize to the same word: `Project` is the home
-    // vessel's own and `Artifacts project` is its shared one, and a panel
-    // showing only the last segment showed the same heading twice.
+    // `Project` and `Artifacts project` end in the same word.
     expect(row(withProject('example-home'))).toContain(
       'vessels.homeVessel.location.project',
     );
   });
 
   test('a caller with no document states nothing about which value is in force', () => {
-    // The honest absence: the settings screen passes a document and the row is
-    // a comparison; a caller that has none gets candidates and no verdict,
-    // rather than a verdict computed against nothing.
     const markup = renderToStaticMarkup(
       <DiscoveredFactList facts={[fact]} onApply={() => undefined} />,
     );
@@ -241,11 +200,7 @@ describe('a row is a reconciliation, not a row of buttons', () => {
 
 describe('the narrowing inputs are seeded from the document', () => {
   test('a project the document already names arrives in the box', () => {
-    // Discovery is staged deliberately: with no project, buckets and signing
-    // keys answer "name a project and run discovery again" — and the candidate
-    // that would unblock it is labelled `<project> — this deployment's own
-    // credential`, so an operator who typed what they read typed a project
-    // that does not exist.
+    // Without a project, discovery cannot list buckets or signing keys.
     expect(
       narrowingFrom({
         installation: { homeVessel: 'home' },
@@ -255,9 +210,7 @@ describe('the narrowing inputs are seeded from the document', () => {
   });
 
   test('the key location is read out of the signer this installation holds', () => {
-    // Not a manifest key of its own — it is a segment inside the signer, and
-    // reading it back is cheaper for an operator than finding the console page
-    // that lists it.
+    // The KMS location is a segment of the signer URI, not a key of its own.
     expect(
       narrowingFrom({
         supplyChain: {
@@ -290,25 +243,18 @@ describe('the panel is part of the settings surface', () => {
   );
 
   test('the screen an operator edits the manifest on offers the ask', () => {
-    // The second half of the criterion, and the half a component test cannot
-    // reach: facts are shown *for confirmation*, which is only true if the
-    // panel is on the screen that edits the manifest. Both inputs are named
-    // here because `manifestFields()` produces no `discovery.` key — nothing
-    // but the panel can satisfy this.
+    // `manifestFields()` makes no `discovery.` key, so only the panel renders these.
     expect(markup).toContain('name="discovery.project"');
     expect(markup).toContain('name="discovery.kmsLocation"');
   });
 
   test('it sits above the form, where the value is confirmed before it is typed', () => {
-    // Order, not just presence: a confirmation offered underneath the field it
-    // would have saved a typo in is a confirmation nobody reaches first.
     expect(markup.indexOf('name="discovery.project"')).toBeLessThan(
       markup.indexOf('name="sources.buckets.0"'),
     );
   });
 });
 
-/** What the stubbed transport recorded of one request. */
 interface Sent {
   readonly path: string;
   readonly body: unknown;
@@ -316,13 +262,7 @@ interface Sent {
 
 const realFetch = globalThis.fetch;
 
-/**
- * One ask, with a stubbed `fetch` under the real typed client.
- *
- * Under the client rather than in place of it: the claim is about the request
- * that leaves the browser, and a stub of `command` itself would assert only
- * that the panel calls a function this test also wrote.
- */
+// Stubs `fetch` under the real typed client, so the request that leaves is checked.
 async function ask(
   narrowing: { project: string; kmsLocation: string },
   respond: () => Response,
@@ -357,9 +297,8 @@ describe('what the panel asks the cloud', () => {
       NO_FACTS,
     );
 
-    // Exactly this object: the command's input is `.strict()`, so an empty
-    // `kmsLocation` is a rejected request rather than a first pass, and an
-    // untrimmed project is a project id nothing in the cloud is named.
+    // The command's input is strict, so an empty `kmsLocation` would be refused;
+    // an untrimmed project names nothing in the cloud.
     expect(sent).toHaveLength(1);
     expect(sent[0]?.body).toEqual({ project: 'example-home' });
     expect(answer).toEqual({ facts: [] });
@@ -394,9 +333,8 @@ describe('what the panel asks the cloud', () => {
   });
 
   test('a transport that never reached the command layer is a sentence too', async () => {
-    // The one case `command` throws on: a proxy answering HTML is not the
-    // server answering. Swallowed into `facts: []` it would render as a cloud
-    // that confirmed nothing exists.
+    // `command` throws when the server did not answer. As `facts: []` it would
+    // read as a cloud that has nothing.
     const { answer } = await ask(
       { project: '', kmsLocation: '' },
       () => new Response('<html>a proxy</html>', { status: 502 }),
@@ -422,12 +360,7 @@ describe('a refusal is shown as a fact about the installation', () => {
 });
 
 describe('an answer arrives; a refusal does not', () => {
-  /**
-   * The one claim motion owes a test: a `found` row is staggered in and an
-   * `unavailable` row is not. Animating a refusal would make an API that is
-   * switched off look like something still landing, which is the failure the
-   * two-armed answer exists to prevent, restated in CSS.
-   */
+  // An animated refusal would make a disabled API look like it is still landing.
   const markup = renderToStaticMarkup(
     <DiscoveredFactList facts={FACTS} onApply={() => undefined} />,
   );

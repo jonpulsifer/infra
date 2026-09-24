@@ -1,15 +1,5 @@
-/**
- * The route GitHub's create and install flows land on (§15).
- *
- * Two legs, one path, and the discipline under test is which callback is
- * believed: the `code=` leg carries a `state` checked against the acting
- * session and is the one leg whose parameters mean anything; the
- * `installation_id=` leg is distrusted wholesale — the docs say not to rely
- * on the parameter — and answers by sending the operator back to the screen
- * that re-enumerates through the App JWT. Every answer is `no-store`,
- * because the exchange upstream of this route is the only place the App's
- * key ever exists as plaintext outside GitHub.
- */
+// Only the `code=` leg is believed, and its `state` must match the session.
+// GitHub's docs say not to rely on `installation_id=`, so that leg only redirects.
 import { describe, expect, test } from 'bun:test';
 import { base64urlEncode } from '@repo/archive/bytes';
 import type { RequestAuthentication } from '../../src/auth/types.ts';
@@ -40,7 +30,6 @@ function keyring(): CredentialKeyring {
   })!;
 }
 
-/** The far side: only the conversion endpoint, answering the design's shape. */
 const conversionHost: Fetcher = async (request) => {
   if (!new URL(request.url).pathname.startsWith('/app-manifests/')) {
     return new Response('{"message":"Not Found"}', { status: 404 });
@@ -118,7 +107,6 @@ describe('the setup landing', () => {
 
     const [row] = await database().db.select().from(githubApp);
     expect(row?.slug).toBe('spindrift-test');
-    // Sealed, never plaintext: the response above carried nothing either.
     expect(row?.encryptedPrivateKey).not.toContain('PRIVATE KEY');
   });
 
@@ -137,8 +125,7 @@ describe('the setup landing', () => {
 
   test('the install callback is a pure refresh signal — nothing is believed', async () => {
     const { land } = serve({ ring: null });
-    // Even with no keyring at all: the parameter is not trusted, so there is
-    // nothing this leg needs the App identity for.
+    // No keyring: this leg never needs the App identity.
     const response = await land('?installation_id=99999');
     expect(response.status).toBe(303);
     expect(response.headers.get('Location')).toBe('/repos');

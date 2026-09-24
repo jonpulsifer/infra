@@ -1,23 +1,16 @@
 /**
- * The App chart, rendered with the values a Target was actually applied.
- *
- * The chart's own goldens live where the chart does
- * (`packages/charts/spindrift-app/tests/`) and render over a baseline of
- * representative values. This renders over **no** baseline: what goes in is the
- * inline blob the adapter wrote onto the delivery object and nothing else, so a
- * value core stopped rendering is a chart that falls back to `values.yaml`
- * rather than a merge that hides it.
+ * Renders the App chart with only the values blob the adapter wrote onto the
+ * delivery object, over no baseline, so a value that core stops writing falls
+ * back to the chart's `values.yaml` default.
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** The chart this installation deploys every Component through. */
 const CHART = join(
   import.meta.dir,
   '../../../../packages/charts/spindrift-app',
 );
 
-/** One rendered object, as loosely typed as YAML actually is. */
 export interface RenderedObject {
   apiVersion: string;
   kind: string;
@@ -29,7 +22,6 @@ export interface RenderedObject {
   spec?: any;
 }
 
-/** `helm template` over the chart, parsed, with `values` as the whole input. */
 export async function renderAppChart(
   values: unknown,
   namespace = 'spindrift-apps',

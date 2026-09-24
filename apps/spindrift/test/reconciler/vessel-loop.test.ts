@@ -1,15 +1,6 @@
 /**
- * The standing checklist a boundary is assessed against.
- *
- * The claim is the one `cloud-discovery.ts` states and nothing acted on until
- * this loop: "a mistyped project or bucket is invisible until a build stages a
- * source archive and fails on a signed URL". A red row on a screen is what turns
- * that into something an operator can see before a build.
- *
- * The far side is faked at the HTTP seam (§ Seam 2), so the real client, its
- * real resource names and its real key-purpose filter all run — which is what
- * makes "the signer is not a signing key here" a fact this suite can produce
- * rather than one it can only stub.
+ * The standing checklist a boundary is assessed against. The cloud APIs are
+ * faked at HTTP, so the real discovery client and its key-purpose filter run.
  */
 import { describe, expect, test } from 'bun:test';
 import { createAdapterRegistry } from '../../src/adapters/registry.ts';
@@ -36,18 +27,12 @@ const TOKEN = 'federated-token';
 
 const fixture = await fixtureManifest();
 
-/** The home vessel as this suite declares it: a project with a signer in it. */
 const HOME_PROJECT = 'example-vessel';
 const SIGNER_LOCATION = 'example-region';
 
 /**
- * The fixture installation with the home vessel actually located somewhere.
- *
- * The document ships without a `location` on either boundary — that half-ready
- * state is one §13 intends to be visible — and a checklist against a project
- * nobody stated is the one answer this loop must not fabricate. So the tests
- * that assert a green row supply one, and the test that asserts the honest
- * refusal leaves it off.
+ * The fixture with the home vessel located in `project`. The fixture states no
+ * location, so `null` leaves it unstated.
  */
 function installationWith(project: string | null): InstallationManifest {
   return {
@@ -65,7 +50,6 @@ function installationWith(project: string | null): InstallationManifest {
   } as InstallationManifest;
 }
 
-/** A store that answers a listing, or refuses the way an unreachable one does. */
 function store(reachable: boolean): SecretStore {
   return {
     adapter: fixture.secretStore.adapter,
@@ -84,7 +68,7 @@ interface Wiring {
   readonly manifest?: InstallationManifest;
   readonly storeReachable?: boolean;
   readonly discovery?: FakeGcpDiscoveryOptions | null;
-  /** Zone names a connected Cloudflare account answers with, or `null` for no reader. */
+  /** Zones the Cloudflare account answers with; `null` wires no reader. */
   readonly zones?: readonly string[] | null;
 }
 
@@ -133,7 +117,6 @@ function context(wiring: Wiring = {}) {
   return { db: database().db, clock: { now: () => NOW }, adapters, manifest };
 }
 
-/** The checklist for the home vessel, keyed so a row is read by name. */
 async function homeChecklist(
   wiring: Wiring = {},
 ): Promise<Map<string, VesselPrerequisiteResult>> {
@@ -169,23 +152,20 @@ describe('the four the home vessel carries', () => {
   });
 
   test('a bucket that is not in the project is the row it should be', async () => {
-    // The exact failure this exists for: a mistyped bucket, said out loud on a
-    // screen instead of at a signed URL minutes into a build.
+    // A mistyped bucket shows here, before a build fails on a signed URL.
     const checklist = await homeChecklist({
       discovery: { buckets: { [HOME_PROJECT]: ['some-other-bucket'] } },
     });
     const bucket = checklist.get('SOURCE_BUCKET')!;
     expect(bucket.met).toBe(false);
     expect(bucket.detail).toContain('example-source-bucket');
-    // And only that row: three independent reads, so one absence is not four.
+    // Only that row: the reads are independent.
     expect(checklist.get('SIGNER_KEY')?.met).toBe(true);
     expect(checklist.get('ARTIFACTS_PROJECT')?.met).toBe(true);
   });
 
   test('a refused read is a different sentence from an absence', async () => {
-    // `cloud-discovery.ts`'s rule, carried all the way to the row: a `403` says
-    // nothing was established, and reporting it as "your bucket is not there"
-    // would put a confident absence on screen off a failed read.
+    // A `403` establishes nothing, so it must not read as an absent bucket.
     const checklist = await homeChecklist({
       discovery: { refuse: { storage: { status: 403, message: 'no' } } },
     });
@@ -196,8 +176,8 @@ describe('the four the home vessel carries', () => {
   });
 
   test('a key of the wrong purpose is not a signer', async () => {
-    // Run through the real filter: a symmetric key produces a `signer` that
-    // validates, saves, reconciles, and fails at the first cosign call.
+    // A symmetric key would pass every other check and fail at the first
+    // cosign call.
     const checklist = await homeChecklist({
       discovery: {
         keys: [
@@ -222,8 +202,7 @@ describe('the four the home vessel carries', () => {
   });
 
   test('a home vessel with no project is not looked for anyway', async () => {
-    // Rather than a probe against `projects/undefined` and a sentence naming
-    // `undefined` back to the operator.
+    // A probe would otherwise request `projects/undefined`.
     const checklist = await homeChecklist({
       manifest: installationWith(null),
     });
@@ -260,9 +239,7 @@ describe('one pass over the boundaries', () => {
         },
       ]);
 
-    // Every vessel, not only the two the installation is built on: an app
-    // vessel's pass is one write of an empty checklist, and that empty list is
-    // what makes assessed-and-asked-nothing a stored state of its own.
+    // Every vessel gets a pass, including an app vessel that is asked nothing.
     const refreshed = await refreshAllVessels(context({ manifest }));
     expect(refreshed.map((pass) => pass.vessel)).toContain('cloud');
     expect(refreshed.map((pass) => pass.vessel)).toContain('elsewhere');
@@ -275,8 +252,8 @@ describe('one pass over the boundaries', () => {
     expect(deriveVesselHealth(home.prerequisites!, home.kind, ['home'])).toBe(
       'healthy',
     );
-    // Assessed and asked nothing, which is a different stored state from never
-    // assessed — and never a green row for something nobody checked.
+    // An empty checklist with `inspectedAt` set means assessed and asked
+    // nothing, a different state from never assessed.
     expect(app.prerequisites).toEqual([]);
     expect(app.inspectedAt).toEqual(NOW);
   });
@@ -294,8 +271,7 @@ describe('one pass over the boundaries', () => {
     const home = (passes: Awaited<ReturnType<typeof refreshAllVessels>>) =>
       passes.find((pass) => pass.vessel === manifest.installation.homeVessel)!;
 
-    // The first pass has nothing to compare against — never assessed is not a
-    // verdict that changed.
+    // The first pass has no earlier verdict to change from.
     expect(
       home(await refreshAllVessels(context({ manifest }))),
     ).not.toHaveProperty('healthChangedFrom');
@@ -308,11 +284,8 @@ describe('one pass over the boundaries', () => {
   });
 
   test('a row an operator cleared elsewhere goes green on the next pass', async () => {
-    // The whole reason a remediation is a pull request and not a mutation. The
-    // change is applied by whatever applies Terraform; nothing tells this loop
-    // that it was, and nothing has to — the next pass reads the boundary again
-    // and the row moves on its own. There is no recheck act in this test
-    // because there is none in the product.
+    // A remediation is applied outside this process, and the next pass sees it
+    // with no recheck act.
     const manifest = installationWith(HOME_PROJECT);
     await database()
       .db.insert(vessels)
@@ -338,7 +311,7 @@ describe('one pass over the boundaries', () => {
       deriveVesselHealth(before.prerequisites!, before.kind, ['home']),
     ).toBe('unhealthy');
 
-    // The boundary now holds what the stanza would have declared.
+    // The bucket now exists in the project.
     const after = (await refreshAllVessels(context({ manifest }))).find(
       (pass) => pass.vessel === manifest.installation.homeVessel,
     )!;
@@ -351,8 +324,7 @@ describe('one pass over the boundaries', () => {
     expect(
       row.prerequisites?.find((item) => item.name === 'SOURCE_BUCKET')?.met,
     ).toBe(true);
-    // And the row still carries only what was observed: what would have cleared
-    // it is composed when somebody reads the checklist, never written here.
+    // Remediation is composed on read, so the stored row carries none.
     for (const item of row.prerequisites ?? []) {
       expect(item.remediation).toBeUndefined();
     }
@@ -374,8 +346,7 @@ describe('what a boundary carries, beside whether it can be used', () => {
       workersSubdomain: 'acme',
       pagesProjects: [],
     });
-    // The inventory is not a checklist: an account is asked nothing, and being
-    // asked nothing is still healthy.
+    // An account is asked nothing, so its checklist is empty.
     expect(account.prerequisites).toEqual([]);
   });
 
@@ -383,8 +354,8 @@ describe('what a boundary carries, beside whether it can be used', () => {
     await refreshAllVessels(context({ zones: ['example.test'] }));
 
     const rows = await database().db.select().from(vessels);
-    // `null` here is "there is nothing of this kind to read", which is what
-    // keeps it apart from an account whose reads were refused.
+    // `null` means this kind has nothing to read, unlike an account whose
+    // reads were refused.
     expect(rows.find((row) => row.kind === 'cluster')!.discovery).toBeNull();
   });
 

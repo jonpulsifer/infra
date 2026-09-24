@@ -1,10 +1,4 @@
-/**
- * The status page an App's address answers with before anything serves it.
- *
- * Real `Request`s against the handler `webRoutes` mounts, over real rows: the
- * claim being tested is that a hostname resolves to the right Component, and a
- * fake that answered that question would be the thing under test.
- */
+// Real rows, no fake: resolving a hostname to a Component is what is under test.
 import { describe, expect, test } from 'bun:test';
 import {
   apps,
@@ -25,7 +19,7 @@ import { aDesiredDocument } from '../harness/release.ts';
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 
-/** The fixture's first private zone — where a default Component is named. */
+// The fixture's first private zone, where a default Component is named.
 const ZONE = 'apps.example.test';
 
 function deps(): StatusRouteDeps {
@@ -52,7 +46,6 @@ async function seedApp(
   return component!;
 }
 
-/** A Deploy in one phase, with the Target and Build chain it requires. */
 async function seedDeploy(
   componentId: string,
   phase: 'LIVE' | 'FAILED' | 'APPLYING',
@@ -84,9 +77,6 @@ async function seedDeploy(
 
 describe('which request this page answers', () => {
   test("the control plane's own name is a plain 404, not a status page", async () => {
-    // A path the table does not hold, on the console's own hostname. Answering
-    // it with a page about an App would be this route claiming a name that is
-    // not an App's.
     const response = await get(manifest.controlPlane.hostname);
     expect(response.status).toBe(404);
     expect(await response.text()).toBe('not found\n');
@@ -120,14 +110,12 @@ describe('what an address says about its App', () => {
     const flat = await get(`shiny.${ZONE}`);
     expect(canonical.status).toBe(503);
     expect(flat.status).toBe(503);
-    // The page echoes the name it was asked about, so the two bodies differ in
-    // exactly that. What must match is the state they report.
+    // The page echoes the requested name, so only the state is compared.
     expect(await flat.text()).toContain('Waiting for a first release');
   });
 
   test('the apex vanity name reaches the same Component as the canonical', async () => {
-    // `@` mints as the bare zone (§9, ticket 137): a request for the zone name
-    // with no label at all is still this App's Component.
+    // `@` is the bare zone.
     await seedApp({ name: 'root', vanityDomain: '@' });
 
     const canonical = await get(`root-web.${ZONE}`);
@@ -160,15 +148,13 @@ describe('what an address says about its App', () => {
 
     const body = await (await get(`broken-web.${ZONE}`)).text();
     expect(body).toContain('The last release failed');
-    // The page is served to whoever asks. A reason belongs in the control
-    // plane, behind a session.
+    // The page is public, so the reason stays behind a session.
     expect(body).not.toContain('deadbeef');
   });
 
   test('a LIVE Deploy reaching this page is reported as unrouted', async () => {
-    // The wildcard only carries a name no exact route claimed, so a live
-    // Component arriving here means its route is gone. Saying "live" would be
-    // the page contradicting the request that reached it.
+    // The wildcard carries only names no exact route claimed, so a live
+    // Component arriving here has lost its route.
     const component = await seedApp({ name: 'live' });
     await seedDeploy(component.id, 'LIVE');
 

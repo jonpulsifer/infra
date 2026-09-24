@@ -1,35 +1,6 @@
 /**
- * Per-test database isolation (Task 7).
- *
- * § Testing: "Tests must be deterministic and offline — no cluster, no cloud
- * project, no network. **The only external process is Postgres**, because the
- * concurrency design is a claim about transactions and a fake store cannot
- * falsify it." Real Postgres is therefore not negotiable, which makes isolation
- * the harness's whole job: a suite that resets a shared schema at file scope
- * cannot be run beside anything, and the claims §6 makes about locking reads and
- * serialized deploys are exactly the claims two tests racing each other would
- * corrupt.
- *
- * The lever is a **Postgres schema per test**, created, migrated, and dropped
- * around each one, reached over a connection whose `search_path` names only that
- * schema. Nothing is qualified in application code — `src/db/schema.ts` declares
- * bare `pgTable`s — so the same Drizzle queries land in whichever schema the
- * session points at, and a row written by one test is not on any path the next
- * one searches.
- *
- * **What drizzle-kit's DDL forced.** The generated migration schema-qualifies
- * every `CREATE TYPE` and every foreign-key `REFERENCES` to `"public"`, e.g.
- * `CREATE TYPE "public"."app_source_kind" AS ENUM(...)`. A qualified name ignores
- * `search_path` entirely, so replaying the file as written would put all sixteen
- * enums in `public` — colliding on the second test — while the tables landed in
- * the isolated schema. Hence {@link migrationStatements}: the committed SQL is
- * read and its `"public".` qualifier — and only that qualifier, never the bare
- * word, which also appears as an `exposure_state` value and in the
- * `public_exposure` column — is rewritten to the test schema. That is a
- * mechanical rewrite of one token, so what runs is still the committed DDL.
- *
- * This is also why `src/db/migrate.ts` is not used here: `drizzle-orm`'s migrator
- * reads a folder and applies it verbatim, with no seam to rewrite through.
+ * A Postgres schema per test, migrated from the committed SQL and reached over
+ * connections whose `search_path` names only that schema.
  */
 
 import { afterEach, beforeEach } from 'bun:test';
@@ -51,36 +22,18 @@ import {
 
 const MIGRATIONS = join(import.meta.dir, '../../src/db/migrations');
 
-/** drizzle-kit writes one statement per breakpoint, not per semicolon. */
+/** drizzle-kit's statement separator. */
 const BREAKPOINT = '--> statement-breakpoint';
 
 /**
- * The qualifier drizzle-kit bakes into `CREATE TYPE` and `REFERENCES`. Matched
- * with its quotes and trailing dot so the bare word `public` — a legitimate
- * `exposure_state` value and part of the `public_exposure` column name — is
- * untouched.
+ * drizzle-kit qualifies `CREATE TYPE` and `REFERENCES` with this, bypassing
+ * `search_path`. The quotes and dot spare the bare word `public` elsewhere.
  */
 const QUALIFIER = '"public".';
 
 /**
- * The committed DDL, read once and joined once.
- *
- * Read once because the files do not change while the process runs, and there
- * is one schema built **per test**: re-reading twenty-five files before each of
- * them is a thousandfold of the same syscalls for a string that was already in
- * memory.
- *
- * Joined once because the cost that matters is round trips, not bytes. The
- * breakpoints exist so drizzle-kit can write one statement per line, not
- * because Postgres needs them apart — sending them separately spends one
- * network round trip per statement, per test, and that is what makes a schema
- * build take long enough on a loaded runner for a five-second hook to time out.
- * Sent together they are one simple-query round trip, and Postgres runs them in
- * one implicit transaction, so a schema is either built whole or not at all.
- *
- * Splitting on the breakpoint before rejoining is not a no-op: it is what drops
- * comment-only fragments and normalizes whitespace, and it is what keeps the
- * rewrite below operating on the same units the committed file declares.
+ * Read once per process and sent as one simple query, which Postgres runs in one
+ * implicit transaction. A round trip per statement times out the hook under load.
  */
 let committedDdl: string | null = null;
 
@@ -101,30 +54,13 @@ async function migrationDdl(): Promise<string> {
   return committedDdl;
 }
 
-/** The committed migrations, as one script targeting `schema`. */
 async function migrationScript(schema: string): Promise<string> {
   return (await migrationDdl()).replaceAll(QUALIFIER, `"${schema}".`);
 }
 
 /**
- * The one session that creates and drops schemas, for the whole process.
- *
- * It is shared because it holds no isolated state: `CREATE SCHEMA` and
- * `DROP SCHEMA` name their target, so nothing about them belongs to the test
- * that asked. What was per-test was the *connection* — a pool opened and closed
- * for a single DDL statement, twice per test, which at four figures of tests is
- * several thousand connection lifecycles Postgres has to set up and reap. A
- * server still reaping them when the next test asks for one is a server that
- * answers `sorry, too many clients already`, and that is the shape the failure
- * takes on a loaded runner.
- *
- * Never closed. It lives exactly as long as the test process, and there is no
- * later point at which closing it would be more correct than exiting.
- *
- * Shareable under concurrency because it is a pool, not a connection —
- * `isolation.test.ts` builds two schemas inside one `Promise.all`, which is the
- * case that would break a single session. Its own `search_path` is deliberately
- * left alone: every statement it runs names the schema it operates on.
+ * One pool for the process creates and drops schemas: a pool per test churns
+ * connections until Postgres answers `too many clients`. Never closed.
  */
 let admin: SQL | null = null;
 
@@ -133,24 +69,14 @@ function adminSession(): SQL {
   return admin;
 }
 
-/**
- * A schema name that is a legal bare identifier and cannot collide with another
- * test's — the isolation claim rests on the name being unguessable, not on a
- * counter that resets when a second process starts.
- */
+/** Random, so test processes running side by side cannot collide. */
 function schemaName(): string {
   return `spindrift_test_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
 /**
- * A connection string pointing every session in the pool at one schema.
- *
- * The `options` startup parameter travels in the connection handshake, so it
- * applies to every connection the pool opens — a bare `SET search_path` would
- * only bind whichever connection happened to run it. `public` is deliberately
- * *not* on the path: leaving it there would let a query for a table this schema
- * is missing silently find one next door, which is the failure the isolation
- * exists to make impossible.
+ * `options` rides the startup handshake, so it binds every pooled connection.
+ * `public` stays off the path, so a missing table fails instead of resolving.
  */
 function schemaUrl(schema: string): string {
   const url = new URL(databaseUrl());
@@ -158,35 +84,19 @@ function schemaUrl(schema: string): string {
   return url.toString();
 }
 
-/** One test's private, migrated schema. */
 export interface IsolatedDatabase {
-  /** The Postgres schema every session below is pinned to. */
   readonly schema: string;
-  /** Drizzle over the primary connection — what a command context takes. */
   readonly db: Database;
-  /** The primary connection, for catalog queries and raw SQL. */
   readonly client: SQL;
-  /**
-   * A second, independent session into the same schema. §6's locking read can
-   * only be proven by two real sessions contending, so the harness hands them
-   * out rather than leaving a test to rebuild the connection string.
-   */
+  /** Another session into the same schema, for tests of contending sessions. */
   connect(): SQL;
-  /** Close every session handed out and drop the schema. */
+  /** Closes every session handed out and drops the schema. */
   close(): Promise<void>;
 }
 
 /**
- * The vessel a fixture Target sits on, one per kind, per isolated database.
- *
- * `targets.vessel_id` is NOT NULL, so every Target row a test inserts needs a
- * boundary to reference. Seeding one here rather than asking each of the forty
- * insert sites to build a pair keeps those tests about what they were about —
- * and the pair is what production always has, so a fixture without one would be
- * a row the schema does not permit.
- *
- * Read synchronously by `targetValues()`, which is a value builder and cannot
- * await. Set by {@link createIsolatedDatabase} before any test body runs.
+ * One seeded vessel per kind, since `targets.vessel_id` is NOT NULL. Set by
+ * {@link createIsolatedDatabase}; `targetValues()` reads it synchronously.
  */
 let defaultVessels: Readonly<Record<VesselKind, string>> | null = null;
 
@@ -199,26 +109,11 @@ export function defaultVesselId(kind: VesselKind): string {
   return defaultVessels[kind];
 }
 
-/**
- * What the fixture vessel of this kind is called.
- *
- * Screens state the boundary by name, read from the placed Target's vessel, so
- * a test asserting what a screen says needs the name rather than the id — and
- * spelling `fixture-cluster` into a test file would put the fixture convention
- * in two places.
- */
 export function defaultVesselName(kind: VesselKind): string {
   return `fixture-${kind}`;
 }
 
-/**
- * Where the fixture boundary of each kind is.
- *
- * A switch so the compiler names the arm a new kind is missing. The seed loops
- * over `VESSEL_KINDS`, so a kind added without one here would otherwise be
- * inserted with another kind's address shape — a row `hasVesselLocation`
- * accepts and every adapter then fails to read.
- */
+/** A switch, so the compiler flags a new vessel kind with no location. */
 function fixtureLocation(kind: VesselKind): VesselLocation {
   switch (kind) {
     case 'cluster':
@@ -232,13 +127,7 @@ function fixtureLocation(kind: VesselKind): VesselLocation {
   }
 }
 
-/**
- * Create, migrate, and hand back one private schema.
- *
- * Callers that want it around every test should use {@link withIsolatedDatabase};
- * this is the form for a test that wants two of them at once, which is what the
- * isolation proof itself needs.
- */
+/** For a test that needs two schemas at once. */
 export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
   const schema = schemaName();
 
@@ -247,13 +136,8 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
   const url = schemaUrl(schema);
   const opened: SQL[] = [];
   const connect = (): SQL => {
-    // `max: 1`, rather than `createClient`'s pool of ten. A schema belongs to
-    // one test and one test talks to it from one session, so the other nine
-    // backends are opened, counted against `max_connections`, and never used.
-    // That is affordable in a single-process run and is not once the files run
-    // in parallel: the ceiling is reached by idle connections long before it is
-    // reached by work. Tests needing a genuinely concurrent second session call
-    // `connect()` again and get their own client.
+    // One connection each: idle pool members exhaust `max_connections` when test
+    // files run in parallel. A concurrent session is another `connect()`.
     const client = new SQL(url, { max: 1 });
     opened.push(client);
     return client;
@@ -290,12 +174,8 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
 }
 
 /**
- * A fresh migrated schema before every test in the enclosing scope, dropped
- * after it.
- *
- * Returns an accessor rather than a value because the value does not exist yet
- * when the file is read: `const database = withIsolatedDatabase()` at the top of a
- * file, `database().db` inside a test.
+ * A fresh schema around every test in the enclosing scope. Returns an accessor,
+ * since the database exists only inside a test.
  */
 export function withIsolatedDatabase(): () => IsolatedDatabase {
   let current: IsolatedDatabase | null = null;

@@ -1,12 +1,3 @@
-/**
- * The attempt log as one `text/plain` document (§21: transport, no domain
- * logic).
- *
- * Two claims: the route sits behind exactly the session gate the attempt
- * stream does — an anonymous read is refused before a context exists — and
- * what an authenticated read gets is the whole log, in order, one line per
- * row, with status events bracketed so the document says where each leg ended.
- */
 import { describe, expect, test } from 'bun:test';
 import type { CommandContext } from '../../src/commands/types.ts';
 import {
@@ -178,7 +169,7 @@ describe('the plain-text attempt log', () => {
     expect(lines[3]).toMatch(
       new RegExp(`^\\[${ISO} deploy LIVE Deployment/web\\]$`),
     );
-    // One line per row, and a newline after the last of them.
+    // A newline follows the last row too.
     expect(lines[4]).toBe('');
   });
 
@@ -230,7 +221,7 @@ describe('the plain-text attempt log', () => {
       request(`buildId=${seeded.build.id}`),
     );
     const lines = (await response.text()).trimEnd().split('\n');
-    // The two seeded build rows, then every one of the seven hundred.
+    // The two seeded build rows, then all 700.
     expect(lines).toHaveLength(702);
     expect(lines.at(-1)).toBe('line 699');
   });

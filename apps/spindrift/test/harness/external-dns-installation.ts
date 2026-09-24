@@ -1,22 +1,6 @@
 /**
- * The DNS controller each cluster runs, read off the cluster manifests (§9).
- *
- * Publication is a two-party mechanism and Spindrift owns one party: the App
- * chart states a record in a `DNSEndpoint` and holds its own route out of the
- * route source. Both halves are inert unless the controller is configured to
- * read the first and to be the thing the second is held out of, and that
- * configuration is declared in `clusters/`, not here. So it is read from
- * `clusters/`: a model that hardcodes `--source=crd` keeps agreeing with itself
- * after the sources list loses `crd`, and that installation publishes nothing
- * at all — the routes are still held out, no source claims an App's name, and
- * `--policy=sync` deletes the records that are already there.
- *
- * **What this refuses to model matters as much as what it reads.** An argument
- * outside {@link INERT_ARGUMENTS} fails here rather than being ignored, because
- * the arguments that would change the answer — which namespaces a source reads,
- * what an annotation key is called, which kind the `crd` source reads — are not
- * enumerable, and a model that shrugs at an argument it has not seen is the
- * hardcoded premise again with more steps.
+ * The external-dns controller each cluster runs, read from `clusters/`. An
+ * argument this model does not account for fails the read.
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -25,39 +9,21 @@ import type { Controller } from './fakes/external-dns.ts';
 
 const REPO_ROOT = join(import.meta.dir, '../../../..');
 
-/** The one declaration of what the controller runs, shared by every cluster. */
 const RELEASE = 'clusters/base/networking/external-dns/helm-release.yaml';
 
-/** Where a cluster builds on it. */
 const overlayPath = (cluster: string) =>
   `clusters/${cluster}/networking/external-dns/kustomization.yaml`;
 
 /**
- * Arguments that change nothing this model reads.
- *
- * `--fqdn-template` only names a hostname for an object that has none
- * (`source/gateway.go`, `hosts()`), and every route the App chart renders
- * carries its own. That holds only while `--combine-fqdn-annotation` is absent
- * — which is itself an argument, so this list is what keeps it absent.
+ * `--fqdn-template` only names an object with no hostname, and every App chart
+ * route has one. It stays inert only while `--combine-fqdn-annotation` is
+ * absent.
  */
 const INERT_ARGUMENTS = [/^--fqdn-template=/];
 
 /**
- * The one argument that is read, and only where it says what Spindrift writes.
- *
- * `--annotation-prefix` renames every annotation key the controller looks for —
- * the `cloudflare-proxied` that decides whether a record is proxied, and the
- * hold-out that keeps a route from claiming its own name — so a foreign value
- * is still refused, exactly as it was before this argument was read at all.
- *
- * What is accepted is any prefix Spindrift's two writers actually write —
- * `ANNOTATION_PREFIXES` in `src/adapters/dns/cluster.ts`, every one of them, on
- * every object. A pin exists at all because external-dns v0.22.0 changed the
- * default with no fallback for the old spelling: an unpinned controller on the
- * new default stops finding `cloudflare-proxied` and publishes every record
- * unproxied. Accepting the whole set rather than one member is what makes
- * moving the pin a one-line change to a flag instead of a flag day — and it
- * still refuses a prefix nothing writes, which is the failure this guards.
+ * It renames every annotation key the controller reads, so only a prefix in
+ * `ANNOTATION_PREFIXES`, which every object is written under, is accepted.
  */
 const ANNOTATION_PREFIX_ARGUMENT = /^--annotation-prefix=(.+)$/;
 
@@ -105,13 +71,7 @@ export async function installedControllers(): Promise<Controller[]> {
   return controllers;
 }
 
-/**
- * One cluster's controller, from the shared release and that cluster's overlay.
- *
- * Kept apart from the reading so the refusals below can be shown failing: a
- * guard only ever handed the manifest it agrees with is a guard nobody has seen
- * work.
- */
+/** Separate from the file reads so tests can hand it manifests it must refuse. */
 export function controllerFor(
   cluster: string,
   release: ExternalDnsRelease,
@@ -147,7 +107,7 @@ export function controllerFor(
   };
 }
 
-/** Arguments a cluster appends to the shared list, as a JSON patch does. */
+/** The arguments a cluster's JSON patches append to the shared list. */
 function appendedArguments(
   overlay: ExternalDnsOverlay,
   origin: string,

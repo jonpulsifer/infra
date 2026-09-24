@@ -1,32 +1,6 @@
 /**
- * A fake Secret Manager (Task 10, § Seam 2).
- *
- * The far-side HTTP API behind the real client, per § Seam 2 — so the
- * conformance suite exercises `SecretManagerStore`'s real resource names, its
- * real base64 payload, and its real pagination loop.
- *
- * Three behaviours here are modelled because the adapter has to survive them,
- * not because they are decoration:
- *
- * - **Versions are numbered by the far side**, starting at 1 per secret. That is
- *   what makes this the `NATIVE` pinning strategy: nothing is minted by
- *   Spindrift to make a reference immutable.
- * - **Destroying an already-destroyed version fails**, as the real API does with
- *   a `FAILED_PRECONDITION`. The contract still requires `destroy` to be
- *   idempotent, so the adapter has to reconcile the two — and would pass a
- *   permissive fake without doing so.
- * - **Listing is paginated**, at a deliberately tiny page, because core reaps
- *   config from that list and a single-page fake would never run the loop.
- *
- * And `secrets.create` is held to its own two rules, because a fake that takes
- * any id and any body would let the adapter drift into producing creates the
- * real API refuses — which is a production-only bug by construction:
- *
- * - **The id must match `[A-Za-z0-9_-]{1,255}`.** The alphabet the adapter has
- *   always sanitized to; the ceiling it did not enforce until it had to.
- * - **The body must carry a replication policy.** The `Secret` resource has no
- *   default for it, so a create without one is refused, and every write this
- *   installation makes would fail on it.
+ * A fake Secret Manager HTTP API for the real `SecretManagerStore` client. It
+ * numbers versions, pages lists, and refuses the creates the real API refuses.
  */
 import type { Fetcher } from '../../../src/adapters/store/http.ts';
 
@@ -53,16 +27,16 @@ export interface RecordedRequest {
 }
 
 export interface FakeSecretManagerOptions {
-  /** The project this API serves. Any other answers `404`. */
+  /** Any other project answers `404`. */
   project?: string;
   token?: string;
-  /** Versions per page. Small on purpose, to run the adapter's page loop. */
+  /** Versions per page, small so the adapter's page loop runs. */
   pageSize?: number;
 }
 
 const BASE = 'https://secretmanager.invalid';
 
-/** The id `projects.secrets.create` accepts, alphabet and ceiling both. */
+/** The id `projects.secrets.create` accepts. */
 const SECRET_ID = /^[A-Za-z0-9_-]{1,255}$/;
 
 export class FakeSecretManager {
@@ -84,17 +58,16 @@ export class FakeSecretManager {
     return BASE;
   }
 
-  /** How many secrets exist — the far side's own view, for a test. */
   get secretCount(): number {
     return this.secrets.size;
   }
 
-  /** The annotations a secret carries, or `null`. */
+  /** `null` when no such secret exists. */
   annotationsOf(id: string): Record<string, string> | null {
     return this.secrets.get(id)?.annotations ?? null;
   }
 
-  /** What was written, decoded. Never reachable through the contract. */
+  /** The decoded payload, which the contract never exposes. */
   payloadOf(id: string, version: string): string | null {
     const stored = this.secrets
       .get(id)
@@ -103,7 +76,7 @@ export class FakeSecretManager {
     return Buffer.from(stored.payload, 'base64').toString('utf8');
   }
 
-  /** Seed a secret this adapter did not create — for the collision refusal. */
+  /** A secret the adapter did not create, for the collision refusal. */
   seedSecret(id: string, annotations: Record<string, string>): void {
     this.secrets.set(id, { id, annotations, versions: [] });
   }
@@ -134,8 +107,7 @@ export class FakeSecretManager {
       return json({ error: { message: 'no such project' } }, 404);
     }
 
-    // The API puts custom verbs on the end of a resource name, so the last
-    // segment carries at most one `:verb` suffix.
+    // Custom verbs ride on the last segment as `name:verb`.
     const tail = segments[segments.length - 1] ?? '';
     const colon = tail.indexOf(':');
     const verb = colon === -1 ? null : tail.slice(colon + 1);
@@ -187,9 +159,7 @@ export class FakeSecretManager {
 
   private createSecret(id: string | null, body: unknown): Response {
     if (!id) return json({ error: { message: 'secretId is required' } }, 400);
-    // Both refusals come before the conflict check, as the real API's argument
-    // validation does: a malformed create is invalid whether or not the id it
-    // names is taken.
+    // The real API validates arguments before it checks for a conflict.
     if (!SECRET_ID.test(id)) {
       return json(
         {
@@ -207,8 +177,8 @@ export class FakeSecretManager {
       replication?: { automatic?: unknown; userManaged?: unknown };
       annotations?: Record<string, string>;
     };
-    // `Replication` is a oneof with no default, so neither an absent block nor
-    // an empty one names a policy.
+    // `Replication` is a oneof with no default, so an absent or empty block
+    // names no policy.
     const replication = requested?.replication;
     if (
       replication?.automatic === undefined &&
@@ -290,6 +260,7 @@ export class FakeSecretManager {
       .get(id)
       ?.versions.find((candidate) => String(candidate.number) === number);
     if (!version) return json({ error: { message: 'no such version' } }, 404);
+    // The real API refuses a second destroy, which the adapter must absorb.
     if (version.state === 'DESTROYED') {
       return json(
         {

@@ -1,17 +1,6 @@
 /**
- * The one configuration pull request (Task 24, §15).
- *
- * Task 24's first acceptance criterion — "a fake GitHub API asserts the PR
- * contains **exactly** the Spindrift files plus one workflow caller" — is the
- * whole reason `test/harness/fakes/github-api.ts` models blobs, trees, and
- * `base_tree` layering rather than only recording requests. `exactly` is a
- * claim about the resulting tree, and a test that asserted on the calls would
- * be asserting that the right things were *asked for*, which is a weaker and
- * much easier thing to be right about by accident.
- *
- * The second claim tested here is §15's "**lossless** serialization": what
- * Spindrift writes into a repository has to parse back to what Spindrift meant,
- * or the file it asks a human to edit is a file it will misread.
+ * The configuration pull request. Tests assert on the resulting tree, which the
+ * fake models, and on each written file parsing back to what was meant.
  */
 import { describe, expect, test } from 'bun:test';
 import type { DetectionProposal } from '../../../src/domain/detection/ladder.ts';
@@ -72,8 +61,7 @@ describe('the Spindrift file Spindrift writes', () => {
     expect(parsed.kind).toBe(proposal.kind);
     expect(parsed.build).toEqual(proposal.build);
     expect(parsed.watchPaths).toEqual(proposal.watchPaths);
-    // The parser reports the file as the source, which is the point of writing
-    // it: §5's ladder puts an in-repo file above detection.
+    // An in-repo file outranks detection.
     expect(parsed.source).toBe('spindrift-file');
   });
 
@@ -94,10 +82,8 @@ describe('the Spindrift file Spindrift writes', () => {
   test.each(['true', 'false', 'null', '~', '3', '1.5'])(
     'round-trips a build command YAML would otherwise retype: %s',
     (command) => {
-      // Plain by shape and not a string once parsed, which is a file Spindrift
-      // wrote and can never read back. One refused scope makes the repo loop
-      // reject the whole commit, so the repository stops advancing for every
-      // App on it until a human edits it by hand.
+      // Unquoted, these parse as non-strings, and one unreadable file makes the
+      // repo loop reject the whole commit.
       const typed: DetectionProposal = {
         ...railpack,
         build: {
@@ -124,15 +110,12 @@ describe('the CI caller', () => {
   test("calls the manifest's reusable workflow and nothing else", () => {
     const caller = buildWorkflowCaller(BUILD_WORKFLOW);
     expect(caller).toContain(`uses: ${BUILD_WORKFLOW}`);
-    // §15: the run happens in the connected repository, so the trigger is a
-    // dispatch Spindrift makes rather than a push this repository takes.
+    // The run starts on a dispatch into the connected repository.
     expect(caller).toContain('workflow_dispatch:');
     expect(caller).not.toContain('on: push');
-    // §15's workflow-ref-scoped cloud identity: federated, never a stored
-    // credential this file would have to carry.
+    // Cloud identity is federated, so the file carries no stored credential.
     expect(caller).toContain('id-token: write');
-    // Ticket 136: a called workflow can only narrow this token, never widen
-    // it, so the connected repository's own GHCR push has to be granted here.
+    // A called workflow can only narrow this token, so it grants GHCR push.
     expect(caller).toContain('packages: write');
     expect(caller).not.toMatch(/secrets\./);
   });
@@ -211,8 +194,6 @@ describe('opening it against the repository API', () => {
         `services/api/${SPINDRIFT_FILE}`,
       ].sort(),
     );
-    // Nothing else in the repository is touched: the review is about the
-    // connection and nothing more.
     expect(after['README.md']).toBe('the repository as it was');
     expect(after['apps/site/package.json']).toBe('{}');
     expect(after[WORKFLOW_PATH]).toContain(`uses: ${BUILD_WORKFLOW}`);
@@ -227,8 +208,7 @@ describe('opening it against the repository API', () => {
 
     expect(opened.branch).toBe(CONFIG_BRANCH);
     expect(fake.head(CONFIG_BRANCH)).toBe(opened.commit);
-    // The default branch has not moved: §15 makes its merge the authoritative
-    // act, and opening a pull request is not that act.
+    // The default branch moves only when a human merges.
     expect(fake.head('main')).toBe(base);
 
     const commits = fake.requests.filter(
@@ -253,11 +233,7 @@ describe('opening it against the repository API', () => {
   });
 
   test('cuts the configuration branch when there is not one yet', async () => {
-    // The bug this pins cost every repository its configuration pull request on
-    // the first connect, and reported nothing: GitHub answers a ref *update*
-    // for a ref that does not exist with `422`, not `404` — 404 is what reading
-    // one answers — so a client tolerating only 404 threw on the branch it was
-    // about to create, and `connectRepository` fails open on that throw.
+    // GitHub answers an update to a missing ref with 422, where a read gets 404.
     const fake = new FakeGitHub();
     const { opened } = await open(fake);
 
@@ -273,8 +249,7 @@ describe('opening it against the repository API', () => {
     const fake = new FakeGitHub();
     const first = await open(fake);
 
-    // The far side from the second connect onwards: the branch takes the new
-    // commit, and the pull request for it already exists.
+    // From the second connect on, the pull request already exists.
     const existing = (async (request: any) => {
       const url = new URL(typeof request === 'string' ? request : request.url);
       if (request.method === 'POST' && url.pathname.endsWith('/pulls')) {
@@ -302,9 +277,7 @@ describe('opening it against the repository API', () => {
     );
 
     expect(second.number).toBe(first.opened.number);
-    // Reviewing a description of the first connection over the diff of the
-    // second is the thing `connectRepository`'s own header promises does not
-    // happen — the branch was corrected and the prose was not.
+    // The title and body must describe the second connection, as its diff does.
     const pull = fake.pulls.find(
       (candidate) => candidate.number === second.number,
     );
@@ -320,8 +293,7 @@ describe('opening it against the repository API', () => {
 
     expect(second.opened.commit).not.toBe(first.opened.commit);
     expect(fake.head(CONFIG_BRANCH)).toBe(second.opened.commit);
-    // The second run patched the existing ref rather than trying to create it
-    // twice — a second connection is somebody correcting the first.
+    // The second run patches the existing ref instead of creating it again.
     expect(
       fake.requests.filter((request) => request.method === 'PATCH'),
     ).toHaveLength(2);
@@ -337,7 +309,7 @@ describe('opening it against the repository API', () => {
     const fake = new FakeGitHub();
     const first = await open(fake);
 
-    // Simulate GitHub returning 422 when PR already exists
+    // GitHub answers 422 when the pull request already exists.
     const failingFetch = (async (request: any) => {
       const url = new URL(typeof request === 'string' ? request : request.url);
       if (request.method === 'POST' && url.pathname.endsWith('/pulls')) {

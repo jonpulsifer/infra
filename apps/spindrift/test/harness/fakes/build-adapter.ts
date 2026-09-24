@@ -1,11 +1,4 @@
-/**
- * A fake build route (Task 7).
- *
- * § Testing: **"Fake the far side, not our side."** This is the builder that is
- * not there. It records the {@link BuildSource} and {@link BuildSpec} it was
- * handed — so a test can assert that the bundle digest reached the route, which
- * is §16's whole join — and replays a scripted result.
- */
+/** A `BuildAdapter` that records each build and replays a scripted result. */
 
 import { createHash } from 'node:crypto';
 import type {
@@ -20,22 +13,16 @@ import type {
 } from '../../../src/adapters/build/contract.ts';
 import type { RegistryFlavour } from '../../../src/domain/artifact-name.ts';
 
-/** What the fake was asked to build, in order. */
 export interface RecordedBuild {
   source: BuildSource;
   spec: BuildSpec;
-  /** The dispatch id core handed the route, or `null` when driven bare. */
+  /** `null` when the route is called without a dispatch id. */
   dispatchId: string | null;
 }
 
-/** One scripted build: what to yield along the way, and how it ends. */
 export interface ScriptedBuild {
   events?: readonly BuildEvent[];
-  /**
-   * The result, minus the bookkeeping the fake fills in itself: `logs` names
-   * this route, and a green build echoes the bundle digest it was given, since
-   * a route that cannot do that cannot produce a joinable provenance (§16).
-   */
+  /** The fake adds `logs`, and a success echoes the bundle digest. */
   result:
     | { status: 'SUCCEEDED'; digest?: string; baseDigest?: string | null }
     | {
@@ -52,9 +39,7 @@ export interface FakeBuildAdapterOptions {
   logFidelity?: LogFidelity;
   buildLevel?: BuildLevel;
   provenanceBuilderId?: string;
-  /** Defaults to true; a test asserting the hosted route's refusal sets false. */
   carriesHeldSecret?: boolean;
-  /** Defaults to every flavour, so a test narrows only when that is its point. */
   selfAuthorizedRegistries?: readonly RegistryFlavour[];
   script?: readonly ScriptedBuild[];
 }
@@ -69,9 +54,7 @@ export class FakeBuildAdapter implements BuildAdapter {
   readonly carriesHeldSecret: boolean;
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[];
 
-  /** Every `build`, in call order. */
   readonly built: RecordedBuild[] = [];
-  /** Every `cancel`, in call order — the far side a test asserts was reached. */
   readonly cancelled: BuildHandle[] = [];
 
   private readonly script: readonly ScriptedBuild[];
@@ -137,7 +120,7 @@ export class FakeBuildAdapter implements BuildAdapter {
       },
       logs,
       provenance: {
-        // Echoed, never invented: this is the join §16 asks a route for.
+        // Verification joins the artifact to its source on this digest.
         bundleDigest: source.bundleDigest,
         claimedLevel: this.buildLevel,
         statement: fakeStatement({
@@ -161,32 +144,14 @@ export class FakeBuildAdapter implements BuildAdapter {
   }
 }
 
-/**
- * A digest the product would accept.
- *
- * `sha256:fake-0` was the old default, and three places in `src/` validate a
- * digest against `^sha256:[0-9a-f]{64}$` — so every command test that ran a
- * build through to a Deploy ran on an artifact the real system cannot produce
- * and would refuse. Hashing the label keeps it deterministic and readable in a
- * diff while being a real digest.
- */
+/** A deterministic digest that passes `DIGEST_PATTERN`. */
 export function fakeDigest(label: string): string {
   return `sha256:${createHash('sha256').update(label).digest('hex')}`;
 }
 
 /**
- * The provenance document a route reports (§16).
- *
- * `{ fake: true }` was here, and it made the verification chain vacuous: the
- * real {@link import('../../../src/supply-chain/verify.ts').SlsaVerifier} reads
- * the *verified envelope* for `predicate.buildDefinition.externalParameters
- * .bundleDigest` and refuses when it does not name the source bundle. A
- * statement without that path fails that check, so nothing that ran against the
- * old value was ever asserting the join §16 is built on.
- *
- * The shape is an in-toto v1 statement because that is what the pinned verifier
- * parses — subject digest, builder id, and bundle digest all live where
- * `apps/spindrift-verifier/pkg/verifier/verify.go` looks for them.
+ * An in-toto v1 statement with the bundle digest at the path `SlsaVerifier` and
+ * `apps/spindrift-verifier` read it from.
  */
 export function fakeStatement(input: {
   builderId: string;

@@ -1,31 +1,6 @@
 /**
- * A fake of the repository host's HTTP API (Task 24, § Seam 2).
- *
- * § Seam 2: real backends are stood in for "the way `apps/ddnsd/main_test.go`
- * already does it in this repo: **a fake of the far-side HTTP API behind the
- * real client**, with the test asserting the requests that were made." So this
- * is the API, not a fake `RepositoryHost` — every assertion about
- * `GitHubApp` runs through its real URL construction, its real JSON bodies, its
- * real Git-data-API sequencing, and its real classification of a `404`.
- *
- * It models a small but genuine git object store: blobs, trees, commits, and
- * branches, with a `base_tree` layering that actually layers. That is what lets
- * a test ask the question Task 24's first acceptance criterion asks — *what is
- * in the tree the configuration PR wrote* — rather than asserting on the
- * requests and hoping they compose.
- *
- * Anything it does not model answers `404`, so a client that started calling a
- * new endpoint fails here rather than silently passing against a permissive
- * stand-in.
- *
- * **It negotiates content, because the real API does and a fake that did not
- * would be strictly more permissive than the thing it stands for.** That is not
- * a hypothetical: `jobLog` shipped asking for `text/plain`, every test passed,
- * and every build in production died on the `415` this fake now answers with.
- * The two endpoints that serve anything other than plain JSON are the two
- * modelled here — job logs, which negotiate as JSON and answer with text, and
- * contents, which answers raw bytes only to a client that asked for them. A
- * request whose `Accept` the real API would refuse is refused here.
+ * The GitHub REST API behind the real `GitHubApp`: a small git object store,
+ * Actions runs, and the real `Accept` negotiation. Anything else answers 404.
  */
 import { encodeBuildReport } from '../../../src/adapters/build/report.ts';
 import type { Fetcher } from '../../../src/integrations/github/http.ts';
@@ -33,18 +8,15 @@ import { tarball } from '../tar.ts';
 
 const BASE = 'https://api.git.invalid';
 
-/** Every request the client made, for a test to assert against. */
 export interface RecordedRequest {
   method: string;
   /** Path and query, without the base URL. */
   path: string;
   body: unknown;
   authorization: string | null;
-  /** What the client said it would take — assertable, because it matters. */
   accept: string | null;
 }
 
-/** One pull request the client opened. */
 export interface RecordedPullRequest {
   number: number;
   title: string;
@@ -58,15 +30,13 @@ export interface RecordedPullRequest {
 interface StoredCommit {
   tree: string;
   parents: string[];
-  /** What `GET /repos/{r}/commits/{sha}` says beside the sha. */
   message: string;
-  /** `null` models a commit whose author the host cannot match to a user. */
+  /** `null` when the host cannot match the author to a user. */
   authorLogin: string | null;
   authorName: string;
   authoredAt: string;
 }
 
-/** What a test may say about the commit it is making, beyond its files. */
 export interface FakeCommitOptions {
   readonly message?: string;
   readonly authorLogin?: string | null;
@@ -74,7 +44,6 @@ export interface FakeCommitOptions {
   readonly authoredAt?: string;
 }
 
-/** One dispatch the client asked for. */
 export interface RecordedDispatch {
   workflow: string;
   branch: string;
@@ -82,35 +51,21 @@ export interface RecordedDispatch {
 }
 
 /**
- * How this host's Actions behave.
- *
- * The two delays are what make the fake worth having: a dispatch that named its
- * run immediately, or a run that was finished the moment it was found, would let
- * a route that never polled pass — and polling is most of what the route does.
+ * A dispatch answers 204 and names no run, so the caller finds the run by its
+ * name after `discoveryDelay` list calls, and it ends after `duration` reads.
  */
 export interface FakeActionsOptions {
   /** List calls before a dispatched run becomes visible. `0` is immediate. */
   discoveryDelay?: number;
   /** Status reads before the run completes. */
   duration?: number;
-  /** How it ends. Anything but `success` is a failed build. */
+  /** Anything but `success` is a failed build. */
   conclusion?: string;
-  /**
-   * The job log, given the spec that was dispatched. The default composes a
-   * valid report, because a green run that reports nothing is its own test
-   * rather than the state every other test wants to start from.
-   */
+  /** The job log for the dispatched spec; the default ends in a valid report. */
   log?: (spec: Record<string, unknown>) => string;
-  /**
-   * The status the logs endpoint answers with. `200` serves the log; anything
-   * else stands in for a host that concluded a run and then would not hand over
-   * its text — the one failure a green run can still die of.
-   */
+  /** Anything but 200 withholds the log of a concluded run. */
   logStatus?: number;
-  /**
-   * List calls that answer `500` before the endpoint serves. Models the far
-   * side flaking on the lookup for a run whose dispatch already worked.
-   */
+  /** List calls that answer `500` before the endpoint serves. */
   listFailures?: number;
   /** Status reads that answer `500` before the endpoint serves. */
   statusFailures?: number;
@@ -121,7 +76,6 @@ interface FakeRun {
   name: string;
   reads: number;
   log: string;
-  /** Set by the cancel endpoint; the run concludes `cancelled` from then on. */
   cancelled: boolean;
 }
 
@@ -129,42 +83,26 @@ export interface FakeGitHubOptions {
   /** `owner/name` of the one repository this host serves. */
   fullName?: string;
   defaultBranch?: string;
-  /** The installation the App must present a token for. */
+  /** The installation id tokens are minted for. */
   installationId?: string;
-  /** The account that installation sits on, as `/app/installations` reports it. */
+  /** The account that installation sits on. */
   accountLogin?: string;
-  /**
-   * The clock installation-token expiry is measured from.
-   *
-   * Shared with the client under test on purpose: a token's lifetime is the
-   * one fact both sides have to agree about for the refresh-margin tests to
-   * mean anything.
-   */
+  /** Share it with the client under test, so both measure token expiry alike. */
   now?: () => Date;
   actions?: FakeActionsOptions;
 }
 
-/** How long a minted installation token lives, as the real host defines it. */
+/** GitHub installation tokens expire after an hour. */
 const TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 
-/**
- * Object ids are a counter in hex, not a hash.
- *
- * They only have to be distinct and stable within one test, and a real digest
- * would make an assertion about a tree depend on the exact bytes of a YAML
- * comment.
- */
+/** A hex counter, since a real hash would tie tree assertions to file bytes. */
 function objectId(counter: number): string {
   return counter.toString(16).padStart(40, '0');
 }
 
 /**
- * Whether an `Accept` names a media type the host will negotiate as JSON.
- *
- * Deliberately not a full RFC 7231 matcher — it exists to draw one line, the
- * one the real API's own refusal draws: "Must accept 'application/json'".
- * `application/vnd.github+json` is that, spelled the way GitHub spells it, and
- * `text/plain` is not.
+ * Draws only the line the real 415 draws: "Must accept 'application/json'",
+ * which `application/vnd.github+json` satisfies and `text/plain` does not.
  */
 function acceptsJson(accept: string | null): boolean {
   if (accept === null || accept.trim() === '') return true;
@@ -180,31 +118,27 @@ function acceptsJson(accept: string | null): boolean {
 }
 
 export class FakeGitHub {
-  /** `owner/name` as the host currently knows it; {@link rename} moves it. */
+  /** The current `owner/name`; {@link FakeGitHub.rename} moves it. */
   fullName: string;
   readonly installationId: string;
   readonly accountLogin: string;
   readonly requests: RecordedRequest[] = [];
   readonly pulls: RecordedPullRequest[] = [];
-  /** Every commit whose archive was downloaded — "fetch once" is checkable. */
   readonly tarballs: string[] = [];
-  /** Every workflow dispatch, in order — the assertion surface for a build. */
   readonly dispatches: RecordedDispatch[] = [];
-  /** Every run id the cancel endpoint was asked to stop, in order. */
   readonly cancels: number[] = [];
 
   defaultBranch: string;
 
   /**
-   * Set to stop answering anything. Models the whole of §15's lost access: an
-   * installation removed from a repository, deleted, or suspended all present
-   * as a `404` this client cannot tell apart.
+   * Every call but a token mint answers 404, as a removed, deleted or suspended
+   * installation does.
    */
   accessLost = false;
-  /** Set to answer every call with a quota refusal instead. */
+  /** Set to answer every call with a quota refusal. */
   rateLimited = false;
 
-  /** Names this repository answered to before a {@link rename}. */
+  /** Names this repository answered to before a {@link FakeGitHub.rename}. */
   private readonly previousNames = new Set<string>();
   private readonly blobs = new Map<string, string>();
   private readonly trees = new Map<string, Map<string, string>>();
@@ -241,12 +175,10 @@ export class FakeGitHub {
     return BASE;
   }
 
-  /** The commit a branch points at, or `undefined`. */
   head(branch: string): string | undefined {
     return this.branches.get(branch);
   }
 
-  /** Every path and its contents at one commit — what a test asserts on. */
   filesAt(commit: string): Record<string, string> {
     const tree = this.trees.get(this.commits.get(commit)?.tree ?? '');
     const files: Record<string, string> = {};
@@ -256,7 +188,7 @@ export class FakeGitHub {
     return files;
   }
 
-  /** Put a commit carrying exactly these files on a branch. */
+  /** Commits exactly these files onto a branch, with no base tree. */
   commitFiles(
     branch: string,
     files: Record<string, string>,
@@ -285,27 +217,22 @@ export class FakeGitHub {
     return commit;
   }
 
-  /** Close a pull request without merging it — what `pullRequestState` asks about. */
+  /** Closes a pull request without merging it. */
   closePullRequest(number: number): void {
     const pull = this.pulls.find((candidate) => candidate.number === number);
     if (pull !== undefined) pull.state = 'closed';
   }
 
   /**
-   * Rename the repository. The old name keeps answering, and every answer
-   * carries the new `full_name` — which is what the real client sees, because
-   * the host's `301` is followed by `fetch` before any body reaches it.
+   * The old name keeps answering with the new `full_name`, since `fetch` follows
+   * the host's 301 before the client sees a body.
    */
   rename(fullName: string): void {
     this.previousNames.add(this.fullName);
     this.fullName = fullName;
   }
 
-  /**
-   * Point a branch at a commit that already exists. Pointing it *back* is how
-   * a test stands in for the API lagging a push: the delivery names the newer
-   * commit while the ref still reads as the older one.
-   */
+  /** Pointing a branch back at an older commit models the API lagging a push. */
   setHead(branch: string, commit: string): void {
     this.branches.set(branch, commit);
   }
@@ -332,7 +259,7 @@ export class FakeGitHub {
     return new Response('{"message":"Not Found"}', { status: 404 });
   }
 
-  /** The host's own refusal, message and all, for an `Accept` it will not serve. */
+  /** The host's own 415 body. */
   private unsupportedMediaType(accept: string | null): Response {
     return this.json(
       {
@@ -343,7 +270,6 @@ export class FakeGitHub {
     );
   }
 
-  /** The transport to hand the real client. */
   readonly fetch: Fetcher = async (request) => {
     const url = new URL(request.url);
     const path = `${url.pathname}${url.search}`;
@@ -364,9 +290,8 @@ export class FakeGitHub {
       });
     }
 
-    // Minting an installation token is the one call that presents the App JWT
-    // rather than a token, so it is answered before the access check: an App
-    // that lost a repository can still mint — the loss shows on the reads.
+    // Minting presents the App JWT, so it precedes the access check: an App that
+    // lost a repository can still mint.
     const minting = url.pathname.match(
       /^\/app\/installations\/([^/]+)\/access_tokens$/,
     );
@@ -386,9 +311,7 @@ export class FakeGitHub {
 
     if (this.accessLost) return this.notFound();
 
-    // The JWT-side enumeration answers a bare array, exactly as the real
-    // endpoint does — not the `{installations: []}` envelope the retired
-    // user-to-server endpoint wrapped it in.
+    // A bare array, as the real endpoint answers.
     if (url.pathname === '/app/installations' && request.method === 'GET') {
       return this.json([
         {
@@ -439,13 +362,6 @@ export class FakeGitHub {
     );
   };
 
-  /**
-   * The Actions half, which models one thing carefully: **a dispatch names no
-   * run.** It answers `204`, and the run has to be found afterwards by the name
-   * the caller stamped — so this fake creates the run without telling anyone,
-   * makes it visible only after `discoveryDelay` list calls, and finishes it
-   * after `duration` status reads.
-   */
   /** Whether a run is over, and how: cancelled wins over the scripted end. */
   private concluded(run: FakeRun): {
     done: boolean;
@@ -481,7 +397,7 @@ export class FakeGitHub {
       const spec = JSON.parse(inputs.spec ?? '{}') as Record<string, unknown>;
       this.runs.push({
         id: this.runNumber,
-        // Exactly what the caller workflow's `run-name` would produce.
+        // What the caller workflow's `run-name` produces.
         name: `spindrift ${inputs.correlation ?? ''}`,
         reads: 0,
         log: this.actions.log(spec),
@@ -504,8 +420,7 @@ export class FakeGitHub {
           name: run.name,
           status: 'queued',
           conclusion: null,
-          // The host's own address for the run, in the layout GitHub serves
-          // — what a cancel from outside the dispatching process reads.
+          // A cancel from outside the dispatching process reads this.
           html_url: `https://github.com/${this.fullName}/actions/runs/${run.id}`,
         })),
       });
@@ -532,8 +447,7 @@ export class FakeGitHub {
     if (cancel && method === 'POST') {
       const run = this.runs.find((each) => each.id === Number(cancel[1]));
       if (run === undefined) return this.notFound();
-      // A concluded run cannot be cancelled, and the host says so with a
-      // `409` rather than a success the caller could mistake for an act.
+      // A concluded run answers 409, as the host does.
       if (this.concluded(run).done) {
         return this.json({ message: 'Cannot cancel a workflow run' }, 409);
       }
@@ -568,10 +482,8 @@ export class FakeGitHub {
 
     const log = rest.match(/^\/actions\/jobs\/(\d+)\/logs$/);
     if (log && method === 'GET') {
-      // The endpoint negotiates as JSON and *answers* with a redirect to a
-      // plain-text blob. Asking for the media type of the answer is the mistake
-      // that reads as obviously correct, so it is the one refused first — before
-      // the job is even looked up, exactly as the real API refuses it.
+      // It negotiates as JSON but answers with plain text. The real API refuses
+      // a non-JSON `Accept` before looking up the job.
       if (!acceptsJson(accept)) return this.unsupportedMediaType(accept);
       const run = this.runs.find((each) => each.id === Number(log[1]));
       if (run === undefined) return this.notFound();
@@ -600,10 +512,7 @@ export class FakeGitHub {
         : this.json({ object: { sha: commit } });
     }
 
-    // Trees answer for a tree id *or* a commit id, exactly as the real
-    // endpoint does, and only `recursive=1` flattens. A client that forgot the
-    // flag gets the top level here too, so "why is my monorepo one entry" is a
-    // question this fake can be asked rather than one production answers.
+    // A tree or commit id, as the real endpoint takes; `recursive` flattens.
     const gitTree = rest.match(/^\/git\/trees\/(.+)$/);
     if (gitTree) {
       const requested = decodeURIComponent(gitTree[1] ?? '');
@@ -640,8 +549,8 @@ export class FakeGitHub {
       const requested = decodeURIComponent(commit[1] ?? '');
       const resolved = this.branches.get(requested) ?? requested;
       const stored = this.commits.get(resolved);
-      // The real answer's shape: the git-level commit under `commit`, and the
-      // host's matched user under `author` — `null` when it matched none.
+      // The git commit under `commit`, and the host's matched user, or `null`,
+      // under `author`.
       return stored === undefined
         ? this.notFound()
         : this.json({
@@ -663,10 +572,8 @@ export class FakeGitHub {
       const at = this.branches.get(ref) ?? ref;
       const file = this.filesAt(at)[decodeURIComponent(contents[1] ?? '')];
       if (file === undefined) return this.notFound();
-      // Raw bytes only to a client that asked for them. To anyone else this
-      // endpoint answers metadata with the file base64'd inside it — so a caller
-      // that dropped the raw media type reads a JSON envelope where it expected
-      // a `spindrift.yaml`, here as in production.
+      // Raw bytes only for the raw media type; otherwise JSON with the file in
+      // base64.
       return accept === 'application/vnd.github.raw'
         ? new Response(file)
         : this.json({
@@ -681,11 +588,8 @@ export class FakeGitHub {
       const at = decodeURIComponent(archive[1] ?? '');
       if (!this.commits.has(at)) return this.notFound();
       this.tarballs.push(at);
-      // A real gzipped tar, wrapping the tree in the host's own
-      // `owner-repo-sha/` directory, because that is what production answers
-      // with and what every consumer downstream of the fetch assumes:
-      // `canonicalGzip` gunzips it before it is digested, and the build routes
-      // `tar -xz` it and unwrap the lone top-level directory (§5).
+      // A gzipped tar wrapping the tree in `owner-repo-sha/`, as GitHub serves
+      // it and the build routes unwrap it.
       const root = `${this.fullName.replace('/', '-')}-${at.slice(0, 7)}`;
       const files = this.filesAt(at);
       return new Response(
@@ -700,9 +604,7 @@ export class FakeGitHub {
       );
     }
 
-    // A single pull request by number — what `pullRequestState` asks for —
-    // matched before the listing below, which `startsWith` would otherwise
-    // also answer.
+    // Before the listing below, which `startsWith` would also match.
     const onePull = rest.match(/^\/pulls\/(\d+)$/);
     if (onePull) {
       const pull = this.pulls.find(
@@ -765,8 +667,7 @@ export class FakeGitHub {
         tree: String(body.tree ?? ''),
         parents: (body.parents ?? []) as string[],
         message: String(body.message ?? ''),
-        // Committed by the App: the host attributes it to the bot, which is
-        // what the configuration pull request's commits look like.
+        // The host attributes a commit the App makes to its bot user.
         authorLogin: `${this.accountLogin}[bot]`,
         authorName: this.accountLogin,
         authoredAt: this.now().toISOString(),
@@ -777,11 +678,7 @@ export class FakeGitHub {
     const update = rest.match(/^\/git\/refs\/heads\/(.+)$/);
     if (update && method === 'PATCH') {
       const name = decodeURIComponent(update[1] ?? '');
-      // The host's own answer, and not the one it is easy to assume: updating a
-      // ref that is not there is a `422`, message and all. This fake said `404`
-      // for years and the production client was written to match the fake, so
-      // the create-the-branch path it falls through to was never once taken
-      // against GitHub.
+      // The host answers 422 for a missing ref, where a 404 is easy to assume.
       if (!this.branches.has(name)) {
         return this.json({ message: 'Reference does not exist' }, 422);
       }
@@ -809,8 +706,7 @@ export class FakeGitHub {
       return this.json(pull, 201);
     }
 
-    // Rewriting an open pull request's prose, which is what a second connect
-    // does to the one it finds already standing on its branch.
+    // A second connect rewrites the open pull request on its branch.
     const editPull = rest.match(/^\/pulls\/(\d+)$/);
     if (editPull && method === 'PATCH') {
       const number = Number(editPull[1]);
@@ -826,10 +722,8 @@ export class FakeGitHub {
 }
 
 /**
- * A fresh RSA keypair in the two shapes the tests need: the private half as a
- * PEM (PKCS#8 by default; PKCS#1 is what GitHub's conversion endpoint actually
- * hands out, and `pkcs1` asks for that), the public half as a WebCrypto key a
- * test can verify a JWT signature against.
+ * A fresh RSA keypair: the private half as PEM, PKCS#8 or the PKCS#1 GitHub hands
+ * out, and the public half as a WebCrypto key for verifying a JWT.
  */
 export async function testAppKey(
   format: 'pkcs8' | 'pkcs1' = 'pkcs8',
@@ -860,13 +754,7 @@ export async function testAppKey(
   };
 }
 
-/**
- * What a green run's log looks like: some output, then the one line core reads.
- *
- * The bundle digest is echoed from the spec that was dispatched rather than
- * fixed, which is what lets a test assert §16's join is real — and what lets a
- * test break it deliberately by supplying its own log.
- */
+/** A green run's log, whose report echoes the dispatched bundle digest. */
 function defaultBuildLog(spec: Record<string, unknown>): string {
   const digest = `sha256:${'a'.repeat(64)}`;
   const destination = String(spec.destination ?? 'registry.invalid/app');

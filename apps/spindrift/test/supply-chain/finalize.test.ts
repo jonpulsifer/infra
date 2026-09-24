@@ -81,7 +81,6 @@ function input(minimumLevel: 1 | 2 | 3 = 2) {
   };
 }
 
-/** A signature verifier that accepts every recorded signature. */
 const acceptingVerifier: SignatureVerifier = {
   async verify() {
     return { ok: true, reason: null };
@@ -378,8 +377,8 @@ describe('the pinned verify-signature process boundary', () => {
       DIGEST,
     );
     expect(recorded[0]).toContain('--bundle-path');
-    // The signer key pins admission — verify-signature refuses any bundle
-    // whose embedded public key does not match the one derived from this.
+    // verify-signature refuses a bundle whose embedded public key differs from
+    // the one derived from this key.
     expect(recorded[0]).toContain('--signer-key');
     expect(recorded[0]?.at(recorded[0].indexOf('--signer-key') + 1)).toBe(
       '/etc/spindrift/signer.pem',
@@ -413,15 +412,7 @@ describe('the pinned verify-signature process boundary', () => {
   });
 });
 
-/**
- * The real classes over the pinned binary's process seam (Task 17).
- *
- * Everything above this point either drives `CoreSupplyChain` over hand-written
- * doubles or drives one real class over a process that always says yes. What is
- * here is the part that used to be unreachable: the verifier's own refusals,
- * its `min()`, its four-deep read of the envelope, and a signature that is
- * signed and re-verified rather than asserted.
- */
+/** The real verifier and signer over a fake of the pinned binaries. */
 describe('the real verifier over the pinned process', () => {
   function statement(overrides: {
     bundleDigest?: string | null;
@@ -465,9 +456,6 @@ describe('the real verifier over the pinned process', () => {
   }
 
   test('the achieved level is the lower of the claim and the profile ceiling', async () => {
-    // `min(claimedLevel, maximumLevel)` had no coverage while the fake answered
-    // `achievedLevel: input.maximumLevel`, so a route claiming less than its
-    // profile permits was recorded at its ceiling.
     const processes = new FakeVerifierProcess();
     const claimingLess = await verifying(processes).verify({
       ...input(),
@@ -502,8 +490,8 @@ describe('the real verifier over the pinned process', () => {
   });
 
   test('a verified envelope naming another bundle refuses', async () => {
-    // §16's join, checked rather than copied: the *verified* document has to
-    // name the bundle core staged, or the provenance describes another build.
+    // The verified document has to name the bundle core staged, or the
+    // provenance describes another build.
     const other = `sha256:${'d'.repeat(64)}`;
     const result = await verifying(new FakeVerifierProcess()).verify({
       ...input(),
@@ -537,8 +525,8 @@ describe('the real verifier over the pinned process', () => {
   });
 
   test('an artifact with no digest-pinned reference never spawns anything', async () => {
-    // The check/use race the verifier's contract warns about: a tag can move
-    // between the check and the pull, so a tag never reaches the tool.
+    // A tag can move between the check and the pull, so a tag never reaches
+    // the tool.
     const processes = new FakeVerifierProcess();
     const result = await verifying(processes).verify({
       ...input(),
@@ -575,9 +563,6 @@ describe('the real verifier over the pinned process', () => {
   });
 
   test('a files artifact is verified and signed like any other digest', async () => {
-    // §16 says core "signs that digest", and a static site has one. Gating the
-    // supply chain on `type === 'image'` refused every files build before the
-    // verifier was even spawned.
     const processes = new FakeVerifierProcess();
     const artifact: Artifact = {
       type: 'files',
@@ -624,9 +609,7 @@ describe('a signature that is signed and re-verified, not asserted', () => {
     }).verify({ artifactDigest: DIGEST, signature });
 
     expect(admitted).toEqual({ ok: true, reason: null });
-    // The bundle came back through the file the signer wrote, not through
-    // stdout — which is the path `CosignSigner` prefers and had never been
-    // exercised against a process that writes one.
+    // The signer reads the bundle back from the file the process wrote.
     expect(processes.callsTo('sign')).toHaveLength(1);
   });
 
@@ -645,9 +628,8 @@ describe('a signature that is signed and re-verified, not asserted', () => {
   });
 
   test('a bundle signed by another key is refused even though it is self-consistent', async () => {
-    // The pin: admission derives the expected public key from the trusted
-    // signer reference, so a bundle whose own key verifies its own signature
-    // still fails.
+    // Admission derives the expected public key from the trusted signer
+    // reference, never from the bundle.
     const signature = await signOnce(
       new FakeVerifierProcess({ signerKey: '/spindrift/other.key' }),
     );

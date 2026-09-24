@@ -1,15 +1,5 @@
-/**
- * The gap this closes, asserted end to end (Task 37).
- *
- * `apps/spindrift/README.md` said it plainly: *"Nobody can sign in... every
- * command route answers 401."* Every other test in `test/auth/` proves a piece
- * of the mechanism; this one proves the outcome, over the real route table, in
- * the units a browser actually deals in — a POST, a `Set-Cookie`, and a
- * subsequent request that carries it.
- *
- * The one assertion worth reading first: **a session minted by the auth surface
- * reaches a command**. That is the sentence the README will stop needing.
- */
+// Enrolment end to end over the real route table: a POST, a `Set-Cookie`, and a
+// command request that carries it.
 import { describe, expect, test } from 'bun:test';
 import type { EnrolmentDeps } from '../../src/auth/enrol.ts';
 import {
@@ -36,16 +26,11 @@ const RELYING_PARTY = {
 
 const SHIPPED_TOKEN = 'the-token-in-the-installation-secret';
 
-/** A stand-in for the client, so this file never depends on a build having run. */
+// A stand-in, so this file never needs a client build.
 const CLIENT = { '/': new Response('the client document') };
 
-/**
- * The real table, assembled the way `serve.ts` assembles it.
- *
- * The command context is built from the same auth deps, so a principal that
- * arrives here really did come out of the auth surface rather than from a
- * fixture the test wrote directly.
- */
+// Assembled as `serve.ts` does, with the command context built from the same
+// auth deps, so every principal here came out of the auth surface.
 function serve() {
   const auth: EnrolmentDeps & GatewayDeps = {
     db: database().db,
@@ -82,9 +67,7 @@ function serve() {
     {
       db: auth.db,
       clock: auth.clock,
-      // No secret configured: this file is about the auth surface, not the
-      // webhook, and an unconfigured secret is what keeps the route from
-      // reaching `current` if a test here ever hit it by mistake.
+      // No secret, so the webhook route never reaches `current`.
       secret: async () => null,
       current: () => {
         throw new Error('an auth-route test reached installation state');
@@ -93,7 +76,6 @@ function serve() {
     {
       db: auth.db,
       clock: auth.clock,
-      // Likewise: this file is about the auth surface, not bosun.
       secret: null,
     },
     {
@@ -134,7 +116,6 @@ function post(path: string, body: unknown = {}, cookie?: string): Request {
   });
 }
 
-/** Pull the session cookie out of a `Set-Cookie` the way a browser would. */
 function cookieFrom(response: Response): string | null {
   const header = response.headers.get('set-cookie');
   if (header === null) return null;
@@ -142,16 +123,9 @@ function cookieFrom(response: Response): string | null {
   return pair?.startsWith(`${SESSION_COOKIE}=`) ? pair : null;
 }
 
-/**
- * The table as a lookup.
- *
- * `webRoutes` returns a precise object type, which is the right type for
- * `Bun.serve` and the wrong one for a test that looks a path up by name — so
- * the widening happens once, here, rather than at each call.
- */
+// Widened once: `webRoutes`' precise type suits `Bun.serve`, not lookup by path.
 type Routes = Record<string, unknown>;
 
-/** Enrol over the routes, exactly as the browser would. */
 async function enrolOverHttp(routes: Routes): Promise<Response> {
   const begun = await call(routes, authPathFor('enrol/begin'), {
     token: SHIPPED_TOKEN,
@@ -169,7 +143,6 @@ async function enrolOverHttp(routes: Routes): Promise<Response> {
   });
 }
 
-/** Look a handler up by path, refusing anything that is not one. */
 function handlerFor(
   routes: Routes,
   path: string,
@@ -203,15 +176,13 @@ describe('enrolling over the route table', () => {
     const header = response.headers.get('set-cookie') ?? '';
     expect(header).toContain('HttpOnly');
 
-    // The token is in the cookie and nowhere in the body: a value the client's
-    // own script can read is a value an injected script can read.
+    // Only in the HttpOnly cookie: any script, injected or not, can read the body.
     const body = await response.text();
     const value = cookie!.slice(`${SESSION_COOKIE}=`.length);
     expect(body).not.toContain(value);
   });
 
   test('and the session it mints reaches a command', async () => {
-    // The whole point of enrolment: without it every command route answers 401.
     const { routes } = serve();
     const cookie = cookieFrom(await enrolOverHttp(routes));
     expect(cookie).not.toBeNull();
@@ -221,9 +192,7 @@ describe('enrolling over the route table', () => {
       commandNames[0]!;
     const response = await call(routes, pathFor(name), {}, cookie!);
 
-    // 422, not 401: an empty object satisfies no command's schema, so the
-    // request got past the session check and was refused by the command's own
-    // input validation — which is the boundary behaving exactly as designed.
+    // 422, not 401: the session check passed and the empty input failed validation.
     expect(response.status).toBe(422);
     const body = (await response.json()) as { failure: { code: string } };
     expect(body.failure.code).toBe('INVALID_INPUT');
@@ -253,9 +222,7 @@ describe('the session route', () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as { value: { principal: unknown } };
-    // A read, not a refusal: the client asks this to decide which screen to
-    // render, and "nobody" is a perfectly good answer to render the enrolment
-    // screen from.
+    // A read, not a refusal: the client picks its screen from this answer.
     expect(body.value.principal).toBeNull();
   });
 
@@ -317,7 +284,7 @@ describe('signing out over the route table', () => {
     const out = await call(routes, authPathFor('signout'), {}, cookie!);
     expect(out.headers.get('set-cookie')).toContain('Max-Age=0');
 
-    // Not just cleared in the browser — the token is dead on the server too.
+    // The session is dead on the server too, not only cleared in the browser.
     const name = commandNames[0]!;
     const after = await call(routes, pathFor(name), {}, cookie!);
     expect(after.status).toBe(401);
@@ -334,7 +301,7 @@ describe('the auth surface refuses what it should', () => {
   });
 
   test('a second enrolment reads as a conflict, not as bad input', async () => {
-    // 409 because the caller has nothing to fix: the installation is claimed.
+    // 409: the installation is claimed, so the caller has nothing to fix.
     const { routes } = serve();
     await enrolOverHttp(routes);
 

@@ -1,16 +1,5 @@
-/**
- * The mounted webhook route (§15, §21).
- *
- * `test/integrations/github/webhook.test.ts` proves the handler's own
- * verify-then-classify contract; this file proves the thing that used to be
- * missing — that `webRoutes` actually reaches it, over a real HTTP `Request`,
- * with the secret and installation state arriving the way `serve.ts` wires
- * them. The opt-in gate and the act a push asks for get their own focused
- * coverage in `test/reconciler/auto-deploy.test.ts` over synthetic passes; the
- * case here is the one only the mounted route can prove — that a real signed
- * delivery, reconciled against a real repository host, causes the pushed
- * commit to be built.
- */
+// The webhook route as mounted, over a real `Request`. The handler's own
+// contract is tested in `test/integrations/github/webhook.test.ts`.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import type { AdapterRegistry } from '../../src/commands/types.ts';
@@ -86,7 +75,7 @@ async function delivery(
   });
 }
 
-/** Deps that throw if a webhook that should refuse before reading them touches them. */
+/** Deps that throw when read, for deliveries refused before any read. */
 const unreachable: WebhookRouteDeps = {
   db: new Proxy(
     {},
@@ -111,7 +100,6 @@ function post(deps: WebhookRouteDeps, request: Request): Promise<Response> {
   return webhookRoutes(deps)[WEBHOOK_PATH]!(request);
 }
 
-/** Records what it was asked to stage; fetches nothing. */
 class FakeSourceStager implements RepositorySourceStager {
   readonly staged: Array<{ repository: string; commit: string }> = [];
 
@@ -235,10 +223,8 @@ describe('a push that reaches an opted-in App', () => {
       .update(components)
       .set({ placedTargetId: target!.id })
       .where(eq(components.id, component!.id));
-    // The artifact on hand, built from the commit *before* the one being
-    // pushed. Deployable in every other respect — signed, at Build Level 2, on
-    // a connected Target — so the only reason the push below must not place it
-    // is the one this test is about.
+    // Built from an older commit and deployable in every other respect, so only
+    // the commit keeps the push from placing it.
     const digest = `sha256:${'a'.repeat(64)}`;
     const [build] = await db
       .insert(builds)
@@ -253,9 +239,8 @@ describe('a push that reaches an opted-in App', () => {
         status: 'SUCCEEDED',
         verifiedBuildLevel: 2,
         signature: testSignature(digest, NOW.toISOString()),
-        // Explicit, and before the frozen clock: the column defaults to the
-        // database's `now()`, which in a test is the real wall clock and
-        // therefore *newer* than the row this delivery writes at `NOW`.
+        // The column defaults to the database's `now()`, which is later than
+        // the frozen `NOW` the delivery writes at.
         createdAt: new Date(NOW.getTime() - 60_000),
       })
       .returning();
@@ -302,15 +287,10 @@ describe('a push that reaches an opted-in App', () => {
 
     expect(response.status).toBe(202);
 
-    // The sharpest fact in this file: the delivery travelled through
-    // verification, classification, a real reconciliation against the host, and
-    // the dispatcher, and what came out the far end was a request to stage
-    // *the commit that was pushed*. Nothing along that path had to be told it —
-    // the reconciliation read it off the branch the delivery named.
+    // The reconciliation reads the commit off the branch the delivery named.
     expect(stager.staged).toEqual([{ repository: fake.fullName, commit }]);
 
-    // And that commit is what the new Build is of. The `#<millis>` suffix is
-    // the rerun uniqueness key, so the commit is read off the base.
+    // A `#<millis>` suffix on `commit` is the rerun uniqueness key.
     const rows = await db
       .select()
       .from(builds)
@@ -324,9 +304,6 @@ describe('a push that reaches an opted-in App', () => {
       .select()
       .from(componentTargetDesired)
       .where(eq(componentTargetDesired.componentId, component!.id));
-    // Nothing was placed. A push used to take the deployable branch here and
-    // make the artifact built from `0`×40 live — deploying a commit nobody
-    // pushed, and never building the one they did.
     expect(desired?.desiredBuildId).toBeNull();
     expect(await db.select().from(deploys)).toHaveLength(0);
   });

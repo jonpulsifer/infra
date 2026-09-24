@@ -1,23 +1,6 @@
-/**
- * The primitives whose behaviour is invisible when it breaks.
- *
- * Six screens are being rewritten on top of `ui/`, so a defect in here is a
- * defect in all six — and every defect this file is aimed at is silent. A sort
- * that compares `12` against `9` as strings still renders a table. A `<time>`
- * without a `dateTime` still shows "8m ago". A tab strip where every tab is a
- * tab stop still looks right in a screenshot. A toast store that notifies
- * nobody renders exactly the same markup as one that works.
- *
- * The shape of the assertions is set by what the suite can do rather than by
- * preference. There is no jsdom in this package (see `test/harness/dom.ts` for
- * why), and the shim it does have has no event system — so nothing here can
- * click. That splits each primitive in two: what it *renders* is asserted
- * through `renderToStaticMarkup`, exactly as `views.test.tsx` and
- * `progress.test.tsx` do, and what it *decides* is asserted against the pure
- * function the component delegates the decision to. Those functions are
- * exported for this reason, which is also why they are the ones the other
- * batches reuse.
- */
+// The `ui/` primitives. Markup is asserted through `renderToStaticMarkup`, and
+// each decision through the pure function the component exports, because the
+// DOM shim in `test/harness/dom.ts` cannot click.
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { copyValue, Ref } from '../../src/web/ui/copy.tsx';
@@ -76,9 +59,7 @@ const order = (markup: string) =>
 
 describe('DataTable sorts what it is told to and says so', () => {
   test('a header cycles unsorted → ascending → descending → unsorted', () => {
-    // The third press is the one that matters: the order the server sent is
-    // itself an answer (newest first, on every ledger), and a two-state toggle
-    // makes it unreachable for the rest of the session.
+    // The third press restores the order the server sent.
     const first = nextSort(null, 'number');
     expect(first).toEqual({ id: 'number', direction: 'asc' });
     const second = nextSort(first, 'number');
@@ -94,8 +75,6 @@ describe('DataTable sorts what it is told to and says so', () => {
   });
 
   test('numbers compare as numbers', () => {
-    // `9`, `12`, `10` sorted as strings gives 10, 12, 9 — a build ledger that
-    // looks sorted and is not.
     expect(
       sortRows(BUILDS, COLUMNS, { id: 'number', direction: 'asc' }).map(
         (row) => row.number,
@@ -130,9 +109,8 @@ describe('DataTable sorts what it is told to and says so', () => {
         initialSort={{ id: 'commit', direction: 'asc' }}
       />,
     );
-    // Three headers, exactly one of them sorted. `aria-sort="none"` on the
-    // other two is legal and makes a screen reader announce sortability three
-    // times per row.
+    // Unsorted headers omit `aria-sort`: `none` on each makes a screen reader
+    // announce sortability over and over.
     expect(markup.match(/<th[ >]/g)).toHaveLength(3);
     expect(markup.match(/aria-sort=/g)).toHaveLength(1);
     expect(markup).toContain('<caption class="sr-only">Builds</caption>');
@@ -174,8 +152,8 @@ describe('DataTable sorts what it is told to and says so', () => {
     );
     expect(markup.match(/tabindex="0"/g)).toHaveLength(1);
     expect(markup.match(/tabindex="-1"/g)).toHaveLength(2);
-    // Selection on a `<tr>` is `aria-current`; `aria-selected` outside a grid
-    // reports a state a table row does not have.
+    // `aria-selected` is only valid on a row inside a grid, so a table row
+    // marks selection with `aria-current`.
     expect(markup).toContain('aria-current="true"');
     expect(markup).not.toContain('aria-selected');
   });
@@ -218,8 +196,6 @@ describe('the shared row keyboard', () => {
   test('arrows move one row and clamp at both ends', () => {
     expect(press('ArrowDown', 0).moved).toEqual([1]);
     expect(press('ArrowUp', 1).moved).toEqual([0]);
-    // Clamped, not wrapped: arrowing off the bottom into the top loses the
-    // reader's place invisibly.
     expect(press('ArrowUp', 0).moved).toEqual([0]);
     expect(press('ArrowDown', 2).moved).toEqual([2]);
   });
@@ -239,8 +215,7 @@ describe('the shared row keyboard', () => {
     const { moved, activated, prevented } = press('Tab', 1);
     expect(moved).toEqual([]);
     expect(activated).toEqual([]);
-    // The one that would be silent: swallowing Tab traps a keyboard reader in
-    // the table.
+    // Swallowing Tab would trap a keyboard reader in the table.
     expect(prevented).toBe(0);
   });
 });
@@ -250,18 +225,16 @@ describe('Timestamp carries the instant, not only the phrase', () => {
 
   test('the machine-readable instant and the hover agree with each other', () => {
     const markup = renderToStaticMarkup(<Timestamp at={AT} when="8m ago" />);
-    // Matched case-insensitively: `dateTime` is a JSX prop name and React is
-    // free to emit either casing, while HTML attribute names are not
-    // case-sensitive. What must not vary is that the attribute is there at all.
+    // Case-insensitive: React may emit `dateTime` in either casing, and HTML
+    // attribute names ignore case.
     expect(markup).toMatch(new RegExp(`datetime="${AT}"`, 'i'));
     expect(markup).toContain(`title="${AT}"`);
     expect(markup).toContain('<time');
   });
 
   test("a static render shows the server's phrase, so SSR output is unchanged", () => {
-    // The whole point of the external store's server snapshot. If this ever
-    // renders a browser-computed relative time, the markup depends on the
-    // machine that rendered it.
+    // The server snapshot keeps a browser-computed relative time out of SSR
+    // markup.
     expect(renderToStaticMarkup(<Timestamp at={AT} when="8m ago" />)).toContain(
       '8m ago',
     );
@@ -322,8 +295,6 @@ describe('copying a value', () => {
     const digest = 'sha256:0123456789abcdef0123456789abcdef';
     const markup = renderToStaticMarkup(<Ref value={digest} kind="digest" />);
     expect(markup).toContain('>sha256:0123456789ab<');
-    // Truncation is a display decision; the full value has to still be
-    // reachable, by hover and by the button's own value.
     expect(markup).toContain(`title="${digest}"`);
     expect(markup).toContain('aria-label="Copy digest"');
   });
@@ -354,8 +325,6 @@ describe('Tabs are one tab stop with a selected tab', () => {
     expect(markup).toContain('role="tablist"');
     expect(markup.match(/role="tab"/g)).toHaveLength(3);
     expect(markup).toContain('aria-selected="true"');
-    // The three hand-rolled strips this replaces all said `aria-current="page"`
-    // on a button that changed a filter.
     expect(markup).not.toContain('aria-current');
   });
 
@@ -396,10 +365,8 @@ describe('the toast store', () => {
   test('a static render of the host is the live region and nothing in it', () => {
     notify({ tone: 'destructive', title: 'The rollback was refused' });
     const markup = renderToStaticMarkup(<ToastHost />);
-    // The region has to exist before it holds anything — one inserted at the
-    // same moment as its content is not reliably announced. And the server
-    // snapshot is empty, so a result raised on one reader's screen cannot be
-    // baked into markup rendered for another.
+    // Screen readers miss a live region inserted with its content, so it
+    // renders empty. The server snapshot is empty, so no toast reaches SSR.
     expect(markup).toContain('aria-live="polite"');
     expect(markup).not.toContain('The rollback was refused');
     dismissToast(activeToasts()[activeToasts().length - 1]?.id ?? '');

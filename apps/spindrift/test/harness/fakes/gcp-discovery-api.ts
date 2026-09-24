@@ -1,49 +1,26 @@
 /**
- * A fake of the three APIs discovery reads (§ Seam 2).
- *
- * The far-side HTTP API behind the real client, so `GcpDiscovery`'s real
- * resource names, its real query parameters, its real page loop and its real
- * key-purpose filter are all exercised. One `Fetcher` rather than three,
- * routing on the host, because that is what the client is actually handed: it
- * addresses three hostnames through one injected transport, and a test that
- * substituted a per-API stub would never prove the client sends the right
- * request to the right host.
- *
- * Five behaviours are modelled because the client has to survive them, not
- * because they decorate:
- *
- * - **A wrong bearer is a `401`**, so a test can prove which credential arrived.
- * - **A disabled service is a `403` carrying `SERVICE_DISABLED` in
- *   `error.details`**, which is the shape the fold keys on and the one that must
- *   not be reported as a missing permission.
- * - **An unknown project is a `404`**, distinct from a refusal.
- * - **Listing is paginated at a deliberately tiny page**, because a client that
- *   reads one page answers a short list that looks complete.
- * - **A key of the wrong purpose exists**, so the filter is run rather than
- *   assumed. A symmetric key offered as a signer is a manifest that validates
- *   and then fails at the first cosign call.
+ * The Resource Manager, Cloud Storage and Cloud KMS APIs `GcpDiscovery` reads,
+ * behind one `Fetcher` routed by host, as the client is given them.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
 
-/** One key the fake holds, and where it lives. */
 export interface FakeCryptoKey {
   readonly project: string;
   readonly location: string;
   readonly ring: string;
   readonly name: string;
-  /** Defaults to a signing key; a test sets another to exercise the filter. */
+  /** Defaults to `ASYMMETRIC_SIGN`; any other purpose must be filtered out. */
   readonly purpose?: string;
 }
 
-/** How one of the three APIs refuses everything asked of it. */
+/** A refusal of everything one API is asked. */
 export interface FakeRefusal {
   readonly status: number;
-  /** Placed in `error.details[].reason`, as the real APIs place it. */
+  /** `error.details[].reason`, such as `SERVICE_DISABLED`. */
   readonly reason?: string;
   /**
-   * Placed in `error.details[].metadata.consumer` as `projects/<id>`, as
-   * ErrorInfo carries it — the project the refused call bills, which is not
-   * necessarily the one the request URL names.
+   * `error.details[].metadata.consumer`: the project the call bills, which may
+   * differ from the one in the URL.
    */
   readonly consumer?: string;
   readonly message?: string;
@@ -53,12 +30,12 @@ export interface FakeGcpDiscoveryOptions {
   readonly token?: string;
   /** Project ids Resource Manager lists as active, in order. */
   readonly projects?: readonly string[];
-  /** Listed too, and pending deletion — an answer that is not a candidate. */
+  /** Listed as `DELETE_REQUESTED`. */
   readonly deletedProjects?: readonly string[];
   readonly buckets?: Readonly<Record<string, readonly string[]>>;
   readonly keyLocations?: Readonly<Record<string, readonly string[]>>;
   readonly keys?: readonly FakeCryptoKey[];
-  /** Items per page. Small on purpose, to run the client's page loop. */
+  /** Items per page; set it small to exercise the client's page loop. */
   readonly pageSize?: number;
   readonly refuse?: {
     readonly resourceManager?: FakeRefusal;
@@ -229,7 +206,7 @@ export class FakeGcpDiscovery {
     return error(404, { message: 'no such route' });
   }
 
-  /** One page of a listing, with the continuation the client has to follow. */
+  /** `pageToken` is the offset of the next page. */
   private page(
     key: string,
     all: readonly unknown[],
@@ -244,7 +221,6 @@ export class FakeGcpDiscovery {
   }
 }
 
-/** A configured blanket refusal, in the shape the real APIs answer with. */
 function refusalOf(refusal: FakeRefusal | undefined): Response | null {
   if (refusal === undefined) return null;
   return error(refusal.status, {

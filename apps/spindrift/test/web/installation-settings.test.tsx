@@ -1,25 +1,3 @@
-/**
- * The settings screen ticket 32 slice 1 exists to build.
- *
- * Rendered to static markup, which is the right depth for what is claimed:
- * every rule below is a statement about **what is on the screen in a given
- * state**, and none is about interaction.
- *
- * Three things are being asserted, and they are not the same thing:
- *
- * 1. **A control exists for every manifest value**, derived from the schema, so
- *    a key an operator has to correct is reachable. This is the half seven
- *    tickets are waiting on — the live installation pins a zero-config frontend
- *    that resolves nowhere, a declaration only seeds an empty row, and until
- *    this screen there was no hand to change it with.
- * 2. **The three refusals read as three different things.**
- *    `configureInstallation` distinguishes "your document is wrong" from "this
- *    installation cannot take it", and flattening the second into a form error
- *    would tell an operator to fix a field that is not wrong.
- * 3. **An adopt act is offered exactly when there is a declaration to adopt**
- *    (ticket 78). The cost is stated before the press: what a `declared` write
- *    does to a Target whose connection moves.
- */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { manifestFields } from '../../src/web/forms/manifest.ts';
@@ -54,36 +32,25 @@ describe('every manifest value is reachable', () => {
   const markup = screen();
 
   test('a control exists for each key the schema declares', () => {
-    // By the schema's keys rather than a list here, for the same reason the
-    // screen renders by them: a list in a test rots exactly as fast as a list
-    // in a component.
     for (const field of manifestFields()) {
       expect(markup).toContain(`name="${field.key}`);
     }
   });
 
   test('a nested key is reached by its own path', () => {
-    // Dotted paths are what let a Zod issue be rendered against the input that
-    // caused it. `targets.0.vessel` names one row of one array — a Target has
-    // no name of its own, so `vessel` is the field this now pins.
+    // Dotted paths let a Zod issue land on the input that caused it.
     expect(markup).toContain('name="dns.zones.0.name"');
     expect(markup).toContain('name="targets.0.vessel"');
   });
 
   test('the pinned zero-config frontend is one of them', () => {
-    // The specific value that cannot be corrected any other way: a declaration
-    // seeds only an empty row, and an installation with a row keeps it. This
-    // input is the whole of the hand ticket 29's second item was missing.
     expect(markup).toContain('name="build.zeroConfigFrontend"');
     expect(markup).toContain(manifest.build.zeroConfigFrontend);
   });
 
   test('the page states what saving does, and it is not a card', () => {
-    // Every top-level key this schema declares has structure, so the "plain"
-    // half of the split is empty for every manifest this build can hold — and
-    // a card was drawn around it regardless: a title, a blurb, and a
-    // permanently empty body sitting above the twelve cards that are the
-    // document. The claim it made was never a section's, it was the page's.
+    // Every top-level key has structure, so no card of plain fields exists to
+    // carry the save sentence.
     expect(
       manifestFields().every(
         (field) => field.node.kind === 'object' || field.node.kind === 'array',
@@ -99,10 +66,7 @@ describe('every manifest value is reachable', () => {
   });
 
   test('a nullable key can be said to be absent', () => {
-    // `auth.gateway` is null in the fixture — passkeys are the only path — and
-    // the screen has to be able to render that as a chosen configuration
-    // rather than as an empty box. Null and absent are different answers and
-    // read as different sentences: this one was stated.
+    // `auth.gateway` is null in the fixture, which is a stated answer, not a blank.
     expect(markup).toContain('name="auth.gateway--present"');
     expect(markup).toContain('Stated as none');
   });
@@ -133,10 +97,6 @@ describe('a refusal reads as what it is', () => {
   });
 
   test('NOT_DEPLOYABLE is a fact about the installation, not a field to fix', () => {
-    // §3's disabled-with-reasons grammar: the caller is told something about
-    // the world. A Target that already exists with a different adapter is not
-    // something re-typing a value in this form resolves, and a form error
-    // saying "fix this" would be false.
     const markup = screen({
       outcome: {
         kind: 'refused',
@@ -164,8 +124,7 @@ describe('a refusal reads as what it is', () => {
   });
 
   test('a success names the Targets the write reconciled', () => {
-    // Writing a manifest is the one act that creates a Target without anybody
-    // naming one, so a confirmation that did not say so would hide it.
+    // Writing a manifest is the one act that creates a Target nobody named.
     const markup = screen({
       outcome: { kind: 'saved', targets: ['cluster', 'cloud-cloudrun'] },
     });
@@ -174,26 +133,13 @@ describe('a refusal reads as what it is', () => {
   });
 });
 
-/**
- * Nothing on this screen is somebody else's to write.
- *
- * The two vessels this installation is built on used to reconcile from the
- * mounted declaration at every restart, so the form rendered them locked — a
- * field that accepted a value and lost it is worse than one that refuses. There
- * is no declaration to reconcile from any more, and the two invariants that
- * lock protected are refusals the schema already makes: a pointer naming no
- * declared vessel, and a home vessel with no shared services. What replaced the
- * "an installation that cannot come back" argument is the export beside Save —
- * it covers every key rather than four.
- */
 describe('the whole document is this screen\u2019s', () => {
-  /** The fixture plus a boundary neither pointer names. */
+  // The fixture plus a vessel neither installation pointer names.
   const withAppVessel = {
     ...manifest,
     vessels: [...manifest.vessels, { name: 'elsewhere', kind: 'cluster' }],
   };
 
-  /** Whether the control with this `name` is rendered disabled. */
   function locked(markup: string, name: string): boolean {
     const control = new RegExp(`<[^>]*name="${name}"[^>]*>`).exec(markup)?.[0];
     if (control === undefined) throw new Error(`no control named ${name}`);
@@ -210,9 +156,6 @@ describe('the whole document is this screen\u2019s', () => {
   });
 
   test('the document can be written down as well as edited', () => {
-    // The other half of what makes those fields safe to hand over: an
-    // installation that can be written down is one that can be restored, which
-    // is the whole of what the governed slice was protecting.
     expect(screen({ document: withAppVessel })).toContain(
       'Download this installation',
     );
@@ -220,19 +163,9 @@ describe('the whole document is this screen\u2019s', () => {
 });
 
 describe('a list is drawn as what its values are', () => {
-  /**
-   * The generator has one rule and it is the element's kind, the same rule it
-   * follows for every other control. Before this, every array was a list of
-   * records: `reaches` — two words out of a closed set of three — rendered as
-   * two bordered, collapsible boxes titled `#1` and `#2`, each holding a
-   * dropdown, and a list of bucket names rendered as a box called `#1` around
-   * a text field.
-   */
   const markup = screen();
 
   test('a closed set is the whole set, toggled', () => {
-    // Every value the schema allows, on or off, so nobody has to learn what
-    // the third one was called. No add, no remove, no order.
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('aria-pressed="false"');
     expect(markup).toContain('name="dns.zones.0.reaches--private"');
@@ -240,8 +173,7 @@ describe('a list is drawn as what its values are', () => {
   });
 
   test('a record carries its own name, not its index', () => {
-    // Derived by shape rather than by key — the first string field that has a
-    // value — so this file still names nothing the schema declares.
+    // The name is the record's first string field with a value.
     for (const zone of manifest.dns.zones) expect(markup).toContain(zone.name);
     for (const route of manifest.build.routes) {
       expect(markup).toContain(route.name);
@@ -250,9 +182,7 @@ describe('a list is drawn as what its values are', () => {
   });
 
   test('a shut entry keeps its fields in the document', () => {
-    // A box being shut is a display decision and must not become a data one:
-    // closed content stays mounted and hidden, so find-in-page and any static
-    // render still see every field.
+    // Closed content stays mounted and hidden, so find-in-page still reaches it.
     expect(markup).toContain('data-[state=closed]:hidden');
     expect(markup).toContain('name="targets.0--variant"');
   });

@@ -1,25 +1,5 @@
-/**
- * Ticket 32 slice 1's two acceptance criteria, over the surface an operator
- * actually reaches.
- *
- * `test/commands/installation-configure.test.ts` already proves the command.
- * What it cannot prove is the sentence the ticket is written in — "onboarding
- * writes the installation row **through a session-authenticated command**, and
- * Target reconciliation runs on that write" — because a command called directly
- * from a test has no session and no route. So this file drives the browser's
- * own route table: `commandRoutes` is what `Bun.serve` is handed, `pathFor` is
- * the path the typed client posts to, and the request goes through the same
- * authentication check every other command does.
- *
- * The document is edited with `forms/document.ts` — the module the form edits
- * through — rather than by spreading an object here, so what is submitted is
- * what the screen would submit.
- *
- * The context resolves the manifest per dispatch, exactly as `serve.ts` does,
- * because that is what makes the read-after-write in these tests mean anything:
- * a process-lifetime copy would answer a `getInstallationManifest` with what
- * the row held at boot.
- */
+// Drives the browser's command routes, session check included, and edits the
+// document through `forms/document.ts` as the form does.
 import { describe, expect, test } from 'bun:test';
 import type { CommandContext, Principal } from '../../src/commands/types.ts';
 import type {
@@ -44,8 +24,8 @@ import { withIsolatedDatabase } from '../harness/db.ts';
 import { authoredFixture, fixtureManifest } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
-// The document an operator writes. `resolved` is the same installation with
-// the deployment's federation joined on, which is what a context carries.
+// `fixture` is the authored document; `resolved` adds the deployment's
+// federation, as a context carries it.
 const fixture = await authoredFixture();
 const resolved = await fixtureManifest();
 
@@ -57,7 +37,7 @@ const OPERATOR: Principal = {
 
 const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 
-/** A context whose manifest is the row, resolved per dispatch. */
+// Resolved per dispatch, as `serve.ts` does, so a read after a write sees the row.
 async function context(): Promise<CommandContext> {
   const stored = await currentStoredManifest(database().db);
   return {
@@ -89,7 +69,6 @@ const anonymous: DispatchDeps = {
   },
 };
 
-/** Post to a command's own route, the way `client.ts` does. */
 async function post(
   deps: DispatchDeps,
   name: Parameters<typeof pathFor>[0],
@@ -110,15 +89,7 @@ async function seed(): Promise<void> {
   await writeStoredManifest(database().db, fixture);
 }
 
-/**
- * Boot with no declaration at all — the state the wizard exists for.
- *
- * The real loader rather than an insert of the placeholder constant, because
- * the claim being tested is about *that function's* placeholder arm: it takes
- * the row or the placeholder and writes whichever it took, so a test that wrote
- * the row itself would prove nothing about what a fresh installation actually
- * boots holding.
- */
+// The real loader, so its placeholder arm writes the row a fresh installation boots with.
 async function bootUnconfigured(): Promise<void> {
   await loadStoredManifest(database().db);
 }
@@ -149,19 +120,11 @@ describe('reading this installation from the browser', () => {
       value: { manifest: AuthoredManifest };
     };
     expect(body.ok).toBe(true);
-    // Whole, because `configureInstallation` takes the whole document: a read
-    // that returned a subset would make the form delete every key it did not
-    // ask for.
+    // Whole, because `configureInstallation` takes the whole document.
     const stored = await storedManifest();
     expect(stored).toBeDefined();
-    // And *authored*, which is the row exactly. This assertion used to compare
-    // against `resolveManifest(stored)`, on the reasoning that anything else
-    // would prove the read had never resolved. That reasoning is what broke
-    // this surface: a reader is handed the resolved document, the schema is
-    // `.strict()`, and the form validates client-side before it dispatches — so
-    // answering the resolved shape made the screen refuse its own round trip
-    // with `cloud: Unrecognized key: "federation"` on a field it never
-    // rendered. The read half answers what the write half accepts.
+    // Authored, not resolved: the strict schema refuses the resolved keys, and
+    // the form validates before it dispatches.
     expect(body.value.manifest).toEqual(stored as AuthoredManifest);
   });
 
@@ -172,39 +135,20 @@ describe('reading this installation from the browser', () => {
   });
 });
 
-/**
- * Which screen an unconfigured installation gets, decided by the row rather
- * than by a flag.
- *
- * This is the whole of what makes onboarding appear instead of a product with
- * nothing configured behind it, and it is asserted over the route table for the
- * same reason the criteria above are: the browser asks this question through
- * `getInstallationManifest` and acts on the answer, so an answer that were only
- * right when the handler is called directly would be right nowhere.
- */
 describe('whether anybody has configured this installation', () => {
   test('a boot with nothing declared is unconfigured, and says so', async () => {
     await bootUnconfigured();
     const { manifest, configured } = await readInstallation();
     expect(configured).toBe(false);
-    // And the document handed to onboarding is the one the row holds, which is
-    // what makes the first screen a confirmation rather than a blank form.
     expect(manifest).toEqual(DEFAULT_PLACEHOLDER_MANIFEST);
   });
 
   test('a declaration configured this installation, so onboarding never runs', async () => {
-    // The live posture, and the one that would be worst to get wrong: an
-    // installation whose chart mounts a manifest has been configured by
-    // whoever wrote it, and showing them a wizard would be offering to redo
-    // work they already did.
     await seed();
     expect((await readInstallation()).configured).toBe(true);
   });
 
   test('onboarding’s own write is what ends it', async () => {
-    // Resolved per dispatch, so the read that follows the write sees the row —
-    // which is what lets onboarding stop because the installation is
-    // configured rather than because a screen decided it was finished.
     await bootUnconfigured();
     const { manifest } = await readInstallation();
     const named = withValueAt(
@@ -233,9 +177,6 @@ describe('configuring this installation from the browser', () => {
   });
 
   test('writes a value that no declaration can reach', async () => {
-    // The act ticket 29's second item has no other path to: a declaration only
-    // seeds an empty row, and an installation with a row keeps it. The edit is
-    // made through the form's own document module.
     await seed();
     const read = await post(authenticated, 'getInstallationManifest', {});
     const { value } = (await read.json()) as {
@@ -258,9 +199,6 @@ describe('configuring this installation from the browser', () => {
   });
 
   test('a configured installation reads back what it just wrote', async () => {
-    // Criterion 2. The value has to survive the round trip through the row,
-    // not just through this process — `context.manifest` is resolved per
-    // dispatch for exactly that reason.
     await seed();
     const edited = withValueAt(
       fixture,
@@ -273,23 +211,16 @@ describe('configuring this installation from the browser', () => {
     const { value } = (await read.json()) as {
       value: { manifest: InstallationManifest };
     };
-    // A list, from a document that wrote a bare string: an installation whose
-    // Targets cannot share a registry names several, and one is the same
-    // document as a one-element list (ticket 39). Nothing stored has to be
-    // rewritten to keep parsing.
+    // A bare string reads back as a one-element list.
     expect(valueAt(value.manifest, ['supplyChain', 'registry'])).toEqual([
       'registry.example.test/second',
     ]);
   });
 
   test('reconciles the Targets the written document declares', async () => {
-    // Criterion 1's second half, and the one a form is most likely to break:
-    // reconciliation runs inside the write's transaction, so a surface that
-    // reached a different writer would leave a Target declared in the document
-    // and absent from the table.
+    // Reconciliation runs inside the manifest write's transaction.
     await seed();
-    // The vessel every existing Target already sits on carries a full set of
-    // surfaces, so a genuinely new Target needs a genuinely new vessel too.
+    // Every existing vessel's surfaces are taken, so a new Target needs a new vessel.
     const declaredVessels = [
       ...fixture.vessels,
       { name: 'spare', kind: 'cluster' as const },
@@ -318,9 +249,6 @@ describe('configuring this installation from the browser', () => {
         targetLabel({ vessel: row.vessel.name, adapter: row.adapter }),
       ),
     ).toEqual(declaredTargets.map((target) => targetLabel(target)));
-    // A Target nobody named through the product exists because the manifest
-    // said so, which is the whole reason the write and the reconcile are one
-    // transaction.
     expect(rows.some((row) => row.vessel.name === 'spare')).toBe(true);
   });
 

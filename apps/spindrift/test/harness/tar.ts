@@ -1,22 +1,10 @@
 /**
- * A tar writer, so a test can hand the static adapter a real bundle.
- *
- * The adapter reads a gzipped tar because that is the format every build route
- * already agrees on (`adapters/build/buildkit.ts` unpacks one), and a reader is
- * only worth having if something independent produced what it reads. So this
- * writes the bytes rather than the reader's own output being fed back to it —
- * a round trip through one implementation proves that implementation
- * self-consistent and nothing else.
- *
- * It writes plain ustar with no extensions, which is the case the reader must
- * get right; the long-name and pax paths are exercised by hand-built headers in
- * `test/adapters/static.test.ts`, where the point is the header rather than the
- * archive around it.
+ * A plain ustar writer, independent of the static adapter's reader, so a test
+ * can hand that reader a real bundle.
  */
 
 const BLOCK = 512;
 
-/** One entry to put in the archive. */
 export interface TarEntry {
   readonly name: string;
   readonly bytes: Uint8Array;
@@ -24,12 +12,11 @@ export interface TarEntry {
   readonly type?: string;
 }
 
-/** A gzipped tar holding these entries, as the adapter will receive it. */
+/** Gzipped, as the adapter receives it. */
 export function tarball(entries: readonly TarEntry[]): Uint8Array<ArrayBuffer> {
   return Bun.gzipSync(tar(entries));
 }
 
-/** An uncompressed tar holding these entries. */
 export function tar(entries: readonly TarEntry[]): Uint8Array<ArrayBuffer> {
   const blocks: Uint8Array[] = [];
   for (const entry of entries) {
@@ -86,7 +73,6 @@ function concat(parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-/** Some bytes, as a `Uint8Array` the writer and the adapter both accept. */
 export function bytes(text: string): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(text);
 }

@@ -1,35 +1,15 @@
 /**
- * Running a route's attest step for real, to see what it would have signed.
- *
- * Both build routes attest the index and then the children the registry names
- * under it, because an index is not what a runtime runs — Cloud Run resolves it
- * to its own platform's manifest *before* admission, and a digest nothing
- * attested reads as `denied by attestor` on an artifact that was attested one
- * indirection up.
- *
- * What a child is, though, is the thing worth testing: BuildKit's `provenance`
- * and `sbom` hang manifests off that same index, nothing ever resolves to one,
- * and each one signed is a KMS operation and an occurrence per destination per
- * build spent on a digest no admission decision is made about.
- *
- * Asserting on the *text* of a selection would pass for any expression that
- * merely mentions `attestation-manifest`. So the step is run instead: what
- * leaves the box is stubbed, and the digests the step named are the digests it
- * would have signed.
+ * Runs a route's attest step with outbound commands stubbed and returns what it
+ * would have signed. Cloud Run admits the platform manifest an index resolves
+ * to, so the step signs children too, but never BuildKit's attestation manifest.
  */
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * A registry's answer for a real single-platform build, captured 2026-08-04
- * from `ghcr.io/jonpulsifer/spindrift@sha256:426ae4ac…`.
- *
- * One platform was asked for and two manifests came back. That is the whole
- * problem in one document: `provenance` and `sbom` make the push an index even
- * at one platform, and the second entry is the attestation manifest they hang
- * off it — `unknown/unknown`, annotated `attestation-manifest`, and not
- * something any runtime can run.
+ * A real single-platform build: `provenance` and `sbom` still make it an index,
+ * and its second entry is the attestation manifest.
  */
 export const SINGLE_PLATFORM_INDEX = {
   schemaVersion: 2,
@@ -57,40 +37,28 @@ export const SINGLE_PLATFORM_INDEX = {
   ],
 };
 
-/** The index the builder reported — what a Deploy pins. */
+/** The index digest the builder reports, which a Deploy pins. */
 export const INDEX_DIGEST =
   'sha256:426ae4acd70b00275a15f9ea9191666ac15d472fb369f57f9f4b89de7c3305ac';
-/** The manifest a runtime resolves that index to — what admission asks about. */
+/** The manifest a runtime resolves the index to, which admission checks. */
 export const RUNTIME_DIGEST = SINGLE_PLATFORM_INDEX.manifests[0]?.digest ?? '';
-/** BuildKit's own attachment — what no runtime ever asks about. */
+/** BuildKit's attestation manifest, which no runtime resolves to. */
 export const ATTACHMENT_DIGEST =
   SINGLE_PLATFORM_INDEX.manifests[1]?.digest ?? '';
 
-/** Enough `gcloud` for a step that lists a key version and then signs. */
 export const GCLOUD_STUB = `case "$*" in
   *print-access-token*) echo stub-token ;;
 esac
 exit 0`;
 
-/**
- * A command that answers with the index and ignores how it was asked.
- *
- * `printf` rather than a `cat` heredoc, because a stub directory is on `PATH`
- * ahead of everything and a step that stubs `cat` would otherwise be stubbing
- * this too.
- */
+/** Prints the index for any arguments; `printf`, as a test may stub `cat`. */
 export function indexStub(): string {
   return `printf '%s\\n' '${JSON.stringify(SINGLE_PLATFORM_INDEX)}'`;
 }
 
 /**
- * Run `script` with `stubs` shadowing the commands that would leave the box,
- * and return the `destination@digest` references its own `attesting …` lines
- * named, in order.
- *
- * `bash`, not `sh`: both steps open with `set -euo pipefail`, which a POSIX
- * shell refuses outright — running them under the wrong shell tests a script
- * neither route executes.
+ * Runs `script` under `bash`, which `set -euo pipefail` needs, with `stubs` first
+ * on `PATH`, and returns the `destination@digest` from each `attesting` line.
  */
 export async function attested(
   script: string,
@@ -106,10 +74,7 @@ export async function attested(
       await chmod(path, 0o755);
     }
     const path = join(directory, 'step.sh');
-    // What the build service does to a step before the container sees it:
-    // template expansion turns its `$$` literal-dollar escape back into `$`.
-    // The route escapes every dollar on the way in, so running the submitted
-    // text verbatim would hand bash a program that is not shell.
+    // The build service expands the route's `$$` escape back to `$`.
     await writeFile(path, script.replaceAll('$$', '$'));
 
     const child = Bun.spawn(['bash', path], {

@@ -1,107 +1,53 @@
 /**
- * A fake Cloud Run API (Task 28, § Seam 2).
- *
- * "A fake of the far-side HTTP API behind the real client, with the test
- * asserting the requests that were made" — so the adapter's real paths, its real
- * apply, and its real status reading all run. Nothing inside core is faked; this
- * is the project that is not there.
- *
- * Six behaviours are modelled because the adapter has to survive all six:
- *
- * - **A write answers with an `Operation` and the Service appears behind it.**
- *   "If successful, the response body contains an instance of `Operation`" —
- *   the work is asynchronous, so a `GET` issued straight after a create can
- *   still `404`. That window is the one thing a first Cloud Run deploy is
- *   guaranteed to hit, so it happens on every create here rather than never.
- * - **The runtime writes `terminalCondition` after the Service is accepted.** A
- *   fake that answered ready on the first read would let an adapter that never
- *   polled pass, which is the whole of `apply`'s second half.
- * - **A document carrying a field the v2 schema does not define is refused.**
- *   Google's protobuf-JSON parsers reject unknown members with `400
- *   INVALID_ARGUMENT`, and the rendered document is the single thing standing
- *   between this product and a Cloud Run deploy — a `Map.set` is not a check.
- *   There is a schema per collection, and they differ in the ways that bite: a
- *   `Job` has no `ingress`, and it wraps its container one level deeper than a
- *   `Service` does.
- * - **A refusal carries a body with a machine-readable reason**, because the
- *   checklist tells "the service is off" from "you may not" from "there is no
- *   such project" by exactly that, and a bare status code would leave nothing to
- *   tell them apart with.
- * - **The IAM policy is a resource that can be read back**, so a test can assert
- *   §9's fail-closed ordering rather than only that a call was made.
- * - **The admission policy lives at its own endpoint**, which is how a Target
- *   that names none is distinguishable from one whose policy admits everything.
- * - **Cloud Scheduler is a third API in the same project**, because what fires a
- *   Job is not the runtime. It is here rather than in a fake of its own for the
- *   reason {@link FakeCloudRun.tick} exists: the only interesting thing about a
- *   scheduler job is whether the call it makes is *admitted*, and answering that
- *   needs the Job's IAM policy — which lives here.
+ * The Cloud Run v2, admission-policy and Cloud Scheduler APIs behind the real
+ * adapter. A write answers with an `Operation`, readiness arrives on a later
+ * read, and a field the v2 schema does not define is refused.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
 import { CLOUD_ENDPOINTS } from '../installation.ts';
 
 export interface RecordedCloudRequest {
   method: string;
-  /** Path and query, which is what an `allowMissing` assertion needs. */
+  /** Path and query. */
   url: string;
   path: string;
   body: unknown;
 }
 
-/** What one applied Service's status becomes, read by read. */
+/** Status fields merged into a resource on its nth read, or `null` for none. */
 export type ServiceScript = (reads: number) => Record<string, unknown> | null;
 
 export interface FakeCloudRunOptions {
   readonly project?: string;
   readonly region?: string;
-  /** What a Service's condition fields become over successive reads. */
   readonly service?: ServiceScript;
-  /** When set, every write is refused with this status and body. */
+  /** When set, every Cloud Run `PATCH` answers with this. */
   readonly refuse?: { status: number; body: unknown };
-  /** When set, the list probe `inspect` makes is refused with this. */
+  /** When set, listing a collection answers with this. */
   readonly refuseList?: { status: number; body: unknown };
-  /** When set, `:setIamPolicy` is refused with this. */
+  /** When set, `:setIamPolicy` answers with this. */
   readonly refuseIam?: { status: number; body: unknown };
-  /** When set, every Cloud Scheduler write is refused with this. */
+  /** When set, every Cloud Scheduler request answers with this. */
   readonly refuseScheduler?: { status: number; body: unknown };
-  /** The admission policy this project reports, or `null` for none at all. */
+  /** The admission policy the project reports; `null` or absent answers 404. */
   readonly admissionPolicy?: Record<string, unknown> | null;
   /**
-   * Runs each Job already has, by job id, **in the order the API will list
-   * them**.
-   *
-   * Seeded rather than only produced by `:run`, because most of a job's history
-   * was written before Spindrift asked for anything — a fake that could only
-   * report what this process started could not test reading one at all.
-   *
-   * The order is the seeder's because `executions.list` documents none and
-   * takes no `orderBy`. Seed oldest-first to hold an adapter to sorting what it
-   * read rather than trusting the page it was handed.
+   * Each Job's existing runs, in the order the API lists them. `executions.list`
+   * documents no order, so seed oldest-first to hold an adapter to sorting.
    */
   readonly executions?: Readonly<Record<string, readonly unknown[]>>;
   /**
-   * Reads a newly created Service `404`s for before it becomes readable.
-   *
-   * One by default rather than zero, because the create-then-`404` window is
-   * not an edge case: the `PATCH` returns an `Operation` and the Service is
-   * created behind it, so the very next `GET` losing the race is the ordinary
-   * shape of a first deploy. An adapter that treated an absent Service as a
-   * failure would be wrong on every App's first deploy and right afterwards,
-   * which is the worst way for a bug to behave.
+   * How many reads of a new resource answer 404 before it is visible, 1 by
+   * default: it is created behind the `Operation`, so a first deploy's next read
+   * loses the race.
    */
   readonly createLatencyReads?: number;
   readonly token?: string;
 }
 
 /**
- * The shape of a v2 `Service`, as much of it as a document may name.
- *
- * `true` is "this member exists and what is under it is not this fake's
- * business" — a free-form map, a scalar, or a message nothing here renders. An
- * object descends, and a one-element array descends into every element. What
- * matters is the *closed* set at each level: Google's parsers refuse a member
- * they do not know, so a fake that accepted one would be the only reader of
- * this document that ever did.
+ * `true` accepts anything under a member, an object descends, and a one-element
+ * array applies to every element. Google's parsers refuse unlisted members too.
  */
 type ServiceSchema =
   | true
@@ -173,15 +119,8 @@ const SERVICE_SCHEMA: ServiceSchema = {
 };
 
 /**
- * `TaskTemplate` — the inner half of a Job's doubled template.
- *
- * The container is the same message a revision holds, which is the point: the
- * two documents differ in how deeply they wrap it and in nothing else. Note
- * what is *not* here that `REVISION_TEMPLATE` has — `scaling`, `revision`,
- * `sessionAffinity`, `healthCheckDisabled` — and note that `Job` has no
- * `ingress` at all. Those absences are the whole value of a closed schema: a
- * renderer that reached for a Service concept is refused here rather than in a
- * vessel.
+ * A Job's inner template: a revision's container one level deeper, without
+ * `scaling`, `revision`, `sessionAffinity` or `healthCheckDisabled`.
  */
 const TASK_TEMPLATE: ServiceSchema = {
   containers: [CONTAINER],
@@ -196,7 +135,7 @@ const TASK_TEMPLATE: ServiceSchema = {
   gpuZonalRedundancyDisabled: true,
 };
 
-/** `ExecutionTemplate` — the outer half, which holds no container itself. */
+/** A Job's outer template, which holds no container itself. */
 const EXECUTION_TEMPLATE: ServiceSchema = {
   labels: true,
   annotations: true,
@@ -222,21 +161,14 @@ const JOB_SCHEMA: ServiceSchema = {
   runExecutionToken: true,
 };
 
-/** The two collections a v2 path can name, and what each one accepts. */
 const SCHEMAS: Record<string, ServiceSchema> = {
   services: SERVICE_SCHEMA,
   jobs: JOB_SCHEMA,
 };
 
 /**
- * A Cloud Scheduler v1 `Job`, closed the same way and for the same reason.
- *
- * Note the two targets that are here and unused: `pubsubTarget` and
- * `oidcToken`. They are the shapes a renderer might reach for by analogy — one
- * fires a topic rather than a Job, and the other authenticates to an endpoint
- * that verifies an audience rather than to an API that verifies a permission —
- * so a document naming them is accepted by the schema and then fails
- * {@link FakeCloudRun.tick}, which is where the mistake actually shows.
+ * A Cloud Scheduler v1 `Job`. `pubsubTarget` and `oidcToken` pass the schema but
+ * fail {@link FakeCloudRun.tick}, which fires only an `oauthToken` HTTP target.
  */
 const SCHEDULER_JOB_SCHEMA: ServiceSchema = {
   name: true,
@@ -257,38 +189,21 @@ const SCHEDULER_JOB_SCHEMA: ServiceSchema = {
   },
 };
 
-/**
- * A unix-cron expression, as loosely as this needs to check one.
- *
- * Five whitespace-separated fields. The real API parses each of them and
- * refuses `400 INVALID_ARGUMENT` for a field it cannot read; what matters here
- * is only that a schedule reaches the far side as a schedule rather than as
- * something the adapter mangled on the way.
- */
+/** Five unix-cron fields, checked only for shape; the real API parses each. */
 const CRON = /^\S+(\s+\S+){4}$/;
 
 /**
- * How this fake is told a call is being made by a service account.
- *
- * The controller's own token is the one every other call carries. A scheduled
- * fire is made by a *different* identity — the account the scheduler job names
- * — which is the whole thing criterion "on the Job and on nothing wider" is
- * about, so it has to be distinguishable here or the IAM policy is decoration.
+ * A bearer token of this prefix plus an email calls as that service account,
+ * which is how a scheduled fire differs from the controller.
  */
 const SERVICE_ACCOUNT_TOKEN = 'sa:';
 
-/** The one role that lets an identity run a Job. */
 const INVOKER = 'roles/run.invoker';
 
-/** The one collection that has runs. Named, because `:run` is refused elsewhere. */
+/** `:run` is refused outside this collection. */
 const JOBS_COLLECTION = 'jobs';
 
-/**
- * The first member the document names that the schema does not, if any.
- *
- * Reported by path rather than by name alone, because "Unknown name `foo`" in
- * a nested message is only actionable if it says which message.
- */
+/** The path of the first member the schema does not name, or `null`. */
 function unknownMember(
   document: unknown,
   schema: ServiceSchema,
@@ -318,13 +233,7 @@ function unknownMember(
   return null;
 }
 
-/**
- * Namespaces the v2 API refuses to take a label in.
- *
- * "Cloud Run API v2 does not support labels with `run.googleapis.com`,
- * `cloud.googleapis.com`, `serving.knative.dev`, or `autoscaling.knative.dev`
- * namespaces, and they will be rejected."
- */
+/** The v2 API rejects labels in these namespaces. */
 const RESERVED_LABEL_NAMESPACES = [
   'run.googleapis.com',
   'cloud.googleapis.com',
@@ -332,7 +241,6 @@ const RESERVED_LABEL_NAMESPACES = [
   'autoscaling.knative.dev',
 ];
 
-/** What is wrong with one label map, or `null` if nothing is. */
 function labelProblem(labels: unknown, where: string): string | null {
   if (labels === null || typeof labels !== 'object') return null;
   for (const [key, value] of Object.entries(
@@ -355,7 +263,7 @@ function labelProblem(labels: unknown, where: string): string | null {
   return null;
 }
 
-/** The default: the runtime reports ready on the second read after apply. */
+/** The default: ready on the second read after apply. */
 const READY: ServiceScript = (reads) =>
   reads < 2
     ? { terminalCondition: { type: 'Ready', state: 'CONDITION_RECONCILING' } }
@@ -372,34 +280,20 @@ export class FakeCloudRun {
   readonly policyEndpoint = CLOUD_ENDPOINTS.policy;
   readonly schedulerEndpoint = CLOUD_ENDPOINTS.scheduler;
   readonly requests: RecordedCloudRequest[] = [];
-  /** Every Operation a write answered with, in order — what a poll would use. */
   readonly operations: { name: string; done: boolean }[] = [];
 
-  /**
-   * What this project holds, by `<collection>/<id>`.
-   *
-   * Keyed by both because a Service and a Job may share a name: they are
-   * separate collections in the same project, and a fake that collapsed them
-   * would hide exactly the case `parseRef` exists to get right.
-   */
+  /** Keyed by `<collection>/<id>`, since a Service and a Job may share a name. */
   private readonly resources = new Map<string, Record<string, unknown>>();
-  /**
-   * What Cloud Scheduler holds, by full resource name.
-   *
-   * A separate map rather than a third collection in `resources`, because it is
-   * a separate *service*: a scheduler job and a Cloud Run Job share a resource
-   * name, and collapsing them would hide the one interesting property of that
-   * — that the same string addresses two things.
-   */
+  /** Scheduler jobs by full resource name, which can equal a Cloud Run Job's. */
   private readonly schedules = new Map<string, Record<string, unknown>>();
-  /** Invoker policies, by `<collection>/<id>` — the surface for exposure. */
+  /** `:setIamPolicy` bodies, by `<collection>/<id>`. */
   private readonly policies = new Map<string, unknown>();
   private readonly reads = new Map<string, number>();
-  /** Reads a just-created Service still owes before it can be seen. */
+  /** 404 reads a just-created resource still owes. */
   private readonly creating = new Map<string, number>();
   private nextOperation = 1;
   private nextRun = 1;
-  /** Each Job's runs, in list order — the sub-collection `:run` prepends to. */
+  /** Each Job's runs in list order; `:run` prepends. */
   private readonly executions = new Map<string, unknown[]>();
   private readonly options: FakeCloudRunOptions;
 
@@ -410,12 +304,10 @@ export class FakeCloudRun {
     }
   }
 
-  /** `projects/<p>/locations/<r>` — what every name here hangs off. */
   private parent(): string {
     return `projects/${this.project}/locations/${this.region}`;
   }
 
-  /** The runs one Job holds, in the order this fake will list them. */
   private runsOf(job: string): unknown[] {
     return this.executions.get(job) ?? [];
   }
@@ -428,63 +320,47 @@ export class FakeCloudRun {
     return this.options.region ?? 'somewhere';
   }
 
-  /** Mint the token provider the adapter is constructed with. */
+  /** The adapter's token provider, the controller's own token. */
   token = (): string => this.options.token ?? 'federated-token';
 
-  /** What the project holds now — the assertion surface for a write. */
   service(id: string): Record<string, unknown> | undefined {
     return this.resources.get(`services/${id}`);
   }
 
-  /** Every Service that exists — the surface for idempotent re-apply. */
   get serviceCount(): number {
     return [...this.resources.keys()].filter((key) =>
       key.startsWith('services/'),
     ).length;
   }
 
-  /** The same, for the other collection. */
   job(id: string): Record<string, unknown> | undefined {
     return this.resources.get(`jobs/${id}`);
   }
 
-  /** The invoker policy written for one Service, if any was. */
   policy(id: string): unknown {
     return this.policies.get(`services/${id}`);
   }
 
-  /** The same, for a Job — which is where a schedule's grant lands. */
   jobPolicy(id: string): unknown {
     return this.policies.get(`jobs/${id}`);
   }
 
-  /** The Cloud Scheduler job standing in front of one Job, if any is. */
   schedule(id: string): Record<string, unknown> | undefined {
     return this.schedules.get(`${this.parent()}/jobs/${id}`);
   }
 
-  /** Somebody deleted the schedule out of band and told nobody. */
+  /** Deletes the schedule out of band. */
   deschedule(id: string): void {
     this.schedules.delete(`${this.parent()}/jobs/${id}`);
   }
 
-  /** Every scheduler job in the project, by name — nothing should be orphaned. */
   scheduled(): string[] {
     return [...this.schedules.keys()].sort();
   }
 
   /**
-   * Let every scheduler job fire once, the way Cloud Scheduler would.
-   *
-   * The point is not that the fake can call itself: it is that the call goes
-   * through the same `fetch` as everything else, carrying **the identity the
-   * scheduler job names** rather than the controller's token. So a fire is
-   * admitted only if that account holds `roles/run.invoker` on that Job — which
-   * makes the IAM policy the adapter writes load-bearing instead of decorative,
-   * and makes an execution here mean the same thing it means in a vessel:
-   * something ran that nobody asked for by hand.
-   *
-   * Returns each fire's status, in scheduler-job name order.
+   * Fires every scheduler job once through `fetch` as the account it names, so a
+   * fire needs `roles/run.invoker` on the Job. Returns statuses in name order.
    */
   async tick(): Promise<number[]> {
     const fired: number[] = [];
@@ -516,7 +392,6 @@ export class FakeCloudRun {
     return fired;
   }
 
-  /** Requests the adapter made, in order — what § Seam 2 asserts on. */
   pathsOf(method: string): string[] {
     return this.requests
       .filter((request) => request.method === method)
@@ -525,9 +400,7 @@ export class FakeCloudRun {
 
   fetch: Fetcher = async (request) => {
     const url = new URL(request.url);
-    // A POST with no body at all is legal and is what `jobs.run` is fired with
-    // — the scheduler sends no overrides. Read as text first so that an empty
-    // body is `null` rather than a parse error thrown out of the transport.
+    // A scheduled `jobs.run` has an empty body, which reads as `null`.
     const sent =
       request.method === 'GET' || request.method === 'DELETE'
         ? ''
@@ -540,10 +413,7 @@ export class FakeCloudRun {
       body,
     });
 
-    // Who is calling. Almost always the controller, holding the token §13's
-    // federation minted; a scheduled fire is the one call made by somebody
-    // else, and `tick` says so in the header rather than by being let in
-    // through a side door.
+    // Only a scheduled fire sets `caller`; every other call is the controller's.
     const authorization = request.headers.get('authorization') ?? '';
     const caller = authorization.startsWith(`Bearer ${SERVICE_ACCOUNT_TOKEN}`)
       ? authorization.slice(`Bearer ${SERVICE_ACCOUNT_TOKEN}`.length)
@@ -567,10 +437,8 @@ export class FakeCloudRun {
       });
     }
 
-    // The collection is part of the path rather than a mode this fake is put
-    // into, because that is what it is on the real API — and because a ref that
-    // named the wrong one has to reach a 404 here rather than silently reading
-    // the other collection's resource of the same name.
+    // A ref naming the wrong collection 404s instead of reading the other
+    // collection's resource of the same name.
     const [collection, ...segments] = url.pathname
       .slice(parent.length)
       .split('/');
@@ -591,9 +459,7 @@ export class FakeCloudRun {
       return json(200, { [collection]: [...this.held(collection)] });
     }
 
-    // A Job's runs are a sub-collection rather than a resource of their own,
-    // so they are routed before the `<name>[:verb]` split — which would
-    // otherwise read `jobs/<id>/executions` as a resource nobody named.
+    // Before the `<name>[:verb]` split, which would read `executions` as a name.
     const runs = rest.match(/^([^/:]+)\/executions$/);
     if (runs !== null) {
       if (request.method !== 'GET') {
@@ -604,11 +470,7 @@ export class FakeCloudRun {
       if (!this.resources.has(`${collection}/${runs[1]}`)) {
         return json(404, notFound());
       }
-      // `pageSize` is honoured and the order is whatever this fake was seeded
-      // with, because that is what `executions.list` documents: a page size and
-      // no ordering at all. An adapter that asks for ten and trusts them to be
-      // the newest ten is right only by luck, and a fake that always answered
-      // newest-first is a fake that makes that luck look like a guarantee.
+      // `executions.list` documents a page size and no order.
       const page = Number(url.searchParams.get('pageSize') ?? '0');
       const held = this.runsOf(runs[1] as string);
       return json(200, {
@@ -620,19 +482,14 @@ export class FakeCloudRun {
     if (name === undefined || name === '') return json(404, notFound());
     const key = `${collection}/${name}`;
 
-    // `jobs.run` is the runtime's own verb: it answers with an `Operation`
-    // whose metadata **is** the Execution being created, and the execution
-    // appears in the job's sub-collection behind it. A fake that only answered
-    // the call would let an adapter that never read the name back pass.
+    // `jobs.run` answers with an `Operation` whose metadata is the new
+    // Execution, which then appears in the Job's runs.
     if (verb === 'run') {
       if (collection !== JOBS_COLLECTION || !this.resources.has(key)) {
         return json(404, notFound());
       }
-      // The controller holds `roles/run.admin` on the project, which carries
-      // this. Every other identity has to have been granted it **on this Job**,
-      // which is what makes a schedule that was removed stop firing even if
-      // something still calls: the binding is what the policy says now, not
-      // what it said when the scheduler job was written.
+      // The controller holds `roles/run.admin` on the project. Any other caller
+      // needs `roles/run.invoker` on this Job's current policy.
       if (caller !== null && !this.mayRun(key, caller)) {
         return json(permissionDenied().status, permissionDenied().body);
       }
@@ -655,12 +512,8 @@ export class FakeCloudRun {
       if (this.options.refuseIam !== undefined) {
         return json(this.options.refuseIam.status, this.options.refuseIam.body);
       }
-      // The org's domain-restricted sharing, verbatim from the live refusal:
-      // `allUsers` belongs to no permitted customer, so a policy naming it is
-      // rejected wherever this installation runs. Modeled unconditionally
-      // because public reach must travel as the Service's own
-      // `invokerIamDisabled` — an adapter that reaches for the binding again
-      // has to fail here the way it fails in a vessel.
+      // Domain-restricted sharing refuses `allUsers` with this message. Public
+      // reach goes through the Service's `invokerIamDisabled` instead.
       const bindings =
         (body as { policy?: { bindings?: { members?: string[] }[] } })?.policy
           ?.bindings ?? [];
@@ -703,7 +556,6 @@ export class FakeCloudRun {
     }
   };
 
-  /** Whether one service account may run one Job, per that Job's own policy. */
   private mayRun(key: string, serviceAccount: string): boolean {
     const written = this.policies.get(key) as
       | { policy?: { bindings?: { role?: string; members?: string[] }[] } }
@@ -716,15 +568,8 @@ export class FakeCloudRun {
   }
 
   /**
-   * Cloud Scheduler, as much of it as an adapter that creates, updates and
-   * deletes needs.
-   *
-   * **No create-or-update, deliberately.** The real `jobs.create` refuses a
-   * name that already exists with `409 ALREADY_EXISTS` and the real
-   * `jobs.patch` refuses one that does not with `404`, and modelling both is
-   * what keeps an adapter honest about the fact that this API has no upsert —
-   * one that assumed otherwise would pass here and leave a Component's second
-   * deploy silently on its first schedule.
+   * Cloud Scheduler has no upsert: `jobs.create` answers 409 for an existing name
+   * and `jobs.patch` answers 404 for a missing one.
    */
   private schedulerResponse(method: string, url: URL, body: unknown): Response {
     if (this.options.refuseScheduler !== undefined) {
@@ -744,9 +589,7 @@ export class FakeCloudRun {
       this.schedules.delete(addressed);
       return json(200, {});
     }
-    // What `observe` asks, and the only read this API serves. A job that was
-    // never scheduled and one whose scheduler job was deleted answer the same
-    // `404` here — which is the point: the API cannot tell them apart either.
+    // Never scheduled and deleted out of band both answer 404, as they do live.
     if (method === 'GET') {
       const held =
         addressed === null ? undefined : this.schedules.get(addressed);
@@ -754,8 +597,7 @@ export class FakeCloudRun {
         ? json(404, notFound())
         : json(200, { ...held, state: 'ENABLED' });
     }
-    // `patch` addresses the job and `create` addresses its parent — the only
-    // difference between the two, other than which of them refuses.
+    // `patch` addresses the job and `create` addresses its parent.
     if (method === 'PATCH') {
       if (addressed === null || !this.schedules.has(addressed)) {
         return json(404, notFound());
@@ -809,7 +651,6 @@ export class FakeCloudRun {
     return json(200, { ...document, state: 'ENABLED' });
   }
 
-  /** Everything stored in one collection. */
   private held(collection: string): Record<string, unknown>[] {
     return [...this.resources]
       .filter(([key]) => key.startsWith(`${collection}/`))
@@ -823,9 +664,7 @@ export class FakeCloudRun {
   }
 
   private readResponse(key: string): Response {
-    // The resource is created *behind* the Operation the write returned, so for
-    // a while after a create it is genuinely not there yet. `read()` must map
-    // that to "still applying" rather than to a failure.
+    // The resource is created behind its `Operation`, so an early read 404s.
     const owed = this.creating.get(key) ?? 0;
     if (owed > 0) {
       this.creating.set(key, owed - 1);
@@ -834,8 +673,7 @@ export class FakeCloudRun {
     const held = this.resources.get(key);
     if (held === undefined) return json(404, notFound());
 
-    // The runtime writes the terminal condition *after* the resource exists,
-    // which is what makes `apply` poll rather than assume.
+    // The terminal condition arrives after the resource exists, so `apply` polls.
     const script = this.options.service ?? READY;
     const reads = (this.reads.get(key) ?? 0) + 1;
     this.reads.set(key, reads);
@@ -853,12 +691,8 @@ export class FakeCloudRun {
     if (this.options.refuse !== undefined) {
       return json(this.options.refuse.status, this.options.refuse.body);
     }
-    // A masked write updates the named fields of a resource that is already
-    // there and leaves the rest as they were. `restart` is the one caller: it
-    // names `template.annotations` and sends only that, so a fake that
-    // replaced the whole document would let a restart drop the image and
-    // still pass. The runtime writes a new revision for any template change,
-    // which here is the read count starting over.
+    // A masked write replaces only the named fields. Any template change is a
+    // new revision, so the read count starts over.
     const mask = url.searchParams.get('updateMask');
     if (mask !== null) {
       const held = this.resources.get(key);
@@ -874,9 +708,7 @@ export class FakeCloudRun {
       this.reads.set(key, 0);
       return json(200, this.operation(name, false));
     }
-    // `allowMissing` is what makes the adapter's one call create-or-update. A
-    // fake that created regardless would let the adapter drop the parameter
-    // and still pass, so the refusal is modelled rather than assumed.
+    // Only `allowMissing=true` lets a `PATCH` create.
     if (
       !this.resources.has(key) &&
       url.searchParams.get('allowMissing') !== 'true'
@@ -890,10 +722,7 @@ export class FakeCloudRun {
     const stored = {
       ...document,
       name,
-      // Only a Service is addressable. A fake that minted a `uri` for a Job
-      // would hand the adapter a URL for something nothing routes to, and the
-      // one assertion that a job reports no address would pass for the wrong
-      // reason.
+      // Only a Service is addressable.
       ...(collection === 'services'
         ? { uri: `https://${name}.run.example.test` }
         : {}),
@@ -943,14 +772,7 @@ export class FakeCloudRun {
     return null;
   }
 
-  /**
-   * The long-running operation a write answers with.
-   *
-   * A real one always carries a `name` — it is the handle the operation is
-   * polled by. The adapter discards this body today, so the `name` is here for
-   * the moment something wants to poll rather than because anything reads it
-   * now; a fake with nothing to poll is a fake that could not tell.
-   */
+  /** A real operation always carries the `name` it is polled by. */
   private operation(id: string, done: boolean): unknown {
     const name = `projects/${this.project}/locations/${this.region}/operations/op-${this.nextOperation++}`;
     this.operations.push({ name, done });
@@ -965,7 +787,6 @@ export class FakeCloudRun {
   }
 }
 
-/** One `updateMask` path read off a document, or `undefined` past its end. */
 function getPath(object: unknown, segments: readonly string[]): unknown {
   return segments.reduce<unknown>(
     (value, segment) =>
@@ -974,7 +795,6 @@ function getPath(object: unknown, segments: readonly string[]): unknown {
   );
 }
 
-/** The same path written into a document, making the way as it goes. */
 function setPath(
   object: Record<string, unknown>,
   segments: readonly string[],
@@ -995,21 +815,16 @@ function setPath(
   setPath(next, rest, value);
 }
 
-/** The member a real `google.rpc.ErrorInfo` detail identifies itself by. */
+/** The `@type` of a `google.rpc.ErrorInfo` detail. */
 const ERROR_INFO = 'type.googleapis.com/google.rpc.ErrorInfo';
 
-/** The body a Google-family API returns for an absent resource. */
 function notFound(): unknown {
   return { error: { message: 'not found', status: 'NOT_FOUND' } };
 }
 
 /**
- * A refusal because the service is switched off in this project.
- *
- * One definition for both APIs this fake stands in for, because what the
- * adapter reads is the ErrorInfo `reason` and that is identical whichever
- * service is off — the human message is the part that names one, and no test
- * reads it.
+ * The API is switched off in the project. It serves every API here: the adapter
+ * reads the ErrorInfo `reason`, which is the same whichever service is off.
  */
 export function serviceDisabled(consumer?: string): {
   status: number;
@@ -1025,8 +840,7 @@ export function serviceDisabled(consumer?: string): {
           {
             '@type': ERROR_INFO,
             reason: 'SERVICE_DISABLED',
-            // ErrorInfo names the project whose switch is off — the call's
-            // consumer, which is not necessarily the project in the URL.
+            // The consumer project, which may differ from the one in the URL.
             ...(consumer === undefined
               ? {}
               : { metadata: { consumer: `projects/${consumer}` } }),
@@ -1037,7 +851,6 @@ export function serviceDisabled(consumer?: string): {
   };
 }
 
-/** A refusal because this identity may not act here. */
 export function permissionDenied(): { status: number; body: unknown } {
   return {
     status: 403,

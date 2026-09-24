@@ -1,11 +1,3 @@
-/**
- * The mounted bosun poll surface (Task: bosun build route).
- *
- * Mirrors `webhook-route.test.ts`'s shape for the other machine-authed
- * route: real `Request`s against the handlers `webRoutes` mounts, over a real
- * outbox row. The claim endpoint's long-poll window is injected short so
- * these tests take milliseconds, not the ~25s production waits.
- */
 import { describe, expect, test } from 'bun:test';
 import { buildOutbox } from '../../src/storage/build-outbox.ts';
 import {
@@ -24,10 +16,8 @@ const NOW = new Date('2026-08-10T00:00:00.000Z');
 function deps(overrides: Partial<BosunRouteDeps> = {}): BosunRouteDeps {
   return {
     db: database().db,
-    // A real, advancing clock — not `NOW` — because the claim route's
-    // long-poll budget measures real elapsed time against it. `pollTimeoutMs`
-    // below is what keeps that real wait down to single-digit milliseconds
-    // rather than the production ~25s.
+    // Not `NOW`: the claim long-poll measures real elapsed time on this clock,
+    // and `pollTimeoutMs` below keeps that wait to milliseconds.
     clock: { now: () => new Date() },
     secret: SECRET,
     pollIntervalMs: 1,
@@ -187,7 +177,7 @@ describe('heartbeat', () => {
 
     expect((await beat(`?claimant=${claimed!.claimant}`)).status).toBe(204);
     expect((await beat('?claimant=somebody-else')).status).toBe(404);
-    // What a bosun host that predates the claimant sends: absent, not wrong.
+    // A bosun host without claimant support sends it empty, which counts as absent.
     expect((await beat('?claimant=')).status).toBe(204);
   });
 });

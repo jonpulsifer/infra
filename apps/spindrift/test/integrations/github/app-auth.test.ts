@@ -1,21 +1,6 @@
 /**
- * The App's own authentication (§15): JWT signing, installation tokens, and
- * the manifest-flow setup that brings the identity into being.
- *
- * Three claims are properties of this file rather than of anybody's
- * discipline:
- *
- * - **The key never leaves.** It arrives once in the conversion response, is
- *   sealed immediately, and nothing this module answers — a JWT, a token, a
- *   status, a setup form — contains it.
- * - **Identity is read per mint, never captured.** The `github_app` row is
- *   written mid-flight by the setup route while the process keeps running, so
- *   an agent constructed before the App existed must start minting the moment
- *   the row does — no restart, no reconstruction.
- * - **A rejected mint is retried once, and nothing durable is spent.** The
- *   Device Flow predecessor deleted its stored credential on a `401`; an
- *   installation token is an hour-lived mint, so the right response is a
- *   fresh mint and, only when that also fails, the ordinary `ACCESS_LOST`.
+ * The App's JWT, installation tokens and manifest-flow setup. The private key
+ * never appears in anything the module returns, and identity is read per mint.
  */
 import { describe, expect, test } from 'bun:test';
 import { base64urlEncode } from '@repo/archive/bytes';
@@ -114,8 +99,7 @@ describe('the App’s own JWT', () => {
     const payload = decodeSegment(claims ?? '');
     const issuedAt = Math.floor(now().getTime() / 1000);
     expect(payload.iss).toBe(CLIENT_ID);
-    // Backdated by a minute: the documented remedy for a far side whose clock
-    // runs behind this one, which it otherwise rejects outright.
+    // Backdated a minute, as GitHub documents, to absorb clock drift.
     expect(payload.iat).toBe(issuedAt - 60);
     expect(payload.exp).toBeLessThanOrEqual(issuedAt + 600);
 
@@ -132,9 +116,7 @@ describe('the App’s own JWT', () => {
   });
 
   test('accepts the PKCS#1 key GitHub actually hands out', async () => {
-    // The conversion endpoint and the key generator emit `BEGIN RSA PRIVATE
-    // KEY`. The predecessor refused it with an openssl incantation; that
-    // ceremony is exactly the onboarding wart this module exists to remove.
+    // GitHub's conversion endpoint and key generator both emit PKCS#1.
     const keyring = ring();
     const { pem, publicKey } = await testAppKey('pkcs1');
     expect(pem).toContain('BEGIN RSA PRIVATE KEY');
@@ -165,9 +147,7 @@ describe('the App’s own JWT', () => {
   });
 
   test('an App created mid-flight is visible with no reconstruction', async () => {
-    // The C-3 property: the agent is built while the row is empty — exactly
-    // the running pod the setup route writes into — and the very next mint
-    // sees the identity.
+    // Built before the row exists, like a pod the setup route writes into.
     const keyring = ring();
     const now = () => new Date('2026-08-13T12:00:00.000Z');
     const auth = agent(new FakeGitHub({ now }), keyring, now);
@@ -215,10 +195,8 @@ describe('installation tokens', () => {
     const ref = { installationId: fake.installationId };
 
     await auth.authorization(ref);
-    // The fake's tokens live an hour; four minutes short of expiry is inside
-    // the five-minute margin. A token that expires mid-request is a `401`
-    // that reads exactly like lost access — the one misclassification this
-    // integration must not make.
+    // The fake's tokens live an hour, so 56 minutes in is inside the
+    // five-minute refresh margin.
     clock = new Date(clock.getTime() + 56 * 60 * 1000);
     await auth.authorization(ref);
 
@@ -236,7 +214,7 @@ describe('installation tokens', () => {
     const now = () => new Date('2026-08-13T12:00:00.000Z');
     const fake = new FakeGitHub({ now });
 
-    // Stand a refusing layer in front of the fake: mints succeed, reads 401.
+    // Mints succeed; every other request is a 401.
     let reads = 0;
     const refusing: Fetcher = async (request) => {
       if (new URL(request.url).pathname.includes('/access_tokens')) {
@@ -272,8 +250,7 @@ describe('installation tokens', () => {
       fake.fullName,
     );
     await expect(read).rejects.toMatchObject({ code: 'ACCESS_LOST' });
-    // One retry, exactly: the request was sent twice, and two tokens were
-    // minted — the cached one was dropped rather than any durable credential.
+    // Exactly one retry, with a fresh mint.
     expect(reads).toBe(2);
     expect(
       fake.requests.filter((request) =>
@@ -361,14 +338,12 @@ describe('the manifest-flow setup', () => {
       },
       default_events: ['push'],
     });
-    // The webhook URL is configuration — the tunnel hostname — never the
-    // control plane's own LAN name, which GitHub's servers cannot reach.
+    // GitHub's servers cannot reach the control plane's LAN name.
     expect(manifest.hook_attributes.url).not.toContain(
       'spindrift.example.test',
     );
-    // Administration is bosun's price of sharing the App; Packages is absent
-    // because GHCR refuses App tokens and the permission would authorize
-    // nothing.
+    // Administration is for bosun, which shares the App. GHCR refuses App
+    // tokens, so Packages would authorize nothing.
     expect(manifest.default_permissions).toEqual({
       contents: 'write',
       pull_requests: 'write',
@@ -410,12 +385,10 @@ describe('the manifest-flow setup', () => {
 
     const [row] = await database().db.select().from(githubApp);
     expect(row?.encryptedPrivateKey).not.toContain('PRIVATE KEY');
-    // The sealed webhook secret opens for the delivery route, and only there.
     await expect(githubAppWebhookSecret(database().db, keyring)).resolves.toBe(
       'a-webhook-secret',
     );
-    // The client secret was discarded: nothing here makes user-to-server
-    // calls, so nothing stores the credential for them.
+    // Nothing makes user-to-server calls, so the client secret is not stored.
     expect(JSON.stringify(row)).not.toContain('discarded-client-secret');
   });
 
@@ -434,9 +407,7 @@ describe('the manifest-flow setup', () => {
       state,
       userId: 'user-1',
     });
-    // Setup succeeded — the identity exists and mints — but deliveries are
-    // refused exactly as they are with no App at all, rather than a null
-    // being sealed and later crashing signature verification.
+    // The identity exists, but deliveries are refused as if there were no App.
     await expect(auth.status()).resolves.toMatchObject({
       state: 'authorized',
     });
@@ -462,8 +433,7 @@ describe('the manifest-flow setup', () => {
     });
     await expect(refused).rejects.toBeInstanceOf(GitHubAppSetupError);
     await expect(refused).rejects.toMatchObject({ status: 409 });
-    // Refused before the far side was ever asked: replacing the identity is a
-    // deliberate act, not a side effect of resubmitting the create flow.
+    // Refused before GitHub is asked; a resubmitted form never replaces the App.
     expect(host.conversions).toEqual([]);
   });
 
@@ -552,9 +522,8 @@ describe('an adopted App, from the installation Secret', () => {
   }
 
   test('works with no keyring and no row: the Secret is the whole identity', async () => {
-    // The App was registered by hand, so there is no conversion response to
-    // seal — the id and PKCS#1 key pasted into the installation Secret are
-    // everything, and the slug is the manifest's public declaration.
+    // A hand-registered App: the Secret carries the id and key, and `appSlug`
+    // names it.
     const { auth, fake, publicKey } = await adoptedAgent();
 
     await expect(auth.status()).resolves.toEqual({
@@ -578,15 +547,13 @@ describe('an adopted App, from the installation Secret', () => {
     );
     expect(verified).toBe(true);
 
-    // And it mints: the whole point of adopting is that tokens flow.
     await expect(
       auth.authorization({ installationId: fake.installationId }),
     ).resolves.toStartWith('Bearer ');
   });
 
   test('names its principal on a source receipt', async () => {
-    // The receipt is written after the tarball is already in hand, so reading
-    // the id from the row alone failed a staging fetch that had succeeded.
+    // An adopted App has no row, so the id comes from the Secret.
     const { auth, fake } = await adoptedAgent();
 
     await expect(

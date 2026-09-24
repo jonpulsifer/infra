@@ -1,31 +1,16 @@
-/**
- * The draft's write side, as a decision rather than a rendering.
- *
- * Two properties that pull against each other, which is why they are one
- * module and one test rather than a debounce somebody added on top of a chain:
- *
- * - **Coalescing.** A name typed a character at a time was a round trip and a
- *   revision bump per character, and a Deploy button that flipped disabled and
- *   back on every one of them.
- * - **Order.** The draft is guarded by a revision, so two writes in flight at
- *   once means the second carries a version the first is about to invalidate —
- *   and the operator is told their own edit is a stale one from another tab.
- *
- * Deliberately not driven through the screen: the mounted harness has no event
- * system (`test/harness/dom.ts`), and typing is exactly what this coalesces.
- */
+// Draft writes coalesce a burst of edits into one save and never overlap: the
+// draft is revision-guarded, so an overlapping save would be refused as stale.
 import { describe, expect, test } from 'bun:test';
 import { draftWrites } from '../../src/web/views/apps/new/writes.ts';
 
 const tick = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-/** A save that records what it was handed and finishes when told. */
+// A save that records what it was handed and finishes when released.
 function recorder() {
   const saved: string[] = [];
   const gates: (() => void)[] = [];
   return {
     saved,
-    /** Let the save that is waiting finish. */
     release: () => gates.shift()?.(),
     save: async (draft: string) => {
       saved.push(draft);
@@ -53,9 +38,7 @@ describe('a burst of edits', () => {
   });
 
   test('reports one stretch of writing rather than one per edit', async () => {
-    // The Deploy button reads this. Flipping it per keystroke is the flicker
-    // the debounce exists to remove, so `true` may not arrive until a save
-    // actually leaves.
+    // The Deploy button reads this, so `true` waits until a save leaves.
     const writing: boolean[] = [];
     const writes = draftWrites<string>({
       save: async () => {},
@@ -71,8 +54,7 @@ describe('a burst of edits', () => {
   });
 
   test('the flush Deploy makes sends what is still scheduled', async () => {
-    // Pressing Deploy inside the debounce window would otherwise complete the
-    // draft the server holds, which is the one before the last edit.
+    // Otherwise Deploy inside the debounce window completes the draft before the last edit.
     const saved: string[] = [];
     const writes = draftWrites<string>({
       save: async (draft) => {
@@ -119,8 +101,7 @@ describe('two saves', () => {
     await tick(15);
     expect(recorded.saved).toEqual(['first']);
 
-    // A second burst while the first save is still in flight. Nothing may go
-    // out until the first has answered with the revision the second needs.
+    // Nothing leaves until the first save answers with the revision the second needs.
     writes.edit('second');
     await tick(15);
     expect(recorded.saved).toEqual(['first']);
@@ -134,12 +115,8 @@ describe('two saves', () => {
   });
 
   test('one refused as stale takes the edits behind it with it', async () => {
-    // What the screen's recovery needs. The draft on screen has just been
-    // replaced by the server's, so an edit written against the version that
-    // lost is not a newer answer — it is an older document, and sending it
-    // writes it at the revision just recovered, where the guard accepts it.
-    // The edit is already in the chain by then, because the save that
-    // recovers is the link in front of it.
+    // Recovery replaces the draft on screen with the server's. An edit made
+    // against the lost version would otherwise save at the recovered revision.
     const recorded = recorder();
     const writes = draftWrites<string>({
       save: recorded.save,
@@ -159,8 +136,7 @@ describe('two saves', () => {
 
     expect(recorded.saved).toEqual(['local-a']);
 
-    // And only what was pending: the next edit is an answer about the draft
-    // now on screen, so it saves.
+    // Only pending edits are dropped.
     writes.edit('recovered-and-edited');
     await tick(15);
     recorded.release();
@@ -169,8 +145,7 @@ describe('two saves', () => {
   });
 
   test('a save that throws does not wedge every save after it', async () => {
-    // The chain is a promise, and a rejected one stays rejected: the draft
-    // would quietly stop saving for the rest of the session.
+    // A rejected link would otherwise reject every save chained after it.
     const saved: string[] = [];
     const writes = draftWrites<string>({
       save: async (draft) => {

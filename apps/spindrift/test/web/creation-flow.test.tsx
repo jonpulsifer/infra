@@ -1,17 +1,5 @@
-/**
- * The creation flow's one hard rule (Task 38): **an unmet prerequisite stops
- * before any Build exists**, keeps the draft, and names the remediation path.
- *
- * Two halves, and both matter. `blockersFor` decides — it is ordinary logic and
- * is tested as such. The screen then has to *show* the decision: a disabled
- * button with no sentence beside it is the failure mode this rule exists to
- * prevent, because it leaves the developer with nothing to act on.
- *
- * The flow is one screen now, so there is no step to put a draft on before
- * asserting: everything is rendered at once and the assertions are about what
- * is on it. That is itself a property worth holding — a preflight you have to
- * navigate to is a preflight somebody can be surprised by.
- */
+// An unmet prerequisite stops creation before any Build exists, keeps the draft
+// and names the fix. `blockersFor` decides; the screen must say why, not only disable.
 import { describe, expect, test } from 'bun:test';
 import { sniffArchiveFormat } from '@repo/archive/archive-format';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -38,7 +26,7 @@ const CANDIDATES = TARGET_OPTIONS.filter((target) => target.candidate).map(
   (target) => target.targetId,
 );
 
-/** A draft with every prerequisite met — the baseline the others deviate from. */
+// Every prerequisite met; the other cases deviate from this.
 const clean: Draft = {
   ...INITIAL_DRAFT,
   config: INITIAL_DRAFT.config.map((key) => ({ ...key, supplied: true })),
@@ -66,9 +54,7 @@ describe('the preflight', () => {
   });
 
   test('an unprovisioned vessel blocks, and says who provisions it', () => {
-    // §14 and Task 46: vessels are pre-provisioned through Terraform, and
-    // Spindrift never creates a project. So the remediation is somebody else's
-    // merge, and saying that is the difference between waiting and retrying.
+    // Vessels are pre-provisioned through Terraform, so the fix is someone else's merge.
     const blockers = blockersFor(
       { ...clean, vessel: { ...clean.vessel, ready: false } },
       CANDIDATES,
@@ -88,15 +74,13 @@ describe('the preflight', () => {
   });
 
   test('a config key with no value blocks, and names the key', () => {
-    // §10 makes values write-only, so a key left empty here cannot be filled in
-    // later from this screen. That is why it is a blocker rather than a warning.
+    // Config values are write-only, so this screen cannot fill an empty key later.
     const blockers = blockersFor(INITIAL_DRAFT, CANDIDATES);
     expect(blockers).toHaveLength(1);
     expect(blockers[0]!.remediation).toContain('DATABASE_URL');
   });
 
   test('several unmet prerequisites are all reported', () => {
-    // Reporting one at a time turns a blocked draft into a guessing game.
     const blockers = blockersFor(
       { ...INITIAL_DRAFT, vessel: { ...clean.vessel, ready: false } },
       CANDIDATES,
@@ -112,8 +96,6 @@ describe('the screen shows the preflight rather than only obeying it', () => {
     expect(markup).toContain('to fix above');
     expect(markup).toContain('DATABASE_URL');
     expect(markup).toContain('Nothing has been created');
-    // The draft survives — the rule is "stops before any Build exists", not
-    // "discards what the developer entered".
     expect(markup).toContain('this draft is kept');
   });
 
@@ -134,34 +116,26 @@ describe('the whole plan is four rows', () => {
   const markup = render(clean);
 
   test('every decision is answered before anything is pressed', () => {
-    // Code, Type, Name, Where it runs. The five §18 decisions are still all
-    // here; Reach, Auth, Target, URL and Vessel are five facts about one
-    // question, and they are stated as one sentence rather than five rows.
+    // Reach, Auth, Target, URL and Vessel are one sentence under `Where it runs`.
     for (const label of ['Code', 'Type', 'Name', 'Where it runs']) {
       expect(markup).toContain(label);
     }
   });
 
   test('and the five infrastructure nouns are not on the top line', () => {
-    // The regression this guards is the row count creeping back up. Each of
-    // these is one Edit away, inside `Where it runs`, which is closed here.
+    // Each is inside `Where it runs`, which is closed here.
     for (const noun of ['Vessel', 'Adapter', 'rank ', 'Reach']) {
       expect(markup).not.toContain(noun);
     }
   });
 
   test('no step rail survives', () => {
-    // The regression this guards is the flow growing its Continue buttons
-    // back: four presses to accept four answers nobody disagreed with.
     expect(markup).not.toContain('Continue');
     expect(markup).not.toContain('aria-current="step"');
   });
 
   test('the vessel is marked immutable while it is still a choice', () => {
-    // Inside `Where it runs` now, so the row has to be open to read it — and
-    // what opens it is its own unmet prerequisite, which is the other half of
-    // what this asserts: a row holding a blocker shows the controls that clear
-    // it without anybody pressing Edit.
+    // A row holding an unmet prerequisite opens itself.
     const excluded = TARGET_OPTIONS.find((target) => !target.candidate)!;
     const markup = render({ ...clean, targetId: excluded.targetId });
 
@@ -172,10 +146,7 @@ describe('the whole plan is four rows', () => {
 
 describe('an App nothing routes to', () => {
   test('states that it has no address, rather than printing one', () => {
-    // The Target mints a canonical hostname whatever the reach is, so the row
-    // read `no address` on its top line with a hostname directly underneath.
-    // Whether there is an address at all is the draft's answer, not the
-    // Target's — the Target only decides what it would be.
+    // The Target mints a hostname whatever the reach; whether one applies is the draft's answer.
     const markup = render({ ...clean, reach: 'none' });
 
     expect(markup).toContain('no address');
@@ -190,9 +161,6 @@ describe('an App nothing routes to', () => {
 
 describe('while the screen is still loading', () => {
   test('the placeholder is the rows that are coming, not one pulsing line', () => {
-    // A card of four rows arrives as a card of four rows. The alternative is a
-    // sentence that says nothing about what will be on the screen, followed by
-    // a layout shift that costs the reader their place.
     const markup = renderToStaticMarkup(<CreationSkeleton phase="draft" />);
     for (const label of ['Code', 'Type', 'Name', 'Where it runs']) {
       expect(markup).toContain(label);
@@ -201,8 +169,7 @@ describe('while the screen is still loading', () => {
   });
 
   test('it names which of the two reads is outstanding', () => {
-    // The second read cannot start until the first has answered — placement is
-    // resolved for the draft (§3) — so "loading" means two different waits.
+    // Placement is resolved for the draft, so the second read waits on the first.
     expect(renderToStaticMarkup(<CreationSkeleton phase="draft" />)).toContain(
       'Recovering the draft',
     );
@@ -213,10 +180,7 @@ describe('while the screen is still loading', () => {
 });
 
 describe('a field the schema will refuse', () => {
-  // The rule is one statement, in `creationDraftSchema`, read from both ends.
-  // Before this the only surface for it was the transport refusal the save
-  // came back with, rendered under the Deploy button as `appName: must be
-  // lowercase…` — the right fact, as far from the input as the page allows.
+  // The screen reads the same rule as `creationDraftSchema`.
   const markup = render({ ...clean, appName: 'Almanac Staging' });
 
   test('is marked where the value is', () => {
@@ -229,8 +193,7 @@ describe('a field the schema will refuse', () => {
   });
 
   test('the Component name carries the schema’s rule too', () => {
-    // Whatever rule the schema states, and no rule it does not: an empty name
-    // is the only thing `componentName` refuses.
+    // An empty name is the only thing `componentNameSchema` refuses.
     expect(render({ ...clean, componentName: '' })).toContain(
       'the Component needs a name',
     );
@@ -246,18 +209,15 @@ describe('when neither read answered', () => {
   );
 
   test('the failure is named and retryable', () => {
-    // Every read behind this screen is idempotent, so a dead end here is a
-    // choice rather than a consequence.
+    // Every read behind this screen is idempotent, so a retry is always safe.
     expect(markup).toContain('the database was unreachable');
     expect(markup).toContain('Try again');
   });
 });
 
 describe('non-candidate Targets are listed rather than hidden', () => {
-  // §3's grammar: listed, disabled, and annotated with why. An empty list is
-  // what makes "nowhere fits" unreadable — and so is a list behind a
-  // disclosure, which is why the Target row opens itself when the chosen
-  // Target is not one.
+  // Listed, disabled and annotated with why. The Target row opens itself when
+  // the chosen Target is excluded.
   const excluded = TARGET_OPTIONS.find((target) => !target.candidate)!;
   const markup = render({ ...clean, targetId: excluded.targetId });
 
@@ -275,8 +235,6 @@ describe('non-candidate Targets are listed rather than hidden', () => {
   });
 
   test('a settled Target keeps its alternatives out of the way', () => {
-    // The other half of the same rule: when the answer is fine, the list of
-    // other answers is noise.
     const settled = render(clean);
     const other = TARGET_OPTIONS.find(
       (target) => target.targetId !== clean.targetId,
@@ -287,8 +245,7 @@ describe('non-candidate Targets are listed rather than hidden', () => {
 
 describe('the draft reducer', () => {
   test('a tile that names a kind preselects it', () => {
-    // `website` is ruled out on the shared fixture, which is a different case
-    // — see below — so this is asked about a kind detection allows.
+    // `website` is ruled out on the shared fixture, so this draft allows it.
     const openToWebsite: Draft = {
       ...INITIAL_DRAFT,
       kind: 'job',
@@ -303,15 +260,12 @@ describe('the draft reducer', () => {
       entry: 'website',
     });
     expect(next.kind).toBe('website');
-    // …and leaves the source alone: `Service` and `Website` name a kind, not a
-    // place to get the code from.
+    // A kind tile leaves the source alone.
     expect(next.source).toEqual(INITIAL_DRAFT.source);
   });
 
   test('a tile naming a kind detection ruled out does not select it', () => {
-    // The Component row draws that kind disabled, wearing the reason it cannot
-    // be chosen (§3). A tile that wrote it anyway produced the one state the
-    // grammar has no reading for: selected and greyed at once.
+    // Otherwise the kind would show as selected and disabled at once.
     expect(INITIAL_DRAFT.detection.unavailable.website).toBeDefined();
     const next = draftReducer(INITIAL_DRAFT, {
       type: 'entry',
@@ -321,18 +275,13 @@ describe('the draft reducer', () => {
   });
 
   test('a tile that names no kind leaves the draft’s kind standing', () => {
-    // Not detection's kind — the operator's, if they corrected it. Reverting to
-    // the proposal on a press about where the *source* comes from undid a
-    // correction made two rows down and took its "corrected" badge with it.
+    // The kind may be the operator's correction, not detection's proposal.
     const corrected: Draft = { ...INITIAL_DRAFT, kind: 'job' };
     const next = draftReducer(corrected, { type: 'entry', entry: 'upload' });
     expect(next.kind).toBe('job');
   });
 
   test('the Upload tile switches the source to an archive', () => {
-    // The defect this pins: the tile set an entry and a kind and nothing else,
-    // so pressing it from a repository draft left the repository picker on
-    // screen and the draft still deploying from a repository.
     const next = draftReducer(INITIAL_DRAFT, {
       type: 'entry',
       entry: 'upload',
@@ -340,7 +289,7 @@ describe('the draft reducer', () => {
     expect(next.source.kind).toBe('archive');
   });
 
-  /** A draft that has only ever been an upload — the fresh-install shape. */
+  // A draft that has only ever been an upload, as on a fresh install.
   const uploadOnly: Draft = {
     ...INITIAL_DRAFT,
     entry: 'upload',
@@ -358,8 +307,6 @@ describe('the draft reducer', () => {
     const linking = draftReducer(uploadOnly, { type: 'entry', entry: 'repo' });
 
     expect(linking.source).toMatchObject({ kind: 'repo', repo: '' });
-    // Which is a draft nothing can be created from, said out loud rather than
-    // discovered at Deploy.
     expect(
       blockersFor(linking, CANDIDATES).map((blocker) => blocker.title),
     ).toContain('No repository is chosen.');
@@ -371,8 +318,6 @@ describe('the draft reducer', () => {
   });
 
   test('a staged archive survives a look at the repo tiles', () => {
-    // Pressing the other tile is a look. Costing somebody a staged upload for
-    // it is how a tile becomes one nobody presses twice.
     const staged = draftReducer(uploadOnly, {
       type: 'archive',
       filename: 'dist.zip',
@@ -412,19 +357,14 @@ describe('the draft reducer', () => {
     expect(next.detection.reason).toContain('Astro');
     expect(next.detection.available).toEqual(['service', 'website']);
     expect(next.detection.unavailable.job).toBeDefined();
-    // The scope names the Component, and the source follows it.
     expect(next.componentName).toBe('web');
     expect(next.source.kind === 'repo' && next.source.subpath).toBe('apps/web');
-    // And the reason records the directory it is about, so a draft reopened
-    // later can tell "already read" from "never asked" without a string match
-    // on the placeholder sentence.
+    // A reopened draft tells a read directory from an unread one by this scope.
     expect(next.detection.scope).toBe('apps/web');
   });
 
   test('a detection overrides a corrected kind, because it is about a new directory', () => {
-    // Still true of the *kind*, and deliberately not of the App name below: a
-    // kind is an answer about a directory, so an answer about a different
-    // directory replaces it. A name is an answer about the App.
+    // A kind answers for a directory; the App name, which survives, answers for the App.
     const corrected = draftReducer(INITIAL_DRAFT, {
       type: 'kind',
       kind: 'job',
@@ -493,16 +433,13 @@ describe('the draft reducer', () => {
       url: 'https://github.com/example/ledger.git',
     });
     expect(next.source.kind === 'repo' && next.source.subpath).toBe('.');
-    // With the claim on it: the root is nobody's word, so the next read of the
-    // new tree is free to propose one.
+    // The root is nobody's answer, so the next read may propose a directory.
     expect(next.scopeByOperator).toBeUndefined();
   });
 
   test('another repository is another read, so the detection resets', () => {
-    // The scope is what `outcomeOf` reads to decide a draft has been answered.
-    // Carried across a repository change, the read of the repository just
-    // chosen applies nothing and the rows below keep describing the previous
-    // one — a kind, a sentence, and ruled-out kinds from somewhere else.
+    // `outcomeOf` reads the scope, so a stale one would make the new
+    // repository's read apply nothing.
     const read = draftReducer(INITIAL_DRAFT, {
       type: 'detect',
       scope: 'apps/api',
@@ -523,8 +460,7 @@ describe('the draft reducer', () => {
   });
 
   test('a directory the operator settled on is recorded as theirs', () => {
-    // Durable rather than session state, because the guard it feeds is about
-    // the read that runs when a saved draft is reopened.
+    // Stored on the draft: the guard it feeds runs when a saved draft is reopened.
     const next = draftReducer(INITIAL_DRAFT, {
       type: 'subpath',
       subpath: 'apps/ddnsd',
@@ -534,9 +470,7 @@ describe('the draft reducer', () => {
   });
 
   test('a directory still being typed is not yet an answer', () => {
-    // The keystroke that took `a` for an answer cleared the prerequisite that
-    // says nothing has been chosen to deploy, and once the debounced save
-    // landed Deploy went green for a path nothing had read.
+    // Otherwise a half-typed path would clear the prerequisite and enable Deploy.
     const next = draftReducer(INITIAL_DRAFT, {
       type: 'subpath',
       subpath: 'a',
@@ -546,21 +480,15 @@ describe('the draft reducer', () => {
   });
 });
 
-/**
- * The chooser's `accept` list is a hand-written claim about
- * `@repo/archive/archive-format`, which decides by magic number and has never
- * heard of a filename. Nothing but this ties the two together, so the screen
- * offered a plain `.tar` the boundary answers with `UNKNOWN_FORMAT` — an
- * operator following the screen earning a `400`.
- */
+// `accept` is a hand-written claim about `@repo/archive/archive-format`, which
+// sniffs magic numbers, not filenames. Only this test ties the two together.
 describe('the archive chooser', () => {
-  /** Real bytes of the container each extension names. */
+  // Real bytes of the container each extension names.
   const SAMPLES: Record<string, Uint8Array> = {
     '.zip': zipOf([{ path: 'index.html', text: 'hi' }]),
     '.tar.gz': tarball([{ name: 'index.html', bytes: bytes('hi') }]),
     '.tgz': tarball([{ name: 'index.html', bytes: bytes('hi') }]),
-    // Not offered, and here to be the reason why rather than an absence: a
-    // plain tar carries neither magic number the boundary reads.
+    // Not offered: a plain tar has no magic number the boundary reads.
     '.tar': tar([{ name: 'index.html', bytes: bytes('hi') }]),
   };
 
@@ -571,16 +499,14 @@ describe('the archive chooser', () => {
     const offered = [...markup.matchAll(/accept="([^"]*)"/g)].flatMap((match) =>
       (match[1] ?? '').split(','),
     );
-    // Zero would make every assertion below vacuous — the picker renders only
-    // once the draft is on an archive source.
+    // The picker renders only on an archive source; zero would make this vacuous.
     expect(offered.length).toBeGreaterThan(0);
 
     const unsampled: string[] = [];
     const refused: string[] = [];
     for (const extension of offered) {
       const sample = SAMPLES[extension];
-      // An extension with no bytes here is one this test cannot answer for:
-      // write the sample before putting the extension on the screen.
+      // A newly offered extension needs a sample here first.
       if (sample === undefined) unsampled.push(extension);
       else if (sniffArchiveFormat(sample) === null) refused.push(extension);
     }

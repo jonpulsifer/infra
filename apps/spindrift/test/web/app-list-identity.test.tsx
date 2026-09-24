@@ -1,27 +1,6 @@
-/**
- * A row in the App list stands for one App (§18, and §2's identity rules).
- *
- * `apps` carries no unique constraint on `name` — `components` has
- * `unique(appId, name)` and `targets` has `unique(name)`, `apps` has neither —
- * so two Apps can wear one name, and a real installation does. `deployApp` and
- * `deleteApp` already refuse to guess between them. The list was the surface
- * that could not ask a better question: it dropped the id before the view ran,
- * so both rows keyed the same, linked the same, and offered a delete the
- * command was right to refuse.
- *
- * Both halves are proved here against **two genuinely different Apps sharing
- * one name**, because one App checked twice is the shape that made this look
- * fine for as long as it did:
- *
- * - the far side hands out an identity — `listApps` carries the id, and each id
- *   opens its own workspace and reviews for its own deletion;
- * - the near side uses it — the row's key, its link, and its trash button are
- *   all the id.
- *
- * The view half calls the components as functions and reads the tree they
- * return, rather than rendering to markup: what is under test is *which value*
- * a handler is closed over, and that is not something markup can show.
- */
+// `apps.name` is not unique, so each App list row keys, links and deletes by id.
+// The view tests read the returned element tree: markup cannot show which id a
+// handler closed over.
 import { describe, expect, test } from 'bun:test';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { deleteApp } from '../../src/commands/apps/delete.ts';
@@ -83,10 +62,7 @@ function context(): CommandContext {
   };
 }
 
-/**
- * Two Apps that answer to one name and are not each other: one a `service`, one
- * a `website`, which is the pair a real installation ended up with.
- */
+// Two different Apps with one name: a service and a website.
 async function seedTwins(ctx: CommandContext, name: string) {
   const made: { id: string; kind: 'service' | 'website' }[] = [];
   for (const kind of ['service', 'website'] as const) {
@@ -127,14 +103,8 @@ async function seedTwins(ctx: CommandContext, name: string) {
   return made;
 }
 
-/**
- * One App with two Components, released to two different verdicts.
- *
- * The `web` Component is serving and the `worker` behind it is red — the shape
- * the list used to report as `live`, because it read the phase off
- * `components[0]` and stopped. Each Component gets its own Target so the two
- * releases are genuinely independent rather than two rows on one placement.
- */
+// A serving `web` and a red `worker`, each on its own Target so the two
+// releases are independent.
 async function seedSplitApp(ctx: CommandContext) {
   const name = `split-${crypto.randomUUID().slice(0, 8)}`;
   const app = await createApp(
@@ -220,15 +190,13 @@ describe('an App is as healthy as its worst Component', () => {
     expect(row).toBeDefined();
     if (!row) return;
 
-    // The whole defect: `components[0]` is the `web` that is serving.
+    // `components[0]` is the serving `web`, so the phase must come from the worst.
     expect(row.phase).toBe('FAILED');
     expect(row.componentCount).toBe(2);
     expect(row.failing).toBe(1);
   });
 
   test('and every other fact on the row belongs to that same Component', async () => {
-    // A row that named one Component's commit beside another's placement is
-    // two answers wearing one line, and no reader can tell which is which.
     const ctx = context();
     const seeded = await seedSplitApp(ctx);
     const red = seeded.released.find((entry) => entry.phase === 'FAILED');
@@ -240,8 +208,6 @@ describe('an App is as healthy as its worst Component', () => {
     const row = listed.value.apps.find((app) => app.id === seeded.appId);
     expect(row?.commit).toBe(red?.commit ?? '');
     expect(row?.deployId).toBe(seeded.redDeployId);
-    // The instant the release was written, so the scan can be ordered by how
-    // long each App has been in the state it is in.
     expect(row?.at).toBeDefined();
     expect(row?.when).toBeDefined();
   });
@@ -260,7 +226,6 @@ describe('two Apps answer to one name', () => {
     const rows = listed.value.apps.filter((app) => app.name === name);
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((row) => row.id)).size).toBe(2);
-    // And the ids are the Apps', not something the projection invented.
     expect(rows.map((row) => row.id).sort()).toEqual(
       twins.map((twin) => twin.id).sort(),
     );
@@ -277,8 +242,7 @@ describe('two Apps answer to one name', () => {
     const rows = listed.value.apps.filter((app) => app.name === name);
     expect(rows).toHaveLength(2);
 
-    // The row says which kind it is; the workspace it links to must agree, or
-    // one of the two rows is a link to the other one's App.
+    // The kind check catches a row that links to its twin.
     for (const row of rows) {
       const workspace = await getAppWorkspace({ name: row.id }, ctx);
       expect(workspace.ok).toBe(true);
@@ -287,7 +251,7 @@ describe('two Apps answer to one name', () => {
       expect(workspace.value.workspace.components[0]?.kind).toBe(row.kind);
     }
 
-    // By name, both rows land on the same App — the reason the id is carried.
+    // By name, both rows would land on the same App.
     const byName = await getAppWorkspace({ name }, ctx);
     expect(byName.ok).toBe(true);
     if (!byName.ok) return;
@@ -311,12 +275,10 @@ describe('two Apps answer to one name', () => {
       expect(review.ok).toBe(true);
       if (!review.ok) continue;
       expect(review.value.deleted).toBe(false);
-      // The id the confirm call will go by is this row's, not the other's.
       expect(review.value.appId).toBe(row.id);
     }
 
-    // A review by name alone is ambiguous across the two rows, and the refusal
-    // is what keeps either from being deleted by accident.
+    // By name alone the review is ambiguous, so it is refused.
     const ambiguous = await deleteApp({ name, confirm: false }, ctx);
     expect(ambiguous.ok).toBe(false);
     if (ambiguous.ok) return;
@@ -347,7 +309,7 @@ describe('two Apps answer to one name', () => {
   });
 });
 
-/** Every element in a tree, depth first — the tree as returned, not rendered. */
+// Every element in a tree, depth first, as returned and not rendered.
 function* elements(node: ReactNode): Generator<ReactElement> {
   if (Array.isArray(node)) {
     for (const child of node) yield* elements(child as ReactNode);
@@ -358,7 +320,6 @@ function* elements(node: ReactNode): Generator<ReactElement> {
   yield* elements((node.props as { children?: ReactNode }).children);
 }
 
-/** A pair of rows sharing a name, as the browser contract now delivers them. */
 const TWIN_ROWS: readonly AppListItem[] = [
   {
     id: '00000000-0000-4000-8000-0000000000b1',
@@ -395,15 +356,6 @@ const idleDeletion: AppDeletionControls = {
   dismiss: () => undefined,
 };
 
-/**
- * The rows this list returns, as elements — one `AppRow` per App.
- *
- * The list was an `ObjectExplorer` when this file was written, so these three
- * tests reached the rows through its `items` and `renderInspector` props. The
- * screen is a flat list now and the rows are `AppRow` elements, but the claim
- * is unchanged and so is the method: walk the tree the component *returns*, and
- * read which value each handler closed over.
- */
 function rowsOf(onNavigate: (path: string) => void = () => undefined) {
   const tree = AppList({
     apps: TWIN_ROWS,
@@ -417,16 +369,14 @@ function rowsOf(onNavigate: (path: string) => void = () => undefined) {
 
 describe('the list renders two same-named rows as two Apps', () => {
   test('there are two rows, keyed by id rather than by name', () => {
-    // Keyed by name, React sees one key twice and reconciles two Apps into one
-    // row — before any of the rest of this can even be asked.
+    // Keyed by name, React would reconcile the twins into one row.
     expect(rowsOf().map((row) => row.key)).toEqual([...IDS]);
   });
 
   test('each row navigates to its own App', () => {
     const visited: string[] = [];
     for (const row of rowsOf((path) => visited.push(path))) {
-      // The row *is* the button, so its own press is the navigation — there is
-      // no inspector in between any more, which was the point of the change.
+      // The row itself is the button.
       for (const inner of elements(
         AppRow(row.props as Parameters<typeof AppRow>[0]),
       )) {
@@ -452,14 +402,11 @@ describe('the list renders two same-named rows as two Apps', () => {
       throw new Error('a row offered no delete');
     });
     expect(targets.map((target) => target.appId)).toEqual([...IDS]);
-    // The name still travels, because it is what the confirmation says out
-    // loud. It is simply not what the command acts on.
+    // The name is for the confirmation's wording; the command acts on the id.
     expect(targets.map((target) => target.name)).toEqual(['twins', 'twins']);
   });
 
   test('a filter that matches one twin leaves one row', () => {
-    // The filter is the screen's state and the list's prop, so this is the
-    // whole of it: a needle in, the rows that survive out.
     const filtered = AppList({
       apps: TWIN_ROWS,
       onNavigate: () => undefined,
@@ -469,8 +416,7 @@ describe('the list renders two same-named rows as two Apps', () => {
     const rows = [...elements(filtered)].filter(
       (element) => element.type === AppRow,
     );
-    // Only the second twin has that address, and matching it must not take the
-    // sibling that shares its name with it.
+    // Only the second twin has that address.
     expect(rows.map((row) => row.key)).toEqual([IDS[1]!]);
   });
 
@@ -509,19 +455,8 @@ describe('App links preserve the stored URL contract', () => {
   });
 });
 
-/**
- * The optimistic drop, which is the last place a name was still standing in for
- * an identity.
- *
- * `app.tsx` removes the row itself rather than re-reading the list, so the
- * predicate it filters on decides what an operator sees the instant a delete
- * completes. Filtering on the name hid *both* twins until a reload — the App
- * that survived being exactly the one this ticket exists to keep reachable.
- *
- * The wiring is additionally guarded by the type system: `onDeleted` now takes
- * an `AppIdentity`, so the old `app.name !== name` predicate is a compile error
- * rather than a silent behaviour, and `bun run typecheck` fails if it returns.
- */
+// The App list drops a deleted row itself instead of re-reading, so its filter
+// decides what stays on screen. `onDeleted` receives an `AppIdentity`.
 describe('deleting one twin leaves the other on screen', () => {
   test('dropping the row by id keeps its same-named sibling', () => {
     const remaining = TWIN_ROWS.filter((app) => app.id !== IDS[0]);
