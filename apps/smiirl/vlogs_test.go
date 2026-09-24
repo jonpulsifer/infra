@@ -49,6 +49,7 @@ func TestRobocallsCount(t *testing.T) {
 		`namespace%3D%22pbx%22`,
 		`container%3D%22asterisk%22`,
 		`pbx-event+kind%3Dscreened`,
+		`-%22Executing%22`,
 		`stats+count%28%29+as+hits`,
 	} {
 		if !strings.Contains(q, want) {
