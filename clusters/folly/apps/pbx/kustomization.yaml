@@ -8,6 +8,11 @@ resources:
   - network-policy.yaml
 
 patches:
+  # First, so containers/0 is still asterisk when its ops run.
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: pbx
   - path: provision-sidecar.yaml
 
 namespace: pbx
@@ -57,3 +62,36 @@ configMapGenerator:
     options:
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled
+
+  # The prompts the dialplan plays by absolute path from /var/lib/pbx-sounds.
+  # `mise run pbx:voices` renders them from sounds/lines.yaml. They are binary,
+  # so they land as binaryData, which Kubernetes caps at 1 MiB per ConfigMap.
+  - name: pbx-sounds
+    files:
+      - sounds/captcha-greeting.ulaw
+      - sounds/captcha-retry.ulaw
+      - sounds/goodbye.ulaw
+      - sounds/queue-caller-eleven.ulaw
+      - sounds/queue-wait-time.ulaw
+      - sounds/queue-moved-up.ulaw
+      - sounds/queue-agents-busy.ulaw
+      - sounds/queue-monitored.ulaw
+      - sounds/queue-skip.ulaw
+      - sounds/queue-music.ulaw
+      - sounds/queue-thinking.ulaw
+      - sounds/queue-faster.ulaw
+      - sounds/queue-doing-great.ulaw
+      - sounds/lenny-hello.ulaw
+      - sounds/lenny-yes.ulaw
+      - sounds/lenny-who.ulaw
+      - sounds/lenny-interesting.ulaw
+      - sounds/lenny-daughter.ulaw
+      - sounds/lenny-ducks.ulaw
+      - sounds/lenny-again.ulaw
+      - sounds/lenny-how-much.ulaw
+      - sounds/lenny-pen.ulaw
+      - sounds/lenny-sounds-good.ulaw
+      - sounds/lenny-quiet.ulaw
+      - sounds/lenny-last-fellow.ulaw
+      - sounds/lenny-kettle.ulaw
+      - sounds/lenny-still-here.ulaw

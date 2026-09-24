@@ -85,6 +85,10 @@ run = "bash .github/scripts/check-prometheus-rules.sh"
 description = "Boot the PBX image's Asterisk against each site's rendered config with no route off the machine; check PJSIP, 911 routing and what a caller can reach (sites: folly offsite, default both)"
 run = "bash .github/scripts/pbx-check.sh"
 
+[tasks."pbx:voices"]
+description = "Render the folly PBX prompts in clusters/folly/apps/pbx/sounds/lines.yaml with ElevenLabs text-to-speech (args: --all or line ids; default: lines with no .ulaw)"
+run = "bash .github/scripts/pbx-voices.sh"
+
 [tasks."pbx:test"]
 description = "Test the PBX check's inbound dialplan walker against fixtures"
 run = "bash .github/scripts/pbx-inbound-walk_test.sh"
