@@ -1,6 +1,6 @@
 /**
- * The exec transport: what the client asks the apiserver for, and how
- * `v4.channel.k8s.io` frames become stdin, stdout, stderr and a close status.
+ * The exec transport: the apiserver request, and `v4.channel.k8s.io` frames as
+ * stdin, stdout, stderr and a close status.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Server, ServerWebSocket } from 'bun';
@@ -245,8 +245,8 @@ describe('exec', () => {
   });
 
   test('a refused upgrade explains itself with the plain GET', async () => {
-    // A 403 reaches Bun's WebSocket as a bare close, so the message a human
-    // reads has to come from re-asking the apiserver in plain HTTP.
+    // A 403 reaches Bun's WebSocket as a bare close, so the reason comes from
+    // a plain HTTP GET.
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,

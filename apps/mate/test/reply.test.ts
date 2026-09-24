@@ -40,8 +40,7 @@ describe('a streamed reply', () => {
     expect(message!.content).toBe('');
     expect(message!.subtext).toEqual(['-# ⟳ reading files']);
     expect(message!.hasStop).toBe(true);
-    // A run of text is a step until it outlives the grace, so the answer
-    // only starts repainting once this one has.
+    // Text becomes the answer only once it outlives RUN_GRACE_MS.
     reply.update({ kind: 'text', delta: 'a' });
     await clock.advance(RUN_GRACE_MS);
     reply.update({ kind: 'text', delta: 'b' });
@@ -65,8 +64,7 @@ describe('a streamed reply', () => {
     const clock = new FakeClock();
     const canvas = new FakeCanvas();
     const reply = new Reply(canvas, clock, silentLog, 't', 1_000);
-    // Each update queues a repaint while the first is still in flight, so
-    // without care one of them repaints after the turn has already ended.
+    // Repaints queued behind an in-flight one must not be applied after finish.
     reply.update({ kind: 'status', line: 'thinking' });
     reply.update({ kind: 'text', delta: 'an answer' });
     reply.update({ kind: 'status', line: null });
@@ -173,8 +171,7 @@ describe('tool calls', () => {
       call: { id: 'c1', title: 'read files', state: 'in_progress' },
     });
     await settle();
-    // Not held for the repaint cadence the way text is: a card arrives at
-    // tool-call rate, and it is one small call.
+    // Cards skip the repaint cadence: they arrive at tool-call rate.
     expect(canvas.cards).toEqual([
       { id: 'c1', title: 'read files', state: 'in_progress' },
     ]);
@@ -210,8 +207,7 @@ describe('tool calls', () => {
       call: { id: 'c1', title: 'read files', state: 'complete' },
     });
     reply.update({ kind: 'status', line: null });
-    // A tool call moving is a repaint of its own, with no text or status
-    // change behind it.
+    // A tool call's state change alone repaints.
     reply.update({
       kind: 'tool',
       call: { id: 'c2', title: 'bun test', state: 'error' },
@@ -294,24 +290,20 @@ describe('what the agent says between tool calls', () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
     const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
-    // The harness clears its own status on the first token of a run, so
-    // without the run behind it the line would go empty exactly when there
-    // is something to say.
+    // The harness clears its status on a run's first token, so the run fills the line.
     reply.update({ kind: 'text', delta: 'Let me look at the vault item.' });
     reply.update({ kind: 'status', line: null });
     await clock.advance(0);
     const [card] = discord.inThread('t');
     expect(card!.subtext).toEqual(['-# ⟳ Let me look at the vault item.']);
-    // A tool call takes the line back: what is running beats what the agent
-    // last said it was about to run.
+    // A running tool call takes the line back from the run.
     reply.update({
       kind: 'tool',
       call: { id: 'c1', title: 'op read', state: 'in_progress' },
     });
     reply.update({ kind: 'status', line: 'op read…' });
     await clock.advance(1_000);
-    // The sentence is kept, as a step on the card, and the running call is
-    // the line that moves.
+    // The sentence stays as a step on the card.
     expect(card!.subtext).toEqual([
       '-# 💬 Let me look at the vault item.',
       '-# ⟳ op read',

@@ -22,7 +22,6 @@ export function CreateProjectModal({
   const router = useRouter();
 
   const handleProjectCreated = (slug: string) => {
-    // Close modal and navigate to the new project
     onOpenChange(false);
     router.push(`/${slug}`);
   };

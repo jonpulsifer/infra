@@ -25,30 +25,29 @@ import (
 )
 
 const (
-	// radix is the wordlist size; every word carries exactly 10 bits.
+	// The wordlist size; each word carries 10 bits.
 	radix     = 1024
 	radixBits = 10
-	// idBits and the field widths below are the 40-bit metadata prefix.
+	// Field widths from the SLIP-0039 share format.
 	idBits       = 15
 	checksumLen  = 3 // words
 	metadataBits = 40
 	digestLen    = 4
-	// The secret sits at f(255) and the digest at f(254). Member and group
-	// indices are four bits, so neither index can collide with a share's own x.
+	// The secret sits at f(255) and the digest at f(254). Share indices are four
+	// bits, so neither collides with a share's own x.
 	secretIndex = 255
 	digestIndex = 254
 	maxShares   = 16
 	minStrength = 128 // bits
-	// baseIterations is per Feistel round; four rounds give SLIP-39's stated
-	// 10000 << e total.
+	// Per Feistel round; four rounds give SLIP-39's 10000 << e total.
 	baseIterations = 2500
 )
 
 //go:embed wordlist.txt
 var wordlistFile string
 
-// wordlistSHA256 pins the vendored list by content. A different list would
-// produce mnemonics that decode to different bytes while still looking valid.
+// Pins the vendored list by content. A different list decodes the same words to
+// different bytes.
 const wordlistSHA256 = "bcc4555340332d169718aed8bf31dd9d5248cb7da6e5d355140ef4f1e601eec3"
 
 type lists struct {
@@ -72,10 +71,8 @@ var wordlist = sync.OnceValues(func() (*lists, error) {
 	return &lists{words: words, index: idx}, nil
 })
 
-// rs1024Polymod is the Reed-Solomon code over GF(1024) from SLIP-0039, verbatim
-// from the specification's Python snippet. Three checksum words guarantee
-// detection of any error affecting at most three words of a share, which is the
-// maximum a three-symbol MDS checksum can guarantee.
+// SLIP-0039's Reed-Solomon code over GF(1024), from the specification's Python.
+// Three checksum words detect any error in up to three words.
 func rs1024Polymod(values []int) uint32 {
 	gen := [10]uint32{0xe0e040, 0x1c1c080, 0x3838100, 0x7070200, 0xe0e0009,
 		0x1c0c2412, 0x38086c24, 0x3090fc48, 0x21b1f890, 0x3f3f120}
@@ -92,9 +89,8 @@ func rs1024Polymod(values []int) uint32 {
 	return chk
 }
 
-// customization binds the checksum to the share's own extendable flag, so an
-// ext bit flip invalidates the whole share rather than producing a differently
-// parsed one.
+// Binds the checksum to the extendable flag, so a flipped ext bit invalidates
+// the share.
 func customization(ext bool) []int {
 	s := "shamir"
 	if ext {
@@ -121,8 +117,8 @@ func rs1024Create(ext bool, data []int) []int {
 	return out
 }
 
-// bitCursor walks a share's 10-bit words as a big-endian bit string. The fields
-// are not byte-aligned, so every read and write goes through here.
+// bitCursor walks a share's 10-bit words as a big-endian bit string, because the
+// fields are not byte-aligned.
 type bitCursor struct {
 	words []int
 	pos   int
@@ -161,10 +157,8 @@ type share struct {
 	value []byte
 }
 
-// checkCommonFields is the "all shares MUST have the same ..." list from
-// SLIP-0039's combine procedure. It is shared with Recover so a plate from a
-// foreign set is named as such instead of surviving to the polynomial check
-// with a vaguer message.
+// The "all shares MUST have the same ..." checks from SLIP-0039's combine. Recover
+// runs them too, so a plate from a foreign set is named as such.
 func checkCommonFields(shares []share) error {
 	first := shares[0]
 	for _, s := range shares[1:] {
@@ -200,9 +194,7 @@ func decodeShare(mnemonic string) (share, error) {
 		}
 		data[i] = idx
 	}
-	// Every length rule below is a hard reject rather than a best effort: a
-	// share of the wrong length cannot be repaired into the right one, and the
-	// specification forbids proposing a correction.
+	// Length faults are rejected: the specification forbids proposing a correction.
 	if len(data)*radixBits < metadataBits+minStrength+checksumLen*radixBits {
 		return share{}, fmt.Errorf("slip39: mnemonic has %d words, too short to carry a share", len(data))
 	}
@@ -239,8 +231,8 @@ func decodeShare(mnemonic string) (share, error) {
 	return s, nil
 }
 
-// peekExt reads the extendable flag before the checksum is verified, because
-// the flag selects which customization string the checksum is computed under.
+// The flag selects the checksum's customization string, so it is read before
+// the checksum is verified.
 func peekExt(data []int) bool {
 	c := &bitCursor{words: data, pos: idBits}
 	return c.read(1) == 1
@@ -281,17 +273,15 @@ func boolBit(b bool) uint32 {
 	return 0
 }
 
-// roundFunction is SLIP-39's Feistel round: PBKDF2-HMAC-SHA256 with the round
-// number prepended to the passphrase as one byte. For an empty passphrase the
-// password is the single byte 0x00 for round 0, which looks wrong and is right.
+// SLIP-39's Feistel round: PBKDF2-HMAC-SHA256 with the round number prepended
+// to the passphrase as one byte, so round 0 of an empty passphrase is 0x00.
 func roundFunction(i byte, passphrase string, e uint8, salt, r []byte) ([]byte, error) {
 	return pbkdf2.Key(sha256.New, string([]byte{i})+passphrase,
 		append(append([]byte{}, salt...), r...), baseIterations<<e, len(r))
 }
 
-// saltPrefix binds the identifier into the encryption only when ext = 0. With
-// ext = 1 the EMS is a pure function of the secret, which is what makes the
-// deterministic split below reproducible.
+// The identifier salts the encryption only without ext. With ext, the EMS
+// depends only on the secret and passphrase, so the split is reproducible.
 func saltPrefix(id uint16, ext bool) []byte {
 	if ext {
 		return nil
@@ -299,9 +289,7 @@ func saltPrefix(id uint16, ext bool) []byte {
 	return binary.BigEndian.AppendUint16([]byte("shamir"), id)
 }
 
-// crypt runs the four-round Feistel network. Encryption uses rounds 0..3 and
-// decryption 3..0; nothing else differs, so both directions share this code and
-// cannot drift apart.
+// crypt runs the four-round Feistel network: rounds 0..3 forward, 3..0 back.
 func crypt(ms []byte, passphrase string, e uint8, id uint16, ext bool, forward bool) ([]byte, error) {
 	half := len(ms) / 2
 	l := append([]byte{}, ms[:half]...)
@@ -323,21 +311,8 @@ func crypt(ms []byte, passphrase string, e uint8, id uint16, ext bool, forward b
 	return append(r, l...), nil
 }
 
-// splitSecret is SLIP-0039's SplitSecret with the randomness supplied by the
-// caller rather than drawn from the OS.
-//
-// Stock SplitSecret is randomised, which means two splits of the same secret
-// produce sets that are not interchangeable and a single lost plate cannot be
-// re-cut without collecting and destroying every survivor. Deriving the
-// randomness from the secret makes replacing one plate a matter of regenerating
-// and stamping one plate. The price, stated plainly: below threshold this stops
-// being information-theoretically secure and becomes computationally secure at
-// 2^256, because T-1 shares plus this published rule determine the secret by
-// search. Everything else guarding the master — HKDF, Ed25519, the tree — is
-// computational already.
-//
-// Only generation changes. The recovery path is untouched, and the output is
-// ordinary SLIP-39 that any conforming implementation reads.
+// splitSecret is SLIP-0039's SplitSecret with the randomness supplied. Derived
+// randomness makes below-threshold security computational, at 2^256.
 func splitSecret(threshold, count int, secret, random []byte) ([][]byte, error) {
 	if threshold <= 0 || threshold > count || count > maxShares {
 		return nil, fmt.Errorf("slip39: %d-of-%d is out of range", threshold, count)
@@ -381,9 +356,8 @@ func splitSecret(threshold, count int, secret, random []byte) ([][]byte, error) 
 	return out, nil
 }
 
-// recoverSecret is SLIP-0039's RecoverSecret. The digest at f(254) is what
-// catches shares that are individually valid but do not belong together; the
-// checksum on each share cannot see that.
+// The digest at f(254) catches shares that are each valid but do not belong
+// together.
 func recoverSecret(threshold int, xs []byte, ys [][]byte) ([]byte, error) {
 	if threshold == 1 {
 		return append([]byte{}, ys[0]...), nil
@@ -400,13 +374,10 @@ func recoverSecret(threshold int, xs []byte, ys [][]byte) ([]byte, error) {
 }
 
 const (
-	// splitSalt and the info below frame the HKDF stream that derandomises
-	// generation. They are versioned so that changing the framing is a visible
-	// change rather than a silently different share set for the same secret.
+	// Versioned, so a change to the split framing is visible.
 	splitSalt = "fml-slip39-split-v1"
 )
 
-// checkSplitParams rejects a share set that would be malformed or pointless.
 func checkSplitParams(secret []byte, threshold, count int) error {
 	if threshold <= 0 || threshold > count || count > maxShares {
 		return fmt.Errorf("slip39: %d-of-%d is out of range (1..%d)", threshold, count, maxShares)
@@ -420,9 +391,8 @@ func checkSplitParams(secret []byte, threshold, count int) error {
 	return nil
 }
 
-// splitStream is the derandomised generation stream. Split and Identifier both
-// read it so the identifier a caller reports can never drift from the one the
-// shares actually carry -- the defect this function exists to make impossible.
+// Split and Identifier both read this stream, so a reported identifier always
+// matches the shares.
 func splitStream(secret []byte, threshold, count int) ([]byte, error) {
 	n := len(secret)
 	need := 2 + (n - digestLen) + max(threshold-2, 0)*n
@@ -430,17 +400,13 @@ func splitStream(secret []byte, threshold, count int) ([]byte, error) {
 		fmt.Sprintf("%d-of-%d", threshold, count), need)
 }
 
-// identifierFrom reads the 15-bit identifier off the front of the stream. The
-// top bit of the two-octet draw is discarded, not folded in, so the identifier
-// stays a straight read.
+// The top bit of the two-octet draw is discarded.
 func identifierFrom(stream []byte) uint16 {
 	return binary.BigEndian.Uint16(stream[:2]) & (1<<idBits - 1)
 }
 
-// Identifier is the identifier the shares of this set carry, without generating
-// them. A holder reads it off the first two words of any plate to confirm the
-// plate belongs to this ceremony, and a transcript publishes it for exactly that
-// check -- so it must be derived here rather than transcribed by hand.
+// Identifier returns the identifier this set's shares carry, without generating
+// them. The transcript publishes it so a holder can check a plate.
 func Identifier(secret []byte, threshold, count int) (uint16, error) {
 	if err := checkSplitParams(secret, threshold, count); err != nil {
 		return 0, err
@@ -452,21 +418,14 @@ func Identifier(secret []byte, threshold, count int) (uint16, error) {
 	return identifierFrom(stream), nil
 }
 
-// Split encodes secret as count mnemonics, any threshold of which recover it.
-// Single group, GT = 1, G = 1: SLIP-0039 says a plain T-of-N scheme SHOULD be
-// built that way rather than as N groups of 1-of-1, so that a recovering party
-// can tell from any single share that a single-level scheme was used.
-//
-// The output is a pure function of (secret, threshold, count). Two runs produce
-// the same share set, so one lost plate is replaced by regenerating and
-// stamping that plate alone.
+// Split encodes secret as count mnemonics in a single group, any threshold of
+// which recover it. Output is deterministic, so a lost plate is re-cut alone.
 func Split(secret []byte, threshold, count int, passphrase string) ([]string, error) {
 	if err := checkSplitParams(secret, threshold, count); err != nil {
 		return nil, err
 	}
-	// The specification requires printable ASCII. Enforced on generation only:
-	// refusing it on recovery would block a share set made by another tool,
-	// which is the interoperability this format was chosen for.
+	// The specification requires printable ASCII. Only generation enforces it, so
+	// recovery accepts share sets from other tools.
 	for i := 0; i < len(passphrase); i++ {
 		if passphrase[i] < 32 || passphrase[i] > 126 {
 			return nil, fmt.Errorf("slip39: passphrase must be printable ASCII")
@@ -502,10 +461,8 @@ func Split(secret []byte, threshold, count int, passphrase string) ([]string, er
 	return out, nil
 }
 
-// Combine recovers the secret. It implements the full two-level scheme even
-// though this repository only ever generates single-group sets, because the
-// official test vectors are the validation checklist and half of them are
-// group-structure failures.
+// Combine recovers the secret. It handles the two-level group scheme, which only
+// the official test vectors exercise.
 func Combine(mnemonics []string, passphrase string) ([]byte, error) {
 	if len(mnemonics) == 0 {
 		return nil, fmt.Errorf("slip39: no mnemonics")
@@ -576,16 +533,8 @@ func Combine(mnemonics []string, passphrase string) ([]byte, error) {
 	return crypt(ems, passphrase, first.e, first.id, first.ext, false)
 }
 
-// Recover is Combine for the room the ceremony actually happens in: five people
-// turn up with five plates, not with exactly three.
-//
-// Combine is deliberately the specification's primitive and rejects a surplus —
-// SLIP-0039 requires each group to supply exactly its threshold — which is
-// correct for a decoder and wrong for a recovery procedure. Recover takes the
-// threshold from each group, and then uses every surplus share as a check
-// rather than discarding it: a share that does not lie on the recovered
-// polynomial is a mis-stamped or misfiled plate, which RS1024 cannot see
-// because that plate is internally perfectly valid.
+// Recover is Combine for more than a threshold of plates. Each surplus share must
+// lie on the recovered polynomial, which catches a mis-stamped plate RS1024 accepts.
 func Recover(mnemonics []string, passphrase string) ([]byte, error) {
 	if len(mnemonics) == 0 {
 		return nil, fmt.Errorf("slip39: no mnemonics")
@@ -601,11 +550,8 @@ func Recover(mnemonics []string, passphrase string) ([]byte, error) {
 	if err := checkCommonFields(shares); err != nil {
 		return nil, err
 	}
-	// The same plate handed over twice is one plate. Dropping the duplicate
-	// here rather than letting Combine reject it matters during a recovery:
-	// two copies of plate 1 plus plate 2 is a valid 2-of-3 quorum, and the
-	// operator should not be sent hunting for a "duplicate member index" when
-	// the room actually holds what it needs.
+	// The same plate handed over twice is one plate. Combine would reject the
+	// duplicate member index.
 	byGroup := map[uint8][]int{}
 	var order []uint8
 	seen := map[[2]uint8]bool{}
@@ -630,9 +576,7 @@ func Recover(mnemonics []string, passphrase string) ([]byte, error) {
 		members := byGroup[group]
 		t := int(shares[members[0]].t)
 		if gi >= gt {
-			// A group beyond the group threshold contributes nothing that can
-			// be checked without recovering it too, and recovering it needs its
-			// own quorum. Refuse rather than ignore.
+			// Checking a group beyond the threshold needs its own quorum.
 			return nil, fmt.Errorf("slip39: %d group(s) supplied, need exactly %d", len(order), gt)
 		}
 		if len(members) < t {
@@ -657,10 +601,8 @@ func Recover(mnemonics []string, passphrase string) ([]byte, error) {
 	return secret, nil
 }
 
-// checkSurplus re-evaluates each group's polynomial at every surplus share's
-// index and compares. The threshold shares already fix the polynomial, so a
-// mismatch means the surplus plate belongs to a different set or was
-// transcribed wrong in a way its own checksum accepts.
+// The threshold shares fix each polynomial, so a surplus share off it is from
+// another set or mis-transcribed.
 func checkSurplus(all []share, surplus []share) error {
 	quorumOf := map[uint8]struct {
 		xs []byte

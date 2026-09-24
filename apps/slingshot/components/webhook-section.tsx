@@ -15,11 +15,8 @@ import { CopyButton } from './copy-button';
 import { OutgoingWebhook } from './outgoing-webhook';
 import { WebhookViewer } from './webhook-viewer';
 
-/**
- * The project page: the endpoint panel, the outgoing sender, and the feed.
- * The feed's state lives in `useWebhookFeed`; this module only renders it and
- * asks for a refresh after a send.
- */
+// The project page: the endpoint panel, the outgoing sender and the feed,
+// whose state lives in useWebhookFeed.
 
 interface WebhookSectionProps {
   projectSlug: string;

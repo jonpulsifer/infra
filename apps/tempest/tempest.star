@@ -23,7 +23,7 @@ WEATHERFLOW_API_URL = "https://swd.weatherflow.com/swd/rest/better_forecast?stat
 CACHE_TTL_SECONDS = 300
 
 FRAME_MS = 50  # divided by scale on 2x so marquees keep the same speed
-ICON_STATES = 8  # distinct animation states per icon
+ICON_STATES = 8
 ICON_HOLD = 3  # frames to hold each state, multiplied by scale
 STATIC_PAGE_FRAMES = 70  # ~3.5s per static page at 1x, multiplied by scale
 
@@ -32,13 +32,11 @@ UNIT_PARAMS = {
     "imperial": "&units_temp=f&units_wind=mph&units_pressure=inhg&units_precip=in&units_distance=mi",
 }
 
-# fonts per scale: big temperature, small labels, ticker
 FONTS = {
     1: {"big": "6x13", "small": "tom-thumb", "ticker": "tb-8"},
     2: {"big": "10x20", "small": "tb-8", "ticker": "terminus-16"},
 }
 
-# palette
 COLOR_SUN = "#ffb300"
 COLOR_SUN_GLOW = "#7a5000"
 COLOR_MOON = "#d8d8ea"
@@ -114,10 +112,6 @@ def get_forecast(api_url, cache_suffix):
         return None, "No conditions for this station"
     cache.set(cache_key, json.encode(forecast), ttl_seconds = CACHE_TTL_SECONDS)
     return forecast, None
-
-# ---------------------------------------------------------------------------
-# pages
-# ---------------------------------------------------------------------------
 
 def page_current(current, unit_labels, scale):
     temp = int(current.get("air_temperature", 0))
@@ -284,15 +278,9 @@ def temp_color(t):
         return "#ff9a4d"
     return "#ff5545"
 
-# ---------------------------------------------------------------------------
-# pixel-art weather icons
-# ---------------------------------------------------------------------------
-
 def at(x, y, widget):
     return render.Padding(pad = (x, y, 0, 0), child = widget)
 
-# The sky conditions the renderer knows how to draw. Provider vocabularies map
-# onto these; nothing below sky_condition() speaks WeatherFlow.
 CLEAR = "clear"
 PARTLY = "partly"
 CLOUDY = "cloudy"
@@ -384,13 +372,11 @@ def sun_parts(size, state, px):
         at(off, off, render.Circle(color = COLOR_SUN, diameter = d)),
     ]
     if state % 2 == 0:
-        # cardinal rays
         parts.append(at(mid, 0, render.Box(width = px, height = ray, color = COLOR_SUN)))
         parts.append(at(mid, size - ray, render.Box(width = px, height = ray, color = COLOR_SUN)))
         parts.append(at(0, mid, render.Box(width = ray, height = px, color = COLOR_SUN)))
         parts.append(at(size - ray, mid, render.Box(width = ray, height = px, color = COLOR_SUN)))
     else:
-        # diagonal rays
         c = off - 2 if off >= 2 else 0
         f = size - c - px
         for (x, y) in [(c, c), (f, c), (c, f), (f, f)]:
@@ -465,10 +451,6 @@ def wind_parts(size, state, px):
         x = (state + i * 2) % max(1, size - lengths[i])
         parts.append(at(x, y, render.Box(width = lengths[i], height = px, color = "#c8d2da")))
     return parts
-
-# ---------------------------------------------------------------------------
-# schema
-# ---------------------------------------------------------------------------
 
 def get_schema():
     return schema.Schema(

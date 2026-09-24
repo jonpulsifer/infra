@@ -14,17 +14,8 @@ import (
 	"time"
 )
 
-// poolTempDir is t.TempDir() without the cleanup assertion, and the difference
-// matters here for one reason: a skiff's lifetime goroutine outlives the test
-// that started it. Every test drives the pool with an uncancelled context, so
-// awaitExit boots a replacement each time a fake VMM's Wait() resolves — and a
-// replacement mid-boot writes into these directories while TempDir is deleting
-// them. t.TempDir() reports that as a failed cleanup on a test whose own
-// assertions all passed, which is a fault in the harness rather than in bosun.
-//
-// The goroutines are bounded by the test binary either way. drain is the
-// daemon's real stop path, but it is not the answer here: it empties the pool,
-// and most of these tests assert on a pool that is deliberately still running.
+// poolTempDir skips t.TempDir's cleanup check: awaitExit goroutines outlive
+// each test and may still write here while the directory is removed.
 func poolTempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "bosun-pool-")
@@ -35,9 +26,7 @@ func poolTempDir(t *testing.T) string {
 	return dir
 }
 
-// testPool wires a pool against a fake GitHub client and a fake launcher —
-// no KVM, no network, no real binaries — with one class, "skiff-test",
-// warm=1, pointed at a minimal on-disk hull.
+// testPool has a fake GitHub and launcher and one class, "skiff-test", at warm 1.
 func testPool(t *testing.T) (*pool, *fakeGitHub, *fakeLaunch) {
 	t.Helper()
 	dir := poolTempDir(t)
@@ -47,8 +36,7 @@ func testPool(t *testing.T) (*pool, *fakeGitHub, *fakeLaunch) {
 		RuntimeDir:   filepath.Join(dir, "run"),
 		LogDir:       filepath.Join(dir, "log"),
 		WorkspaceDir: filepath.Join(dir, "workspace"),
-		// Real config always has one (LoadConfig defaults it); drain's poll
-		// ticker would panic on zero. Short, so drain-path tests retry fast.
+		// drain's poll ticker panics on zero; short, so drain-path tests retry fast.
 		PollInterval: Duration(25 * time.Millisecond),
 		Classes: map[string]Class{
 			"skiff-test": {Hull: hullDir, VCPUs: 1, Memory: "512M", Warm: 1, MaxLifetime: Duration(time.Hour)},
@@ -105,8 +93,7 @@ func TestFillBootsWarmCountAndCredentialShareAlwaysPresent(t *testing.T) {
 		t.Fatalf("unexpected jitconfig generation: %v", gh.generated)
 	}
 
-	// virtiofsd (credential) + virtiofsd (diag) + passt + cloud-hypervisor,
-	// no hull devices.
+	// Two virtiofsds (credential, diag), passt and cloud-hypervisor.
 	if fl.count() != 4 {
 		t.Fatalf("want 4 launches for a device-less hull, got %d", fl.count())
 	}
@@ -129,16 +116,12 @@ func TestFillBootsWarmCountAndCredentialShareAlwaysPresent(t *testing.T) {
 		}
 	}
 
-	// The diag share is a real host directory, made before the VMM starts:
-	// virtiofsd has nothing to serve otherwise.
+	// virtiofsd needs the diag directory to exist before the VMM starts.
 	if fi, err := os.Stat(s.paths.diagDir); err != nil || !fi.IsDir() {
 		t.Fatalf("diag dir not created: err=%v", err)
 	}
 }
 
-// Every side-car must be Wait()ed by someone, or it becomes a zombie in
-// bosun's process table the moment it exits — one per helper per recycled
-// skiff, for as long as bosun runs.
 func TestEveryHelperIsReaped(t *testing.T) {
 	p, _, fl := testPool(t)
 	p.fill(context.Background())
@@ -180,16 +163,11 @@ func TestPoolReplacesSkiffAfterExit(t *testing.T) {
 	if _, err := os.Stat(first.paths.dir); !os.IsNotExist(err) {
 		t.Fatalf("retired skiff's state dir should be gone, err=%v", err)
 	}
-	// The evidence outlives the skiff; that is the entire point of putting it
-	// under logDir rather than in the state dir retire wipes.
 	if _, err := os.Stat(first.paths.diagDir); err != nil {
 		t.Fatalf("retired skiff's diag dir should survive, err=%v", err)
 	}
 }
 
-// Helpers drop sidecar files beside their sockets and do not clean them up:
-// virtiofsd a "<sock>.pid", passt a "<sock>.repair". Removing only the socket
-// leaked both for as long as bosun ran.
 func TestRetireRemovesHelperSidecarFiles(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -225,10 +203,6 @@ func TestRetireRemovesHelperSidecarFiles(t *testing.T) {
 	})
 }
 
-// A VMM that exits non-zero without bosun having asked was killed by
-// something outside -- the cgroup OOM killer is the one that happens. Calling
-// that "completed" would hide an OOM-killed job in the metric that says
-// whether jobs are finishing.
 func TestExternallyKilledSkiffIsNotCountedAsCompleted(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -281,10 +255,6 @@ func TestPoolDoesNotRefillDuringShutdown(t *testing.T) {
 	}
 }
 
-// Drain's safety argument, end to end: the registration is deleted before the
-// VMM is killed, so GitHub can never hand this skiff a job mid-scuttle — and
-// the fake refuses the DELETE for a busy runner exactly as GitHub does, which
-// is what makes bosun's own (poll-interval-stale) busy flag irrelevant.
 func TestDrainScuttlesIdleSkiffRegistrationFirst(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -292,9 +262,8 @@ func TestDrainScuttlesIdleSkiffRegistrationFirst(t *testing.T) {
 	s := onlySkiff(t, p)
 	cancel() // SIGTERM: refills are off
 
-	// The ordering is the safety property, so it is asserted at the moment
-	// of the DELETE rather than inferred from the end state: a kill-first
-	// scuttle would leave a live registration GitHub could hand a job to.
+	// Asserted at the DELETE itself: a kill-first scuttle would leave a live
+	// registration GitHub could hand a job to.
 	chCall, ok := fl.last("cloud-hypervisor")
 	if !ok {
 		t.Fatal("cloud-hypervisor was never launched")
@@ -327,9 +296,7 @@ func TestDrainScuttlesIdleSkiffRegistrationFirst(t *testing.T) {
 	}
 }
 
-// A busy skiff is left to finish its job: the DELETE is refused, drain waits,
-// and the pool empties only when the guest halts itself — counted as
-// completed, because the job was.
+// The guest's own halt counts as completed, because the job was.
 func TestDrainWaitsForBusySkiffToFinish(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -369,10 +336,6 @@ func TestDrainWaitsForBusySkiffToFinish(t *testing.T) {
 	}
 }
 
-// A refill can race the stop signal: awaitExit's ctx check may pass an
-// instant before cancellation, so spawn itself must refuse once drain has
-// begun — otherwise a freshly minted skiff joins a pool drain already swept,
-// and GitHub can hand it a brand-new job mid-stop.
 func TestSpawnRefusesDuringDrain(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -410,9 +373,6 @@ func TestSpawnRefusesDuringDrain(t *testing.T) {
 	}
 }
 
-// The drain budget is what bounds how long a stop can block a deploy: at the
-// deadline whatever remains is killed and retired, and the loss is visible in
-// the exit counter rather than folded into a clean shutdown.
 func TestDrainDeadlineKillsRemainingBusySkiff(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -465,12 +425,7 @@ func TestJITConfigDeletedOnFirstOnline(t *testing.T) {
 	}
 }
 
-// TestWedgedIdleGuestIsKilled drives the wedge path (online, then offline
-// while the VMM is still alive, having never gone busy) and observes its
-// effect the same way TestPoolReplacesSkiffAfterExit does: the skiff gets
-// replaced. It deliberately does not read chCall.proc.exitCh directly —
-// awaitExit's own goroutine is already receiving from that channel via
-// Wait(), and a second receiver would race it for the single buffered value.
+// Observes the replacement: reading exitCh would race awaitExit's own Wait.
 func TestWedgedIdleGuestIsKilled(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
@@ -498,10 +453,6 @@ func TestWedgedIdleGuestIsKilled(t *testing.T) {
 	})
 }
 
-// TestWedgeRuleSpareABusySkiff is the reason the rule is scoped to idle
-// skiffs at all: the offline-with-a-live-VMM signal cannot distinguish a hung
-// guest from a running job whose runner went quiet, and killing on it takes
-// the job and the evidence of why. A busy skiff is maxLifetime's problem.
 func TestWedgeRuleSparesABusySkiff(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
@@ -516,9 +467,8 @@ func TestWedgeRuleSparesABusySkiff(t *testing.T) {
 		p.pollOnce(ctx)
 	}
 
-	// The decision, not its effect: pollSkiff sets the exit reason on this
-	// goroutine before killing, while retire runs on awaitExit's and would
-	// race an assertion about the pool's contents.
+	// Assert the decision: retire runs on awaitExit's goroutine and would race a
+	// check of the pool's contents.
 	if r := first.reason(); r != "" {
 		t.Fatalf("a busy skiff was condemned after %d offline polls, reason=%q", wedgeThreshold*3, r)
 	}
@@ -531,9 +481,6 @@ func TestWedgeRuleSparesABusySkiff(t *testing.T) {
 	}
 }
 
-// The other half of that trade: with the wedge rule declining to act, the
-// class's busy-time budget must still reap it, or a wedged job holds its
-// label forever.
 func TestBusySkiffIsReapedByMaxLifetime(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
@@ -610,13 +557,7 @@ func TestSweepOnEmptyRuntimeDirIsANoop(t *testing.T) {
 	}
 }
 
-// TestTransientOfflineDoesNotKill covers the incident this debounce exists
-// for: a runner briefly lost its connection to GitHub, and killing on the
-// first offline observation destroyed a healthy skiff a minute later. Driven
-// idle, where the wedge rule does apply, so the debounce is what is under
-// test rather than the busy exemption. Anything short of wedgeThreshold
-// consecutive observations, or a streak broken by a single online, must leave
-// the skiff alone.
+// Driven idle, where the wedge rule applies, so the debounce is under test.
 func TestTransientOfflineDoesNotKill(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
@@ -630,7 +571,7 @@ func TestTransientOfflineDoesNotKill(t *testing.T) {
 		gh.setStatus(first.runnerID, "offline", false)
 		p.pollOnce(ctx)
 	}
-	// one good observation resets the streak, exactly as a reconnect would
+	// one good observation resets the streak, as a reconnect would
 	gh.setStatus(first.runnerID, "online", false)
 	p.pollOnce(ctx)
 	for i := 0; i < wedgeThreshold-1; i++ {
@@ -647,9 +588,6 @@ func TestTransientOfflineDoesNotKill(t *testing.T) {
 	}
 }
 
-// A workspace image is reserved on real storage, so unlike everything else a
-// skiff leaves behind it does not evaporate with a tmpfs — retire has to
-// delete it, and sweep has to collect whatever a cgroup kill left.
 func TestWorkspaceDiskIsCreatedOnBootAndDeletedOnRetire(t *testing.T) {
 	p, _, fl := testPool(t)
 	class := p.cfg.Classes["skiff-test"]
@@ -694,9 +632,6 @@ func TestSweepClearsOrphanedWorkspaceImages(t *testing.T) {
 	}
 }
 
-// bosun restarts on every token rotation and every rebuild of its host. A sweep
-// that took the slot images with it would make a warm cache something that only
-// ever survives between two consecutive jobs.
 func TestSweepKeepsPersistedSlotImagesAndDropsSlotsAboveWarm(t *testing.T) {
 	p, _, _ := testPool(t)
 	class := p.cfg.Classes["skiff-test"]
@@ -709,11 +644,9 @@ func TestSweepKeepsPersistedSlotImagesAndDropsSlotsAboveWarm(t *testing.T) {
 		filepath.Join(p.cfg.WorkspaceDir, "skiff-test-0.img"),
 		filepath.Join(p.cfg.WorkspaceDir, "skiff-test-1.img"),
 	}
-	// Slot 2 belongs to a warm count this class no longer declares, so nothing
-	// will ever mount it again.
+	// Slot 2 is above the warm count, so nothing mounts it again.
 	retired := filepath.Join(p.cfg.WorkspaceDir, "skiff-test-2.img")
-	// A skiff whose VMM was killed with the cgroup, from before the class
-	// persisted.
+	// An ephemeral image left by a cgroup kill.
 	orphan := filepath.Join(p.cfg.WorkspaceDir, "deadbeef.img")
 	for _, path := range append(append([]string{}, live...), retired, orphan) {
 		if err := ensureWorkspace(path, "1M", false); err != nil {
@@ -736,9 +669,6 @@ func TestSweepKeepsPersistedSlotImagesAndDropsSlotsAboveWarm(t *testing.T) {
 	}
 }
 
-// Two skiffs finishing at once spawn two replacements on two goroutines. Both
-// reading "the lowest free slot" off the live skiff map would hand two running
-// guests the same disk, so the claim has to be the reservation.
 func TestPersistingClassGivesEachLiveSkiffItsOwnSlotAndHandsItBack(t *testing.T) {
 	p, _, fl := testPool(t)
 	class := p.cfg.Classes["skiff-test"]
@@ -774,17 +704,8 @@ func TestPersistingClassGivesEachLiveSkiffItsOwnSlotAndHandsItBack(t *testing.T)
 		t.Fatal("cloud-hypervisor was never launched")
 	}
 
-	// Retire releases the slot rather than deleting the image: what the last
-	// job left on it is the cache the next one is here for.
-	//
-	// Cancelled first, and it is load-bearing. Retiring kills the guest's
-	// process, which wakes that skiff's own awaitExit goroutine -- and
-	// awaitExit replaces a halted skiff 1:1, so its replacement claims the
-	// slot this retire just released. That is the production behaviour and it
-	// is correct; it also races the claim below for the same slot, which made
-	// this test fail roughly one run in two hundred. awaitExit already skips
-	// the replacement once ctx is done, so cancelling is what lets the claim
-	// observe the released slot rather than the replacement's.
+	// Retire releases the slot and keeps the image. Cancel first, or the retired
+	// skiff's replacement races the claim below for the released slot.
 	cancel()
 
 	victim := skiffs[0]
@@ -797,9 +718,6 @@ func TestPersistingClassGivesEachLiveSkiffItsOwnSlotAndHandsItBack(t *testing.T)
 	}
 }
 
-// A build claim boots a skiff the same way a GitHub label does, except the
-// share carries request.json instead of a jitconfig and the cmdline tells
-// the guest which one to expect.
 func TestSpawnBuildBootsSkiffWithRequestJSONAndNoJITConfig(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx := context.Background()
@@ -839,9 +757,6 @@ func TestSpawnBuildBootsSkiffWithRequestJSONAndNoJITConfig(t *testing.T) {
 	}
 }
 
-// The end-to-end path: runBuild boots the skiff, and once it halts the
-// result posted to Spindrift is composed from whatever the guest left in the
-// diag share -- the same share retire deliberately keeps around.
 func TestBuildSkiffExitPostsResultFromDiagFiles(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx := context.Background()
@@ -886,9 +801,6 @@ func TestBuildSkiffExitPostsResultFromDiagFiles(t *testing.T) {
 	}
 }
 
-// A guest that halts without ever writing a result -- crashed before it
-// could, or the hull does not understand bosun.mode=build at all -- must not
-// leave Spindrift's build row hanging until its lease expires.
 func TestBuildSkiffExitWithNoResultFilesPostsFailed(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx := context.Background()
@@ -920,8 +832,6 @@ func TestBuildSkiffExitWithNoResultFilesPostsFailed(t *testing.T) {
 	}
 }
 
-// awaitExit's replacement logic is scoped to GitHub skiffs: a build skiff's
-// next boot is buildLoop's own claim loop, not an automatic refill.
 func TestBuildSkiffExitDoesNotRefillTheClass(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx := context.Background()
@@ -950,9 +860,6 @@ func TestBuildSkiffExitDoesNotRefillTheClass(t *testing.T) {
 	}
 }
 
-// A build skiff has no GitHub registration to prove idle against, and is
-// busy by construction, so drain's registration-first scuttle must leave it
-// alone entirely -- not even attempt a DeleteRunner call.
 func TestDrainDoesNotScuttleAnInFlightBuildSkiffViaScuttleIdle(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
@@ -976,9 +883,7 @@ func TestDrainDoesNotScuttleAnInFlightBuildSkiffViaScuttleIdle(t *testing.T) {
 	}
 }
 
-// The wedge and JIT-expiry checks do not apply to a build skiff, but the
-// class's lifetime budget still does -- measured from spawn, since a build
-// skiff is busy from the moment it boots.
+// Measured from spawn, since a build skiff is busy from boot.
 func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
 	p, _, _ := testPool(t)
 	p.cfg.Classes["skiff-test"] = Class{
@@ -1002,8 +907,7 @@ func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
 	}
 }
 
-// fakeClock drives the pool's now seam. Guarded because a skiff's own
-// awaitExit goroutine reads it while the test advances it.
+// fakeClock is guarded: awaitExit reads it while the test advances it.
 type fakeClock struct {
 	mu sync.Mutex
 	t  time.Time
@@ -1021,11 +925,7 @@ func (c *fakeClock) advance(d time.Duration) {
 	c.t = c.t.Add(d)
 }
 
-// TestSkiffVerdict is the reaper at the constants the daemon ships with --
-// jitExpiry and a class maxLifetime of an hour, wedgeThreshold of 3 -- rather
-// than at the millisecond budgets the pool-level tests have to use to stay
-// fast. Each case feeds the skiff its GitHub readings through observe, the
-// way pollSkiff does, and then asks for the verdict some time later.
+// At the shipped constants, feeding readings through observe as pollSkiff does.
 func TestSkiffVerdict(t *testing.T) {
 	const maxLifetime = time.Hour
 	minted := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
@@ -1061,8 +961,6 @@ func TestSkiffVerdict(t *testing.T) {
 			want:     exitWedged,
 		},
 		{
-			// The same signal on a running job cannot be told from a job whose
-			// runner is merely quiet, so the wedge rule spares it.
 			name:     "the same signal on a busy skiff is spared",
 			readings: append([]reading{{"online", true}}, offline(wedgeThreshold*3, true)...),
 			after:    time.Minute,
@@ -1101,9 +999,6 @@ func TestSkiffVerdict(t *testing.T) {
 	}
 }
 
-// A class missing from the config yields a zero budget from pool.maxLifetime,
-// and zero must not read as "expired the instant it went busy" — a class going
-// missing under a running skiff would then kill the job it is in the middle of.
 func TestAZeroBudgetNeverReaps(t *testing.T) {
 	minted := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	s := &skiff{mintedAt: minted}
@@ -1113,9 +1008,7 @@ func TestAZeroBudgetNeverReaps(t *testing.T) {
 	}
 }
 
-// The budget the daemon actually ships with, driven through the poll loop:
-// the clock is the pool's, so an hour of a job passes without the test
-// waiting for one or the class having to declare a millisecond budget.
+// The pool's clock lets an hour-long job pass without waiting for one.
 func TestPollSkiffReapsAtTheShippedLifetime(t *testing.T) {
 	p, gh, _ := testPool(t)
 	clock := &fakeClock{t: time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)}
@@ -1145,10 +1038,6 @@ func TestPollSkiffReapsAtTheShippedLifetime(t *testing.T) {
 	}
 }
 
-// A claim that lands just as a stop begins is refused by spawn -- and
-// runBuild must post nothing for it: the build was never attempted, so
-// staying silent lets Spindrift's lease expire and another host claim the
-// request, where a FAILED post would close the build permanently.
 func TestDrainRefusedClaimPostsNoResult(t *testing.T) {
 	p, _, _ := testPool(t)
 	ctx := context.Background()
@@ -1166,15 +1055,6 @@ func TestDrainRefusedClaimPostsNoResult(t *testing.T) {
 	}
 }
 
-// ── recovery: what the pool does when GitHub is unreachable ────────────────
-//
-// The paths below are the ones a live outage exercises and a happy-path fake
-// never did. Every one of them was silently broken before it had a test.
-
-// A replacement that cannot boot used to shrink its class permanently: spawn
-// logged the failure, awaitExit dropped it, and nothing anywhere compared the
-// live count against the declared warm count again. One transient error, one
-// slot gone for the life of the process, and no counter that said so.
 func TestTopUpRecoversAClassFromAFailedReplacement(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1194,8 +1074,7 @@ func TestTopUpRecoversAClassFromAFailedReplacement(t *testing.T) {
 		return len(p.snapshot()) == 0
 	})
 
-	// Ticking while GitHub is still down leaves the class empty. How often it
-	// is willing to retry is a separate property; see the backoff test.
+	// Still down, so the class stays empty; retry frequency is the backoff test's.
 	for range 3 {
 		p.pollOnce(ctx)
 	}
@@ -1213,11 +1092,8 @@ func TestTopUpRecoversAClassFromAFailedReplacement(t *testing.T) {
 	}
 }
 
-// The window awaitExit holds open around its 1:1 replacement: the outgoing
-// skiff is out of the map and the incoming one is not in it yet. A top-up that
-// reads that as a shortfall boots a second replacement, and because every
-// replacement after it is 1:1, the class stays one over its warm count for
-// good -- on a host whose MemoryMax was sized for the declared number.
+// awaitExit's replacement window: the outgoing skiff has left the map and the
+// incoming one is not in it yet.
 func TestTopUpDoesNotBootIntoTheReplacementWindow(t *testing.T) {
 	p, _, _ := testPool(t)
 	ctx := context.Background()
@@ -1242,10 +1118,7 @@ func TestTopUpDoesNotBootIntoTheReplacementWindow(t *testing.T) {
 	}
 }
 
-// The same property under the real thing rather than a hand-built window:
-// recycle repeatedly while the poll loop runs, and the class never exceeds
-// what it declares. This is the assertion the mechanism test above cannot
-// make, and the one that fails if the reservation is ever dropped.
+// The end-to-end check that fails if the replacement reservation is dropped.
 func TestRecyclingUnderAPollLoopNeverExceedsTheWarmCount(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1294,11 +1167,6 @@ func TestRecyclingUnderAPollLoopNeverExceedsTheWarmCount(t *testing.T) {
 	}
 }
 
-// Reaping used to be skipped entirely when the status read failed, which
-// froze maxLifetime, JIT expiry and the wedge rule together for the length of
-// an outage. A class budget is a wall-clock judgement: the job is over its
-// budget whether or not GitHub is answering, and the frozen skiff published as
-// live-and-idle, so nothing else could see it either.
 func TestLifetimeReaperStillFiresWhileGitHubIsUnreachable(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1328,14 +1196,8 @@ func TestLifetimeReaperStillFiresWhileGitHubIsUnreachable(t *testing.T) {
 	}
 }
 
-// The rule that must NOT fire from a failed read, and the one this change got
-// wrong on its first pass.
-//
-// busySince is set only by observe, so on a poll whose read failed a zero one
-// means "bosun has not looked", not "idle". A skiff's runner holds its own
-// connection to the Actions service, so GitHub can hand it a job while
-// api.github.com is refusing bosun's reads -- and reaping on that stale zero
-// destroys the job, counted as jit_expired, which no alert watches.
+// busySince is set only by observe, so after a failed read a zero one means
+// "not looked", and GitHub may have handed the runner a job meanwhile.
 func TestJITExpiryDoesNotFireOnAFailedRead(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1353,8 +1215,6 @@ func TestJITExpiryDoesNotFireOnAFailedRead(t *testing.T) {
 	gh.setStatus(s.runnerID, "online", false)
 	p.pollOnce(ctx) // online and idle, on a reading that succeeded
 
-	// GitHub goes away. For all bosun knows the guest has since been handed a
-	// job, because that dispatch does not come through the API bosun reads.
 	gh.fail(nil, errors.New("github is down"), nil)
 	now = now.Add(jitExpiry + time.Minute)
 	p.pollOnce(ctx)
@@ -1366,8 +1226,7 @@ func TestJITExpiryDoesNotFireOnAFailedRead(t *testing.T) {
 		t.Fatal("killed a skiff GitHub may have handed a job")
 	}
 
-	// It is garbage collection, not a deadline. The first reading that comes
-	// back and does say idle reaps it, one poll interval later.
+	// The first successful reading that says idle reaps it.
 	gh.fail(nil, nil, nil)
 	p.pollOnce(ctx)
 	if r := s.reason(); r != exitJITExpired {
@@ -1375,10 +1234,6 @@ func TestJITExpiryDoesNotFireOnAFailedRead(t *testing.T) {
 	}
 }
 
-// The one rule that must NOT fire from a failed read. The wedge verdict is
-// GitHub saying "offline" repeatedly; GitHub saying nothing at all is a
-// different thing, and killing a healthy guest for it would turn every
-// upstream blip into destroyed jobs.
 func TestWedgeRuleDoesNotFireOnFailedReads(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1402,10 +1257,6 @@ func TestWedgeRuleDoesNotFireOnFailedReads(t *testing.T) {
 	}
 }
 
-// runner-id is the only record of a registration bosun could not delete, and
-// sweep-on-start is the only thing that can still act on it. Wiping the state
-// directory anyway is how one unreachable GitHub during a retire became a
-// ghost runner nothing could ever name again.
 func TestRetireKeepsTheRunnerIDWhenDeregistrationFails(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1432,8 +1283,7 @@ func TestRetireKeepsTheRunnerIDWhenDeregistrationFails(t *testing.T) {
 	if _, err := os.ReadFile(filepath.Join(dir, "runner-id")); err != nil {
 		t.Fatalf("runner-id must survive a failed deregistration: %v", err)
 	}
-	// The credential must not. The registration is still live -- which is
-	// precisely why leaving a jitconfig on disk beside it would be wrong.
+	// The jitconfig goes, since the registration is still live.
 	if _, err := os.Stat(filepath.Join(dir, "jitconfig")); !os.IsNotExist(err) {
 		t.Fatalf("jitconfig should be gone, err=%v", err)
 	}
@@ -1450,9 +1300,6 @@ func TestRetireKeepsTheRunnerIDWhenDeregistrationFails(t *testing.T) {
 	}
 }
 
-// A 404 is the outcome the DELETE exists to produce, not a failure to reach
-// GitHub. Treating it as one would keep every already-gone runner's directory
-// forever, retried on every start.
 func TestRetireTreatsAnAlreadyGoneRunnerAsDeregistered(t *testing.T) {
 	p, gh, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1475,9 +1322,6 @@ func TestRetireTreatsAnAlreadyGoneRunnerAsDeregistered(t *testing.T) {
 	})
 }
 
-// main logs the start against what was asked for, because it is routinely
-// less: every class mints to boot, so a GitHub that is down at start yields an
-// empty pool. Reporting "filled" regardless is what made that look fine.
 func TestFillReportsWhatItActuallyBooted(t *testing.T) {
 	ctx := context.Background()
 
@@ -1496,11 +1340,7 @@ func TestFillReportsWhatItActuallyBooted(t *testing.T) {
 	}
 }
 
-// The cap is what keeps the backstop cheap: spawn boots processes
-// synchronously on the poll goroutine, so a class several slots short has to
-// converge over several ticks rather than stalling one on a fleet of mints.
-// fill, which runs once at start, has no cap -- start-up should not take three
-// poll intervals to reach a warm count.
+// fill has no cap, so start-up reaches the warm count in one pass.
 func TestTopUpBootsAtMostOneSkiffPerClassPerTick(t *testing.T) {
 	ctx := context.Background()
 
@@ -1522,11 +1362,6 @@ func TestTopUpBootsAtMostOneSkiffPerClassPerTick(t *testing.T) {
 	}
 }
 
-// Every spawn attempt has external cost -- a real GitHub registration minted
-// and deleted, a helpers log, and a diagnostic directory nothing collects
-// inside the retention window. A class that cannot boot at all (a hull path
-// that does not exist, a workspace that will not fit) must not pay that once
-// per tick forever against a condition an operator is already paged for.
 func TestARepeatedlyFailingClassBacksOff(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
@@ -1544,8 +1379,7 @@ func TestARepeatedlyFailingClassBacksOff(t *testing.T) {
 		t.Fatalf("mint attempts per tick = %v, want %v", attempts, want)
 	}
 
-	// And any success clears it, so a transient failure costs ticks rather
-	// than the rest of the process's life.
+	// Any success clears it.
 	gh.fail(nil, nil, nil)
 	waitFor(t, "the class recovers once GitHub returns", func() bool {
 		p.topUp(ctx)
@@ -1563,9 +1397,6 @@ func widen(p *pool, warm int) {
 	p.cfg.Classes["skiff-test"] = class
 }
 
-// A build skiff is claimed work, not a warm slot. Counting one as filling the
-// class would leave GitHub with nothing to hand a job to for as long as the
-// build ran.
 func TestBuildSkiffDoesNotCountTowardTheWarmCount(t *testing.T) {
 	p, _, _ := testPool(t)
 	ctx := context.Background()
@@ -1581,8 +1412,6 @@ func TestBuildSkiffDoesNotCountTowardTheWarmCount(t *testing.T) {
 	}
 }
 
-// Draining is the one time a short class is correct: the stop path's whole
-// job is to stop replacing.
 func TestTopUpIsRefusedWhileDraining(t *testing.T) {
 	p, _, _ := testPool(t)
 	ctx := context.Background()

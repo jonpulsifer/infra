@@ -11,22 +11,18 @@ import (
 	"strings"
 )
 
-// Path limits from SPEC.md section 3.1. Both are sanity bounds rather than
-// cryptographic ones: HKDF's info has no practical length limit, but a path
-// that long is a bug in whatever generated it.
+// Sanity bounds: HKDF info has no practical limit, but a longer path is a bug in
+// whatever generated it.
 const (
 	MaxPathBytes      = 128
 	MaxPathComponents = 16
 )
 
-// Root is the mandatory first component. A path that does not start here is
-// not part of this tree and is rejected rather than adopted.
+// Root is the mandatory first component.
 const Root = "fml"
 
-// SplitPath validates a path against SPEC.md section 3.1 and returns its
-// components. It rejects; it never normalises. Sanitising silently maps two
-// distinct operator intents onto one key, and the operator finds out years
-// later when a key they expected to be distinct is not.
+// SplitPath validates a path and returns its components. It never normalises,
+// because normalising maps two distinct intents onto one key.
 func SplitPath(path string) ([]string, error) {
 	if path == "" {
 		return nil, fmt.Errorf("derive: empty path")
@@ -34,9 +30,8 @@ func SplitPath(path string) ([]string, error) {
 	if len(path) > MaxPathBytes {
 		return nil, fmt.Errorf("derive: path %q is %d octets, limit %d", path, len(path), MaxPathBytes)
 	}
-	// Splitting on the separator turns a leading, trailing or doubled "/" into
-	// an empty component, which the charset check below rejects. One code path
-	// covers all three.
+	// A leading, trailing or doubled "/" becomes an empty component, which
+	// checkComponent rejects.
 	parts := strings.Split(path, "/")
 	if len(parts) > MaxPathComponents {
 		return nil, fmt.Errorf("derive: path %q has %d components, limit %d", path, len(parts), MaxPathComponents)
@@ -55,12 +50,8 @@ func SplitPath(path string) ([]string, error) {
 	return parts, nil
 }
 
-// checkComponent enforces component = lowercase-letter *( lowercase-letter /
-// digit / "-" ). The charset is what makes component-list to string injective:
-// "/" cannot appear inside a component, so splitting the joined string always
-// recovers the list it was built from. Two distinct paths therefore always have
-// distinct HKDF info, and the separator-injection bug where ["a/b","c"] and
-// ["a","b/c"] derive the same key cannot exist.
+// The charset excludes "/", so joining components is injective and two
+// distinct component lists always get distinct HKDF info.
 func checkComponent(c string) error {
 	if c == "" {
 		return fmt.Errorf("empty")
@@ -77,9 +68,8 @@ func checkComponent(c string) error {
 	return nil
 }
 
-// isVersion reports whether c matches "v" nonzero-digit *digit. v0 and v01 are
-// not versions: a leading zero would give one version two spellings and two
-// distinct keys.
+// isVersion matches "v" nonzero-digit *digit. A leading zero would give one
+// version two spellings and two keys.
 func isVersion(c string) bool {
 	if len(c) < 2 || c[0] != 'v' || c[1] < '1' || c[1] > '9' {
 		return false
@@ -92,7 +82,7 @@ func isVersion(c string) bool {
 	return true
 }
 
-// CheckBranchPath accepts exactly fml/<branch>/<version>.
+// CheckBranchPath accepts fml/<branch>/<version>.
 func CheckBranchPath(path string) error {
 	parts, err := SplitPath(path)
 	if err != nil {
@@ -104,13 +94,8 @@ func CheckBranchPath(path string) error {
 	return nil
 }
 
-// CheckLeafPath accepts a branch path followed by at least two more components,
-// and requires the leaf to be a strict descendant of branchPath.
-//
-// The descent check is not decoration. A 32-octet branch secret carries no
-// evidence of which branch it is, so without it the holder of fml/wallet/v1
-// can derive a perfectly well-formed key at an fml/infra/... path that nobody
-// will ever reproduce — silently, and discovered only when the key is needed.
+// CheckLeafPath requires at least two components below branchPath. A branch
+// secret does not identify its branch, so the descent check stops cross-branch keys.
 func CheckLeafPath(branchPath, leafPath string) error {
 	if err := CheckBranchPath(branchPath); err != nil {
 		return err

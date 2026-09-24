@@ -1,30 +1,22 @@
-/**
- * Simple in-memory rate limiter for 5 requests per second
- * Uses a sliding window approach
- *
- * Note: This is per-instance. For distributed rate limiting,
- * consider using Vercel Edge Config or Vercel KV in production.
- */
+// A sliding-window rate limiter held in memory, so each server instance
+// counts on its own.
 
 interface RateLimitEntry {
   timestamps: number[];
 }
 
 const rateLimitStore = new Map<string, RateLimitEntry>();
-const CLEANUP_INTERVAL = 60000; // Clean up old entries every minute
+const CLEANUP_INTERVAL = 60000; // ms
 const MAX_REQUESTS = 5;
-const WINDOW_MS = 1000; // 1 second window
+const WINDOW_MS = 1000;
 
-// Cleanup old entries periodically
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     const now = Date.now();
     for (const [key, entry] of rateLimitStore.entries()) {
-      // Remove timestamps older than the window
       entry.timestamps = entry.timestamps.filter(
         (ts) => now - ts < WINDOW_MS * 2,
       );
-      // Remove empty entries
       if (entry.timestamps.length === 0) {
         rateLimitStore.delete(key);
       }
@@ -39,20 +31,13 @@ export interface RateLimitResult {
   reset: number;
 }
 
-/**
- * Check if a request should be rate limited
- * @param identifier - Unique identifier (e.g., project ID or IP)
- * @returns Rate limit result
- */
 export function checkRateLimit(identifier: string): RateLimitResult {
   const now = Date.now();
   const entry = rateLimitStore.get(identifier) || { timestamps: [] };
 
-  // Remove timestamps outside the current window
   entry.timestamps = entry.timestamps.filter((ts) => now - ts < WINDOW_MS);
 
   if (entry.timestamps.length >= MAX_REQUESTS) {
-    // Rate limited
     const oldestTimestamp = entry.timestamps[0];
     const reset = oldestTimestamp + WINDOW_MS;
     rateLimitStore.set(identifier, entry);
@@ -64,7 +49,6 @@ export function checkRateLimit(identifier: string): RateLimitResult {
     };
   }
 
-  // Allow request
   entry.timestamps.push(now);
   rateLimitStore.set(identifier, entry);
 

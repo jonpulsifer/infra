@@ -36,12 +36,8 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <SidebarProvider defaultOpen={true}>
-          {/*
-            AppSidebar must precede SidebarInset. SidebarInset offsets itself
-            with peer-data-* selectors, and Tailwind's `peer` only matches a
-            preceding sibling - with the order reversed the inset got no offset
-            and the fixed sidebar rendered on top of the page.
-          */}
+          {/* AppSidebar must come first: SidebarInset offsets itself with
+              peer-data-* selectors, which match only a preceding sibling. */}
           <AppSidebar />
           <SidebarInset className="min-w-0 overflow-x-hidden">
             <div className="md:hidden sticky top-0 z-30 flex items-center gap-3 border-b border-border/60 bg-background/90 px-4 py-3 backdrop-blur">

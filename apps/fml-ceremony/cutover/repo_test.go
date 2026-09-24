@@ -10,14 +10,8 @@ import (
 	"testing"
 )
 
-// A model of a cutover is fiction unless it is pinned to the tree it claims to
-// describe. These assertions read the committed files and the NixOS wiring and
-// fail when reality moves, so the state machine above cannot quietly drift into
-// describing an estate that no longer exists.
-//
-// They deliberately do not repeat what `mise run pki:verify` already asserts —
-// linkage, signatures, CA:TRUE, pathLen depth, expiry ordering. That check runs
-// as its own job in .github/workflows/go.yml.
+// These tests pin the model to the committed files and NixOS wiring. They skip
+// what `mise run pki:verify` checks, which runs as its own job in go.yml.
 
 const repoRoot = "../../.."
 
@@ -48,10 +42,8 @@ func readCerts(t *testing.T, path string) []*x509.Certificate {
 	return out
 }
 
-// caFile is <cluster>-ca-bundle.pem and also backs clientCaFile and
-// kubeletClientCaFile. An FML anchor in it turns every certificate issued
-// anywhere under the FML Root into an authentication credential, and one
-// carrying O=system:masters into cluster-admin.
+// caFile also backs clientCaFile and kubeletClientCaFile, so an FML anchor in it
+// makes any certificate under the FML Root an authentication credential.
 func TestCABundleCarriesOnlyClusterCAs(t *testing.T) {
 	for _, cluster := range clusterName {
 		path := filepath.Join(certsDir(), cluster+"-ca-bundle.pem")
@@ -64,8 +56,6 @@ func TestCABundleCarriesOnlyClusterCAs(t *testing.T) {
 	}
 }
 
-// The chain file is the one an OpenSSL client has to build a whole path out of:
-// cluster CA, Intermediate, self-signed Root, and every link present.
 func TestChainFileIsAWholePathToASelfSignedRoot(t *testing.T) {
 	for _, cluster := range clusterName {
 		path := filepath.Join(certsDir(), cluster+"-ca-chain.pem")
@@ -86,11 +76,8 @@ func TestChainFileIsAWholePathToASelfSignedRoot(t *testing.T) {
 	}
 }
 
-// The re-birth's whole no-maintenance-window argument: the per-cluster
-// Kubernetes CA key survives, so its subjectKeyIdentifier survives, so every
-// certificate cfssl has already issued still names an issuer that exists. If
-// this ever stops holding, the cutover needs an overlap bundle and a window —
-// see TestRotatingTheClusterCAKeyReintroducesTheWindow.
+// If this stops holding, the cutover needs an overlap bundle and a maintenance
+// window. See TestRotatingTheClusterCAKeyReintroducesTheWindow.
 func TestIssuedCertsNameTheClusterCAByAnIdentifierTheRebirthDoesNotChange(t *testing.T) {
 	for _, cluster := range clusterName {
 		ca := readCerts(t, filepath.Join(certsDir(), cluster+"-ca.pem"))[0]
@@ -105,10 +92,7 @@ func TestIssuedCertsNameTheClusterCAByAnIdentifierTheRebirthDoesNotChange(t *tes
 	}
 }
 
-// A duplicate kid resolves a token against whichever entry the apiserver reads
-// first. The re-birth reissues the signer certificate for an unchanged key, so
-// exactly one entry is correct — a second is the "treat a reissue as a
-// rotation" mistake.
+// A duplicate kid resolves a token against whichever entry the apiserver reads first.
 func TestJWKSPublishesNoDuplicateKid(t *testing.T) {
 	for _, cluster := range clusterName {
 		path := filepath.Join(repoRoot, "terraform", "pki", "oidc", cluster, "jwks.json")
@@ -132,8 +116,7 @@ func TestJWKSPublishesNoDuplicateKid(t *testing.T) {
 	}
 }
 
-// The model assumes a specific wiring: the bundle in caFile, the chain in
-// --root-ca-file, and neither swapped for the other.
+// The model assumes the bundle backs caFile and the chain backs --root-ca-file.
 func TestNixWiresTheBundleAndTheChainToDifferentOptions(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "nix", "services", "k8s", "default.nix"))
 	if err != nil {
@@ -156,8 +139,6 @@ func TestNixWiresTheBundleAndTheChainToDifferentOptions(t *testing.T) {
 	}
 }
 
-// The runbook a human follows and the sequence the model checked are the same
-// list, in the same order.
 func TestCutoverDocMatchesTheCheckedPlan(t *testing.T) {
 	raw, err := os.ReadFile("CUTOVER.md")
 	if err != nil {
@@ -174,9 +155,8 @@ func TestCutoverDocMatchesTheCheckedPlan(t *testing.T) {
 	}
 }
 
-// CI routing in this repo is an allow-list: a path no workflow names runs no
-// jobs and still reports green. These checks are worthless if a change to the
-// certificates does not reach them.
+// CI routing is an allow-list: a path no workflow names runs no jobs and still
+// reports green.
 func TestCertChangesRouteToThisWorkflow(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(repoRoot, ".github", "workflows", "go.yml"))
 	if err != nil {

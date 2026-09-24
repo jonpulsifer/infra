@@ -1,9 +1,6 @@
 /**
- * The seam: the same thread contract, driven through a surface the state
- * machine knows nothing about. Nothing here names Discord, and the fake has
- * no archive, so a capability only one surface has is proved optional rather
- * than assumed. The last block puts two surfaces behind one Threads and
- * checks that the caps are mate's rather than either surface's.
+ * The thread contract through a surface the state machine knows nothing
+ * about, then two surfaces behind one Threads sharing mate's caps.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { MINT_FAILED, SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
@@ -138,8 +135,6 @@ describe('a thread on a surface that is not Discord', () => {
     const start = mention('go');
     await threads.onMessage(start);
     await clock.advance(5_000);
-    // The state machine names no surface: the calls reach whichever canvas
-    // has somewhere to put them, and the answer is the same either way.
     expect(surface.canvases.get(start.id)?.cards).toEqual([
       { id: 'c1', title: 'read files', state: 'in_progress' },
       { id: 'c1', title: 'read files', state: 'complete' },
@@ -167,8 +162,7 @@ describe('a thread on a surface that is not Discord', () => {
       metrics,
     });
     await after.rehydrate();
-    // A working sign that belongs to the thread outlives the process that
-    // raised it, so the thread is told the turn it was raised for is over.
+    // A thread-level working sign outlives the process, so it is settled.
     expect(surface.settled).toEqual([start.id]);
   });
 
@@ -206,9 +200,7 @@ describe('a thread on a surface that is not Discord', () => {
     const start = mention('start');
     await threads.onMessage(start);
     await clock.advance(5_000);
-    // A thread mate owns takes any message in it as a prompt, so the one
-    // shape that must never be one is mate's own — here without the bot flag
-    // the surface would normally carry, which is what makes it a loop.
+    // Without the bot flag, mate's own message in an owned thread would loop.
     await threads.onMessage({
       ...inThread(start.id, 'ok ', ME),
       authorIsBot: false,
@@ -359,8 +351,7 @@ describe('the sandbox a thread is named after', () => {
   });
 
   test('the thread and channel it is labelled with survive a round trip', () => {
-    // A label value is 63 characters of [A-Za-z0-9._-] starting and ending
-    // alphanumeric; a Slack timestamp and channel are both already that.
+    // A label value is up to 63 of [A-Za-z0-9._-], alphanumeric at both ends.
     const label = /^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$/;
     expect('1758300000.000100').toMatch(label);
     expect(CHANNEL).toMatch(label);
@@ -422,9 +413,8 @@ describe('two surfaces, one mate', () => {
     await clock.advance(5_000);
     const discordThreadId = discord.threads[0]?.id ?? '';
 
-    // A restarted mate whose surfaces arrive one at a time: Slack's socket
-    // opens before the gateway, and a Discord that never connects must not
-    // hold the other surface's threads hostage.
+    // After a restart surfaces arrive one at a time, and a Discord that never
+    // connects must not block Slack's threads.
     const after = new Threads({
       surfaces: [],
       sandboxes: shared,

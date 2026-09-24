@@ -90,8 +90,7 @@ func main() {
 
 	targets, err := loadTargets(targetsFile)
 	if err != nil {
-		// A missing/empty target file shouldn't keep the UI from starting;
-		// it just renders an empty list until the ConfigMap is populated.
+		// The UI still starts, with an empty target list.
 		log.Printf("warning: could not load targets from %s: %v", targetsFile, err)
 	}
 	log.Printf("loaded %d targets from %s", len(targets), targetsFile)

@@ -10,8 +10,6 @@ import (
 	dto "github.com/prometheus/client_model/go"
 )
 
-// The conversion the whole exporter rests on. 1072 decidegrees Celsius is the
-// number a controller set to 225F actually publishes.
 func TestFahrenheit(t *testing.T) {
 	for _, tc := range []struct {
 		deci int
@@ -35,8 +33,6 @@ func fixedState(t *testing.T, now time.Time) *State {
 	return s
 }
 
-// An unplugged probe must produce no series at all. Reported as a temperature
-// it is -5866F, which is not a reading of anything.
 func TestUnpluggedProbeIsNotATemperature(t *testing.T) {
 	now := time.Unix(1789943581, 0)
 	s := fixedState(t, now)
@@ -76,8 +72,6 @@ flameboss_blower_percent{device="1"} 25
 	}
 }
 
-// A short temps array must not report the probes it did not mention as a
-// reading held over from the last message.
 func TestShortTempsArrayClearsProbes(t *testing.T) {
 	s := fixedState(t, time.Unix(100, 0))
 	s.Temps(1, Temps{Name: "temps", CookID: 7, Temps: []int{1072, 749}, SetTemp: 1072})
@@ -90,8 +84,7 @@ func TestShortTempsArrayClearsProbes(t *testing.T) {
 	}
 }
 
-// pit_reached_target is what keeps the band alerts quiet during the ramp, so
-// it has to latch for the cook and reset when a new cook starts.
+// pit_reached_target keeps the band alerts quiet during the ramp.
 func TestReachedTargetLatchesPerCook(t *testing.T) {
 	s := fixedState(t, time.Unix(100, 0))
 	ramp := Temps{Name: "temps", CookID: 7, Temps: []int{600}, SetTemp: 1072}
@@ -104,15 +97,13 @@ flameboss_pit_reached_target{device="1"} 0
 		t.Error(err)
 	}
 
-	// Within 5F of set counts as settled, and a later dip does not unlatch it:
-	// a pit that has been up and fell back is exactly what the alerts are for.
+	// A later dip must not unlatch it: the alerts exist for a pit that fell back.
 	s.Temps(1, Temps{Name: "temps", CookID: 7, Temps: []int{1050}, SetTemp: 1072})
 	s.Temps(1, ramp)
 	if v := only(t, s, "flameboss_pit_reached_target"); v != 1 {
 		t.Errorf("reached target after a dip = %v, want 1", v)
 	}
 
-	// A new cook id is a new fire.
 	s.Temps(1, Temps{Name: "temps", CookID: 8, Temps: []int{600}, SetTemp: 1072})
 	if v := only(t, s, "flameboss_pit_reached_target"); v != 0 {
 		t.Errorf("reached target on a new cook = %v, want 0", v)
@@ -134,8 +125,6 @@ func TestNewCookResetsStartTime(t *testing.T) {
 	}
 }
 
-// Silence has two stages, and both matter to the alerts: the cook stops being
-// active, then the cook stops existing. The second is what resolves the alert.
 func TestSilenceEndsTheCook(t *testing.T) {
 	start := time.Unix(1000, 0)
 	s := fixedState(t, start)
@@ -160,15 +149,13 @@ func TestSilenceEndsTheCook(t *testing.T) {
 			t.Errorf("%s after the retire window = %d, want 0", metric, got)
 		}
 	}
-	// The device and its message counters outlive the cook: they describe the
-	// controller, not the fire.
+	// Message counters describe the controller and outlive the cook.
 	if got := testutil.CollectAndCount(s, "flameboss_messages_total"); got != 1 {
 		t.Errorf("messages_total after the retire window = %d, want 1", got)
 	}
 }
 
-// A connection that drops and comes back is one reconnect. A server dialled for
-// the first time is not.
+// A first connection is not a reconnect.
 func TestReconnectsCountTransitions(t *testing.T) {
 	s := fixedState(t, time.Unix(1000, 0))
 	s.SetBrokerConnected("s2.myflameboss.com", true)
@@ -202,8 +189,7 @@ flameboss_device_server{device="193415",server="s2.myflameboss.com"} 1
 	}
 }
 
-// only reads the value of one named metric and fails unless there is exactly
-// one series of it, so a test asserting a value cannot silently read the first
+// only fails unless name has one series, so an assertion cannot read the first
 // of several.
 func only(t *testing.T, c prometheus.Collector, name string) float64 {
 	t.Helper()
@@ -236,8 +222,7 @@ func only(t *testing.T, c prometheus.Collector, name string) float64 {
 	return found[0]
 }
 
-// A label is what makes a graph say "Brisket" rather than "Probe 1", and a
-// relabelled probe must not leave its old name behind as a second series.
+// A relabelled probe must not leave its old name behind as a second series.
 func TestProbeLabelsFollowTheController(t *testing.T) {
 	s := fixedState(t, time.Unix(1000, 0))
 	s.Labels(1, []string{"Pit", "Brisket", "", "Butt"})
@@ -256,8 +241,7 @@ flameboss_probe_info{device="1",label="Butt",probe="3"} 1
 	}
 }
 
-// Until the controller says whether an alarm is set, the exporter does not
-// know, and a false would read as "no alarm" to the rules that fall back on it.
+// A false would read as "no alarm" to the rules that fall back on it.
 func TestAlarmSettingsAreUnknownUntilPublished(t *testing.T) {
 	s := fixedState(t, time.Unix(1000, 0))
 	for _, metric := range []string{"flameboss_meat_alarm_enabled", "flameboss_pit_alarm_enabled", "flameboss_supply_volts"} {
@@ -291,8 +275,7 @@ flameboss_supply_volts{device="1"} 12.1
 	}
 }
 
-// Events belong to a cook. One that arrives with no cook is dropped; one that
-// arrives during a cook is gone when the next cook starts.
+// An event with no cook is dropped; one during a cook ends with that cook.
 func TestControllerEventsBelongToTheCook(t *testing.T) {
 	start := time.Unix(1000, 0)
 	s := fixedState(t, start)

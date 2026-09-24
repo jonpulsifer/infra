@@ -9,10 +9,8 @@ import {
 const NOW = 1_789_862_400_000; // ms
 const NOW_SECONDS = NOW / 1000;
 
-// One Tempest row, laid out the way the API documents obs_st. Indices matter
-// more than values here: reading temperature out of the pressure slot is the
-// failure this whole file exists to catch, and it is invisible in the UI until
-// someone notices the high is 1017 degrees.
+// One obs_st row as the API documents it. The indices are under test: reading
+// temperature from the pressure slot gives a 1017-degree high.
 function tempestRow(at: number, temperature: number): Array<number | null> {
   return [
     at, // 0 timestamp
@@ -152,8 +150,7 @@ describe('buildHistory', () => {
       WEATHERFLOW_CONFIG.HISTORY_POINTS,
     );
     expect(series.length).toBeGreaterThan(40);
-    // Averaging within a bucket would otherwise clip both ends, and a curve
-    // that stops short of the high the panel prints beside it reads as a bug.
+    // Averaging alone would clip both ends short of the extremes the panel prints.
     expect(Math.min(...values)).toBeCloseTo(
       history?.extremes.temperature?.min ?? 0,
       1,

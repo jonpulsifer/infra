@@ -15,16 +15,15 @@ import type {
   WeatherSnapshot,
 } from '~/lib/weatherflow/types';
 
-// Device types that report outdoor weather; a hub (HB) reports none, so
-// asking it for observations only wastes a request.
+// A hub (HB) reports no weather, so asking it for observations wastes a request.
 const WEATHER_DEVICE_TYPES = new Set(['ST', 'AR', 'SK']);
 
 type Station = {
   id: number;
   name: string;
   token: string;
-  // Devices whose raw observations the 24h window is built from. A Tempest is
-  // one device; an older station splits the metrics across an AIR and a SKY.
+  // The 24 h window's sources. An older station splits its metrics across an
+  // AIR and a SKY.
   deviceIds: number[];
 };
 type PressureSample = { t: number; p: number };
@@ -55,15 +54,12 @@ function computeTrend(history: PressureSample[]): BarometricTrend {
 }
 
 /**
- * Polls the WeatherFlow REST API for the latest observation of every station
- * reachable with the configured tokens, keeping an in-memory snapshot that
- * /api/weather serves to any number of clients. Upstream traffic is fixed at
- * one request per station per POLL_INTERVAL regardless of client count.
+ * Keeps the in-memory snapshot /api/weather serves. Upstream traffic stays one
+ * request per station per POLL_INTERVAL, whatever the client count.
  */
 class WeatherPoller {
   private tokens: string[];
-  // Tokens whose station list we haven't successfully fetched yet; retried
-  // every tick until discovery succeeds or the token is rejected as invalid.
+  // Retried every tick until discovery succeeds or the token is rejected.
   private undiscovered: Set<string>;
   private ignoreStationIds: Set<number>;
   private stations: Station[] = [];
@@ -95,9 +91,8 @@ class WeatherPoller {
       setInterval(() => {
         this.tick();
       }, WEATHERFLOW_CONFIG.POLL_INTERVAL);
-      // History is deliberately not awaited: a day of samples per device is a
-      // much larger fetch, and the first snapshot should not wait on it. The
-      // panels render without a window and pick one up on a later poll.
+      // Not awaited: the first snapshot must not wait on a day of samples per
+      // device.
       this.firstTick.then(() => {
         this.historyTick();
         setInterval(() => {
@@ -133,8 +128,8 @@ class WeatherPoller {
     return undefined;
   }
 
-  // Never rejects: discovery and per-station polls each catch their own
-  // errors, so a failed tick just leaves the previous snapshot in place.
+  // Never rejects: each step catches its own errors, so a failed tick keeps the
+  // previous snapshot.
   private async tick(): Promise<void> {
     for (const token of [...this.undiscovered]) {
       await this.discover(token);
@@ -171,9 +166,7 @@ class WeatherPoller {
           `Discovered station ${station.station_id} (${station.name ?? 'unnamed'}) with ${deviceIds.length} weather device(s)`,
         );
         if (deviceIds.length === 0) {
-          // Without a device there is nothing to read raw observations from,
-          // so this station's panel shows current conditions and no 24h window
-          // — worth saying out loud rather than leaving it to look like a
+          // No device means no 24 h window, which would otherwise look like a
           // fetch that never finished.
           console.warn(
             `Station ${station.station_id} reports no ST/AR/SK device; it will have no 24h history.`,
@@ -185,7 +178,7 @@ class WeatherPoller {
     } catch (error) {
       const status = (error as { status?: number }).status;
       if (status === 401 || status === 403) {
-        // Rejected token: user-actionable, no point retrying.
+        // A rejected token needs the user; retrying cannot help.
         this.undiscovered.delete(token);
         this.tokenErrors.set(
           token,
@@ -196,8 +189,7 @@ class WeatherPoller {
     }
   }
 
-  // Never rejects, for the same reason tick() doesn't: a station whose history
-  // fetch fails keeps the window it already had.
+  // Never rejects: a failed history fetch keeps the station's previous window.
   private async historyTick(): Promise<void> {
     await Promise.all(this.stations.map((s) => this.pollHistory(s)));
   }
@@ -296,8 +288,7 @@ class WeatherPoller {
   }
 }
 
-// One poller (and one poll interval) per process, surviving dev-server module
-// reloads.
+// One poller per process, kept across dev-server module reloads.
 declare global {
   var __weatherPoller: WeatherPoller | undefined;
 }

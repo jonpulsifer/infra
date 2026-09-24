@@ -12,8 +12,7 @@ import (
 	"strings"
 )
 
-// jwk field order is the wire order; kube-apiserver does not care, but keeping
-// it stable keeps the committed documents diffable.
+// Field order is the wire order, which keeps the committed documents diffable.
 type jwk struct {
 	Use string `json:"use"`
 	Kty string `json:"kty"`
@@ -48,9 +47,8 @@ func jwkFromCert(path string) (jwk, error) {
 	if !ok {
 		return jwk{}, fmt.Errorf("%s: signer key is %s, JWKS needs RSA", path, keyAlgorithm(cert.PublicKey))
 	}
-	// kid must equal base64url(SHA256(DER SPKI)) — the derivation in
-	// k8s.io/kubernetes pkg/serviceaccount keyIDFromPublicKey — or tokens the
-	// apiserver mints will not resolve against these documents.
+	// kid must be base64url(SHA256(DER SPKI)), as k8s.io/kubernetes pkg/serviceaccount
+	// keyIDFromPublicKey derives it, or apiserver-minted tokens will not resolve.
 	sum, err := spkiSHA256(pub)
 	if err != nil {
 		return jwk{}, err
@@ -66,8 +64,7 @@ func jwkFromCert(path string) (jwk, error) {
 	}, nil
 }
 
-// exponentBytes renders a public exponent as the shortest big-endian byte string, which
-// is what RFC 7518 asks for.
+// RFC 7518 asks for the shortest big-endian byte string.
 func exponentBytes(e int) []byte {
 	var b []byte
 	for v := e; v > 0; v >>= 8 {
@@ -79,8 +76,7 @@ func exponentBytes(e int) []byte {
 	return b
 }
 
-// writeJSON matches python's json.dumps(indent=2) plus a trailing newline, and
-// leaves HTML characters alone so issuer URLs survive intact.
+// HTML characters stay unescaped, so issuer URLs survive intact.
 func writeJSON(path string, v any) error {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

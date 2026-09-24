@@ -2,10 +2,7 @@ import { ChevronUp } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { MetricExtremes } from '~/lib/weatherflow/types';
 
-/**
- * Format a metric's numeric value for display. Always uses nullish checks -
- * `0` is a legitimate value, never a "missing data" signal.
- */
+/** Nullish checks only: `0` is a real reading, never missing data. */
 export function formatMetricNumber(
   value: number | undefined,
   {
@@ -42,20 +39,15 @@ export interface MetricCellProps {
   decimals?: number;
   showUnitWhenEmpty?: boolean;
   locale?: boolean;
-  /** Escape hatch: pre-formatted number text, bypassing formatMetricNumber. */
+  /** Pre-formatted number text, bypassing formatMetricNumber. */
   displayText?: string;
-  /** This metric's low and high over the last 24h, shown under the value. */
+  /** This metric's 24 h low and high, shown under the value. */
   range?: MetricExtremes;
 }
 
 /**
- * One metric in a station panel: label, current reading, and the last 24 hours'
- * low and high underneath. The panels put these in a grid - four across on a
- * kiosk, two on a phone.
- *
- * Leading the group is marked with a caret rather than a colour: the palette's
- * hues identify stations, and reusing one for "highest right now" would mean a
- * panel changed colour because a reading changed.
+ * A caret marks the group leader, because the palette's hues identify stations
+ * and a reading change must not recolour a panel.
  */
 export function MetricCell({
   icon,

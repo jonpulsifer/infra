@@ -19,8 +19,6 @@ func TestUserIDIsTheUsernameWithoutItsPrefix(t *testing.T) {
 }
 
 func TestSendTopicsAreExplicit(t *testing.T) {
-	// Not `flameboss/<id>/send/#`: the broker accepts the wildcard and
-	// delivers nothing on it.
 	want := []string{"flameboss/193415/send/open", "flameboss/193415/send/data"}
 	if got := sendTopics(193415); !reflect.DeepEqual(got, want) {
 		t.Errorf("sendTopics = %v, want %v", got, want)
@@ -45,8 +43,6 @@ func TestDeviceFromTopic(t *testing.T) {
 	}
 }
 
-// The control plane decides where this process sends the account's
-// credentials, so a `server` outside the broker's own domain is refused.
 func TestAllowedServer(t *testing.T) {
 	r := &Relay{opts: Options{Host: "myflameboss.com"}}
 	for server, want := range map[string]bool{
@@ -67,8 +63,6 @@ func TestAllowedServer(t *testing.T) {
 	}
 }
 
-// The two shapes of `connected` mean different things: one names the server
-// this connection landed on, the other names a device's server.
 func TestControlMessageShapes(t *testing.T) {
 	var deviceless control
 	if err := json.Unmarshal([]byte(`{"name":"connected","server":"s2.myflameboss.com"}`), &deviceless); err != nil {
@@ -87,7 +81,7 @@ func TestControlMessageShapes(t *testing.T) {
 	}
 }
 
-// The live payload, byte for byte as the cooker publishes it.
+// Captured from a live controller.
 func TestTempsDecodesTheWirePayload(t *testing.T) {
 	const payload = `{"name":"temps","cook_id":5242100,"sec":1789943581,"temps":[1305,-32767,-32767,-32767],"set_temp":1212,"blower":0}`
 	var got Temps
@@ -111,7 +105,6 @@ func testRelay(t *testing.T, s *State) (*Relay, *bytes.Buffer) {
 	}, &logs
 }
 
-// Every modelled uplink, in the shape the spec gives it, lands in state.
 func TestApplyModelledUplinks(t *testing.T) {
 	s := NewState(5*time.Minute, 30*time.Minute)
 	s.now = func() time.Time { return time.Unix(1000, 0) }
@@ -153,8 +146,6 @@ func TestApplyModelledUplinks(t *testing.T) {
 	}
 }
 
-// The first payload of each unmeasured message is logged whole, once. `wifi`
-// is never logged at all: it carries the network's SSID and may carry its key.
 func TestEvidenceIsLoggedOnceAndNeverForWifi(t *testing.T) {
 	r, logs := testRelay(t, NewState(5*time.Minute, 30*time.Minute))
 	r.logFirst(1, "meat_alarm", []byte(`{"name":"meat_alarm","sensor":1,"done_temp":950}`))

@@ -1,9 +1,6 @@
 /**
- * A surface the state machine has never heard of: no Discord types, no Slack
- * types, channel-scoped thread keys, no archive and a `settle` — one optional
- * capability declared and one not, so both halves of optional are driven.
- * Driving the contract through this is what proves the seam holds. The Slack
- * Web API fake below records the six calls the real adapter makes.
+ * `FakeSurface` uses no Discord or Slack types, and declares `settle` but not
+ * `archive` to drive both sides of an optional capability.
  */
 import type {
   SessionStatus,
@@ -34,9 +31,8 @@ export interface Frame {
 
 export class FakeCanvas implements Canvas {
   readonly frames: Frame[] = [];
-  /** Every tool card painted, in order, as the surface was told of it. */
   readonly cards: ToolCall[] = [];
-  /** Every step painted, in order: what the agent said between tool calls. */
+  /** What the agent said between tool calls. */
   readonly steps: string[] = [];
   working_ = 0;
   failTool: Error | null = null;
@@ -64,7 +60,6 @@ export class FakeCanvas implements Canvas {
     this.steps.push(text);
   }
 
-  /** What the last frame says, which is what a human would be looking at. */
   get answer(): string {
     return this.frames.at(-1)?.text ?? '';
   }
@@ -83,12 +78,7 @@ export type NoticeCall =
   | { call: 'edit'; id: string; text: string }
   | { call: 'remove'; id: string };
 
-/**
- * A line the surface keeps a hand on, as both real adapters hold one: a
- * message in the thread, rewritten where it stands and taken back out of it
- * at the end. Holding it in `posted` is what makes it visible to the replay
- * the way a real one is.
- */
+/** Held in `posted`, as a real notice is, so the transcript replay sees it. */
 class FakeNotice implements Notice {
   constructor(
     private readonly surface: FakeSurface,
@@ -138,16 +128,10 @@ export class FakeSurface implements Surface {
   readonly opened: { channelId: string; messageId: string; title: string }[] =
     [];
   readonly askers: string[] = [];
-  /** Every thread told it is not working on anything, in order. */
   readonly settled: string[] = [];
-  /** Every line a notice was ever given, in order, whether or not it still stands. */
+  /** Every line a notice was given, including ones since rewritten or removed. */
   readonly notices: string[] = [];
-  /**
-   * The calls behind those lines, as `FakeSlack` records its own: what a line
-   * was drawn with, and against which message. Content alone cannot tell a
-   * rewrite in place from a line taken away and the news posted under it, and
-   * in place is what every terminal path claims to do.
-   */
+  /** Tells a rewrite in place from a removal followed by a new post. */
   readonly noticeCalls: NoticeCall[] = [];
   failNotice: Error | null = null;
   private serial = 0;
@@ -213,7 +197,6 @@ export class FakeSurface implements Surface {
     return canvas;
   }
 
-  /** A message landing in the thread, which is what the replay reads back. */
   say(
     threadId: string,
     content: string,
@@ -321,21 +304,19 @@ export class FakeSlack implements SlackApi {
     return { userId: 'U0BOT', teamId: 'TAR78LS82', appBotId: 'B0BOT' };
   }
 
-  /** Every chunk the stream was given, in order. */
   chunks(): StreamChunk[] {
     return this.calls.flatMap((c) =>
       c.call === 'start' ? c.args.chunks : c.call === 'append' ? c.chunks : [],
     );
   }
 
-  /** The answer text alone, as a human would read it back. */
+  /** The answer text alone. */
   streamed(): string {
     return this.chunks()
       .map((chunk) => (chunk.type === 'markdown_text' ? chunk.text : ''))
       .join('');
   }
 
-  /** Every tool card, in the order Slack was told of it. */
   cards(): { id: string; title: string; status: string }[] {
     return this.chunks()
       .filter((chunk) => chunk.type === 'task_update')
@@ -372,7 +353,6 @@ export class FakeSocket implements SocketLike {
     this.emit('close', {});
   }
 
-  /** One frame down the wire. */
   deliver(frame: unknown): void {
     this.emit('message', { data: JSON.stringify(frame) });
   }

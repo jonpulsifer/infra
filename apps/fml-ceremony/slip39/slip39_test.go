@@ -9,10 +9,8 @@ import (
 	"testing"
 )
 
-// TestFIPS197 pins GF(2^8) multiplication against FIPS-197 section 4.2 before
-// anything touches a share. A field built on the wrong generator round-trips
-// perfectly through its own splitter and fails every official vector, so this
-// runs first and localises that failure to eight lines of arithmetic.
+// A field on the wrong generator round-trips through its own splitter and still
+// fails every official vector, so multiplication is pinned to FIPS-197 first.
 func TestFIPS197(t *testing.T) {
 	if got := gmul(0x57, 0x83); got != 0xc1 {
 		t.Errorf("0x57 * 0x83 = %#x, want 0xc1", got)
@@ -38,8 +36,7 @@ func TestWordlistIdentity(t *testing.T) {
 	if len(wl.words) != radix {
 		t.Fatalf("%d words", len(wl.words))
 	}
-	// Every four-letter prefix is unique, which is what makes recording only
-	// the first four letters on a steel plate lossless and reversible.
+	// Unique four-letter prefixes let a plate record only the first four letters.
 	seen := map[string]string{}
 	for _, w := range wl.words {
 		if len(w) < 4 || len(w) > 8 {
@@ -80,13 +77,7 @@ func loadVectors(t *testing.T) []vector {
 	return out
 }
 
-// TestOfficialVectors runs all 45 quadruples from the SLIP-0039 reference
-// implementation. Fifteen must recover their stated secret; the other thirty
-// carry an empty secret and are the combine-time validation checklist written
-// out — bad checksum, non-zero padding, differing id, differing iteration
-// exponent, mismatched thresholds and counts, duplicate member indices,
-// insufficient groups or members, invalid digest, short mnemonic, invalid
-// master-secret length.
+// The SLIP-0039 reference vectors. A vector with an empty secret must fail to combine.
 func TestOfficialVectors(t *testing.T) {
 	vs := loadVectors(t)
 	if len(vs) != 45 {
@@ -116,10 +107,8 @@ func TestOfficialVectors(t *testing.T) {
 	}
 }
 
-// TestEmptyPassphraseRoundTrip covers the gap the official vectors leave. Every
-// valid vector uses the passphrase "TREZOR"; the empty passphrase this ceremony
-// uses appears in none of them, and neither does a 3-of-5 set at any
-// passphrase, extendable or not.
+// Every valid official vector uses the passphrase "TREZOR", and the ceremony
+// uses none.
 func TestEmptyPassphraseRoundTrip(t *testing.T) {
 	secret, err := hex.DecodeString("2d85dabefa504eefea7740977b1f9110daf404cc24422896a209b41eca970218")
 	if err != nil {
@@ -148,10 +137,7 @@ func TestEmptyPassphraseRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSplitIsDeterministic is the property that makes replacing one lost plate
-// a matter of regenerating and stamping that plate, instead of reconstituting
-// the secret, re-splitting, and physically collecting and destroying every
-// surviving plate from every holder.
+// Determinism lets one lost plate be re-cut alone.
 func TestSplitIsDeterministic(t *testing.T) {
 	secret := make([]byte, 32)
 	for i := range secret {
@@ -170,8 +156,7 @@ func TestSplitIsDeterministic(t *testing.T) {
 			t.Fatalf("share %d differs between runs", i)
 		}
 	}
-	// A different threshold or count is a different set, and mixing the two
-	// must abort rather than silently interpolate garbage.
+	// A different threshold or count is a different set.
 	c, err := Split(secret, 2, 3, "")
 	if err != nil {
 		t.Fatal(err)
@@ -224,9 +209,7 @@ func TestCombineRejection(t *testing.T) {
 			t.Errorf("%s: recovered %x", tc.name, got)
 		}
 	}
-	// A wrong passphrase does not fail — SLIP-39 has no way to verify one — it
-	// silently returns a different secret. That is the specification's
-	// behaviour, and it is the reason this ceremony uses no passphrase at all.
+	// SLIP-39 cannot verify a passphrase: a wrong one returns a different secret.
 	other, err := Combine(shares[:3], "TREZOR")
 	if err != nil {
 		t.Fatalf("a wrong passphrase errored instead of returning other bytes: %v", err)
@@ -236,9 +219,6 @@ func TestCombineRejection(t *testing.T) {
 	}
 }
 
-// TestRecoverSurplus is the difference between the specification's decoder and
-// a recovery procedure: five people with five plates must not be told no, and
-// a plate that does not belong must not be silently ignored.
 func TestRecoverSurplus(t *testing.T) {
 	secret := make([]byte, 32)
 	secret[31] = 7
@@ -258,8 +238,7 @@ func TestRecoverSurplus(t *testing.T) {
 	if _, err := Recover(shares[:2], ""); err == nil {
 		t.Error("two plates of a 3-of-5 recovered")
 	}
-	// A surplus plate from a foreign set is internally valid and passes RS1024.
-	// The identifier names it.
+	// A foreign surplus plate passes RS1024; its identifier gives it away.
 	other := make([]byte, 32)
 	other[0] = 9
 	foreign, err := Split(other, 3, 5, "")
@@ -270,10 +249,8 @@ func TestRecoverSurplus(t *testing.T) {
 		t.Error("a foreign surplus plate was accepted")
 	}
 
-	// The case only the polynomial check can see: a plate from the right set,
-	// with the right identifier and a valid checksum, whose value is wrong.
-	// This is a mis-stamped or mis-transcribed plate, and it is the reason
-	// surplus shares are checked rather than dropped.
+	// Right set, valid checksum, wrong value: only the polynomial check sees a
+	// mis-stamped plate.
 	bad, err := decodeShare(shares[3])
 	if err != nil {
 		t.Fatal(err)
@@ -291,11 +268,7 @@ func TestRecoverSurplus(t *testing.T) {
 	}
 }
 
-// TestIdentifierMatchesShares is the guard for the defect that put three
-// invented identifiers into a published transcript: a caller reporting the
-// identifier separately from the shares can report one the plates do not carry.
-// Identifier and Split must read the same stream, so every share of every set
-// must carry exactly what Identifier says.
+// Every share must carry the identifier that Identifier reports.
 func TestIdentifierMatchesShares(t *testing.T) {
 	secrets := [][]byte{
 		make([]byte, 32),
@@ -326,8 +299,8 @@ func TestIdentifierMatchesShares(t *testing.T) {
 	}
 }
 
-// TestIdentifierRejectsBadParams: Identifier must refuse exactly what Split
-// refuses, or a caller can publish an identifier for a set that cannot exist.
+// Identifier refuses what Split refuses, or a caller can publish an identifier
+// for a set that cannot exist.
 func TestIdentifierRejectsBadParams(t *testing.T) {
 	secret := make([]byte, 32)
 	for _, tc := range []struct{ threshold, count int }{{0, 3}, {4, 3}, {2, 17}, {1, 3}} {
@@ -340,10 +313,7 @@ func TestIdentifierRejectsBadParams(t *testing.T) {
 	}
 }
 
-// TestRecoverToleratesDuplicatePlates: a holder turning up with two copies of
-// the same plate must not consume a quorum slot. Before the fix, plate1 twice
-// plus plate2 filled a 2-of-3 quorum with two copies of plate1 and aborted on
-// "duplicate member index" while the room actually held what it needed.
+// Two copies of one plate fill one quorum slot.
 func TestRecoverToleratesDuplicatePlates(t *testing.T) {
 	secret := bytes.Repeat([]byte{0x3c}, 32)
 	ms, err := Split(secret, 2, 3, "")

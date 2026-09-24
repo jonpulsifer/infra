@@ -1,8 +1,7 @@
 /**
- * The wiki: docs/ (Markdown with YAML frontmatter, ordered by docs/nav.yaml)
- * rendered to a static site in dist/, plus search.json for the client,
- * graph.json for /graph/, and pages.json for the MCP endpoint in functions/.
- * `bun run build.ts --check` runs every validation without writing dist/.
+ * Renders docs/ (Markdown with YAML frontmatter, ordered by docs/nav.yaml) to a
+ * static site in dist/, with search.json, graph.json and the pages.json that
+ * functions/mcp.ts serves. `--check` validates without writing dist/.
  */
 import { existsSync, statSync } from "node:fs";
 import { cp, rm } from "node:fs/promises";
@@ -31,8 +30,7 @@ export const defaults = (): Options => ({
   docs: join(ROOT, "docs"),
   out: join(import.meta.dir, "dist"),
   repo: ROOT,
-  // The kthx client imports its own diagrams, and its image build prunes to its
-  // package, so those live there and are served from here too.
+  // The kthx image build prunes to its own package, so its diagrams live there.
   assets: [
     join(ROOT, "docs", "assets"),
     join(ROOT, "apps", "spindrift", "src", "web", "client", "diagrams"),
@@ -109,8 +107,6 @@ const slug = (s: string) =>
     .toLowerCase()
     .replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, "")
     .replace(/ /g, "-");
-
-// ── loading ─────────────────────────────────────────────────────────────────
 
 function parsePage(file: string, raw: string, fail: Ctx["fail"]): Page {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
@@ -207,8 +203,6 @@ function navOrder(ctx: Ctx): Page[] {
   }
   return order;
 }
-
-// ── rendering ───────────────────────────────────────────────────────────────
 
 function resolve(raw: string, p: Page, ctx: Ctx, image: boolean): string {
   if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(raw)) {
@@ -343,7 +337,7 @@ function render(p: Page, ctx: Ctx): void {
         else if (c === esc(href) && /^[^\s/:]+@[^\s/:]+\.[a-z]+$/i.test(href)) href = `mailto:${href}`;
         const url = resolve(href, p, ctx, false);
         const ext = /^https?:/.test(url) ? ' rel="noopener"' : "";
-        // A linked image goes where the link goes, not to itself: anchors cannot nest.
+        // Anchors cannot nest, so a linked image drops its own fig anchor.
         const inner = c.replace(/<a class="fig" href="[^"]*">(<img [^>]*>)<\/a>/g, "$1");
         return `<a href="${esc(url)}"${title ? ` title="${esc(title)}"` : ""}${ext}>${inner}</a>`;
       },
@@ -384,8 +378,6 @@ async function highlight(p: Page): Promise<void> {
   );
   p.html = p.html.replace(/\0(\d+)\0/g, (_, i) => blocks[+i]);
 }
-
-// ── chrome ──────────────────────────────────────────────────────────────────
 
 const svg = (d: string, fill = false) =>
   `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" ${fill ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'}>${d}</svg>`;
@@ -505,8 +497,6 @@ ${from.length ? `<details class="backlinks"><summary>Linked from <span class="co
   return layout(ctx, p, main, p, rail);
 }
 
-// ── build ───────────────────────────────────────────────────────────────────
-
 async function emit(ctx: Ctx): Promise<void> {
   const { o, order } = ctx;
   await rm(o.out, { recursive: true, force: true });
@@ -540,7 +530,7 @@ function served(ctx: Ctx): string[] {
   return [...new Set(urls)].sort();
 }
 
-/** Loads, validates and (unless `check`) writes the site. Problems come back in `errors`; nothing is written when there are any. */
+/** Writes nothing when `check` is set or any problem comes back in `errors`. */
 export async function build(o: Options): Promise<{ pages: Page[]; errors: string[]; urls: string[] }> {
   const errors: string[] = [];
   const fail = (file: string, msg: string) => errors.push(`${relative(o.repo, join(o.docs, file))}: ${msg}`);
@@ -562,7 +552,6 @@ export async function build(o: Options): Promise<{ pages: Page[]; errors: string
   }
   const ctx: Ctx = { o, pages, sections: readNav(nav, pages, fail), order: [], links: [], fail };
   ctx.order = navOrder(ctx);
-  // Only pages in the nav order are written, so any other page is unreachable.
   for (const p of pages.values())
     if (!ctx.order.includes(p)) fail(p.file, "not in nav.yaml, so no reader can reach it");
   for (const p of pages.values()) render(p, ctx);

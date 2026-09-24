@@ -19,16 +19,11 @@ import (
 	"time"
 )
 
-// fixedToken builds a ghClient token source that always returns s, ignoring
-// ctx and repo -- what every test here wants except the one that exercises
-// appAuth itself.
 func fixedToken(s string) func(context.Context, string) (string, error) {
 	return func(context.Context, string) (string, error) { return s, nil }
 }
 
-// fakeGitHub is an in-memory stand-in for the three runner endpoints bosun
-// calls. It never simulates the list endpoint on purpose: bosun must never
-// call it either.
+// fakeGitHub has no list endpoint, since bosun must never call one.
 type fakeGitHub struct {
 	mu        sync.Mutex
 	nextID    int64
@@ -37,16 +32,11 @@ type fakeGitHub struct {
 	generated []fakeGenerated
 	onDelete  func(runnerID int64) // observation hook for a successful delete; drain tests pin ordering with it
 
-	// Error injection. bosun's recovery paths are the ones a live GitHub
-	// outage exercises and a happy-path fake never does: what a class does
-	// when its mint fails, what a reaper does when it cannot read a status,
-	// and what a retire does when it cannot delete a registration.
+	// Error injection for the recovery paths a GitHub outage exercises.
 	generateErr error
 	getErr      error
 	deleteErr   error
-	// generateCalls counts attempts rather than successes, which is what a
-	// test of the top-up's backoff needs: a failed mint appends nothing to
-	// generated but still costs a real registration call.
+	// Attempts, not successes: a failed mint still costs a registration call.
 	generateCalls int
 }
 
@@ -97,8 +87,7 @@ func (f *fakeGitHub) DeleteRunner(ctx context.Context, repo string, runnerID int
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	// The real API refuses to delete a runner that is running a job (422),
-	// and drain's whole safety argument rests on that refusal.
+	// The real API refuses to delete a busy runner (422); drain relies on that.
 	if s, ok := f.statuses[runnerID]; ok && s.busy {
 		return fmt.Errorf("fake: runner %d is busy", runnerID)
 	}
@@ -122,8 +111,7 @@ func (f *fakeGitHub) setStatus(runnerID int64, status string, busy bool) {
 	f.statuses[runnerID] = fakeRunnerStatus{status: status, busy: busy}
 }
 
-// fail makes every call of one kind return err until it is cleared, which is
-// how these tests spell "GitHub is unreachable right now".
+// fail makes every call of one kind return err until cleared.
 func (f *fakeGitHub) fail(generate, get, del error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -136,9 +124,6 @@ func (f *fakeGitHub) generateCount() int {
 	return f.generateCalls
 }
 
-// runnerGone must key on the DELETE's own response. Every failure below
-// carries an *httpStatusError somewhere in its chain, and only one of them
-// means the runner is gone.
 func TestRunnerGoneOnlyMatchesTheDeleteItself(t *testing.T) {
 	del404 := &httpStatusError{method: http.MethodDelete, url: "https://api/x", status: "404 Not Found", statusCode: http.StatusNotFound}
 	tests := []struct {
@@ -148,10 +133,7 @@ func TestRunnerGoneOnlyMatchesTheDeleteItself(t *testing.T) {
 	}{
 		{"the DELETE itself 404s", del404, true},
 		{"wrapped, still the DELETE", fmt.Errorf("delete runner: %w", del404), true},
-		// DeleteRunner resolves an installation token first and wraps the
-		// failure as "github auth: %w". A repo the App is not installed on
-		// 404s there, and reading that as "already deleted" throws away the
-		// runner id on the strength of a request that never left the process.
+		// A 404 from the auth chain, before any DELETE was sent.
 		{"the auth chain's GET 404s", fmt.Errorf("github auth: %w", &httpStatusError{method: http.MethodGet, url: "https://api/repos/o/r/installation", status: "404 Not Found", statusCode: http.StatusNotFound}), false},
 		{"the token mint 404s", fmt.Errorf("github auth: %w", &httpStatusError{method: http.MethodPost, url: "https://api/app/installations/1/access_tokens", status: "404 Not Found", statusCode: http.StatusNotFound}), false},
 		{"the DELETE fails some other way", &httpStatusError{method: http.MethodDelete, status: "500 Internal Server Error", statusCode: http.StatusInternalServerError}, false},
@@ -253,11 +235,6 @@ func TestGHClientErrorStatus(t *testing.T) {
 	}
 }
 
-// TestAppAuthTokenMintsCachesAndRefreshes exercises the JWT-mint-and-cache
-// core of appAuth against a throwaway RSA key and a fake App API: first call
-// resolves the installation and mints a token; a call still inside the
-// token's lifetime reuses it with no further HTTP calls; a call inside the
-// refresh margin mints again but does not re-resolve the installation.
 func TestAppAuthTokenMintsCachesAndRefreshes(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -330,8 +307,7 @@ func TestAppAuthTokenMintsCachesAndRefreshes(t *testing.T) {
 		t.Fatalf("expected a cache hit, got token=%q resolveHits=%d mintHits=%d", tok2, resolveHits, mintHits)
 	}
 
-	// Inside the refresh margin of the cached token's expiry: mints again,
-	// but the installation id -- resolved once above -- stays cached.
+	// Inside the refresh margin: mints again, but the installation stays cached.
 	current = current.Add(56 * time.Minute)
 	tok3, err := auth.Token(ctx, "acme/widgets")
 	if err != nil {

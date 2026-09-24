@@ -13,7 +13,7 @@ export default function Dashboard() {
   const [now, setNow] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Tick every second: drives the clock and the per-station freshness text
+  // Drives the clock and each station's freshness text.
   useEffect(() => {
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);

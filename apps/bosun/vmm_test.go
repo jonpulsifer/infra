@@ -181,8 +181,6 @@ func TestResolvePathsPropagatesSockPathError(t *testing.T) {
 	}
 }
 
-// The workspace disk goes after the hull's own disks so their indices are
-// untouched, and the guest is told the name rather than left to count.
 func TestChArgsWorkspaceDiskComesLastAndIsNamedOnTheCmdline(t *testing.T) {
 	h := &hull{
 		dir: "/hulls/ubuntu",
@@ -221,8 +219,6 @@ func TestChArgsWorkspaceDiskComesLastAndIsNamedOnTheCmdline(t *testing.T) {
 	}
 }
 
-// A class with no workspace must produce exactly the argv it produced before
-// the option existed: no disk, and nothing extra on the cmdline.
 func TestChArgsNoWorkspaceLeavesCmdlineAlone(t *testing.T) {
 	h := &hull{
 		dir:      "/hulls/nixos",
@@ -258,9 +254,6 @@ func TestChArgsAnnouncesCacheURLOnCmdline(t *testing.T) {
 	}
 }
 
-// Both host services are optional and independent: a host may run either, and
-// a hull that understands neither still boots, because what it does not
-// recognise on the cmdline it ignores.
 func TestBuildkitURLReachesTheCmdlineAndOnlyWhenSet(t *testing.T) {
 	h := &hull{
 		dir:      "/hulls/nixos",
@@ -285,8 +278,6 @@ func TestBuildkitURLReachesTheCmdlineAndOnlyWhenSet(t *testing.T) {
 	}
 }
 
-// The reservation is the whole reason the disk exists: a sparse file would
-// move the overcommit onto the host filesystem rather than remove it.
 func TestEnsureWorkspaceReservesTheWholeSize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "sk11.img")
 	if err := ensureWorkspace(path, "2M", false); err != nil {
@@ -309,18 +300,15 @@ func TestEnsureWorkspaceReservesTheWholeSize(t *testing.T) {
 	}
 }
 
-// The whole value of a persisting class is that the next skiff finds what the
-// last one left, so an image the right size must survive being ensured again --
-// and the ephemeral path must still truncate, or a class that stopped
-// persisting would quietly keep handing out the old disk.
+// The ephemeral path must still truncate, or a class that stopped persisting
+// would keep handing out the old disk.
 func TestEnsureWorkspaceKeepsAPersistedImageAndTruncatesAnEphemeralOne(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "skiff-ubuntu-0.img")
 	if err := ensureWorkspace(path, "2M", true); err != nil {
 		t.Fatalf("ensureWorkspace: %v", err)
 	}
-	// Stands in for a filesystem and its caches: bosun never learns what is on
-	// the disk, only whether it left it alone.
+	// Stands in for a filesystem and its caches.
 	if err := os.WriteFile(path, append([]byte("warm-cache"), make([]byte, 2<<20-10)...), 0o600); err != nil {
 		t.Fatalf("seed image: %v", err)
 	}
@@ -336,8 +324,6 @@ func TestEnsureWorkspaceKeepsAPersistedImageAndTruncatesAnEphemeralOne(t *testin
 		t.Errorf("persisted image was rewritten: got %q", kept[:10])
 	}
 
-	// A class whose workspace size changed cannot keep a filesystem sized for
-	// the old figure.
 	if err := ensureWorkspace(path, "3M", true); err != nil {
 		t.Fatalf("ensureWorkspace (resize): %v", err)
 	}

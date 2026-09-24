@@ -2,8 +2,8 @@ import type { Network } from '@x402/core/types';
 
 export const BASE: Network = 'eip155:8453';
 export const SOLANA: Network = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
-/** `METHOD /path` → [price, what it returns]. The routes map and the page
- * are both rendered from this table. */
+/** `METHOD /path` → [price, what it returns]. The paywall routes, the MCP
+ * tools and the page all read their prices from here. */
 export const PRICES: Record<string, [string, string]> = {
   'GET /fortune': ['$0.001', 'a robot fortune'],
   'GET /premium/fortune': ['$0.10', 'the same fortune, tier: premium'],

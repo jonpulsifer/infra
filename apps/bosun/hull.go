@@ -12,9 +12,7 @@ import (
 	"strings"
 )
 
-// hullManifest is hull.json: the declared shape of a microVM image. bosun
-// translates it into cloud-hypervisor argv and carries no branching per hull
-// family — it never knows what built the kernel or what a device path means.
+// hull.json, turned into cloud-hypervisor argv with no per-family branching.
 type hullManifest struct {
 	Kernel  string       `json:"kernel"`
 	Initrd  string       `json:"initrd"`
@@ -22,9 +20,8 @@ type hullManifest struct {
 	Devices []hullDevice `json:"devices,omitempty"`
 }
 
-// hullDevice is one declared guest device: exactly one of its fields is set.
-// A share is a virtiofs directory bosun runs a virtiofsd for; a disk is a
-// file the hull ships, handed to the guest as a virtio-blk device.
+// Exactly one field is set. A share gets its own virtiofsd; a disk is a file the
+// hull ships, attached as virtio-blk.
 type hullDevice struct {
 	Share *hullShare `json:"share,omitempty"`
 	Disk  *hullDisk  `json:"disk,omitempty"`
@@ -41,13 +38,8 @@ type hullDisk struct {
 	RO   bool   `json:"ro"`
 }
 
-// hull is a loaded manifest plus the digest bosun computed for it. id is
-// deliberately absent from hull.json — a digest cannot live inside the file
-// it digests — so bosun computes it here: sha256 over hull.json's bytes plus
-// the kernel and initrd files it names, then each disk in declaration order.
-// Device share hosts are not hashed: they are host-side bind targets (e.g.
-// /nix/store), not content the hull ships. Disks are hashed: a rootfs image
-// is exactly the content a hull ships.
+// digest is sha256 over hull.json, the kernel, the initrd and each disk in
+// order. Share hosts are host paths such as /nix/store, so they are not hashed.
 type hull struct {
 	dir      string
 	manifest hullManifest
@@ -82,9 +74,7 @@ func loadHull(dir string) (*hull, error) {
 			return nil, fmt.Errorf("hull manifest %s: devices[%d] must declare exactly one of share or disk", dir, i)
 		}
 	}
-	// Guest disk names run /dev/vda..vdz, and bosun may append a workspace
-	// disk after whatever the hull declared. Past this the name it puts on the
-	// cmdline would be wrong rather than missing, so the manifest is rejected.
+	// A disk past vdz would get a wrong name on the cmdline, so reject it here.
 	if disks > maxHullDisks {
 		return nil, fmt.Errorf("hull manifest %s: %d disks exceeds the %d guest device names available", dir, disks, maxHullDisks)
 	}
@@ -112,29 +102,17 @@ func hashFile(w io.Writer, path string) error {
 	return err
 }
 
-// maxHullDisks leaves one of the 26 /dev/vd? names for bosun's workspace
-// disk, which is always appended last.
+// Leaves one of the 26 /dev/vd? names for the workspace disk bosun appends last.
 const maxHullDisks = 25
 
-// guestDiskName is the device cloud-hypervisor presents for the nth --disk,
-// in declaration order. bosun tells the guest this name rather than letting
-// it count, because an index shifts with whatever the hull declared while a
-// name handed over on the cmdline does not.
+// guestDiskName is the device cloud-hypervisor presents for the nth --disk. bosun
+// passes it on the cmdline, since a guest-side index shifts with the hull's disks.
 func guestDiskName(n int) string {
 	return "/dev/vd" + string(rune('a'+n))
 }
 
-// readBuildResult is the other half of the bosun<->hull contract hull.json
-// declares: what a build skiff's guest leaves behind. The guest writes
-// result/status and result/build.log into its diag share -- the one writable
-// path it has -- and this reads them back.
-//
-// diagDir is kept on purpose by retire, the same evidence a wedged GitHub
-// skiff leaves behind. A missing status file means the guest never finished
-// the handshake, which is reported as FAILED rather than left for Spindrift's
-// lease to time out on. exitReason is why bosun ended the skiff, empty when
-// the guest halted itself; logger carries only the two warnings for a guest
-// that did not hold up its end.
+// readBuildResult reads the result/ files a build guest writes to its diag
+// share. A missing status is FAILED; exitReason is empty if the guest halted.
 func readBuildResult(diagDir, exitReason string, logger *slog.Logger) buildResult {
 	logBytes, _ := os.ReadFile(filepath.Join(diagDir, "result", "build.log"))
 	logText := tailString(logBytes, buildResultMaxLog)

@@ -10,14 +10,8 @@ import (
 	"github.com/jonpulsifer/infra/apps/fml-ceremony/slip39"
 )
 
-// The share plan of SPEC.md section 6.1 and 8, as arithmetic rather than prose:
-// four separate secrets, four separate share sets. The master is 3-of-5 held by
-// people; each minted branch is 2-of-3 held at sites. Holders and sites are
-// disjoint — nobody holds both a master plate and a branch plate — which is
-// what makes the two-tier quorum mean anything.
-//
-// Names here are roles, not the roster. Who actually holds which plate is
-// private and lives nowhere in this repository.
+// The master is 3-of-5 held by people; each minted branch is 2-of-3 held at
+// sites. Names are roles; the real roster is private and never goes in this repo.
 type shareSet struct {
 	name      string
 	threshold int
@@ -59,17 +53,8 @@ func buildPlan(t *testing.T) []*shareSet {
 	return plan
 }
 
-// TestQuorumSafety enumerates every subset of every set's holders — all 48
-// distinct outcomes across the three sets — and asserts two properties by
-// actually running the recovery, not by reasoning about it:
-//
-//  1. No unintended coalition reconstructs anything. A set is recoverable
-//     exactly when the coalition holds at least that set's threshold, and every
-//     sub-threshold attempt aborts.
-//  2. No single person and no single site loss makes anything unrecoverable.
-//
-// This is a static combinatorial property, which is why it is a table test and
-// not a model checker.
+// Every subset of a set's holders recovers exactly when it meets the threshold,
+// and no single holder's loss makes a set unrecoverable.
 func TestQuorumSafety(t *testing.T) {
 	plan := buildPlan(t)
 
@@ -81,10 +66,8 @@ func TestQuorumSafety(t *testing.T) {
 		t.Fatalf("the plan has %d plates, expected 11", total)
 	}
 
-	// The three sets never interact: a coalition's outcome for one set is a
-	// function of that set's mask alone, so enumerating the 2^11 cross-product
-	// would re-read these same 48 answers and assert nothing further. The
-	// cross-set property is TestNoCrossSetCoalition's job, not this loop's.
+	// An outcome depends only on its own set's mask, so the 2^11 cross-product
+	// adds nothing. TestNoCrossSetCoalition covers mixed sets.
 	type outcome struct {
 		ok     bool
 		secret string
@@ -99,14 +82,10 @@ func TestQuorumSafety(t *testing.T) {
 					held = append(held, s.mnemonics[j])
 				}
 			}
-			// Recover, not Combine: the property under test is "this coalition
-			// gets the secret", and a coalition of four turning up with four
-			// plates is a coalition of four. Combine is the specification's
-			// exact-threshold primitive and refuses the surplus.
+			// Recover, because Combine refuses plates beyond the threshold.
 			got, err := slip39.Recover(held, "")
 			recovered[i][mask] = outcome{ok: err == nil, secret: hex.EncodeToString(got)}
 
-			// Property 1, asserted where the outcome is produced.
 			want := bits.OnesCount(uint(mask)) >= s.threshold
 			if (err == nil) != want {
 				t.Fatalf("%s: %d of %d plates recovered=%v, want %v (mask %0*b)",
@@ -120,7 +99,6 @@ func TestQuorumSafety(t *testing.T) {
 		}
 	}
 
-	// Property 2, stated as the loss of any single plate holder.
 	for i, s := range plan {
 		for j, holder := range s.holders {
 			full := 1<<len(s.holders) - 1
@@ -130,9 +108,8 @@ func TestQuorumSafety(t *testing.T) {
 		}
 	}
 
-	// A branch is recoverable a second way: 3-of-5 people rebuild the master
-	// and re-derive it. So losing an entire site costs nothing at all, and
-	// losing two of a branch's three sites is still survivable.
+	// Below a branch's threshold, 3-of-5 people can still rebuild the master and
+	// re-derive the branch.
 	for _, s := range plan[1:] {
 		for mask := 0; mask < 1<<len(s.holders); mask++ {
 			if bits.OnesCount(uint(mask)) >= s.threshold {
@@ -149,10 +126,7 @@ func TestQuorumSafety(t *testing.T) {
 	}
 }
 
-// TestNoCrossSetCoalition is the other half of "no unintended coalition":
-// holding a threshold of one set must not help with any other. Every branch
-// site together must not reach the master, and the two branches' sites together
-// must not reach each other's secret.
+// A threshold of one set must not help with any other.
 func TestNoCrossSetCoalition(t *testing.T) {
 	plan := buildPlan(t)
 
@@ -161,9 +135,6 @@ func TestNoCrossSetCoalition(t *testing.T) {
 			if i == j {
 				continue
 			}
-			// Mixing whole sets must abort on the identifier, and mixing a
-			// threshold of one set with any plates of another must not produce
-			// the other's secret.
 			mixed := append(append([]string{}, a.mnemonics...), b.mnemonics...)
 			if _, err := slip39.Combine(mixed, ""); err == nil {
 				t.Errorf("%s + %s combined", a.name, b.name)
@@ -178,9 +149,7 @@ func TestNoCrossSetCoalition(t *testing.T) {
 		}
 	}
 
-	// A branch-secret holder derives their own leaves and nobody else's. This
-	// is the two-tier quorum's whole point, so it is asserted rather than
-	// assumed.
+	// A branch-secret holder derives their own leaves and nobody else's.
 	for _, s := range plan[1:] {
 		for _, d := range derive.V1Tree {
 			m, err := derive.MintLeaf(s.secret, s.name, d.Path)
@@ -190,15 +159,12 @@ func TestNoCrossSetCoalition(t *testing.T) {
 				}
 				continue
 			}
-			// The descent check refuses outright rather than returning a
-			// well-formed key nobody can reproduce.
 			if err == nil {
 				t.Errorf("%s minted %s, a leaf of another branch: %+v", s.name, d.Path, m.Leaf)
 			}
 		}
 	}
 
-	// Reserved names mint nothing at all, from any secret.
 	for _, r := range derive.ReservedBranches {
 		if _, err := derive.Declared(r + "/v1/anything/v1"); err == nil {
 			t.Errorf("%s minted something", r)
@@ -206,9 +172,7 @@ func TestNoCrossSetCoalition(t *testing.T) {
 	}
 }
 
-// TestPlateCapacity is the number to check before buying any steel plate: a
-// 256-bit secret gives 33-word shares, not 24 and not 20, which disqualifies
-// most seed plates on the market.
+// A 256-bit secret gives 33-word shares, more than most seed plates hold.
 func TestPlateCapacity(t *testing.T) {
 	plan := buildPlan(t)
 	plates := 0

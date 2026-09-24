@@ -14,9 +14,8 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-// Temps is the one uplink this exporter reads for cook telemetry. Every
-// temperature in it is decidegrees Celsius regardless of what the controller's
-// own display is set to.
+// Temps is the cook telemetry uplink. Temperatures are decidegrees Celsius
+// whatever the controller's display is set to.
 type Temps struct {
 	Name    string `json:"name"`
 	CookID  int    `json:"cook_id"`
@@ -32,18 +31,8 @@ type control struct {
 	DeviceID *int   `json:"device_id"`
 }
 
-// Relay follows devices across Flame Boss's servers.
-//
-// A controller is not pinned to a server: it connects to whichever one it
-// lands on and it moves between them. The entry host is a load balancer, so
-// the only way to know where a device is, is to announce on the entry
-// connection and read the `connected` messages the control plane sends back --
-// one naming the server this connection itself landed on, then one per online
-// device naming that device's server. A device on a server we already hold is
-// served on that connection; anything else gets a new one.
-//
-// A fixed bridge to one server FQDN is the thing this replaces. It works right
-// up until the device moves, and then it is silent rather than broken.
+// Relay follows devices across Flame Boss servers: a device moves between them
+// and the entry host is a load balancer, so only `connected` messages locate it.
 type Relay struct {
 	opts  Options
 	state *State
@@ -71,9 +60,7 @@ type Options struct {
 	Password string
 }
 
-// UserID is the account the credentials belong to. The control-plane topics
-// are addressed by it, and it is the username minus its `T-` prefix rather
-// than a second secret to keep in step.
+// UserID addresses the control-plane topics: the username minus its `T-` prefix.
 func (o Options) UserID() string { return strings.TrimPrefix(o.Username, "T-") }
 
 func NewRelay(opts Options, state *State, log *slog.Logger) *Relay {
@@ -89,8 +76,7 @@ func NewRelay(opts Options, state *State, log *slog.Logger) *Relay {
 
 func sendTopics(dev int) []string {
 	// Explicit subtopics, not `send/#`: the broker ACL accepts a wildcard
-	// subscription and then delivers nothing on it, which looks exactly like a
-	// controller that is switched off.
+	// subscription and delivers nothing on it.
 	d := strconv.Itoa(dev)
 	return []string{"flameboss/" + d + "/send/open", "flameboss/" + d + "/send/data"}
 }
@@ -104,9 +90,8 @@ func deviceFromTopic(topic string) (int, bool) {
 	return id, err == nil
 }
 
-// Start opens the entry connection. paho reconnects on its own; the connect
-// handler re-announces and re-subscribes, because a resumed session is not
-// guaranteed to carry either.
+// Start opens the entry connection. The connect handler announces and
+// subscribes again after every paho reconnect.
 func (r *Relay) Start() error {
 	c, err := r.dial(r.opts.Host, true)
 	if err != nil {
@@ -128,7 +113,7 @@ func (r *Relay) dial(host string, isEntry bool) (*conn, error) {
 	o := mqtt.NewClientOptions().
 		AddBroker(fmt.Sprintf("%s://%s:%d", scheme, host, r.opts.Port)).
 		// Unique per connection: two clients sharing an id kick each other off
-		// in a loop that reads as a flapping controller.
+		// in a loop.
 		SetClientID(fmt.Sprintf("flameboss-exporter-%d-%d", time.Now().UnixNano(), rand.Intn(1<<16))).
 		SetUsername(r.opts.Username).
 		SetPassword(r.opts.Password).
@@ -167,9 +152,8 @@ func (r *Relay) dial(host string, isEntry bool) (*conn, error) {
 	}
 
 	c.client = mqtt.NewClient(o)
-	// With SetConnectRetry the token resolves on the first successful attempt,
-	// so a cloud that is down at boot must not be a crash loop: report the
-	// error, keep the client, let it retry.
+	// With SetConnectRetry the token resolves only on success, so wait in the
+	// background and let a cloud that is down at boot retry.
 	go func() {
 		if t := c.client.Connect(); t.Wait() && t.Error() != nil {
 			r.log.Error("connect failed", "server", host, "err", t.Error())
@@ -195,10 +179,8 @@ func (r *Relay) announce(client mqtt.Client) {
 	r.log.Info("announced", "user", r.opts.UserID())
 }
 
-// Announce re-asks the control plane where the devices are. Nothing requires
-// it -- every server publishes `connected` when a device connects -- but it is
-// one small message and it closes the window where a `connected` arrived while
-// this process was reconnecting.
+// Announce asks the control plane again where the devices are, which recovers
+// a `connected` sent while this process was reconnecting.
 func (r *Relay) Announce() {
 	r.mu.Lock()
 	entry := r.entry
@@ -232,8 +214,7 @@ func (r *Relay) onMessage(_ mqtt.Client, m mqtt.Message) {
 	}
 }
 
-// uplink is the union of the fields the modelled messages carry. Each message
-// fills only its own; json leaves the rest at their zero values.
+// The union of the modelled messages' fields; each message fills only its own.
 type uplink struct {
 	Sensor  int      `json:"sensor"`
 	Action  string   `json:"action"`
@@ -242,8 +223,7 @@ type uplink struct {
 	Values  []string `json:"values"`
 }
 
-// apply turns one uplink into state. Anything not named here is counted and
-// otherwise ignored.
+// apply ignores a message it does not name; onMessage has already counted it.
 func (r *Relay) apply(dev int, name string, payload []byte) error {
 	if name == "temps" {
 		var t Temps
@@ -273,9 +253,8 @@ func (r *Relay) apply(dev int, name string, payload []byte) error {
 		r.state.PitAlarmTriggered(dev)
 	case "vent_advice":
 		r.state.VentAdvice(dev)
-	// The spec marks these deprecated in favour of `open_pit`, but `open_pit`
-	// is the lid-pause *setting*, and these two are what this firmware
-	// actually publishes when the lid moves.
+	// The spec deprecates these for `open_pit`, which is the lid-pause setting.
+	// The firmware publishes these when the lid moves.
 	case "opened":
 		r.state.Lid(dev, true)
 	case "closed":
@@ -288,13 +267,8 @@ func (r *Relay) apply(dev int, name string, payload []byte) error {
 	return nil
 }
 
-// evidence names the uplinks whose wire format is still unmeasured: a scale
-// the spec's examples do not settle, or a message the spec does not list. The
-// first of each is logged whole, once per process, so the next cook records
-// what they actually carry.
-//
-// It is an allow-list on purpose. `wifi` carries the network's SSID and may
-// carry its key, and a payload logged here ends up in VictoriaLogs.
+// Uplinks with an unconfirmed wire format; the first of each is logged whole.
+// An allow-list: `wifi` may carry the network key, and these logs are stored.
 var evidence = map[string]bool{
 	"meat_alarm":   true,
 	"pit_alarm":    true,
@@ -333,9 +307,7 @@ func (r *Relay) onControl(payload []byte) {
 		return
 	}
 	if c.DeviceID == nil {
-		// Device-less: names the server the entry connection itself landed on,
-		// so devices there reuse it instead of opening a second connection to
-		// a server we are already talking to.
+		// Names the entry connection's own server, so devices there share it.
 		r.mu.Lock()
 		var adopted []int
 		if r.entry != nil {
@@ -345,10 +317,8 @@ func (r *Relay) onControl(payload []byte) {
 			delete(r.conns, r.entry.fqdn)
 			r.state.ForgetServer(r.entry.fqdn)
 			r.entry.fqdn = c.Server
-			// A device `connected` can arrive before this message, which dials
-			// a second connection to the server the entry connection was
-			// already on. Fold it in rather than leave it holding
-			// subscriptions nothing will ever reap.
+			// A device `connected` that arrived first dialed a duplicate
+			// connection to this server. Nothing would reap it, so fold it in.
 			if dup, ok := r.conns[c.Server]; ok && dup != r.entry {
 				for dev := range dup.devices {
 					r.entry.devices[dev] = true
@@ -374,11 +344,8 @@ func (r *Relay) onControl(payload []byte) {
 	r.assign(*c.DeviceID, c.Server)
 }
 
-// allowedServer refuses to dial anywhere the control plane names that is not
-// the broker's own domain. The server field decides where this process opens a
-// connection and sends the account's credentials, so it is checked rather than
-// trusted. A bare hostname (a simulator, a LAN broker) has no domain to
-// compare and is accepted as given.
+// allowedServer limits dials to the broker's domain, since each dial sends the
+// account's credentials. A bare-hostname broker has no domain to compare.
 func (r *Relay) allowedServer(server string) bool {
 	host := r.opts.Host
 	if !strings.Contains(host, ".") {
@@ -415,8 +382,7 @@ func (r *Relay) assign(dev int, server string) {
 	client := c.client
 	r.mu.Unlock()
 
-	// The connect handler subscribes what the connection holds, so a brand new
-	// connection needs nothing here; one already up does.
+	// A new connection subscribes in its connect handler.
 	if held && client.IsConnected() {
 		for _, t := range sendTopics(dev) {
 			r.subscribe(client, t)
@@ -436,9 +402,8 @@ func (c *conn) unsubscribe(dev int, r *Relay) {
 	}
 }
 
-// reap closes a data connection with no devices left on it. The entry
-// connection is never reaped: it is the control channel, and without it this
-// process stops hearing where devices go.
+// reap closes a data connection with no devices. The entry connection carries
+// the control topics and is never reaped.
 func (r *Relay) reap(c *conn) {
 	if c.isEntry || len(c.devices) > 0 {
 		return

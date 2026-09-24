@@ -16,9 +16,7 @@ func sample(value float64, labels ...string) promSample {
 	return promSample{Metric: m, Value: value}
 }
 
-// cannedProm is the second adapter behind promSource: it answers queries from
-// a table instead of a Prometheus, so the fleet module is exercised without
-// an HTTP server.
+// cannedProm answers promSource queries from a table.
 type cannedProm struct {
 	vec  map[string][]promSample
 	rng  []float64

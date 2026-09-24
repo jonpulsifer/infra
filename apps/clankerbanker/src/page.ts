@@ -24,7 +24,7 @@ export const addrUrl = (chain: string, address: string) =>
 const chain = (network: string) => (network === BASE ? 'base' : 'solana');
 
 const num = (n: number) => n.toLocaleString('en-US');
-/** ISO instant → the clock time a teller would write on the slip. */
+/** HH:MM:SS of an ISO instant. */
 const clock = (at: string) => at.slice(11, 19) || at;
 
 const MP =
@@ -35,9 +35,8 @@ const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const cmd = (s: string, what = 'command') =>
   `<div class="cmd"><code>${esc(s)}</code><button type="button" data-copy="${esc(s)}" aria-label="Copy ${esc(what)}: ${esc(s)}">Copy</button></div>`;
 
-/** The plate a phone scans: the bare address, so a wallet that speaks neither
- * EIP-681 nor Solana Pay still sends to the right place. Keyed by address, and
- * the only addresses are the treasury's, so this holds at most two. */
+/** QR codes of the bare address, which wallets without EIP-681 or Solana Pay
+ * can still pay. Only treasury addresses reach it, so it holds at most two. */
 const plates = new Map<string, string>();
 export const qr = (address: string) => {
   let svg = plates.get(address);
@@ -71,8 +70,7 @@ const EMPTY_BOARD = '<tr class="empty"><td colspan="3">nobody yet</td></tr>';
 const PRICE_HEAD =
   '<thead><tr><th class="m" scope="col">Route</th><th class="m n" scope="col">Charge</th><th scope="col">For</th></tr></thead>';
 
-/** Serial numbers run consecutively across the series, off the settlement
- * count, so every note restrikes when the ledger moves. */
+/** Numbered from the settlement count, so every serial changes on a payment. */
 const serial = (i: number, count: number) =>
   `CB ${String(count + i).padStart(8, '0')} ${ROMAN[i]}`;
 
@@ -98,8 +96,8 @@ const regRow = (e: Entry) =>
 const boardRow = (l: Leader) =>
   `<tr data-payer="${esc(l.payer)}"><td class="m" title="${esc(l.payer)}">${esc(short(l.payer))}</td><td class="m n">${usd(l.total)}</td><td class="m n">${num(l.count)}</td></tr>`;
 
-/** One box per glyph of the sheet total; the client repaints only the boxes
- * whose digit changed, so the markup here must match what it builds. */
+/** Must match the boxes the client script builds, since it repaints only the
+ * boxes whose glyph changed. */
 const combCells = (money: string) =>
   [...money]
     .map((ch) => {

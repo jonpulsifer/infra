@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Webhook } from '@/lib/types';
 import { CopyButton } from './copy-button';
 
-// Client-side component to avoid hydration mismatch
+// Reads the origin after mount, so the server and client renders match.
 function WebhookLinkCopyButton({
   projectSlug,
   webhookId,

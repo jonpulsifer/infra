@@ -25,7 +25,6 @@ export function CreateProjectForm({ onSuccess }: CreateProjectFormProps = {}) {
     setIsLoading(true);
     setError(null);
 
-    // Client-side validation
     const validationResult = slugSchema.safeParse(slug);
     if (!validationResult.success) {
       const firstError = validationResult.error.issues[0];
@@ -40,9 +39,8 @@ export function CreateProjectForm({ onSuccess }: CreateProjectFormProps = {}) {
       const result = await createProjectAction(slug);
 
       toast.success('Webhook project created successfully');
-      // Server action already revalidates the layout, so sidebar will update automatically
+      // The action revalidates the layout, which refreshes the sidebar.
 
-      // Call onSuccess callback if provided, otherwise redirect
       if (onSuccess) {
         onSuccess(result.slug);
       } else {

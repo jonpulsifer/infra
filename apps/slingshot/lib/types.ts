@@ -1,7 +1,3 @@
-/**
- * Core types for the webhook testing platform
- */
-
 export interface Webhook {
   id: string;
   method: string;
@@ -14,7 +10,7 @@ export interface Webhook {
   userAgent?: string;
   responseStatus?: number;
   responseBody?: string;
-  duration?: number; // Latency in milliseconds (for outgoing requests)
+  duration?: number; // ms, outgoing requests only
 }
 
 export interface Project {

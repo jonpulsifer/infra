@@ -18,7 +18,6 @@ export function RefreshMenu({ onRefresh, isRefreshing }: RefreshMenuProps) {
       if (!response.ok) {
         throw new Error('Failed to exit');
       }
-      // If the exit fails, show a message after a delay
       setTimeout(() => {
         setIsExiting(false);
         alert('Restart request sent. The app should restart shortly.');
@@ -29,7 +28,6 @@ export function RefreshMenu({ onRefresh, isRefreshing }: RefreshMenuProps) {
     }
   };
 
-  // Close menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {

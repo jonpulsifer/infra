@@ -132,20 +132,18 @@ export class FakeKube {
   readonly pods = new Map<string, Json>();
   readonly execs: ExecRecord[] = [];
   readonly patches: Patched[] = [];
-  /** Every request, so a test can pin what a path asks for and what it does not. */
   readonly requests: { method: string; path: string; query: string }[] = [];
   script: AgentScript = {};
   /** When false, a minted Sandbox stays not-Ready until `markReady` is called. */
   readyOnCreate = true;
   /** Answers every PATCH 403, the way a Role without `patch` does. */
   patchFails = false;
-  /** Answers every DELETE 500, the way an apiserver having a bad day does. */
+  /** Answers every DELETE 500. */
   deleteFails = false;
-  /** Fails a one-shot command, which is how the refresh exec is made to lose. */
+  /** Fails every one-shot exec with this message. */
   commandFails: string | null = null;
-  /** Refuses every TokenRequest with this message, the way a missing RBAC rule does. */
+  /** Refuses every TokenRequest 403 with this message, as a missing RBAC rule does. */
   tokenRequestFails: string | null = null;
-  /** Every TokenRequest served, so a test can read what was asked for. */
   readonly tokenRequests: {
     account: string;
     expirationSeconds: number;
@@ -163,8 +161,7 @@ export class FakeKube {
   constructor() {
     const fake = this;
     this.server = Bun.serve<SocketData>({
-      // Bun's fetch resolves AAAA first and does not fall back, so the loopback
-      // address is spelled out rather than left to `localhost`.
+      // Bun's fetch resolves AAAA first with no fallback, so bind IPv4 loopback.
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: 60,
@@ -173,8 +170,7 @@ export class FakeKube {
       },
       websocket: {
         open(ws) {
-          // Anything that is not the ACP harness is a one-shot command: it
-          // exits and the apiserver closes the stream behind it.
+          // Any command but the ACP harness is one-shot: it exits and the stream closes.
           if (!ws.data.exec.command.includes('acp')) {
             const said = fake.commandFails;
             ws.send(
@@ -244,7 +240,6 @@ export class FakeKube {
     this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
   }
 
-  /** Takes a Sandbox's Ready condition away, the way a pod going under does. */
   markNotReady(name: string): void {
     const sandbox = this.sandboxes.get(name);
     if (!sandbox) throw new Error(`no sandbox ${name}`);
@@ -255,7 +250,7 @@ export class FakeKube {
     this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
   }
 
-  /** Deletes the pod out from under a live Sandbox, the way a node eviction would. */
+  /** Deletes the pod under a live Sandbox, as a node eviction would. */
   killPod(name: string): void {
     const pod = this.pods.get(name);
     if (!pod) return;
@@ -289,12 +284,7 @@ export class FakeKube {
     for (const watcher of watchers) watcher.push(type, object);
   }
 
-  /**
-   * TokenRequest, as the apiserver answers it: a bearer token for the named
-   * ServiceAccount, and the expiry it actually granted. The asked-for
-   * `expirationSeconds` is recorded so a test can pin that a turn never gets
-   * a token it can outlive.
-   */
+  /** Records the requested `expirationSeconds`, so a test can check a turn cannot outlive its token. */
   private async tokenRequest(
     request: Request,
     account: string,
@@ -387,9 +377,7 @@ export class FakeKube {
         contentType: request.headers.get('content-type'),
         body,
       });
-      // A merge patch carrying a resourceVersion is an update from that
-      // revision, which is how two writers racing for one object are told
-      // apart: the apiserver refuses the second.
+      // A merge patch carrying a stale resourceVersion is a 409, as on the apiserver.
       const want = ((body.metadata ?? {}) as Json).resourceVersion;
       if (want && want !== (sandbox.metadata as Json).resourceVersion) {
         return status(

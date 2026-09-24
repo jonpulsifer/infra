@@ -88,12 +88,12 @@ const ask = (q: string) => llm(ASK_SYSTEM, q);
 const isQ = (q: unknown): q is string =>
   typeof q === 'string' && q.length >= 1 && q.length <= 500;
 
-// Pre-payment guards: refuse before anyone pays for nothing.
+// These guards run before the paywall, so a bad request costs nothing.
 const bad = (c: Ctx, error: string, status: 400 | 413 | 503 = 400) =>
   c.json({ error }, status);
 const brainGuard: MiddlewareHandler<Env> = async (c, next) =>
   brainReady() ? next() : bad(c, 'no brain configured', 503);
-// The amount is USD, becomes the exact-scheme price, capped at $10,000.
+// The amount is USD and becomes the exact-scheme price.
 const TIP_ANY = 'GET /tip/:name/:amount';
 const tipAmountOk = (a: string) =>
   /^\d{1,5}(\.\d{1,4})?$/.test(a) && Number(a) >= 0.0001 && Number(a) <= 10000;
@@ -124,7 +124,7 @@ app.get('/roast/:address', brainGuard, (c, next) =>
     : bad(c, 'not a base or solana address'),
 );
 
-// Bearer pass: a valid token names the payer and skips the paywall below.
+// A valid bearer pass sets the payer, which the paywall below checks.
 const tokenHash = (token: string) => sha256(`pass:${token}`);
 app.use(async (c, next) => {
   const auth = c.req.header('authorization');
@@ -155,9 +155,8 @@ if (treasury.length === 0) {
   )
     .register(BASE, new ExactEvmScheme())
     .register(SOLANA, new ExactSvmScheme())
-    // One signed payment is one request: a second copy arriving while the
-    // first is between verify and settle would be served and then fail to
-    // settle on the spent nonce.
+    // A copy of a payment that arrives between the first's verify and settle
+    // would be served, then fail to settle on the spent nonce.
     .onBeforeVerify(async ({ transportContext, paymentPayload }) => {
       const key = stashKey(transportContext, paymentPayload);
       if (payers.has(key))
@@ -205,16 +204,13 @@ if (treasury.length === 0) {
         }
       },
     )
-    // A settlement that fails without throwing — the facilitator answering
-    // 200 with `success: false` — skips afterSettle entirely, so the release
-    // above never runs. Without this the signed payment stays wedged in the
-    // gate and every retry of it aborts as already in flight, forever.
+    // A facilitator 200 with `success: false` skips afterSettle. Without this
+    // release, every retry of the payment aborts as already in flight.
     .onSettleFailure(async ({ transportContext, paymentPayload }) => {
       payers.delete(stashKey(transportContext, paymentPayload));
     });
-  // Cloudflare terminates TLS and the tunnel hands us plain http, so the URL
-  // the middleware would derive advertises `http://` and x402 clients refuse
-  // the quote. Pin the resource to the public origin instead.
+  // The tunnel delivers plain http, and x402 clients refuse a quote whose
+  // resource URL is `http://`, so the resource uses the public origin.
   const origin = env.PUBLIC_ORIGIN ?? 'https://clankerbanker.ca';
   const routes: Record<string, RouteConfig> = {};
   for (const [key, [price, description]] of Object.entries(PRICES)) {
@@ -228,18 +224,16 @@ if (treasury.length === 0) {
     };
   }
   const pay = paymentMiddleware(routes, x402);
-  // A pass skips the paywall on the fun routes only: not the one that mints
-  // passes (one dollar would buy a chain of them), and not the ones that
-  // cost the bank something per call (a model completion, a stored value).
+  // A pass skips the paywall except on /account, which mints passes, and on
+  // routes that cost the bank per call: a model completion or a stored value.
   const metered = (c: Ctx) =>
     c.req.path === '/account' ||
     c.req.path === '/ask' ||
     c.req.path.startsWith('/roast/') ||
     (c.req.method === 'PUT' && c.req.path.startsWith('/kv/'));
   app.use((c, next) => (c.get('payer') && !metered(c) ? next() : pay(c, next)));
-  // Any-amount tips: the price comes from the URL, so the static routes map
-  // can't quote it — build a one-route paywall per concrete path instead.
-  // A tip is a payment by definition, so a bearer pass never skips it.
+  // The tip price comes from the URL, so each path gets its own paywall.
+  // A bearer pass never skips a tip.
   const tipPay = new Map<string, MiddlewareHandler<Env>>();
   app.use('/tip/:name/:amount', (c, next) => {
     let mw = tipPay.get(c.req.path);
@@ -279,8 +273,8 @@ app.get('/ping', (c) => c.json({ pong: true, at: new Date().toISOString() }));
 app.get('/fortune', (c) => fortune(c));
 app.get('/premium/fortune', (c) => fortune(c, { tier: 'premium' }));
 app.get('/oracle', (c) => c.json({ answer: pick(ORACLE) }));
-// Seeded from the payment the payer signed before the roll, so the roll is
-// provably fair to them; a pass-holder committed nothing, so they get chance.
+// Seeded from the payment the payer signed, so the roll is provably fair to
+// them. A pass-holder signed nothing and gets a random seed.
 app.get('/dice', (c) =>
   c.json(
     dice(
@@ -376,7 +370,7 @@ app.get('/', async (c) => {
   );
 });
 
-// MCP: the same four tools, paid per call, same ledger (route mcp:<tool>).
+// MCP tools are paid per call and recorded in the ledger as route mcp:<tool>.
 let mcp: Promise<(req: Request) => Promise<Response>> | undefined;
 app.on(['GET', 'DELETE'], '/mcp', (c) => c.body(null, 405));
 app.post('/mcp', async (c) => {
@@ -427,8 +421,8 @@ app.post('/mcp', async (c) => {
 export default {
   port: Number(env.PORT ?? 3000),
   hostname: '0.0.0.0',
-  // The largest body any route accepts is a 4 KiB kv value; MCP calls are
-  // a few hundred bytes. Anything bigger is refused before it is buffered.
+  // Headroom over the largest body a route takes, a 4 KiB kv value. Bun
+  // refuses a larger body before buffering it.
   maxRequestBodySize: 64 * 1024,
   fetch: app.fetch,
 };

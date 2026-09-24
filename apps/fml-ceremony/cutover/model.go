@@ -28,9 +28,7 @@ import (
 	"slices"
 )
 
-// gen is which generation of trust material a certificate belongs to: the one
-// signed by the retiring anchors, or the one signed by the anchors the ceremony
-// minted.
+// gen is the anchor generation a certificate was signed under.
 type gen uint8
 
 const (
@@ -45,7 +43,7 @@ func (g gen) String() string {
 	return "old"
 }
 
-// Clusters, in the index order every [2]-sized field in State uses.
+// The index order of every per-cluster array in State.
 const (
 	folly = iota
 	offsite
@@ -54,11 +52,8 @@ const (
 
 var clusterName = [numClusters]string{"folly", "offsite"}
 
-// chain is the ordered content of <cluster>-ca-chain.pem: the cluster CA, the
-// FML Intermediate, the FML Root. An OpenSSL client can only build a path out
-// of it when all three come from the same generation — a cluster CA names its
-// issuer by the Intermediate's subjectKeyIdentifier, and the re-birth changes
-// that identifier because it changes the key behind it.
+// chain is <cluster>-ca-chain.pem: cluster CA, Intermediate, Root. An OpenSSL
+// client builds a path from it only when all three share a generation.
 type chain struct{ CA, Int, Root gen }
 
 func (c chain) homogeneous() bool { return c.CA == c.Int && c.Int == c.Root }
@@ -67,8 +62,8 @@ func (c chain) String() string {
 	return fmt.Sprintf("{ca:%s int:%s root:%s}", c.CA, c.Int, c.Root)
 }
 
-// State is one point in the cutover. Every field is comparable so State works
-// directly as a map key for the search.
+// State is one point in the cutover. Every field stays comparable, because the
+// search uses State as a map key.
 type State struct {
 	// Offline, and in 1Password.
 
@@ -80,7 +75,7 @@ type State struct {
 
 	// terraform/pki state.
 
-	TFSigned gen // generation of the Intermediate that signed the four leaf certs
+	TFSigned gen // generation behind the four certificates terraform/pki signs
 
 	// terraform/pki/certs, in the working tree and then on main.
 
@@ -90,10 +85,10 @@ type State struct {
 	FileChain [numClusters]chain // <cluster>-ca-chain.pem, written as a unit
 	JWKS      [numClusters]int   // entries published in oidc/<cluster>/jwks.json
 	Committed bool               // the certs/ edit is merged to main
-	Verified  bool               // pki:verify passed against exactly what is on main
+	Verified  bool               // pki:verify passed against what is on main
 
-	// clusters/offsite/apps/spindrift/ca-bundle.yaml. Written by post-rotate.sh
-	// from offsite-ca.pem plus folly-ca-chain.pem, shipped by Flux.
+	// clusters/offsite/apps/spindrift/ca-bundle.yaml: offsite-ca.pem plus
+	// folly-ca-chain.pem, written by post-rotate.sh and applied by Flux.
 
 	FileBundleOffsiteCA  gen
 	FileBundleFollyChain chain
@@ -107,25 +102,21 @@ type State struct {
 	Cfssl        [numClusters]gen   // cfssl's CA, loaded once at unit start
 	KCMPub       [numClusters]chain // kube-root-ca.crt, published once at unit start
 	PodCA        [numClusters]chain // ca.crt as the kubelet projects it into pods
-	PodProc      [numClusters]chain // the store a long-lived process actually holds
+	PodProc      [numClusters]chain // the store a long-lived process holds
 
-	// The forbidden edit: the chain merged into <cluster>-ca-bundle.pem, which
-	// backs services.kubernetes.caFile and therefore clientCaFile and
-	// kubeletClientCaFile.
+	// The chain merged into <cluster>-ca-bundle.pem, which backs caFile and so
+	// clientCaFile and kubeletClientCaFile.
 	CAFilePoisoned [numClusters]bool
 }
 
 // Params selects which model to search.
 type Params struct {
-	// Guarded runs the sanctioned plan: every action carries the precondition
-	// the runbook states. Unguarded lets the operator do the steps in any order
-	// and take the two tempting wrong turns, which is how the search finds the
-	// orderings that break.
+	// Guarded enforces each step's runbook precondition. Unguarded allows any
+	// order plus two wrong turns, so the search finds the orderings that break.
 	Guarded bool
 
-	// RotateClusterCAKey asks what the same plan costs if the per-cluster
-	// Kubernetes CA key is replaced as well. It is false for the settled
-	// re-birth; the model keeps it because the answer is the justification.
+	// RotateClusterCAKey also replaces each cluster's Kubernetes CA key. The re-birth
+	// keeps that key, so API server certificates verify under both generations.
 	RotateClusterCAKey bool
 }
 
@@ -137,13 +128,10 @@ type action struct {
 
 func always(State, Params) bool { return true }
 
-// actions is the whole vocabulary of the cutover, named the way the runbook
-// names them.
+// Action names are the runbook's step names: RunbookPlan and CUTOVER.md match on them.
 func actions(p Params) []action {
 	as := []action{
 		{
-			// The ceremony mints anchors whose pathLenConstraint admits the two
-			// CAs beneath the root and the one beneath the intermediate.
 			name:    "ceremony: mint anchors (pathLen 2 / 1)",
 			enabled: func(s State, _ Params) bool { return !s.Minted },
 			apply: func(s State, _ Params) State {
@@ -152,10 +140,8 @@ func actions(p Params) []action {
 			},
 		},
 		{
-			// The same step with Go's zero value left in place. x509 emits
-			// pathLen:0 when MaxPathLen is 0 and MaxPathLenZero is set, and
-			// nothing but a full-path validator ever notices — see the same trap
-			// documented on max_path_length in terraform/pki/pki.tf.
+			// Go's zero value mints pathLen:0 anchors, which only a full-path
+			// validator rejects.
 			name:    "ceremony: mint anchors (pathLen 0 — the Go zero value)",
 			enabled: func(s State, _ Params) bool { return !s.Minted },
 			apply: func(s State, _ Params) State {
@@ -174,19 +160,15 @@ func actions(p Params) []action {
 				if !s.Minted || s.OPAnchors == genNew {
 					return false
 				}
-				// Overwriting the item's fields is the point of no return: the
-				// old Intermediate key signs everything currently deployed and
-				// there is no other copy. Rollback must not depend on 1Password
-				// item history, the same rule terraform/pki/README.md sets for
-				// the cluster CA escrow.
+				// The old Intermediate key signs everything deployed, and rollback
+				// must not rely on 1Password item history, so escrow it first.
 				return !p.Guarded || s.OldEscrow
 			},
 			apply: func(s State, _ Params) State { s.OPAnchors = genNew; return s },
 		},
 		{
-			// Replaces exactly four tls_locally_signed_cert resources: both
-			// cluster CAs and both SA signers. Every tls_private_key must show
-			// no change.
+			// Replaces the four tls_locally_signed_cert resources, the cluster
+			// CAs and SA signers. Every tls_private_key must show no change.
 			name:    "atlantis: apply terraform/pki",
 			enabled: func(s State, _ Params) bool { return s.TFSigned != s.OPAnchors },
 			apply:   func(s State, _ Params) State { s.TFSigned = s.OPAnchors; return s },
@@ -205,8 +187,7 @@ func actions(p Params) []action {
 				if s.Committed {
 					return false
 				}
-				// Hosts auto-upgrade from main. Merging an unverified chain
-				// starts a clock the operator does not control.
+				// Hosts auto-upgrade from main, so a merge deploys the chain.
 				return !p.Guarded || s.Verified
 			},
 			apply: func(s State, _ Params) State { s.Committed = true; return s },
@@ -229,8 +210,7 @@ func actions(p Params) []action {
 				if !p.Guarded {
 					return true
 				}
-				// Nothing may stop trusting the old anchors until every store
-				// that has to verify something already holds the new ones.
+				// The old anchors stay until every verifying store holds the new ones.
 				for c := range numClusters {
 					if s.PodProc[c] != (chain{genNew, genNew, genNew}) ||
 						s.KCMPub[c] != (chain{genNew, genNew, genNew}) ||
@@ -249,22 +229,16 @@ func actions(p Params) []action {
 		c := c
 		as = append(as,
 			action{
-				// post-rotate.sh rewrites fml-root.pem and fml-intermediate.pem
-				// unconditionally, then this cluster's CA, chain and JWKS, then
-				// the spindrift bundle from whatever offsite-ca.pem and
-				// folly-ca-chain.pem happen to be. Running it for one cluster
-				// therefore moves the shared anchors and leaves the other
-				// cluster's chain behind.
+				// Rewrites the shared anchors, this cluster's files and ca-bundle.yaml,
+				// so a run for one cluster leaves the other cluster's chain behind.
 				name:    "scripts/pki/post-rotate.sh " + clusterName[c],
 				enabled: always,
 				apply: func(s State, _ Params) State {
 					s.FileRoot, s.FileInt = s.OPAnchors, s.OPAnchors
 					s.FileCA[c] = s.TFSigned
 					s.FileChain[c] = chain{CA: s.FileCA[c], Int: s.FileInt, Root: s.FileRoot}
-					// The SA signer key survives the re-birth, so the reissued
-					// certificate carries the same public key and the script's
-					// SPKI comparison writes no *-sa-signer-prev.pem. One entry,
-					// one kid.
+					// The SA signer key survives, so the script's SPKI check writes
+					// no *-sa-signer-prev.pem and the JWKS keeps one entry.
 					s.JWKS[c] = 1
 					s.FileBundleOffsiteCA = s.FileCA[offsite]
 					s.FileBundleFollyChain = s.FileChain[folly]
@@ -273,10 +247,8 @@ func actions(p Params) []action {
 				},
 			},
 			action{
-				// Hosts rebuild from main on their own auto-upgrade timer, so
-				// this needs no operator. sops-nix compares decrypted plaintext
-				// and the keys are unchanged, so nothing restarts: Cfssl and
-				// KCMPub deliberately do not move here.
+				// Runs on each host's auto-upgrade timer. The decrypted keys are
+				// unchanged, so sops-nix restarts nothing and Cfssl and KCMPub stay.
 				name:    "nixos-rebuild " + clusterName[c],
 				enabled: func(s State, _ Params) bool { return s.Committed },
 				apply: func(s State, _ Params) State {
@@ -301,9 +273,8 @@ func actions(p Params) []action {
 				apply:   func(s State, _ Params) State { s.PodCA[c] = s.KCMPub[c]; return s },
 			},
 			action{
-				// NODE_EXTRA_CA_CERTS and Vector's CA file are read once at
-				// process start, so a refreshed projection reaches nothing until
-				// the pod restarts.
+				// NODE_EXTRA_CA_CERTS and Vector's CA file are read at process
+				// start, so a refreshed projection needs a pod restart.
 				name:    "kubectl rollout restart openssl clients (" + clusterName[c] + ")",
 				enabled: func(s State, _ Params) bool { return s.PodProc[c] != s.PodCA[c] },
 				apply:   func(s State, _ Params) State { s.PodProc[c] = s.PodCA[c]; return s },
@@ -315,23 +286,20 @@ func actions(p Params) []action {
 		return as
 	}
 
-	// The two wrong turns. Both are what a tired operator reaches for, and
-	// neither is available in the sanctioned plan.
+	// Two wrong turns the guarded plan excludes.
 	for c := range numClusters {
 		c := c
 		as = append(as,
 			action{
-				// The 2am fix for "unable to get issuer certificate": put the
-				// anchors where the failing client is already looking. caFile
+				// The tempting fix for "unable to get issuer certificate". caFile
 				// also backs clientCaFile and kubeletClientCaFile.
 				name:    "operator: merge the chain into " + clusterName[c] + "-ca-bundle.pem",
 				enabled: func(s State, _ Params) bool { return !s.CAFilePoisoned[c] },
 				apply:   func(s State, _ Params) State { s.CAFilePoisoned[c] = true; return s },
 			},
 			action{
-				// Treating the reissue as a rotation: keep the previous signer
-				// certificate for JWKS overlap. Its key is the same key, so the
-				// second entry carries the same kid.
+				// Treats the reissue as a rotation. The key is unchanged, so the
+				// second JWKS entry repeats the kid.
 				name:    "operator: keep " + clusterName[c] + "-sa-signer-prev.pem for overlap",
 				enabled: func(s State, _ Params) bool { return s.JWKS[c] == 1 },
 				apply:   func(s State, _ Params) State { s.JWKS[c] = 2; return s },
@@ -341,10 +309,7 @@ func actions(p Params) []action {
 	return as
 }
 
-// certsCoherent is what pki:verify asserts about the committed files: every
-// cluster CA is signed by the committed Intermediate, which is signed by the
-// committed Root, and each chain file is the matching cluster CA followed by
-// those two.
+// certsCoherent is what pki:verify asserts about the committed files.
 func (s State) certsCoherent() bool {
 	if s.FileInt != s.FileRoot {
 		return false
@@ -360,49 +325,38 @@ func (s State) certsCoherent() bool {
 	return true
 }
 
-// opensslUsable answers whether a client that builds a full path can verify an
-// API server leaf against this store. Go clients cannot reach this predicate:
-// crypto/x509 treats every certificate in a trust store as an anchor and stops
-// there, which is exactly why the pathLen and linkage faults below stay
-// invisible to kubectl, Flux and Prometheus.
+// opensslUsable reports whether a full-path validator can verify an API server
+// leaf against store. Go treats every store entry as an anchor and never fails here.
 func (s State) opensslUsable(store chain) bool {
 	if !store.homogeneous() {
 		return false
 	}
-	// A new-generation anchor that forbids the depth beneath it fails path
-	// building for everyone at once, the moment it lands.
+	// A new root with too small a pathLen fails every full-path validator at once.
 	return store.Root != genNew || s.PathLenOK
 }
 
-// violations lists every invariant this state breaks.
 func (s State) violations(p Params) []string {
 	var v []string
 	for c := range numClusters {
 		name := clusterName[c]
 
-		// The chain must never become an authentication credential. caFile
-		// backs clientCaFile and kubeletClientCaFile: a certificate carrying
-		// O=system:masters issued anywhere under the FML Root would be
-		// cluster-admin.
+		// caFile backs clientCaFile and kubeletClientCaFile, so with the anchors in
+		// it any O=system:masters certificate under the FML Root is cluster-admin.
 		if s.CAFilePoisoned[c] {
 			v = append(v, name+": the FML anchors are in caFile, so anything issued under the FML Root authenticates to the API server")
 		}
 
-		// Duplicate JWKS kid.
 		if s.JWKS[c] > 1 {
 			v = append(v, fmt.Sprintf("%s: oidc/%s/jwks.json publishes %d entries for one signer key, so the same kid appears twice", name, name, s.JWKS[c]))
 		}
 
-		// Go clients verify the API server as long as the store holds a
-		// certificate for the key cfssl is issuing under. The key survives the
-		// re-birth, so this can only fire when the cluster CA key is rotated
-		// too — which is the whole argument for not rotating it.
+		// Go clients need the store to hold the key cfssl issues under. That key
+		// survives the re-birth, so this fires only when it is rotated too.
 		if p.RotateClusterCAKey && s.ClosureCA[c] != s.Cfssl[c] {
 			v = append(v, fmt.Sprintf("%s: caFile carries the %s cluster CA while cfssl issues under the %s one, so kubectl, Flux and Prometheus cannot verify the API server", name, s.ClosureCA[c], s.Cfssl[c]))
 		}
 
-		// OpenSSL clients inside the cluster: Vector, and anything else reading
-		// ca.crt with a full-path validator.
+		// Vector, and any other full-path validator reading ca.crt.
 		if !s.opensslUsable(s.PodProc[c]) {
 			v = append(v, fmt.Sprintf("%s: pods hold ca.crt %s, which no full-path validator can build a path out of", name, s.PodProc[c]))
 		}
@@ -418,14 +372,12 @@ func (s State) violations(p Params) []string {
 		}
 	}
 
-	// Spindrift reaches folly's API server over plain fetch with
-	// NODE_EXTRA_CA_CERTS as its whole trust input, and the runtime does no
-	// partial-chain verification: folly's three certificates have to agree.
+	// NODE_EXTRA_CA_CERTS is the only trust input for the fetch to folly's API
+	// server, and the runtime does no partial-chain verification.
 	if !s.opensslUsable(s.LiveBundleFollyChain) {
 		v = append(v, fmt.Sprintf("spindrift: the folly half of NODE_EXTRA_CA_CERTS is %s, so offsite cannot reach folly.lolwtf.ca:6443", s.LiveBundleFollyChain))
 	}
 
-	// Burning the old anchors while anything still needs them.
 	if s.OldBurned {
 		for c := range numClusters {
 			if s.PodProc[c].Root == genOld || s.KCMPub[c].Root == genOld || s.ClosureChain[c].Root == genOld {
@@ -437,15 +389,13 @@ func (s State) violations(p Params) []string {
 		}
 	}
 
-	// The fleet auto-upgrades from main, so an unverified merge is a deployment.
 	if s.Committed && !s.Verified {
 		v = append(v, "terraform/pki/certs is on main without pki:verify having passed against it; hosts auto-upgrade from main on their own timer")
 	}
 	return v
 }
 
-// Initial is the estate before the ceremony: everything old, everything
-// consistent, one JWKS entry per cluster.
+// Initial is the estate before the ceremony.
 func Initial() State {
 	old := chain{genOld, genOld, genOld}
 	s := State{FileBundleOffsiteCA: genOld, FileBundleFollyChain: old, LiveBundleOffsiteCA: genOld, LiveBundleFollyChain: old}
@@ -460,7 +410,7 @@ func Initial() State {
 	return s
 }
 
-// Done is the state the cutover is trying to reach.
+// Done reports whether the cutover is complete.
 func (s State) Done() bool {
 	if !s.OldBurned || !s.Verified || !s.Committed || s.OPAnchors != genNew || s.TFSigned != genNew {
 		return false
@@ -475,7 +425,7 @@ func (s State) Done() bool {
 	return s.LiveBundleFollyChain == all && s.LiveBundleOffsiteCA == genNew
 }
 
-// Trace is a reachable sequence of steps and what it ends in.
+// Trace is a reachable sequence of steps and the violations it ends in.
 type Trace struct {
 	Steps      []string
 	Violations []string
@@ -506,9 +456,8 @@ func (n *node) steps() []string {
 	return out
 }
 
-// Search explores every reachable interleaving breadth-first. It returns the
-// shortest trace to each distinct violation (at most limit of them), whether a
-// Done state is reachable, and how many states it visited.
+// Search explores every reachable ordering breadth-first. It returns the
+// shortest trace to each distinct violation, at most limit of them.
 func Search(p Params, limit int) (bad []Trace, doneReachable bool, visited int) {
 	as := actions(p)
 	seen := map[State]bool{Initial(): true}
@@ -528,8 +477,7 @@ func Search(p Params, limit int) (bad []Trace, doneReachable bool, visited int) 
 				reported[v[0]] = true
 				bad = append(bad, Trace{Steps: cur.n.steps(), Violations: v})
 			}
-			// A broken state is not a place to keep exploring from; the
-			// operator is in a hole and the model has said so.
+			// A violating state is terminal.
 			continue
 		}
 		if cur.s.Done() {
@@ -554,10 +502,8 @@ func Search(p Params, limit int) (bad []Trace, doneReachable bool, visited int) 
 	return bad, doneReachable, visited
 }
 
-// RunbookPlan is the ordered sequence CUTOVER.md tells a human to follow. The
-// tests replay it against the guarded model and assert that CUTOVER.md still
-// lists these steps, in this order, so the runbook cannot drift away from the
-// thing that was checked.
+// RunbookPlan is the step order in CUTOVER.md. Tests replay it against the
+// guarded model and require CUTOVER.md to list it in this order.
 var RunbookPlan = []string{
 	"ceremony: mint anchors (pathLen 2 / 1)",
 	"1password: preserve the superseded Intermediate item",
@@ -581,8 +527,8 @@ var RunbookPlan = []string{
 	"1password: destroy the superseded anchors",
 }
 
-// Replay walks plan through the model, returning the state after each step and
-// the first step that was not enabled or that broke an invariant.
+// Replay walks plan through the model. It returns the state after each step and
+// stops at the first step that is not enabled or breaks an invariant.
 func Replay(p Params, plan []string) (states []State, err error) {
 	as := actions(p)
 	s := Initial()

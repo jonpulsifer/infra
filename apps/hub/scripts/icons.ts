@@ -1,12 +1,6 @@
-// Regenerates the PWA icons in public/. Run from the repo root:
-//
-//   bun run apps/hub/scripts/icons.ts
-//
-// The mark is the same thing the dashboard draws - a day's temperature curve
-// with its high picked out - so the installed app's icon and its content agree.
-// Everything is rasterised here rather than shipped as SVG because iOS wants a
-// PNG for its home-screen icon and Android's maskable slot is a raster contract
-// too; a hand-rolled encoder keeps that from costing the app a dependency.
+// Regenerates the PWA icons in public/: bun run apps/hub/scripts/icons.ts
+// iOS and Android's maskable slot want PNGs, so this rasterises the mark with its
+// own encoder.
 
 const OUT = new URL('../public/', import.meta.url);
 
@@ -18,9 +12,8 @@ type Rgb = readonly [number, number, number];
 
 const SUPERSAMPLE = 4;
 
-// A day's temperature: coldest before dawn, peaking mid-afternoon. The mark
-// shows a little under one full cycle (SPAN), so it ends mid-afternoon's
-// descent rather than symmetrically back where it started.
+// A day's temperature, coldest before dawn. The mark shows a little under one
+// cycle, so it ends on the afternoon descent.
 const SPAN = 0.88;
 
 /** Height of the curve at `t` across the mark, 0 at the bottom of the box. */
@@ -67,7 +60,6 @@ function distanceToSegment(
 function render(size: number, options: { rounded: boolean; inset: number }) {
   const pixels = new Uint8Array(size * size * 4);
 
-  // The mark's content box, and the polyline through it.
   const pad = size * options.inset;
   const boxX = pad;
   const boxY = pad;
@@ -112,8 +104,7 @@ function render(size: number, options: { rounded: boolean; inset: number }) {
             dot++;
             continue;
           }
-          // A ground-coloured ring keeps the dot legible where it sits on the
-          // curve it marks.
+          // A ground-coloured ring keeps the dot legible on its own curve.
           if (toPeak <= peakRadius + stroke * 0.34) continue;
 
           let onLine = false;
@@ -199,8 +190,7 @@ function chunk(type: string, body: Uint8Array): Uint8Array {
 
 function encodePng(pixels: Uint8Array, size: number): Uint8Array {
   const stride = size * 4;
-  // One filter byte per scanline; filter 0 (None) throughout - these icons are
-  // flat colour, so the extra prediction buys nothing.
+  // Filter 0 (None) on every scanline: flat colour gains nothing from prediction.
   const raw = new Uint8Array((stride + 1) * size);
   for (let y = 0; y < size; y++) {
     raw.set(
@@ -242,9 +232,8 @@ function encodePng(pixels: Uint8Array, size: number): Uint8Array {
 const ICONS = [
   { file: 'icon-192.png', size: 192, rounded: true, inset: 0.18 },
   { file: 'icon-512.png', size: 512, rounded: true, inset: 0.18 },
-  // Android crops a maskable icon to whatever shape the launcher uses, so the
-  // mark has to stay inside the safe circle and the ground has to fill the
-  // whole square.
+  // Android crops a maskable icon to the launcher's shape, so the mark stays in
+  // the safe circle and the ground fills the square.
   { file: 'icon-maskable-512.png', size: 512, rounded: false, inset: 0.28 },
   // iOS masks the home-screen icon itself; a pre-rounded one gets rounded twice.
   { file: 'apple-touch-icon.png', size: 180, rounded: false, inset: 0.18 },

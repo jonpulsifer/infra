@@ -13,9 +13,8 @@ import (
 	"github.com/jonpulsifer/infra/apps/fml-ceremony/jcs"
 )
 
-// fixture is written by apps/fml-ceremony's transcript tests. Reading the same
-// file from both sides is what stops the writer and this independent reader
-// from drifting apart while each keeps passing its own tests.
+// apps/fml-ceremony's transcript tests write this file, so the writer and this
+// reader test against the same bytes.
 const fixture = "../fml-ceremony/testdata/transcript.example.json"
 
 func TestFixtureVerifies(t *testing.T) {
@@ -37,10 +36,8 @@ func TestFixtureVerifies(t *testing.T) {
 	}
 }
 
-// TestTampering is the point of the tool: every one of these is a transcript
-// that reads plausibly and must not pass. Each case rebuilds the hash chain
-// after editing, so nothing here is caught merely because the chain broke --
-// except the case that is meant to be.
+// Each case rebuilds the hash chain after its edit, so only the chain case
+// fails on the chain.
 func TestTampering(t *testing.T) {
 	cases := []struct {
 		name string
@@ -71,9 +68,7 @@ func TestTampering(t *testing.T) {
 			},
 		},
 		{
-			// The fixture publishes no digest at all -- it carries no entropy
-			// and says so -- so this case has to introduce the violation it
-			// tests rather than lean on the fixture already committing it.
+			// The fixture publishes no digest, so the case adds one.
 			name: "a witness digest for a source that cannot afford one",
 			want: "below the 128-bit floor",
 			edit: func(_ *testing.T, _ map[string]any, e []map[string]any) ([]map[string]any, bool) {
@@ -102,9 +97,7 @@ func TestTampering(t *testing.T) {
 			},
 		},
 		{
-			// The reserved-name list only covers the two branches someone thought
-			// of in advance. This branch is well-formed, unreserved, and has no
-			// share set -- so anything derived under it dies with the master.
+			// Well-formed and unreserved, but with no share set.
 			name: "a key minted under a branch with no share set",
 			want: "no share set",
 			edit: func(_ *testing.T, _ map[string]any, e []map[string]any) ([]map[string]any, bool) {
@@ -178,8 +171,6 @@ func load(t *testing.T) (map[string]any, []map[string]any) {
 	return doc, entries
 }
 
-// body returns the nth body of a given step, so a case can name what it is
-// corrupting instead of counting entries.
 func body(entries []map[string]any, step string, n int) map[string]any {
 	for _, e := range entries {
 		if e["step"] == step {
@@ -192,9 +183,8 @@ func body(entries []map[string]any, step string, n int) map[string]any {
 	panic("no such step: " + step)
 }
 
-// assemble rebuilds the document. With rechain set it recomputes seq and prev,
-// so an edit is caught by the check it targets rather than by the chain; the
-// one case that leaves it unset is testing the chain itself.
+// With rechain set, assemble recomputes seq and prev so an edit reaches the
+// check it targets.
 func assemble(t *testing.T, doc map[string]any, entries []map[string]any, rechain bool) []byte {
 	t.Helper()
 	prev := genesis

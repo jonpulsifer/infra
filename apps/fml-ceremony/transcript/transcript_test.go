@@ -23,9 +23,7 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden transcript fixture")
 
-// goldenPath is read by apps/fml-attest's tests too. One file, written here and
-// verified there, is what stops the writer and the independent reader from
-// drifting apart while both keep passing their own tests.
+// apps/fml-attest's tests verify this same file, so writer and reader cannot drift.
 const goldenPath = "../testdata/transcript.example.json"
 
 func TestChain(t *testing.T) {
@@ -54,9 +52,8 @@ func TestChain(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	// Each entry's prev is the previous entry's digest, and each entry's bytes
-	// inside the canonical document hash to the head that was returned when it
-	// was appended. Both halves have to hold or a reader cannot replay the chain.
+	// Each prev is the previous entry's digest, and each entry's bytes hash to
+	// the head returned when it was appended.
 	prev := genesis
 	for i, e := range doc.Entries {
 		var got struct {
@@ -78,8 +75,7 @@ func TestChain(t *testing.T) {
 }
 
 func TestShardCheckIsStable(t *testing.T) {
-	// Pinned so a change to the tag or the construction shows up as a test
-	// failure rather than as a recovery quorum that cannot confirm its secret.
+	// Pinned, so a change to the tag or the construction fails here.
 	const wantZero = "650073a5dfe8c506fb77fa5f970ee7074a85d60b5b4bff9094c7de5955babca3"
 	if got := ShardCheck(make([]byte, 32)); got != wantZero {
 		t.Fatalf("ShardCheck(zero32) = %s, want %s", got, wantZero)
@@ -95,12 +91,8 @@ func TestBytesRefusesAnEmptyTranscript(t *testing.T) {
 	}
 }
 
-// TestGoldenTranscript builds the published rehearsal fixture and compares it
-// byte for byte. Regenerate with `go test ./transcript -update`.
-//
-// It is a rehearsal on SPEC.md's vector A -- the all-zero master, whose derived
-// public halves are published in section 11 -- so a reader can check every key
-// in the fixture against the spec by hand.
+// Regenerate with `go test ./transcript -update`. The fixture uses SPEC.md's
+// vector A, so a reader can check every key in it by hand.
 func TestGoldenTranscript(t *testing.T) {
 	got, err := buildRehearsal(t)
 	if err != nil {
@@ -123,7 +115,7 @@ func TestGoldenTranscript(t *testing.T) {
 	}
 }
 
-// Vector A of SPEC.md section 11, verbatim.
+// SPEC.md's vector A, verbatim.
 const (
 	vecMaster       = "0000000000000000000000000000000000000000000000000000000000000000"
 	vecInfraSecret  = "4f48ab1c12e7fb032b6293447491ce8e7811f0f198dbc6246bbeef5e235b6d37"
@@ -183,12 +175,8 @@ func buildRehearsal(t *testing.T) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Fixture bytes, not a real contribution: a fixed pattern and a constant
-	// carry no entropy at all. So this fixture claims none and publishes NO
-	// witness digest -- a digest of a guessable contribution is a brute-force
-	// target, not a witness, and this is the document a real transcript will be
-	// copied from. It must demonstrate the floor rule rather than teach a
-	// reader to walk past it.
+	// Fixture bytes carry no entropy, so the fixture claims none and, per the
+	// witness floor, publishes no witness digest.
 	kernel := entropy.Source{Label: "kernel-csprng", Bytes: bytes.Repeat([]byte{0x5a}, 32)}
 	if _, err := tr.Append(StepEntropy, Entropy{
 		Mix: "fml-entropy-mix-v1",
@@ -209,10 +197,8 @@ func buildRehearsal(t *testing.T) ([]byte, error) {
 		return nil, err
 	}
 
-	// The identifier is DERIVED, never transcribed. A literal here would be an
-	// invented number sitting unmarked beside verified ones, in the one artifact
-	// a stranger is told to check -- and a wrong identifier makes a correct plate
-	// fail the very check the field exists for.
+	// Derive the identifier, never transcribe it: a wrong one makes a correct
+	// plate fail its check.
 	for _, s := range []struct {
 		secret            string
 		bytes             string
@@ -290,11 +276,8 @@ func buildRehearsal(t *testing.T) ([]byte, error) {
 	return tr.Bytes()
 }
 
-// mintCA builds the fixture's certificates through the ceremony's own
-// deterministic profile, so the fixture exercises the certificate a real
-// ceremony would mint rather than a lookalike. Reproducible by construction:
-// certs.SelfSigned refuses a randomness source, the serial is derived from the
-// key, and notBefore is the transcript's pinned instant.
+// mintCA uses the ceremony's own deterministic profile, so the fixture holds the
+// certificates a real ceremony mints.
 func mintCA(t *testing.T, seedHex, cn string, parent *x509.Certificate, parentSeedHex string) []byte {
 	t.Helper()
 	key := ed25519.NewKeyFromSeed(mustHex(t, seedHex))

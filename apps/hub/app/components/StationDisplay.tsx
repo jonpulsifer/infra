@@ -25,13 +25,13 @@ interface StationDisplayProps {
   label: string;
   observation: StationObservation | null;
   history?: StationHistory;
-  now: number; // ms epoch, ticks from the dashboard clock
+  now: number; // ms epoch, from the dashboard clock
   index: number; // this station's position in the compared group
   accent: string; // this station's identity colour
   leaders: LeaderMap; // per-metric leading station index
   tempDelta?: number | null; // signed °C vs the other station (2-station mode)
   otherName?: string; // the station tempDelta is measured against
-  onRemove?: () => void; // dev-only per-panel remove affordance
+  onRemove?: () => void; // dev builds only
 }
 
 const WIND_DIRECTIONS = [
@@ -62,10 +62,6 @@ function windDirection(degrees?: number): string | undefined {
   return WIND_DIRECTIONS[Math.round(degrees / 22.5) % 16];
 }
 
-/**
- * Plain-language freshness for the panel header: a colored dot plus the
- * observation time. Green under 3 minutes old, amber under 10, "Stale" beyond.
- */
 function getFreshness(
   obsTimestamp: number | undefined,
   now: number,
@@ -119,8 +115,7 @@ export function StationDisplay({
   const leads = (field: keyof LeaderMap) => leaders[field] === index;
   const range = history?.extremes;
 
-  // The history window records wind in m/s, like the observation; the panel
-  // shows km/h, so the range has to travel through the same conversion.
+  // History records wind in m/s and the panel shows km/h.
   const kmhRange = (field: 'windSpeed' | 'windGust') => {
     const extremes = range?.[field];
     if (!extremes) return undefined;
@@ -165,7 +160,7 @@ export function StationDisplay({
     </div>
   );
 
-  // Skeleton while a discovered station has no observation yet
+  // Skeleton while a discovered station has no observation yet.
   if (observation == null) {
     return (
       <div className="flex min-w-0 flex-1 flex-col gap-2.5 bg-[#10151d] p-3.5 sm:p-4">

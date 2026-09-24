@@ -10,28 +10,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// probeUnplugged is what the controller reports for a probe that is not
-// connected. It is a sentinel, not a temperature: converted it reads as
-// -5866 F, which would drag every graph's y-axis to the floor and make an
-// unplugged probe look like a cook in a freezer.
+// The controller's sentinel for an unplugged probe; converted, it reads -5866 F.
 const probeUnplugged = -32767
 
-// fahrenheit converts the wire scale -- decidegrees Celsius on every
-// temperature field of every message -- to the scale the cook is read in.
-// Rounded to the hundredth: the controller reports a tenth of a degree
-// Celsius, so the digits past that are float noise, and they would otherwise
-// be exposed as `267.08000000000004`.
+// Every temperature on the wire is decidegrees Celsius. Rounding to the
+// hundredth drops float noise such as 267.08000000000004.
 func fahrenheit(deci int) float64 {
 	return math.Round((float64(deci)*9/50+32)*100) / 100
 }
 
-// pitAtTarget is how close the pit has to come to the set temperature, in F,
-// before the cook counts as settled. Until it does, the pit is legitimately
-// far below set and the band alerts have nothing to say.
+// How close the pit must come to set, in F, before the cook counts as settled.
 const pitAtTarget = 5
 
-// cook is the telemetry of one cook on one device. Its zero value is not a
-// cook: cookID 0 means no temps message has arrived yet.
 type cook struct {
 	cookID     int
 	startedAt  time.Time // first telemetry seen for this cookID
@@ -44,9 +34,7 @@ type cook struct {
 	reachedSet bool
 	pitPlugged bool
 
-	// What the controller itself reported during this cook. They belong to
-	// the cook rather than the device because each one is about this fire: a
-	// meat alarm that went off last weekend says nothing about tonight.
+	// Controller events, which reset with each new cook.
 	lidOpen       bool
 	meatTriggered [3]bool
 	pitAlarmAt    time.Time
@@ -59,22 +47,19 @@ type device struct {
 	online bool
 	cook   *cook
 
-	// Settings, as the controller last published them. None of these has a
-	// zero value that means "off": until the controller says, the exporter
-	// does not know, and exports nothing rather than a false.
+	// Settings as the controller last published them. Empty or nil means not
+	// yet reported, and exports no series.
 	labels      [3]string // meat probes 1-3; the pit's own label is not used
 	meatAlarm   [3]*bool  // an alarm configured on the probe, whatever its temperature
 	pitAlarm    *bool
 	supplyDeciV *int
-	// Counters are per message name so an uplink this exporter does not model
-	// still shows up -- flameboss/<id>/send/data carries alarm and lid
-	// messages that a controller only publishes when they change, and the
-	// counter is how we learn they arrived at all.
+	// Per message name, so an uplink the exporter does not model still shows
+	// up. send/data carries alarm and lid messages only when they change.
 	messages map[string]uint64
 }
 
-// State holds everything the collector reports. Every field is written by MQTT
-// callbacks, which paho may run concurrently, and read by a scrape.
+// State is written by MQTT callbacks, which paho may run concurrently, and
+// read by scrapes.
 type State struct {
 	mu sync.Mutex
 
@@ -82,9 +67,7 @@ type State struct {
 	servers map[string]bool   // server FQDN -> connected
 	reconn  map[string]uint64 // server FQDN -> reconnects
 
-	// stale is how long a cook may go without telemetry and still count as
-	// live; retire is when the cook's series are dropped entirely, which is
-	// what resolves the silence alert instead of leaving it firing forever.
+	// Quiet past stale clears cook_active; quiet past retire drops the cook.
 	stale  time.Duration
 	retire time.Duration
 
@@ -111,9 +94,8 @@ func (s *State) dev(id int) *device {
 	return d
 }
 
-// SetBrokerConnected records a connection's state. A server this process has
-// never dialed is absent rather than 0: a bare 0 for every server Flame Boss
-// runs would be an alert on someone else's shard.
+// SetBrokerConnected records a connection's state. A server this process never dialed
+// has no series, since a 0 would alert on a server this account's devices never use.
 func (s *State) SetBrokerConnected(server string, up bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,9 +111,8 @@ func (s *State) ForgetServer(server string) {
 	delete(s.servers, server)
 }
 
-// SeeDevice records what the control plane said: this device is online, on
-// this server. It is the only signal that a controller exists before it
-// publishes anything.
+// SeeDevice records the control plane's report that a device is online on
+// server, the only sign of a controller before it publishes.
 func (s *State) SeeDevice(id int, server string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,8 +133,8 @@ func (s *State) CountMessage(id int, name string) {
 	s.dev(id).messages[name]++
 }
 
-// Temps applies a temps uplink. A new cookID starts a new cook: the settled
-// flag and the start time belong to one cook and must not carry over.
+// Temps applies a temps uplink. A new cookID starts a new cook, so the settled
+// flag and start time never carry over.
 func (s *State) Temps(id int, m Temps) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -186,8 +167,7 @@ func (s *State) Temps(id int, m Temps) {
 	}
 }
 
-// Labels records the names the controller shows for its probes. values[0] is
-// the pit, which the exporter already names; 1-3 are the meat probes.
+// Labels records probe names. values[0] is the pit; 1-3 are the meat probes.
 func (s *State) Labels(id int, values []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -200,11 +180,8 @@ func (s *State) Labels(id int, values []string) {
 	}
 }
 
-// MeatAlarm records whether a done alarm is configured on one probe. Only the
-// action is modelled: `off` against anything else. The temperature it fires at
-// is left out until a real payload shows its scale -- the spec's example reads
-// as Fahrenheit, and so did its example for `temps`, which is decidegrees
-// Celsius on the wire.
+// MeatAlarm records whether a done alarm is set: any action but `off`. Its temperature
+// waits for a payload that confirms its scale; the spec's temps example was wrong.
 func (s *State) MeatAlarm(id, sensor int, action string) {
 	if sensor < 1 || sensor > 3 {
 		return
@@ -221,18 +198,15 @@ func (s *State) PitAlarm(id int, enabled bool) {
 	s.dev(id).pitAlarm = &enabled
 }
 
-// SupplyVoltage records the controller's DC input, in the decivolts the
-// controller publishes it in (it sends one whenever the input moves 0.1 V).
+// SupplyVoltage records the DC input in decivolts, sent on every 0.1 V change.
 func (s *State) SupplyVoltage(id, deciV int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dev(id).supplyDeciV = &deciV
 }
 
-// cookEvent applies f to the device's current cook. An event that arrives
-// before any `temps` belongs to no cook this exporter has seen -- a lid opened
-// while the controller is idle is someone at the barbecue, not a fire -- and
-// is dropped.
+// cookEvent drops an event that arrives before any temps, such as a lid opened
+// on an idle controller.
 func (s *State) cookEvent(id int, f func(c *cook)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -262,9 +236,6 @@ func (s *State) VentAdvice(id int) {
 	s.cookEvent(id, func(c *cook) { c.ventAdviceAt = now })
 }
 
-// Descriptors. Temperatures are Fahrenheit because that is the scale the cook
-// is read in; the decidegree Celsius the wire carries appears nowhere outside
-// fahrenheit().
 var (
 	descBroker = prometheus.NewDesc("flameboss_broker_connected",
 		"1 when this exporter holds an MQTT connection to the named Flame Boss server.",
@@ -399,9 +370,7 @@ func (s *State) Collect(ch chan<- prometheus.Metric) {
 		if c == nil {
 			continue
 		}
-		// A cook that has been quiet past the retire window is over. Dropping
-		// its series is what resolves the silence alert; keeping them at their
-		// last value would leave a cold pit graphed as a live cook forever.
+		// Dropping a retired cook's series resolves the silence alert.
 		if now.Sub(c.receivedAt) > s.retire {
 			d.cook = nil
 			continue

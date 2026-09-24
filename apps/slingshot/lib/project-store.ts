@@ -1,24 +1,9 @@
 import type { Webhook } from './types';
 
-/**
- * The one seam between Slingshot and its storage.
- *
- * Everything the app knows about how a project is persisted lives behind this
- * interface: the document shape, the 100-webhook circular buffer, the counters
- * that back the stats pages, and the version markers the polling clients use to
- * avoid re-downloading data they already have.
- *
- * Callers ask for outcomes ("record this webhook") rather than describing
- * writes. That is what lets `recordWebhook` be a single transaction - three
- * separate modules previously wrote this same document, and the ingest path
- * fired two concurrent transactions at it per request.
- *
- * Two adapters satisfy this interface: Firestore in production
- * (`lib/project-store-firestore.ts`) and an in-memory store used by the tests
- * (`lib/project-store-memory.ts`).
- */
+// The storage interface: projects, their webhook buffers, the stats counters
+// and the etags polling clients send.
 
-/** Circular buffer size. A project keeps at most this many webhooks. */
+/** A project keeps this many of its newest webhooks. */
 export const MAX_WEBHOOKS = 100;
 
 /** The project every install starts with, and which cannot be deleted. */
@@ -51,20 +36,13 @@ export interface StatsSnapshot {
   global: GlobalStats;
 }
 
-/** A read result carrying the version marker that produced it. */
 export interface Versioned<T> {
   data: T;
   etag: string | null;
 }
 
-/**
- * The result of a freshness poll: either nothing has moved since `knownEtag`,
- * or here is the new data and the etag that goes with it.
- *
- * This is polling-based staleness detection, not locking. The etag is a
- * timestamp-derived marker written server-side on every write. A client cannot
- * use it to prevent a write, only to skip a download.
- */
+// An etag is a write timestamp. It lets a poll skip an unchanged download and
+// never guards a write.
 export type FeedUpdate<T> =
   | { changed: false }
   | { changed: true; data: T; etag: string | null };
@@ -78,7 +56,7 @@ export interface ProjectStore {
   /** Rejects for the default project, or if it would leave zero projects. */
   deleteProject(slug: string): Promise<void>;
 
-  /** Append a webhook, evict past the cap, and update counters - atomically. */
+  /** Appends, evicts past MAX_WEBHOOKS and updates counters atomically. */
   recordWebhook(slug: string, webhook: Webhook): Promise<void>;
   readFeed(slug: string): Promise<Versioned<WebhookFeed>>;
   readFeedIfChanged(
@@ -112,10 +90,6 @@ export const EMPTY_STATS: StatsSnapshot = {
   global: { totalProjects: 0, totalWebhooks: 0, updatedAt: 0 },
 };
 
-/**
- * Sort order used by every adapter: the default project pinned to the top,
- * everything else alphabetical.
- */
 export function sortProjects(projects: ProjectSummary[]): ProjectSummary[] {
   const rest = projects
     .filter((p) => p.slug !== DEFAULT_PROJECT_SLUG)
@@ -124,11 +98,6 @@ export function sortProjects(projects: ProjectSummary[]): ProjectSummary[] {
   return preferred ? [preferred, ...rest] : rest;
 }
 
-/**
- * Given a version marker and a reader, decide whether the caller's etag is
- * stale and return fresh data only when it is. Shared by every adapter so the
- * freshness rule is stated once.
- */
 export async function resolveIfChanged<T>(
   knownEtag: string | null | undefined,
   currentEtag: string | null,

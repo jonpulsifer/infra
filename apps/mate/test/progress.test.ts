@@ -1,9 +1,6 @@
 /**
- * The acknowledgment: the line a thread watches between the question and the
- * answer. The first block drives it through the port, so nothing here names
- * Discord or Slack and the contract is the state machine's rather than either
- * adapter's; the last two check that each adapter renders it with the calls
- * its own API actually has.
+ * The status line a thread watches while it waits: through the surface port
+ * first, then as each adapter draws it.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { DiscordNotice } from '../src/discord.ts';
@@ -31,7 +28,7 @@ import {
 const ME = 'U0BOT';
 const OWNER = 'UAR78LSKC';
 const CHANNEL = 'C062BS4GADR';
-/** Longer than anything the tests advance by accident, so the wait is the test. */
+/** Longer than any incidental clock advance. */
 const MINT_MS = 30_000;
 
 const config: ThreadsConfig = {
@@ -49,11 +46,7 @@ let serial = 0;
 
 const answering: Script = () => [{ text: 'ok' }];
 
-/**
- * The steps the line was rewritten through, with the elapsed count and the
- * redraws that only moved it stripped off: what a human would say they read,
- * rather than every frame they read it in.
- */
+/** The distinct steps the line showed, elapsed counts stripped. */
 function said(): string[] {
   const steps = surface.notices.map((line) => line.split(' · ')[0] ?? line);
   return steps.filter((step, at) => step !== steps[at - 1]);
@@ -120,11 +113,8 @@ describe('the line a thread watches while it waits', () => {
     void threads.onMessage(start);
     await settle();
 
-    // The whole point: the human has an answer to "did it hear me" while the
-    // mint that takes tens of seconds has not even begun to finish.
     expect(surface.linesIn(start.id)).toEqual([MINT_STEPS.booting]);
     expect(surface.canvases.has(start.id)).toBe(false);
-    // One line the whole way through, rewritten rather than reposted.
     expect(said()).toEqual([MINT_STEPS.creating, MINT_STEPS.booting]);
 
     await clock.advance(MINT_MS + 5_000);
@@ -151,15 +141,12 @@ describe('the line a thread watches while it waits', () => {
     const { threads } = build();
     const start = mention();
     await threads.onMessage(start);
-    // Short of the redraw cadence on purpose: a timer nobody cancelled fires
-    // once and takes itself off the list, so a count read after five seconds
-    // cannot tell it from one that was cancelled. What is left at a second is
-    // the quiet timer the finished turn arms, and nothing else.
+    // Read before the redraw cadence, while an uncancelled redraw timer would
+    // still be pending; the one left is the quiet timer.
     await clock.advance(1_000);
     expect(clock.pendingTimers).toBe(1);
 
     expect(surface.answerIn(start.id)).toBe('ok');
-    // Nothing of the wait is left above the answer.
     expect(surface.linesIn(start.id)).toEqual([]);
   });
 
@@ -178,8 +165,6 @@ describe('the line a thread watches while it waits', () => {
     await threads.onMessage(mention());
     await clock.advance(5_000);
 
-    // The steps a fresh mint takes are the ones a spare skips, which is the
-    // whole of what the pool buys said in the thread.
     expect(said()).toEqual([
       MINT_STEPS.creating,
       MINT_STEPS.adopting,
@@ -197,8 +182,6 @@ describe('the line when the wait ends badly', () => {
     await threads.onMessage(start);
     await settle();
 
-    // One line in the thread, not a stale acknowledgment with a refusal
-    // underneath it.
     expect(surface.linesIn(start.id)).toEqual([
       `${MINT_FAILED}: no room on the node`,
     ]);
@@ -228,9 +211,7 @@ describe('the line when the wait ends badly', () => {
       id: first?.id ?? '',
       text: `${MINT_FAILED}: no room on the node`,
     });
-    // The claim the whole design rests on, and the only assertion that can
-    // see it: one message, written where it stands. Taking the line away and
-    // posting the reason under it leaves the same words in the thread.
+    // Remove-then-post leaves the same words, so only the call log shows an edit in place.
     expect(calls.filter((call) => call.call === 'post')).toHaveLength(1);
     expect(calls.filter((call) => call.call === 'remove')).toHaveLength(0);
   });
@@ -240,13 +221,10 @@ describe('the line when the wait ends badly', () => {
     const start = mention();
     void threads.onMessage(start);
     await settle();
-    // From here every draw is refused, the take-back at the turn's start
-    // included — a deleted message, a surface rate-limiting mate.
+    // Every draw fails from here, including the removal at the turn's start.
     surface.failNotice = new Error('rate limited');
     await clock.advance(MINT_MS + 5_000);
 
-    // The wait is not the turn: a line mate could not clear is a stale line
-    // above a real answer, not a lost answer.
     expect(surface.answerIn(start.id)).toBe('ok');
     expect(surface.linesIn(start.id)).toHaveLength(1);
     expect(log.of('the waiting line could not be drawn')).toHaveLength(1);
@@ -261,8 +239,7 @@ describe('the line when the wait ends badly', () => {
 
     expect(surface.linesIn(queued.id)).toEqual([`${WAITING} · next up`]);
 
-    // Nobody freed a slot, so the quiet timer takes it out of the queue —
-    // and the line it was watching says that rather than waiting forever.
+    // No slot frees, so the quiet timer drops it from the queue.
     await clock.advance(config.quietMs + 1_000);
     expect(surface.linesIn(queued.id)).toEqual([STOPPED_WAITING]);
   });
@@ -275,8 +252,6 @@ describe('the line when the wait ends badly', () => {
     expect(surface.linesIn(start.id)).toEqual([MINT_STEPS.booting]);
 
     await threads.quiesce();
-    // A line saying mate is starting a sandbox is the one thing it says that
-    // a dead process leaves reading as true.
     expect(surface.linesIn(start.id)).toEqual([NEVER_STARTED]);
   });
 
@@ -287,8 +262,7 @@ describe('the line when the wait ends badly', () => {
     await threads.onMessage(start);
     await settle();
 
-    // The rewrite is what failed, not the news: the thread is owed a reason
-    // either way, and a plain post is the fallback that always exists.
+    // The rewrite failed, so the reason arrives as a plain post.
     expect(surface.linesIn(start.id)).toEqual([
       `${MINT_FAILED}: no room on the node`,
     ]);
@@ -305,8 +279,7 @@ describe('the line as each surface draws it', () => {
     await notice.say(MINT_STEPS.booting);
     expect(discord.contentsIn('thread-1')).toEqual([MINT_STEPS.booting]);
     expect(discord.inThread('thread-1')[0]?.edits).toBe(1);
-    // No Stop button on it: the wait is not a turn, and there is nothing yet
-    // to cancel.
+    // No Stop button: nothing is running yet to cancel.
     expect(discord.inThread('thread-1')[0]?.hasStop).toBe(false);
 
     await notice.done(null);
@@ -319,9 +292,7 @@ describe('the line as each surface draws it', () => {
     await notice.say(MINT_STEPS.booting);
     discord.failDeletes = new Error('429 too many requests');
 
-    // The refusal is raised rather than hidden, because `Progress` is what
-    // counts a line that could not be drawn and what tells the caller the
-    // thread is still owed its sentence.
+    // Raised so `Progress` counts the failure and the caller posts instead.
     await expect(notice.done(null)).rejects.toThrow('429');
     expect(discord.contentsIn('thread-1')).toEqual([MINT_STEPS.booting]);
   });
@@ -344,9 +315,7 @@ describe('the line as each surface draws it', () => {
     };
     const notice = new SlackNotice(api, thread);
 
-    // `openThread` makes no call on Slack, so this is the first thing that
-    // happens in the thread at all — and it is a plain message rather than a
-    // stream chunk, which would be counted as part of the answer.
+    // A plain message: a stream chunk would count as part of the answer.
     await notice.say(MINT_STEPS.creating);
     await notice.say('<@U0NOPE> booting');
     await notice.done(null);

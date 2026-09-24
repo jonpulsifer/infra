@@ -6,11 +6,7 @@ interface DevControlsProps {
   onRemove: () => void;
 }
 
-/**
- * Dev-only floating panel to add/remove mock stations. Rendered only when the
- * weather hook reports it's running against mock data (`import.meta.env.DEV`),
- * so it never appears on a real display.
- */
+/** Adds and removes mock stations. Rendered only in dev builds. */
 export function DevControls({ count, onAdd, onRemove }: DevControlsProps) {
   const btn =
     'flex items-center justify-center w-7 h-7 rounded-full bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';

@@ -16,9 +16,7 @@ type fleet struct {
 	CPUHistory  []float64
 }
 
-// fleetSamples is the raw material collectFleet gathers before any modelling
-// happens. Keeping it a value is what lets buildNodes be exercised from
-// literals instead of an HTTP server.
+// fleetSamples holds the raw query results, so buildNodes tests need no HTTP server.
 type fleetSamples struct {
 	Up    []promSample
 	Temp  []promSample
@@ -27,13 +25,12 @@ type fleetSamples struct {
 	Ready []promSample
 }
 
-// collectFleet reads a source and models what comes back. Only the node list
-// is required; every enrichment degrades on its own so a failed sub-query
-// cannot hide the fleet.
+// collectFleet requires only the node list; a failed enrichment query leaves
+// its fields empty.
 func collectFleet(ctx context.Context, src promSource) (fleet, error) {
 	up, err := src.Query(ctx, queryNodeUp)
 	if err != nil {
-		return fleet{}, err // nothing else is useful without the node list
+		return fleet{}, err
 	}
 
 	samples := fleetSamples{Up: up}
@@ -53,8 +50,7 @@ func collectFleet(ctx context.Context, src promSource) (fleet, error) {
 	return f, nil
 }
 
-// buildNodes turns node-exporter series into the node list, k8s nodes first
-// and both groups alphabetical.
+// buildNodes orders k8s nodes first, each group alphabetical.
 func buildNodes(s fleetSamples) []Node {
 	nodes := map[string]*Node{}
 	var names []string
@@ -148,9 +144,8 @@ func severityRank(s string) int {
 	}
 }
 
-// nodeName normalizes a node-exporter series to a short host name: prefer
-// the k8s node label, else the host part of instance ("dns.lolwtf.ca:9100"
-// -> "dns").
+// nodeName prefers the k8s node label, else the first label of the instance
+// host ("dns.lolwtf.ca:9100" -> "dns").
 func nodeName(metric map[string]string) string {
 	if n := metric["node"]; n != "" {
 		return n

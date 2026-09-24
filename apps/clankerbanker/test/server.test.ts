@@ -5,12 +5,12 @@ import { leaderboard } from '../src/ledger.ts';
 import { qr } from '../src/page.ts';
 import { PRICES } from '../src/prices.ts';
 
-// Offline fake facilitator: the middleware syncs /supported before answering
-// the first paid request, so serve the two kinds PayAI advertises.
 const HOSTILE_PAYER = '"><img src=x onerror=alert(1)>';
 const HOSTILE_TX = '"><b>tx</b>';
 let facilitatorCalls = 0;
 let settleSucceeds = true;
+// The middleware fetches /supported before the first paid request, so the
+// fake serves the two kinds PayAI advertises.
 const facilitator = Bun.serve({
   port: 0,
   fetch: (req) => {
@@ -46,7 +46,7 @@ const facilitator = Bun.serve({
       : new Response('not found', { status: 404 });
   },
 });
-// Canned brain + chain RPC: never a real provider, never a real node.
+// Canned LLM and Base RPC answers.
 let brainStatus = 200;
 const brain = Bun.serve({
   port: 0,
@@ -134,7 +134,6 @@ function payload(body: {
   };
 }
 
-/** Drive verify → handler → settle offline; returns the paid response. */
 async function pay(path: string, init: RequestInit = {}) {
   const body = await challenge(path, init);
   const header = btoa(JSON.stringify(payload(body)));
@@ -222,7 +221,7 @@ describe('clankerbanker', () => {
       process.env.PAY_TO_SOLANA as string,
     ]) {
       expect(html).toContain(`data-copy="${address}"`);
-      expect(html).toContain(qr(address)); // the plate encodes that address
+      expect(html).toContain(qr(address));
     }
     expect(html).toContain('https://basescan.org/address/');
     expect(html).toContain('https://solscan.io/account/');
@@ -370,7 +369,7 @@ describe('clankerbanker', () => {
     );
     expect(facilitatorCalls).toBe(before);
     expect(await ledgerEntries()).toHaveLength(rows);
-    // A pass never mints a pass: that route stays behind the paywall.
+    // A pass cannot buy another pass.
     expect(
       (
         await app.request('/account', {
@@ -379,7 +378,7 @@ describe('clankerbanker', () => {
         })
       ).status,
     ).toBe(402);
-    // A pass-holder committed no payment, so the die is chance, not a replay.
+    // A pass-holder signed no payment, so each roll gets a random seed.
     const roll = async () =>
       (
         (await (
@@ -532,9 +531,8 @@ describe('clankerbanker', () => {
   });
 
   test('a settlement that fails without throwing releases the lock', async () => {
-    // The facilitator answers 200 with success:false. That skips afterSettle,
-    // where the in-flight gate is normally released, so only onSettleFailure
-    // can free the key. If it does not, this payment is wedged forever.
+    // A 200 with success:false skips afterSettle, so only onSettleFailure can
+    // release the in-flight key.
     const header = btoa(JSON.stringify(payload(await challenge('/oracle'))));
     const rows = (await ledgerEntries()).length;
     settleSucceeds = false;

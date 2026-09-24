@@ -22,43 +22,32 @@ import (
 	"time"
 )
 
-// NoExpiry is RFC 5280's "no well-defined expiration date", which is what both
-// anchors already carry. They are distributed out of band and pinned on every
-// node, so a date on them buys a fleet-wide outage nobody is watching for
-// rather than any security.
+// NoExpiry is RFC 5280's "no well-defined expiration date". The anchors are
+// pinned on every node out of band, so an expiry adds an outage and no security.
 var NoExpiry = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 
-// serialSalt frames the serial derivation. The serial is derived from the
-// certificate's own public key rather than from its private seed, so a verifier
-// holding only the transcript can recompute and check it without any secret.
+// The serial derives from the public key, so a verifier holding only the
+// transcript can recompute it without any secret.
 const serialSalt = "fml-cert-serial-v1"
 
-// SerialOctets is 16, matching what apps/fml-pki's random serial produces. DER
-// adds at most one leading zero octet, so the encoded INTEGER is at most 17
-// octets and stays inside RFC 5280's 20-octet ceiling.
+// SerialOctets matches the size of apps/fml-pki's random serial.
 const SerialOctets = 16
 
-// Profile is everything the ceremony must pin for a certificate to be
-// reproducible. Nothing here is read from the clock or from a random source.
+// Profile is every input a reproducible certificate needs. None comes from the
+// clock or a random source.
 type Profile struct {
-	// Path is the leaf path the signing key was derived at. It is the serial's
-	// domain separator, which is what keeps two certificates for two different
-	// keys from ever colliding.
+	// The leaf path the signing key was derived at, and the serial's domain separator.
 	Path string
-	// RawSubject is the DER-encoded subject, carried verbatim from the
-	// certificate being replaced rather than rebuilt from a pkix.Name.
-	// Round-tripping through pkix.Name can reorder or drop attributes, and
-	// these certificates have to stay interchangeable with the ones already
-	// distributed.
+	// Carried verbatim from the certificate being replaced: round-tripping
+	// through pkix.Name can reorder or drop attributes.
 	RawSubject []byte
 	MaxPathLen int
 	NotBefore  time.Time
 	NotAfter   time.Time
 }
 
-// Serial derives a certificate serial from its public key (SPEC.md's tree gives
-// the path; the key gives the material). RFC 5280 requires a positive integer
-// of at most 20 octets.
+// Serial derives a certificate serial from its public key and derivation path.
+// RFC 5280 requires a positive integer of at most 20 octets.
 func Serial(pub ed25519.PublicKey, path string) (*big.Int, error) {
 	okm, err := hkdf.Key(sha256.New, pub, []byte(serialSalt), path, SerialOctets)
 	if err != nil {
@@ -71,20 +60,12 @@ func Serial(pub ed25519.PublicKey, path string) (*big.Int, error) {
 	return sn, nil
 }
 
-// RFC 5280 caps a serial at 20 octets, and DER prepends a zero octet when the
-// high bit is set, so SerialOctets may not exceed 19. Asserted at compile time:
-// a runtime check could never fire while SerialOctets is a constant, which is
-// validation that only reads like validation.
+// DER prepends a zero octet when the high bit is set, so SerialOctets may not
+// exceed 19 under RFC 5280's 20-octet cap. This fails to compile otherwise.
 const _ = uint(19 - SerialOctets)
 
-// subjectKeyID is RFC 5280 section 4.2.1.2 method (1): SHA-1 over the
-// subjectPublicKey BIT STRING contents, which for Ed25519 is the 32-octet
-// public key. Computed here rather than left to crypto/x509 to derive, because
-// a re-birth's whole determinism claim should not rest on an unexported
-// derivation in a package that is allowed to change it.
-//
-// SHA-1 is an identifier here, not a security property: it names a key so a
-// chain builder can match authorityKeyIdentifier to subjectKeyIdentifier.
+// RFC 5280 key identifier method (1): SHA-1 over the Ed25519 public key.
+// Computed here so determinism does not depend on crypto/x509's derivation.
 func subjectKeyID(pub ed25519.PublicKey) []byte {
 	sum := sha1.Sum(pub)
 	return sum[:]
@@ -115,17 +96,13 @@ func template(p Profile, pub ed25519.PublicKey) (*x509.Certificate, error) {
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		MaxPathLen:            p.MaxPathLen,
-		// Only meaningful at maxPathLen 0, where it is the difference between
-		// pathLen:0 and no constraint at all.
+		// Without it, MaxPathLen 0 means no path length constraint.
 		MaxPathLenZero: p.MaxPathLen == 0,
 	}, nil
 }
 
-// nilReader is the entropy source handed to x509.CreateCertificate. Ed25519
-// signatures are deterministic per RFC 8032 and crypto/ed25519 ignores the
-// reader entirely, so a certificate that needs randomness to be created is a
-// certificate that cannot be reproduced. Failing loudly beats discovering that
-// in twenty years.
+// Ed25519 signing ignores the reader, so any read means the certificate needs
+// randomness and could not be reproduced.
 type nilReader struct{}
 
 func (nilReader) Read([]byte) (int, error) {
@@ -134,7 +111,7 @@ func (nilReader) Read([]byte) (int, error) {
 
 var _ io.Reader = nilReader{}
 
-// SelfSigned mints the root: signed by its own key, anchoring the chain.
+// SelfSigned mints the root.
 func SelfSigned(key ed25519.PrivateKey, p Profile) ([]byte, error) {
 	pub, ok := key.Public().(ed25519.PublicKey)
 	if !ok {
@@ -147,9 +124,8 @@ func SelfSigned(key ed25519.PrivateKey, p Profile) ([]byte, error) {
 	return x509.CreateCertificate(nilReader{}, tmpl, tmpl, pub, key)
 }
 
-// SignedBy mints the intermediate under the freshly minted root. parent must be
-// the parsed root certificate, so that the intermediate's
-// authorityKeyIdentifier names the root's new key rather than the old one.
+// SignedBy mints the intermediate. parent must be the parsed new root, so the
+// intermediate's authorityKeyIdentifier names the root's new key.
 func SignedBy(key ed25519.PrivateKey, p Profile, parent *x509.Certificate, parentKey ed25519.PrivateKey) ([]byte, error) {
 	pub, ok := key.Public().(ed25519.PublicKey)
 	if !ok {

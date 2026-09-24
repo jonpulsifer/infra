@@ -11,10 +11,8 @@ import (
 	"strings"
 )
 
-// pathLen reports the pathLenConstraint and whether the extension carried one.
-// Go splits this across two fields because DER cannot distinguish an absent
-// constraint from a zero one by value alone — which is the exact ambiguity that
-// makes opentofu/tls drop `max_path_length = 0` on the floor.
+// pathLen reports the pathLenConstraint and whether it is present. MaxPathLen 0
+// alone cannot tell an absent constraint from zero; MaxPathLenZero does.
 func pathLen(c *x509.Certificate) (int, bool) {
 	if c.MaxPathLenZero {
 		return 0, true
@@ -51,8 +49,7 @@ func checkChain(label string, chain []named) []string {
 				label, lower.name, lower.cert.Issuer, upper.name, upper.cert.Subject))
 			continue
 		}
-		// Linkage by name is not linkage by key; a stale anchor with a matching
-		// subject would otherwise pass.
+		// A stale anchor with a matching subject passes the name check.
 		if err := lower.cert.CheckSignatureFrom(upper.cert); err != nil {
 			problems = append(problems, fmt.Sprintf(
 				"%s: %s does not carry a valid signature from %s: %v",
@@ -103,16 +100,8 @@ func checkChain(label string, chain []named) []string {
 	return problems
 }
 
-// checkChainFile asserts that <cluster>-ca-chain.pem is what kube-controller-
-// manager can hand to every pod as ca.crt: the cluster CA, then each issuer up
-// to a self-signed root. It is deliberately not the same file as
-// <cluster>-ca-bundle.pem, which is a rotation overlap set (current plus
-// previous CA) and carries no chain.
-//
-// This file must never become services.kubernetes.caFile. That option also
-// feeds clientCaFile and kubeletClientCaFile, so putting the FML anchors in it
-// would let anything issued anywhere under the FML Root authenticate to the API
-// server. Only --root-ca-file takes the chain.
+// checkChainFile asserts <cluster>-ca-chain.pem runs from the cluster CA to a
+// self-signed root. It must never back caFile, which also authenticates clients.
 func checkChainFile(label, path string, clusterCA *x509.Certificate) []string {
 	certs, err := readCerts(path)
 	if err != nil {
@@ -137,10 +126,8 @@ func checkChainFile(label, path string, clusterCA *x509.Certificate) []string {
 	return append(problems, checkChain(label, chain)...)
 }
 
-// runVerify asserts what a Go client never exercises. crypto/x509 treats every
-// certificate in a trust store as an anchor and stops there, so a hierarchy can
-// contradict itself and still serve kubectl, Flux and Prometheus for years.
-// OpenSSL builds the full path and rejects it.
+// runVerify checks what Go clients never exercise: crypto/x509 anchors on any
+// trust store entry, and OpenSSL builds the full path.
 func runVerify(certsDir string, out, errOut io.Writer) error {
 	root, err := readCert(filepath.Join(certsDir, "fml-root.pem"))
 	if err != nil {

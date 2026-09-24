@@ -1,11 +1,6 @@
 /**
- * The credential seam: what mate signs, what it asks GitHub for, how long it
- * is willing to hold the answer, and that neither the key nor the token ever
- * reaches a log line.
- *
- * The App is served by a `Bun.serve` of its own rather than a stubbed
- * `fetch`, so the assertions are about bytes on a wire — the JWT as GitHub
- * would parse it, the mint body as GitHub would read it.
+ * The GitHub App credential. A real `Bun.serve` stands in for GitHub, so the
+ * assertions read the JWT and the mint body as GitHub would.
  */
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { createVerify, generateKeyPairSync } from 'node:crypto';
@@ -19,17 +14,15 @@ import {
 import { FakeClock, RecordingLog } from './support.ts';
 
 const HOUR_MS = 60 * 60_000;
-/** The turn cap the reuse rule is written against. */
+/** The default turn cap; the reuse floor adds five minutes to it. */
 const TURN_TIMEOUT_MS = 45 * 60_000;
 
-/** Made once: a 2048-bit keygen is the slowest thing in this file by far. */
+/** Generated once: a 2048-bit keygen is slow. */
 let privateKey = '';
 let publicKey = '';
 
 beforeAll(() => {
-  // PKCS#1 on purpose — `BEGIN RSA PRIVATE KEY` is the shape GitHub's own
-  // download has, and the shape WebCrypto refuses. No key here is ever
-  // committed: it lives for the length of the run.
+  // PKCS#1: the shape GitHub's key download has, and WebCrypto refuses.
   const pair = generateKeyPairSync('rsa', {
     modulusLength: 2048,
     privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
@@ -46,7 +39,6 @@ interface Call {
   body: string;
 }
 
-/** Enough of api.github.com to answer an App, and to misbehave on demand. */
 class FakeGitHub {
   readonly calls: Call[] = [];
   private readonly server: Server<never>;
@@ -57,7 +49,7 @@ class FakeGitHub {
   slug = 'clanky-bot';
   minted = 0;
   revoked: string[] = [];
-  /** Answers nothing at all, for the bounded-fetch case. */
+  /** Never answers. */
   hang = false;
   /** Refuses everything with this status and a body, as a revoked App does. */
   denyWith: number | null = null;
@@ -189,14 +181,12 @@ describe('the App JWT', () => {
       expect(jwt.header.alg).toBe('RS256');
       expect(jwt.header.typ).toBe('JWT');
       const now = Math.floor(clock.now() / 1000);
-      // Backdated against skew, and a minute inside GitHub's ten-minute cap:
-      // a JWT issued in the apiserver's future is refused outright.
+      // GitHub refuses a JWT issued in its future or living past ten minutes.
       expect(jwt.claims.iat).toBe(now - 60);
       expect(jwt.claims.exp).toBe(now + 540);
       expect(jwt.claims.exp).toBeLessThan(now + 600);
       expect(jwt.claims.iss).toBe('5027196');
-      // The signature is the whole point of the PKCS#1 path: a key that
-      // loaded but signed wrongly would look identical up to here.
+      // A key that loaded but signed wrongly passes every check above.
       const verifier = createVerify('RSA-SHA256');
       verifier.update(jwt.signed);
       expect(verifier.verify(publicKey, jwt.signature, 'base64url')).toBe(true);
@@ -234,8 +224,7 @@ describe('a mint', () => {
       const [call] = github.of('/app/installations/42/access_tokens');
       expect(call?.method).toBe('POST');
       const body = JSON.parse(call?.body ?? '{}');
-      // Asked for at the mint rather than trusted from the App's grant, so
-      // widening the installation later does not widen a sandbox's token.
+      // Scoped at the mint, so widening the installation never widens a sandbox's token.
       expect(body).toEqual({
         repositories: ['infra'],
         permissions: {
@@ -271,13 +260,11 @@ describe('a mint', () => {
       github.gone.add(42);
       const token = await app.token();
       expect(token.token).toBe('ghs_token_1');
-      // Two discoveries, and the second mint is against the new id.
       expect(github.of('/repos/jonpulsifer/infra/installation')).toHaveLength(
         2,
       );
       expect(github.of('/app/installations/43/access_tokens')).toHaveLength(1);
 
-      // A second 404 in a row is an answer, not a stale id: it is raised.
       github.gone.add(43);
       await expect(app.preflight()).rejects.toMatchObject({
         name: 'GithubAppError',
@@ -301,8 +288,7 @@ describe('the reuse rule', () => {
       expect((await app.token()).token).toBe(first.token);
       expect(github.minted).toBe(1);
 
-      // Eleven minutes in, 49 are left: a turn starting now could outlive
-      // its own credential, so it gets a new one.
+      // Eleven minutes in, 49 are left: under the floor.
       await clock.advance(2 * 60_000);
       const second = await app.token();
       expect(second.token).not.toBe(first.token);
@@ -322,8 +308,6 @@ describe('a revoke', () => {
       await app.revoke(token.token);
       // Authenticated with the token itself: nothing else can revoke one.
       expect(github.revoked).toEqual([token.token]);
-      // And the held copy is gone, so the next turn cannot be handed a
-      // credential that GitHub has already thrown away.
       expect((await app.token()).token).not.toBe(token.token);
       expect(github.minted).toBe(2);
     } finally {
@@ -337,8 +321,7 @@ describe('every call', () => {
     const { app, github } = build({ timeoutMs: 100 });
     try {
       github.hang = true;
-      // Bun's fetch has no happy-eyeballs fallback and no default deadline:
-      // unbounded, this is a turn that never ends and never says why.
+      // Bun's fetch has no default deadline, so an unbounded call hangs the turn.
       await expect(app.token()).rejects.toMatchObject({
         name: 'GithubAppError',
         status: 0,
@@ -355,8 +338,7 @@ describe('every call', () => {
       const failure = await app.token().catch((error: unknown) => error);
       expect(failure).toBeInstanceOf(GithubAppError);
       expect((failure as GithubAppError).status).toBe(401);
-      // The request id is what a support question is asked with; the body is
-      // what a token could be echoed back in, so it is dropped.
+      // Keep the request id for support; drop the body, which could echo a token.
       expect((failure as GithubAppError).message).toContain('ABCD:1234');
       expect((failure as GithubAppError).message).not.toContain(
         'Bad credentials',
@@ -381,9 +363,7 @@ describe('the log', () => {
     }
   });
 
-  // The caller logs the readiness line and sets the gauge beside it. A line
-  // from in here as well is the same news twice, which is what shipped: two
-  // identical `github app ready` entries in the same millisecond.
+  // The caller logs readiness, so a line from here would duplicate it.
   test('a preflight reports its answer and says nothing itself', async () => {
     const { app, github, log } = build();
     try {
