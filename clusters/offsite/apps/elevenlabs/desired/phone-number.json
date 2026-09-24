@@ -1,0 +1,10 @@
+{
+  "phone_number_id": "phnum_8101kst8hfnhex0ar1vfqvmffckk",
+  "agent_name": "pbx-troll",
+  "inbound_trunk_config": {
+    "allowed_addresses": [
+      "0.0.0.0/0"
+    ],
+    "media_encryption": "required"
+  }
+}

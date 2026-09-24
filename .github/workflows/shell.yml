@@ -10,6 +10,7 @@ on:
       - 'scripts/**'
       - '.github/scripts/**'
       - 'dotfiles/**'
+      - 'clusters/offsite/apps/elevenlabs/*.sh'
       - 'mise.toml'
       - '.github/workflows/shell.yml'
   pull_request:
