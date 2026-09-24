@@ -20,7 +20,6 @@ The folly PBX carries each of the four office-phone lines to its own voip.ms sub
 
 - Every office-phone line, 911 included, depends on folly.
 - The offsite PBX stays parked until its trunk proves TLS and the owner asks for that DID to ring.
-- The ElevenLabs reconciler only reports drift. Its write key, the 1Password item `elevenlabs pbx api key`, does not exist.
 
 ## How it works
 
@@ -36,11 +35,11 @@ Asterisk logs every SIP message. Vector removes the SRTP keys and digest respons
 
 `clusters/offsite/apps/elevenlabs/desired/` declares the troll agent, `pbx-troll`, and the phone number record it answers. Every 15 minutes, the offsite CronJob `elevenlabs-reconcile` runs `reconcile.sh` to make ElevenLabs match those files. It logs field names, never values.
 
-- With no write key, it logs what it would create, patch or bind, and changes nothing.
-- With a write key, it creates the agent if no agent has its name and patches the declared fields that differ. When the agent matches git, each run binds the number with one PATCH that carries the whole inbound trunk, digest credentials included, because the API never returns the password.
+The write key exists, so the reconciler runs in write mode: it owns `pbx-troll` and the phone number's binding to it in the live ElevenLabs account. Each run creates the agent if none has its name, patches the declared fields that differ, and, once the agent matches git, binds the number with one PATCH that carries the whole inbound trunk and its digest credentials, because the API never returns the password. Without the write key, it only logs what it would create, patch or bind.
+
 - If ElevenLabs reports no credentials after the bind, it unbinds the number and fails the Job.
 
-External Secrets reads three 1Password items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, and `elevenlabs troll trunk` for the digest credentials. To turn on writes, the owner creates `elevenlabs pbx api key` with the key in its `password` field. The key needs write access to agents and phone numbers.
+External Secrets reads three 1Password items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, and `elevenlabs troll trunk` for the digest credentials.
 
 ## Operate
 
