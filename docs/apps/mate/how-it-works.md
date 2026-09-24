@@ -37,9 +37,13 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 | Pod | Egress |
 | --- | --- |
 | mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector |
-| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443 |
+| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443 |
 
-The microVM isolates the kernel, and the network policy is the only network boundary.
+The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on.
+
+## Fence
+
+A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mate-sandbox-debug` any `pods/exec` into the `mate` namespace, and the sandbox's network policy excludes `mate` from its in-cluster egress. The fence stops only the direct path: a controller token read from a pod elsewhere, such as Grafana's or Atlantis's, still reads mate's Secrets.
 
 ## Rules
 

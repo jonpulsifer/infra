@@ -1,0 +1,7 @@
+---
+# Kept out of ../kustomization.yaml so its namespace transformer does not add a
+# namespace to cluster-scoped kinds that kustomize's OpenAPI data does not know.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - sandbox-fence.yaml

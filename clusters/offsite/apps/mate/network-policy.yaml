@@ -1,6 +1,6 @@
 ---
-# Egress for the bot pod only; sandbox-network-policy.yaml covers sandboxes.
-# No ingress rules, so Cilium leaves ingress unenforced for the readiness probe.
+# Egress for the bot pod; sandbox-network-policy.yaml covers sandboxes. Cilium
+# admits the node, where the readiness probe comes from; nothing else reaches mate.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -13,6 +13,14 @@ spec:
   endpointSelector:
     matchLabels:
       app.kubernetes.io/name: mate
+  ingress:
+    # deployment.yaml's readinessProbe.
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
     # rule; without it every connection below fails closed.

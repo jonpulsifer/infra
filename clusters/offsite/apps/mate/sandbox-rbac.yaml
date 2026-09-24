@@ -11,8 +11,8 @@ metadata:
     app.kubernetes.io/part-of: mate
 automountServiceAccountToken: false
 ---
-# Reads everything but Secrets, yet pods/exec reaches any pod's mounted Secrets
-# and token. RBAC has no deny, so core omits `secrets` and each group is listed.
+# Reads all but Secrets; pods/exec reaches the mounted Secrets and token of any pod
+# outside `mate` (fence/). RBAC has no deny, so core omits `secrets` and each group is listed.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

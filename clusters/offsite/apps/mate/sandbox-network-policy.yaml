@@ -43,12 +43,16 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # Every pod in every namespace on every port, unauthenticated ones such as
-    # Prometheus included. An empty selector would mean this namespace only.
+    # Every pod outside `mate`, on every port, Prometheus included. Exists keeps
+    # NotIn from also matching identities with no namespace label.
     - toEndpoints:
         - matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
               operator: Exists
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: NotIn
+              values:
+                - mate
     # Not a pod or ClusterIP backend, so only the entity reaches it. What the
     # agent may do there is sandbox-rbac.yaml's.
     - toEntities:
