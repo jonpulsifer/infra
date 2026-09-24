@@ -58,9 +58,9 @@ done < <(grep -rhoE '`[A-Za-z0-9_.-]+/[A-Za-z0-9_./ -]*`' \
 if ((missing)); then status=1; else note "    ok"; fi
 
 # ── 3. no archaeology ────────────────────────────────────────────────────────
-# docs/agents/ states the rule, so it quotes the very words the rule forbids.
+# docs/agents/ and the style guide state the rule, so they quote the words it forbids.
 note "==> archaeology"
-mapfile -t prose < <(find docs -name '*.md' -not -path 'docs/agents/*' | sort)
+mapfile -t prose < <(find docs -name '*.md' -not -path 'docs/agents/*' -not -path 'docs/reference/style-guide.md' | sort)
 if grep -niE '\b(formerly|used to be|previously|no longer|migrated from|kept for continuity|not yet migrated|superseded by)\b' \
   "${prose[@]}" README.md 2>/dev/null; then
   note "    ^ past tense in docs; describe what is true today instead"

@@ -1,99 +1,103 @@
 ---
 title: Deploy a NixOS host
-description: "Build a host's closure from the flake, deploy it with nixos-rebuild, verify it, roll it back, or add a host."
+description: Deploy the NixOS configuration of a host from your machine or from GitHub Actions, or restore the previous generation.
 ---
 
-Use this when building, deploying, or rolling back a NixOS host from this repo. Host inventory lives in [Hosts](../hosts/index.md); architecture background lives in [NixOS](../platform/nixos.md).
+Use this runbook to deploy a host before its daily auto-upgrade, or to restore the previous generation.
 
-## Quick checks
+## Before you start
 
-Confirm the host exists in the flake:
+- Run `mise run devshell`.
+- You need SSH access to the host as `jawn`.
+- Read the [host sheet](../hosts/index.md).
+- To restore a host that does not boot, you need its console.
+- To deploy from GitHub Actions, sign in to `gh`.
 
-```bash
-nix eval --json .#nixosConfigurations --apply builtins.attrNames
-```
+`<host>` is the host name in `nix/hosts/default.nix`.
 
-Build the system closure without deploying:
+| Host | `<target>` | `<build-host>` |
+| --- | --- | --- |
+| `folly` node | `<host>.lolwtf.ca` | `riptide.lolwtf.ca` |
+| `offsite` node | `<host>.lolwtf.ca` | `<target>` |
+| Raspberry Pi | `<host>.<tailnet>` | `forge.lolwtf.ca` |
 
-```bash
-nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel --no-link
-```
+`<tailnet>` is the `tailnet` key in `terraform/network/tailscale/fleet.tf.json`.
 
-Operator-run ARM host builds always use [forge](../hosts/forge.md); use the exact pre-PR build command in [Test a change](test-a-change.md).
+## Deploy a change
 
-Run a harmless remote command through the host app:
+> [!CAUTION]
+> Auto-upgrade rebuilds each host from `main` once a day and removes a change deployed from a branch. The Pi 4 and Pi Zero hosts have no auto-upgrade.
 
-```bash
-nix run .#<hostname> -- date
-```
+1. Deploy the configuration.
 
-## Deploy safely
+   ```bash
+   nixos-rebuild boot --sudo --flake .#<host> --build-host <build-host> --target-host <target>
+   ```
 
-Prefer `boot` for remote or headless hosts. It builds and installs the new generation, but activation waits until the next reboot:
+   If the change must be active now, use `switch` in place of `boot`. If the host is a Raspberry Pi, add `--no-reexec`.
 
-```bash
-nixos-rebuild boot --sudo --target-host <hostname> --flake .#<hostname>
-```
+   Result: The command prints `Done. The new configuration is` and a store path.
 
-Use `switch` when immediate activation is intended:
+> [!CAUTION]
+> If you reboot a node with `services.k8s.role = "control-plane"`, the Kubernetes API of its cluster stops.
 
-```bash
-nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
-```
+2. If you used `boot`, reboot the host.
+3. Make sure that no systemd unit failed.
 
-For offsite or Tailscale-only paths, use the reachable target host name:
+   ```bash
+   ssh <target> systemctl --failed --no-pager
+   ```
 
-```bash
-nixos-rebuild boot --sudo --target-host <hostname>.<tailnet-name> --flake .#<hostname>
-```
+   Result: The command prints `0 loaded units listed.`
 
-## After deploying
+## Deploy from GitHub Actions
 
-Verify the host answers:
+The `nixos-deploy` workflow builds and deploys a Pi 4 or Pi Zero host.
 
-```bash
-nix run .#<hostname> -- hostname
-nix run .#<hostname> -- systemctl --failed --no-pager
-```
+1. Run the workflow.
 
-If the change touched a service, check that unit explicitly:
+   ```bash
+   gh workflow run nixos-deploy.yaml -f host=<host> -f mode=boot
+   ```
 
-```bash
-nix run .#<hostname> -- systemctl --no-pager --full status <unit>.service
-nix run .#<hostname> -- journalctl -u <unit>.service -n 80 --no-pager
-```
+   The workflow deploys only `main`. If the change must be active now, use `mode=switch`.
 
-## Roll back
+   Result: The command prints `Created workflow_dispatch event for nixos-deploy.yaml at main`.
 
-If the host is reachable and the current generation is bad:
+2. Wait for the run to complete. When `gh` asks for a run, select the `nixos-deploy` run.
 
-```bash
-nix run .#<hostname> -- sudo nixos-rebuild switch --rollback
-```
+   ```bash
+   gh run watch --exit-status
+   ```
 
-If remote access is risky, use the bootloader console or local access and select the previous generation.
+   Result: The command prints `Run nixos-deploy (<run-id>) completed with 'success'`.
 
-## Adding a host
+3. Do steps 2 and 3 of [Deploy a change](#deploy-a-change).
 
-Kubernetes nodes are declared inline in `nixosConfigurations` in `flake.nix` via `mkHost`; the hostname is the attr name and cluster membership comes from `tags = [ "folly" ]` or `[ "offsite" ]`.
+## Restore the previous generation
 
-Standalone hosts with unique config get a file under `nix/hosts/<hostname>.nix` and a `flake.nix` host entry pointing at it.
+1. If the host boots, roll back.
 
-Validate after adding a host:
+   ```bash
+   ssh <target> sudo nixos-rebuild switch --rollback
+   ```
 
-```bash
-nix flake check
-nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel --no-link
-```
+   Result: The command prints `Done. The new configuration is /nix/var/nix/profiles/system`.
 
-## Dotfiles
+2. If the host does not boot, restart it from the console. Select the previous generation in the boot menu.
+3. If the change is on `main`, merge a revert before the next auto-upgrade.
 
-Dotfiles are mise-managed from the in-repo `dotfiles/` tree. `nix/system/mise-dotfiles.nix` carries that subtree into the system closure and runs `mise run bootstrap` during activation.
+## If something goes wrong
 
-Shell tooling (eza, fzf, neovim, bat, ripgrep, fd, delta, jq, gh, btop, sd, 1password-cli) and zsh plugins (pure, fzf-tab, autosuggestions, syntax-highlighting, kube-ps1) come from home-manager for the `jawn` user via `nix/system/home-manager.nix` and `nix/home/jawn.nix`. Activation sets `HM_ACTIVATED=1` so `dotfiles/scripts/deploy-dotfiles.sh` skips deploying `~/.config/zsh` on those hosts.
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| A deployed change is gone. | Auto-upgrade rebuilt the host from `main`. | Merge the change. |
+| A systemd unit failed. | The change broke the unit. | Run `ssh <target> journalctl -u <unit> -n 80 --no-pager`. |
+| `nixos-rebuild` prints `did you forget to use --ask-sudo-password?`. | A remote command failed. | Read the lines above that message. |
+| The rollback finds no earlier generation. | `nix.gc` in `nix/system/nixos.nix` deleted it. | Deploy the last good commit. |
 
-The bootstrap task routes by OS; there is no dotfiles-only bootstrap flag.
+## Related
 
-## Auto-upgrade caveat
-
-Hosts auto-rebuild from GitHub `main`. A config deployed from a branch can be reverted by the next auto-upgrade unless the branch merges promptly. Treat a branch deploy as a test unless it has merged.
+- [Add a Kubernetes node](add-a-kubernetes-node.md): install a new node.
+- [Test a change](test-a-change.md): the build commands.
+- [NixOS](../platform/nixos.md): the host registry.

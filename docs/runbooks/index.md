@@ -8,6 +8,7 @@ Operational procedures for when things misbehave. These pages are served from Cl
 ## The runbooks
 
 - [Deploy a NixOS host](deploy-a-nixos-host.md) — build, deploy, verify, and roll back NixOS hosts
+- [Add a Kubernetes node](add-a-kubernetes-node.md) — declare and install a new x86_64 node
 - [Apply a Terraform change](apply-a-terraform-change.md) — Atlantis-first OpenTofu workflow and local validation
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md) — inspect Flux, reconcile resources, and handle SOPS safely
 - [Operate Postgres](operate-postgres.md) — reach a CloudNativePG database through `kubectl cnpg`, and check whether it has a backup
@@ -28,7 +29,7 @@ Operational procedures for when things misbehave. These pages are served from Cl
 - [Install Windows monitoring](install-windows-monitoring.md) — the Windows desktops: windows_exporter, the sensor exporter that supplies the temperatures it cannot, and Event Log into VictoriaLogs
 - [Flame Boss exporter](../apps/flameboss.md) — the barbecue as a monitoring target: how a cook reaches Prometheus from Flame Boss's cloud, why the dashboard is empty between cooks, and what each alert means
 - [Operate the office phone](operate-the-office-phone.md) — the SPA504G's four lines through the folly PBX to voip.ms: health, provisioning the handset from git, reading the SIP, and the failure signatures that each call taught
-- [Smiirl counter](../apps/smiirl.md) — the split-flap counter that thinks the lab is Smiirl's cloud: checks, the byte-exact internet check, out-of-sync flaps and the firmware's calibration wizard
+- [Operate the Smiirl counter](operate-the-smiirl-counter.md) — check, calibrate and repair the Smiirl counter.
 - [Repair the Rowbutt GitHub credential](repair-the-rowbutt-github-credential.md) — the GitHub App mate mints sandbox tokens from: the boot line, the readiness gauge, forcing a resync, rotating the private key, reinstalling the App, and why a sandbox cannot push
 
 ## Conventions

@@ -9,18 +9,15 @@ import (
 	"time"
 )
 
-// githubAPI is the search host; the tests point it at a stub.
+// A var so tests can point it at a stub.
 var githubAPI = "https://api.github.com"
 
-// githubEvery is how long a count stands before it is fetched again. GitHub
-// allows ten unauthenticated searches a minute, so this is nowhere near the
-// limit even with the drums asking for a different person every cycle turn.
+// GitHub allows ten unauthenticated searches a minute, far above this rate.
 var githubEvery = 5 * time.Minute
 
 var githubClient = &http.Client{Timeout: 10 * time.Second}
 
-// githubCount is how many public commits or pull requests user has, taken
-// from the search API's total_count. Both searches work unauthenticated.
+// Both searches work unauthenticated, so no token is sent.
 func githubCount(user, what string) (int, error) {
 	path, q := "/search/commits", "author:"+user
 	if what == "prs" {
@@ -30,7 +27,7 @@ func githubCount(user, what string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// GitHub rejects a request that does not name itself.
+	// GitHub rejects a request with no User-Agent.
 	req.Header.Set("User-Agent", "smiirl (github.com/jonpulsifer/infra)")
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := githubClient.Do(req)

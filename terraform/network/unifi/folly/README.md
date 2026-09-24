@@ -37,7 +37,7 @@ policy behave differently: the **pod CIDRs and LB VIP pools are load-bearing as
 sources** — omit them and pod-sourced packets hit the `Lab → Vpn` chain's
 closing `DROP` — while as **destinations** only the node CIDR dispatches, and
 traffic to a VIP or pod takes the `→ WAN` fall-through instead. See the comment
-above `locals` in `firewall.tf`; `docs/platform/network.md`
+above `locals` in `firewall.tf`; `docs/platform/network/routing-and-firewall.md`
 carries the full reasoning and why closing the inbound gap is not worth it.
 
 The offsite console has **no custom firewall policies** — its k8s network sits
