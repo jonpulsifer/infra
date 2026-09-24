@@ -6,8 +6,10 @@ playful troll screen. See [Tidbyt apps](https://wiki.lolwtf.ca/apps/tidbyt/).
 
 Unlike rackstat and tempest, callerid does not fetch anything: whatever calls
 Tronbyt's `push_app` API supplies `name`, `number` and `verdict` in the push,
-and the app only renders them. With no `number` config, it cycles a demo
-through every verdict instead.
+and the app only renders them. With no `verdict` config, it cycles a demo
+through every verdict instead. Every pusher must send `verdict`, even for a
+withheld caller ID: a `verdict` with no `number` still renders that verdict,
+with an UNKNOWN number.
 
 ![callerid](./callerid.webp)
 
@@ -27,9 +29,9 @@ pixlet render callerid.star number=9025551234 name=Nan verdict=contact --format 
 
 | Field | Meaning |
 | --- | --- |
-| `number` | Caller ID, digits only. Empty renders the demo. |
+| `number` | Caller ID, digits only. Empty renders as UNKNOWN. |
 | `name` | Caller name, when known. Shown instead of the number for `ring` and `contact`. |
-| `verdict` | One of `ring`, `contact`, `spam`, `troll`. |
+| `verdict` | One of `ring`, `contact`, `spam`, `troll`. Unset renders the demo. |
 
 ## Deploy
 

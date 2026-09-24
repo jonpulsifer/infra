@@ -18,7 +18,7 @@ The Tidbyt apps are five Pixlet apps, rackstat, tempest, wishin, callerid and bu
 
 `apps/wishin/` holds only the display app. wishin.app, a gift wishlist site, is a separate project on Vercel.
 
-rackstat, tempest and wishin fetch their own data on Tronbyt's render schedule. callerid renders only its config, so something has to push it: Tronbyt's `push_app` API renders a named app with a config and sends the image to a device. Nothing calls that endpoint for callerid yet, so with no `number` set it cycles a demo of every verdict instead.
+rackstat, tempest and wishin fetch their own data on Tronbyt's render schedule. callerid renders only its config, so something has to push it: Tronbyt's `push_app` API renders a named app with a config and sends the image to a device. Nothing calls that endpoint for callerid yet, so with no `verdict` set it cycles a demo of every verdict instead. A `verdict` with no `number`, such as a withheld caller ID, still renders that verdict.
 
 ## Use it
 
