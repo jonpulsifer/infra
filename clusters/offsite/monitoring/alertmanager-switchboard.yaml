@@ -50,9 +50,12 @@ spec:
     groupBy: [cluster, namespace, alertname]
     groupWait: 30s
     groupInterval: 5m
-    # Switchboard dedupes by fingerprint and forgets a fingerprint on resolve,
-    # so a repeat is what re-rings for an alert that stays firing.
-    repeatInterval: 4h
+    # A repeat retries a notification switchboard skipped (quiet hours, the
+    # cap, the cooldown) or failed to place. After a placed call switchboard
+    # dedupes the fingerprint until the alert resolves, so a still-firing
+    # alert rings once and a repeat costs nothing. Short, so a page held over
+    # quiet hours rings soon after they end.
+    repeatInterval: 15m
   receivers:
     - name: switchboard
       webhookConfigs:
