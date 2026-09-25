@@ -18,7 +18,9 @@ spec:
   data:
     # The alert-token field of the `switchboard` item, which also holds the
     # ring token mate's sandboxes use. Until the item exists this Secret is
-    # missing and the operator keeps the receiver out of the rendered config.
+    # missing, so kube-prometheus.yaml leaves this config out of the selector:
+    # a selected config with a missing Secret is rejected, receiver and route
+    # together, and PrometheusOperatorRejectedResources fires.
     - secretKey: token
       remoteRef:
         key: switchboard
