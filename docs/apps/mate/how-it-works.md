@@ -42,7 +42,7 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 | Pod | Egress |
 | --- | --- |
 | mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector |
-| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
+| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 
 The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on.
 
