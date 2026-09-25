@@ -6,6 +6,7 @@ kind: Namespace
 metadata:
   name: elevenlabs
   labels:
+    lolwtf.ca/sandbox-exec: deny
     kustomize.toolkit.fluxcd.io/prune: enabled
     app.kubernetes.io/name: elevenlabs
     pod-security.kubernetes.io/enforce: restricted

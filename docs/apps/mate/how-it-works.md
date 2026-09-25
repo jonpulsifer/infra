@@ -43,7 +43,7 @@ The microVM isolates the kernel, and the network policy is the only network boun
 
 ## Fence
 
-A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mate-sandbox-debug` any `pods/exec`, `pods/attach` or `pods/portforward` into `mate` or into a namespace labelled `lolwtf.ca/sandbox-exec: deny`. The sandbox's network policy also excludes `mate` from its in-cluster egress. The label marks a namespace where exec leads to escalation: a ServiceAccount that reads Secrets beyond its namespace or otherwise escalates, a credential that does, or a privileged or host-level pod. A new namespace like that needs the label too. A namespace with no Namespace manifest in this repo, such as `kube-system`, is named directly in the policy instead. A ServiceAccount that can patch Namespaces, such as spindrift's, can still remove the label from a fenced namespace.
+A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mate-sandbox-debug` any `pods/exec`, `pods/attach` or `pods/portforward` into `mate` or into a namespace labelled `lolwtf.ca/sandbox-exec: deny`. The sandbox's network policy also excludes `mate` from its in-cluster egress. The label marks a namespace where exec reaches something worth more than the sandbox holds: a ServiceAccount that reads Secrets beyond its namespace or otherwise escalates, an outside credential such as a tunnel, DNS or API key, a pod that can evict mate, or a privileged or host-level pod. A new namespace like that needs the label too. A namespace with no Namespace manifest in this repo, such as `kube-system`, is named directly in the policy instead. A ServiceAccount that can patch Namespaces, such as spindrift's, can still remove the label from a fenced namespace.
 
 ## Rules
 

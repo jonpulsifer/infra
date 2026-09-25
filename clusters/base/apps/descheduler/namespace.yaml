@@ -4,6 +4,7 @@ kind: Namespace
 metadata:
   name: descheduler
   labels:
+    lolwtf.ca/sandbox-exec: deny
     kustomize.toolkit.fluxcd.io/prune: enabled
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/audit-version: latest

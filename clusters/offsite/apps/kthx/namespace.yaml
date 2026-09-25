@@ -4,6 +4,7 @@ kind: Namespace
 metadata:
   name: kthx
   labels:
+    lolwtf.ca/sandbox-exec: deny
     kustomize.toolkit.fluxcd.io/prune: enabled
     # Lets this namespace's HTTPRoute attach to the `spindrift-apps` Gateway,
     # whose listeners admit routes by this namespace label.

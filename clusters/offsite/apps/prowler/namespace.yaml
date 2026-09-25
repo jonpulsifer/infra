@@ -4,6 +4,7 @@ kind: Namespace
 metadata:
   name: prowler
   labels:
+    lolwtf.ca/sandbox-exec: deny
     kustomize.toolkit.fluxcd.io/prune: enabled
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/enforce-version: latest
