@@ -25,10 +25,10 @@ The agent runs every command without approval.
 | --- | --- |
 | Repository | `main`, with `AGENTS.md` and the repository skills |
 | GitHub | Pushes branches and opens pull requests as `clanky-bot[bot]`. Its comments can plan OpenTofu changes through Atlantis. |
-| offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod but mate's own namespace |
+| offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod but `mate`'s own namespace and the namespaces [the fence](mate/how-it-works.md#fence) excludes |
 | Hosts | None. `rowbutt`, the host user for Rowbutt, is in `wheel` on every host, and the sandbox has no SSH key for it. |
 
-With `pods/exec`, the agent can read the credentials in any pod outside `mate`, such as the Atlantis pod, so it can get cluster-admin. The owner accepts this risk. [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox.
+With `pods/exec`, the agent can still read the credentials of any pod in a namespace the fence leaves open. The owner accepts this residual risk. [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox, and out of each namespace the policy names or that carries the `lolwtf.ca/sandbox-exec: deny` label.
 
 ## Limits
 
