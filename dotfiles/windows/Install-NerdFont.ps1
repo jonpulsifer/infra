@@ -10,10 +10,22 @@
 
     Keeping this font is the point: it is the same family the ghostty config
     uses on macOS and NixOS, so the terminal looks the same everywhere.
+
+    The download is checked against a pinned SHA256 before it is unpacked.
+
+.PARAMETER Url
+    Release asset to install.
+
+.PARAMETER Sha256
+    Expected hash of that asset.
+
+.PARAMETER Force
+    Install even when the family is already registered.
 #>
 [CmdletBinding()]
 param(
-    [string] $Version = 'v3.5.1',
+    [string] $Url = 'https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/CascadiaCode.zip',
+    [string] $Sha256 = '1298bf92698afa06185cf1d05e6ae05f2d8a1e8c3cb45ddf4c3035168ab342a1',
     [switch] $Force
 )
 
@@ -32,14 +44,18 @@ if (-not $Force) {
     }
 }
 
-$url = "https://github.com/ryanoasis/nerd-fonts/releases/download/$Version/CascadiaCode.zip"
 $work = Join-Path ([IO.Path]::GetTempPath()) "nerdfont-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 
 try {
-    Write-Host "  downloading CascadiaCode.zip ($Version)"
+    Write-Host "  downloading $Url"
     $archive = Join-Path $work 'CascadiaCode.zip'
-    Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+    Invoke-WebRequest -Uri $Url -OutFile $archive -UseBasicParsing
+
+    $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+    if ($actual -ne $Sha256.ToUpperInvariant()) {
+        throw "Hash mismatch for $Url`n  expected $($Sha256.ToUpperInvariant())`n  got      $actual"
+    }
 
     Expand-Archive -LiteralPath $archive -DestinationPath $work -Force
 

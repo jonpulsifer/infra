@@ -9,8 +9,9 @@
 
     Stages, each idempotent and safe to re-run:
 
-      0. Re-exec under PowerShell 7 -- the one-liner above may well land in
-         Windows PowerShell 5.1, so everything in this file has to parse there.
+      0. Re-exec under PowerShell 7 with the same switches -- the one-liner
+         above may well land in Windows PowerShell 5.1, so everything in this
+         file has to parse there.
          No ternaries, no ?? and no && in this script for that reason.
       1. Check winget is present.
       2. winget configure the DSC file: applications and OS settings, including
@@ -92,13 +93,13 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
         throw 'PowerShell 7 still is not on PATH. Open a new terminal and run this again.'
     }
 
-    # Under `irm | iex` there is no file on disk to hand to pwsh.
-    $arguments = @('-NoProfile', '-Command', "irm $BootstrapUrl | iex")
-    if ($WithWsl) {
-        $arguments = @('-NoProfile', '-Command', "& ([scriptblock]::Create((irm $BootstrapUrl))) -WithWsl")
-    }
+    $switches = @()
+    if ($WithWsl) { $switches += '-WithWsl' }
+    if ($WithMonitoring) { $switches += '-WithMonitoring' }
+    if ($SkipConfiguration) { $switches += '-SkipConfiguration' }
 
-    & pwsh @arguments
+    # Under `irm | iex` there is no file on disk to hand to pwsh.
+    & pwsh -NoProfile -Command "& ([scriptblock]::Create((irm $BootstrapUrl))) $($switches -join ' ')"
     return
 }
 
