@@ -13,8 +13,12 @@ configMapGenerator:
       - reconcile.sh
   - name: elevenlabs-desired
     files:
-      - desired/troll-agent.json
       - desired/phone-number.json
+  # Each file, by name: the reconciler owns every agent this ConfigMap holds.
+  - name: elevenlabs-desired-agents
+    files:
+      - desired/agents/pbx-troll.json
+      - desired/agents/pbx-switchboard.json
 generatorOptions:
   annotations:
     # The script is bash and the prompt is free text: their ${...} is not

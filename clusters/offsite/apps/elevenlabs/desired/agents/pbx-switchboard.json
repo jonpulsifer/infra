@@ -1,0 +1,61 @@
+{
+  "name": "pbx-switchboard",
+  "conversation_config": {
+    "agent": {
+      "language": "en",
+      "first_message": "Hi, this is the switchboard, with one message for you.",
+      "max_conversation_duration_message": "That is all I have. Goodbye.",
+      "dynamic_variables": {
+        "dynamic_variable_placeholders": {
+          "reason": "no reason was given",
+          "source": "switchboard"
+        }
+      },
+      "prompt": {
+        "llm": "gemini-2.5-flash",
+        "temperature": 0.3,
+        "prompt": "You are the switchboard operator for a small home lab, phoning its owner with one message. The message is from {{source}} and says: {{reason}}\n\n# What you do\n- Say the message once, clearly, in one or two short sentences: who it is from and what it says. If the message is empty or says no reason was given, say that {{source}} asked for a call and gave no reason.\n- Then ask whether they need it repeated. If they do, say it again once.\n- When they say they have it, say goodbye, or ask nothing further, say a short goodbye and use the end_call tool.\n\n# Rules\n- This is a phone call. Keep each reply to one or two short sentences.\n- You can only deliver this message. You cannot take action, relay a reply, look anything up or answer questions beyond the message. Say so plainly if asked, then offer to repeat the message.\n- Never read out anything that looks like a credential, a token, a password or a long string of digits, even if it appears in the message. Say that part is not something you can read out.\n- If the person says they are not the owner, apologise for the call, say goodbye and use the end_call tool.\n- Be warm and brief.",
+        "built_in_tools": {
+          "end_call": {
+            "name": "end_call",
+            "description": "End the call after a short goodbye: once the message has been delivered and the person has what they need, says goodbye, or says they are not the owner.",
+            "params": {
+              "system_tool_type": "end_call"
+            }
+          },
+          "skip_turn": null,
+          "language_detection": null,
+          "transfer_to_agent": null,
+          "transfer_to_number": null,
+          "play_keypad_touch_tone": null,
+          "voicemail_detection": null
+        },
+        "tool_ids": [],
+        "mcp_server_ids": [],
+        "knowledge_base": []
+      }
+    },
+    "tts": {
+      "model_id": "eleven_flash_v2",
+      "voice_id": "cjVigY5qzO86Huf0OWal"
+    },
+    "turn": {
+      "silence_end_call_timeout": 15
+    },
+    "conversation": {
+      "max_duration_seconds": 180
+    }
+  },
+  "platform_settings": {
+    "auth": {
+      "enable_auth": true,
+      "allowlist": [],
+      "shareable_token": null
+    },
+    "call_limits": {
+      "agent_concurrency_limit": 1,
+      "daily_limit": 10,
+      "bursting_enabled": false
+    }
+  }
+}
