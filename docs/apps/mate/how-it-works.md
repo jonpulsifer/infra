@@ -29,6 +29,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 | OpenCode key | Sandbox environment, from Secret `mate-opencode` | The model API |
 | kthx site bearers | `/home/agent/.config/kthx/sites.json`, from Secret `mate-kthx-sites` | Every quick site Rowbutt claims |
 | kthx agent token | Sandbox environment `KTHX_AGENT_TOKEN`, from Secret `mate-kthx-agent` | Every built-apps command but minting tokens, replacing the engine settings and connecting or probing a Target, for 90 days |
+| Ring token | Sandbox environment, from Secret `mate-switchboard` | `POST /ring` on [Switchboard](../switchboard.md), which rings one fixed number |
 
 `MATE_SSH_KEY_FILE` and `MATE_CONNECT_SECRET` are unset, so a sandbox has no SSH key and no 1Password token.
 

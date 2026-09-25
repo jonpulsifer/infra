@@ -28,6 +28,7 @@ The agent runs every command without approval.
 | offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod but `mate`'s own namespace and the namespaces [the fence](mate/how-it-works.md#fence) excludes |
 | Hosts | None. `rowbutt`, the host user for Rowbutt, is in `wheel` on every host, and the sandbox has no SSH key for it. |
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx` MCP tools, when Secret `mate-kthx-agent` holds an agent token. |
+| Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason. Switchboard fixes the number and caps the calls per day. |
 
 With `pods/exec`, the agent can still read the credentials of any pod in a namespace the fence leaves open. The owner accepts this residual risk. [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox, and out of each namespace the policy names or that carries the `lolwtf.ca/sandbox-exec: deny` label.
 
