@@ -99,11 +99,15 @@ spec:
             equal: [namespace]
           - target_matchers: [alertname = "InfoInhibitor"]
       alertmanagerSpec:
-        # The Discord receiver is an AlertmanagerConfig in base/monitoring; the
-        # chart's default selector selects none.
+        # The Discord receiver is an AlertmanagerConfig in base/monitoring and
+        # the switchboard receiver is one here; the chart's default selector
+        # selects none. Each selected config is a sub-route with continue, so
+        # a critical alert goes to both.
         alertmanagerConfigSelector:
-          matchLabels:
-            alertmanagerConfig: discord
+          matchExpressions:
+            - key: alertmanagerConfig
+              operator: In
+              values: [discord, switchboard]
         # Otherwise the operator pins that config's route to alerts labelled
         # namespace=monitoring, and nothing else ever reaches Discord.
         alertmanagerConfigMatcherStrategy:

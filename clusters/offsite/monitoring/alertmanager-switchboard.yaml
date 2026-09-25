@@ -1,0 +1,66 @@
+---
+# Rings the owner's phone through switchboard (docs/apps/switchboard.md) for a
+# critical alert. The Discord config in base/monitoring stays the record of
+# every alert; this one carries only what is worth a call.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-switchboard
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: alertmanager-switchboard
+    creationPolicy: Owner
+  data:
+    # The alert-token field of the `switchboard` item, which also holds the
+    # ring token mate's sandboxes use. Until the item exists this Secret is
+    # missing and the operator keeps the receiver out of the rendered config.
+    - secretKey: token
+      remoteRef:
+        key: switchboard
+        property: alert-token
+---
+# The operator makes each selected AlertmanagerConfig a sub-route with
+# `continue: true`, so a critical alert reaches Discord and this receiver.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: switchboard
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: switchboard
+spec:
+  route:
+    # Matches every namespace only while alertmanagerConfigMatcherStrategy is None.
+    receiver: switchboard
+    matchers:
+      - name: severity
+        value: critical
+        matchType: "="
+      # Watchdog always fires, and InfoInhibitor is a synthetic inhibitor.
+      - name: alertname
+        value: Watchdog|InfoInhibitor
+        matchType: "!~"
+    groupBy: [cluster, namespace, alertname]
+    groupWait: 30s
+    groupInterval: 5m
+    # Switchboard dedupes by fingerprint and forgets a fingerprint on resolve,
+    # so a repeat is what re-rings for an alert that stays firing.
+    repeatInterval: 4h
+  receivers:
+    - name: switchboard
+      webhookConfigs:
+        - url: http://switchboard.elevenlabs.svc.cluster.local:8080/alertmanager
+          # A resolved notification clears the fingerprint, so the next firing
+          # of the same alert can ring again.
+          sendResolved: true
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: alertmanager-switchboard
+                key: token
