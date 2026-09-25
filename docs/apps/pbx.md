@@ -31,15 +31,16 @@ The folly PBX registers each sub-account over TLS and requires SRTP for media. A
 
 Asterisk logs every SIP message. Vector removes the SRTP keys and digest responses before VictoriaLogs stores the logs.
 
-## ElevenLabs agent and number
+## ElevenLabs agents and number
 
-`clusters/offsite/apps/elevenlabs/desired/` declares the troll agent, `pbx-troll`, and the phone number record it answers. Every 15 minutes, the offsite CronJob `elevenlabs-reconcile` runs `reconcile.sh` to make ElevenLabs match those files. It logs field names, never values.
+`clusters/offsite/apps/elevenlabs/desired/agents/` declares one agent per file: the troll agent `pbx-troll`, and `pbx-switchboard`, the operator [Switchboard](switchboard.md) calls the owner with. `desired/phone-number.json` declares the phone number record: the agent that answers it, its inbound trunk, and an outbound trunk to voip.ms over TLS for switchboard's calls. Every 15 minutes, the offsite CronJob `elevenlabs-reconcile` runs `reconcile.sh` to make ElevenLabs match those files. It logs field names, never values.
 
-The write key exists, so the reconciler runs in write mode: it owns `pbx-troll` and the phone number's binding to it in the live ElevenLabs account. Each run creates the agent if none has its name, patches the declared fields that differ, and, once the agent matches git, binds the number with one PATCH that carries the whole inbound trunk and its digest credentials, because the API never returns the password. Without the write key, it only logs what it would create, patch or bind.
+The write key exists, so the reconciler runs in write mode: it owns every declared agent and the phone number in the live ElevenLabs account. Each run creates an agent whose name none has, patches the declared fields that differ, and, once the answering agent matches git, binds the number with one PATCH that carries all of the inbound trunk and its digest credentials, because the API never returns the password. The same PATCH carries the outbound trunk and its credentials when the Secret `elevenlabs-outbound-trunk` exists. Until the 1Password item `elevenlabs outbound trunk` does, each run logs that the trunk waits, and the number has no outbound trunk. Without the write key, it only logs what it would create, patch or bind.
 
-- If ElevenLabs reports no credentials after the bind, it unbinds the number and fails the Job.
+- If ElevenLabs reports no inbound credentials after the bind, it unbinds the number and fails the Job.
+- If the live number carries an outbound trunk whose password git does not hold, it fails the Job.
 
-External Secrets reads three 1Password items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, and `elevenlabs troll trunk` for the digest credentials.
+External Secrets reads four 1Password items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, `elevenlabs troll trunk` for the inbound digest credentials, and `elevenlabs outbound trunk` for the sub-account it dials out on.
 
 ## Operate
 
