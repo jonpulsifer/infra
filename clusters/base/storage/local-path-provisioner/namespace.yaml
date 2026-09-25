@@ -5,6 +5,7 @@ metadata:
   name: local-path-provisioner
   labels:
     kustomize.toolkit.fluxcd.io/prune: enabled
+    lolwtf.ca/sandbox-exec: deny
     pod-security.kubernetes.io/audit: baseline
     pod-security.kubernetes.io/audit-version: latest
     pod-security.kubernetes.io/enforce: privileged
