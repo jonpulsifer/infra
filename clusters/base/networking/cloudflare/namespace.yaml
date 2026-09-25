@@ -4,6 +4,7 @@ kind: Namespace
 metadata:
   name: cloudflare
   labels:
+    lolwtf.ca/sandbox-exec: deny
     kustomize.toolkit.fluxcd.io/prune: enabled
     pod-security.kubernetes.io/audit: baseline
     pod-security.kubernetes.io/audit-version: latest
