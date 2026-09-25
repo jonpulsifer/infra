@@ -3,7 +3,6 @@ import { readConfig } from '../src/config.ts';
 
 const minimal = {
   ELEVENLABS_API_KEY: 'key',
-  SWITCHBOARD_AGENT_ID: 'agent_1',
   SWITCHBOARD_PHONE_NUMBER_ID: 'phnum_1',
   SWITCHBOARD_TO_NUMBER: '+19025551234',
   SWITCHBOARD_RING_TOKEN: 'ring-token',
@@ -13,6 +12,8 @@ const minimal = {
 describe('config from the environment', () => {
   test('applies the contract defaults', () => {
     const config = readConfig(minimal);
+    expect(config.agentName).toBe('pbx-switchboard');
+    expect(config.agentId).toBeUndefined();
     expect(config.ringDailyCap).toBe(3);
     expect(config.alertDailyCap).toBe(3);
     expect(config.cooldownMs).toBe(10 * 60_000);
@@ -73,9 +74,20 @@ describe('config from the environment', () => {
     ).toThrow('SWITCHBOARD_QUIET_TZ');
   });
 
+  test('an agent id is an override, and a blank one is no override', () => {
+    expect(
+      readConfig({ ...minimal, SWITCHBOARD_AGENT_ID: 'agent_1' }).agentId,
+    ).toBe('agent_1');
+    expect(
+      readConfig({ ...minimal, SWITCHBOARD_AGENT_ID: '  ' }).agentId,
+    ).toBeUndefined();
+  });
+
   test('takes every override', () => {
     const config = readConfig({
       ...minimal,
+      SWITCHBOARD_AGENT_NAME: 'pbx-other',
+      SWITCHBOARD_AGENT_ID: 'agent_9',
       SWITCHBOARD_RING_DAILY_CAP: '5',
       SWITCHBOARD_ALERT_DAILY_CAP: '1',
       SWITCHBOARD_COOLDOWN_MINUTES: '2',
@@ -84,6 +96,8 @@ describe('config from the environment', () => {
       SWITCHBOARD_QUIET_TZ: 'UTC',
       SWITCHBOARD_PORT: '9090',
     });
+    expect(config.agentName).toBe('pbx-other');
+    expect(config.agentId).toBe('agent_9');
     expect(config.ringDailyCap).toBe(5);
     expect(config.alertDailyCap).toBe(1);
     expect(config.cooldownMs).toBe(2 * 60_000);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { Config } from '../src/config.ts';
+import type { ResolvedConfig } from '../src/config.ts';
 import type { Fields, Log } from '../src/log.ts';
 import { createApp } from '../src/server.ts';
 
@@ -8,8 +8,9 @@ afterEach(() => {
   globalThis.fetch = original;
 });
 
-const baseConfig: Config = {
+const baseConfig: ResolvedConfig = {
   elevenlabsApiKey: 'super-secret-key',
+  agentName: 'pbx-switchboard',
   agentId: 'agent_1',
   phoneNumberId: 'phnum_1',
   toNumber: '+19025551234',

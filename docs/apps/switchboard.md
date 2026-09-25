@@ -19,6 +19,11 @@ bill. `/ring` takes a short reason and rings the number in
 `critical` alert outside quiet hours, skips the synthetic `Watchdog` alert,
 and dedupes by fingerprint so a repeated notification does not ring twice.
 
+At boot, switchboard lists the ElevenLabs agents and keeps the id of the one
+named `SWITCHBOARD_AGENT_NAME`, `pbx-switchboard` by default. No agent of that
+name, or two of them, is a config error, and the process exits with status 64.
+`SWITCHBOARD_AGENT_ID` skips the lookup.
+
 Every call goes to ElevenLabs' outbound-call endpoint, bounded by a timeout
 and never retried: a redial is a decision for whoever calls switchboard, not
 switchboard itself. It logs an outcome and never the destination number, a
