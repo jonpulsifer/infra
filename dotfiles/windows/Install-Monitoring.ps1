@@ -113,6 +113,17 @@ function Install-Msi {
     }
 }
 
+function Uninstall-Msi {
+    param([Parameter(Mandatory)] [string] $ProductCode)
+
+    $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/x', $ProductCode, '/qn', '/norestart') `
+        -Wait -PassThru -NoNewWindow
+    # 1605 is a product this account never installed. 3010 is success with a reboot pending.
+    if ($proc.ExitCode -notin 0, 1605, 3010) {
+        throw "msiexec exited $($proc.ExitCode) removing $ProductCode"
+    }
+}
+
 function Set-FirewallRule {
     # The name check makes it idempotent, so ShouldProcess adds nothing.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
@@ -208,13 +219,28 @@ Write-Host "==> Vector $VectorVersion" -ForegroundColor Cyan
 
 $vectorExe = Join-Path $env:ProgramFiles 'Vector\bin\vector.exe'
 $vectorConfig = Join-Path $env:ProgramFiles 'Vector\config\vector.yaml'
+$taskName = 'Vector'
 
-if (Test-Path -LiteralPath $vectorExe) {
+# vector.exe has no version resource, so its ProductVersion is empty. The binary reports its own.
+$vectorInstalled = $null
+if ((Test-Path -LiteralPath $vectorExe) -and ("$(& $vectorExe --version)" -match '^vector (\S+)')) {
+    $vectorInstalled = $Matches[1]
+}
+
+if ($vectorInstalled -eq $VectorVersion) {
     Write-Host '  ok       already installed'
 }
 else {
     $msi = Get-PinnedFile -Url $VectorUrl -Sha256 $VectorSha256 -Extension '.msi'
     try {
+        # The task holds vector.exe open.
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $vectorExe) {
+            # Every Vector MSI has this ProductCode and no upgrade table, so msiexec
+            # refuses a new version (1638) until the old one is removed.
+            Uninstall-Msi -ProductCode '{7FAD6F97-D84E-42CC-A600-5F4EC3460FF5}'
+            Write-Host "  removed  Vector $vectorInstalled"
+        }
         Install-Msi -Path $msi
         Write-Host "  installed $vectorExe"
     }
@@ -233,7 +259,6 @@ New-Item -ItemType Directory -Path 'C:\ProgramData\vector' -Force | Out-Null
 
 # vector.exe is a console binary: as an sc.exe service the SCM kills it with error
 # 1053. A SYSTEM task at startup keeps it running.
-$taskName = 'Vector'
 $action = New-ScheduledTaskAction -Execute $vectorExe -Argument "--config `"$vectorConfig`""
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

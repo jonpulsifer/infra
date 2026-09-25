@@ -66,28 +66,7 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 
 2. In `Install-Monitoring.ps1`, change the `<Agent>Version`, `<Agent>Url` and `<Agent>Sha256` parameters together. `<Agent>` is `Exporter`, `Ohm` or `Vector`.
 3. Merge the change.
-4. If the agent is Vector, do [Remove Vector](#remove-vector) on each desktop.
-5. Do [Install or update the agents](#install-or-update-the-agents) on each desktop.
-
-## Remove Vector
-
-Before a Vector upgrade, do this procedure.
-
-1. On the desktop, open PowerShell 7 as administrator.
-2. Stop the `Vector` task.
-
-   ```powershell
-   Stop-ScheduledTask -TaskName Vector
-   ```
-
-3. Uninstall Vector in Settings, Apps, Installed apps.
-4. Make sure `vector.exe` is gone.
-
-   ```powershell
-   Test-Path 'C:\Program Files\Vector\bin\vector.exe'
-   ```
-
-   Result: `False`.
+4. Do [Install or update the agents](#install-or-update-the-agents) on each desktop.
 
 ## Check a desktop
 
@@ -173,7 +152,6 @@ Memory Integrity and the vulnerable driver blocklist are Windows security settin
 | Step 4 of [Check a desktop](#check-a-desktop) prints `0`. | The `OhmGraphite` service stopped, or it does not run as LocalSystem. | As administrator, run `sc.exe config OhmGraphite obj= LocalSystem`. Run `Restart-Service OhmGraphite`. |
 | GPU temperature is present, and GPU load is missing. | The `gpu` collector is off. | Run the installer again. |
 | Step 6 of [Check a desktop](#check-a-desktop) shows no lines. | The `Vector` task stopped, or `vector.yaml` has another endpoint. | Run the installer again. |
-| Vector stays at an old version. | The installer skips Vector when `vector.exe` exists. | Do [Remove Vector](#remove-vector). Run the installer again. |
 
 ## Related
 
