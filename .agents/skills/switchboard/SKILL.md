@@ -18,7 +18,7 @@ agent needs beyond it.
 When the owner asks to be called, send one request and read the status code:
 
 ```bash
-curl -sS -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
+curl -sS --max-time 15 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
   -H "Authorization: Bearer $SWITCHBOARD_RING_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"reason":"<one short line>"}'
@@ -29,6 +29,9 @@ curl -sS -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
   `cooldown`. Report the reason and do not retry.
 - `502`: the call was attempted once and failed. Report it and do not retry.
 - `401`, or either variable unset: this sandbox has no ring token. Say so.
+- `000`, with a curl error instead of a response (name not resolved,
+  connection refused, or the timeout): switchboard is parked, as
+  `docs/apps/switchboard.md` says. Say so and do not retry.
 
 ## Notes
 
