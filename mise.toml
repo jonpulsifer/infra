@@ -89,6 +89,10 @@ run = "bash .github/scripts/pbx-check.sh"
 description = "Test the PBX check's inbound dialplan walker against fixtures"
 run = "bash .github/scripts/pbx-inbound-walk_test.sh"
 
+[tasks."pbx:voices"]
+description = "Render the PBX's recorded prompts in clusters/folly/apps/pbx/sounds with ElevenLabs text-to-speech (default: only lines with no clip; pass --all or line ids)"
+run = "bash .github/scripts/pbx-voices.sh"
+
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [

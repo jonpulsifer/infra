@@ -1,0 +1,96 @@
+# The PBX's recorded prompts. `mise run pbx:voices` renders each line to
+# <id>.ulaw beside this file with ElevenLabs text-to-speech, and the dialplan
+# plays /var/lib/pbx-sounds/<id>. Every file here counts against one
+# ConfigMap, so keep lines short.
+voices:
+  house: &house cjVigY5qzO86Huf0OWal
+  lenny: &lenny pqHfZKP75CvOlQylNhV4
+
+lines:
+  # The press-5 screen.
+  - id: captcha-greeting
+    voice_id: *house
+    text: Hi! You've reached the desk. If you're a person, press 5.
+  - id: captcha-retry
+    voice_id: *house
+    text: Sorry, I didn't catch that. If you're a real person, press 5 now.
+  - id: goodbye
+    voice_id: *house
+    text: Thanks for calling. Goodbye!
+
+  # The Endless Queue, in order, with hold music between each.
+  - id: queue-01
+    voice_id: *house
+    text: Thank you for holding. Your call is important to us, but not that important.
+  - id: queue-02
+    voice_id: *house
+    text: You are caller number eleven.
+  - id: queue-03
+    voice_id: *house
+    text: Your call has been placed in a queue. The queue has been placed in a drawer.
+  - id: queue-04
+    voice_id: *house
+    text: Your estimated wait time is... yes.
+  - id: queue-05
+    voice_id: *house
+    text: Good news! You are still caller number eleven.
+  - id: queue-06
+    voice_id: *house
+    text: All of our agents are busy pretending to be busy.
+  - id: queue-07
+    voice_id: *house
+    text: We are experiencing higher than usual call volumes, because you keep calling.
+  - id: queue-08
+    voice_id: *house
+    text: Calls are answered in the order they were received. Yours was received last.
+  - id: queue-09
+    voice_id: *house
+    text: Please enjoy more of this wonderful music.
+  - id: queue-10
+    voice_id: *house
+    text: Thank you for your patience. Your patience is also important to us.
+
+  # Robo-Lenny: 01 and 02 once, then 03 to 14 on a loop, each after the
+  # caller stops talking.
+  - id: lenny-01
+    voice_id: *lenny
+    text: Hello? Oh, hello! Yes, this is Gordon.
+  - id: lenny-02
+    voice_id: *lenny
+    text: Sorry, who's this, now?
+  - id: lenny-03
+    voice_id: *lenny
+    text: Oh, yes. Yes, yes.
+  - id: lenny-04
+    voice_id: *lenny
+    text: That's interesting. My daughter was just saying something about that.
+  - id: lenny-05
+    voice_id: *lenny
+    text: Hang on, the ducks are at the window again. Shoo! Sorry, go on.
+  - id: lenny-06
+    voice_id: *lenny
+    text: Could you say that again? The line went a bit funny.
+  - id: lenny-07
+    voice_id: *lenny
+    text: Yes... yes, I see.
+  - id: lenny-08
+    voice_id: *lenny
+    text: Back in my day, we didn't have these telephone things. We just shouted.
+  - id: lenny-09
+    voice_id: *lenny
+    text: Sorry, I'm a bit hard of hearing. Could you speak up?
+  - id: lenny-10
+    voice_id: *lenny
+    text: Mm-hmm. Yes. Go on.
+  - id: lenny-11
+    voice_id: *lenny
+    text: Is this about the ducks? I've told the council, they're not my ducks.
+  - id: lenny-12
+    voice_id: *lenny
+    text: Oh, that does sound good. Very good indeed.
+  - id: lenny-13
+    voice_id: *lenny
+    text: Someone's at the door. No, no, it's just the wind. Where were we?
+  - id: lenny-14
+    voice_id: *lenny
+    text: Sorry, I missed that last bit. Could you start again from the beginning?

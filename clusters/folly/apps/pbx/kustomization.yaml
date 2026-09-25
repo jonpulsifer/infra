@@ -8,6 +8,12 @@ resources:
   - network-policy.yaml
 
 patches:
+  # First, while asterisk is still the base's only container: the sidecar's
+  # strategic merge puts provision ahead of it.
+  - path: asterisk-mounts.yaml
+    target:
+      kind: Deployment
+      name: pbx
   - path: provision-sidecar.yaml
 
 namespace: pbx
@@ -52,6 +58,42 @@ configMapGenerator:
     # Escaping each one as `$${...}` would work and would be unreadable, and
     # every future dialplan line would have to remember. Opting the ConfigMap
     # out is the version that cannot be got wrong later.
+    options:
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+
+  # The recorded prompts, rendered from sounds/lines.yaml by
+  # `mise run pbx:voices`. Binary, so kustomize writes them as binaryData;
+  # the opt-out keeps Flux away from them all the same.
+  - name: pbx-sounds
+    files:
+      - sounds/captcha-greeting.ulaw
+      - sounds/captcha-retry.ulaw
+      - sounds/goodbye.ulaw
+      - sounds/queue-01.ulaw
+      - sounds/queue-02.ulaw
+      - sounds/queue-03.ulaw
+      - sounds/queue-04.ulaw
+      - sounds/queue-05.ulaw
+      - sounds/queue-06.ulaw
+      - sounds/queue-07.ulaw
+      - sounds/queue-08.ulaw
+      - sounds/queue-09.ulaw
+      - sounds/queue-10.ulaw
+      - sounds/lenny-01.ulaw
+      - sounds/lenny-02.ulaw
+      - sounds/lenny-03.ulaw
+      - sounds/lenny-04.ulaw
+      - sounds/lenny-05.ulaw
+      - sounds/lenny-06.ulaw
+      - sounds/lenny-07.ulaw
+      - sounds/lenny-08.ulaw
+      - sounds/lenny-09.ulaw
+      - sounds/lenny-10.ulaw
+      - sounds/lenny-11.ulaw
+      - sounds/lenny-12.ulaw
+      - sounds/lenny-13.ulaw
+      - sounds/lenny-14.ulaw
     options:
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled

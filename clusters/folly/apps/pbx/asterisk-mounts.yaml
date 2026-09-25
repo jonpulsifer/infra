@@ -1,0 +1,19 @@
+---
+# folly's extra mounts on the shared Deployment's asterisk container, as
+# appends. A strategic-merge patch would replace these lists rather than add to
+# them; `test` refuses to patch if the container order ever changes under it.
+#
+# The prompts mount beside /var/lib/asterisk, not under it: that directory is
+# the image's links into the Nix store, and the dialplan plays these by
+# absolute path.
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: asterisk
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value: {name: sounds, mountPath: /var/lib/pbx-sounds, readOnly: true}
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: sounds
+    configMap: {name: pbx-sounds, defaultMode: 0444}
