@@ -47,7 +47,9 @@ mkdir -p "$stubs"
 
 # The URL is the last argument and the body arrives on stdin, the way
 # reconcile.sh's call() invokes curl. A PATCH updates the fixture the way the
-# API would read it back: a password becomes has_auth_credentials.
+# API would read it back: a password becomes has_auth_credentials, and with
+# STUB_DROP_AUTH=1 the inbound trunk reads back without it, the way a rejected
+# credential does.
 cat >"$stubs/curl" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -65,8 +67,9 @@ path=${url#*://}
 path=/${path#*/}
 path=${path%%\?*}
 
+# A null leaf is part of the shape: the unbind body is {agent_id: null}.
 shape=""
-[[ -z $body ]] || shape=$(jq -r '[paths(scalars) | map(tostring) | join(".")] | join(" ")' <<<"$body")
+[[ -z $body ]] || shape=$(jq -r '[paths(type != "object" and type != "array") | map(tostring) | join(".")] | join(" ")' <<<"$body")
 printf '%s %s key=%s %s\n' "$method" "$path" "$key" "$shape" >>"$STUB_LOG"
 
 respond() { printf '%s\n%s' "$1" "$2"; }
@@ -102,7 +105,8 @@ case "$method $path" in
   "PATCH /v1/convai/phone-numbers/"*)
     jq --argjson b "$body" "
       .assigned_agent = (if (\$b | has(\"agent_id\")) then (if \$b.agent_id == null then null else {agent_id: \$b.agent_id} end) else .assigned_agent end)
-      | .inbound_trunk = (if \$b.inbound_trunk_config == null then .inbound_trunk else (\$b.inbound_trunk_config | $trunk) end)
+      | .inbound_trunk = (if \$b.inbound_trunk_config == null then .inbound_trunk
+                          else (\$b.inbound_trunk_config | $trunk | .has_auth_credentials = (.has_auth_credentials and \$ENV.STUB_DROP_AUTH != \"1\")) end)
       | .outbound_trunk = (if \$b.outbound_trunk_config == null then .outbound_trunk else (\$b.outbound_trunk_config | $trunk) end)
     " "$STUB_DIR/number.json" >"$STUB_DIR/number.next.json"
     mv "$STUB_DIR/number.next.json" "$STUB_DIR/number.json"
@@ -142,7 +146,7 @@ run_case() {
   status=0
   out=$(env -u ELEVENLABS_READ_KEY -u ELEVENLABS_WRITE_KEY \
     -u TRUNK_USERNAME -u TRUNK_PASSWORD -u OUTBOUND_TRUNK_USERNAME -u OUTBOUND_TRUNK_PASSWORD \
-    -u STUB_CREATE_STATUS \
+    -u STUB_CREATE_STATUS -u STUB_DROP_AUTH \
     ELEVENLABS_API=http://stub DESIRED_DIR="$dir" "$@" bash "$script" 2>&1) || status=$?
   requests=$(cat "$STUB_LOG")
 }
@@ -170,6 +174,28 @@ assert_contains 'the number PATCH carries the inbound password' "$patch" 'inboun
 assert_lacks 'the number PATCH carries no outbound trunk without its item' "$patch" 'outbound_trunk_config'
 assert_equal 'the final line claims no outbound trunk when none was sent' \
   "number $number_id: bound to pbx-troll with credentials" "$(tail -n1 <<<"$out")"
+
+run_case "$desired" "${write_env[@]}" STUB_DROP_AUTH=1
+assert_equal 'a trunk that reads back without credentials fails the Job' 1 "$status"
+assert_contains 'a trunk that reads back without credentials is named' "$out" \
+  "number $number_id: the trunk reports no credentials after the write"
+assert_contains 'a trunk that reads back without credentials is unbound' "$out" "number $number_id: unbound"
+assert_lacks 'a trunk that reads back without credentials is not reported bound' "$out" 'bound to pbx-troll'
+assert_equal 'the unbind is the second number PATCH' 2 "$(grep -c "PATCH /v1/convai/phone-numbers/$number_id" <<<"$requests")"
+assert_equal 'the unbind PATCH carries only agent_id' \
+  "PATCH /v1/convai/phone-numbers/$number_id key=write-key agent_id" \
+  "$(grep "PATCH /v1/convai/phone-numbers/$number_id" <<<"$requests" | tail -n1)"
+assert_equal 'the unbind leaves the number with no agent' null "$(jq -r .assigned_agent "$STUB_DIR/number.json")"
+
+run_case "$desired" ELEVENLABS_READ_KEY=read-key ELEVENLABS_WRITE_KEY=write-key
+assert_equal 'a write run without the inbound item fails the Job' 1 "$status"
+assert_contains 'a write run without the inbound item binds no agent' "$out" \
+  "number $number_id: the trunk credentials are missing, so no agent is bound"
+assert_contains 'a write run without the inbound item unbinds the number' "$out" "number $number_id: unbound"
+assert_equal 'a write run without the inbound item sends one number PATCH, carrying only agent_id' \
+  "PATCH /v1/convai/phone-numbers/$number_id key=write-key agent_id" \
+  "$(grep "PATCH /v1/convai/phone-numbers/$number_id" <<<"$requests")"
+assert_equal 'the unbind leaves the number with no agent' null "$(jq -r .assigned_agent "$STUB_DIR/number.json")"
 
 run_case "$desired" "${write_env[@]}" OUTBOUND_TRUNK_USERNAME=out-user OUTBOUND_TRUNK_PASSWORD=out-pass
 assert_equal 'a write run with the outbound item exits 0' 0 "$status"
