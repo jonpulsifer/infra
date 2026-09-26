@@ -2,22 +2,28 @@
 # Alertmanager's API takes an alert from any pod that reaches it, and the
 # switchboard receiver turns a forged critical alert into a call to the owner
 # that spends the day's cap. Prometheus posts alerts and scrapes both ports,
-# and Grafana reads the API as a datasource; nothing else on offsite has a
-# reason to. The single replica has no cluster peer, so 9094 stays closed.
+# Grafana reads the API as a datasource, and `mise run alerts` reads it through
+# the kube-apiserver's service proxy; nothing else on offsite has a reason to.
+# The single replica has no cluster peer, so 9094 stays closed.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: alertmanager
   namespace: monitoring
 spec:
-  # The operator stamps this label on the Alertmanager StatefulSet's pods.
+  # The operator sets this label on the Alertmanager StatefulSet's pods.
   endpointSelector:
     matchLabels:
       app.kubernetes.io/name: alertmanager
   ingress:
-    # The liveness and readiness probes come from the node.
+    # The liveness and readiness probes come from the node. The service proxy
+    # comes from the control-plane node's address, which carries the
+    # kube-apiserver identity whichever node the pod is on. Each entity also
+    # admits that node's host-network pods, so a namespace that runs one is
+    # fenced from the sandbox (clusters/offsite/apps/mate/fence/).
     - fromEntities:
         - host
+        - kube-apiserver
       toPorts:
         - ports:
             - {port: "9093", protocol: TCP}

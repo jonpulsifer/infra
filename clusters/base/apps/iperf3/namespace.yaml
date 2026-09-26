@@ -5,6 +5,10 @@ metadata:
   labels:
     app.kubernetes.io/name: iperf3
     app.kubernetes.io/part-of: netbench
+    # A hostNetwork pod has the node's identity, so every network policy that
+    # admits the node admits it; the sandbox fence on offsite is what keeps a
+    # Rowbutt sandbox out of it. folly has no fence, so the label is inert there.
+    lolwtf.ca/sandbox-exec: deny
     # The DaemonSet needs hostNetwork, which baseline and restricted forbid.
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/enforce-version: latest
