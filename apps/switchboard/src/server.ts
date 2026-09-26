@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AlertmanagerPayload } from './alertmanager.ts';
 import { criticalFiringAlerts, resolvedFingerprints } from './alertmanager.ts';
 import { bearerMatches } from './auth.ts';
-import type { Config } from './config.ts';
+import type { ResolvedConfig } from './config.ts';
 import { FingerprintDedupe } from './dedupe.ts';
 import { OutboundCallError, placeOutboundCall } from './elevenlabs.ts';
 import { Limiter } from './limiter.ts';
@@ -11,7 +11,7 @@ import { isQuietHours } from './quiet-hours.ts';
 import { sanitizeReason } from './reason.ts';
 
 export interface ServerDeps {
-  readonly config: Config;
+  readonly config: ResolvedConfig;
   readonly log: Log;
   /** Overridable for tests; defaults to the wall clock. */
   readonly now?: () => number;

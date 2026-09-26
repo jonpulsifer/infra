@@ -4,7 +4,7 @@ description: Two Asterisk phone switches, one on folly for the four lines of the
 status: live
 ---
 
-The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it carries the four lines of the office phone, cathy, a Cisco SPA504G, to voip.ms, the SIP carrier. On offsite, it hands one voip.ms number to an ElevenLabs voice agent, but the pod stays parked at zero replicas today. Git declares the ElevenLabs troll agent, which keeps spam callers talking, and the phone number it answers, and a CronJob on offsite applies them.
+The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it carries the four lines of the office phone, cathy, a Cisco SPA504G, to voip.ms, the SIP carrier. On offsite, it hands one voip.ms number to an ElevenLabs voice agent, but the pod stays parked at zero replicas today. [ElevenLabs](elevenlabs.md) has the troll agent, which keeps spam callers talking, and the phone number it answers.
 
 ## Use it
 
@@ -31,16 +31,6 @@ The folly PBX registers each sub-account over TLS and requires SRTP for media. A
 
 Asterisk logs every SIP message. Vector removes the SRTP keys and digest responses before VictoriaLogs stores the logs.
 
-## ElevenLabs agent and number
-
-`clusters/offsite/apps/elevenlabs/desired/` declares the troll agent, `pbx-troll`, and the phone number record it answers. Every 15 minutes, the offsite CronJob `elevenlabs-reconcile` runs `reconcile.sh` to make ElevenLabs match those files. It logs field names, never values.
-
-The write key exists, so the reconciler runs in write mode: it owns `pbx-troll` and the phone number's binding to it in the live ElevenLabs account. Each run creates the agent if none has its name, patches the declared fields that differ, and, once the agent matches git, binds the number with one PATCH that carries the whole inbound trunk and its digest credentials, because the API never returns the password. Without the write key, it only logs what it would create, patch or bind.
-
-- If ElevenLabs reports no credentials after the bind, it unbinds the number and fails the Job.
-
-External Secrets reads three 1Password items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, and `elevenlabs troll trunk` for the digest credentials.
-
 ## Operate
 
 | Alert | Meaning | Runbook |
@@ -49,12 +39,12 @@ External Secrets reads three 1Password items in the `homelab` vault, one Secret 
 | `PBXTrunkNotRegistered` | A voip.ms sub-account has not been registered for 5 minutes. | [Operate the office phone](../runbooks/operate-the-office-phone.md) |
 | `PBXHandsetOffline` | An office-phone line has not been registered to the PBX for 5 minutes. | [Operate the office phone](../runbooks/operate-the-office-phone.md) |
 
-No alerts watch the offsite PBX. A failed `elevenlabs-reconcile` Job fires `KubeJobFailed`, and its log names the HTTP status or the field at fault.
+No alerts watch the offsite PBX.
 
 ## Reference
 
 - Manifests: `clusters/base/apps/pbx/`, `clusters/folly/apps/pbx/` and `clusters/offsite/apps/pbx/`
-- ElevenLabs reconciler: `clusters/offsite/apps/elevenlabs/`
+- Agents and number: [ElevenLabs](elevenlabs.md)
 - Image: `nix/images/asterisk.nix`, built by `.github/workflows/nix-images.yml` and published as `ghcr.io/jonpulsifer/asterisk`
 - Alerts: `clusters/folly/monitoring/pbx-rules.yaml`
 - Addresses: `CATHY_IP` and `PBX_SIP_VIP` in `clusters/folly/config/cluster-settings.yaml`, a divergence that [Topology](../reference/topology.md#rules) records

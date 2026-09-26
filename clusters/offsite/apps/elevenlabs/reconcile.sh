@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Makes the ElevenLabs troll agent and its phone number match desired/*.json.
-# With no write key it only reports drift. It logs field names, never values:
-# the requests carry an API key and the trunk password, so never add `set -x`
-# or print a request or response body.
+# Makes every ElevenLabs agent under desired/agents/ and the phone number in
+# desired/phone-number.json match git. With no write key it only reports
+# drift. It logs field names, never values: the requests carry an API key and
+# the trunk passwords, so never add `set -x` or print a request or response
+# body.
 set -euo pipefail
 
 api=${ELEVENLABS_API:-https://api.elevenlabs.io}
 desired=${DESIRED_DIR:-/desired}
+agents_dir=${AGENTS_DIR:-$desired/agents}
 write_key=${ELEVENLABS_WRITE_KEY:-}
 read_key=${ELEVENLABS_READ_KEY:-$write_key}
 failed=0
@@ -67,7 +69,8 @@ drift() {
 }
 
 # Pages through every agent: the list's search is fuzzy, and an agent it
-# missed would be created again on every run.
+# missed would be created again on every run. Status 1 is a failed list;
+# status 2 is two live agents of one name, which git cannot choose between.
 find_agent() {
   local page cursor="" ids="[]"
   for _ in {1..20}; do
@@ -76,78 +79,150 @@ find_agent() {
     [[ $(jq -r .has_more <<<"$page") == true ]] || break
     cursor=$(jq -r '.next_cursor | @uri' <<<"$page")
   done
-  jq -r --arg n "$1" 'if length > 1 then error("more than one agent is named \($n)") else .[] end' <<<"$ids"
+  [[ $(jq length <<<"$ids") -le 1 ]] || return 2
+  jq -r '.[]' <<<"$ids"
 }
 
 [[ -n $read_key ]] || die "no API key: the Secret elevenlabs-read-key is missing"
 mode="report"
 [[ -z $write_key ]] || mode="write"
 
-want_agent=$(jq -c . "$desired/troll-agent.json")
 want_number=$(jq -c . "$desired/phone-number.json")
-name=$(jq -r .name <<<"$want_agent")
 number_id=$(jq -r .phone_number_id <<<"$want_number")
-[[ $(jq -r .agent_name <<<"$want_number") == "$name" ]] \
-  || die "phone-number.json binds an agent that troll-agent.json does not declare"
+bound_name=$(jq -r .agent_name <<<"$want_number")
 log "mode: $mode"
 
-agent_id=$(find_agent "$name") || die "could not list agents"
-agent_ready=no
-if [[ -z $agent_id ]]; then
-  if [[ $mode == report ]]; then
-    log "agent $name: would create"
-  else
-    created=$(call POST /v1/convai/agents/create "$write_key" <<<"$want_agent") || die "could not create agent $name"
+# One entry per declared agent: its live id (empty until a report run's
+# "would create" happens), and whether it matches git closely enough to
+# answer the number.
+declare -A agent_ids=() agent_ready=()
+
+# A request that fails for one agent fails the Job at the end and leaves that
+# agent as it is: the other agents and the number's guards still run.
+give_up() {
+  log "$*"
+  failed=1
+}
+
+# reconcile_agent NAME WANT creates or patches one agent and records it.
+reconcile_agent() {
+  local name=$1 want=$2 agent_id live fields left created status
+  agent_ready[$name]=no
+  agent_ids[$name]=""
+  agent_id=$(find_agent "$name") || {
+    status=$?
+    [[ $status == 2 ]] || die "could not list agents"
+    give_up "agent $name: more than one live agent has this name"
+    return
+  }
+  agent_ids[$name]=$agent_id
+  if [[ -z $agent_id ]]; then
+    if [[ $mode == report ]]; then
+      log "agent $name: would create"
+      return
+    fi
+    created=$(call POST /v1/convai/agents/create "$write_key" <<<"$want") || {
+      give_up "agent $name: not created"
+      return
+    }
     agent_id=$(jq -r '.agent_id // empty' <<<"$created")
-    [[ -n $agent_id ]] || die "the create response named no agent"
+    if [[ -z $agent_id ]]; then
+      give_up "agent $name: the create response named no agent"
+      return
+    fi
+    agent_ids[$name]=$agent_id
     log "agent $name: created $agent_id"
     fields=created
-  fi
-else
-  live=$(call GET "/v1/convai/agents/$agent_id" "$read_key") || die "could not read agent $name"
-  fields=$(drift "$want_agent" "$live")
-  if [[ -z $fields ]]; then
-    log "agent $name ($agent_id): in sync"
-    agent_ready=yes
-  elif [[ $mode == report ]]; then
-    log "agent $name ($agent_id): would patch $fields"
   else
-    call PATCH "/v1/convai/agents/$agent_id" "$write_key" <<<"$want_agent" >/dev/null \
-      || die "could not patch agent $name"
+    live=$(call GET "/v1/convai/agents/$agent_id" "$read_key") || {
+      give_up "agent $name ($agent_id): not read"
+      return
+    }
+    fields=$(drift "$want" "$live")
+    if [[ -z $fields ]]; then
+      log "agent $name ($agent_id): in sync"
+      agent_ready[$name]=yes
+      return
+    fi
+    if [[ $mode == report ]]; then
+      log "agent $name ($agent_id): would patch $fields"
+      return
+    fi
+    call PATCH "/v1/convai/agents/$agent_id" "$write_key" <<<"$want" >/dev/null || {
+      give_up "agent $name ($agent_id): not patched"
+      return
+    }
   fi
-fi
 
-# A write re-reads the agent, and binds the number only to an agent whose
-# auth, call limits and tools match git.
-if [[ $mode == write && $agent_ready == no ]]; then
-  live=$(call GET "/v1/convai/agents/$agent_id" "$read_key") || die "could not re-read agent $name"
-  left=$(drift "$want_agent" "$live")
+  # A write re-reads the agent, and the number binds only to an agent whose
+  # auth, call limits and tools match git.
+  live=$(call GET "/v1/convai/agents/$agent_id" "$read_key") || {
+    give_up "agent $name ($agent_id): not re-read"
+    return
+  }
+  left=$(drift "$want" "$live")
   if [[ -n $left ]]; then
-    log "agent $name ($agent_id): still differs after a write: $left"
-    failed=1
-  else
-    [[ $fields == created ]] || log "agent $name ($agent_id): patched $fields"
-    agent_ready=yes
+    give_up "agent $name ($agent_id): still differs after a write: $left"
+    return
   fi
-fi
+  [[ $fields == created ]] || log "agent $name ($agent_id): patched $fields"
+  agent_ready[$name]=yes
+}
+
+agent_files=("$agents_dir"/*.json)
+[[ -e ${agent_files[0]} ]] || die "$agents_dir declares no agent"
+for file in "${agent_files[@]}"; do
+  want_agent=$(jq -c . "$file")
+  name=$(jq -r '.name // empty' <<<"$want_agent")
+  [[ -n $name ]] || die "$(basename "$file") names no agent"
+  [[ ! -v agent_ids[$name] ]] || die "two files under $agents_dir name the agent $name"
+  reconcile_agent "$name" "$want_agent"
+done
+
+[[ -v agent_ids[$bound_name] ]] \
+  || die "phone-number.json binds an agent that $agents_dir does not declare"
+agent_id=${agent_ids[$bound_name]}
+bound_ready=${agent_ready[$bound_name]}
+
+have_creds=yes
+[[ -n ${TRUNK_USERNAME:-} && -n ${TRUNK_PASSWORD:-} ]] || have_creds=no
+have_out=yes
+[[ -n ${OUTBOUND_TRUNK_USERNAME:-} && -n ${OUTBOUND_TRUNK_PASSWORD:-} ]] || have_out=no
+
+# The outbound trunk is compared and sent only with its credentials in hand:
+# git declares the address and transport, and the 1Password item holds the
+# sub-account it dials out on.
+want_out=$(jq -c '.outbound_trunk_config // empty' <<<"$want_number")
+out_cfg=null
+[[ -z $want_out || $have_out == no ]] || out_cfg=$want_out
 
 live=$(call GET "/v1/convai/phone-numbers/$number_id" "$read_key") || die "could not read number $number_id"
-fields=$(jq -rn --argjson want "$want_number" --argjson live "$live" --arg agent "$agent_id" '
+fields=$(jq -rn --argjson want "$want_number" --argjson live "$live" --arg agent "$agent_id" --argjson out "$out_cfg" '
   $want.inbound_trunk_config as $t
   | [ (if $agent == "" or ($live.assigned_agent.agent_id // "") != $agent then "agent_id" else empty end),
       ($t | keys_unsorted[] | select($t[.] != $live.inbound_trunk[.]) | "inbound_trunk_config.\(.)"),
       (if ($live.inbound_trunk.has_auth_credentials | not) or $live.inbound_trunk.username != $ENV.TRUNK_USERNAME
-       then "inbound_trunk_config.credentials" else empty end) ]
+       then "inbound_trunk_config.credentials" else empty end),
+      (($out // {}) | keys_unsorted[] | select($out[.] != $live.outbound_trunk[.]) | "outbound_trunk_config.\(.)"),
+      (if $out != null and (($live.outbound_trunk.has_auth_credentials // false | not)
+                            or $live.outbound_trunk.username != $ENV.OUTBOUND_TRUNK_USERNAME)
+       then "outbound_trunk_config.credentials" else empty end) ]
   | join(", ")')
 assigned=$(jq -r '.assigned_agent.agent_id // empty' <<<"$live")
 has_auth=$(jq -r '.inbound_trunk.has_auth_credentials == true' <<<"$live")
-if [[ $(jq -r '.outbound_trunk != null' <<<"$live") == true ]]; then
+live_out=$(jq -r '.outbound_trunk != null' <<<"$live")
+
+if [[ -z $want_out && $live_out == true ]]; then
   log "number $number_id: has an outbound trunk, which git does not declare; remove it in the ElevenLabs dashboard"
   failed=1
+elif [[ -n $want_out && $have_out == no ]]; then
+  log "number $number_id: the outbound trunk waits for the 1Password item elevenlabs outbound trunk"
+  # A trunk whose password git cannot re-send is one it cannot own.
+  if [[ $live_out == true ]]; then
+    log "number $number_id: has an outbound trunk with no credentials in git; remove it in the ElevenLabs dashboard"
+    failed=1
+  fi
 fi
-
-have_creds=yes
-[[ -n ${TRUNK_USERNAME:-} && -n ${TRUNK_PASSWORD:-} ]] || have_creds=no
 
 if [[ $mode == report ]]; then
   if [[ -n $assigned && $has_auth != true ]]; then
@@ -155,7 +230,7 @@ if [[ $mode == report ]]; then
     failed=1
   fi
   if [[ -z $fields ]]; then
-    log "number $number_id: in sync; a write run also re-sends the password, which the API never returns"
+    log "number $number_id: in sync; a write run also re-sends each password, which the API never returns"
   elif [[ $have_creds == no ]]; then
     log "number $number_id: differs in $fields; would not bind: the trunk credentials are missing"
   else
@@ -175,21 +250,26 @@ if [[ $have_creds == no ]]; then
   [[ -z $assigned ]] || unbind
   exit 1
 fi
-if [[ $agent_ready != yes ]]; then
-  log "number $number_id: not bound, because agent $name differs from git"
+if [[ $bound_ready != yes ]]; then
+  log "number $number_id: not bound, because agent $bound_name differs from git"
   [[ -z $assigned || $has_auth == true ]] || unbind
   exit 1
 fi
 
-# One PATCH carries the agent and the whole inbound trunk. The API never
-# returns the password, and a partial inbound_trunk_config resets what it
-# omits, so every write run re-sends all of it.
-jq -n --argjson want "$want_number" --arg agent "$agent_id" '{
+# One PATCH carries the agent, the full inbound trunk and, with its
+# credentials in hand, the full outbound trunk. The API never returns a
+# password, and a partial trunk config resets what it omits, so every write
+# run re-sends all of it.
+jq -n --argjson want "$want_number" --arg agent "$agent_id" --argjson out "$out_cfg" '{
   agent_id: $agent,
   inbound_trunk_config: ($want.inbound_trunk_config + {
     credentials: {username: $ENV.TRUNK_USERNAME, password: $ENV.TRUNK_PASSWORD}
   })
-}' | call PATCH "/v1/convai/phone-numbers/$number_id" "$write_key" >/dev/null \
+} + (if $out == null then {} else {
+  outbound_trunk_config: ($out + {
+    credentials: {username: $ENV.OUTBOUND_TRUNK_USERNAME, password: $ENV.OUTBOUND_TRUNK_PASSWORD}
+  })
+} end)' | call PATCH "/v1/convai/phone-numbers/$number_id" "$write_key" >/dev/null \
   || die "could not patch number $number_id"
 
 live=$(call GET "/v1/convai/phone-numbers/$number_id" "$read_key") || die "could not re-read number $number_id"
@@ -199,8 +279,17 @@ if [[ $(jq -r '.inbound_trunk.has_auth_credentials == true' <<<"$live") != true 
   exit 1
 fi
 if [[ $(jq -r '.assigned_agent.agent_id // empty' <<<"$live") != "$agent_id" ]]; then
-  log "number $number_id: agent $name is not bound after the write"
+  log "number $number_id: agent $bound_name is not bound after the write"
   exit 1
 fi
-log "number $number_id: bound to $name with credentials${fields:+ (was: $fields)}"
+# out_cfg is the JSON null, a non-empty string, so it needs a test of its own.
+out_note=""
+if [[ $out_cfg != null ]]; then
+  out_note=" and an outbound trunk"
+  if [[ $(jq -r '.outbound_trunk.has_auth_credentials == true' <<<"$live") != true ]]; then
+    log "number $number_id: the outbound trunk reports no credentials after the write"
+    failed=1
+  fi
+fi
+log "number $number_id: bound to $bound_name with credentials${out_note}${fields:+ (was: $fields)}"
 exit "$failed"

@@ -9,6 +9,7 @@ sections:
       - apps/clankerbanker.md
       - apps/flameboss.md
       - apps/pbx.md
+      - apps/elevenlabs.md
       - apps/pulsifer-ca.md
       - apps/slingshot.md
       - apps/smiirl.md

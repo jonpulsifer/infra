@@ -10,7 +10,7 @@ on:
       - 'scripts/**'
       - '.github/scripts/**'
       - 'dotfiles/**'
-      - 'clusters/offsite/apps/elevenlabs/*.sh'
+      - 'clusters/offsite/apps/elevenlabs/**'
       - 'mise.toml'
       - '.github/workflows/shell.yml'
   pull_request:
@@ -37,3 +37,5 @@ jobs:
           install_args: shfmt
       - name: Format and lint
         run: mise run check
+      - name: Test the ElevenLabs reconciler
+        run: bash .github/scripts/elevenlabs-reconcile_test.sh

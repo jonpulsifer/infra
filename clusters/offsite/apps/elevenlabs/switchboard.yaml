@@ -1,0 +1,216 @@
+---
+# Switchboard (`apps/switchboard`) rings the owner's cell through the
+# pbx-switchboard agent and the phone number's outbound trunk. It is parked at
+# zero replicas until two items exist in the 1Password vault `homelab`:
+# `switchboard` (to-number, ring-token, alert-token), which fills the Secret
+# switchboard-config below, and `elevenlabs outbound trunk`, which lets the
+# reconciler give the number a trunk to dial out on. To unpark it, set
+# replicas to 1 here and merge, once the image below is a build that resolves
+# the agent by name (apps/switchboard/src/agent.ts): an older build exits 64
+# for want of SWITCHBOARD_AGENT_ID.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: switchboard
+  labels:
+    app.kubernetes.io/name: switchboard
+spec:
+  replicas: 0
+  # The daily caps and the cooldown live in the process, so two pods would
+  # double them.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: switchboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: switchboard
+      annotations:
+        # The tokens and the key are env vars, so Reloader rolls the pod when
+        # either Secret rotates.
+        secret.reloader.stakater.com/reload: switchboard-config,elevenlabs-write-key
+    spec:
+      automountServiceAccountToken: false
+      # toFQDNs only matches names Cilium's DNS proxy saw resolved through the
+      # policy's rule; ndots 1 keeps the search domains off api.elevenlabs.io.
+      dnsConfig:
+        options:
+          - {name: ndots, value: "1"}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: switchboard
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # full `ghcr.io/…/switchboard…@sha256:` string, so keep it one literal.
+          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:a19a87558ba45da5241d2ae11a59ddc2e5a43258f95b7c298d7022e0106c1da7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # outbound-call needs the convai write key the reconciler holds.
+            - name: ELEVENLABS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: elevenlabs-write-key
+                  key: ELEVENLABS_WRITE_KEY
+            # desired/agents/pbx-switchboard.json declares the agent; the pod
+            # resolves its id from the agents list at boot.
+            - name: SWITCHBOARD_AGENT_NAME
+              value: pbx-switchboard
+            # desired/phone-number.json declares the number and its outbound
+            # trunk.
+            - name: SWITCHBOARD_PHONE_NUMBER_ID
+              value: phnum_8101kst8hfnhex0ar1vfqvmffckk
+            # The only number switchboard dials; no request can name another.
+            - name: SWITCHBOARD_TO_NUMBER
+              valueFrom:
+                secretKeyRef:
+                  name: switchboard-config
+                  key: SWITCHBOARD_TO_NUMBER
+            - name: SWITCHBOARD_RING_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: switchboard-config
+                  key: SWITCHBOARD_RING_TOKEN
+            - name: SWITCHBOARD_ALERT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: switchboard-config
+                  key: SWITCHBOARD_ALERT_TOKEN
+            # The caps (3 a day per caller class, a 10 minute cooldown) and the
+            # quiet hours (23:00-08:00 America/Halifax) are the image's defaults.
+            - name: SWITCHBOARD_PORT
+              value: "8080"
+            # readOnlyRootFilesystem: /tmp (below) is the only writable path.
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          # The port opens only once the agent id is resolved, so a pod that
+          # cannot name its agent never reports ready.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: switchboard
+  labels:
+    app.kubernetes.io/name: switchboard
+spec:
+  selector:
+    app.kubernetes.io/name: switchboard
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+# Only mate's sandboxes and Alertmanager reach switchboard, and switchboard
+# reaches only the ElevenLabs API. Every other pod on the cluster would
+# otherwise be able to spend the daily caps.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: switchboard
+  labels:
+    app.kubernetes.io/name: switchboard
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: switchboard
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    # The readinessProbe comes from the node.
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+    # Each caller class by its pod labels: sandboxes.ts sets the mate label,
+    # and the prometheus-operator sets the Alertmanager one.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: mate
+            app.kubernetes.io/name: mate-sandbox
+        - matchLabels:
+            io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: alertmanager
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+  egress:
+    # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
+    # rule. The proxy refuses every other name, so the pod sets ndots to 1.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+          rules:
+            dns:
+              - matchName: api.elevenlabs.io
+    - toFQDNs:
+        - matchName: api.elevenlabs.io
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# The cell number and the two bearer tokens, from the 1Password item
+# `switchboard`. Until the item exists this ExternalSecret errors, and the
+# parked Deployment asks for no Secret.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: switchboard-config
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: switchboard-config
+    creationPolicy: Owner
+  data:
+    - secretKey: SWITCHBOARD_TO_NUMBER
+      remoteRef: {key: switchboard, property: to-number}
+    - secretKey: SWITCHBOARD_RING_TOKEN
+      remoteRef: {key: switchboard, property: ring-token}
+    - secretKey: SWITCHBOARD_ALERT_TOKEN
+      remoteRef: {key: switchboard, property: alert-token}

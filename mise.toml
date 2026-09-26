@@ -89,6 +89,10 @@ run = "bash .github/scripts/pbx-check.sh"
 description = "Test the PBX check's inbound dialplan walker against fixtures"
 run = "bash .github/scripts/pbx-inbound-walk_test.sh"
 
+[tasks."elevenlabs:test"]
+description = "Run the ElevenLabs reconciler against a stubbed API and check what it logs and sends"
+run = "bash .github/scripts/elevenlabs-reconcile_test.sh"
+
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [

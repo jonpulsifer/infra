@@ -1,6 +1,6 @@
 ---
-# Makes the ElevenLabs troll agent and phone number match desired/. The script
-# is reconcile.sh, in a ConfigMap that Flux does not substitute. A failed run
+# Makes the ElevenLabs agents and phone number match desired/. The script is
+# reconcile.sh, in a ConfigMap that Flux does not substitute. A failed run
 # fires KubeJobFailed, and the TTL clears the failed Job an hour later.
 apiVersion: batch/v1
 kind: CronJob
@@ -38,10 +38,15 @@ spec:
             - name: reconcile
               image: jonpulsifer/bashcurljq:latest
               command: [/bin/bash, /scripts/reconcile.sh]
+              # A ConfigMap key holds no slash, so the agents mount beside
+              # desired/ instead of under it, and AGENTS_DIR names that path.
+              env:
+                - {name: AGENTS_DIR, value: /desired-agents}
               envFrom:
                 - secretRef: {name: elevenlabs-read-key, optional: true}
                 - secretRef: {name: elevenlabs-write-key, optional: true}
                 - secretRef: {name: elevenlabs-troll-trunk, optional: true}
+                - secretRef: {name: elevenlabs-outbound-trunk, optional: true}
               resources:
                 requests: {cpu: 10m, memory: 32Mi}
                 limits: {memory: 64Mi}
@@ -53,6 +58,7 @@ spec:
               volumeMounts:
                 - {name: scripts, mountPath: /scripts, readOnly: true}
                 - {name: desired, mountPath: /desired, readOnly: true}
+                - {name: agents, mountPath: /desired-agents, readOnly: true}
                 - {name: tmp, mountPath: /tmp}
           volumes:
             - name: scripts
@@ -61,6 +67,9 @@ spec:
             - name: desired
               configMap:
                 name: elevenlabs-desired
+            - name: agents
+              configMap:
+                name: elevenlabs-desired-agents
             # bash writes a large here-string to a temporary file.
             - name: tmp
               emptyDir:

@@ -4,7 +4,10 @@ export class ConfigError extends Error {
 
 export interface Config {
   readonly elevenlabsApiKey: string;
-  readonly agentId: string;
+  /** The agent to look up at boot, when no id overrides it. */
+  readonly agentName: string;
+  /** From SWITCHBOARD_AGENT_ID: skips the lookup by name. */
+  readonly agentId?: string;
   readonly phoneNumberId: string;
   /** The only number switchboard ever dials. No request can override it. */
   readonly toNumber: string;
@@ -19,12 +22,19 @@ export interface Config {
   readonly port: number;
 }
 
+/** A Config once boot has settled the agent id. */
+export type ResolvedConfig = Config & { readonly agentId: string };
+
 type Env = Record<string, string | undefined>;
 
 function required(env: Env, key: string): string {
   const value = env[key]?.trim();
   if (!value) throw new ConfigError(`${key} is required`);
   return value;
+}
+
+function optional(env: Env, key: string): string | undefined {
+  return env[key]?.trim() || undefined;
 }
 
 function integer(env: Env, key: string, fallback: number, min: number): number {
@@ -76,7 +86,8 @@ function timezone(env: Env, key: string, fallback: string): string {
 export function readConfig(env: Env): Config {
   return {
     elevenlabsApiKey: required(env, 'ELEVENLABS_API_KEY'),
-    agentId: required(env, 'SWITCHBOARD_AGENT_ID'),
+    agentName: optional(env, 'SWITCHBOARD_AGENT_NAME') ?? 'pbx-switchboard',
+    agentId: optional(env, 'SWITCHBOARD_AGENT_ID'),
     phoneNumberId: required(env, 'SWITCHBOARD_PHONE_NUMBER_ID'),
     toNumber: readToNumber(env),
     ringToken: required(env, 'SWITCHBOARD_RING_TOKEN'),

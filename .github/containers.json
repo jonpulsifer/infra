@@ -52,6 +52,9 @@
     ],
     "spindrift": [
       "clusters/offsite/apps/spindrift/helm-release.yaml"
+    ],
+    "switchboard": [
+      "clusters/offsite/apps/elevenlabs/switchboard.yaml"
     ]
   },
   "ignore": [
