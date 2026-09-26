@@ -91,13 +91,6 @@ spec:
             - name: base-templates
               mountPath: /templates/base
               readOnly: true
-          # Before the drain below: a stranger held in a spam sink or on the
-          # troll line would otherwise keep the old pod, and the handset's 911,
-          # waiting out the whole grace period.
-          lifecycle:
-            preStop:
-              exec:
-                command: ["/bin/bash", "/templates/base/hangup-strangers.sh"]
           # /metrics answering is a weaker claim than "calls work", but it is
           # the only one a probe can make without placing one. Registration
           # state is an alert on the scraped metrics, not a probe.
@@ -117,8 +110,9 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {memory: 512Mi}
-      # A call in progress is the thing this must not cut off. Asterisk stops
-      # accepting new calls on SIGTERM and exits when the last one ends.
+      # Asterisk hangs up every call on SIGTERM and exits within 15 s, so a roll
+      # cuts a call in progress; the runbook says to merge only when no call is
+      # up. The grace period is headroom for a shutdown that hangs, not a drain.
       terminationGracePeriodSeconds: 300
       volumes:
         - name: base-templates

@@ -32,7 +32,6 @@ configMapGenerator:
       - config/prometheus.conf
       - config/rtp.conf
       - config/render.sh
-      - config/hangup-strangers.sh
     # Asterisk's dialplan and this render script are written in ${...}, which
     # is also Flux's postBuild substitution syntax. Flux does not merely blank
     # what it cannot resolve here — `${PBX_*}` and `${$name}` are not valid
