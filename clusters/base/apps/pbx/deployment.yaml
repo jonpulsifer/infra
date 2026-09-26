@@ -88,9 +88,6 @@ spec:
             - {name: spool, mountPath: /var/spool/asterisk}
             - {name: cache, mountPath: /var/cache/asterisk}
             - {name: db, mountPath: /var/lib/asterisk-db}
-            - name: base-templates
-              mountPath: /templates/base
-              readOnly: true
           # /metrics answering is a weaker claim than "calls work", but it is
           # the only one a probe can make without placing one. Registration
           # state is an alert on the scraped metrics, not a probe.
