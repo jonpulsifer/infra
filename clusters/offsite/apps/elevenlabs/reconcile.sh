@@ -69,7 +69,8 @@ drift() {
 }
 
 # Pages through every agent: the list's search is fuzzy, and an agent it
-# missed would be created again on every run.
+# missed would be created again on every run. Status 1 is a failed list;
+# status 2 is two live agents of one name, which git cannot choose between.
 find_agent() {
   local page cursor="" ids="[]"
   for _ in {1..20}; do
@@ -78,7 +79,8 @@ find_agent() {
     [[ $(jq -r .has_more <<<"$page") == true ]] || break
     cursor=$(jq -r '.next_cursor | @uri' <<<"$page")
   done
-  jq -r --arg n "$1" 'if length > 1 then error("more than one agent is named \($n)") else .[] end' <<<"$ids"
+  [[ $(jq length <<<"$ids") -le 1 ]] || return 2
+  jq -r '.[]' <<<"$ids"
 }
 
 [[ -n $read_key ]] || die "no API key: the Secret elevenlabs-read-key is missing"
@@ -104,9 +106,15 @@ give_up() {
 
 # reconcile_agent NAME WANT creates or patches one agent and records it.
 reconcile_agent() {
-  local name=$1 want=$2 agent_id live fields left created
+  local name=$1 want=$2 agent_id live fields left created status
   agent_ready[$name]=no
-  agent_id=$(find_agent "$name") || die "could not list agents"
+  agent_ids[$name]=""
+  agent_id=$(find_agent "$name") || {
+    status=$?
+    [[ $status == 2 ]] || die "could not list agents"
+    give_up "agent $name: more than one live agent has this name"
+    return
+  }
   agent_ids[$name]=$agent_id
   if [[ -z $agent_id ]]; then
     if [[ $mode == report ]]; then

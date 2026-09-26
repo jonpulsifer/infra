@@ -202,6 +202,19 @@ assert_contains 'the number is still reconciled after a failed create' "$request
 assert_equal 'the number is still bound after a failed create' \
   "number $number_id: bound to pbx-troll with credentials" "$(tail -n1 <<<"$out")"
 
+jq '.agents += [{agent_id: "agent_troll2", name: "pbx-troll"}]' "$pristine/agents.json" >"$pristine/agents.two.json"
+mv "$pristine/agents.json" "$pristine/agents.one.json"
+mv "$pristine/agents.two.json" "$pristine/agents.json"
+run_case "$desired" "${write_env[@]}"
+assert_equal 'two live agents of one name fail the Job' 1 "$status"
+assert_contains 'two live agents of one name are named' "$out" 'agent pbx-troll: more than one live agent has this name'
+assert_lacks 'two live agents of one name are not a failed list' "$out" 'could not list agents'
+assert_contains 'the other agent is still reconciled after a duplicated name' "$out" 'agent pbx-switchboard: created agent_new'
+assert_contains 'the number is still guarded after a duplicated name' "$out" \
+  "number $number_id: not bound, because agent pbx-troll differs from git"
+assert_lacks 'the number is not bound to a guessed agent' "$requests" "PATCH /v1/convai/phone-numbers/$number_id"
+mv "$pristine/agents.one.json" "$pristine/agents.json"
+
 undeclared="$work/undeclared"
 cp -r "$desired" "$undeclared"
 jq '.agent_name = "nobody"' "$desired/phone-number.json" >"$undeclared/phone-number.json"
