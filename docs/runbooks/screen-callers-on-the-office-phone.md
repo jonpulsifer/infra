@@ -1,12 +1,13 @@
 ---
 title: Screen callers on the office phone
-description: How the folly PBX screens unknown callers on line 4, how to add a contact who skips the screen, what the star codes do, and how to render the prompts.
+description: How the folly PBX screens unknown callers on line 4, how to add or remove a contact who skips the screen, what the star codes do, how to render the prompts, and how to test the screen.
 ---
 
 The folly PBX answers unknown callers on line 4 and asks them to press 5. This
-runbook adds a contact who skips that screen, lists the star codes, and renders
-the prompts. [Operate the office phone](operate-the-office-phone.md) covers the
-lines, the trunks and a failed call.
+runbook adds and removes a contact who skips that screen, lists the star codes,
+renders the prompts and tests the screen after a merge.
+[Operate the office phone](operate-the-office-phone.md) covers the lines, the
+trunks and a failed call.
 
 ## How the screen works
 
@@ -17,8 +18,9 @@ lines, the trunks and a failed call.
   line within an hour of a 911 from the handset. It answers anyone else and
   plays the press-5 prompt twice. A 5 rings the handset as `[5] <number>`. Any
   other answer goes to `config/spam.conf`, which holds the caller for up to ten
-  minutes in the Endless Queue or with Robo-Lenny. Three callers are held at
-  once; the fourth hears goodbye.
+  minutes in the Endless Queue or with Robo-Lenny. Two callers hear the prompt
+  at once and three are held: the next stranger gets a busy signal, and the
+  next held caller hears goodbye.
 - A contact rings as `[OK] <name>` with the Friend ring; a caller who pressed 5
   rings with the Human ring. Both are `Ring10` and `Ring11` in
   `provision/cathy.xml`.
@@ -34,15 +36,19 @@ lines, the trunks and a failed call.
 
 ## Add a contact
 
+> [!NOTE]
+> A contact's name and number are in the PBX log in VictoriaLogs each time
+> they call. The item is not the only copy.
+
 1. In the `homelab` vault, open the item `pbx contacts`, or create it as a
    Secure Note. Keep one item with that title.
 
 2. Add a text field. Make the label the name the handset shows and the value
-   the number, in any North American format. Keep every label in the item
-   unique.
+   the ten-digit number, in any North American format. Keep every label in the
+   item unique.
 
    > [!NOTE]
-   > External Secrets fails the whole item on a repeated label or a second
+   > External Secrets fails the item on a repeated label or a second
    > item with the title, and then no contact skips the screen.
 
 3. Make sure the ExternalSecret has synced. It refreshes every hour, and the
@@ -64,6 +70,27 @@ lines, the trunks and a failed call.
 
    Result: `Dialplan reloaded.` `dialplan show globals` then lists one
    `CONTACT_<ten digits>` line per contact.
+
+## Remove a contact
+
+> [!NOTE]
+> A reload sets the globals the file still holds and clears none; only a
+> restart forgets one. Delete the field, not the item: External Secrets keeps
+> the Secret of a deleted item.
+
+1. Delete the contact's field from the `pbx contacts` item.
+
+2. Make sure the ExternalSecret has synced, as in step 3 of
+   [Add a contact](#add-a-contact).
+
+3. Make sure `core show channels` shows no active call, then restart the pod.
+
+   ```bash
+   kubectl --context folly -n pbx rollout restart deploy/pbx
+   ```
+
+   Result: after the pod starts, `dialplan show globals` lists no `CONTACT_`
+   line for the number.
 
 ## Star codes
 
@@ -93,13 +120,43 @@ the task names a file that is missing there. The prompts share a 700 KiB
 budget, and `mise run pbx:check` fails if the dialplan plays a file the
 ConfigMap does not carry.
 
+## Test the screen
+
+Place these calls after the pod rolls and the phone has fetched its profile
+([Change the phone](operate-the-office-phone.md#change-the-phone)).
+
+1. Call line 4 from a contact's number.
+
+   Result: the handset shows `[OK] <name>` and plays the Friend ring.
+
+2. Call line 4 from another number and press 5.
+
+   Result: the prompt plays once, then the handset shows `[5] <number>` and
+   plays the Human ring.
+
+3. Call line 4 from that number again and press nothing.
+
+   Result: the caller is held. `*25` on the handset plays the call, and `*26`
+   counts it.
+
+4. Dial `*20` from each line.
+
+   Result: the phone plays the echo test. A reorder tone means the line's
+   `Dial_Plan` on the phone does not send `*xx`.
+
+5. Dial 933 from line 1.
+
+   Result: voip.ms reads the e911 address back.
+
 ## If something goes wrong
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | A caller on line 4 hears "press five", or is held in the queue or with Lenny | Line 4 screens every caller who is not a contact. | Add them as a contact, or tell them to press 5. |
+| A caller on line 4 gets a busy signal | Two callers are in the screen. | Wait, or raise the cap in `config/inbound.conf`. |
 | `pbx-contacts` shows `SecretSyncedError` | The `pbx contacts` item is missing, has a repeated label, or shares its title with another item. No alert covers it. | Fix the item. The ExternalSecret retries within the hour. |
-| A new contact still hears the screen | Asterisk read the contacts file at its last dialplan load. | Run `dialplan reload` after the Secret and the pod's copy have caught up. |
+| A new contact still hears the screen | Asterisk read the contacts file at its last dialplan load, or the value is not ten digits and the template skipped it. | Run `dialplan reload` after the Secret has caught up. If `dialplan show globals` has no line for it, fix the value. |
+| A removed contact still skips the screen | A reload keeps the global, or the item was deleted and its Secret kept. | Restart the pod. If the item is gone, recreate it without the field first. |
 | `[OK]` or `[5]` shows with the line's usual ring | The phone has not fetched the profile with `Ring10` and `Ring11`. | Resync the phone ([Change the phone](operate-the-office-phone.md#change-the-phone)). |
 
 ## Related
