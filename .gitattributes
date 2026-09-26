@@ -1,0 +1,2 @@
+# mu-law prompts: git's text heuristic misses them, so say so.
+*.ulaw binary
