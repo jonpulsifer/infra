@@ -19,21 +19,19 @@ trunks and a failed call.
   plays the press-5 prompt twice. A 5 rings the handset as `[5] <number>`. Any
   other answer goes to `config/agent.conf`, which dials Earl, the troll agent
   on [ElevenLabs](../apps/elevenlabs.md), for up to ten minutes.
-- When the agent is off, on two calls already, or does not answer in 60
-  seconds, `config/spam.conf` holds the caller for up to ten minutes in the
-  Endless Queue or with Robo-Lenny. Two callers hear the prompt at once and
-  three are held: the next stranger gets a busy signal, and the next held
-  caller hears goodbye.
-- The agent's number and credentials are the 1Password item
-  `elevenlabs troll trunk`, read through the ExternalSecret `pbx-elevenlabs`
-  when the pod starts. Without that Secret the agent is off.
+- When the agent is off, is on two calls, has answered twenty today, or does
+  not answer in 60 seconds, `config/spam.conf` holds the caller for up to ten
+  minutes in the Endless Queue or with Robo-Lenny. Two callers hear the prompt
+  at once and three are held: the next stranger gets a busy signal, and the
+  next held caller hears goodbye.
 - A contact rings as `[OK] <name>` with the Friend ring; a caller who pressed 5
   rings with the Human ring. Both are `Ring10` and `Ring11` in
   `provision/cathy.xml`.
 - Each step logs one line, `pbx-event kind=<kind> line=<line> caller=<digits>`,
-  from `config/events.conf`. `kind=troll-miss` names why the agent did not
-  take a caller in `why=`. The PBX dashboard counts `kind=screened`, and so
-  does the [Smiirl counter](operate-the-smiirl-counter.md).
+  from `config/events.conf`. `kind=troll` is a hand-off,
+  `kind=held sink=troll` a call Earl answered, and `why=` on `kind=troll-miss`
+  says why he did not take one. The PBX dashboard counts `kind=screened`, and
+  so does the [Smiirl counter](operate-the-smiirl-counter.md).
 
 ## Before you start
 
@@ -115,7 +113,7 @@ Dial a code from any line. `config/handset-codes.conf` sends each one to
 | `*26` | The number of callers the sinks have held since the pod started |
 | `*27` | Robo-Lenny |
 | `*28` | The Endless Queue |
-| `*29` | Earl, the troll agent, in `desk` mode; an error tone if the agent is off or busy |
+| `*29` | Earl, the troll agent, in `desk` mode; an error tone if he does not answer |
 
 ## Render the prompts
 
@@ -164,8 +162,9 @@ Place these calls after the pod rolls and the phone has fetched its profile
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | A caller on line 4 hears "press five", talks to Earl, or is held in the queue or with Lenny | Line 4 screens every caller who is not a contact. | Add them as a contact, or tell them to press 5. |
-| Screened callers are held, never trolled, and the log has `why=off` | The pod started without the `pbx-elevenlabs` Secret. | Make sure `kubectl --context folly -n pbx get externalsecret pbx-elevenlabs` shows `SecretSynced`, then restart the pod when no call is up. |
-| The log has `why=CONGESTION`, `CHANUNAVAIL` or `BUSY` | ElevenLabs refused the call or was unreachable, or the agent hit its daily cap. | Read the agent's SIP ([Diagnose a failed call](operate-the-office-phone.md#diagnose-a-failed-call)). |
+| Screened callers are held, never trolled, and the log has `why=off` | The pod started without the `pbx-elevenlabs` Secret, which it reads only at start. | Make sure `kubectl --context folly -n pbx get externalsecret pbx-elevenlabs` shows `SecretSynced`, then restart the pod when no call is up. |
+| The log has `why=daily` | The PBX's own cap: Earl has answered twenty calls today. | Wait for the next day. |
+| The log has `why=CONGESTION`, `CHANUNAVAIL`, `BUSY` or `NOANSWER` | ElevenLabs refused the call, was unreachable, or did not answer in 60 seconds. How it treats a call over its own limits is unverified; with call queueing on, it plays hold audio. | Read the agent's SIP ([Diagnose a failed call](operate-the-office-phone.md#diagnose-a-failed-call)). |
 | A caller on line 4 gets a busy signal | Two callers are in the screen. | Wait, or raise the cap in `config/inbound.conf`. |
 | `pbx-contacts` shows `SecretSyncedError` | The `pbx contacts` item is missing, has a repeated label, or shares its title with another item. No alert covers it. | Fix the item. The ExternalSecret retries within the hour. |
 | A new contact still hears the screen | Asterisk read the contacts file at its last dialplan load, or the value is not ten digits and the template skipped it. | Run `dialplan reload` after the Secret has caught up. If `dialplan show globals` has no line for it, fix the value. |

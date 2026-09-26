@@ -20,22 +20,25 @@
 #      pattern is a star code into [toybox], and on folly a 911 sets
 #      GLOBAL(LAST911);
 #   5. nothing reachable from a context an inbound call starts in dials a
-#      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk);
+#      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk),
+#      and an ElevenLabs trunk refuses transfers and lands in
+#      [from-elevenlabs];
 #   6. a site with [pbx-event] logs the line Grafana and the smiirl parse;
 #   7. on folly, one trunk is screened and line 1's never is, an open line, a
 #      contact and a 911 callback ring unanswered, a stranger on a screened
 #      line hears the press-5 prompt and then the troll agent, a stranger who
 #      hangs up on the prompt is counted, a caller who pressed 5 rings the
 #      handset as [5] with the Human ring, a caller the agent does not take
-#      (its trunk refusing, its Secret absent, or two calls already on it) is
-#      held in a spam sink with the ten-minute cap and its hangup handler, the
-#      agent's leg carries the mode and caller headers its pre-dial handler
-#      adds, a third stranger on a line screening two is refused unanswered,
-#      a fourth held caller hears goodbye, the INVITE to the handset carries
-#      the Alert-Info its pre-dial handler adds, every trunk takes voip.ms's
-#      DID-form INVITE by its own X-Dest-User header and never by its From
-#      user, and every prompt the dialplan plays is in the ConfigMap mounted
-#      for it.
+#      (its trunk refusing, its Secret absent, two calls already on it, or its
+#      twenty a day used) is held in a spam sink with the ten-minute cap and
+#      its hangup handler and logs one held line, the agent's leg carries the
+#      mode and caller headers its pre-dial handler adds, the agent's hangup
+#      handler logs and counts only a call the agent answered, a third stranger
+#      on a line screening two is refused unanswered, a fourth held caller
+#      hears goodbye, the INVITE to the handset carries the Alert-Info its
+#      pre-dial handler adds, every trunk takes voip.ms's DID-form INVITE by
+#      its own X-Dest-User header and never by its From user, and every prompt
+#      the dialplan plays is in the ConfigMap mounted for it.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -604,6 +607,24 @@ check_pjsip_objects() {
   [[ -n $missing ]] || say "    all $(wc -l <<<"$declared") declared PJSIP objects loaded, $(wc -w <<<"$ENDPOINTS") of them endpoints"
 }
 
+# A site's ElevenLabs trunk bridges its callers to a far end this lab does not
+# run. allow_transfer = no is the endpoint's half of the rule that a caller is
+# never transferred, and the walker holds the dialplan's; from-elevenlabs is
+# the context that hangs up anything ElevenLabs sends.
+check_agent_trunk() {
+  grep -qxF elevenlabs <<<"$ENDPOINTS" || return 0
+  local show transfer ctx
+  show=$(ast 'pjsip show endpoint elevenlabs')
+  transfer=$(endpoint_param "$show" allow_transfer)
+  ctx=$(endpoint_param "$show" context)
+  if [[ $transfer == false && $ctx == from-elevenlabs ]]; then
+    say "    the elevenlabs trunk refuses transfers and lands in [from-elevenlabs]"
+  else
+    fail "the elevenlabs endpoint must refuse transfers and land in [from-elevenlabs]" \
+      "allow_transfer: ${transfer:-unset}" "context: ${ctx:-unset}"
+  fi
+}
+
 # --- 911 through the handset pattern -------------------------------------
 
 endpoint_param() { awk -v key="$2" '$1 == key && $2 == ":" { $1 = ""; $2 = ""; sub(/^ +/, ""); print; exit }' <<<"$1"; }
@@ -807,8 +828,11 @@ check_events() {
 # it sends itself is the one the handset would get. `troll` enters [agent] as a
 # screened caller would. Its trunk is localized to this Asterisk's own TLS
 # listener, which has no certificate, so the Dial fails the way an unreachable
-# ElevenLabs would; `trolling` stands in for a call the agent is on, and
-# `earl` enters as the handset's *29 does.
+# ElevenLabs would; `trolling` stands in for a call the agent is on, `daily`
+# for a day the agent has answered twenty, and `earl` enters as the handset's
+# *29 does. No call is answered here, so `answered` and `rang` hang up with
+# the agent's hangup handler and ANSWEREDTIME as Dial leaves it: set after a
+# bridged call, empty for a caller who hung up while the agent's leg rang.
 # shellcheck disable=SC2016 # ${EPOCH} is Asterisk's
 INBOUND_PROBE_CONTEXT=(
   '[pbx-check-inbound]'
@@ -860,6 +884,21 @@ INBOUND_PROBE_CONTEXT=(
   ' same => n,Wait(30)'
   'exten => overcap,1,Goto(troll,1)'
   'exten => earl,1,Goto(agent,desk,1)'
+  'exten => daily,1,Set(GLOBAL(TROLL_DAY)=${STRFTIME(,,%Y%m%d)})'
+  ' same => n,Set(GLOBAL(TROLL_N)=20)'
+  ' same => n,Goto(troll,1)'
+  'exten => answered,1,Set(ANSWEREDTIME=5)'
+  ' same => n,Set(CALLERID(num)=6135550110)'
+  ' same => n,Set(GLOBAL(TROLL_DAY)=)'
+  ' same => n,Goto(held,1)'
+  'exten => rang,1,Set(ANSWEREDTIME=)'
+  ' same => n,Set(CALLERID(num)=6135550111)'
+  ' same => n,Goto(held,1)'
+  'exten => held,1,Set(HANDSET=line4)'
+  ' same => n,Set(SINK=troll)'
+  ' same => n,Set(SINK_START=${EPOCH})'
+  ' same => n,Set(CHANNEL(hangup_handler_push)=agent-held,s,1)'
+  ' same => n,Hangup()'
 )
 
 # Places probe $1 and fails if its Executing lines hold $2, or miss any of the
@@ -947,12 +986,14 @@ check_inbound_routes() {
 
 # With the pbx-elevenlabs Secret, a screened caller is dialled to the agent
 # with the mode and caller headers its pre-dial handler adds and, the trunk
-# refusing here, lands in a sink with the troll's held-time handler popped; a
-# caller over the agent's two calls is never dialled. Without the Secret,
-# pbx-env's `off` sends every caller straight to a sink. The handset's desk
-# demo never lands in a sink.
+# refusing here, lands in a sink with the agent's hangup handler popped, so it
+# logs one held line, the sink's; a caller over the agent's two calls, or its
+# twenty a day, is never dialled; and the hangup handler logs and counts a
+# call the agent answered and nothing else. Without the Secret, pbx-env's
+# `off` sends every caller straight to a sink. The handset's desk demo never
+# lands in a sink.
 check_troll() {
-  local log="$SITE_DIR/asterisk.log" miss offset want
+  local log="$SITE_DIR/asterisk.log" miss offset want held counted i
   miss='"NOTICE,pbx-event kind=troll-miss line=line4 caller=6135550109 mode=troll why='
   expect_route earl '"GROUP()=spam"' ' mode=desk why=' '"beeperr"'
   quiesce
@@ -964,7 +1005,7 @@ check_troll() {
   offset=$(wc -c <"$log")
   expect_route troll '"PJSIP/line4,' \
     '"NOTICE,pbx-event kind=troll line=line4 caller=6135550109 mode=troll"' \
-    '"SPYGROUP=troll"' '"CHANNEL(hangup_handler_push)=spam-held,s,1"' \
+    '"SPYGROUP=troll"' '"CHANNEL(hangup_handler_push)=agent-held,s,1"' \
     "\"PJSIP/$(dummy_for PBX_AGENT_DID)@elevenlabs,60,b(agent-leg^s^1(troll^" \
     '^6135550109))S(600)"' '"CHANNEL(hangup_handler_pop)="' "$miss" '"GROUP()=spam"'
   # As for the handset leg, the pre-dial handler's proof is the INVITE it sent.
@@ -974,11 +1015,33 @@ check_troll() {
       || fail "the INVITE to the agent does not carry '$want'"
   done
   quiesce
+  for ((i = 0; i < 50; i++)); do
+    tail -c +"$((offset + 1))" "$log" | grep -qF 'pbx-event kind=held line=line4 caller=6135550109 ' && break
+    sleep 0.1
+  done
+  sleep 0.5
+  held=$(tail -c +"$((offset + 1))" "$log" | grep -F '] NOTICE[' | grep -oE 'pbx-event kind=held line=line4 caller=6135550109 .*$' || true)
+  if [[ $(grep -c . <<<"$held") != 1 || ! $held =~ \ sink=(lenny|queue)$ ]]; then
+    fail "a caller the agent did not take must log one held line, its sink's" "${held:-no held line}"
+  fi
   hold_probe trolling 1 '"GROUP()=troll"'
   hold_probe trolling 2 '"GROUP()=troll"'
   expect_route overcap '"PJSIP/' "${miss}full\"" '"GROUP()=spam"'
   quiesce
+  expect_route daily '"PJSIP/' "${miss}daily\"" '"GROUP()=spam"'
+  quiesce
+  expect_route answered '"1?done")' \
+    '"NOTICE,pbx-event kind=held line=line4 caller=6135550110 secs=' ' sink=troll")'
+  counted=$(troll_count)
+  [[ $counted == 1 ]] || fail "the agent's hangup handler did not count a call the agent answered" "TROLL_N: ${counted:-unset}"
+  expect_route rang '"NOTICE,pbx-event kind=held' '"1?done")'
+  [[ $(troll_count) == "$counted" ]] \
+    || fail "the agent's hangup handler counted a caller who hung up while the agent's leg rang"
+  quiesce
 }
+
+# The agent's answered calls today, GLOBAL(TROLL_N).
+troll_count() { ast 'dialplan show globals' | awk -F= '$1 ~ /^[[:space:]]*TROLL_N$/ { v = $2; sub(/[[:space:]]+$/, "", v); print v; exit }'; }
 
 # The b() handler's proof is the header on the wire: the SIP log holds the
 # INVITE the leg probe sent to Asterisk itself.
@@ -1161,6 +1224,7 @@ run_checks() {
   local site=$1
   check_boot_log
   check_pjsip_objects
+  check_agent_trunk
   check_reload_and_handsets "$site"
   check_events
   check_inbound_routes "$site"

@@ -27,6 +27,9 @@
 # The troll trunk's number and credentials. Last in envFrom, so the Secret's
 # values replace pbx-env's `off` defaults; optional, so a missing 1Password
 # item still boots the phone, with every screened caller sent to the sinks.
+# Reloader does not watch it: stale credentials only send callers to the
+# sinks, and a roll cuts every live call, 911 included. A change reaches the
+# pod at the next restart, when no call is up.
 - op: test
   path: /spec/template/spec/initContainers/0/name
   value: render-config
@@ -34,7 +37,3 @@
   path: /spec/template/spec/initContainers/0/envFrom/-
   value:
     secretRef: {name: pbx-elevenlabs, optional: true}
-# render-config reads both Secrets once, at pod start.
-- op: replace
-  path: /metadata/annotations/secret.reloader.stakater.com~1reload
-  value: pbx-secrets,pbx-elevenlabs

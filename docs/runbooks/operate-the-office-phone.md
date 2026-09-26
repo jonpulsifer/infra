@@ -104,12 +104,13 @@ filter that drops those lines.
 | No inbound INVITE arrives at all | The DID's POP in the voip.ms portal is not the server the trunk registers to. |
 | `vms-*: Couldn't negotiate stream ... (nothing)` | The trunk's codecs or SRTP profile do not overlap voip.ms's offer. Read the offer's `m=` and `a=crypto` lines. |
 | `lineN: Couldn't negotiate stream ...`, handset shows 488 | The handset offers SRTP on every call (`Secure_Call_Setting` is phone-wide); the line endpoint must accept SDES. |
-| Call connects, silent both ways | The RTP port range in `config/rtp.conf` and the ranges the NetworkPolicies open disagree. `rtp show settings` shows what Asterisk uses. |
+| Call connects, silent both ways | The RTP port range in `config/rtp.conf` and the ingress range for the pod's own RTP ports in `clusters/base/apps/pbx/network-policy.yaml` disagree. `rtp show settings` shows what Asterisk uses. |
 | `401` → `100 Trying` → bare `503` on one sub-account while another works | voip.ms fraud protection holding a sub-account that started a new calling pattern. Settings look identical; voip.ms support releases it. |
 | A line will not register | The source address reaching the PBX is not the handset's: check the VIP's `externalTrafficPolicy: Local` and both policies naming `CATHY_IP`. |
 | A caller on line 4 hears "press five", or is held in a queue | Line 4 screens every caller who is not a contact. See [Screen callers on the office phone](screen-callers-on-the-office-phone.md). |
-| `elevenlabs`: `SSL_ERROR_SSL`, or no reply to the INVITE | The PBX cannot reach `sip.rtc.elevenlabs.io` on 5061. Check the egress policy and DNS. |
-| `elevenlabs`: `401` twice, then the leg ends | ElevenLabs rejects the credentials: the reconciler on offsite has not re-sent the item, or the pod has not restarted since it changed. |
+| `elevenlabs`: no reply to the INVITE, and no TLS error | The PBX cannot reach `sip.rtc.elevenlabs.io` on 5061. Check the egress policy and DNS. |
+| `elevenlabs`: `SSL_ERROR_SSL (Handshake)` | The TLS handshake or certificate check failed. Check `ca_list_file` and `verify_server` in `transport-tls` against the server's certificate. |
+| `elevenlabs`: `401` twice, then the leg ends | ElevenLabs rejects the credentials: the reconciler on offsite has not re-sent the item, or the pod has not restarted since it changed. Reloader does not watch `pbx-elevenlabs`. |
 | `elevenlabs`: `404` | `agent-did` is not the number imported at ElevenLabs, leading `+` included. |
 | The agent answers, then silence, and the call ends 30 s later | Its audio never reaches the pod, and `rtp_timeout` ends the leg. |
 
