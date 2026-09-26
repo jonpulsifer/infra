@@ -101,6 +101,12 @@ describe('config from the environment', () => {
         vault: null,
         github: false,
         kubeServiceAccount: null,
+        kthx: {
+          origin: null,
+          sitesSecret: 'mate-kthx-sites',
+          mcpUrl: null,
+          agentSecret: 'mate-kthx-agent',
+        },
       },
       githubApp: null,
       sshKeyFile: null,
@@ -165,6 +171,58 @@ describe('config from the environment', () => {
         MATE_TURN_MINUTES: '55',
       }),
     ).toThrow('while a GitHub App is configured');
+  });
+
+  test('kthx is two independent halves, each off until its URL is set', () => {
+    const kube = {
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+    };
+    expect(readSandboxConfig(kube).kthx).toEqual({
+      origin: null,
+      sitesSecret: 'mate-kthx-sites',
+      mcpUrl: null,
+      agentSecret: 'mate-kthx-agent',
+    });
+
+    // The CLI half alone, with the origin normalised the way the CLI does it.
+    expect(
+      readSandboxConfig({
+        ...kube,
+        MATE_KTHX_ORIGIN: ' https://kthx.example.test/// ',
+        MATE_KTHX_SITES_SECRET: 'other-sites',
+      }).kthx,
+    ).toEqual({
+      origin: 'https://kthx.example.test',
+      sitesSecret: 'other-sites',
+      mcpUrl: null,
+      agentSecret: 'mate-kthx-agent',
+    });
+
+    // The MCP half alone.
+    expect(
+      readSandboxConfig({
+        ...kube,
+        MATE_KTHX_MCP_URL:
+          'http://spindrift.spindrift.svc.cluster.local:3000/mcp',
+        MATE_KTHX_AGENT_SECRET: 'other-agent',
+      }).kthx,
+    ).toEqual({
+      origin: null,
+      sitesSecret: 'mate-kthx-sites',
+      mcpUrl: 'http://spindrift.spindrift.svc.cluster.local:3000/mcp',
+      agentSecret: 'other-agent',
+    });
+
+    for (const bad of ['kthx.example.test', 'ftp://kthx.example.test', ':']) {
+      expect(() =>
+        readSandboxConfig({ ...kube, MATE_KTHX_ORIGIN: bad }),
+      ).toThrow('MATE_KTHX_ORIGIN must be an http(s) URL');
+      expect(() =>
+        readSandboxConfig({ ...kube, MATE_KTHX_MCP_URL: bad }),
+      ).toThrow('MATE_KTHX_MCP_URL must be an http(s) URL');
+    }
   });
 
   // A spare holds a whole sandbox's memory.

@@ -126,6 +126,14 @@ spec:
             # mounted Secrets. mate mints a bound token per turn (sandbox-rbac.yaml).
             - name: MATE_SANDBOX_KUBE_SA
               value: mate-sandbox-debug
+            # The private claiming host, which a sandbox reaches; its site tokens
+            # are kept in the mate-kthx-sites Secret between sandboxes.
+            - name: MATE_KTHX_ORIGIN
+              value: https://kthx.${SECRET_DOMAIN}
+            # The engine's Service: the public hostname is not reachable from a
+            # sandbox. The bearer is the mate-kthx-agent Secret, read by the pod.
+            - name: MATE_KTHX_MCP_URL
+              value: http://spindrift.spindrift.svc.cluster.local:3000/mcp
             # On the emptyDir, so a container restart resumes the gateway session
             # instead of spending an identify from the daily budget.
             - name: MATE_SESSION_FILE

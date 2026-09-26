@@ -68,6 +68,22 @@ export interface SandboxConfig {
    * mate's, in `sandbox-rbac.yaml`.
    */
   readonly kubeServiceAccount: string | null;
+  readonly kthx: KthxConfig;
+}
+
+/**
+ * Two halves, each off on `null`: `origin` gives the agent the `kthx` CLI
+ * against the private claiming host and keeps its site tokens in a Secret
+ * across sandboxes; `mcpUrl` gives opencode the engine's MCP server. Names
+ * only, never a token, so `sandboxManifest` may read it.
+ */
+export interface KthxConfig {
+  readonly origin: string | null;
+  /** The Secret whose `sites.json` is the CLI's token file, kept between sandboxes. */
+  readonly sitesSecret: string;
+  readonly mcpUrl: string | null;
+  /** The Secret holding the engine's agent token as `KTHX_AGENT_TOKEN`. */
+  readonly agentSecret: string;
 }
 
 // The vault is the boundary: the agent's commands are auto-allowed, so it can
@@ -147,6 +163,28 @@ function text(env: Env, key: string, fallback: string): string {
   return env[key]?.trim() || fallback;
 }
 
+function httpUrl(env: Env, key: string): string | null {
+  const raw = env[key]?.trim();
+  if (!raw) return null;
+  let url: URL | null = null;
+  try {
+    url = new URL(raw);
+  } catch {}
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+    throw new ConfigError(`${key} must be an http(s) URL, got ${raw}`);
+  }
+  return raw;
+}
+
+function kthx(env: Env): KthxConfig {
+  return {
+    origin: httpUrl(env, 'MATE_KTHX_ORIGIN')?.replace(/\/+$/, '') ?? null,
+    sitesSecret: text(env, 'MATE_KTHX_SITES_SECRET', 'mate-kthx-sites'),
+    mcpUrl: httpUrl(env, 'MATE_KTHX_MCP_URL'),
+    agentSecret: text(env, 'MATE_KTHX_AGENT_SECRET', 'mate-kthx-agent'),
+  };
+}
+
 function vault(env: Env): VaultConfig | null {
   const connectSecret = env.MATE_CONNECT_SECRET?.trim();
   if (!connectSecret) return null;
@@ -222,6 +260,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     vault: vault(env),
     github: Boolean(env.MATE_GITHUB_APP_ID?.trim()),
     kubeServiceAccount: env.MATE_SANDBOX_KUBE_SA?.trim() || null,
+    kthx: kthx(env),
   };
 }
 

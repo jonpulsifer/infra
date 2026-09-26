@@ -4,6 +4,12 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { SandboxConfig } from '../src/config.ts';
+import {
+  KthxSites,
+  parseSites,
+  type Sites,
+  serialize,
+} from '../src/kthx-sites.ts';
 import { Kube } from '../src/kube.ts';
 import type { PromptSink, SandboxRef, Update } from '../src/sandbox.ts';
 import type { TokenSource } from '../src/sandboxes.ts';
@@ -55,6 +61,12 @@ const config: SandboxConfig = {
   },
   kubeServiceAccount: 'mate-sandbox-debug',
   github: true,
+  kthx: {
+    origin: null,
+    sitesSecret: 'mate-kthx-sites',
+    mcpUrl: null,
+    agentSecret: 'mate-kthx-agent',
+  },
 };
 
 class Collect implements PromptSink {
@@ -743,6 +755,322 @@ describe('attach', () => {
       expect(fake.tokenRequests).toEqual([]);
       // Not even a clearing exec: there is nothing to write or clear.
       expect(stamps()).toEqual([]);
+    });
+  });
+
+  // The CLI's token file is stamped from a Secret at a turn's start and read
+  // back into it at the end, so a site claimed here outlives the sandbox.
+  describe('the kthx sites', () => {
+    const ORIGIN = 'https://kthx.example.test';
+    const MCP = 'http://spindrift.spindrift.svc.cluster.local:3000/mcp';
+    const FILE = '/home/agent/.config/kthx/sites.json';
+    const SECRET = 'mate-kthx-sites';
+    const kthxConfig: SandboxConfig = {
+      ...config,
+      kthx: {
+        origin: ORIGIN,
+        sitesSecret: SECRET,
+        mcpUrl: MCP,
+        agentSecret: 'mate-kthx-agent',
+      },
+    };
+
+    function held(names: Record<string, string>): Sites {
+      return { [ORIGIN]: names };
+    }
+
+    function turning(sandboxConfig = kthxConfig) {
+      const kube = new Kube(fake.config());
+      sandboxes = new KubeSandboxes({
+        kube,
+        config: sandboxConfig,
+        guildId: GUILD,
+        log,
+        metrics,
+        kthxSites: new KthxSites({
+          kube,
+          namespace: fake.namespace,
+          secret: SECRET,
+          log,
+        }),
+      });
+      return sandboxes;
+    }
+
+    /** Every one-shot exec that stamped credentials, oldest first. */
+    function stamps() {
+      return fake.execs.filter((e) =>
+        e.command.some((word) => word.includes('.github-token')),
+      );
+    }
+
+    function secretPatches() {
+      return fake.patches.filter((patch) => patch.name === SECRET);
+    }
+
+    function stored(): Sites {
+      return parseSites(fake.secretValue(SECRET, 'sites.json') ?? '');
+    }
+
+    /** A turn during which the agent leaves `contents` in the CLI's file. */
+    async function turnLeaving(contents: string | null) {
+      fake.script = { chunks: ['one', 'two'], chunkDelayMs: 80 };
+      const ref = await sandboxes.mint(THREAD);
+      const session = await sandboxes.attach(ref);
+      const turn = sandboxes.prompt(session, 'claim a site', new Collect());
+      // After the stamp, before the harvest.
+      await until(() => stamps().length === 1);
+      await Bun.sleep(20);
+      if (contents !== null) fake.files.set(FILE, contents);
+      return { ref, result: await turn };
+    }
+
+    test('hands the harness the origin, the agent token and the MCP server', async () => {
+      await turning().mint(THREAD);
+      const env = envOf(podTemplate().containers[0]);
+
+      expect(env.KTHX_ORIGIN.value).toBe(ORIGIN);
+      // `optional`: the owner mints this token; until then no Secret exists.
+      expect(env.KTHX_AGENT_TOKEN.valueFrom.secretKeyRef).toEqual({
+        name: 'mate-kthx-agent',
+        key: 'KTHX_AGENT_TOKEN',
+        optional: true,
+      });
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value).mcp).toEqual({
+        kthx: {
+          type: 'remote',
+          url: MCP,
+          enabled: true,
+          headers: { Authorization: 'Bearer {env:KTHX_AGENT_TOKEN}' },
+          oauth: false,
+          timeout: 10000,
+        },
+      });
+    });
+
+    test('each half stands alone', async () => {
+      await turning({
+        ...kthxConfig,
+        kthx: { ...kthxConfig.kthx, mcpUrl: null },
+      }).mint(THREAD);
+      let env = envOf(podTemplate().containers[0]);
+      expect(env.KTHX_ORIGIN.value).toBe(ORIGIN);
+      expect(env.KTHX_AGENT_TOKEN).toBeUndefined();
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value).mcp).toBeUndefined();
+
+      fake.sandboxes.clear();
+      await turning({
+        ...kthxConfig,
+        kthx: { ...kthxConfig.kthx, origin: null },
+      }).mint(THREAD);
+      env = envOf(podTemplate().containers[0]);
+      expect(env.KTHX_ORIGIN).toBeUndefined();
+      expect(env.KTHX_AGENT_TOKEN.valueFrom.secretKeyRef.name).toBe(
+        'mate-kthx-agent',
+      );
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value).mcp.kthx.url).toBe(
+        MCP,
+      );
+    });
+
+    test('with neither knob the sandbox is exactly what it was', async () => {
+      const ref = await sandboxes.mint(THREAD);
+      const env = envOf(podTemplate().containers[0]);
+      expect(env.KTHX_ORIGIN).toBeUndefined();
+      expect(env.KTHX_AGENT_TOKEN).toBeUndefined();
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value)).not.toHaveProperty(
+        'mcp',
+      );
+
+      // The stamp neither reads nor writes the file, and nothing touches the Secret.
+      const session = await sandboxes.attach(ref);
+      await sandboxes.prompt(session, 'hi', new Collect());
+      for (const exec of fake.execs) {
+        expect(exec.command.join(' ')).not.toContain('kthx');
+      }
+      expect(fake.requests.some((r) => r.path.includes('/secrets/'))).toBe(
+        false,
+      );
+      expect(metrics.siteSyncs).toEqual([]);
+    });
+
+    test('stamps the file from the Secret and truncates it after the turn', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog' })),
+      });
+      const { result } = await turnLeaving(null);
+      expect(result.stopReason).toBe('end_turn');
+
+      const [stamp, retire] = stamps();
+      expect(stamp?.command[2]).toContain('umask 077');
+      expect(stamp?.command[2]).toContain(`"$(dirname ${FILE})"`);
+      expect(stamp?.command[2]).toContain(`printf %s "$5" > ${FILE}`);
+      expect(parseSites(stamp?.command[8] ?? '')).toEqual(
+        held({ blog: 'tok-blog' }),
+      );
+      // Read back unchanged: nothing to save, and the file is cleared.
+      expect(retire?.command[8]).toBe('');
+      expect(fake.files.get(FILE)).toBe('');
+      expect(secretPatches()).toEqual([]);
+      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
+    });
+
+    test('a site claimed during the turn is saved under mate s own field manager', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog' })),
+      });
+      const before = fake.secretRevision(SECRET);
+      await turnLeaving(
+        serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
+      );
+
+      const [patch] = secretPatches();
+      expect(secretPatches()).toHaveLength(1);
+      expect(patch?.query).toBe('fieldManager=mate');
+      expect(patch?.contentType).toBe('application/merge-patch+json');
+      expect(patch?.body.metadata).toEqual({ resourceVersion: before });
+      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
+      expect(fake.files.get(FILE)).toBe('');
+      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
+      // No token reaches the log.
+      expect(JSON.stringify(log.entries)).not.toContain('tok-shop');
+    });
+
+    test('a site removed during the turn leaves the ledger, and one claimed elsewhere stays', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog', old: 'tok-old' })),
+      });
+      fake.script = { chunks: ['one', 'two'], chunkDelayMs: 80 };
+      const ref = await sandboxes.mint(THREAD);
+      const session = await sandboxes.attach(ref);
+      const turn = sandboxes.prompt(session, 'kthx rm old', new Collect());
+      await until(() => stamps().length === 1);
+      await Bun.sleep(20);
+      // The agent ran `kthx rm old`; another thread claimed `shop` meanwhile.
+      fake.files.set(FILE, serialize(held({ blog: 'tok-blog' })));
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(
+          held({ blog: 'tok-blog', old: 'tok-old', shop: 'tok-shop' }),
+        ),
+      });
+      await turn;
+
+      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
+    });
+
+    test('a save that lands on a moved Secret is folded again', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog' })),
+      });
+      fake.script = { chunks: ['one', 'two'], chunkDelayMs: 80 };
+      const ref = await sandboxes.mint(THREAD);
+      const session = await sandboxes.attach(ref);
+      const turn = sandboxes.prompt(session, 'claim a site', new Collect());
+      await until(() => stamps().length === 1);
+      await Bun.sleep(20);
+      fake.files.set(
+        FILE,
+        serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
+      );
+      fake.secretMovesAfterRead = 1;
+      await turn;
+
+      expect(secretPatches()).toHaveLength(2);
+      expect(
+        log.of('kthx sites ledger moved under a save; retrying'),
+      ).toHaveLength(1);
+      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
+      expect(fake.files.get(FILE)).toBe('');
+      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
+    });
+
+    test('a failed save leaves the file for the next turn, which heals it', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog' })),
+      });
+      fake.secretPatchFails = true;
+      const claimed = serialize(held({ blog: 'tok-blog', shop: 'tok-shop' }));
+      const { ref, result } = await turnLeaving(claimed);
+      expect(result.stopReason).toBe('end_turn');
+
+      // Not truncated: the file is the only copy of the new bearer.
+      expect(fake.files.get(FILE)).toBe(claimed);
+      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
+      expect(metrics.siteSyncs).toEqual(['ok', 'save-failed']);
+      expect(
+        log.of('could not save the sandbox kthx sites into the ledger'),
+      ).toHaveLength(1);
+      // The other credentials were still cleared.
+      expect(stamps()[1]?.command[4]).toBe('');
+
+      // The next turn's start folds the file in before stamping.
+      fake.secretPatchFails = false;
+      fake.script = {};
+      const session = await sandboxes.attach(ref);
+      await sandboxes.prompt(session, 'again', new Collect());
+      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
+      expect(parseSites(stamps()[2]?.command[8] ?? '')).toEqual(
+        held({ blog: 'tok-blog', shop: 'tok-shop' }),
+      );
+      expect(metrics.siteSyncs).toEqual(['ok', 'save-failed', 'ok', 'ok']);
+    });
+
+    test('a corrupt file is left alone and never saved over', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog' })),
+      });
+      const { result } = await turnLeaving('{not json');
+      expect(result.stopReason).toBe('end_turn');
+
+      expect(fake.files.get(FILE)).toBe('{not json');
+      expect(secretPatches()).toEqual([]);
+      expect(metrics.siteSyncs).toEqual(['ok', 'read-failed']);
+      expect(log.of('could not read the sandbox kthx sites file')).toHaveLength(
+        1,
+      );
+    });
+
+    test('a missing Secret is logged and the turn still answers', async () => {
+      turning();
+      const { result } = await turnLeaving(null);
+      expect(result.stopReason).toBe('end_turn');
+      // Nothing to stamp, so the file is not written at all.
+      expect(fake.files.has(FILE)).toBe(false);
+      expect(metrics.siteSyncs).toEqual(['save-failed', 'save-failed']);
+      const [entry] = log.of(
+        'could not save the sandbox kthx sites into the ledger',
+      );
+      expect(entry?.fields?.error).toContain('not found');
+    });
+
+    test('teardown keeps what the sandbox still holds', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog' })),
+      });
+      fake.secretPatchFails = true;
+      const { ref } = await turnLeaving(
+        serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
+      );
+      fake.secretPatchFails = false;
+
+      await sandboxes.teardown(ref);
+      expect(fake.sandboxes.has(NAME)).toBe(false);
+      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
+      expect(metrics.siteSyncs.at(-1)).toBe('ok');
+    });
+
+    test('a teardown of something already gone is still not an error', async () => {
+      turning();
+      await sandboxes.teardown({ name: NAME, thread: THREAD });
+      expect(log.entries.filter((e) => e.level !== 'info')).toEqual([]);
+      expect(metrics.siteSyncs).toEqual([]);
     });
   });
 

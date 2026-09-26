@@ -17,6 +17,7 @@ import {
 import { createGateway } from './gateway.ts';
 import { GithubApp } from './github-app.ts';
 import { Health } from './health.ts';
+import { KthxSites } from './kthx-sites.ts';
 import { discoverKube, Kube } from './kube.ts';
 import { jsonLog as log, plain } from './log.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
@@ -143,16 +144,36 @@ async function readSshKey(path: string | null): Promise<string | null> {
 
 const kubeConfig =
   config.sandboxes.mode === 'kube' ? await discoverKube() : null;
+const kube = kubeConfig ? new Kube(kubeConfig) : null;
+
+// The ledger lives in mate's own namespace, whichever one holds the sandboxes.
+function openKthxSites(kube: Kube): KthxSites | null {
+  if (config.sandboxes.mode !== 'kube') return null;
+  const { kthx } = config.sandboxes.sandbox;
+  if (kthx.mcpUrl) log.info('kthx mcp on', { url: kthx.mcpUrl });
+  if (!kthx.origin) return null;
+  log.info('kthx sites ledger on', {
+    origin: kthx.origin,
+    secret: kthx.sitesSecret,
+  });
+  return new KthxSites({
+    kube,
+    namespace: kube.namespace,
+    secret: kthx.sitesSecret,
+    log,
+  });
+}
 
 const sandboxes: Sandboxes =
-  config.sandboxes.mode === 'kube' && kubeConfig
+  config.sandboxes.mode === 'kube' && kube && kubeConfig
     ? new KubeSandboxes({
-        kube: new Kube(kubeConfig),
+        kube,
         config: config.sandboxes.sandbox,
         guildId: config.guildId,
         log,
         metrics: lazyInstruments(),
         githubApp,
+        kthxSites: openKthxSites(kube),
         clusterCa: kubeConfig.ca ?? null,
         sshKey: await readSshKey(config.sandboxes.sshKeyFile),
       })
