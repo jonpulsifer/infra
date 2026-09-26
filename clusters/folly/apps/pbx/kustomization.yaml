@@ -6,6 +6,7 @@ resources:
   - service-lb.yaml
   - external-secret.yaml
   - external-secret-contacts.yaml
+  - external-secret-elevenlabs.yaml
   - network-policy.yaml
 
 patches:
@@ -38,6 +39,14 @@ configMapGenerator:
       # register. voip.ms delivers each DID from the POP set on that DID, so
       # the DID's POP has to name this server too.
       - PBX_VOIPMS_SERVER=montreal10.voip.ms
+      # The troll trunk's number and credentials while the pbx-elevenlabs
+      # Secret is absent. That Secret comes later in render-config's envFrom
+      # and replaces all three. `off` has no digits, so agent.conf sends every
+      # screened caller to the sinks, and it keeps the auth section loadable:
+      # an empty password fails it.
+      - PBX_AGENT_DID=off
+      - PBX_ELEVENLABS_USER=off
+      - PBX_ELEVENLABS_PASS=off
 
   # render.sh renders every *.conf here into /etc/asterisk, where
   # extensions.conf includes the rest by name.

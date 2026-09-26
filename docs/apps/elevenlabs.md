@@ -20,6 +20,7 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 - With that Secret in hand, the number dials out as `168847_elevenlabs` for anyone who holds the write key, on the voip.ms balance folly's lines share. The sub-account's voip.ms settings, which git does not hold, set what such a call can reach and cost.
 - ElevenLabs holds that sub-account's password, and anyone who has it can register the sub-account and take the calls of any DID routed to it.
 - A live outbound trunk whose password git does not hold fails the Job.
+- The folly [PBX](pbx.md) reads a rotated `elevenlabs troll trunk` only when it restarts, and sends troll calls to its sinks until then.
 
 ## How it works
 

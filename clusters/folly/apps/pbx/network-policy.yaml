@@ -1,5 +1,6 @@
 ---
-# folly egress. Two destinations: the carrier, and the handset on the LAN.
+# folly egress. Three destinations: the carrier, the troll agent at ElevenLabs,
+# and the handset on the LAN.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -27,6 +28,10 @@ spec:
             dns:
               - matchPattern: "*.voip.ms"
               - matchPattern: voip.ms
+              # `*` matches one DNS label and `**.` any number. The trunk's host
+              # is sip.rtc.elevenlabs.io, and a call's ACK and BYE go to a
+              # Contact host under hosts.rtc.elevenlabs.io.
+              - matchPattern: "**.rtc.elevenlabs.io"
     - toFQDNs:
         - matchPattern: "*.voip.ms"
         - matchName: voip.ms
@@ -38,6 +43,16 @@ spec:
             # fallback while TLS proves itself, and goes when it has.
             - {port: "5060", protocol: UDP}
             - {port: "5060", protocol: TCP}
+    # The troll trunk, TLS only. The INVITE goes to sip.rtc.elevenlabs.io, and
+    # the call's ACK and BYE go to the Contact host its answer names, under
+    # hosts.rtc.elevenlabs.io, over the open connection or a new one. `**.`
+    # because how many labels that host has is theirs to choose.
+    - toFQDNs:
+        - matchName: sip.rtc.elevenlabs.io
+        - matchPattern: "**.hosts.rtc.elevenlabs.io"
+      toPorts:
+        - ports:
+            - {port: "5061", protocol: TCP}
     # RTP to the carrier cannot be an FQDN rule and this is the honest reason:
     # the media address arrives in an SDP body, from a host this pod never
     # looked up. A toFQDNs egress rule permits the signalling and then silently
@@ -46,6 +61,17 @@ spec:
       toPorts:
         - ports:
             - {port: "10000", endPort: 20000, protocol: UDP}
+    # ElevenLabs sends media from ports anywhere in 10000-60000, wider than
+    # voip.ms; rtp.conf still pins this pod's own ports to 10000-20000. `world`
+    # includes the private and shared (100.64/10) ranges, and a LAN host's UDP
+    # service can listen anywhere in this one, so the ports past 20000 reach
+    # public addresses only.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10]
+      toPorts:
+        - ports:
+            - {port: "20001", endPort: 60000, protocol: UDP}
     # The handset. She is a LAN host, not a cluster endpoint, so she is `world`
     # to Cilium even though the packets never leave the building.
     #

@@ -1,7 +1,7 @@
 ---
-# Ingress only. Egress is declared per site, because what a PBX is allowed to
-# talk to is the one thing genuinely different between them — folly reaches one
-# voip.ms server, offsite reaches that and ElevenLabs.
+# Ingress only. Egress is declared in each site's own network-policy.yaml,
+# because what a PBX is allowed to talk to is the one thing genuinely different
+# between them: each site's carriers, agents and handsets are its own.
 #
 # Naming any ingress rule makes ingress default-deny for this endpoint, which
 # is why the probe path is spelled out: `host` is the kubelet on this node
