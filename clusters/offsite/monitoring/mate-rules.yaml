@@ -139,6 +139,23 @@ spec:
             message: "mate is failing to mint GitHub tokens"
             description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. The runbook at https://wiki.lolwtf.ca/runbooks/repair-the-rowbutt-github-credential/ has the checks."
 
+        # One failed fold is a bearer that may exist only in a sandbox the quiet
+        # teardown deletes, so the first counts. `result!="ok"` is the contract.
+        - alert: MateKthxSitesSyncFailing
+          expr: |
+            sum(increase(mate_kthx_sites_syncs_total{result!="ok"}[30m])) > 0
+            or sum(
+              mate_kthx_sites_syncs_total{result!="ok"}
+              unless ignoring(pod, instance)
+              mate_kthx_sites_syncs_total{result!="ok"} offset 30m
+            ) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate could not keep a sandbox kthx site tokens"
+            description: "A fold of a sandbox's kthx site tokens into the mate-kthx-sites Secret failed, so a site claimed in that turn may have its only bearer in the sandbox, which the quiet teardown deletes. The next turn on that thread retries the save and a teardown makes one last attempt, so a single failure heals itself unless the thread is already quiet. `read-failed` is the file in the sandbox, `save-failed` the Secret. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i kthx`. What the ledger holds, names only: `kubectl --context offsite -n mate get secret mate-kthx-sites -o jsonpath='{.data.sites\\.json}' | base64 -d | jq 'map_values(keys)'`."
+
         # A sweep runs every five minutes, so 20m is four that could not refill.
         # Both read 0 until the first sweep, so a mate with no pool cannot fire.
         - alert: MateWarmPoolShort

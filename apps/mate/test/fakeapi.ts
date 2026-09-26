@@ -124,12 +124,16 @@ function merge(into: Json, patch: Json): Json {
 export interface Patched {
   name: string;
   contentType: string | null;
+  query: string;
   body: Json;
 }
 
 export class FakeKube {
   readonly sandboxes = new Map<string, Json>();
   readonly pods = new Map<string, Json>();
+  readonly secrets = new Map<string, Json>();
+  /** The harness home: what `printf … > path` wrote and `cat path` reads. */
+  readonly files = new Map<string, string>();
   readonly execs: ExecRecord[] = [];
   readonly patches: Patched[] = [];
   readonly requests: { method: string; path: string; query: string }[] = [];
@@ -138,6 +142,10 @@ export class FakeKube {
   readyOnCreate = true;
   /** Answers every PATCH 403, the way a Role without `patch` does. */
   patchFails = false;
+  /** Answers a Secret PATCH 403 while every other patch still lands. */
+  secretPatchFails = false;
+  /** This many Secret reads are answered, then the object moves on, as another writer would move it. */
+  secretMovesAfterRead = 0;
   /** Answers every DELETE 500. */
   deleteFails = false;
   /** Fails every one-shot exec with this message. */
@@ -173,6 +181,8 @@ export class FakeKube {
           // Any command but the ACP harness is one-shot: it exits and the stream closes.
           if (!ws.data.exec.command.includes('acp')) {
             const said = fake.commandFails;
+            const out = said ? '' : fake.shell(ws.data.exec.command);
+            if (out) ws.send(frame(STDOUT, out));
             ws.send(
               frame(
                 STATUS,
@@ -276,6 +286,53 @@ export class FakeKube {
     this.emit(this.podWatchers, 'ADDED', pod);
   }
 
+  /** A Secret as the apiserver holds it: `data` values base64. */
+  putSecret(name: string, data: Record<string, string>): void {
+    const secret: Json = {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: { name, namespace: this.namespace },
+      type: 'Opaque',
+      data: Object.fromEntries(
+        Object.entries(data).map(([key, value]) => [
+          key,
+          Buffer.from(value).toString('base64'),
+        ]),
+      ),
+    };
+    this.bump(secret);
+    this.secrets.set(name, secret);
+  }
+
+  secretRevision(name: string): string {
+    const secret = this.secrets.get(name);
+    if (!secret) throw new Error(`no secret ${name}`);
+    return (secret.metadata as Json).resourceVersion as string;
+  }
+
+  /** One `data` value, decoded; `undefined` when the Secret or key is absent. */
+  secretValue(name: string, key: string): string | undefined {
+    const data = (this.secrets.get(name)?.data ?? {}) as Record<string, string>;
+    const raw = data[key];
+    return raw === undefined
+      ? undefined
+      : Buffer.from(raw, 'base64').toString('utf8');
+  }
+
+  // Enough of `sh -c` for the one-shot scripts sandboxes.ts runs: every
+  // `printf %s "$n" > path` stores an argument, and `cat path` reads one back.
+  private shell(command: string[]): string {
+    const [shell, flag, script, ...argv] = command;
+    if (shell !== '/bin/sh' || flag !== '-c' || !script) return '';
+    for (const [, index, path] of script.matchAll(
+      /printf %s "\$(\d+)" > (\S+)/g,
+    )) {
+      this.files.set(path as string, argv[Number(index)] ?? '');
+    }
+    const read = /(?:^|; )cat (\S+)/.exec(script);
+    return read ? (this.files.get(read[1] as string) ?? '') : '';
+  }
+
   private bump(object: Json): void {
     (object.metadata as Json).resourceVersion = String(++this.revision);
   }
@@ -328,9 +385,13 @@ export class FakeKube {
       return this.list(this.sandboxes, this.sandboxWatchers, url);
     }
     if (path.startsWith(`${sandboxes}/`)) {
-      return this.one(request, path.slice(sandboxes.length + 1));
+      return this.one(request, path.slice(sandboxes.length + 1), url);
     }
     if (path === pods) return this.list(this.pods, this.podWatchers, url);
+    const secrets = `/api/v1/namespaces/${this.namespace}/secrets/`;
+    if (path.startsWith(secrets)) {
+      return this.secret(request, path.slice(secrets.length), url);
+    }
     const token = /\/serviceaccounts\/([^/]+)\/token$/.exec(path);
     if (token && request.method === 'POST') {
       return this.tokenRequest(request, token[1] as string);
@@ -354,7 +415,49 @@ export class FakeKube {
     return Response.json(this.sandboxes.get(name), { status: 201 });
   }
 
-  private async one(request: Request, name: string): Promise<Response> {
+  private async secret(
+    request: Request,
+    name: string,
+    url: URL,
+  ): Promise<Response> {
+    const secret = this.secrets.get(name);
+    if (!secret) return status(404, `secrets "${name}" not found`, 'NotFound');
+    if (request.method === 'PATCH') {
+      if (this.patchFails || this.secretPatchFails) {
+        return status(403, `secrets "${name}" is forbidden`, 'Forbidden');
+      }
+      const body = (await request.json()) as Json;
+      this.patches.push({
+        name,
+        contentType: request.headers.get('content-type'),
+        query: url.searchParams.toString(),
+        body,
+      });
+      const want = ((body.metadata ?? {}) as Json).resourceVersion;
+      if (want && want !== (secret.metadata as Json).resourceVersion) {
+        return status(
+          409,
+          `Operation cannot be fulfilled on secrets "${name}": the object has been modified`,
+          'Conflict',
+        );
+      }
+      merge(secret, body);
+      this.bump(secret);
+      return Response.json(secret);
+    }
+    const served = Response.json(secret);
+    if (this.secretMovesAfterRead > 0) {
+      this.secretMovesAfterRead -= 1;
+      this.bump(secret);
+    }
+    return served;
+  }
+
+  private async one(
+    request: Request,
+    name: string,
+    url: URL,
+  ): Promise<Response> {
     const sandbox = this.sandboxes.get(name);
     if (request.method === 'DELETE') {
       if (!sandbox) return status(404, `no sandbox ${name}`, 'NotFound');
@@ -375,6 +478,7 @@ export class FakeKube {
       this.patches.push({
         name,
         contentType: request.headers.get('content-type'),
+        query: url.searchParams.toString(),
         body,
       });
       // A merge patch carrying a stale resourceVersion is a 409, as on the apiserver.
@@ -410,9 +514,9 @@ export class FakeKube {
     }
     const seconds = Number(url.searchParams.get('timeoutSeconds') ?? '10');
     let watcher: Watcher;
+    let open = true;
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
-        let open = true;
         const finish = () => {
           if (!open) return;
           open = false;
@@ -430,7 +534,10 @@ export class FakeKube {
         watchers.add(watcher);
         setTimeout(finish, seconds * 1000).unref?.();
       },
+      // The runtime has closed the stream; the timer above must not close it
+      // again, or it throws into whatever test is running by then.
       cancel: () => {
+        open = false;
         watchers.delete(watcher);
       },
     });

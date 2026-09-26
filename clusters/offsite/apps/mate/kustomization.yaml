@@ -7,6 +7,7 @@ resources:
   - rbac.yaml
   - sandbox-rbac.yaml
   - external-secret.yaml
+  - kthx-sites-secret.yaml
   - network-policy.yaml
   - sandbox-network-policy.yaml
   - deployment.yaml
