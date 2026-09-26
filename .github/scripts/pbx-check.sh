@@ -21,12 +21,16 @@
 #   5. nothing reachable from a context an inbound call starts in dials a
 #      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk);
 #   6. a site with [pbx-event] logs the line Grafana and the smiirl parse;
-#   7. on folly, line 1's trunk is never screened, an open line, a contact and
-#      a 911 callback ring unanswered, a stranger on a screened line hears the
-#      press-5 prompt, a caller who pressed 5 rings the handset as [5] with the
-#      Human ring, a caller who did not is held in a spam sink with the
-#      ten-minute cap and its hangup handler, and every prompt the dialplan
-#      plays is in the ConfigMap mounted for it.
+#   7. on folly, one trunk is screened and line 1's never is, an open line, a
+#      contact and a 911 callback ring unanswered, a stranger on a screened
+#      line hears the press-5 prompt and then the sinks, a stranger who hangs
+#      up on the prompt is counted, a caller who pressed 5 rings the handset
+#      as [5] with the Human ring, a caller who did not is held in a spam sink
+#      with the ten-minute cap and its hangup handler, a third stranger on a
+#      line screening two is refused unanswered, a fourth held caller hears
+#      goodbye, the INVITE to the handset carries the Alert-Info its pre-dial
+#      handler adds, and every prompt the dialplan plays is in the ConfigMap
+#      mounted for it.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -642,6 +646,9 @@ check_reload_and_handsets() {
     fi
   done
   if [[ $site == folly ]]; then
+    # The inbound probes set SCREEN themselves, so only this sees a trunk
+    # that lost its set_var.
+    ((${#screened[@]})) || fail "no trunk sets SCREEN=yes, so no line asks a stranger to press 5"
     printf '%s\n' "${INBOUND_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
   fi
   if has_context pbx-event; then
@@ -780,6 +787,13 @@ check_events() {
 # hour of a 911, and answers anyone else with the press-5 prompt. `human` and
 # `sink` enter where a Read verdict would send the caller, since no probe can
 # press a digit: a 5 rings the handset as [5], anything else is held in [spam].
+# No prompt file exists here, so a Read returns at once and no probe can be
+# held in one: `crowd` stands in for a caller mid-prompt by joining the screen
+# group and staying, and `dropped` hangs up inside [from-voipms] with that
+# group set, which is the state of a stranger who hangs up on the prompt.
+# `leg` dials line4 at Asterisk's own loopback address, because Dial runs b()
+# only on a channel it created and no handset is registered here; the INVITE
+# it sends itself is the one the handset would get.
 # shellcheck disable=SC2016 # ${EPOCH} is Asterisk's
 INBOUND_PROBE_CONTEXT=(
   '[pbx-check-inbound]'
@@ -810,6 +824,17 @@ INBOUND_PROBE_CONTEXT=(
   ' same => n,Set(CALLERID(num)=6135550106)'
   ' same => n,Answer()'
   ' same => n,Goto(spam,s,1)'
+  'exten => crowd,1,Set(GROUP(screen)=line4)'
+  ' same => n,Answer()'
+  ' same => n,Wait(30)'
+  'exten => third,1,Goto(stranger,1)'
+  'exten => filler,1,Goto(sink,1)'
+  'exten => fourth,1,Goto(sink,1)'
+  'exten => dropped,1,Set(HANDSET=line4)'
+  ' same => n,Set(CALLERID(num)=6135550108)'
+  ' same => n,Set(GROUP(screen)=line4)'
+  ' same => n,Goto(from-voipms,busy,1)'
+  'exten => leg,1,Dial(PJSIP/line4/sip:line4@127.0.0.1:5060,3,b(handset-leg^s^1(Friend)))'
 )
 
 # Places probe $1 and fails if its Executing lines hold $2, or miss any of the
@@ -829,6 +854,31 @@ expect_route() {
   if [[ $seen == *"$refuse"* ]]; then fail "inbound probe '$name' ran $refuse"; fi
 }
 
+# Places probe $1 with a caller who stays on for 30 s, and returns once $2
+# probes of that name have run $3, so the callers a cap counts are on the line
+# before the next one arrives.
+hold_probe() {
+  local name=$1 count=$2 step=$3 i
+  ast "channel originate Local/$name@pbx-check-inbound/n application Wait 30" >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    (($(grep -F "(\"Local/$name@pbx-check-inbound-" "$SITE_DIR/asterisk.log" | grep -cF "$step") >= count)) && return 0
+    sleep 0.1
+  done
+  fail "held probe '$name' ($count) never ran $step"
+}
+
+# Hangs up every probe and waits until Asterisk agrees, so a cap counts only
+# the callers placed for it.
+quiesce() {
+  local i
+  ast 'channel request hangup all' >/dev/null || true
+  for ((i = 0; i < 50; i++)); do
+    [[ $(ast 'core show channels count') == "0 active channels"* ]] && return 0
+    sleep 0.1
+  done
+  fail "channels from an earlier probe are still up"
+}
+
 check_inbound_routes() {
   [[ $1 == folly ]] || return 0
   local before=$SITE_FAILURES answer='] Answer("'
@@ -838,7 +888,11 @@ check_inbound_routes() {
     '"NOTICE,pbx-event kind=contact line=line4 caller=16135550104"' \
     '"CALLERID(name)=[OK] Pbx Check"' \
     '"PJSIP/line4,25,b(handset-leg^s^1(Friend))"'
-  expect_route stranger '"PJSIP/line4,' "$answer" '"DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6"'
+  # Waited for past the verdict, so a Read that rings the desk is seen.
+  expect_route stranger '"PJSIP/line4,' "$answer" '"GROUP(screen)=line4"' \
+    '"DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6"' \
+    '"NOTICE,pbx-event kind=screened line=line4 caller=6135550103"' '"spam,s,1"'
+  expect_route dropped "$answer" '"NOTICE,pbx-event kind=screened line=line4 caller=6135550108"'
   expect_route human "$answer" \
     '"NOTICE,pbx-event kind=captcha-pass line=line4 caller=6135550105"' \
     '"CALLERID(name)=[5] 6135550105"' \
@@ -846,7 +900,38 @@ check_inbound_routes() {
   # A sink never dials anything.
   expect_route sink '"PJSIP/' '"TIMEOUT(absolute)=600"' '"GROUP()=spam"' \
     '"CHANNEL(hangup_handler_push)=spam-held,s,1"'
-  ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5, a 5 rings as [5], the rest are held"
+  # The caps: a third stranger on a line screening two is refused before
+  # Answer, and a fourth held caller hears goodbye and joins no group.
+  quiesce
+  hold_probe crowd 1 '"GROUP(screen)=line4"'
+  hold_probe crowd 2 '"GROUP(screen)=line4"'
+  expect_route third "$answer" '"1?busy,1"' '"17")'
+  quiesce
+  hold_probe filler 1 '"GROUP()=spam"'
+  hold_probe filler 2 '"GROUP()=spam"'
+  hold_probe filler 3 '"GROUP()=spam"'
+  expect_route fourth '"GROUP()=spam"' '"1?full,1"' '"/var/lib/pbx-sounds/goodbye"'
+  quiesce
+  ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5 and then a sink, a 5 rings as [5]; a third stranger and a fourth held caller are refused"
+  check_handset_leg
+}
+
+# The b() handler's proof is the header on the wire: the SIP log holds the
+# INVITE the leg probe sent to Asterisk itself.
+check_handset_leg() {
+  local log="$SITE_DIR/asterisk.log" offset i
+  offset=$(wc -c <"$log")
+  ast 'channel originate Local/leg@pbx-check-inbound/n application Wait 1' >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    tail -c +"$((offset + 1))" "$log" | grep -qF 'Alert-Info: Friend' && break
+    sleep 0.1
+  done
+  if ((i < 50)) && tail -c +"$((offset + 1))" "$log" | grep -F '@handset-leg:' | grep -qF '("PJSIP/line4-'; then
+    say "    the INVITE to the handset carries the Alert-Info its pre-dial handler adds"
+  else
+    fail "the handset-leg pre-dial handler did not put Alert-Info: Friend on the INVITE to line4"
+  fi
+  quiesce
 }
 
 # Every prompt the dialplan plays from a ConfigMap the asterisk container
