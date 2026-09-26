@@ -350,6 +350,18 @@
       groupSlug: 'mate-sandbox-toolset',
     },
     {
+      // The sandbox's kthx CLI is a digest pin on the first-party kthx image,
+      // which CD moves on every kthx build on main. In the toolset group each
+      // build would reopen that PR and, since a first-party digest is never
+      // automerged, hold two dozen tool bumps behind a digest review. Its own
+      // group keeps the digest reviewed on its own and the toolset moving.
+      description: 'mate sandbox kthx cli: the first-party digest is its own pull request',
+      matchFileNames: ['images/mate-sandbox/Dockerfile'],
+      matchPackageNames: ['ghcr.io/jonpulsifer/kthx'],
+      groupName: 'mate sandbox kthx cli',
+      groupSlug: 'mate-sandbox-kthx-cli',
+    },
+    {
       // Two of the sandbox's tools have to be the versions the repo already
       // runs, not merely current ones: Atlantis applies with the `opentofu`
       // the root mise.toml names, and `docs:diagrams` commits d2's output, so

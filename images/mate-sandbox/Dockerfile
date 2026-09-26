@@ -133,6 +133,19 @@ COPY --from=toolset /out/libexec/ /usr/local/libexec/
 
 COPY gh /usr/local/bin/gh
 
+# The CLI comes from the image that serves it, so the sandbox runs the build
+# the apex serves. It is a Bun bundle: `kthx` on PATH is the shim copied in
+# below, and `kthx upgrade` would install a second copy the shim never runs.
+COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:8497f1108ed3910343e69dabcbc45d477f3935f415eb6ec0661241fd1faf775b /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
+RUN set -eux; \
+    mkdir -m 0755 -p /usr/local/lib/kthx; \
+    tar -xzf /tmp/kthx.tgz --no-same-owner -C /usr/local/lib/kthx --strip-components=1 \
+      package/kthx.js package/version.json; \
+    chmod 0644 /usr/local/lib/kthx/kthx.js /usr/local/lib/kthx/version.json; \
+    rm /tmp/kthx.tgz
+
+COPY kthx /usr/local/bin/kthx
+
 COPY mise.toml /etc/mise/config.toml
 
 # The platform package opencode-ai installs on linux/amd64. It needs AVX2;
@@ -149,8 +162,8 @@ RUN groupadd -g 1337 agent \
 USER 1337:1337
 WORKDIR /home/agent
 
-# HOME and the XDG roots sit on the pod's emptyDir. Autoupdate is off because
-# the binary is root-owned and pinned.
+# HOME and the XDG roots sit on the pod's emptyDir. opencode's autoupdate and
+# the kthx update check are off because both are root-owned and pinned.
 ENV HOME=/home/agent \
     USER=agent \
     XDG_DATA_HOME=/home/agent/.local/share \
@@ -160,13 +173,15 @@ ENV HOME=/home/agent \
     LANG=C.UTF-8 \
     TERM=dumb \
     NO_COLOR=1 \
-    OPENCODE_DISABLE_AUTOUPDATE=1
+    OPENCODE_DISABLE_AUTOUPDATE=1 \
+    KTHX_NO_UPDATE_CHECK=1
 
 # Runs as the sandbox uid, so a binary that cannot start fails the build.
 # helm, kubectl, kustomize and pixlet reject `--version`.
 RUN set -eux; \
-    for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh jq mise \
-                op opencode promtool shellcheck shfmt sops terraform-docs tofu yq; do \
+    for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh jq kthx \
+                mise op opencode promtool shellcheck shfmt sops terraform-docs tofu \
+                yq; do \
       "$tool" --version >/dev/null; \
     done; \
     helm version >/dev/null; \
