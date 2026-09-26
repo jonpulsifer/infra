@@ -1,9 +1,4 @@
-import type {
-  AriBridge,
-  AriChannel,
-  AriEndpoint,
-  AriEvent,
-} from './ari-types.ts';
+import type { AriBridge, AriChannel, AriEndpoint } from './ari-types.ts';
 import { parseAriTime } from './ari-types.ts';
 import type { LinePlan } from './lines.ts';
 import type { EndpointState, PbxMetrics, Registration } from './metrics.ts';
@@ -17,8 +12,9 @@ import {
 } from './stage.ts';
 
 /**
- * The channel variables the board reads. ari.conf's `channelvars` names the
- * same list, so each channel event carries their current values.
+ * The channel variables the board reads from each channel in ARI's list.
+ * TRAIL is the `pbx-event` kinds the call has logged, which config/events.conf
+ * appends to: a Gosub that short falls between two polls.
  */
 export const TRACKED_VARS = [
   'HANDSET',
@@ -26,27 +22,37 @@ export const TRACKED_VARS = [
   'SCREEN',
   'CONTACT',
   'SINK',
+  'TRAIL',
 ] as const;
 
-// Dialplan the call passes through without moving: the event logger, Dial's
-// pre-dial handlers, the sinks' and the agent's hangup handlers, and each
-// context's `h`.
-const SUBROUTINES = new Set([
+/**
+ * ari.conf's `channelvars`, in order: the tracked variables, then the global
+ * EATEN, which a channel without its own reads through to.
+ */
+export const CHANNEL_VARS = [...TRACKED_VARS, 'EATEN'] as const;
+
+// Dial's pre-dial handlers, which run on the leg Dial is ringing. A leg seen
+// in one is that leg, even before Dial marks it AppDial.
+const PREDIAL = ['handset-leg', 'agent-leg'];
+
+/**
+ * Dialplan a call passes through without moving: the event logger, Dial's
+ * pre-dial handlers, and the sinks' and the agent's hangup handlers. Each
+ * context's `h` is the same.
+ */
+export const SUBROUTINES: ReadonlySet<string> = new Set([
   'pbx-event',
-  'handset-leg',
-  'agent-leg',
+  ...PREDIAL,
   'spam-held',
   'agent-held',
 ]);
 
-// events.conf's kinds that decide how the PBX treated a caller.
-const VERDICTS: Record<string, string> = {
+/** events.conf's kinds that decide how the PBX treated a caller. */
+export const VERDICTS: Readonly<Record<string, string>> = {
   contact: 'contact',
   'captcha-pass': 'pressed 5',
   screened: 'screened',
 };
-
-const PBX_EVENT = /^pbx-event,s,1\(([a-z0-9-]+)/;
 
 export interface Party {
   readonly name: string;
@@ -85,8 +91,6 @@ export interface RecentCall {
   readonly endedAt: string;
   readonly seconds: number;
   readonly talkedSeconds: number;
-  readonly cause: number | null;
-  readonly causeText: string | null;
 }
 
 export interface LineView {
@@ -95,7 +99,6 @@ export interface LineView {
   readonly account: string | null;
   readonly screened: boolean;
   readonly handset: EndpointState;
-  readonly handsetRttMs: number | null;
   readonly registration: Registration | 'unknown';
   readonly calls: number;
 }
@@ -104,7 +107,10 @@ export type AriLink = 'connecting' | 'connected' | 'disconnected';
 
 export interface AsteriskView {
   readonly ari: AriLink;
-  /** Why the last attempt failed: `unauthorized`, `unreachable` or `closed`. */
+  /**
+   * Why the last poll failed: `unauthorized`, `forbidden`, `unreachable` or
+   * `http-error`.
+   */
   readonly reason: string | null;
   readonly since: string;
   readonly metrics: 'ok' | 'failing' | 'unknown';
@@ -124,8 +130,8 @@ export interface BoardView {
 
 interface Leg {
   readonly id: string;
-  /** When the board first heard of it, by the board's clock. */
-  readonly seenAt: number;
+  /** The last poll that listed it, by the board's clock. */
+  lastSeen: number;
   name: string;
   endpoint: string | null;
   state: string;
@@ -133,8 +139,7 @@ interface Leg {
   createdAt: number;
   place: Place;
   vars: Record<string, string>;
-  parent?: string;
-  /** Dial's outgoing leg, known by its app even when the Dial was missed. */
+  /** A leg Dial is ringing, known by its app or its pre-dial handler. */
   dialled: boolean;
   bridge?: string;
   bridgedAt?: number;
@@ -153,10 +158,6 @@ export interface ModelOptions {
 
 const EMPTY_PLACE: Place = { context: '', exten: '', app: '', appData: '' };
 
-// How long a destroyed channel's id is remembered, so a channel list fetched
-// just before it ended cannot bring it back.
-const GONE_MS = 120_000;
-
 /** PJSIP/line4-0000002a names endpoint line4. */
 function endpointOf(name: string): string | null {
   const match = /^PJSIP\/(.+)-[0-9a-f]+$/.exec(name);
@@ -167,18 +168,25 @@ function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
+/** Dial(PJSIP/line4&PJSIP/6135550123@vms-cathy,...) rings line4 and vms-cathy. */
+function dialTargets(appData: string): string[] {
+  const targets = (appData.split(',')[0] ?? '').split('&');
+  return targets.flatMap((target) => {
+    const match = /^PJSIP\/(?:[^@]*@)?(.+)$/.exec(target.trim());
+    return match ? [match[1] as string] : [];
+  });
+}
+
 /**
- * The PBX as the board shows it: every channel ARI reports, folded into calls
+ * The PBX as the board shows it: every channel ARI lists, folded into calls
  * keyed by the channel that started them, plus the four lines and the calls
  * that ended while the board watched. It does no I/O; the ARI client feeds it
- * events and the server reads snapshots.
+ * each poll's lists and the server reads snapshots.
  */
 export class BoardModel {
   private readonly legs = new Map<string, Leg>();
   private readonly bridges = new Map<string, Set<string>>();
   private readonly ariEndpoints = new Map<string, EndpointState>();
-  private readonly contactRtt = new Map<string, number>();
-  private readonly gone = new Map<string, number>();
   private recent: RecentCall[] = [];
   private metrics: PbxMetrics | undefined;
   private metricsState: AsteriskView['metrics'] = 'unknown';
@@ -187,6 +195,7 @@ export class BoardModel {
   private linkSince: number;
   private eaten: number | null = null;
   private readonly listeners = new Set<() => void>();
+  private notified = '';
   private readonly plan: readonly LinePlan[];
   private readonly trunkLine = new Map<string, LinePlan>();
   private readonly lineByName = new Map<string, LinePlan>();
@@ -202,17 +211,18 @@ export class BoardModel {
     this.linkSince = this.now();
   }
 
-  /** The model's clock, so a caller can stamp a request with it. */
-  clock(): number {
-    return this.now();
-  }
-
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
+  // Each poll reloads the lists, so only a snapshot that differs from the
+  // last one told is news; the clock alone is not.
   private changed(): void {
+    const { now: _, ...view } = this.snapshot();
+    const signature = JSON.stringify(view);
+    if (signature === this.notified) return;
+    this.notified = signature;
     for (const listener of this.listeners) listener();
   }
 
@@ -221,6 +231,9 @@ export class BoardModel {
     this.link = link;
     this.linkReason = reason;
     this.linkSince = this.now();
+    // EATEN starts again with the PBX, and a PBX that restarts is one the
+    // board lost for a while, so the count comes back from the next channel.
+    if (link === 'disconnected') this.eaten = null;
     this.changed();
   }
 
@@ -231,100 +244,36 @@ export class BoardModel {
   }
 
   /**
-   * Replaces every channel and bridge with ARI's current lists, as after a
-   * (re)connect or a periodic resync. `since` is when the lists were asked
-   * for: a channel the board first heard of before then, and ARI does not
-   * list, ended unseen and goes to recent with no cause. One heard of since
-   * started after the lists were read, and one destroyed since ended after,
-   * so the lists do not speak for either.
+   * Replaces every channel and bridge with one poll's lists. A channel the
+   * lists no longer name has ended, as of the last poll that named it.
    */
-  load(
-    state: {
-      channels: readonly AriChannel[];
-      bridges: readonly AriBridge[];
-      endpoints?: readonly AriEndpoint[];
-    },
-    since = this.now(),
-  ): void {
+  load(state: {
+    channels: readonly AriChannel[];
+    bridges: readonly AriBridge[];
+    endpoints?: readonly AriEndpoint[];
+  }): void {
+    const now = this.now();
     const live = new Set(state.channels.map((c) => c.id));
     for (const leg of [...this.legs.values()]) {
-      if (!live.has(leg.id) && leg.seenAt < since) {
-        this.end(leg, this.now(), null, null);
-      }
+      if (!live.has(leg.id)) this.end(leg);
     }
-    for (const channel of state.channels) {
-      if (!this.gone.has(channel.id)) this.upsert(channel);
-    }
-    this.bridges.clear();
-    for (const leg of this.legs.values()) leg.bridge = undefined;
-    for (const bridge of state.bridges) this.setBridge(bridge);
+    for (const channel of state.channels) this.upsert(channel, now);
+    this.setBridges(state.bridges, now);
     for (const endpoint of state.endpoints ?? []) this.setEndpoint(endpoint);
     this.changed();
   }
 
-  apply(event: AriEvent): void {
-    const at = parseAriTime(event.timestamp) ?? this.now();
-    switch (event.type) {
-      case 'ChannelCreated':
-      case 'ChannelStateChange':
-      case 'ChannelDialplan':
-      case 'ChannelCallerId':
-      case 'ChannelConnectedLine':
-      case 'ChannelHangupRequest':
-        if (event.channel) this.upsert(event.channel, at);
-        break;
-      case 'ChannelVarset':
-        this.varset(event, at);
-        break;
-      case 'Dial':
-        this.dial(event, at);
-        break;
-      case 'ChannelEnteredBridge':
-      case 'ChannelLeftBridge':
-        if (event.channel) this.upsert(event.channel, at);
-        if (event.bridge) this.setBridge(event.bridge, at);
-        break;
-      case 'BridgeDestroyed':
-        if (event.bridge) this.setBridge({ id: event.bridge.id, channels: [] });
-        break;
-      case 'ChannelDestroyed': {
-        const leg = event.channel && this.legs.get(event.channel.id);
-        if (!leg) return;
-        this.end(leg, at, event.cause ?? null, event.cause_txt ?? null);
-        break;
-      }
-      case 'EndpointStateChange':
-        if (!event.endpoint) return;
-        this.setEndpoint(event.endpoint);
-        break;
-      case 'ContactStatusChange': {
-        const aor = event.contact_info?.aor;
-        const usec = Number(event.contact_info?.roundtrip_usec);
-        if (!aor) return;
-        if (Number.isFinite(usec) && usec > 0) {
-          this.contactRtt.set(aor, Math.round(usec / 1000));
-        } else {
-          this.contactRtt.delete(aor);
-        }
-        break;
-      }
-      default:
-        return;
-    }
-    this.changed();
-  }
-
-  private upsert(channel: AriChannel, at = this.now()): Leg {
+  private upsert(channel: AriChannel, now: number): void {
     let leg = this.legs.get(channel.id);
     if (!leg) {
       leg = {
         id: channel.id,
-        seenAt: this.now(),
+        lastSeen: now,
         name: channel.name,
         endpoint: endpointOf(channel.name),
         state: channel.state ?? 'Unknown',
         caller: { name: '', number: '' },
-        createdAt: parseAriTime(channel.creationtime) ?? at,
+        createdAt: parseAriTime(channel.creationtime) ?? now,
         place: EMPTY_PLACE,
         vars: {},
         dialled: false,
@@ -332,6 +281,7 @@ export class BoardModel {
       };
       this.legs.set(channel.id, leg);
     }
+    leg.lastSeen = now;
     leg.name = channel.name;
     leg.state = channel.state ?? leg.state;
     if (channel.caller) {
@@ -344,10 +294,25 @@ export class BoardModel {
       const value = channel.channelvars?.[name];
       if (value !== undefined) leg.vars[name] = value;
     }
+    this.countEaten(channel.channelvars?.EATEN);
+    const trail = (leg.vars.TRAIL ?? '').split(/\s+/).filter(Boolean);
+    for (const kind of trail.slice(leg.trail.length)) {
+      leg.verdict = VERDICTS[kind] ?? leg.verdict;
+    }
+    leg.trail = trail;
     const dp = channel.dialplan;
-    if (dp?.app_name === 'AppDial') leg.dialled = true;
+    if (dp?.app_name === 'AppDial' || PREDIAL.includes(dp?.context ?? '')) {
+      leg.dialled = true;
+    }
     if (dp?.context !== undefined) this.move(leg, dp);
-    return leg;
+  }
+
+  // GLOBAL(EATEN) only grows while the PBX runs, and each channel carries it
+  // as of its own last step, so the largest is the newest.
+  private countEaten(value: string | undefined): void {
+    if (!value) return;
+    const eaten = Number(value);
+    if (Number.isFinite(eaten)) this.eaten = Math.max(this.eaten ?? 0, eaten);
   }
 
   private move(leg: Leg, dp: NonNullable<AriChannel['dialplan']>): void {
@@ -355,11 +320,6 @@ export class BoardModel {
     const exten = dp.exten ?? '';
     const app = dp.app_name ?? '';
     const appData = dp.app_data ?? '';
-    const kind = app === 'Gosub' ? PBX_EVENT.exec(appData)?.[1] : undefined;
-    if (kind && leg.trail.at(-1) !== kind) {
-      leg.trail.push(kind);
-      leg.verdict = VERDICTS[kind] ?? leg.verdict;
-    }
     if (SUBROUTINES.has(context) || exten === 'h' || context === '') return;
     leg.place = { context, exten, app, appData };
     if (context === 'from-voipms') {
@@ -373,58 +333,24 @@ export class BoardModel {
     if (context === 'spam' && exten === 'full') leg.verdict = 'refused (full)';
   }
 
-  private varset(event: AriEvent, at: number): void {
-    const name = event.variable?.replace(/^_+/, '');
-    if (!event.channel) {
-      // A global: Set(GLOBAL(EATEN)=...) in spam.conf.
-      if (name === 'EATEN') {
-        const eaten = Number(event.value);
-        this.eaten = Number.isFinite(eaten) ? eaten : this.eaten;
-      }
-      return;
-    }
-    // The snapshot on a ChannelVarset predates the Set it reports, so the
-    // event's own value is applied after it.
-    const leg = this.upsert(event.channel, at);
-    if (name && (TRACKED_VARS as readonly string[]).includes(name)) {
-      leg.vars[name] = event.value ?? '';
-    }
-  }
-
-  private dial(event: AriEvent, at: number): void {
-    if (!event.peer) return;
-    const peer = this.upsert(event.peer, at);
-    if (event.caller && event.caller.id !== peer.id) {
-      this.upsert(event.caller, at);
-      peer.parent = event.caller.id;
-      peer.dialled = true;
-    }
-  }
-
-  private setBridge(bridge: AriBridge, at = this.now()): void {
-    const previous = this.bridges.get(bridge.id) ?? new Set<string>();
-    const members = new Set(bridge.channels ?? []);
-    for (const id of previous) {
-      const leg = this.legs.get(id);
-      if (leg && !members.has(id) && leg.bridge === bridge.id) {
-        leg.bridge = undefined;
-      }
-    }
-    if (members.size === 0) {
-      this.bridges.delete(bridge.id);
-      return;
-    }
-    this.bridges.set(bridge.id, members);
-    for (const id of members) {
-      const leg = this.legs.get(id);
-      if (!leg) continue;
-      leg.bridge = bridge.id;
-      const other = [...members]
-        .map((m) => this.legs.get(m))
-        .find((l) => l && l.id !== id);
-      if (other) {
-        leg.bridgedAt ??= at;
-        leg.talkedWith = other.endpoint ?? other.name;
+  private setBridges(bridges: readonly AriBridge[], at: number): void {
+    this.bridges.clear();
+    for (const leg of this.legs.values()) leg.bridge = undefined;
+    for (const bridge of bridges) {
+      // The two lists are read at once, so a bridge can name a channel the
+      // channel list has not caught up with; the next poll places it.
+      const members = (bridge.channels ?? [])
+        .map((id) => this.legs.get(id))
+        .filter((leg): leg is Leg => leg !== undefined);
+      if (members.length === 0) continue;
+      this.bridges.set(bridge.id, new Set(members.map((leg) => leg.id)));
+      for (const leg of members) {
+        leg.bridge = bridge.id;
+        const other = members.find((l) => l.id !== leg.id);
+        if (other) {
+          leg.bridgedAt ??= at;
+          leg.talkedWith = other.endpoint ?? other.name;
+        }
       }
     }
   }
@@ -437,20 +363,10 @@ export class BoardModel {
     );
   }
 
-  private end(
-    leg: Leg,
-    at: number,
-    cause: number | null,
-    causeText: string | null,
-  ): void {
+  private end(leg: Leg): void {
     this.legs.delete(leg.id);
-    const now = this.now();
-    this.gone.set(leg.id, now);
-    for (const [id, when] of this.gone) {
-      if (now - when > GONE_MS) this.gone.delete(id);
-    }
-    if (leg.bridge) this.bridges.get(leg.bridge)?.delete(leg.id);
-    if (leg.parent || leg.dialled) return;
+    if (leg.dialled) return;
+    const at = leg.lastSeen;
     const facts = this.facts(leg);
     const partner =
       leg.talkedWith === AGENT_ENDPOINT ? AGENT_NAME : leg.talkedWith;
@@ -471,17 +387,23 @@ export class BoardModel {
       talkedSeconds: leg.bridgedAt
         ? Math.max(0, Math.round((at - leg.bridgedAt) / 1000))
         : 0,
-      cause,
-      causeText,
     };
     this.recent.unshift(call);
     this.opts.onEnded?.(call);
     this.recent.length = Math.min(this.recent.length, this.opts.recentLimit);
   }
 
-  /** The descendants of a call's first channel, through Dial's links. */
-  private children(root: Leg): Leg[] {
-    return [...this.legs.values()].filter((l) => l.parent === root.id);
+  /** The leg a root's Dial is ringing: one of its targets, not yet bridged. */
+  private ringing(root: Leg): Leg | undefined {
+    if (root.place.app !== 'Dial') return undefined;
+    const targets = dialTargets(root.place.appData);
+    return [...this.legs.values()].find(
+      (leg) =>
+        leg.dialled &&
+        !leg.bridge &&
+        leg.endpoint !== null &&
+        targets.includes(leg.endpoint),
+    );
   }
 
   private facts(root: Leg) {
@@ -505,7 +427,7 @@ export class BoardModel {
           .map((id) => this.legs.get(id))
           .find((l) => l && l.id !== root.id)
       : undefined;
-    const dialling = this.children(root).find((l) => !l.bridge);
+    const dialling = this.ringing(root);
     const stage = stageOf({
       direction,
       place: root.place,
@@ -526,7 +448,7 @@ export class BoardModel {
     for (const leg of this.legs.values()) {
       // A dialled leg belongs to its caller's call, and one whose caller has
       // already gone is about to be destroyed itself.
-      if (leg.parent || leg.dialled) continue;
+      if (leg.dialled) continue;
       const facts = this.facts(leg);
       calls.push({
         id: leg.id,
@@ -554,7 +476,6 @@ export class BoardModel {
         this.ariEndpoints.get(plan.line) ??
         metrics?.endpoints[plan.line] ??
         'unknown',
-      handsetRttMs: this.contactRtt.get(plan.line) ?? null,
       registration:
         (plan.account && metrics?.registrations[plan.account]) || 'unknown',
       calls: calls.filter((c) => c.line === plan.line).length,

@@ -1,10 +1,10 @@
 ---
 # The Switchboard board (apps/switchboard with SWITCHBOARD_ROLE=board): one
 # page of the office phone's calls in progress, their IVR stage, the four
-# lines and the calls that ended since the pod started. It follows the PBX as
-# the read-only ARI user in config/ari.conf and changes nothing. The page has
-# no login: anything that reaches folly's LoadBalancer pool, the LAN and the
-# tailnet, can read caller names and numbers on it.
+# lines and the calls that ended since the pod started. It polls ARI's lists
+# as the user in config/ari.conf, and pbx-ari below admits it to those lists
+# alone. The page has no login: anything that reaches folly's LoadBalancer
+# pool, the LAN and the tailnet, can read caller names and numbers on it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,10 +15,6 @@ metadata:
     app.kubernetes.io/part-of: pbx
 spec:
   replicas: 1
-  # Each pod registers the same ARI application, and the newer one takes the
-  # event stream from the older. Recreate keeps that to one pod at a time.
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: switchboard
@@ -227,6 +223,13 @@ spec:
 ---
 # The other half: the PBX admits the board to its HTTP port. folly's alone;
 # the base pbx-ingress is shared with offsite, which has no board.
+#
+# By exact path, as GET, through Cilium's proxy. ARI's read-only user may GET
+# /ari/channels/{id}/variable, and ARI answers it by running the function the
+# name spells, SET() included, which can send a live call out through a trunk.
+# These are the requests apps/switchboard/src/board/ari.ts makes, and its tests
+# fail if the two lists differ. Envoy matches the whole path, query string
+# included, and answers anything else 403.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -246,3 +249,9 @@ spec:
       toPorts:
         - ports:
             - {port: "8088", protocol: TCP}
+          rules:
+            http:
+              - {method: GET, path: /ari/channels}
+              - {method: GET, path: /ari/bridges}
+              - {method: GET, path: /ari/endpoints}
+              - {method: GET, path: /metrics}

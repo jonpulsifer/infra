@@ -14,7 +14,8 @@
 #      modules a call needs run and are not noloaded, the ones modules.conf
 #      refuses do not load, nothing logs an error against a shipped config
 #      file, the dialplan reloads clean, and a site that ships ari.conf has
-#      ARI on with every user read-only;
+#      ARI on with at least one user, every one limited to GET, and no
+#      outbound websocket;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
 #      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, nothing
 #      else rings a line HANDSET does not name, every exact code beside that
@@ -57,6 +58,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 WALKER="$ROOT/.github/scripts/pbx-inbound-walk.awk"
+ARI_USERS="$ROOT/.github/scripts/pbx-ari-users.awk"
 
 SYSTEM=x86_64-linux
 HANDSET_CONTEXT=from-handset
@@ -74,12 +76,14 @@ REQUIRED_MODULES=(
   app_read.so app_playback.so app_waitforsilence.so res_musiconhold.so
   func_groupcount.so func_timeout.so app_exec.so func_logic.so func_strings.so
 )
-# A second dial tone, a shell, SIP over the metrics port's WebSocket, and
-# ARI's config reader, which hands any ARI user the trunk passwords;
-# modules.conf refuses them on every site.
+# A second dial tone, a shell, SIP over the metrics port's WebSocket, ARI's
+# config reader and the two functions that read the same fields, each of which
+# hands the trunk passwords to anyone with ARI's password, and ARI's events
+# socket, which runs REST requests no network policy sees; modules.conf
+# refuses them on every site.
 FORBIDDEN_MODULES=(
   app_disa.so app_system.so func_shell.so res_pjsip_transport_websocket.so
-  res_ari_asterisk.so
+  res_ari_asterisk.so res_ari_events.so func_sorcery.so func_config.so
 )
 
 WORK=""
@@ -533,17 +537,22 @@ check_boot_log() {
 
 # ARI, on a site that ships ari.conf, is for reading. A user without
 # read_only could originate a call from the PBX, or hang one up, with nothing
-# but its password.
+# but its password. read_only is not the whole of it: a GET of a channel
+# variable still runs a dialplan function, SET() included, so the site's
+# network policy limits the paths, and FORBIDDEN_MODULES closes the events
+# socket. An outbound websocket is that socket the other way round, and runs
+# every REST request its far end sends.
 check_ari() {
   [[ -f $ETC/ari.conf ]] || return 0
   ast 'ari show status' | grep -Eq '^Enabled:[[:space:]]+Yes' || fail "ari.conf ships but ARI is not enabled"
-  local users writable
-  users=$(ast 'ari show users')
-  writable=$(awk 'NR > 2 && NF && $1 != "Yes" { print $2 }' <<<"$users")
-  if [[ -n $writable ]]; then
-    fail "ari.conf declares ARI users that can write" "$writable"
+  local verdict
+  if verdict=$(ast 'ari show users' | awk -f "$ARI_USERS"); then
+    say "    ARI is on and GET-only for: $verdict"
   else
-    say "    ARI is on and read-only for: $(awk 'NR > 2 && NF { print $2 }' <<<"$users" | paste -sd' ')"
+    fail "ari.conf must declare ARI users, each read-only" "$verdict"
+  fi
+  if grep -Eq '^[[:space:]]*type[[:space:]]*=[[:space:]]*outbound_websocket' "$ETC/ari.conf"; then
+    fail "ari.conf declares an outbound websocket"
   fi
 }
 

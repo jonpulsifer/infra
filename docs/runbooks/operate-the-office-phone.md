@@ -86,6 +86,34 @@ The fetch shows up in the `provision` container's log and on the dashboard.
 It includes every setting the phone has, so read it through a filter rather
 than printing it.
 
+## Rotate the board's ARI password
+
+The [Switchboard board](../apps/switchboard/board.md) reads the PBX as the ARI
+user in `clusters/folly/apps/pbx/config/ari.conf`. The password is the SOPS
+Secret `pbx-ari`, in `clusters/folly/apps/pbx/ari-secret.sops.yaml`. The board
+restarts when that Secret changes. The PBX reads it only when its pod starts,
+because Reloader watches only `pbx-secrets` on the PBX. Until the PBX restarts,
+the board shows `ARI disconnected (unauthorized)`, and a restart of the PBX is
+the fix for that state whatever caused it.
+
+1. From the repo root, write a new password straight into the encrypted file.
+   Nothing prints it:
+
+   ```sh
+   SOPS_AGE_KEY_FILE=~/.config/age/keys.txt bash -c 'set -euo pipefail
+   f=clusters/folly/apps/pbx/ari-secret.sops.yaml
+   pw=$(head -c 24 /dev/urandom | od -An -vtx1 | tr -d " \n")
+   printf "apiVersion: v1\nkind: Secret\nmetadata:\n  name: pbx-ari\n  namespace: pbx\ntype: Opaque\nstringData:\n  PBX_ARI_PASSWORD: \"%s\"\n" "$pw" |
+     sops encrypt --filename-override "$f" /dev/stdin >"$f"'
+   ```
+
+2. Merge, and wait for Flux to apply it.
+3. When `core show channels` shows no active call, restart the PBX:
+
+   ```sh
+   kubectl --context folly -n pbx rollout restart deploy/pbx
+   ```
+
 ## Read the SIP
 
 PJSIP logs every SIP message the PBX sends and receives. In VictoriaLogs:
