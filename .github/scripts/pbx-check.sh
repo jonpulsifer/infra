@@ -14,10 +14,23 @@
 #      run and are not noloaded, nothing logs an error against a shipped
 #      config file, and the dialplan reloads clean;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
-#      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, and nothing
-#      else rings a line HANDSET does not name;
+#      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, nothing
+#      else rings a line HANDSET does not name, every exact code beside that
+#      pattern is a star code into [toybox], and on folly a 911 sets
+#      GLOBAL(LAST911);
 #   5. nothing reachable from a context an inbound call starts in dials a
-#      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk).
+#      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk);
+#   6. a site with [pbx-event] logs the line Grafana and the smiirl parse;
+#   7. on folly, one trunk is screened and line 1's never is, an open line, a
+#      contact and a 911 callback ring unanswered, a stranger on a screened
+#      line hears the press-5 prompt and then the sinks, a stranger who hangs
+#      up on the prompt is counted, a caller who pressed 5 rings the handset
+#      as [5] with the Human ring, a caller who did not is held in a spam sink
+#      with the ten-minute cap and its hangup handler, a third stranger on a
+#      line screening two is refused unanswered, a fourth held caller hears
+#      goodbye, the INVITE to the handset carries the Alert-Info its pre-dial
+#      handler adds, and every prompt the dialplan plays is in the ConfigMap
+#      mounted for it.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -49,7 +62,11 @@ REQUIRED_MODULES=(
   res_srtp.so res_rtp_asterisk.so
   pbx_config.so app_dial.so app_stack.so res_prometheus.so
   codec_g722.so codec_ulaw.so
+  app_read.so app_playback.so app_waitforsilence.so res_musiconhold.so
+  func_groupcount.so func_timeout.so app_exec.so func_logic.so func_strings.so
 )
+# A second dial tone and a shell; modules.conf refuses them on every site.
+FORBIDDEN_MODULES=(app_disa.so app_system.so func_shell.so)
 
 WORK=""
 ASTERISK_PID=""
@@ -488,6 +505,12 @@ check_boot_log() {
     ast "module show like $mod" | grep -E "^${mod}[[:space:]].*[[:space:]]Running[[:space:]]" >/dev/null || missing+=("$mod")
   done
   if ((${#missing[@]})); then fail "required modules are not running" "${missing[@]}"; fi
+
+  local loaded=()
+  for mod in "${FORBIDDEN_MODULES[@]}"; do
+    if ast "module show like $mod" | grep -E "^${mod}[[:space:]]" >/dev/null; then loaded+=("$mod"); fi
+  done
+  if ((${#loaded[@]})); then fail "modules.conf must refuse these, and they loaded" "${loaded[@]}"; fi
 }
 
 # --- PJSIP: declared vs loaded --------------------------------------------
@@ -576,7 +599,7 @@ endpoint_param() { awk -v key="$2" '$1 == key && $2 == ":" { $1 = ""; $2 = ""; s
 
 check_reload_and_handsets() {
   local site=$1 ep show ctx trunk handset
-  local -a lines=() trunks=() roots=(from-voipms)
+  local -a lines=() trunks=() roots=(from-voipms) screened=()
   local -A shows=()
   for ep in $ENDPOINTS; do
     show=$(ast "pjsip show endpoint $ep")
@@ -592,6 +615,7 @@ check_reload_and_handsets() {
     elif [[ -n $ctx && $ctx != from-voipms ]]; then
       roots+=("$ctx")
     fi
+    if [[ $ctx == from-voipms && $(endpoint_param "$show" SCREEN) == yes ]]; then screened+=("$ep"); fi
   done
   INBOUND_ROOTS="${roots[*]}"
 
@@ -616,7 +640,24 @@ check_reload_and_handsets() {
     # shellcheck disable=SC2016 # ${EXTEN} is Asterisk's
     printf '[pbx-check-%s]\nexten => %s,1,Set(TRUNK=%s)\n same => n,Goto(%s,${EXTEN},1)\n\n' \
       "${lines[i]}" "$HANDSET_PATTERN" "${trunks[i]}" "$HANDSET_CONTEXT" >>"$ETC/pbx-check.conf"
+    # The handset dials 911 on line 1, so 911 calls back on line 1's trunk.
+    if [[ ${lines[i]} == line1 ]] && printf '%s\n' "${screened[@]}" | grep -qxF "${trunks[i]}"; then
+      fail "${trunks[i]} sets SCREEN=yes, but line1 dials 911 on it, so a callback from 911 would be screened"
+    fi
   done
+  if [[ $site == folly ]]; then
+    # The inbound probes set SCREEN themselves, so only this sees a trunk
+    # that lost its set_var.
+    ((${#screened[@]})) || fail "no trunk sets SCREEN=yes, so no line asks a stranger to press 5"
+    printf '%s\n' "${INBOUND_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
+  fi
+  if has_context pbx-event; then
+    printf '%s\n' '[pbx-check-event]' \
+      'exten => s,1,Set(HANDSET=line4)' \
+      ' same => n,Set(CALLERID(num)=+1 (613) 555-0123)' \
+      " same => n,Gosub(pbx-event,s,1($EVENT_PROBE_ARGS))" \
+      ' same => n,Hangup()' '' >>"$ETC/pbx-check.conf"
+  fi
 
   local log="$SITE_DIR/asterisk.log" offset reply errors
   offset=$(wc -c <"$log")
@@ -677,9 +718,242 @@ check_reload_and_handsets() {
   else
     say "    ${#lines[@]} handset line(s) x ${#GOLDEN_NUMBERS[@]} numbers reach Dial(PJSIP/<number>@<trunk>,60)"
   fi
+
+  if [[ $site == folly ]] && ! ast 'dialplan show globals' | grep -E '^[[:space:]]*LAST911=[0-9]+[[:space:]]*$' >/dev/null; then
+    fail "a 911 from the handset did not set GLOBAL(LAST911), so a callback from 911 would be screened"
+  fi
+  check_handset_codes "${lines[0]}"
+}
+
+# Every exact extension in the handset context is a star code into [toybox]:
+# a code that starts with a digit would take a number away from the trunk.
+check_handset_codes() {
+  local line=$1 code log="$SITE_DIR/asterisk.log" i
+  local -a codes=() wrong=()
+  mapfile -t codes < <(ast "dialplan show $HANDSET_CONTEXT" | awk -v c="[ Context '$HANDSET_CONTEXT'" -v p="$HANDSET_PATTERN" '
+    index($0, c) == 1 { inside = 1; next }
+    /^\[ / { inside = 0 }
+    inside && match($0, /^  '\''[^'\'']*'\''/) { e = substr($0, RSTART + 3, RLENGTH - 4); if (e != p) print e }
+  ')
+  ((${#codes[@]})) || return 0
+  for code in "${codes[@]}"; do
+    [[ $code == \** ]] || wrong+=("$code does not start with *")
+    ast "channel originate Local/$code@pbx-check-$line/n application Wait 1" >/dev/null
+  done
+  for code in "${codes[@]}"; do
+    for ((i = 0; i < 50; i++)); do
+      grep -F "(\"Local/$code@pbx-check-$line-" "$log" | grep -F '@toybox:1] ' >/dev/null && break
+      sleep 0.1
+    done
+    ((i < 50)) || wrong+=("$code never reached [toybox]")
+  done
+  ast 'channel request hangup all' >/dev/null || true
+  if ((${#wrong[@]})); then
+    fail "handset codes must be star codes that land in [toybox]" "${wrong[@]}"
+  else
+    say "    ${#codes[@]} handset codes reach [toybox], none of them a number"
+  fi
+}
+
+# --- the pbx-event log contract ----------------------------------------------
+
+has_context() { grep -qxF "[$1]" "$ETC"/*.conf; }
+
+# Grafana and the smiirl parse this line out of VictoriaLogs.
+EVENT_PROBE_ARGS='screened,secs=3,sink=queue'
+EVENT_PROBE_WANT='pbx-event kind=screened line=line4 caller=16135550123 secs=3 sink=queue'
+
+check_events() {
+  has_context pbx-event || return 0
+  local log="$SITE_DIR/asterisk.log" got="" offset i
+  offset=$(wc -c <"$log")
+  ast 'channel originate Local/s@pbx-check-event/n application Wait 1' >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    got=$(tail -c +"$((offset + 1))" "$log" | grep -F '] NOTICE[' | grep -oE 'pbx-event kind=.*$' | head -n 1 || true)
+    [[ -n $got ]] && break
+    sleep 0.1
+  done
+  if [[ $got == "$EVENT_PROBE_WANT" ]]; then
+    say "    the pbx-event helper logs the contract line"
+  else
+    fail "the pbx-event helper broke the log contract" "want: $EVENT_PROBE_WANT" "got:  ${got:-nothing}"
+  fi
 }
 
 # --- inbound ---------------------------------------------------------------
+
+# folly's inbound routes, each driven by a caller the check fakes: an open line
+# rings unanswered, a screened line rings unanswered for a contact or within an
+# hour of a 911, and answers anyone else with the press-5 prompt. `human` and
+# `sink` enter where a Read verdict would send the caller, since no probe can
+# press a digit: a 5 rings the handset as [5], anything else is held in [spam].
+# No prompt file exists here, so a Read returns at once and no probe can be
+# held in one: `crowd` stands in for a caller mid-prompt by joining the screen
+# group and staying, and `dropped` hangs up inside [from-voipms] with that
+# group set, which is the state of a stranger who hangs up on the prompt.
+# `leg` dials line4 at Asterisk's own loopback address, because Dial runs b()
+# only on a channel it created and no handset is registered here; the INVITE
+# it sends itself is the one the handset would get.
+# shellcheck disable=SC2016 # ${EPOCH} is Asterisk's
+INBOUND_PROBE_CONTEXT=(
+  '[pbx-check-inbound]'
+  'exten => open,1,Set(HANDSET=line1)'
+  ' same => n,Set(CALLERID(num)=6135550101)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => callback,1,Set(HANDSET=line4)'
+  ' same => n,Set(SCREEN=yes)'
+  ' same => n,Set(GLOBAL(LAST911)=${EPOCH})'
+  ' same => n,Set(CALLERID(num)=6135550102)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => contact,1,Set(HANDSET=line4)'
+  ' same => n,Set(SCREEN=yes)'
+  ' same => n,Set(GLOBAL(LAST911)=)'
+  ' same => n,Set(GLOBAL(CONTACT_6135550104)=Pbx Check)'
+  ' same => n,Set(CALLERID(num)=+1 613 555 0104)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => stranger,1,Set(HANDSET=line4)'
+  ' same => n,Set(SCREEN=yes)'
+  ' same => n,Set(GLOBAL(LAST911)=)'
+  ' same => n,Set(CALLERID(num)=6135550103)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => human,1,Set(HANDSET=line4)'
+  ' same => n,Set(CALLERID(num)=6135550105)'
+  ' same => n,Set(CALLER=6135550105)'
+  ' same => n,Goto(from-voipms,human,1)'
+  'exten => sink,1,Set(HANDSET=line4)'
+  ' same => n,Set(CALLERID(num)=6135550106)'
+  ' same => n,Answer()'
+  ' same => n,Goto(spam,s,1)'
+  'exten => crowd,1,Set(GROUP(screen)=line4)'
+  ' same => n,Answer()'
+  ' same => n,Wait(30)'
+  'exten => third,1,Goto(stranger,1)'
+  'exten => filler,1,Goto(sink,1)'
+  'exten => fourth,1,Goto(sink,1)'
+  'exten => dropped,1,Set(HANDSET=line4)'
+  ' same => n,Set(CALLERID(num)=6135550108)'
+  ' same => n,Set(GROUP(screen)=line4)'
+  ' same => n,Goto(from-voipms,busy,1)'
+  'exten => leg,1,Dial(PJSIP/line4/sip:line4@127.0.0.1:5060,3,b(handset-leg^s^1(Friend)))'
+)
+
+# Places probe $1 and fails if its Executing lines hold $2, or miss any of the
+# rest. The last is the route's final step, so it is the one waited for.
+expect_route() {
+  local name=$1 refuse=$2 seen="" want i
+  shift 2
+  ast "channel originate Local/$name@pbx-check-inbound/n application Wait 1" >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    seen=$(grep -F "(\"Local/$name@pbx-check-inbound-" "$SITE_DIR/asterisk.log" || true)
+    [[ $seen == *"${!#}"* ]] && break
+    sleep 0.1
+  done
+  for want in "$@"; do
+    [[ $seen == *"$want"* ]] || fail "inbound probe '$name' never ran $want"
+  done
+  if [[ $seen == *"$refuse"* ]]; then fail "inbound probe '$name' ran $refuse"; fi
+}
+
+# Places probe $1 with a caller who stays on for 30 s, and returns once $2
+# probes of that name have run $3, so the callers a cap counts are on the line
+# before the next one arrives.
+hold_probe() {
+  local name=$1 count=$2 step=$3 i
+  ast "channel originate Local/$name@pbx-check-inbound/n application Wait 30" >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    (($(grep -F "(\"Local/$name@pbx-check-inbound-" "$SITE_DIR/asterisk.log" | grep -cF "$step") >= count)) && return 0
+    sleep 0.1
+  done
+  fail "held probe '$name' ($count) never ran $step"
+}
+
+# Hangs up every probe and waits until Asterisk agrees, so a cap counts only
+# the callers placed for it.
+quiesce() {
+  local i
+  ast 'channel request hangup all' >/dev/null || true
+  for ((i = 0; i < 50; i++)); do
+    [[ $(ast 'core show channels count') == "0 active channels"* ]] && return 0
+    sleep 0.1
+  done
+  fail "channels from an earlier probe are still up"
+}
+
+check_inbound_routes() {
+  [[ $1 == folly ]] || return 0
+  local before=$SITE_FAILURES answer='] Answer("'
+  expect_route open "$answer" '"PJSIP/line1,25,b(handset-leg^s^1())"'
+  expect_route callback "$answer" '"PJSIP/line4,25,b(handset-leg^s^1())"'
+  expect_route contact "$answer" \
+    '"NOTICE,pbx-event kind=contact line=line4 caller=16135550104"' \
+    '"CALLERID(name)=[OK] Pbx Check"' \
+    '"PJSIP/line4,25,b(handset-leg^s^1(Friend))"'
+  # Waited for past the verdict, so a Read that rings the desk is seen.
+  expect_route stranger '"PJSIP/line4,' "$answer" '"GROUP(screen)=line4"' \
+    '"DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6"' \
+    '"NOTICE,pbx-event kind=screened line=line4 caller=6135550103"' '"spam,s,1"'
+  expect_route dropped "$answer" '"NOTICE,pbx-event kind=screened line=line4 caller=6135550108"'
+  expect_route human "$answer" \
+    '"NOTICE,pbx-event kind=captcha-pass line=line4 caller=6135550105"' \
+    '"CALLERID(name)=[5] 6135550105"' \
+    '"PJSIP/line4,25,mb(handset-leg^s^1(Human))"'
+  # A sink never dials anything.
+  expect_route sink '"PJSIP/' '"TIMEOUT(absolute)=600"' '"GROUP()=spam"' \
+    '"CHANNEL(hangup_handler_push)=spam-held,s,1"'
+  # The caps: a third stranger on a line screening two is refused before
+  # Answer, and a fourth held caller hears goodbye and joins no group.
+  quiesce
+  hold_probe crowd 1 '"GROUP(screen)=line4"'
+  hold_probe crowd 2 '"GROUP(screen)=line4"'
+  expect_route third "$answer" '"1?busy,1"' '"17")'
+  quiesce
+  hold_probe filler 1 '"GROUP()=spam"'
+  hold_probe filler 2 '"GROUP()=spam"'
+  hold_probe filler 3 '"GROUP()=spam"'
+  expect_route fourth '"GROUP()=spam"' '"1?full,1"' '"/var/lib/pbx-sounds/goodbye"'
+  quiesce
+  ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5 and then a sink, a 5 rings as [5]; a third stranger and a fourth held caller are refused"
+  check_handset_leg
+}
+
+# The b() handler's proof is the header on the wire: the SIP log holds the
+# INVITE the leg probe sent to Asterisk itself.
+check_handset_leg() {
+  local log="$SITE_DIR/asterisk.log" offset i
+  offset=$(wc -c <"$log")
+  ast 'channel originate Local/leg@pbx-check-inbound/n application Wait 1' >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    tail -c +"$((offset + 1))" "$log" | grep -qF 'Alert-Info: Friend' && break
+    sleep 0.1
+  done
+  if ((i < 50)) && tail -c +"$((offset + 1))" "$log" | grep -F '@handset-leg:' | grep -qF '("PJSIP/line4-'; then
+    say "    the INVITE to the handset carries the Alert-Info its pre-dial handler adds"
+  else
+    fail "the handset-leg pre-dial handler did not put Alert-Info: Friend on the INVITE to line4"
+  fi
+  quiesce
+}
+
+# Every prompt the dialplan plays from a ConfigMap the asterisk container
+# mounts must be a key of that ConfigMap. Playback takes no extension.
+check_sounds() {
+  local pod="$SITE_DIR/pod.yaml" mount volume cm ref key refs
+  local -a missing=()
+  while IFS=$'\t' read -r mount volume; do
+    cm=$(V="$volume" yq '.volumes[] | select(.name == strenv(V)) | .configMap.name // ""' "$pod")
+    [[ -n $cm ]] || continue
+    doc ConfigMap "$cm" >"$SITE_DIR/sounds.yaml"
+    refs=$(grep -ohE "$mount/[^,)\"[:space:]]+" "$ETC"/*.conf | sort -u || true)
+    for ref in $refs; do
+      key=${ref#"$mount"/}
+      K="$key" yq -e '(.binaryData // {}) + (.data // {}) | keys | .[] | select(. == strenv(K) + ".ulaw" or . == strenv(K) + ".gsm" or . == strenv(K) + ".wav")' \
+        "$SITE_DIR/sounds.yaml" >/dev/null 2>&1 || missing+=("$ref")
+    done
+  done < <(yq '.containers[] | select(.name == "asterisk") | (.volumeMounts // [])[] | [.mountPath, .name] | @tsv' "$pod")
+  if ((${#missing[@]})); then
+    fail "the dialplan plays prompts its ConfigMap does not carry (give Playback no extension)" "${missing[@]}"
+  fi
+}
 
 check_inbound() {
   local out
@@ -700,6 +974,7 @@ check_site() {
   mkdir -p "$SITE_DIR"
   say "==> $site"
   render "$site" full || return 1
+  check_sounds
   localize || return 1
   check_no_pjsip_noload
   boot || return 1
@@ -711,11 +986,14 @@ check_site() {
     SITE_DIR="$WORK/$site-degraded"
     mkdir -p "$SITE_DIR"
     say "==> $site (degraded: optional secrets absent)"
-    if render "$site" degraded && localize; then
-      check_no_pjsip_noload
-      if boot; then
-        say "    booted ($ISOLATION)"
-        run_checks "$site"
+    if render "$site" degraded; then
+      check_sounds
+      if localize; then
+        check_no_pjsip_noload
+        if boot; then
+          say "    booted ($ISOLATION)"
+          run_checks "$site"
+        fi
       fi
     fi
     stop_asterisk
@@ -731,6 +1009,8 @@ run_checks() {
   check_boot_log
   check_pjsip_objects
   check_reload_and_handsets "$site"
+  check_events
+  check_inbound_routes "$site"
   check_inbound
 }
 

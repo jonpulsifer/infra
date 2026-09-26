@@ -1,0 +1,94 @@
+# The folly PBX's own prompts. `mise run pbx:voices` renders each line to
+# <id>.ulaw beside this file, and the pbx-sounds ConfigMap serves them.
+voices:
+  # Rowbutt's voice, for the PBX itself.
+  house: &house cjVigY5qzO86Huf0OWal
+  # Bill, a stock ElevenLabs voice labelled old, male and American.
+  lenny: &lenny pqHfZKP75CvOlQylNhV4
+
+lines:
+  - id: captcha-greeting
+    voice_id: *house
+    text: Hi there, you've reached the desk. If you're a human, press five. If you're a robot, please hold forever.
+  - id: captcha-retry
+    voice_id: *house
+    text: Sorry, I didn't catch that. Humans, press five.
+  - id: goodbye
+    voice_id: *house
+    text: Thanks for calling. Goodbye!
+
+  # The Endless Queue, with hold music between lines.
+  - id: queue-caller-eleven
+    voice_id: *house
+    text: You are caller number eleven. Your call is important to us, but not that important.
+  - id: queue-wait-time
+    voice_id: *house
+    text: Your estimated wait time is... yes.
+  - id: queue-moved-up
+    voice_id: *house
+    text: Good news! You have moved up. You are now caller number eleven.
+  - id: queue-agents-busy
+    voice_id: *house
+    text: All of our agents are busy helping callers who pressed five.
+  - id: queue-monitored
+    voice_id: *house
+    text: This call may be monitored for quality and entertainment purposes.
+  - id: queue-skip
+    voice_id: *house
+    text: To skip the queue, hang up now, and never call again.
+  - id: queue-music
+    voice_id: *house
+    text: Please enjoy the music. We picked it out just for you.
+  - id: queue-thinking
+    voice_id: *house
+    text: We apologize for the delay. The computer is thinking about it.
+  - id: queue-faster
+    voice_id: *house
+    text: For faster service, keep holding. For slower service, also keep holding.
+  - id: queue-doing-great
+    voice_id: *house
+    text: You're doing great. Most callers give up by now.
+
+  # Robo-Lenny: a polite old man who is very glad you called.
+  - id: lenny-hello
+    voice_id: *lenny
+    text: Hello? Oh, hi, sorry, I was out in the garden. Who's this?
+  - id: lenny-yes
+    voice_id: *lenny
+    text: Yes. Yes, yes.
+  - id: lenny-who
+    voice_id: *lenny
+    text: Sorry, who did you say you were with?
+  - id: lenny-interesting
+    voice_id: *lenny
+    text: Oh, that's interesting. That's very interesting, that is.
+  - id: lenny-daughter
+    voice_id: *lenny
+    text: My daughter was just saying that. She's very clever.
+  - id: lenny-ducks
+    voice_id: *lenny
+    text: Hang on, hang on. The ducks are at the back door again. Just a moment.
+  - id: lenny-again
+    voice_id: *lenny
+    text: Sorry, could you say that again? The line's gone a bit funny.
+  - id: lenny-how-much
+    voice_id: *lenny
+    text: Mm-hmm. And how much would that be, roughly?
+  - id: lenny-pen
+    voice_id: *lenny
+    text: Now, should I write this down? Let me find a pen. Hang on.
+  - id: lenny-sounds-good
+    voice_id: *lenny
+    text: Well, that sounds good. It does.
+  - id: lenny-quiet
+    voice_id: *lenny
+    text: I'm sorry, you're a bit quiet. Could you speak up a little?
+  - id: lenny-last-fellow
+    voice_id: *lenny
+    text: The last fellow who called was ever so nice, too.
+  - id: lenny-kettle
+    voice_id: *lenny
+    text: Oh, sorry, that's the kettle. Where were we?
+  - id: lenny-still-here
+    voice_id: *lenny
+    text: Yes, yes, I'm still here. Go on.

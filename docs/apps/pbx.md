@@ -23,7 +23,7 @@ The folly PBX carries each of the four office-phone lines to its own voip.ms sub
 
 ## How it works
 
-Both sites run the Deployment in `clusters/base/apps/pbx/`, with one replica; offsite's own overlay patches that to zero while it is parked. An init container renders the Asterisk config and fills in the `PBX_*` values from the ConfigMap `pbx-env` and the Secret `pbx-secrets`. External Secrets reads the voip.ms and ElevenLabs credentials from 1Password. Each site's trunks and dialplan are `config/pjsip.conf` and `config/extensions.conf` in its own overlay.
+Both sites run the Deployment in `clusters/base/apps/pbx/`, with one replica; offsite's own overlay patches that to zero while it is parked. An init container renders the Asterisk config and fills in the `PBX_*` values from the ConfigMap `pbx-env` and the Secret `pbx-secrets`. External Secrets reads the voip.ms and ElevenLabs credentials from 1Password. Each site's trunks are `config/pjsip.conf` in its own overlay, and its dialplan is the other `config/*.conf` files there; folly's `extensions.conf` includes one file per feature, and its `config/events.conf` logs one `pbx-event kind=<kind> line=<line> caller=<digits>` line per call event, which the PBX dashboard and the Smiirl count. On folly, an unknown caller on line 4 presses 5 to ring the desk, and a contact from 1Password rings through; [Screen callers on the office phone](../runbooks/screen-callers-on-the-office-phone.md) has the rest.
 
 A change to a config file in git rolls the pod, because each generated ConfigMap name has a content hash. A change to `CATHY_IP` or `PBX_SIP_VIP` in cluster-settings does not. Restart the `pbx` Deployment after it. Reloader restarts the pod when `pbx-secrets` changes.
 

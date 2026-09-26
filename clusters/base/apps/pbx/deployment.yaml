@@ -107,8 +107,9 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {memory: 512Mi}
-      # A call in progress is the thing this must not cut off. Asterisk stops
-      # accepting new calls on SIGTERM and exits when the last one ends.
+      # Asterisk hangs up every call on SIGTERM and exits within 15 s, so a roll
+      # cuts a call in progress; the runbook says to merge only when no call is
+      # up. The grace period is headroom for a shutdown that hangs, not a drain.
       terminationGracePeriodSeconds: 300
       volumes:
         - name: base-templates

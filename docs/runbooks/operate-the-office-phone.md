@@ -35,6 +35,14 @@ Every line depends on folly being up — dial tone, and **911**. A folly outage
 leaves the desk phone with no lines at all; a cell phone is the emergency
 backup.
 
+A merge under `clusters/folly/apps/pbx/` or `clusters/base/apps/pbx/` rolls the
+pod, and Asterisk hangs up every call within 15 seconds of the stop. Merge only
+when `core show channels` shows no active call, and not within an hour of a 911
+call from the handset: a roll forgets `GLOBAL(LAST911)`, and a callback to a
+screened line meets the screen. Line 4 screens unknown callers;
+[Screen callers on the office phone](screen-callers-on-the-office-phone.md)
+covers the screen, the contacts and the star codes.
+
 ## Check its health
 
 - **Grafana → PBX.** Trunk and line registration, calls, and four log panels:
@@ -98,6 +106,7 @@ filter that drops those lines.
 | Call connects, silent both ways | The RTP port range in `config/rtp.conf` and the ranges the NetworkPolicies open disagree. `rtp show settings` shows what Asterisk uses. |
 | `401` → `100 Trying` → bare `503` on one sub-account while another works | voip.ms fraud protection holding a sub-account that started a new calling pattern. Settings look identical; voip.ms support releases it. |
 | A line will not register | The source address reaching the PBX is not the handset's: check the VIP's `externalTrafficPolicy: Local` and both policies naming `CATHY_IP`. |
+| A caller on line 4 hears "press five", or is held in a queue | Line 4 screens every caller who is not a contact. See [Screen callers on the office phone](screen-callers-on-the-office-phone.md). |
 
 ## Techniques that settle it
 
@@ -117,6 +126,7 @@ filter that drops those lines.
   variable substitution and schema typing, which `kubectl kustomize` never
   sees. `mise run pbx:check` boots the image's Asterisk against each site's
   rendered config with no route off the machine. It fails when a PJSIP object
-  does not load, when 911 stops reaching a line's trunk, or when an inbound
-  call can reach a trunk. `.github/workflows/pbx.yml` runs it on every PBX
-  change.
+  does not load, when 911 stops reaching a line's trunk, when an inbound call
+  can reach a trunk, when a prompt is missing from `pbx-sounds`, or when the
+  open, contact, 911-callback, press-5 or spam route changes.
+  `.github/workflows/pbx.yml` runs it on every PBX change.

@@ -28,6 +28,7 @@ configMapGenerator:
       - config/http.conf
       - config/logger.conf
       - config/modules.conf
+      - config/musiconhold.conf
       - config/prometheus.conf
       - config/rtp.conf
       - config/render.sh

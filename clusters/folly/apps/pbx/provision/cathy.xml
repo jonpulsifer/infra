@@ -32,6 +32,16 @@
   <Secure_Call_Indication_Tone group="Regional/Call_Progress_Tones"></Secure_Call_Indication_Tone>
 
   <!--
+    Phone-wide: two distinctive rings. The PBX names one in an Alert-Info
+    header on the call it rings (config/inbound.conf): Friend for a contact,
+    Human for a caller who pressed 5. The phone matches the header against
+    each ring's n= name. Slots 10 and 11 replace stock tones no line defaults
+    to; w= is the waveform and c= a Regional/Distinctive_Ring_Patterns cadence.
+  -->
+  <Ring10 group="Phone/Ring_Tone">n=Friend;w=4;c=3</Ring10>
+  <Ring11 group="Phone/Ring_Tone">n=Human;w=5;c=5</Ring11>
+
+  <!--
     Per line. SIP ports stay what the phone has always used: lines 1-3 share
     5060, line 4 is on 5063 — the PBX's egress policy opens exactly those.
     Register every 60s, because registrations live in an emptyDir and every PBX
