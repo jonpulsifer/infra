@@ -4,10 +4,7 @@ description: A Bun service on offsite that rings the owner's phone through an El
 status: parked
 ---
 
-Switchboard places one outbound call at a time: ElevenLabs dials the owner's
-cell over voip.ms and hands the call to the `pbx-switchboard` agent, which
-says one message. mate's sandboxes and offsite's Alertmanager are its callers.
-The Deployment is parked at zero replicas until two 1Password items exist.
+Switchboard rings the owner's cell for mate and for Alertmanager: ElevenLabs dials it over voip.ms and hands the call to the `pbx-switchboard` agent, which says one message. The Deployment is parked at zero replicas until two 1Password items exist.
 
 ## Use it
 
@@ -18,54 +15,30 @@ The Deployment is parked at zero replicas until two 1Password items exist.
 
 ## Limits
 
-- Parked: `clusters/offsite/apps/elevenlabs/switchboard.yaml` sets zero
-  replicas, so nothing answers today.
-- Each caller class rings at most three times a day, ten minutes apart.
-  Alerts ring for a firing `critical` alert other than `Watchdog`, outside
-  23:00 to 08:00 America/Halifax.
-- The agent takes one call at a time, ten a day, 180 seconds each, and hangs
-  up after 15 seconds of silence.
-- It dials one number, `SWITCHBOARD_TO_NUMBER`. No request can choose another.
+- Each caller class rings at most three times a day, ten minutes apart. Alerts ring for a firing `critical` alert other than `Watchdog`, outside 23:00 to 08:00 America/Halifax.
+- The agent takes one call at a time, ten a day, 180 seconds each, and hangs up after 15 seconds of silence.
+- It dials `SWITCHBOARD_TO_NUMBER`; no request can choose another number.
 
 ## How it works
 
-Switchboard runs in offsite's `elevenlabs` namespace beside the reconciler,
-with the same write key. At boot it lists the ElevenLabs agents and keeps the
-id of the one named `SWITCHBOARD_AGENT_NAME`, `pbx-switchboard` by default.
-No agent of that name, or two of them, is a config error, and the process
-exits with status 64. `SWITCHBOARD_AGENT_ID` skips the lookup.
+Switchboard runs in offsite's `elevenlabs` namespace with the write key the [ElevenLabs](elevenlabs.md) reconciler holds. At boot it lists the agents and keeps the id of the one named `SWITCHBOARD_AGENT_NAME`; none, or two, exits with status 64. `SWITCHBOARD_AGENT_ID` skips the lookup.
 
-Each request carries its class's bearer token. A call goes to ElevenLabs'
-outbound-call endpoint through the phone number's outbound trunk, bounded by a
-timeout and never retried, and the daily cap counts attempts. `/alertmanager`
-dedupes by fingerprint until the alert resolves. It logs an outcome and never
-the destination number, a URL, a request body or a token. A
-CiliumNetworkPolicy admits mate's sandbox pods and Alertmanager, and lets the
-pod reach `api.elevenlabs.io` and nothing else.
+Each request carries its class's bearer token. A call goes to the outbound-call endpoint, bounded by a timeout and never retried; the daily cap counts attempts, and `/alertmanager` dedupes by fingerprint until the alert resolves. The log has each outcome and never a number, URL, body or token. A CiliumNetworkPolicy admits the two callers; the pod reaches nothing but `api.elevenlabs.io`.
 
 ## Unpark it
 
-Two items in the 1Password vault `homelab` fill the Secrets:
-
-| Item | Fields | Secret |
-| --- | --- | --- |
-| `switchboard` | `to-number` (the cell, E.164), `ring-token`, `alert-token` | `switchboard-config` |
-| `elevenlabs outbound trunk` | `username` and `password` of a voip.ms sub-account | `elevenlabs-outbound-trunk`, read by the reconciler |
-
-The owner creates the voip.ms sub-account for outbound calls alone:
-international and premium calling off, a low balance cap, SRTP on, and a
-caller ID with no e911 address. Once the reconciler reports the outbound trunk
-bound, set `replicas: 1` in `switchboard.yaml` and merge. voip.ms holds the
-first call from a new sub-account as a fraud check.
+1. Create a voip.ms sub-account for outbound calls alone: international and premium calling off, a low balance cap, SRTP on, a caller ID with no e911 address.
+2. In the `homelab` vault, create `switchboard` (`to-number` as E.164, `ring-token`, `alert-token`) and `elevenlabs outbound trunk` (the sub-account's `username`, `password`). Wait for a reconcile run to log `and an outbound trunk`.
+3. Make sure the pinned image has `apps/switchboard/src/agent.ts`; a build without it logs `SWITCHBOARD_AGENT_ID is required` and exits. `bash .github/scripts/cd-digest-update.sh revision jonpulsifer/switchboard <digest>` names a digest's commit.
+4. Set `replicas: 1` in `switchboard.yaml` and merge. voip.ms holds the first call from a new sub-account as a fraud check.
 
 ## Operate
 
-No alert watches switchboard. A refused ring answers 429 with a `skipped`
-reason, a failed call answers 502, and the pod's log has each outcome.
+No alert watches switchboard. A refused ring answers 429 with a `skipped` reason, a failed call 502; the pod's log has each outcome.
 
 ## Reference
 
 - Source: `apps/switchboard/`
-- Manifests: `clusters/offsite/apps/elevenlabs/switchboard.yaml`
+- Manifests: `clusters/offsite/apps/elevenlabs/switchboard.yaml`, which names the Secrets
 - Agent: `clusters/offsite/apps/elevenlabs/desired/agents/pbx-switchboard.json`
-- Image: `ghcr.io/jonpulsifer/switchboard`, built by `.github/workflows/containers.yml`; `.github/containers.json` names the manifest CD rolls
+- Image: `ghcr.io/jonpulsifer/switchboard`; `.github/containers.json` names the manifest CD rolls

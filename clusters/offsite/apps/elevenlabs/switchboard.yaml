@@ -5,7 +5,9 @@
 # `switchboard` (to-number, ring-token, alert-token), which fills the Secret
 # switchboard-config below, and `elevenlabs outbound trunk`, which lets the
 # reconciler give the number a trunk to dial out on. To unpark it, set
-# replicas to 1 here and merge.
+# replicas to 1 here and merge, once the image below is a build that resolves
+# the agent by name (apps/switchboard/src/agent.ts): an older build exits 64
+# for want of SWITCHBOARD_AGENT_ID.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,7 +47,7 @@ spec:
       containers:
         - name: switchboard
           # CD rewrites this digest (`.github/containers.json`) by matching the
-          # whole `ghcr.io/…/switchboard…@sha256:` string, so keep it one literal.
+          # full `ghcr.io/…/switchboard…@sha256:` string, so keep it one literal.
           image: ghcr.io/jonpulsifer/switchboard:latest@sha256:a19a87558ba45da5241d2ae11a59ddc2e5a43258f95b7c298d7022e0106c1da7
           imagePullPolicy: IfNotPresent
           ports:
@@ -158,8 +160,8 @@ spec:
       toPorts:
         - ports:
             - {port: "8080", protocol: TCP}
-    # Each caller class by its pod labels: sandboxes.ts stamps the mate one,
-    # and the prometheus-operator stamps the Alertmanager one.
+    # Each caller class by its pod labels: sandboxes.ts sets the mate label,
+    # and the prometheus-operator sets the Alertmanager one.
     - fromEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: mate

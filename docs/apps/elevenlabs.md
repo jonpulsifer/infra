@@ -1,0 +1,36 @@
+---
+title: ElevenLabs
+description: The voice agents and the phone number that git declares for the PBX and Switchboard, and the offsite CronJob that makes the ElevenLabs account match them.
+status: live
+---
+
+ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voip.ms. `clusters/offsite/apps/elevenlabs/desired/` declares the agents and the phone number, and the CronJob `elevenlabs-reconcile` on offsite makes the account match it every 15 minutes. The [PBX](pbx.md) sends screened callers to the troll agent, and [Switchboard](switchboard.md) rings the owner through the other.
+
+## Use it
+
+| Surface | Address | Who can reach it |
+| --- | --- | --- |
+| The number's inbound trunk | `agent-did` in the item `elevenlabs troll trunk` | The folly PBX, with that item's digest credentials |
+| The number's outbound trunk | voip.ms over TLS, as the sub-account in `elevenlabs outbound trunk` | Switchboard, through the outbound-call API |
+
+## Limits
+
+- The write key, item `elevenlabs pbx api key`, exists only in offsite's `elevenlabs` namespace.
+- The number gets an outbound trunk only once the Secret `elevenlabs-outbound-trunk` exists; until then each run logs that the trunk waits.
+- A live outbound trunk whose password git does not hold fails the Job.
+
+## How it works
+
+`desired/agents/` holds one agent per file, `pbx-troll` and `pbx-switchboard`. `desired/phone-number.json` names the agent that answers the number, its inbound trunk and its outbound trunk. Each run of `reconcile.sh` creates an agent no live one is named after, patches the declared fields that differ, and binds the number with one PATCH: the agent, the full inbound trunk with its digest credentials and, with the Secret in hand, the outbound trunk with its credentials. The API never returns a password, so every write run re-sends them. It logs field names, never values.
+
+A failed request for one agent fails the Job and leaves that agent as it is; the other agents and the number are still reconciled. If ElevenLabs reports no inbound credentials after the bind, the run unbinds the number. Without the write key it only logs what it would create, patch or bind.
+
+## Operate
+
+No alert is specific to it. A failed run fires `KubeJobFailed`, and the Job's log names the HTTP status or the field at fault.
+
+## Reference
+
+- Manifests and desired state: `clusters/offsite/apps/elevenlabs/`
+- Test: `mise run elevenlabs:test` runs `reconcile.sh` against a stubbed API
+- Items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, `elevenlabs troll trunk` for the inbound credentials, `elevenlabs outbound trunk` for the outbound sub-account
