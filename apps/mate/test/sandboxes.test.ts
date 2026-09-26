@@ -337,6 +337,7 @@ describe('mint', () => {
     const checkout = envOf(pod.initContainers[0]);
     expect(checkout.GIT_CONFIG_COUNT.value).toBe('3');
     expect(checkout.OP_CONNECT_TOKEN).toBeUndefined();
+    expect(checkout.SWITCHBOARD_URL).toBeUndefined();
     expect(checkout.SWITCHBOARD_RING_TOKEN).toBeUndefined();
   });
 
