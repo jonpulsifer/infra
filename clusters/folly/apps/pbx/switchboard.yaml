@@ -1,0 +1,248 @@
+---
+# The Switchboard board (apps/switchboard with SWITCHBOARD_ROLE=board): one
+# page of the office phone's calls in progress, their IVR stage, the four
+# lines and the calls that ended since the pod started. It follows the PBX as
+# the read-only ARI user in config/ari.conf and changes nothing. The page has
+# no login: anything that reaches folly's LoadBalancer pool, the LAN and the
+# tailnet, can read caller names and numbers on it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: switchboard
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: switchboard
+    app.kubernetes.io/part-of: pbx
+spec:
+  replicas: 1
+  # Each pod registers the same ARI application, and the newer one takes the
+  # event stream from the older. Recreate keeps that to one pod at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: switchboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: switchboard
+        app.kubernetes.io/part-of: pbx
+      annotations:
+        # The password is an env var, so a rotated Secret needs a new pod.
+        # The PBX reads it once, at render, and needs a restart of its own.
+        secret.reloader.stakater.com/reload: pbx-ari
+    spec:
+      automountServiceAccountToken: false
+      # The Service below is named switchboard, so service links would put
+      # SWITCHBOARD_SERVICE_HOST, SWITCHBOARD_PORT=tcp://… and more into the
+      # prefix the board reads its config from.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: switchboard
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # full `ghcr.io/…/switchboard…@sha256:` string, so keep it one literal.
+          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:3ed12f0ee0e6c231b849f1011b804e7b58dc8209aac59872fdfe177d6cd2eef3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SWITCHBOARD_ROLE
+              value: board
+            # Asterisk's HTTP server, through the metrics Service the base
+            # declares.
+            - name: SWITCHBOARD_ARI_URL
+              value: http://pbx-metrics.pbx.svc.cluster.local:8088
+            - name: SWITCHBOARD_ARI_USER
+              value: switchboard
+            - name: SWITCHBOARD_ARI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pbx-ari
+                  key: PBX_ARI_PASSWORD
+            # The template the PBX renders, mounted below: each line's trunk,
+            # account and screen come from it, so a line added there shows up
+            # here with the same merge.
+            - name: SWITCHBOARD_PJSIP_CONF
+              value: /etc/switchboard/pjsip.conf
+            - name: SWITCHBOARD_PORT
+              value: "8080"
+            # readOnlyRootFilesystem: /tmp (below) is the only writable path.
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: pjsip
+              mountPath: /etc/switchboard
+              readOnly: true
+          # /healthz answers once the port opens, whether or not the PBX does:
+          # the page is how an unreachable PBX gets seen.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        # kustomize rewrites this name to the generated, hashed pbx-site, so a
+        # pjsip.conf change rolls the board with the PBX. The template holds
+        # placeholders, never a rendered password.
+        - name: pjsip
+          configMap:
+            name: pbx-site
+            defaultMode: 0444
+            items:
+              - {key: pjsip.conf, path: pjsip.conf}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: switchboard
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: switchboard
+    app.kubernetes.io/part-of: pbx
+spec:
+  selector:
+    app.kubernetes.io/name: switchboard
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: switchboard
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: switchboard
+    app.kubernetes.io/part-of: pbx
+  annotations:
+    cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "switchboard.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: switchboard
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: switchboard
+    app.kubernetes.io/part-of: pbx
+spec:
+  parentRefs:
+    - name: switchboard
+  hostnames:
+    - "switchboard.${SECRET_DOMAIN}"
+  rules:
+    # /events is a stream that stays open while the page does. Envoy's
+    # default 15 s route timeout would cut it; 0s turns that timeout off,
+    # and the stream's 15 s heartbeat keeps Envoy's idle timer from firing.
+    - timeouts:
+        request: 0s
+      backendRefs:
+        - name: switchboard
+          port: 8080
+---
+# The board takes requests from the Gateway's Envoy (the `ingress` entity)
+# and the kubelet's probes, and reaches the PBX's HTTP port and DNS alone.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: switchboard
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: switchboard
+    app.kubernetes.io/part-of: pbx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: switchboard
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - fromEntities: [host, ingress]
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: pbx
+            app.kubernetes.io/name: pbx
+      toPorts:
+        - ports:
+            - {port: "8088", protocol: TCP}
+---
+# The other half: the PBX admits the board to its HTTP port. folly's alone;
+# the base pbx-ingress is shared with offsite, which has no board.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pbx-ari
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pbx
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: pbx
+            app.kubernetes.io/name: switchboard
+      toPorts:
+        - ports:
+            - {port: "8088", protocol: TCP}

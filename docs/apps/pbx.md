@@ -12,6 +12,7 @@ The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it
 | --- | --- | --- |
 | SIP, folly | `PBX_SIP_VIP`, port 5060 | The office phone only, from `CATHY_IP` |
 | Provisioning profile, folly | `/cathy.xml` over HTTP at `PBX_SIP_VIP` | The office phone only, from `CATHY_IP` |
+| [Switchboard board](switchboard/board.md), folly | `https://switchboard.lolwtf.ca` | Clients that route to folly's load-balancer range, with no sign-in |
 | Phone number, offsite | The agent's voip.ms number | Nobody — the pod is parked |
 
 The folly PBX carries each of the four office-phone lines to its own voip.ms sub-account. The offsite PBX opens both of its SIP connections outbound: a registration to voip.ms and calls to ElevenLabs. [Operate the office phone](../runbooks/operate-the-office-phone.md) checks, changes and debugs the office phone.
@@ -27,7 +28,7 @@ Both sites run the Deployment in `clusters/base/apps/pbx/`, with one replica; of
 
 A change to a config file in git rolls the pod, because each generated ConfigMap name has a content hash. A change to `CATHY_IP` or `PBX_SIP_VIP` in cluster-settings does not. Restart the `pbx` Deployment after it. Reloader restarts the pod when `pbx-secrets` changes, live call or not; a change to `pbx-elevenlabs` waits for the next restart.
 
-The folly PBX registers each sub-account over TLS and requires SRTP for media. Each folly trunk in `config/pjsip.conf` matches both forms voip.ms delivers a call in; its comments name them. The offsite trunk matches only the registered-contact form. A sidecar serves the provisioning profile from `provision/cathy.xml`.
+The folly PBX registers each sub-account over TLS and requires SRTP for media. Each folly trunk in `config/pjsip.conf` matches both forms voip.ms delivers a call in; its comments name them. The offsite trunk matches only the registered-contact form. A sidecar serves the provisioning profile from `provision/cathy.xml`. Its HTTP port also serves ARI, the Asterisk REST interface, to the read-only user in `config/ari.conf`, which the Switchboard board uses.
 
 Asterisk logs every SIP message. Vector removes the SRTP keys and digest responses before VictoriaLogs stores the logs.
 

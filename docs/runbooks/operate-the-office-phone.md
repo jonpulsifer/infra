@@ -47,6 +47,10 @@ covers the screen, the contacts and the star codes.
 
 - **Grafana → PBX.** Trunk and line registration, calls, and four log panels:
   call flow, errors, SIP messages, and the handset's profile fetches.
+- **The Switchboard board** at `https://switchboard.lolwtf.ca`. Each call in
+  progress with its IVR stage, each line's handset and trunk registration,
+  and the calls that ended since the board started. See
+  [Switchboard board](../apps/switchboard/board.md).
 - **Alerts** in `clusters/folly/monitoring/pbx-rules.yaml` go to Discord:
   `PBXDown`, `PBXTrunkNotRegistered` per sub-account, and `PBXHandsetOffline`
   per line.

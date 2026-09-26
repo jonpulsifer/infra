@@ -10,6 +10,8 @@ sections:
       - apps/flameboss.md
       - apps/pbx.md
       - apps/elevenlabs.md
+      - path: apps/switchboard.md
+        children: [apps/switchboard/board.md]
       - apps/pulsifer-ca.md
       - apps/slingshot.md
       - apps/smiirl.md
@@ -19,7 +21,7 @@ sections:
       - group: Internal tools
         items: [apps/netbench.md]
       - group: Parked
-        items: [apps/bosun.md, apps/switchboard.md]
+        items: [apps/bosun.md]
   - title: Platform
     index: platform/index.md
     items:

@@ -8,6 +8,8 @@ resources:
   - external-secret-contacts.yaml
   - external-secret-elevenlabs.yaml
   - network-policy.yaml
+  - ari-secret.sops.yaml
+  - switchboard.yaml
 
 patches:
   # First, so containers/0 is still asterisk when its ops run.
@@ -60,6 +62,7 @@ configMapGenerator:
       - config/agent.conf
       - config/toybox.conf
       - config/handset-codes.conf
+      - config/ari.conf
     # Asterisk's dialplan and this render script are written in ${...}, which
     # is also Flux's postBuild substitution syntax. Flux does not merely blank
     # what it cannot resolve here — `${PBX_*}` and `${$name}` are not valid

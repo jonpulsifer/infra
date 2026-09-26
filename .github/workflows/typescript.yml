@@ -37,7 +37,8 @@ jobs:
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
           # The clusters/, mise.toml and dotfiles/skills/ paths are test inputs.
-          # Keep them in step with the spindrift and mate test inputs in turbo.json.
+          # Keep them in step with the spindrift, mate and switchboard test
+          # inputs in turbo.json.
           files: |
             apps/clankerbanker/**
             apps/hub/**
@@ -46,6 +47,7 @@ jobs:
             apps/slingshot/**
             apps/spindrift/**
             apps/switchboard/**
+            clusters/folly/apps/pbx/config/pjsip.conf
             packages/charts/**
             clusters/base/platform/spindrift-target/**
             clusters/offsite/apps/spindrift/**
