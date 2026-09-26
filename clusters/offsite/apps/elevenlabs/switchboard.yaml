@@ -1,13 +1,13 @@
 ---
 # Switchboard (`apps/switchboard`) rings the owner's cell through the
-# pbx-switchboard agent and the phone number's outbound trunk. It is parked at
-# zero replicas until two items exist in the 1Password vault `homelab`:
-# `switchboard` (to-number, ring-token, alert-token), which fills the Secret
-# switchboard-config below, and `elevenlabs outbound trunk`, which lets the
-# reconciler give the number a trunk to dial out on. To unpark it, set
-# replicas to 1 here and merge, once the image below is a build that resolves
-# the agent by name (apps/switchboard/src/agent.ts): an older build exits 64
-# for want of SWITCHBOARD_AGENT_ID.
+# pbx-switchboard agent and the phone number's outbound trunk, which the
+# reconciler builds from the existing sub-account 168847_elevenlabs
+# (external-secret.yaml). It is parked at zero replicas until the item
+# `switchboard` (to-number, ring-token, alert-token) exists in the 1Password
+# vault `homelab` and fills the Secret switchboard-config below. To unpark it,
+# set replicas to 1 here and merge, once the image below is a build that
+# resolves the agent by name (apps/switchboard/src/agent.ts): an older build
+# exits 64 for want of SWITCHBOARD_AGENT_ID.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

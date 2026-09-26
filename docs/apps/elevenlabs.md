@@ -11,7 +11,7 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
 | The number's inbound trunk | `agent-did` in the item `elevenlabs troll trunk` | The folly PBX, with that item's digest credentials |
-| The number's outbound trunk | voip.ms over TLS, as the sub-account in `elevenlabs outbound trunk` | Switchboard, through the outbound-call API |
+| The number's outbound trunk | voip.ms over TLS, as the sub-account `168847_elevenlabs` | Switchboard, through the outbound-call API |
 
 ## Limits
 
@@ -33,4 +33,4 @@ No alert is specific to it. A failed run fires `KubeJobFailed`, and the Job's lo
 
 - Manifests and desired state: `clusters/offsite/apps/elevenlabs/`
 - Test: `mise run elevenlabs:test` runs `reconcile.sh` against a stubbed API
-- Items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, `elevenlabs troll trunk` for the inbound credentials, `elevenlabs outbound trunk` for the outbound sub-account
+- Items in the `homelab` vault, one Secret each: `rowbutt elevenlabs api key` to read, `elevenlabs pbx api key` to write, `elevenlabs troll trunk` for the inbound credentials, and the `168847_elevenlabs` field of `voip.ms sub accounts` for the outbound sub-account's password
