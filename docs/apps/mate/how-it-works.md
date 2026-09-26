@@ -29,6 +29,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 | OpenCode key | Sandbox environment, from Secret `mate-opencode` | The model API |
 | kthx site bearers | `/home/agent/.config/kthx/sites.json`, from Secret `mate-kthx-sites` | Every quick site Rowbutt claims |
 | kthx agent token | Sandbox environment `KTHX_AGENT_TOKEN`, from Secret `mate-kthx-agent` | Every built-apps command but minting tokens, replacing the engine settings and connecting or probing a Target, for 90 days |
+| Ring token | Sandbox environment, from Secret `mate-switchboard`, absent until the `switchboard` 1Password item exists | `POST /ring` on [Switchboard](../switchboard.md), which rings one fixed number |
 
 `MATE_SSH_KEY_FILE` and `MATE_CONNECT_SECRET` are unset, so a sandbox has no SSH key and no 1Password token.
 
@@ -41,9 +42,9 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 | Pod | Egress |
 | --- | --- |
 | mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector |
-| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
+| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 
-The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on.
+The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on. Alertmanager's ingress policy, `clusters/offsite/monitoring/alertmanager-network-policy.yaml`, admits Prometheus, Grafana, the API server and its node's host-network pods; every namespace that runs one of those is fenced, so no pod the sandbox can `pods/exec` into can post an alert.
 
 ## Fence
 

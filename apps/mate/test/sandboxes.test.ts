@@ -67,6 +67,10 @@ const config: SandboxConfig = {
     mcpUrl: null,
     agentSecret: 'mate-kthx-agent',
   },
+  switchboard: {
+    url: 'http://switchboard.elevenlabs.svc.cluster.local:8080',
+    secret: 'mate-switchboard',
+  },
 };
 
 class Collect implements PromptSink {
@@ -333,6 +337,25 @@ describe('mint', () => {
     const checkout = envOf(pod.initContainers[0]);
     expect(checkout.GIT_CONFIG_COUNT.value).toBe('3');
     expect(checkout.OP_CONNECT_TOKEN).toBeUndefined();
+    expect(checkout.SWITCHBOARD_URL).toBeUndefined();
+    expect(checkout.SWITCHBOARD_RING_TOKEN).toBeUndefined();
+  });
+
+  test('hands the harness the switchboard address and an optional ring token', async () => {
+    await sandboxes.mint(THREAD);
+    const env = envOf(podTemplate().containers[0]);
+
+    expect(env.SWITCHBOARD_URL.value).toBe(
+      'http://switchboard.elevenlabs.svc.cluster.local:8080',
+    );
+    // Optional: a missing Secret must not hold the sandbox in
+    // CreateContainerConfigError. The pod names the Secret, never the token.
+    expect(env.SWITCHBOARD_RING_TOKEN.valueFrom.secretKeyRef).toEqual({
+      name: 'mate-switchboard',
+      key: 'SWITCHBOARD_RING_TOKEN',
+      optional: true,
+    });
+    expect(env.SWITCHBOARD_RING_TOKEN.value).toBeUndefined();
   });
 
   test('points the harness at Connect and never at a service account', async () => {
@@ -424,7 +447,7 @@ describe('mint', () => {
   test('hands the harness no credential path when none is configured', async () => {
     sandboxes = new KubeSandboxes({
       kube: new Kube(fake.config()),
-      config: { ...config, vault: null, github: false },
+      config: { ...config, vault: null, github: false, switchboard: null },
       guildId: GUILD,
       log,
     });
@@ -435,6 +458,8 @@ describe('mint', () => {
     expect(env.OP_CONNECT_HOST).toBeUndefined();
     expect(env.OP_CONNECT_TOKEN).toBeUndefined();
     expect(env.MATE_GITHUB_TOKEN_FILE).toBeUndefined();
+    expect(env.SWITCHBOARD_URL).toBeUndefined();
+    expect(env.SWITCHBOARD_RING_TOKEN).toBeUndefined();
   });
 
   test('waits for the controller to report Ready', async () => {
