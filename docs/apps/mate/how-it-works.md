@@ -44,7 +44,7 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 | mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector |
 | Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 
-The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on.
+The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on. Alertmanager's own ingress policy in `clusters/offsite/monitoring/alertmanager-network-policy.yaml` admits Prometheus and Grafana alone, so a pod the sandbox can `pods/exec` into cannot post an alert to it either.
 
 ## Fence
 
