@@ -28,7 +28,7 @@ The agent runs every command without approval.
 | offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod but `mate`'s own namespace and the namespaces [the fence](mate/how-it-works.md#fence) excludes |
 | Hosts | None. `rowbutt`, the host user for Rowbutt, is in `wheel` on every host, and the sandbox has no SSH key for it. |
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx` MCP tools, when Secret `mate-kthx-agent` holds an agent token. |
-| Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason. Switchboard fixes the number and caps the calls per day. It is parked until the `switchboard` 1Password item exists, so a ring gets no answer today. |
+| Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason. Switchboard fixes the number and caps the calls per day. It is parked, so a ring gets no answer today; its page has the current state. |
 
 With `pods/exec`, the agent can still read the credentials of any pod in a namespace the fence leaves open. The owner accepts this residual risk. [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox, and out of each namespace the policy names or that carries the `lolwtf.ca/sandbox-exec: deny` label.
 
@@ -51,7 +51,7 @@ mate is one Bun process, and its ingress admits only the node it runs on. For ea
 
 The other alerts are in `clusters/offsite/monitoring/mate-rules.yaml`, and each `description` names its fix.
 
-To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To disable GitHub or cluster access, unset `MATE_GITHUB_APP_ID` or `MATE_SANDBOX_KUBE_SA`. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token.
+To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To disable GitHub, cluster or phone access, unset `MATE_GITHUB_APP_ID`, `MATE_SANDBOX_KUBE_SA` or `MATE_SWITCHBOARD_URL`. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token.
 
 ## Reference
 
