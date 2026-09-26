@@ -32,5 +32,8 @@ log.info('switchboard listening', { port: config.port });
 export default {
   port: config.port,
   hostname: '0.0.0.0',
+  // Headroom over the largest Alertmanager group. Bun refuses a larger body
+  // before buffering it, which the pod's memory limit could not absorb.
+  maxRequestBodySize: 1024 * 1024,
   fetch: app.fetch,
 };

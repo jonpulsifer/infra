@@ -109,13 +109,24 @@ describe('findAgentId', () => {
     expect((failure as AgentLookupError).transient).toBe(false);
   });
 
-  test('a non-2xx response is a transient http-error', async () => {
+  test('a 5xx response is a transient http-error', async () => {
     globalThis.fetch = (async () =>
       new Response('nope', { status: 503 })) as unknown as typeof fetch;
     const failure = await findAgentId(opts).catch((e: unknown) => e);
     expect((failure as AgentLookupError).reason).toBe('http-error');
     expect((failure as AgentLookupError).httpStatus).toBe(503);
     expect((failure as AgentLookupError).transient).toBe(true);
+  });
+
+  test('a refused key is an http-error that is final', async () => {
+    for (const status of [401, 403, 404]) {
+      globalThis.fetch = (async () =>
+        new Response('no', { status })) as unknown as typeof fetch;
+      const failure = await findAgentId(opts).catch((e: unknown) => e);
+      expect((failure as AgentLookupError).reason).toBe('http-error');
+      expect((failure as AgentLookupError).httpStatus).toBe(status);
+      expect((failure as AgentLookupError).transient).toBe(false);
+    }
   });
 
   test('a body without an agents list is a bad-response', async () => {
@@ -256,6 +267,23 @@ describe('resolveAgentId', () => {
     }).catch((e: unknown) => e);
     expect(failure).toBeInstanceOf(ConfigError);
     expect((failure as ConfigError).message).toContain('not-found');
+    expect(requests).toBe(1);
+  });
+
+  test('a refused key is a config error after one request', async () => {
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests++;
+      return new Response('no', { status: 401 });
+    }) as unknown as typeof fetch;
+    const { log } = fakeLog();
+    const failure = await resolveAgentId(base, {
+      log,
+      attempts: 5,
+      sleep: noSleep,
+    }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(ConfigError);
+    expect((failure as ConfigError).message).toContain('http-error');
     expect(requests).toBe(1);
   });
 });

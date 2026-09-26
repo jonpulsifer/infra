@@ -27,13 +27,15 @@ export class AgentLookupError extends Error {
     this.httpStatus = httpStatus;
   }
 
-  /** True when a later attempt could answer differently. */
+  /**
+   * True when a later attempt could answer differently. A 401, 403 or 404
+   * is the account's answer, not the network's, so it is final.
+   */
   get transient(): boolean {
-    return (
-      this.reason === 'timeout' ||
-      this.reason === 'network' ||
-      this.reason === 'http-error'
-    );
+    if (this.reason === 'timeout' || this.reason === 'network') return true;
+    if (this.reason !== 'http-error') return false;
+    const status = this.httpStatus ?? 0;
+    return status === 408 || status === 429 || status >= 500;
   }
 }
 
@@ -71,10 +73,10 @@ export interface FindAgentOptions {
 }
 
 /**
- * The id of the one agent named exactly `name`. The list's `search` is fuzzy,
+ * The id of the one agent whose name is `name`. The list's `search` is fuzzy,
  * so every page is read and the name compared here; no match, or more than
- * one, is a failure rather than a guess. The thrown error never carries the
- * URL or the key.
+ * one, is a failure, not a guess. The thrown error never carries the URL or
+ * the key.
  */
 export async function findAgentId(opts: FindAgentOptions): Promise<string> {
   const matches: string[] = [];
