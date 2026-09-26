@@ -100,7 +100,7 @@ filter that drops those lines.
 | Symptom | Cause |
 | --- | --- |
 | `Call ... to extension 's' rejected` | voip.ms delivers a call to a sub-account's registered contact as `s`, not as its digits. `from-voipms` must answer `s`. |
-| `No matching endpoint found` on an `INVITE` addressed to the DID's digits at the PBX's public address, with an `X-Dest-User` header; the caller hears that the call cannot be completed | voip.ms delivers this sub-account's calls in its DID form, which only an identify on `X-Dest-User` matches. voip.ms sets the form on its side, so it can change while every registration stays green. Each trunk in `config/pjsip.conf` needs its `(trunk-identify)` section; `pjsip show identifies` lists one per trunk. |
+| `No matching endpoint found` on an `INVITE` to the DID's digits with an `X-Dest-User` header | voip.ms sends this sub-account's calls in the DID form, and no identify matches its `X-Dest-User`. voip.ms sets the form, and registrations stay green. Each folly trunk needs its `(trunk-identify)` section; `pjsip show identifies` lists one per trunk. |
 | No inbound INVITE arrives at all | The DID's POP in the voip.ms portal is not the server the trunk registers to. |
 | `vms-*: Couldn't negotiate stream ... (nothing)` | The trunk's codecs or SRTP profile do not overlap voip.ms's offer. Read the offer's `m=` and `a=crypto` lines. |
 | `lineN: Couldn't negotiate stream ...`, handset shows 488 | The handset offers SRTP on every call (`Secure_Call_Setting` is phone-wide); the line endpoint must accept SDES. |
@@ -128,7 +128,7 @@ filter that drops those lines.
   sees. `mise run pbx:check` boots the image's Asterisk against each site's
   rendered config with no route off the machine. It fails when a PJSIP object
   does not load, when 911 stops reaching a line's trunk, when an inbound call
-  can reach a trunk, when a trunk stops taking voip.ms's DID-form call, when a
-  prompt is missing from `pbx-sounds`, or when the open, contact, 911-callback,
-  press-5 or spam route changes.
+  can reach a trunk, when a folly trunk stops taking voip.ms's DID-form call,
+  when a prompt is missing from `pbx-sounds`, or when the open, contact,
+  911-callback, press-5 or spam route changes.
   `.github/workflows/pbx.yml` runs it on every PBX change.

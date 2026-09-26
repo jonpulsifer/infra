@@ -27,7 +27,7 @@ Both sites run the Deployment in `clusters/base/apps/pbx/`, with one replica; of
 
 A change to a config file in git rolls the pod, because each generated ConfigMap name has a content hash. A change to `CATHY_IP` or `PBX_SIP_VIP` in cluster-settings does not. Restart the `pbx` Deployment after it. Reloader restarts the pod when `pbx-secrets` changes.
 
-The folly PBX registers each sub-account over TLS and requires SRTP for media. voip.ms delivers each inbound call down that connection in one of two forms: to the registered contact, or to the DID's digits with an `X-Dest-User` header that names the sub-account. Each trunk in `config/pjsip.conf` matches both. A sidecar serves the provisioning profile from `provision/cathy.xml`.
+The folly PBX registers each sub-account over TLS and requires SRTP for media. Each folly trunk in `config/pjsip.conf` matches both forms voip.ms delivers a call in; its comments name them. The offsite trunk matches only the registered-contact form. A sidecar serves the provisioning profile from `provision/cathy.xml`.
 
 Asterisk logs every SIP message. Vector removes the SRTP keys and digest responses before VictoriaLogs stores the logs.
 

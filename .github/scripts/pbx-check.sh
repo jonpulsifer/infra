@@ -11,8 +11,9 @@
 #      dropped, since a 1Password item that does not exist yet must still
 #      boot;
 #   3. every PJSIP object the config declares loads, identifies included, the
-#      modules a call needs run and are not noloaded, nothing logs an error
-#      against a shipped config file, and the dialplan reloads clean;
+#      modules a call needs run and are not noloaded, the ones modules.conf
+#      refuses do not load, nothing logs an error against a shipped config
+#      file, and the dialplan reloads clean;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
 #      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, nothing
 #      else rings a line HANDSET does not name, every exact code beside that
@@ -30,8 +31,8 @@
 #      line screening two is refused unanswered, a fourth held caller hears
 #      goodbye, the INVITE to the handset carries the Alert-Info its pre-dial
 #      handler adds, every trunk takes voip.ms's DID-form INVITE by its own
-#      X-Dest-User header, and every prompt the dialplan plays is in the
-#      ConfigMap mounted for it.
+#      X-Dest-User header and never by its From user, and every prompt the
+#      dialplan plays is in the ConfigMap mounted for it.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -66,8 +67,9 @@ REQUIRED_MODULES=(
   app_read.so app_playback.so app_waitforsilence.so res_musiconhold.so
   func_groupcount.so func_timeout.so app_exec.so func_logic.so func_strings.so
 )
-# A second dial tone and a shell; modules.conf refuses them on every site.
-FORBIDDEN_MODULES=(app_disa.so app_system.so func_shell.so)
+# A second dial tone, a shell, and SIP over the metrics port's WebSocket;
+# modules.conf refuses them on every site.
+FORBIDDEN_MODULES=(app_disa.so app_system.so func_shell.so res_pjsip_transport_websocket.so)
 
 WORK=""
 ASTERISK_PID=""
@@ -354,15 +356,18 @@ localize() {
 # A noload here is silent: the module just is not there, and nothing a boot
 # logs counts it. res_pjsip*/chan_pjsip* are how a handset registers, gets
 # identified and answers voip.ms's digest challenge, so any of them missing
-# breaks a real call while every check here keeps passing.
+# breaks a real call while every check here keeps passing. FORBIDDEN_MODULES
+# are the exception: the boot check requires those absent.
 check_no_pjsip_noload() {
   local offenders
-  offenders=$(awk '
+  offenders=$(awk -v forbidden="${FORBIDDEN_MODULES[*]}" '
+    BEGIN { m = split(forbidden, f, " "); for (i = 1; i <= m; i++) refused[f[i]] = 1 }
     /^[[:space:]]*noload[[:space:]]*=/ {
       mod = $0
       sub(/^[[:space:]]*noload[[:space:]]*=[[:space:]]*/, "", mod)
       sub(/[[:space:]]*;.*/, "", mod)
-      if (mod ~ /^(res_pjsip|chan_pjsip)/) print FILENAME ":" FNR ": " $0
+      sub(/[[:space:]]+$/, "", mod)
+      if (mod ~ /^(res_pjsip|chan_pjsip)/ && !(mod in refused)) print FILENAME ":" FNR ": " $0
     }
   ' "$ETC/modules.conf" 2>/dev/null)
   [[ -z $offenders ]] || fail "modules.conf noloads a PJSIP module a handset call needs" "${offenders//$ETC\//}"
@@ -940,16 +945,22 @@ check_handset_leg() {
 # voip.ms delivers a call in one of two forms: to the registered contact with
 # the registration's `line` parameter, or to the DID's digits with an
 # X-Dest-User header naming the sub-account and no `line`. Only an identify
-# matches the second, so every trunk must have one whose value is the trunk's
-# own sub-account (its from_user), and a DID-form INVITE carrying each
-# identify's header must land on that identify's trunk in [from-voipms].
-# Asterisk sends each INVITE to itself from line4, as `leg` does.
+# matches the second, so every folly trunk needs one on X-Dest-User whose
+# value is its own sub-account (its from_user), and no two may share a value.
+# No identify may match by address: the ip identifier runs before the
+# username and header identifiers, so one would take every request from that
+# address. A DID-form INVITE carrying each value must land on that
+# identify's trunk in [from-voipms], and its From user names another trunk,
+# so a trunk still found by From user fails. Asterisk sends each INVITE to
+# itself from line4, as `leg` does. offsite is not checked: its parked trunk
+# matches only the registered-contact form.
 IDENTIFY_PROBE_DID=6135550199
+IDENTIFY_HEADER=X-Dest-User
 
 check_trunk_identifies() {
-  local log="$SITE_DIR/asterisk.log" ep id show match value offset i k n=0
-  local -a trunks=() endpoints=() wrong=()
-  local -A account=() matched=()
+  local log="$SITE_DIR/asterisk.log" ep id show match name value offset i k n=0
+  local -a trunks=() endpoints=() values=() wrong=()
+  local -A account=() matched=() owner=()
   for ep in $ENDPOINTS; do
     show=$(ast "pjsip show endpoint $ep")
     [[ $(endpoint_param "$show" context) == from-voipms ]] || continue
@@ -957,18 +968,41 @@ check_trunk_identifies() {
     account[$ep]=$(endpoint_param "$show" from_user)
   done
   for id in $(ast 'pjsip show identifies' | awk '$1 == "Identify:" && $2 !~ /^</ { print $2 }'); do
-    match=$(ast "pjsip show identify ${id%%/*}" | awk '$1 == "Header:" { $1 = ""; sub(/^ +/, ""); print; exit }')
+    ep=${id#*/}
+    id=${id%%/*}
+    show=$(ast "pjsip show identify $id")
+    if awk '$1 == "Match:" && $2 !~ /^</ { found = 1 } END { exit !found }' <<<"$show"; then
+      wrong+=("identify $id for $ep matches by address")
+    fi
+    match=$(awk '$1 == "Header:" { $1 = ""; sub(/^ +/, ""); print; exit }' <<<"$show")
     [[ -n $match ]] || continue
+    name=${match%%:*}
+    name=${name%"${name##*[![:space:]]}"}
     value=${match#*:}
     value=${value#"${value%%[![:space:]]*}"}
+    # PJSIP finds a header by name without regard to case.
+    if [[ ${name,,} != "${IDENTIFY_HEADER,,}" ]]; then
+      wrong+=("identify $id for $ep matches header '$name', not $IDENTIFY_HEADER")
+    fi
+    if [[ -z $value ]]; then
+      wrong+=("identify $id for $ep matches an empty value")
+      continue
+    fi
+    if [[ -n ${owner[$value]:-} ]]; then
+      wrong+=("identifies for ${owner[$value]} and $ep both match '$value', so Asterisk picks one")
+    fi
+    owner[$value]=$ep
     n=$((n + 1))
-    endpoints[n]=${id#*/}
-    matched[${id#*/}]+=" $value"
+    endpoints[n]=$ep
+    values[n]=$value
+    matched[$ep]+=" $value"
+  done
+  for ((i = 1; i <= n; i++)); do
     printf '%s\n' '[pbx-check-identify]' \
-      "exten => $n,1,Set(CALLERID(num)=$(printf '613555%04d' "$n"))" \
-      " same => n,Dial(PJSIP/line4/sip:$IDENTIFY_PROBE_DID@127.0.0.1:5060,3,b(pbx-check-identify-leg^$n^1))" \
+      "exten => $i,1,Set(CALLERID(num)=${endpoints[i % n + 1]})" \
+      " same => n,Dial(PJSIP/line4/sip:$IDENTIFY_PROBE_DID@127.0.0.1:5060,3,b(pbx-check-identify-leg^$i^1))" \
       '[pbx-check-identify-leg]' \
-      "exten => $n,1,Set(PJSIP_HEADER(add,${match%%:*})=$value)" \
+      "exten => $i,1,Set(PJSIP_HEADER(add,$IDENTIFY_HEADER)=${values[i]})" \
       ' same => n,Return()' '' >>"$ETC/pbx-check.conf"
   done
   ast 'dialplan reload' >/dev/null
@@ -987,13 +1021,13 @@ check_trunk_identifies() {
       tail -c +"$((offset + 1))" "$log" | grep -qF "Executing [$IDENTIFY_PROBE_DID@from-voipms:1] Goto(\"PJSIP/${endpoints[i]}-" && break
       sleep 0.1
     done
-    ((k < 50)) || wrong+=("a DID-form INVITE for ${endpoints[i]} never reached [from-voipms] on it")
+    ((k < 50)) || wrong+=("a DID-form INVITE for ${endpoints[i]}, From ${endpoints[i % n + 1]}, never reached [from-voipms] on ${endpoints[i]}")
     quiesce
   done
   if ((${#wrong[@]})); then
     fail "a voip.ms call to a DID's digits would not reach its own trunk" "${wrong[@]}"
   else
-    say "    ${#trunks[@]} trunks take a DID-form INVITE by its X-Dest-User header"
+    say "    ${#trunks[@]} trunks take a DID-form INVITE by its $IDENTIFY_HEADER header, not by its From user; no identify matches by address"
   fi
 }
 
