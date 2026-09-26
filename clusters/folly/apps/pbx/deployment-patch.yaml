@@ -1,6 +1,7 @@
 ---
-# folly's additions to the base Deployment. JSON6902 ops that append, because
-# envFrom has no merge key and a strategic merge would replace the whole list.
+# folly's additions to the base Deployment, as JSON6902 ops on containers/0.
+# The test op fails the build if that is not the asterisk container:
+# provision-sidecar.yaml adds a second one.
 - op: test
   path: /spec/template/spec/containers/0/name
   value: asterisk
