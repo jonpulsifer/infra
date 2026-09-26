@@ -102,10 +102,15 @@ spec:
         # The Discord receiver is an AlertmanagerConfig in base/monitoring and
         # the switchboard receiver is one here; the chart's default selector
         # selects none. Each selected config is a sub-route with continue, so
-        # a critical alert goes to both. `switchboard` joins the values once
-        # the `switchboard` 1Password item exists: selected before then, its
-        # missing Secret has the operator reject that config, and
-        # PrometheusOperatorRejectedResources fires until the item appears.
+        # a critical alert goes to both. `switchboard` joins the values only
+        # once both hold: the `switchboard` 1Password item exists, and
+        # Deployment switchboard in elevenlabs has a Ready pod. Without the
+        # item the operator rejects the config for its missing Secret and
+        # PrometheusOperatorRejectedResources fires. Without the pod every
+        # webhook fails; AlertmanagerClusterFailedToSendAlerts, critical on
+        # this chart, then fires and is routed here too, so the owner is rung
+        # about it once the pod comes up. Unpark switchboard in its own merge
+        # first, then add the value; park in the reverse order.
         alertmanagerConfigSelector:
           matchExpressions:
             - key: alertmanagerConfig

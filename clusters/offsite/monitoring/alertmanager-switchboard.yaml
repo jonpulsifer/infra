@@ -54,7 +54,9 @@ spec:
     # cap, the cooldown) or failed to place. After a placed call switchboard
     # dedupes the fingerprint until the alert resolves, so a still-firing
     # alert rings once and a repeat costs nothing. Short, so a page held over
-    # quiet hours rings soon after they end.
+    # quiet hours rings soon after they end. The seen set is in memory, so a
+    # switchboard restart forgets it and the next repeat rings once more for
+    # each still-firing critical group, within the cooldown and the cap.
     repeatInterval: 15m
   receivers:
     - name: switchboard
