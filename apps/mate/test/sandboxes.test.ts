@@ -1020,6 +1020,25 @@ describe('attach', () => {
       expect(metrics.siteSyncs).toEqual(['ok', 'save-failed', 'ok', 'ok']);
     });
 
+    test('a second turn that claims nothing keeps every site the first one did', async () => {
+      turning();
+      fake.putSecret(SECRET, { 'sites.json': serialize(held({})) });
+      const { ref } = await turnLeaving(serialize(held({ blog: 'tok-blog' })));
+      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
+      // Truncated at the end of the turn, so the file is empty when the next
+      // one starts; an empty file is not a removal.
+      expect(fake.files.get(FILE)).toBe('');
+
+      fake.script = {};
+      const session = await sandboxes.attach(ref);
+      await sandboxes.prompt(session, 'again', new Collect());
+      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
+      expect(parseSites(stamps()[2]?.command[8] ?? '')).toEqual(
+        held({ blog: 'tok-blog' }),
+      );
+      expect(metrics.siteSyncs).toEqual(['ok', 'ok', 'ok', 'ok']);
+    });
+
     test('a corrupt file is left alone and never saved over', async () => {
       turning();
       fake.putSecret(SECRET, {

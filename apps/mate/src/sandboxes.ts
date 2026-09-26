@@ -908,17 +908,22 @@ export class KubeSandboxes implements Sandboxes {
     // Truncated only once the ledger holds what it said; otherwise the file
     // is the only copy of the turn's claims, and the next turn retries.
     const synced = this.kthx ? await this.syncSites(name, pod) : null;
-    await this.writeCredentials(pod, {
-      github: '',
-      kube: '',
-      ssh: '',
-      kthx: synced ? '' : null,
-    }).catch((error) =>
+    try {
+      await this.writeCredentials(pod, {
+        github: '',
+        kube: '',
+        ssh: '',
+        kthx: synced ? '' : null,
+      });
+      // An empty file is what the next turn reads first, and it must fold
+      // in as nothing claimed, not as every site removed.
+      if (synced) this.stamped.set(name, {});
+    } catch (error) {
       this.deps.log.warn("could not clear the turn's credentials", {
         sandbox: name,
         error: plain(error),
-      }),
-    );
+      });
+    }
     if (!token) return;
     await this.deps.githubApp?.revoke(token).catch((error: unknown) =>
       this.deps.log.warn('could not revoke the GitHub token', {
