@@ -93,6 +93,7 @@ sections:
           - runbooks/repair-a-kiosk.md
           - runbooks/connect-an-agent-to-the-wiki.md
           - runbooks/operate-the-office-phone.md
+          - runbooks/screen-callers-on-the-office-phone.md
       - group: Every change
         items:
           - runbooks/test-a-change.md

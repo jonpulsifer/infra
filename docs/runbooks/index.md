@@ -41,6 +41,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Repair a kiosk](repair-a-kiosk.md): restart or start a Weather Hub kiosk
 - [Connect an agent to the wiki](connect-an-agent-to-the-wiki.md): add the wiki's MCP endpoint to an MCP client
 - [Operate the office phone](operate-the-office-phone.md): check, change and debug the office phone and the folly PBX
+- [Screen callers on the office phone](screen-callers-on-the-office-phone.md): add a contact who skips the press-5 screen, use the star codes, and render the prompts
 
 ## Every change
 
