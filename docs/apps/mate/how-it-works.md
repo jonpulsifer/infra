@@ -15,9 +15,9 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 ## A turn
 
 1. mate moves the Sandbox's `spec.shutdownTime` two hours ahead and sets the annotation `lolwtf.ca/turn-started`.
-2. mate mints the credentials and writes them into the pod with one `pods/exec`.
+2. mate mints the credentials and writes them, with the kthx sites file from Secret `mate-kthx-sites`, into the pod with one `pods/exec`.
 3. mate sends the prompt to OpenCode over ACP (Agent Client Protocol) and streams the answer.
-4. mate empties the credential files, revokes the GitHub token, moves `shutdownTime` two hours ahead and removes the annotation.
+4. mate reads the kthx sites file back into the Secret, empties the credential files, revokes the GitHub token, moves `shutdownTime` two hours ahead and removes the annotation.
 
 ## Credentials
 
@@ -27,8 +27,12 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 | GitHub installation token | The file in `$MATE_GITHUB_TOKEN_FILE` | `clanky-bot[bot]` on `jonpulsifer/infra`: contents and pull requests write, actions read |
 | Cluster token | `$KUBECONFIG` | ServiceAccount `mate-sandbox-debug`, for `MATE_TURN_MINUTES` plus 5 minutes |
 | OpenCode key | Sandbox environment, from Secret `mate-opencode` | The model API |
+| kthx site bearers | `/home/agent/.config/kthx/sites.json`, from Secret `mate-kthx-sites` | Every quick site Rowbutt claims |
+| kthx agent token | Sandbox environment `KTHX_AGENT_TOKEN`, from Secret `mate-kthx-agent` | Every built-apps command but minting tokens, replacing the engine settings and connecting or probing a Target, for 90 days |
 
 `MATE_SSH_KEY_FILE` and `MATE_CONNECT_SECRET` are unset, so a sandbox has no SSH key and no 1Password token.
+
+mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx-sites.ts` is the ledger that writes the file into the sandbox and reads it back.
 
 `clanky-bot[bot]` is in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego`, so its comments can plan.
 
@@ -37,7 +41,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 | Pod | Egress |
 | --- | --- |
 | mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector |
-| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443 |
+| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 
 The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on.
 
@@ -55,6 +59,7 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 ## Where it lives
 
 - `apps/mate/src/sandboxes.ts`: the Sandbox and the credential writes
+- `apps/mate/src/kthx-sites.ts`: the ledger of kthx site bearers
 - `images/mate-sandbox/Dockerfile`: the harness image
 - `clusters/offsite/monitoring/mate-rules.yaml`: alerts, tested by `mise run k8s:check-rules`
 - `.github/containers.json`: the CD entries for both images

@@ -274,6 +274,28 @@ tests:
         alertname: MateGitHubTokenMintFailing
         exp_alerts: []
 
+  # One failed fold of a sandbox's kthx site tokens, then none for an hour. The
+  # climbing `ok` folds prove the `result!="ok"` matcher does the work.
+  - interval: 1m
+    input_series:
+      - series: 'mate_kthx_sites_syncs_total{result="save-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x70
+      - series: 'mate_kthx_sites_syncs_total{result="ok",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+2x70
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateKthxSitesSyncFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate could not keep a sandbox's kthx site tokens"
+              description: "A fold of a sandbox's kthx site tokens into the mate-kthx-sites Secret failed, so a site claimed in that turn may have its only bearer in the sandbox, which the quiet teardown deletes. The next turn on that thread retries the save and a teardown makes one last attempt, so a single failure heals itself unless the thread is already quiet. `read-failed` is the file in the sandbox, `save-failed` the Secret. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i kthx`. What the ledger holds, names only: `kubectl --context offsite -n mate get secret mate-kthx-sites -o jsonpath='{.data.sites\\.json}' | base64 -d | jq 'map_values(keys)'`."
+      # Half an hour on, the series is no longer new, so the alert clears.
+      - eval_time: 60m
+        alertname: MateKthxSitesSyncFailing
+        exp_alerts: []
+
   # A collector roll: every series restarts under a new pod and instance with
   # the same values. Each eval lands its offset in the old series.
   - interval: 1m

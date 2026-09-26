@@ -1,0 +1,7 @@
+#!/bin/sh
+# Baked into the sandbox image at /usr/local/bin/kthx, in front of the bundle
+# at the path below. A shim, not a `bun add -g` install: the sandbox's egress
+# policy blocks the download, and a global install lands in HOME, an emptyDir.
+# `kthx upgrade` replaces only a `bun add -g` install, so in a sandbox it puts
+# a second copy where this shim never looks.
+exec bun /usr/local/lib/kthx/kthx.js "$@"

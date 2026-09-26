@@ -47,6 +47,8 @@ export interface Instruments {
   /** `ok` is the only non-failure result. */
   githubTokenMinted(result: string): void;
   githubTokenStamped(result: string): void;
+  /** One per fold of a sandbox's kthx site tokens into the ledger; `ok` is the only non-failure. */
+  kthxSitesSynced(result: string): void;
   turnStarted(): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
   teardown(reason: TeardownReason): void;
@@ -127,6 +129,7 @@ export function getInstruments(): Instruments {
   const teardowns = meter.createCounter('mate_teardowns_total');
   const tokenMints = meter.createCounter('mate_github_token_mints_total');
   const tokenStamps = meter.createCounter('mate_github_token_stamps_total');
+  const siteSyncs = meter.createCounter('mate_kthx_sites_syncs_total');
   const firstToken = meter.createHistogram(
     'mate_turn_first_token_milliseconds',
     { unit: 'ms' },
@@ -161,6 +164,7 @@ export function getInstruments(): Instruments {
     },
     githubTokenMinted: (result) => tokenMints.add(1, { result }),
     githubTokenStamped: (result) => tokenStamps.add(1, { result }),
+    kthxSitesSynced: (result) => siteSyncs.add(1, { result }),
     minted: (result, sample) => {
       mints.add(1, { result });
       if (!sample) return;
@@ -198,6 +202,7 @@ export function lazyInstruments(): Instruments {
     githubAppReady: (ready) => getInstruments().githubAppReady(ready),
     githubTokenMinted: (result) => getInstruments().githubTokenMinted(result),
     githubTokenStamped: (result) => getInstruments().githubTokenStamped(result),
+    kthxSitesSynced: (result) => getInstruments().kthxSitesSynced(result),
     turnStarted: () => getInstruments().turnStarted(),
     turnEnded: (reason, sample) => getInstruments().turnEnded(reason, sample),
     teardown: (reason) => getInstruments().teardown(reason),

@@ -4,13 +4,20 @@
  * that dies mid-thread cannot leak one.
  */
 import { AcpClient } from './acp.ts';
-import type { SandboxConfig, VaultConfig } from './config.ts';
+import type { KthxConfig, SandboxConfig, VaultConfig } from './config.ts';
 // Mint and revoke only, so nothing here can reach the App's private key.
 export interface TokenSource {
   token(): Promise<{ token: string }>;
   revoke(token: string): Promise<void>;
 }
 
+import {
+  type KthxSites,
+  parseSites,
+  SITES_LIMIT_BYTES,
+  type Sites,
+  serialize,
+} from './kthx-sites.ts';
 import {
   type ExecClose,
   type Kube,
@@ -79,6 +86,9 @@ const TOKEN_FILE_ENV = 'MATE_GITHUB_TOKEN_FILE';
 const TOKEN_FILE = `${AGENT_HOME}/.github-token`;
 const KUBECONFIG_FILE = `${AGENT_HOME}/.kube/config`;
 const SSH_DIR = `${AGENT_HOME}/.ssh`;
+// Where the kthx CLI keeps its site tokens under the image's XDG_CONFIG_HOME.
+const KTHX_SITES_FILE = `${AGENT_HOME}/.config/kthx/sites.json`;
+const KTHX_TOKEN_ENV = 'KTHX_AGENT_TOKEN';
 const SSH_KEY_FILE = `${SSH_DIR}/id_ed25519`;
 const SSH_CONFIG_FILE = `${SSH_DIR}/config`;
 // accept-new: home is a fresh emptyDir with no known hosts, so `yes` refuses
@@ -156,6 +166,8 @@ export interface KubeSandboxesDeps {
   metrics?: Instruments;
   /** Absent when no App is configured. */
   githubApp?: TokenSource | null;
+  /** Absent when `config.kthx.origin` is unset. */
+  kthxSites?: KthxSites | null;
   clusterCa?: string | null;
   sshKey?: string | null;
   ttlMs?: number;
@@ -231,7 +243,10 @@ function pullPolicy(image: string): string {
 
 // Paths are absolute: opencode resolves a relative one against its own config
 // directory, and reports neither that nor a missing file.
-export function opencodeConfig(model: string): string {
+export function opencodeConfig(
+  model: string,
+  kthxMcpUrl: string | null = null,
+): string {
   return JSON.stringify({
     model,
     // Project config, which would load AGENTS.md, is turned off.
@@ -241,6 +256,22 @@ export function opencodeConfig(model: string): string {
     permission: 'allow',
     autoupdate: false,
     share: 'disabled',
+    // opencode substitutes `{env:…}` itself, an unset variable as ''. Without
+    // `oauth: false` a 401 starts OAuth discovery against the engine.
+    ...(kthxMcpUrl
+      ? {
+          mcp: {
+            kthx: {
+              type: 'remote',
+              url: kthxMcpUrl,
+              enabled: true,
+              headers: { Authorization: `Bearer {env:${KTHX_TOKEN_ENV}}` },
+              oauth: false,
+              timeout: 10_000,
+            },
+          },
+        }
+      : {}),
   });
 }
 
@@ -321,6 +352,29 @@ function connectEnv(vault: VaultConfig): Record<string, unknown>[] {
         },
       },
     },
+  ];
+}
+
+// The agent token is minted by the owner in the console, so the Secret can be
+// absent; `optional`, as the Connect token is, keeps that from holding every
+// sandbox in CreateContainerConfigError.
+function kthxEnv(kthx: KthxConfig): Record<string, unknown>[] {
+  return [
+    ...(kthx.origin ? [{ name: 'KTHX_ORIGIN', value: kthx.origin }] : []),
+    ...(kthx.mcpUrl
+      ? [
+          {
+            name: KTHX_TOKEN_ENV,
+            valueFrom: {
+              secretKeyRef: {
+                name: kthx.agentSecret,
+                key: KTHX_TOKEN_ENV,
+                optional: true,
+              },
+            },
+          },
+        ]
+      : []),
   ];
 }
 
@@ -464,12 +518,13 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 },
                 {
                   name: 'OPENCODE_CONFIG_CONTENT',
-                  value: opencodeConfig(config.model),
+                  value: opencodeConfig(config.model, config.kthx.mcpUrl),
                 },
                 // opencode npm-installs a plugin into any `.opencode/` it
                 // loads, and npm is outside the sandbox's egress allow-list.
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
                 ...(config.vault ? connectEnv(config.vault) : []),
+                ...kthxEnv(config.kthx),
                 ...gitEnv(config.github),
                 ...(config.kubeServiceAccount
                   ? [{ name: 'KUBECONFIG', value: KUBECONFIG_FILE }]
@@ -568,6 +623,10 @@ export function waitForPodGone(
 
 export class KubeSandboxes implements Sandboxes {
   private readonly attached = new Map<string, Attachment>();
+  // What each sandbox's sites file holds that the ledger also holds: a name
+  // missing from the file is a removal only against this. Empty after a
+  // restart, which folds every site as new.
+  private readonly stamped = new Map<string, Sites>();
   private warming: Promise<void> | null = null;
   private again = false;
   private inherited = true;
@@ -746,8 +805,13 @@ export class KubeSandboxes implements Sandboxes {
     return Boolean(
       this.deps.githubApp ||
         this.deps.config.kubeServiceAccount ||
-        this.deps.sshKey,
+        this.deps.sshKey ||
+        this.kthx,
     );
+  }
+
+  private get kthx(): KthxSites | null {
+    return this.deps.config.kthx.origin ? (this.deps.kthxSites ?? null) : null;
   }
 
   // Never fails the turn: a thread that cannot push can still answer, and the
@@ -758,8 +822,17 @@ export class KubeSandboxes implements Sandboxes {
     const github = githubApp ? await this.mintGithub(name) : null;
     const kube = await this.mintCluster(name);
     const ssh = this.deps.sshKey ?? '';
+    // First, so a save the last turn's end could not make is retried now.
+    const sites = this.kthx ? await this.syncSites(name, pod) : null;
     try {
-      await this.writeCredentials(pod, { github: github ?? '', kube, ssh });
+      await this.writeCredentials(pod, {
+        github: github ?? '',
+        kube,
+        ssh,
+        kthx: sites ? serialize(sites) : null,
+      });
+      // Only now: a write that failed left the file as the sync read it.
+      if (sites) this.stamped.set(name, sites);
       if (githubApp) metrics?.githubTokenStamped(github ? 'ok' : 'mint-failed');
       return github;
     } catch (error) {
@@ -836,16 +909,26 @@ export class KubeSandboxes implements Sandboxes {
     token: string | null,
   ): Promise<void> {
     if (!this.credentialled) return;
-    await this.writeCredentials(pod, {
-      github: '',
-      kube: '',
-      ssh: '',
-    }).catch((error) =>
+    // Truncated only once the ledger holds what it said; otherwise the file
+    // is the only copy of the turn's claims, and the next turn retries.
+    const synced = this.kthx ? await this.syncSites(name, pod) : null;
+    try {
+      // `{}` and not nothing: the CLI reads an empty file as corrupt.
+      await this.writeCredentials(pod, {
+        github: '',
+        kube: '',
+        ssh: '',
+        kthx: synced ? serialize({}) : null,
+      });
+      // What the next turn reads first, and it folds in as nothing claimed,
+      // not as every site removed.
+      if (synced) this.stamped.set(name, {});
+    } catch (error) {
       this.deps.log.warn("could not clear the turn's credentials", {
         sandbox: name,
         error: plain(error),
-      }),
-    );
+      });
+    }
     if (!token) return;
     await this.deps.githubApp?.revoke(token).catch((error: unknown) =>
       this.deps.log.warn('could not revoke the GitHub token', {
@@ -855,11 +938,106 @@ export class KubeSandboxes implements Sandboxes {
     );
   }
 
-  // One exec for every file, since a human is waiting on the turn.
+  /**
+   * Reads the sandbox's kthx site tokens back into the ledger. Answers what
+   * the file should hold now, or `null` to leave it alone: an unreadable file
+   * may hold tokens nobody else has, and after a failed save it is their only
+   * copy. `read-failed` is the file, `save-failed` the Secret.
+   */
+  private async syncSites(name: string, pod: string): Promise<Sites | null> {
+    const { log, metrics } = this.deps;
+    const ledger = this.kthx;
+    if (!ledger) return null;
+    const before = this.stamped.get(name) ?? {};
+    let harvested: Sites;
+    try {
+      // Only absence is tolerated: a file that is there but cannot be read
+      // is not a file with nothing in it.
+      harvested = parseSites(
+        await this.execText(pod, [
+          '/bin/sh',
+          '-c',
+          `[ ! -e ${KTHX_SITES_FILE} ] || head -c ${SITES_LIMIT_BYTES + 1} ${KTHX_SITES_FILE}`,
+        ]),
+      );
+    } catch (error) {
+      metrics?.kthxSitesSynced('read-failed');
+      log.error('could not read the sandbox kthx sites file', {
+        sandbox: name,
+        error: plain(error),
+      });
+      // Unknown: a fold against nothing stamped can only add, never remove.
+      this.stamped.set(name, {});
+      return null;
+    }
+    try {
+      const sites = await ledger.merge(before, harvested);
+      metrics?.kthxSitesSynced('ok');
+      // The file holds this, and now so does the ledger.
+      this.stamped.set(name, harvested);
+      return sites;
+    } catch (error) {
+      metrics?.kthxSitesSynced('save-failed');
+      log.error('could not save the sandbox kthx sites into the ledger', {
+        sandbox: name,
+        secret: ledger.secret,
+        error: plain(error),
+      });
+      // The file holds what the ledger does not; the next fold must add it.
+      this.stamped.set(name, {});
+      return null;
+    }
+  }
+
+  // stdin is never closed: the stream has no half-close, and kata-clh drops
+  // stdout after an EOF on it.
+  private async execText(pod: string, command: string[]): Promise<string> {
+    const stream = await this.deps.kube.exec({
+      namespace: this.namespace,
+      pod,
+      container: HARNESS_CONTAINER,
+      command,
+      timeoutMs: STAMP_TIMEOUT_MS,
+    });
+    const timer = setTimeout(() => stream.close(), STAMP_TIMEOUT_MS);
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    let close: ExecClose;
+    try {
+      const reader = stream.stdout.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        // The agent writes the file; mate buffers it and stamps it back as
+        // one argument, so it stays well under MAX_ARG_STRLEN.
+        if (size > SITES_LIMIT_BYTES) {
+          stream.close();
+          throw new Error(
+            `${command[0]} printed more than ${SITES_LIMIT_BYTES} bytes`,
+          );
+        }
+        chunks.push(value);
+      }
+      close = await stream.closed;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (close.status?.status !== 'Success') {
+      throw new Error(
+        `${command[0]} said ${close.status?.message || close.reason}`,
+      );
+    }
+    return Buffer.concat(chunks).toString('utf8');
+  }
+
+  // One exec for every file, since a human is waiting on the turn. A null
+  // `kthx` leaves the sites file alone.
   private async writeCredentials(
     pod: string,
-    values: { github: string; kube: string; ssh: string },
+    values: { github: string; kube: string; ssh: string; kthx: string | null },
   ): Promise<void> {
+    const sites = values.kthx;
     const stream = await this.deps.kube.exec({
       namespace: this.namespace,
       pod,
@@ -871,11 +1049,14 @@ export class KubeSandboxes implements Sandboxes {
           // First, so no file is ever briefly readable by others; ssh refuses
           // a key that is.
           'umask 077',
-          `mkdir -p ${SSH_DIR} "$(dirname ${KUBECONFIG_FILE})"`,
+          `mkdir -p ${SSH_DIR} "$(dirname ${KUBECONFIG_FILE})"${
+            sites === null ? '' : ` "$(dirname ${KTHX_SITES_FILE})"`
+          }`,
           `printf %s "$1" > ${TOKEN_FILE}`,
           `printf %s "$2" > ${KUBECONFIG_FILE}`,
           `printf %s "$3" > ${SSH_KEY_FILE}`,
           `printf %s "$4" > ${SSH_CONFIG_FILE}`,
+          ...(sites === null ? [] : [`printf %s "$5" > ${KTHX_SITES_FILE}`]),
         ].join('; '),
         // Values go in argv, since `ExecStream` cannot half-close stdin. That
         // puts them in the apiserver audit log wherever auditing is on.
@@ -885,6 +1066,7 @@ export class KubeSandboxes implements Sandboxes {
         values.ssh,
         // No key, no client config pointing ssh at one.
         values.ssh ? SSH_CLIENT_CONFIG : '',
+        ...(sites === null ? [] : [sites]),
       ],
       timeoutMs: STAMP_TIMEOUT_MS,
     });
@@ -913,7 +1095,23 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   async teardown(ref: SandboxRef): Promise<void> {
+    if (this.kthx) await this.keepSites(ref);
     await this.destroy(ref.name);
+    this.stamped.delete(ref.name);
+  }
+
+  // Best effort, before the delete takes the file with it.
+  private async keepSites(ref: SandboxRef): Promise<void> {
+    try {
+      await this.syncSites(ref.name, await this.podOf(ref));
+    } catch (error) {
+      // 404: gone already, and its home with it.
+      if (error instanceof KubeError && error.status === 404) return;
+      this.deps.log.warn(
+        'could not keep the sandbox kthx sites before teardown',
+        { sandbox: ref.name, error: plain(error) },
+      );
+    }
   }
 
   async podOf(ref: SandboxRef): Promise<string> {
