@@ -23,7 +23,7 @@ Switchboard rings the owner's cell for mate and Alertmanager: ElevenLabs dials i
 
 Switchboard runs in offsite's `elevenlabs` namespace with the write key the [ElevenLabs](elevenlabs.md) reconciler holds. At boot it lists the agents and keeps the id of the one named `SWITCHBOARD_AGENT_NAME`; none, or two, exits with status 64. `SWITCHBOARD_AGENT_ID` skips the lookup.
 
-Each request carries its class's bearer token. A call goes to the outbound-call endpoint, bounded by a timeout and never retried; the daily cap counts attempts, and `/alertmanager` dedupes by fingerprint until the alert resolves. The log has each outcome and never a number, URL, body or token. A CiliumNetworkPolicy admits the two callers; the pod reaches nothing but `api.elevenlabs.io`.
+Each request carries its class's bearer token. A call goes to the outbound-call endpoint, bounded by a timeout and never retried; the daily cap counts attempts, and `/alertmanager` dedupes by fingerprint until the alert resolves or the pod restarts. The log has each outcome and never a number, URL, body or token. A CiliumNetworkPolicy admits the two callers; the pod reaches nothing but `api.elevenlabs.io`.
 
 ## Unpark it
 
@@ -36,15 +36,7 @@ Each request carries its class's bearer token. A call goes to the outbound-call 
 
 No alert watches switchboard. A refused ring answers 429 with a `skipped` reason, a failed call 502.
 
-Two callers on offsite are declared for it. mate gives each Rowbutt sandbox
-`SWITCHBOARD_URL` and the ring token, and the `switchboard` AlertmanagerConfig
-in `clusters/offsite/monitoring/` posts a firing `critical` alert to
-`/alertmanager`. That config is selected only once `switchboard` is in
-`alertmanagerConfigSelector` in `clusters/offsite/monitoring/kube-prometheus.yaml`.
-Add it in its own merge after a switchboard pod is Ready, and drop it before
-parking; [Alerting](../platform/observability/alerting.md) has the rule.
-Switchboard dedupes an alert by fingerprint until it resolves or the pod
-restarts.
+Two callers on offsite are declared for it. mate gives each Rowbutt sandbox `SWITCHBOARD_URL` and the ring token, and the `switchboard` AlertmanagerConfig in `clusters/offsite/monitoring/` posts a firing `critical` alert to `/alertmanager`. That config is selected only once `switchboard` is in `alertmanagerConfigSelector` in `clusters/offsite/monitoring/kube-prometheus.yaml`. Add it in its own merge after a switchboard pod is Ready, and drop it before parking; [Alerting](../platform/observability/alerting.md) has the rule.
 
 ## Reference
 
