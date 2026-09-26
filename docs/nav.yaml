@@ -38,7 +38,8 @@ sections:
       - platform/opentofu.md
       - platform/build-and-release.md
       - platform/cloud.md
-      - platform/observability.md
+      - path: platform/observability.md
+        children: [platform/observability/alerting.md]
   - title: Hosts
     index: hosts/index.md
     items:
