@@ -157,8 +157,8 @@ run_case "$desired" ELEVENLABS_READ_KEY=read-key
 assert_equal 'report mode exits 0 when nothing is wrong live' 0 "$status"
 assert_contains 'report mode says what it would create' "$out" 'agent pbx-switchboard: would create'
 assert_contains 'report mode reads the troll agent as in sync' "$out" 'agent pbx-troll (agent_troll1): in sync'
-assert_contains 'report mode names the Secret the outbound trunk waits for' "$out" \
-  "number $number_id: the outbound trunk waits for the Secret elevenlabs-outbound-trunk"
+assert_contains 'report mode names the keys the outbound trunk waits for' "$out" \
+  "number $number_id: the outbound trunk waits for OUTBOUND_TRUNK_USERNAME and OUTBOUND_TRUNK_PASSWORD (Secret elevenlabs-outbound-trunk)"
 assert_contains 'report mode does not bind without the inbound credentials' "$out" 'would not bind: the trunk credentials are missing'
 assert_lacks 'report mode sends no POST' "$requests" 'POST '
 assert_lacks 'report mode sends no PATCH' "$requests" 'PATCH '

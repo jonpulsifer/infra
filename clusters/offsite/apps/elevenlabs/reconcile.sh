@@ -216,7 +216,7 @@ if [[ -z $want_out && $live_out == true ]]; then
   log "number $number_id: has an outbound trunk, which git does not declare; remove it in the ElevenLabs dashboard"
   failed=1
 elif [[ -n $want_out && $have_out == no ]]; then
-  log "number $number_id: the outbound trunk waits for the Secret elevenlabs-outbound-trunk"
+  log "number $number_id: the outbound trunk waits for OUTBOUND_TRUNK_USERNAME and OUTBOUND_TRUNK_PASSWORD (Secret elevenlabs-outbound-trunk)"
   # A trunk whose password git cannot re-send is one it cannot own.
   if [[ $live_out == true ]]; then
     log "number $number_id: has an outbound trunk with no credentials in git; remove it in the ElevenLabs dashboard"

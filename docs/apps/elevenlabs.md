@@ -11,12 +11,14 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
 | The number's inbound trunk | `agent-did` in the item `elevenlabs troll trunk` | The folly PBX, with that item's digest credentials |
-| The number's outbound trunk | voip.ms over TLS, as the sub-account `168847_elevenlabs` | Switchboard, through the outbound-call API |
+| The number's outbound trunk | voip.ms over TLS, as the sub-account `168847_elevenlabs` | Anyone holding the `elevenlabs pbx api key`, which Switchboard uses through the outbound-call API |
 
 ## Limits
 
 - The write key, item `elevenlabs pbx api key`, exists only in offsite's `elevenlabs` namespace.
-- The number gets an outbound trunk only once the Secret `elevenlabs-outbound-trunk` exists; until then each run logs that the trunk waits.
+- The number gets an outbound trunk only once the Secret `elevenlabs-outbound-trunk` holds its username and password; until then each run logs that the trunk waits.
+- With that Secret in hand, the number dials out as `168847_elevenlabs` for anyone who holds the write key, on the voip.ms balance folly's lines share. The sub-account's voip.ms settings, which git does not hold, set what such a call can reach and cost.
+- ElevenLabs holds that sub-account's password, and anyone who has it can register the sub-account and take the calls of any DID routed to it.
 - A live outbound trunk whose password git does not hold fails the Job.
 
 ## How it works
