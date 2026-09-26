@@ -1,5 +1,6 @@
 ---
-# folly egress. Two destinations: the carrier, and the handset on the LAN.
+# folly egress. Three destinations: the carrier, the troll agent at ElevenLabs,
+# and the handset on the LAN.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -27,6 +28,10 @@ spec:
             dns:
               - matchPattern: "*.voip.ms"
               - matchPattern: voip.ms
+              # `*` matches one DNS label and `**.` any number. The trunk's host
+              # is sip.rtc.elevenlabs.io, and a follow-up request goes to a
+              # Contact host under hosts.rtc.elevenlabs.io.
+              - matchPattern: "**.rtc.elevenlabs.io"
     - toFQDNs:
         - matchPattern: "*.voip.ms"
         - matchName: voip.ms
@@ -38,14 +43,29 @@ spec:
             # fallback while TLS proves itself, and goes when it has.
             - {port: "5060", protocol: UDP}
             - {port: "5060", protocol: TCP}
+    # The troll trunk, TLS only. rewrite_contact in pjsip.conf sends a call's
+    # ACK and BYE back down the connection this pod opened. ElevenLabs
+    # documents follow-up requests to a Contact host under
+    # hosts.rtc.elevenlabs.io, so that is admitted too, with `**.` because how
+    # many labels it has is theirs to choose.
+    - toFQDNs:
+        - matchName: sip.rtc.elevenlabs.io
+        - matchPattern: "**.hosts.rtc.elevenlabs.io"
+      toPorts:
+        - ports:
+            - {port: "5061", protocol: TCP}
     # RTP to the carrier cannot be an FQDN rule and this is the honest reason:
     # the media address arrives in an SDP body, from a host this pod never
     # looked up. A toFQDNs egress rule permits the signalling and then silently
     # drops every audio packet — a call that connects and carries silence.
+    #
+    # ElevenLabs sends media from ports anywhere in 10000-60000, wider than
+    # voip.ms. rtp.conf still pins this pod's own sockets to 10000-20000, so
+    # this widens only the far end's port.
     - toEntities: [world]
       toPorts:
         - ports:
-            - {port: "10000", endPort: 20000, protocol: UDP}
+            - {port: "10000", endPort: 60000, protocol: UDP}
     # The handset. She is a LAN host, not a cluster endpoint, so she is `world`
     # to Cilium even though the packets never leave the building.
     #

@@ -108,6 +108,10 @@ filter that drops those lines.
 | `401` → `100 Trying` → bare `503` on one sub-account while another works | voip.ms fraud protection holding a sub-account that started a new calling pattern. Settings look identical; voip.ms support releases it. |
 | A line will not register | The source address reaching the PBX is not the handset's: check the VIP's `externalTrafficPolicy: Local` and both policies naming `CATHY_IP`. |
 | A caller on line 4 hears "press five", or is held in a queue | Line 4 screens every caller who is not a contact. See [Screen callers on the office phone](screen-callers-on-the-office-phone.md). |
+| `elevenlabs`: `SSL_ERROR_SSL`, or no reply to the INVITE | The PBX cannot reach `sip.rtc.elevenlabs.io` on 5061. Check the egress policy and DNS. |
+| `elevenlabs`: `401` twice, then the leg ends | ElevenLabs rejects the credentials: the reconciler on offsite has not re-sent the item, or the pod has not restarted since it changed. |
+| `elevenlabs`: `404` | `agent-did` is not the number imported at ElevenLabs, leading `+` included. |
+| The agent answers, then silence, and the call ends 30 s later | Its audio never reaches the pod, and `rtp_timeout` ends the leg. |
 
 ## Techniques that settle it
 

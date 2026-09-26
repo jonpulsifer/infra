@@ -24,15 +24,18 @@
 #   6. a site with [pbx-event] logs the line Grafana and the smiirl parse;
 #   7. on folly, one trunk is screened and line 1's never is, an open line, a
 #      contact and a 911 callback ring unanswered, a stranger on a screened
-#      line hears the press-5 prompt and then the sinks, a stranger who hangs
-#      up on the prompt is counted, a caller who pressed 5 rings the handset
-#      as [5] with the Human ring, a caller who did not is held in a spam sink
-#      with the ten-minute cap and its hangup handler, a third stranger on a
-#      line screening two is refused unanswered, a fourth held caller hears
-#      goodbye, the INVITE to the handset carries the Alert-Info its pre-dial
-#      handler adds, every trunk takes voip.ms's DID-form INVITE by its own
-#      X-Dest-User header and never by its From user, and every prompt the
-#      dialplan plays is in the ConfigMap mounted for it.
+#      line hears the press-5 prompt and then the troll agent, a stranger who
+#      hangs up on the prompt is counted, a caller who pressed 5 rings the
+#      handset as [5] with the Human ring, a caller the agent does not take
+#      (its trunk refusing, its Secret absent, or two calls already on it) is
+#      held in a spam sink with the ten-minute cap and its hangup handler, the
+#      agent's leg carries the mode and caller headers its pre-dial handler
+#      adds, a third stranger on a line screening two is refused unanswered,
+#      a fourth held caller hears goodbye, the INVITE to the handset carries
+#      the Alert-Info its pre-dial handler adds, every trunk takes voip.ms's
+#      DID-form INVITE by its own X-Dest-User header and never by its From
+#      user, and every prompt the dialplan plays is in the ConfigMap mounted
+#      for it.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -169,6 +172,7 @@ doc() { KIND="$1" NAME="$2" yq 'select(.kind == strenv(KIND) and .metadata.name 
 render() {
   local site=$1 mode=${2:-full} keys
   [[ $mode == full ]] && HAS_OPTIONAL=0
+  RENDER_MODE=$mode
   STREAM="$SITE_DIR/kustomize.yaml"
   if ! kubectl kustomize "clusters/$site/apps/pbx" >"$STREAM" 2>"$SITE_DIR/kustomize.err"; then
     fail "kubectl kustomize clusters/$site/apps/pbx" "$(cat "$SITE_DIR/kustomize.err")"
@@ -800,7 +804,11 @@ check_events() {
 # group set, which is the state of a stranger who hangs up on the prompt.
 # `leg` dials line4 at Asterisk's own loopback address, because Dial runs b()
 # only on a channel it created and no handset is registered here; the INVITE
-# it sends itself is the one the handset would get.
+# it sends itself is the one the handset would get. `troll` enters [agent] as a
+# screened caller would. Its trunk is localized to this Asterisk's own TLS
+# listener, which has no certificate, so the Dial fails the way an unreachable
+# ElevenLabs would; `trolling` stands in for a call the agent is on, and
+# `earl` enters as the handset's *29 does.
 # shellcheck disable=SC2016 # ${EPOCH} is Asterisk's
 INBOUND_PROBE_CONTEXT=(
   '[pbx-check-inbound]'
@@ -842,6 +850,16 @@ INBOUND_PROBE_CONTEXT=(
   ' same => n,Set(GROUP(screen)=line4)'
   ' same => n,Goto(from-voipms,busy,1)'
   'exten => leg,1,Dial(PJSIP/line4/sip:line4@127.0.0.1:5060,3,b(handset-leg^s^1(Friend)))'
+  'exten => troll,1,Set(HANDSET=line4)'
+  ' same => n,Set(CALLERID(num)=6135550109)'
+  ' same => n,Set(CALLER=6135550109)'
+  ' same => n,Answer()'
+  ' same => n,Goto(agent,s,1)'
+  'exten => trolling,1,Set(GROUP()=troll)'
+  ' same => n,Answer()'
+  ' same => n,Wait(30)'
+  'exten => overcap,1,Goto(troll,1)'
+  'exten => earl,1,Goto(agent,desk,1)'
 )
 
 # Places probe $1 and fails if its Executing lines hold $2, or miss any of the
@@ -898,7 +916,9 @@ check_inbound_routes() {
   # Waited for past the verdict, so a Read that rings the desk is seen.
   expect_route stranger '"PJSIP/line4,' "$answer" '"GROUP(screen)=line4"' \
     '"DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6"' \
-    '"NOTICE,pbx-event kind=screened line=line4 caller=6135550103"' '"spam,s,1"'
+    '"NOTICE,pbx-event kind=screened line=line4 caller=6135550103"' '"agent,s,1"' \
+    '"NOTICE,pbx-event kind=troll-miss line=line4 caller=6135550103 mode=troll why=' \
+    '"GROUP()=spam"'
   expect_route dropped "$answer" '"NOTICE,pbx-event kind=screened line=line4 caller=6135550108"'
   expect_route human "$answer" \
     '"NOTICE,pbx-event kind=captcha-pass line=line4 caller=6135550105"' \
@@ -919,9 +939,45 @@ check_inbound_routes() {
   hold_probe filler 3 '"GROUP()=spam"'
   expect_route fourth '"GROUP()=spam"' '"1?full,1"' '"/var/lib/pbx-sounds/goodbye"'
   quiesce
-  ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5 and then a sink, a 5 rings as [5]; a third stranger and a fourth held caller are refused"
+  check_troll
+  ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5 and then the troll, falling back to a sink; a 5 rings as [5]; a third stranger and a fourth held caller are refused"
   check_handset_leg
   check_trunk_identifies
+}
+
+# With the pbx-elevenlabs Secret, a screened caller is dialled to the agent
+# with the mode and caller headers its pre-dial handler adds and, the trunk
+# refusing here, lands in a sink with the troll's held-time handler popped; a
+# caller over the agent's two calls is never dialled. Without the Secret,
+# pbx-env's `off` sends every caller straight to a sink. The handset's desk
+# demo never lands in a sink.
+check_troll() {
+  local log="$SITE_DIR/asterisk.log" miss offset want
+  miss='"NOTICE,pbx-event kind=troll-miss line=line4 caller=6135550109 mode=troll why='
+  expect_route earl '"GROUP()=spam"' ' mode=desk why=' '"beeperr"'
+  quiesce
+  if [[ $RENDER_MODE == degraded ]]; then
+    expect_route troll '"PJSIP/' "${miss}off\"" '"GROUP()=spam"'
+    quiesce
+    return
+  fi
+  offset=$(wc -c <"$log")
+  expect_route troll '"PJSIP/line4,' \
+    '"NOTICE,pbx-event kind=troll line=line4 caller=6135550109 mode=troll"' \
+    '"SPYGROUP=troll"' '"CHANNEL(hangup_handler_push)=spam-held,s,1"' \
+    "\"PJSIP/$(dummy_for PBX_AGENT_DID)@elevenlabs,60,b(agent-leg^s^1(troll^" \
+    '^6135550109))S(600)"' '"CHANNEL(hangup_handler_pop)="' "$miss" '"GROUP()=spam"'
+  # As for the handset leg, the pre-dial handler's proof is the INVITE it sent.
+  for want in "INVITE sip:$(dummy_for PBX_AGENT_DID)@127.0.0.1:5061;transport=tls" \
+    'X-Pbx-Mode: troll' 'X-Caller-ID: 6135550109'; do
+    tail -c +"$((offset + 1))" "$log" | grep -qF "$want" \
+      || fail "the INVITE to the agent does not carry '$want'"
+  done
+  quiesce
+  hold_probe trolling 1 '"GROUP()=troll"'
+  hold_probe trolling 2 '"GROUP()=troll"'
+  expect_route overcap '"PJSIP/' "${miss}full\"" '"GROUP()=spam"'
+  quiesce
 }
 
 # The b() handler's proof is the header on the wire: the SIP log holds the

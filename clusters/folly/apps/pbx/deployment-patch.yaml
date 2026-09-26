@@ -1,7 +1,8 @@
 ---
-# folly's additions to the base Deployment, as JSON6902 ops on containers/0.
-# The test op fails the build if that is not the asterisk container:
-# provision-sidecar.yaml adds a second one.
+# folly's additions to the base Deployment, as JSON6902 ops on containers/0
+# and initContainers/0. The test ops fail the build if those are not the
+# asterisk and render-config containers: provision-sidecar.yaml adds a second
+# container.
 - op: test
   path: /spec/template/spec/containers/0/name
   value: asterisk
@@ -23,3 +24,17 @@
   value:
     name: contacts
     secret: {secretName: pbx-contacts, optional: true, defaultMode: 0444}
+# The troll trunk's number and credentials. Last in envFrom, so the Secret's
+# values replace pbx-env's `off` defaults; optional, so a missing 1Password
+# item still boots the phone, with every screened caller sent to the sinks.
+- op: test
+  path: /spec/template/spec/initContainers/0/name
+  value: render-config
+- op: add
+  path: /spec/template/spec/initContainers/0/envFrom/-
+  value:
+    secretRef: {name: pbx-elevenlabs, optional: true}
+# render-config reads both Secrets once, at pod start.
+- op: replace
+  path: /metadata/annotations/secret.reloader.stakater.com~1reload
+  value: pbx-secrets,pbx-elevenlabs

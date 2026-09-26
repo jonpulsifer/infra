@@ -1,6 +1,6 @@
 ---
 title: Screen callers on the office phone
-description: How the folly PBX screens unknown callers on line 4, how to add or remove a contact who skips the screen, what the star codes do, how to render the prompts, and how to test the screen.
+description: How the folly PBX screens unknown callers on line 4 and hands them to the ElevenLabs troll agent, how to add or remove a contact who skips the screen, what the star codes do, how to render the prompts, and how to test the screen.
 ---
 
 The folly PBX answers unknown callers on line 4 and asks them to press 5. This
@@ -17,15 +17,22 @@ trunks and a failed call.
 - `config/inbound.conf` rings a contact, an unscreened line, and a screened
   line within an hour of a 911 from the handset. It answers anyone else and
   plays the press-5 prompt twice. A 5 rings the handset as `[5] <number>`. Any
-  other answer goes to `config/spam.conf`, which holds the caller for up to ten
-  minutes in the Endless Queue or with Robo-Lenny. Two callers hear the prompt
-  at once and three are held: the next stranger gets a busy signal, and the
-  next held caller hears goodbye.
+  other answer goes to `config/agent.conf`, which dials Earl, the troll agent
+  on [ElevenLabs](../apps/elevenlabs.md), for up to ten minutes.
+- When the agent is off, on two calls already, or does not answer in 60
+  seconds, `config/spam.conf` holds the caller for up to ten minutes in the
+  Endless Queue or with Robo-Lenny. Two callers hear the prompt at once and
+  three are held: the next stranger gets a busy signal, and the next held
+  caller hears goodbye.
+- The agent's number and credentials are the 1Password item
+  `elevenlabs troll trunk`, read through the ExternalSecret `pbx-elevenlabs`
+  when the pod starts. Without that Secret the agent is off.
 - A contact rings as `[OK] <name>` with the Friend ring; a caller who pressed 5
   rings with the Human ring. Both are `Ring10` and `Ring11` in
   `provision/cathy.xml`.
 - Each step logs one line, `pbx-event kind=<kind> line=<line> caller=<digits>`,
-  from `config/events.conf`. The PBX dashboard counts `kind=screened`, and so
+  from `config/events.conf`. `kind=troll-miss` names why the agent did not
+  take a caller in `why=`. The PBX dashboard counts `kind=screened`, and so
   does the [Smiirl counter](operate-the-smiirl-counter.md).
 
 ## Before you start
@@ -104,10 +111,11 @@ Dial a code from any line. `config/handset-codes.conf` sends each one to
 | `*22` | A Morse greeting |
 | `*23` | Milliwatt tone |
 | `*24` | The monkeys |
-| `*25` | Listen to the held callers; an error tone if nobody is held |
-| `*26` | The number of callers held since the pod started |
+| `*25` | Listen to the held callers and the agent's calls; an error tone if there are none |
+| `*26` | The number of callers the sinks have held since the pod started |
 | `*27` | Robo-Lenny |
 | `*28` | The Endless Queue |
+| `*29` | Earl, the troll agent, in `desk` mode; an error tone if the agent is off or busy |
 
 ## Render the prompts
 
@@ -136,15 +144,18 @@ Place these calls after the pod rolls and the phone has fetched its profile
 
 3. Call line 4 from that number again and press nothing.
 
-   Result: the caller is held. `*25` on the handset plays the call, and `*26`
-   counts it.
+   Result: Earl answers, and `*25` on the handset plays the call.
 
-4. Dial `*20` from each line.
+4. Dial `*29`.
+
+   Result: Earl answers and plays up the demo.
+
+5. Dial `*20` from each line.
 
    Result: the phone plays the echo test. A reorder tone means the line's
    `Dial_Plan` on the phone does not send `*xx`.
 
-5. Dial 933 from line 1.
+6. Dial 933 from line 1.
 
    Result: voip.ms reads the e911 address back.
 
@@ -152,7 +163,9 @@ Place these calls after the pod rolls and the phone has fetched its profile
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| A caller on line 4 hears "press five", or is held in the queue or with Lenny | Line 4 screens every caller who is not a contact. | Add them as a contact, or tell them to press 5. |
+| A caller on line 4 hears "press five", talks to Earl, or is held in the queue or with Lenny | Line 4 screens every caller who is not a contact. | Add them as a contact, or tell them to press 5. |
+| Screened callers are held, never trolled, and the log has `why=off` | The pod started without the `pbx-elevenlabs` Secret. | Make sure `kubectl --context folly -n pbx get externalsecret pbx-elevenlabs` shows `SecretSynced`, then restart the pod when no call is up. |
+| The log has `why=CONGESTION`, `CHANUNAVAIL` or `BUSY` | ElevenLabs refused the call or was unreachable, or the agent hit its daily cap. | Read the agent's SIP ([Diagnose a failed call](operate-the-office-phone.md#diagnose-a-failed-call)). |
 | A caller on line 4 gets a busy signal | Two callers are in the screen. | Wait, or raise the cap in `config/inbound.conf`. |
 | `pbx-contacts` shows `SecretSyncedError` | The `pbx contacts` item is missing, has a repeated label, or shares its title with another item. No alert covers it. | Fix the item. The ExternalSecret retries within the hour. |
 | A new contact still hears the screen | Asterisk read the contacts file at its last dialplan load, or the value is not ten digits and the template skipped it. | Run `dialplan reload` after the Secret has caught up. If `dialplan show globals` has no line for it, fix the value. |
