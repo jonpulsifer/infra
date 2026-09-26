@@ -355,7 +355,7 @@
       "gridPos": {
         "x": 0,
         "y": 7,
-        "w": 6,
+        "w": 4,
         "h": 4
       },
       "targets": [
@@ -412,9 +412,9 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 6,
+        "x": 4,
         "y": 7,
-        "w": 6,
+        "w": 4,
         "h": 4
       },
       "targets": [
@@ -460,6 +460,65 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Screened calls",
+      "datasource": {
+        "type": "victoriametrics-logs-datasource",
+        "uid": "victorialogs"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 7,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "victorialogs"
+          },
+          "expr": "{namespace=\"pbx\", container=\"asterisk\"} \"pbx-event kind=screened\" -\"Executing\" | stats count() as screened",
+          "queryType": "stats",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "description": "Callers on a screened line who did not press 5, over the dashboard's time range: one pbx-event kind=screened line each, minus the console's echo of the Log() call."
     },
     {
       "id": 9,
