@@ -36,6 +36,16 @@ Each request carries its class's bearer token. A call goes to the outbound-call 
 
 No alert watches switchboard. A refused ring answers 429 with a `skipped` reason, a failed call 502.
 
+Two callers on offsite are declared for it. mate gives each Rowbutt sandbox
+`SWITCHBOARD_URL` and the ring token, and the `switchboard` AlertmanagerConfig
+in `clusters/offsite/monitoring/` posts a firing `critical` alert to
+`/alertmanager`. That config is selected only once `switchboard` is in
+`alertmanagerConfigSelector` in `clusters/offsite/monitoring/kube-prometheus.yaml`.
+Add it in its own merge after a switchboard pod is Ready, and drop it before
+parking; [Alerting](../platform/observability/alerting.md) has the rule.
+Switchboard dedupes an alert by fingerprint until it resolves or the pod
+restarts.
+
 ## Reference
 
 - Source: `apps/switchboard/`
