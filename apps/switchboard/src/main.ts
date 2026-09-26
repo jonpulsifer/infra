@@ -1,7 +1,8 @@
-import { resolveAgentId } from './agent.ts';
-import { ConfigError, readConfig } from './config.ts';
+import { startBoard } from './board/main.ts';
+import { ConfigError } from './config.ts';
 import { jsonLog as log } from './log.ts';
-import { createApp } from './server.ts';
+import { startRing } from './ring.ts';
+import { readRole } from './role.ts';
 
 const EXIT_CONFIG = 64;
 
@@ -13,27 +14,15 @@ function exitOnConfigError(error: unknown): never {
   throw error;
 }
 
-function loadConfig() {
-  try {
-    return readConfig(process.env);
-  } catch (error) {
-    return exitOnConfigError(error);
-  }
+// The role is read first, so the board never asks for the ringer's
+// ElevenLabs key and tokens, and the ringer never asks for the board's ARI
+// credentials.
+let role: ReturnType<typeof readRole>;
+try {
+  role = readRole(process.env);
+} catch (error) {
+  exitOnConfigError(error);
 }
 
-const config = loadConfig();
-// Settled before the port opens, so a pod that cannot name its agent never
-// reports ready.
-const agentId = await resolveAgentId(config, { log }).catch(exitOnConfigError);
-const app = createApp({ config: { ...config, agentId }, log });
-
-log.info('switchboard listening', { port: config.port });
-
-export default {
-  port: config.port,
-  hostname: '0.0.0.0',
-  // Headroom over the largest Alertmanager group. Bun refuses a larger body
-  // before buffering it, which the pod's memory limit could not absorb.
-  maxRequestBodySize: 1024 * 1024,
-  fetch: app.fetch,
-};
+const start = role === 'board' ? startBoard : startRing;
+await start(process.env, log).catch(exitOnConfigError);

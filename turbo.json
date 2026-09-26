@@ -45,6 +45,14 @@
       ],
       "outputs": []
     },
+    "switchboard#test": {
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/clusters/folly/apps/pbx/config/pjsip.conf"
+      ],
+      "outputs": []
+    },
     "kthx#test": {
       "dependsOn": ["build"],
       "inputs": [

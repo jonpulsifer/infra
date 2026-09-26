@@ -13,7 +13,8 @@
 #   3. every PJSIP object the config declares loads, identifies included, the
 #      modules a call needs run and are not noloaded, the ones modules.conf
 #      refuses do not load, nothing logs an error against a shipped config
-#      file, and the dialplan reloads clean;
+#      file, the dialplan reloads clean, and a site that ships ari.conf has
+#      ARI on with every user read-only;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
 #      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, nothing
 #      else rings a line HANDSET does not name, every exact code beside that
@@ -73,9 +74,13 @@ REQUIRED_MODULES=(
   app_read.so app_playback.so app_waitforsilence.so res_musiconhold.so
   func_groupcount.so func_timeout.so app_exec.so func_logic.so func_strings.so
 )
-# A second dial tone, a shell, and SIP over the metrics port's WebSocket;
+# A second dial tone, a shell, SIP over the metrics port's WebSocket, and
+# ARI's config reader, which hands any ARI user the trunk passwords;
 # modules.conf refuses them on every site.
-FORBIDDEN_MODULES=(app_disa.so app_system.so func_shell.so res_pjsip_transport_websocket.so)
+FORBIDDEN_MODULES=(
+  app_disa.so app_system.so func_shell.so res_pjsip_transport_websocket.so
+  res_ari_asterisk.so
+)
 
 WORK=""
 ASTERISK_PID=""
@@ -524,6 +529,22 @@ check_boot_log() {
     if ast "module show like $mod" | grep -E "^${mod}[[:space:]]" >/dev/null; then loaded+=("$mod"); fi
   done
   if ((${#loaded[@]})); then fail "modules.conf must refuse these, and they loaded" "${loaded[@]}"; fi
+}
+
+# ARI, on a site that ships ari.conf, is for reading. A user without
+# read_only could originate a call from the PBX, or hang one up, with nothing
+# but its password.
+check_ari() {
+  [[ -f $ETC/ari.conf ]] || return 0
+  ast 'ari show status' | grep -Eq '^Enabled:[[:space:]]+Yes' || fail "ari.conf ships but ARI is not enabled"
+  local users writable
+  users=$(ast 'ari show users')
+  writable=$(awk 'NR > 2 && NF && $1 != "Yes" { print $2 }' <<<"$users")
+  if [[ -n $writable ]]; then
+    fail "ari.conf declares ARI users that can write" "$writable"
+  else
+    say "    ARI is on and read-only for: $(awk 'NR > 2 && NF { print $2 }' <<<"$users" | paste -sd' ')"
+  fi
 }
 
 # --- PJSIP: declared vs loaded --------------------------------------------
@@ -1223,6 +1244,7 @@ check_site() {
 run_checks() {
   local site=$1
   check_boot_log
+  check_ari
   check_pjsip_objects
   check_agent_trunk
   check_reload_and_handsets "$site"

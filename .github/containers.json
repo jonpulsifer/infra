@@ -54,6 +54,7 @@
       "clusters/offsite/apps/spindrift/helm-release.yaml"
     ],
     "switchboard": [
+      "clusters/folly/apps/pbx/switchboard.yaml",
       "clusters/offsite/apps/elevenlabs/switchboard.yaml"
     ]
   },
