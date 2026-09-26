@@ -37,3 +37,5 @@ jobs:
           install_args: shfmt
       - name: Format and lint
         run: mise run check
+      - name: Test the ElevenLabs reconciler
+        run: bash .github/scripts/elevenlabs-reconcile_test.sh
