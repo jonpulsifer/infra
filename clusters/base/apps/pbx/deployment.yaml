@@ -10,8 +10,9 @@ metadata:
     # within the ExternalSecret's refresh and then sits unused until something
     # restarts the pod. This rolls it when the Secret changes. The ConfigMaps
     # need no entry: their generated names carry a content hash, so a config
-    # change is already a new Deployment spec.
-    reloader.stakater.com/reload: pbx-secrets
+    # change is already a new Deployment spec. The key names the kind:
+    # Reloader has no untyped `reloader.stakater.com/reload` and ignores it.
+    secret.reloader.stakater.com/reload: pbx-secrets
 spec:
   # One. Two Asterisks would both register the same voip.ms sub-account and the
   # carrier would deliver each inbound call to whichever registered last.
