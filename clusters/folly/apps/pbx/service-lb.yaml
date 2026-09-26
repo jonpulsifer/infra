@@ -24,11 +24,12 @@ spec:
   # the handset's source address is rewritten to the node's before the packet
   # reaches Asterisk.
   #
-  # Two things key on that address and both would fail silently: pjsip.conf
-  # identifies line 4 by `match = ${CATHY_IP}` because it carries no password,
-  # and the CiliumNetworkPolicy admits SIP and the provisioning fetch
-  # `fromCIDR` the same host. Seen as 10.3.0.x, the REGISTER matches no
-  # endpoint and is rejected.
+  # Two things key on that address and both would fail silently. The handset's
+  # lines carry no password: pjsip.conf identifies each by its username and
+  # admits it only from CATHY_IP, through the lines' permit ACL. The
+  # CiliumNetworkPolicy admits SIP and the provisioning fetch `fromCIDR` the
+  # same host. Seen as 10.3.0.x, the REGISTER is dropped by the policy, and
+  # the ACL would refuse it if it were not.
   #
   # `Local` keeps the client address. The cost is that only a node running the
   # pod answers the VIP, which is what Cilium already announces over BGP, and
