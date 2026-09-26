@@ -153,7 +153,7 @@ spec:
           labels:
             severity: warning
           annotations:
-            message: "mate could not keep a sandbox kthx site tokens"
+            message: "mate could not keep a sandbox's kthx site tokens"
             description: "A fold of a sandbox's kthx site tokens into the mate-kthx-sites Secret failed, so a site claimed in that turn may have its only bearer in the sandbox, which the quiet teardown deletes. The next turn on that thread retries the save and a teardown makes one last attempt, so a single failure heals itself unless the thread is already quiet. `read-failed` is the file in the sandbox, `save-failed` the Secret. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i kthx`. What the ledger holds, names only: `kubectl --context offsite -n mate get secret mate-kthx-sites -o jsonpath='{.data.sites\\.json}' | base64 -d | jq 'map_values(keys)'`."
 
         # A sweep runs every five minutes, so 20m is four that could not refill.

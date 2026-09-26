@@ -14,6 +14,7 @@ export interface TokenSource {
 import {
   type KthxSites,
   parseSites,
+  SITES_LIMIT_BYTES,
   type Sites,
   serialize,
 } from './kthx-sites.ts';
@@ -622,8 +623,9 @@ export function waitForPodGone(
 
 export class KubeSandboxes implements Sandboxes {
   private readonly attached = new Map<string, Attachment>();
-  // The ledger as last saved and written into each sandbox, for the fold at
-  // the turn's end. Empty after a restart, which folds every site as new.
+  // What each sandbox's sites file holds that the ledger also holds: a name
+  // missing from the file is a removal only against this. Empty after a
+  // restart, which folds every site as new.
   private readonly stamped = new Map<string, Sites>();
   private warming: Promise<void> | null = null;
   private again = false;
@@ -829,6 +831,8 @@ export class KubeSandboxes implements Sandboxes {
         ssh,
         kthx: sites ? serialize(sites) : null,
       });
+      // Only now: a write that failed left the file as the sync read it.
+      if (sites) this.stamped.set(name, sites);
       if (githubApp) metrics?.githubTokenStamped(github ? 'ok' : 'mint-failed');
       return github;
     } catch (error) {
@@ -909,14 +913,15 @@ export class KubeSandboxes implements Sandboxes {
     // is the only copy of the turn's claims, and the next turn retries.
     const synced = this.kthx ? await this.syncSites(name, pod) : null;
     try {
+      // `{}` and not nothing: the CLI reads an empty file as corrupt.
       await this.writeCredentials(pod, {
         github: '',
         kube: '',
         ssh: '',
-        kthx: synced ? '' : null,
+        kthx: synced ? serialize({}) : null,
       });
-      // An empty file is what the next turn reads first, and it must fold
-      // in as nothing claimed, not as every site removed.
+      // What the next turn reads first, and it folds in as nothing claimed,
+      // not as every site removed.
       if (synced) this.stamped.set(name, {});
     } catch (error) {
       this.deps.log.warn("could not clear the turn's credentials", {
@@ -943,13 +948,16 @@ export class KubeSandboxes implements Sandboxes {
     const { log, metrics } = this.deps;
     const ledger = this.kthx;
     if (!ledger) return null;
+    const before = this.stamped.get(name) ?? {};
     let harvested: Sites;
     try {
+      // Only absence is tolerated: a file that is there but cannot be read
+      // is not a file with nothing in it.
       harvested = parseSites(
         await this.execText(pod, [
           '/bin/sh',
           '-c',
-          `cat ${KTHX_SITES_FILE} 2>/dev/null || true`,
+          `[ ! -e ${KTHX_SITES_FILE} ] || head -c ${SITES_LIMIT_BYTES + 1} ${KTHX_SITES_FILE}`,
         ]),
       );
     } catch (error) {
@@ -958,12 +966,15 @@ export class KubeSandboxes implements Sandboxes {
         sandbox: name,
         error: plain(error),
       });
+      // Unknown: a fold against nothing stamped can only add, never remove.
+      this.stamped.set(name, {});
       return null;
     }
     try {
-      const sites = await ledger.merge(this.stamped.get(name) ?? {}, harvested);
+      const sites = await ledger.merge(before, harvested);
       metrics?.kthxSitesSynced('ok');
-      this.stamped.set(name, sites);
+      // The file holds this, and now so does the ledger.
+      this.stamped.set(name, harvested);
       return sites;
     } catch (error) {
       metrics?.kthxSitesSynced('save-failed');
@@ -972,6 +983,8 @@ export class KubeSandboxes implements Sandboxes {
         secret: ledger.secret,
         error: plain(error),
       });
+      // The file holds what the ledger does not; the next fold must add it.
+      this.stamped.set(name, {});
       return null;
     }
   }
@@ -987,13 +1000,26 @@ export class KubeSandboxes implements Sandboxes {
       timeoutMs: STAMP_TIMEOUT_MS,
     });
     const timer = setTimeout(() => stream.close(), STAMP_TIMEOUT_MS);
-    let text: string;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
     let close: ExecClose;
     try {
-      [text, close] = await Promise.all([
-        new Response(stream.stdout).text(),
-        stream.closed,
-      ]);
+      const reader = stream.stdout.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        // The agent writes the file; mate buffers it and stamps it back as
+        // one argument, so it stays well under MAX_ARG_STRLEN.
+        if (size > SITES_LIMIT_BYTES) {
+          stream.close();
+          throw new Error(
+            `${command[0]} printed more than ${SITES_LIMIT_BYTES} bytes`,
+          );
+        }
+        chunks.push(value);
+      }
+      close = await stream.closed;
     } finally {
       clearTimeout(timer);
     }
@@ -1002,7 +1028,7 @@ export class KubeSandboxes implements Sandboxes {
         `${command[0]} said ${close.status?.message || close.reason}`,
       );
     }
-    return text;
+    return Buffer.concat(chunks).toString('utf8');
   }
 
   // One exec for every file, since a human is waiting on the turn. A null

@@ -32,7 +32,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 
 `MATE_SSH_KEY_FILE` and `MATE_CONNECT_SECRET` are unset, so a sandbox has no SSH key and no 1Password token.
 
-mate's Role reads and patches exactly one Secret, `mate-kthx-sites`, and nothing else. `apps/mate/src/kthx-sites.ts` is the ledger that stamps the file in and harvests it back.
+mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx-sites.ts` is the ledger that writes the file into the sandbox and reads it back.
 
 `clanky-bot[bot]` is in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego`, so its comments can plan.
 

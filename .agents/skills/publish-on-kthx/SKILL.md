@@ -6,7 +6,6 @@ description: >-
   list, roll back or delete a site on kthx.dev, or to build and deploy an app
   through kthx.
 metadata:
-  runbook: docs/apps/kthx/sites.md
   wiki: https://wiki.lolwtf.ca/apps/kthx/sites/
 ---
 
@@ -31,9 +30,12 @@ kthx init --name <name> <dir>   # claims the name; writes <dir>/kthx.json
 kthx deploy <dir>               # uploads a release and serves it
 kthx ls                         # every site of yours; in a site's dir, its releases
 kthx rollback                   # serves the previous release and holds it
-kthx rm                         # deletes the site; the name stays taken
+printf '%s\n' <name> | kthx rm  # deletes the site; the name stays taken
 ```
 
+- `kthx rm` asks for the site's name on stdin and deletes nothing without it.
+  A bare `kthx rm` in a sandbox, which has no terminal, exits 0 and keeps the
+  site.
 - Run `kthx init` first, or run `kthx deploy` from inside the directory.
   `kthx deploy` on a directory with no `kthx.json` writes one to the current
   directory, not the target.

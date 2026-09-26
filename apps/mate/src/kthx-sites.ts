@@ -13,6 +13,9 @@ export const SITES_KEY = 'sites.json';
 // leaves a field another manager owns alone.
 export const FIELD_MANAGER = 'mate';
 const SAVE_ATTEMPTS = 3;
+// A bearer per site is about a hundred bytes. The file crosses pods/exec in
+// one argument each way, and a Secret holds a mebibyte.
+export const SITES_LIMIT_BYTES = 64 * 1024;
 const MERGE_PATCH = 'application/merge-patch+json';
 
 export type SyncResult = 'ok' | 'read-failed' | 'save-failed';
@@ -143,13 +146,19 @@ export class KthxSites {
   }
 
   private async save(sites: Sites, resourceVersion: string): Promise<void> {
+    const text = serialize(sites);
+    if (Buffer.byteLength(text) > SITES_LIMIT_BYTES) {
+      throw new Error(
+        `the ledger would be over ${SITES_LIMIT_BYTES} bytes; nothing saved`,
+      );
+    }
     const response = await this.deps.kube.request(this.path(), {
       method: 'PATCH',
       query: { fieldManager: FIELD_MANAGER },
       contentType: MERGE_PATCH,
       body: {
         metadata: { resourceVersion },
-        data: { [SITES_KEY]: Buffer.from(serialize(sites)).toString('base64') },
+        data: { [SITES_KEY]: Buffer.from(text).toString('base64') },
       },
     });
     if (!response.ok) throw await kubeError(response);

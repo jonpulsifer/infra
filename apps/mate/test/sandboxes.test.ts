@@ -910,8 +910,8 @@ describe('attach', () => {
         held({ blog: 'tok-blog' }),
       );
       // Read back unchanged: nothing to save, and the file is cleared.
-      expect(retire?.command[8]).toBe('');
-      expect(fake.files.get(FILE)).toBe('');
+      expect(retire?.command[8]).toBe('{}\n');
+      expect(fake.files.get(FILE)).toBe('{}\n');
       expect(secretPatches()).toEqual([]);
       expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
     });
@@ -932,7 +932,7 @@ describe('attach', () => {
       expect(patch?.contentType).toBe('application/merge-patch+json');
       expect(patch?.body.metadata).toEqual({ resourceVersion: before });
       expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      expect(fake.files.get(FILE)).toBe('');
+      expect(fake.files.get(FILE)).toBe('{}\n');
       expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
       // No token reaches the log.
       expect(JSON.stringify(log.entries)).not.toContain('tok-shop');
@@ -984,7 +984,7 @@ describe('attach', () => {
         log.of('kthx sites ledger moved under a save; retrying'),
       ).toHaveLength(1);
       expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      expect(fake.files.get(FILE)).toBe('');
+      expect(fake.files.get(FILE)).toBe('{}\n');
       expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
     });
 
@@ -1027,7 +1027,7 @@ describe('attach', () => {
       expect(stored()).toEqual(held({ blog: 'tok-blog' }));
       // Truncated at the end of the turn, so the file is empty when the next
       // one starts; an empty file is not a removal.
-      expect(fake.files.get(FILE)).toBe('');
+      expect(fake.files.get(FILE)).toBe('{}\n');
 
       fake.script = {};
       const session = await sandboxes.attach(ref);
@@ -1037,6 +1037,43 @@ describe('attach', () => {
         held({ blog: 'tok-blog' }),
       );
       expect(metrics.siteSyncs).toEqual(['ok', 'ok', 'ok', 'ok']);
+    });
+
+    test('a stamp that fails after the fold is never read as a removal', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
+      });
+      fake.writeFails = 'exec did not open';
+      const { result } = await turnLeaving(null);
+      expect(result.stopReason).toBe('end_turn');
+
+      // The file never held the ledger, so nothing in it is missing.
+      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
+      expect(secretPatches()).toEqual([]);
+      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
+    });
+
+    test('a file over the limit is read-failed and never saved over', async () => {
+      turning();
+      fake.putSecret(SECRET, {
+        'sites.json': serialize(held({ blog: 'tok-blog' })),
+      });
+      const huge = serialize(
+        held({ blog: 'tok-blog', big: 'x'.repeat(70_000) }),
+      );
+      const { result } = await turnLeaving(huge);
+      expect(result.stopReason).toBe('end_turn');
+
+      expect(fake.files.get(FILE)).toBe(huge);
+      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
+      expect(metrics.siteSyncs).toEqual(['ok', 'read-failed']);
+      expect(
+        String(
+          log.of('could not read the sandbox kthx sites file')[0]?.fields
+            ?.error,
+        ),
+      ).toContain('more than');
     });
 
     test('a corrupt file is left alone and never saved over', async () => {

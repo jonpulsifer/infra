@@ -150,6 +150,8 @@ export class FakeKube {
   deleteFails = false;
   /** Fails every one-shot exec with this message. */
   commandFails: string | null = null;
+  /** Fails only the one-shot execs that write files, so a read still answers. */
+  writeFails: string | null = null;
   /** Refuses every TokenRequest 403 with this message, as a missing RBAC rule does. */
   tokenRequestFails: string | null = null;
   readonly tokenRequests: {
@@ -180,7 +182,11 @@ export class FakeKube {
         open(ws) {
           // Any command but the ACP harness is one-shot: it exits and the stream closes.
           if (!ws.data.exec.command.includes('acp')) {
-            const said = fake.commandFails;
+            const said =
+              fake.commandFails ??
+              (ws.data.exec.command.some((word) => word.includes('printf %s'))
+                ? fake.writeFails
+                : null);
             const out = said ? '' : fake.shell(ws.data.exec.command);
             if (out) ws.send(frame(STDOUT, out));
             ws.send(
@@ -320,7 +326,8 @@ export class FakeKube {
   }
 
   // Enough of `sh -c` for the one-shot scripts sandboxes.ts runs: every
-  // `printf %s "$n" > path` stores an argument, and `cat path` reads one back.
+  // `printf %s "$n" > path` stores an argument, and `cat path` or `head -c n
+  // path` reads one back; an absent path reads as nothing.
   private shell(command: string[]): string {
     const [shell, flag, script, ...argv] = command;
     if (shell !== '/bin/sh' || flag !== '-c' || !script) return '';
@@ -329,7 +336,7 @@ export class FakeKube {
     )) {
       this.files.set(path as string, argv[Number(index)] ?? '');
     }
-    const read = /(?:^|; )cat (\S+)/.exec(script);
+    const read = /(?:cat|head -c \d+) (\S+)/.exec(script);
     return read ? (this.files.get(read[1] as string) ?? '') : '';
   }
 
