@@ -70,6 +70,22 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 
    Result: A number larger than zero.
 
+## Give Rowbutt a token
+
+[Rowbutt](../apps/mate.md) runs every command without approval, so the warning above applies in full. Its sandboxes reach the engine in the cluster, and the ExternalSecret `mate-kthx-agent` in namespace `mate` hands each sandbox the token as `KTHX_AGENT_TOKEN`.
+
+1. Mint an agent token as above.
+2. In the `homelab` vault in 1Password, create an API Credential item titled `mate kthx agent token`, and put the token in its `credential` field.
+3. Make sure the ExternalSecret has synced. It refreshes on its interval, and a sandbox created after that carries the token.
+
+   ```bash
+   kubectl --context offsite -n mate get externalsecret mate-kthx-agent
+   ```
+
+   Result: `STATUS` is `SecretSynced`.
+
+A revoked or expired token makes the `kthx` server fail when OpenCode starts a session, and the agent reports that it has no `kthx` tools. Mint a new token and update the item.
+
 ## Revoke a token
 
 1. Go to Settings, then Identity, in the console.

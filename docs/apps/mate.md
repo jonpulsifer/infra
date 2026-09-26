@@ -27,6 +27,7 @@ The agent runs every command without approval.
 | GitHub | Pushes branches and opens pull requests as `clanky-bot[bot]`. Its comments can plan OpenTofu changes through Atlantis. |
 | offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod but `mate`'s own namespace and the namespaces [the fence](mate/how-it-works.md#fence) excludes |
 | Hosts | None. `rowbutt`, the host user for Rowbutt, is in `wheel` on every host, and the sandbox has no SSH key for it. |
+| [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx` MCP tools, when Secret `mate-kthx-agent` holds an agent token. |
 
 With `pods/exec`, the agent can still read the credentials of any pod in a namespace the fence leaves open. The owner accepts this residual risk. [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox, and out of each namespace the policy names or that carries the `lolwtf.ca/sandbox-exec: deny` label.
 
@@ -45,10 +46,11 @@ mate is one Bun process, and its ingress admits only the node it runs on. For ea
 | Alert | Meaning | Runbook |
 | --- | --- | --- |
 | `MateGitHubCredentialBroken`, `MateGitHubTokenMintFailing` | mate cannot mint GitHub tokens, so sandboxes cannot push | [Repair the Rowbutt GitHub credential](../runbooks/repair-the-rowbutt-github-credential.md) |
+| `MateKthxSitesSyncFailing` | mate could not read back or save a sandbox's kthx site tokens. A site claimed in that turn may be orphaned. Read the mate log. | |
 
 The other alerts are in `clusters/offsite/monitoring/mate-rules.yaml`, and each `description` names its fix.
 
-To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To disable GitHub or cluster access, unset `MATE_GITHUB_APP_ID` or `MATE_SANDBOX_KUBE_SA`.
+To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To disable GitHub or cluster access, unset `MATE_GITHUB_APP_ID` or `MATE_SANDBOX_KUBE_SA`. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token.
 
 ## Reference
 

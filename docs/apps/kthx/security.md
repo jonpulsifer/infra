@@ -24,6 +24,7 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 | An agent on `/mcp` | An agent token, valid 90 days | Every action except minting tokens, replacing the engine settings, and connecting or probing a Target |
 | kthx on GitHub | The private GitHub App `spindrift-bot` (ID `4576122`), installed on `jonpulsifer` only | Push branches, open pull requests and run workflows in connected repositories |
 | A quick-site owner | Its bearer token or tailnet login | Upload, roll back and delete that site |
+| [Rowbutt](../mate.md) | An agent token from Secret `mate-kthx-agent`, and the site bearers in Secret `mate-kthx-sites` | What an agent on `/mcp` can, without approval, and every quick site it claims |
 
 ## Secrets
 
