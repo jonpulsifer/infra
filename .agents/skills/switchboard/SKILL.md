@@ -4,7 +4,6 @@ description: >-
   Ring the owner's phone through switchboard from a Rowbutt sandbox. Use when
   the owner asks to be called, rung or phoned, or says "call me".
 metadata:
-  runbook: docs/apps/switchboard.md
   wiki: https://wiki.lolwtf.ca/apps/switchboard/
 ---
 
