@@ -42,7 +42,7 @@ ARG KUBECTL_VERSION=1.37.1
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.1
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.9.12
+ARG MISE_VERSION=2026.9.13
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
