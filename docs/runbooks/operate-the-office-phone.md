@@ -114,39 +114,6 @@ the fix for that state whatever caused it.
    kubectl --context folly -n pbx rollout restart deploy/pbx
    ```
 
-## Check the offsite PBX
-
-The offsite PBX takes every call voip.ms delivers to the sub-account
-`168847_elevenlabs` and hands it to the troll agent at ElevenLabs. It
-registers over TLS to the same numbered server as folly, from offsite's own
-public address. Its config is `clusters/offsite/apps/pbx/`, and every command
-takes `--context offsite`:
-
-```sh
-kubectl --context offsite -n pbx exec deploy/pbx -c asterisk -- \
-  /bin/asterisk -C /etc/asterisk/asterisk.conf -rx 'pjsip show registrations'
-```
-
-- **Registration.** `vms-elevenlabs` shows `Registered`, and
-  `pjsip show identifies` lists its `X-Dest-User` identify.
-- **A delivered call.** voip.ms sends an `INVITE` down that TLS connection,
-  addressed to `s` with a `line` parameter, or to digits with
-  `X-Dest-User: 168847_elevenlabs`. The call logs `pbx-event kind=inbound`
-  and `kind=troll`, then `kind=held` with its length when the agent answered,
-  or `kind=troll-miss` with `why=full`, `daily` or the Dial status. Offsite's
-  VictoriaLogs holds them: `{namespace="pbx", container="asterisk"} "pbx-event"`.
-- **No call arrives.** A green registration and no `INVITE` from voip.ms
-  means voip.ms did not deliver. voip.ms fraud protection can hold a
-  sub-account that takes its first calls, and voip.ms support releases it.
-- **The caller ID** on a transferred call is whatever voip.ms presents. The
-  dialplan logs it and passes it to the agent, and routes on nothing it
-  carries.
-
-`PBXDown` and `PBXTrunkNotRegistered` in
-`clusters/offsite/monitoring/pbx-rules.yaml` are warnings. A merge under
-`clusters/offsite/apps/pbx/` or `clusters/base/apps/pbx/` rolls this pod, and
-so does a change to its `pbx-secrets`. Check `core show channels` here too.
-
 ## Read the SIP
 
 PJSIP logs every SIP message the PBX sends and receives. In VictoriaLogs:
@@ -198,7 +165,10 @@ filter that drops those lines.
   sees. `mise run pbx:check` boots the image's Asterisk against each site's
   rendered config with no route off the machine. It fails when a PJSIP object
   does not load, when 911 stops reaching a line's trunk, when an inbound call
-  can reach a trunk, when a folly trunk stops taking voip.ms's DID-form call,
-  when a prompt is missing from `pbx-sounds`, or when the open, contact,
-  911-callback, press-5 or spam route changes.
+  can reach a trunk, when a trunk identifies by anything but `header` or a
+  folly trunk stops taking voip.ms's DID-form call, when a prompt is missing
+  from `pbx-sounds`, or when the open, contact, 911-callback, press-5 or spam
+  route changes. On offsite, it fails when a caller stops reaching the agent
+  with its headers, when a miss or a cap answers the caller, or when the held
+  count changes.
   `.github/workflows/pbx.yml` runs it on every PBX change.

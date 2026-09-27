@@ -15,12 +15,13 @@ The PBX is Asterisk, an open-source phone switch, on both clusters. On folly, it
 | [Switchboard board](switchboard/board.md), folly | `https://switchboard.lolwtf.ca` | Clients that route to folly's load-balancer range, with no sign-in |
 | Troll line, offsite | Calls voip.ms delivers to the sub-account `168847_elevenlabs` | voip.ms, down the registration the offsite PBX opens |
 
-The folly PBX carries each of the four office-phone lines to its own voip.ms sub-account. The offsite PBX opens both of its SIP connections outbound: a registration to voip.ms and calls to ElevenLabs. [Operate the office phone](../runbooks/operate-the-office-phone.md) checks, changes and debugs the office phone.
+The folly PBX carries each of the four office-phone lines to its own voip.ms sub-account. The offsite PBX opens both of its SIP connections outbound: a registration to voip.ms and calls to ElevenLabs. [Operate the office phone](../runbooks/operate-the-office-phone.md) checks, changes and debugs the office phone, and [Operate the offsite PBX](../runbooks/operate-the-offsite-pbx.md) checks the offsite PBX.
 
 ## Limits
 
 - Every office-phone line, 911 included, depends on folly.
-- The offsite PBX sends each call to the troll agent, two at a time and twenty a day. It refuses a caller over either cap unanswered, and a caller the agent does not take hears goodbye.
+- The offsite PBX sends each call to the troll agent, two at a time and twenty answered a day. It refuses a caller over either cap, or one the agent does not take, before it answers.
+- Each PBX counts its own calls to the agent, so the two sites together let through four at once and forty answered a day, twice the limits in `clusters/offsite/apps/elevenlabs/desired/agents/pbx-troll.json`.
 - The PBX dashboard, the Switchboard board and the Smiirl read folly alone. The offsite PBX's `pbx-event` lines are in offsite's VictoriaLogs.
 
 ## How it works
@@ -31,7 +32,7 @@ A change to a config file in git rolls the pod, because each generated ConfigMap
 
 The folly PBX registers each sub-account over TLS and requires SRTP for media. Each folly trunk in `config/pjsip.conf` matches both forms voip.ms delivers a call in; its comments name them. The offsite trunk, `vms-elevenlabs`, registers the same way and matches both forms too. A sidecar serves the provisioning profile from `provision/cathy.xml`. Asterisk's own HTTP port, which serves `/metrics`, also serves ARI, the Asterisk REST interface, to the user in `config/ari.conf`. The Switchboard board polls it, and the CiliumNetworkPolicy `pbx-ari` admits the board to four paths alone.
 
-On offsite, `config/extensions.conf` sends each call to the troll agent over a TLS trunk like folly's, with `X-Pbx-Mode: troll`, and logs `pbx-event` lines whose `line` is `vms-elevenlabs`. The caller ID voip.ms presents on a transferred call is logged and passed to the agent, and the dialplan routes on nothing it carries. The pod admits no SIP, so 30 s without the agent's audio ends a leg whose BYE never arrives.
+On offsite, `config/extensions.conf` sends each call to the troll agent over a TLS trunk like folly's, with `X-Pbx-Mode: troll`, and logs `pbx-event` lines whose `line` is `vms-elevenlabs`. The pod admits no SIP, so 30 s without the agent's audio ends a leg whose BYE never arrives.
 
 Asterisk logs every SIP message. Vector removes the SRTP keys and digest responses before VictoriaLogs stores the logs.
 
@@ -43,7 +44,7 @@ Asterisk logs every SIP message. Vector removes the SRTP keys and digest respons
 | `PBXTrunkNotRegistered` | A voip.ms sub-account has not been registered for 5 minutes. | [Operate the office phone](../runbooks/operate-the-office-phone.md) |
 | `PBXHandsetOffline` | An office-phone line has not been registered to the PBX for 5 minutes. | [Operate the office phone](../runbooks/operate-the-office-phone.md) |
 
-On offsite, `PBXDown` and `PBXTrunkNotRegistered` are warnings, because that site carries no office line. `PBXHandsetOffline` is folly's alone.
+On offsite, `PBXDown` and `PBXTrunkNotRegistered` are warnings, because that site carries no office line, and [Operate the offsite PBX](../runbooks/operate-the-offsite-pbx.md) covers them. `PBXHandsetOffline` is folly's alone.
 
 ## Reference
 
