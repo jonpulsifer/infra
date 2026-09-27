@@ -42,11 +42,12 @@
 #      its own X-Dest-User header and never by its From user, and every prompt
 #      the dialplan plays is in the ConfigMap mounted for it.
 #   8. on offsite, the one trunk identifies by its own X-Dest-User header
-#      alone, a caller in [from-voipms] is dialled to the agent at the rendered
-#      number with its mode and caller headers and hears goodbye when the agent
-#      does not answer, a caller over the agent's two calls or its twenty a day
-#      is refused unanswered, and the agent's hangup handler counts only a call
-#      the agent answered.
+#      alone, a caller entering [from-voipms] at `s`, at a one-digit extension
+#      or at a DID's digits is dialled to the agent at the rendered number with
+#      its mode and caller headers, a caller the agent does not take or one
+#      over its two calls or its twenty a day is refused and never answered,
+#      the pbx-event helper names a PJSIP channel's endpoint as its line, and
+#      the agent's hangup handler counts only a call the agent answered.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -1231,19 +1232,25 @@ check_inbound() {
 # --- offsite: the troll host -------------------------------------------------
 
 # offsite's inbound route, driven like folly's. `troll` enters [from-voipms] as
-# voip.ms delivers a call, with a caller ID whose leading 1 CALLER folds. The
-# elevenlabs trunk is localized to this Asterisk's own TLS listener, which has
-# no certificate, so the Dial fails the way an unreachable ElevenLabs would and
-# the caller hears goodbye. `trolling` stands in for a call the agent is on,
-# `daily` for a day the agent has answered twenty, and `answered` and `rang`
-# hang up with the agent's hangup handler and ANSWEREDTIME as Dial leaves it.
-# No channel here is PJSIP, so the probes' pbx-event lines carry an empty
-# line=; a real call names the trunk.
+# voip.ms delivers a call, with a caller ID whose leading 1 CALLER folds, and
+# `onedigit` and `didform` enter at the digits a transferred or DID-form call
+# carries. The elevenlabs trunk is localized to this Asterisk's own TLS
+# listener, which has no certificate, so the Dial fails the way an unreachable
+# ElevenLabs would. `trolling` stands in for a call the agent is on, `daily`
+# for a day the agent has answered twenty, and `answered` and `rang` hang up
+# with the agent's hangup handler and ANSWEREDTIME as Dial leaves it. No
+# channel a probe starts is PJSIP, so their pbx-event lines carry an empty
+# line=; `endpoint` runs the helper on the PJSIP leg a Dial creates, as a real
+# call's line runs on the trunk's channel.
 # shellcheck disable=SC2016 # ${EPOCH} and ${STRFTIME(...)} are Asterisk's
 OFFSITE_PROBE_CONTEXT=(
   '[pbx-check-inbound]'
   'exten => troll,1,Set(CALLERID(num)=+1 (613) 555-0201)'
   ' same => n,Goto(from-voipms,s,1)'
+  'exten => onedigit,1,Set(CALLERID(num)=6135550202)'
+  ' same => n,Goto(from-voipms,7,1)'
+  'exten => didform,1,Set(CALLERID(num)=6135550203)'
+  " same => n,Goto(from-voipms,$IDENTIFY_PROBE_DID,1)"
   'exten => trolling,1,Set(GROUP()=troll)'
   ' same => n,Answer()'
   ' same => n,Wait(30)'
@@ -1261,48 +1268,58 @@ OFFSITE_PROBE_CONTEXT=(
   'exten => held,1,Set(SINK_START=${EPOCH})'
   ' same => n,Set(CHANNEL(hangup_handler_push)=agent-held,s,1)'
   ' same => n,Hangup()'
+  'exten => endpoint,1,Dial(PJSIP/1@elevenlabs,1,b(pbx-check-line^s^1))'
+  '[pbx-check-line]'
+  'exten => s,1,Gosub(pbx-event,s,1(line-probe))'
+  ' same => n,Return()'
 )
 
 # offsite hands every caller to the agent: dialled at the rendered number with
-# the mode and caller headers its pre-dial handler adds, goodbye when the agent
-# does not answer, refused unanswered over its two calls or its twenty a day,
-# and counted only when the agent answered. The trunk's identify is checked on
-# the loaded objects alone.
+# the mode and caller headers its pre-dial handler adds, refused unanswered
+# when the agent does not answer or is over its two calls or its twenty a day,
+# and counted only when the agent answered. A miss must never answer: voip.ms
+# reports an answered call to folly as a transfer that succeeded, and folly's
+# own fallback never runs. The trunk's identify is checked on the loaded
+# objects alone.
 check_agent_host() {
   [[ $1 == offsite ]] || return 0
-  local log="$SITE_DIR/asterisk.log" before=$SITE_FAILURES did offset want counted i
+  local log="$SITE_DIR/asterisk.log" before=$SITE_FAILURES did offset want counted probe name exten caller i
   local miss='"NOTICE,pbx-event kind=troll-miss line= caller=16135550201 mode=troll why='
   did=$(dummy_for PBX_AGENT_DID)
   quiesce
   printf '%s\n' "${OFFSITE_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
   ast 'dialplan reload' >/dev/null
   offset=$(wc -c <"$log")
-  expect_route troll '] Answer("' \
+  expect_route troll '] Playback("' \
     '"NOTICE,pbx-event kind=inbound line= caller=16135550201"' \
     '"NOTICE,pbx-event kind=troll line= caller=16135550201 mode=troll"' \
     '"CHANNEL(hangup_handler_push)=agent-held,s,1"' \
     "\"PJSIP/$did@elevenlabs,60,b(agent-leg^s^1(troll^" \
-    '^6135550201))S(600)"' '"CHANNEL(hangup_handler_pop)="' "$miss" '"vm-goodbye"'
+    '^6135550201))S(600)"' '"CHANNEL(hangup_handler_pop)="' "$miss" '"34")'
   # The pre-dial handler's proof is the INVITE it sent.
   for want in "INVITE sip:$did@127.0.0.1:5061;transport=tls" \
     'X-Pbx-Mode: troll' 'X-Caller-ID: 6135550201'; do
     tail -c +"$((offset + 1))" "$log" | grep -qF "$want" \
       || fail "the INVITE to the agent does not carry '$want'"
   done
-  # Playback logs this only once it has opened the file, so the stock sound
-  # this site mounts no copy of resolves in the data directory the pod uses.
-  for ((i = 0; i < 50; i++)); do
-    tail -c +"$((offset + 1))" "$log" | grep -qF "Playing 'vm-goodbye." && break
-    sleep 0.1
-  done
-  ((i < 50)) || fail "the goodbye a caller the agent does not take hears, vm-goodbye, never played"
   quiesce
+  for probe in onedigit:7:6135550202 "didform:$IDENTIFY_PROBE_DID:6135550203"; do
+    IFS=: read -r name exten caller <<<"$probe"
+    expect_route "$name" '] Playback("' "[$exten@from-voipms:1] Goto(\"Local/$name@" \
+      "\"PJSIP/$did@elevenlabs,60,b(agent-leg^s^1(troll^" "^$caller))S(600)\"" '"34")'
+    quiesce
+  done
   hold_probe trolling 1 '"GROUP()=troll"'
   hold_probe trolling 2 '"GROUP()=troll"'
   expect_route overcap '"PJSIP/' "${miss}full\"" '"17")'
   quiesce
   expect_route daily '"PJSIP/' "${miss}daily\"" '"17")'
   quiesce
+  for probe in troll onedigit didform overcap daily; do
+    if grep -F "(\"Local/$probe@pbx-check-inbound-" "$log" | grep -qE '\] (Answer|Background|Playback|Read)\("'; then
+      fail "inbound probe '$probe' answered a caller the agent did not take"
+    fi
+  done
   expect_route answered '"1?done")' \
     '"NOTICE,pbx-event kind=held line= caller=6135550210 secs=' ' sink=troll")'
   counted=$(troll_count)
@@ -1311,8 +1328,16 @@ check_agent_host() {
   [[ $(troll_count) == "$counted" ]] \
     || fail "the agent's hangup handler counted a caller who hung up while the agent's leg rang"
   quiesce
+  offset=$(wc -c <"$log")
+  ast 'channel originate Local/endpoint@pbx-check-inbound/n application Wait 1' >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    tail -c +"$((offset + 1))" "$log" | grep -qF 'pbx-event kind=line-probe line=elevenlabs ' && break
+    sleep 0.1
+  done
+  ((i < 50)) || fail "the pbx-event helper did not name a PJSIP channel's endpoint as its line"
+  quiesce
   check_trunk_identifies static
-  ((SITE_FAILURES > before)) || say "    offsite probes: a caller reaches the agent with its mode and caller headers and hears goodbye on a miss; the agent's two calls and twenty a day refuse unanswered; only an answered call is counted"
+  ((SITE_FAILURES > before)) || say "    offsite probes: a caller at s, one digit or a DID reaches the agent with its mode and caller headers; a miss and the agent's two calls and twenty a day refuse unanswered; pbx-event names the endpoint; only an answered call is counted"
 }
 
 # --- main ------------------------------------------------------------------
