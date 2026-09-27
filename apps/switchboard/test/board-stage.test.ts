@@ -114,6 +114,15 @@ describe('the IVR stage of a call', () => {
     ],
     ['the troll agent', input('inbound', 'agent', 's'), 'agent', 'with Earl'],
     [
+      'handing off to offsite',
+      input('inbound', 'agent', 'dial', {
+        app: 'Transfer',
+        appData: 'sip:100@montreal10.voip.ms',
+      }),
+      'agent',
+      'handing off to offsite',
+    ],
+    [
       'dialling the troll agent',
       input('inbound', 'from-voipms', 's', { dialling: 'elevenlabs' }),
       'agent',
