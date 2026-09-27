@@ -13,7 +13,11 @@
 #
 # From a reachable priority, Dial and Page may name only PJSIP/${HANDSET} and
 # PJSIP/<fixed number>@elevenlabs, plus Local/ legs, which are followed. No
-# Dial or Queue option may grant a transfer, park or recording.
+# Dial or Queue option may grant a transfer, park or recording. Transfer()
+# may name only a literal sip:<extension>@<host> URI whose extension is at
+# most eight digits: never a variable, an endpoint or a channel, which would
+# let a caller or a trunk's contact choose where the caller goes, and never a
+# phone number, which voip.ms would place as a billed call.
 #
 # In every context, CURLOPT's conntimeout and httptimeout must be literal
 # seconds under 5. The unit is seconds, and a large value holds the call while
@@ -153,6 +157,7 @@ function inspect(c, loc, text,   low, i, rest, name, start, args) {
     else if (name == "dial") dial(c, loc, text, args, 1)
     else if (name == "page") dial(c, loc, text, args, 0)
     else if (name == "queue") queue(c, loc, text, args)
+    else if (name == "transfer") transfer(c, loc, text, args)
     else if (name == "set" || name == "mset") assignment(c, loc, text, args)
     rest = substr(rest, start)
   }
@@ -299,6 +304,15 @@ function handler(c, loc, text, group,   is_u, n, parts, target, ext) {
   } else if (n == 2) ext = parts[1]
   if (index(ext, "$")) report(c, loc, "runs a handler at an extension named by a variable", text)
   if (trim(target) != "") reach(c, loc, text, target)
+}
+
+function transfer(c, loc, text, args,   t, ext) {
+  t = trim(args)
+  ext = tolower(t)
+  sub(/^sips?:/, "", ext)
+  sub(/@.*/, "", ext)
+  if (index(t, "$") || tolower(t) !~ /^sips?:[0-9]*@[a-z0-9.-]+$/ || length(ext) > 8)
+    report(c, loc, "transfers to " t "; Transfer() may name only a literal sip: URI to an extension of at most eight digits", text)
 }
 
 function queue(c, loc, text, args,   n, parts) {

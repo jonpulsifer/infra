@@ -8,8 +8,9 @@
 #   2. the config renders the way the pod renders it — the overlay's own
 #      render-config script over its own mounts, with a dummy for every PBX_*
 #      value the pod's env provides, and again with every optional secret
-#      dropped, since a 1Password item that does not exist yet must still
-#      boot;
+#      dropped and every empty pbx-env literal kept empty, since a 1Password
+#      item that does not exist yet, or a value the owner has yet to fill in,
+#      must still boot;
 #   3. every PJSIP object the config declares loads, identifies included, the
 #      modules a call needs run and are not noloaded, the ones modules.conf
 #      refuses do not load, nothing logs an error against a shipped config
@@ -23,22 +24,30 @@
 #      GLOBAL(LAST911);
 #   5. nothing reachable from a context an inbound call starts in dials a
 #      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk),
-#      and an ElevenLabs trunk refuses transfers and lands in
-#      [from-elevenlabs];
+#      Transfer() names only a literal sip: URI to a short extension, and an
+#      ElevenLabs trunk refuses transfers and lands in [from-elevenlabs];
 #   6. a site with [pbx-event] logs the line Grafana and the smiirl parse;
 #   7. on folly, one trunk is screened and line 1's never is, an open line, a
 #      contact and a 911 callback ring unanswered, a stranger on a screened
 #      line hears the press-5 prompt and then the troll agent, a stranger who
 #      hangs up on the prompt is counted, a caller who pressed 5 rings the
-#      handset as [5] with the Human ring, a caller the agent does not take
-#      (its trunk refusing, its Secret absent, two calls already on it, or its
-#      twenty a day used) is held in a spam sink with the ten-minute cap and
-#      its hangup handler and logs one held line, the agent's leg carries the
-#      mode and caller headers its pre-dial handler adds, the agent's hangup
-#      handler logs and counts only a call the agent answered, a third stranger
-#      on a line screening two is refused unanswered, a fourth held caller
-#      hears goodbye, the INVITE to the handset carries the Alert-Info its
-#      pre-dial handler adds, every trunk takes voip.ms's DID-form INVITE by
+#      handset as [5] with the Human ring, every call that rings the handset,
+#      and only those, sets an adaptive jitterbuffer before its Dial, a
+#      screened stranger is offered to offsite with Transfer() before the
+#      agent's trunk only while PBX_TROLL_EXTENSION is set and the day's
+#      twenty have room, with a time limit and a hangup handler that counts
+#      it, a refused transfer falls through to the agent with both undone, a
+#      challenged one and one that runs out of time go to a sink, one voip.ms
+#      takes hangs up and counts without a held line, the desk demo is never
+#      transferred, a caller the agent does not take (its trunk refusing, its
+#      Secret absent, two calls already on it, or its twenty a day used) is
+#      held in a spam sink with the ten-minute cap and its hangup handler and
+#      logs one held line, the agent's leg carries the mode and caller
+#      headers its pre-dial handler adds, the agent's hangup handler logs and
+#      counts only a call the agent answered, a third stranger on a line
+#      screening two is refused unanswered, a fourth held caller hears
+#      goodbye, the INVITE to the handset carries the Alert-Info its pre-dial
+#      handler adds, every trunk takes voip.ms's DID-form INVITE by
 #      its own X-Dest-User header and never by its From user, and every prompt
 #      the dialplan plays is in the ConfigMap mounted for it.
 #   8. on offsite, the one trunk identifies by its own X-Dest-User header
@@ -82,6 +91,9 @@ REQUIRED_MODULES=(
   codec_g722.so codec_ulaw.so
   app_read.so app_playback.so app_waitforsilence.so res_musiconhold.so
   func_groupcount.so func_timeout.so app_exec.so func_logic.so func_strings.so
+  # The offsite hand-off, and the handset's jitterbuffer with the timer it
+  # runs on: with no timing module, JITTERBUFFER() sets nothing and logs nothing.
+  app_transfer.so res_pjsip_refer.so func_jitterbuffer.so res_timing_timerfd.so
 )
 # A second dial tone, a shell, SIP over the metrics port's WebSocket, ARI's
 # config reader and the two functions that read the same fields, each of which
@@ -181,6 +193,7 @@ dummy_for() {
   case $1 in
     *_IP | *_SERVER | *_HOST | *_DOMAIN) echo 127.0.0.1 ;;
     *_DID | *_NUMBER) echo +15555550100 ;;
+    *_EXTENSION) echo 100 ;;
     *) echo pbx-check-dummy ;;
   esac
 }
@@ -271,6 +284,12 @@ render() {
       while IFS=$'\t' read -r k v; do
         [[ -n $k ]] || continue
         [[ $v == *"\${"* ]] && v=$(dummy_for "$k")
+        # An empty literal is one the owner fills in later, which makes it an
+        # optional value: the full render gets a dummy, the degraded one none.
+        if [[ -z $v && $mode == full ]]; then
+          v=$(dummy_for "$k")
+          HAS_OPTIONAL=1
+        fi
         env[$k]=$v
       done < <(yq '.data // {} | to_entries | .[] | [.key, .value] | @tsv' "$SITE_DIR/doc.yaml")
     elif [[ $secret_name != - ]]; then
@@ -358,7 +377,7 @@ localize() {
       -e "s#/etc/asterisk#$ETC#g" \
       -e "s#^([[:space:]]*ca_list_file[[:space:]]*=[[:space:]]*).*#\\1$CACERT_BUNDLE#" \
       -e 's#(^|[^A-Za-z0-9.-])([A-Za-z0-9-]+\.)*(voip\.ms|elevenlabs\.io)([^A-Za-z0-9.-]|$)#\1127.0.0.1\4#g' \
-      -e 's#(^|[^A-Za-z])(sips?:)([^@;:>[:space:]\\]+@)?(\[[^]]*\]|[^;:>[:space:]\\/,)]+)#\1\2\3127.0.0.1#g' \
+      -e 's#(^|[^A-Za-z])(sips?:)([^@;:>[:space:]\\]*@)?(\[[^]]*\]|[^;:>[:space:]\\/,)]+)#\1\2\3127.0.0.1#g' \
       -e 's#(https?://)([^/@[:space:]]+@)?(\[[^]]*\]|[^/:[:space:],)"]+)#\1\2127.0.0.1#g' \
       -e 's#^([[:space:]]*(from_domain|stunaddr|turnaddr)[[:space:]]*=[[:space:]]*).+#\1127.0.0.1#' \
       -e 's#^([[:space:]]*bind[[:space:]]*=[[:space:]]*)(\[[^]]*\]|[^:[:space:]]+)#\1127.0.0.1#' \
@@ -412,7 +431,7 @@ assert_loopback() {
       while (match(rest, /(^|[^A-Za-z])sips?:/)) {
         rest = substr(rest, RSTART + RLENGTH)
         uri = rest
-        sub(/^[^@;:>[:space:]\\]+@/, "", uri)
+        sub(/^[^@;:>[:space:]\\]*@/, "", uri)
         if (match(uri, /^\[[^]]*\]/) || match(uri, /^[^;:>[:space:]\\\/,)]+/)) h = substr(uri, 1, RLENGTH)
         else h = ""
         if (!host_ok(h)) bad = bad " " h
@@ -1019,6 +1038,8 @@ check_inbound_routes() {
   ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5 and then the troll, falling back to a sink; a 5 rings as [5]; a third stranger and a fourth held caller are refused"
   check_handset_leg
   check_trunk_identifies
+  check_troll_transfer
+  check_jitterbuffer
 }
 
 # With the pbx-elevenlabs Secret, a screened caller is dialled to the agent
@@ -1075,6 +1096,165 @@ check_troll() {
   [[ $(troll_count) == "$counted" ]] \
     || fail "the agent's hangup handler counted a caller who hung up while the agent's leg rang"
   quiesce
+}
+
+# With PBX_TROLL_EXTENSION set, the screened `troll` probe logs the offsite
+# hand-off, pushes the day's counter as its hangup handler, sets a time limit
+# and runs Transfer() to that extension before the agent's trunk. A Local
+# channel has no transfer, so it reports UNSUPPORTED, and the probe undoes
+# both and falls through to the Dial check_troll already proved. The rest of
+# [pbx-check-transfer] enters where Transfer() returns, with a status no probe
+# can produce here: `moved` (SUCCESS) hangs up, and its handler counts it with
+# no held line; `refused` (603) falls through to the agent; `challenged` (407)
+# goes to a sink and never dials. `waited` enters `T` as a spent time limit
+# does and goes to a sink uncounted, and `deskwait` shows the desk demo's own
+# ten-minute limit still just hangs up there. A caller over the day's twenty
+# is never transferred, nor is the desk demo, and with the extension empty
+# nothing is.
+# shellcheck disable=SC2016 # ${...} is Asterisk's
+TRANSFER_PROBE_CONTEXT=(
+  '[pbx-check-transfer]'
+  'exten => moved,1,Gosub(caller,1)'
+  ' same => n,Set(TRANSFERSTATUS=SUCCESS)'
+  ' same => n,Set(CHANNEL(hangup_handler_push)=agent-held,count,1)'
+  ' same => n,Goto(agent,dial,moved)'
+  'exten => refused,1,Gosub(caller,1)'
+  ' same => n,Set(TRANSFERSTATUSPROTOCOL=603)'
+  ' same => n,Goto(agent,dial,moved)'
+  'exten => challenged,1,Gosub(caller,1)'
+  ' same => n,Set(TRANSFERSTATUSPROTOCOL=407)'
+  ' same => n,Goto(agent,dial,moved)'
+  'exten => waited,1,Gosub(caller,1)'
+  ' same => n,Set(CHANNEL(hangup_handler_push)=agent-held,count,1)'
+  ' same => n,Goto(agent,T,1)'
+  'exten => deskwait,1,Gosub(caller,1)'
+  ' same => n,Set(AGENT_MODE=desk)'
+  ' same => n,Goto(agent,T,1)'
+  'exten => caller,1,Set(HANDSET=line4)'
+  ' same => n,Set(CALLERID(num)=6135550112)'
+  ' same => n,Set(CALLER=6135550112)'
+  ' same => n,Set(AGENT_MODE=troll)'
+  ' same => n,Set(TRANSFERSTATUS=FAILURE)'
+  ' same => n,Set(TRANSFERSTATUSPROTOCOL=0)'
+  ' same => n,Answer()'
+  ' same => n,Return()'
+)
+
+# Succeeds when each fixed string after $1 is on a line of $1 below the one
+# before it, and prints the first that is not.
+in_order() {
+  local seen=$1 want at=0 n
+  shift
+  for want in "$@"; do
+    n=$(tail -n +"$((at + 1))" <<<"$seen" | grep -nF -m 1 -- "$want" | cut -d: -f1)
+    if [[ -z $n ]]; then
+      printf '%s\n' "$want"
+      return 1
+    fi
+    at=$((at + n))
+  done
+}
+
+# Places [pbx-check-transfer] probe $1 and prints its Executing lines once it
+# has run $2.
+transfer_probe() {
+  local name=$1 last=$2 log="$SITE_DIR/asterisk.log" offset i
+  offset=$(wc -c <"$log")
+  ast "channel originate Local/$name@pbx-check-transfer/n application Wait 1" >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    tail -c +"$((offset + 1))" "$log" | grep -F "(\"Local/$name@pbx-check-transfer-" | grep -qF -- "$last" && break
+    sleep 0.1
+  done
+  sleep 0.5
+  tail -c +"$((offset + 1))" "$log" | grep -F "(\"Local/$name@pbx-check-transfer-" || true
+}
+
+check_troll_transfer() {
+  local log="$SITE_DIR/asterisk.log" seen missing before after name
+  local miss='"NOTICE,pbx-event kind=troll-miss line=line4 caller=6135550112 site=offsite why='
+  local -a wrong=()
+  seen=$(grep -F '("Local/earl@pbx-check-inbound-' "$log" || true)
+  [[ $seen != *'] Transfer("'* ]] || wrong+=("the desk demo ran Transfer()")
+  seen=$(grep -F '("Local/troll@pbx-check-inbound-' "$log" || true)
+  if [[ $RENDER_MODE == degraded ]]; then
+    [[ $seen != *'] Transfer("'* && $seen != *site=offsite* ]] \
+      || wrong+=("with PBX_TROLL_EXTENSION empty, a screened caller was still transferred")
+  else
+    missing=$(in_order "$seen" \
+      '"NOTICE,pbx-event kind=troll line=line4 caller=6135550109 mode=troll site=offsite"' \
+      '"CHANNEL(hangup_handler_push)=agent-held,count,1"' '"TIMEOUT(absolute)=45"' \
+      "\"sip:$(dummy_for PBX_TROLL_EXTENSION)@127.0.0.1\")" '"TIMEOUT(absolute)=0"' \
+      '"CHANNEL(hangup_handler_pop)="' \
+      '"NOTICE,pbx-event kind=troll-miss line=line4 caller=6135550109 site=offsite why=UNSUPPORTED"' \
+      '@elevenlabs,60,') \
+      || wrong+=("the troll probe did not offer offsite and undo it before the agent's trunk; missing or out of order: $missing")
+    seen=$(grep -F '("Local/daily@pbx-check-inbound-' "$log" || true)
+    [[ $seen != *'] Transfer("'* && $seen != *site=offsite* ]] \
+      || wrong+=("a caller over the day's twenty was still transferred")
+
+    printf '%s\n' "${TRANSFER_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
+    ast 'dialplan reload' >/dev/null
+    before=$(troll_count)
+    seen=$(transfer_probe moved '"1?Hangup()")')
+    after=$(troll_count)
+    [[ $seen == *'"1?Hangup()")'* ]] || wrong+=("a call voip.ms took did not hang up")
+    [[ $seen != *'] Dial("'* && $seen != *'kind=held'* && $seen != *'kind=troll-miss'* ]] \
+      || wrong+=("a call voip.ms took still dialled, logged a miss or logged a held line")
+    [[ $after == $((${before:-0} + 1)) ]] \
+      || wrong+=("a call voip.ms took was not counted toward the day's twenty (TROLL_N ${before:-unset} -> ${after:-unset})")
+    quiesce
+    seen=$(transfer_probe refused '@elevenlabs,60,')
+    missing=$(in_order "$seen" "${miss}FAILURE-603\"" '"0?spam,s,1")' '@elevenlabs,60,') \
+      || wrong+=("a refused transfer did not log FAILURE-603 and fall through to the agent; missing or out of order: $missing")
+    quiesce
+    seen=$(transfer_probe challenged '"GROUP()=spam"')
+    missing=$(in_order "$seen" "${miss}FAILURE-407\"" '"1?spam,s,1")' '"GROUP()=spam"') \
+      || wrong+=("a challenged transfer did not go to a sink; missing or out of order: $missing")
+    [[ $seen != *'] Dial("'* ]] || wrong+=("a challenged transfer still dialled the agent")
+    quiesce
+    before=$(troll_count)
+    seen=$(transfer_probe waited '"GROUP()=spam"')
+    missing=$(in_order "$seen" '"CHANNEL(hangup_handler_pop)="' "${miss}timeout\"" '"GROUP()=spam"') \
+      || wrong+=("a transfer out of time did not go to a sink; missing or out of order: $missing")
+    [[ $seen != *'] Dial("'* ]] || wrong+=("a transfer out of time still dialled the agent")
+    quiesce
+    [[ $(troll_count) == "$before" ]] || wrong+=("a transfer out of time was counted toward the day's twenty")
+    seen=$(transfer_probe deskwait '"1?Hangup()")')
+    [[ $seen == *'"1?Hangup()")'* && $seen != *site=offsite* && $seen != *'"GROUP()=spam"'* ]] \
+      || wrong+=("the desk demo's time limit no longer just hangs up")
+    quiesce
+  fi
+  if ((${#wrong[@]})); then
+    fail "the offsite hand-off" "${wrong[@]}"
+  elif [[ $RENDER_MODE == degraded ]]; then
+    say "    with PBX_TROLL_EXTENSION empty, no screened caller is transferred"
+  else
+    say "    a screened stranger is offered to offsite first, counted and time-limited, and falls through when refused; a challenged or timed-out one is held in a sink; a taken one hangs up with no held line; *29 and a caller over the day's twenty are never transferred"
+  fi
+}
+
+# Every call that rings the handset sets an adaptive jitterbuffer on the
+# carrier channel before its Dial; the prompt, the sinks and the agent's path
+# never do.
+check_jitterbuffer() {
+  local log="$SITE_DIR/asterisk.log" name seen set dial
+  local -a wrong=()
+  for name in open callback contact human; do
+    seen=$(grep -F "(\"Local/$name@pbx-check-inbound-" "$log" || true)
+    set=$(grep -nF '"JITTERBUFFER(adaptive)=default")' <<<"$seen" | head -n 1 | cut -d: -f1)
+    dial=$(grep -nF '] Dial("' <<<"$seen" | head -n 1 | cut -d: -f1)
+    [[ -n $set && -n $dial && $set -lt $dial ]] || wrong+=("$name rings the handset with no jitterbuffer set before its Dial")
+  done
+  for name in stranger sink troll earl; do
+    if grep -F "(\"Local/$name@pbx-check-inbound-" "$log" | grep -qF 'JITTERBUFFER('; then
+      wrong+=("$name sets a jitterbuffer, but only a call that rings the handset may")
+    fi
+  done
+  if ((${#wrong[@]})); then
+    fail "the handset's calls must buffer the caller's audio, and only they" "${wrong[@]}"
+  else
+    say "    every call that rings the handset sets an adaptive jitterbuffer before its Dial, and no other does"
+  fi
 }
 
 # The agent's answered calls today, GLOBAL(TROLL_N).

@@ -138,6 +138,42 @@ check 'every root is walked' 1 'dials PJSIP/1@vms-1994' \
 check 'a missing inbound context is refused' 1 'the inbound context does not exist' \
   "$(handset)"
 
+check 'a transfer to a literal sip: URI passes' 0 'none of them a trunk' \
+  "$(inbound 's|2|Transfer(sip:100@montreal10.voip.ms)')"
+
+check 'a transfer to an empty extension, the render with none set, passes' 0 'none of them a trunk' \
+  "$(inbound 's|2|Transfer(sip:@127.0.0.1)')"
+
+check 'a transfer to an international number is refused' 1 'transfers to sip:0114412345678@montreal10.voip.ms' \
+  "$(inbound 's|2|Transfer(sip:0114412345678@montreal10.voip.ms)')"
+
+check 'a transfer to a ten-digit number is refused' 1 'an extension of at most eight digits' \
+  "$(inbound 's|2|Transfer(sip:6135550100@montreal10.voip.ms)')"
+
+check 'a transfer to a named user on another host is refused' 1 'transfers to sip:x@evil.example' \
+  "$(inbound 's|2|Transfer(sip:x@evil.example)')"
+
+check 'a transfer with no host is refused' 1 'Transfer() may name only a literal sip: URI' \
+  "$(inbound 's|2|Transfer(sip:100)')"
+
+check 'a transfer to a caller-chosen number is refused' 1 'transfers to sip:${CALLERID(num)}@montreal10.voip.ms' \
+  "$(inbound 's|2|Transfer(sip:${CALLERID(num)}@montreal10.voip.ms)')"
+
+check 'a transfer to a variable is refused' 1 'Transfer() may name only a literal sip: URI' \
+  "$(inbound 's|2|Transfer(${TARGET})')"
+
+check 'a transfer to an endpoint is refused' 1 'transfers to PJSIP/vms-1994' \
+  "$(inbound 's|2|Transfer(PJSIP/vms-1994)')"
+
+check 'a transfer with no destination is refused' 1 'Transfer() may name only a literal sip: URI' \
+  "$(inbound 's|2|Transfer()')"
+
+check 'a transfer nested in ExecIf is read' 1 'transfers to sip:${EXTEN}@montreal10.voip.ms' \
+  "$(inbound 's|2|ExecIf($[1]?Transfer(sip:${EXTEN}@montreal10.voip.ms))')"
+
+check 'a transfer behind a Goto is read' 1 'transfers to Local/s@push' \
+  "$(inbound 's|2|Goto(agent,s,1)')$(context agent 's|1|Transfer(Local/s@push)')"
+
 check 'a fast CURLOPT timeout passes' 0 'none of them a trunk' \
   "$(inbound)$(context push 's|1|Set(CURLOPT(conntimeout)=0.3)' 's|2|Set(CURLOPT(httptimeout)=2)')"
 

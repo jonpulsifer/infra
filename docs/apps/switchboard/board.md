@@ -26,6 +26,7 @@ The page shows:
 - The board samples the PBX once a second, so a call that ends within a second, such as one the screening cap refuses, can miss the page. The PBX log still has it.
 - The recent calls carry no hangup cause, and the pod holds them, so a restart empties the list.
 - A context the board has no name for reads as `in <context>`.
+- A caller handed to offsite leaves folly while `PBX_TROLL_EXTENSION` is set, so the board lists the call as ended at `handing off to offsite`, and the caller's time with Earl is in offsite's PBX log.
 
 ## How it works
 

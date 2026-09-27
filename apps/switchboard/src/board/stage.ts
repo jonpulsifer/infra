@@ -44,6 +44,8 @@ export const AGENT_ENDPOINT = 'elevenlabs';
 export const AGENT_NAME = 'Earl';
 // The ElevenLabs troll line's contexts, from agent.conf.
 const AGENT_CONTEXTS = new Set(['agent', 'from-elevenlabs']);
+/** The app agent.conf hands a screened caller to offsite's Earl with. */
+export const TRANSFER_APP = 'Transfer';
 const SINKS: Record<string, string> = {
   queue: 'Endless Queue',
   lenny: 'Robo-Lenny',
@@ -105,6 +107,9 @@ export function stageOf(input: StageInput): Stage {
     if (LINE.test(bridgedTo))
       return stage('talking', `talking on ${bridgedTo}`);
     return stage('talking', 'talking');
+  }
+  if (place.context === 'agent' && place.app === TRANSFER_APP) {
+    return stage('agent', 'handing off to offsite');
   }
   if (AGENT_CONTEXTS.has(place.context))
     return stage('agent', `with ${AGENT_NAME}`);

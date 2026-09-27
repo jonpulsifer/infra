@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { ARI_LISTS, METRICS_PATH } from '../src/board/ari.ts';
 import { CHANNEL_VARS, SUBROUTINES, VERDICTS } from '../src/board/model.ts';
 import type { Direction, StageInput } from '../src/board/stage.ts';
-import { AGENT_ENDPOINT, stageOf } from '../src/board/stage.ts';
+import { AGENT_ENDPOINT, stageOf, TRANSFER_APP } from '../src/board/stage.ts';
 
 const PBX = join(import.meta.dir, '../../../clusters/folly/apps/pbx');
 const CONFIG = join(PBX, 'config');
@@ -125,6 +125,13 @@ describe.skipIf(!present)('the board and the folly dialplan', () => {
   test('the troll agent is the endpoint the dialplan dials', () => {
     expect(read('pjsip.conf')).toContain(`[${AGENT_ENDPOINT}]`);
     expect(read('agent.conf')).toContain(`@${AGENT_ENDPOINT},`);
+  });
+
+  test('the offsite hand-off is the Transfer agent.conf runs', () => {
+    expect(read('agent.conf')).toContain(`,${TRANSFER_APP}(`);
+    expect(stageOf(place('inbound', 'agent', 'dial', TRANSFER_APP)).label).toBe(
+      'handing off to offsite',
+    );
   });
 
   test("ari.conf's channelvars are the ones the board reads", () => {
