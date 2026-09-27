@@ -41,6 +41,13 @@
 #      pre-dial handler adds, every trunk takes voip.ms's DID-form INVITE by
 #      its own X-Dest-User header and never by its From user, and every prompt
 #      the dialplan plays is in the ConfigMap mounted for it.
+#   8. on offsite, the one trunk identifies by its own X-Dest-User header
+#      alone, a caller entering [from-voipms] at `s`, at a one-digit extension
+#      or at a DID's digits is dialled to the agent at the rendered number with
+#      its mode and caller headers, a caller the agent does not take or one
+#      over its two calls or its twenty a day is refused and never answered,
+#      the pbx-event helper names a PJSIP channel's endpoint as its line, and
+#      the agent's hangup handler counts only a call the agent answered.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -1094,20 +1101,23 @@ check_handset_leg() {
 # voip.ms delivers a call in one of two forms: to the registered contact with
 # the registration's `line` parameter, or to the DID's digits with an
 # X-Dest-User header naming the sub-account and no `line`. Only an identify
-# matches the second, so every folly trunk needs one on X-Dest-User whose
-# value is its own sub-account (its from_user), and no two may share a value.
-# No identify may match by address: the ip identifier runs before the
+# matches the second, so every trunk needs one on X-Dest-User whose value is
+# its own sub-account (its from_user), and no two may share a value. Every
+# trunk identifies by `header` alone: the username identifier runs before the
+# header one, so with it listed a From user naming a trunk would take the
+# call. No identify may match by address: the ip identifier runs before the
 # username and header identifiers, so one would take every request from that
-# address. A DID-form INVITE carrying each value must land on that
-# identify's trunk in [from-voipms], and its From user names another trunk,
-# so a trunk still found by From user fails. Asterisk sends each INVITE to
-# itself from line4, as `leg` does. offsite is not checked: its parked trunk
-# matches only the registered-contact form.
+# address. With $1 = live, the default, a DID-form INVITE carrying each value
+# must reach that identify's trunk in [from-voipms], and its From user names
+# another trunk, so a trunk still found by From user fails. Asterisk sends
+# each INVITE to itself from line4, as `leg` does. offsite has no line4 and no
+# UDP listener to send one to, so it passes `static` and the loaded objects
+# are the proof.
 IDENTIFY_PROBE_DID=6135550199
 IDENTIFY_HEADER=X-Dest-User
 
 check_trunk_identifies() {
-  local log="$SITE_DIR/asterisk.log" ep id show match name value offset i k n=0
+  local mode=${1:-live} log="$SITE_DIR/asterisk.log" ep id show match name value by offset i k n=0
   local -a trunks=() endpoints=() values=() wrong=()
   local -A account=() matched=() owner=()
   for ep in $ENDPOINTS; do
@@ -1115,6 +1125,8 @@ check_trunk_identifies() {
     [[ $(endpoint_param "$show" context) == from-voipms ]] || continue
     trunks+=("$ep")
     account[$ep]=$(endpoint_param "$show" from_user)
+    by=$(endpoint_param "$show" identify_by)
+    [[ $by == header ]] || wrong+=("$ep identifies by '${by:-unset}', not header alone")
   done
   for id in $(ast 'pjsip show identifies' | awk '$1 == "Identify:" && $2 !~ /^</ { print $2 }'); do
     ep=${id#*/}
@@ -1146,15 +1158,17 @@ check_trunk_identifies() {
     values[n]=$value
     matched[$ep]+=" $value"
   done
-  for ((i = 1; i <= n; i++)); do
-    printf '%s\n' '[pbx-check-identify]' \
-      "exten => $i,1,Set(CALLERID(num)=${endpoints[i % n + 1]})" \
-      " same => n,Dial(PJSIP/line4/sip:$IDENTIFY_PROBE_DID@127.0.0.1:5060,3,b(pbx-check-identify-leg^$i^1))" \
-      '[pbx-check-identify-leg]' \
-      "exten => $i,1,Set(PJSIP_HEADER(add,$IDENTIFY_HEADER)=${values[i]})" \
-      ' same => n,Return()' '' >>"$ETC/pbx-check.conf"
-  done
-  ast 'dialplan reload' >/dev/null
+  if [[ $mode == live ]]; then
+    for ((i = 1; i <= n; i++)); do
+      printf '%s\n' '[pbx-check-identify]' \
+        "exten => $i,1,Set(CALLERID(num)=${endpoints[i % n + 1]})" \
+        " same => n,Dial(PJSIP/line4/sip:$IDENTIFY_PROBE_DID@127.0.0.1:5060,3,b(pbx-check-identify-leg^$i^1))" \
+        '[pbx-check-identify-leg]' \
+        "exten => $i,1,Set(PJSIP_HEADER(add,$IDENTIFY_HEADER)=${values[i]})" \
+        ' same => n,Return()' '' >>"$ETC/pbx-check.conf"
+    done
+    ast 'dialplan reload' >/dev/null
+  fi
 
   for ep in "${trunks[@]}"; do
     if [[ -z ${matched[$ep]:-} ]]; then
@@ -1163,20 +1177,24 @@ check_trunk_identifies() {
       wrong+=("$ep is sub-account '${account[$ep]}', but its identify matches '${matched[$ep]# }'")
     fi
   done
-  for ((i = 1; i <= n; i++)); do
-    offset=$(wc -c <"$log")
-    ast "channel originate Local/$i@pbx-check-identify/n application Wait 1" >/dev/null
-    for ((k = 0; k < 50; k++)); do
-      tail -c +"$((offset + 1))" "$log" | grep -qF "Executing [$IDENTIFY_PROBE_DID@from-voipms:1] Goto(\"PJSIP/${endpoints[i]}-" && break
-      sleep 0.1
+  if [[ $mode == live ]]; then
+    for ((i = 1; i <= n; i++)); do
+      offset=$(wc -c <"$log")
+      ast "channel originate Local/$i@pbx-check-identify/n application Wait 1" >/dev/null
+      for ((k = 0; k < 50; k++)); do
+        tail -c +"$((offset + 1))" "$log" | grep -qF "Executing [$IDENTIFY_PROBE_DID@from-voipms:1] Goto(\"PJSIP/${endpoints[i]}-" && break
+        sleep 0.1
+      done
+      ((k < 50)) || wrong+=("a DID-form INVITE for ${endpoints[i]}, From ${endpoints[i % n + 1]}, never reached [from-voipms] on ${endpoints[i]}")
+      quiesce
     done
-    ((k < 50)) || wrong+=("a DID-form INVITE for ${endpoints[i]}, From ${endpoints[i % n + 1]}, never reached [from-voipms] on ${endpoints[i]}")
-    quiesce
-  done
+  fi
   if ((${#wrong[@]})); then
     fail "a voip.ms call to a DID's digits would not reach its own trunk" "${wrong[@]}"
-  else
+  elif [[ $mode == live ]]; then
     say "    ${#trunks[@]} trunks take a DID-form INVITE by its $IDENTIFY_HEADER header, not by its From user; no identify matches by address"
+  else
+    say "    ${#trunks[@]} trunk(s) identify by header alone, each by an $IDENTIFY_HEADER identify on its own sub-account; no identify matches by address"
   fi
 }
 
@@ -1209,6 +1227,117 @@ check_inbound() {
   else
     fail "a caller can reach something that is not theirs to reach" "$out"
   fi
+}
+
+# --- offsite: the troll host -------------------------------------------------
+
+# offsite's inbound route, driven like folly's. `troll` enters [from-voipms] as
+# voip.ms delivers a call, with a caller ID whose leading 1 CALLER folds, and
+# `onedigit` and `didform` enter at the digits a transferred or DID-form call
+# carries. The elevenlabs trunk is localized to this Asterisk's own TLS
+# listener, which has no certificate, so the Dial fails the way an unreachable
+# ElevenLabs would. `trolling` stands in for a call the agent is on, `daily`
+# for a day the agent has answered twenty, and `answered` and `rang` hang up
+# with the agent's hangup handler and ANSWEREDTIME as Dial leaves it. No
+# channel a probe starts is PJSIP, so their pbx-event lines carry an empty
+# line=; `endpoint` runs the helper on the PJSIP leg a Dial creates, as a real
+# call's line runs on the trunk's channel.
+# shellcheck disable=SC2016 # ${EPOCH} and ${STRFTIME(...)} are Asterisk's
+OFFSITE_PROBE_CONTEXT=(
+  '[pbx-check-inbound]'
+  'exten => troll,1,Set(CALLERID(num)=+1 (613) 555-0201)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => onedigit,1,Set(CALLERID(num)=6135550202)'
+  ' same => n,Goto(from-voipms,7,1)'
+  'exten => didform,1,Set(CALLERID(num)=6135550203)'
+  " same => n,Goto(from-voipms,$IDENTIFY_PROBE_DID,1)"
+  'exten => trolling,1,Set(GROUP()=troll)'
+  ' same => n,Answer()'
+  ' same => n,Wait(30)'
+  'exten => overcap,1,Goto(troll,1)'
+  'exten => daily,1,Set(GLOBAL(TROLL_DAY)=${STRFTIME(,,%Y%m%d)})'
+  ' same => n,Set(GLOBAL(TROLL_N)=20)'
+  ' same => n,Goto(troll,1)'
+  'exten => answered,1,Set(ANSWEREDTIME=5)'
+  ' same => n,Set(CALLERID(num)=6135550210)'
+  ' same => n,Set(GLOBAL(TROLL_DAY)=)'
+  ' same => n,Goto(held,1)'
+  'exten => rang,1,Set(ANSWEREDTIME=)'
+  ' same => n,Set(CALLERID(num)=6135550211)'
+  ' same => n,Goto(held,1)'
+  'exten => held,1,Set(SINK_START=${EPOCH})'
+  ' same => n,Set(CHANNEL(hangup_handler_push)=agent-held,s,1)'
+  ' same => n,Hangup()'
+  'exten => endpoint,1,Dial(PJSIP/1@elevenlabs,1,b(pbx-check-line^s^1))'
+  '[pbx-check-line]'
+  'exten => s,1,Gosub(pbx-event,s,1(line-probe))'
+  ' same => n,Return()'
+)
+
+# offsite hands every caller to the agent: dialled at the rendered number with
+# the mode and caller headers its pre-dial handler adds, refused unanswered
+# when the agent does not answer or is over its two calls or its twenty a day,
+# and counted only when the agent answered. A miss must never answer: voip.ms
+# reports an answered call to folly as a transfer that succeeded, and folly's
+# own fallback never runs. The trunk's identify is checked on the loaded
+# objects alone.
+check_agent_host() {
+  [[ $1 == offsite ]] || return 0
+  local log="$SITE_DIR/asterisk.log" before=$SITE_FAILURES did offset want counted probe name exten caller i
+  local miss='"NOTICE,pbx-event kind=troll-miss line= caller=16135550201 mode=troll why='
+  did=$(dummy_for PBX_AGENT_DID)
+  quiesce
+  printf '%s\n' "${OFFSITE_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
+  ast 'dialplan reload' >/dev/null
+  offset=$(wc -c <"$log")
+  expect_route troll '] Playback("' \
+    '"NOTICE,pbx-event kind=inbound line= caller=16135550201"' \
+    '"NOTICE,pbx-event kind=troll line= caller=16135550201 mode=troll"' \
+    '"CHANNEL(hangup_handler_push)=agent-held,s,1"' \
+    "\"PJSIP/$did@elevenlabs,60,b(agent-leg^s^1(troll^" \
+    '^6135550201))S(600)"' '"CHANNEL(hangup_handler_pop)="' "$miss" '"34")'
+  # The pre-dial handler's proof is the INVITE it sent.
+  for want in "INVITE sip:$did@127.0.0.1:5061;transport=tls" \
+    'X-Pbx-Mode: troll' 'X-Caller-ID: 6135550201'; do
+    tail -c +"$((offset + 1))" "$log" | grep -qF "$want" \
+      || fail "the INVITE to the agent does not carry '$want'"
+  done
+  quiesce
+  for probe in onedigit:7:6135550202 "didform:$IDENTIFY_PROBE_DID:6135550203"; do
+    IFS=: read -r name exten caller <<<"$probe"
+    expect_route "$name" '] Playback("' "[$exten@from-voipms:1] Goto(\"Local/$name@" \
+      "\"PJSIP/$did@elevenlabs,60,b(agent-leg^s^1(troll^" "^$caller))S(600)\"" '"34")'
+    quiesce
+  done
+  hold_probe trolling 1 '"GROUP()=troll"'
+  hold_probe trolling 2 '"GROUP()=troll"'
+  expect_route overcap '"PJSIP/' "${miss}full\"" '"17")'
+  quiesce
+  expect_route daily '"PJSIP/' "${miss}daily\"" '"17")'
+  quiesce
+  for probe in troll onedigit didform overcap daily; do
+    if grep -F "(\"Local/$probe@pbx-check-inbound-" "$log" | grep -qE '\] (Answer|Background|Playback|Read)\("'; then
+      fail "inbound probe '$probe' answered a caller the agent did not take"
+    fi
+  done
+  expect_route answered '"1?done")' \
+    '"NOTICE,pbx-event kind=held line= caller=6135550210 secs=' ' sink=troll")'
+  counted=$(troll_count)
+  [[ $counted == 1 ]] || fail "the agent's hangup handler did not count a call the agent answered" "TROLL_N: ${counted:-unset}"
+  expect_route rang '"NOTICE,pbx-event kind=held' '"1?done")'
+  [[ $(troll_count) == "$counted" ]] \
+    || fail "the agent's hangup handler counted a caller who hung up while the agent's leg rang"
+  quiesce
+  offset=$(wc -c <"$log")
+  ast 'channel originate Local/endpoint@pbx-check-inbound/n application Wait 1' >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    tail -c +"$((offset + 1))" "$log" | grep -qF 'pbx-event kind=line-probe line=elevenlabs ' && break
+    sleep 0.1
+  done
+  ((i < 50)) || fail "the pbx-event helper did not name a PJSIP channel's endpoint as its line"
+  quiesce
+  check_trunk_identifies static
+  ((SITE_FAILURES > before)) || say "    offsite probes: a caller at s, one digit or a DID reaches the agent with its mode and caller headers; a miss and the agent's two calls and twenty a day refuse unanswered; pbx-event names the endpoint; only an answered call is counted"
 }
 
 # --- main ------------------------------------------------------------------
@@ -1259,6 +1388,7 @@ run_checks() {
   check_reload_and_handsets "$site"
   check_events
   check_inbound_routes "$site"
+  check_agent_host "$site"
   check_inbound
 }
 

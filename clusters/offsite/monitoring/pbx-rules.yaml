@@ -1,0 +1,34 @@
+---
+# The offsite PBX, the troll agent's host: its pod and its one voip.ms trunk.
+# Warnings, because this site carries only strangers bound for the troll
+# agent, never an office line or 911. Five minutes, because a roll drops the
+# registration for up to a minute.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pbx
+  namespace: monitoring
+  labels:
+    release: prom-stack
+spec:
+  groups:
+    - name: pbx
+      rules:
+        - alert: PBXDown
+          # `sum by` gives both halves one label set. Asterisk exports the trunk
+          # alert's series, so only absent() sees a PBX that is gone.
+          expr: sum by (namespace, job) (up{namespace="pbx", job="pbx-metrics"}) == 0 or absent(up{namespace="pbx", job="pbx-metrics"})
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: The offsite PBX is down — the troll line has no host
+            description: "Prometheus has had no metrics from the offsite PBX for five minutes. PBXTrunkNotRegistered cannot fire while this does, because its series come from the PBX itself, and voip.ms has nowhere to deliver a call on 168847_elevenlabs. Check the pbx Deployment with kubectl --context offsite -n pbx; the render-config and asterisk logs say why it stopped. https://wiki.lolwtf.ca/runbooks/operate-the-offsite-pbx/"
+        - alert: PBXTrunkNotRegistered
+          expr: asterisk_pjsip_outbound_registration_status{namespace="pbx"} != 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "Trunk {{ $labels.username }} is not registered"
+            description: "Registration status is {{ $value }} (0 unregistered, 2 rejected by the carrier) and has been for five minutes, so voip.ms has no contact to deliver the troll line's calls to. 2 means the carrier refused the credentials — check the 168847_elevenlabs field of 1Password item \"voip.ms sub accounts\". 0 is usually the network or the egress policy. https://wiki.lolwtf.ca/runbooks/operate-the-offsite-pbx/"

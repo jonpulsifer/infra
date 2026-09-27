@@ -165,7 +165,10 @@ filter that drops those lines.
   sees. `mise run pbx:check` boots the image's Asterisk against each site's
   rendered config with no route off the machine. It fails when a PJSIP object
   does not load, when 911 stops reaching a line's trunk, when an inbound call
-  can reach a trunk, when a folly trunk stops taking voip.ms's DID-form call,
-  when a prompt is missing from `pbx-sounds`, or when the open, contact,
-  911-callback, press-5 or spam route changes.
+  can reach a trunk, when a trunk identifies by anything but `header` or a
+  folly trunk stops taking voip.ms's DID-form call, when a prompt is missing
+  from `pbx-sounds`, or when the open, contact, 911-callback, press-5 or spam
+  route changes. On offsite, it fails when a caller stops reaching the agent
+  with its headers, when a miss or a cap answers the caller, or when the held
+  count changes.
   `.github/workflows/pbx.yml` runs it on every PBX change.

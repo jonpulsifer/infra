@@ -10,7 +10,7 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
-| The number's inbound trunk | `agent-did` in the item `elevenlabs troll trunk` | The folly PBX, with that item's digest credentials |
+| The number's inbound trunk | `agent-did` in the item `elevenlabs troll trunk` | The offsite PBX, for every call on `168847_elevenlabs`, and the folly PBX, for the calls its own dialplan sends there; both with that item's digest credentials |
 | The number's outbound trunk | voip.ms over TLS, as the sub-account `168847_elevenlabs` | Anyone holding the `elevenlabs pbx api key`, which Switchboard uses through the outbound-call API |
 
 ## Limits
@@ -19,8 +19,10 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 - The number gets an outbound trunk only once the Secret `elevenlabs-outbound-trunk` holds its username and password; until then each run logs that the trunk waits.
 - With that Secret in hand, the number dials out as `168847_elevenlabs` for anyone who holds the write key, on the voip.ms balance folly's lines share. The sub-account's voip.ms settings, which git does not hold, set what such a call can reach and cost.
 - ElevenLabs holds that sub-account's password, and anyone who has it can register the sub-account and take the calls of any DID routed to it.
+- The offsite PBX registers `168847_elevenlabs` and takes every call voip.ms delivers to it. Another client registered with that password can take those calls instead.
 - A live outbound trunk whose password git does not hold fails the Job.
 - The folly [PBX](pbx.md) reads a rotated `elevenlabs troll trunk` only when it restarts, and sends troll calls to its sinks until then.
+- The offsite PBX reads `elevenlabs troll trunk` through its `pbx-secrets`, which Reloader watches, so a rotation restarts it and cuts any call on it.
 
 ## How it works
 

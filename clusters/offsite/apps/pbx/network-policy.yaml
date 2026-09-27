@@ -1,6 +1,7 @@
 ---
-# offsite egress. Carrier and agent, nothing else. No LAN destination: no
-# handset registers to this site.
+# offsite egress: the carrier and the troll agent, over TLS, and RTP to public
+# addresses. Nothing on the LAN, because no handset registers here, and no
+# plain SIP, because pjsip.conf declares only a TLS transport.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -13,6 +14,9 @@ spec:
     matchLabels:
       app.kubernetes.io/name: pbx
   egress:
+    # toFQDNs below is enforced by Cilium's DNS proxy, which only sees lookups
+    # this rule routes through it. Without the matchPattern a name never
+    # resolves to an allowed identity and every connection fails closed.
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: kube-system
@@ -24,41 +28,64 @@ spec:
           rules:
             dns:
               - matchPattern: "*.voip.ms"
-              - matchPattern: voip.ms
-              # A bare `*` matches one DNS label. Their SIP host has two
-              # (sip.rtc.elevenlabs.io), so `**` — matching any number of
-              # labels — is what actually lets the lookup through.
-              - matchPattern: "**.elevenlabs.io"
+              # `*` matches one DNS label and `**.` any number. The trunk's host
+              # is sip.rtc.elevenlabs.io, and a call's ACK and BYE go to a
+              # Contact host under hosts.rtc.elevenlabs.io.
+              - matchPattern: "**.rtc.elevenlabs.io"
+    # The registration, and the connection voip.ms delivers calls down. The
+    # numbered server in pbx-env is one label under voip.ms.
     - toFQDNs:
         - matchPattern: "*.voip.ms"
-        - matchName: voip.ms
-      toPorts:
-        - ports:
-            - {port: "5060", protocol: UDP}
-            - {port: "5060", protocol: TCP}
-    # 5061 for TLS, which is the transport the endpoint pins. 5060/TCP is
-    # allowed alongside it so a fallback to their TCP port does not need a
-    # policy change at the moment someone is debugging a handshake.
-    #
-    # A follow-up request such as their BYE goes to the Contact host from
-    # their response, one label under a different domain
-    # (<id>.hosts.rtc.elevenlabs.io) — the DNS rule above resolves it, but
-    # toFQDNs enforces destinations independently and needs its own entry.
-    - toFQDNs:
-        - matchName: sip.rtc.elevenlabs.io
-        - matchPattern: "*.hosts.rtc.elevenlabs.io"
       toPorts:
         - ports:
             - {port: "5061", protocol: TCP}
-            - {port: "5060", protocol: TCP}
-    # Media, from both far ends. See the same rule in folly's policy: an SDP
-    # body names a host nothing here ever resolved, so no FQDN rule can cover
-    # it, and without this the call connects and carries silence.
-    #
-    # ElevenLabs' media servers pick from a wider range than our own; rtp.conf
-    # still pins this pod's own RTP sockets to 10000-20000, so this widens
-    # only the destination port the far end may answer from.
-    - toEntities: [world]
+    # The troll trunk. The INVITE goes to sip.rtc.elevenlabs.io, and the call's
+    # ACK and BYE go to the Contact host its answer names, under
+    # hosts.rtc.elevenlabs.io, over the open connection or a new one. `**.`
+    # because how many labels that host has is theirs to choose.
+    - toFQDNs:
+        - matchName: sip.rtc.elevenlabs.io
+        - matchPattern: "**.hosts.rtc.elevenlabs.io"
+      toPorts:
+        - ports:
+            - {port: "5061", protocol: TCP}
+    # RTP cannot be an FQDN rule: the media address arrives in an SDP body,
+    # from a host this pod never looked up. A toFQDNs egress rule permits the
+    # signalling and then drops every audio packet, and the call connects and
+    # carries silence. ElevenLabs sends media from ports anywhere in
+    # 10000-60000, wider than voip.ms; rtp.conf still pins this pod's own ports
+    # to 10000-20000. `world` includes the private and shared (100.64/10)
+    # ranges, where the site's LAN and the site-to-site link are, so this names
+    # public addresses only.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10]
       toPorts:
         - ports:
             - {port: "10000", endPort: 60000, protocol: UDP}
+---
+# The base policy admits RTP from `world`, which folly's handset needs, and
+# `world` includes private addresses. Each site advertises its pod pools over
+# BGP, so a host on the LAN or across the site-to-site link can reach this
+# pod's RTP ports. Nothing private sends media here, and a deny wins over the
+# base's allow. CIDR rules never match cluster endpoints or nodes.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pbx-rtp-public-only
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pbx
+  ingressDeny:
+    - fromCIDRSet:
+        - cidr: 10.0.0.0/8
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 100.64.0.0/10
+      toPorts:
+        - ports:
+            - {port: "10000", endPort: 20000, protocol: UDP}

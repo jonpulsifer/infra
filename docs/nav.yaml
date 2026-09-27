@@ -98,6 +98,7 @@ sections:
           - runbooks/connect-an-agent-to-the-wiki.md
           - runbooks/operate-the-office-phone.md
           - runbooks/screen-callers-on-the-office-phone.md
+          - runbooks/operate-the-offsite-pbx.md
       - group: Every change
         items:
           - runbooks/test-a-change.md

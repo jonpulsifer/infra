@@ -35,9 +35,12 @@ spec:
     # the pod opened first — so a leg where the far end speaks first gets
     # nothing until Asterisk happens to send. A carrier that latches its media
     # to our first packet then waits forever, and an agent that greets the
-    # caller before they speak is silent. `world` here is not the internet at
-    # large: nothing unsolicited crosses CGNAT and the UDM to a pod address, so
-    # in practice this admits the carriers' media and nothing else routable.
+    # caller before they speak is silent. `world` is every address outside the
+    # cluster, private ones included. A site's gateway NAT keeps the internet
+    # out, but each site routes its pod addresses over BGP, so a host on the
+    # LAN or across the site-to-site link can reach these ports too. SRTP on
+    # the trunks drops what such a host sends, and offsite denies the private
+    # ranges on top.
     - fromEntities: [world]
       toPorts:
         - ports:
