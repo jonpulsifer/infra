@@ -322,6 +322,9 @@ render() {
   done < <(printf '%s\n' "${rewrites[@]}" | awk '{ print length, $0 }' | sort -rn | cut -d' ' -f2-)
   sed "${sed_args[@]}" "$SITE_DIR/root$script" >"$SITE_DIR/render.sh"
   for k in "${!env[@]}"; do assignments+=("$k=${env[$k]}"); done
+  # What the dialplan sees, a ConfigMap literal in both renders: the transfer
+  # checks below follow it rather than the render mode.
+  TROLL_EXTENSION=${env[PBX_TROLL_EXTENSION]:-}
 
   if ! env -i PATH="$ENVSUBST_BIN:$PATH" "${assignments[@]}" bash "$SITE_DIR/render.sh" >"$SITE_DIR/render.log" 2>&1; then
     fail "render-config's script failed" "$(cat "$SITE_DIR/render.log")"
@@ -1176,22 +1179,29 @@ check_troll_transfer() {
   seen=$(grep -F '("Local/earl@pbx-check-inbound-' "$log" || true)
   [[ $seen != *'] Transfer("'* ]] || wrong+=("the desk demo ran Transfer()")
   seen=$(grep -F '("Local/troll@pbx-check-inbound-' "$log" || true)
-  if [[ $RENDER_MODE == degraded ]]; then
+  # Where the undone transfer lands: on the agent's trunk, or, with the agent
+  # off in the degraded render, straight in a sink.
+  local next='@elevenlabs,60,'
+  [[ $RENDER_MODE == full ]] || next='"GROUP()=spam"'
+  if [[ -z $TROLL_EXTENSION ]]; then
     [[ $seen != *'] Transfer("'* && $seen != *site=offsite* ]] \
       || wrong+=("with PBX_TROLL_EXTENSION empty, a screened caller was still transferred")
   else
     missing=$(in_order "$seen" \
       '"NOTICE,pbx-event kind=troll line=line4 caller=6135550109 mode=troll site=offsite"' \
       '"CHANNEL(hangup_handler_push)=agent-held,count,1"' '"TIMEOUT(absolute)=45"' \
-      "\"sip:$(dummy_for PBX_TROLL_EXTENSION)@127.0.0.1\")" '"TIMEOUT(absolute)=0"' \
+      "\"sip:$TROLL_EXTENSION@127.0.0.1\")" '"TIMEOUT(absolute)=0"' \
       '"CHANNEL(hangup_handler_pop)="' \
       '"NOTICE,pbx-event kind=troll-miss line=line4 caller=6135550109 site=offsite why=UNSUPPORTED"' \
-      '@elevenlabs,60,') \
-      || wrong+=("the troll probe did not offer offsite and undo it before the agent's trunk; missing or out of order: $missing")
+      "$next") \
+      || wrong+=("the troll probe did not offer offsite and undo it before $next; missing or out of order: $missing")
     seen=$(grep -F '("Local/daily@pbx-check-inbound-' "$log" || true)
     [[ $seen != *'] Transfer("'* && $seen != *site=offsite* ]] \
       || wrong+=("a caller over the day's twenty was still transferred")
-
+  fi
+  # The statuses no probe can produce are entered directly, and their
+  # fall-throughs need the agent's trunk, which only the full render has.
+  if [[ -n $TROLL_EXTENSION && $RENDER_MODE == full ]]; then
     printf '%s\n' "${TRANSFER_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
     ast 'dialplan reload' >/dev/null
     before=$(troll_count)
@@ -1226,8 +1236,10 @@ check_troll_transfer() {
   fi
   if ((${#wrong[@]})); then
     fail "the offsite hand-off" "${wrong[@]}"
-  elif [[ $RENDER_MODE == degraded ]]; then
+  elif [[ -z $TROLL_EXTENSION ]]; then
     say "    with PBX_TROLL_EXTENSION empty, no screened caller is transferred"
+  elif [[ $RENDER_MODE == degraded ]]; then
+    say "    a screened stranger is offered to offsite (extension $TROLL_EXTENSION) and, the transfer undone and the agent off, held in a sink"
   else
     say "    a screened stranger is offered to offsite first, counted and time-limited, and falls through when refused; a challenged or timed-out one is held in a sink; a taken one hangs up with no held line; *29 and a caller over the day's twenty are never transferred"
   fi
