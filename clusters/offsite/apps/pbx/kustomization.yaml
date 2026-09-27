@@ -8,32 +8,25 @@ resources:
 
 namespace: pbx
 
-patches:
-  # Parked. The trunk still needs TLS to voip.ms proven live, and the owner
-  # has not asked for DID #2 to ring anyone yet. Everything else here keeps
-  # reconciling — the ExternalSecret still syncs and a config change still
-  # validates — so removing this patch is the whole way to bring it back.
-  - target:
-      kind: Deployment
-      name: pbx
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 0
-
 configMapGenerator:
   # The non-secret half of the trunk. No ${...} of its own, so unlike pbx-site
   # this one is left in Flux's substitution path.
   - name: pbx-env
     literals:
-      # The sub-account whose DID the agent answers.
+      # The sub-account voip.ms delivers the troll line's calls to.
       - PBX_VOIPMS_USER=168847_elevenlabs
-      - PBX_VOIPMS_SERVER=ca.voip.ms
+      # A numbered server: voip.ms requires one for encrypted calls, and
+      # ca.voip.ms is an alias. folly's lines register to the same one. A DID
+      # routed to this sub-account has to name this server as its POP too.
+      - PBX_VOIPMS_SERVER=montreal10.voip.ms
 
+  # render.sh renders every *.conf here into /etc/asterisk, where
+  # extensions.conf includes the rest by name.
   - name: pbx-site
     files:
       - config/pjsip.conf
       - config/extensions.conf
+      - config/events.conf
     # Asterisk's dialplan and this render script are written in ${...}, which
     # is also Flux's postBuild substitution syntax. Flux does not merely blank
     # what it cannot resolve here — `${PBX_*}` and `${$name}` are not valid

@@ -36,8 +36,8 @@ spec:
     # nothing until Asterisk happens to send. A carrier that latches its media
     # to our first packet then waits forever, and an agent that greets the
     # caller before they speak is silent. `world` here is not the internet at
-    # large: nothing unsolicited crosses CGNAT and the UDM to a pod address, so
-    # in practice this admits the carriers' media and nothing else routable.
+    # large: nothing unsolicited crosses a site's gateway NAT to a pod address,
+    # so in practice this admits the far ends' media and nothing else routable.
     - fromEntities: [world]
       toPorts:
         - ports:
