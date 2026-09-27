@@ -141,6 +141,21 @@ check 'a missing inbound context is refused' 1 'the inbound context does not exi
 check 'a transfer to a literal sip: URI passes' 0 'none of them a trunk' \
   "$(inbound 's|2|Transfer(sip:100@montreal10.voip.ms)')"
 
+check 'a transfer to an empty extension, the render with none set, passes' 0 'none of them a trunk' \
+  "$(inbound 's|2|Transfer(sip:@127.0.0.1)')"
+
+check 'a transfer to an international number is refused' 1 'transfers to sip:0114412345678@montreal10.voip.ms' \
+  "$(inbound 's|2|Transfer(sip:0114412345678@montreal10.voip.ms)')"
+
+check 'a transfer to a ten-digit number is refused' 1 'an extension of at most eight digits' \
+  "$(inbound 's|2|Transfer(sip:6135550100@montreal10.voip.ms)')"
+
+check 'a transfer to a named user on another host is refused' 1 'transfers to sip:x@evil.example' \
+  "$(inbound 's|2|Transfer(sip:x@evil.example)')"
+
+check 'a transfer with no host is refused' 1 'Transfer() may name only a literal sip: URI' \
+  "$(inbound 's|2|Transfer(sip:100)')"
+
 check 'a transfer to a caller-chosen number is refused' 1 'transfers to sip:${CALLERID(num)}@montreal10.voip.ms' \
   "$(inbound 's|2|Transfer(sip:${CALLERID(num)}@montreal10.voip.ms)')"
 

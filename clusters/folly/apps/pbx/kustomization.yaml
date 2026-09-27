@@ -52,8 +52,9 @@ configMapGenerator:
       # The internal extension voip.ms assigns to the elevenlabs sub-account
       # (168847_elevenlabs), where agent.conf transfers a screened stranger
       # so that offsite answers them. The owner turns on that sub-account's
-      # internal extension in the voip.ms portal and puts the number here.
-      # Empty skips the transfer, and folly keeps every call.
+      # internal extension in the voip.ms portal and puts the number here,
+      # only while the offsite PBX is registered: a caller voip.ms takes has
+      # no fallback here. Empty skips the transfer, and folly keeps every call.
       - PBX_TROLL_EXTENSION=
 
   # render.sh renders every *.conf here into /etc/asterisk, where
