@@ -1,7 +1,7 @@
 ---
-# offsite egress: the carrier and the troll agent, over TLS, and RTP. Nothing
-# on the LAN, because no handset registers here, and no plain SIP, because
-# pjsip.conf declares only a TLS transport. Ingress is the base policy's.
+# offsite egress: the carrier and the troll agent, over TLS, and RTP to public
+# addresses. Nothing on the LAN, because no handset registers here, and no
+# plain SIP, because pjsip.conf declares only a TLS transport.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -52,18 +52,40 @@ spec:
     # RTP cannot be an FQDN rule: the media address arrives in an SDP body,
     # from a host this pod never looked up. A toFQDNs egress rule permits the
     # signalling and then drops every audio packet, and the call connects and
-    # carries silence.
-    - toEntities: [world]
-      toPorts:
-        - ports:
-            - {port: "10000", endPort: 20000, protocol: UDP}
-    # ElevenLabs sends media from ports anywhere in 10000-60000, wider than
-    # voip.ms; rtp.conf still pins this pod's own ports to 10000-20000. `world`
-    # includes the private and shared (100.64/10) ranges, so the ports past
-    # 20000 reach public addresses only.
+    # carries silence. ElevenLabs sends media from ports anywhere in
+    # 10000-60000, wider than voip.ms; rtp.conf still pins this pod's own ports
+    # to 10000-20000. `world` includes the private and shared (100.64/10)
+    # ranges, where the site's LAN and the site-to-site link are, so this names
+    # public addresses only.
     - toCIDRSet:
         - cidr: 0.0.0.0/0
           except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10]
       toPorts:
         - ports:
-            - {port: "20001", endPort: 60000, protocol: UDP}
+            - {port: "10000", endPort: 60000, protocol: UDP}
+---
+# The base policy admits RTP from `world`, which folly's handset needs, and
+# `world` includes private addresses. Each site advertises its pod pools over
+# BGP, so a host on the LAN or across the site-to-site link can reach this
+# pod's RTP ports. Nothing private sends media here, and a deny wins over the
+# base's allow. CIDR rules never match cluster endpoints or nodes.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pbx-rtp-public-only
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pbx
+  ingressDeny:
+    - fromCIDRSet:
+        - cidr: 10.0.0.0/8
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 100.64.0.0/10
+      toPorts:
+        - ports:
+            - {port: "10000", endPort: 20000, protocol: UDP}
