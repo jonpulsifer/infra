@@ -134,6 +134,11 @@ spec:
             # sandbox. The bearer is the mate-kthx-agent Secret, read by the pod.
             - name: MATE_KTHX_MCP_URL
               value: http://spindrift.spindrift.svc.cluster.local:3000/mcp
+            # Each sandbox gets this address and a ring token from Secret
+            # mate-switchboard, so the agent can ring the owner's phone. The
+            # number and the caps are switchboard's; the sandbox holds neither.
+            - name: MATE_SWITCHBOARD_URL
+              value: http://switchboard.elevenlabs.svc.cluster.local:8080
             # On the emptyDir, so a container restart resumes the gateway session
             # instead of spending an identify from the daily budget.
             - name: MATE_SESSION_FILE

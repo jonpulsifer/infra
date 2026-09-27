@@ -43,8 +43,10 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # Every pod outside `mate`, on every port, Prometheus included. Exists keeps
-    # NotIn from also matching identities with no namespace label.
+    # Every pod outside `mate`, on every port, Prometheus included, but not
+    # Alertmanager: its API takes an alert from anyone, and a critical one rings
+    # the owner through switchboard without the ring token. Exists keeps NotIn
+    # from also matching identities with no namespace label.
     - toEndpoints:
         - matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
@@ -53,6 +55,10 @@ spec:
               operator: NotIn
               values:
                 - mate
+            - key: k8s:app.kubernetes.io/name
+              operator: NotIn
+              values:
+                - alertmanager
     # Not a pod or ClusterIP backend, so only the entity reaches it. What the
     # agent may do there is sandbox-rbac.yaml's.
     - toEntities:

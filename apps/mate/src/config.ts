@@ -69,6 +69,8 @@ export interface SandboxConfig {
    */
   readonly kubeServiceAccount: string | null;
   readonly kthx: KthxConfig;
+  /** `null`, the default, gives the sandbox no way to ring the owner. */
+  readonly switchboard: SwitchboardConfig | null;
 }
 
 /**
@@ -84,6 +86,14 @@ export interface KthxConfig {
   readonly mcpUrl: string | null;
   /** The Secret holding the engine's agent token as `KTHX_AGENT_TOKEN`. */
   readonly agentSecret: string;
+}
+
+// Switchboard fixes the number and the caps server-side; the sandbox holds a
+// token that can only ask it to ring.
+export interface SwitchboardConfig {
+  readonly url: string;
+  /** The Secret holding the ring token as `SWITCHBOARD_RING_TOKEN`. */
+  readonly secret: string;
 }
 
 // The vault is the boundary: the agent's commands are auto-allowed, so it can
@@ -198,6 +208,15 @@ function vault(env: Env): VaultConfig | null {
   };
 }
 
+function switchboard(env: Env): SwitchboardConfig | null {
+  const url = env.MATE_SWITCHBOARD_URL?.trim();
+  if (!url) return null;
+  return {
+    url,
+    secret: text(env, 'MATE_SWITCHBOARD_SECRET', 'mate-switchboard'),
+  };
+}
+
 // A bad App id or key is not a `ConfigError`, since the one replica failing to
 // boot would take both chat surfaces down. A non-GitHub checkout URL is one.
 function githubApp(env: Env, checkoutRepo: string): GithubAppConfig | null {
@@ -261,6 +280,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     github: Boolean(env.MATE_GITHUB_APP_ID?.trim()),
     kubeServiceAccount: env.MATE_SANDBOX_KUBE_SA?.trim() || null,
     kthx: kthx(env),
+    switchboard: switchboard(env),
   };
 }
 

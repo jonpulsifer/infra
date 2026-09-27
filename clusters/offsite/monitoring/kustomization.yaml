@@ -8,6 +8,8 @@ resources:
   - spindrift-rules.yaml
   - kthx-rules.yaml
   - mate-rules.yaml
+  - alertmanager-switchboard.yaml
+  - alertmanager-network-policy.yaml
   - ../../base/monitoring
 patches:
   - target:

@@ -107,6 +107,7 @@ describe('config from the environment', () => {
           mcpUrl: null,
           agentSecret: 'mate-kthx-agent',
         },
+        switchboard: null,
       },
       githubApp: null,
       sshKeyFile: null,
@@ -134,6 +135,36 @@ describe('config from the environment', () => {
         'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
       connectSecret: 'mate-onepassword',
     });
+  });
+
+  test('a sandbox can ring the owner only once a switchboard URL is set', () => {
+    const kube = {
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+    };
+    expect(readSandboxConfig(kube).switchboard).toBeNull();
+    expect(
+      readSandboxConfig({ ...kube, MATE_SWITCHBOARD_SECRET: 'ring' })
+        .switchboard,
+    ).toBeNull();
+    expect(
+      readSandboxConfig({
+        ...kube,
+        MATE_SWITCHBOARD_URL:
+          ' http://switchboard.elevenlabs.svc.cluster.local:8080 ',
+      }).switchboard,
+    ).toEqual({
+      url: 'http://switchboard.elevenlabs.svc.cluster.local:8080',
+      secret: 'mate-switchboard',
+    });
+    expect(
+      readSandboxConfig({
+        ...kube,
+        MATE_SWITCHBOARD_URL: 'http://switchboard:8080',
+        MATE_SWITCHBOARD_SECRET: 'ring',
+      }).switchboard,
+    ).toEqual({ url: 'http://switchboard:8080', secret: 'ring' });
   });
 
   test('the GitHub App is off until an id is set, and is never on the sandbox config', () => {

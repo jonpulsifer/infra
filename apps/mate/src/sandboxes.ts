@@ -4,7 +4,12 @@
  * that dies mid-thread cannot leak one.
  */
 import { AcpClient } from './acp.ts';
-import type { KthxConfig, SandboxConfig, VaultConfig } from './config.ts';
+import type {
+  KthxConfig,
+  SandboxConfig,
+  SwitchboardConfig,
+  VaultConfig,
+} from './config.ts';
 // Mint and revoke only, so nothing here can reach the App's private key.
 export interface TokenSource {
   token(): Promise<{ token: string }>;
@@ -378,6 +383,26 @@ function kthxEnv(kthx: KthxConfig): Record<string, unknown>[] {
   ];
 }
 
+// A missing Secret would hold every sandbox in CreateContainerConfigError, so
+// the token is optional; without it a ring gets a 401, which the skill reports.
+function switchboardEnv(
+  switchboard: SwitchboardConfig,
+): Record<string, unknown>[] {
+  return [
+    { name: 'SWITCHBOARD_URL', value: switchboard.url },
+    {
+      name: 'SWITCHBOARD_RING_TOKEN',
+      valueFrom: {
+        secretKeyRef: {
+          name: switchboard.secret,
+          key: 'SWITCHBOARD_RING_TOKEN',
+          optional: true,
+        },
+      },
+    },
+  ];
+}
+
 export interface SandboxDeclaration {
   name: string;
   namespace: string;
@@ -525,6 +550,9 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
                 ...(config.vault ? connectEnv(config.vault) : []),
                 ...kthxEnv(config.kthx),
+                ...(config.switchboard
+                  ? switchboardEnv(config.switchboard)
+                  : []),
                 ...gitEnv(config.github),
                 ...(config.kubeServiceAccount
                   ? [{ name: 'KUBECONFIG', value: KUBECONFIG_FILE }]

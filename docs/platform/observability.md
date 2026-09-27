@@ -27,7 +27,7 @@ Clients that route to a cluster's load-balancer range reach its addresses.
 
 ## Alerts and logs
 
-The `discord` AlertmanagerConfig sends alerts to a Discord webhook from 1Password, except `Watchdog` and `InfoInhibitor`. Each alert carries its `cluster` label, repeats every 12 hours, and reports when it resolves. The `inhibit_rules` in `kube-prometheus.yaml` send an info alert only while a warning or critical alert fires in its namespace.
+Alertmanager routes every alert to Discord, and on offsite a firing `critical` alert to the owner's phone as well. [Alerting](observability/alerting.md) has the routes, the selector rules and who can post an alert.
 
 The in-cluster log streams carry `cluster` and a `job` of `kubernetes` or `systemd-journal`. The desktop streams carry `job="windows-eventlog"`, `host`, `channel` and `level`. Query logs in Grafana, or directly with the header `AccountID: 1`.
 
@@ -42,7 +42,6 @@ The k6 operator on folly runs each new TestRun, a k6 test, in a runner Job. Each
 ## Rules
 
 - Label each ServiceMonitor and PrometheusRule, and each PodMonitor on folly, `release: prom-stack`, or Prometheus ignores it. offsite selects every PodMonitor.
-- Keep `alertmanagerConfigSelector` and `alertmanagerConfigMatcherStrategy` in each `kube-prometheus.yaml`, or no alert reaches Discord.
 - Route only `/insert` of VictoriaLogs out of the cluster. It has no authentication, so another path exposes every log.
 - Run `mise run k8s:check-rules` after a rule change, or a broken rule fails CI.
 
