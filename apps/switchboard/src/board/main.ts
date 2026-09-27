@@ -22,7 +22,7 @@ function readPlan(path: string) {
 }
 
 /**
- * The board: reads the lines from pjsip.conf, follows the PBX over ARI, and
+ * The board: reads the lines from pjsip.conf, polls the PBX's ARI lists, and
  * serves the page. The port opens at once, so the page can say the PBX is
  * unreachable rather than the pod never becoming ready.
  */
@@ -45,7 +45,6 @@ export async function startBoard(
         trail: call.trail.join(' '),
         seconds: call.seconds,
         talkedSeconds: call.talkedSeconds,
-        cause: call.causeText,
       }),
   });
   new AriClient({ config, model, log }).start();

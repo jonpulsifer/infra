@@ -54,7 +54,9 @@ jobs:
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
-      - name: Test the inbound walker
-        run: bash .github/scripts/pbx-inbound-walk_test.sh
+      - name: Test the inbound walker and the ARI user reader
+        run: |
+          bash .github/scripts/pbx-inbound-walk_test.sh
+          bash .github/scripts/pbx-ari-users_test.sh
       - name: Boot both sites
         run: bash .github/scripts/pbx-check.sh

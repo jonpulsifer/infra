@@ -1,44 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AriClient } from '../src/board/ari.ts';
+import { ARI_LISTS, AriClient, METRICS_PATH } from '../src/board/ari.ts';
+import type { AriChannel } from '../src/board/ari-types.ts';
 import { BoardModel } from '../src/board/model.ts';
 import type { Fields, Log } from '../src/log.ts';
 import { channel, PLAN } from './board-fixtures.ts';
-
-class FakeSocket {
-  static last: FakeSocket | undefined;
-  onopen: (() => void) | null = null;
-  onmessage: ((m: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  pings = 0;
-  terminated = false;
-  private pong: (() => void) | undefined;
-  constructor(
-    readonly url: string,
-    readonly options: { headers: Record<string, string> },
-  ) {
-    FakeSocket.last = this;
-  }
-  addEventListener(type: string, listener: () => void) {
-    if (type === 'pong') this.pong = listener;
-  }
-  ping() {
-    this.pings++;
-  }
-  answerPing() {
-    this.pong?.();
-  }
-  send(event: object) {
-    this.onmessage?.({ data: JSON.stringify(event) });
-  }
-  close() {
-    this.onclose?.();
-  }
-  terminate() {
-    this.terminated = true;
-    this.onclose?.();
-  }
-}
 
 const PASSWORD = 'hunter2hunter2';
 const config = {
@@ -59,18 +24,22 @@ function fakeFetch(
   status: (path: string) => number,
   body: (path: string) => unknown,
 ) {
-  const requests: { url: string; authorization: string | null }[] = [];
+  const requests: {
+    url: string;
+    method: string;
+    authorization: string | null;
+  }[] = [];
   const impl = (async (url: string, init?: RequestInit) => {
     const path = new URL(url).pathname;
     requests.push({
       url,
+      method: init?.method ?? 'GET',
       authorization: new Headers(init?.headers).get('authorization'),
     });
-    const code = status(path);
     const payload = body(path);
     return new Response(
       typeof payload === 'string' ? payload : JSON.stringify(payload),
-      { status: code },
+      { status: status(path) },
     );
   }) as unknown as typeof fetch;
   return { impl, requests };
@@ -95,100 +64,119 @@ function start(fetchImpl: typeof fetch, timings = {}) {
     config,
     model,
     log,
-    WebSocket: FakeSocket as never,
     fetch: fetchImpl,
-    timings: { metricsMs: 60_000, backoffMs: [5], ...timings },
+    timings: { pollMs: 5, metricsMs: 60_000, backoffMs: [5], ...timings },
   });
   client.start();
-  return { model, lines, socket: FakeSocket.last as FakeSocket };
+  return { model, lines };
 }
 
 describe('the ARI client', () => {
-  test('subscribes to everything with the credential in a header only', async () => {
+  test('reads only the paths pbx-ari admits, with the credential in a header', async () => {
+    const { impl, requests } = fakeFetch(
+      () => 200,
+      (path) => (path === METRICS_PATH ? '' : []),
+    );
+    const { model } = start(impl);
+    await until(() => model.snapshot().asterisk.ari === 'connected');
+    await until(() => requests.length > 2 * ARI_LISTS.length);
+    const allowed: string[] = [...ARI_LISTS, METRICS_PATH];
+    for (const r of requests) {
+      const url = new URL(r.url);
+      expect(allowed).toContain(url.pathname);
+      expect(url.search).toBe('');
+      expect(r.method).toBe('GET');
+      expect(r.url).not.toContain(PASSWORD);
+      if (url.pathname === METRICS_PATH) expect(r.authorization).toBeNull();
+      else
+        expect(r.authorization).toBe(
+          `Basic ${btoa(`switchboard:${PASSWORD}`)}`,
+        );
+    }
+  });
+
+  test('follows the PBX from one poll to the next', async () => {
+    let channels: AriChannel[] = [
+      channel('1.1', 'PJSIP/vms-1994-00000001', {
+        context: 'from-voipms',
+        exten: 's',
+        vars: { HANDSET: 'line4', SCREEN: 'yes' },
+      }),
+    ];
+    const { impl } = fakeFetch(
+      () => 200,
+      (path) => (path === '/ari/channels' ? channels : []),
+    );
+    const { model, lines } = start(impl);
+    await until(() => model.snapshot().calls.length === 1);
+    channels = [
+      channel('1.1', 'PJSIP/vms-1994-00000001', {
+        context: 'spam',
+        exten: 'queue',
+        vars: { HANDSET: 'line4', SCREEN: 'yes' },
+      }),
+    ];
+    await until(
+      () => model.snapshot().calls[0]?.stage.label === 'held: Endless Queue',
+    );
+    channels = [];
+    await until(() => model.snapshot().recent.length === 1);
+    expect(lines.filter((l) => l.includes('ari connected'))).toHaveLength(1);
+    expect(lines.join('\n')).not.toContain(PASSWORD);
+  });
+
+  test('says when the credential is refused, and recovers', async () => {
+    let status = 401;
+    const { impl } = fakeFetch(
+      (path) => (path.startsWith('/ari/') ? status : 200),
+      () => [],
+    );
+    const { model, lines } = start(impl);
+    await until(() => model.snapshot().asterisk.reason === 'unauthorized');
+    expect(model.snapshot().asterisk.ari).toBe('disconnected');
+    status = 200;
+    await until(() => model.snapshot().asterisk.ari === 'connected');
+    expect(lines.join('\n')).not.toContain(PASSWORD);
+  });
+
+  test('names a path the network policy refuses', async () => {
+    const { impl } = fakeFetch(
+      (path) => (path === '/ari/bridges' ? 403 : 200),
+      () => [],
+    );
+    const { model } = start(impl);
+    await until(() => model.snapshot().asterisk.reason === 'forbidden');
+  });
+
+  test('treats a reply that is not a list as an error', async () => {
+    const { impl } = fakeFetch(
+      () => 200,
+      (path) => (path === '/ari/channels' ? '<html>' : []),
+    );
+    const { model } = start(impl);
+    await until(() => model.snapshot().asterisk.reason === 'http-error');
+  });
+
+  test('stops polling when stopped', async () => {
     const { impl, requests } = fakeFetch(
       () => 200,
       () => [],
     );
-    const { model, socket } = start(impl);
-    expect(socket.url).toBe(
-      'ws://pbx:8088/ari/events?app=switchboard&subscribeAll=true',
-    );
-    expect(socket.options.headers.authorization).toBe(
-      `Basic ${btoa(`switchboard:${PASSWORD}`)}`,
-    );
-    socket.onopen?.();
+    const { model } = start(impl);
     await until(() => model.snapshot().asterisk.ari === 'connected');
-    expect(requests.some((r) => r.url.endsWith('/ari/channels'))).toBe(true);
-    for (const r of requests) {
-      expect(r.url).not.toContain(PASSWORD);
-      if (r.url.includes('/ari/'))
-        expect(r.authorization).toStartWith('Basic ');
-      else expect(r.authorization).toBeNull();
-    }
-  });
-
-  test('loads the channels, then applies what arrived while they loaded', async () => {
-    const trunk = channel('1.1', 'PJSIP/vms-1994-00000001', {
-      context: 'from-voipms',
-      exten: 's',
-      vars: { HANDSET: 'line4', SCREEN: 'yes' },
-    });
-    const { impl } = fakeFetch(
-      () => 200,
-      (path) => (path === '/ari/channels' ? [trunk] : []),
-    );
-    const { model, socket, lines } = start(impl);
-    socket.onopen?.();
-    socket.send({
-      type: 'ChannelDialplan',
-      channel: {
-        ...trunk,
-        dialplan: {
-          context: 'spam',
-          exten: 'queue',
-          app_name: 'Playback',
-          app_data: '',
-        },
-      },
-    });
-    expect(model.snapshot().calls).toHaveLength(0);
-    await until(() => model.snapshot().asterisk.ari === 'connected');
-    const view = model.snapshot();
-    expect(view.asterisk.ari).toBe('connected');
-    expect(view.calls[0]?.stage.label).toBe('held: Endless Queue');
-    expect(lines.join('\n')).not.toContain(PASSWORD);
-  });
-
-  test('says when the credential is refused, and tries again', async () => {
-    const { impl } = fakeFetch(
-      (path) => (path.startsWith('/ari/') ? 401 : 200),
-      () => '',
-    );
-    const { model, socket, lines } = start(impl, { backoffMs: [200] });
-    socket.close();
-    await until(() => model.snapshot().asterisk.ari === 'disconnected');
-    expect(model.snapshot().asterisk.reason).toBe('unauthorized');
-    await until(() => FakeSocket.last !== socket);
-    expect(lines.join('\n')).not.toContain(PASSWORD);
-  });
-
-  test('drops a socket that stops answering pings', async () => {
-    const { impl } = fakeFetch(
-      () => 200,
-      () => [],
-    );
-    const { socket } = start(impl, { pingMs: 5, pongTimeoutMs: 5 });
-    socket.onopen?.();
-    await until(() => socket.terminated);
-    expect(socket.pings).toBeGreaterThan(0);
+    client?.stop();
+    await new Promise((r) => setTimeout(r, 20));
+    const seen = requests.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(requests.length).toBe(seen);
   });
 
   test('reads registrations from /metrics and says when it cannot', async () => {
     let up = true;
     const { impl } = fakeFetch(
-      (path) => (path === '/metrics' && !up ? 503 : 200),
+      (path) => (path === METRICS_PATH && !up ? 503 : 200),
       (path) =>
-        path === '/metrics'
+        path === METRICS_PATH
           ? 'asterisk_pjsip_outbound_registration_status{username="sip:168847_1994@pop"} 1\n'
           : [],
     );

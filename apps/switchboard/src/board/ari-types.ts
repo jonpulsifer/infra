@@ -1,6 +1,6 @@
 // The slice of the ARI data model (Asterisk 22, rest-api/api-docs) the board
-// reads. Every field is optional here because the board must survive an
-// event it only half understands.
+// reads from ARI's lists. Every field is optional here because the board must
+// survive an object it only half understands.
 
 export interface AriCallerId {
   readonly name?: string;
@@ -23,7 +23,7 @@ export interface AriChannel {
   readonly connected?: AriCallerId;
   readonly dialplan?: AriDialplan;
   readonly creationtime?: string;
-  /** The variables ari.conf's `channelvars` names, on every channel event. */
+  /** The variables ari.conf's `channelvars` names, as of the last step. */
   readonly channelvars?: Readonly<Record<string, string>>;
 }
 
@@ -36,30 +36,6 @@ export interface AriEndpoint {
   readonly technology?: string;
   readonly resource: string;
   readonly state?: string;
-}
-
-export interface AriContactInfo {
-  readonly aor?: string;
-  readonly contact_status?: string;
-  readonly roundtrip_usec?: string;
-}
-
-export interface AriEvent {
-  readonly type: string;
-  readonly timestamp?: string;
-  readonly channel?: AriChannel;
-  /** Dial: the channel being dialled. */
-  readonly peer?: AriChannel;
-  /** Dial: the channel that dialled, absent for an originate. */
-  readonly caller?: AriChannel;
-  readonly dialstatus?: string;
-  readonly variable?: string;
-  readonly value?: string;
-  readonly cause?: number;
-  readonly cause_txt?: string;
-  readonly bridge?: AriBridge;
-  readonly endpoint?: AriEndpoint;
-  readonly contact_info?: AriContactInfo;
 }
 
 /** ARI dates end in `+0000`; ISO 8601 wants `+00:00`. */

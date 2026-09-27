@@ -18,31 +18,24 @@ The page shows:
 
 - Each call in progress: the caller, or the number the handset dialled; the line and trunk; the IVR stage, such as `press-5 prompt`, `with Earl` or `held: Robo-Lenny`; the verdict and `pbx-event` kinds; and the elapsed time.
 - Each line: handset and trunk registration, whether it screens, and whether a call is up.
-- The last 25 calls to end, with the hangup cause, and the state of the ARI connection.
+- The last 25 calls to end, and the state of the ARI connection.
 
 ## Limits
 
 - The page has no sign-in and shows callers' names and numbers to every client that reaches it.
-- The pod holds the recent calls, so a restart empties the list.
+- The board samples the PBX once a second, so a call that ends within a second, such as one the screening cap refuses, can miss the page. The PBX log still has it.
+- The recent calls carry no hangup cause, and the pod holds them, so a restart empties the list.
 - A context the board has no name for reads as `in <context>`.
 
 ## How it works
 
-The board connects to ARI, the Asterisk REST interface, on the PBX's HTTP port as the read-only user in `clusters/folly/apps/pbx/config/ari.conf`; `pbx-check` fails a config with a writable ARI user. One websocket subscribes to every event. The board reads the channel list at each connect and each minute, and `/metrics` every 15 seconds for trunk registrations.
+The board polls ARI, the Asterisk REST interface, on the PBX's HTTP port as the user in `clusters/folly/apps/pbx/config/ari.conf`. Each second it reads the channel, bridge and endpoint lists, and every 15 seconds `/metrics` for trunk registrations. Each channel carries the variables `ari.conf` names, so the board reads the stage from the dialplan position and the verdict from `TRAIL`, which `config/events.conf` appends each `pbx-event` kind to.
 
-It reads the lines from the `pjsip.conf` template in the `pbx-site` ConfigMap, each stage from the dialplan position, and each verdict from the `pbx-event` kinds in `config/events.conf`. The PBX does not load `res_ari_asterisk`, which returns trunk passwords to any ARI user. CiliumNetworkPolicies admit only the Gateway and the kubelet to the board, and the board to the PBX.
+ARI's read-only user can still run dialplan functions through a GET, so the CiliumNetworkPolicy `pbx-ari` admits the board to those four paths alone, by exact path and as GET. The PBX refuses the modules in `clusters/base/apps/pbx/config/modules.conf` that would hand the ARI password more, and `pbx-check` fails a writable ARI user.
 
 ## Operate
 
-No alert watches the board. The ARI password is the SOPS Secret `pbx-ari`, which the PBX reads when its pod starts. If the page shows `ARI disconnected (unauthorized)`, restart the `pbx` Deployment when no call is up. To rotate the password, run this from the repo root, merge, and restart `pbx`:
-
-```sh
-SOPS_AGE_KEY_FILE=~/.config/age/keys.txt bash -c 'set -euo pipefail
-f=clusters/folly/apps/pbx/ari-secret.sops.yaml
-pw=$(head -c 24 /dev/urandom | od -An -vtx1 | tr -d " \n")
-printf "apiVersion: v1\nkind: Secret\nmetadata:\n  name: pbx-ari\n  namespace: pbx\ntype: Opaque\nstringData:\n  PBX_ARI_PASSWORD: \"%s\"\n" "$pw" |
-  sops encrypt --filename-override "$f" /dev/stdin >"$f"'
-```
+No alert watches the board. [Operate the office phone](../../runbooks/operate-the-office-phone.md#rotate-the-boards-ari-password) rotates its ARI password and says what `ARI disconnected (unauthorized)` means.
 
 ## Reference
 

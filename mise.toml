@@ -90,8 +90,11 @@ description = "Render the folly PBX prompts in clusters/folly/apps/pbx/sounds/li
 run = "bash .github/scripts/pbx-voices.sh"
 
 [tasks."pbx:test"]
-description = "Test the PBX check's inbound dialplan walker against fixtures"
-run = "bash .github/scripts/pbx-inbound-walk_test.sh"
+description = "Test the PBX check's inbound dialplan walker and ARI user reader against fixtures"
+run = [
+  "bash .github/scripts/pbx-inbound-walk_test.sh",
+  "bash .github/scripts/pbx-ari-users_test.sh",
+]
 
 [tasks."elevenlabs:test"]
 description = "Run the ElevenLabs reconciler against a stubbed API and check what it logs and sends"

@@ -122,8 +122,7 @@ td.num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-n
       card.append(el('div', 'sub', (l.account || l.trunk || 'no trunk') + (l.screened ? ' · screened' : '')));
       var chips = el('div', 'chips');
       var h = l.handset;
-      chips.append(pill('handset ' + h + (l.handsetRttMs !== null ? ' ' + l.handsetRttMs + ' ms' : ''),
-        h === 'online' ? 'ok' : h === 'offline' ? 'bad' : 'warn'));
+      chips.append(pill('handset ' + h, h === 'online' ? 'ok' : h === 'offline' ? 'bad' : 'warn'));
       var r = l.registration;
       chips.append(pill('trunk ' + r, r === 'registered' ? 'ok' : r === 'unknown' ? 'warn' : 'bad'));
       card.append(chips);
@@ -189,7 +188,6 @@ td.num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-n
         ? c.verdict + ' · ' + c.lastStage
         : c.lastStage;
       row.append(el('td', '', what));
-      row.append(el('td', 'hide-narrow muted', c.causeText || ''));
       row.append(el('td', 'num', clock(c.seconds)));
       body.append(row);
     });
