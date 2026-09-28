@@ -136,7 +136,7 @@ COPY gh /usr/local/bin/gh
 # The CLI comes from the image that serves it, so the sandbox runs the build
 # the apex serves. It is a Bun bundle: `kthx` on PATH is the shim copied in
 # below, and `kthx upgrade` would install a second copy the shim never runs.
-COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:12f06cc351efb6b11b40d5366d3f6db2c8b10ab843e1af398cbc58a7fd933c75 /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
+COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:0c1e59e6afc0021f9a6bd165958d54eb53c26d5375936a690d1c2b1b6da09f85 /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
 RUN set -eux; \
     mkdir -m 0755 -p /usr/local/lib/kthx; \
     tar -xzf /tmp/kthx.tgz --no-same-owner -C /usr/local/lib/kthx --strip-components=1 \
