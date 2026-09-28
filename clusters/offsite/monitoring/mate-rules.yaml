@@ -205,3 +205,48 @@ spec:
           annotations:
             message: "mate's Discord identify budget is approaching its reserve"
             description: "Fewer than 40% of the day's IDENTIFYs are left, against a reserve of 20% that mate will not spend into — below that it stops connecting until Discord's reset, and exhausting the budget outright makes Discord rotate the bot token. Something is reconnecting: read the pod for `gateway closed` lines and their codes, and check whether the Deployment is rolling (the digest-bump CD opens a PR per build)."
+
+        # `absent` covers a gone instance, a broken scrape and an unselected
+        # PodMonitor.
+        - alert: MateDatabaseDown
+          expr: |
+            cnpg_collector_up{namespace="mate",cluster="mate-db"} == 0
+            or absent(cnpg_collector_up{namespace="mate",cluster="mate-db"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate's session database is not reporting"
+            description: "`cnpg_collector_up` for the mate-db cluster is 0 or missing: the instance is down, or the PodMonitor it exports through is not being scraped, so nothing can read or write the session store. `kubectl cnpg status mate-db -n mate --context offsite` shows which. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the checks."
+
+        # local-path enforces no size and has no kubelet_volume_stats_*, so this
+        # alert is the claim's only budget. WAL and the catalog sit on top.
+        - alert: MateDatabaseVolumeFilling
+          expr: |
+            sum(cnpg_pg_database_size_bytes{namespace="mate"})
+            /
+            sum(kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace="mate",persistentvolumeclaim=~"mate-db-.*"})
+            > 0.8
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate's session database is past 80% of its volume"
+            description: "The databases in mate-db sum to more than 80% of what its claim asks for. local-path does not enforce the size, so the node's disk is the real limit. Raise `storage.size` in clusters/offsite/apps/mate/database.yaml, which the storage class allows live, or prune the corpus."
+
+        # Keyed on the last success: failed Jobs outlive a fix, and a CronJob that
+        # stops firing leaves none. The middle arm waits out the first window.
+        - alert: MateDatabaseBackupFailing
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="mate",cronjob="mate-db-backup"} > 36 * 3600
+            or (
+              time() - kube_cronjob_created{namespace="mate",cronjob="mate-db-backup"} > 36 * 3600
+              unless on() kube_cronjob_status_last_successful_time{namespace="mate",cronjob="mate-db-backup"}
+            )
+            or absent(kube_cronjob_created{namespace="mate",cronjob="mate-db-backup"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "The nightly mate database dump has not succeeded"
+            description: "mate-db-backup has not succeeded in 36 hours, one whole window missed with the schedule at 04:43 UTC, so the bucket has no current dump of the session store. Read both containers of the most recent Job within three days, after which the Job is collected: dump is pg_dump, upload is gcloud. A 403 from the upload is the federation or the bucket grant in terraform/gcp/projects/homelab-ng/mate.tf. If there is no Job at all, the CronJob stopped firing, is suspended or is gone."

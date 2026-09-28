@@ -19,6 +19,7 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 | Declared in | Change it through |
 | --- | --- |
 | `clusters/folly/apps/tronbyt/04-database.yaml` | Git |
+| `clusters/offsite/apps/mate/database.yaml` | Git |
 | `packages/charts/*/templates/database.yaml`, in each chart that has one | Git, in the chart values of the HelmRelease |
 | The `spindrift-datastores` namespace | kthx. Each is the database that kthx makes for a [built app](../apps/kthx/built-apps.md). |
 
@@ -89,21 +90,22 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 ## Check the backups
 
 > [!WARNING]
-> Only the kthx database has a backup. If another database loses its volume, its data is lost.
+> Only the kthx and mate databases have a backup. If another database loses its volume, its data is lost.
 
 | Database | Backup |
 | --- | --- |
 | kthx (`kthx-db`) | The CronJob `kthx-db-backup` writes a `pg_dumpall` to `gs://bluenose-kthx/backups/pg/` each night. The bucket deletes a dump after 30 days. |
+| mate (`mate-db`) | The CronJob `mate-db-backup` writes a `pg_dump` to `gs://homelab-ng-mate/backups/pg/` each night. The bucket deletes a dump after 30 days. |
 | The built-apps database (`spindrift-db`) | None. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
 
 1. Read the backup line in the `kubectl cnpg status` output of the database.
 
    Result: `Continuous Backup not configured`.
 
-2. Make sure that the last kthx dump is less than a day old.
+2. Make sure that the last dump is less than a day old. `<cronjob>` is `kthx-db-backup` in `kthx`, or `mate-db-backup` in `mate`.
 
    ```bash
-   kubectl get cronjob kthx-db-backup -n kthx --context offsite -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'
+   kubectl get cronjob <cronjob> -n <namespace> --context offsite -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'
    ```
 
    Result: The time of the last successful dump, in UTC.
@@ -116,8 +118,10 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 | `unknown command "cnpg" for "kubectl"` | The plugin is not installed. | Run `mise install github:cloudnative-pg/cloudnative-pg`. |
 | `cnpg status` shows no primary. | The `Cluster` is in bootstrap or in a restart. | If no primary shows after 5 minutes, read `kubectl cnpg logs cluster`. |
 | `KthxBackupFailing` fires. | No kthx dump has succeeded for 36 hours. | Read the logs of the last `kthx-db-backup` Job. |
+| `MateDatabaseBackupFailing` fires. | No mate dump has succeeded for 36 hours. | Read the logs of the last `mate-db-backup` Job. A 403 from `upload` is the grant in `terraform/gcp/projects/homelab-ng/mate.tf`. |
 
 ## Related
 
 - [Kubernetes](../platform/kubernetes.md)
 - [kthx](../apps/kthx.md)
+- [How Rowbutt works](../apps/mate/how-it-works.md#session-store)

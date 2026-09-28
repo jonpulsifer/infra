@@ -40,7 +40,7 @@ With `pods/exec`, the agent can still read the credentials of any pod in a names
 
 ## How it works
 
-mate is one Bun process, and its ingress admits only the node it runs on. For each thread, it creates a `Sandbox` object, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md). Each turn gets short-lived GitHub and cluster tokens. [How Rowbutt works](mate/how-it-works.md) has the details.
+mate is one Bun process, and its ingress admits only the node it runs on. For each thread, it creates a `Sandbox` object, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md). Each turn gets short-lived GitHub and cluster tokens. The Postgres database `mate-db` is the [session store](mate/how-it-works.md#session-store), with a nightly dump. [How Rowbutt works](mate/how-it-works.md) has the details.
 
 ## Operate
 
@@ -48,6 +48,7 @@ mate is one Bun process, and its ingress admits only the node it runs on. For ea
 | --- | --- | --- |
 | `MateGitHubCredentialBroken`, `MateGitHubTokenMintFailing` | mate cannot mint GitHub tokens, so sandboxes cannot push | [Repair the Rowbutt GitHub credential](../runbooks/repair-the-rowbutt-github-credential.md) |
 | `MateKthxSitesSyncFailing` | mate could not read back or save a sandbox's kthx site tokens. A site claimed in that turn may be orphaned. Read the mate log. | |
+| `MateDatabaseDown`, `MateDatabaseVolumeFilling`, `MateDatabaseBackupFailing` | The session store is down, past 80% of its volume, or has no dump from the last 36 hours | [Operate Postgres](../runbooks/operate-postgres.md) |
 
 The other alerts are in `clusters/offsite/monitoring/mate-rules.yaml`, and each `description` names its fix.
 

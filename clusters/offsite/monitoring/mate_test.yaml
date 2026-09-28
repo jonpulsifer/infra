@@ -439,3 +439,152 @@ tests:
       - eval_time: 45m
         alertname: MateWarmPoolShort
         exp_alerts: []
+
+  # The instance stops reporting 0 at minute 11.
+  - interval: 1m
+    input_series:
+      - series: 'cnpg_collector_up{namespace="mate",cluster="mate-db",pod="mate-db-1",job="mate/mate-db"}'
+        values: 1x10 0x20
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MateDatabaseDown
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: MateDatabaseDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: mate
+              cluster: mate-db
+              pod: mate-db-1
+              job: mate/mate-db
+            exp_annotations:
+              message: "mate's session database is not reporting"
+              description: "`cnpg_collector_up` for the mate-db cluster is 0 or missing: the instance is down, or the PodMonitor it exports through is not being scraped, so nothing can read or write the session store. `kubectl cnpg status mate-db -n mate --context offsite` shows which. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the checks."
+
+  # No instance series at all, so only the `absent` arm can fire.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics"}'
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: MateDatabaseDown
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: MateDatabaseDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: mate
+              cluster: mate-db
+            exp_annotations:
+              message: "mate's session database is not reporting"
+              description: "`cnpg_collector_up` for the mate-db cluster is 0 or missing: the instance is down, or the PodMonitor it exports through is not being scraped, so nothing can read or write the session store. `kubectl cnpg status mate-db -n mate --context offsite` shows which. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the checks."
+
+  # The database grows from 1 GiB to 4.5 GiB of a 5 GiB claim at minute 31.
+  - interval: 1m
+    input_series:
+      - series: 'cnpg_pg_database_size_bytes{namespace="mate",datname="mate",pod="mate-db-1",job="mate/mate-db"}'
+        values: 1073741824x30 4831838208x60
+      - series: 'kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace="mate",persistentvolumeclaim="mate-db-1",job="kube-state-metrics"}'
+        values: 5368709120x90
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: MateDatabaseVolumeFilling
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: MateDatabaseVolumeFilling
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate's session database is past 80% of its volume"
+              description: "The databases in mate-db sum to more than 80% of what its claim asks for. local-path does not enforce the size, so the node's disk is the real limit. Raise `storage.size` in clusters/offsite/apps/mate/database.yaml, which the storage class allows live, or prune the corpus."
+
+  # A CronJob created at minute 0 that has never run is inside its first
+  # window, not failing.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: 0x60
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts: []
+
+  # Created 35h50m before the test starts and never succeeded: the window
+  # closes at minute 10, and the alert fires 15 minutes later.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -129000x60
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: mate
+              cronjob: mate-db-backup
+              job: kube-state-metrics
+            exp_annotations:
+              message: "The nightly mate database dump has not succeeded"
+              description: "mate-db-backup has not succeeded in 36 hours, one whole window missed with the schedule at 04:43 UTC, so the bucket has no current dump of the session store. Read both containers of the most recent Job within three days, after which the Job is collected: dump is pg_dump, upload is gcloud. A 403 from the upload is the federation or the bucket grant in terraform/gcp/projects/homelab-ng/mate.tf. If there is no Job at all, the CronJob stopped firing, is suspended or is gone."
+
+  # An old CronJob whose last success an hour ago holds the alert off; one
+  # 35h50m ago goes stale at minute 10.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -1000000x60
+      - series: 'kube_cronjob_status_last_successful_time{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -3600x60
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -1000000x60
+      - series: 'kube_cronjob_status_last_successful_time{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -129000x60
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: mate
+              cronjob: mate-db-backup
+              job: kube-state-metrics
+            exp_annotations:
+              message: "The nightly mate database dump has not succeeded"
+              description: "mate-db-backup has not succeeded in 36 hours, one whole window missed with the schedule at 04:43 UTC, so the bucket has no current dump of the session store. Read both containers of the most recent Job within three days, after which the Job is collected: dump is pg_dump, upload is gcloud. A 403 from the upload is the federation or the bucket grant in terraform/gcp/projects/homelab-ng/mate.tf. If there is no Job at all, the CronJob stopped firing, is suspended or is gone."
+
+  # The CronJob is gone, so only the `absent` arm can fire.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics"}'
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: MateDatabaseBackupFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: mate
+              cronjob: mate-db-backup
+            exp_annotations:
+              message: "The nightly mate database dump has not succeeded"
+              description: "mate-db-backup has not succeeded in 36 hours, one whole window missed with the schedule at 04:43 UTC, so the bucket has no current dump of the session store. Read both containers of the most recent Job within three days, after which the Job is collected: dump is pg_dump, upload is gcloud. A 403 from the upload is the federation or the bucket grant in terraform/gcp/projects/homelab-ng/mate.tf. If there is no Job at all, the CronJob stopped firing, is suspended or is gone."
