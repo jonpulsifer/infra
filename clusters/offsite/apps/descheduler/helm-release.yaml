@@ -24,6 +24,11 @@ spec:
     keepHistory: false
   values:
     kind: Deployment
+    # The chart requests 500m; a pass every 30m peaks near 3m and 34Mi. Its limits stay.
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
     deschedulingInterval: 30m
     deschedulerPolicy:
       maxNoOfPodsToEvictPerNode: 2

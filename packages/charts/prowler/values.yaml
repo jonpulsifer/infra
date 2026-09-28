@@ -24,7 +24,7 @@ api:
   # which overruns the 2Gi limit.
   workers: 2
   resources:
-    requests: {memory: 1Gi, cpu: 250m}
+    requests: {memory: 1Gi, cpu: 50m}
     limits: {memory: 2Gi, cpu: "2"}
 
 worker:
@@ -32,7 +32,7 @@ worker:
   # Unset, Celery starts a child per visible CPU, each loading the full SDK, and OOMKills the pod.
   concurrency: 2
   resources:
-    requests: {memory: 1Gi, cpu: 250m}
+    requests: {memory: 1Gi, cpu: 100m}
     limits: {memory: 4Gi, cpu: "2"}
 
 beat:
@@ -44,7 +44,7 @@ ui:
   replicas: 1
   port: 3000
   resources:
-    requests: {memory: 256Mi, cpu: 100m}
+    requests: {memory: 256Mi, cpu: 25m}
     limits: {memory: 1Gi, cpu: "1"}
 
 database:
@@ -72,7 +72,7 @@ neo4j:
   size: 10Gi
   storageClass: ""
   resources:
-    requests: {memory: 1Gi, cpu: 250m}
+    requests: {memory: 1Gi, cpu: 100m}
     limits: {memory: 2Gi, cpu: "1"}
 
 # Keyless GCP through a projected token and an ADC `external_account` document. The
