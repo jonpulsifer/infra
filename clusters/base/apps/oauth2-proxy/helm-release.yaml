@@ -55,7 +55,7 @@ spec:
     # X-Auth-Request-Redirect from Host; without it sign-in returns to oauth2.*.
     extraContainers:
       - name: authz-shim
-        image: docker.io/nginxinc/nginx-unprivileged:1.31-alpine@sha256:6a23acdfca2b9cfbcec61419e3f1426bcbedb91362f2f19306a8567423bb4612
+        image: docker.io/nginxinc/nginx-unprivileged:1.31-alpine@sha256:26b0bf6fbf07297983cb341998d79c831508787de26627dd2a112321b9c3a4af
         command: [nginx, -c, /etc/nginx/shim/nginx.conf, -g, "daemon off;"]
         ports:
           - name: authz
