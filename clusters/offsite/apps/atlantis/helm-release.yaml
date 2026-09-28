@@ -15,7 +15,7 @@ spec:
   values:
     image:
       repository: ghcr.io/jonpulsifer/atlantis
-      tag: latest@sha256:9313562f9a1784e3512bca90ca4749cb1dced4f232c378a356f76f9eb2aaaec2
+      tag: latest@sha256:39168bb8c9ee11d1133982d91e307a12b2230ae5dae4f66db2148ed121ee537d
     orgAllowlist: github.com/jonpulsifer/infra
     environment:
       ATLANTIS_AUTOMERGE: "true"
