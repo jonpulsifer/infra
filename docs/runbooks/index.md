@@ -23,6 +23,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 ## Cloud and network
 
 - [Apply an OpenTofu change](apply-an-opentofu-change.md): change a root, check it, and apply it through Atlantis
+- [Release a stale state lock](release-a-stale-state-lock.md): confirm a state lock is stale, then release it and plan the root again
 - [Authorize Developer Connect](authorize-developer-connect.md): authorize the GitHub connection of the trusted-builds project
 - [Inspect the UniFi network](inspect-the-unifi-network.md): read the live state of a UniFi console and compare it with git
 

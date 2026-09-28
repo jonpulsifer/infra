@@ -124,6 +124,9 @@ spec:
     podTemplate:
       annotations:
         configmap.reloader.stakater.com/reload: kubeconfig-hook,plan-hook,apply-hook,policies
+    # Atlantis drains on SIGTERM by finishing the command in flight. A kill
+    # before it ends strands the tofu state lock in the GCS bucket.
+    terminationGracePeriodSeconds: 600
     ingress:
       enabled: true
       annotations:

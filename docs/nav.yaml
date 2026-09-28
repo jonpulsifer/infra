@@ -81,6 +81,7 @@ sections:
       - group: Cloud and network
         items:
           - runbooks/apply-an-opentofu-change.md
+          - runbooks/release-a-stale-state-lock.md
           - runbooks/authorize-developer-connect.md
           - runbooks/inspect-the-unifi-network.md
       - group: Secrets
