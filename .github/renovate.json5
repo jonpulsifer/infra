@@ -163,6 +163,9 @@
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
       matchDepNames:    ['unifi'],
+      // 0.56.0 and 0.56.1 fail every OpenTofu plan against state written by
+      // 0.55.0: identity gained `site` without a schema version bump.
+      allowedVersions: '!/^0\\.56\\.[01]$/',
       groupName: 'terraform unifi provider',
       groupSlug: 'terraform-unifi-provider',
     },
