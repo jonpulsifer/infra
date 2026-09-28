@@ -11,7 +11,7 @@
     "smoke": "bun run src/smoke.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.4.0",
+    "@agentclientprotocol/sdk": "1.5.0",
     "@discordjs/core": "2.6.0",
     "@discordjs/rest": "2.6.3",
     "@discordjs/ws": "2.0.4",
