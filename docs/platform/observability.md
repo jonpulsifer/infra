@@ -37,7 +37,7 @@ folly scrapes the lab hosts and the Windows desktops through EndpointSlices. `Pr
 
 ## k6
 
-The k6 operator on folly runs each new TestRun, a k6 test, in a runner Job. Each day at 09:17 local time, the CronJob `k6-scenarios` recreates the `scenarios` TestRun. It checks the kthx console and two built apps, and pushes metrics to Prometheus. A failed threshold fails the runner Job and fires `KubeJobFailed`, but the TestRun still shows `finished`.
+The k6 operator on folly runs each new TestRun, a k6 test, in a runner Job. Each day at 09:17 local time, the CronJob `k6-scenarios` recreates the `scenarios` TestRun. It checks the kthx console, a built app, and the 404 status page that an unclaimed App name gets through the public edge, and pushes metrics to Prometheus. A failed threshold fails the runner Job and fires `KubeJobFailed`, but the TestRun still shows `finished`.
 
 ## Rules
 
