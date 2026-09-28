@@ -126,6 +126,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Git sends a persisted GITHUB_TOKEN header ahead of any credential in
+          # the remote URL, so the delivery step would push as
+          # github-actions[bot] however it sets the URL. That identity's push to
+          # an open pull request holds every check at action_required, and
+          # --auto never merges it.
+          persist-credentials: false
       # Per-image needs come from each app's build.json through the matrix.
       - name: Authenticate build to Google Cloud
         if: matrix.gcp-credentials != ''
@@ -360,10 +367,10 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
           fi
-          # `actions/checkout` left GITHUB_TOKEN in the remote's auth header, so
-          # a push would use it whatever GH_TOKEN says. Carry the token that
-          # opens the pull request through to the push as well, or the branch is
-          # pushed by one identity and the pull request opened by another.
+          # The checkout above persists no credentials, so this URL's token is
+          # the only one git sends. The branch is pushed by the identity that
+          # opens the pull request, and a force push to an open one runs its
+          # checks.
           git remote set-url origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Stage only the manifests this step edited. A blanket `git add .`

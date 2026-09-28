@@ -41,6 +41,12 @@ assert_equal 'the step declares exactly the environment this test supplies' \
   $'BUILT_COMMIT\nCD_ACTOR\nDIGEST\nGH_TOKEN\nIMAGE_NAME\nMANIFESTS\nREGISTRY_REPOSITORY' \
   "$declared"
 
+# A persisted checkout header outranks the token in the push URL, and a push as
+# github-actions[bot] to an open pull request never runs its checks.
+persisted=$(yq -r '.jobs.build.steps[] | select(.name == "Checkout") | .with."persist-credentials"' "$workflow")
+assert_equal 'the build checkout persists no token for the delivery push to use' \
+  false "$persisted"
+
 stubs="$work/stubs"
 mkdir -p "$stubs"
 
