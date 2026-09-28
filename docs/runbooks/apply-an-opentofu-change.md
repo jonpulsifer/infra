@@ -118,6 +118,7 @@ Use this runbook to change the OpenTofu code in `terraform/` or `clusters/<site>
 | The pull request merged, but the change is not live. | Atlantis did not plan the root. | Open a new pull request. Comment `atlantis plan -d <root>`. Comment `atlantis apply`. |
 | `init` cannot install an `opentofu/*` provider, such as the `opentofu/tls` provider of `terraform/pki`. | You ran `terraform`. | Run `tofu`. |
 | The state of a root is not at the path of the root in the bucket. | The `prefix` in the `backend` block of the root differs from its path. | Use the `prefix` from the `backend` block. |
+| The plan or apply fails with a lock error. | An earlier Atlantis pod was killed mid-command and left the state lock behind. | Follow [Release a stale state lock](release-a-stale-state-lock.md). |
 
 ## Related
 
