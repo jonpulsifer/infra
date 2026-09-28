@@ -99,8 +99,9 @@ spec:
             # has one other node.
             - name: MATE_MAX_CONCURRENT
               value: "2"
-            # A warm spare skips the cold mint. At peak (two threads plus the spare)
-            # oldschool's CPU requests reach 3157m of 4000m.
+            # A warm spare skips the cold mint. Sandboxes are the largest driver
+            # of oldschool's CPU requests, so check KubeCPUOvercommit headroom
+            # before raising concurrency or spares.
             - name: MATE_SPARES
               value: "1"
             - name: MATE_PORT
