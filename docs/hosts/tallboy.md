@@ -28,4 +28,5 @@ Reach it at [`tallboy.<tailnet>`](index.md#reach-a-host). `terraform/network/uni
 ## Quirks
 
 - Memory Integrity (HVCI) blocks the sensor driver, so tallboy reports no CPU temperature or fan speed.
-- The per-host `Windows*` rules resolve when tallboy is off. The chart's `TargetDown` covers the `windows-exporter` job and fires now because [atomic](atomic.md) does not answer.
+- The per-host `Windows*` rules resolve when tallboy is off, and `TargetDown` leaves the `windows-exporter` job out.
+- While Mullvad VPN is connected with Local network sharing off, it drops inbound LAN traffic, so folly cannot scrape tallboy.

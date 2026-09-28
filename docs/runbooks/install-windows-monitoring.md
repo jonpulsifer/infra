@@ -145,7 +145,9 @@ Memory Integrity and the vulnerable driver blocklist are Windows security settin
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| `TargetDown` fires for job `windows-exporter`. | A desktop is off or unreachable. | Do step 2 of [Check a desktop](#check-a-desktop). |
+| `WindowsAgentDown` fires. | One agent stopped, and the desktop is on. | Do [Check a desktop](#check-a-desktop), then [Install or update the agents](#install-or-update-the-agents). |
+| `WindowsDesktopUnseen` fires. | The desktop has another address, or no agents. | Do step 2 of [Check a desktop](#check-a-desktop). |
+| Step 2 of [Check a desktop](#check-a-desktop) prints `000` while Mullvad VPN is connected. | Mullvad drops LAN traffic while Local network sharing is off. | On the desktop, run `mullvad lan set allow`. |
 | `WindowsCollectorFailing` fires. | The performance counter registry is damaged. | As administrator, run `lodctr /R`. Run `Restart-Service windows_exporter`. |
 | Step 2 of [Check a desktop](#check-a-desktop) prints `000`, and the desktop is on. | The desktop has another address, or it is outside the Internal zone. | Find the desktop with [Inspect the UniFi network](inspect-the-unifi-network.md). |
 | The installer stops with `Hash mismatch`. | The download is not the pinned file. | Make sure the `<Agent>Url` and `<Agent>Sha256` parameters name the same release. |
