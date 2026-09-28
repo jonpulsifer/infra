@@ -10,4 +10,6 @@ resources:
   - kthx-sites-secret.yaml
   - network-policy.yaml
   - sandbox-network-policy.yaml
+  - database.yaml
+  - database-backup.yaml
   - deployment.yaml

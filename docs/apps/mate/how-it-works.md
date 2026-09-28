@@ -11,6 +11,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 | --- | --- | --- |
 | mate | Connects to Discord and Slack, runs threads, creates Sandboxes and mints tokens | Deployment `mate` in namespace `mate` |
 | Sandbox | One per thread, plus one ready spare. Init container `checkout` clones the repository, and container `harness` runs OpenCode. | A pod with runtime class `kata-clh`, a Cloud Hypervisor microVM ([Kubernetes](../../platform/kubernetes.md)), in namespace `mate` on [oldschool](../../hosts/oldschool.md), the offsite worker node |
+| [Session store](#session-store) | Postgres reserved for mate's session state. Nothing connects to it yet. | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
 
 ## A turn
 
@@ -41,10 +42,18 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 
 | Pod | Egress |
 | --- | --- |
-| mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector |
+| mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector, the `mate-db` instance on 5432 |
 | Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 
 The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on. Alertmanager's ingress policy, `clusters/offsite/monitoring/alertmanager-network-policy.yaml`, admits Prometheus, Grafana, the API server and its node's host-network pods; every namespace that runs one of those is fenced, so no pod the sandbox can `pods/exec` into can post an alert.
+
+No policy selects the `mate-db` instance or the backup Job's pod. The CloudNativePG controller, Prometheus and the kubelet reach the instance, and the Job reaches Google Cloud. A sandbox reaches neither, because its egress leaves out every pod in `mate`.
+
+## Session store
+
+`clusters/offsite/apps/mate/database.yaml` declares `mate-db`, one Postgres instance on a `local-path` volume. Its database and owner role are both `mate`, and CloudNativePG writes the role's credentials to Secret `mate-db-app`. Flux never prunes the `Cluster`, because CloudNativePG deletes the volume with it; removing the store is a deliberate delete.
+
+CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped `pg_dump` to `gs://homelab-ng-mate/backups/pg/` at 04:43 UTC. It signs in to Google Cloud as `mate-db-backup@homelab-ng` through workload identity federation, with no key. `terraform/gcp/projects/homelab-ng/mate.tf` declares that account and the bucket, which deletes a dump after 30 days. There is no WAL archive, so a restore loses every write after the last dump.
 
 ## Fence
 
@@ -62,5 +71,6 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/sandboxes.ts`: the Sandbox and the credential writes
 - `apps/mate/src/kthx-sites.ts`: the ledger of kthx site bearers
 - `images/mate-sandbox/Dockerfile`: the harness image
+- `clusters/offsite/apps/mate/database.yaml`: the session store
 - `clusters/offsite/monitoring/mate-rules.yaml`: alerts, tested by `mise run k8s:check-rules`
 - `.github/containers.json`: the CD entries for both images

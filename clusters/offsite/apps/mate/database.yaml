@@ -1,0 +1,43 @@
+---
+# mate's session store. Nothing connects to it yet.
+# database-backup.yaml dumps it nightly; there is no WAL archive.
+# No CiliumNetworkPolicy selects the instance, whose pods CNPG labels
+# `app.kubernetes.io/name: postgresql`: the operator, the scrape and the probes
+# all reach it. The sandbox policy's egress leaves out every pod in `mate`.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: mate-db
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-db
+    app.kubernetes.io/part-of: mate
+  annotations:
+    # CNPG deletes the volume with the Cluster; the nightly dump is the only other copy.
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  instances: 1
+  enableSuperuserAccess: false
+  # local-path binds the claim, and so the instance, to the node it first lands on.
+  storage:
+    storageClass: local-path
+    size: 5Gi
+  # Requests keep the instance out of BestEffort, which the kubelet evicts
+  # first. offsite's other instances idle near 11m CPU and 80-190Mi.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  monitoring:
+    # CNPG's PodMonitor carries no release label; offsite's Prometheus selects every PodMonitor.
+    enablePodMonitor: true
+  bootstrap:
+    initdb:
+      database: mate
+      owner: mate
+      encoding: UTF8
+      localeCollate: C
+      localeCType: C
+      dataChecksums: true

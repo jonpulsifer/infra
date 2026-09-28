@@ -67,6 +67,15 @@ spec:
     # FQDN rule can.
     - toEntities:
         - kube-apiserver
+    # The session store's instance (database.yaml), by the label CNPG stamps on
+    # it. The `mate-db-rw` Service resolves to it before the verdict.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: mate-db
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
     # The OTLP collector alone, by pod labels: the rest of `monitoring` is
     # closed. Cilium resolves the ClusterIP to a backend before the verdict.
     - toEndpoints:

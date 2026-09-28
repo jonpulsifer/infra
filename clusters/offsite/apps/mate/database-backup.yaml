@@ -1,0 +1,169 @@
+---
+# The dump's GCP identity. terraform/gcp/projects/homelab-ng/mate.tf federates
+# `offsite:system:serviceaccount:mate:mate-db-backup`, so the name matters.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mate-db-backup
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-db-backup
+    app.kubernetes.io/part-of: mate
+automountServiceAccountToken: false
+---
+# Keyless GCP: STS trades the projected token for the account's access token.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mate-db-backup-gcp
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-db-backup
+    app.kubernetes.io/part-of: mate
+data:
+  gcp-credentials.json: |-
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/mate-db-backup@homelab-ng.iam.gserviceaccount.com:generateAccessToken",
+      "credential_source": {
+        "file": "/var/run/secrets/gcp/gcp-token",
+        "format": {
+          "type": "text"
+        }
+      }
+    }
+---
+# Nightly `pg_dump` of the session database into the bucket's `backups/pg/`,
+# which a lifecycle rule expires. The Postgres image has no GCS client and the
+# gcloud image has no Postgres client, so the two steps share an emptyDir.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mate-db-backup
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-db-backup
+    app.kubernetes.io/part-of: mate
+spec:
+  # Clear of kthx-db-backup at 04:23.
+  schedule: "43 4 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A missed run is skipped; the next night's dump covers it.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # Three days to read a failed run: `failedJobsHistoryLimit` alone evicts by count.
+      ttlSecondsAfterFinished: 259200
+      backoffLimit: 2
+      template:
+        metadata:
+          # Not `mate` or `mate-sandbox`: either would put this pod under that
+          # CiliumNetworkPolicy, which admits neither Postgres nor GCS.
+          labels:
+            app.kubernetes.io/name: mate-db-backup
+            app.kubernetes.io/part-of: mate
+        spec:
+          # OnFailure deletes the retried pod when `backoffLimit` is spent, so no
+          # log survives. Never keeps each failed attempt.
+          restartPolicy: Never
+          serviceAccountName: mate-db-backup
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: dump
+              # Keep this major equal to the server's, which the CNPG operator's
+              # default image sets, or `pg_dump` refuses the server.
+              image: ghcr.io/cloudnative-pg/postgresql:18
+              command:
+                - bash
+                - -c
+                - set -euo pipefail; pg_dump -d "$DATABASE_URL" | gzip -9 > /dump/pg.sql.gz
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: mate-db-app
+                      key: uri
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          containers:
+            - name: upload
+              image: gcr.io/google.com/cloudsdktool/google-cloud-cli:582.0.0-slim
+              # gcloud ignores GOOGLE_APPLICATION_CREDENTIALS, so `auth login
+              # --cred-file` hands it the ADC document.
+              command:
+                - bash
+                - -c
+                - |
+                  set -euo pipefail
+                  gcloud --quiet auth login --cred-file="$GOOGLE_APPLICATION_CREDENTIALS"
+                  exec gcloud --quiet storage cp /dump/pg.sql.gz \
+                    "gs://$BACKUP_BUCKET/backups/pg/$(date -u +%F).sql.gz"
+              env:
+                # Declared in terraform/gcp/projects/homelab-ng/mate.tf.
+                - name: BACKUP_BUCKET
+                  value: homelab-ng-mate
+                - name: GOOGLE_APPLICATION_CREDENTIALS
+                  value: /var/run/secrets/gcp/gcp-credentials.json
+                - name: HOME
+                  value: /tmp
+                # gcloud's credential store and logs; the root filesystem is read-only.
+                - name: CLOUDSDK_CONFIG
+                  value: /tmp/gcloud
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: gcp-federation
+                  mountPath: /var/run/secrets/gcp
+                  readOnly: true
+              resources:
+                requests: {cpu: 50m, memory: 256Mi}
+                limits: {memory: 1Gi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: dump
+              emptyDir:
+                sizeLimit: 5Gi
+            - name: tmp
+              emptyDir: {}
+            - name: gcp-federation
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+                      expirationSeconds: 3600
+                      path: gcp-token
+                  - configMap:
+                      name: mate-db-backup-gcp

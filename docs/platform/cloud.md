@@ -11,7 +11,7 @@ The organization root declares folders, projects, budgets, policies, custom role
 
 | Project | What it is for |
 | --- | --- |
-| `homelab-ng` | It has the OpenTofu state bucket, Firestore and the [oldboy](../hosts/oldboy.md) VM. It also has the KMS key that unseals [OpenBao](secrets.md#openbao), the Prowler cloud-scanner identity, and workload identity pools for GitHub Actions, Vercel and the clusters. |
+| `homelab-ng` | It has the OpenTofu state bucket, Firestore and the [oldboy](../hosts/oldboy.md) VM. It also has the KMS key that unseals [OpenBao](secrets.md#openbao), the Prowler cloud-scanner identity, the bucket and identity that back up the [mate](../apps/mate.md) database, and workload identity pools for GitHub Actions, Vercel and the clusters. |
 | `bluenose` | It has the storage, identities and Secret Manager of [kthx](../apps/kthx.md). It is also the default Vessel, the project that kthx deploys [Apps](../apps/kthx/built-apps.md) into. |
 | `trusted-builds` | The supply chain of kthx Apps. It has the signing key, the Binary Authorization attestor, a staging registry and the Developer Connect link to GitHub. |
 | `lolcorp` | Holds the org policies a Google Workspace BigQuery export needs. Nothing runs in it. |
