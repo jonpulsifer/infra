@@ -101,6 +101,8 @@ describe('config from the environment', () => {
         vault: null,
         github: false,
         kubeServiceAccount: null,
+        kubeContext: 'cluster',
+        kubePeers: [],
         kthx: {
           origin: null,
           sitesSecret: 'mate-kthx-sites',

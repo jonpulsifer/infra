@@ -5,7 +5,6 @@ metadata:
   name: valkey-operator-system
   labels:
     kustomize.toolkit.fluxcd.io/prune: enabled
-    lolwtf.ca/sandbox-exec: deny
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/audit-version: latest
     pod-security.kubernetes.io/enforce: baseline

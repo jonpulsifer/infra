@@ -1,6 +1,8 @@
 ---
-# RBAC has no deny, so this keeps sandbox-rbac.yaml's cluster-wide pods/exec
-# out of `mate` and every namespace labelled `lolwtf.ca/sandbox-exec: deny`.
+# The sandbox identity is cluster-admin, so this is a guard against accidents,
+# not a boundary: it keeps a turn's exec out of mate's own pod and the other
+# threads' sandboxes, and cluster-admin can still read their Secrets or delete
+# this policy.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -18,25 +20,15 @@ spec:
         operations: ["CONNECT"]
         resources: ["pods/exec", "pods/attach", "pods/portforward"]
   # Only the sandbox identity is evaluated, so mate's own exec into its
-  # sandboxes is never a match, in any namespace.
+  # sandboxes is never a match.
   matchConditions:
-    - name: sandbox-debug
+    - name: sandbox-admin
       expression: >-
-        request.userInfo.username == "system:serviceaccount:mate:mate-sandbox-debug"
+        request.userInfo.username == "system:serviceaccount:mate:mate-sandbox-admin"
   validations:
-    # kube-system, flux-system and agent-sandbox-system carry no Namespace
-    # manifest in this repo, so the CEL names them instead of the label.
-    - expression: >-
-        request.namespace != "mate" &&
-        !(request.namespace in ["agent-sandbox-system", "flux-system", "kube-system"]) &&
-        !(has(namespaceObject.metadata.labels) &&
-        "lolwtf.ca/sandbox-exec" in namespaceObject.metadata.labels &&
-        namespaceObject.metadata.labels["lolwtf.ca/sandbox-exec"] == "deny")
+    - expression: request.namespace != "mate"
       reason: Forbidden
-      message: >-
-        mate-sandbox-debug cannot exec, attach or port-forward into mate,
-        kube-system, flux-system, agent-sandbox-system or a namespace labelled
-        lolwtf.ca/sandbox-exec: deny.
+      message: mate-sandbox-admin cannot exec, attach or port-forward into mate.
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

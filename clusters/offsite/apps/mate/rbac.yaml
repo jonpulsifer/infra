@@ -59,14 +59,14 @@ rules:
     verbs:
       - get
       - patch
-  # Only for the sandbox debug account; without resourceNames mate could mint
-  # a token for any ServiceAccount here, its own included.
+  # Only for the sandbox account; without resourceNames mate could mint a
+  # token for any ServiceAccount here, its own included.
   - apiGroups:
       - ""
     resources:
       - serviceaccounts/token
     resourceNames:
-      - mate-sandbox-debug
+      - mate-sandbox-admin
     verbs:
       - create
 ---

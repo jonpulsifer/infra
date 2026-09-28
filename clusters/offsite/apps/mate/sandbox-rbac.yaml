@@ -1,115 +1,30 @@
 ---
-# The identity a sandbox debugs the cluster with, apart from mate's own. mate
-# mints a bound token per turn; never write a long-lived one.
+# The identity a sandbox administers the clusters with, apart from mate's own.
+# mate mints a bound token per turn; never write a long-lived one. folly admits
+# the same token through the federation in nix/services/k8s/default.nix, and
+# clusters/folly/apps/mate-sandbox/ binds it there.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: mate-sandbox-debug
+  name: mate-sandbox-admin
   namespace: mate
   labels:
     app.kubernetes.io/name: mate-sandbox
     app.kubernetes.io/part-of: mate
 automountServiceAccountToken: false
 ---
-# Reads all but Secrets; pods/exec reaches the mounted Secrets and token of any pod in
-# a namespace fence/ leaves open. RBAC has no deny, so core omits `secrets` and lists each group.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: mate-sandbox-debug
-  labels:
-    app.kubernetes.io/name: mate-sandbox
-    app.kubernetes.io/part-of: mate
-rules:
-  - apiGroups: [""]
-    resources:
-      - componentstatuses
-      - configmaps
-      - endpoints
-      - events
-      - limitranges
-      - namespaces
-      - nodes
-      - persistentvolumeclaims
-      - persistentvolumes
-      - pods
-      - podtemplates
-      - replicationcontrollers
-      - resourcequotas
-      - serviceaccounts
-      - services
-    verbs: ["get", "list", "watch"]
-  - apiGroups:
-      - acme.cert-manager.io
-      - actions.github.com
-      - admissionregistration.k8s.io
-      - agents.x-k8s.io
-      - apiextensions.k8s.io
-      - apiregistration.k8s.io
-      - apps
-      - authentication.k8s.io
-      - authorization.k8s.io
-      - autoscaling
-      - batch
-      - certificates.k8s.io
-      - cert-manager.io
-      - cilium.io
-      - coordination.k8s.io
-      - discovery.k8s.io
-      - events.k8s.io
-      - extensions.agents.x-k8s.io
-      - externaldns.k8s.io
-      - external-secrets.io
-      - flowcontrol.apiserver.k8s.io
-      - fluxcd.controlplane.io
-      - gateway.networking.k8s.io
-      - gateway.networking.x-k8s.io
-      - generators.external-secrets.io
-      - helm.toolkit.fluxcd.io
-      - kustomize.toolkit.fluxcd.io
-      - kyverno.io
-      - metrics.k8s.io
-      - monitoring.coreos.com
-      - networking.k8s.io
-      - node.k8s.io
-      - onepassword.com
-      - policies.kyverno.io
-      - policy
-      - postgresql.cnpg.io
-      - rbac.authorization.k8s.io
-      - reports.kyverno.io
-      - resource.k8s.io
-      - scheduling.k8s.io
-      - source.toolkit.fluxcd.io
-      - storage.k8s.io
-      - tailscale.com
-      - valkey.io
-      - wgpolicyk8s.io
-    resources: ["*"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get", "list"]
-  # A WebSocket exec client sends a GET, which a `create`-only rule answers 403.
-  - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["get", "create"]
-  - apiGroups: ["authorization.k8s.io"]
-    resources: ["selfsubjectaccessreviews", "selfsubjectrulesreviews"]
-    verbs: ["create"]
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: mate-sandbox-debug
+  name: mate-sandbox-admin
   labels:
     app.kubernetes.io/name: mate-sandbox
     app.kubernetes.io/part-of: mate
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: mate-sandbox-debug
+  name: cluster-admin
 subjects:
   - kind: ServiceAccount
-    name: mate-sandbox-debug
+    name: mate-sandbox-admin
     namespace: mate

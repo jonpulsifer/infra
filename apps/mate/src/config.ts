@@ -68,6 +68,13 @@ export interface SandboxConfig {
    * mate's, in `sandbox-rbac.yaml`.
    */
   readonly kubeServiceAccount: string | null;
+  /** The kubeconfig context for the cluster mate runs on. */
+  readonly kubeContext: string;
+  /**
+   * Other clusters that admit the same token, by their directory under
+   * `clusters/`; the sandbox's checkout says where each is and what CA it has.
+   */
+  readonly kubePeers: readonly string[];
   readonly kthx: KthxConfig;
   /** `null`, the default, gives the sandbox no way to ring the owner. */
   readonly switchboard: SwitchboardConfig | null;
@@ -154,6 +161,34 @@ function slackIds(env: Env, key: string): ReadonlySet<string> {
   }
   if (set.size === 0) throw new ConfigError(`${key} is empty`);
   return set;
+}
+
+/** A cluster name is also a path segment and a kubeconfig name. */
+const CLUSTER_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+function clusterName(env: Env, key: string, fallback: string): string {
+  const value = text(env, key, fallback);
+  if (!CLUSTER_NAME.test(value)) {
+    throw new ConfigError(`${key} is not a cluster name: ${value}`);
+  }
+  return value;
+}
+
+function clusterNames(env: Env, key: string): readonly string[] {
+  const names = [
+    ...new Set(
+      (env[key] ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ];
+  for (const name of names) {
+    if (!CLUSTER_NAME.test(name)) {
+      throw new ConfigError(`${key} holds a non-cluster name: ${name}`);
+    }
+  }
+  return names;
 }
 
 // `min` is 0 only for a setting where 0 means off.
@@ -279,6 +314,8 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     vault: vault(env),
     github: Boolean(env.MATE_GITHUB_APP_ID?.trim()),
     kubeServiceAccount: env.MATE_SANDBOX_KUBE_SA?.trim() || null,
+    kubeContext: clusterName(env, 'MATE_SANDBOX_KUBE_CONTEXT', 'cluster'),
+    kubePeers: clusterNames(env, 'MATE_SANDBOX_KUBE_PEERS'),
     kthx: kthx(env),
     switchboard: switchboard(env),
   };

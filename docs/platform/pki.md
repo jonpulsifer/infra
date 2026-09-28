@@ -39,7 +39,7 @@ Nodes trust `terraform/pki/certs/<cluster>-ca-bundle.pem`. Pods get `<cluster>-c
 | kthx | offsite | See [Ownership and security](../apps/kthx/security.md#federation) |
 | mate database backup | offsite | Write access to the `homelab-ng-mate` bucket. See [How Rowbutt works](../apps/mate/how-it-works.md#session-store). |
 
-Each API server also accepts tokens from the other cluster, for the ServiceAccounts `atlantis/atlantis` and `spindrift/spindrift` only. RBAC in `clusters/` binds them as `federated:<subject>`.
+Each API server also accepts tokens from the other cluster, for the ServiceAccounts `atlantis/atlantis`, `mate/mate-sandbox-admin` and `spindrift/spindrift` only. RBAC in `clusters/` binds them as `federated:<subject>`.
 
 ## Rules
 

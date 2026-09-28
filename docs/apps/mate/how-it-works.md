@@ -28,13 +28,18 @@ The sandbox image also carries `mate-hands`, a daemon that runs file and shell c
 | --- | --- | --- |
 | GitHub App private key | mate's pod, from Secret `mate-github-app` | Signs token requests |
 | GitHub installation token | The file in `$MATE_GITHUB_TOKEN_FILE` | `clanky-bot[bot]` on `jonpulsifer/infra`: contents and pull requests write, actions read |
-| Cluster token | `$KUBECONFIG` | ServiceAccount `mate-sandbox-debug`, for `MATE_TURN_MINUTES` plus 5 minutes |
+| Cluster token | `$KUBECONFIG`, with the contexts `offsite` and `folly` | ServiceAccount `mate-sandbox-admin`, `cluster-admin` on both clusters, for `MATE_TURN_MINUTES` plus 5 minutes |
+| SSH key | `/home/agent/.ssh/id_ed25519`, from Secret `mate-sandbox-ssh` | `rowbutt` on every host that `github.com/rowbutt.keys` authorizes, with passwordless sudo |
 | OpenCode key | Sandbox environment, from Secret `mate-opencode` | The model API |
 | kthx site bearers | `/home/agent/.config/kthx/sites.json`, from Secret `mate-kthx-sites` | Every quick site Rowbutt claims |
 | kthx agent token | Sandbox environment `KTHX_AGENT_TOKEN`, from Secret `mate-kthx-agent` | Every built-apps command but minting tokens, replacing the engine settings and connecting or probing a Target, for 90 days |
 | Ring token | Sandbox environment, from Secret `mate-switchboard`, absent until the `switchboard` 1Password item exists | `POST /ring` on [Switchboard](../switchboard.md), which rings one fixed number |
 
-`MATE_SSH_KEY_FILE` and `MATE_CONNECT_SECRET` are unset, so a sandbox has no SSH key and no 1Password token.
+`MATE_CONNECT_SECRET` is unset, so a sandbox has no 1Password token.
+
+The token's audience is `api`. offsite admits it for `mate-sandbox-admin`, and folly admits the same token as `federated:system:serviceaccount:mate:mate-sandbox-admin` through the allow-list in `nix/services/k8s/default.nix`; `clusters/folly/apps/mate-sandbox/` binds that user to `cluster-admin`. mate writes a context for each cluster in `MATE_SANDBOX_KUBE_PEERS` from the sandbox's checkout: the API server in `clusters/<cluster>/config/cluster-topology.json` and the CA in `terraform/pki/certs/<cluster>-ca-bundle.pem`.
+
+The 1Password item `SSH: rowbutt` holds the key as PKCS#8, and `apps/mate/src/ssh-key.ts` rewrites it in OpenSSH format when mate starts. The SSH client config, `SSH_CLIENT_CONFIG` in `apps/mate/src/sandboxes.ts`, completes a short host name with `lolwtf.ca` and reaches folly's Lab Net hosts through riptide.
 
 mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx-sites.ts` is the ledger that writes the file into the sandbox and reads it back.
 
@@ -45,9 +50,9 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 | Pod | Egress |
 | --- | --- |
 | mate | DNS, Discord, Slack, `api.github.com`, the API server, the OTLP collector, the `mate-db` instance on 5432 |
-| Sandbox | DNS; `opencode.ai`, `models.opencode.ai`, `github.com` and `api.github.com` on 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; `CILIUM_NATIVE_ROUTING_CIDR` on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
+| Sandbox | DNS; the internet on 80 and 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; offsite's nodes on 22; `CILIUM_NATIVE_ROUTING_CIDR`, which holds folly's hosts and API server, on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 
-The microVM isolates the kernel, and the network policy is the only network boundary. mate's ingress admits only the node it runs on. Alertmanager's ingress policy, `clusters/offsite/monitoring/alertmanager-network-policy.yaml`, admits Prometheus, Grafana, the API server and its node's host-network pods; every namespace that runs one of those is fenced, so no pod the sandbox can `pods/exec` into can post an alert.
+The microVM isolates the kernel. mate's ingress admits only the node it runs on. The sandbox's policy keeps it away from `mate` and from Alertmanager, whose API takes an alert from anyone, but as `cluster-admin` and root on the nodes it can reach both on purpose.
 
 No policy selects the `mate-db` instance or the backup Job's pod. The CloudNativePG controller, Prometheus and the kubelet reach the instance, and the Job reaches Google Cloud. A sandbox reaches neither, because its egress leaves out every pod in `mate`.
 
@@ -59,7 +64,7 @@ CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped 
 
 ## Fence
 
-A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mate-sandbox-debug` any `pods/exec`, `pods/attach` or `pods/portforward` into `mate` or into a namespace labelled `lolwtf.ca/sandbox-exec: deny`. The sandbox's network policy also excludes `mate` from its in-cluster egress. The label marks a namespace where exec reaches something worth more than the sandbox holds: a ServiceAccount that reads Secrets beyond its namespace or otherwise escalates, an outside credential such as a tunnel, DNS or API key, a pod that can evict mate, or a privileged or host-level pod. A new namespace like that needs the label too. A namespace with no Namespace manifest in this repo, such as `kube-system`, is named directly in the policy instead. A ServiceAccount that can patch Namespaces, such as spindrift's, can still remove the label from a fenced namespace.
+A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mate-sandbox-admin` any `pods/exec`, `pods/attach` or `pods/portforward` into `mate`, which holds mate's credentials and every thread's sandbox. The sandbox's network policy also excludes `mate` from its in-cluster egress. Both guard against accidents, not intent: the sandbox is `cluster-admin`, so it can read mate's Secrets or delete the policy.
 
 ## Rules
 

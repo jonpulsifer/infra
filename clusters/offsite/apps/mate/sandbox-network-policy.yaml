@@ -1,7 +1,9 @@
 ---
-# The only network boundary for agent commands, which run auto-allowed; kata-clh
-# isolates the kernel, not the network. No ingress rules, so Cilium leaves
-# ingress unenforced; mate reaches the harness through pods/exec.
+# The network boundary for agent commands, which run auto-allowed; kata-clh
+# isolates the kernel, not the network. The sandbox is cluster-admin and root
+# on every host it can reach, so this keeps it out of mate and Alertmanager by
+# accident, not against intent. No ingress rules, so Cilium leaves ingress
+# unenforced; mate reaches the harness through pods/exec.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -17,8 +19,6 @@ spec:
     matchLabels:
       app.kubernetes.io/name: mate-sandbox
   egress:
-    # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
-    # rule. The open pattern leaves DNS itself as a way out.
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: kube-system
@@ -32,15 +32,14 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
-    # models.opencode.ai serves the catalogue `session/new` waits on. No
-    # tarball, release-asset or npm hosts: a push and a pull request need none.
-    - toFQDNs:
-        - matchName: opencode.ai
-        - matchName: models.opencode.ai
-        - matchName: github.com
-        - matchName: api.github.com
+    # The internet on the web ports: the provider, GitHub, package registries
+    # and documentation.
+    - toEntities:
+        - world
       toPorts:
         - ports:
+            - port: "80"
+              protocol: TCP
             - port: "443"
               protocol: TCP
     # Every pod outside `mate`, on every port, Prometheus included, but not
@@ -67,8 +66,17 @@ spec:
         - ports:
             - port: "6443"
               protocol: TCP
-    # Both sites' hosts: SSH as `rowbutt`, which has passwordless sudo on each,
-    # and the apiservers. Login stays off while MATE_SSH_KEY_FILE is unset.
+    # SSH as `rowbutt`, which has passwordless sudo on every host. A CIDR rule
+    # never matches this cluster's own nodes while policy-cidr-match-mode is
+    # unset, so they are the host and remote-node entities.
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "22"
+              protocol: TCP
+    # folly's hosts and apiserver, across the site-to-site tunnel.
     - toCIDRSet:
         - cidr: ${CILIUM_NATIVE_ROUTING_CIDR}
       toPorts:

@@ -152,6 +152,8 @@ export class FakeKube {
   commandFails: string | null = null;
   /** Fails only the one-shot execs that write files, so a read still answers. */
   writeFails: string | null = null;
+  /** What the checkout prints for the peer clusters' topology and CA. */
+  peerOutput = '';
   /** Refuses every TokenRequest 403 with this message, as a missing RBAC rule does. */
   tokenRequestFails: string | null = null;
   readonly tokenRequests: {
@@ -331,6 +333,7 @@ export class FakeKube {
   private shell(command: string[]): string {
     const [shell, flag, script, ...argv] = command;
     if (shell !== '/bin/sh' || flag !== '-c' || !script) return '';
+    if (script.includes('cluster-topology.json')) return this.peerOutput;
     for (const [, index, path] of script.matchAll(
       /printf %s "\$(\d+)" > (\S+)/g,
     )) {

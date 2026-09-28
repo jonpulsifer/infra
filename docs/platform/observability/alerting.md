@@ -13,13 +13,12 @@ On offsite, the `switchboard` AlertmanagerConfig posts a firing `critical` alert
 
 ## Who can post an alert
 
-Alertmanager's API has no authentication. On offsite, its network policy admits Prometheus, Grafana, the API server, whose service proxy `mise run alerts` reads through, and the host-network pods on its node. Each namespace with a host-network pod is fenced from the Rowbutt sandbox ([the fence](../../apps/mate/how-it-works.md#fence)), and the sandbox's own egress excludes Alertmanager, so a sandbox has no pod to post from.
+Alertmanager's API has no authentication. On offsite, its network policy admits Prometheus, Grafana, the API server, whose service proxy `mise run alerts` reads through, and the host-network pods on its node. The Rowbutt sandbox's egress excludes Alertmanager, but the sandbox is `cluster-admin` and root on the nodes, so it can post an alert on purpose ([How Rowbutt works](../../apps/mate/how-it-works.md#network)).
 
 ## Rules
 
 - Keep `alertmanagerConfigSelector` and `alertmanagerConfigMatcherStrategy` in each `kube-prometheus.yaml`, or no alert reaches Discord.
 - Add `switchboard` to offsite's `alertmanagerConfigSelector` only once the switchboard Deployment has a Ready pod, in its own merge, and drop it before parking the Deployment. Selected with no pod, every webhook fails and `AlertmanagerClusterFailedToSendAlerts`, a critical alert, rings the owner when the pod comes up.
-- Label a namespace that runs a host-network pod `lolwtf.ca/sandbox-exec: deny`, or a sandbox can post an alert from it.
 
 ## Where it lives
 
