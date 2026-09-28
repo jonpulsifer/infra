@@ -2,7 +2,8 @@ resource "google_bigquery_dataset" "audit_anomalies" {
   dataset_id                  = "audit_anomalies"
   location                    = "US"
   default_table_expiration_ms = 7776000000 # 90 days
-  delete_contents_on_destroy  = false
+  # Lets a future destroy of this dataset also delete its tables.
+  delete_contents_on_destroy = true
 }
 
 resource "google_bigquery_table" "anomalies" {
