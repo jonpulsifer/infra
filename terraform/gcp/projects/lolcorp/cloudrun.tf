@@ -3,6 +3,9 @@ resource "google_cloud_run_v2_service" "audit_pipeline" {
   location = "us-central1"
   ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
+  # A destroy reads this from state, so it must be applied before the service is removed.
+  deletion_protection = false
+
   template {
     scaling {
       min_instance_count = 0

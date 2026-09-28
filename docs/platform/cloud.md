@@ -14,7 +14,7 @@ The organization root declares folders, projects, budgets, policies, custom role
 | `homelab-ng` | It has the OpenTofu state bucket, Firestore and the [oldboy](../hosts/oldboy.md) VM. It also has the KMS key that unseals [OpenBao](secrets.md#openbao), the Prowler cloud-scanner identity, and workload identity pools for GitHub Actions, Vercel and the clusters. |
 | `bluenose` | It has the storage, identities and Secret Manager of [kthx](../apps/kthx.md). It is also the default Vessel, the project that kthx deploys [Apps](../apps/kthx/built-apps.md) into. |
 | `trusted-builds` | The supply chain of kthx Apps. It has the signing key, the Binary Authorization attestor, a staging registry and the Developer Connect link to GitHub. |
-| `lolcorp` | An audit-log pipeline that scores logs with Gemini and writes anomalies to BigQuery. Its feed, the organization sink `audit-log-sink`, is off. |
+| `lolcorp` | Holds the org policies a Google Workspace BigQuery export needs. Nothing runs in it. |
 | `wishin-app` | The Firebase project of wishin.app, a gift wishlist site. |
 | `jonpulsifer` | The owner's `jonpulsifer` bucket and a `dotfiles` Cloud Source repository. |
 
@@ -43,7 +43,6 @@ The Workspace root declares the `pulsifer.ca` domain, its alias `pulsifer.dev`, 
 - Create a project in `terraform/gcp/organization/projects.tf`, or it has no folder, billing account or deletion lien. Then give it a root.
 - The organization blocks new service account keys. Give a workload a federated identity.
 - Keep a new App zone in step with the external-dns and cert-manager lists in [Ingress and DNS](network/ingress-and-dns.md), or its names do not resolve.
-- Turn on `audit-log-sink` only after the `lolcorp` pipeline has a pre-LLM filter or daily budget, and keep its `token-plumbing` exclusion. Each exported event costs a Gemini call.
 
 ## Where it lives
 
