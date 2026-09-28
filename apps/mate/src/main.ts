@@ -26,6 +26,7 @@ import { KubeSandboxes, SPARE_SWEEP_MS } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
 import { openSocket, slackEvent, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
+import { opensshKey } from './ssh-key.ts';
 import {
   EXPORT_TIMEOUT_MS,
   startTelemetry,
@@ -132,7 +133,7 @@ async function openGithubApp(
 async function readSshKey(path: string | null): Promise<string | null> {
   if (!path) return null;
   try {
-    return await Bun.file(path).text();
+    return opensshKey(await Bun.file(path).text());
   } catch (error) {
     log.error('the sandbox SSH key could not be read', {
       keyFile: path,

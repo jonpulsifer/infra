@@ -1,0 +1,20 @@
+---
+# A Rowbutt sandbox on offsite administers folly with its per-turn offsite
+# token, which folly's apiserver admits as this federated user
+# (nix/services/k8s/default.nix). clusters/offsite/apps/mate/ declares the
+# ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mate-sandbox-admin
+  labels:
+    app.kubernetes.io/name: mate-sandbox
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:mate:mate-sandbox-admin

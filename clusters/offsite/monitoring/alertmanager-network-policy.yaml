@@ -19,8 +19,7 @@ spec:
     # The liveness and readiness probes come from the node. The service proxy
     # comes from the control-plane node's address, which carries the
     # kube-apiserver identity whichever node the pod is on. Each entity also
-    # admits that node's host-network pods, so a namespace that runs one is
-    # fenced from the sandbox (clusters/offsite/apps/mate/fence/).
+    # admits that node's host-network pods.
     - fromEntities:
         - host
         - kube-apiserver

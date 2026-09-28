@@ -24,9 +24,10 @@ spec:
         app.kubernetes.io/name: mate
         app.kubernetes.io/part-of: mate
       annotations:
-        # The tokens are env vars and the App key file refreshes on the kubelet's
-        # schedule, so Reloader rolls the pod when one of these Secrets rotates.
-        secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app
+        # The tokens are env vars, mate reads the SSH key once at boot, and the
+        # App key file refreshes on the kubelet's schedule, so Reloader rolls
+        # the pod when one of these Secrets rotates.
+        secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app,mate-sandbox-ssh
     spec:
       # This token mints Sandboxes and execs into them. rbac.yaml scopes it and
       # network-policy.yaml limits its egress.
@@ -123,10 +124,20 @@ spec:
               value: "5027196"
             - name: MATE_GITHUB_APP_KEY_FILE
               value: /var/run/mate/github-app/private-key
-            # Reads all but Secrets and can exec into any pod, which reaches its
-            # mounted Secrets. mate mints a bound token per turn (sandbox-rbac.yaml).
+            # cluster-admin on offsite and folly. mate mints a bound token per
+            # turn (sandbox-rbac.yaml).
             - name: MATE_SANDBOX_KUBE_SA
-              value: mate-sandbox-debug
+              value: mate-sandbox-admin
+            # The context the token reaches this cluster by, and the clusters
+            # that admit it too; the sandbox's checkout says where each is.
+            - name: MATE_SANDBOX_KUBE_CONTEXT
+              value: offsite
+            - name: MATE_SANDBOX_KUBE_PEERS
+              value: folly
+            # rowbutt's key, which is root on every host through passwordless
+            # sudo. mate stamps it into the sandbox per turn and clears it after.
+            - name: MATE_SSH_KEY_FILE
+              value: /var/run/mate/ssh/private-key
             # The private claiming host, which a sandbox reaches; its site tokens
             # are kept in the mate-kthx-sites Secret between sandboxes.
             - name: MATE_KTHX_ORIGIN
@@ -154,6 +165,9 @@ spec:
               mountPath: /tmp
             - name: github-app
               mountPath: /var/run/mate/github-app
+              readOnly: true
+            - name: sandbox-ssh
+              mountPath: /var/run/mate/ssh
               readOnly: true
           # No liveness probe: /healthz is 503 while the identify-budget guard
           # sleeps, and a restart would burn the budget it protects.
@@ -185,4 +199,9 @@ spec:
         - name: github-app
           secret:
             secretName: mate-github-app
+            optional: true
+        # `optional`, as above: with no Secret a sandbox gets no SSH key.
+        - name: sandbox-ssh
+          secret:
+            secretName: mate-sandbox-ssh
             optional: true

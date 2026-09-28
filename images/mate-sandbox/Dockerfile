@@ -135,6 +135,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       git \
+      openssh-client \
       procps \
       ripgrep \
       tini \
@@ -193,7 +194,7 @@ ENV HOME=/home/agent \
     KTHX_NO_UPDATE_CHECK=1
 
 # Runs as the sandbox uid, so a binary that cannot start fails the build.
-# helm, kubectl, kustomize and pixlet reject `--version`.
+# helm, kubectl, kustomize and pixlet reject `--version`; ssh has only `-V`.
 RUN set -eux; \
     for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh jq kthx \
                 mate-hands mise op opencode promtool shellcheck shfmt sops \
@@ -203,7 +204,8 @@ RUN set -eux; \
     helm version >/dev/null; \
     kubectl version --client >/dev/null; \
     kustomize version >/dev/null; \
-    pixlet version >/dev/null
+    pixlet version >/dev/null; \
+    ssh -V 2>/dev/null
 
 # `gh auth token` needs no network. Through the wrapper it must print the token
 # file's contents. It must also fail when mate empties the file between turns,

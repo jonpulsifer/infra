@@ -96,9 +96,26 @@ const KTHX_SITES_FILE = `${AGENT_HOME}/.config/kthx/sites.json`;
 const KTHX_TOKEN_ENV = 'KTHX_AGENT_TOKEN';
 const SSH_KEY_FILE = `${SSH_DIR}/id_ed25519`;
 const SSH_CONFIG_FILE = `${SSH_DIR}/config`;
-// accept-new: home is a fresh emptyDir with no known hosts, so `yes` refuses
-// every host, and `no` would accept a changed key.
-const SSH_CLIENT_CONFIG = [
+// folly's Lab Net has no route from offsite, but folly's nodes do, and the
+// Lab zone admits them. optiplex, folly's only control plane, is not the hop.
+const LAB_NET_HOSTS = ['spore', 'capsule', 'forge', 'cloudpi4', 'homepi4'];
+const LAB_NET_JUMP = 'riptide.lolwtf.ca';
+// `always` canonicalizes a short name before the Host blocks match, proxied
+// or not. accept-new: home is a fresh emptyDir with no known hosts, so `yes`
+// refuses every host, and `no` would accept a changed key.
+export const SSH_CLIENT_CONFIG = [
+  'CanonicalizeHostname always',
+  'CanonicalDomains lolwtf.ca',
+  'CanonicalizeMaxDots 0',
+  'CanonicalizeFallbackLocal yes',
+  '',
+  `Host ${LAB_NET_HOSTS.map((host) => `${host}.lolwtf.ca`).join(' ')}`,
+  `  ProxyJump ${LAB_NET_JUMP}`,
+  '',
+  // Its wired port has no link; it answers on the lab WLAN.
+  'Host homepi4.lolwtf.ca',
+  '  HostName homepi4-wifi.lolwtf.ca',
+  '',
   'Host *',
   '  User rowbutt',
   `  IdentityFile ${SSH_KEY_FILE}`,
@@ -107,9 +124,11 @@ const SSH_CLIENT_CONFIG = [
   `  UserKnownHostsFile ${SSH_DIR}/known_hosts`,
   '',
 ].join('\n');
-// Both the token audience and the server address: a bound token is refused
-// by any audience it was not minted for.
 const CLUSTER_URL = 'https://kubernetes.default.svc:443';
+// Both apiservers list `api` in --api-audiences, and folly's federation admits
+// an offsite token for no other audience. A bound token is refused by any
+// audience it was not minted for, compared as exact strings.
+const TOKEN_AUDIENCE = 'api';
 // Outlives the turn, so the token never expires under a running `kubectl`.
 const TOKEN_SLACK_SECONDS = 5 * 60;
 // The apiserver refuses a TokenRequest under ten minutes.
@@ -280,36 +299,88 @@ export function opencodeConfig(
   });
 }
 
-// With no CA the sandbox trusts the system store, as mate does. It never gets
-// `insecure-skip-tls-verify`.
-export function kubeconfig(token: string, ca: string | null): string {
-  const cluster = [
-    `    server: ${CLUSTER_URL}`,
-    ...(ca
-      ? [
-          `    certificate-authority-data: ${Buffer.from(ca).toString('base64')}`,
-        ]
-      : []),
-  ];
-  return [
-    'apiVersion: v1',
-    'kind: Config',
-    'clusters:',
-    '  - name: cluster',
-    '    cluster:',
-    ...cluster,
-    'users:',
-    '  - name: sandbox',
-    '    user:',
-    `      token: ${token}`,
-    'contexts:',
-    '  - name: cluster',
-    '    context:',
-    '      cluster: cluster',
-    '      user: sandbox',
-    'current-context: cluster',
-    '',
-  ].join('\n');
+export interface KubeCluster {
+  name: string;
+  server: string;
+  ca: string | null;
+}
+
+// JSON is YAML, so kubectl reads it and no indentation can slip. The first
+// cluster is the current context. With no CA the sandbox trusts the system
+// store, as mate does; it never gets `insecure-skip-tls-verify`.
+export function kubeconfig(token: string, clusters: KubeCluster[]): string {
+  return `${JSON.stringify(
+    {
+      apiVersion: 'v1',
+      kind: 'Config',
+      clusters: clusters.map(({ name, server, ca }) => ({
+        name,
+        cluster: {
+          server,
+          ...(ca
+            ? {
+                'certificate-authority-data':
+                  Buffer.from(ca).toString('base64'),
+              }
+            : {}),
+        },
+      })),
+      users: [{ name: 'sandbox', user: { token } }],
+      contexts: clusters.map(({ name }) => ({
+        name,
+        context: { cluster: name, user: 'sandbox' },
+      })),
+      'current-context': clusters[0]?.name ?? '',
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+const PEER_SERVER = /^https:\/\/[a-z0-9.-]+:\d{1,5}$/;
+const PEM_CERTIFICATE = '-----BEGIN CERTIFICATE-----';
+
+// Prints one JSON line per peer whose topology and CA bundle the checkout
+// holds, the way the Atlantis kubeconfig hook reads them.
+export function peerScript(peers: readonly string[]): string {
+  return peers
+    .map(
+      (peer) =>
+        `jq -c --arg name ${peer} --rawfile ca ${WORKSPACE}/terraform/pki/certs/${peer}-ca-bundle.pem ` +
+        `'{name: $name, server: ("https://" + .data.API_SERVER_HOSTNAME + ":" + .data.API_SERVER_PORT), ca: $ca}' ` +
+        `${WORKSPACE}/clusters/${peer}/config/cluster-topology.json 2>/dev/null || true`,
+    )
+    .join('; ');
+}
+
+/** Keeps only well-formed lines for the peers asked for, in that order. */
+export function parsePeers(
+  printed: string,
+  peers: readonly string[],
+): KubeCluster[] {
+  const found = new Map<string, KubeCluster>();
+  for (const line of printed.split('\n')) {
+    if (!line.trim()) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const { name, server, ca } = (parsed ?? {}) as Record<string, unknown>;
+    if (
+      typeof name !== 'string' ||
+      !peers.includes(name) ||
+      typeof server !== 'string' ||
+      !PEER_SERVER.test(server) ||
+      typeof ca !== 'string' ||
+      !ca.includes(PEM_CERTIFICATE)
+    ) {
+      continue;
+    }
+    found.set(name, { name, server, ca });
+  }
+  return peers.flatMap((peer) => found.get(peer) ?? []);
 }
 
 // Command-scope config, where git honours `safe.directory`: the emptyDir mount
@@ -848,7 +919,7 @@ export class KubeSandboxes implements Sandboxes {
     const { githubApp, log, metrics } = this.deps;
     if (!this.credentialled) return null;
     const github = githubApp ? await this.mintGithub(name) : null;
-    const kube = await this.mintCluster(name);
+    const kube = await this.mintCluster(name, pod);
     const ssh = this.deps.sshKey ?? '';
     // First, so a save the last turn's end could not make is retried now.
     const sites = this.kthx ? await this.syncSites(name, pod) : null;
@@ -897,7 +968,7 @@ export class KubeSandboxes implements Sandboxes {
    * `''` means no cluster access. A bound token cannot be revoked, so its
    * expiry bounds any copy taken during the turn.
    */
-  private async mintCluster(name: string): Promise<string> {
+  private async mintCluster(name: string, pod: string): Promise<string> {
     const { config, kube, log } = this.deps;
     const account = config.kubeServiceAccount;
     if (!account) return '';
@@ -906,20 +977,30 @@ export class KubeSandboxes implements Sandboxes {
       Math.ceil(config.turnTimeoutMs / 1000) + TOKEN_SLACK_SECONDS,
     );
     try {
-      const minted = await kube.json<{ status?: { token?: string } }>(
-        `/api/v1/namespaces/${this.namespace}/serviceaccounts/${account}/token`,
-        {
-          method: 'POST',
-          body: {
-            apiVersion: 'authentication.k8s.io/v1',
-            kind: 'TokenRequest',
-            spec: { audiences: [CLUSTER_URL], expirationSeconds: seconds },
+      const [minted, peers] = await Promise.all([
+        kube.json<{ status?: { token?: string } }>(
+          `/api/v1/namespaces/${this.namespace}/serviceaccounts/${account}/token`,
+          {
+            method: 'POST',
+            body: {
+              apiVersion: 'authentication.k8s.io/v1',
+              kind: 'TokenRequest',
+              spec: { audiences: [TOKEN_AUDIENCE], expirationSeconds: seconds },
+            },
           },
-        },
-      );
+        ),
+        this.peerClusters(name, pod),
+      ]);
       const token = minted.status?.token;
       if (!token) throw new Error('TokenRequest answered no token');
-      return kubeconfig(token, this.deps.clusterCa ?? null);
+      return kubeconfig(token, [
+        {
+          name: config.kubeContext,
+          server: CLUSTER_URL,
+          ca: this.deps.clusterCa ?? null,
+        },
+        ...peers,
+      ]);
     } catch (error) {
       log.error('could not mint cluster access for this turn', {
         sandbox: name,
@@ -927,6 +1008,40 @@ export class KubeSandboxes implements Sandboxes {
         error: plain(error),
       });
       return '';
+    }
+  }
+
+  /** Never fails the turn: without a peer the kubeconfig still reaches this cluster. */
+  private async peerClusters(
+    name: string,
+    pod: string,
+  ): Promise<KubeCluster[]> {
+    const peers = this.deps.config.kubePeers;
+    if (peers.length === 0) return [];
+    try {
+      const found = parsePeers(
+        await this.execText(pod, ['/bin/sh', '-c', peerScript(peers)]),
+        peers,
+      );
+      const missing = peers.filter(
+        (peer) => !found.some((c) => c.name === peer),
+      );
+      if (missing.length > 0) {
+        this.deps.log.warn(
+          'the checkout does not say where these clusters are',
+          {
+            sandbox: name,
+            missing,
+          },
+        );
+      }
+      return found;
+    } catch (error) {
+      this.deps.log.warn('could not read the peer clusters from the checkout', {
+        sandbox: name,
+        error: plain(error),
+      });
+      return [];
     }
   }
 

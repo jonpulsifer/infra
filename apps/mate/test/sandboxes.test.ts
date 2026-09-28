@@ -16,6 +16,7 @@ import type { TokenSource } from '../src/sandboxes.ts';
 import {
   HARNESS_CONTAINER,
   KubeSandboxes,
+  parsePeers,
   SESSION_ANNOTATION,
   sandboxName,
   TTL_MS,
@@ -43,6 +44,16 @@ const OTHER_THREAD: ThreadRef = {
   channelId: '1509024937422356532',
 };
 
+interface KubeconfigShape {
+  clusters: {
+    name: string;
+    cluster: { server: string; 'certificate-authority-data'?: string };
+  }[];
+  users: { name: string; user: { token: string } }[];
+  contexts: { name: string; context: { cluster: string; user: string } }[];
+  'current-context': string;
+}
+
 const config: SandboxConfig = {
   image:
     'ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac',
@@ -59,7 +70,9 @@ const config: SandboxConfig = {
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
     connectSecret: 'mate-onepassword',
   },
-  kubeServiceAccount: 'mate-sandbox-debug',
+  kubeServiceAccount: 'mate-sandbox-admin',
+  kubeContext: 'offsite',
+  kubePeers: ['folly'],
   github: true,
   kthx: {
     origin: null,
@@ -199,6 +212,33 @@ async function until(what: () => boolean, ms = 2000): Promise<void> {
     await Bun.sleep(10);
   }
 }
+
+describe('parsePeers', () => {
+  const ca = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
+  const line = (fields: Record<string, unknown>) => JSON.stringify(fields);
+
+  test('keeps well-formed peers in the order asked, and drops the rest', () => {
+    const printed = [
+      line({ name: 'b', server: 'https://b.example.test:6443', ca }),
+      'jq: error: not json',
+      line({ name: 'a', server: 'https://a.example.test:6443', ca }),
+      // Asked for no such cluster.
+      line({ name: 'c', server: 'https://c.example.test:6443', ca }),
+      // A missing topology key prints `null` into the server.
+      line({ name: 'd', server: 'https://null:null', ca }),
+      line({ name: 'e', server: 'https://e.example.test:6443', ca: '' }),
+      '',
+    ].join('\n');
+    expect(parsePeers(printed, ['a', 'b', 'd', 'e'])).toEqual([
+      { name: 'a', server: 'https://a.example.test:6443', ca },
+      { name: 'b', server: 'https://b.example.test:6443', ca },
+    ]);
+  });
+
+  test('answers nothing for a checkout that printed nothing', () => {
+    expect(parsePeers('', ['folly'])).toEqual([]);
+  });
+});
 
 describe('mint', () => {
   test('stamps the sandbox a thread gets', async () => {
@@ -665,20 +705,62 @@ describe('attach', () => {
 
       expect(fake.tokenRequests).toHaveLength(1);
       const [asked] = fake.tokenRequests;
-      expect(asked?.account).toBe('mate-sandbox-debug');
+      expect(asked?.account).toBe('mate-sandbox-admin');
       // The token must outlive the longest turn.
       expect(asked?.expirationSeconds).toBeGreaterThan(
         config.turnTimeoutMs / 1000,
       );
-      expect(asked?.audiences).toEqual(['https://kubernetes.default.svc:443']);
+      // Both apiservers accept `api`; folly's federation accepts nothing else.
+      expect(asked?.audiences).toEqual(['api']);
 
       const kubeconfig = wrote(0).kube ?? '';
-      expect(kubeconfig).toContain('token: sa-token-1');
-      expect(kubeconfig).toContain(
-        'server: https://kubernetes.default.svc:443',
+      const parsed = Bun.YAML.parse(kubeconfig) as KubeconfigShape;
+      expect(parsed['current-context']).toBe('offsite');
+      expect(parsed.users).toEqual([
+        { name: 'sandbox', user: { token: 'sa-token-1' } },
+      ]);
+      // The checkout holds no peer topology here, so the context is local only.
+      expect(parsed.clusters.map((c) => c.name)).toEqual(['offsite']);
+      expect(parsed.clusters[0]?.cluster.server).toBe(
+        'https://kubernetes.default.svc:443',
       );
       // Never skip-verify on an agent's behalf.
       expect(kubeconfig).not.toContain('insecure-skip-tls-verify');
+    });
+
+    test('adds a context for each peer cluster the checkout describes', async () => {
+      fake.peerOutput = `${JSON.stringify({
+        name: 'folly',
+        server: 'https://folly.example.test:6443',
+        ca: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n',
+      })}\n`;
+      const session = await turning();
+      await sandboxes.prompt(session, 'is folly healthy', new Collect());
+
+      const parsed = Bun.YAML.parse(wrote(0).kube ?? '') as KubeconfigShape;
+      expect(parsed.clusters.map((c) => c.name)).toEqual(['offsite', 'folly']);
+      const folly = parsed.clusters[1]?.cluster;
+      expect(folly?.server).toBe('https://folly.example.test:6443');
+      expect(
+        Buffer.from(folly?.['certificate-authority-data'] ?? '', 'base64')
+          .toString()
+          .startsWith('-----BEGIN CERTIFICATE-----'),
+      ).toBe(true);
+      expect(parsed.contexts).toContainEqual({
+        name: 'folly',
+        context: { cluster: 'folly', user: 'sandbox' },
+      });
+      expect(parsed['current-context']).toBe('offsite');
+      // Read in the sandbox, from the checkout, and never copied into mate.
+      const read = fake.execs.find((e) =>
+        e.command.some((word) => word.includes('cluster-topology.json')),
+      );
+      expect(read?.command[2]).toContain(
+        '/workspace/clusters/folly/config/cluster-topology.json',
+      );
+      expect(read?.command[2]).toContain(
+        '/workspace/terraform/pki/certs/folly-ca-bundle.pem',
+      );
     });
 
     test('truncates everything and hands the token back when the turn ends', async () => {
@@ -754,6 +836,18 @@ describe('attach', () => {
       );
       // The agent's home is a fresh emptyDir with no known hosts, so `yes` would refuse all.
       expect(first.sshConfig).toContain('StrictHostKeyChecking accept-new');
+      // `ssh spore` becomes spore.lolwtf.ca, which has no route from offsite
+      // but one through a folly node.
+      expect(first.sshConfig).toContain('CanonicalizeHostname always');
+      expect(first.sshConfig).toContain('CanonicalDomains lolwtf.ca');
+      expect(first.sshConfig).toMatch(
+        /Host [^\n]*spore\.lolwtf\.ca[^\n]*\n {2}ProxyJump riptide\.lolwtf\.ca/,
+      );
+      // Host * last: ssh takes the first value it finds for each option.
+      const sshConfig = first.sshConfig ?? '';
+      expect(sshConfig.indexOf('Host *')).toBeGreaterThan(
+        sshConfig.indexOf('ProxyJump'),
+      );
       // umask 077, because ssh refuses a private key others can read.
       expect(stamps()[0]?.command[2]).toContain('umask 077');
       expect(stamps()[0]?.command[2]).toContain('mkdir -p /home/agent/.ssh');
