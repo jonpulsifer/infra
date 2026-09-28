@@ -1,6 +1,6 @@
 # organization
 
-OpenTofu root for the Google Cloud organization: folders, org policies, custom roles, the org IAM policy, the billing budget, the audit-log sink, and the projects. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+OpenTofu root for the Google Cloud organization: folders, org policies, custom roles, the org IAM policy, the billing budget, and the projects. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
 
 `projects.tf` calls `modules/project` once for each project. A project that needs more resources also has a root under `terraform/gcp/projects/`.
 
@@ -26,14 +26,14 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.8.3 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.44.0 |
-| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 7.44.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 8.3.0 |
+| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 8.3.0 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_google"></a> [google](#provider\_google) | 7.44.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 8.3.0 |
 
 ## Modules
 
@@ -58,7 +58,6 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | [google_folder.dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
 | [google_folder.hidden](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
 | [google_folder.production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
-| [google_logging_organization_sink.audit_logs](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/logging_organization_sink) | resource |
 | [google_org_policy_policy.compute_setNewProjectDefaultToZonalDNSOnly](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.gcp_restrictCmekCryptoKeyProjects_dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.gcp_restrictCmekCryptoKeyProjects_production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
@@ -87,7 +86,5 @@ No inputs.
 
 ## Outputs
 
-| Name | Description |
-| ---- | ----------- |
-| <a name="output_audit_sink_writer_identity"></a> [audit\_sink\_writer\_identity](#output\_audit\_sink\_writer\_identity) | Writer identity for the audit log sink — grant roles/pubsub.publisher on the lolcorp audit-log-ingest topic |
+No outputs.
 <!-- END_TF_DOCS -->
