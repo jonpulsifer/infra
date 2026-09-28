@@ -41,13 +41,9 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
-| [google_bigquery_dataset.audit_anomalies](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_dataset) | resource |
-| [google_bigquery_table.anomalies](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_table) | resource |
-| [google_cloud_run_v2_service.audit_pipeline](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/cloud_run_v2_service) | resource |
 | [google_org_policy_policy.allow_all_domains](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.allowed_locations](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_project_service.service](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_service) | resource |
-| [google_service_account.audit_pipeline](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account) | resource |
 
 ## Inputs
 
