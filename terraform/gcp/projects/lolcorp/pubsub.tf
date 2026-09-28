@@ -34,10 +34,20 @@ resource "google_pubsub_subscription" "audit_log_push" {
     dead_letter_topic     = google_pubsub_topic.audit_log_dlq.id
     max_delivery_attempts = 10
   }
+
+  # The default policy deletes a subscription after 31 idle days.
+  expiration_policy {
+    ttl = ""
+  }
 }
 
 resource "google_pubsub_subscription" "audit_log_dlq_pull" {
   name    = "audit-log-dlq-pull"
   project = local.project
   topic   = google_pubsub_topic.audit_log_dlq.name
+
+  # The default policy deletes a subscription after 31 idle days.
+  expiration_policy {
+    ttl = ""
+  }
 }
