@@ -34,9 +34,11 @@ export const options: Options = {
   },
 };
 
-const hit = (url?: string) => {
-  const res = http.get(url ?? '');
-  check(res, { 'status is 200': () => res.status === 200 });
+const hit = (url: string | undefined, status = 200) => {
+  const res = http.get(url ?? '', {
+    responseCallback: http.expectedStatuses(status),
+  });
+  check(res, { 'status is expected': () => res.status === status });
 };
 
 export function app() {
@@ -47,6 +49,7 @@ export function control_plane() {
   hit(targets.control_plane);
 }
 
+// An unclaimed App name: the control plane's status page answers it with 404.
 export function edge() {
-  hit(targets.edge);
+  hit(targets.edge, 404);
 }
