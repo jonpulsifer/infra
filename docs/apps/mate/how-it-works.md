@@ -35,7 +35,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 
 mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx-sites.ts` is the ledger that writes the file into the sandbox and reads it back.
 
-`clanky-bot[bot]` is in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego`, so its comments can plan.
+`clanky-bot[bot]` is in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego` and in `atlantis_appliers` in `clusters/offsite/apps/atlantis/policies/appliers.rego`, so its comments can plan and apply.
 
 ## Network
 

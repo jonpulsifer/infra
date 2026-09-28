@@ -24,7 +24,7 @@ The agent runs every command without approval.
 | Access | Scope |
 | --- | --- |
 | Repository | `main`, with `AGENTS.md` and the repository skills |
-| GitHub | Pushes branches and opens pull requests as `clanky-bot[bot]`. Its comments can plan OpenTofu changes through Atlantis. |
+| GitHub | Pushes branches, opens pull requests and merges any pull request whose required checks pass, as `clanky-bot[bot]`. Its comments can plan and apply OpenTofu changes through Atlantis. |
 | offsite cluster | Reads every resource except Secrets, and has `pods/exec` in every pod but `mate`'s own namespace and the namespaces [the fence](mate/how-it-works.md#fence) excludes |
 | Hosts | None. `rowbutt`, the host user for Rowbutt, is in `wheel` on every host, and the sandbox has no SSH key for it. |
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx` MCP tools, when Secret `mate-kthx-agent` holds an agent token. |
