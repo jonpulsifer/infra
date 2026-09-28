@@ -121,10 +121,12 @@ desktops:
   caldigit ts4:
     mac: 64:4b:f0:37:15:69
     ip: 4
+  # On `future`, so `ip` is an octet of FUTURE_CIDR.
   atomic:
     mac: a8:a1:59:42:16:1c
     dev-id: 2663
-    ip: 5
+    network: future
+    ip: 13
   atomic-wifi:
     mac: b8:9a:2a:d5:26:f9
     dev-id: 2663
