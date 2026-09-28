@@ -33,7 +33,7 @@ The in-cluster log streams carry `cluster` and a `job` of `kubernetes` or `syste
 
 ## Targets outside Kubernetes
 
-folly scrapes the lab hosts and the Windows desktops through EndpointSlices. `PrometheusTargetMissing` fires when a lab host stops answering. A desktop that is off fires only the chart's `TargetDown` warning for job `windows-exporter`.
+folly scrapes the lab hosts and the Windows desktops through EndpointSlices. `PrometheusTargetMissing` fires when a lab host stops answering. A desktop that is off fires nothing: `TargetDown` leaves job `windows-exporter` out. `WindowsAgentDown` fires when one agent on a desktop answers and the other does not, and `WindowsDesktopUnseen` fires when a desktop has not answered for 7 days.
 
 ## k6
 

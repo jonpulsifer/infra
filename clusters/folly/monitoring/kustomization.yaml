@@ -6,6 +6,7 @@ resources:
   - grafana-dashboards
   - local-node-exporters.yaml
   - windows-exporters.yaml
+  - target-down.yaml
   - victoria-logs-route.yaml
   - capsule.yaml
   - spore.yaml

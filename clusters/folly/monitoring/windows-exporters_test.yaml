@@ -165,3 +165,60 @@ tests:
             exp_annotations:
               message: tallboy drive Samsung 990 PRO is at 75C
               description: "NVMe drives throttle around 70C and shorten their life well before that."
+
+  # Agent liveness. tallboy is on with OhmGraphite stopped; atomic never answers.
+  - interval: 1m
+    input_series:
+      - series: 'up{instance="tallboy",endpoint="http-metrics",job="windows-exporter"}'
+        values: 1x70
+      - series: 'up{instance="tallboy",endpoint="sensors",job="windows-exporter"}'
+        values: 0x70
+      - series: 'up{instance="atomic",endpoint="http-metrics",job="windows-exporter"}'
+        values: 0x70
+      - series: 'up{instance="atomic",endpoint="sensors",job="windows-exporter"}'
+        values: 0x70
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: WindowsAgentDown
+        exp_alerts: []
+      # atomic is off, which is not an agent fault.
+      - eval_time: 16m
+        alertname: WindowsAgentDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+              endpoint: sensors
+              job: windows-exporter
+            exp_annotations:
+              message: "tallboy: the sensors agent does not answer, and the other one does"
+              description: "The desktop is on, so one agent stopped or lost its firewall rule. Run Install-Monitoring.ps1 again."
+      - eval_time: 59m
+        alertname: WindowsDesktopUnseen
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: WindowsDesktopUnseen
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: atomic
+              endpoint: http-metrics
+              job: windows-exporter
+            exp_annotations:
+              message: "atomic has not answered a scrape in 7 days"
+              description: "The desktop has another address, or no agents. Do Check a desktop in the Install Windows monitoring runbook, or remove it from the EndpointSlice."
+
+  # A desktop switched off after it answered stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'up{instance="atomic",endpoint="http-metrics",job="windows-exporter"}'
+        values: 1x5 0x70
+      - series: 'up{instance="atomic",endpoint="sensors",job="windows-exporter"}'
+        values: 1x5 0x70
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: WindowsDesktopUnseen
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: WindowsAgentDown
+        exp_alerts: []

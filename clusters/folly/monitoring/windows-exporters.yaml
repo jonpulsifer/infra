@@ -90,9 +90,31 @@ metadata:
 spec:
   groups:
     - name: windows-exporters
-      # No target-missing alert: a powered-off desktop is normal, so every rule
-      # resolves when the host goes away.
+      # A desktop that is off is normal, so a down target alone fires nothing
+      # here, and target-down.yaml leaves this job out of TargetDown.
       rules:
+        # The other agent answers, so the desktop is on.
+        - alert: WindowsAgentDown
+          expr: |
+            up{job="windows-exporter"} == 0
+              and on (instance)
+            up{job="windows-exporter"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }}: the {{ $labels.endpoint }} agent does not answer, and the other one does"
+            description: "The desktop is on, so one agent stopped or lost its firewall rule. Run Install-Monitoring.ps1 again."
+
+        - alert: WindowsDesktopUnseen
+          expr: max_over_time(up{job="windows-exporter", endpoint="http-metrics"}[7d]) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }} has not answered a scrape in 7 days"
+            description: "The desktop has another address, or no agents. Do Check a desktop in the Install Windows monitoring runbook, or remove it from the EndpointSlice."
+
         # Lettered volumes only: the EFI and recovery partitions (HarddiskVolumeN)
         # sit near full permanently.
         - alert: WindowsDiskFillingUp

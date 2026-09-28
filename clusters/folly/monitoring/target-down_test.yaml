@@ -1,0 +1,33 @@
+---
+# promtool tests for target-down.yaml, run by `mise run k8s:check-rules`.
+rule_files:
+  - target-down.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # Half of a lab job is down.
+      - series: 'up{job="lab",namespace="monitoring",service="lab",instance="a"}'
+        values: 0x20
+      - series: 'up{job="lab",namespace="monitoring",service="lab",instance="b"}'
+        values: 1x20
+      # A desktop that is off.
+      - series: 'up{job="windows-exporter",namespace="monitoring",service="windows-exporters",instance="atomic"}'
+        values: 0x20
+      - series: 'up{job="windows-exporter",namespace="monitoring",service="windows-exporters",instance="tallboy"}'
+        values: 1x20
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: lab
+              namespace: monitoring
+              service: lab
+            exp_annotations:
+              description: "50% of the lab/lab targets in monitoring namespace are down."
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/targetdown
+              summary: One or more targets are unreachable.
