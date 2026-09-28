@@ -58,6 +58,7 @@ jobs:
             clusters/folly/apps/k6/**
             packages/archive/**
             packages/kthx/**
+            packages/mate-hands/**
             packages/typescript-config/**
             dotfiles/skills/**
             images/mate-sandbox/mise.toml

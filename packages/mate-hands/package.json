@@ -1,0 +1,22 @@
+{
+  "name": "@repo/mate-hands",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./protocol": "./src/protocol.ts",
+    "./main": "./src/main.ts"
+  },
+  "scripts": {
+    "compile": "bun build --compile --minify --no-compile-autoload-dotenv --no-compile-autoload-bunfig src/main.ts --outfile dist/mate-hands",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "1.4.2",
+    "typescript": "5.9.3"
+  }
+}

@@ -13,6 +13,8 @@ mate is the process behind [Rowbutt](../mate.md). It runs each thread in a sandb
 | Sandbox | One per thread, plus one ready spare. Init container `checkout` clones the repository, and container `harness` runs OpenCode. | A pod with runtime class `kata-clh`, a Cloud Hypervisor microVM ([Kubernetes](../../platform/kubernetes.md)), in namespace `mate` on [oldschool](../../hosts/oldschool.md), the offsite worker node |
 | [Session store](#session-store) | Postgres reserved for mate's session state. Nothing connects to it yet. | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
 
+The sandbox image also carries `mate-hands`, a daemon that runs file and shell calls sent over one `pods/exec` stream. mate does not use it yet.
+
 ## A turn
 
 1. mate moves the Sandbox's `spec.shutdownTime` two hours ahead and sets the annotation `lolwtf.ca/turn-started`.
@@ -72,5 +74,6 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/kthx-sites.ts`: the ledger of kthx site bearers
 - `images/mate-sandbox/Dockerfile`: the harness image
 - `clusters/offsite/apps/mate/database.yaml`: the session store
+- `packages/mate-hands/`: the `mate-hands` daemon, and the protocol that `apps/mate/src/hands.ts` speaks to it
 - `clusters/offsite/monitoring/mate-rules.yaml`: alerts, tested by `mise run k8s:check-rules`
 - `.github/containers.json`: the CD entries for both images

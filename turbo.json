@@ -39,6 +39,7 @@
       "dependsOn": ["build"],
       "inputs": [
         "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/mate-hands/**",
         "$TURBO_ROOT$/dotfiles/skills/**",
         "$TURBO_ROOT$/mise.toml",
         "$TURBO_ROOT$/images/mate-sandbox/mise.toml"

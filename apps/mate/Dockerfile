@@ -26,9 +26,13 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=deps --chmod=755 /app ./
 COPY --from=pruner --chmod=755 /app/out/full/apps/mate/src ./apps/mate/src
+# `deps` has only the workspace manifests and symlinks, so the package's
+# source comes from `pruner`.
+COPY --from=pruner --chmod=755 /app/out/full/packages/mate-hands/src ./packages/mate-hands/src
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 RUN test -f /app/apps/mate/src/main.ts \
-  && test -d /app/apps/mate/node_modules/@discordjs/ws
+  && test -d /app/apps/mate/node_modules/@discordjs/ws \
+  && test -f /app/apps/mate/node_modules/@repo/mate-hands/src/protocol.ts
 WORKDIR /app/apps/mate
 USER 65532:65532
 EXPOSE 8080
