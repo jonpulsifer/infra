@@ -8,12 +8,10 @@ locals {
       cidr       = local.future_cidr
       fixed_ip   = local.lab_topology.TALLBOY_IP
     }
-    # No network_id: the provider sends a network override, and the controller answers
-    # VirtualNetworkOverrideUnsupportedForDefaultNetwork on Management.
     atomic = {
       client     = local.clients.desktops.atomic
-      network_id = null
-      cidr       = local.fml_cidr
+      network_id = unifi_network.future.id
+      cidr       = local.future_cidr
       fixed_ip   = local.lab_topology.ATOMIC_IP
     }
   }

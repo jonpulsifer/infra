@@ -1,6 +1,6 @@
 ---
 title: atomic
-description: A Windows desktop at folly on the Management network that Prometheus on folly cannot scrape.
+description: A Windows desktop at folly on the future network that Prometheus on folly cannot scrape.
 status: unverified
 specs:
   vendor: unknown
@@ -12,7 +12,7 @@ specs:
   os: Windows
 ---
 
-atomic is a Windows desktop on folly's [Management](../platform/network.md#networks) network. Its setup procedure is [Install a Windows desktop](../runbooks/install-a-windows-desktop.md).
+atomic is a Windows desktop on folly's [`future`](../platform/network.md#networks) network, behind a switch port whose native network is `future`. Its setup procedure is [Install a Windows desktop](../runbooks/install-a-windows-desktop.md).
 
 ## What it runs
 
@@ -24,5 +24,5 @@ Reach it at [`atomic.<tailnet>`](index.md#reach-a-host). `terraform/network/unif
 
 ## Quirks
 
-- `clusters/folly/monitoring/windows-exporters.yaml` declares atomic as a scrape target, and atomic does not answer. The chart's `TargetDown` alert fires for the `windows-exporter` job because of it.
+- `clusters/folly/monitoring/windows-exporters.yaml` declares atomic as a scrape target, and its agents do not answer while atomic is on. `WindowsDesktopUnseen` fires for it until the agents are installed. See [Install or update the agents](../runbooks/install-windows-monitoring.md#install-or-update-the-agents).
 - The per-host `Windows*` rules in the same file resolve when atomic is off.

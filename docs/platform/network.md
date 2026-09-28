@@ -23,7 +23,7 @@ The network connects two sites, folly (home) and offsite (remote). Each site has
 | folly | Management | Home network, WLAN `fml` |
 | folly | Lab Net | Lab hosts, WLAN `lab` (open, hidden) |
 | folly | Kubernetes | folly nodes. DHCP offers iPXE netboot from spore. |
-| folly | future | IPv6 prefix delegated from the WAN. Holds the Windows desktop tallboy. |
+| folly | future | IPv6 prefix delegated from the WAN. Holds the Windows desktops tallboy and atomic. |
 | folly | iot | IoT devices |
 | offsite | Default | Client LAN |
 | offsite | Kubernetes | offsite nodes |
