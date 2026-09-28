@@ -2,9 +2,13 @@ package appliers
 
 import rego.v1
 
-# Who may comment `atlantis apply` or `atlantis import`. Plan runs the pull
-# request's code with Atlantis's credentials, so only-me.rego is a trust list too.
-atlantis_appliers := {"jonpulsifer"}
+# Who may comment `atlantis apply` or `atlantis import`. clanky-bot[bot] is the
+# identity a Rowbutt sandbox comments as. Plan runs the pull request's code with
+# Atlantis's credentials, so only-me.rego is a trust list too.
+atlantis_appliers := {
+    "jonpulsifer",
+    "clanky-bot[bot]",
+}
 
 allowed if input.user in atlantis_appliers
 

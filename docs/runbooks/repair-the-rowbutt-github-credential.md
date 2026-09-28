@@ -114,6 +114,7 @@ If the `clanky-bot` App is deleted or unusable, do this procedure. `<slug>` is t
    - `GIT_USER` in `apps/mate/src/sandboxes.ts`: `<slug>[bot]`
    - `GIT_EMAIL` in the same file: `<bot-id>+<slug>[bot]@users.noreply.github.com`
    - `clanky-bot[bot]` in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego`: `<slug>[bot]`
+   - `clanky-bot[bot]` in `atlantis_appliers` in `clusters/offsite/apps/atlantis/policies/appliers.rego`: `<slug>[bot]`
 
 > [!CAUTION]
 > mate cannot make tokens from step 7 until it restarts with the new App ID.
