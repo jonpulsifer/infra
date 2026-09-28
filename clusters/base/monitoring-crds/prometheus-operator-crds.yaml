@@ -15,7 +15,7 @@ spec:
       chart: prometheus-operator-crds
       # Same operator (v0.94.0) as kube-prometheus-stack 91.x, whose operator on
       # offsite reads these CRDs; bump the two together.
-      version: 32.0.0
+      version: 32.0.1
       sourceRef:
         kind: HelmRepository
         name: prometheus-crds
