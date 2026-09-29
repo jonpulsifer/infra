@@ -46,6 +46,12 @@
       ],
       "outputs": []
     },
+    "@repo/pi-store-postgres#test": {
+      "dependsOn": ["build"],
+      "inputs": ["$TURBO_DEFAULT$"],
+      "env": ["DATABASE_URL", "PI_STORE_TEST_DATABASE_URL"],
+      "outputs": []
+    },
     "switchboard#test": {
       "dependsOn": ["build"],
       "inputs": [
