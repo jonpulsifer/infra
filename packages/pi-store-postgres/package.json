@@ -1,0 +1,25 @@
+{
+  "name": "@repo/pi-store-postgres",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "bench": "bun run test/bench.ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.87.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.87.1",
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "1.4.2",
+    "typescript": "5.9.3"
+  }
+}
