@@ -49,6 +49,7 @@ jobs:
             apps/switchboard/**
             clusters/folly/apps/pbx/config/**
             clusters/folly/apps/pbx/switchboard.yaml
+            clusters/offsite/apps/mate/database-backup.yaml
             packages/charts/**
             clusters/base/platform/spindrift-target/**
             clusters/offsite/apps/spindrift/**

@@ -30,7 +30,13 @@ export type TurnResumeResult = 'resumed' | 'lost' | 'discarded';
 
 export type ProviderErrorKind = 'limit' | 'auth' | 'timeout' | 'other';
 
-export type StoreOp = 'open' | 'fault' | 'rows' | 'migrate' | 'quarantine';
+export type StoreOp =
+  | 'open'
+  | 'fault'
+  | 'rows'
+  | 'migrate'
+  | 'quarantine'
+  | 'credentials';
 
 /** The bounded set a tool's name is counted under. */
 export type ToolLabel = 'bash' | 'read' | 'write' | 'edit' | 'kthx' | 'other';

@@ -125,8 +125,8 @@ spec:
             message: "mate cannot give a thread a sandbox"
             description: "More than two sandbox mints or connects failed in the last thirty minutes, so turns that need a command or a file get tool errors instead of results. A mint failure is the Sandbox never going Ready — the sandbox image digest, the kata-clh runtime class, or the namespace's restricted PSA. A connect is `pods/exec` into a Ready pod and then the mate-hands hello: a failure is the Role in ../../apps/mate/rbac.yaml, or a daemon that speaks another protocol, which mate condemns as too old so the next call mints a new sandbox. `mate_hands_connects_total` by `result` says which."
 
-        # Every op counts: an open, a fault mid-turn, a row write, a migration
-        # or a quarantine.
+        # Every op counts: an open, a fault mid-turn, a row write, a migration,
+        # a quarantine or a credential read or write.
         - alert: MateStoreFailing
           expr: |
             sum(increase(mate_store_failures_total[30m])) > 2
@@ -140,7 +140,7 @@ spec:
             severity: warning
           annotations:
             message: "mate is failing to reach its session store"
-            description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, and `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
+            description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection, and `credentials` the ChatGPT sign-in, which mate keeps in memory and retries until it saves. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
 
         # mate test-mints at boot and on a timer; 0 means turns cannot push. No
         # App means no series. Guarded on the Deployment as MateNotReporting is.

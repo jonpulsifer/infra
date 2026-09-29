@@ -11,7 +11,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs the agent loop for eac
 | --- | --- | --- |
 | mate | Connects to Discord and Slack, runs the agent loop on pi (`@earendil-works/pi-agent-core`), calls the model, bridges the kthx MCP tools, creates Sandboxes and mints tokens | Deployment `mate` in namespace `mate` |
 | Sandbox | One per thread that has run a tool, plus one ready spare. Init container `checkout` clones the repository. mate execs `mate-hands`, the daemon that runs the agent's file and shell calls, in container `harness`. | A pod with runtime class `kata-clh`, a Cloud Hypervisor microVM ([Kubernetes](../../platform/kubernetes.md)), in namespace `mate` on [oldschool](../../hosts/oldschool.md), the offsite worker node |
-| [Session store](#session-store) | Postgres that holds pi's sessions and mate's `mate_threads` table | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
+| [Session store](#session-store) | Postgres that holds pi's sessions and mate's `mate_threads` and `mate_credentials` tables | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
 
 The model is `MATE_MODEL`, through pi-ai's `opencode-go` provider, at the reasoning level in `MATE_THINKING`. The system prompt is a note about the surface and the sandbox, then `AGENTS.md`, then an index of the skills in `dotfiles/skills/` and `.agents/skills/`. The mate image bakes these files, and the agent reads a skill from the sandbox's checkout.
 
@@ -65,9 +65,9 @@ No policy selects the `mate-db` instance or the backup Job's pod. The CloudNativ
 
 `clusters/offsite/apps/mate/database.yaml` declares `mate-db`, one Postgres instance on a `local-path` volume. Its database and owner role are both `mate`. CloudNativePG writes the role's credentials to Secret `mate-db-app` and its CA to Secret `mate-db-ca`, and mate connects with `sslmode=verify-full` against that CA. Flux never prunes the `Cluster`, because CloudNativePG deletes the volume with it; removing the store is a deliberate delete.
 
-`packages/pi-store-postgres/` keeps pi's sessions in tables prefixed `pi_`. mate keeps a row per thread in `mate_threads`: its session id, its sandbox and the turn in flight, so a restarted mate finds every open thread. mate deletes the session of a thread closed for more than `MATE_SESSION_RETENTION_DAYS`, 14 by default. If the store is down, mate stays connected and tells each thread that it cannot reach its memory.
+`packages/pi-store-postgres/` keeps pi's sessions in tables prefixed `pi_`. mate keeps a row per thread in `mate_threads`: its session id, its sandbox and the turn in flight, so a restarted mate finds every open thread. `mate_credentials` holds the ChatGPT sign-in, and mate is its only writer. A credential that mate cannot save stays in memory, and mate retries the write every 30 seconds. mate deletes the session of a thread closed for more than `MATE_SESSION_RETENTION_DAYS`, 14 by default. If the store is down, mate stays connected and tells each thread that it cannot reach its memory.
 
-CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped `pg_dump` to `gs://homelab-ng-mate/backups/pg/` at 04:43 UTC. It signs in to Google Cloud as `mate-db-backup@homelab-ng` through workload identity federation, with no key. `terraform/gcp/projects/homelab-ng/mate.tf` declares that account and the bucket, which deletes a dump after 30 days. There is no WAL archive, so a restore loses every write after the last dump.
+CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped `pg_dump` to `gs://homelab-ng-mate/backups/pg/` at 04:43 UTC. The dump leaves out the rows of `mate_credentials`, so a restore needs a new ChatGPT sign-in. It signs in to Google Cloud as `mate-db-backup@homelab-ng` through workload identity federation, with no key. `terraform/gcp/projects/homelab-ng/mate.tf` declares that account and the bucket, which deletes a dump after 30 days. There is no WAL archive, so a restore loses every write after the last dump.
 
 ## Fence
 
@@ -91,6 +91,7 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/credentials.ts`: the credential files of a turn
 - `apps/mate/src/sandboxes.ts`: the Sandbox, its manifest and the spare pool
 - `apps/mate/src/store.ts`: the connection to `mate-db` and the `mate_threads` table
+- `apps/mate/src/credential-store.ts`: the `mate_credentials` table
 - `apps/mate/src/profile.ts`: the system prompt
 - `apps/mate/src/mcp.ts`: the kthx MCP bridge
 - `apps/mate/src/kthx-sites.ts`: the ledger of kthx site bearers

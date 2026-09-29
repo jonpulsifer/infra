@@ -7,6 +7,7 @@ import { silentLog } from '../src/log.ts';
 import {
   composeUrl,
   isStoreUnavailable,
+  MIGRATIONS,
   migrateThreads,
   openDatabase,
   POOL_OPTIONS,
@@ -36,7 +37,7 @@ describe('the migrations', () => {
     await Promise.all([migrateThreads(sql), migrateThreads(sql)]);
     await migrate(sql);
     const [row] = await sql`SELECT count(*)::int AS n FROM mate_migrations`;
-    expect(row.n).toBe(1);
+    expect(row.n).toBe(MIGRATIONS.length);
   });
 });
 

@@ -47,7 +47,8 @@
         "$TURBO_ROOT$/mise.toml",
         "$TURBO_ROOT$/images/mate-sandbox/gh",
         "$TURBO_ROOT$/images/mate-sandbox/mise.toml",
-        "$TURBO_ROOT$/terraform/pki/certs/fml-root.pem"
+        "$TURBO_ROOT$/terraform/pki/certs/fml-root.pem",
+        "$TURBO_ROOT$/clusters/offsite/apps/mate/database-backup.yaml"
       ],
       "env": ["DATABASE_URL", "MATE_TEST_DATABASE_URL"],
       "outputs": []
