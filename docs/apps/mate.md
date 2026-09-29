@@ -31,7 +31,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 | Hosts | SSH as `rowbutt`, the host user for Rowbutt, which has passwordless sudo on every NixOS host. It reaches both sites' nodes, and folly's Lab Net hosts through riptide. weatherpi4 and oldboy have no route from the sandbox. |
 | Internet | Every host on ports 80 and 443 |
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx_*` tools that mate bridges from the kthx MCP server, when Secret `mate-kthx-agent` holds an agent token. |
-| Weather | Current conditions, forecasts and alerts, through the `weather_*` tools that mate bridges from the in-cluster weather MCP server at `MATE_WEATHER_MCP_URL`. The server takes no token. |
+| Weather | Canadian weather and the family Tempest stations, through the `weather_*` tools that mate bridges from the [Weather API](weather.md) at `MATE_WEATHER_MCP_URL`. The server takes no token. |
 | Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason; Switchboard fixes the number and caps the calls. Parked today, so a ring gets no answer; its page has the state. |
 
 [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox. It guards against accidents only: as `cluster-admin` and root on the hosts, the agent can read mate's Secrets or remove the fence.

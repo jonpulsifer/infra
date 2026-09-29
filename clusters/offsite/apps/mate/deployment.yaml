@@ -189,10 +189,6 @@ spec:
             # pods and not the public hostname.
             - name: MATE_KTHX_MCP_URL
               value: http://spindrift.spindrift.svc.cluster.local:3000/mcp
-            # mate bridges the weather service's MCP tools as `weather_*`. It
-            # takes no token.
-            - name: MATE_WEATHER_MCP_URL
-              value: http://weather.weather.svc.cluster.local:8080/mcp
             # The bearer for the URL above. `optional`: until the owner mints it
             # (docs/runbooks/connect-an-agent-to-kthx.md) the agent has no kthx
             # tools.
@@ -202,6 +198,10 @@ spec:
                   name: mate-kthx-agent
                   key: KTHX_AGENT_TOKEN
                   optional: true
+            # mate bridges the weather service's MCP tools as `weather_*`. It
+            # takes no token.
+            - name: MATE_WEATHER_MCP_URL
+              value: http://weather.weather.svc.cluster.local:8080/mcp
             # Each sandbox gets this address and a ring token from Secret
             # mate-switchboard, so the agent can ring the owner's phone. The
             # number and the caps are switchboard's; the sandbox holds neither.

@@ -17,6 +17,7 @@ sections:
       - apps/smiirl.md
       - apps/tidbyt.md
       - apps/hub.md
+      - apps/weather.md
       - apps/wiki.md
       - group: Internal tools
         items: [apps/netbench.md]
