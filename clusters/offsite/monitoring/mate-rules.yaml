@@ -188,7 +188,9 @@ spec:
             description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, OpenAI refused the token refresh, or chatgpt.com refused a fresh token too. Until the owner signs it in again, mate cannot use ChatGPT, so a turn that would use it runs on MATE_FALLBACK_MODEL. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
 
         # The keeper rotates the token at two days left, so under one is a day
-        # of failed refreshes. The gauge is absent while signed out.
+        # of failed refreshes. A token chatgpt.com refuses reads as expired
+        # until its forced rotation gets through, so an hour of failed
+        # rotations fires too. The gauge is absent while signed out.
         - alert: MateChatGPTTokenNotRefreshing
           expr: |
             mate_chatgpt_token_expiry_seconds < 86400
@@ -199,7 +201,7 @@ spec:
             severity: warning
           annotations:
             message: "mate's ChatGPT token is not refreshing"
-            description: "mate's ChatGPT access token has less than a day left. mate refreshes it once two days are left, so every refresh since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, mate's ChatGPT requests fail until a refresh gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+            description: "mate's ChatGPT access token has less than a day left, or chatgpt.com refused it over an hour ago. mate rotates the token once two days are left, or at once when chatgpt.com refuses it, and tries a failed rotation again every 15 minutes, so every rotation since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, or once chatgpt.com refuses it, mate's ChatGPT requests fail until a rotation gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
 
         # ChatGPT's own failures, not the requests the breaker sends past it
         # while it waits. A blip is one per running turn, then a trial a minute

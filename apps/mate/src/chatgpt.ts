@@ -115,11 +115,17 @@ export class ChatgptKeeper {
   private stopped = false;
   /** Credentials the store has written, which a rotation always adds to. */
   private writes = 0;
+  /**
+   * When chatgpt.com refused the token, while the rotation that replaces it
+   * is owed: a failure on the way retries it forced, not as a check.
+   */
+  private refusedAt: number | null = null;
 
   constructor(private readonly options: ChatgptKeeperOptions) {
     options.credentials.onChange((change) => {
       if (change.providerId !== CHATGPT_PROVIDER) return;
       if (change.stored) this.writes += 1;
+      this.refusedAt = null;
       this.set(
         change.stored && change.expires !== null
           ? { state: 'good', expires: change.expires }
@@ -151,24 +157,32 @@ export class ChatgptKeeper {
   }
 
   check(): Promise<CheckResult> {
-    this.running ??= this.run(false).finally(() => {
+    this.running ??= this.run().finally(() => {
       this.running = null;
     });
     return this.running;
   }
 
-  /** One rotation now, whatever is left: for a token the backend refuses. */
+  /**
+   * One rotation now, whatever is left: for a token the backend refuses. It
+   * stays owed until one gets through, OpenAI refuses it, or a sign-in lands.
+   */
   async forceRefresh(): Promise<CheckResult> {
     // A check that has just rotated has replaced the refused token already.
     if ((await this.running) === 'refreshed') return 'refreshed';
-    return this.run(true);
+    this.refusedAt ??= this.options.clock.now();
+    return this.check();
   }
 
-  private async run(force: boolean): Promise<CheckResult> {
+  private async run(): Promise<CheckResult> {
+    const force = this.refusedAt !== null;
     const result = await this.attempt(force);
-    this.schedule(
-      result === 'transient' || result === 'store' ? RETRY_MS : CHECK_MS,
-    );
+    const failed = result === 'transient' || result === 'store';
+    if (force && !failed && this.refusedAt !== null) {
+      this.refusedAt = null;
+      this.set(this.signIn);
+    }
+    this.schedule(failed || this.refusedAt !== null ? RETRY_MS : CHECK_MS);
     return result;
   }
 
@@ -263,16 +277,20 @@ export class ChatgptKeeper {
 
   private set(signIn: SignIn): void {
     this.signIn = signIn;
-    this.options.metrics?.chatgpt(gauge(signIn));
+    this.options.metrics?.chatgpt(gauge(signIn, this.refusedAt));
   }
 }
 
-function gauge(signIn: SignIn): ChatgptSignIn | null {
+function gauge(signIn: SignIn, refusedAt: number | null): ChatgptSignIn | null {
   switch (signIn.state) {
     case 'unknown':
       return null;
     case 'good':
-      return { signedIn: true, expiresAt: signIn.expires };
+      // A token chatgpt.com refused stopped working then, whatever its expiry.
+      return {
+        signedIn: true,
+        expiresAt: Math.min(signIn.expires, refusedAt ?? signIn.expires),
+      };
     default:
       return { signedIn: false, expiresAt: null };
   }

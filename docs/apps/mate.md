@@ -53,7 +53,7 @@ mate is one Bun process, and its ingress admits only the node it runs on. It run
 | --- | --- | --- |
 | `MateGitHubCredentialBroken`, `MateGitHubTokenMintFailing` | mate cannot mint GitHub tokens, so sandboxes cannot push | [Repair the Rowbutt GitHub credential](../runbooks/repair-the-rowbutt-github-credential.md) |
 | `MateKthxSitesSyncFailing` | mate could not read back or save a sandbox's kthx site tokens. A site claimed in that turn may be orphaned. Read the mate log. | |
-| `MateChatGPTSignedOut`, `MateChatGPTTokenNotRefreshing` | mate holds no working ChatGPT sign-in, or a day of token refreshes failed | [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md) |
+| `MateChatGPTSignedOut`, `MateChatGPTTokenNotRefreshing` | mate holds no working ChatGPT sign-in, or its token refreshes keep failing | [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md) |
 | `MateModelPrimaryFailing` | ChatGPT fails mate's requests for a reason other than its usage limit or the sign-in, so the fallback model answers | [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) |
 | `MateStoreFailing`, `MateDatabaseDown`, `MateDatabaseVolumeFilling`, `MateDatabaseBackupFailing` | mate cannot reach the session store, or the store is down, past 80% of its volume, or has no dump from the last 36 hours | [Operate Postgres](../runbooks/operate-postgres.md) |
 

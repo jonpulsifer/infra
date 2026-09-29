@@ -478,8 +478,38 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate's ChatGPT token is not refreshing"
-              description: "mate's ChatGPT access token has less than a day left. mate refreshes it once two days are left, so every refresh since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, mate's ChatGPT requests fail until a refresh gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+              description: "mate's ChatGPT access token has less than a day left, or chatgpt.com refused it over an hour ago. mate rotates the token once two days are left, or at once when chatgpt.com refuses it, and tries a failed rotation again every 15 minutes, so every rotation since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, or once chatgpt.com refuses it, mate's ChatGPT requests fail until a rotation gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
       - eval_time: 160m
+        alertname: MateChatGPTTokenNotRefreshing
+        exp_alerts: []
+
+  # chatgpt.com refuses a token with ten days left at 31m, and every forced
+  # rotation fails: the gauge reads it as expired from then, so an hour of
+  # that fires. The rotation that gets through at 122m clears it.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x160
+      - series: 'mate_chatgpt_token_expiry_seconds{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 864000-60x30 0-60x90 864000x30
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: MateChatGPTTokenNotRefreshing
+        exp_alerts: []
+      - eval_time: 95m
+        alertname: MateChatGPTTokenNotRefreshing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate's ChatGPT token is not refreshing"
+              description: "mate's ChatGPT access token has less than a day left, or chatgpt.com refused it over an hour ago. mate rotates the token once two days are left, or at once when chatgpt.com refuses it, and tries a failed rotation again every 15 minutes, so every rotation since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, or once chatgpt.com refuses it, mate's ChatGPT requests fail until a rotation gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+      - eval_time: 130m
         alertname: MateChatGPTTokenNotRefreshing
         exp_alerts: []
 

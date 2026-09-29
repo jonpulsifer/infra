@@ -323,11 +323,17 @@ async function signIn(expiresInDays = 10): Promise<void> {
 }
 
 async function until(check: () => boolean, ms = 5_000): Promise<void> {
-  const deadline = Date.now() + ms;
+  const deadline = performance.now() + ms;
   while (!check()) {
-    if (Date.now() > deadline) throw new Error('it never happened');
+    if (performance.now() > deadline) throw new Error('it never happened');
     await Bun.sleep(5);
   }
+}
+
+/** Moves mate's clock on, and pi's `Date.now()` with it. */
+async function later(ms: number): Promise<void> {
+  setSystemTime(new Date(clock.now() + ms));
+  await clock.advance(ms);
 }
 
 describe('the command', () => {
@@ -749,6 +755,71 @@ describe('the keeper', () => {
     expect(metrics.chatgptStates.at(-1)).toMatchObject({ signedIn: true });
     expect(setup.router?.status().now).toEqual({ route: 'primary' });
     expectNothingSecret();
+  });
+
+  test.each<Outcome>([500, 'network'])(
+    'a forced rotation that fails with %p is forced again every 15 minutes until one gets through',
+    async (outcome) => {
+      await signIn(5);
+      const ask = () =>
+        setup.models.completeSimple(
+          setup.model,
+          {
+            messages: [{ role: 'user', content: 'hi', timestamp: Date.now() }],
+          },
+          { transport: 'sse' },
+        );
+      const rotations = () => openai.of('/oauth/token').length;
+      openai.codex = 401;
+      openai.refresh = outcome;
+      await ask();
+      await until(() => rotations() === 1);
+      await settle();
+      expect(setup.router?.status().now).toMatchObject({ reason: 'auth' });
+      // A refused token works no longer, so MateChatGPTTokenNotRefreshing counts from here.
+      expect(metrics.chatgptStates.at(-1)).toEqual({
+        signedIn: true,
+        expiresAt: clock.now(),
+      });
+
+      await later(RETRY_MS);
+      await until(() => rotations() === 2, 2_000);
+      await settle();
+      expect(setup.router?.status().now).toMatchObject({ reason: 'auth' });
+
+      openai.refresh = 'ok';
+      openai.codex = 'ok';
+      await later(RETRY_MS);
+      await until(() => setup.router?.status().now.route === 'primary');
+      expect(rotations()).toBe(3);
+      expect(await store.read(CHATGPT_PROVIDER)).toMatchObject({
+        refresh: 'rt_SECRET_1',
+      });
+      expect(metrics.chatgptStates.at(-1)?.expiresAt).toBeGreaterThan(
+        clock.now() + 9 * DAY_MS,
+      );
+      expect((await ask()).provider).toBe(CHATGPT_PROVIDER);
+
+      await later(RETRY_MS);
+      await settle();
+      expect(rotations()).toBe(3);
+      expectNothingSecret();
+    },
+  );
+
+  test('a forced rotation owed through failures gives way to a new sign-in', async () => {
+    await signIn(5);
+    openai.refresh = 'network';
+    expect(await keeper.forceRefresh()).toBe('transient');
+    await signIn(10);
+    expect(metrics.chatgptStates.at(-1)).toMatchObject({ signedIn: true });
+    expect(metrics.chatgptStates.at(-1)?.expiresAt).toBeGreaterThan(
+      clock.now() + 9 * DAY_MS,
+    );
+    openai.refresh = 'ok';
+    await later(RETRY_MS);
+    await settle();
+    expect(openai.of('/oauth/token')).toHaveLength(1);
   });
 
   test('a forced refresh rotates a token with days left', async () => {

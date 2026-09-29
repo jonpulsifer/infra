@@ -1900,7 +1900,7 @@
       "id": 33,
       "type": "timeseries",
       "title": "ChatGPT sign-in",
-      "description": "Days until the ChatGPT access token expires, and 1 while mate holds a working sign-in. mate refreshes the token at two days left, MateChatGPTTokenNotRefreshing fires under one, and MateChatGPTSignedOut on 0. No series means no sign-in to read.",
+      "description": "Days until the ChatGPT access token expires, and 1 while mate holds a working sign-in. A token chatgpt.com refuses reads as expired until its rotation gets through. mate refreshes the token at two days left, MateChatGPTTokenNotRefreshing fires under one, and MateChatGPTSignedOut on 0. No series means no sign-in to read.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

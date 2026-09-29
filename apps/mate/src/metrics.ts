@@ -41,7 +41,11 @@ export type StoreOp =
 
 export interface ChatgptSignIn {
   readonly signedIn: boolean;
-  /** When the access token expires, in epoch ms; null while signed out. */
+  /**
+   * When the access token stops working, in epoch ms: its expiry, or when
+   * chatgpt.com refused it, until its rotation gets through. Null while
+   * signed out.
+   */
   readonly expiresAt: number | null;
 }
 

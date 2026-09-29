@@ -77,7 +77,7 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
 | The test request failed with `HTTP 401` or `HTTP 403`. | The plan does not include Codex, or OpenAI refuses the client. | Check the plan in ChatGPT's settings. |
 | `MateChatGPTSignedOut` fires, or `chatgpt status` says `OpenAI refused the token refresh`. | The refresh token is revoked or spent. | Do [Sign in](#sign-in). |
 | `chatgpt status` says `chatgpt.com refused a fresh token too`. | chatgpt.com refuses the account or mate's client, not only the token. | Do [Sign in](#sign-in). If its test request fails with `HTTP 401` or `HTTP 403`, check the plan. |
-| `MateChatGPTTokenNotRefreshing` fires. | A day of refreshes failed on egress, DNS or mate-db. | Read the mate log. If `MateStoreFailing` fires, do [Operate Postgres](operate-postgres.md). |
+| `MateChatGPTTokenNotRefreshing` fires. | A day of refreshes, or an hour of rotations since chatgpt.com refused the token, failed on egress, DNS or mate-db. | Read the mate log. If `MateStoreFailing` fires, do [Operate Postgres](operate-postgres.md). |
 | After a restore of mate-db, `chatgpt status` says `not signed in`. | The nightly dump leaves out `mate_credentials`. | Do [Sign in](#sign-in). |
 
 ## Related
