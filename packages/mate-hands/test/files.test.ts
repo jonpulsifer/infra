@@ -37,14 +37,14 @@ describe('hello and ping', () => {
   test('hello names the workspace, home, epoch and limits', async () => {
     const hello = await hands.result<Hello>('hello');
     expect(hello).toMatchObject({
-      protocol: 1,
-      version: '0.1.0',
+      protocol: 2,
+      version: '0.2.0',
       epoch: 1,
       pid: hands.pid,
       cwd,
       home,
       tmp,
-      watchdogMs: 60_000,
+      watchdogMs: 30_000,
     });
     expect(hello.limits.maxReadBytes).toBe(8 * 1024 * 1024);
   });

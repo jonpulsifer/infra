@@ -5,7 +5,11 @@
  * daemon that its client is gone.
  */
 import {
+  closeSync,
+  constants,
+  fstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -35,6 +39,10 @@ interface Stat {
 
 const RECORD = /^\d+-\d+\.json$/;
 const KILL_WAIT_MS = 1_000;
+// The agent can write the state directory, and a FIFO there would block a
+// sync open, so records open without blocking and must be regular files.
+const READ_RECORD =
+  constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
 
 function stat(pid: number): Stat | null {
   try {
@@ -95,6 +103,10 @@ function groupAlive(group: Group): boolean {
   return isOurs(group) && signal(-group.pgid, 0);
 }
 
+function recordName({ epoch, pid }: Omit<DaemonRecord, 'groups'>): string {
+  return `${epoch}-${pid}.json`;
+}
+
 export class Ledger {
   readonly path: string;
 
@@ -103,13 +115,15 @@ export class Ledger {
     readonly record: Omit<DaemonRecord, 'groups'>,
   ) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    this.path = join(dir, `${record.epoch}-${record.pid}.json`);
+    this.path = join(dir, recordName(record));
   }
 
   save(groups: Group[]): void {
     const tmp = `${this.path}.tmp`;
+    rmSync(tmp, { force: true });
     writeFileSync(tmp, JSON.stringify({ ...this.record, groups }), {
       mode: 0o600,
+      flag: 'wx',
     });
     renameSync(tmp, this.path);
   }
@@ -173,20 +187,28 @@ export type Claim =
   | { superseded: null; killed: DaemonRecord[] };
 
 /**
- * Makes `ledger`'s daemon the owner of the state directory. A record with an
- * epoch at or above its own supersedes it; every older daemon is killed, then
- * its groups. The caller saves its own record first, so of two daemons that
- * start together the newer one always sees the older.
+ * Makes `ledger`'s daemon the owner of the state directory. The live daemon
+ * with the highest epoch at or above its own supersedes it, so a client can
+ * start its next daemon past that epoch. Every other daemon is killed, then
+ * its groups: the older ones, and the dead ones whatever their epoch, so a
+ * record a daemon left when it was killed, or one the agent planted, cannot
+ * supersede every daemon after it. The caller saves its own record first, so
+ * of two daemons that start together the newer one always sees the older.
  */
 export async function claim(ledger: Ledger): Promise<Claim> {
   const { dir, record } = ledger;
   const others = records(dir).filter(
     (r) => r.epoch !== record.epoch || r.pid !== record.pid,
   );
-  const newer = others.find((r) => r.epoch >= record.epoch);
-  if (newer) return { superseded: newer };
+  const owner = others
+    .filter((r) => r.epoch >= record.epoch && isLive(r.pid, r.start))
+    .reduce<DaemonRecord | null>(
+      (top, r) => (top && top.epoch >= r.epoch ? top : r),
+      null,
+    );
+  if (owner) return { superseded: owner };
   for (const old of others) {
-    const path = join(dir, `${old.epoch}-${old.pid}.json`);
+    const path = join(dir, recordName(old));
     if (isLive(old.pid, old.start)) {
       signal(old.pid, 'SIGKILL');
       await gone(old.pid, old.start);
@@ -208,16 +230,21 @@ function records(dir: string): DaemonRecord[] {
   const found: DaemonRecord[] = [];
   for (const name of readdirSync(dir)) {
     if (!RECORD.test(name)) continue;
-    const record = readRecord(join(dir, name));
-    if (record) found.push(record);
-    else rmSync(join(dir, name), { force: true });
+    const path = join(dir, name);
+    const record = readRecord(path);
+    // A daemon names its record for its epoch and pid, so any other is planted.
+    if (record && name === recordName(record)) found.push(record);
+    else rmSync(path, { force: true });
   }
   return found;
 }
 
 function readRecord(path: string): DaemonRecord | null {
+  let fd: number | undefined;
   try {
-    const value = JSON.parse(readFileSync(path, 'utf8')) as DaemonRecord;
+    fd = openSync(path, READ_RECORD);
+    if (!fstatSync(fd).isFile()) return null;
+    const value = JSON.parse(readFileSync(fd, 'utf8')) as DaemonRecord;
     const valid =
       Number.isSafeInteger(value.epoch) &&
       Number.isSafeInteger(value.pid) &&
@@ -226,5 +253,7 @@ function readRecord(path: string): DaemonRecord | null {
     return valid ? value : null;
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }

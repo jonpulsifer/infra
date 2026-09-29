@@ -4,10 +4,15 @@
  * cannot, so the daemon ends only on what the client says.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyUpdate, type ShellOutputView } from '@repo/mate-hands/protocol';
+import {
+  applyUpdate,
+  type Hello,
+  type ShellOutputView,
+} from '@repo/mate-hands/protocol';
+import { type Clock, systemClock } from '../src/clock.ts';
 import {
   HANDS_BINARY,
   HandsClient,
@@ -80,6 +85,39 @@ function daemon(
   return run;
 }
 
+/** A stream that answers `hello` with `hello` and ignores everything else. */
+function scripted(hello: Partial<Hello>): ExecStream {
+  const encoder = new TextEncoder();
+  let output: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let ended: () => void = () => {};
+  const closed = new Promise<void>((resolve) => {
+    ended = resolve;
+  });
+  const answer = (line: string) => output?.enqueue(encoder.encode(line));
+  const close = () => {
+    output?.close();
+    output = undefined;
+    ended();
+  };
+  return {
+    stdout: new ReadableStream<Uint8Array>({
+      start(controller) {
+        output = controller;
+      },
+    }),
+    stdin: new WritableStream<Uint8Array>({
+      write(chunk) {
+        const request = JSON.parse(new TextDecoder().decode(chunk));
+        if (request.method === 'hello') {
+          answer(`${JSON.stringify({ id: request.id, result: hello })}\n`);
+        }
+      },
+    }),
+    closed: closed.then(() => ({ code: 0, reason: 'closed', status: null })),
+    close,
+  };
+}
+
 async function connect(run: Started, epoch = 1, log = new RecordingLog()) {
   return HandsClient.connect(run.exec, { epoch, log, fields: { test: true } });
 }
@@ -144,7 +182,7 @@ describe('connect', () => {
     const run = daemon({ epoch: 7 });
     const client = await connect(run, 7);
     expect(client.hello).toMatchObject({
-      protocol: 1,
+      protocol: 2,
       epoch: 7,
       cwd: run.cwd,
       pid: run.proc.pid,
@@ -157,15 +195,48 @@ describe('connect', () => {
     expect(error.detail).toMatchObject({ kind: 'protocol', code: 'mismatch' });
   });
 
-  test('a stale epoch is superseded and the owner keeps running', async () => {
+  test('a stale epoch is superseded by the owner it names', async () => {
     const state = dir('shared');
     const owner = await connect(daemon({ epoch: 9, state }), 9);
     const stale = daemon({ epoch: 2, state });
     const error = await failure(connect(stale, 2));
-    expect(error.detail).toMatchObject({ code: 'superseded' });
+    expect(error.detail).toMatchObject({ code: 'superseded', epoch: 9 });
+    expect(error.ownerEpoch).toBe(9);
     expect(await stale.proc.exited).toBe(2);
     expect(await owner.call('ping', {})).toBeNull();
     await owner.close();
+  });
+
+  test('a daemon on another protocol is refused', async () => {
+    const exec = scripted({ protocol: 1, epoch: 1 });
+    const error = await failure(
+      HandsClient.connect(exec, { epoch: 1, log: new RecordingLog() }),
+    );
+    expect(error.detail).toEqual({
+      kind: 'protocol',
+      code: 'mismatch',
+      message: 'hands speak protocol 1, mate speaks 2',
+    });
+    expect(error.ownerEpoch).toBeUndefined();
+  });
+
+  test('a default daemon watches for 30s, and the client pings every 10s', async () => {
+    const delays: number[] = [];
+    const clock: Clock = {
+      ...systemClock,
+      after: (ms, fn) => {
+        delays.push(ms);
+        return systemClock.after(ms, fn);
+      },
+    };
+    const client = await HandsClient.connect(daemon().exec, {
+      epoch: 1,
+      log: new RecordingLog(),
+      clock,
+    });
+    expect(client.hello.watchdogMs).toBe(30_000);
+    expect(delays.at(-1)).toBe(10_000);
+    await client.close();
   });
 });
 
@@ -213,6 +284,24 @@ describe('calls', () => {
     });
     await call('reader.close', { reader });
     expect(await call('cleanup', {})).toBeNull();
+    await client.close();
+  });
+
+  test('writeFiles writes files with their modes', async () => {
+    const run = daemon();
+    const client = await connect(run);
+    const { written } = await client.call('writeFiles', {
+      files: [
+        { path: 'creds/token', content: 'ghs-a-token', mode: 0o600 },
+        { path: 'creds/sites.json', content: '{}', mode: 0o600 },
+      ],
+    });
+    expect(written).toBe(2);
+    expect(readFileSync(join(run.cwd, 'creds/token'), 'utf8')).toBe(
+      'ghs-a-token',
+    );
+    expect(statSync(join(run.cwd, 'creds/token')).mode & 0o777).toBe(0o600);
+    expect(statSync(join(run.cwd, 'creds')).mode & 0o777).toBe(0o700);
     await client.close();
   });
 
