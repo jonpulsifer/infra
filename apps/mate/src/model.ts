@@ -20,7 +20,13 @@ import type { CreateModelSetup, ModelSetup } from './brain-inputs.ts';
 import { systemClock } from './clock.ts';
 import { ConfigError } from './config.ts';
 import { type Log, plain } from './log.ts';
-import { CHATGPT_PROVIDER, routeModels, spec, unpriced } from './route.ts';
+import {
+  CHATGPT_PROVIDER,
+  routeModels,
+  spec,
+  unpriced,
+  unroutedModels,
+} from './route.ts';
 
 export { CHATGPT_PROVIDER } from './route.ts';
 
@@ -86,7 +92,13 @@ export const createModelSetup: CreateModelSetup = ({
   supported('MATE_THINKING', model, thinking);
   const chatgpt = model.provider === CHATGPT_PROVIDER;
   if (fallbackSpec === null && !chatgpt) {
-    return { models: direct, direct, model, thinking, router: null };
+    return {
+      models: unroutedModels(direct),
+      direct,
+      model,
+      thinking,
+      router: null,
+    };
   }
   let fallback: { model: Model<Api>; thinking: ThinkingLevel } | null = null;
   if (fallbackSpec !== null) {

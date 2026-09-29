@@ -125,8 +125,8 @@ export class ChatgptKeeper {
       );
       options.router?.credentialChanged(change.stored);
     });
-    options.router?.onTokenRefused(() => {
-      if (!this.stopped) void this.forceRefresh();
+    options.router?.onTokenRefused((again) => {
+      if (!this.stopped && !again) void this.forceRefresh();
     });
   }
 

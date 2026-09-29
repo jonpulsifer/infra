@@ -61,6 +61,7 @@ import {
   STORE_MS,
   stripForeignThinking,
   TRANSIENT_MS,
+  unroutedModels,
 } from '../src/route.ts';
 import {
   FakeClock,
@@ -301,7 +302,12 @@ interface Rig {
   readonly log: RecordingLog;
   readonly metrics: RecordingInstruments;
   readonly events: RouteEvent[];
+  /** When the router asked for a forced rotation. */
   readonly refused: number[];
+  /** When chatgpt.com refused the token a rotation or a sign-in gave. */
+  readonly stuck: number[];
+  /** pi's own Models under the router. */
+  readonly inner: ReturnType<typeof createModels>;
   /** What the next refresh answers: a new token, or a failure with a status. */
   refresh: 'ok' | number;
   signIn(expiresInMs?: number): Promise<void>;
@@ -353,7 +359,8 @@ function rig(
   const events: RouteEvent[] = [];
   router.onRoute((event) => events.push(event));
   const refused: number[] = [];
-  router.onTokenRefused(() => refused.push(clock.now()));
+  const stuck: number[] = [];
+  router.onTokenRefused((again) => (again ? stuck : refused).push(clock.now()));
   const built = {
     models,
     router,
@@ -365,6 +372,8 @@ function rig(
     metrics,
     events,
     refused,
+    stuck,
+    inner,
     signIn: async (expiresInMs = 5 * 86_400_000) => {
       await store.modify(CHATGPT_PROVIDER, async () => ({
         type: 'oauth',
@@ -413,6 +422,28 @@ async function collect(
   const seen: AssistantMessageEvent[] = [];
   for await (const event of stream) seen.push(event);
   return seen;
+}
+
+/** Plays that each wait for their own answer, in the order requests take them. */
+function gates(count: number): {
+  plays: Play[];
+  answer: ((play: Play) => void)[];
+} {
+  const answer: ((play: Play) => void)[] = [];
+  const plays = Array.from(
+    { length: count },
+    (): Play => ({
+      hold: new Promise<Play>((resolve) => answer.push(resolve)),
+    }),
+  );
+  return { plays, answer };
+}
+
+function waitMs(made: Rig): number | null {
+  const now = made.router.status().now;
+  return now.route === 'fallback' && now.retryAt !== null
+    ? now.retryAt - made.clock.now()
+    : null;
 }
 
 const LIMIT_SSE =
@@ -593,7 +624,10 @@ describe('a failure before any content', () => {
     made.codex.script({
       fail: LIMIT_SSE,
       status: 429,
-      headers: { 'x-codex-primary-reset-after-seconds': '1800' },
+      headers: {
+        'x-codex-primary-reset-after-seconds': '1800',
+        'x-codex-primary-used-percent': '100',
+      },
     });
     made.go.script({ text: 'qwen 1' }, { text: 'qwen 2' });
     expect((await ask(made)).provider).toBe('opencode-go');
@@ -623,6 +657,22 @@ describe('a failure before any content', () => {
     expect(made.router.status().now).toMatchObject({
       retryAt: made.clock.now() + 30 * MINUTE_MS + RESET_SLACK_MS,
     });
+  });
+
+  test('a limit inside a 200 waits the backoff, not the weekly reset every SSE answer names', async () => {
+    const made = await signedIn();
+    made.codex.script({
+      fail: 'rate_limit_exceeded: Rate limit reached, please slow down',
+      status: 200,
+      headers: {
+        'x-codex-primary-reset-after-seconds': '518400',
+        'x-codex-primary-used-percent': '3',
+      },
+    });
+    made.go.script({ text: 'qwen' });
+    await ask(made, { transport: 'sse' });
+    expect(made.router.status().now).toMatchObject({ reason: 'limit' });
+    expect(waitMs(made)).toBe(LIMIT_FIRST_MS);
   });
 
   test('one trial over SSE after the reset: its answer closes the breaker, and the next request is ordinary', async () => {
@@ -688,6 +738,39 @@ describe('a failure before any content', () => {
       retryAt: made.clock.now() + 2 * LIMIT_FIRST_MS,
     });
   });
+
+  test.each<[string, Play, number]>([
+    ['a WebSocket limit', { fail: LIMIT_WS, started: true }, LIMIT_FIRST_MS],
+    [
+      'a refusal',
+      { fail: 'model is not supported', status: 400 },
+      REJECTED_FIRST_MS,
+    ],
+  ])(
+    '%s that fails three requests at once waits the first backoff, and a failed trial doubles it',
+    async (_, play, first) => {
+      const made = await signedIn();
+      const { plays, answer } = gates(3);
+      made.codex.script(...plays, play);
+      made.go.script(
+        { text: '1' },
+        { text: '2' },
+        { text: '3' },
+        { text: '4' },
+      );
+      const asked = ['a', 'b', 'c'].map((id) =>
+        ask(made, { sessionId: `${id}:main` }),
+      );
+      await settle();
+      for (const open of answer) open(play);
+      await Promise.all(asked);
+      expect(waitMs(made)).toBe(first);
+      await made.clock.advance(first);
+      await ask(made);
+      expect(made.codex.calls).toHaveLength(4);
+      expect(waitMs(made)).toBe(2 * first);
+    },
+  );
 
   test('start, then an error: the fallback answers, and the consumer sees one start', async () => {
     const made = await signedIn();
@@ -839,6 +922,44 @@ describe('a failure before any content', () => {
     expect(made.refused).toHaveLength(2);
   });
 
+  test('two requests refused on one token ask for one rotation', async () => {
+    const made = await signedIn();
+    const { plays, answer } = gates(2);
+    made.codex.script(...plays);
+    made.go.script({ text: 'a' }, { text: 'b' });
+    const refused: Play = { fail: 'Unauthorized', status: 401 };
+    const a = ask(made, { sessionId: 'a:main' });
+    const b = ask(made, { sessionId: 'b:main' });
+    await settle();
+    answer[0]?.(refused);
+    answer[1]?.(refused);
+    await Promise.all([a, b]);
+    expect(made.refused).toHaveLength(1);
+    expect(made.stuck).toEqual([]);
+  });
+
+  test('chatgpt.com refusing the token its rotation gave says the sign-in is stuck, once', async () => {
+    const made = await signedIn();
+    const refused: Play = { fail: 'Unauthorized', status: 401 };
+    made.codex.script(refused, refused);
+    made.go.script({ text: '1' }, { text: '2' }, { text: '3' });
+    await ask(made);
+    expect(made.refused).toHaveLength(1);
+    expect(made.stuck).toEqual([]);
+    // The rotation writes a new token.
+    await made.signIn();
+    await ask(made);
+    expect(made.refused).toHaveLength(1);
+    expect(made.stuck).toHaveLength(1);
+    expect(made.router.status().now).toMatchObject({
+      reason: 'auth',
+      retryAt: null,
+    });
+    await ask(made);
+    expect(made.codex.calls).toHaveLength(2);
+    expect(made.stuck).toHaveLength(1);
+  });
+
   test('Stop is forwarded as it is: no fallback, and no verdict on ChatGPT', async () => {
     const made = await signedIn();
     made.codex.script({ hold: new Promise<Play>(() => {}) });
@@ -914,6 +1035,118 @@ describe('a failure after content', () => {
     answer({ text: 'late' });
     expect((await early).provider).toBe(CHATGPT_PROVIDER);
     expect(made.router.status().now).toMatchObject({ reason: 'limit' });
+  });
+});
+
+describe('a request admitted before the breaker changed', () => {
+  test('its refusal of a token a rotation has replaced opens nothing, so the new token is used', async () => {
+    const made = await signedIn();
+    const { plays, answer } = gates(2);
+    made.codex.script(...plays, { text: 'the new token works' });
+    made.go.script({ text: 'qwen a' }, { text: 'qwen b' });
+    const refused: Play = { fail: 'Unauthorized', status: 401 };
+    const a = ask(made, { sessionId: 'a:main' });
+    const b = ask(made, { sessionId: 'b:main' });
+    await settle();
+    answer[0]?.(refused);
+    expect((await a).provider).toBe('opencode-go');
+    expect(made.refused).toHaveLength(1);
+    // The keeper's rotation writes a new token.
+    await made.signIn();
+    expect(made.router.status().now).toEqual({ route: 'primary' });
+    answer[1]?.(refused);
+    expect((await b).provider).toBe('opencode-go');
+    expect(made.router.status().now).toEqual({ route: 'primary' });
+    expect(made.refused).toHaveLength(1);
+    expect(made.stuck).toEqual([]);
+    expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
+    expect(made.router.claimNotice()).toBeNull();
+  });
+
+  test("its refusal of a token the keeper's scheduled rotation replaced opens nothing", async () => {
+    const made = await signedIn();
+    const { plays, answer } = gates(1);
+    made.codex.script(...plays, { text: 'the new token works' });
+    made.go.script({ text: 'qwen' });
+    const asked = ask(made);
+    await settle();
+    await made.signIn();
+    answer[0]?.({ fail: 'Unauthorized', status: 401 });
+    expect((await asked).provider).toBe('opencode-go');
+    expect(made.router.status().now).toEqual({ route: 'primary' });
+    expect(made.refused).toEqual([]);
+    expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
+  });
+
+  test('its refusal after a logout leaves the outage a logout', async () => {
+    const made = await signedIn();
+    const { plays, answer } = gates(1);
+    made.codex.script(...plays);
+    made.go.script({ text: 'qwen' });
+    const asked = ask(made);
+    await settle();
+    made.router.credentialChanged(false);
+    answer[0]?.({ fail: 'Unauthorized', status: 401 });
+    await asked;
+    expect(made.router.status().now).toMatchObject({
+      reason: 'unconfigured',
+    });
+    expect(made.refused).toEqual([]);
+    expect(made.router.claimNotice()).toStartWith(SIGNED_OUT);
+  });
+
+  test('its answer on a token a rotation replaced says nothing of the new one', async () => {
+    const made = await signedIn();
+    const { plays, answer } = gates(1);
+    const refused: Play = { fail: 'Unauthorized', status: 401 };
+    made.codex.script(...plays, refused, refused);
+    made.go.script({ text: 'qwen 1' }, { text: 'qwen 2' });
+    const old = ask(made, { sessionId: 'old:main' });
+    await settle();
+    await ask(made);
+    await made.signIn();
+    answer[0]?.({ text: 'on the old token' });
+    expect((await old).provider).toBe(CHATGPT_PROVIDER);
+    await ask(made);
+    expect(made.refused).toHaveLength(1);
+    expect(made.stuck).toHaveLength(1);
+  });
+
+  test('a trial a rotation overtook still lets the next request try', async () => {
+    const made = await signedIn();
+    const { plays, answer } = gates(1);
+    made.codex.script({ fail: LIMIT_WS, started: true }, ...plays, {
+      text: 'back',
+    });
+    made.go.script({ text: 'qwen 1' }, { text: 'qwen 2' });
+    await ask(made);
+    await made.clock.advance(LIMIT_FIRST_MS);
+    const trial = ask(made);
+    await settle();
+    await made.signIn();
+    answer[0]?.({ fail: LIMIT_WS, started: true });
+    expect((await trial).provider).toBe('opencode-go');
+    expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
+    expect(made.router.status().now).toEqual({ route: 'primary' });
+  });
+
+  test('its failure after a trial closed the outage opens no new one', async () => {
+    const made = await signedIn();
+    const { plays, answer } = gates(2);
+    made.codex.script(...plays, { text: 'back' }, { text: 'again' });
+    made.go.script({ text: 'qwen a' }, { text: 'qwen b' });
+    const dropped: Play = { fail: 'WebSocket closed 1006', started: true };
+    const a = ask(made, { sessionId: 'a:main' });
+    const b = ask(made, { sessionId: 'b:main' });
+    await settle();
+    answer[0]?.(dropped);
+    expect((await a).provider).toBe('opencode-go');
+    await made.clock.advance(TRANSIENT_MS);
+    expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
+    answer[1]?.(dropped);
+    expect((await b).provider).toBe('opencode-go');
+    expect(made.router.status().now).toEqual({ route: 'primary' });
+    expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
   });
 });
 
@@ -1021,6 +1254,20 @@ describe('the notice', () => {
     );
   });
 
+  test('an outage that turns into one with its own notice says the new one', async () => {
+    const made = await signedIn();
+    made.codex.script({ fail: LIMIT_SSE, status: 429 });
+    made.go.script({ text: '1' }, { text: '2' });
+    await ask(made);
+    expect(made.router.claimNotice()).toStartWith(LIMIT_FALLBACK);
+    made.router.authBroken();
+    await ask(made);
+    expect(made.router.claimNotice()).toBe(
+      `${SIGN_IN_BROKE} opencode-go/qwen3.8-max. Say \`chatgpt login\` here to sign in again.`,
+    );
+    expect(made.router.claimNotice()).toBeNull();
+  });
+
   test('names a missing sign-in, and a sign-in OpenAI stopped honouring', async () => {
     const made = rig();
     made.go.script({ text: '1' });
@@ -1114,13 +1361,26 @@ describe('classify', () => {
     expect(classify(failed(text), status)).toBe(reason as never);
   });
 
-  test('the reset is the SSE header, or the minutes in the text', () => {
+  test('the reset is the SSE header once the weekly window is spent, or the minutes in the text', () => {
+    const spent = {
+      'x-codex-primary-reset-after-seconds': '90',
+      'x-codex-primary-used-percent': '100',
+    };
     expect(
-      resetAfterMs(failed(LIMIT_SSE), {
-        status: 429,
-        headers: { 'x-codex-primary-reset-after-seconds': '90' },
-      }),
+      resetAfterMs(failed(LIMIT_SSE), { status: 429, headers: spent }),
     ).toBe(90_000);
+    // Every SSE answer names the weekly reset, spent or not.
+    for (const headers of [
+      { ...spent, 'x-codex-primary-used-percent': '99' },
+      { 'x-codex-primary-reset-after-seconds': '90' },
+    ]) {
+      expect(resetAfterMs(failed(LIMIT_SSE), { status: 429, headers })).toBe(
+        30 * MINUTE_MS,
+      );
+      expect(
+        resetAfterMs(failed(LIMIT_WS), { status: 200, headers }),
+      ).toBeNull();
+    }
     expect(resetAfterMs(failed(LIMIT_SSE), null)).toBe(30 * MINUTE_MS);
     expect(resetAfterMs(failed(LIMIT_WS), null)).toBeNull();
   });
@@ -1183,6 +1443,31 @@ describe('stripForeignThinking', () => {
       );
     expect(blocks(made.codex.calls[0])).toEqual(['thinking', 'text']);
     expect(blocks(made.go.calls[0])).toEqual(['text']);
+  });
+
+  test('a step a run captured on another model, and the rollback with no router, drop it too', async () => {
+    const made = await signedIn();
+    made.go.script({ text: 'resumed' }, { text: 'rolled back' });
+    const history: Context = {
+      messages: [
+        { role: 'user', content: 'one', timestamp: 0 },
+        assistant(CHATGPT_PROVIDER, 'gpt-6-sol', [thought, answer]),
+        { role: 'user', content: 'two', timestamp: 0 },
+      ],
+    };
+    await made.models.completeSimple(QWEN, history, {});
+    // MATE_MODEL=opencode-go/qwen3.8-max with MATE_FALLBACK_MODEL=none.
+    const rollback = unroutedModels(made.inner);
+    await rollback.completeSimple(QWEN, history, {});
+    const blocks = made.go.calls.map((call) =>
+      call.messages.flatMap((m) =>
+        m.role === 'assistant' ? m.content.map((b) => b.type) : [],
+      ),
+    );
+    expect(blocks).toEqual([['text'], ['text']]);
+    expect(rollback.getModel(CHATGPT_PROVIDER, 'gpt-6-sol')?.cost).toEqual(
+      NO_COST_RATES,
+    );
   });
 });
 

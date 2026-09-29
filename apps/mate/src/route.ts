@@ -49,6 +49,7 @@ export const RESET_SLACK_MS = 30_000;
 export const RESET_MAX_MS = 7 * 24 * HOUR_MS;
 /** Sent over SSE only; the WebSocket path drops it. */
 const RESET_HEADER = 'x-codex-primary-reset-after-seconds';
+const USED_HEADER = 'x-codex-primary-used-percent';
 
 export type Route = 'primary' | 'fallback';
 
@@ -61,7 +62,7 @@ export type RouteReason =
   | 'store'
   | 'paused';
 
-type Failure = Exclude<RouteReason, 'paused'>;
+export type Failure = Exclude<RouteReason, 'paused'>;
 
 /**
  * Why a request left ChatGPT, in words that read both after an em dash and
@@ -126,9 +127,13 @@ export interface RouterStatus {
 
 export interface ModelRouter {
   onRoute(listener: (event: RouteEvent) => void): () => void;
-  /** chatgpt.com refused the stored token, once per outage: one forced refresh may mend it. */
-  onTokenRefused(listener: () => void): () => void;
-  /** The owner's notice for the outage under way, the first time only. */
+  /**
+   * chatgpt.com refused the stored token. `again` is false the first time,
+   * when one forced rotation may mend it, and true when it refuses the token
+   * that came after, which no rotation mends.
+   */
+  onTokenRefused(listener: (again: boolean) => void): () => void;
+  /** The owner's notice for the outage under way, once for each reason it takes. */
   claimNotice(): string | null;
   /** A sign-in, a rotation or a logout: `stored` is false for a logout. */
   credentialChanged(stored: boolean): void;
@@ -159,8 +164,15 @@ interface Outage {
 }
 
 type Admission =
-  | { readonly kind: 'primary' | 'trial' }
+  | { readonly kind: 'primary' | 'trial'; readonly generation: number }
   | { readonly kind: 'fallback'; readonly reason: RouteReason };
+
+/** A request sent to ChatGPT, as the breaker admitted it. */
+interface Attempt {
+  readonly trial: boolean;
+  /** The breaker's generation when it was admitted. */
+  readonly generation: number;
+}
 
 /** What a primary request heard before its first content. */
 interface Heard {
@@ -259,8 +271,12 @@ export function resetAfterMs(
   message: AssistantMessage,
   response: ProviderResponse | null,
 ): number | null {
+  // Every SSE answer names the weekly window's reset, spent or not.
+  const used = Number(response?.headers[USED_HEADER]);
   const header = Number(response?.headers[RESET_HEADER]);
-  if (Number.isFinite(header) && header > 0) return header * 1000;
+  if (used >= 100 && Number.isFinite(header) && header > 0) {
+    return header * 1000;
+  }
   const minutes = /Try again in ~(\d+) min/i.exec(message.errorMessage ?? '');
   return minutes?.[1] === undefined ? null : Number(minutes[1]) * MINUTE_MS;
 }
@@ -340,7 +356,7 @@ function backoff(first: number, streak: number): number {
 class Router implements ModelRouter {
   readonly models: Models;
   private readonly routeListeners = new Set<(event: RouteEvent) => void>();
-  private readonly refusedListeners = new Set<() => void>();
+  private readonly refusedListeners = new Set<(again: boolean) => void>();
   private readonly requests: Record<Route, number> = {
     primary: 0,
     fallback: 0,
@@ -348,13 +364,20 @@ class Router implements ModelRouter {
   private readonly primary: Model<Api>;
   private outage: Outage | null = null;
   private outages = 0;
-  private claimed = 0;
-  /** A request is trying ChatGPT for the open outage. */
-  private trying = false;
+  /** The reasons whose notice the outage under way has given. */
+  private told: { readonly id: number; readonly reasons: Set<Failure> } | null =
+    null;
+  /**
+   * Moves on at each sign-in change and each recovery. A request admitted
+   * before one failed on what it replaced, so its failure changes nothing.
+   */
+  private generation = 0;
+  /** The generation of the request trying ChatGPT for the open outage. */
+  private trying: number | null = null;
   private limitStreak = 0;
   private rejectedStreak = 0;
-  /** A forced refresh was asked for since ChatGPT last answered. */
-  private refreshAsked = false;
+  /** The generation that asked for a forced rotation since ChatGPT last answered. */
+  private refreshAsked: number | null = null;
   private pausedUntil: number | null = null;
   private pausedAt = 0;
   private pauseTimer: Handle | null = null;
@@ -375,7 +398,7 @@ class Router implements ModelRouter {
     return () => this.routeListeners.delete(listener);
   }
 
-  onTokenRefused(listener: () => void): () => void {
+  onTokenRefused(listener: (again: boolean) => void): () => void {
     this.refusedListeners.add(listener);
     return () => this.refusedListeners.delete(listener);
   }
@@ -383,7 +406,10 @@ class Router implements ModelRouter {
   claimNotice(): string | null {
     const open = this.outage;
     const fallback = this.options.fallback;
-    if (!open || !fallback || this.claimed === open.id) return null;
+    if (!open || !fallback) return null;
+    const told =
+      this.told?.id === open.id ? this.told.reasons : new Set<Failure>();
+    if (told.has(open.reason)) return null;
     const answering = spec(fallback.model);
     const now = this.options.clock.now();
     let notice: string;
@@ -407,13 +433,15 @@ class Router implements ModelRouter {
         // A blip or mate-db: the log and the alerts cover them.
         return null;
     }
-    this.claimed = open.id;
+    told.add(open.reason);
+    this.told = { id: open.id, reasons: told };
     return notice;
   }
 
   credentialChanged(stored: boolean): void {
+    this.generation += 1;
     if (!stored) {
-      this.fail('unconfigured', {});
+      this.fail('unconfigured', null);
       return;
     }
     const open = this.outage;
@@ -423,7 +451,7 @@ class Router implements ModelRouter {
   }
 
   authBroken(): void {
-    this.fail('auth', {});
+    this.fail('auth', null);
   }
 
   pause(untilMs: number): void {
@@ -495,12 +523,9 @@ class Router implements ModelRouter {
     options: SimpleStreamOptions | undefined,
     simple: boolean,
   ): AssistantMessageEventStream {
-    const call: Call = simple
-      ? (model, ctx, opts) => this.inner.streamSimple(model, ctx, opts)
-      : (model, ctx, opts) =>
-          this.inner.stream(model, ctx, opts as ModelsApiStreamOptions<Api>);
+    const call = direct(this.inner, simple);
     if (!same(requested, this.primary)) {
-      return call(unpriced(requested), context, options);
+      return passThrough(call, requested, context, options);
     }
     const out = createAssistantMessageEventStream();
     this.drive(out, call, context, options, simple).catch((error) => {
@@ -533,11 +558,14 @@ class Router implements ModelRouter {
         admitted.reason,
       );
     }
-    const trial = admitted.kind === 'trial';
+    const attempt: Attempt = {
+      trial: admitted.kind === 'trial',
+      generation: admitted.generation,
+    };
     const refused = await this.probe();
     if (refused) {
       if (!fallback) return this.forward(out, options, refused);
-      this.fail(refused, { trial });
+      this.fail(refused, attempt);
       return this.toFallback(out, call, context, options, simple, refused);
     }
     const heard: Heard = { response: null, model: null };
@@ -547,7 +575,7 @@ class Router implements ModelRouter {
       {
         ...options,
         ...(fallback ? { timeoutMs: PRIMARY_TIMEOUT_MS } : {}),
-        ...(trial ? { transport: 'sse' } : {}),
+        ...(attempt.trial ? { transport: 'sse' } : {}),
         onResponse: (response, model) => {
           heard.response = response;
           heard.model = model;
@@ -561,7 +589,9 @@ class Router implements ModelRouter {
       if (event.type === 'done') last = event.message;
       if (event.type === 'error') last = event.error;
       if (committed) {
-        if (event.type === 'error') this.lateFailure(event.error, heard);
+        if (event.type === 'error') {
+          this.lateFailure(event.error, heard, attempt);
+        }
         out.push(event);
         continue;
       }
@@ -572,12 +602,12 @@ class Router implements ModelRouter {
       if (event.type === 'error') {
         return this.early(out, call, context, options, simple, event, {
           heard,
-          trial,
+          attempt,
         });
       }
       // The first content, or an answer with none: ChatGPT has answered.
       committed = true;
-      this.succeed(trial);
+      this.succeed(attempt);
       this.routed(options, 'primary', null, this.primary);
       if (heard.response) {
         await options?.onResponse?.(
@@ -599,7 +629,7 @@ class Router implements ModelRouter {
     options: SimpleStreamOptions | undefined,
     simple: boolean,
     event: Extract<AssistantMessageEvent, { type: 'error' }>,
-    { heard, trial }: { heard: Heard; trial: boolean },
+    { heard, attempt }: { heard: Heard; attempt: Attempt },
   ): Promise<void> {
     const fallback = this.options.fallback;
     const message = event.error;
@@ -607,8 +637,8 @@ class Router implements ModelRouter {
       message.stopReason === 'aborted' || options?.signal?.aborted === true;
     // Stop and the turn's timeout end the request; pi compacts an overflow.
     if (aborted || isContextOverflow(message, this.primary.contextWindow)) {
-      if (!aborted) this.succeed(trial);
-      else if (trial) this.trying = false;
+      if (!aborted) this.succeed(attempt);
+      else this.release(attempt);
       this.routed(options, 'primary', null, this.primary);
       out.push(event);
       out.end(message);
@@ -628,8 +658,7 @@ class Router implements ModelRouter {
     if (!fallback) {
       return this.forward(out, options, reason, message);
     }
-    this.fail(reason, {
-      trial,
+    this.fail(reason, attempt, {
       resetMs:
         reason === 'limit' ? resetAfterMs(message, heard.response) : null,
       status,
@@ -706,51 +735,71 @@ class Router implements ModelRouter {
   }
 
   private admit(): Admission {
-    if (!this.options.fallback) return { kind: 'primary' };
+    const generation = this.generation;
+    if (!this.options.fallback) return { kind: 'primary', generation };
     const now = this.options.clock.now();
     if (this.paused(now) !== null)
       return { kind: 'fallback', reason: 'paused' };
     const open = this.outage;
-    if (!open) return { kind: 'primary' };
-    if (open.until !== null && now >= open.until && !this.trying) {
-      this.trying = true;
-      return { kind: 'trial' };
+    if (!open) return { kind: 'primary', generation };
+    if (open.until !== null && now >= open.until && this.trying === null) {
+      this.trying = generation;
+      return { kind: 'trial', generation };
     }
     return { kind: 'fallback', reason: open.reason };
   }
 
-  /** An error after content: pi's retry decides, and the breaker still learns. */
-  private lateFailure(message: AssistantMessage, heard: Heard): void {
-    if (message.stopReason === 'aborted' || !this.options.fallback) return;
-    const reason = classify(message, heard.response?.status ?? null);
-    if (reason !== 'limit' && reason !== 'transient') return;
-    this.fail(reason, {
-      resetMs:
-        reason === 'limit' ? resetAfterMs(message, heard.response) : null,
-    });
+  /** Frees the trial's place; true when `attempt` held it. */
+  private release(attempt: Attempt): boolean {
+    if (!attempt.trial || this.trying !== attempt.generation) return false;
+    this.trying = null;
+    return true;
   }
 
+  /** An error after content: pi's retry decides, and the breaker still learns. */
+  private lateFailure(
+    message: AssistantMessage,
+    heard: Heard,
+    attempt: Attempt,
+  ): void {
+    if (message.stopReason === 'aborted') return;
+    const reason = classify(message, heard.response?.status ?? null);
+    if (reason !== 'limit' && reason !== 'transient') return;
+    // Its first content ended any trial it was.
+    this.fail(
+      reason,
+      { trial: false, generation: attempt.generation },
+      {
+        resetMs:
+          reason === 'limit' ? resetAfterMs(message, heard.response) : null,
+      },
+    );
+  }
+
+  /** `attempt` is null for news from outside a request: a refused refresh or a logout. */
   private fail(
     reason: Failure,
+    attempt: Attempt | null,
     {
-      trial = false,
       resetMs = null,
       status = null,
       backend = false,
     }: {
-      trial?: boolean;
       resetMs?: number | null;
       status?: number | null;
       backend?: boolean;
-    },
+    } = {},
   ): void {
     const { clock, log, fallback } = this.options;
     // With nothing to fall back to, every request tries ChatGPT anyway.
     if (!fallback) return;
+    const trial = attempt !== null && this.release(attempt);
+    if (attempt && attempt.generation !== this.generation) return;
     const now = clock.now();
-    if (trial) this.trying = false;
-    const until = this.until(reason, resetMs, now);
     const open = this.outage;
+    // Failures at once share a step of the backoff; a failed trial takes the next.
+    const advance = !open || trial || open.reason !== reason;
+    const until = this.until(reason, resetMs, now, advance);
     if (!open) {
       this.outages += 1;
       this.outage = {
@@ -775,26 +824,47 @@ class Router implements ModelRouter {
       open.resetKnown = resetMs !== null;
       open.status = status;
     }
-    if (reason === 'auth' && backend && !this.refreshAsked) {
-      this.refreshAsked = true;
-      for (const listener of this.refusedListeners) this.safely(listener);
-    }
+    if (reason === 'auth' && backend && attempt) this.tokenRefused(attempt);
     this.report();
+  }
+
+  /**
+   * One forced rotation per refused token. When chatgpt.com refuses a token
+   * issued after the rotation was asked for, the account or the client is
+   * refused, not the token, and the keeper hears that instead.
+   */
+  private tokenRefused(attempt: Attempt): void {
+    const asked = this.refreshAsked;
+    if (asked !== null && attempt.generation <= asked) return;
+    this.refreshAsked = attempt.generation;
+    const again = asked !== null;
+    for (const listener of this.refusedListeners) {
+      this.safely(() => listener(again));
+    }
   }
 
   private until(
     reason: Failure,
     resetMs: number | null,
     now: number,
+    advance: boolean,
   ): number | null {
     switch (reason) {
-      case 'limit':
+      case 'limit': {
         if (resetMs !== null) {
           return now + Math.min(resetMs + RESET_SLACK_MS, RESET_MAX_MS);
         }
-        return now + backoff(LIMIT_FIRST_MS, this.limitStreak++);
-      case 'rejected':
-        return now + backoff(REJECTED_FIRST_MS, this.rejectedStreak++);
+        const streak = advance
+          ? this.limitStreak++
+          : Math.max(this.limitStreak - 1, 0);
+        return now + backoff(LIMIT_FIRST_MS, streak);
+      }
+      case 'rejected': {
+        const streak = advance
+          ? this.rejectedStreak++
+          : Math.max(this.rejectedStreak - 1, 0);
+        return now + backoff(REJECTED_FIRST_MS, streak);
+      }
       case 'transient':
         return now + TRANSIENT_MS;
       case 'store':
@@ -805,13 +875,17 @@ class Router implements ModelRouter {
     }
   }
 
-  /** A request admitted before an outage says nothing about it; a trial does. */
-  private succeed(trial: boolean): void {
-    if (trial) this.trying = false;
+  /**
+   * A request admitted before an outage, a sign-in change or a recovery says
+   * nothing about ChatGPT now; a trial does.
+   */
+  private succeed(attempt: Attempt): void {
+    const trial = this.release(attempt);
+    if (attempt.generation !== this.generation) return;
     if (this.outage && !trial) return;
     this.limitStreak = 0;
     this.rejectedStreak = 0;
-    this.refreshAsked = false;
+    this.refreshAsked = null;
     if (this.outage) this.close('a trial request');
   }
 
@@ -819,6 +893,7 @@ class Router implements ModelRouter {
     const open = this.outage;
     if (!open) return;
     this.outage = null;
+    this.generation += 1;
     this.options.log.info('ChatGPT answers again', {
       after: open.reason,
       by,
@@ -870,6 +945,23 @@ type RouteCall = (
   simple: boolean,
 ) => AssistantMessageEventStream;
 
+function direct(inner: Models, simple: boolean): Call {
+  return simple
+    ? (model, context, options) => inner.streamSimple(model, context, options)
+    : (model, context, options) =>
+        inner.stream(model, context, options as ModelsApiStreamOptions<Api>);
+}
+
+/** A request for a model nothing routes, less another model's reasoning. */
+function passThrough(
+  call: Call,
+  model: Model<Api>,
+  context: Context,
+  options: SimpleStreamOptions | undefined,
+): AssistantMessageEventStream {
+  return call(unpriced(model), stripForeignThinking(context, model), options);
+}
+
 /** `inner` with its four request methods routed and ChatGPT's price at 0. */
 function routedModels(inner: Models, route: RouteCall): Models {
   return {
@@ -903,6 +995,17 @@ function routedModels(inner: Models, route: RouteCall): Models {
     cancelDeferred: (model, handle, options) =>
       inner.cancelDeferred(model, handle, options),
   };
+}
+
+/**
+ * `inner` with nothing routed, for MATE_FALLBACK_MODEL=none: each request
+ * goes to the model it names, less another model's reasoning, as a
+ * fallback's request would.
+ */
+export function unroutedModels(inner: Models): Models {
+  return routedModels(inner, (model, context, options, simple) =>
+    passThrough(direct(inner, simple), model, context, options),
+  );
 }
 
 /**

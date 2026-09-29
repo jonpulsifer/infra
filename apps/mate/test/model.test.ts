@@ -67,9 +67,16 @@ describe('createModelSetup', () => {
     expect(made.model.api).toBe('openai-completions');
     expect(made.model.baseUrl).toBe('https://opencode.ai/zen/go/v1');
     expect(made.thinking).toBe('medium');
-    // `none` is the rollback: the harness gets pi's own Models, as before.
+    // `none` is the rollback: nothing routes, and a request drops another
+    // model's reasoning, as the fallback's does.
     expect(made.router).toBeNull();
-    expect(made.models).toBe(made.direct);
+    expect(made.models).not.toBe(made.direct);
+    expect(made.models.getModel(CHATGPT_PROVIDER, 'gpt-6-sol')?.cost).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
   });
 
   test('routes gpt-6-sol first and qwen3.8-max after, at their own levels', () => {
