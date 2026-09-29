@@ -712,6 +712,45 @@ describe('the keeper', () => {
     expectNothingSecret();
   });
 
+  test('chatgpt.com refusing the token its rotation gave signs mate out until the next login', async () => {
+    await signIn(5);
+    await keeper.check();
+    const ask = () =>
+      setup.models.completeSimple(
+        setup.model,
+        { messages: [{ role: 'user', content: 'hi', timestamp: Date.now() }] },
+        { transport: 'sse' },
+      );
+    openai.codex = 401;
+    await ask();
+    await until(() => setup.router?.status().now.route === 'primary');
+    await ask();
+    await until(() => keeper.state().state === 'refused');
+    expect(metrics.chatgptStates.at(-1)).toEqual({
+      signedIn: false,
+      expiresAt: null,
+    });
+    expect(
+      log.of(
+        'chatgpt.com refused a fresh ChatGPT token too; mate stays signed out until `chatgpt login`',
+      ),
+    ).toHaveLength(1);
+    await command('chatgpt status');
+    expect(said().at(-1)).toMatch(
+      /^ℹ️ ChatGPT: signed out, because chatgpt\.com refused a fresh token too, at \d\d:\d\d UTC\. Say `chatgpt login` to sign in again\. .*Now: fallback since \d\d:\d\d UTC \(mate's ChatGPT sign-in stopped working, HTTP 401\), until a sign-in\./,
+    );
+    // A check leaves it signed out: another rotation would not mend it.
+    expect(await keeper.check()).toBe('refused');
+    expect(openai.of('/oauth/token')).toHaveLength(1);
+
+    openai.codex = 'ok';
+    await command('chatgpt login');
+    expect(keeper.state().state).toBe('good');
+    expect(metrics.chatgptStates.at(-1)).toMatchObject({ signedIn: true });
+    expect(setup.router?.status().now).toEqual({ route: 'primary' });
+    expectNothingSecret();
+  });
+
   test('a forced refresh rotates a token with days left', async () => {
     await signIn(5);
     expect(await keeper.forceRefresh()).toBe('refreshed');

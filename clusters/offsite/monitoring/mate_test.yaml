@@ -417,7 +417,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate is not signed in to ChatGPT"
-              description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, or OpenAI refused the token refresh. Until the owner signs it in again, MATE_FALLBACK_MODEL answers every turn. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
+              description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, OpenAI refused the token refresh, or chatgpt.com refused a fresh token too. Until the owner signs it in again, mate cannot use ChatGPT, so a turn that would use it runs on MATE_FALLBACK_MODEL. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
 
   # Signed in, then signed out and back within the half hour: no alert.
   - interval: 1m

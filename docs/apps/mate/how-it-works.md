@@ -33,7 +33,7 @@ A breaker that all threads share keeps requests off ChatGPT while it is down:
 | Reason | ChatGPT stays off |
 | --- | --- |
 | `limit`: the usage limit | Until the reset that OpenAI gives, or 5 minutes, doubling to 2 hours |
-| `auth`: OpenAI refuses the token or its refresh | Until a new token. The first refused token gets one forced rotation. |
+| `auth`: OpenAI refuses the token or its refresh | Until a new token. The first refused token gets one forced rotation. If chatgpt.com refuses the new token too, mate counts itself signed out. |
 | `unconfigured`: no sign-in | Until a sign-in |
 | `transient`: a 5xx, a timeout, or `chatgpt.com` out of reach | 1 minute |
 | `store`: mate-db cannot be read | 1 minute |

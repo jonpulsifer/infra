@@ -71,6 +71,8 @@ export type SignIn =
       readonly state: 'refused';
       readonly expires: number;
       readonly at: number;
+      /** OpenAI refused the refresh, or chatgpt.com a token fresh from one. */
+      readonly by: 'refresh' | 'chatgpt';
     };
 
 export type CheckResult =
@@ -126,7 +128,9 @@ export class ChatgptKeeper {
       options.router?.credentialChanged(change.stored);
     });
     options.router?.onTokenRefused((again) => {
-      if (!this.stopped && !again) void this.forceRefresh();
+      if (this.stopped) return;
+      if (again) this.refusedByChatgpt();
+      else void this.forceRefresh();
     });
   }
 
@@ -207,7 +211,7 @@ export class ChatgptKeeper {
       }
       const failure = refreshFailure(error);
       if (failure.kind === 'refused') {
-        this.set({ state: 'refused', expires, at: clock.now() });
+        this.set({ state: 'refused', expires, at: clock.now(), by: 'refresh' });
         this.options.router?.authBroken();
         log.error(
           'OpenAI refused the ChatGPT refresh; mate stays signed out until `chatgpt login`',
@@ -219,6 +223,22 @@ export class ChatgptKeeper {
       return failure.kind;
     }
     return this.refreshed();
+  }
+
+  /** A fresh token refused too: the account or mate's client is refused, and no rotation mends that. */
+  private refusedByChatgpt(): void {
+    const known = this.signIn;
+    if (known.state !== 'good') return;
+    const { clock, log } = this.options;
+    this.set({
+      state: 'refused',
+      expires: known.expires,
+      at: clock.now(),
+      by: 'chatgpt',
+    });
+    log.error(
+      'chatgpt.com refused a fresh ChatGPT token too; mate stays signed out until `chatgpt login`',
+    );
   }
 
   private refreshed(): CheckResult {
@@ -726,7 +746,9 @@ function signInLine(signIn: SignIn, now: number): string {
         ? `signed in, token good until ${at(signIn.expires, now)}.`
         : `signed in, but its token expired at ${at(signIn.expires, now)} and mate has not refreshed it.`;
     case 'refused':
-      return `signed out, because OpenAI refused the token refresh at ${at(signIn.at, now)}. Say \`chatgpt login\` to sign in again.`;
+      return signIn.by === 'refresh'
+        ? `signed out, because OpenAI refused the token refresh at ${at(signIn.at, now)}. Say \`chatgpt login\` to sign in again.`
+        : `signed out, because chatgpt.com refused a fresh token too, at ${at(signIn.at, now)}. Say \`chatgpt login\` to sign in again.`;
   }
 }
 

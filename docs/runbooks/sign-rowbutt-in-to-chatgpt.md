@@ -94,6 +94,7 @@ A drill shows that the fallback model can continue a thread that ChatGPT started
 | `auth.openai.com could not be reached` or `chatgpt.com could not be reached` | mate's egress policy or DNS blocks the host. | Make sure that both hosts are in `clusters/offsite/apps/mate/network-policy.yaml` on port 443. |
 | The test request failed with `HTTP 401` or `HTTP 403`. | The plan does not include Codex, or OpenAI refuses the client. | Check the plan in ChatGPT's settings. |
 | `MateChatGPTSignedOut` fires, or `chatgpt status` says `OpenAI refused the token refresh`. | The refresh token is revoked or spent. | Do [Sign in](#sign-in). |
+| `chatgpt status` says `chatgpt.com refused a fresh token too`. | chatgpt.com refuses the account or mate's client, not only the token. | Do [Sign in](#sign-in). If its test request fails with `HTTP 401` or `HTTP 403`, check the plan. |
 | `MateChatGPTTokenNotRefreshing` fires. | A day of refreshes failed on egress, DNS or mate-db. | Read the mate log. If `MateStoreFailing` fires, do [Operate Postgres](operate-postgres.md). |
 | After a restore of mate-db, `chatgpt status` says `not signed in`. | The nightly dump leaves out `mate_credentials`. | Do [Sign in](#sign-in). |
 | `MateModelPrimaryFailing` fires. | `chatgpt.com` is out of reach or fails, or refuses the request, such as for a model the plan lacks. | Read the `ChatGPT failed before answering` lines of the mate log. Make sure that `chatgpt.com` is in the network policy on port 443. Check the plan. |
