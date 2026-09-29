@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # switchboard: one Bun process that runs its source as committed, with no build step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:43c334f3a02ad976d558840f4a5f9a785e67acc51c8d7e3d77fbae47a4a39c52 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:5f1b5386bd77dd4a5e814361bcf7abcbea93b5ffa0794eb02b71bf503d1cd659 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
