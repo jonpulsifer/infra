@@ -284,6 +284,34 @@ export class Threads {
     }
   }
 
+  /** Trusted internal trigger. Bot-authored Slack events must never enter onMessage. */
+  async scheduled(ref: ThreadRef, asker: string, text: string): Promise<void> {
+    const surface = this.surfaces.get(ref.surface);
+    if (
+      !surface ||
+      !surface.allowedChannelIds.has(ref.channelId) ||
+      !surface.allowedUserIds.has(asker)
+    ) {
+      throw new Error(
+        'scheduled report has no authorized destination or owner',
+      );
+    }
+    if (this.draining || this.quiesced)
+      throw new Error('mate is shutting down');
+    const thread = this.ensure(surface, ref);
+    // A restart may find the root message but not the queued prompt. Requeue
+    // only if no turn has started; an interrupted turn belongs to rehydration.
+    const row = thread.row ?? (await this.deps.store.get(thread.key));
+    if (row && (row.turns > 0 || row.turn)) return;
+    if (thread.pending.length > 0) return;
+    this.accept(thread, {
+      text,
+      raw: text,
+      authorId: asker,
+      message: { channelId: ref.channelId, id: ref.id },
+    });
+  }
+
   async onMessage(message: Inbound): Promise<void> {
     const { log } = this.deps;
     const surface = this.surfaces.get(message.surface);

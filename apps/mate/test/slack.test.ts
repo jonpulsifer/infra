@@ -1474,6 +1474,17 @@ describe('a Web API call', () => {
     globalThis.fetch = original;
   });
 
+  test('a scheduled report posts a root without a thread_ts', async () => {
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as Record<string, string>;
+      expect(body.channel).toBe(CHANNEL);
+      expect(body.text).toBe('daily check');
+      expect(body).not.toHaveProperty('thread_ts');
+      return Response.json({ ok: true, ts: TS });
+    }) as unknown as typeof fetch;
+    expect(await web().postRoot(CHANNEL, 'daily check')).toBe(TS);
+  });
+
   test('a transport failure names the method and the status', async () => {
     globalThis.fetch = (async () =>
       new Response('<html>502 Bad Gateway</html>', {

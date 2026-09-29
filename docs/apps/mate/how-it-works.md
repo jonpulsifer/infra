@@ -15,6 +15,10 @@ mate is the process behind [Rowbutt](../mate.md). It runs the agent loop for eac
 
 The model is `MATE_MODEL`, on the owner's ChatGPT subscription through pi-ai's `openai-codex` provider, at the reasoning level in `MATE_THINKING`. When ChatGPT cannot answer, `MATE_FALLBACK_MODEL` answers through pi-ai's `opencode-go` provider, at `MATE_FALLBACK_THINKING`. [Model routing](#model-routing) says when. The system prompt is a note about the surface and the sandbox, then `AGENTS.md`, then an index of the skills in `dotfiles/skills/` and `.agents/skills/`. The mate image bakes these files, and the agent reads a skill from the sandbox's checkout.
 
+## Daily custodian
+
+`apps/mate/src/custodian.ts` checks the local date and hour in `America/Halifax` every minute. When it is 18:00 or later, `mate_custodian_runs` claims the calendar day, posts a Slack root in the configured channel, saves its timestamp and queues a trusted internal turn under the owner's identity. The turn shares the normal queue, budgets, sandbox credentials and restart handling. The daily assignment requests read-only inspection; the sandbox does not enforce read-only access. A failed database or Slack call retries while the same Atlantic day remains. After a root is saved, a restart queues it only if its thread has no started turn. A crash between Slack's post and the timestamp write may leave a duplicate root; investigate a missing or duplicate report in mate's logs and Slack.
+
 ## A turn
 
 1. The model streams its answer. A turn that calls no tool ends here, and no sandbox exists for it.

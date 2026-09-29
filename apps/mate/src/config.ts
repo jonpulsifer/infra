@@ -27,6 +27,8 @@ export interface Config {
   readonly sandboxes: SandboxesChoice;
   /** The second surface, or `null` when mate answers on Discord alone. */
   readonly slack: SlackConfig | null;
+  /** A daily 18:00 America/Halifax report, disabled without a channel. */
+  readonly custodianChannel: string | null;
 }
 
 export interface SlackConfig {
@@ -454,6 +456,16 @@ function slack(env: Env): SlackConfig | null {
 
 export function readConfig(env: Env): Config {
   refuseRenamed(env);
+  const custodianChannel = env.MATE_CUSTODIAN_CHANNEL?.trim() || null;
+  if (
+    custodianChannel &&
+    (!SLACK_ID.test(custodianChannel) ||
+      !slack(env)?.allowedChannelIds.has(custodianChannel))
+  ) {
+    throw new ConfigError(
+      'MATE_CUSTODIAN_CHANNEL must be an allowed Slack channel',
+    );
+  }
   return {
     token: required(env, 'DISCORD_TOKEN'),
     guildId: required(env, 'MATE_GUILD_ID'),
@@ -468,5 +480,6 @@ export function readConfig(env: Env): Config {
     sessionFile: env.MATE_SESSION_FILE?.trim() || null,
     sandboxes: sandboxes(env),
     slack: slack(env),
+    custodianChannel,
   };
 }
