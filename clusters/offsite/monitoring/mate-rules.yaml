@@ -173,6 +173,34 @@ spec:
             message: "mate is failing to mint GitHub tokens"
             description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. The runbook at https://wiki.lolwtf.ca/runbooks/repair-the-rowbutt-github-credential/ has the checks."
 
+        # 0 while mate holds no working ChatGPT sign-in; absent without a store,
+        # or before mate has read it. Guarded on the Deployment as above.
+        - alert: MateChatGPTSignedOut
+          expr: |
+            mate_chatgpt_signed_in == 0
+            and on()
+            kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate is not signed in to ChatGPT"
+            description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, or OpenAI refused the token refresh. Until the owner signs it in again, mate cannot use ChatGPT. `chatgpt status` in a mate thread says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, say `chatgpt login` to mate and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
+
+        # The keeper rotates the token at two days left, so under one is a day
+        # of failed refreshes. The gauge is absent while signed out.
+        - alert: MateChatGPTTokenNotRefreshing
+          expr: |
+            mate_chatgpt_token_expiry_seconds < 86400
+            and on()
+            kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "mate's ChatGPT token is not refreshing"
+            description: "mate's ChatGPT access token has less than a day left. mate refreshes it once two days are left, so every refresh since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, mate's ChatGPT requests fail until a refresh gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+
         # One failed fold is a bearer that may exist only in a sandbox the quiet
         # teardown deletes, so the first counts. `result!="ok"` is the contract.
         - alert: MateKthxSitesSyncFailing

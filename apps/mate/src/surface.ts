@@ -110,4 +110,9 @@ export interface Surface {
   settle?(thread: ThreadRef): Promise<void>;
   /** Discord reacts on the message; Slack's agent session already shows it. */
   mark?(message: MessageRef, mark: Mark): Promise<void>;
+  /**
+   * A message only `userId` can see, never in the thread: a Discord DM, or a
+   * Slack message in the thread's channel that only they see.
+   */
+  whisper?(thread: ThreadRef, userId: string, text: string): Promise<void>;
 }

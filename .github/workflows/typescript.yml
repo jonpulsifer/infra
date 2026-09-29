@@ -50,6 +50,7 @@ jobs:
             clusters/folly/apps/pbx/config/**
             clusters/folly/apps/pbx/switchboard.yaml
             clusters/offsite/apps/mate/database-backup.yaml
+            clusters/offsite/apps/mate/network-policy.yaml
             packages/charts/**
             clusters/base/platform/spindrift-target/**
             clusters/offsite/apps/spindrift/**

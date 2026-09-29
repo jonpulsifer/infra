@@ -24,6 +24,7 @@ import type {
 } from '../src/lease.ts';
 import type { Fields, Log } from '../src/log.ts';
 import type {
+  ChatgptSignIn,
   Instruments,
   ProviderErrorKind,
   StoreOp,
@@ -68,9 +69,11 @@ interface Timer {
 }
 
 export class FakeClock implements Clock {
-  private time = 1_700_000_000_000;
   private timers: Timer[] = [];
   private seq = 0;
+
+  /** pi reads `Date.now()` itself, so a test that shares a token's expiry with it starts there. */
+  constructor(private time = 1_700_000_000_000) {}
 
   now(): number {
     return this.time;
@@ -204,8 +207,13 @@ export class RecordingInstruments implements Instruments {
   readonly tokenStamps: string[] = [];
   readonly siteSyncs: string[] = [];
   appReady: boolean | null = null;
+  /** Every sign-in state reported, oldest first. */
+  readonly chatgptStates: (ChatgptSignIn | null)[] = [];
 
   identifyLimit(_limit: SessionStartLimit): void {}
+  chatgpt(state: ChatgptSignIn | null): void {
+    this.chatgptStates.push(state);
+  }
   gatewayClosed(code: number, fatal: boolean): void {
     this.closes.push({ code, fatal });
   }
@@ -304,6 +312,9 @@ export class FakeDiscord implements Discord {
   failEdits: Error | null = null;
   failDeletes: Error | null = null;
   failReactions: Error | null = null;
+  /** Direct messages, which live outside every thread. */
+  readonly dms: { userId: string; content: string }[] = [];
+  failDirectMessages: Error | null = null;
   private readonly reactions = new Set<string>();
   private serial = 0;
 
@@ -345,6 +356,12 @@ export class FakeDiscord implements Discord {
       content: seen.content,
     });
     return id;
+  }
+
+  async directMessage(userId: string, body: OutMessage): Promise<string> {
+    if (this.failDirectMessages) throw this.failDirectMessages;
+    this.dms.push({ userId, content: spoken(body) });
+    return `dm-${++this.serial}`;
   }
 
   async history(

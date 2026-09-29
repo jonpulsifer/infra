@@ -46,6 +46,8 @@ export interface Discord {
     name: string,
   ): Promise<string>;
   createMessage(channelId: string, body: OutMessage): Promise<string>;
+  /** Opens the DM channel with the user, then posts there. */
+  directMessage(userId: string, body: OutMessage): Promise<string>;
   /** A thread's messages, newest first, as Discord returns them. */
   history(channelId: string, query: HistoryQuery): Promise<HistoryMessage[]>;
   editMessage(
@@ -159,6 +161,14 @@ export function discordOver(api: API): Discord {
     },
     async createMessage(channelId, body) {
       const message = await api.channels.createMessage(channelId, {
+        ...wire(body),
+        allowed_mentions: NO_MENTIONS,
+      });
+      return message.id;
+    },
+    async directMessage(userId, body) {
+      const dm = await api.users.createDM(userId);
+      const message = await api.channels.createMessage(dm.id, {
         ...wire(body),
         allowed_mentions: NO_MENTIONS,
       });
@@ -425,6 +435,11 @@ export function discordSurface(
     },
     mark(message, mark) {
       return markMessage(api, message, mark);
+    },
+    // A DM needs no gateway intent to send; the user's privacy settings can
+    // still refuse it.
+    async whisper(_thread, userId, line) {
+      await api.directMessage(userId, { content: line });
     },
   };
 }

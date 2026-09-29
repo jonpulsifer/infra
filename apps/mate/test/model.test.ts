@@ -3,8 +3,17 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import {
+  type CredentialStore,
+  InMemoryCredentialStore,
+} from '@earendil-works/pi-ai';
 import { ConfigError } from '../src/config.ts';
-import { createModelSetup, MODEL_KEY_ENV } from '../src/model.ts';
+import {
+  CHATGPT_PROVIDER,
+  chatgptModel,
+  createModelSetup,
+  MODEL_KEY_ENV,
+} from '../src/model.ts';
 import { RecordingLog } from './support.ts';
 
 const SPEC = 'opencode-go/qwen3.8-max';
@@ -22,13 +31,19 @@ function keyFile(): string {
 }
 
 function setup(
-  options: { spec?: string; thinking?: ThinkingLevel; keyFile?: string } = {},
+  options: {
+    spec?: string;
+    thinking?: ThinkingLevel;
+    keyFile?: string;
+    credentials?: CredentialStore;
+  } = {},
 ) {
   const log = new RecordingLog();
   const made = createModelSetup({
     spec: options.spec ?? SPEC,
     thinking: options.thinking ?? 'medium',
     keyFile: options.keyFile ?? keyFile(),
+    credentials: options.credentials,
     log,
   });
   return { ...made, log };
@@ -48,8 +63,10 @@ describe('createModelSetup', () => {
     expect(made.thinking).toBe('medium');
   });
 
+  // Turns stay on OpenCode Go until the router that falls back from ChatGPT exists.
   test.each([
     'opencode-go/no-such-model',
+    'openai-codex/gpt-6-sol',
     'anthropic/claude-opus-4-7',
     'qwen3.8-max',
     'opencode-go/',
@@ -67,6 +84,29 @@ describe('createModelSetup', () => {
       );
     },
   );
+
+  test('signs ChatGPT in through the credential store, which the key file never reaches', async () => {
+    const credentials = new InMemoryCredentialStore();
+    const file = keyFile();
+    writeFileSync(file, 'sk-opencode-key');
+    const made = setup({ keyFile: file, credentials });
+    const chatgpt = chatgptModel(made);
+    expect(chatgpt?.provider).toBe(CHATGPT_PROVIDER);
+    expect(chatgpt?.id).toBe('gpt-6-sol');
+    expect(chatgpt?.baseUrl).toBe('https://chatgpt.com/backend-api');
+    expect(await made.models.getAuth(CHATGPT_PROVIDER)).toBeUndefined();
+
+    await credentials.modify(CHATGPT_PROVIDER, async () => ({
+      type: 'oauth',
+      access: 'access-token',
+      refresh: 'refresh-token',
+      expires: Date.now() + 86_400_000,
+    }));
+    expect((await made.models.getAuth(CHATGPT_PROVIDER))?.auth.apiKey).toBe(
+      'access-token',
+    );
+    expect(await apiKey(made)).toBe('sk-opencode-key');
+  });
 
   test('reads the key file on every request, so a rotation needs no rebuild', async () => {
     const file = keyFile();

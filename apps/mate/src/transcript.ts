@@ -24,6 +24,8 @@ export interface ReplayOptions {
   me: string;
   /** Texts already queued as prompts, never replayed as history. */
   skip: readonly string[];
+  /** True for a human's line that commands mate itself, which no session hears. */
+  command?(text: string): boolean;
 }
 
 function render(message: HistoryMessage, me: string): string {
@@ -35,11 +37,15 @@ function render(message: HistoryMessage, me: string): string {
 function eligible(
   message: HistoryMessage,
   allowed: ReadonlySet<string>,
-  { me, skip }: ReplayOptions,
+  { me, skip, command }: ReplayOptions,
 ): boolean {
   if (message.authorId === me) {
     if (isNotice(message.content)) return false;
-  } else if (message.authorIsBot || !allowed.has(message.authorId)) {
+  } else if (
+    message.authorIsBot ||
+    !allowed.has(message.authorId) ||
+    command?.(message.content)
+  ) {
     return false;
   }
   const text = message.content.trim();
