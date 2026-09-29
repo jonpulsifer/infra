@@ -106,7 +106,7 @@ spec:
             severity: warning
           annotations:
             message: "mate turns are failing"
-            description: "More than two turns ended in an error in the last thirty minutes. `error` is a run pi gave up on, usually at the model provider, and `mate_provider_errors_total` says which kind: `auth` is the key in Secret mate-opencode, `limit` the usage cap of the `opencode-go` plan, `timeout` a provider that stopped answering, and `other` anything else, such as a MATE_MODEL the provider refuses. `brain-failed` is the session store or the harness itself failing: read `mate_store_failures_total` by `op`, which MateStoreFailing watches, alongside mate's log (`kubectl --context offsite logs -n mate deploy/mate`), because a `brain-failed` turn with no store failure is a fault in mate's own agent loop. A sandbox that dies mid-turn is a tool error the model sees, not a failed turn."
+            description: "More than two turns ended in an error in the last thirty minutes. `error` is a run pi gave up on, usually at the model provider, and `mate_provider_errors_total` says which kind. With a fallback, a run fails only when the fallback fails too, and the kind is its own: `auth` is the key in Secret mate-opencode, or the ChatGPT sign-in, `limit` a plan's usage cap, `timeout` a provider that stopped answering, and `other` anything else, such as a model the provider refuses. `brain-failed` is the session store or the harness itself failing: read `mate_store_failures_total` by `op`, which MateStoreFailing watches, alongside mate's log (`kubectl --context offsite logs -n mate deploy/mate`), because a `brain-failed` turn with no store failure is a fault in mate's own agent loop. A sandbox that dies mid-turn is a tool error the model sees, not a failed turn."
 
         # A failed mint is a tool error inside a turn, so only this sees it.
         # `connect-failed`: the Sandbox went Ready but mate-hands did not answer.
@@ -185,10 +185,12 @@ spec:
             severity: warning
           annotations:
             message: "mate is not signed in to ChatGPT"
-            description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, or OpenAI refused the token refresh. Until the owner signs it in again, mate cannot use ChatGPT. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
+            description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, OpenAI refused the token refresh, or chatgpt.com refused a fresh token too. Until the owner signs it in again, mate cannot use ChatGPT, so a turn that would use it runs on MATE_FALLBACK_MODEL. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
 
         # The keeper rotates the token at two days left, so under one is a day
-        # of failed refreshes. The gauge is absent while signed out.
+        # of failed refreshes. A token chatgpt.com refuses reads as expired
+        # until its forced rotation gets through, so an hour of failed
+        # rotations fires too. The gauge is absent while signed out.
         - alert: MateChatGPTTokenNotRefreshing
           expr: |
             mate_chatgpt_token_expiry_seconds < 86400
@@ -199,7 +201,33 @@ spec:
             severity: warning
           annotations:
             message: "mate's ChatGPT token is not refreshing"
-            description: "mate's ChatGPT access token has less than a day left. mate refreshes it once two days are left, so every refresh since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, mate's ChatGPT requests fail until a refresh gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+            description: "mate's ChatGPT access token has less than a day left, or chatgpt.com refused it over an hour ago. mate rotates the token once two days are left, or at once when chatgpt.com refuses it, and tries a failed rotation again every 15 minutes, so every rotation since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, or once chatgpt.com refuses it, mate's ChatGPT requests fail until a rotation gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+
+        # ChatGPT's own failures, not the requests the breaker sends past it
+        # while it waits. A blip is one per running turn, then a trial a minute
+        # on, so six transient or store failures in 30m is an outage. A refusal
+        # keeps ChatGPT off for 15m or more, so one is enough. The offset arms
+        # as above.
+        - alert: MateModelPrimaryFailing
+          expr: |
+            sum(increase(mate_model_primary_failures_total{reason=~"transient|store"}[30m])) > 5
+            or sum(increase(mate_model_primary_failures_total{reason="rejected"}[30m])) > 0
+            or sum(
+              mate_model_primary_failures_total{reason=~"transient|store"}
+              unless ignoring(pod, instance)
+              mate_model_primary_failures_total{reason=~"transient|store"} offset 30m
+            ) > 5
+            or sum(
+              mate_model_primary_failures_total{reason="rejected"}
+              unless ignoring(pod, instance)
+              mate_model_primary_failures_total{reason="rejected"} offset 30m
+            ) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "ChatGPT is failing mate's requests"
+            description: "ChatGPT failed mate's model requests in the last thirty minutes for a reason other than its usage limit or the sign-in: more than five `transient` or `store` failures, or a `rejected` one. MATE_FALLBACK_MODEL answers each of those requests, and the breaker then keeps ChatGPT off for a minute after a `transient` or `store` failure and fifteen minutes or more after a `rejected` one, so turns run on the slower model. `reason` on `mate_model_primary_failures_total` says which: `transient` is chatgpt.com out of reach, a 5xx or a timeout, which is mate's CiliumNetworkPolicy, DNS or OpenAI; `rejected` is ChatGPT refusing the request, such as a model the plan lacks or instructions it will not take; `store` is mate-db, which MateStoreFailing also watches. Mention mate with `chatgpt status` for the last failure, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate | grep 'ChatGPT failed'`. `chatgpt pause` keeps every turn on the fallback while you look. The runbook at https://wiki.lolwtf.ca/runbooks/operate-the-rowbutt-model-fallback/ has the checks."
 
         # One failed fold is a bearer that may exist only in a sandbox the quiet
         # teardown deletes, so the first counts. `result!="ok"` is the contract.
@@ -244,8 +272,9 @@ spec:
             message: "mate has spent most of its daily turn budget"
             description: "More than 96 of the 120 turns allowed in a rolling day have been taken. Past 120 every thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
 
-        # qwen3.8-max lists at $2 and $6 per million input and output tokens.
-        # The turn cap bounds volume, so this trips when the cost per turn moves.
+        # qwen3.8-max lists at $2 and $6 per million input and output tokens, and
+        # ChatGPT counts at 0. The turn cap bounds volume, so this trips when the
+        # cost per turn moves.
         - alert: MateSpendAboveBudget
           expr: sum(increase(mate_turn_cost_usd_sum[24h])) > 25
           for: 0m
@@ -253,7 +282,7 @@ spec:
             severity: warning
           annotations:
             message: "mate's reported spend is above its daily budget"
-            description: "The turns of the last rolling day report more than $25 of model spend. The number is qwen3.8-max's list price from pi's catalog, summed over each run: a shadow of the flat-rate `opencode-go` plan, not a bill. Volume is capped at 120 turns/day, so this is the tokens per turn moving: check MATE_MODEL and MATE_THINKING on the mate Deployment, then which threads run long turns. The threshold is a first estimate; move it once a week of turns shows a normal day."
+            description: "The turns of the last rolling day report more than $25 of model spend. The number is the list price from pi's catalog, summed over each run, with ChatGPT's requests at $0: a shadow of the fallback, qwen3.8-max, on the flat-rate `opencode-go` plan, not a bill. Volume is capped at 120 turns/day, so this is the tokens per turn moving, or the fallback answering more: check `mate_model_routes_total`, MATE_MODEL, MATE_FALLBACK_MODEL and MATE_THINKING on the mate Deployment, then which threads run long turns. The threshold is a first estimate; move it once a week of turns shows a normal day."
 
         # mate sleeps to the reset below a 20% reserve; this fires at 40%. The
         # gauge goes absent once `reset_after` passes.

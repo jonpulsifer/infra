@@ -1,45 +1,84 @@
 /**
- * The model mate's brain talks to, and the key it pays with. The key is a
- * mounted file read on every request, so a rotation needs no restart and the
- * key never enters `process.env`, stream options or a log. The ChatGPT
- * provider signs in through the credential store instead.
+ * The models mate's brain talks to, and what each pays with. The OpenCode Go
+ * key is a mounted file read on every request, so a rotation needs no restart
+ * and the key never enters `process.env`, stream options or a log. The
+ * ChatGPT provider signs in through the credential store instead. With a
+ * fallback, requests for a ChatGPT primary go through the router.
  */
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   type Api,
+  clampThinkingLevel,
   createModels,
   getSupportedThinkingLevels,
   type Model,
+  type Models,
 } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { opencodeGoProvider } from '@earendil-works/pi-ai/providers/opencode-go';
 import type { CreateModelSetup, ModelSetup } from './brain-inputs.ts';
+import { systemClock } from './clock.ts';
 import { ConfigError } from './config.ts';
 import { type Log, plain } from './log.ts';
+import {
+  CHATGPT_PROVIDER,
+  routeModels,
+  spec,
+  unpriced,
+  unroutedModels,
+} from './route.ts';
 
-const MODEL_PROVIDER = 'opencode-go';
+export { CHATGPT_PROVIDER } from './route.ts';
+
+const PROVIDERS: ReadonlySet<string> = new Set([
+  'opencode-go',
+  CHATGPT_PROVIDER,
+]);
 /** The only variable pi-ai's OpenCode Go provider reads its key from. */
 export const MODEL_KEY_ENV = 'OPENCODE_API_KEY';
-export const CHATGPT_PROVIDER = 'openai-codex';
 /** The ChatGPT model a sign-in's test request goes to while turns use another. */
 export const CHATGPT_MODEL = 'gpt-6-sol';
 
+function lookup(models: Models, name: string, wanted: string): Model<Api> {
+  const slash = wanted.indexOf('/');
+  const provider = slash > 0 ? wanted.slice(0, slash) : '';
+  const id = slash > 0 ? wanted.slice(slash + 1) : '';
+  if (!PROVIDERS.has(provider) || !id) {
+    throw new ConfigError(
+      `${name} must be ${[...PROVIDERS].join('/<model> or ')}/<model>, got ${wanted}`,
+    );
+  }
+  const model = models.getModel(provider, id);
+  if (!model) {
+    throw new ConfigError(`${name} names ${wanted}, which pi-ai does not list`);
+  }
+  return model;
+}
+
+// The catalog maps an unsupported level to null, and a null level sends no
+// reasoning parameter, so the model would think at its own default.
+function supported(name: string, model: Model<Api>, level: ThinkingLevel) {
+  const levels = getSupportedThinkingLevels(model);
+  if (!levels.includes(level)) {
+    throw new ConfigError(
+      `${name}=${level} is not a level ${spec(model)} supports: ${levels.join(', ')}`,
+    );
+  }
+}
+
 export const createModelSetup: CreateModelSetup = ({
-  spec,
+  spec: wanted,
   thinking,
+  fallbackSpec = null,
+  fallbackThinking = null,
   keyFile,
   credentials,
   log,
+  clock = systemClock,
+  metrics,
 }) => {
-  const slash = spec.indexOf('/');
-  const provider = slash > 0 ? spec.slice(0, slash) : '';
-  const id = slash > 0 ? spec.slice(slash + 1) : '';
-  if (provider !== MODEL_PROVIDER || !id) {
-    throw new ConfigError(
-      `MATE_MODEL must be ${MODEL_PROVIDER}/<model>, got ${spec}`,
-    );
-  }
   const readKey = keyReader(keyFile, log);
-  const models = createModels({
+  const direct = createModels({
     credentials,
     authContext: {
       env: (name) =>
@@ -47,29 +86,60 @@ export const createModelSetup: CreateModelSetup = ({
       fileExists: () => Promise.resolve(false),
     },
   });
-  models.setProvider(opencodeGoProvider());
-  models.setProvider(openaiCodexProvider());
-  const model = models.getModel(provider, id);
-  if (!model) {
-    throw new ConfigError(
-      `MATE_MODEL names ${spec}, which pi-ai does not list`,
-    );
+  direct.setProvider(opencodeGoProvider());
+  direct.setProvider(openaiCodexProvider());
+  const model = lookup(direct, 'MATE_MODEL', wanted);
+  supported('MATE_THINKING', model, thinking);
+  const chatgpt = model.provider === CHATGPT_PROVIDER;
+  if (fallbackSpec === null && !chatgpt) {
+    return {
+      models: unroutedModels(direct),
+      direct,
+      model,
+      thinking,
+      router: null,
+    };
   }
-  // The catalog maps an unsupported level to null, and a null level sends no
-  // reasoning parameter, so the model would think at its own default.
-  const supported = getSupportedThinkingLevels(model);
-  if (!supported.includes(thinking)) {
-    throw new ConfigError(
-      `MATE_THINKING=${thinking} is not a level ${spec} supports: ${supported.join(', ')}`,
-    );
+  let fallback: { model: Model<Api>; thinking: ThinkingLevel } | null = null;
+  if (fallbackSpec !== null) {
+    if (!chatgpt) {
+      throw new ConfigError(
+        `MATE_FALLBACK_MODEL answers when ChatGPT cannot, so MATE_MODEL must be ${CHATGPT_PROVIDER}/<model>, got ${wanted}; set MATE_FALLBACK_MODEL=none`,
+      );
+    }
+    const backup = lookup(direct, 'MATE_FALLBACK_MODEL', fallbackSpec);
+    if (backup.provider === model.provider && backup.id === model.id) {
+      throw new ConfigError(
+        `MATE_FALLBACK_MODEL must differ from MATE_MODEL, both ${wanted}; set it to none for no fallback`,
+      );
+    }
+    const level = fallbackThinking ?? clampThinkingLevel(backup, thinking);
+    supported('MATE_FALLBACK_THINKING', backup, level);
+    // Compaction follows the lane's window, so a smaller fallback could overflow.
+    if (backup.contextWindow < model.contextWindow) {
+      log.warn('the fallback model has the smaller context window', {
+        primary: spec(model),
+        primaryWindow: model.contextWindow,
+        fallback: spec(backup),
+        fallbackWindow: backup.contextWindow,
+      });
+    }
+    fallback = { model: backup, thinking: level };
   }
-  return { models, model, thinking };
+  const { models, router } = routeModels(direct, {
+    primary: model,
+    fallback,
+    clock,
+    log,
+    metrics,
+  });
+  return { models, direct, model: unpriced(model), thinking, router };
 };
 
 /** The model a ChatGPT sign-in proves: the lane's own, or pi's `gpt-6-sol`. */
 export function chatgptModel(setup: ModelSetup): Model<Api> | null {
   if (setup.model.provider === CHATGPT_PROVIDER) return setup.model;
-  return setup.models.getModel(CHATGPT_PROVIDER, CHATGPT_MODEL) ?? null;
+  return setup.direct.getModel(CHATGPT_PROVIDER, CHATGPT_MODEL) ?? null;
 }
 
 function keyReader(file: string, log: Log): () => Promise<string | undefined> {

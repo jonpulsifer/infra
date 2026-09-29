@@ -49,6 +49,8 @@ const ACCOUNT = 'acct-test';
 const DAY_MS = 86_400_000;
 const TEN_DAYS_S = 864_000;
 const ref: ThreadRef = discordRef(THREAD, CHANNEL);
+const DEPLOYED = 'openai-codex/gpt-6-sol';
+const FALLBACK = 'opencode-go/qwen3.8-max';
 
 function jwt(n: number): string {
   const payload = btoa(
@@ -236,15 +238,31 @@ beforeEach(async () => {
     clock,
     metrics,
   });
+  wire(DEPLOYED, FALLBACK);
+  discord = new FakeDiscord(ME);
+  surface = discord.surface({
+    me: ME,
+    allowedUserIds: new Set([OWNER]),
+    allowedChannelIds: new Set([CHANNEL]),
+    clock,
+  });
+});
+
+/** mate's model setup, keeper and commands over the one store. */
+function wire(spec: string, fallbackSpec: string | null): void {
+  keeper?.stop();
   setup = createModelSetup({
-    spec: 'opencode-go/qwen3.8-max',
+    spec,
     thinking: 'medium',
+    fallbackSpec,
     keyFile: '/nonexistent/opencode-key',
     credentials: store,
     log,
+    clock,
+    metrics,
   });
   keeper = new ChatgptKeeper({
-    models: setup.models,
+    models: setup.direct,
     credentials: {
       read: (id) => {
         reads += 1;
@@ -255,24 +273,19 @@ beforeEach(async () => {
     clock,
     log,
     metrics,
+    router: setup.router,
   });
   account = new ChatgptAccount({
-    models: setup.models,
+    models: setup.direct,
     keeper,
     credentials: store,
     model: chatgptModel(setup),
     lane: { model: setup.model, thinking: setup.thinking },
+    router: setup.router,
     clock,
     log,
   });
-  discord = new FakeDiscord(ME);
-  surface = discord.surface({
-    me: ME,
-    allowedUserIds: new Set([OWNER]),
-    allowedChannelIds: new Set([CHANNEL]),
-    clock,
-  });
-});
+}
 
 afterEach(async () => {
   keeper.stop();
@@ -310,11 +323,17 @@ async function signIn(expiresInDays = 10): Promise<void> {
 }
 
 async function until(check: () => boolean, ms = 5_000): Promise<void> {
-  const deadline = Date.now() + ms;
+  const deadline = performance.now() + ms;
   while (!check()) {
-    if (Date.now() > deadline) throw new Error('it never happened');
+    if (performance.now() > deadline) throw new Error('it never happened');
     await Bun.sleep(5);
   }
+}
+
+/** Moves mate's clock on, and pi's `Date.now()` with it. */
+async function later(ms: number): Promise<void> {
+  setSystemTime(new Date(clock.now() + ms));
+  await clock.advance(ms);
 }
 
 describe('the command', () => {
@@ -356,7 +375,7 @@ describe('signing in', () => {
     expect(dm?.content).toMatch(/The code expires at \d\d:\d\d UTC\.$/);
     expect(said()).toEqual([
       `${CHATGPT.codeSent} by DM. It works for 15 minutes.`,
-      `${CHATGPT.signedIn}. A test request to openai-codex/gpt-6-sol answered in 0.0 s. MATE_MODEL is opencode-go/qwen3.8-max, so turns do not use it yet.`,
+      `${CHATGPT.signedIn}. A test request to openai-codex/gpt-6-sol answered in 0.0 s, so turns use it from now on, with opencode-go/qwen3.8-max as the fallback.`,
     ]);
     expect(openai.calls.map((call) => call.path)).toEqual([
       '/api/accounts/deviceauth/usercode',
@@ -380,6 +399,26 @@ describe('signing in', () => {
     });
     for (const line of said()) expect(isNotice(line)).toBe(true);
     expectNothingSecret();
+  });
+
+  test('with turns on OpenCode Go, a sign-in says that turns do not use it yet', async () => {
+    wire(FALLBACK, null);
+    await command('chatgpt login');
+    expect(said().at(-1)).toBe(
+      `${CHATGPT.signedIn}. A test request to openai-codex/gpt-6-sol answered in 0.0 s. MATE_MODEL is opencode-go/qwen3.8-max, so turns do not use it yet.`,
+    );
+    openai.codex = 403;
+    await command('chatgpt login');
+    expect(said().at(-1)).toBe(
+      `${CHATGPT.proofFailed} a test request to openai-codex/gpt-6-sol failed (HTTP 403). mate keeps answering with opencode-go/qwen3.8-max; \`chatgpt status\` says more.`,
+    );
+  });
+
+  test('the test request reaches ChatGPT even while the router sends turns elsewhere', async () => {
+    setup.router?.pause(clock.now() + 60 * 60_000);
+    await command('chatgpt login');
+    expect(openai.of('/backend-api/codex/responses')).toHaveLength(1);
+    expect(said().at(-1)).toStartWith(`${CHATGPT.signedIn}. A test request`);
   });
 
   test('on Slack the code goes to a message only the owner sees, in the channel', async () => {
@@ -537,7 +576,7 @@ describe('signing in', () => {
       openai.codex = outcome;
       await command('chatgpt login');
       expect(said().at(-1)).toBe(
-        `${CHATGPT.proofFailed} a test request to openai-codex/gpt-6-sol failed (${why}). mate keeps answering with opencode-go/qwen3.8-max; \`chatgpt status\` says more.`,
+        `${CHATGPT.proofFailed} a test request to openai-codex/gpt-6-sol failed (${why}). mate answers with opencode-go/qwen3.8-max while ChatGPT fails; \`chatgpt status\` says more.`,
       );
       expect(await store.read(CHATGPT_PROVIDER)).toBeDefined();
       await command('chatgpt status');
@@ -609,6 +648,12 @@ describe('the keeper', () => {
       });
       expect(await keeper.check()).toBe('refused');
       expect(openai.of('/oauth/token')).toHaveLength(1);
+      // The access token may still work, but the owner's kill switch looks like this.
+      expect(setup.router?.status().now).toMatchObject({
+        route: 'fallback',
+        reason: 'auth',
+        retryAt: null,
+      });
       await command('chatgpt status');
       expect(said().at(-1)).toMatch(
         /^ℹ️ ChatGPT: signed out, because OpenAI refused the token refresh at \d\d:\d\d UTC\. Say `chatgpt login` to sign in again\./,
@@ -616,6 +661,7 @@ describe('the keeper', () => {
       await command('chatgpt login');
       expect(keeper.state().state).toBe('good');
       expect(metrics.chatgptStates.at(-1)).toMatchObject({ signedIn: true });
+      expect(setup.router?.status().now).toEqual({ route: 'primary' });
       expectNothingSecret();
     },
   );
@@ -639,6 +685,142 @@ describe('the keeper', () => {
       });
     },
   );
+
+  test('chatgpt.com refusing the token asks for one rotation, which lets ChatGPT answer again', async () => {
+    await signIn(5);
+    const ask = () =>
+      setup.models.completeSimple(
+        setup.model,
+        { messages: [{ role: 'user', content: 'hi', timestamp: Date.now() }] },
+        { transport: 'sse' },
+      );
+    openai.codex = 401;
+    const refused = await ask();
+    expect(refused.errorMessage).toStartWith(
+      "mate's ChatGPT sign-in stopped working; opencode-go/qwen3.8-max: ",
+    );
+    await until(() => setup.router?.status().now.route === 'primary');
+    expect(openai.of('/oauth/token')).toEqual([
+      expect.objectContaining({ grant: 'refresh_token' }),
+    ]);
+    expect(await store.read(CHATGPT_PROVIDER)).toMatchObject({
+      refresh: 'rt_SECRET_1',
+    });
+
+    // A token refused again right after its rotation is not the token's fault.
+    await ask();
+    await settle();
+    expect(openai.of('/oauth/token')).toHaveLength(1);
+    expect(setup.router?.status().now).toMatchObject({ reason: 'auth' });
+    openai.codex = 'ok';
+    expect((await ask()).errorMessage).toStartWith("mate's ChatGPT sign-in");
+    expect(JSON.stringify(refused)).not.toContain('SECRET');
+    expectNothingSecret();
+  });
+
+  test('chatgpt.com refusing the token its rotation gave signs mate out until the next login', async () => {
+    await signIn(5);
+    await keeper.check();
+    const ask = () =>
+      setup.models.completeSimple(
+        setup.model,
+        { messages: [{ role: 'user', content: 'hi', timestamp: Date.now() }] },
+        { transport: 'sse' },
+      );
+    openai.codex = 401;
+    await ask();
+    await until(() => setup.router?.status().now.route === 'primary');
+    await ask();
+    await until(() => keeper.state().state === 'refused');
+    expect(metrics.chatgptStates.at(-1)).toEqual({
+      signedIn: false,
+      expiresAt: null,
+    });
+    expect(
+      log.of(
+        'chatgpt.com refused a fresh ChatGPT token too; mate stays signed out until `chatgpt login`',
+      ),
+    ).toHaveLength(1);
+    await command('chatgpt status');
+    expect(said().at(-1)).toMatch(
+      /^ℹ️ ChatGPT: signed out, because chatgpt\.com refused a fresh token too, at \d\d:\d\d UTC\. Say `chatgpt login` to sign in again\. .*Now: fallback since \d\d:\d\d UTC \(mate's ChatGPT sign-in stopped working, HTTP 401\), until a sign-in\./,
+    );
+    // A check leaves it signed out: another rotation would not mend it.
+    expect(await keeper.check()).toBe('refused');
+    expect(openai.of('/oauth/token')).toHaveLength(1);
+
+    openai.codex = 'ok';
+    await command('chatgpt login');
+    expect(keeper.state().state).toBe('good');
+    expect(metrics.chatgptStates.at(-1)).toMatchObject({ signedIn: true });
+    expect(setup.router?.status().now).toEqual({ route: 'primary' });
+    expectNothingSecret();
+  });
+
+  test.each<Outcome>([500, 'network'])(
+    'a forced rotation that fails with %p is forced again every 15 minutes until one gets through',
+    async (outcome) => {
+      await signIn(5);
+      const ask = () =>
+        setup.models.completeSimple(
+          setup.model,
+          {
+            messages: [{ role: 'user', content: 'hi', timestamp: Date.now() }],
+          },
+          { transport: 'sse' },
+        );
+      const rotations = () => openai.of('/oauth/token').length;
+      openai.codex = 401;
+      openai.refresh = outcome;
+      await ask();
+      await until(() => rotations() === 1);
+      await settle();
+      expect(setup.router?.status().now).toMatchObject({ reason: 'auth' });
+      // A refused token works no longer, so MateChatGPTTokenNotRefreshing counts from here.
+      expect(metrics.chatgptStates.at(-1)).toEqual({
+        signedIn: true,
+        expiresAt: clock.now(),
+      });
+
+      await later(RETRY_MS);
+      await until(() => rotations() === 2, 2_000);
+      await settle();
+      expect(setup.router?.status().now).toMatchObject({ reason: 'auth' });
+
+      openai.refresh = 'ok';
+      openai.codex = 'ok';
+      await later(RETRY_MS);
+      await until(() => setup.router?.status().now.route === 'primary');
+      expect(rotations()).toBe(3);
+      expect(await store.read(CHATGPT_PROVIDER)).toMatchObject({
+        refresh: 'rt_SECRET_1',
+      });
+      expect(metrics.chatgptStates.at(-1)?.expiresAt).toBeGreaterThan(
+        clock.now() + 9 * DAY_MS,
+      );
+      expect((await ask()).provider).toBe(CHATGPT_PROVIDER);
+
+      await later(RETRY_MS);
+      await settle();
+      expect(rotations()).toBe(3);
+      expectNothingSecret();
+    },
+  );
+
+  test('a forced rotation owed through failures gives way to a new sign-in', async () => {
+    await signIn(5);
+    openai.refresh = 'network';
+    expect(await keeper.forceRefresh()).toBe('transient');
+    await signIn(10);
+    expect(metrics.chatgptStates.at(-1)).toMatchObject({ signedIn: true });
+    expect(metrics.chatgptStates.at(-1)?.expiresAt).toBeGreaterThan(
+      clock.now() + 9 * DAY_MS,
+    );
+    openai.refresh = 'ok';
+    await later(RETRY_MS);
+    await settle();
+    expect(openai.of('/oauth/token')).toHaveLength(1);
+  });
 
   test('a forced refresh rotates a token with days left', async () => {
     await signIn(5);
@@ -682,18 +864,33 @@ describe('the keeper', () => {
 });
 
 describe('status, logout and pause', () => {
-  test('status says what mate holds and what turns use', async () => {
+  test('status says what mate holds, which model answers now and why', async () => {
+    await keeper.check();
+    await command('chatgpt status');
+    expect(said()).toEqual([
+      expect.stringMatching(
+        /^ℹ️ ChatGPT: not signed in\. Say `chatgpt login` to sign in\. Route: openai-codex\/gpt-6-sol \(medium\), fallback opencode-go\/qwen3\.8-max \(medium\)\. Now: fallback since \d\d:\d\d UTC \(mate is not signed in to ChatGPT\), until a sign-in\. Since start: 0 requests on ChatGPT, 0 on the fallback\.$/,
+      ),
+    ]);
+    await signIn(5);
+    await command('chatgpt status');
+    expect(said().at(-1)).toMatch(
+      /^ℹ️ ChatGPT: signed in, token good until \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Route: .*\. Now: primary\. Since start: 0 requests on ChatGPT, 0 on the fallback\.$/,
+    );
+    await command('chatgpt pause 30');
+    await command('chatgpt status');
+    expect(said().at(-1)).toMatch(
+      /Now: fallback since \d\d:\d\d UTC \(ChatGPT is paused\) until \d\d:\d\d UTC\./,
+    );
+  });
+
+  test('with turns on OpenCode Go, status says they do not use ChatGPT', async () => {
+    wire(FALLBACK, null);
     await keeper.check();
     await command('chatgpt status');
     expect(said()).toEqual([
       `${CHATGPT.status}not signed in. Say \`chatgpt login\` to sign in. Turns use opencode-go/qwen3.8-max (medium), not ChatGPT.`,
     ]);
-    await signIn(5);
-    await command('chatgpt pause 30');
-    await command('chatgpt status');
-    expect(said().at(-1)).toMatch(
-      /^ℹ️ ChatGPT: signed in, token good until \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Turns use opencode-go\/qwen3\.8-max \(medium\), not ChatGPT\. Paused until \d\d:\d\d UTC\.$/,
-    );
   });
 
   test('status stays out of a replay, and an answer that starts with the word ChatGPT does not', async () => {
@@ -744,23 +941,60 @@ describe('status, logout and pause', () => {
     expect(await store.read(CHATGPT_PROVIDER)).toBeDefined();
   });
 
-  test('pause holds until its time or a resume', async () => {
+  test('pause sends every request to the fallback until its time or a resume', async () => {
     await command('chatgpt pause');
     expect(account.paused()).toBe(clock.now() + 60 * 60_000);
+    expect(setup.router?.status().now).toMatchObject({ reason: 'paused' });
     expect(said()).toEqual([
       expect.stringMatching(
-        /^⏸️ ChatGPT is paused until \d\d:\d\d UTC, or until mate restarts\. Say `chatgpt resume` to end it sooner\.$/,
+        /^⏸️ ChatGPT is paused until \d\d:\d\d UTC, or until mate restarts, and opencode-go\/qwen3\.8-max answers\. Say `chatgpt resume` to end it sooner\.$/,
       ),
     ]);
     await command('chatgpt resume');
     expect(account.paused()).toBeNull();
-    expect(said().at(-1)).toBe(`${CHATGPT.resumed}.`);
+    expect(said().at(-1)).toBe(
+      `${CHATGPT.resumed}, so the next request tries it.`,
+    );
 
     await command(`chatgpt pause ${PAUSE_MAX_MINUTES}`);
     expect(said().at(-1)).toMatch(/until \d{4}-\d\d-\d\d \d\d:\d\d UTC/);
     await clock.advance(PAUSE_MAX_MINUTES * 60_000);
     expect(account.paused()).toBeNull();
+    expect(metrics.primary).toBe(true);
   });
+
+  test('a resume while signed out says that a sign-in is still needed', async () => {
+    await keeper.check();
+    await command('chatgpt resume');
+    expect(said()).toEqual([
+      `${CHATGPT.resumed}, but mate is not signed in to ChatGPT, so opencode-go/qwen3.8-max answers until a sign-in.`,
+    ]);
+  });
+
+  test.each([
+    [
+      FALLBACK,
+      null,
+      'turns use opencode-go/qwen3.8-max, not ChatGPT, so there is nothing to',
+    ],
+    [
+      DEPLOYED,
+      null,
+      "MATE_FALLBACK_MODEL is none, so nothing answers in ChatGPT's place and there is nothing to",
+    ],
+  ])(
+    'with %s and fallback %p, pause and resume say there is nothing to do',
+    async (spec, fallback, why) => {
+      wire(spec, fallback);
+      await command('chatgpt pause');
+      await command('chatgpt resume');
+      expect(said()).toEqual([
+        `${CHATGPT.status}${why} pause.`,
+        `${CHATGPT.status}${why} resume.`,
+      ]);
+      expect(account.paused()).toBeNull();
+    },
+  );
 });
 
 describe('the egress', () => {
@@ -797,6 +1031,9 @@ describe('the egress', () => {
       .flatMap((rule) => rule.toFQDNs ?? [])
       .map((fqdn) => fqdn.matchName);
     for (const host of openai.hosts) expect(on443).toContain(host);
-    expect(on443).toContain(new URL(setup.model.baseUrl).hostname);
+    const fallback = setup.router?.status().fallback?.model;
+    for (const model of [setup.model, fallback]) {
+      expect(on443).toContain(new URL(model?.baseUrl ?? '').hostname);
+    }
   });
 });

@@ -1,6 +1,7 @@
 /** What a turn's events look like on a surface: text, status and cards. */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { HarnessEvent } from '@earendil-works/pi-agent-core';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import { SANDBOX_CARD_ID } from '../src/lease.ts';
 import {
   CONNECTING,
@@ -264,6 +265,32 @@ describe('the translator', () => {
     expect(sink.statuses.at(-1)).toBe('⏳ the model stumbled — retrying (1/3)');
     turn.event(delta('text_delta', 'ok'));
     expect(sink.statuses.at(-1)).toBeNull();
+  });
+
+  test('a request the fallback answers says why until it speaks or calls a tool', () => {
+    const qwen = { provider: 'opencode-go', id: 'qwen3.8-max' } as Model<Api>;
+    const sol = { provider: 'openai-codex', id: 'gpt-6-sol' } as Model<Api>;
+    expect(turn.route).toBeNull();
+    turn.routed({ route: 'primary', reason: null, model: sol });
+    expect(turn.fellBack).toBe(false);
+    turn.routed({ route: 'fallback', reason: 'limit', model: qwen });
+    expect(sink.statuses.at(-1)).toBe(
+      "↪️ qwen3.8-max is answering — ChatGPT's usage limit is reached",
+    );
+    turn.event(delta('thinking_delta', 'hmm'));
+    expect(sink.statuses.at(-1)).toStartWith('↪️');
+    turn.event(delta('text_delta', 'ok'));
+    expect(sink.statuses.at(-1)).toBeNull();
+    turn.routed({ route: 'fallback', reason: 'paused', model: qwen });
+    expect(sink.statuses.at(-1)).toBe(
+      '↪️ qwen3.8-max is answering — ChatGPT is paused',
+    );
+    turn.event(toolStart('t1', 'bash', { command: 'ls' }));
+    expect(sink.statuses.at(-1)).toBe('$ ls…');
+    turn.event(toolEnd('t1', 'bash', false));
+    expect(sink.statuses.at(-1)).toBeNull();
+    expect(turn.fellBack).toBe(true);
+    expect(turn.route).toBe('mixed');
   });
 
   test('sums the cost of every request in the run', () => {

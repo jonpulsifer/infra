@@ -11,9 +11,13 @@ import {
   DAY_SPENT,
   GAVE_UP_WAITING,
   HARNESS_FAILED,
+  LIMIT_FALLBACK,
   NEVER_STARTED,
+  PRIMARY_REFUSING,
   RESTARTED,
   RESUMING,
+  SIGN_IN_BROKE,
+  SIGNED_OUT,
   STORE_DOWN,
   THREAD_CLOSED,
   THREAD_SPENT,
@@ -1525,6 +1529,47 @@ async function preCutover(opts: BuildOptions = {}) {
   built.threads.adopt(ref(threadId));
   return { ...built, threadId };
 }
+
+describe('a model outage', () => {
+  const NOTICE = `${LIMIT_FALLBACK} opencode-go/qwen3.8-max until about 14:05 UTC.`;
+
+  test("the brain's notice is posted after the answer, and after an error line", async () => {
+    const { threads } = build({
+      script: () => [{ text: 'the answer' }, { notice: NOTICE }],
+    });
+    await threads.onMessage(mention('go'));
+    await clock.advance(2_000);
+    const threadId = discord.threads[0]?.id ?? '';
+    expect(discord.contentsIn(threadId)).toEqual(['the answer', NOTICE]);
+
+    const failing = build({
+      script: () => [{ notice: NOTICE }, { fail: 'provider returned 503' }],
+    });
+    await failing.threads.onMessage(mention('again'));
+    await clock.advance(2_000);
+    const second = discord.threads[1]?.id ?? '';
+    expect(discord.contentsIn(second).slice(-2)).toEqual([
+      `${HARNESS_FAILED}: provider returned 503`,
+      NOTICE,
+    ]);
+  });
+
+  test.each([
+    NOTICE,
+    `${LIMIT_FALLBACK} opencode-go/qwen3.8-max and tries ChatGPT again every few minutes.`,
+    `${SIGNED_OUT} opencode-go/qwen3.8-max. Say \`chatgpt login\` here to sign it in.`,
+    `${SIGN_IN_BROKE} opencode-go/qwen3.8-max. Say \`chatgpt login\` here to sign in again.`,
+    `${PRIMARY_REFUSING} opencode-go/qwen3.8-max for a while. \`chatgpt status\` says why.`,
+  ])('a replay leaves out %p', async (notice) => {
+    const { threads, brain, threadId } = await preCutover();
+    discord.post(threadId, notice, ME, 'mate');
+    await threads.onMessage(inThread(threadId, 'second question'));
+    await clock.advance(5_000);
+    const prompt = brain.prompts.at(-1) ?? '';
+    expect(prompt).toContain('you: alpha');
+    expect(prompt).not.toContain(notice.slice(0, 20));
+  });
+});
 
 describe('replaying the transcript', () => {
   test('a session the store does not hold is handed what the thread already said, in order', async () => {

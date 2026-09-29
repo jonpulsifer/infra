@@ -7,7 +7,7 @@ import {
   type CredentialStore,
   InMemoryCredentialStore,
 } from '@earendil-works/pi-ai';
-import { ConfigError } from '../src/config.ts';
+import { ConfigError, readBrainConfig } from '../src/config.ts';
 import {
   CHATGPT_PROVIDER,
   chatgptModel,
@@ -34,6 +34,8 @@ function setup(
   options: {
     spec?: string;
     thinking?: ThinkingLevel;
+    fallbackSpec?: string | null;
+    fallbackThinking?: ThinkingLevel | null;
     keyFile?: string;
     credentials?: CredentialStore;
   } = {},
@@ -42,6 +44,8 @@ function setup(
   const made = createModelSetup({
     spec: options.spec ?? SPEC,
     thinking: options.thinking ?? 'medium',
+    fallbackSpec: options.fallbackSpec,
+    fallbackThinking: options.fallbackThinking,
     keyFile: options.keyFile ?? keyFile(),
     credentials: options.credentials,
     log,
@@ -49,29 +53,170 @@ function setup(
   return { ...made, log };
 }
 
+const CODEX = 'openai-codex/gpt-6-sol';
+
 async function apiKey(made: ReturnType<typeof setup>) {
   return (await made.models.getAuth(made.model))?.auth.apiKey;
 }
 
 describe('createModelSetup', () => {
-  test('resolves qwen3.8-max on the OpenCode Go endpoint', () => {
+  test('resolves qwen3.8-max on the OpenCode Go endpoint, with nothing routed', () => {
     const made = setup();
     expect(made.model.provider).toBe('opencode-go');
     expect(made.model.id).toBe('qwen3.8-max');
     expect(made.model.api).toBe('openai-completions');
     expect(made.model.baseUrl).toBe('https://opencode.ai/zen/go/v1');
     expect(made.thinking).toBe('medium');
+    // `none` is the rollback: nothing routes, and a request drops another
+    // model's reasoning, as the fallback's does.
+    expect(made.router).toBeNull();
+    expect(made.models).not.toBe(made.direct);
+    expect(made.models.getModel(CHATGPT_PROVIDER, 'gpt-6-sol')?.cost).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
   });
 
-  // Turns stay on OpenCode Go until the router that falls back from ChatGPT exists.
+  test('routes gpt-6-sol first and qwen3.8-max after, at their own levels', () => {
+    const made = setup({ spec: CODEX, fallbackSpec: SPEC });
+    expect(made.model.provider).toBe(CHATGPT_PROVIDER);
+    expect(made.model.id).toBe('gpt-6-sol');
+    expect(made.model.baseUrl).toBe('https://chatgpt.com/backend-api');
+    expect(made.models).not.toBe(made.direct);
+    const route = made.router?.status();
+    expect(route?.fallback?.model.id).toBe('qwen3.8-max');
+    expect(route?.fallback?.thinking).toBe('medium');
+    expect(made.log.entries).toEqual([]);
+  });
+
+  test("ChatGPT's list price is zeroed, so the cost metric stays the fallback's shadow", () => {
+    const made = setup({ spec: CODEX, fallbackSpec: SPEC });
+    expect(made.model.cost).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+    expect(made.models.getModel(CHATGPT_PROVIDER, 'gpt-6-sol')?.cost).toEqual(
+      made.model.cost,
+    );
+    expect(
+      made.direct.getModel(CHATGPT_PROVIDER, 'gpt-6-sol')?.cost.output,
+    ).toBe(10);
+    expect(
+      made.models.getModel('opencode-go', 'qwen3.8-max')?.cost.output,
+    ).toBe(6);
+  });
+
   test.each([
     'opencode-go/no-such-model',
-    'openai-codex/gpt-6-sol',
+    'openai-codex/no-such-model',
     'anthropic/claude-opus-4-7',
     'qwen3.8-max',
     'opencode-go/',
   ])('refuses %s', (spec) => {
     expect(() => setup({ spec })).toThrow(ConfigError);
+  });
+
+  test.each<[string, string | null, ThinkingLevel | null, string]>([
+    [CODEX, CODEX, null, 'MATE_FALLBACK_MODEL must differ from MATE_MODEL'],
+    [
+      SPEC,
+      'opencode-go/qwen3.8-flash',
+      null,
+      'MATE_FALLBACK_MODEL answers when ChatGPT cannot, so MATE_MODEL must be openai-codex/<model>',
+    ],
+    [CODEX, 'opencode-go/no-such-model', null, 'which pi-ai does not list'],
+    [
+      CODEX,
+      SPEC,
+      'high',
+      `MATE_FALLBACK_THINKING=high is not a level ${SPEC} supports: low, medium, xhigh`,
+    ],
+  ])(
+    'refuses %s falling back to %s at %p',
+    (spec, fallbackSpec, fallbackThinking, why) => {
+      expect(() => setup({ spec, fallbackSpec, fallbackThinking })).toThrow(
+        why,
+      );
+    },
+  );
+
+  // Raising MATE_THINKING must never make mate refuse to boot over the fallback.
+  test("an unset fallback level is the fallback's nearest to MATE_THINKING", () => {
+    const made = setup({ spec: CODEX, thinking: 'high', fallbackSpec: SPEC });
+    expect(made.thinking).toBe('high');
+    expect(made.router?.status().fallback?.thinking).toBe('xhigh');
+    const low = setup({
+      spec: CODEX,
+      thinking: 'high',
+      fallbackSpec: SPEC,
+      fallbackThinking: 'low',
+    });
+    expect(low.router?.status().fallback?.thinking).toBe('low');
+  });
+
+  test('a fallback with the smaller context window is warned of, since compaction follows the primary', () => {
+    const made = setup({ spec: CODEX, fallbackSpec: 'opencode-go/glm-5.1' });
+    expect(
+      made.log.of('the fallback model has the smaller context window'),
+    ).toEqual([
+      expect.objectContaining({
+        level: 'warn',
+        fields: expect.objectContaining({
+          primaryWindow: 272_000,
+          fallbackWindow: 202_752,
+        }),
+      }),
+    ]);
+  });
+
+  test("the Deployment's model settings build, so mate boots on them", async () => {
+    const deployment = Bun.YAML.parse(
+      await Bun.file(
+        new URL(
+          '../../../clusters/offsite/apps/mate/deployment.yaml',
+          import.meta.url,
+        ),
+      ).text(),
+    ) as {
+      spec: {
+        template: {
+          spec: {
+            containers: {
+              name: string;
+              env: { name: string; value?: string }[];
+            }[];
+          };
+        };
+      };
+    };
+    const mate = deployment.spec.template.spec.containers.find(
+      (container) => container.name === 'mate',
+    );
+    const env = Object.fromEntries(
+      (mate?.env ?? []).flatMap((one) =>
+        one.name.startsWith('MATE_') && one.value !== undefined
+          ? [[one.name, one.value]]
+          : [],
+      ),
+    );
+    const brain = readBrainConfig(env);
+    const made = setup({
+      spec: brain.model,
+      thinking: brain.thinking,
+      fallbackSpec: brain.fallbackModel,
+      fallbackThinking: brain.fallbackThinking,
+    });
+    expect(made.log.entries).toEqual([]);
+  });
+
+  test('ChatGPT with no fallback still routes, to zero its price', () => {
+    const made = setup({ spec: CODEX, fallbackSpec: null });
+    expect(made.router?.status().fallback).toBeNull();
+    expect(made.model.cost.input).toBe(0);
   });
 
   test.each<ThinkingLevel>(['off', 'high'])(

@@ -22,6 +22,7 @@ import {
 } from './notices.ts';
 import { redact } from './redact.ts';
 import { oneLine } from './reply.ts';
+import { REASONS, type Route, type RouteEvent } from './route.ts';
 import type { PromptSink, Update } from './sandbox.ts';
 import type { ToolCall } from './surface.ts';
 
@@ -177,6 +178,9 @@ export class TurnTranslator {
   private thinking = false;
   private sawText = false;
   private retrying: string | null = null;
+  /** Says why the fallback answers, until it streams text or calls a tool. */
+  private routing: string | null = null;
+  private readonly routes = new Set<Route>();
   /** Whether the assistant message now open has streamed any text. */
   private streamed = false;
   /** SIGTERM: the card is left as it was, so nothing more is drawn. */
@@ -191,6 +195,27 @@ export class TurnTranslator {
   ) {
     this.startedAt = clock.now();
     this.card = new SandboxCard((call) => this.tool(call), clock);
+  }
+
+  /** Which models answered the turn's requests, or null before any. */
+  get route(): Route | 'mixed' | null {
+    if (this.routes.size > 1) return 'mixed';
+    return [...this.routes][0] ?? null;
+  }
+
+  /** Some request of the turn went to the fallback. */
+  get fellBack(): boolean {
+    return this.routes.has('fallback');
+  }
+
+  /** A request of this turn's session was routed; sync and never throws. */
+  routed(event: RouteEvent): void {
+    this.routes.add(event.route);
+    this.routing =
+      event.route === 'fallback' && event.reason
+        ? `↪️ ${event.model.id} is answering — ${REASONS[event.reason]}`
+        : null;
+    this.refresh();
   }
 
   get toolCount(): number {
@@ -223,6 +248,7 @@ export class TurnTranslator {
         return;
       case 'tool_start':
         this.retrying = null;
+        this.routing = null;
         this.tool({
           id: event.toolCallId,
           title: toolTitle(event.toolName, event.args),
@@ -261,6 +287,7 @@ export class TurnTranslator {
   end(): void {
     this.card.end();
     this.retrying = null;
+    this.routing = null;
     this.thinking = false;
     this.setStatus(null);
   }
@@ -279,6 +306,7 @@ export class TurnTranslator {
       this.sawText = true;
       this.streamed = true;
       this.retrying = null;
+      this.routing = null;
       this.send({ kind: 'text', delta: event.delta });
       this.refresh();
     } else if (event.type === 'thinking_delta') {
@@ -318,7 +346,9 @@ export class TurnTranslator {
     this.setStatus(
       running
         ? `${running.title}…`
-        : (this.retrying ?? (this.thinking && !this.sawText ? THINKING : null)),
+        : (this.retrying ??
+            this.routing ??
+            (this.thinking && !this.sawText ? THINKING : null)),
     );
   }
 

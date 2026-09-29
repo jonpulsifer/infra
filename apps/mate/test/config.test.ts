@@ -126,8 +126,10 @@ describe('config from the environment', () => {
         switchboard: null,
       },
       brain: {
-        model: 'opencode-go/qwen3.8-max',
+        model: 'openai-codex/gpt-6-sol',
         thinking: 'medium',
+        fallbackModel: 'opencode-go/qwen3.8-max',
+        fallbackThinking: null,
         modelKeyFile: '/var/run/mate/opencode/api-key',
         databaseUrl: null,
         databaseCaFile: '/var/run/mate/db-ca/ca.crt',
@@ -294,8 +296,8 @@ describe('config from the environment', () => {
     );
   });
 
-  test('the model is provider/model, and qwen3.8-max unless told otherwise', () => {
-    expect(readBrainConfig({}).model).toBe('opencode-go/qwen3.8-max');
+  test('the model is provider/model, and gpt-6-sol unless told otherwise', () => {
+    expect(readBrainConfig({}).model).toBe('openai-codex/gpt-6-sol');
     expect(
       readBrainConfig({ MATE_MODEL: ' opencode-go/qwen3.8-flash ' }).model,
     ).toBe('opencode-go/qwen3.8-flash');
@@ -304,6 +306,41 @@ describe('config from the environment', () => {
         'MATE_MODEL must be provider/model',
       );
     }
+  });
+
+  test('the fallback is qwen3.8-max unless told otherwise, and none turns it off', () => {
+    expect(readBrainConfig({}).fallbackModel).toBe('opencode-go/qwen3.8-max');
+    expect(
+      readBrainConfig({ MATE_FALLBACK_MODEL: ' opencode-go/glm-5.1 ' })
+        .fallbackModel,
+    ).toBe('opencode-go/glm-5.1');
+    expect(
+      readBrainConfig({
+        MATE_MODEL: 'opencode-go/qwen3.8-max',
+        MATE_FALLBACK_MODEL: 'none',
+      }).fallbackModel,
+    ).toBeNull();
+    for (const bad of ['qwen3.8-max', 'opencode-go/', 'None']) {
+      expect(() => readBrainConfig({ MATE_FALLBACK_MODEL: bad })).toThrow(
+        'MATE_FALLBACK_MODEL must be provider/model',
+      );
+    }
+  });
+
+  test('the fallback must differ from the model', () => {
+    expect(() =>
+      readBrainConfig({ MATE_MODEL: 'opencode-go/qwen3.8-max' }),
+    ).toThrow('MATE_FALLBACK_MODEL must differ from MATE_MODEL');
+  });
+
+  test("the fallback's thinking level is one of pi's, or unset", () => {
+    expect(readBrainConfig({}).fallbackThinking).toBeNull();
+    expect(
+      readBrainConfig({ MATE_FALLBACK_THINKING: 'low' }).fallbackThinking,
+    ).toBe('low');
+    expect(() => readBrainConfig({ MATE_FALLBACK_THINKING: 'loud' })).toThrow(
+      'MATE_FALLBACK_THINKING must be one of',
+    );
   });
 
   test("the thinking level is one of pi's, medium unless told otherwise", () => {

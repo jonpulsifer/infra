@@ -37,7 +37,8 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Install kthx](install-kthx.md): install the kthx engine on the offsite cluster
 - [Connect an agent to kthx](connect-an-agent-to-kthx.md): mint an agent token and connect an MCP client
 - [Repair the Rowbutt GitHub credential](repair-the-rowbutt-github-credential.md): check, rotate and replace the GitHub App credential of Rowbutt
-- [Sign Rowbutt in to ChatGPT](sign-rowbutt-in-to-chatgpt.md): sign mate in to the owner's ChatGPT subscription from chat, pause it, and sign it out
+- [Sign Rowbutt in to ChatGPT](sign-rowbutt-in-to-chatgpt.md): sign mate in to the owner's ChatGPT subscription from chat, and sign it out
+- [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md): check which model answers Rowbutt, keep turns off ChatGPT, and drill the fallback
 - [Operate the Smiirl counter](operate-the-smiirl-counter.md): check, calibrate and repair the Smiirl counter
 - [Operate the Flame Boss exporter](operate-the-flame-boss-exporter.md): check a cook, act on its alerts, and replace the Flame Boss token
 - [Repair a kiosk](repair-a-kiosk.md): restart or start a Weather Hub kiosk

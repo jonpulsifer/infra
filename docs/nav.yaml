@@ -94,6 +94,7 @@ sections:
           - runbooks/connect-an-agent-to-kthx.md
           - runbooks/repair-the-rowbutt-github-credential.md
           - runbooks/sign-rowbutt-in-to-chatgpt.md
+          - runbooks/operate-the-rowbutt-model-fallback.md
           - runbooks/operate-the-smiirl-counter.md
           - runbooks/operate-the-flame-boss-exporter.md
           - runbooks/repair-a-kiosk.md

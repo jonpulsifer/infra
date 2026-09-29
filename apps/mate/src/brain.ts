@@ -56,6 +56,7 @@ import {
   type ProviderErrorKind,
 } from './metrics.ts';
 import { redact } from './redact.ts';
+import { fallbackError, type RouteEvent } from './route.ts';
 import type { PromptResult, PromptSink } from './sandbox.ts';
 import { type Database, isStoreUnavailable, storeError } from './store.ts';
 import { type ThreadRef, threadKey } from './surface.ts';
@@ -207,7 +208,9 @@ export function resetNote(reason: SandboxGoneReason): string {
   return `[mate: this thread's sandbox was deleted (${reason}) since your last turn. The next tool call starts a fresh checkout at /workspace; uncommitted work from earlier turns is gone.]`;
 }
 
-export function providerErrorKind(message: string): ProviderErrorKind {
+/** A fallback that failed too is judged by its own words, not the router's clause. */
+export function providerErrorKind(routed: string): ProviderErrorKind {
+  const message = fallbackError(routed) ?? routed;
   if (
     /usage.?limit|available balance|insufficient_quota|quota|billing|budget/i.test(
       message,
@@ -215,7 +218,11 @@ export function providerErrorKind(message: string): ProviderErrorKind {
   ) {
     return 'limit';
   }
-  if (/\b40[13]\b|unauthori[sz]ed|forbidden|api.?key/i.test(message)) {
+  if (
+    /\b40[13]\b|unauthori[sz]ed|forbidden|api.?key|Provider is not configured|signed in to ChatGPT|ChatGPT sign-in/i.test(
+      message,
+    )
+  ) {
     return 'auth';
   }
   if (/timed? ?out|timeout/i.test(message)) return 'timeout';
@@ -296,6 +303,7 @@ export class PiBrain implements Brain {
     deps.mcp?.onChange(() => {
       for (const tb of this.threads.values()) tb.stale = true;
     });
+    deps.setup.router?.onRoute((event) => this.routed(event));
   }
 
   async open(row: ThreadRow): Promise<BrainSession> {
@@ -498,7 +506,20 @@ export class PiBrain implements Brain {
     } finally {
       await this.endTurn(tb, turn, result);
     }
-    return result;
+    const notice = turn.translator.fellBack
+      ? (this.deps.setup.router?.claimNotice() ?? null)
+      : null;
+    return notice ? { ...result, notice } : result;
+  }
+
+  /** A model request of a running turn went to ChatGPT or to the fallback. */
+  private routed(event: RouteEvent): void {
+    if (!event.sessionId) return;
+    for (const tb of this.threads.values()) {
+      if (`${tb.row.sessionId}:${LANE}` !== event.sessionId) continue;
+      tb.turn?.translator.routed(event);
+      return;
+    }
   }
 
   private startTurn(tb: ThreadBrain, sink: PromptSink): Turn {
@@ -584,6 +605,7 @@ export class PiBrain implements Brain {
         stamped: summary?.stamped ?? false,
         tools: turn.translator.toolCount,
         costUsd: turn.translator.costUsd,
+        route: turn.translator.route,
       });
       turn.translator.end();
     }

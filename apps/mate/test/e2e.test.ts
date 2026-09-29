@@ -163,7 +163,7 @@ function faux(...steps: FauxResponseStep[]): ModelSetup {
   const model = provider.getModel('faux');
   if (!model) throw new Error('no faux model');
   provider.setResponses(steps);
-  return { models, model, thinking: 'off' };
+  return { models, direct: models, model, thinking: 'off', router: null };
 }
 
 const tool = (

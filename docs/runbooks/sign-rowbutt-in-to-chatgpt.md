@@ -1,9 +1,9 @@
 ---
 title: Sign Rowbutt in to ChatGPT
-description: Sign mate in to the owner's ChatGPT subscription from chat, check and pause the sign-in, and sign it out.
+description: Sign mate in to the owner's ChatGPT subscription from chat, check the sign-in, and sign it out.
 ---
 
-This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscription with OpenAI's device code. mate, the process behind Rowbutt, keeps the token in the `mate_credentials` table of mate-db, the [session store](../apps/mate/how-it-works.md#session-store). At boot and every six hours, it refreshes a token with fewer than two days left. Use this runbook to sign in, when `MateChatGPTSignedOut` or `MateChatGPTTokenNotRefreshing` fires, or to cut mate off. While `MATE_MODEL` names an `opencode-go` model, no turn uses ChatGPT.
+This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscription with OpenAI's device code. mate, the process behind Rowbutt, keeps the token in the `mate_credentials` table of mate-db, the [session store](../apps/mate/how-it-works.md#session-store). At boot and every six hours, it refreshes a token with fewer than two days left. Turns use ChatGPT first, and `MATE_FALLBACK_MODEL` when ChatGPT cannot answer. Use this runbook to sign in, when `MateChatGPTSignedOut` or `MateChatGPTTokenNotRefreshing` fires, or to cut mate off. [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md) pauses ChatGPT and handles `MateModelPrimaryFailing`.
 
 > [!WARNING]
 > This runbook changes live state by hand. It is an exception to the GitOps rule because OpenAI issues the token to mate, and git cannot hold it. The sandbox is `cluster-admin`, so the agent can read the token in mate-db and use the owner's ChatGPT account. The owner accepts this. The kill switch is [Sign out](#sign-out).
@@ -38,7 +38,7 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
 
 1. Mention Rowbutt with `chatgpt status`.
 
-   Result: mate says `ℹ️ ChatGPT: signed in, token good until`, with a date.
+   Result: mate says `ℹ️ ChatGPT: signed in, token good until`, with a date, and `Now: primary.`
 
 2. Read the ChatGPT lines of the mate log.
 
@@ -47,13 +47,6 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
    ```
 
    Result: The log shows `the ChatGPT token is refreshed` about every eight days, and no `refused` line.
-
-## Pause and resume
-
-A pause keeps ChatGPT out of use without a deploy. A restart of mate ends the pause.
-
-1. Say `chatgpt pause` for 60 minutes, or `chatgpt pause <minutes>` for up to 10080.
-2. To end the pause, say `chatgpt resume`.
 
 ## Sign out
 
@@ -83,11 +76,13 @@ A pause keeps ChatGPT out of use without a deploy. A restart of mate ends the pa
 | `auth.openai.com could not be reached` or `chatgpt.com could not be reached` | mate's egress policy or DNS blocks the host. | Make sure that both hosts are in `clusters/offsite/apps/mate/network-policy.yaml` on port 443. |
 | The test request failed with `HTTP 401` or `HTTP 403`. | The plan does not include Codex, or OpenAI refuses the client. | Check the plan in ChatGPT's settings. |
 | `MateChatGPTSignedOut` fires, or `chatgpt status` says `OpenAI refused the token refresh`. | The refresh token is revoked or spent. | Do [Sign in](#sign-in). |
-| `MateChatGPTTokenNotRefreshing` fires. | A day of refreshes failed on egress, DNS or mate-db. | Read the mate log. If `MateStoreFailing` fires, do [Operate Postgres](operate-postgres.md). |
+| `chatgpt status` says `chatgpt.com refused a fresh token too`. | chatgpt.com refuses the account or mate's client, not only the token. | Do [Sign in](#sign-in). If its test request fails with `HTTP 401` or `HTTP 403`, check the plan. |
+| `MateChatGPTTokenNotRefreshing` fires. | A day of refreshes, or an hour of rotations since chatgpt.com refused the token, failed on egress, DNS or mate-db. | Read the mate log. If `MateStoreFailing` fires, do [Operate Postgres](operate-postgres.md). |
 | After a restore of mate-db, `chatgpt status` says `not signed in`. | The nightly dump leaves out `mate_credentials`. | Do [Sign in](#sign-in). |
 
 ## Related
 
 - [Rowbutt](../apps/mate.md)
 - [How Rowbutt works](../apps/mate/how-it-works.md)
+- [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md)
 - [Operate Postgres](operate-postgres.md)

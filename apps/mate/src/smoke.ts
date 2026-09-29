@@ -202,9 +202,13 @@ const brain = new PiBrain({
   store,
   sessions,
   hands,
+  // No credential store: a second holder of the ChatGPT refresh token could
+  // spend it under mate, so a ChatGPT primary answers on the fallback here.
   setup: createModelSetup({
     spec: brainConfig.model,
     thinking: brainConfig.thinking,
+    fallbackSpec: brainConfig.fallbackModel,
+    fallbackThinking: brainConfig.fallbackThinking,
     keyFile: brainConfig.modelKeyFile,
     log: jsonLog,
   }),
