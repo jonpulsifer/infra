@@ -745,7 +745,9 @@ describe('the keeper', () => {
     expect(said().at(-1)).toMatch(
       /^ℹ️ ChatGPT: signed out, because chatgpt\.com refused a fresh token too, at \d\d:\d\d UTC\. Say `chatgpt login` to sign in again\. .*Now: fallback since \d\d:\d\d UTC \(mate's ChatGPT sign-in stopped working, HTTP 401\), until a sign-in\./,
     );
-    // A check leaves it signed out: another rotation would not mend it.
+    // The just-refused rotation can still be clearing its in-flight promise.
+    // Once it settles, another check leaves the account signed out.
+    await settle();
     expect(await keeper.check()).toBe('refused');
     expect(openai.of('/oauth/token')).toHaveLength(1);
 
