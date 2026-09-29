@@ -4,8 +4,9 @@
 # Each thread's checkout is a fresh clone, and mise exits 1 on an untrusted
 # config. Trust grants nothing: the agent already runs commands there.
 trusted_config_paths = ["/workspace"]
-# A tool missing from disable_tools then fails at once instead of hanging on
-# denied egress. mise still clones plugins over HTTPS with this set.
+# A tool missing from disable_tools then fails the task at once. Online, mise
+# installs it into HOME, a copy that goes with the sandbox, and hides the
+# drift. mise still clones plugins over HTTPS with this set.
 offline = true
 # Stops mise resolving the root mise.toml's tools before each task. "*" is read
 # as a tool name, so each is listed; apps/mate/test/sandboxes.test.ts keeps the

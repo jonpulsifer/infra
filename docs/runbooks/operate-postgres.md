@@ -11,7 +11,7 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 ## Before you start
 
 - Get `kubectl` access, as [Get cluster admin access](get-cluster-admin-access.md) describes.
-- Install `kubectl-cnpg`. `dotfiles/mise-global-config.toml` installs it with mise.
+- Install `kubectl-cnpg`. `dotfiles/mise-global-config.toml` installs it with mise, and the [Rowbutt](../apps/mate.md) sandbox image carries it at the operator's version.
 - Put `--context <site>` after the `cnpg` command. `<site>` is `folly` or `offsite`.
 
 ## Find a database
