@@ -231,10 +231,17 @@ export type SlackCall =
   | { call: 'post'; channel: string; threadTs: string; text: string }
   | { call: 'edit'; ts: string; text: string }
   | { call: 'remove'; ts: string }
-  | { call: 'start'; args: StreamStart }
+  | { call: 'start'; ts: string; args: StreamStart }
   | { call: 'append'; ts: string; chunks: StreamChunk[] }
-  | { call: 'stop'; ts: string }
+  | { call: 'stop'; ts: string; chunks: StreamChunk[] }
   | { call: 'session'; threadTs: string; status: SessionStatus };
+
+export interface PlanRow {
+  id: string;
+  title: string;
+  status: string;
+  details: string;
+}
 
 export class FakeSlack implements SlackApi {
   readonly calls: SlackCall[] = [];
@@ -265,7 +272,7 @@ export class FakeSlack implements SlackApi {
   async startStream(args: StreamStart): Promise<string> {
     if (this.failStart) throw this.failStart;
     const ts = `s-${++this.serial}`;
-    this.calls.push({ call: 'start', args });
+    this.calls.push({ call: 'start', ts, args });
     return ts;
   }
 
@@ -278,9 +285,13 @@ export class FakeSlack implements SlackApi {
     this.calls.push({ call: 'append', ts, chunks });
   }
 
-  async stopStream(_channel: string, ts: string): Promise<void> {
+  async stopStream(
+    _channel: string,
+    ts: string,
+    chunks: StreamChunk[] = [],
+  ): Promise<void> {
     if (this.failStopStream) throw this.failStopStream;
-    this.calls.push({ call: 'stop', ts });
+    this.calls.push({ call: 'stop', ts, chunks });
   }
 
   async session(
@@ -304,10 +315,43 @@ export class FakeSlack implements SlackApi {
     return { userId: 'U0BOT', teamId: 'TAR78LS82', appBotId: 'B0BOT' };
   }
 
-  chunks(): StreamChunk[] {
-    return this.calls.flatMap((c) =>
-      c.call === 'start' ? c.args.chunks : c.call === 'append' ? c.chunks : [],
+  chunks(ts?: string): StreamChunk[] {
+    return this.calls.flatMap((c) => {
+      if (c.call === 'post' || c.call === 'edit' || c.call === 'remove')
+        return [];
+      if (c.call === 'session' || (ts && c.ts !== ts)) return [];
+      return c.call === 'start' ? c.args.chunks : c.chunks;
+    });
+  }
+
+  /** Every plan title sent, in order. */
+  titles(): string[] {
+    return this.chunks().flatMap((chunk) =>
+      chunk.type === 'plan_update' ? [chunk.title] : [],
     );
+  }
+
+  /**
+   * A stream's plan as Slack keeps it: the last title, and tasks merged by id
+   * with each chunk's `details` appended to the task's.
+   */
+  plan(stream = 0): { title: string | null; rows: PlanRow[] } {
+    const ts = this.only('start')[stream]?.ts;
+    if (!ts) return { title: null, rows: [] };
+    let title: string | null = null;
+    const rows = new Map<string, PlanRow>();
+    for (const chunk of this.chunks(ts)) {
+      if (chunk.type === 'plan_update') title = chunk.title;
+      if (chunk.type !== 'task_update') continue;
+      const was = rows.get(chunk.id)?.details ?? '';
+      rows.set(chunk.id, {
+        id: chunk.id,
+        title: chunk.title,
+        status: chunk.status,
+        details: `${was}${chunk.details ?? ''}`,
+      });
+    }
+    return { title, rows: [...rows.values()] };
   }
 
   /** The answer text alone. */

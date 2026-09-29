@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { SANDBOX_CARD_ID } from '../src/lease.ts';
 import { silentLog } from '../src/log.ts';
-import { UNDELIVERED } from '../src/notices.ts';
+import {
+  CONNECTING,
+  MINT_STEPS,
+  SANDBOX_READY,
+  UNDELIVERED,
+} from '../src/notices.ts';
 import { NO_REPLY, Reply } from '../src/reply.ts';
 import { type Script, StubBrain } from '../src/sandbox.ts';
 import {
+  DETAILS_MAX,
   decodeSlack,
   escapeSlack,
+  PLAN_ROWS,
   PROCESSING_RENEW_MS,
   type SlackBlock,
   SlackCanvas,
@@ -15,10 +23,11 @@ import {
   slackSessionStopped,
   slackSurface,
   slackWeb,
+  TITLE_CADENCE_MS,
 } from '../src/slack.ts';
 import { SocketMode } from '../src/socket.ts';
 import { MemoryThreadStore } from '../src/store.ts';
-import type { Inbound, ThreadRef } from '../src/surface.ts';
+import type { Inbound, ThreadRef, ToolCall } from '../src/surface.ts';
 import { Threads } from '../src/threads.ts';
 import { replayPreamble } from '../src/transcript.ts';
 import { FakeSlack, FakeSocket } from './fakesurface.ts';
@@ -273,6 +282,7 @@ describe('streaming a turn', () => {
     expect(api.calls).toEqual([
       {
         call: 'start',
+        ts: 's-1',
         args: {
           channel: CHANNEL,
           threadTs: TS,
@@ -396,18 +406,32 @@ describe('streaming a turn', () => {
   });
 });
 
-describe('tool cards', () => {
-  test('a tool call before any text opens the stream with a card of its own', async () => {
+describe('the plan', () => {
+  const running = (id: string, title: string): ToolCall => ({
+    id,
+    title,
+    state: 'in_progress',
+  });
+  const finished = (id: string, title: string): ToolCall => ({
+    id,
+    title,
+    state: 'complete',
+  });
+  const broke = (id: string, title: string): ToolCall => ({
+    id,
+    title,
+    state: 'error',
+  });
+
+  test('a tool call before any text opens the stream with a titled plan', async () => {
     const painter = canvas();
-    await painter.tool({
-      id: 'call-1',
-      title: 'read files',
-      state: 'in_progress',
-    });
+    await painter.tool(running('call-1', 'read files'));
+    // An untitled plan stopped over an open task reads "Something went wrong".
     expect(api.only('start')[0]?.args.chunks).toEqual([
+      { type: 'plan_update', title: 'read files…' },
       {
         type: 'task_update',
-        id: 'call-1',
+        id: 'phase-1',
         title: 'read files',
         status: 'in_progress',
       },
@@ -415,99 +439,304 @@ describe('tool cards', () => {
     expect(api.streamed()).toBe('');
   });
 
-  test('a step is a complete card of its own, cut to one line', async () => {
+  test('a plan in a stream the answer opened is titled with its first task', async () => {
+    const painter = canvas();
+    await painter.live('On it. ', null);
+    await painter.step('Let me look first.');
+    expect(api.only('append')[0]?.chunks).toEqual([
+      { type: 'plan_update', title: 'Working · 1 step…' },
+      {
+        type: 'task_update',
+        id: 'phase-1',
+        title: 'Let me look first.',
+        status: 'in_progress',
+      },
+    ]);
+  });
+
+  test('narration opens a phase titled with the sentence, and the calls after it are its details', async () => {
     const painter = canvas();
     await painter.step(
       'Before I make a change,\nlet me confirm the tooling can push.',
     );
+    await painter.tool(running('c1', '$ git status'));
+    await painter.tool(finished('c1', '$ git status'));
+    await painter.tool(running('c2', 'read src/slack.ts'));
+    await painter.tool(broke('c2', 'read src/slack.ts'));
     await painter.step('x'.repeat(400));
+    await painter.tool(running('c3', '$ bun test'));
+    await painter.tool(finished('c3', '$ bun test'));
     await painter.final('No token here.', 'done');
-    const cards = api.cards();
-    expect(cards).toEqual([
+    // A failed call is a mark in the row, not a failed row.
+    expect(api.plan().rows).toEqual([
       {
-        id: 'say-1',
+        id: 'phase-1',
         title: 'Before I make a change, let me confirm the tooling can push.',
         status: 'complete',
+        details: '✓ $ git status\n✗ read src/slack.ts',
       },
-      { id: 'say-2', title: `${'x'.repeat(119)}…`, status: 'complete' },
+      {
+        id: 'phase-2',
+        title: `${'x'.repeat(119)}…`,
+        status: 'complete',
+        details: '✓ $ bun test',
+      },
     ]);
-    // Steps are drawn complete, so the end-of-turn sweep leaves them alone.
     expect(api.streamed()).toBe('No token here.');
   });
 
-  test('one card per call, mutated by its id, interleaved with the answer', async () => {
+  test('calls before any narration open a phase titled from the first of them', async () => {
     const painter = canvas();
-    await painter.tool({ id: 'c1', title: 'read files', state: 'in_progress' });
-    await painter.live('looking. ', 'read files');
-    await painter.tool({ id: 'c1', title: 'read files', state: 'complete' });
-    await painter.tool({
-      id: 'c2',
-      title: 'run `bun test`',
-      state: 'in_progress',
-    });
-    await painter.tool({ id: 'c2', title: 'run `bun test`', state: 'error' });
-    await painter.final('looking. done', 'done');
-    // Slack merges a task_update into the card its id names.
-    expect(api.cards()).toEqual([
-      { id: 'c1', title: 'read files', status: 'in_progress' },
-      { id: 'c1', title: 'read files', status: 'complete' },
-      { id: 'c2', title: 'run `bun test`', status: 'in_progress' },
-      { id: 'c2', title: 'run `bun test`', status: 'error' },
-    ]);
-    expect(api.chunks().map((chunk) => chunk.type)).toEqual([
-      'task_update',
-      'markdown_text',
-      'task_update',
-      'task_update',
-      'task_update',
-      'markdown_text',
-    ]);
-    expect(api.streamed()).toBe('looking. done');
-    expect(api.only('stop')).toHaveLength(1);
-  });
-
-  test('a turn stopped under a running tool closes its card', async () => {
-    const painter = canvas();
-    await painter.tool({ id: 'c1', title: 'read files', state: 'complete' });
-    await painter.tool({
-      id: 'c2',
-      title: 'run `bun test`',
-      state: 'in_progress',
-    });
-    await painter.final('partial', 'stopped');
-    // Slack has no cancelled card, and a running one would spin forever.
-    expect(api.cards().at(-1)).toEqual({
-      id: 'c2',
-      title: 'run `bun test`',
-      status: 'error',
-    });
-    expect(api.cards().filter((card) => card.id === 'c1')).toHaveLength(1);
-  });
-
-  test('a turn that ends normally completes the card it was still running', async () => {
-    const painter = canvas();
-    await painter.tool({ id: 'c1', title: 'read files', state: 'in_progress' });
-    await painter.final('done', 'done');
-    // `chat.stopStream` marks a card still `in_progress` as `error`.
-    expect(api.cards()).toEqual([
-      { id: 'c1', title: 'read files', status: 'in_progress' },
-      { id: 'c1', title: 'read files', status: 'complete' },
+    await painter.tool(finished('c1', '$ git status'));
+    await painter.tool(finished('c2', '$ git log'));
+    await painter.step('Now the tests.');
+    await painter.tool(finished('c3', '$ bun test'));
+    await painter.final('ok', 'done');
+    expect(api.plan().rows).toEqual([
+      {
+        id: 'phase-1',
+        title: '$ git status',
+        status: 'complete',
+        details: '✓ $ git status\n✓ $ git log',
+      },
+      {
+        id: 'phase-2',
+        title: 'Now the tests.',
+        status: 'complete',
+        details: '✓ $ bun test',
+      },
     ]);
   });
 
-  test('a card title cannot ping a human, however the model writes it', async () => {
+  test('a row runs while it is the current phase or a call under it does', async () => {
     const painter = canvas();
-    // Slack copies the title into the message `text` verbatim, where `<@U…>` is a real mention.
-    await painter.tool({
-      id: 'c1',
-      title: `ping <@${OWNER}> and <!channel>`,
-      state: 'in_progress',
-    });
-    await painter.final('', 'stopped');
-    for (const card of api.cards()) {
-      expect(card.title).toBe(`ping &lt;@${OWNER}> and &lt;!channel>`);
+    const statuses = () => api.plan().rows.map((row) => row.status);
+    await painter.step('One.');
+    await painter.tool(running('c1', '$ sleep 60'));
+    await painter.step('Two.');
+    expect(statuses()).toEqual(['in_progress', 'in_progress']);
+    await painter.tool(finished('c1', '$ sleep 60'));
+    expect(statuses()).toEqual(['complete', 'in_progress']);
+    // The call lands in the phase it started in.
+    expect(api.plan().rows[0]?.details).toBe('✓ $ sleep 60');
+    await painter.step('Three.');
+    expect(statuses()).toEqual(['complete', 'complete', 'in_progress']);
+  });
+
+  test('a row lists its calls within the details cap, and counts the rest', async () => {
+    const painter = canvas();
+    await painter.step('Many commands.');
+    for (let i = 1; i <= 30; i += 1) {
+      await painter.tool(finished(`c${i}`, `$ echo ${'y'.repeat(40)} ${i}`));
     }
-    expect(api.cards()).toHaveLength(2);
+    await painter.step('Next.');
+    await painter.final('ok', 'done');
+    const lines = api.plan().rows[0]?.details.split('\n') ?? [];
+    const listed = lines.length - 1;
+    // Slack appends details, so the earliest lines stay and the rest are counted.
+    expect(listed).toBeGreaterThan(5);
+    expect(lines.slice(0, listed)).toEqual(
+      Array.from(
+        { length: listed },
+        (_, i) => `✓ $ echo ${'y'.repeat(40)} ${i + 1}`,
+      ),
+    );
+    expect(lines.at(-1)).toBe(`…${30 - listed} more`);
+    expect(api.plan().rows[0]?.details.length).toBeLessThanOrEqual(DETAILS_MAX);
+  });
+
+  test('the sandbox is listed like a call, and not counted as one', async () => {
+    const painter = canvas();
+    await painter.tool(running('c1', '$ git status'));
+    await painter.tool(running(SANDBOX_CARD_ID, MINT_STEPS.reusing));
+    await painter.tool(running(SANDBOX_CARD_ID, CONNECTING));
+    await painter.tool(finished(SANDBOX_CARD_ID, SANDBOX_READY));
+    await painter.tool(finished('c1', '$ git status'));
+    await painter.final('ok', 'done');
+    expect(api.plan()).toEqual({
+      title: 'Ran 1 command in 1 step · 0s',
+      rows: [
+        {
+          id: 'phase-1',
+          title: '$ git status',
+          status: 'complete',
+          details: `✓ ${SANDBOX_READY}\n✓ $ git status`,
+        },
+      ],
+    });
+  });
+
+  test('the running title changes at most once a cadence, and the latest one lands', async () => {
+    const painter = canvas();
+    await painter.tool(running('c1', '$ git status'));
+    await painter.tool(finished('c1', '$ git status'));
+    await clock.advance(1_000);
+    await painter.tool(running(SANDBOX_CARD_ID, MINT_STEPS.booting));
+    expect(api.titles()).toEqual(['$ git status…']);
+    await clock.advance(TITLE_CADENCE_MS - 1_001);
+    expect(api.titles()).toEqual(['$ git status…']);
+    // The newest call running is the one a human waits on.
+    await clock.advance(1);
+    expect(api.titles()).toEqual(['$ git status…', `${MINT_STEPS.booting}…`]);
+    await painter.tool(finished(SANDBOX_CARD_ID, SANDBOX_READY));
+    await clock.advance(TITLE_CADENCE_MS);
+    expect(api.titles().at(-1)).toBe('Working · 1 command in 1 step…');
+    await painter.tool(running('c2', '$ bun test'));
+    await painter.final('ok', 'done');
+    expect(api.titles().at(-1)).toBe('Ran 2 commands in 1 step · 6s');
+    expect(clock.pendingTimers).toBe(0);
+  });
+
+  const endings = [
+    {
+      outcome: 'done',
+      title: 'Ran 2 commands in 2 steps · 42s',
+      statuses: ['complete', 'complete'],
+      last: '✓ $ bun test',
+    },
+    {
+      outcome: 'stopped',
+      title: '⏹️ Stopped · 2 commands in 2 steps · 42s',
+      statuses: ['complete', 'error'],
+      last: '✗ $ bun test',
+    },
+    {
+      outcome: 'failed',
+      title: '⚠️ Failed · 2 commands in 2 steps · 42s',
+      statuses: ['error', 'error'],
+      last: '✗ $ bun test',
+    },
+  ] as const;
+  for (const ending of endings) {
+    test(`a ${ending.outcome} turn closes every row and titles the plan in the stop itself`, async () => {
+      const painter = canvas();
+      await painter.step('Looking first.');
+      await painter.tool(broke('c1', '$ git push'));
+      await painter.step('Now the tests.');
+      await painter.tool(running('c2', '$ bun test'));
+      await clock.advance(42_000);
+      await painter.final('answer', ending.outcome);
+      const [stop] = api.only('stop');
+      expect(stop?.chunks.at(-1)).toEqual({
+        type: 'plan_update',
+        title: ending.title,
+      });
+      // Nothing follows the stop, so the plan is left as the stop leaves it.
+      expect(api.calls.at(-1)).toMatchObject({ call: 'session' });
+      const { title, rows } = api.plan();
+      expect(title).toBe(ending.title);
+      expect(rows.map((row) => row.status)).toEqual([...ending.statuses]);
+      expect(rows[1]?.details).toBe(ending.last);
+    });
+  }
+
+  test('a turn that only narrated counts its steps', async () => {
+    const painter = canvas();
+    await painter.step('Thinking out loud.');
+    await clock.advance(5_000);
+    await painter.final('ok', 'done');
+    expect(api.plan().title).toBe('1 step · 5s');
+  });
+
+  test('a turn with no tool work has no plan', async () => {
+    const painter = canvas();
+    await painter.live('hello ', 'thinking');
+    await painter.final('hello there', 'done');
+    expect(
+      api.chunks().filter((chunk) => chunk.type !== 'markdown_text'),
+    ).toEqual([]);
+    expect(api.only('stop')).toEqual([{ call: 'stop', ts: 's-1', chunks: [] }]);
+  });
+
+  test("a stream the human's stop already ended keeps the title it had", async () => {
+    const painter = canvas();
+    await painter.tool(running('c1', '$ bun test'));
+    api.failAppend = ended('stopped_by_user');
+    await painter.final('partial', 'stopped');
+    // Slack refuses every later frame, so the title sent first is the one it keeps.
+    expect(api.only('stop')).toEqual([]);
+    expect(api.plan().title).toBe('$ bun test…');
+    expect(api.only('session').at(-1)?.status).toBe('active');
+  });
+
+  test('a rolled answer leaves its plan closed and titled, and a later call opens another', async () => {
+    const painter = canvas(40);
+    const text = `${'a'.repeat(30)}\n${'b'.repeat(29)}`;
+    await painter.step('Looking.');
+    await painter.tool(running('c1', '$ ls'));
+    await painter.live(text, null);
+    expect(api.only('stop')[0]?.chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'phase-1',
+        title: 'Looking.',
+        status: 'complete',
+      },
+      { type: 'plan_update', title: 'Ran 1 command in 1 step · 0s' },
+    ]);
+    await painter.tool(finished('c1', '$ ls'));
+    const opened = api.only('append').at(-1);
+    expect(opened?.ts).toBe('s-2');
+    expect(opened?.chunks[0]).toEqual({
+      type: 'plan_update',
+      title: 'Working · 1 command in 2 steps…',
+    });
+    await painter.final(text, 'done');
+    expect(api.plan(1)).toEqual({
+      title: 'Ran 1 command in 2 steps · 0s',
+      rows: [
+        {
+          id: 'phase-1',
+          title: '$ ls',
+          status: 'complete',
+          details: '✓ $ ls',
+        },
+      ],
+    });
+    expect(api.streamed()).toBe(text);
+  });
+
+  test('phases past the plan cap fold into its last row', async () => {
+    const painter = canvas();
+    for (let i = 1; i <= 60; i += 1) {
+      await painter.step(`Step ${i}.`);
+      await painter.tool(finished(`c${i}`, `$ echo ${i}`));
+    }
+    await painter.final('ok', 'done');
+    const { title, rows } = api.plan();
+    // Slack keeps a plan's first 50 tasks and silently drops the rest.
+    expect(rows).toHaveLength(PLAN_ROWS);
+    expect(rows.at(-1)).toMatchObject({
+      id: `phase-${PLAN_ROWS}`,
+      title: 'Step 60.',
+      status: 'complete',
+    });
+    expect(rows.at(-1)?.details.split('\n')).toEqual(
+      Array.from(
+        { length: 60 - PLAN_ROWS + 1 },
+        (_, i) => `✓ $ echo ${PLAN_ROWS + i}`,
+      ),
+    );
+    expect(title).toBe('Ran 60 commands in 60 steps · 0s');
+  });
+
+  test('nothing in a plan can ping a human, however the model writes it', async () => {
+    const painter = canvas();
+    await painter.step(`Asking <@${OWNER}> first.`);
+    await painter.tool(running('c1', 'echo <!channel> <#C0X>'));
+    await painter.final('', 'stopped');
+    const planned = api
+      .chunks()
+      .filter((chunk) => chunk.type !== 'markdown_text');
+    expect(JSON.stringify(planned)).not.toMatch(/<[@!#]/);
+    expect(api.plan().rows).toEqual([
+      {
+        id: 'phase-1',
+        title: `Asking &lt;@${OWNER}> first.`,
+        status: 'error',
+        details: '✗ echo &lt;!channel> &lt;#C0X>',
+      },
+    ]);
   });
 });
 
@@ -939,9 +1168,28 @@ describe('a Web API call', () => {
       chunks: [{ type: 'markdown_text', text: 'hi' }],
       recipient_user_id: OWNER,
       recipient_team_id: TEAM,
-      // One card per call, not one plan block.
-      task_display_mode: 'timeline',
+      // Every task of the stream is a row of one titled plan block.
+      task_display_mode: 'plan',
     });
+  });
+
+  test("a stop carries the plan's last chunks, and a bare stop sends none", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return Response.json({ ok: true });
+    }) as unknown as typeof fetch;
+    const client = web();
+    const title = {
+      type: 'plan_update',
+      title: 'Ran 1 command in 1 step · 1s',
+    };
+    await client.stopStream(CHANNEL, '1.1', [title as never]);
+    await client.stopStream(CHANNEL, '1.2');
+    expect(bodies).toEqual([
+      { channel: CHANNEL, ts: '1.1', chunks: [title] },
+      { channel: CHANNEL, ts: '1.2' },
+    ]);
   });
 
   test('a session warning is said once each, not once a turn', async () => {

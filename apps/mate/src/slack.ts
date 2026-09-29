@@ -2,7 +2,8 @@
  * Slack as a surface: Socket Mode inbound (`socket.ts`) and a few Web API calls
  * on Bun's `fetch`, since the `@slack/*` packages declare a Node engine.
  */
-import type { Clock, Handle } from './clock.ts';
+import { type Clock, duration, type Handle } from './clock.ts';
+import { SANDBOX_CARD_ID } from './lease.ts';
 import { type Log, plain } from './log.ts';
 import { NO_REPLY, oneLine, STOPPED, splitAt } from './reply.ts';
 import {
@@ -31,6 +32,15 @@ export const PROCESSING_RENEW_MS = 1_800_000;
 /** One read of a thread, bounded: the replay only ever wants the newest few. */
 const REPLIES_PAGE = 200;
 const REPLIES_PAGES = 5;
+// Slack silently drops a plan's tasks past the 50th.
+export const PLAN_ROWS = 49;
+// Slack adds each chunk's `details` to what the task holds, and took 600
+// characters in one; a row's sum stays inside that.
+export const DETAILS_MAX = 600;
+/** Kept free in a full row for the count of the calls it could not list. */
+const MORE_ROOM = 16;
+/** The plan's running title changes at most this often. */
+export const TITLE_CADENCE_MS = 3_000;
 
 export class SlackError extends Error {
   constructor(
@@ -182,14 +192,17 @@ function styled(text: string, style: unknown): string {
   return out;
 }
 
-// Slack merges `task_update` chunks by `id` into one card it updates in place.
+// In a `plan` stream every task is a row of one block. Slack merges
+// `task_update` chunks by `id`, and appends each one's `details` to the row's.
 export type StreamChunk =
   | { type: 'markdown_text'; text: string }
+  | { type: 'plan_update'; title: string }
   | {
       type: 'task_update';
       id: string;
       title: string;
       status: ToolState;
+      details?: string;
     };
 
 export interface StreamStart {
@@ -215,7 +228,12 @@ export interface SlackApi {
     ts: string,
     chunks: StreamChunk[],
   ): Promise<void>;
-  stopStream(channel: string, ts: string): Promise<void>;
+  /** `chunks` land with the stop, as the stream's last frame. */
+  stopStream(
+    channel: string,
+    ts: string,
+    chunks?: StreamChunk[],
+  ): Promise<void>;
   session(
     channel: string,
     threadTs: string,
@@ -324,9 +342,9 @@ export function slackWeb(
         thread_ts: args.threadTs,
         recipient_user_id: args.userId,
         recipient_team_id: args.teamId,
-        // A stopped `plan` retitles itself "Something went wrong", which Slack
-        // folds into the message text the replay reads back.
-        task_display_mode: 'timeline',
+        // A plan keeps the title mate gives it through the stop; an untitled
+        // one stopped over an open task retitles itself "Something went wrong".
+        task_display_mode: 'plan',
         // Opened with chunks: a `markdown_text` stream refuses them later with
         // `streaming_mode_mismatch`.
         chunks: args.chunks,
@@ -336,8 +354,12 @@ export function slackWeb(
     async appendStream(channel, ts, chunks) {
       await call('chat.appendStream', { channel, ts, chunks });
     },
-    async stopStream(channel, ts) {
-      await call('chat.stopStream', { channel, ts });
+    async stopStream(channel, ts, chunks = []) {
+      await call('chat.stopStream', {
+        channel,
+        ts,
+        ...(chunks.length > 0 ? { chunks } : {}),
+      });
     },
     async session(channel, threadTs, status) {
       const set = await call('agents.sessions.setStatus', {
@@ -420,6 +442,211 @@ export async function openSocket(appToken: string): Promise<string> {
   return payload.url;
 }
 
+interface Row {
+  readonly id: string;
+  title: string;
+  status: ToolState;
+  /** The `details` characters sent, which Slack keeps adding up. */
+  written: number;
+  /** Finished calls past the details budget, counted instead of listed. */
+  hidden: number;
+  failed: boolean;
+  running: number;
+}
+
+interface Running {
+  title: string;
+  /** Null once a roll has closed the plan the call started in. */
+  row: Row | null;
+}
+
+const MARK = { complete: '✓', error: '✗' } as const;
+
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+// Mentions are escaped: `<@U…>` in a title or details is a real mention.
+function taskChunk(row: Row, details: string): StreamChunk {
+  return {
+    type: 'task_update',
+    id: row.id,
+    title: escapeMentions(row.title),
+    status: row.status,
+    ...(details ? { details } : {}),
+  };
+}
+
+/**
+ * A turn's tool work as plan rows: a sentence of narration, or a call made
+ * before any, opens a phase, and each call lands in its phase's details as a
+ * line once it finishes. Rows belong to one stream's plan; a call finishing
+ * after a roll lands in the next.
+ */
+class Phases {
+  private rows: Row[] = [];
+  private current: Row | null = null;
+  private readonly running = new Map<string, Running>();
+  private readonly commands = new Set<string>();
+  private steps = 0;
+  private readonly touched = new Map<Row, string>();
+
+  step(text: string): StreamChunk[] {
+    this.open(oneLine(text));
+    return this.flush();
+  }
+
+  tool(call: ToolCall): StreamChunk[] {
+    // Discord's footer does not count the lease either.
+    if (call.id !== SANDBOX_CARD_ID) this.commands.add(call.id);
+    const known = this.running.get(call.id);
+    if (call.state === 'in_progress') {
+      if (known) {
+        known.title = call.title;
+      } else {
+        const row = this.current ?? this.open(call.title);
+        row.running += 1;
+        this.running.set(call.id, { title: call.title, row });
+      }
+      return this.flush();
+    }
+    this.running.delete(call.id);
+    const row = known?.row ?? this.current ?? this.open(call.title);
+    if (known?.row) row.running -= 1;
+    this.note(row, call.title, call.state);
+    this.release(row);
+    return this.flush();
+  }
+
+  /**
+   * Closes every row of the plan. `null` is a roll: its calls run on into the
+   * next stream. A row with a failed call is `complete`, since agents fail
+   * commands harmlessly all the time, unless the turn itself failed.
+   */
+  close(outcome: Outcome | null): StreamChunk[] {
+    if (outcome) {
+      const state = outcome === 'done' ? 'complete' : 'error';
+      for (const call of this.running.values()) {
+        this.note(
+          call.row ?? this.current ?? this.open(call.title),
+          call.title,
+          state,
+        );
+      }
+      this.running.clear();
+    }
+    for (const row of this.rows) {
+      const open = row.status === 'in_progress';
+      const failed =
+        (open && outcome !== null && outcome !== 'done') ||
+        (outcome === 'failed' && row.failed);
+      const status = failed ? 'error' : open ? 'complete' : row.status;
+      if (status !== row.status || row.hidden > 0) this.settle(row, status);
+    }
+    this.current = null;
+    return this.flush();
+  }
+
+  /** After a roll: the next stream's plan starts empty. */
+  reset(): void {
+    this.rows = [];
+    this.current = null;
+    this.touched.clear();
+    for (const call of this.running.values()) call.row = null;
+  }
+
+  /** The title while the turn runs: the newest call running, or the tally. */
+  live(): string {
+    const newest = [...this.running.values()].at(-1);
+    return newest ? `${newest.title}…` : `Working · ${this.tally()}…`;
+  }
+
+  /** The turn in one line, with the outcomes of Discord's footer. */
+  summary(outcome: Outcome, ms: number): string {
+    const facts = `${this.tally()} · ${duration(ms)}`;
+    if (outcome === 'stopped') return `⏹️ Stopped · ${facts}`;
+    if (outcome === 'failed') return `⚠️ Failed · ${facts}`;
+    return this.commands.size > 0 ? `Ran ${facts}` : facts;
+  }
+
+  private tally(): string {
+    const steps = count(this.steps, 'step');
+    return this.commands.size > 0
+      ? `${count(this.commands.size, 'command')} in ${steps}`
+      : steps;
+  }
+
+  private open(title: string): Row {
+    this.steps += 1;
+    const last = this.rows.at(-1);
+    if (last && this.rows.length >= PLAN_ROWS) {
+      last.title = title;
+      last.status = 'in_progress';
+      this.current = last;
+      this.touch(last);
+      return last;
+    }
+    const previous = this.current;
+    const row: Row = {
+      id: `phase-${this.rows.length + 1}`,
+      title,
+      status: 'in_progress',
+      written: 0,
+      hidden: 0,
+      failed: false,
+      running: 0,
+    };
+    this.rows.push(row);
+    this.current = row;
+    if (previous) this.release(previous);
+    this.touch(row);
+    return row;
+  }
+
+  // Slack only appends to details, so a line is written once, finished. Past
+  // the budget the earliest lines stay, and the rest become a count.
+  private note(row: Row, title: string, state: 'complete' | 'error'): void {
+    if (state === 'error') row.failed = true;
+    const line = escapeMentions(`${MARK[state]} ${oneLine(title)}`);
+    const text = row.written > 0 ? `\n${line}` : line;
+    if (row.hidden > 0 || row.written + text.length > DETAILS_MAX - MORE_ROOM) {
+      row.hidden += 1;
+      return;
+    }
+    row.written += text.length;
+    this.touch(row, text);
+  }
+
+  /** A row stays open while it is the current phase or a call under it runs. */
+  private release(row: Row): void {
+    if (row === this.current || row.running > 0) return;
+    if (row.status === 'in_progress') this.settle(row, 'complete');
+  }
+
+  private settle(row: Row, status: ToolState): void {
+    row.status = status;
+    let more = '';
+    if (row.hidden > 0) {
+      more = `${row.written > 0 ? '\n' : ''}…${row.hidden} more`;
+      row.written += more.length;
+      row.hidden = 0;
+    }
+    this.touch(row, more);
+  }
+
+  private touch(row: Row, details = ''): void {
+    this.touched.set(row, `${this.touched.get(row) ?? ''}${details}`);
+  }
+
+  private flush(): StreamChunk[] {
+    const chunks = [...this.touched].map(([row, details]) =>
+      taskChunk(row, details),
+    );
+    this.touched.clear();
+    return chunks;
+  }
+}
+
 export class SlackCanvas implements Canvas {
   private streamTs: string | null = null;
   /** Answer characters streamed this turn, across every message it has taken. */
@@ -429,8 +656,15 @@ export class SlackCanvas implements Canvas {
   /** Set once Slack has ended the stream itself, which its own stop does. */
   private over = false;
   private renewing: Handle | null = null;
-  private readonly running = new Map<string, string>();
-  private steps = 0;
+  private readonly phases = new Phases();
+  /** The live stream holds a plan, which has had a title from its first chunk. */
+  private planned = false;
+  private title: string | null = null;
+  private titledAt = Number.NEGATIVE_INFINITY;
+  private retitling: Handle | null = null;
+  private ending = false;
+  private queue: Promise<void> = Promise.resolve();
+  private readonly startedAt: number;
 
   constructor(
     private readonly api: SlackApi,
@@ -439,7 +673,9 @@ export class SlackCanvas implements Canvas {
     private readonly thread: ThreadRef,
     private readonly recipient: { userId: string; teamId: string },
     private readonly cap = STREAM_CAP,
-  ) {}
+  ) {
+    this.startedAt = clock.now();
+  }
 
   // Called until the first frame is sent, which also retries a failed first call.
   async working(): Promise<void> {
@@ -470,44 +706,41 @@ export class SlackCanvas implements Canvas {
   }
 
   // A channel thread has no free-text status, and `assistant.threads.setStatus`
-  // does nothing there, so the tool cards carry it.
+  // does nothing there, so the plan's title carries it.
   async live(text: string, _status: string | null): Promise<void> {
-    await this.stream(text);
+    await this.serial(() => this.stream(text));
   }
 
   async tool(call: ToolCall): Promise<void> {
-    if (call.state === 'in_progress') this.running.set(call.id, call.title);
-    else this.running.delete(call.id);
-    await this.card(call.id, call.title, call.state);
+    await this.serial(() => this.send(this.phases.tool(call)));
   }
 
-  // A finished sentence, so `complete` at once. The `say-` prefix keeps the
-  // counted id clear of a `toolCallId`.
   async step(text: string): Promise<void> {
-    this.steps += 1;
-    await this.card(`say-${this.steps}`, oneLine(text), 'complete');
-  }
-
-  // Slack folds the title into the message text verbatim, where `<@U…>` would
-  // read back as a real mention.
-  private card(id: string, title: string, status: ToolState): Promise<void> {
-    return this.chunk({
-      type: 'task_update',
-      id,
-      title: escapeMentions(title),
-      status,
-    });
+    await this.serial(() => this.send(this.phases.step(text)));
   }
 
   async final(text: string, outcome: Outcome): Promise<void> {
+    await this.serial(() => this.finish(text, outcome));
+  }
+
+  // The title's timer writes between the renderer's frames, and Slack keeps
+  // the order the calls land in.
+  private serial(work: () => Promise<void>): Promise<void> {
+    const run = this.queue.then(work);
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  private async finish(text: string, outcome: Outcome): Promise<void> {
+    this.ending = true;
+    this.unschedule();
     try {
       await this.stream(
         outcome === 'stopped' ? `${text}${text ? '\n\n' : ''}${STOPPED}` : text,
         true,
       );
-      await this.closeCards(outcome === 'done' ? 'complete' : 'error');
-      // Tool cards are not an answer. A failed turn has its own line, and
-      // after the human's stop a "no reply" is noise.
+      // A plan is not an answer. A failed turn has its own line, and after
+      // the human's stop a "no reply" is noise.
       if (this.sent === 0 && outcome !== 'failed' && !this.over) {
         await this.nothing();
       }
@@ -515,46 +748,47 @@ export class SlackCanvas implements Canvas {
       // Always: a message left streaming refuses later edits, and the thread
       // would keep spinning.
       this.rest();
-      await this.endStream();
+      await this.endStream(outcome);
       await this.settle();
     }
   }
 
-  // `chat.stopStream` marks a card left `in_progress` as `error`, so a done
-  // turn closes its cards itself. Slack has no cancelled state.
-  private async closeCards(state: ToolState): Promise<void> {
-    const open = [...this.running];
-    this.running.clear();
-    for (const [id, title] of open) {
-      await this.card(id, title, state).catch((error) =>
-        this.log.warn('a tool card could not be closed', {
-          threadId: this.thread.id,
-          error: plain(error),
-        }),
-      );
-    }
-  }
-
-  private async endStream(): Promise<void> {
+  // The plan's closes and title ride the stop: Slack turns a task left
+  // `in_progress` to `error`, and retitles an untitled plan.
+  private async endStream(outcome: Outcome): Promise<void> {
     const ts = this.streamTs;
     this.streamTs = null;
     if (!ts || this.over) return;
-    await this.api.stopStream(this.thread.channelId, ts).catch((error) => {
-      // The human's stop may have ended the stream since the last frame.
-      if (alreadyOver(error)) {
-        this.ended(error);
-        return;
-      }
-      this.log.warn('the stream could not be stopped', {
-        threadId: this.thread.id,
-        error: plain(error),
+    await this.api
+      .stopStream(this.thread.channelId, ts, this.closing(outcome))
+      .catch((error) => {
+        // The human's stop may have ended the stream since the last frame.
+        if (alreadyOver(error)) {
+          this.ended(error);
+          return;
+        }
+        this.log.warn('the stream could not be stopped', {
+          threadId: this.thread.id,
+          error: plain(error),
+        });
       });
-    });
+    this.planned = false;
+  }
+
+  /** A roll passes `null`: the turn goes on, so its title is the tally so far. */
+  private closing(outcome: Outcome | null): StreamChunk[] {
+    const closes = this.phases.close(outcome);
+    if (!this.planned && closes.length === 0) return [];
+    const title = this.phases.summary(
+      outcome ?? 'done',
+      this.clock.now() - this.startedAt,
+    );
+    return [...closes, { type: 'plan_update', title }];
   }
 
   private async nothing(): Promise<void> {
     if (this.streamTs) {
-      await this.chunk({ type: 'markdown_text', text: NO_REPLY });
+      await this.send([{ type: 'markdown_text', text: NO_REPLY }]);
       return;
     }
     await this.api.post(
@@ -579,27 +813,71 @@ export class SlackCanvas implements Canvas {
 
   // A stream the human stopped ends the painting; a new message would answer
   // past the stop.
-  private async chunk(chunk: StreamChunk): Promise<void> {
+  private async send(chunks: StreamChunk[]): Promise<void> {
     if (this.over) return;
+    const tasks = chunks.some((chunk) => chunk.type === 'task_update');
+    const batch =
+      this.planned || tasks
+        ? [...this.retitle(!this.planned), ...chunks]
+        : chunks;
+    if (batch.length === 0) return;
     try {
       if (this.streamTs) {
-        await this.api.appendStream(this.thread.channelId, this.streamTs, [
-          chunk,
-        ]);
-        return;
+        await this.api.appendStream(
+          this.thread.channelId,
+          this.streamTs,
+          batch,
+        );
+      } else {
+        this.streamTs = await this.api.startStream({
+          channel: this.thread.channelId,
+          threadTs: this.thread.id,
+          userId: this.recipient.userId,
+          teamId: this.recipient.teamId,
+          chunks: batch,
+        });
       }
-      this.streamTs = await this.api.startStream({
-        channel: this.thread.channelId,
-        threadTs: this.thread.id,
-        userId: this.recipient.userId,
-        teamId: this.recipient.teamId,
-        chunks: [chunk],
-      });
+      if (tasks) this.planned = true;
     } catch (error) {
       if (!alreadyOver(error)) throw error;
       this.ended(error);
       this.streamTs = null;
     }
+  }
+
+  // A plan's first chunk always carries a title: one stopped untitled reads
+  // "Something went wrong". Later titles wait out the cadence.
+  private retitle(first: boolean): StreamChunk[] {
+    if (this.ending && !first) return [];
+    const title = escapeMentions(this.phases.live());
+    if (!first && title === this.title) return [];
+    const wait = this.titledAt + TITLE_CADENCE_MS - this.clock.now();
+    if (!first && wait > 0) {
+      this.schedule(wait);
+      return [];
+    }
+    this.unschedule();
+    this.title = title;
+    this.titledAt = this.clock.now();
+    return [{ type: 'plan_update', title }];
+  }
+
+  private schedule(wait: number): void {
+    if (this.retitling) return;
+    this.retitling = this.clock.after(wait, () => {
+      this.retitling = null;
+      void this.serial(() => this.send([])).catch((error) =>
+        this.log.warn('the plan title could not be updated', {
+          threadId: this.thread.id,
+          error: plain(error),
+        }),
+      );
+    });
+  }
+
+  private unschedule(): void {
+    if (this.retitling) this.clock.cancel(this.retitling);
+    this.retitling = null;
   }
 
   // Usually Slack's own stop, so this is info: nothing is broken.
@@ -619,24 +897,28 @@ export class SlackCanvas implements Canvas {
     while (tail && !this.over) {
       if (this.streamTs && this.painted >= this.cap) await this.roll();
       const [head, rest] = splitAt(tail, this.cap - this.painted);
-      await this.chunk({ type: 'markdown_text', text: head });
+      await this.send([{ type: 'markdown_text', text: head }]);
       this.sent += head.length;
       this.painted += head.length;
       tail = rest;
     }
   }
 
+  // The rolled message keeps its plan, closed and titled; a call after the
+  // roll opens a plan of its own in the next one.
   private async roll(): Promise<void> {
     const ts = this.streamTs;
     if (!ts) return;
     try {
-      await this.api.stopStream(this.thread.channelId, ts);
+      await this.api.stopStream(this.thread.channelId, ts, this.closing(null));
     } catch (error) {
       if (!alreadyOver(error)) throw error;
       this.ended(error);
     }
     this.streamTs = null;
     this.painted = 0;
+    this.planned = false;
+    this.phases.reset();
   }
 }
 
