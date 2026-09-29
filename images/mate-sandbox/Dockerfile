@@ -196,17 +196,6 @@ COPY images/mate-sandbox/kthx /usr/local/bin/kthx
 
 COPY images/mate-sandbox/mise.toml /etc/mise/config.toml
 
-# mate runs the agent loop in its own process, and no mate in this repo execs
-# opencode. The binary stays so a mate image that still runs `opencode acp`
-# works against this sandbox image while the two roll out, and goes in a later
-# change. It is the platform package opencode-ai installs on linux/amd64, which
-# needs AVX2.
-# renovate: datasource=npm depName=opencode-linux-x64
-ARG OPENCODE_VERSION=1.18.32
-RUN curl -fsSL "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-${OPENCODE_VERSION}.tgz" \
-      | tar -xz --no-same-owner -C /usr/local/bin --strip-components=2 package/bin/opencode \
-    && chmod 0755 /usr/local/bin/opencode
-
 COPY --from=hands --chmod=0755 /out/mate-hands /usr/local/bin/mate-hands
 
 RUN groupadd -g 1337 agent \
@@ -216,9 +205,8 @@ USER 1337:1337
 WORKDIR /home/agent
 
 # HOME and the XDG roots sit on the pod's emptyDir; mate writes each turn's
-# credentials under HOME through mate-hands. The kthx update check and the
-# autoupdate of the opencode binary above are off because both are root-owned
-# and pinned.
+# credentials under HOME through mate-hands. The kthx update check is off
+# because the CLI is root-owned and pinned.
 ENV HOME=/home/agent \
     USER=agent \
     XDG_DATA_HOME=/home/agent/.local/share \
@@ -228,7 +216,6 @@ ENV HOME=/home/agent \
     LANG=C.UTF-8 \
     TERM=dumb \
     NO_COLOR=1 \
-    OPENCODE_DISABLE_AUTOUPDATE=1 \
     KTHX_NO_UPDATE_CHECK=1
 
 # Runs as the sandbox uid, so a binary that cannot start fails the build.
@@ -236,7 +223,7 @@ ENV HOME=/home/agent \
 # ssh has only `-V`.
 RUN set -eux; \
     for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh hubble \
-                jq kthx mate-hands mise op opencode promtool shellcheck shfmt \
+                jq kthx mate-hands mise op promtool shellcheck shfmt \
                 sops terraform-docs tofu yq; do \
       "$tool" --version >/dev/null; \
     done; \

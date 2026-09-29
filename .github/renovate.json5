@@ -419,17 +419,6 @@
       groupSlug: 'cloudnative-pg',
     },
     {
-      // mate runs its agent loop in its own process. The sandbox image keeps
-      // the opencode binary only for a mate image that still execs it while
-      // the mate and sandbox images roll out, and a later change removes both
-      // the binary and this rule. Until then its pin stays its own pull
-      // request, out of the toolset group, so no bump to it rides along with
-      // two dozen unrelated tools.
-      description: 'opencode: the leftover harness binary is its own pull request',
-      matchDepNames: ['opencode-linux-x64'],
-      groupName: null,
-    },
-    {
       // The crds chart and the stack chart each carry their own copy of the
       // same prometheus-operator CRDs. Offsite takes its CRDs from the crds
       // release and its operator from the stack, so splitting them into two
