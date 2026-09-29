@@ -166,7 +166,7 @@ COPY images/mate-sandbox/mise.toml /etc/mise/config.toml
 # The platform package opencode-ai installs on linux/amd64. It needs AVX2;
 # opencode-linux-x64-baseline is the build for nodes without it.
 # renovate: datasource=npm depName=opencode-linux-x64
-ARG OPENCODE_VERSION=1.18.31
+ARG OPENCODE_VERSION=1.18.32
 RUN curl -fsSL "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-${OPENCODE_VERSION}.tgz" \
       | tar -xz --no-same-owner -C /usr/local/bin --strip-components=2 package/bin/opencode \
     && chmod 0755 /usr/local/bin/opencode
