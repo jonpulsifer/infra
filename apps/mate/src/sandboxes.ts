@@ -1,28 +1,25 @@
 /**
- * One `agents.x-k8s.io/v1beta1` Sandbox per thread, reached by exec-ing
- * `opencode acp` in its pod. Every turn slides `spec.shutdownTime`, so a mate
- * that dies mid-thread cannot leak one.
+ * The sandboxes behind the brain's hands: one `agents.x-k8s.io/v1beta1`
+ * Sandbox per thread, found by label, adopted from a warm spare or minted on
+ * a turn's first tool call, and reached through mate-hands. Every turn slides
+ * `spec.shutdownTime`, so a mate that dies mid-thread cannot leak one.
  */
-import { AcpClient } from './acp.ts';
+import { PROTOCOL_VERSION } from '@repo/mate-hands/protocol';
+import { type Clock, systemClock } from './clock.ts';
 import type {
   KthxConfig,
   SandboxConfig,
   SwitchboardConfig,
   VaultConfig,
 } from './config.ts';
-// Mint and revoke only, so nothing here can reach the App's private key.
-export interface TokenSource {
-  token(): Promise<{ token: string }>;
-  revoke(token: string): Promise<void>;
-}
-
+import { Credentials, KUBECONFIG_PATH, TOKEN_PATH } from './credentials.ts';
+import { HARNESS_CONTAINER } from './hands.ts';
 import {
-  type KthxSites,
-  parseSites,
-  SITES_LIMIT_BYTES,
-  type Sites,
-  serialize,
-} from './kthx-sites.ts';
+  type Epochs,
+  HandsLink,
+  type HandsTarget,
+  SandboxGone,
+} from './hands-env.ts';
 import {
   type ExecClose,
   type Kube,
@@ -32,19 +29,30 @@ import {
   kubeError,
   ok,
 } from './kube.ts';
-import { type Log, plain } from './log.ts';
-import type { Instruments } from './metrics.ts';
-import type {
-  MintedRef,
-  OnMintStep,
-  PromptResult,
-  PromptSink,
-  Sandboxes,
-  SandboxRef,
-  Session,
-  ThreadRef,
-} from './sandbox.ts';
-import type { SurfaceName } from './surface.ts';
+import {
+  AGENT_HOME,
+  type CreateKubeHands,
+  HANDS_LABEL,
+  type Hands,
+  type KubeHandsDeps,
+  type OnMintStep,
+  type SandboxSource,
+  START_BUDGET_MS,
+  type TeardownReason,
+  type ThreadHands,
+  type ThreadHandsHooks,
+  TTL_MS,
+  WORKSPACE,
+} from './lease.ts';
+import { plain } from './log.ts';
+import { redact } from './redact.ts';
+import {
+  type LeaseDeps,
+  type SandboxHandle,
+  SandboxSlots,
+  ThreadHandsImpl,
+} from './sandbox-lease.ts';
+import { type SurfaceName, type ThreadRef, threadKey } from './surface.ts';
 
 export const SANDBOX_API = 'agents.x-k8s.io/v1beta1';
 const SANDBOXES = '/apis/agents.x-k8s.io/v1beta1';
@@ -60,20 +68,18 @@ export const SURFACE_LABEL = 'lolwtf.ca/surface';
 // sandboxes.
 export const GUILD_LABEL = 'lolwtf.ca/guild';
 // `true` on an unclaimed spare; adoption swaps it for the thread labels.
-// `condemned` marks one being deleted; neither the pool nor `list()` takes it.
+// `condemned` marks one being deleted; nothing takes it.
 export const SPARE_LABEL = 'lolwtf.ca/spare';
 const SPARE = 'true';
 const CONDEMNED = 'condemned';
-// An annotation: a label value allows only 63 characters of `[A-Za-z0-9._-]`.
-export const SESSION_ANNOTATION = 'lolwtf.ca/acp-session';
-// Set for the length of a turn, so a mate restarted mid-turn can say so in
-// the thread.
+// The mate-hands protocol this code speaks. A sandbox without it was minted
+// by an earlier mate, and the first boot condemns it.
+const HANDS = String(PROTOCOL_VERSION);
+// An earlier mate set this for the length of a turn; the first boot after it
+// reads it to tell the thread its turn was cut off.
 export const TURN_ANNOTATION = 'lolwtf.ca/turn-started';
 
-export const HARNESS_CONTAINER = 'harness';
 export const CHECKOUT_CONTAINER = 'checkout';
-export const WORKSPACE = '/workspace';
-export const AGENT_HOME = '/home/agent';
 export const AGENT_UID = 1337;
 // The image's user has no GECOS and no git config, so without an ident
 // `git commit` fails.
@@ -88,51 +94,8 @@ const CHECKOUT_DEPTH = 50;
 // Read by the credential helper and `images/mate-sandbox/gh`. The agent can
 // read the token too, so it names one repository and is revoked after the turn.
 const TOKEN_FILE_ENV = 'MATE_GITHUB_TOKEN_FILE';
-const TOKEN_FILE = `${AGENT_HOME}/.github-token`;
-const KUBECONFIG_FILE = `${AGENT_HOME}/.kube/config`;
-const SSH_DIR = `${AGENT_HOME}/.ssh`;
-// Where the kthx CLI keeps its site tokens under the image's XDG_CONFIG_HOME.
-const KTHX_SITES_FILE = `${AGENT_HOME}/.config/kthx/sites.json`;
-const KTHX_TOKEN_ENV = 'KTHX_AGENT_TOKEN';
-const SSH_KEY_FILE = `${SSH_DIR}/id_ed25519`;
-const SSH_CONFIG_FILE = `${SSH_DIR}/config`;
-// folly's Lab Net has no route from offsite, but folly's nodes do, and the
-// Lab zone admits them. optiplex, folly's only control plane, is not the hop.
-const LAB_NET_HOSTS = ['spore', 'capsule', 'forge', 'cloudpi4', 'homepi4'];
-const LAB_NET_JUMP = 'riptide.lolwtf.ca';
-// `always` canonicalizes a short name before the Host blocks match, proxied
-// or not. accept-new: home is a fresh emptyDir with no known hosts, so `yes`
-// refuses every host, and `no` would accept a changed key.
-export const SSH_CLIENT_CONFIG = [
-  'CanonicalizeHostname always',
-  'CanonicalDomains lolwtf.ca',
-  'CanonicalizeMaxDots 0',
-  'CanonicalizeFallbackLocal yes',
-  '',
-  `Host ${LAB_NET_HOSTS.map((host) => `${host}.lolwtf.ca`).join(' ')}`,
-  `  ProxyJump ${LAB_NET_JUMP}`,
-  '',
-  // Its wired port has no link; it answers on the lab WLAN.
-  'Host homepi4.lolwtf.ca',
-  '  HostName homepi4-wifi.lolwtf.ca',
-  '',
-  'Host *',
-  '  User rowbutt',
-  `  IdentityFile ${SSH_KEY_FILE}`,
-  '  IdentitiesOnly yes',
-  '  StrictHostKeyChecking accept-new',
-  `  UserKnownHostsFile ${SSH_DIR}/known_hosts`,
-  '',
-].join('\n');
-const CLUSTER_URL = 'https://kubernetes.default.svc:443';
-// Both apiservers list `api` in --api-audiences, and folly's federation admits
-// an offsite token for no other audience. A bound token is refused by any
-// audience it was not minted for, compared as exact strings.
-const TOKEN_AUDIENCE = 'api';
-// Outlives the turn, so the token never expires under a running `kubectl`.
-const TOKEN_SLACK_SECONDS = 5 * 60;
-// The apiserver refuses a TokenRequest under ten minutes.
-const TOKEN_FLOOR_SECONDS = 600;
+const TOKEN_FILE = `${AGENT_HOME}/${TOKEN_PATH}`;
+const KUBECONFIG_FILE = `${AGENT_HOME}/${KUBECONFIG_PATH}`;
 // git asks every matching helper in config order and the first answer wins.
 // `gitEnv` sets it empty first, which clears earlier helpers for this URL.
 const CREDENTIAL_KEY = 'credential.https://github.com.helper';
@@ -140,26 +103,18 @@ const CREDENTIAL_KEY = 'credential.https://github.com.helper';
 // file exits 1, since git would report a blank password as a rejected one.
 const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(cat "$${TOKEN_FILE_ENV}" 2>/dev/null) || exit 1; test -n "$t" || exit 1; printf "username=${GIT_HTTPS_USER}\\npassword=%s\\n" "$t"; }; f`;
 
-export const TTL_MS = 2 * 60 * 60_000;
 // Only a sweep renews a spare, so this bounds what a dead mate leaves on the
 // node. Six sweeps fit, so a few failed sweeps cannot reap a healthy spare.
 export const SPARE_TTL_MS = 30 * 60_000;
 export const SPARE_SWEEP_MS = 5 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
 const REFRESH_TIMEOUT_MS = 60_000;
-// A few `printf`s on a live pod; a slow write has gone wrong and holds up
-// the turn.
-const STAMP_TIMEOUT_MS = 15_000;
 const GONE_TIMEOUT_MS = 180_000;
-const REAP_TIMEOUT_MS = 15_000;
 const WATCH_SECONDS = 60;
 // Without a pause, a watch that ends with no event re-lists as fast as the
 // apiserver answers.
 const WATCH_IDLE_MS = 1_000;
 const STDERR_LIMIT = 500;
-// A provider error can echo `OPENCODE_API_KEY` from the harness environment.
-const SECRET_SHAPED =
-  /(?:sk-[A-Za-z0-9._-]{8,}|[Bb]earer\s+[A-Za-z0-9._-]{8,}|[A-Za-z0-9_-]{32,})/g;
 // CRDs reject strategic merge; a merge patch leaves sibling fields alone.
 const MERGE_PATCH = 'application/merge-patch+json';
 
@@ -180,30 +135,6 @@ export interface SandboxStatus {
 
 export type Sandbox = KubeObject<Record<string, unknown>, SandboxStatus>;
 type Pod = KubeObject<Record<string, unknown>, { phase?: string }>;
-
-export interface KubeSandboxesDeps {
-  kube: Kube;
-  config: SandboxConfig;
-  guildId: string;
-  log: Log;
-  /** Absent in the smoke harness, which runs with no metrics SDK. */
-  metrics?: Instruments;
-  /** Absent when no App is configured. */
-  githubApp?: TokenSource | null;
-  /** Absent when `config.kthx.origin` is unset. */
-  kthxSites?: KthxSites | null;
-  clusterCa?: string | null;
-  sshKey?: string | null;
-  ttlMs?: number;
-  readyTimeoutMs?: number;
-  goneTimeoutMs?: number;
-}
-
-interface Attachment {
-  client: AcpClient;
-  sessionId: string;
-  pod: string;
-}
 
 const SNOWFLAKE = /^\d{15,22}$/;
 const SLACK_CHANNEL = /^[A-Z][A-Z0-9]{1,20}$/;
@@ -265,124 +196,6 @@ function pullPolicy(image: string): string {
   return image.includes('@sha256:') ? 'IfNotPresent' : 'Always';
 }
 
-// Paths are absolute: opencode resolves a relative one against its own config
-// directory, and reports neither that nor a missing file.
-export function opencodeConfig(
-  model: string,
-  kthxMcpUrl: string | null = null,
-): string {
-  return JSON.stringify({
-    model,
-    // Project config, which would load AGENTS.md, is turned off.
-    instructions: [`${WORKSPACE}/AGENTS.md`],
-    // opencode's own skill walk looks only in `.agents/` and `.claude/`.
-    skills: { paths: [`${WORKSPACE}/dotfiles/skills`] },
-    permission: 'allow',
-    autoupdate: false,
-    share: 'disabled',
-    // opencode substitutes `{env:…}` itself, an unset variable as ''. Without
-    // `oauth: false` a 401 starts OAuth discovery against the engine.
-    ...(kthxMcpUrl
-      ? {
-          mcp: {
-            kthx: {
-              type: 'remote',
-              url: kthxMcpUrl,
-              enabled: true,
-              headers: { Authorization: `Bearer {env:${KTHX_TOKEN_ENV}}` },
-              oauth: false,
-              timeout: 10_000,
-            },
-          },
-        }
-      : {}),
-  });
-}
-
-export interface KubeCluster {
-  name: string;
-  server: string;
-  ca: string | null;
-}
-
-// JSON is YAML, so kubectl reads it and no indentation can slip. The first
-// cluster is the current context. With no CA the sandbox trusts the system
-// store, as mate does; it never gets `insecure-skip-tls-verify`.
-export function kubeconfig(token: string, clusters: KubeCluster[]): string {
-  return `${JSON.stringify(
-    {
-      apiVersion: 'v1',
-      kind: 'Config',
-      clusters: clusters.map(({ name, server, ca }) => ({
-        name,
-        cluster: {
-          server,
-          ...(ca
-            ? {
-                'certificate-authority-data':
-                  Buffer.from(ca).toString('base64'),
-              }
-            : {}),
-        },
-      })),
-      users: [{ name: 'sandbox', user: { token } }],
-      contexts: clusters.map(({ name }) => ({
-        name,
-        context: { cluster: name, user: 'sandbox' },
-      })),
-      'current-context': clusters[0]?.name ?? '',
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-const PEER_SERVER = /^https:\/\/[a-z0-9.-]+:\d{1,5}$/;
-const PEM_CERTIFICATE = '-----BEGIN CERTIFICATE-----';
-
-// Prints one JSON line per peer whose topology and CA bundle the checkout
-// holds, the way the Atlantis kubeconfig hook reads them.
-export function peerScript(peers: readonly string[]): string {
-  return peers
-    .map(
-      (peer) =>
-        `jq -c --arg name ${peer} --rawfile ca ${WORKSPACE}/terraform/pki/certs/${peer}-ca-bundle.pem ` +
-        `'{name: $name, server: ("https://" + .data.API_SERVER_HOSTNAME + ":" + .data.API_SERVER_PORT), ca: $ca}' ` +
-        `${WORKSPACE}/clusters/${peer}/config/cluster-topology.json 2>/dev/null || true`,
-    )
-    .join('; ');
-}
-
-/** Keeps only well-formed lines for the peers asked for, in that order. */
-export function parsePeers(
-  printed: string,
-  peers: readonly string[],
-): KubeCluster[] {
-  const found = new Map<string, KubeCluster>();
-  for (const line of printed.split('\n')) {
-    if (!line.trim()) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const { name, server, ca } = (parsed ?? {}) as Record<string, unknown>;
-    if (
-      typeof name !== 'string' ||
-      !peers.includes(name) ||
-      typeof server !== 'string' ||
-      !PEER_SERVER.test(server) ||
-      typeof ca !== 'string' ||
-      !ca.includes(PEM_CERTIFICATE)
-    ) {
-      continue;
-    }
-    found.set(name, { name, server, ca });
-  }
-  return peers.flatMap((peer) => found.get(peer) ?? []);
-}
-
 // Command-scope config, where git honours `safe.directory`: the emptyDir mount
 // root stays uid 0 under fsGroup, so git would fail on `dubious ownership`.
 export function gitEnv(github: boolean): { name: string; value: string }[] {
@@ -431,27 +244,10 @@ function connectEnv(vault: VaultConfig): Record<string, unknown>[] {
   ];
 }
 
-// The agent token is minted by the owner in the console, so the Secret can be
-// absent; `optional`, as the Connect token is, keeps that from holding every
-// sandbox in CreateContainerConfigError.
+// The CLI's claiming host. The engine's MCP server is mate's to call, and its
+// agent token stays in mate's pod.
 function kthxEnv(kthx: KthxConfig): Record<string, unknown>[] {
-  return [
-    ...(kthx.origin ? [{ name: 'KTHX_ORIGIN', value: kthx.origin }] : []),
-    ...(kthx.mcpUrl
-      ? [
-          {
-            name: KTHX_TOKEN_ENV,
-            valueFrom: {
-              secretKeyRef: {
-                name: kthx.agentSecret,
-                key: KTHX_TOKEN_ENV,
-                optional: true,
-              },
-            },
-          },
-        ]
-      : []),
-  ];
+  return kthx.origin ? [{ name: 'KTHX_ORIGIN', value: kthx.origin }] : [];
 }
 
 // A missing Secret would hold every sandbox in CreateContainerConfigError, so
@@ -491,6 +287,7 @@ function baseLabels(guildId: string): Record<string, string> {
     'app.kubernetes.io/part-of': 'mate',
     [MINTED_BY_LABEL]: MINTED_BY,
     [GUILD_LABEL]: guildId,
+    [HANDS_LABEL]: HANDS,
   };
 }
 
@@ -525,6 +322,26 @@ function condemnLabels(): Record<string, string | null> {
     [CHANNEL_LABEL]: null,
     [SPARE_LABEL]: CONDEMNED,
   };
+}
+
+/** The thread a sandbox's labels name, if they name one. */
+function threadOf(labels: Record<string, string>): ThreadRef | null {
+  const id = labels[THREAD_LABEL];
+  const channelId = labels[CHANNEL_LABEL];
+  if (!id || !channelId || labels[SPARE_LABEL]) return null;
+  // Discord sandboxes can predate the surface label.
+  const surface = (labels[SURFACE_LABEL] ?? 'discord') as SurfaceName;
+  return { surface, channelId, id };
+}
+
+/** Checked, not selected on: older Discord sandboxes carry only the thread label. */
+function belongsTo(sandbox: Sandbox, thread: ThreadRef): boolean {
+  const labels = sandbox.metadata.labels ?? {};
+  return (
+    labels[THREAD_LABEL] === thread.id &&
+    (labels[SURFACE_LABEL] ?? 'discord') === thread.surface &&
+    (labels[CHANNEL_LABEL] ?? thread.channelId) === thread.channelId
+  );
 }
 
 export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
@@ -603,22 +420,6 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
               image: config.image,
               imagePullPolicy: pullPolicy(config.image),
               env: [
-                {
-                  name: 'OPENCODE_API_KEY',
-                  valueFrom: {
-                    secretKeyRef: {
-                      name: config.secret,
-                      key: 'OPENCODE_API_KEY',
-                    },
-                  },
-                },
-                {
-                  name: 'OPENCODE_CONFIG_CONTENT',
-                  value: opencodeConfig(config.model, config.kthx.mcpUrl),
-                },
-                // opencode npm-installs a plugin into any `.opencode/` it
-                // loads, and npm is outside the sandbox's egress allow-list.
-                { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
                 ...(config.vault ? connectEnv(config.vault) : []),
                 ...kthxEnv(config.kthx),
                 ...(config.switchboard
@@ -650,6 +451,32 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
   };
 }
 
+/** The sandbox's running pod, or `null` when it has none. */
+async function runningPod(
+  kube: Kube,
+  namespace: string,
+  sandbox: Sandbox,
+): Promise<Pod | null> {
+  const selector = sandbox.status?.selector;
+  if (!selector) return null;
+  const pods = await kube.json<KubeList<Pod>>(
+    `${PODS}/namespaces/${namespace}/pods`,
+    { query: { labelSelector: selector } },
+  );
+  const uid = sandbox.metadata.uid;
+  return (
+    pods.items.find(
+      (candidate) =>
+        !candidate.metadata.deletionTimestamp &&
+        candidate.status?.phase === 'Running' &&
+        (!uid ||
+          (candidate.metadata.ownerReferences ?? []).some(
+            (o) => o.uid === uid,
+          )),
+    ) ?? null
+  );
+}
+
 // Via `status.selector`: the controller does not set the
 // `agents.x-k8s.io/pod-name` annotation.
 export async function resolvePod(
@@ -658,22 +485,11 @@ export async function resolvePod(
   sandbox: Sandbox,
 ): Promise<string> {
   const name = sandbox.metadata.name;
-  const selector = sandbox.status?.selector;
-  if (!selector) throw new Error(`sandbox ${name} reports no pod selector`);
-  const pods = await kube.json<KubeList<Pod>>(
-    `${PODS}/namespaces/${namespace}/pods`,
-    { query: { labelSelector: selector } },
-  );
-  const uid = sandbox.metadata.uid;
-  const pod = pods.items.find(
-    (candidate) =>
-      !candidate.metadata.deletionTimestamp &&
-      candidate.status?.phase === 'Running' &&
-      (!uid ||
-        (candidate.metadata.ownerReferences ?? []).some((o) => o.uid === uid)),
-  );
+  const pod = await runningPod(kube, namespace, sandbox);
   if (!pod) {
-    throw new Error(`sandbox ${name} has no running pod for ${selector}`);
+    throw new Error(
+      `sandbox ${name} has no running pod for ${sandbox.status?.selector ?? 'its selector'}`,
+    );
   }
   return pod.metadata.name;
 }
@@ -720,65 +536,137 @@ export function waitForPodGone(
   );
 }
 
-export class KubeSandboxes implements Sandboxes {
-  private readonly attached = new Map<string, Attachment>();
-  // What each sandbox's sites file holds that the ledger also holds: a name
-  // missing from the file is a removal only against this. Empty after a
-  // restart, which folds every site as new.
-  private readonly stamped = new Map<string, Sites>();
+/** Where a sandbox keeps the checkout and the agent's home; tests move both. */
+export interface HandsLayout {
+  readonly workspace: string;
+  readonly home: string;
+  /** Refuses a daemon with another home; `null` skips the check. */
+  readonly expectHome: string | null;
+  readonly epochs?: Epochs;
+}
+
+const SANDBOX_LAYOUT: HandsLayout = {
+  workspace: WORKSPACE,
+  home: AGENT_HOME,
+  expectHome: AGENT_HOME,
+};
+
+/**
+ * The sandboxes of one guild's threads, the warm pool, and each thread's
+ * hands. It holds one `ThreadHands` per open thread and caps the sandboxes
+ * leased at once at `MATE_MAX_SANDBOXES`.
+ */
+export class KubeHands implements Hands {
+  private readonly threads = new Map<string, ThreadHandsImpl>();
+  // Labelled thread sandboxes counted at boot, before their threads open.
+  private readonly standing = new Map<
+    string,
+    { ref: ThreadRef; name: string }
+  >();
+  private readonly slots: SandboxSlots;
+  private readonly credentials: Credentials;
+  private readonly clock: Clock;
+  private readonly leaseDeps: LeaseDeps;
   private warming: Promise<void> | null = null;
   private again = false;
-  private inherited = true;
+  // Spares outlive a rollout, and nothing on one records the image or
+  // checkout it was built from, so the first pass discards them all.
+  private inheritedSpares = true;
+  private inheritedSandboxes = false;
 
-  constructor(private readonly deps: KubeSandboxesDeps) {}
+  constructor(
+    private readonly deps: KubeHandsDeps,
+    private readonly layout: HandsLayout = SANDBOX_LAYOUT,
+  ) {
+    this.clock = deps.clock ?? systemClock;
+    this.slots = new SandboxSlots({
+      capacity: deps.maxSandboxes,
+      clock: this.clock,
+      log: deps.log,
+      metrics: deps.metrics,
+      evict: (key) => this.evict(key),
+    });
+    this.credentials = new Credentials({
+      kube: deps.kube,
+      namespace: this.namespace,
+      config: deps.config,
+      log: deps.log,
+      clock: this.clock,
+      metrics: deps.metrics,
+      githubApp: deps.githubApp,
+      kthxSites: deps.kthxSites,
+      clusterCa: deps.clusterCa,
+      sshKey: deps.sshKey,
+      home: layout.home,
+    });
+    this.leaseDeps = {
+      log: deps.log,
+      clock: this.clock,
+      metrics: deps.metrics,
+      slots: this.slots,
+      credentials: this.credentials,
+      workspace: layout.workspace,
+      home: layout.home,
+      acquire: (ref, onStep) => this.acquire(ref, onStep),
+      find: (ref) => this.findReady(ref),
+      link: (handle) => this.link(handle),
+      slide: (name) => this.slide(name),
+      lose: (name) => this.lose(name),
+      discard: (name) => this.discardOne(name),
+    };
+  }
 
   get namespace(): string {
     return this.deps.config.namespace ?? this.deps.kube.namespace;
   }
 
-  async list(): Promise<SandboxRef[]> {
-    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
-      query: { labelSelector: this.selector() },
-    });
-    const refs: SandboxRef[] = [];
-    for (const sandbox of list.items) {
-      if (sandbox.metadata.deletionTimestamp) continue;
-      const labels = sandbox.metadata.labels ?? {};
-      // Spares and condemned sandboxes carry no thread labels by design.
-      if (labels[SPARE_LABEL]) continue;
-      const id = labels[THREAD_LABEL];
-      const channelId = labels[CHANNEL_LABEL];
-      // Discord sandboxes can predate the surface label.
-      const surface = (labels[SURFACE_LABEL] ?? 'discord') as SurfaceName;
-      if (!id || !channelId) {
-        this.deps.log.warn('sandbox has no thread labels; ignoring it', {
-          sandbox: sandbox.metadata.name,
-        });
-        continue;
-      }
-      refs.push({
-        name: sandbox.metadata.name,
-        thread: { surface, channelId, id },
-        turnInFlight: Boolean(sandbox.metadata.annotations?.[TURN_ANNOTATION]),
-      });
+  thread(ref: ThreadRef, hooks: ThreadHandsHooks): ThreadHands {
+    const key = threadKey(ref);
+    const known = this.threads.get(key);
+    if (known) {
+      known.hooks = hooks;
+      return known;
     }
-    return refs;
+    const made = new ThreadHandsImpl(
+      ref,
+      key,
+      hooks,
+      this.leaseDeps,
+      this.standing.get(key)?.name ?? null,
+    );
+    this.threads.set(key, made);
+    return made;
   }
 
-  async mint(thread: ThreadRef, onStep?: OnMintStep): Promise<MintedRef> {
-    const existing = await this.find(thread);
-    if (existing) return this.reuse(existing, thread, onStep);
-    const taken = await this.adopt(thread, onStep);
-    if (taken) {
-      // Refill in the background: this thread should not wait for it.
-      void this.ensureSpares().catch((error) =>
-        this.deps.log.warn('minting a replacement spare failed', {
-          error: plain(error),
-        }),
-      );
-      return taken;
+  async release(ref: ThreadRef, reason: TeardownReason): Promise<void> {
+    const { log, metrics } = this.deps;
+    const key = threadKey(ref);
+    const thread = this.threads.get(key);
+    if (thread) thread.released = true;
+    try {
+      await thread?.openLease?.abandon();
+      const found = await this.sandboxesOf(ref);
+      for (const sandbox of found) {
+        const name = sandbox.metadata.name;
+        await this.keepSites(sandbox);
+        await this.destroy(name);
+        this.credentials.forget(name);
+      }
+      const held = found.length > 0 || Boolean(thread?.holding);
+      this.slots.release(key);
+      this.standing.delete(key);
+      this.threads.delete(key);
+      if (!held) return;
+      thread?.tell((hooks) => hooks.onSandboxGone(reason));
+      metrics?.teardown(reason);
+    } catch (error) {
+      if (thread) thread.released = false;
+      log.warn("could not release the thread's sandbox", {
+        thread: key,
+        reason,
+        error: plain(error),
+      });
     }
-    return this.mintFresh(thread, onStep);
   }
 
   /**
@@ -794,6 +682,51 @@ export class KubeSandboxes implements Sandboxes {
     return this.warming;
   }
 
+  async start(): Promise<readonly ThreadRef[]> {
+    const { log } = this.deps;
+    let listed: Sandbox[];
+    try {
+      listed = await this.listWithin(START_BUDGET_MS);
+    } catch (error) {
+      log.warn('could not count the standing sandboxes at boot', {
+        error: plain(error),
+      });
+      this.inheritedSandboxes = true;
+      return [];
+    }
+    const interrupted: ThreadRef[] = [];
+    const inherited: Sandbox[] = [];
+    for (const sandbox of listed) {
+      const labels = sandbox.metadata.labels ?? {};
+      const thread = threadOf(labels);
+      if (labels[HANDS_LABEL] === HANDS) {
+        if (!thread) continue;
+        const key = threadKey(thread);
+        this.standing.set(key, { ref: thread, name: sandbox.metadata.name });
+        this.slots.register(key);
+        continue;
+      }
+      if (labels[SPARE_LABEL] === CONDEMNED) continue;
+      if (thread && sandbox.metadata.annotations?.[TURN_ANNOTATION]) {
+        interrupted.push(thread);
+      }
+      inherited.push(sandbox);
+    }
+    if (inherited.length > 0) {
+      this.inheritedSandboxes = true;
+      void this.condemnInherited(inherited);
+    }
+    return interrupted;
+  }
+
+  /** Each lease's `abandon` is bounded by `ABANDON_BUDGET_MS`, and they run together. */
+  async shutdown(): Promise<void> {
+    const leases = [...this.threads.values()].flatMap((thread) =>
+      thread.openLease ? [thread.openLease] : [],
+    );
+    await Promise.all(leases.map((lease) => lease.abandon()));
+  }
+
   private async passes(): Promise<void> {
     try {
       do {
@@ -805,696 +738,29 @@ export class KubeSandboxes implements Sandboxes {
     }
   }
 
-  async attach(ref: SandboxRef): Promise<Session> {
-    const { kube, log } = this.deps;
-    this.detach(ref.name);
-    const sandbox = await kube.json<Sandbox>(this.path(ref.name));
-    if (!isReady(sandbox)) {
-      throw new Error(
-        `sandbox ${ref.name} is not ready: ${whyNotReady(sandbox)}`,
-      );
-    }
-    const pod = await resolvePod(kube, this.namespace, sandbox);
-    const stored = sandbox.metadata.annotations?.[SESSION_ANNOTATION];
-    if (stored) await this.reap(ref.name, pod);
-    const exec = await kube.exec({
-      namespace: this.namespace,
-      pod,
-      container: HARNESS_CONTAINER,
-      command: ['opencode', 'acp', '--cwd', WORKSPACE],
-      onStderr: (text) => {
-        const line = redactStderr(text);
-        if (line) log.warn('harness stderr', { sandbox: ref.name, line });
-      },
-    });
-    const client = new AcpClient(exec, log, { sandbox: ref.name, pod });
-    let session: { id: string; resumed: boolean };
-    // Register only once the session and TTL are stored; a failed attach
-    // closes its harness.
-    try {
-      await client.initialize();
-      session = await this.openSession(client, ref.name, stored);
-      if (session.id !== stored) await this.remember(ref.name, session.id);
-      await this.slide(ref.name);
-    } catch (error) {
-      client.close();
-      throw error;
-    }
-    const attachment: Attachment = { client, sessionId: session.id, pod };
-    this.attached.set(ref.name, attachment);
-    void client.closed.then((close) => {
-      if (this.attached.get(ref.name) === attachment) {
-        this.attached.delete(ref.name);
-      }
-      log.warn('harness stream closed', {
-        sandbox: ref.name,
-        code: close.code,
-        reason: close.reason,
-      });
-    });
-    return { id: session.id, sandbox: ref, resumed: session.resumed };
-  }
-
-  async prompt(
-    session: Session,
-    text: string,
-    sink: PromptSink,
-  ): Promise<PromptResult> {
-    const name = session.sandbox.name;
-    const attachment = this.attached.get(name);
-    if (!attachment || attachment.sessionId !== session.id) {
-      throw new Error(`sandbox ${name} is not attached`);
-    }
-    await this.mark(name).catch((error) =>
-      this.deps.log.warn('turn mark failed', {
-        sandbox: name,
-        error: plain(error),
-      }),
-    );
-    const token = await this.stampToken(name, attachment.pod);
-    let result: PromptResult;
-    try {
-      result = await attachment.client.prompt(
-        session.id,
-        text,
-        sink,
-        this.deps.config.turnTimeoutMs,
-      );
-    } finally {
-      // Every way a turn ends, a throw included, clears the turn's credentials.
-      await this.retireToken(name, attachment.pod, token);
-    }
-    // The answer stands: a failed slide leaves only a shorter TTL and a
-    // stale turn mark.
-    await this.slide(name).catch((error) =>
-      this.deps.log.warn('shutdownTime slide failed', {
-        sandbox: name,
-        error: plain(error),
-      }),
-    );
-    return {
-      stopReason: result.stopReason,
-      error: result.error,
-      firstTokenMs: result.firstTokenMs,
-      costUsd: result.costUsd,
-    };
-  }
-
-  private get credentialled(): boolean {
-    return Boolean(
-      this.deps.githubApp ||
-        this.deps.config.kubeServiceAccount ||
-        this.deps.sshKey ||
-        this.kthx,
-    );
-  }
-
-  private get kthx(): KthxSites | null {
-    return this.deps.config.kthx.origin ? (this.deps.kthxSites ?? null) : null;
-  }
-
-  // Never fails the turn: a thread that cannot push can still answer, and the
-  // metric and the `gh` wrapper report the missing token.
-  private async stampToken(name: string, pod: string): Promise<string | null> {
-    const { githubApp, log, metrics } = this.deps;
-    if (!this.credentialled) return null;
-    const github = githubApp ? await this.mintGithub(name) : null;
-    const kube = await this.mintCluster(name, pod);
-    const ssh = this.deps.sshKey ?? '';
-    // First, so a save the last turn's end could not make is retried now.
-    const sites = this.kthx ? await this.syncSites(name, pod) : null;
-    try {
-      await this.writeCredentials(pod, {
-        github: github ?? '',
-        kube,
-        ssh,
-        kthx: sites ? serialize(sites) : null,
-      });
-      // Only now: a write that failed left the file as the sync read it.
-      if (sites) this.stamped.set(name, sites);
-      if (githubApp) metrics?.githubTokenStamped(github ? 'ok' : 'mint-failed');
-      return github;
-    } catch (error) {
-      metrics?.githubTokenStamped('stamp-failed');
-      log.error("could not stamp the turn's credentials into the sandbox", {
-        sandbox: name,
-        error: plain(error),
-      });
-      // Revoke now, since it reached nobody. A cluster token cannot be
-      // revoked and expires on its own.
-      if (github) await githubApp?.revoke(github).catch(() => {});
-      return null;
-    }
-  }
-
-  /** `null` when minting failed; the reason is already logged. */
-  private async mintGithub(name: string): Promise<string | null> {
-    const { githubApp, log, metrics } = this.deps;
-    try {
-      const token = (await githubApp?.token())?.token ?? null;
-      metrics?.githubTokenMinted('ok');
-      return token;
-    } catch (error) {
-      metrics?.githubTokenMinted('mint-failed');
-      log.error('could not mint a GitHub token for this turn', {
-        sandbox: name,
-        error: plain(error),
-      });
-      return null;
-    }
-  }
-
-  /**
-   * `''` means no cluster access. A bound token cannot be revoked, so its
-   * expiry bounds any copy taken during the turn.
-   */
-  private async mintCluster(name: string, pod: string): Promise<string> {
-    const { config, kube, log } = this.deps;
-    const account = config.kubeServiceAccount;
-    if (!account) return '';
-    const seconds = Math.max(
-      TOKEN_FLOOR_SECONDS,
-      Math.ceil(config.turnTimeoutMs / 1000) + TOKEN_SLACK_SECONDS,
-    );
-    try {
-      const [minted, peers] = await Promise.all([
-        kube.json<{ status?: { token?: string } }>(
-          `/api/v1/namespaces/${this.namespace}/serviceaccounts/${account}/token`,
-          {
-            method: 'POST',
-            body: {
-              apiVersion: 'authentication.k8s.io/v1',
-              kind: 'TokenRequest',
-              spec: { audiences: [TOKEN_AUDIENCE], expirationSeconds: seconds },
-            },
-          },
-        ),
-        this.peerClusters(name, pod),
-      ]);
-      const token = minted.status?.token;
-      if (!token) throw new Error('TokenRequest answered no token');
-      return kubeconfig(token, [
-        {
-          name: config.kubeContext,
-          server: CLUSTER_URL,
-          ca: this.deps.clusterCa ?? null,
-        },
-        ...peers,
-      ]);
-    } catch (error) {
-      log.error('could not mint cluster access for this turn', {
-        sandbox: name,
-        serviceAccount: account,
-        error: plain(error),
-      });
-      return '';
-    }
-  }
-
-  /** Never fails the turn: without a peer the kubeconfig still reaches this cluster. */
-  private async peerClusters(
-    name: string,
-    pod: string,
-  ): Promise<KubeCluster[]> {
-    const peers = this.deps.config.kubePeers;
-    if (peers.length === 0) return [];
-    try {
-      const found = parsePeers(
-        await this.execText(pod, ['/bin/sh', '-c', peerScript(peers)]),
-        peers,
-      );
-      const missing = peers.filter(
-        (peer) => !found.some((c) => c.name === peer),
-      );
-      if (missing.length > 0) {
-        this.deps.log.warn(
-          'the checkout does not say where these clusters are',
-          {
-            sandbox: name,
-            missing,
-          },
-        );
-      }
-      return found;
-    } catch (error) {
-      this.deps.log.warn('could not read the peer clusters from the checkout', {
-        sandbox: name,
-        error: plain(error),
-      });
-      return [];
-    }
-  }
-
-  /** Truncates every credential file, then revokes the GitHub token. */
-  private async retireToken(
-    name: string,
-    pod: string,
-    token: string | null,
-  ): Promise<void> {
-    if (!this.credentialled) return;
-    // Truncated only once the ledger holds what it said; otherwise the file
-    // is the only copy of the turn's claims, and the next turn retries.
-    const synced = this.kthx ? await this.syncSites(name, pod) : null;
-    try {
-      // `{}` and not nothing: the CLI reads an empty file as corrupt.
-      await this.writeCredentials(pod, {
-        github: '',
-        kube: '',
-        ssh: '',
-        kthx: synced ? serialize({}) : null,
-      });
-      // What the next turn reads first, and it folds in as nothing claimed,
-      // not as every site removed.
-      if (synced) this.stamped.set(name, {});
-    } catch (error) {
-      this.deps.log.warn("could not clear the turn's credentials", {
-        sandbox: name,
-        error: plain(error),
-      });
-    }
-    if (!token) return;
-    await this.deps.githubApp?.revoke(token).catch((error: unknown) =>
-      this.deps.log.warn('could not revoke the GitHub token', {
-        sandbox: name,
-        error: plain(error),
-      }),
-    );
-  }
-
-  /**
-   * Reads the sandbox's kthx site tokens back into the ledger. Answers what
-   * the file should hold now, or `null` to leave it alone: an unreadable file
-   * may hold tokens nobody else has, and after a failed save it is their only
-   * copy. `read-failed` is the file, `save-failed` the Secret.
-   */
-  private async syncSites(name: string, pod: string): Promise<Sites | null> {
-    const { log, metrics } = this.deps;
-    const ledger = this.kthx;
-    if (!ledger) return null;
-    const before = this.stamped.get(name) ?? {};
-    let harvested: Sites;
-    try {
-      // Only absence is tolerated: a file that is there but cannot be read
-      // is not a file with nothing in it.
-      harvested = parseSites(
-        await this.execText(pod, [
-          '/bin/sh',
-          '-c',
-          `[ ! -e ${KTHX_SITES_FILE} ] || head -c ${SITES_LIMIT_BYTES + 1} ${KTHX_SITES_FILE}`,
-        ]),
-      );
-    } catch (error) {
-      metrics?.kthxSitesSynced('read-failed');
-      log.error('could not read the sandbox kthx sites file', {
-        sandbox: name,
-        error: plain(error),
-      });
-      // Unknown: a fold against nothing stamped can only add, never remove.
-      this.stamped.set(name, {});
-      return null;
-    }
-    try {
-      const sites = await ledger.merge(before, harvested);
-      metrics?.kthxSitesSynced('ok');
-      // The file holds this, and now so does the ledger.
-      this.stamped.set(name, harvested);
-      return sites;
-    } catch (error) {
-      metrics?.kthxSitesSynced('save-failed');
-      log.error('could not save the sandbox kthx sites into the ledger', {
-        sandbox: name,
-        secret: ledger.secret,
-        error: plain(error),
-      });
-      // The file holds what the ledger does not; the next fold must add it.
-      this.stamped.set(name, {});
-      return null;
-    }
-  }
-
-  // stdin is never closed: the stream has no half-close, and kata-clh drops
-  // stdout after an EOF on it.
-  private async execText(pod: string, command: string[]): Promise<string> {
-    const stream = await this.deps.kube.exec({
-      namespace: this.namespace,
-      pod,
-      container: HARNESS_CONTAINER,
-      command,
-      timeoutMs: STAMP_TIMEOUT_MS,
-    });
-    const timer = setTimeout(() => stream.close(), STAMP_TIMEOUT_MS);
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    let close: ExecClose;
-    try {
-      const reader = stream.stdout.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.length;
-        // The agent writes the file; mate buffers it and stamps it back as
-        // one argument, so it stays well under MAX_ARG_STRLEN.
-        if (size > SITES_LIMIT_BYTES) {
-          stream.close();
-          throw new Error(
-            `${command[0]} printed more than ${SITES_LIMIT_BYTES} bytes`,
-          );
-        }
-        chunks.push(value);
-      }
-      close = await stream.closed;
-    } finally {
-      clearTimeout(timer);
-    }
-    if (close.status?.status !== 'Success') {
-      throw new Error(
-        `${command[0]} said ${close.status?.message || close.reason}`,
-      );
-    }
-    return Buffer.concat(chunks).toString('utf8');
-  }
-
-  // One exec for every file, since a human is waiting on the turn. A null
-  // `kthx` leaves the sites file alone.
-  private async writeCredentials(
-    pod: string,
-    values: { github: string; kube: string; ssh: string; kthx: string | null },
-  ): Promise<void> {
-    const sites = values.kthx;
-    const stream = await this.deps.kube.exec({
-      namespace: this.namespace,
-      pod,
-      container: HARNESS_CONTAINER,
-      command: [
-        '/bin/sh',
-        '-c',
-        [
-          // First, so no file is ever briefly readable by others; ssh refuses
-          // a key that is.
-          'umask 077',
-          `mkdir -p ${SSH_DIR} "$(dirname ${KUBECONFIG_FILE})"${
-            sites === null ? '' : ` "$(dirname ${KTHX_SITES_FILE})"`
-          }`,
-          `printf %s "$1" > ${TOKEN_FILE}`,
-          `printf %s "$2" > ${KUBECONFIG_FILE}`,
-          `printf %s "$3" > ${SSH_KEY_FILE}`,
-          `printf %s "$4" > ${SSH_CONFIG_FILE}`,
-          ...(sites === null ? [] : [`printf %s "$5" > ${KTHX_SITES_FILE}`]),
-        ].join('; '),
-        // Values go in argv, since `ExecStream` cannot half-close stdin. That
-        // puts them in the apiserver audit log wherever auditing is on.
-        'mate',
-        values.github,
-        values.kube,
-        values.ssh,
-        // No key, no client config pointing ssh at one.
-        values.ssh ? SSH_CLIENT_CONFIG : '',
-        ...(sites === null ? [] : [sites]),
-      ],
-      timeoutMs: STAMP_TIMEOUT_MS,
-    });
-    void stream.stdout.cancel().catch(() => {});
-    const timer = setTimeout(() => stream.close(), STAMP_TIMEOUT_MS);
-    let close: ExecClose;
-    try {
-      close = await stream.closed;
-    } finally {
-      clearTimeout(timer);
-    }
-    // No status means nobody saw the exit, and the files may be empty.
-    if (close.status?.status !== 'Success') {
-      throw new Error(
-        `writing the token said ${close.status?.message || close.reason}`,
-      );
-    }
-  }
-
-  async cancel(session: Session): Promise<void> {
-    // After a failed `session/load` the attachment holds a new session id,
-    // and cancelling the old one stops nothing.
-    const attachment = this.attached.get(session.sandbox.name);
-    if (attachment?.sessionId !== session.id) return;
-    await attachment.client.cancel(session.id);
-  }
-
-  async teardown(ref: SandboxRef): Promise<void> {
-    if (this.kthx) await this.keepSites(ref);
-    await this.destroy(ref.name);
-    this.stamped.delete(ref.name);
-  }
-
-  // Best effort, before the delete takes the file with it.
-  private async keepSites(ref: SandboxRef): Promise<void> {
-    try {
-      await this.syncSites(ref.name, await this.podOf(ref));
-    } catch (error) {
-      // 404: gone already, and its home with it.
-      if (error instanceof KubeError && error.status === 404) return;
-      this.deps.log.warn(
-        'could not keep the sandbox kthx sites before teardown',
-        { sandbox: ref.name, error: plain(error) },
-      );
-    }
-  }
-
-  async podOf(ref: SandboxRef): Promise<string> {
-    const sandbox = await this.deps.kube.json<Sandbox>(this.path(ref.name));
-    return resolvePod(this.deps.kube, this.namespace, sandbox);
-  }
-
-  private path(name?: string): string {
-    const base = `${SANDBOXES}/namespaces/${this.namespace}/sandboxes`;
-    return name ? `${base}/${name}` : base;
-  }
-
-  private selector(): string {
-    return `${MINTED_BY_LABEL}=${MINTED_BY},${GUILD_LABEL}=${this.deps.guildId}`;
-  }
-
-  private shutdownTime(): string {
-    return new Date(Date.now() + (this.deps.ttlMs ?? TTL_MS)).toISOString();
-  }
-
-  private spareShutdownTime(): string {
-    return new Date(Date.now() + SPARE_TTL_MS).toISOString();
-  }
-
-  private spareSelector(): string {
-    return `${this.selector()},${SPARE_LABEL}=${SPARE}`;
-  }
-
-  /**
-   * By label, since an adopted spare's name derives from no thread. A
-   * terminating object is skipped, because `reuse` fails on it.
-   */
-  private async find(thread: ThreadRef): Promise<Sandbox | undefined> {
-    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
-      query: {
-        labelSelector: `${this.selector()},${THREAD_LABEL}=${thread.id}`,
-      },
-    });
-    // Checked, not selected on: older Discord sandboxes carry only the thread
-    // label. A Slack `thread_ts` is unique per channel only.
-    return list.items
-      .filter((found) => !found.metadata.deletionTimestamp)
-      .find((found) => {
-        const labels = found.metadata.labels ?? {};
-        return (
-          (labels[SURFACE_LABEL] ?? 'discord') === thread.surface &&
-          (labels[CHANNEL_LABEL] ?? thread.channelId) === thread.channelId
-        );
-      });
-  }
-
-  private async reuse(
-    existing: Sandbox,
-    thread: ThreadRef,
-    onStep?: OnMintStep,
-  ): Promise<MintedRef> {
-    const name = existing.metadata.name;
-    if (existing.metadata.deletionTimestamp) {
-      throw new Error(`sandbox ${name} is still terminating`);
-    }
-    this.deps.log.info('sandbox already existed', { sandbox: name });
-    onStep?.('reusing');
-    await this.waitUsable(name);
-    return { name, thread, source: 'reused' };
-  }
-
-  private async mintFresh(
-    thread: ThreadRef,
-    onStep?: OnMintStep,
-  ): Promise<MintedRef> {
-    const { kube } = this.deps;
-    const name = sandboxName(thread);
-    onStep?.('creating');
-    const response = await kube.request(this.path(), {
-      method: 'POST',
-      body: sandboxManifest({
-        name,
-        namespace: this.namespace,
-        labels: sandboxLabels(thread, this.deps.guildId),
-        config: this.deps.config,
-        shutdownTime: this.shutdownTime(),
-      }),
-    });
-    if (!ok(response, 409)) throw await kubeError(response);
-    await drain(response);
-    // `find` saw nothing, so a 409 means an object without our labels holds
-    // the name.
-    if (response.status === 409) {
-      return this.reuse(
-        await kube.json<Sandbox>(this.path(name)),
-        thread,
-        onStep,
-      );
-    }
-    onStep?.('booting');
-    await this.waitUsable(name);
-    return { name, thread, source: 'fresh' };
-  }
-
-  private async waitUsable(name: string): Promise<void> {
-    try {
-      await this.waitReady(name);
-    } catch (error) {
-      // `shutdownTime` is hours away, and an abandoned sandbox could still
-      // start later with nobody to talk to.
-      await this.destroy(name).catch((failure) =>
-        this.deps.log.warn('could not delete a sandbox that never came up', {
-          sandbox: name,
-          error: plain(failure),
-        }),
-      );
-      throw error;
-    }
-  }
-
-  private async adopt(
-    thread: ThreadRef,
-    onStep?: OnMintStep,
-  ): Promise<MintedRef | null> {
-    const { config, log } = this.deps;
-    // Pool off: skip the list, so an apiserver hiccup cannot cost a thread
-    // its answer.
-    if (config.spares === 0) return null;
-    const labels = claimLabels(thread);
-    for (const spare of await this.spares()) {
-      if (!isReady(spare)) continue;
-      const name = spare.metadata.name;
-      onStep?.('adopting');
-      try {
-        await this.patch(name, {
-          metadata: {
-            // Conditional on the listed revision: of two threads racing for
-            // one spare, the second gets a 409.
-            resourceVersion: spare.metadata.resourceVersion,
-            labels,
-          },
-          spec: {
-            shutdownTime: this.shutdownTime(),
-            // The controller copies template labels onto the running pod.
-            podTemplate: { metadata: { labels } },
-          },
-        });
-      } catch (error) {
-        if (error instanceof KubeError && error.status === 409) {
-          log.info('a spare was taken while this thread was reaching for it', {
-            sandbox: name,
-          });
-          continue;
-        }
-        throw error;
-      }
-      onStep?.('refreshing');
-      try {
-        await this.refresh(spare);
-      } catch (error) {
-        // The caller mints a replacement, so `condemn` strips the thread
-        // labels first. If that patch fails, the mint fails too.
-        log.warn('could not bring an adopted spare up to date; minting one', {
-          sandbox: name,
-          error: plain(error),
-        });
-        await this.condemn(name);
-        return null;
-      }
-      log.info('adopted a warm spare', {
-        sandbox: name,
-        surface: thread.surface,
-        threadId: thread.id,
-      });
-      return { name, thread, source: 'spare' };
-    }
-    return null;
-  }
-
-  /**
-   * The patch is awaited because it makes the object unreachable; the delete
-   * is not. Pass a listed `resourceVersion` to leave a moved object alone.
-   */
-  private async condemn(name: string, resourceVersion?: string): Promise<void> {
-    const labels = condemnLabels();
-    await this.patch(name, {
-      metadata: { labels, ...(resourceVersion ? { resourceVersion } : {}) },
-      spec: { podTemplate: { metadata: { labels } } },
-    });
-    void this.destroy(name).catch((failure) =>
-      this.deps.log.warn('could not delete a condemned sandbox', {
-        sandbox: name,
-        error: plain(failure),
-      }),
-    );
-  }
-
-  // Before the ACP attach, because opencode snapshots the workspace as it
-  // finds it.
-  private async refresh(spare: Sandbox): Promise<void> {
-    const { kube, config, log } = this.deps;
-    const name = spare.metadata.name;
-    const pod = await resolvePod(kube, this.namespace, spare);
-    let said = '';
-    const stream = await kube.exec({
-      namespace: this.namespace,
-      pod,
-      container: HARNESS_CONTAINER,
-      command: ['/bin/sh', '-c', refreshScript(), 'mate', config.checkoutRef],
-      onStderr: (text) => {
-        // Redacted as it arrives, because it ends up in a thrown Error.
-        said = redactStderr(`${said}${text}`);
-      },
-      timeoutMs: REFRESH_TIMEOUT_MS,
-    });
-    void stream.stdout.cancel().catch(() => {});
-    const timer = setTimeout(() => stream.close(), REFRESH_TIMEOUT_MS);
-    let close: ExecClose;
-    try {
-      close = await stream.closed;
-    } finally {
-      clearTimeout(timer);
-    }
-    // No status means nobody saw the exit; the workspace may not have moved.
-    if (close.status?.status !== 'Success') {
-      throw new Error(
-        `git said ${said.trim() || close.status?.message || close.reason}`,
-      );
-    }
-    log.info('refreshed an adopted workspace', { sandbox: name, pod });
-  }
-
-  private async spares(): Promise<Sandbox[]> {
-    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
-      query: { labelSelector: this.spareSelector() },
-    });
-    return list.items.filter((spare) => !spare.metadata.deletionTimestamp);
-  }
-
   private async sweep(): Promise<void> {
     const { config, log } = this.deps;
+    if (this.inheritedSandboxes) {
+      const listed = await this.list().catch((error: unknown) => {
+        log.warn('could not list sandboxes an earlier mate left', {
+          error: plain(error),
+        });
+        return null;
+      });
+      if (listed) {
+        await this.condemnInherited(
+          listed.filter(
+            (s) =>
+              s.metadata.labels?.[HANDS_LABEL] !== HANDS &&
+              s.metadata.labels?.[SPARE_LABEL] !== CONDEMNED,
+          ),
+        );
+      }
+    }
     const want = config.spares;
     // Pool off, the default: no apiserver calls at all.
     if (want === 0) return;
-    if (this.inherited) await this.discard();
+    if (this.inheritedSpares) await this.discardSpares();
     const ready: Sandbox[] = [];
     // Unready spares that could not be condemned still take room on the node,
     // so they count against the pool.
@@ -1556,10 +822,480 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   /**
-   * Spares outlive a rollout, and nothing on one records the image, model or
-   * checkout it was built from, so the first pass discards them all.
+   * Sandboxes an earlier mate minted, which speak no protocol this one does:
+   * a thread's keeps its kthx sites first. Retried each sweep until all go.
    */
-  private async discard(): Promise<void> {
+  private async condemnInherited(sandboxes: Sandbox[]): Promise<void> {
+    const { log, metrics } = this.deps;
+    let all = true;
+    for (const sandbox of sandboxes) {
+      const name = sandbox.metadata.name;
+      const claimed = threadOf(sandbox.metadata.labels ?? {}) !== null;
+      try {
+        if (claimed) await this.keepSites(sandbox);
+        await this.condemn(name);
+        this.credentials.forget(name);
+        if (claimed) metrics?.teardown('inherited');
+        log.info('condemned a sandbox an earlier mate left', {
+          sandbox: name,
+        });
+      } catch (error) {
+        all = false;
+        log.warn('could not condemn a sandbox an earlier mate left', {
+          sandbox: name,
+          error: plain(error),
+        });
+      }
+    }
+    if (all) this.inheritedSandboxes = false;
+  }
+
+  /** Finds, adopts or mints the thread's sandbox, and waits for it to be Ready. */
+  private async acquire(
+    ref: ThreadRef,
+    onStep: OnMintStep,
+  ): Promise<SandboxHandle> {
+    const existing = await this.find(ref);
+    if (existing)
+      return this.handle(await this.reuse(existing, onStep), 'reused');
+    const adopted = await this.adopt(ref, onStep);
+    if (adopted) {
+      // Refill in the background: this thread should not wait for it.
+      void this.ensureSpares().catch((error) =>
+        this.deps.log.warn('minting a replacement spare failed', {
+          error: plain(error),
+        }),
+      );
+      return this.handle(adopted, 'spare');
+    }
+    const minted = await this.mintFresh(ref, onStep);
+    return this.handle(minted.sandbox, minted.source);
+  }
+
+  private async handle(
+    sandbox: Sandbox,
+    source: SandboxSource,
+  ): Promise<SandboxHandle> {
+    const pod = await runningPod(this.deps.kube, this.namespace, sandbox);
+    if (!pod) {
+      throw new Error(`sandbox ${sandbox.metadata.name} has no running pod`);
+    }
+    return {
+      sandbox: sandbox.metadata.name,
+      pod: pod.metadata.name,
+      podUid: pod.metadata.uid ?? null,
+      source,
+    };
+  }
+
+  /** The thread's sandbox if it stands Ready; never mints. */
+  private async findReady(ref: ThreadRef): Promise<SandboxHandle | null> {
+    const found = await this.find(ref);
+    if (!found || !isReady(found)) return null;
+    return this.handle(found, 'reused');
+  }
+
+  private link(handle: SandboxHandle): HandsLink {
+    return new HandsLink({
+      kube: this.deps.kube,
+      namespace: this.namespace,
+      log: this.deps.log,
+      clock: this.clock,
+      metrics: this.deps.metrics,
+      cwd: this.layout.workspace,
+      expectHome: this.layout.expectHome,
+      epochs: this.layout.epochs,
+      locate: () => this.locate(handle),
+    });
+  }
+
+  /** Where `handle`'s daemon runs, while its pod is still the one it was. */
+  private async locate(handle: SandboxHandle): Promise<HandsTarget> {
+    const name = handle.sandbox;
+    let sandbox: Sandbox;
+    try {
+      sandbox = await this.deps.kube.json<Sandbox>(this.path(name));
+    } catch (error) {
+      if (error instanceof KubeError && error.status === 404) {
+        throw new SandboxGone(`sandbox ${name} was deleted`);
+      }
+      throw error;
+    }
+    if (sandbox.metadata.deletionTimestamp) {
+      throw new SandboxGone(`sandbox ${name} is being deleted`);
+    }
+    if (!isReady(sandbox)) {
+      throw new SandboxGone(
+        `sandbox ${name} stopped being ready: ${whyNotReady(sandbox)}`,
+      );
+    }
+    const pod = await runningPod(this.deps.kube, this.namespace, sandbox);
+    if (
+      !pod ||
+      pod.metadata.name !== handle.pod ||
+      (handle.podUid !== null && pod.metadata.uid !== handle.podUid)
+    ) {
+      throw new SandboxGone(`sandbox ${name} lost its pod ${handle.pod}`);
+    }
+    return { sandbox: name, pod: handle.pod };
+  }
+
+  /** A sandbox that died or runs no daemon mate speaks to. Never throws. */
+  private async lose(name: string): Promise<void> {
+    try {
+      const sandbox = await this.deps.kube
+        .json<Sandbox>(this.path(name))
+        .catch(() => null);
+      if (sandbox) await this.keepSites(sandbox);
+      await this.condemn(name);
+    } catch (error) {
+      if (error instanceof KubeError && error.status === 404) return;
+      this.deps.log.warn('could not condemn a lost sandbox', {
+        sandbox: name,
+        error: plain(error),
+      });
+    } finally {
+      this.credentials.forget(name);
+    }
+  }
+
+  private async discardOne(name: string): Promise<void> {
+    await this.condemn(name).catch((error: unknown) =>
+      this.deps.log.warn('could not discard a sandbox nobody wants', {
+        sandbox: name,
+        error: plain(error),
+      }),
+    );
+  }
+
+  /**
+   * Preempts an idle holder for a waiting thread; true once it no longer
+   * counts. A turn that begins before the condemn keeps the sandbox, and one
+   * that begins after it waits for its slot to be taken, then for another.
+   */
+  private async evict(key: string): Promise<boolean> {
+    const { log, metrics } = this.deps;
+    const inUse = () => {
+      const thread = this.threads.get(key);
+      return Boolean(thread?.openLease || thread?.busy);
+    };
+    const ref = this.threads.get(key)?.ref ?? this.standing.get(key)?.ref;
+    if (!ref) return true;
+    if (inUse()) return false;
+    const found = await this.sandboxesOf(ref);
+    for (const sandbox of found) await this.keepSites(sandbox);
+    if (inUse()) return false;
+    const thread = this.threads.get(key);
+    for (const sandbox of found) {
+      const name = sandbox.metadata.name;
+      await this.condemn(name);
+      this.credentials.forget(name);
+      thread?.gone(name);
+    }
+    this.standing.delete(key);
+    if (thread) thread.holding = null;
+    if (found.length === 0) return true;
+    log.info('preempted an idle sandbox for a waiting thread', {
+      thread: key,
+      sandboxes: found.map((s) => s.metadata.name),
+    });
+    thread?.tell((hooks) => hooks.onSandboxGone('preempted'));
+    metrics?.teardown('preempted');
+    return true;
+  }
+
+  /** Best effort, before the delete takes the file with it. */
+  private async keepSites(sandbox: Sandbox): Promise<void> {
+    if (!this.credentials.kthx) return;
+    const pod = await runningPod(this.deps.kube, this.namespace, sandbox).catch(
+      () => null,
+    );
+    if (pod) {
+      await this.credentials.keepSites(
+        sandbox.metadata.name,
+        pod.metadata.name,
+      );
+    }
+  }
+
+  private async list(): Promise<Sandbox[]> {
+    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
+      query: { labelSelector: this.selector() },
+    });
+    return list.items.filter((s) => !s.metadata.deletionTimestamp);
+  }
+
+  private listWithin(ms: number): Promise<Sandbox[]> {
+    return new Promise((resolve, reject) => {
+      const timer = this.clock.after(ms, () =>
+        reject(new Error(`listing took over ${ms / 1000}s`)),
+      );
+      this.list().then(
+        (listed) => {
+          this.clock.cancel(timer);
+          resolve(listed);
+        },
+        (error: unknown) => {
+          this.clock.cancel(timer);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  private path(name?: string): string {
+    const base = `${SANDBOXES}/namespaces/${this.namespace}/sandboxes`;
+    return name ? `${base}/${name}` : base;
+  }
+
+  private selector(): string {
+    return `${MINTED_BY_LABEL}=${MINTED_BY},${GUILD_LABEL}=${this.deps.guildId}`;
+  }
+
+  private handsSelector(): string {
+    return `${this.selector()},${HANDS_LABEL}=${HANDS}`;
+  }
+
+  private shutdownTime(): string {
+    return new Date(Date.now() + (this.deps.ttlMs ?? TTL_MS)).toISOString();
+  }
+
+  private spareShutdownTime(): string {
+    return new Date(Date.now() + SPARE_TTL_MS).toISOString();
+  }
+
+  private spareSelector(): string {
+    return `${this.handsSelector()},${SPARE_LABEL}=${SPARE}`;
+  }
+
+  /**
+   * By label, since an adopted spare's name derives from no thread. A
+   * terminating object is skipped, because `reuse` fails on it.
+   */
+  private async find(thread: ThreadRef): Promise<Sandbox | undefined> {
+    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
+      query: {
+        labelSelector: `${this.handsSelector()},${THREAD_LABEL}=${thread.id}`,
+      },
+    });
+    return list.items.find(
+      (found) => !found.metadata.deletionTimestamp && belongsTo(found, thread),
+    );
+  }
+
+  /** Every sandbox labelled for the thread, whatever protocol it speaks. */
+  private async sandboxesOf(thread: ThreadRef): Promise<Sandbox[]> {
+    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
+      query: {
+        labelSelector: `${this.selector()},${THREAD_LABEL}=${thread.id}`,
+      },
+    });
+    return list.items.filter(
+      (found) => !found.metadata.deletionTimestamp && belongsTo(found, thread),
+    );
+  }
+
+  /** A full TTL from now, so a long turn is not reaped mid-answer. */
+  private async reuse(existing: Sandbox, onStep: OnMintStep): Promise<Sandbox> {
+    const name = existing.metadata.name;
+    if (existing.metadata.deletionTimestamp) {
+      throw new Error(`sandbox ${name} is still terminating`);
+    }
+    this.deps.log.info('sandbox already existed', { sandbox: name });
+    onStep('reusing');
+    const ready = await this.waitUsable(name);
+    await this.slide(name);
+    return ready;
+  }
+
+  private async mintFresh(
+    thread: ThreadRef,
+    onStep: OnMintStep,
+  ): Promise<{ sandbox: Sandbox; source: SandboxSource }> {
+    const { kube } = this.deps;
+    const base = sandboxName(thread);
+    onStep('creating');
+    let name = base;
+    let response = await this.create(
+      name,
+      sandboxLabels(thread, this.deps.guildId),
+    );
+    if (response.status === 409) {
+      await drain(response);
+      // `find` saw nothing of ours, so the name is held by a sandbox being
+      // deleted, or one an earlier mate minted; this one gets its own.
+      const holder = await kube.json<Sandbox>(this.path(name));
+      if (
+        !holder.metadata.deletionTimestamp &&
+        holder.metadata.labels?.[HANDS_LABEL] === HANDS &&
+        belongsTo(holder, thread)
+      ) {
+        return { sandbox: await this.reuse(holder, onStep), source: 'reused' };
+      }
+      name = `${base}-${crypto.randomUUID().slice(0, 4)}`;
+      response = await this.create(
+        name,
+        sandboxLabels(thread, this.deps.guildId),
+      );
+    }
+    if (!ok(response)) throw await kubeError(response);
+    await drain(response);
+    onStep('booting');
+    return { sandbox: await this.waitUsable(name), source: 'fresh' };
+  }
+
+  private create(
+    name: string,
+    labels: Record<string, string>,
+    shutdownTime = this.shutdownTime(),
+  ): Promise<Response> {
+    return this.deps.kube.request(this.path(), {
+      method: 'POST',
+      body: sandboxManifest({
+        name,
+        namespace: this.namespace,
+        labels,
+        config: this.deps.config,
+        shutdownTime,
+      }),
+    });
+  }
+
+  private async waitUsable(name: string): Promise<Sandbox> {
+    try {
+      return await this.waitReady(name);
+    } catch (error) {
+      // `shutdownTime` is hours away, and an abandoned sandbox could still
+      // start later with nobody to talk to.
+      await this.destroy(name).catch((failure) =>
+        this.deps.log.warn('could not delete a sandbox that never came up', {
+          sandbox: name,
+          error: plain(failure),
+        }),
+      );
+      throw error;
+    }
+  }
+
+  private async adopt(
+    thread: ThreadRef,
+    onStep: OnMintStep,
+  ): Promise<Sandbox | null> {
+    const { config, log } = this.deps;
+    // Pool off: skip the list, so an apiserver hiccup cannot cost a thread
+    // its answer.
+    if (config.spares === 0) return null;
+    const labels = claimLabels(thread);
+    for (const spare of await this.spares()) {
+      if (!isReady(spare)) continue;
+      const name = spare.metadata.name;
+      onStep('adopting');
+      try {
+        await this.patch(name, {
+          metadata: {
+            // Conditional on the listed revision: of two threads racing for
+            // one spare, the second gets a 409.
+            resourceVersion: spare.metadata.resourceVersion,
+            labels,
+          },
+          spec: {
+            shutdownTime: this.shutdownTime(),
+            // The controller copies template labels onto the running pod.
+            podTemplate: { metadata: { labels } },
+          },
+        });
+      } catch (error) {
+        if (error instanceof KubeError && error.status === 409) {
+          log.info('a spare was taken while this thread was reaching for it', {
+            sandbox: name,
+          });
+          continue;
+        }
+        throw error;
+      }
+      onStep('refreshing');
+      try {
+        await this.refresh(spare);
+      } catch (error) {
+        // The caller mints a replacement, so `condemn` strips the thread
+        // labels first. If that patch fails, the mint fails too.
+        log.warn('could not bring an adopted spare up to date; minting one', {
+          sandbox: name,
+          error: plain(error),
+        });
+        await this.condemn(name);
+        return null;
+      }
+      log.info('adopted a warm spare', {
+        sandbox: name,
+        surface: thread.surface,
+        threadId: thread.id,
+      });
+      return spare;
+    }
+    return null;
+  }
+
+  /**
+   * The patch is awaited because it makes the object unreachable; the delete
+   * is not. Pass a listed `resourceVersion` to leave a moved object alone.
+   */
+  private async condemn(name: string, resourceVersion?: string): Promise<void> {
+    const labels = condemnLabels();
+    await this.patch(name, {
+      metadata: { labels, ...(resourceVersion ? { resourceVersion } : {}) },
+      spec: { podTemplate: { metadata: { labels } } },
+    });
+    void this.destroy(name).catch((failure) =>
+      this.deps.log.warn('could not delete a condemned sandbox', {
+        sandbox: name,
+        error: plain(failure),
+      }),
+    );
+  }
+
+  // Before the first tool call, so the agent never sees the spare's old tree.
+  private async refresh(spare: Sandbox): Promise<void> {
+    const { kube, config, log } = this.deps;
+    const name = spare.metadata.name;
+    const pod = await resolvePod(kube, this.namespace, spare);
+    let said = '';
+    const stream = await kube.exec({
+      namespace: this.namespace,
+      pod,
+      container: HARNESS_CONTAINER,
+      command: ['/bin/sh', '-c', refreshScript(), 'mate', config.checkoutRef],
+      onStderr: (text) => {
+        // Redacted as it arrives, because it ends up in a thrown Error.
+        said = redactStderr(`${said}${text}`);
+      },
+      timeoutMs: REFRESH_TIMEOUT_MS,
+    });
+    void stream.stdout.cancel().catch(() => {});
+    const timer = setTimeout(() => stream.close(), REFRESH_TIMEOUT_MS);
+    let close: ExecClose;
+    try {
+      close = await stream.closed;
+    } finally {
+      clearTimeout(timer);
+    }
+    // No status means nobody saw the exit; the workspace may not have moved.
+    if (close.status?.status !== 'Success') {
+      throw new Error(
+        `git said ${said.trim() || close.status?.message || close.reason}`,
+      );
+    }
+    log.info('refreshed an adopted workspace', { sandbox: name, pod });
+  }
+
+  private async spares(): Promise<Sandbox[]> {
+    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
+      query: { labelSelector: this.spareSelector() },
+    });
+    return list.items.filter((spare) => !spare.metadata.deletionTimestamp);
+  }
+
+  private async discardSpares(): Promise<void> {
     let all = true;
     for (const stale of await this.spares()) {
       const name = stale.metadata.name;
@@ -1577,31 +1313,24 @@ export class KubeSandboxes implements Sandboxes {
       }
     }
     // Retry while any remain, or an inherited spare is renewed indefinitely.
-    this.inherited = !all;
+    this.inheritedSpares = !all;
   }
 
   private async mintSpare(): Promise<void> {
-    const { kube, log } = this.deps;
     const name = spareName();
-    const response = await kube.request(this.path(), {
-      method: 'POST',
-      body: sandboxManifest({
-        name,
-        namespace: this.namespace,
-        labels: spareLabels(this.deps.guildId),
-        config: this.deps.config,
-        shutdownTime: this.spareShutdownTime(),
-      }),
-    });
+    const response = await this.create(
+      name,
+      spareLabels(this.deps.guildId),
+      this.spareShutdownTime(),
+    );
     if (!ok(response)) throw await kubeError(response);
     await drain(response);
     await this.waitUsable(name);
-    log.info('a spare is warm', { sandbox: name });
+    this.deps.log.info('a spare is warm', { sandbox: name });
   }
 
   private async destroy(name: string): Promise<void> {
     const { kube } = this.deps;
-    this.detach(name);
     const response = await kube.request(this.path(name), { method: 'DELETE' });
     if (!ok(response, 404)) throw await kubeError(response);
     await drain(response);
@@ -1648,90 +1377,8 @@ export class KubeSandboxes implements Sandboxes {
     throw new Error(`sandbox ${name} was not ready in time: ${why}`);
   }
 
-  private async openSession(
-    client: AcpClient,
-    name: string,
-    stored: string | undefined,
-  ): Promise<{ id: string; resumed: boolean }> {
-    const { log } = this.deps;
-    if (stored) {
-      try {
-        await client.loadSession(stored, WORKSPACE);
-        log.info('acp session loaded', { sandbox: name, session: stored });
-        return { id: stored, resumed: true };
-      } catch (error) {
-        log.warn('acp session/load failed; opening a new session', {
-          sandbox: name,
-          session: stored,
-          error: plain(error),
-        });
-      }
-    }
-    const fresh = await client.newSession(WORKSPACE);
-    log.info('acp session opened', { sandbox: name, session: fresh });
-    return { id: fresh, resumed: false };
-  }
-
-  // A dead mate's harness keeps running with no reader, and two `opencode acp`
-  // processes would share one state directory.
-  private async reap(name: string, pod: string): Promise<void> {
-    const { kube, log } = this.deps;
-    try {
-      const stream = await kube.exec({
-        namespace: this.namespace,
-        pod,
-        container: HARNESS_CONTAINER,
-        // `-x` matches the process name; `-f` would match this shell's own
-        // arguments and kill the reaper.
-        command: ['/bin/sh', '-c', 'pkill -x opencode; exit 0'],
-        timeoutMs: REAP_TIMEOUT_MS,
-      });
-      void stream.stdout.cancel().catch(() => {});
-      const timer = setTimeout(() => stream.close(), REAP_TIMEOUT_MS);
-      try {
-        await stream.closed;
-      } finally {
-        clearTimeout(timer);
-      }
-      log.info('reaped any orphaned harness', { sandbox: name, pod });
-    } catch (error) {
-      log.warn('reaping the orphaned harness failed', {
-        sandbox: name,
-        pod,
-        error: plain(error),
-      });
-    }
-  }
-
-  private detach(name: string): void {
-    const attachment = this.attached.get(name);
-    if (!attachment) return;
-    this.attached.delete(name);
-    attachment.client.close();
-  }
-
   private async slide(name: string): Promise<void> {
-    await this.patch(name, {
-      spec: { shutdownTime: this.shutdownTime() },
-      metadata: { annotations: { [TURN_ANNOTATION]: null } },
-    });
-  }
-
-  // The controller deletes at `shutdownTime` even mid-turn, so the start of a
-  // turn slides it too and the turn gets a full TTL.
-  private async mark(name: string): Promise<void> {
-    await this.patch(name, {
-      spec: { shutdownTime: this.shutdownTime() },
-      metadata: {
-        annotations: { [TURN_ANNOTATION]: new Date().toISOString() },
-      },
-    });
-  }
-
-  private async remember(name: string, sessionId: string): Promise<void> {
-    await this.patch(name, {
-      metadata: { annotations: { [SESSION_ANNOTATION]: sessionId } },
-    });
+    await this.patch(name, { spec: { shutdownTime: this.shutdownTime() } });
   }
 
   private async patch(name: string, body: unknown): Promise<void> {
@@ -1752,12 +1399,11 @@ function idle(deadline: number): Promise<void> {
 }
 
 function redactStderr(text: string): string {
-  return text
-    .replace(SECRET_SHAPED, '[redacted]')
-    .trim()
-    .slice(0, STDERR_LIMIT);
+  return redact(text).trim().slice(0, STDERR_LIMIT);
 }
 
 async function drain(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => {});
 }
+
+export const createKubeHands: CreateKubeHands = (deps) => new KubeHands(deps);

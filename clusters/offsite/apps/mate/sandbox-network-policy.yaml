@@ -3,7 +3,7 @@
 # isolates the kernel, not the network. The sandbox is cluster-admin and root
 # on every host it can reach, so this keeps it out of mate and Alertmanager by
 # accident, not against intent. No ingress rules, so Cilium leaves ingress
-# unenforced; mate reaches the harness through pods/exec.
+# unenforced; mate reaches the mate-hands daemon through pods/exec.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -32,8 +32,8 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
-    # The internet on the web ports: the provider, GitHub, package registries
-    # and documentation.
+    # The internet on the web ports: GitHub, package registries and
+    # documentation.
     - toEntities:
         - world
       toPorts:

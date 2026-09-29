@@ -16,6 +16,7 @@ import {
   subtext,
   TEXT_CAP,
 } from '../src/discord.ts';
+import { SANDBOX_CARD_ID } from '../src/lease.ts';
 import { isNotice, SANDBOX_CLOSED } from '../src/notices.ts';
 import { threadKey } from '../src/surface.ts';
 import { FakeClock, FakeDiscord } from './support.ts';
@@ -135,6 +136,24 @@ describe('a live card', () => {
     await canvas.final('a'.repeat(CHUNK_BUDGET * 2), 'done');
     for (const message of discord.inThread(THREAD))
       expect(total(message.body)).toBeLessThanOrEqual(TEXT_CAP);
+  });
+});
+
+describe("a card's footer", () => {
+  test('counts the tools the agent called, and not the sandbox card', async () => {
+    const clock = new FakeClock();
+    const discord = new FakeDiscord();
+    const canvas = new DiscordCanvas(discord, THREAD, 'k', clock);
+    await canvas.tool?.({
+      id: SANDBOX_CARD_ID,
+      title: 'sandbox ready',
+      state: 'complete',
+    });
+    await canvas.tool?.({ id: 'c1', title: '$ ls', state: 'complete' });
+    await canvas.final('done', 'done');
+    expect(discord.inThread(THREAD).at(-1)?.subtext).toEqual([
+      '-# ✓ 1 tool · 0s',
+    ]);
   });
 });
 

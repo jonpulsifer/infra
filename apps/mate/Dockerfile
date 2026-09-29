@@ -2,7 +2,8 @@
 #
 # mate: one Bun process that runs its source as committed, with no build step.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:43c334f3a02ad976d558840f4a5f9a785e67acc51c8d7e3d77fbae47a4a39c52 AS base
-ARG BUN_VERSION=1.4.0
+# renovate: datasource=npm depName=bun
+ARG BUN_VERSION=1.4.2
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 USER root
@@ -10,9 +11,13 @@ RUN apk add --no-cache bash curl unzip \
   && curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
 
 FROM base AS pruner
+# At least 2.11.2: 2.10.3's prune drops a nested lockfile entry that pi-ai's
+# dependencies need, and the frozen install then refuses it.
+# renovate: datasource=npm depName=turbo
+ARG TURBO_VERSION=2.11.2
 WORKDIR /app
 COPY . .
-RUN bun x turbo@2.10.3 prune mate --docker
+RUN bun x "turbo@${TURBO_VERSION}" prune mate --docker
 
 FROM base AS deps
 WORKDIR /app
@@ -26,13 +31,24 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=deps --chmod=755 /app ./
 COPY --from=pruner --chmod=755 /app/out/full/apps/mate/src ./apps/mate/src
-# `deps` has only the workspace manifests and symlinks, so the package's
+# `deps` has only the workspace manifests and symlinks, so each package's
 # source comes from `pruner`.
 COPY --from=pruner --chmod=755 /app/out/full/packages/mate-hands/src ./packages/mate-hands/src
+COPY --from=pruner --chmod=755 /app/out/full/packages/pi-store-postgres/src ./packages/pi-store-postgres/src
+# The agent's profile: the system prompt is AGENTS.md plus an index of these
+# skills. turbo prune leaves them out, so they come from the raw context.
+COPY --from=pruner --chmod=755 /app/AGENTS.md /app/AGENTS.md
+COPY --from=pruner --chmod=755 /app/dotfiles/skills /app/dotfiles/skills
+COPY --from=pruner --chmod=755 /app/.agents/skills /app/.agents/skills
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 RUN test -f /app/apps/mate/src/main.ts \
   && test -d /app/apps/mate/node_modules/@discordjs/ws \
-  && test -f /app/apps/mate/node_modules/@repo/mate-hands/src/protocol.ts
+  && test -d /app/apps/mate/node_modules/@earendil-works/pi-agent-core \
+  && test -f /app/apps/mate/node_modules/@repo/mate-hands/src/protocol.ts \
+  && test -f /app/apps/mate/node_modules/@repo/pi-store-postgres/src/index.ts \
+  && test -f /app/AGENTS.md \
+  && ls /app/dotfiles/skills/*/SKILL.md >/dev/null \
+  && ls /app/.agents/skills/*/SKILL.md >/dev/null
 WORKDIR /app/apps/mate
 USER 65532:65532
 EXPOSE 8080

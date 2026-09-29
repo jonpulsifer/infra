@@ -58,7 +58,7 @@ This page defines the lab's own terms, and the tool terms that have a lab-specif
 | Registry | `nix/hosts/default.nix`, the list of every host, image and package | [NixOS](../platform/nixos.md#registry) |
 | Root | An OpenTofu directory with its own state | [OpenTofu and Atlantis](../platform/opentofu.md) |
 | Rowbutt | The chat bot that gives the owner a coding agent in Discord and Slack | [Rowbutt](../apps/mate.md) |
-| Sandbox | The Kata microVM pod in which Rowbutt runs one thread | [Rowbutt](../apps/mate.md) |
+| Sandbox | The Kata microVM pod in which Rowbutt runs one thread's tools | [Rowbutt](../apps/mate.md) |
 | Site Magic | UniFi's WireGuard tunnel between the folly and offsite gateways | [Routing and firewall](../platform/network/routing-and-firewall.md) |
 | Skiff | A Bosun microVM that runs one GitHub Actions job and then halts | [Bosun](../apps/bosun.md#terms) |
 | Status | A page's state. `live` runs, `experiment` is a trial, `parked` is in the tree and runs nowhere, `unplugged` is powered off, `off-git` runs from config outside git, and `unverified` is unconfirmed. | [Style guide](style-guide.md#sections) |

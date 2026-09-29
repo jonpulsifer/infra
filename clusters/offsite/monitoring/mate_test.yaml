@@ -102,17 +102,20 @@ tests:
         alertname: MateGatewayFatalClose
         exp_alerts: []
 
-  # Both slots held for a full 45m window of data.
+  # A turn waits for a sandbox for a full 15m window, and threads wait for a
+  # turn for a full 10m window.
   - interval: 1m
     input_series:
-      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
-        values: 2x60
+      - series: 'mate_sandbox_waiters{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x5 1x40
+      - series: 'mate_queue_depth{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x5 2x40
     alert_rule_test:
-      - eval_time: 44m
-        alertname: MateSandboxesAtCap
+      - eval_time: 19m
+        alertname: MateSandboxWaitsLong
         exp_alerts: []
-      - eval_time: 48m
-        alertname: MateSandboxesAtCap
+      - eval_time: 21m
+        alertname: MateSandboxWaitsLong
         exp_alerts:
           - exp_labels:
               severity: warning
@@ -122,29 +125,96 @@ tests:
               namespace: monitoring
               instance: 10.101.1.173:8889
             exp_annotations:
-              message: "mate has been at its sandbox cap for three quarters of an hour"
-              description: "Both sandbox slots have been held continuously for forty-five minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is two busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+              message: "mate turns have waited a quarter of an hour for a sandbox"
+              description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+      - eval_time: 14m
+        alertname: MateThreadsQueued
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: MateThreadsQueued
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate threads have waited ten minutes for a turn"
+              description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
 
-  # One slot frees for a minute at t=20.
+  # Each wait drops to zero at t=20: a preempted slot, a turn that ended.
   - interval: 1m
     input_series:
-      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
-        values: 2x19 1x1 2x60
+      - series: 'mate_sandbox_waiters{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x19 0x1 1x14
+      - series: 'mate_queue_depth{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x19 0x1 1x9
     alert_rule_test:
-      - eval_time: 60m
-        alertname: MateSandboxesAtCap
+      - eval_time: 34m
+        alertname: MateSandboxWaitsLong
+        exp_alerts: []
+      - eval_time: 29m
+        alertname: MateThreadsQueued
         exp_alerts: []
 
+  # A series that reads 1 from its first point, as a new wait does after a
+  # roll: the offset arm holds each alert for a full window.
+  - interval: 1m
+    input_series:
+      - series: 'mate_sandbox_waiters{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x40
+      - series: 'mate_queue_depth{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x40
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: MateSandboxWaitsLong
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: MateSandboxWaitsLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate turns have waited a quarter of an hour for a sandbox"
+              description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+      - eval_time: 9m
+        alertname: MateThreadsQueued
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: MateThreadsQueued
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate threads have waited ten minutes for a turn"
+              description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+
   # Turns and mints failing, then stopping; each is summed across its label.
+  # No failing series crosses the threshold alone, so each matched value
+  # counts, and the climbing `end_turn` and `ok` series must not.
   - interval: 1m
     input_series:
       - series: 'mate_turns_ended_total{reason="error",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
-        values: 1+1x3 4x60
-      - series: 'mate_turns_ended_total{reason="sandbox-died",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+1x1 2x62
+      - series: 'mate_turns_ended_total{reason="brain-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
         values: 1x64
+      - series: 'mate_turns_ended_total{reason="end_turn",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+10x63
       - series: 'mate_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
         values: 1+1x1 2x62
-      - series: 'mate_mints_total{result="attach-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+      - series: 'mate_mints_total{result="connect-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
         values: 1x64
       - series: 'mate_mints_total{result="ok",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
         values: 1+10x63
@@ -156,7 +226,7 @@ tests:
               severity: warning
             exp_annotations:
               message: "mate turns are failing"
-              description: "More than two turns ended in an error or a dead sandbox in the last thirty minutes. `error` is what the harness reported over ACP — the OpenCode Go key, the model id in MATE_SANDBOX_MODEL, or a region gate on the model. `sandbox-died` is the pod: read `kubectl --context offsite describe sandbox -n mate` and the node's pressure before blaming the harness."
+              description: "More than two turns ended in an error in the last thirty minutes. `error` is a run pi gave up on, usually at the model provider, and `mate_provider_errors_total` says which kind: `auth` is the key in Secret mate-opencode, `limit` the usage cap of the `opencode-go` plan, `timeout` a provider that stopped answering, and `other` anything else, such as a MATE_MODEL the provider refuses. `brain-failed` is the session store or the harness itself failing: read `mate_store_failures_total` by `op`, which MateStoreFailing watches, alongside mate's log (`kubectl --context offsite logs -n mate deploy/mate`), because a `brain-failed` turn with no store failure is a fault in mate's own agent loop. A sandbox that dies mid-turn is a tool error the model sees, not a failed turn."
       - eval_time: 10m
         alertname: MateSandboxMintFailing
         exp_alerts:
@@ -164,14 +234,64 @@ tests:
               severity: warning
             exp_annotations:
               message: "mate cannot give a thread a sandbox"
-              description: "More than two mints or attaches failed in the last thirty minutes, so a human asking mate a question is getting a plain refusal instead of an answer. A mint failure is the Sandbox never going Ready — the harness image digest, the kata-clh runtime class, or the namespace's restricted PSA. An attach failure is `pods/exec` into a Ready pod, which is the Role in ../../apps/mate/rbac.yaml or the harness not starting inside the sandbox."
-      # Nothing failed in the last half hour. The climbing `ok` mints prove the
-      # result matcher does the work.
+              description: "More than two sandbox mints or connects failed in the last thirty minutes, so turns that need a command or a file get tool errors instead of results. A mint failure is the Sandbox never going Ready — the sandbox image digest, the kata-clh runtime class, or the namespace's restricted PSA. A connect is `pods/exec` into a Ready pod and then the mate-hands hello: a failure is the Role in ../../apps/mate/rbac.yaml, or a daemon that speaks another protocol, which mate condemns as too old so the next call mints a new sandbox. `mate_hands_connects_total` by `result` says which."
+      # Nothing failed in the last half hour.
       - eval_time: 60m
         alertname: MateTurnsFailing
         exp_alerts: []
       - eval_time: 60m
         alertname: MateSandboxMintFailing
+        exp_alerts: []
+
+  # Session-store failures in a burst across two ops, then none; summed
+  # across `op`.
+  - interval: 1m
+    input_series:
+      - series: 'mate_store_failures_total{op="open",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+1x2 3x62
+      - series: 'mate_store_failures_total{op="fault",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x64
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateStoreFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate is failing to reach its session store"
+              description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, and `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
+      - eval_time: 60m
+        alertname: MateStoreFailing
+        exp_alerts: []
+
+  # mate restarted into a mate-db that is down, and the migrate series is born
+  # at 3, which `increase()` reads as none.
+  - interval: 1m
+    input_series:
+      - series: 'mate_store_failures_total{op="migrate",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 3x70
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateStoreFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate is failing to reach its session store"
+              description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, and `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
+      # Half an hour on, the series is no longer new, so the alert clears.
+      - eval_time: 60m
+        alertname: MateStoreFailing
+        exp_alerts: []
+
+  # Two failures are not an alert.
+  - interval: 1m
+    input_series:
+      - series: 'mate_store_failures_total{op="rows",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+1x1 2x68
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateStoreFailing
         exp_alerts: []
 
   # mate is ready and its key yields no installation token.
@@ -312,10 +432,18 @@ tests:
         values: 4x29 _x40
       - series: 'mate_github_token_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
         values: _x29 4x40
-      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
-        values: 2x29 _x40
-      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
-        values: _x29 2x40
+      - series: 'mate_store_failures_total{op="open",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
+        values: 6x29 _x40
+      - series: 'mate_store_failures_total{op="open",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
+        values: _x29 6x40
+      - series: 'mate_sandbox_waiters{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
+        values: 1x29 _x40
+      - series: 'mate_sandbox_waiters{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
+        values: _x29 1x40
+      - series: 'mate_queue_depth{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
+        values: 1x29 _x40
+      - series: 'mate_queue_depth{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
+        values: _x29 1x40
     alert_rule_test:
       - eval_time: 50m
         alertname: MateTurnsFailing
@@ -326,9 +454,12 @@ tests:
       - eval_time: 50m
         alertname: MateGitHubTokenMintFailing
         exp_alerts: []
-      # The cap has held for the full window across the roll.
-      - eval_time: 65m
-        alertname: MateSandboxesAtCap
+      - eval_time: 50m
+        alertname: MateStoreFailing
+        exp_alerts: []
+      # Both waits have held for their full windows across the roll.
+      - eval_time: 45m
+        alertname: MateSandboxWaitsLong
         exp_alerts:
           - exp_labels:
               severity: warning
@@ -339,15 +470,29 @@ tests:
               pod: opentelemetry-collector-6f8df4944d-jwcb7
               instance: 10.101.1.173:8889
             exp_annotations:
-              message: "mate has been at its sandbox cap for three quarters of an hour"
-              description: "Both sandbox slots have been held continuously for forty-five minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is two busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+              message: "mate turns have waited a quarter of an hour for a sandbox"
+              description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+      - eval_time: 45m
+        alertname: MateThreadsQueued
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              pod: opentelemetry-collector-6f8df4944d-jwcb7
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate threads have waited ten minutes for a turn"
+              description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
 
   - interval: 30m
     input_series:
       - series: 'mate_turns_total{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
         values: 1+5x30
       - series: 'mate_turn_cost_usd_sum{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
-        values: 0.01+0.05x30
+        values: 0.01+1x30
     alert_rule_test:
       - eval_time: 150m
         alertname: MateTurnBudgetNearlySpent
@@ -375,7 +520,7 @@ tests:
               severity: warning
             exp_annotations:
               message: "mate's reported spend is above its daily budget"
-              description: "The turns of the last rolling day report more than $0.50 of model spend, against a measured $0.002178 for a real turn. Volume is capped at 120 turns/day, so this is the price per turn moving: check MATE_SANDBOX_MODEL on the mate Deployment and what the harness is actually being handed. The number is OpenCode Go's list-price shadow on a flat-rate plan, not a bill."
+              description: "The turns of the last rolling day report more than $25 of model spend. The number is qwen3.8-max's list price from pi's catalog, summed over each run: a shadow of the flat-rate `opencode-go` plan, not a bill. Volume is capped at 120 turns/day, so this is the tokens per turn moving: check MATE_MODEL and MATE_THINKING on the mate Deployment, then which threads run long turns. The threshold is a first estimate; move it once a week of turns shows a normal day."
 
   # A bot connected all day stops reporting the identify budget.
   - interval: 1m
@@ -426,7 +571,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate is not keeping a sandbox warm"
-              description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so every thread has been paying the full cold start again — tens of seconds of a line saying `booting the sandbox` before a word of the answer. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
+              description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so a thread with no sandbox of its own pays the full cold mint at its turn's first tool call, which waits tens of seconds on the thread's sandbox card. A turn that only talks mints nothing and waits for nothing. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
 
   # MATE_SPARES unset: nothing wanted, nothing held, no alert.
   - interval: 1m

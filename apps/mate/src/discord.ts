@@ -14,6 +14,7 @@ import {
   SeparatorSpacingSize,
 } from 'discord-api-types/v10';
 import { type Clock, duration } from './clock.ts';
+import { SANDBOX_CARD_ID } from './lease.ts';
 import { plain } from './log.ts';
 import { oneLine, splitAt } from './reply.ts';
 import type {
@@ -296,8 +297,10 @@ export class DiscordCanvas implements Canvas {
   }
 
   private footer(outcome: Outcome, empty: boolean): string {
-    const tools = [...this.timeline.values()].filter(
-      (entry) => entry.state !== 'step',
+    // The sandbox card is the lease, not a tool the agent called.
+    const tools = [...this.timeline].filter(
+      ([key, entry]) =>
+        entry.state !== 'step' && key !== `tool:${SANDBOX_CARD_ID}`,
     ).length;
     const facts = [
       ...(tools > 0 ? [`${tools} tool${tools === 1 ? '' : 's'}`] : []),

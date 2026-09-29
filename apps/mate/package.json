@@ -11,16 +11,19 @@
     "smoke": "bun run src/smoke.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.5.0",
     "@discordjs/core": "2.6.0",
     "@discordjs/rest": "2.6.3",
     "@discordjs/ws": "2.0.4",
+    "@earendil-works/pi-agent-core": "0.87.1",
+    "@earendil-works/pi-ai": "0.87.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.222.0",
     "@opentelemetry/resources": "^2.10.0",
     "@opentelemetry/sdk-metrics": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.30.0",
     "@repo/mate-hands": "workspace:*",
+    "@repo/pi-store-postgres": "workspace:*",
     "discord-api-types": "0.38.55",
     "zod": "4.6.5"
   },

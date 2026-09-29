@@ -12,13 +12,23 @@ import {
   spoken,
 } from '../src/discord.ts';
 import type { SessionStartLimit } from '../src/guard.ts';
-import type { Fields, Log } from '../src/log.ts';
 import type {
-  Instruments,
+  HandsCallResult,
+  HandsConnectResult,
+  HandsConnectSample,
+  HandsDropReason,
   MintResult,
   MintSample,
   TeardownReason,
+  TurnSandboxSource,
+} from '../src/lease.ts';
+import type { Fields, Log } from '../src/log.ts';
+import type {
+  Instruments,
+  ProviderErrorKind,
+  StoreOp,
   TurnEnd,
+  TurnResumeResult,
   TurnSample,
 } from '../src/metrics.ts';
 import type {
@@ -174,9 +184,21 @@ export class RecordingInstruments implements Instruments {
   readonly mints: MintResult[] = [];
   readonly mintSamples: MintSample[] = [];
   readonly closes: { code: number; fatal: boolean }[] = [];
+  readonly resumes: TurnResumeResult[] = [];
+  readonly tools: { tool: string; isError: boolean }[] = [];
+  readonly providerErrors: ProviderErrorKind[] = [];
+  readonly storeFailures: StoreOp[] = [];
+  readonly turnSandboxes: TurnSandboxSource[] = [];
+  readonly connects: HandsConnectResult[] = [];
+  readonly calls: { method: string; result: HandsCallResult }[] = [];
+  readonly drops: HandsDropReason[] = [];
+  readonly mcpCalls: string[] = [];
   started = 0;
   live = 0;
+  waiters = 0;
   queued = 0;
+  running = 0;
+  mcp: boolean | null = null;
   pool: { ready: number; wanted: number } | null = null;
   readonly tokenMints: string[] = [];
   readonly tokenStamps: string[] = [];
@@ -194,8 +216,14 @@ export class RecordingInstruments implements Instruments {
   sandboxesLive(count: number): void {
     this.live = count;
   }
+  sandboxWaiters(count: number): void {
+    this.waiters = count;
+  }
   queueDepth(depth: number): void {
     this.queued = depth;
+  }
+  turnsRunning(count: number): void {
+    this.running = count;
   }
   githubAppReady(ready: boolean | null): void {
     this.appReady = ready;
@@ -212,12 +240,42 @@ export class RecordingInstruments implements Instruments {
   spares(ready: number, wanted: number): void {
     this.pool = { ready, wanted };
   }
+  handsConnected(result: HandsConnectResult, _sample: HandsConnectSample) {
+    this.connects.push(result);
+  }
+  handsCall(method: string, result: HandsCallResult, _ms: number): void {
+    this.calls.push({ method, result });
+  }
+  handsDropped(reason: HandsDropReason): void {
+    this.drops.push(reason);
+  }
+  turnSandbox(source: TurnSandboxSource): void {
+    this.turnSandboxes.push(source);
+  }
+  mcpUp(up: boolean): void {
+    this.mcp = up;
+  }
+  mcpCall(result: string): void {
+    this.mcpCalls.push(result);
+  }
   turnStarted(): void {
     this.started += 1;
   }
   turnEnded(reason: TurnEnd, sample: TurnSample): void {
     this.turns.push(reason);
     this.samples.push(sample);
+  }
+  turnResumed(result: TurnResumeResult): void {
+    this.resumes.push(result);
+  }
+  toolEnded(tool: string, isError: boolean): void {
+    this.tools.push({ tool, isError });
+  }
+  providerError(kind: ProviderErrorKind): void {
+    this.providerErrors.push(kind);
+  }
+  storeFailed(op: StoreOp): void {
+    this.storeFailures.push(op);
   }
   teardown(reason: TeardownReason): void {
     this.teardowns.push(reason);

@@ -99,7 +99,7 @@
       "id": 3,
       "type": "stat",
       "title": "Sandboxes live",
-      "description": "One per thread holding a sandbox. Two is MATE_MAX_CONCURRENT, at which the next thread is queued. It counts threads, not Sandboxes, so the warm spare mate keeps beside them is not in it.",
+      "description": "Sandboxes leased to threads. At MATE_MAX_SANDBOXES a turn that needs one takes the sandbox of a thread idle for five minutes, or waits. It counts threads, not Sandboxes, so the warm spare mate keeps beside them is not in it.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -159,7 +159,7 @@
       "id": 4,
       "type": "stat",
       "title": "Threads waiting",
-      "description": "Threads told to wait for a slot, FIFO. Anything above zero for long is starvation, not load.",
+      "description": "Threads waiting for a free turn, first in first out. A turn slot frees as soon as a turn ends, so ten minutes above zero is MateThreadsQueued.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -296,7 +296,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "Turns per hour, by how they ended",
-      "description": "end_turn is the harness finishing. cancelled is the Stop button. error is what the harness reported over ACP; sandbox-died is the pod going away underneath a running turn.",
+      "description": "end_turn is the model finishing. cancelled is the Stop button. error is a run pi gave up on, usually at the provider; brain-failed is mate losing the thread's session store, or its own agent loop failing. A sandbox that dies mid-turn is a tool error, not an ending.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -383,7 +383,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "sandbox-died"
+              "options": "brain-failed"
             },
             "properties": [
               {
@@ -425,7 +425,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Time to first token",
-      "description": "From the prompt reaching the harness to the first streamed chunk \u2014 what the human watches an empty message for. A cold sandbox adds its own mint time on top and is not in here.",
+      "description": "From the prompt reaching the model to the first streamed word of the answer — what the human watches an empty message for. A turn that runs a tool before it writes counts the tool, and any sandbox it waits for, in here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -502,7 +502,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "Sandbox mints per hour, by result",
-      "description": "mint-failed is the Sandbox never going Ready; attach-failed is a Ready pod that would not open an ACP session. Both leave the thread with a refusal instead of an answer.",
+      "description": "mint-failed is the Sandbox never going Ready; connect-failed is a Ready pod whose mate-hands would not answer, or answered in an older protocol. Either leaves the turn's tool calls failing.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -574,7 +574,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "attach-failed"
+              "options": "connect-failed"
             },
             "properties": [
               {
@@ -616,7 +616,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Teardowns per hour, by reason",
-      "description": "quiet and archived are the sandbox being reaped as designed. restart is a mate that died holding a turn. error is a thread whose sandbox was torn down under a failure.",
+      "description": "quiet and archived are the sandbox being reaped as designed. preempted is an idle thread's sandbox given to a waiting turn. inherited is a sandbox an older mate minted, condemned at boot. restart is a mate that died holding one, and error a sandbox torn down under a failure.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -729,6 +729,36 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "preempted"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inherited"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
           }
         ]
       },
@@ -773,7 +803,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Time to a Ready sandbox",
-      "description": "How long the Sandbox takes to go Ready: a kata VM booting, the image landing and a shallow clone finishing, all of it ahead of the harness reading a word of the question. One line per source, and mints are rare enough that most of this panel is gaps.",
+      "description": "How long the Sandbox takes to go Ready: a kata VM booting, the image landing and a shallow clone finishing, all of it ahead of the first tool call's result. One line per source, and mints are rare enough that most of this panel is gaps.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -849,8 +879,8 @@
     {
       "id": 19,
       "type": "timeseries",
-      "title": "Time to an ACP session",
-      "description": "The rest of that wait: exec into the harness, initialize, and load or open the session. Paid on every mint, warm or cold. One line per source.",
+      "title": "Time to connected hands",
+      "description": "The rest of the first tool call's wait: the `pods/exec` stream opening, then the mate-hands hello. Paid once per turn that runs a tool, on a reused sandbox too.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -908,18 +938,36 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, source) (rate(mate_attach_duration_milliseconds_bucket[6h])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mate_exec_open_milliseconds_bucket[6h])))",
           "refId": "A",
-          "legendFormat": "{{source}} p50"
+          "legendFormat": "exec open p50"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(mate_attach_duration_milliseconds_bucket[6h])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mate_exec_open_milliseconds_bucket[6h])))",
           "refId": "B",
-          "legendFormat": "{{source}} p95"
+          "legendFormat": "exec open p95"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mate_hands_connect_milliseconds_bucket[6h])))",
+          "refId": "C",
+          "legendFormat": "hello p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mate_hands_connect_milliseconds_bucket[6h])))",
+          "refId": "D",
+          "legendFormat": "hello p95"
         }
       ]
     },
@@ -1003,9 +1051,9 @@
       ]
     },
     {
-      "id": 11,
+      "id": 21,
       "type": "row",
-      "title": "Budget",
+      "title": "Tools and hands",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1016,18 +1064,154 @@
       "panels": []
     },
     {
-      "id": 12,
+      "id": 22,
       "type": "timeseries",
-      "title": "Sandboxes live and threads waiting",
-      "description": "The cap and the queue behind it. Three held with nobody waiting is busy; three held with a queue is what MateSandboxesAtCap fires on.",
+      "title": "Tool calls per hour, by tool and result",
+      "description": "Each tool call the model made, by tool and whether it returned an error. bash, read, write and edit run in the sandbox through mate-hands; kthx is every bridged kthx_* tool. A climb in errors on one tool is that tool, not the model.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (tool, result) (rate(mate_tool_calls_total[1h])) * 3600 > 0",
+          "refId": "A",
+          "legendFormat": "{{tool}} {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Hands call latency p95, by method",
+      "description": "How long each mate-hands method takes to answer, at the 95th percentile. exec is the command itself and can run for minutes; the file methods are a round trip into the sandbox and should stay well under a second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, method) (rate(mate_hands_call_milliseconds_bucket[1h])))",
+          "refId": "A",
+          "legendFormat": "{{method}}"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Turn sandboxes per hour, by source",
+      "description": "What each turn's tool calls found. none is a chat-only turn, which mints nothing; reused is the thread's own sandbox, spare a warm one adopted, fresh a cold mint, and failed no sandbox at all.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
         "y": 32
       },
       "fieldConfig": {
@@ -1061,7 +1245,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "live"
+              "options": "none"
             },
             "properties": [
               {
@@ -1076,7 +1260,37 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "waiting"
+              "options": "reused"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "spare"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fresh"
             },
             "properties": [
               {
@@ -1084,6 +1298,21 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
                 }
               }
             ]
@@ -1108,26 +1337,94 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "mate_sandboxes_live",
+          "expr": "sum by (source) (rate(mate_turn_sandboxes_total[1h])) * 3600 > 0",
           "refId": "A",
-          "legendFormat": "live"
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Hands links per hour",
+      "description": "Links opened by result, and links dropped by reason. A turn opens one link on its first tool call; superseded is a connect refused because another live link holds the sandbox at the same or a newer epoch, which mate retries once past, and mismatch an image too old for mate's protocol. closed is the stream ending, unresponsive a daemon that stopped answering pings, and deadline and abort-grace a call that never answered.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(mate_hands_connects_total[1h])) * 3600 > 0",
+          "refId": "A",
+          "legendFormat": "connect {{result}}"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "mate_queue_depth",
+          "expr": "sum by (reason) (rate(mate_hands_drops_total[1h])) * 3600 > 0",
           "refId": "B",
-          "legendFormat": "waiting"
+          "legendFormat": "drop {{reason}}"
         }
       ]
     },
     {
-      "id": 13,
+      "id": 26,
       "type": "timeseries",
-      "title": "Reported spend per hour",
-      "description": "The per-turn USD step the harness reports over ACP, which is OpenCode Go's list-price shadow on a flat-rate plan rather than a bill. A real turn measured $0.002178.",
+      "title": "kthx MCP bridge up",
+      "description": "1 while mate holds a listing of the kthx engine's tools and reaches the engine, 0 while it retries. No series means MATE_KTHX_MCP_URL or KTHX_AGENT_TOKEN is unset, and the agent has no kthx tools.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1136,7 +1433,507 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_mcp_up",
+          "refId": "A",
+          "legendFormat": "up"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "row",
+      "title": "The model and its memory",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "panels": []
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Resumes per hour, by result",
+      "description": "Turns a mate restart cut off. resumed picked up where it stopped, in a fresh message; discarded was aborted, because the thread had no turn in flight or had used its two resumes; lost is a turn mate marked in flight with no open run left to resume, so its answer is gone.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "resumed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "discarded"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lost"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(mate_turn_resumes_total[1h])) * 3600 > 0",
+          "refId": "A",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Provider errors per hour, by kind",
+      "description": "Runs that ended in a provider error. auth is the key in Secret mate-opencode, limit the plan's usage cap, timeout a provider that stopped answering, and other anything else. MateTurnsFailing counts the same runs as error.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (kind) (rate(mate_provider_errors_total[1h])) * 3600 > 0",
+          "refId": "A",
+          "legendFormat": "{{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Session store failures per hour, by op",
+      "description": "open and rows are mate-db unreachable or slow; migrate is mate retrying its schema at boot; fault a commit that failed mid-turn; quarantine a stored session mate set aside as corrupt. MateStoreFailing fires on more than two in half an hour.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (op) (rate(mate_store_failures_total[1h])) * 3600 > 0",
+          "refId": "A",
+          "legendFormat": "{{op}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Budget",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Turns and sandboxes, running and waiting",
+      "description": "Turns running against MATE_MAX_CONCURRENT and the threads queued behind them, and sandboxes leased against MATE_MAX_SANDBOXES and the turns waiting for one. Ten minutes of queue is MateThreadsQueued; fifteen of sandbox waiting is MateSandboxWaitsLong.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "turns running"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "threads queued"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sandboxes live"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sandbox waiters"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_turns_running",
+          "refId": "A",
+          "legendFormat": "turns running"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_queue_depth",
+          "refId": "B",
+          "legendFormat": "threads queued"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_sandboxes_live",
+          "refId": "C",
+          "legendFormat": "sandboxes live"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_sandbox_waiters",
+          "refId": "D",
+          "legendFormat": "sandbox waiters"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Reported spend per hour",
+      "description": "Each run's usage summed at qwen3.8-max's list price from pi's catalog, $2 and $6 per million input and output tokens. The `opencode-go` plan is flat-rate, so this is a shadow of list price, not a bill.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 58
       },
       "fieldConfig": {
         "defaults": {
@@ -1200,7 +1997,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 66
       },
       "panels": []
     },
@@ -1217,7 +2014,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 41
+        "y": 67
       },
       "fieldConfig": {
         "defaults": {
@@ -1325,7 +2122,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 41
+        "y": 67
       },
       "fieldConfig": {
         "defaults": {

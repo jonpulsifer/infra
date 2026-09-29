@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { silentLog } from '../src/log.ts';
-import { MINT_STEPS, UNDELIVERED } from '../src/notices.ts';
+import { UNDELIVERED } from '../src/notices.ts';
 import { NO_REPLY, Reply } from '../src/reply.ts';
-import { type Script, StubSandboxes } from '../src/sandbox.ts';
+import { type Script, StubBrain } from '../src/sandbox.ts';
 import {
   decodeSlack,
   escapeSlack,
@@ -16,6 +16,7 @@ import {
   slackWeb,
 } from '../src/slack.ts';
 import { SocketMode } from '../src/socket.ts';
+import { MemoryThreadStore } from '../src/store.ts';
 import type { Inbound, ThreadRef } from '../src/surface.ts';
 import { Threads } from '../src/threads.ts';
 import { FakeSlack, FakeSocket } from './fakesurface.ts';
@@ -985,7 +986,8 @@ describe('a turn stopped from Slack', () => {
     });
     const threads = new Threads({
       surfaces: [surface],
-      sandboxes: new StubSandboxes({ clock, script }),
+      brain: new StubBrain({ clock, script }),
+      store: new MemoryThreadStore(clock),
       clock,
       log,
       config: {
@@ -1033,7 +1035,7 @@ describe('a turn stopped from Slack', () => {
     deliver(stopping());
     await clock.advance(3_000);
     expect(metrics.turns).toEqual(['cancelled']);
-    expect(threads.stateOf(KEY)).toBe('attached');
+    expect(threads.stateOf(KEY)).toBe('idle');
     expect(api.streamed()).toEndWith('*stopped*');
     expect(api.streamed()).not.toContain('four');
     expect(api.only('stop')).toHaveLength(1);
@@ -1073,11 +1075,8 @@ describe('a turn stopped from Slack', () => {
       expect(api.only('start')).toHaveLength(1);
       expect(api.streamed()).not.toContain('*stopped*');
       expect(metrics.turns).toEqual(['cancelled']);
-      // The only post is the status line, removed when the turn started.
-      expect(api.only('post').map((call) => call.text)).toEqual([
-        MINT_STEPS.creating,
-      ]);
-      expect(api.only('remove')).toHaveLength(1);
+      // Nothing is posted beside the stream: a turn that starts at once has no status line.
+      expect(api.only('post')).toEqual([]);
       expect(JSON.stringify(api.calls)).not.toContain(UNDELIVERED);
       expect(log.entries.filter((e) => e.level === 'error')).toEqual([]);
       expect(api.only('session').at(-1)?.status).toBe('active');
@@ -1088,7 +1087,7 @@ describe('a turn stopped from Slack', () => {
     const { threads, deliver } = build(streaming('one'));
     deliver(ask);
     await clock.advance(3_000);
-    expect(threads.stateOf(KEY)).toBe('attached');
+    expect(threads.stateOf(KEY)).toBe('idle');
     await clock.advance(QUIET_MS);
     expect(threads.stateOf(KEY)).toBe('closed');
     expect(api.only('session').at(-1)?.status).toBe('closed');

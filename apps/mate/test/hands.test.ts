@@ -4,8 +4,7 @@
  * cannot, so the daemon ends only on what the client says.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyUpdate,
@@ -20,70 +19,15 @@ import {
   handsCommand,
 } from '../src/hands.ts';
 import type { ExecStream } from '../src/kube.ts';
+import {
+  alive,
+  cleanUp,
+  daemon,
+  pidsIn,
+  type Started,
+  tempDir,
+} from './hands-support.ts';
 import { RecordingLog } from './support.ts';
-
-const DAEMON = Bun.resolveSync('@repo/mate-hands/main', import.meta.dir);
-
-interface Started {
-  exec: ExecStream;
-  proc: ReturnType<typeof Bun.spawn>;
-  cwd: string;
-  state: string;
-}
-
-const started: Started[] = [];
-const dirs: string[] = [];
-
-function dir(name: string): string {
-  const made = mkdtempSync(join(tmpdir(), `mate-hands-client-${name}-`));
-  dirs.push(made);
-  return made;
-}
-
-function daemon(
-  opts: { epoch?: number; state?: string; args?: string[] } = {},
-): Started {
-  const cwd = dir('cwd');
-  const state = opts.state ?? dir('state');
-  const proc = Bun.spawn(
-    [
-      process.execPath,
-      DAEMON,
-      '--epoch',
-      String(opts.epoch ?? 1),
-      '--cwd',
-      cwd,
-      '--state-dir',
-      state,
-      ...(opts.args ?? []),
-    ],
-    {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
-    },
-  );
-  const stdin = new WritableStream<Uint8Array>({
-    async write(chunk) {
-      proc.stdin.write(chunk);
-      await proc.stdin.flush();
-    },
-  });
-  const exec: ExecStream = {
-    stdout: proc.stdout,
-    stdin,
-    closed: proc.exited.then((code) => ({
-      code,
-      reason: `exited ${code}`,
-      status: null,
-    })),
-    close: () => {},
-  };
-  const run = { exec, proc, cwd, state };
-  started.push(run);
-  return run;
-}
 
 /** A stream that answers `hello` with `hello` and ignores everything else. */
 function scripted(hello: Partial<Hello>): ExecStream {
@@ -122,15 +66,7 @@ async function connect(run: Started, epoch = 1, log = new RecordingLog()) {
   return HandsClient.connect(run.exec, { epoch, log, fields: { test: true } });
 }
 
-afterEach(async () => {
-  for (const run of started.splice(0)) {
-    run.proc.kill('SIGTERM');
-    await run.proc.exited;
-  }
-  for (const made of dirs.splice(0)) {
-    rmSync(made, { recursive: true, force: true });
-  }
-});
+afterEach(cleanUp);
 
 async function failure(promise: Promise<unknown>): Promise<HandsError> {
   const error = await promise.then(
@@ -139,27 +75,6 @@ async function failure(promise: Promise<unknown>): Promise<HandsError> {
   );
   expect(error).toBeInstanceOf(HandsError);
   return error as HandsError;
-}
-
-function alive(pid: number): boolean {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat.slice(stat.lastIndexOf(')') + 2)[0] !== 'Z';
-  } catch {
-    return false;
-  }
-}
-
-async function pidsIn(path: string, count: number): Promise<number[]> {
-  for (let i = 0; i < 150; i++) {
-    const pids = await Bun.file(path)
-      .text()
-      .then((t) => t.split('\n').filter(Boolean).map(Number))
-      .catch(() => []);
-    if (pids.length >= count) return pids;
-    await Bun.sleep(20);
-  }
-  throw new Error(`no pids in ${path}`);
 }
 
 describe('handsCommand', () => {
@@ -196,7 +111,7 @@ describe('connect', () => {
   });
 
   test('a stale epoch is superseded by the owner it names', async () => {
-    const state = dir('shared');
+    const state = tempDir('shared');
     const owner = await connect(daemon({ epoch: 9, state }), 9);
     const stale = daemon({ epoch: 2, state });
     const error = await failure(connect(stale, 2));

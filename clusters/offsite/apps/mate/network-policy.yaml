@@ -63,6 +63,14 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # The model provider: pi-ai's `opencode-go` endpoints are under
+    # https://opencode.ai/zen/go.
+    - toFQDNs:
+        - matchName: opencode.ai
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
     # mate reaches the API server by the IP in KUBERNETES_SERVICE_HOST, so no
     # FQDN rule can.
     - toEntities:
@@ -75,6 +83,18 @@ spec:
       toPorts:
         - ports:
             - port: "5432"
+              protocol: TCP
+    # The kthx MCP server, on the engine's web pods, by the labels its
+    # Service selects. Cilium resolves the ClusterIP to a backend before the
+    # verdict.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: spindrift
+            app.kubernetes.io/name: spindrift
+            app.kubernetes.io/component: web
+      toPorts:
+        - ports:
+            - port: "3000"
               protocol: TCP
     # The OTLP collector alone, by pod labels: the rest of `monitoring` is
     # closed. Cilium resolves the ClusterIP to a backend before the verdict.

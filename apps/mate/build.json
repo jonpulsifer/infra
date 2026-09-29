@@ -1,6 +1,6 @@
 [
   {
-    "_comment": "The context is the repo root because the Dockerfile prunes the workspace; the watch list is what turbo prune actually pulls in.",
+    "_comment": "The context is the repo root because the Dockerfile prunes the workspace; the watch list is what turbo prune pulls in, the agent profile the runner copies from the raw context, and the root .dockerignore that lets the profile in.",
     "image": "mate",
     "context": ".",
     "file": "apps/mate/Dockerfile",
@@ -9,7 +9,12 @@
     "watch": [
       "apps/mate",
       "packages/mate-hands",
+      "packages/pi-store-postgres",
       "packages/typescript-config",
+      "AGENTS.md",
+      "dotfiles/skills",
+      ".agents/skills",
+      ".dockerignore",
       "package.json",
       "bun.lock",
       "turbo.json"

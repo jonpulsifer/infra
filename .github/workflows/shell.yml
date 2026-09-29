@@ -10,6 +10,7 @@ on:
       - 'scripts/**'
       - '.github/scripts/**'
       - 'dotfiles/**'
+      - 'images/*/gh'
       - 'clusters/offsite/apps/elevenlabs/**'
       - 'mise.toml'
       - '.github/workflows/shell.yml'

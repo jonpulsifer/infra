@@ -1,13 +1,13 @@
 /**
- * Replays a thread's history into a harness session that `session/load` could
- * not restore. The thread is mate's only durable log.
+ * Replays a thread's history into a session mate-db does not hold: a thread
+ * from before the brain moved into mate, or one whose session was set aside.
  */
 import { isNotice } from './notices.ts';
 import type { HistoryMessage, Surface, ThreadRef } from './surface.ts';
 
 /** Sized against the thread cap of 30 turns (MATE_MAX_TURNS_PER_THREAD). */
 export const REPLAY_MESSAGES = 40;
-/** Counts the preamble with its header and footer; 8000 keeps it a small share of the harness context. */
+/** Counts the preamble with its header and footer; 8000 keeps it a small share of the model's context. */
 export const REPLAY_CHARS = 8_000;
 /** Bounds the read to two requests; past either cap the newest messages win. */
 export const REPLAY_PAGES = 2;

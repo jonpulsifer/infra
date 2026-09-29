@@ -1,5 +1,5 @@
 ---
-# mate's session store. Nothing connects to it yet.
+# mate's session store: pi's sessions and the `mate_threads` table, over TLS.
 # database-backup.yaml dumps it nightly; there is no WAL archive.
 # No CiliumNetworkPolicy selects the instance, whose pods CNPG labels
 # `app.kubernetes.io/name: postgresql`: the operator, the scrape and the probes

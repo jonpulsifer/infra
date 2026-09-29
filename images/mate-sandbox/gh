@@ -19,7 +19,7 @@
 # /usr/local/libexec, rather than the real binary keeping a name of its own
 # beside this one: the wrapper has to be what PATH finds, /usr/local/bin is
 # already the first entry in Debian's own PATH, and a directory prepended at
-# runtime does not survive the login shells opencode spawns.
+# runtime does not survive a login shell, whose /etc/profile resets PATH.
 set -eu
 
 REAL=/usr/local/libexec/gh

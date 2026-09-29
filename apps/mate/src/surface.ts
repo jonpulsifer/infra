@@ -52,7 +52,7 @@ export type Outcome = 'done' | 'stopped' | 'failed';
 export type ToolState = 'in_progress' | 'complete' | 'error';
 
 export interface ToolCall {
-  /** The harness's own id for it, stable across its updates. */
+  /** pi's own id for it, stable across its updates. */
   readonly id: string;
   readonly title: string;
   readonly state: ToolState;
@@ -61,7 +61,7 @@ export interface ToolCall {
 // The renderer decides what the answer says and when; the canvas decides how it
 // reaches the surface, and alone remembers what has been shown.
 export interface Canvas {
-  /** The answer so far, and the line naming what the harness is doing. */
+  /** The answer so far, and the line naming what the agent is doing. */
   live(text: string, status: string | null): Promise<void>;
   /** The last frame; whatever the surface drew for a live turn goes with it. */
   final(text: string, outcome: Outcome): Promise<void>;
@@ -98,7 +98,7 @@ export interface Surface {
   readonly allowedChannelIds: ReadonlySet<string>;
   openThread(message: Inbound, title: string): Promise<ThreadRef>;
   post(thread: ThreadRef, text: string): Promise<void>;
-  /** For the wait for a sandbox, which is news only until the next step. */
+  /** For the wait for a turn, which is news only until the turn starts. */
   notice(thread: ThreadRef): Notice;
   /** The thread's own messages, newest first. */
   history(thread: ThreadRef, query: HistoryQuery): Promise<HistoryMessage[]>;
