@@ -32,6 +32,7 @@ import type {
   TurnResumeResult,
   TurnSample,
 } from '../src/metrics.ts';
+import type { Route, RouteReason } from '../src/route.ts';
 import type {
   Canvas,
   HistoryMessage,
@@ -209,10 +210,18 @@ export class RecordingInstruments implements Instruments {
   appReady: boolean | null = null;
   /** Every sign-in state reported, oldest first. */
   readonly chatgptStates: (ChatgptSignIn | null)[] = [];
+  readonly routes: { route: Route; reason: RouteReason | null }[] = [];
+  primary: boolean | null = null;
 
   identifyLimit(_limit: SessionStartLimit): void {}
   chatgpt(state: ChatgptSignIn | null): void {
     this.chatgptStates.push(state);
+  }
+  modelRouted(route: Route, reason: RouteReason | null): void {
+    this.routes.push({ route, reason });
+  }
+  primaryUp(up: boolean | null): void {
+    this.primary = up;
   }
   gatewayClosed(code: number, fatal: boolean): void {
     this.closes.push({ code, fatal });

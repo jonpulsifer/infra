@@ -11,12 +11,19 @@ import {
   type Models,
   ModelsError,
 } from '@earendil-works/pi-ai';
-import type { Clock, Handle } from './clock.ts';
+import { utc as at, type Clock, type Handle } from './clock.ts';
 import type { CredentialChange } from './credential-store.ts';
 import type { Log } from './log.ts';
 import type { ChatgptSignIn, Instruments } from './metrics.ts';
-import { CHATGPT_PROVIDER } from './model.ts';
 import { CHATGPT, STORE_DOWN } from './notices.ts';
+import {
+  CHATGPT_PROVIDER,
+  type ModelRouter,
+  REASONS,
+  type RouterStatus,
+  refreshFailure,
+  spec,
+} from './route.ts';
 import type { Command, CommandContext, Commands } from './threads.ts';
 
 const MINUTE_MS = 60_000;
@@ -56,14 +63,6 @@ export function parseChatgptCommand(text: string): ChatgptCommand | null {
   return { kind: verb as 'login' | 'status' | 'logout' | 'resume' };
 }
 
-/** A time the owner reads: the hour today, the date as well on another day. */
-export function at(ms: number, now: number): string {
-  const [day, time] = new Date(ms).toISOString().split('T');
-  const today = new Date(now).toISOString().split('T')[0];
-  const clock = time?.slice(0, 5) ?? '';
-  return day === today ? `${clock} UTC` : `${day} ${clock} UTC`;
-}
-
 export type SignIn =
   | { readonly state: 'unknown' }
   | { readonly state: 'none' }
@@ -96,6 +95,11 @@ export interface ChatgptKeeperOptions {
   readonly clock: Clock;
   readonly log: Log;
   readonly metrics?: Pick<Instruments, 'chatgpt'>;
+  /** Told of every sign-in and refusal; asks for a rotation when chatgpt.com refuses the token. */
+  readonly router?: Pick<
+    ModelRouter,
+    'credentialChanged' | 'authBroken' | 'onTokenRefused'
+  > | null;
 }
 
 /**
@@ -119,6 +123,10 @@ export class ChatgptKeeper {
           ? { state: 'good', expires: change.expires }
           : { state: 'none' },
       );
+      options.router?.credentialChanged(change.stored);
+    });
+    options.router?.onTokenRefused(() => {
+      if (!this.stopped) void this.forceRefresh();
     });
   }
 
@@ -171,6 +179,7 @@ export class ChatgptKeeper {
     }
     if (stored?.type !== 'oauth' || typeof stored.expires !== 'number') {
       this.set({ state: 'none' });
+      this.options.router?.credentialChanged(false);
       return 'none';
     }
     const { expires } = stored;
@@ -199,6 +208,7 @@ export class ChatgptKeeper {
       const failure = refreshFailure(error);
       if (failure.kind === 'refused') {
         this.set({ state: 'refused', expires, at: clock.now() });
+        this.options.router?.authBroken();
         log.error(
           'OpenAI refused the ChatGPT refresh; mate stays signed out until `chatgpt login`',
           { status: failure.status },
@@ -250,33 +260,6 @@ function gauge(signIn: SignIn): ChatgptSignIn | null {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? '');
-}
-
-type RefreshFailure =
-  | { kind: 'refused'; status: number }
-  | { kind: 'transient' | 'store'; why: string };
-
-/**
- * pi rejects a refresh with a ModelsError whose cause names the HTTP status.
- * 400, 401 and 403 are a dead refresh token; anything else may pass.
- */
-export function refreshFailure(error: unknown): RefreshFailure {
-  if (error instanceof ModelsError && error.code === 'auth') {
-    return { kind: 'store', why: 'mate-db' };
-  }
-  const cause = error instanceof Error ? error.cause : undefined;
-  const text = `${message(cause)} ${message(error)}`;
-  const status = /token refresh failed \((\d{3})\)/.exec(text)?.[1];
-  if (status && ['400', '401', '403'].includes(status)) {
-    return { kind: 'refused', status: Number(status) };
-  }
-  if (status) return { kind: 'transient', why: `HTTP ${status}` };
-  if (/timed? ?out|abort/i.test(text))
-    return { kind: 'transient', why: 'timeout' };
-  if (/token refresh error/i.test(text)) {
-    return { kind: 'transient', why: 'network' };
-  }
-  return { kind: 'transient', why: 'unexpected' };
 }
 
 type LoginFailure =
@@ -354,6 +337,7 @@ type Proof =
   | { readonly ok: false; readonly why: string; readonly at: number };
 
 export interface ChatgptAccountOptions {
+  /** Straight to ChatGPT: the router must not send the test request elsewhere. */
   readonly models: Pick<Models, 'login' | 'logout' | 'completeSimple'>;
   readonly keeper: ChatgptKeeper;
   /** Read before a sign-in starts, since pi saves it only after the code is entered. */
@@ -365,6 +349,8 @@ export interface ChatgptAccountOptions {
     readonly model: Model<Api>;
     readonly thinking: ThinkingLevel;
   };
+  /** Null while turns never use ChatGPT, so nothing routes or pauses. */
+  readonly router: Pick<ModelRouter, 'pause' | 'resume' | 'status'> | null;
   readonly clock: Clock;
   readonly log: Log;
   readonly loginTimeoutMs?: number;
@@ -373,7 +359,6 @@ export interface ChatgptAccountOptions {
 /** The `chatgpt` commands. Only the allowlist reaches them. */
 export class ChatgptAccount implements Commands {
   private pending: Pending | null = null;
-  private pausedUntil: number | null = null;
   private proof: Proof | null = null;
 
   constructor(private readonly options: ChatgptAccountOptions) {}
@@ -386,13 +371,10 @@ export class ChatgptAccount implements Commands {
 
   /** When a pause ends, or null while ChatGPT is not paused. */
   paused(): number | null {
-    if (
-      this.pausedUntil !== null &&
-      this.pausedUntil <= this.options.clock.now()
-    ) {
-      this.pausedUntil = null;
-    }
-    return this.pausedUntil;
+    const now = this.options.router?.status().now;
+    return now?.route === 'fallback' && now.reason === 'paused'
+      ? now.retryAt
+      : null;
   }
 
   /** On shutdown: ends a sign-in waiting for its code, once its thread is told. */
@@ -417,8 +399,7 @@ export class ChatgptAccount implements Commands {
       case 'pause':
         return this.pause(context, command.minutes);
       case 'resume':
-        this.pausedUntil = null;
-        return this.say(context, `${CHATGPT.resumed}.`);
+        return this.resume(context);
     }
   }
 
@@ -600,12 +581,22 @@ export class ChatgptAccount implements Commands {
   }
 
   private signedIn(proof: Proof): string {
-    const spec = this.spec(this.options.model);
-    const lane = this.spec(this.options.lane.model);
-    if (proof.ok) {
-      return `${CHATGPT.signedIn}. A test request to ${spec} answered in ${seconds(proof.ms)}. MATE_MODEL is ${lane}, so turns do not use it yet.`;
+    const tested = this.named(this.options.model);
+    const lane = spec(this.options.lane.model);
+    const fallback = this.fallback();
+    if (!this.usesChatgpt()) {
+      if (proof.ok) {
+        return `${CHATGPT.signedIn}. A test request to ${tested} answered in ${seconds(proof.ms)}. MATE_MODEL is ${lane}, so turns do not use it yet.`;
+      }
+      return `${CHATGPT.proofFailed} a test request to ${tested} failed (${proof.why}). mate keeps answering with ${lane}; \`chatgpt status\` says more.`;
     }
-    return `${CHATGPT.proofFailed} a test request to ${spec} failed (${proof.why}). mate keeps answering with ${lane}; \`chatgpt status\` says more.`;
+    if (proof.ok) {
+      return `${CHATGPT.signedIn}. A test request to ${tested} answered in ${seconds(proof.ms)}, so turns use it from now on${fallback ? `, with ${fallback} as the fallback` : ''}.`;
+    }
+    const meanwhile = fallback
+      ? `mate answers with ${fallback} while ChatGPT fails`
+      : 'mate has no fallback, so turns fail while ChatGPT does';
+    return `${CHATGPT.proofFailed} a test request to ${tested} failed (${proof.why}). ${meanwhile}; \`chatgpt status\` says more.`;
   }
 
   private async logout(context: CommandContext): Promise<void> {
@@ -621,31 +612,80 @@ export class ChatgptAccount implements Commands {
     }
     this.proof = null;
     this.options.log.info('mate signed out of ChatGPT');
+    const answering = this.usesChatgpt()
+      ? this.fallback()
+      : spec(this.options.lane.model);
+    const then = answering
+      ? ` and answers with ${answering}`
+      : ', and turns fail until the next sign-in';
     await this.say(
       context,
-      `${CHATGPT.signedOut} and answers with ${this.spec(this.options.lane.model)}. Its last tokens stay valid at OpenAI until they expire; to end them now, sign out of all sessions in ChatGPT's security settings.`,
+      `${CHATGPT.signedOut}${then}. Its last tokens stay valid at OpenAI until they expire; to end them now, sign out of all sessions in ChatGPT's security settings.`,
     );
   }
 
   private async pause(context: CommandContext, minutes: number) {
-    const now = this.options.clock.now();
-    this.pausedUntil = now + minutes * MINUTE_MS;
+    const { clock, router } = this.options;
+    const fallback = this.fallback();
+    if (!router || !fallback) {
+      await this.say(context, `${CHATGPT.status}${this.unrouted('pause')}`);
+      return;
+    }
+    const now = clock.now();
+    const until = now + minutes * MINUTE_MS;
+    router.pause(until);
     await this.say(
       context,
-      `${CHATGPT.paused} until ${at(this.pausedUntil, now)}, or until mate restarts. Say \`chatgpt resume\` to end it sooner.`,
+      `${CHATGPT.paused} until ${at(until, now)}, or until mate restarts, and ${fallback} answers. Say \`chatgpt resume\` to end it sooner.`,
     );
+  }
+
+  private async resume(context: CommandContext) {
+    const { router } = this.options;
+    const fallback = this.fallback();
+    if (!router || !fallback) {
+      await this.say(context, `${CHATGPT.status}${this.unrouted('resume')}`);
+      return;
+    }
+    router.resume();
+    const now = router.status().now;
+    await this.say(
+      context,
+      now.route === 'fallback' && now.retryAt === null
+        ? `${CHATGPT.resumed}, but ${REASONS[now.reason]}, so ${fallback} answers until a sign-in.`
+        : `${CHATGPT.resumed}, so the next request tries it.`,
+    );
+  }
+
+  /** Why a pause or a resume has nothing to act on. */
+  private unrouted(verb: 'pause' | 'resume'): string {
+    return this.usesChatgpt()
+      ? `MATE_FALLBACK_MODEL is none, so nothing answers in ChatGPT's place and there is nothing to ${verb}.`
+      : `turns use ${spec(this.options.lane.model)}, not ChatGPT, so there is nothing to ${verb}.`;
+  }
+
+  private usesChatgpt(): boolean {
+    return this.options.lane.model.provider === CHATGPT_PROVIDER;
+  }
+
+  /** What answers in ChatGPT's place, or null for nothing. */
+  private fallback(): string | null {
+    const fallback = this.options.router?.status().fallback;
+    return fallback ? spec(fallback.model) : null;
   }
 
   private status(): string {
     const now = this.options.clock.now();
     const signIn = this.options.keeper.state();
-    const { lane } = this.options;
+    const { lane, router } = this.options;
     const lines = [`${CHATGPT.status}${signInLine(signIn, now)}`];
-    lines.push(
-      `Turns use ${this.spec(lane.model)} (${lane.thinking}), not ChatGPT.`,
-    );
-    const paused = this.paused();
-    if (paused !== null) lines.push(`Paused until ${at(paused, now)}.`);
+    if (router) {
+      lines.push(...routeLines(router.status(), lane.thinking, now));
+    } else {
+      lines.push(
+        `Turns use ${spec(lane.model)} (${lane.thinking}), not ChatGPT.`,
+      );
+    }
     if (this.pending) {
       lines.push(
         `A sign-in is waiting for its code, until ${at(this.pending.until, now)}.`,
@@ -661,8 +701,8 @@ export class ChatgptAccount implements Commands {
     return lines.join(' ');
   }
 
-  private spec(model: Model<Api> | null): string {
-    return model ? `${model.provider}/${model.id}` : `${CHATGPT_PROVIDER}`;
+  private named(model: Model<Api> | null): string {
+    return model ? spec(model) : CHATGPT_PROVIDER;
   }
 
   private async say(context: CommandContext, text: string): Promise<void> {
@@ -688,6 +728,42 @@ function signInLine(signIn: SignIn, now: number): string {
     case 'refused':
       return `signed out, because OpenAI refused the token refresh at ${at(signIn.at, now)}. Say \`chatgpt login\` to sign in again.`;
   }
+}
+
+/** Which model answers now, and why, for `chatgpt status`. */
+function routeLines(
+  route: RouterStatus,
+  thinking: ThinkingLevel,
+  now: number,
+): string[] {
+  const primary = `${spec(route.primary)} (${thinking})`;
+  const lines = [
+    route.fallback
+      ? `Route: ${primary}, fallback ${spec(route.fallback.model)} (${route.fallback.thinking}).`
+      : `Route: ${primary}, with no fallback.`,
+  ];
+  const state = route.now;
+  if (state.route === 'primary') {
+    lines.push('Now: primary.');
+  } else {
+    const why = `${REASONS[state.reason]}${state.status === null ? '' : `, HTTP ${state.status}`}`;
+    const since = `Now: fallback since ${at(state.since, now)} (${why})`;
+    if (state.reason === 'paused' && state.retryAt !== null) {
+      lines.push(`${since} until ${at(state.retryAt, now)}.`);
+    } else if (state.retryAt === null) {
+      lines.push(`${since}, until a sign-in.`);
+    } else if (state.retryAt <= now) {
+      lines.push(`${since}; the next request tries ChatGPT again.`);
+    } else {
+      lines.push(
+        `${since}; trying ChatGPT again at ${at(state.retryAt, now)}.`,
+      );
+    }
+  }
+  lines.push(
+    `Since start: ${route.requests.primary} requests on ChatGPT, ${route.requests.fallback} on the fallback.`,
+  );
+  return lines;
 }
 
 function seconds(ms: number): string {

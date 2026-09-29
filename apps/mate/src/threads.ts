@@ -868,6 +868,7 @@ export class Threads {
     if (result.stopReason === 'error') {
       await this.tell(thread, `${HARNESS_FAILED}: ${plain(result.error)}`);
     }
+    if (result.notice) await this.tell(thread, result.notice);
   }
 
   private async brainFailed(

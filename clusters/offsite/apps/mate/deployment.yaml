@@ -132,6 +132,9 @@ spec:
               value: opencode-go/qwen3.8-max
             - name: MATE_THINKING
               value: medium
+            # `none` routes nothing, so turns reach MATE_MODEL alone.
+            - name: MATE_FALLBACK_MODEL
+              value: none
             # Read on every request, so a rotated key needs no restart.
             - name: MATE_MODEL_KEY_FILE
               value: /var/run/mate/opencode/api-key

@@ -39,6 +39,7 @@ import {
   PiBrain,
   type PiBrainDeps,
   postgresSessions,
+  providerErrorKind,
   RECOVERING,
   resetNote,
   type SessionSource,
@@ -50,6 +51,10 @@ import type {
   ModelSetup,
 } from '../src/brain-inputs.ts';
 import { BrainUnavailable, TurnAbandoned } from '../src/brain-port.ts';
+import { systemClock } from '../src/clock.ts';
+import { silentLog } from '../src/log.ts';
+import { LIMIT_FALLBACK } from '../src/notices.ts';
+import { CHATGPT_PROVIDER, routeModels } from '../src/route.ts';
 import type { PromptSink, Update } from '../src/sandbox.ts';
 import { POOL_OPTIONS, PostgresThreadStore } from '../src/store.ts';
 import { type ThreadRef, threadKey } from '../src/surface.ts';
@@ -121,7 +126,7 @@ function faux(
         : step;
     };
   return {
-    setup: { models, model, thinking },
+    setup: { models, direct: models, model, thinking, router: null },
     options,
     script: (...steps) => provider.setResponses(steps.map(record)),
   };
@@ -1379,5 +1384,236 @@ describe('putting threads away', () => {
     expect(await sessionExists(sql, reopened.sessionId)).toBe(true);
     expect(await rows.get(live.key)).toBeDefined();
     expect(await sessionExists(sql, live.sessionId)).toBe(true);
+  });
+});
+
+interface Routed {
+  readonly setup: ModelSetup;
+  /** The pre-cutover lane: qwen3.8-max, with nothing routed. */
+  readonly unrouted: ModelSetup;
+  codex(...steps: FauxResponseStep[]): void;
+  go(...steps: FauxResponseStep[]): void;
+  readonly asked: string[];
+}
+
+/** mate's two providers, played by faux ones that carry their ids. */
+function routed(): Routed {
+  const asked: string[] = [];
+  const track =
+    (step: FauxResponseStep): FauxResponseStep =>
+    (context, streamOptions, state, requested) => {
+      asked.push(`${requested.provider}/${requested.id}`);
+      return typeof step === 'function'
+        ? step(context, streamOptions, state, requested)
+        : step;
+    };
+  const codex = fauxProvider({
+    api: 'faux-codex',
+    provider: CHATGPT_PROVIDER,
+    tokenSize: { min: 3, max: 3 },
+    models: [{ id: 'gpt-6-sol', reasoning: true, cost: price }],
+  });
+  const go = fauxProvider({
+    api: 'faux-go',
+    provider: 'opencode-go',
+    tokenSize: { min: 3, max: 3 },
+    models: [{ id: 'qwen3.8-max', reasoning: true, cost: price }],
+  });
+  const inner = createModels();
+  inner.setProvider(codex.provider);
+  inner.setProvider(go.provider);
+  const primary = codex.getModel('gpt-6-sol');
+  const fallback = go.getModel('qwen3.8-max');
+  if (!primary || !fallback) throw new Error('no faux models');
+  const { models, router } = routeModels(inner, {
+    primary,
+    fallback: { model: fallback, thinking: 'medium' },
+    clock: systemClock,
+    log: silentLog,
+  });
+  return {
+    setup: {
+      models,
+      direct: inner,
+      model: primary,
+      thinking: 'medium',
+      router,
+    },
+    unrouted: {
+      models: inner,
+      direct: inner,
+      model: fallback,
+      thinking: 'medium',
+      router: null,
+    },
+    codex: (...steps) => codex.appendResponses(steps.map(track)),
+    go: (...steps) => go.appendResponses(steps.map(track)),
+    asked,
+  };
+}
+
+const usageLimit = () =>
+  fauxAssistantMessage([], {
+    stopReason: 'error',
+    errorMessage: 'Codex error: The usage limit has been reached',
+  });
+
+describe('a routed model', () => {
+  test('a tool turn whose second step ChatGPT cannot answer finishes on qwen3.8-max, says why in its status line, and carries the notice once', async () => {
+    const models = routed();
+    models.codex(tool('bash', { command: 'true' }), usageLimit());
+    models.go(fauxAssistantMessage('done on qwen'));
+    const built = build({ ...faux(), setup: models.setup });
+    const { session } = await opened(built);
+    const sink = new Recorder();
+    const result = await built.brain.prompt(session, 'go', sink, ASKER);
+    expect(result.stopReason).toBe('end_turn');
+    expect(sink.text).toBe('done on qwen');
+    expect(models.asked).toEqual([
+      'openai-codex/gpt-6-sol',
+      'openai-codex/gpt-6-sol',
+      'opencode-go/qwen3.8-max',
+    ]);
+    const lines = sink.updates.flatMap((u) =>
+      u.kind === 'status' && u.line ? [u.line] : [],
+    );
+    expect(lines).toContain(
+      "↪️ qwen3.8-max is answering — ChatGPT's usage limit is reached",
+    );
+    expect(result.notice).toStartWith(LIMIT_FALLBACK);
+    expect(built.log.of('turn ended')[0]?.fields).toMatchObject({
+      route: 'mixed',
+    });
+
+    models.go(fauxAssistantMessage('qwen again'));
+    const next = await built.brain.prompt(
+      session,
+      'more',
+      new Recorder(),
+      ASKER,
+    );
+    expect(next.stopReason).toBe('end_turn');
+    expect(next.notice).toBeUndefined();
+    expect(built.log.of('turn ended')[1]?.fields).toMatchObject({
+      route: 'fallback',
+    });
+  });
+
+  test('a turn ChatGPT answers alone has no notice and no ↪️ line', async () => {
+    const models = routed();
+    models.codex(fauxAssistantMessage('from ChatGPT'));
+    const built = build({ ...faux(), setup: models.setup });
+    const { session } = await opened(built);
+    const sink = new Recorder();
+    const result = await built.brain.prompt(session, 'hi', sink, ASKER);
+    expect(result.notice).toBeUndefined();
+    expect(
+      sink.updates.some((u) => u.kind === 'status' && u.line?.startsWith('↪️')),
+    ).toBe(false);
+    expect(built.log.of('turn ended')[0]?.fields).toMatchObject({
+      route: 'primary',
+    });
+  });
+
+  test('a lane saved on qwen3.8-max is brought to ChatGPT at its next open', async () => {
+    const models = routed();
+    models.go(fauxAssistantMessage('old'));
+    const first = build({ ...faux(), setup: models.unrouted });
+    const { session, row } = await opened(first);
+    await first.brain.prompt(session, 'hi', new Recorder(), ASKER);
+    await first.brain.release(row.ref, 'quiet');
+    expect(await lane(row.sessionId)).toMatchObject({
+      model: { provider: 'opencode-go', modelId: 'qwen3.8-max' },
+    });
+    const second = build({ ...faux(), setup: models.setup });
+    await second.brain.open(row);
+    expect(await lane(row.sessionId)).toMatchObject({
+      model: { provider: CHATGPT_PROVIDER, modelId: 'gpt-6-sol' },
+      thinkingLevel: 'medium',
+    });
+  });
+
+  test('a step a restart cut off on qwen3.8-max resumes on it, straight through the router', async () => {
+    const models = routed();
+    const asked = gate();
+    // The step never answers: SIGTERM finds it waiting on the model.
+    models.go(() => {
+      asked.open();
+      return new Promise(() => {});
+    });
+    const first = build(
+      { ...faux(), setup: models.unrouted },
+      { timeouts: { abandonClose: 100 } },
+    );
+    const { session, row } = await opened(first);
+    const running = first.brain
+      .prompt(session, 'go', new Recorder(), ASKER)
+      .catch((error: unknown) => error);
+    await asked.wait;
+    await first.brain.abandon();
+    expect(await running).toBeInstanceOf(TurnAbandoned);
+
+    models.go(fauxAssistantMessage('picked up on qwen'));
+    const second = build({ ...faux(), setup: models.setup });
+    const reopened = await second.brain.open(row);
+    expect(reopened.interrupted).not.toBeNull();
+    const sink = new Recorder();
+    const resumed = await second.brain.resume(reopened, sink, ASKER);
+    expect(resumed.stopReason).toBe('end_turn');
+    expect(sink.text).toBe('picked up on qwen');
+    expect(models.asked).toEqual([
+      'opencode-go/qwen3.8-max',
+      'opencode-go/qwen3.8-max',
+    ]);
+    expect(resumed.notice).toBeUndefined();
+  });
+
+  test("both failing is the fallback's own kind of error, after the clause for ChatGPT", async () => {
+    const models = routed();
+    models.codex(usageLimit());
+    models.go(
+      fauxAssistantMessage([], {
+        stopReason: 'error',
+        errorMessage: '401 Unauthorized',
+      }),
+    );
+    const built = build(
+      { ...faux(), setup: models.setup },
+      { retry: { enabled: false, maxRetries: 0, baseDelayMs: 1 } },
+    );
+    const { session } = await opened(built);
+    const result = await built.brain.prompt(
+      session,
+      'hi',
+      new Recorder(),
+      ASKER,
+    );
+    expect(result.error).toBe(
+      "ChatGPT's usage limit is reached; opencode-go/qwen3.8-max: 401 Unauthorized",
+    );
+    expect(built.metrics.providerErrors).toEqual(['auth']);
+  });
+});
+
+describe('providerErrorKind', () => {
+  test.each([
+    ['You have hit your ChatGPT usage limit (prolite plan).', 'limit'],
+    ['GoUsageLimitError: available balance', 'limit'],
+    ['401 Unauthorized', 'auth'],
+    ['Provider is not configured: openai-codex', 'auth'],
+    ['mate is not signed in to ChatGPT', 'auth'],
+    ["mate's ChatGPT sign-in stopped working", 'auth'],
+    ['Request timed out', 'timeout'],
+    ['model is not supported', 'other'],
+    [
+      "ChatGPT's usage limit is reached; opencode-go/qwen3.8-max: Request timed out",
+      'timeout',
+    ],
+    [
+      "mate's ChatGPT sign-in stopped working; opencode-go/qwen3.8-max: 500 server error",
+      'other',
+    ],
+  ])('%p is %s', (message, kind) => {
+    expect(providerErrorKind(message)).toBe(kind as never);
   });
 });

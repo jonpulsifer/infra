@@ -26,6 +26,14 @@ export const systemClock: Clock = {
     }),
 };
 
+/** A time the owner reads: the hour today, the date as well on another day. */
+export function utc(ms: number, now: number): string {
+  const [day, time] = new Date(ms).toISOString().split('T');
+  const today = new Date(now).toISOString().split('T')[0];
+  const clock = time?.slice(0, 5) ?? '';
+  return day === today ? `${clock} UTC` : `${day} ${clock} UTC`;
+}
+
 export function duration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   if (seconds < 60) return `${seconds}s`;

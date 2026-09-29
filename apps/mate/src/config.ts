@@ -55,6 +55,10 @@ export interface BrainConfig {
   /** `provider/model`. */
   readonly model: string;
   readonly thinking: ThinkingLevel;
+  /** `provider/model` that answers when ChatGPT cannot; `null` for `none`. */
+  readonly fallbackModel: string | null;
+  /** `null` takes the fallback's supported level nearest `thinking`. */
+  readonly fallbackThinking: ThinkingLevel | null;
   /** Read on every request; never copied into the environment. */
   readonly modelKeyFile: string;
   /** `null` leaves the store down, which is not a reason to refuse to boot. */
@@ -265,15 +269,22 @@ function refuseRenamed(env: Env): void {
   }
 }
 
-function thinking(env: Env): ThinkingLevel {
-  const raw = text(env, 'MATE_THINKING', 'medium');
+function thinking(key: string, raw: string): ThinkingLevel {
   const level = THINKING_LEVELS.find((one) => one === raw);
   if (!level) {
     throw new ConfigError(
-      `MATE_THINKING must be one of ${THINKING_LEVELS.join(', ')}, got ${raw}`,
+      `${key} must be one of ${THINKING_LEVELS.join(', ')}, got ${raw}`,
     );
   }
   return level;
+}
+
+function modelSpec(env: Env, key: string, fallback: string): string {
+  const model = text(env, key, fallback);
+  if (!MODEL_SPEC.test(model)) {
+    throw new ConfigError(`${key} must be provider/model, got ${model}`);
+  }
+  return model;
 }
 
 function kthxMcp(env: Env): BrainConfig['kthxMcp'] {
@@ -284,13 +295,24 @@ function kthxMcp(env: Env): BrainConfig['kthxMcp'] {
 
 export function readBrainConfig(env: Env): BrainConfig {
   refuseRenamed(env);
-  const model = text(env, 'MATE_MODEL', 'opencode-go/qwen3.8-max');
-  if (!MODEL_SPEC.test(model)) {
-    throw new ConfigError(`MATE_MODEL must be provider/model, got ${model}`);
+  const model = modelSpec(env, 'MATE_MODEL', 'openai-codex/gpt-6-sol');
+  const fallbackModel =
+    text(env, 'MATE_FALLBACK_MODEL', '') === 'none'
+      ? null
+      : modelSpec(env, 'MATE_FALLBACK_MODEL', 'opencode-go/qwen3.8-max');
+  if (fallbackModel === model) {
+    throw new ConfigError(
+      `MATE_FALLBACK_MODEL must differ from MATE_MODEL, both ${model}; set it to none for no fallback`,
+    );
   }
+  const fallbackThinking = env.MATE_FALLBACK_THINKING?.trim();
   return {
     model,
-    thinking: thinking(env),
+    thinking: thinking('MATE_THINKING', text(env, 'MATE_THINKING', 'medium')),
+    fallbackModel,
+    fallbackThinking: fallbackThinking
+      ? thinking('MATE_FALLBACK_THINKING', fallbackThinking)
+      : null,
     modelKeyFile: text(
       env,
       'MATE_MODEL_KEY_FILE',

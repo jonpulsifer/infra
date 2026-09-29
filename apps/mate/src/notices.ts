@@ -58,6 +58,16 @@ export const CHATGPT = {
   status: 'ℹ️ ChatGPT: ',
 } as const;
 
+// Said once per outage, after the answer, while the fallback answers for ChatGPT.
+export const LIMIT_FALLBACK =
+  "↪️ ChatGPT's usage limit is reached, so mate answers with";
+export const SIGNED_OUT =
+  '🔑 mate is not signed in to ChatGPT, so it answers with';
+export const SIGN_IN_BROKE =
+  "🔑 mate's ChatGPT sign-in stopped working, so it answers with";
+export const PRIMARY_REFUSING =
+  "↪️ ChatGPT is refusing mate's requests, so it answers with";
+
 // Posted by earlier versions of mate.
 export const STOPPED_WAITING =
   '💤 gave up waiting for a sandbox — reply to try again';
@@ -87,6 +97,10 @@ const PREFIXES: readonly string[] = [
   MINT_FAILED,
   SANDBOX_LOST,
   ...Object.values(CHATGPT),
+  LIMIT_FALLBACK,
+  SIGNED_OUT,
+  SIGN_IN_BROKE,
+  PRIMARY_REFUSING,
   STOPPED_WAITING,
   SANDBOX_CLOSED,
   ATTACHING,

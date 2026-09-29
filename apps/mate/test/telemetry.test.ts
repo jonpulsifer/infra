@@ -100,11 +100,14 @@ describe('the SDK', () => {
         signedIn: true,
         expiresAt: Date.now() + 3_600_000,
       });
+      getInstruments().modelRouted('fallback', 'limit');
+      getInstruments().primaryUp(false);
       // The exit flush carries the last counters out before the 15 s export interval.
       await stopTelemetry();
     } finally {
       collector.stop(true);
       getInstruments().chatgpt(null);
+      getInstruments().primaryUp(null);
     }
 
     expect(bodies).toHaveLength(1);
@@ -117,6 +120,9 @@ describe('the SDK', () => {
     // The names MateChatGPTSignedOut and MateChatGPTTokenNotRefreshing read.
     expect(sent).toContain('mate_chatgpt_signed_in');
     expect(sent).toContain('mate_chatgpt_token_expiry_seconds');
+    // The names MateModelPrimaryFailing and the dashboard read.
+    expect(sent).toContain('mate_model_routes_total');
+    expect(sent).toContain('mate_model_primary_up');
     expect(sent).not.toContain('mate_attach_duration_milliseconds');
     // The resource attribute the collector turns into the `exported_job` label.
     expect(sent).toContain('service.name');

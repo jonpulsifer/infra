@@ -15,29 +15,44 @@ import type {
 } from '@earendil-works/pi-ai';
 import type { Clock } from './clock.ts';
 import type { Log } from './log.ts';
+import type { Instruments } from './metrics.ts';
+import type { ModelRouter } from './route.ts';
 import type { SurfaceName } from './surface.ts';
 
 export interface ModelSetupOptions {
   /** `provider/model`, from MATE_MODEL. */
   readonly spec: string;
   readonly thinking: ThinkingLevel;
+  /** `provider/model`, from MATE_FALLBACK_MODEL; null or absent routes nothing. */
+  readonly fallbackSpec?: string | null;
+  /** From MATE_FALLBACK_THINKING; null takes the fallback's level nearest `thinking`. */
+  readonly fallbackThinking?: ThinkingLevel | null;
   /** Read on every request, so a rotated key needs no restart. */
   readonly keyFile: string;
   /** Holds the ChatGPT sign-in; without one, pi keeps it in memory. */
   readonly credentials?: CredentialStore;
   readonly log: Log;
+  readonly clock?: Clock;
+  readonly metrics?: Pick<Instruments, 'modelRouted' | 'primaryUp'>;
 }
 
 export interface ModelSetup {
+  /** What turns ask: ChatGPT first and the fallback after, when routed. */
   readonly models: Models;
+  /** Straight to each provider: a sign-in's test request must reach ChatGPT itself. */
+  readonly direct: Models;
+  /** The lane's model, MATE_MODEL. */
   readonly model: Model<Api>;
   readonly thinking: ThinkingLevel;
+  /** Null when nothing routes: no fallback, and a primary other than ChatGPT. */
+  readonly router: ModelRouter | null;
 }
 
 /**
  * Throws `ConfigError` for a provider mate does not register, a model the
- * catalog lacks, or a thinking level outside pi-ai's
- * `getSupportedThinkingLevels(model)`.
+ * catalog lacks, a thinking level outside pi-ai's
+ * `getSupportedThinkingLevels(model)`, or a fallback that is the primary or
+ * backs a primary other than ChatGPT.
  */
 export type CreateModelSetup = (options: ModelSetupOptions) => ModelSetup;
 

@@ -15,6 +15,7 @@ import type {
   MintSample,
   TurnSandboxSource,
 } from './lease.ts';
+import type { Route, RouteReason } from './route.ts';
 import type { StopReason } from './sandbox.ts';
 
 /** `brain-failed`: the brain or its store threw, so the harness never reported an end. */
@@ -69,6 +70,10 @@ export interface Instruments extends HandsInstruments, McpInstruments {
   storeFailed(op: StoreOp): void;
   /** `null` reports nothing: mate has no credential store, or has not read it yet. */
   chatgpt(state: ChatgptSignIn | null): void;
+  /** One per request for the primary model; `reason` is null on the primary. */
+  modelRouted(route: Route, reason: RouteReason | null): void;
+  /** `null` reports nothing: no fallback, so nothing routes. */
+  primaryUp(up: boolean | null): void;
 }
 
 let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
@@ -80,6 +85,8 @@ let appReady: boolean | null = null;
 /** `null` until a bridge is configured, so the gauge is absent without one. */
 let mcp: boolean | null = null;
 let chatgpt: ChatgptSignIn | null = null;
+/** `null` while no router runs, so the gauge is absent without a fallback. */
+let primary: boolean | null = null;
 let live = 0;
 let waiters = 0;
 let queued = 0;
@@ -168,6 +175,10 @@ export function getInstruments(): Instruments {
       if (chatgpt?.expiresAt == null) return;
       result.observe(Math.round((chatgpt.expiresAt - Date.now()) / 1000));
     });
+  meter.createObservableGauge('mate_model_primary_up').addCallback((result) => {
+    if (primary === null) return;
+    result.observe(primary ? 1 : 0);
+  });
   const closes = meter.createCounter('mate_gateway_closes_total');
   const mints = meter.createCounter('mate_mints_total');
   const turns = meter.createCounter('mate_turns_total');
@@ -184,6 +195,7 @@ export function getInstruments(): Instruments {
   const providerErrors = meter.createCounter('mate_provider_errors_total');
   const storeFailures = meter.createCounter('mate_store_failures_total');
   const mcpCalls = meter.createCounter('mate_mcp_calls_total');
+  const routes = meter.createCounter('mate_model_routes_total');
   const firstToken = meter.createHistogram(
     'mate_turn_first_token_milliseconds',
     { unit: 'ms' },
@@ -278,6 +290,11 @@ export function getInstruments(): Instruments {
     chatgpt: (state) => {
       chatgpt = state;
     },
+    modelRouted: (route, reason) =>
+      routes.add(1, { route, reason: reason ?? 'none' }),
+    primaryUp: (up) => {
+      primary = up;
+    },
   };
   cached = { provider, instruments };
   return instruments;
@@ -314,5 +331,7 @@ export function lazyInstruments(): Instruments {
     providerError: (kind) => getInstruments().providerError(kind),
     storeFailed: (op) => getInstruments().storeFailed(op),
     chatgpt: (state) => getInstruments().chatgpt(state),
+    modelRouted: (route, reason) => getInstruments().modelRouted(route, reason),
+    primaryUp: (up) => getInstruments().primaryUp(up),
   };
 }

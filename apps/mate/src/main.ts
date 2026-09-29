@@ -200,9 +200,13 @@ function openModel(
     return createModelSetup({
       spec: brain.model,
       thinking: brain.thinking,
+      fallbackSpec: brain.fallbackModel,
+      fallbackThinking: brain.fallbackThinking,
       keyFile: brain.modelKeyFile,
       credentials: credentials ?? undefined,
       log,
+      clock: systemClock,
+      metrics: lazyInstruments(),
     });
   } catch (error) {
     if (error instanceof ConfigError) {
@@ -251,24 +255,27 @@ interface Wiring {
   chatgpt: Chatgpt | null;
 }
 
-// Signed in from chat and kept fresh by the keeper; no turn uses it.
+// Signed in from chat and kept fresh by the keeper, which tells the router of
+// each sign-in and refusal.
 function openChatgpt(
   setup: ModelSetup,
   credentials: PostgresCredentialStore,
 ): Chatgpt {
   const keeper = new ChatgptKeeper({
-    models: setup.models,
+    models: setup.direct,
     credentials,
     clock: systemClock,
     log,
     metrics: lazyInstruments(),
+    router: setup.router,
   });
   const account = new ChatgptAccount({
-    models: setup.models,
+    models: setup.direct,
     keeper,
     credentials,
     model: chatgptModel(setup),
     lane: { model: setup.model, thinking: setup.thinking },
+    router: setup.router,
     clock: systemClock,
     log,
   });
@@ -649,6 +656,10 @@ log.info('mate starting', {
   model: config.sandboxes.mode === 'kube' ? config.sandboxes.brain.model : null,
   thinking:
     config.sandboxes.mode === 'kube' ? config.sandboxes.brain.thinking : null,
+  fallback:
+    config.sandboxes.mode === 'kube'
+      ? config.sandboxes.brain.fallbackModel
+      : null,
   maxConcurrent: config.maxConcurrent,
   maxSandboxes: config.maxSandboxes,
   store: storeState(wiring.db),

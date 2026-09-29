@@ -39,6 +39,8 @@ export interface PromptResult {
   costUsd?: number | null;
   /** The brain set the thread's memory aside; the next prompt carries the transcript. */
   reset?: boolean;
+  /** Why ChatGPT did not answer, said once per outage after the answer. */
+  notice?: string | null;
 }
 
 export type Step =
@@ -52,7 +54,9 @@ export type Step =
   /** The brain's store failed under the turn. */
   | { throw: string }
   /** A tool call leasing the sandbox, drawn as the brain draws it. */
-  | { mint: SandboxSource | 'fail' };
+  | { mint: SandboxSource | 'fail' }
+  /** The result carries it, as PiBrain's carries a model outage's notice. */
+  | { notice: string };
 
 export type Script = (prompt: string) => Step[];
 
@@ -252,11 +256,15 @@ export class StubBrain implements Brain {
     );
     const startedAt = this.clock.now();
     let firstTokenMs: number | null = null;
+    let notice: string | null = null;
     try {
       for (const step of steps) {
         await this.step(step, run, sink, card);
         if ('text' in step) firstTokenMs ??= this.clock.now() - startedAt;
-        if ('fail' in step) return { stopReason: 'error', error: step.fail };
+        if ('notice' in step) notice = step.notice;
+        if ('fail' in step) {
+          return { stopReason: 'error', error: step.fail, notice };
+        }
       }
       if (run.stop.signal.aborted) return { stopReason: 'cancelled' };
       stored.messages += 1;
@@ -264,6 +272,7 @@ export class StubBrain implements Brain {
         stopReason: 'end_turn',
         firstTokenMs,
         costUsd: this.opts.costUsd ?? null,
+        notice,
       };
     } catch (error) {
       if (run.abort.signal.aborted) throw run.abort.signal.reason;
