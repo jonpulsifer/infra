@@ -77,6 +77,7 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 ## Rules
 
 - Keep one replica with `strategy: Recreate`. Two pods on Discord both reply, two on Slack each get half the events, and both write each thread's session.
+- Run no second mate against `mate-db`, such as a local run with its `DATABASE_URL`. Both would refresh the one ChatGPT token, and OpenAI refuses a refresh token spent twice.
 - Keep the probe readiness-only. `/healthz` returns 503 while mate waits for Discord's session start limit, so a liveness probe restarts mate and spends more of it.
 - Keep `MATE_TURN_MINUTES` under 55, or mate does not start.
 - Keep `MATE_MAX_SANDBOXES` plus `MATE_SPARES` sandboxes within oldschool's free CPU. Each sandbox requests 500m, and one that does not fit stays `Pending`.
