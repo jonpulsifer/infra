@@ -21,9 +21,9 @@ To stop a turn, use Discord's Stop button or Slack's stop control.
 
 ## Daily custodian
 
-mate starts a daily homelab check at 18:00 `America/Halifax` in Slack `#chatops`, configured by `MATE_CUSTODIAN_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. It checks the clusters, Flux, alerts, backups, hosts and PR status, and reports failures and work that needs the owner. The assignment asks for inspection only: no merges or changes. This is a prompt policy, **not a permission boundary**: the scheduled agent currently receives the same powerful sandbox credentials as an interactive turn. Do not rely on it as a hard read-only guard.
+mate starts a daily homelab check at 18:00 `America/Halifax` in Slack `#chatops`, configured by `MATE_CUSTODIAN_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. It checks the clusters, Flux, alerts, backups, hosts and PR status, and reports failures and work that needs the owner. The assignment can fix clear problems through branches and PRs and merge understood PRs once required checks pass and reviews do not block. It does not bypass protections, make live infrastructure changes by hand or apply Atlantis plans without the owner's approval. The scheduled agent has the same sandbox credentials and GitOps rules as an interactive turn.
 
-mate records the day and Slack root in `mate-db` and retries an unstarted check until midnight Atlantic time. A restart resumes an interrupted turn. If mate stops after Slack accepts the root but before its timestamp reaches the database, a retry can post a second root. `apps/mate/src/custodian.ts` owns this schedule; unset `MATE_CUSTODIAN_CHANNEL` to stop new reports. There is no unattended PR merging.
+mate records the day and Slack root in `mate-db` and retries an unstarted check until midnight Atlantic time. A restart resumes an interrupted turn. If mate stops after Slack accepts the root but before its timestamp reaches the database, a retry can post a second root. `apps/mate/src/custodian.ts` owns this schedule; unset `MATE_CUSTODIAN_CHANNEL` to stop new reports. The daily assignment can merge passing PRs; it escalates unclear or risky changes to the owner.
 
 ## What the agent can do
 

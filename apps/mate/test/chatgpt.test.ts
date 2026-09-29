@@ -947,7 +947,7 @@ describe('status, logout and pause', () => {
     expect(setup.router?.status().now).toMatchObject({ reason: 'paused' });
     expect(said()).toEqual([
       expect.stringMatching(
-        /^⏸️ ChatGPT is paused until \d\d:\d\d UTC, or until mate restarts, and opencode-go\/qwen3\.8-max answers\. Say `chatgpt resume` to end it sooner\.$/,
+        /^⏸️ ChatGPT is paused until (?:\d{4}-\d\d-\d\d )?\d\d:\d\d UTC, or until mate restarts, and opencode-go\/qwen3\.8-max answers\. Say `chatgpt resume` to end it sooner\.$/,
       ),
     ]);
     await command('chatgpt resume');

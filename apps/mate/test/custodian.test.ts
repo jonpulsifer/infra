@@ -23,10 +23,13 @@ describe('Atlantic schedule', () => {
     expect(dueDay(at('2026-07-04T03:00:00Z'))).toBeNull();
   });
 
-  test('the assignment forbids merges and live changes', () => {
-    expect(custodianPrompt('2026-07-03')).toContain(
-      'do not change live state, merge PRs',
+  test('the assignment allows GitOps repairs and guarded merges', () => {
+    const prompt = custodianPrompt('2026-07-03');
+    expect(prompt).toContain('Fix clear issues through the repository');
+    expect(prompt).toContain(
+      'merge only changes you understand whose required checks pass',
     );
+    expect(prompt).toContain('never make live infrastructure changes by hand');
   });
 });
 
