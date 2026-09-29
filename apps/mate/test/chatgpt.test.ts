@@ -600,6 +600,26 @@ describe('the keeper', () => {
     });
   });
 
+  // pi throws after a forced rotation whose new token lasts no longer than the old.
+  test('a forced refresh of a token signed in a moment ago rotates it once and says so', async () => {
+    await signIn(10);
+    expect(await keeper.forceRefresh()).toBe('refreshed');
+    expect(openai.of('/oauth/token')).toHaveLength(1);
+    expect(await store.read(CHATGPT_PROVIDER)).toMatchObject({
+      refresh: 'rt_SECRET_1',
+    });
+    expect(log.of('the ChatGPT refresh failed; retrying')).toEqual([]);
+    expect(log.of('the ChatGPT token is refreshed')).toHaveLength(1);
+    expectNothingSecret();
+  });
+
+  test('a forced refresh behind a check that has just rotated does not rotate again', async () => {
+    await signIn(1);
+    const results = await Promise.all([keeper.check(), keeper.forceRefresh()]);
+    expect(results).toEqual(['refreshed', 'refreshed']);
+    expect(openai.of('/oauth/token')).toHaveLength(1);
+  });
+
   test('no credential is signed out; an unreadable store reports nothing', async () => {
     up = false;
     expect(await keeper.check()).toBe('store');

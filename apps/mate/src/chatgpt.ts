@@ -107,10 +107,13 @@ export class ChatgptKeeper {
   private timer: Handle | null = null;
   private running: Promise<CheckResult> | null = null;
   private stopped = false;
+  /** Credentials the store has written, which a rotation always adds to. */
+  private writes = 0;
 
   constructor(private readonly options: ChatgptKeeperOptions) {
     options.credentials.onChange((change) => {
       if (change.providerId !== CHATGPT_PROVIDER) return;
+      if (change.stored) this.writes += 1;
       this.set(
         change.stored && change.expires !== null
           ? { state: 'good', expires: change.expires }
@@ -144,7 +147,8 @@ export class ChatgptKeeper {
 
   /** One rotation now, whatever is left: for a token the backend refuses. */
   async forceRefresh(): Promise<CheckResult> {
-    await this.running;
+    // A check that has just rotated has replaced the refused token already.
+    if ((await this.running) === 'refreshed') return 'refreshed';
     return this.run(true);
   }
 
@@ -178,6 +182,7 @@ export class ChatgptKeeper {
     this.set({ state: 'good', expires });
     const left = expires - clock.now();
     if (!force && left >= REFRESH_MARGIN_MS) return 'fresh';
+    const writes = this.writes;
     try {
       const auth = await models.getAuth(CHATGPT_PROVIDER, {
         minOAuthValidityMs: force
@@ -186,6 +191,11 @@ export class ChatgptKeeper {
       });
       if (!auth) return 'none';
     } catch (error) {
+      // A forced rotation of a new token saves, then pi finds the next token
+      // lasts no longer than the old one did and throws.
+      if (this.writes !== writes && this.signIn.state === 'good') {
+        return this.refreshed();
+      }
       const failure = refreshFailure(error);
       if (failure.kind === 'refused') {
         this.set({ state: 'refused', expires, at: clock.now() });
@@ -198,8 +208,12 @@ export class ChatgptKeeper {
       log.warn('the ChatGPT refresh failed; retrying', { why: failure.why });
       return failure.kind;
     }
+    return this.refreshed();
+  }
+
+  private refreshed(): CheckResult {
     if (this.signIn.state === 'good') {
-      log.info('the ChatGPT token is refreshed', {
+      this.options.log.info('the ChatGPT token is refreshed', {
         expiresAt: new Date(this.signIn.expires).toISOString(),
       });
     }
