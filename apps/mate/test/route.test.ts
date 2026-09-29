@@ -3,7 +3,15 @@
  * carry mate's provider ids and pi's catalog models: a real AgentHarness
  * first, then each failure class, the breaker, the notices and the pause.
  */
-import { describe, expect, spyOn, test } from 'bun:test';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  spyOn,
+  test,
+} from 'bun:test';
 import {
   AgentHarness,
   type AgentHarnessTool,
@@ -65,6 +73,7 @@ import {
 } from '../src/route.ts';
 import {
   FakeClock,
+  NOON_UTC,
   RecordingInstruments,
   RecordingLog,
   settle,
@@ -312,6 +321,9 @@ interface Rig {
   refresh: 'ok' | number;
   signIn(expiresInMs?: number): Promise<void>;
 }
+
+beforeEach(() => setSystemTime(new Date(NOON_UTC)));
+afterEach(() => setSystemTime());
 
 function rig(
   options: { fallback?: boolean; fallbackThinking?: ThinkingLevel } = {},

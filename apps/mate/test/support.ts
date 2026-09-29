@@ -69,6 +69,9 @@ interface Timer {
   seq: number;
 }
 
+/** Noon UTC, far from a day boundary, for tests whose labels read the wall clock. */
+export const NOON_UTC = Date.UTC(2026, 5, 15, 12);
+
 export class FakeClock implements Clock {
   private timers: Timer[] = [];
   private seq = 0;

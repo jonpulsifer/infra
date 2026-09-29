@@ -34,6 +34,7 @@ import {
   discordRef,
   FakeClock,
   FakeDiscord,
+  NOON_UTC,
   RecordingInstruments,
   RecordingLog,
   settle,
@@ -224,7 +225,8 @@ let surface: Surface;
 let reads: number;
 
 beforeEach(async () => {
-  clock = new FakeClock(Date.now());
+  setSystemTime(new Date(NOON_UTC));
+  clock = new FakeClock(NOON_UTC);
   log = new RecordingLog();
   metrics = new RecordingInstruments();
   openai = new FakeOpenAI();
