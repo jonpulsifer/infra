@@ -574,7 +574,8 @@ async function shutdown(signal: string): Promise<void> {
     log.warn('gateway destroy failed', { error: plain(error) });
   }
   await wiring.mcp?.close().catch(() => {});
-  // Before the pool closes: a rotated token that did not save gets a last try.
+  // Before the pool closes: a refresh still running saves its rotated token,
+  // and one that did not save gets a last try.
   await wiring.chatgpt?.credentials.close().catch(() => {});
   await wiring.db
     ?.close()

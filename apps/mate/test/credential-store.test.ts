@@ -200,6 +200,36 @@ describe('modify', () => {
     expect(await open().read(CODEX)).toEqual(credential(2));
   });
 
+  test('a caller that stops waiting before its turn comes never runs', async () => {
+    const store = open();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = store.modify(CODEX, async () => {
+      await held;
+      return credential(1);
+    });
+    const stop = new AbortController();
+    let ran = false;
+    const queued = store.modify(
+      CODEX,
+      async () => {
+        ran = true;
+        return credential(2);
+      },
+      { signal: stop.signal },
+    );
+    await settle();
+    stop.abort(new Error('the user pressed Stop'));
+    await expect(queued).rejects.toThrow('the user pressed Stop');
+    release();
+    await first;
+    await store.modify(CODEX, async () => undefined);
+    expect(ran).toBe(false);
+    expect(await open().read(CODEX)).toEqual(credential(1));
+  });
+
   test('refuses opencode-go, whose key file a stored credential would override', async () => {
     const store = open();
     await expect(
@@ -316,6 +346,69 @@ describe('a write that fails', () => {
       credential(1),
     ]);
     expect(clock.pendingTimers).toBe(0);
+  });
+
+  test('closing on a store still down says the credential is lost, by provider alone', async () => {
+    const store = open();
+    await store.read(CODEX);
+    up = false;
+    const written = store.modify(CODEX, async () => credential(1));
+    for (const wait of WRITE_RETRY_MS) {
+      await settle();
+      await clock.advance(wait);
+    }
+    await written;
+    await store.close();
+    expect(log.of('mate stops with a credential it could not save')).toEqual([
+      expect.objectContaining({ fields: { providers: [CODEX] } }),
+    ]);
+    expect(clock.pendingTimers).toBe(0);
+    expectNoSecret(JSON.stringify(log.entries));
+  });
+});
+
+// main.ts closes the pool as soon as close() returns, then exits.
+describe('closing', () => {
+  test('waits for a rotation still running, and saves it before it returns', async () => {
+    const store = open();
+    await store.modify(CODEX, async () => credential(0));
+    let rotate = () => {};
+    const rotated = new Promise<void>((resolve) => {
+      rotate = resolve;
+    });
+    const refreshing = store.modify(CODEX, async () => {
+      await rotated;
+      return credential(1);
+    });
+    await settle();
+    let closed = false;
+    const closing = store.close().then(() => {
+      closed = true;
+    });
+    await settle();
+    expect(closed).toBe(false);
+    rotate();
+    await closing;
+    expect((await rows()).map((r) => JSON.parse(r.credential))).toEqual([
+      credential(1),
+    ]);
+    expect(await refreshing).toEqual(credential(1));
+  });
+
+  test('refuses a write that has not started, so no refresh spends a token after it', async () => {
+    const store = open();
+    await store.close();
+    let ran = false;
+    const refresh = async () => {
+      ran = true;
+      return credential(1);
+    };
+    await expect(store.modify(CODEX, refresh)).rejects.toBeInstanceOf(
+      StoreUnavailable,
+    );
+    await expect(store.delete(CODEX)).rejects.toBeInstanceOf(StoreUnavailable);
+    expect(ran).toBe(false);
+    expect(await rows()).toEqual([]);
   });
 });
 

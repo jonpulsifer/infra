@@ -89,6 +89,7 @@ export class PostgresCredentialStore implements CredentialStore {
         new Error(`mate stores no ${providerId} credential; its key is a file`),
       );
     }
+    if (this.closed) return Promise.reject(closedError());
     return this.enqueue(
       providerId,
       async () => {
@@ -108,6 +109,7 @@ export class PostgresCredentialStore implements CredentialStore {
   }
 
   delete(providerId: string, options?: AuthOperationOptions): Promise<void> {
+    if (this.closed) return Promise.reject(closedError());
     return this.enqueue(
       providerId,
       async () => {
@@ -131,12 +133,22 @@ export class PostgresCredentialStore implements CredentialStore {
     return () => this.listeners.delete(listener);
   }
 
-  /** Stops the retry timer after one last try to save what is unsaved. */
+  /**
+   * Refuses new writes and waits for those already running, since a refresh
+   * in flight has spent the old token at OpenAI. Then one last try saves what
+   * is unsaved.
+   */
   async close(): Promise<void> {
     this.closed = true;
     if (this.retry) this.clock.cancel(this.retry);
     this.retry = null;
+    await Promise.allSettled([...this.chains.values()]);
     await this.flush();
+    if (this.unsaved.size > 0) {
+      this.options.log.error('mate stops with a credential it could not save', {
+        providers: [...this.unsaved],
+      });
+    }
   }
 
   private sql(): NonNullable<Database['sql']> {
@@ -337,6 +349,10 @@ function failure(error: unknown): string {
   const codes = [field(error, 'errno'), field(error, 'code')].filter(Boolean);
   const name = error instanceof Error ? error.name : 'unknown error';
   return codes.length > 0 ? `${name} (${codes.join(', ')})` : name;
+}
+
+function closedError(): StoreUnavailable {
+  return new StoreUnavailable('the credential store is closed');
 }
 
 function unavailable(
