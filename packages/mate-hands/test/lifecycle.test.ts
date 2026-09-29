@@ -4,8 +4,18 @@
  * started, including background children of finished commands.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { readdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import {
+  closeSync,
+  constants,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { Ledger, startTime } from '../src/groups.ts';
 import {
   alive,
   eventually,
@@ -139,5 +149,75 @@ describe('epochs', () => {
     expect(await owner.result('ping')).toBeNull();
     expect(pids.every(alive)).toBe(true);
     expect(readdirSync(state)).toEqual([`9-${owner.pid}.json`]);
+  });
+
+  test('a dead daemon with a newer epoch is cleared, not obeyed', async () => {
+    const dir = scratch();
+    const state = scratch('state');
+    const orphan = spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });
+    orphan.unref();
+    const pgid = orphan.pid as number;
+    const gone = Bun.spawn(['true']);
+    await gone.exited;
+    const planted = {
+      epoch: Number.MAX_SAFE_INTEGER,
+      pid: gone.pid,
+      start: '1',
+      groups: [{ pgid, start: startTime(pgid) }],
+    };
+    writeFileSync(
+      join(state, `${planted.epoch}-${planted.pid}.json`),
+      JSON.stringify(planted),
+    );
+    try {
+      const next = hands({ epoch: 5, cwd: dir, stateDir: state });
+      expect(await next.result('ping')).toBeNull();
+      expect(await allDead([pgid])).toBe(true);
+      expect(readdirSync(state)).toEqual([`5-${next.pid}.json`]);
+      const said = () => next.stderr.join('');
+      expect(
+        await eventually(() => said().includes('a dead newer daemon')),
+      ).toBe(true);
+    } finally {
+      orphan.kill('SIGKILL');
+    }
+  });
+});
+
+describe('the state directory', () => {
+  function mkfifo(path: string): void {
+    expect(Bun.spawnSync(['mkfifo', path]).exitCode).toBe(0);
+  }
+
+  test('a FIFO named like a record is removed, not read', async () => {
+    const state = scratch('state');
+    mkfifo(join(state, '99-99.json'));
+    const h = hands({ epoch: 5, stateDir: state });
+    expect(await h.result('ping')).toBeNull();
+    expect(readdirSync(state)).toEqual([`5-${h.pid}.json`]);
+  });
+
+  test('a FIFO at the temp path of a record is replaced, not written', () => {
+    const ledger = new Ledger(scratch('state'), {
+      epoch: 3,
+      pid: 4,
+      start: null,
+    });
+    const tmp = `${ledger.path}.tmp`;
+    mkfifo(tmp);
+    // A reader, so a regression writes into the FIFO and does not hang.
+    const reader = openSync(tmp, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      ledger.save([]);
+      expect(lstatSync(ledger.path).isFile()).toBe(true);
+      expect(JSON.parse(readFileSync(ledger.path, 'utf8'))).toEqual({
+        epoch: 3,
+        pid: 4,
+        start: null,
+        groups: [],
+      });
+    } finally {
+      closeSync(reader);
+    }
   });
 });

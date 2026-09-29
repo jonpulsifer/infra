@@ -128,12 +128,15 @@ export class Daemon {
       log.warn('superseded', { epoch, by: claimed.superseded.epoch });
     } else {
       for (const old of claimed.killed) {
-        log.info('took over from an older daemon', {
+        const fields = {
           epoch,
           old: old.epoch,
           pid: old.pid,
           groups: old.groups.length,
-        });
+        };
+        if (old.epoch < epoch)
+          log.info('took over from an older daemon', fields);
+        else log.warn('cleared the record of a dead newer daemon', fields);
       }
     }
     const { stdin, stdout } = this.stdio;

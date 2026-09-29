@@ -1,11 +1,12 @@
 /**
  * The file methods, with pi's `NodeExecutionEnv` semantics and a cap on every
- * read, because a whole file crosses the exec stream as one message.
+ * read, because a whole file crosses the exec stream as one message. Reads
+ * and writes open only regular files: a FIFO opened for a blocking read or
+ * write never returns, ignores cancel and holds a thread of the fs pool.
  */
 import { randomUUID } from 'node:crypto';
-import type { Stats } from 'node:fs';
+import { constants, type Stats } from 'node:fs';
 import {
-  appendFile,
   type FileHandle,
   lstat,
   mkdir,
@@ -29,6 +30,11 @@ import {
 } from './protocol.ts';
 
 const CHUNK_BYTES = 64 * 1024;
+
+const { O_APPEND, O_CREAT, O_NOCTTY, O_NONBLOCK, O_RDONLY, O_WRONLY } =
+  constants;
+const READ = O_RDONLY | O_NONBLOCK | O_NOCTTY;
+const WRITE = O_WRONLY | O_CREAT | O_NONBLOCK | O_NOCTTY;
 
 const ERRNO = new Map<string | undefined, FileErrorCode>([
   ['ABORT_ERR', 'aborted'],
@@ -68,6 +74,39 @@ function info(path: string, stats: Stats): FileInfo | null {
     size: stats.size,
     mtimeMs: stats.mtimeMs,
   };
+}
+
+function notRegular(path: string): HandsError {
+  return fileError('invalid', `${path} is not a regular file`, path);
+}
+
+/**
+ * Opens `path` without blocking, and closes and refuses it unless the opened
+ * fd is a regular file. The fd is checked, not the path, so a symlink to a
+ * FIFO is refused too.
+ */
+async function openRegular(path: string, flags: number): Promise<FileHandle> {
+  let handle: FileHandle;
+  try {
+    handle = await open(path, flags, 0o666);
+  } catch (error) {
+    // What a FIFO with no reader, or a socket, answers a nonblocking open.
+    if ((error as NodeJS.ErrnoException)?.code === 'ENXIO') {
+      throw notRegular(path);
+    }
+    throw error;
+  }
+  try {
+    const stats = await handle.stat();
+    if (stats.isDirectory()) {
+      throw fileError('is_directory', `${path} is a directory`, path);
+    }
+    if (!stats.isFile()) throw notRegular(path);
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => {});
+    throw error;
+  }
 }
 
 function tooLarge(path: string, max: number, what = path): HandsError {
@@ -146,7 +185,7 @@ export class Files {
   async read(path: string, signal: AbortSignal): Promise<Buffer> {
     aborted(signal, path);
     const max = this.limits.maxReadBytes;
-    const handle = await open(path, 'r');
+    const handle = await openRegular(path, READ);
     try {
       if ((await handle.stat()).size > max) throw tooLarge(path, max);
       const chunks: Buffer[] = [];
@@ -173,7 +212,7 @@ export class Files {
   ): Promise<string[]> {
     if (maxLines !== undefined && maxLines <= 0) return [];
     const reader = new LineReader(
-      await open(path, 'r'),
+      await openRegular(path, READ),
       path,
       this.limits.maxReadBytes,
     );
@@ -204,8 +243,19 @@ export class Files {
     aborted(signal, path);
     await mkdir(dirname(path), { recursive: true });
     aborted(signal, path);
-    if (append) await appendFile(path, content);
-    else await writeFile(path, content, { signal });
+    const handle = await openRegular(path, append ? WRITE | O_APPEND : WRITE);
+    try {
+      if (append) {
+        await handle.writeFile(content);
+      } else {
+        await handle.truncate(0);
+        await handle.writeFile(content, { signal });
+      }
+    } catch (error) {
+      await handle.close().catch(() => {});
+      throw error;
+    }
+    await handle.close();
     return null;
   }
 
@@ -256,9 +306,10 @@ export class Files {
     return realpath(path);
   }
 
+  /** pi's answer: an unsupported file type is an error, not a yes. */
   async exists(path: string): Promise<boolean> {
     try {
-      await lstat(path);
+      await this.fileInfo(path);
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return false;
@@ -298,7 +349,7 @@ export class Files {
         `${this.limits.maxReaders} line readers are already open`,
       );
     }
-    const handle = await open(path, 'r');
+    const handle = await openRegular(path, READ);
     const id = this.nextReader++;
     this.readers.set(
       id,
