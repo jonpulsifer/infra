@@ -17,7 +17,7 @@
         "@x402/core": "2.27.0",
         "@x402/evm": "2.27.0",
         "@x402/hono": "2.26.0",
-        "@x402/mcp": "2.26.0",
+        "@x402/mcp": "2.27.0",
         "@x402/svm": "2.27.0",
         "hono": "4.13.8",
         "uqr": "0.1.3",
@@ -1392,7 +1392,7 @@
 
     "@x402/hono": ["@x402/hono@2.26.0", "", { "dependencies": { "@x402/core": "~2.26.0", "@x402/extensions": "~2.26.0" }, "peerDependencies": { "@x402/paywall": "^2.26.0", "hono": "^4.0.0" }, "optionalPeers": ["@x402/paywall"] }, "sha512-q/UKxcDs1LzM24ON0BGAoOecFeYl7TqV0Dgui+nJd64l+ef0XU2VLXW9/N4dY5t6gyNRe2EknvQ7DIiJ3WD+NA=="],
 
-    "@x402/mcp": ["@x402/mcp@2.26.0", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.12.1", "@x402/core": "~2.26.0", "zod": "^3.24.2" } }, "sha512-97aB5577Lb/8aYtQc1YHmstRGdwuSVk/WzUPwN7V9Wfgtt4xP4R4eQu4aN4/cxQqvMxA3egMBjRbmFfrbpcaIw=="],
+    "@x402/mcp": ["@x402/mcp@2.27.0", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.12.1", "@x402/core": "~2.27.0", "zod": "^3.24.2" } }, "sha512-tCSRu/Li9pX1CPvXHiX42bavKwKVXL0Asz5whjTAy9YOdAOxdLNXsXK0e2fpc/4V1sj9d609glj6cZkgb+18yA=="],
 
     "@x402/svm": ["@x402/svm@2.27.0", "", { "dependencies": { "@noble/hashes": "^1.8.0", "@solana-program/compute-budget": "^0.11.0", "@solana-program/token": "^0.9.0", "@solana-program/token-2022": "^0.6.1", "@x402/core": "~2.27.0" }, "peerDependencies": { "@solana/kit": ">=5.1.0" } }, "sha512-ObRKE5qAVit/oSdscfno3M52PX4PDV2VuyYJPOE4rIzR6fzHNRaAjRi9EgzU6otvYhVhm7ejiZbYlp1DEwMJag=="],
 
@@ -2573,8 +2573,6 @@
     "@x402/extensions/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "@x402/hono/@x402/core": ["@x402/core@2.26.0", "", { "dependencies": { "zod": "^3.24.2" } }, "sha512-8dlXip9u0JjyELzzFz48vntuMajvUjA8IYpitfaW423m53bR49amZDIn3n4gXRYoNEKzGB9Rtn8at35WHz61cA=="],
-
-    "@x402/mcp/@x402/core": ["@x402/core@2.26.0", "", { "dependencies": { "zod": "^3.24.2" } }, "sha512-8dlXip9u0JjyELzzFz48vntuMajvUjA8IYpitfaW423m53bR49amZDIn3n4gXRYoNEKzGB9Rtn8at35WHz61cA=="],
 
     "@x402/mcp/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
