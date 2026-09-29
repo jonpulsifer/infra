@@ -5,6 +5,7 @@
 import type {
   SessionStatus,
   SlackApi,
+  SlackBlock,
   SlackMessage,
   StreamChunk,
   StreamStart,
@@ -229,12 +230,20 @@ export class FakeSurface implements Surface {
 
 export type SlackCall =
   | { call: 'post'; channel: string; threadTs: string; text: string }
-  | { call: 'edit'; ts: string; text: string }
+  | { call: 'edit'; ts: string; text: string; blocks?: SlackBlock[] }
+  | { call: 'read'; threadTs: string; ts: string }
   | { call: 'remove'; ts: string }
-  | { call: 'start'; args: StreamStart }
+  | { call: 'start'; ts: string; args: StreamStart }
   | { call: 'append'; ts: string; chunks: StreamChunk[] }
-  | { call: 'stop'; ts: string }
+  | { call: 'stop'; ts: string; chunks: StreamChunk[] }
   | { call: 'session'; threadTs: string; status: SessionStatus };
+
+export interface PlanRow {
+  id: string;
+  title: string;
+  status: string;
+  details: string;
+}
 
 export class FakeSlack implements SlackApi {
   readonly calls: SlackCall[] = [];
@@ -245,6 +254,7 @@ export class FakeSlack implements SlackApi {
   failAppend: Error | null = null;
   failStart: Error | null = null;
   failEdit: Error | null = null;
+  failRead: Error | null = null;
   private serial = 0;
 
   async post(channel: string, threadTs: string, text: string): Promise<string> {
@@ -253,9 +263,14 @@ export class FakeSlack implements SlackApi {
     return ts;
   }
 
-  async edit(_channel: string, ts: string, text: string): Promise<void> {
+  async edit(
+    _channel: string,
+    ts: string,
+    text: string,
+    blocks?: SlackBlock[],
+  ): Promise<void> {
     if (this.failEdit) throw this.failEdit;
-    this.calls.push({ call: 'edit', ts, text });
+    this.calls.push({ call: 'edit', ts, text, ...(blocks ? { blocks } : {}) });
   }
 
   async remove(_channel: string, ts: string): Promise<void> {
@@ -265,7 +280,7 @@ export class FakeSlack implements SlackApi {
   async startStream(args: StreamStart): Promise<string> {
     if (this.failStart) throw this.failStart;
     const ts = `s-${++this.serial}`;
-    this.calls.push({ call: 'start', args });
+    this.calls.push({ call: 'start', ts, args });
     return ts;
   }
 
@@ -278,9 +293,13 @@ export class FakeSlack implements SlackApi {
     this.calls.push({ call: 'append', ts, chunks });
   }
 
-  async stopStream(_channel: string, ts: string): Promise<void> {
+  async stopStream(
+    _channel: string,
+    ts: string,
+    chunks: StreamChunk[] = [],
+  ): Promise<void> {
     if (this.failStopStream) throw this.failStopStream;
-    this.calls.push({ call: 'stop', ts });
+    this.calls.push({ call: 'stop', ts, chunks });
   }
 
   async session(
@@ -296,6 +315,17 @@ export class FakeSlack implements SlackApi {
     return this.thread;
   }
 
+  /** A message pushed to `thread`, or else a stream as Slack stored it. */
+  async message(
+    _channel: string,
+    threadTs: string,
+    ts: string,
+  ): Promise<SlackMessage | null> {
+    this.calls.push({ call: 'read', threadTs, ts });
+    if (this.failRead) throw this.failRead;
+    return this.thread.find((m) => m.ts === ts) ?? this.stored(ts);
+  }
+
   async userName(userId: string): Promise<string> {
     return this.names.get(userId) ?? userId;
   }
@@ -304,15 +334,78 @@ export class FakeSlack implements SlackApi {
     return { userId: 'U0BOT', teamId: 'TAR78LS82', appBotId: 'B0BOT' };
   }
 
-  chunks(): StreamChunk[] {
-    return this.calls.flatMap((c) =>
-      c.call === 'start' ? c.args.chunks : c.call === 'append' ? c.chunks : [],
+  chunks(ts?: string): StreamChunk[] {
+    return this.calls.flatMap((c) => {
+      if (
+        c.call === 'post' ||
+        c.call === 'edit' ||
+        c.call === 'remove' ||
+        c.call === 'read'
+      )
+        return [];
+      if (c.call === 'session' || (ts && c.ts !== ts)) return [];
+      return c.call === 'start' ? c.args.chunks : c.chunks;
+    });
+  }
+
+  /** Every plan title sent, in order. */
+  titles(): string[] {
+    return this.chunks().flatMap((chunk) =>
+      chunk.type === 'plan_update' ? [chunk.title] : [],
     );
   }
 
+  /**
+   * A stream's plan as Slack keeps it: the last title, and tasks merged by id
+   * with each chunk's `details` appended to the task's.
+   */
+  plan(stream = 0): { title: string | null; rows: PlanRow[] } {
+    const ts = this.only('start')[stream]?.ts;
+    return ts ? this.planOf(ts) : { title: null, rows: [] };
+  }
+
+  /** A stream as a read gives it back: its plan block, then its answer. */
+  stored(ts: string): SlackMessage | null {
+    if (!this.only('start').some((c) => c.ts === ts)) return null;
+    const { title, rows } = this.planOf(ts);
+    const answer = this.streamed(ts);
+    const blocks: SlackBlock[] = [];
+    if (title !== null) {
+      blocks.push({
+        type: 'plan',
+        title,
+        tasks: rows.map(({ id, details, ...row }) => ({
+          task_id: id,
+          ...row,
+          ...(details ? { details } : {}),
+        })),
+      });
+    }
+    if (answer) blocks.push({ type: 'markdown', text: answer });
+    const text = [title, answer].filter(Boolean).join(' ');
+    return { ts, bot_id: 'B0BOT', text, blocks };
+  }
+
+  private planOf(ts: string): { title: string | null; rows: PlanRow[] } {
+    let title: string | null = null;
+    const rows = new Map<string, PlanRow>();
+    for (const chunk of this.chunks(ts)) {
+      if (chunk.type === 'plan_update') title = chunk.title;
+      if (chunk.type !== 'task_update') continue;
+      const was = rows.get(chunk.id)?.details ?? '';
+      rows.set(chunk.id, {
+        id: chunk.id,
+        title: chunk.title,
+        status: chunk.status,
+        details: `${was}${chunk.details ?? ''}`,
+      });
+    }
+    return { title, rows: [...rows.values()] };
+  }
+
   /** The answer text alone. */
-  streamed(): string {
-    return this.chunks()
+  streamed(ts?: string): string {
+    return this.chunks(ts)
       .map((chunk) => (chunk.type === 'markdown_text' ? chunk.text : ''))
       .join('');
   }
