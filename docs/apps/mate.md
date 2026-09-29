@@ -17,7 +17,7 @@ Mention Rowbutt in one of these channels to open a thread, and reply in it with 
 
 To stop a turn, use Discord's Stop button or Slack's stop control.
 
-`chatgpt login`, `chatgpt status`, `chatgpt logout`, `chatgpt pause [minutes]` and `chatgpt resume` manage Rowbutt's ChatGPT sign-in and whether ChatGPT answers, and never reach the agent. [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md) has the steps.
+`chatgpt login`, `chatgpt status`, `chatgpt logout`, `chatgpt pause [minutes]` and `chatgpt resume` manage Rowbutt's ChatGPT sign-in and whether ChatGPT answers, and never reach the agent. [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md) and [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) have the steps.
 
 ## What the agent can do
 
@@ -54,12 +54,12 @@ mate is one Bun process, and its ingress admits only the node it runs on. It run
 | `MateGitHubCredentialBroken`, `MateGitHubTokenMintFailing` | mate cannot mint GitHub tokens, so sandboxes cannot push | [Repair the Rowbutt GitHub credential](../runbooks/repair-the-rowbutt-github-credential.md) |
 | `MateKthxSitesSyncFailing` | mate could not read back or save a sandbox's kthx site tokens. A site claimed in that turn may be orphaned. Read the mate log. | |
 | `MateChatGPTSignedOut`, `MateChatGPTTokenNotRefreshing` | mate holds no working ChatGPT sign-in, or a day of token refreshes failed | [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md) |
-| `MateModelPrimaryFailing` | ChatGPT fails mate's requests for a reason other than its usage limit or the sign-in, so the fallback model answers | [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md#if-something-goes-wrong) |
+| `MateModelPrimaryFailing` | ChatGPT fails mate's requests for a reason other than its usage limit or the sign-in, so the fallback model answers | [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) |
 | `MateStoreFailing`, `MateDatabaseDown`, `MateDatabaseVolumeFilling`, `MateDatabaseBackupFailing` | mate cannot reach the session store, or the store is down, past 80% of its volume, or has no dump from the last 36 hours | [Operate Postgres](../runbooks/operate-postgres.md) |
 
 The other alerts are in `clusters/offsite/monitoring/mate-rules.yaml`, and each `description` names its fix.
 
-To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To take turns off ChatGPT, say `chatgpt pause 10080`, or set `MATE_MODEL` to the fallback's model and `MATE_FALLBACK_MODEL` to `none`. To disable GitHub, cluster, host or phone access, unset `MATE_GITHUB_APP_ID`, `MATE_SANDBOX_KUBE_SA`, `MATE_SSH_KEY_FILE` or `MATE_SWITCHBOARD_URL`. To keep the agent off folly, unset `MATE_SANDBOX_KUBE_PEERS`. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token.
+To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To take turns off ChatGPT until mate restarts, say `chatgpt pause <minutes>`. CD restarts mate at each new image, so for longer, set `MATE_MODEL` to the fallback's model and `MATE_FALLBACK_MODEL` to `none`, as [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) says. To disable GitHub, cluster, host or phone access, unset `MATE_GITHUB_APP_ID`, `MATE_SANDBOX_KUBE_SA`, `MATE_SSH_KEY_FILE` or `MATE_SWITCHBOARD_URL`. To keep the agent off folly, unset `MATE_SANDBOX_KUBE_PEERS`. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token.
 
 ## Reference
 

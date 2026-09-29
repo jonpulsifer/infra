@@ -1,9 +1,9 @@
 ---
 title: Sign Rowbutt in to ChatGPT
-description: Sign mate in to the owner's ChatGPT subscription from chat, check and pause the sign-in, and sign it out.
+description: Sign mate in to the owner's ChatGPT subscription from chat, check the sign-in, and sign it out.
 ---
 
-This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscription with OpenAI's device code. mate, the process behind Rowbutt, keeps the token in the `mate_credentials` table of mate-db, the [session store](../apps/mate/how-it-works.md#session-store). At boot and every six hours, it refreshes a token with fewer than two days left. Turns use ChatGPT first, and `MATE_FALLBACK_MODEL` when ChatGPT cannot answer. Use this runbook to sign in, when `MateChatGPTSignedOut`, `MateChatGPTTokenNotRefreshing` or `MateModelPrimaryFailing` fires, or to cut mate off.
+This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscription with OpenAI's device code. mate, the process behind Rowbutt, keeps the token in the `mate_credentials` table of mate-db, the [session store](../apps/mate/how-it-works.md#session-store). At boot and every six hours, it refreshes a token with fewer than two days left. Turns use ChatGPT first, and `MATE_FALLBACK_MODEL` when ChatGPT cannot answer. Use this runbook to sign in, when `MateChatGPTSignedOut` or `MateChatGPTTokenNotRefreshing` fires, or to cut mate off. [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md) pauses ChatGPT and handles `MateModelPrimaryFailing`.
 
 > [!WARNING]
 > This runbook changes live state by hand. It is an exception to the GitOps rule because OpenAI issues the token to mate, and git cannot hold it. The sandbox is `cluster-admin`, so the agent can read the token in mate-db and use the owner's ChatGPT account. The owner accepts this. The kill switch is [Sign out](#sign-out).
@@ -48,24 +48,6 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
 
    Result: The log shows `the ChatGPT token is refreshed` about every eight days, and no `refused` line.
 
-## Pause and resume
-
-A pause sends every turn to the fallback without a deploy. A restart of mate ends the pause.
-
-1. Say `chatgpt pause` for 60 minutes, or `chatgpt pause <minutes>` for up to 10080.
-2. To end the pause, say `chatgpt resume`.
-
-## Drill the fallback
-
-A drill shows that the fallback model can continue a thread that ChatGPT started.
-
-1. In a thread that ChatGPT answered, say `chatgpt pause 5`.
-2. Ask Rowbutt for a task that runs a command.
-
-   Result: the status line starts with `↪️`, and the fallback model finishes the turn.
-
-3. Say `chatgpt resume`.
-
 ## Sign out
 
 1. Mention Rowbutt with `chatgpt logout`.
@@ -97,11 +79,10 @@ A drill shows that the fallback model can continue a thread that ChatGPT started
 | `chatgpt status` says `chatgpt.com refused a fresh token too`. | chatgpt.com refuses the account or mate's client, not only the token. | Do [Sign in](#sign-in). If its test request fails with `HTTP 401` or `HTTP 403`, check the plan. |
 | `MateChatGPTTokenNotRefreshing` fires. | A day of refreshes failed on egress, DNS or mate-db. | Read the mate log. If `MateStoreFailing` fires, do [Operate Postgres](operate-postgres.md). |
 | After a restore of mate-db, `chatgpt status` says `not signed in`. | The nightly dump leaves out `mate_credentials`. | Do [Sign in](#sign-in). |
-| `MateModelPrimaryFailing` fires. | `chatgpt.com` is out of reach or fails, or refuses the request, such as for a model the plan lacks. | Read the `ChatGPT failed before answering` lines of the mate log. Make sure that `chatgpt.com` is in the network policy on port 443. Check the plan. |
-| A turn ends with `↪️ ChatGPT's usage limit is reached`. | The plan's usage limit is spent. | Wait for the reset. To stop the tries, say `chatgpt pause`. |
 
 ## Related
 
 - [Rowbutt](../apps/mate.md)
 - [How Rowbutt works](../apps/mate/how-it-works.md)
+- [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md)
 - [Operate Postgres](operate-postgres.md)

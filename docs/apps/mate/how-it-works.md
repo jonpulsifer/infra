@@ -38,7 +38,7 @@ A breaker that all threads share keeps requests off ChatGPT while it is down:
 | `transient`: a 5xx, a timeout, or `chatgpt.com` out of reach | 1 minute |
 | `store`: mate-db cannot be read | 1 minute |
 | `rejected`: any other refusal | 15 minutes, doubling to 2 hours |
-| `paused`: `chatgpt pause` | Until the pause ends, or `chatgpt resume` |
+| `paused`: `chatgpt pause` | Until the pause ends, `chatgpt resume`, or a restart of mate |
 
 After the wait, one request tries ChatGPT over SSE, and the other requests stay on the fallback. The breaker is in memory, so a restarted mate tries ChatGPT first. While the fallback answers, the turn's status line starts with ↪️ and names the reason. The first turn of a `limit`, `auth`, `unconfigured` or `rejected` outage ends with one notice.
 
