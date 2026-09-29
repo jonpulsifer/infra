@@ -3,7 +3,7 @@
  * carry mate's provider ids and pi's catalog models: a real AgentHarness
  * first, then each failure class, the breaker, the notices and the pause.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import {
   AgentHarness,
   type AgentHarnessTool,
@@ -990,6 +990,56 @@ describe('a failure before any content', () => {
     stop.abort();
     expect((await trial).stopReason).toBe('aborted');
     expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
+  });
+
+  test('a trial the router throws on still lets the next request try', async () => {
+    const made = await signedIn();
+    made.codex.script(
+      { fail: 'server_error', status: 500 },
+      { fail: 'server_error', status: 500 },
+      { text: 'back' },
+    );
+    made.go.script({ text: 'qwen' });
+    await ask(made);
+    await made.clock.advance(TRANSIENT_MS);
+    spyOn(made.metrics, 'primaryFailed').mockImplementationOnce(() => {
+      throw new Error('a meter that throws');
+    });
+    expect((await ask(made)).errorMessage).toBe("mate's model router failed");
+    expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
+    expect(made.codex.calls.map((call) => call.transport)).toEqual([
+      undefined,
+      'sse',
+      'sse',
+    ]);
+  });
+
+  test("a failed trial still answering on the fallback leaves the next trial's place alone", async () => {
+    const made = await signedIn();
+    const next = gates(1);
+    const answering = gates(1);
+    made.codex.script(
+      { fail: 'server_error', status: 500 },
+      { fail: 'server_error', status: 500 },
+      ...next.plays,
+    );
+    made.go.script({ text: 'qwen 1' }, ...answering.plays, {
+      text: 'qwen 3',
+    });
+    await ask(made);
+    await made.clock.advance(TRANSIENT_MS);
+    const failed = ask(made, { sessionId: 'a:main' });
+    await settle();
+    await made.clock.advance(TRANSIENT_MS);
+    const trial = ask(made, { sessionId: 'b:main' });
+    await settle();
+    answering.answer[0]?.({ text: 'qwen 2' });
+    expect((await failed).provider).toBe('opencode-go');
+    await settle();
+    expect((await ask(made)).provider).toBe('opencode-go');
+    expect(made.codex.calls).toHaveLength(3);
+    next.answer[0]?.({ text: 'back' });
+    expect((await trial).provider).toBe(CHATGPT_PROVIDER);
   });
 
   test('an overflow is forwarded, so pi compacts instead of falling back', async () => {

@@ -167,7 +167,7 @@ interface Outage {
 }
 
 type Admission =
-  | { readonly kind: 'primary' | 'trial'; readonly generation: number }
+  | { readonly kind: 'primary'; readonly attempt: Attempt }
   | { readonly kind: 'fallback'; readonly reason: RouteReason };
 
 /** A request sent to ChatGPT, as the breaker admitted it. */
@@ -375,8 +375,8 @@ class Router implements ModelRouter {
    * before one failed on what it replaced, so its failure changes nothing.
    */
   private generation = 0;
-  /** The generation of the request trying ChatGPT for the open outage. */
-  private trying: number | null = null;
+  /** The request trying ChatGPT for the open outage. */
+  private trying: Attempt | null = null;
   private limitStreak = 0;
   private rejectedStreak = 0;
   /** The generation that asked for a forced rotation since ChatGPT last answered. */
@@ -549,7 +549,6 @@ class Router implements ModelRouter {
     options: SimpleStreamOptions | undefined,
     simple: boolean,
   ): Promise<void> {
-    const fallback = this.options.fallback;
     const admitted = this.admit();
     if (admitted.kind === 'fallback') {
       return this.toFallback(
@@ -561,10 +560,30 @@ class Router implements ModelRouter {
         admitted.reason,
       );
     }
-    const attempt: Attempt = {
-      trial: admitted.kind === 'trial',
-      generation: admitted.generation,
-    };
+    try {
+      await this.tryPrimary(
+        out,
+        call,
+        context,
+        options,
+        simple,
+        admitted.attempt,
+      );
+    } finally {
+      // However it ended, a trial's place is free for the next request.
+      this.release(admitted.attempt);
+    }
+  }
+
+  private async tryPrimary(
+    out: AssistantMessageEventStream,
+    call: Call,
+    context: Context,
+    options: SimpleStreamOptions | undefined,
+    simple: boolean,
+    attempt: Attempt,
+  ): Promise<void> {
+    const fallback = this.options.fallback;
     const refused = await this.probe();
     if (refused) {
       this.options.metrics?.primaryFailed(refused);
@@ -741,22 +760,26 @@ class Router implements ModelRouter {
 
   private admit(): Admission {
     const generation = this.generation;
-    if (!this.options.fallback) return { kind: 'primary', generation };
+    const primary: Admission = {
+      kind: 'primary',
+      attempt: { trial: false, generation },
+    };
+    if (!this.options.fallback) return primary;
     const now = this.options.clock.now();
     if (this.paused(now) !== null)
       return { kind: 'fallback', reason: 'paused' };
     const open = this.outage;
-    if (!open) return { kind: 'primary', generation };
+    if (!open) return primary;
     if (open.until !== null && now >= open.until && this.trying === null) {
-      this.trying = generation;
-      return { kind: 'trial', generation };
+      this.trying = { trial: true, generation };
+      return { kind: 'primary', attempt: this.trying };
     }
     return { kind: 'fallback', reason: open.reason };
   }
 
   /** Frees the trial's place; true when `attempt` held it. */
   private release(attempt: Attempt): boolean {
-    if (!attempt.trial || this.trying !== attempt.generation) return false;
+    if (this.trying !== attempt) return false;
     this.trying = null;
     return true;
   }
