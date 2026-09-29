@@ -59,6 +59,7 @@ jobs:
             packages/archive/**
             packages/kthx/**
             packages/mate-hands/**
+            packages/pi-store-postgres/**
             packages/typescript-config/**
             dotfiles/skills/**
             images/mate-sandbox/mise.toml

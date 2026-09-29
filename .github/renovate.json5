@@ -441,6 +441,16 @@
       groupName: 'prometheus-operator',
       groupSlug: 'prometheus-operator',
     },
+    {
+      // pi-agent-core requires pi-ai at its own minor, so bumping one alone
+      // installs two copies of pi-ai. They are one bump, and as 0.x releases
+      // they stay manual under the npm rule above.
+      description: 'pi: agent-core and ai move together',
+      matchDatasources: ['npm'],
+      matchPackageNames: ['@earendil-works/**'],
+      groupName: 'pi',
+      groupSlug: 'pi',
+    },
     // ============================================================
     // Flux helm charts
     // ============================================================
