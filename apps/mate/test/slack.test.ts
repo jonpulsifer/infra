@@ -679,7 +679,8 @@ describe('the plan', () => {
     api.failAppend = ended('stopped_by_user');
     await painter.final('partial', 'stopped');
     // Slack refuses every later frame, so the title sent first is the one it
-    // keeps, and a command's name there would read as still running.
+    // keeps unless the retitle lands, and a command's name there would read
+    // as still running.
     expect(api.only('stop')).toEqual([]);
     expect(api.plan().title).toBe('Working · 1 command in 1 step…');
     expect(api.only('session').at(-1)?.status).toBe('active');
@@ -824,6 +825,171 @@ describe('the plan', () => {
         details: '✗ echo &lt;!channel> &lt;#C0X>',
       },
     ]);
+  });
+
+  describe("a plan Slack's own stop ended", () => {
+    const STOPPED_TITLE = '⏹️ Stopped · 2 commands in 2 steps · 42s';
+
+    /** A turn the human stops with a row still running. */
+    async function stopMidTurn() {
+      const painter = canvas();
+      await painter.step('Looking first.');
+      await painter.tool(finished('c1', '$ git status'));
+      await painter.step('Now the tests.');
+      await painter.tool(running('c2', '$ bun test'));
+      await painter.live('Found it. ', null);
+      await clock.advance(42_000);
+      api.failAppend = ended('stopped_by_user');
+      return painter;
+    }
+
+    test('is sent back once with the stopped title, its rows as Slack stored them', async () => {
+      const painter = await stopMidTurn();
+      await painter.final('Found it. More.', 'stopped');
+      expect(api.only('read')).toEqual([
+        { call: 'read', threadTs: TS, ts: 's-1' },
+      ]);
+      expect(api.only('edit')).toEqual([
+        {
+          call: 'edit',
+          ts: 's-1',
+          text: `${STOPPED_TITLE} Found it. `,
+          blocks: [
+            {
+              type: 'plan',
+              title: STOPPED_TITLE,
+              tasks: [
+                {
+                  task_id: 'phase-1',
+                  title: 'Looking first.',
+                  status: 'complete',
+                  details: '✓ $ git status',
+                },
+                // Closed as Slack closes a row a stop leaves running.
+                {
+                  task_id: 'phase-2',
+                  title: 'Now the tests.',
+                  status: 'error',
+                },
+              ],
+            },
+            { type: 'markdown', text: 'Found it. ' },
+          ],
+        },
+      ]);
+      expect(api.only('session').at(-1)?.status).toBe('active');
+    });
+
+    test('a stop found at the last frame or at a roll is retitled the same way', async () => {
+      const title = '⏹️ Stopped · 1 command in 1 step · 0s';
+      const atStop = canvas();
+      await atStop.tool(running('c1', '$ bun test'));
+      api.failStopStream = ended('message_not_in_streaming_state');
+      await atStop.final('partial', 'stopped');
+      expect(api.only('edit').map((c) => [c.ts, c.blocks?.[0]?.title])).toEqual(
+        [['s-1', title]],
+      );
+
+      api.calls.length = 0;
+      api.failStopStream = ended('stopped_by_user');
+      const atRoll = canvas(40);
+      await atRoll.tool(running('c1', '$ ls'));
+      const text = `${'a'.repeat(30)}\n${'b'.repeat(29)}`;
+      await atRoll.live(text, null);
+      await atRoll.final(text, 'stopped');
+      expect(api.only('edit').map((c) => [c.ts, c.blocks?.[0]?.title])).toEqual(
+        [['s-2', title]],
+      );
+    });
+
+    test('an answer with no plan, or one whose plan Slack never took, is left alone', async () => {
+      const painter = canvas();
+      await painter.live('partial ', null);
+      api.failAppend = ended('stopped_by_user');
+      await painter.tool(running('c1', '$ bun test'));
+      await painter.final('partial more', 'stopped');
+      expect(api.only('read')).toEqual([]);
+      expect(api.only('edit')).toEqual([]);
+    });
+
+    test('a message that reads back without its plan is left alone', async () => {
+      const painter = await stopMidTurn();
+      api.thread.push({ ts: 's-1', bot_id: BOT, text: 'Found it. ' });
+      await painter.final('Found it. More.', 'stopped');
+      expect(api.only('read')).toHaveLength(1);
+      expect(api.only('edit')).toEqual([]);
+      expect(log.entries.filter((e) => e.level !== 'info')).toEqual([]);
+    });
+
+    for (const outcome of ['done', 'stopped', 'failed'] as const) {
+      test(`mate's own stop of a ${outcome} turn is the plan's last word`, async () => {
+        const painter = canvas();
+        await painter.tool(running('c1', '$ bun test'));
+        await painter.final('answer', outcome);
+        expect(api.only('stop')).toHaveLength(1);
+        expect(api.only('read')).toEqual([]);
+        expect(api.only('edit')).toEqual([]);
+      });
+    }
+
+    for (const failing of ['read', 'update'] as const) {
+      test(`a ${failing} that fails is one warning, tried once, and the turn still ends`, async () => {
+        const painter = await stopMidTurn();
+        if (failing === 'read') {
+          api.failRead = new SlackError('conversations.replies', 'ratelimited');
+        } else {
+          api.failEdit = new SlackError('chat.update', 'cant_update_message');
+        }
+        await expect(
+          painter.final('Found it. More.', 'stopped'),
+        ).resolves.toBeUndefined();
+        expect(log.entries.filter((e) => e.level !== 'info')).toEqual([
+          expect.objectContaining({
+            level: 'warn',
+            msg: 'the stopped plan could not be retitled',
+          }),
+        ]);
+        expect(api.only('read')).toHaveLength(1);
+        expect(api.only('session').at(-1)?.status).toBe('active');
+      });
+    }
+
+    test('nothing sent back can ping a human, however the read returns it', async () => {
+      const painter = canvas();
+      await painter.step('Asking first.');
+      api.thread.push({
+        ts: 's-1',
+        bot_id: BOT,
+        text: `Working · 1 step… <@${OWNER}>`,
+        blocks: [
+          {
+            type: 'plan',
+            title: 'Working · 1 step…',
+            tasks: [
+              {
+                task_id: 'phase-1',
+                title: `Asking <@${OWNER}> first.`,
+                status: 'in_progress',
+                details: '✗ echo <!channel> <#C0X>',
+              },
+            ],
+          },
+        ],
+      });
+      api.failAppend = ended('stopped_by_user');
+      await painter.final('', 'stopped');
+      const [edit] = api.only('edit');
+      expect(JSON.stringify(edit)).not.toMatch(/<[@!#]/);
+      expect(edit?.text).toBe(`⏹️ Stopped · 1 step · 0s &lt;@${OWNER}>`);
+      expect(edit?.blocks?.[0]?.tasks).toEqual([
+        {
+          task_id: 'phase-1',
+          title: `Asking &lt;@${OWNER}> first.`,
+          status: 'error',
+          details: '✗ echo &lt;!channel> &lt;#C0X>',
+        },
+      ]);
+    });
   });
 });
 
@@ -1390,6 +1556,41 @@ describe('a Web API call', () => {
       { channel: CHANNEL, ts: '1.1', chunks: [title] },
       { channel: CHANNEL, ts: '1.2' },
     ]);
+  });
+
+  test('a reply is read by its own ts, and a streamed one is rewritten with its blocks', async () => {
+    const sent: { url: string; body: string }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      sent.push({ url: String(url), body: String(init.body) });
+      return Response.json({
+        ok: true,
+        messages: [
+          { ts: TS, text: 'the parent' },
+          { ts: '1.2', text: 'the reply' },
+        ],
+      });
+    }) as unknown as typeof fetch;
+    const client = web();
+    // The parent can come back beside the one reply asked for.
+    expect((await client.message(CHANNEL, TS, '1.2'))?.text).toBe('the reply');
+    const blocks = [{ type: 'plan', title: 'Ran 1 command in 1 step · 1s' }];
+    await client.edit(CHANNEL, '1.2', 'Ran 1 command in 1 step · 1s', blocks);
+    const [read, update] = sent;
+    expect(read?.url).toEndWith('conversations.replies');
+    expect(Object.fromEntries(new URLSearchParams(read?.body))).toEqual({
+      channel: CHANNEL,
+      ts: TS,
+      oldest: '1.2',
+      latest: '1.2',
+      inclusive: 'true',
+    });
+    expect(update?.url).toEndWith('chat.update');
+    expect(JSON.parse(update?.body ?? '{}')).toEqual({
+      channel: CHANNEL,
+      ts: '1.2',
+      text: 'Ran 1 command in 1 step · 1s',
+      blocks,
+    });
   });
 
   test('a session warning is said once each, not once a turn', async () => {

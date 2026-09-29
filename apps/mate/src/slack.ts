@@ -102,10 +102,21 @@ export interface RichElement {
   elements?: RichElement[];
 }
 
+/** A plan's row as Slack stores it; the fields mate never changes pass through. */
+export interface SlackTask {
+  title?: unknown;
+  status?: unknown;
+  details?: unknown;
+  [field: string]: unknown;
+}
+
 export interface SlackBlock {
   type: string;
   text?: unknown;
   elements?: RichElement[];
+  /** A plan's. */
+  title?: unknown;
+  tasks?: SlackTask[];
 }
 
 export interface SlackMessage {
@@ -235,8 +246,16 @@ export type SessionStatus = 'processing' | 'active' | 'closed';
 
 export interface SlackApi {
   post(channel: string, threadTs: string, text: string): Promise<string>;
-  /** Rewrites a message mate posted; only a plain one, never a streamed answer. */
-  edit(channel: string, ts: string, text: string): Promise<void>;
+  /**
+   * Rewrites a message mate posted. A streamed one goes back whole, as the
+   * `blocks` Slack stored for it.
+   */
+  edit(
+    channel: string,
+    ts: string,
+    text: string,
+    blocks?: SlackBlock[],
+  ): Promise<void>;
   remove(channel: string, ts: string): Promise<void>;
   startStream(args: StreamStart): Promise<string>;
   appendStream(
@@ -257,6 +276,12 @@ export interface SlackApi {
   ): Promise<void>;
   /** A thread's messages, oldest first. */
   replies(channel: string, threadTs: string): Promise<SlackMessage[]>;
+  /** One reply as Slack stored it, or null once it is gone. */
+  message(
+    channel: string,
+    threadTs: string,
+    ts: string,
+  ): Promise<SlackMessage | null>;
   userName(userId: string): Promise<string>;
   identity(): Promise<{ userId: string; teamId: string; appBotId: string }>;
 }
@@ -345,8 +370,13 @@ export function slackWeb(
       });
       return String(sent.ts);
     },
-    async edit(channel, ts, text) {
-      await call('chat.update', { channel, ts, text });
+    async edit(channel, ts, text, blocks) {
+      await call('chat.update', {
+        channel,
+        ts,
+        text,
+        ...(blocks ? { blocks } : {}),
+      });
     },
     async remove(channel, ts) {
       await call('chat.delete', { channel, ts });
@@ -409,6 +439,18 @@ export function slackWeb(
         if (!cursor) break;
       }
       return all;
+    },
+    // The window holds the one reply, and the parent may come back beside it.
+    async message(channel, threadTs, ts) {
+      const got = await read('conversations.replies', {
+        channel,
+        ts: threadTs,
+        oldest: ts,
+        latest: ts,
+        inclusive: 'true',
+      });
+      const messages = (got.messages ?? []) as SlackMessage[];
+      return messages.find((message) => message.ts === ts) ?? null;
     },
     async userName(userId) {
       const known = names.get(userId);
@@ -491,6 +533,26 @@ function taskChunk(row: Row, details: string): StreamChunk {
     status: row.status,
     ...(details ? { details } : {}),
   };
+}
+
+// Whatever the read gave back, a field sent again must not ping anyone.
+function quiet(value: unknown): unknown {
+  return typeof value === 'string' ? escapeMentions(value) : value;
+}
+
+/**
+ * A stored plan retitled, with a row the stop left running closed as Slack
+ * closes one.
+ */
+function stoppedPlan(plan: SlackBlock, title: string): SlackBlock {
+  if (!plan.tasks) return { ...plan, title };
+  const tasks = plan.tasks.map((task) => ({
+    ...task,
+    title: quiet(task.title),
+    details: quiet(task.details),
+    status: task.status === 'in_progress' ? 'error' : task.status,
+  }));
+  return { ...plan, title, tasks };
 }
 
 /**
@@ -701,6 +763,8 @@ export class SlackCanvas implements Canvas {
   private painted = 0;
   /** Set once Slack has ended the stream itself, which its own stop does. */
   private over = false;
+  /** The message Slack ended while it held a plan, retitled at the turn's end. */
+  private cut: string | null = null;
   private renewing: Handle | null = null;
   private readonly phases = new Phases();
   /** The live stream holds a plan, which has had a title from its first chunk. */
@@ -796,6 +860,7 @@ export class SlackCanvas implements Canvas {
       this.rest();
       await this.endStream(outcome);
       await this.settle();
+      await this.mend(outcome);
     }
   }
 
@@ -810,7 +875,7 @@ export class SlackCanvas implements Canvas {
       .catch((error) => {
         // The human's stop may have ended the stream since the last frame.
         if (alreadyOver(error)) {
-          this.ended(error);
+          this.ended(error, ts);
           return;
         }
         this.log.warn('the stream could not be stopped', {
@@ -857,6 +922,43 @@ export class SlackCanvas implements Canvas {
       );
   }
 
+  // Slack's own stop refuses the stop that titles and closes the plan, so it
+  // would keep its running title. The message Slack stored is sent back with
+  // the title mate's stop would have given it; once, and never a fault.
+  private async mend(outcome: Outcome): Promise<void> {
+    const ts = this.cut;
+    this.cut = null;
+    if (!ts) return;
+    try {
+      const stored = await this.api.message(
+        this.thread.channelId,
+        this.thread.id,
+        ts,
+      );
+      const blocks = stored?.blocks ?? [];
+      const plan = blocks.find((block) => block.type === 'plan');
+      if (!plan) return;
+      const title = escapeMentions(
+        this.phases.summary(outcome, this.clock.now() - this.startedAt),
+      );
+      const was = typeof plan.title === 'string' ? plan.title : '';
+      const text = stored?.text ?? '';
+      await this.api.edit(
+        this.thread.channelId,
+        ts,
+        escapeMentions(was ? text.replace(was, () => title) : text),
+        blocks.map((block) =>
+          block === plan ? stoppedPlan(plan, title) : block,
+        ),
+      );
+    } catch (error) {
+      this.log.warn('the stopped plan could not be retitled', {
+        threadId: this.thread.id,
+        error: plain(error),
+      });
+    }
+  }
+
   // A stream the human stopped ends the painting; a new message would answer
   // past the stop.
   private async send(chunks: StreamChunk[]): Promise<void> {
@@ -887,7 +989,7 @@ export class SlackCanvas implements Canvas {
       if (tasks) this.planned = true;
     } catch (error) {
       if (!alreadyOver(error)) throw error;
-      this.ended(error);
+      this.ended(error, this.streamTs);
       this.streamTs = null;
     }
   }
@@ -928,8 +1030,9 @@ export class SlackCanvas implements Canvas {
   }
 
   // Usually Slack's own stop, so this is info: nothing is broken.
-  private ended(error: unknown): void {
+  private ended(error: unknown, ts: string | null): void {
     this.over = true;
+    if (ts && this.planned) this.cut = ts;
     this.log.info('the stream was already over', {
       threadId: this.thread.id,
       error: plain(error),
@@ -960,7 +1063,7 @@ export class SlackCanvas implements Canvas {
       await this.api.stopStream(this.thread.channelId, ts, this.closing(null));
     } catch (error) {
       if (!alreadyOver(error)) throw error;
-      this.ended(error);
+      this.ended(error, ts);
     }
     this.streamTs = null;
     this.painted = 0;

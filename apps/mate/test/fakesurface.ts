@@ -5,6 +5,7 @@
 import type {
   SessionStatus,
   SlackApi,
+  SlackBlock,
   SlackMessage,
   StreamChunk,
   StreamStart,
@@ -229,7 +230,8 @@ export class FakeSurface implements Surface {
 
 export type SlackCall =
   | { call: 'post'; channel: string; threadTs: string; text: string }
-  | { call: 'edit'; ts: string; text: string }
+  | { call: 'edit'; ts: string; text: string; blocks?: SlackBlock[] }
+  | { call: 'read'; threadTs: string; ts: string }
   | { call: 'remove'; ts: string }
   | { call: 'start'; ts: string; args: StreamStart }
   | { call: 'append'; ts: string; chunks: StreamChunk[] }
@@ -252,6 +254,7 @@ export class FakeSlack implements SlackApi {
   failAppend: Error | null = null;
   failStart: Error | null = null;
   failEdit: Error | null = null;
+  failRead: Error | null = null;
   private serial = 0;
 
   async post(channel: string, threadTs: string, text: string): Promise<string> {
@@ -260,9 +263,14 @@ export class FakeSlack implements SlackApi {
     return ts;
   }
 
-  async edit(_channel: string, ts: string, text: string): Promise<void> {
+  async edit(
+    _channel: string,
+    ts: string,
+    text: string,
+    blocks?: SlackBlock[],
+  ): Promise<void> {
     if (this.failEdit) throw this.failEdit;
-    this.calls.push({ call: 'edit', ts, text });
+    this.calls.push({ call: 'edit', ts, text, ...(blocks ? { blocks } : {}) });
   }
 
   async remove(_channel: string, ts: string): Promise<void> {
@@ -307,6 +315,17 @@ export class FakeSlack implements SlackApi {
     return this.thread;
   }
 
+  /** A message pushed to `thread`, or else a stream as Slack stored it. */
+  async message(
+    _channel: string,
+    threadTs: string,
+    ts: string,
+  ): Promise<SlackMessage | null> {
+    this.calls.push({ call: 'read', threadTs, ts });
+    if (this.failRead) throw this.failRead;
+    return this.thread.find((m) => m.ts === ts) ?? this.stored(ts);
+  }
+
   async userName(userId: string): Promise<string> {
     return this.names.get(userId) ?? userId;
   }
@@ -317,7 +336,12 @@ export class FakeSlack implements SlackApi {
 
   chunks(ts?: string): StreamChunk[] {
     return this.calls.flatMap((c) => {
-      if (c.call === 'post' || c.call === 'edit' || c.call === 'remove')
+      if (
+        c.call === 'post' ||
+        c.call === 'edit' ||
+        c.call === 'remove' ||
+        c.call === 'read'
+      )
         return [];
       if (c.call === 'session' || (ts && c.ts !== ts)) return [];
       return c.call === 'start' ? c.args.chunks : c.chunks;
@@ -337,7 +361,32 @@ export class FakeSlack implements SlackApi {
    */
   plan(stream = 0): { title: string | null; rows: PlanRow[] } {
     const ts = this.only('start')[stream]?.ts;
-    if (!ts) return { title: null, rows: [] };
+    return ts ? this.planOf(ts) : { title: null, rows: [] };
+  }
+
+  /** A stream as a read gives it back: its plan block, then its answer. */
+  stored(ts: string): SlackMessage | null {
+    if (!this.only('start').some((c) => c.ts === ts)) return null;
+    const { title, rows } = this.planOf(ts);
+    const answer = this.streamed(ts);
+    const blocks: SlackBlock[] = [];
+    if (title !== null) {
+      blocks.push({
+        type: 'plan',
+        title,
+        tasks: rows.map(({ id, details, ...row }) => ({
+          task_id: id,
+          ...row,
+          ...(details ? { details } : {}),
+        })),
+      });
+    }
+    if (answer) blocks.push({ type: 'markdown', text: answer });
+    const text = [title, answer].filter(Boolean).join(' ');
+    return { ts, bot_id: 'B0BOT', text, blocks };
+  }
+
+  private planOf(ts: string): { title: string | null; rows: PlanRow[] } {
     let title: string | null = null;
     const rows = new Map<string, PlanRow>();
     for (const chunk of this.chunks(ts)) {
@@ -355,8 +404,8 @@ export class FakeSlack implements SlackApi {
   }
 
   /** The answer text alone. */
-  streamed(): string {
-    return this.chunks()
+  streamed(ts?: string): string {
+    return this.chunks(ts)
       .map((chunk) => (chunk.type === 'markdown_text' ? chunk.text : ''))
       .join('');
   }
