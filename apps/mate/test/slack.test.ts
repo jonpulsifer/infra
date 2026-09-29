@@ -434,7 +434,7 @@ describe('the plan', () => {
     await painter.tool(running('call-1', 'read files'));
     // An untitled plan stopped over an open task reads "Something went wrong".
     expect(api.only('start')[0]?.args.chunks).toEqual([
-      { type: 'plan_update', title: 'read files…' },
+      { type: 'plan_update', title: 'Working · 1 command in 1 step…' },
       {
         type: 'task_update',
         id: 'phase-1',
@@ -551,6 +551,19 @@ describe('the plan', () => {
     expect(api.plan().rows[0]?.details.length).toBeLessThanOrEqual(DETAILS_MAX);
   });
 
+  test('a full row keeps room for the count of the calls it could not list', async () => {
+    const painter = canvas();
+    await painter.step('Long commands.');
+    // Five of these lines come to 599 characters, one short of the cap.
+    for (let i = 1; i <= 6; i += 1) {
+      await painter.tool(finished(`c${i}`, `$ ${String(i).repeat(115)}`));
+    }
+    await painter.final('ok', 'done');
+    const details = api.plan().rows[0]?.details ?? '';
+    expect(details.split('\n').at(-1)).toMatch(/^…\d+ more$/);
+    expect(details.length).toBeLessThanOrEqual(DETAILS_MAX);
+  });
+
   test('the sandbox is listed like a call, and not counted as one', async () => {
     const painter = canvas();
     await painter.tool(running('c1', '$ git status'));
@@ -577,19 +590,25 @@ describe('the plan', () => {
     await painter.tool(running('c1', '$ git status'));
     await painter.tool(finished('c1', '$ git status'));
     await clock.advance(1_000);
+    // The lease is not a command, so it leaves the title alone.
     await painter.tool(running(SANDBOX_CARD_ID, MINT_STEPS.booting));
-    expect(api.titles()).toEqual(['$ git status…']);
+    await painter.tool(running('c2', '$ git log'));
+    expect(api.titles()).toEqual(['Working · 1 command in 1 step…']);
     await clock.advance(TITLE_CADENCE_MS - 1_001);
-    expect(api.titles()).toEqual(['$ git status…']);
-    // The newest call running is the one a human waits on.
+    expect(api.titles()).toEqual(['Working · 1 command in 1 step…']);
     await clock.advance(1);
-    expect(api.titles()).toEqual(['$ git status…', `${MINT_STEPS.booting}…`]);
+    expect(api.titles()).toEqual([
+      'Working · 1 command in 1 step…',
+      'Working · 2 commands in 1 step…',
+    ]);
     await painter.tool(finished(SANDBOX_CARD_ID, SANDBOX_READY));
+    await painter.tool(finished('c2', '$ git log'));
+    await painter.step('Now the tests.');
     await clock.advance(TITLE_CADENCE_MS);
-    expect(api.titles().at(-1)).toBe('Working · 1 command in 1 step…');
-    await painter.tool(running('c2', '$ bun test'));
+    expect(api.titles().at(-1)).toBe('Working · 2 commands in 2 steps…');
+    await painter.tool(running('c3', '$ bun test'));
     await painter.final('ok', 'done');
-    expect(api.titles().at(-1)).toBe('Ran 2 commands in 1 step · 6s');
+    expect(api.titles().at(-1)).toBe('Ran 3 commands in 2 steps · 6s');
     expect(clock.pendingTimers).toBe(0);
   });
 
@@ -654,22 +673,48 @@ describe('the plan', () => {
     expect(api.only('stop')).toEqual([{ call: 'stop', ts: 's-1', chunks: [] }]);
   });
 
-  test("a stream the human's stop already ended keeps the title it had", async () => {
+  test("a stream the human's stop already ended keeps a running title that names no command", async () => {
     const painter = canvas();
     await painter.tool(running('c1', '$ bun test'));
     api.failAppend = ended('stopped_by_user');
     await painter.final('partial', 'stopped');
-    // Slack refuses every later frame, so the title sent first is the one it keeps.
+    // Slack refuses every later frame, so the title sent first is the one it
+    // keeps, and a command's name there would read as still running.
     expect(api.only('stop')).toEqual([]);
-    expect(api.plan().title).toBe('$ bun test…');
+    expect(api.plan().title).toBe('Working · 1 command in 1 step…');
     expect(api.only('session').at(-1)?.status).toBe('active');
   });
 
-  test('a rolled answer leaves its plan closed and titled, and a later call opens another', async () => {
+  test('a close Slack never got is sent again with the stop', async () => {
+    const painter = canvas();
+    await painter.step('A.');
+    await painter.tool(finished('c1', '$ one'));
+    api.failAppend = new SlackError('chat.appendStream', 'HTTP 503');
+    await expect(painter.step('B.')).rejects.toThrow('HTTP 503');
+    api.failAppend = null;
+    await painter.tool(finished('c2', '$ two'));
+    await painter.final('ok', 'done');
+    // Slack turns a row the stop leaves running into an error.
+    expect(api.plan().rows.map((row) => [row.id, row.status])).toEqual([
+      ['phase-1', 'complete'],
+      ['phase-2', 'complete'],
+    ]);
+    const [stop] = api.only('stop');
+    expect(stop?.chunks.map((chunk) => chunk.type)).toEqual([
+      'task_update',
+      'task_update',
+      'plan_update',
+    ]);
+  });
+
+  test('a roll whose stop is refused closes its rows when it is tried again', async () => {
     const painter = canvas(40);
     const text = `${'a'.repeat(30)}\n${'b'.repeat(29)}`;
     await painter.step('Looking.');
     await painter.tool(running('c1', '$ ls'));
+    api.failStopStream = new SlackError('chat.stopStream', 'internal_error');
+    await expect(painter.live(text, null)).rejects.toThrow('internal_error');
+    api.failStopStream = null;
     await painter.live(text, null);
     expect(api.only('stop')[0]?.chunks).toEqual([
       {
@@ -678,28 +723,62 @@ describe('the plan', () => {
         title: 'Looking.',
         status: 'complete',
       },
-      { type: 'plan_update', title: 'Ran 1 command in 1 step · 0s' },
+      { type: 'plan_update', title: '1 command in 1 step so far · 0s' },
+    ]);
+    expect(api.plan(0).rows[0]?.status).toBe('complete');
+  });
+
+  test('a rolled answer leaves its plan closed and titled so far, and its phase goes on in the next', async () => {
+    const painter = canvas(40);
+    const text = `${'a'.repeat(30)}\n${'b'.repeat(29)}`;
+    await painter.step('Looking.');
+    await painter.tool(running('c1', '$ ls'));
+    await painter.live(text, null);
+    // The turn goes on, so the rolled plan does not claim it ran to the end.
+    expect(api.only('stop')[0]?.chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'phase-1',
+        title: 'Looking.',
+        status: 'complete',
+      },
+      { type: 'plan_update', title: '1 command in 1 step so far · 0s' },
     ]);
     await painter.tool(finished('c1', '$ ls'));
     const opened = api.only('append').at(-1);
     expect(opened?.ts).toBe('s-2');
     expect(opened?.chunks[0]).toEqual({
       type: 'plan_update',
-      title: 'Working · 1 command in 2 steps…',
+      title: 'Working · 1 command in 1 step…',
     });
+    await painter.tool(finished('c2', '$ pwd'));
     await painter.final(text, 'done');
+    // The phase the roll cut is the same step, still under its sentence.
     expect(api.plan(1)).toEqual({
-      title: 'Ran 1 command in 2 steps · 0s',
+      title: 'Ran 2 commands in 1 step · 0s',
       rows: [
         {
           id: 'phase-1',
-          title: '$ ls',
+          title: 'Looking.',
           status: 'complete',
-          details: '✓ $ ls',
+          details: '✓ $ ls\n✓ $ pwd',
         },
       ],
     });
     expect(api.streamed()).toBe(text);
+  });
+
+  test('an answer that rolls after the tool work leaves the last stream with no plan', async () => {
+    const painter = canvas(40);
+    await painter.step('Looking.');
+    await painter.tool(finished('c1', '$ ls'));
+    await painter.final(`${'a'.repeat(30)}\n${'b'.repeat(28)}`, 'failed');
+    expect(api.titles()).toEqual([
+      'Working · 1 step…',
+      '1 command in 1 step so far · 0s',
+    ]);
+    expect(api.plan(1)).toEqual({ title: null, rows: [] });
+    expect(api.only('stop').at(-1)?.chunks).toEqual([]);
   });
 
   test('phases past the plan cap fold into its last row', async () => {
@@ -724,6 +803,8 @@ describe('the plan', () => {
       ),
     );
     expect(title).toBe('Ran 60 commands in 60 steps · 0s');
+    // The stop sends only what Slack has not taken: the last row and the title.
+    expect(api.only('stop')[0]?.chunks).toHaveLength(2);
   });
 
   test('nothing in a plan can ping a human, however the model writes it', async () => {

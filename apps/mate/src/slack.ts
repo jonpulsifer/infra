@@ -496,18 +496,23 @@ function taskChunk(row: Row, details: string): StreamChunk {
 /**
  * A turn's tool work as plan rows: a sentence of narration, or a call made
  * before any, opens a phase, and each call lands in its phase's details as a
- * line once it finishes. Rows belong to one stream's plan; a call finishing
- * after a roll lands in the next.
+ * line once it finishes. Rows belong to one stream's plan; the phase a roll
+ * cuts goes on, uncounted, as a row of the next.
  */
 class Phases {
   private rows: Row[] = [];
   private current: Row | null = null;
+  /** The sentence of the phase a roll cut, which goes on in the next plan. */
+  private carried: string | null = null;
   private readonly running = new Map<string, Running>();
   private readonly commands = new Set<string>();
   private steps = 0;
   private readonly touched = new Map<Row, string>();
+  /** Each row's status as Slack last took it. */
+  private readonly shown = new Map<string, ToolState>();
 
   step(text: string): StreamChunk[] {
+    this.carried = null;
     this.open(oneLine(text));
     return this.flush();
   }
@@ -520,14 +525,14 @@ class Phases {
       if (known) {
         known.title = call.title;
       } else {
-        const row = this.current ?? this.open(call.title);
+        const row = this.phase(call.title);
         row.running += 1;
         this.running.set(call.id, { title: call.title, row });
       }
       return this.flush();
     }
     this.running.delete(call.id);
-    const row = known?.row ?? this.current ?? this.open(call.title);
+    const row = known?.row ?? this.phase(call.title);
     if (known?.row) row.running -= 1;
     this.note(row, call.title, call.state);
     this.release(row);
@@ -543,11 +548,7 @@ class Phases {
     if (outcome) {
       const state = outcome === 'done' ? 'complete' : 'error';
       for (const call of this.running.values()) {
-        this.note(
-          call.row ?? this.current ?? this.open(call.title),
-          call.title,
-          state,
-        );
+        this.note(call.row ?? this.phase(call.title), call.title, state);
       }
       this.running.clear();
     }
@@ -557,28 +558,45 @@ class Phases {
         (open && outcome !== null && outcome !== 'done') ||
         (outcome === 'failed' && row.failed);
       const status = failed ? 'error' : open ? 'complete' : row.status;
-      if (status !== row.status || row.hidden > 0) this.settle(row, status);
+      // Against what Slack took, not what was sent: a close lost to a failed
+      // call would leave the row running, which the stop turns into an error.
+      if (status !== this.shown.get(row.id) || row.hidden > 0) {
+        this.settle(row, status);
+      }
     }
-    this.current = null;
+    if (outcome) this.current = null;
     return this.flush();
+  }
+
+  /** Slack took these chunks. */
+  took(chunks: StreamChunk[]): void {
+    for (const chunk of chunks) {
+      if (chunk.type === 'task_update') this.shown.set(chunk.id, chunk.status);
+    }
   }
 
   /** After a roll: the next stream's plan starts empty. */
   reset(): void {
+    this.carried = this.current?.title ?? this.carried;
     this.rows = [];
     this.current = null;
     this.touched.clear();
+    this.shown.clear();
     for (const call of this.running.values()) call.row = null;
   }
 
-  /** The title while the turn runs: the newest call running, or the tally. */
+  // Slack's own stop refuses every later frame, so this title can be the one
+  // it keeps; a command's name there would read as still running.
   live(): string {
-    const newest = [...this.running.values()].at(-1);
-    return newest ? `${newest.title}…` : `Working · ${this.tally()}…`;
+    return `Working · ${this.tally()}…`;
   }
 
-  /** The turn in one line, with the outcomes of Discord's footer. */
-  summary(outcome: Outcome, ms: number): string {
+  /**
+   * The turn in one line, with the outcomes of Discord's footer. A roll passes
+   * `null`: the turn goes on in the next message.
+   */
+  summary(outcome: Outcome | null, ms: number): string {
+    if (outcome === null) return `${this.tally()} so far · ${duration(ms)}`;
     const facts = `${this.tally()} · ${duration(ms)}`;
     if (outcome === 'stopped') return `⏹️ Stopped · ${facts}`;
     if (outcome === 'failed') return `⚠️ Failed · ${facts}`;
@@ -592,8 +610,20 @@ class Phases {
       : steps;
   }
 
+  /** Where a call lands with no phase open: the one a roll cut, or its own. */
+  private phase(title: string): Row {
+    if (this.current) return this.current;
+    const carried = this.carried;
+    this.carried = null;
+    return carried === null ? this.open(title) : this.row(carried);
+  }
+
   private open(title: string): Row {
     this.steps += 1;
+    return this.row(title);
+  }
+
+  private row(title: string): Row {
     const last = this.rows.at(-1);
     if (last && this.rows.length >= PLAN_ROWS) {
       last.title = title;
@@ -796,7 +826,7 @@ export class SlackCanvas implements Canvas {
     const closes = this.phases.close(outcome);
     if (!this.planned && closes.length === 0) return [];
     const title = this.phases.summary(
-      outcome ?? 'done',
+      outcome,
       this.clock.now() - this.startedAt,
     );
     return [...closes, { type: 'plan_update', title }];
@@ -853,6 +883,7 @@ export class SlackCanvas implements Canvas {
           chunks: batch,
         });
       }
+      this.phases.took(batch);
       if (tasks) this.planned = true;
     } catch (error) {
       if (!alreadyOver(error)) throw error;
@@ -920,8 +951,8 @@ export class SlackCanvas implements Canvas {
     }
   }
 
-  // The rolled message keeps its plan, closed and titled; a call after the
-  // roll opens a plan of its own in the next one.
+  // The rolled message keeps its plan, closed and titled with the tally so
+  // far; a call after the roll opens a plan of its own in the next one.
   private async roll(): Promise<void> {
     const ts = this.streamTs;
     if (!ts) return;
