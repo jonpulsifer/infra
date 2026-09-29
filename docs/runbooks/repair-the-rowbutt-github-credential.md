@@ -140,7 +140,7 @@ If the `clanky-bot` App is deleted or unusable, do this procedure. `<slug>` is t
 | The log shows `find installation: github said 404`. | The App is not installed on `infra`. | In the App settings, install it on `jonpulsifer/infra` only. mate finds it within 15 minutes. |
 | `gh` prints `no token in`, or git prints `could not read Username`. | The turn has no token. | Read the `could not mint` and `could not stamp` lines in the mate log. |
 | The log shows `could not mint`. | mate could not make the token. | Do [Check the credential](#check-the-credential). |
-| The log shows `could not stamp`. | `pods/exec` into the sandbox failed. | Read the `error` field of the line. |
+| The log shows `could not stamp`. | The mate-hands link could not write the turn's files into the sandbox: the link dropped, or `pods/exec` into the sandbox failed. | Read the `error` field of the line. |
 | The push does not end. | The sandbox egress policy blocks the host. | Read `clusters/offsite/apps/mate/sandbox-network-policy.yaml`. |
 
 ## Related

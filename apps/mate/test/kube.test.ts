@@ -127,7 +127,13 @@ function open(): Promise<ExecStream> {
   return kube.exec({
     pod: 'mate-1',
     container: 'harness',
-    command: ['opencode', 'acp', '--cwd', '/workspace'],
+    command: [
+      '/usr/local/bin/mate-hands',
+      '--epoch',
+      '1',
+      '--cwd',
+      '/workspace',
+    ],
     onStderr: (text) => stderr.push(text),
   });
 }
@@ -148,8 +154,9 @@ describe('exec', () => {
     expect(url?.searchParams.get('stderr')).toBe('true');
     expect(url?.searchParams.get('tty')).toBe('false');
     expect(url?.searchParams.getAll('command')).toEqual([
-      'opencode',
-      'acp',
+      '/usr/local/bin/mate-hands',
+      '--epoch',
+      '1',
       '--cwd',
       '/workspace',
     ]);

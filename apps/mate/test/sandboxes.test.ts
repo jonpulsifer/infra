@@ -1,139 +1,87 @@
-/** KubeSandboxes against a fake apiserver. */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+/** KubeHands' sandboxes against a fake apiserver: the manifest, the mint and the pool. */
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { BACKGROUND_CONTEXT } from '@earendil-works/pi-agent-core';
 import type { SandboxConfig } from '../src/config.ts';
-import {
-  KthxSites,
-  parseSites,
-  type Sites,
-  serialize,
-} from '../src/kthx-sites.ts';
+import { HARNESS_CONTAINER } from '../src/hands.ts';
 import { Kube } from '../src/kube.ts';
-import type { PromptSink, SandboxRef, Update } from '../src/sandbox.ts';
-import type { TokenSource } from '../src/sandboxes.ts';
+import { type TurnLeaseSummary, WORKSPACE } from '../src/lease.ts';
 import {
-  HARNESS_CONTAINER,
-  KubeSandboxes,
-  parsePeers,
-  SESSION_ANNOTATION,
+  sandboxLabels,
+  sandboxManifest,
   sandboxName,
-  TTL_MS,
-  TURN_ANNOTATION,
-  WORKSPACE,
 } from '../src/sandboxes.ts';
-import type { ThreadRef, ToolCall } from '../src/surface.ts';
-import { FakeKube } from './fakeapi.ts';
-import { RecordingInstruments, RecordingLog } from './support.ts';
+import type { ThreadRef } from '../src/surface.ts';
+import {
+  begin,
+  cleanUp,
+  GUILD,
+  Hooks,
+  OTHER_THREAD,
+  type Rig,
+  rig,
+  SANDBOX_CONFIG,
+  THREAD,
+  until,
+} from './hands-support.ts';
 
-const THREAD: ThreadRef = {
-  surface: 'discord',
-  id: '1509024937422356777',
-  channelId: '1509024937422356532',
-};
-const GUILD = '1509024936717455381';
+afterEach(cleanUp);
+
+const C = BACKGROUND_CONTEXT;
 const NAME = sandboxName(THREAD);
-const threadQuery = encodeURIComponent(
-  `lolwtf.ca/minted-by=mate,lolwtf.ca/guild=${GUILD},lolwtf.ca/thread=${THREAD.id}`,
-);
 
-const OTHER_THREAD: ThreadRef = {
-  surface: 'discord',
-  id: '1509024937422356999',
-  channelId: '1509024937422356532',
-};
-
-interface KubeconfigShape {
-  clusters: {
-    name: string;
-    cluster: { server: string; 'certificate-authority-data'?: string };
-  }[];
-  users: { name: string; user: { token: string } }[];
-  contexts: { name: string; context: { cluster: string; user: string } }[];
-  'current-context': string;
-}
-
-const config: SandboxConfig = {
-  image:
-    'ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac',
-  runtimeClass: 'kata-clh',
-  namespace: 'mate',
-  secret: 'mate-opencode',
-  checkoutRepo: 'https://github.com/jonpulsifer/infra',
-  checkoutRef: 'main',
-  model: 'opencode-go/qwen3.8-flash',
-  turnTimeoutMs: 4000,
-  spares: 0,
+const FULL: Partial<SandboxConfig> = {
   vault: {
     connectHost:
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
     connectSecret: 'mate-onepassword',
   },
   kubeServiceAccount: 'mate-sandbox-admin',
-  kubeContext: 'offsite',
   kubePeers: ['folly'],
   github: true,
-  kthx: {
-    origin: null,
-    sitesSecret: 'mate-kthx-sites',
-    mcpUrl: null,
-    agentSecret: 'mate-kthx-agent',
-  },
   switchboard: {
     url: 'http://switchboard.elevenlabs.svc.cluster.local:8080',
     secret: 'mate-switchboard',
   },
 };
 
-class Collect implements PromptSink {
-  text = '';
-  readonly status: (string | null)[] = [];
-  readonly cards: ToolCall[] = [];
-  update(update: Update): void {
-    if (update.kind === 'text') this.text += update.delta;
-    else if (update.kind === 'tool') this.cards.push(update.call);
-    else this.status.push(update.line);
-  }
+type Json = Record<string, any>;
+
+/** One turn that makes one tool call, so the thread gets its sandbox. */
+async function mint(
+  r: Rig,
+  thread: ThreadRef = THREAD,
+): Promise<TurnLeaseSummary & { error: string | null }> {
+  const turn = begin(r.hands.thread(thread, new Hooks()));
+  const result = await turn.env.exists('.', C);
+  const summary = await turn.lease.finish();
+  turn.end();
+  return { ...summary, error: result.ok ? null : result.error.message };
 }
 
-let fake: FakeKube;
-let log: RecordingLog;
-let metrics: RecordingInstruments;
-let sandboxes: KubeSandboxes;
-
-beforeEach(() => {
-  fake = new FakeKube();
-  log = new RecordingLog();
-  metrics = new RecordingInstruments();
-  sandboxes = new KubeSandboxes({
-    kube: new Kube(fake.config()),
-    config,
-    guildId: GUILD,
-    log,
-    readyTimeoutMs: 4000,
-    goneTimeoutMs: 4000,
-  });
-});
-
-afterEach(() => {
-  fake.stop();
-});
-
-function podTemplate(): Record<string, any> {
-  const spec = fake.sandboxes.get(NAME)?.spec as Record<string, any>;
-  return spec.podTemplate.spec;
+function object(r: Rig, name = NAME): Json {
+  return r.fake.sandboxes.get(name) as Json;
 }
 
-function shutdownTime(): number {
-  const spec = fake.sandboxes.get(NAME)?.spec as Record<string, any>;
-  return Date.parse(spec.shutdownTime);
+function podTemplate(r: Rig, name = NAME): Json {
+  return object(r, name).spec.podTemplate.spec;
 }
 
-function envOf(container: Record<string, any>): Record<string, any> {
+function envOf(container: Json): Json {
   return Object.fromEntries(
-    (container.env ?? []).map((e: Record<string, unknown>) => [e.name, e]),
+    (container.env ?? []).map((e: Json) => [e.name, e]),
   );
+}
+
+/** Spares carry the spare label; a claimed one keeps its `mate-spare-` name. */
+function spareNames(r: Rig): string[] {
+  return [...r.fake.sandboxes.entries()]
+    .filter(
+      ([, o]) => (o.metadata as Json).labels['lolwtf.ca/spare'] === 'true',
+    )
+    .map(([name]) => name);
 }
 
 /**
@@ -152,6 +100,7 @@ function tokenFile(contents: string | null): string {
  * global config are empty, as in the sandbox: no `/etc/gitconfig`, empty HOME.
  */
 function credential(
+  r: Rig,
   token: string,
   operation: 'fill' | 'approve' | 'reject',
   host: string,
@@ -162,7 +111,7 @@ function credential(
     GIT_CONFIG_GLOBAL: global,
     GIT_CONFIG_SYSTEM: '/dev/null',
   };
-  for (const entry of podTemplate().containers[0].env as {
+  for (const entry of podTemplate(r).containers[0].env as {
     name: string;
     value?: string;
   }[]) {
@@ -179,88 +128,65 @@ function credential(
   });
 }
 
-async function attach(): Promise<SandboxRef> {
-  const ref = await sandboxes.mint(THREAD);
-  await sandboxes.attach(ref);
-  return ref;
+/** A Sandbox as an earlier mate, or another process, left it. */
+async function plant(
+  r: Rig,
+  name: string,
+  labels: Record<string, string>,
+): Promise<void> {
+  const response = await new Kube(r.fake.config()).request(
+    '/apis/agents.x-k8s.io/v1beta1/namespaces/mate/sandboxes',
+    {
+      method: 'POST',
+      body: sandboxManifest({
+        name,
+        namespace: 'mate',
+        labels,
+        config: SANDBOX_CONFIG,
+        shutdownTime: new Date(Date.now() + 3_600_000).toISOString(),
+      }),
+    },
+  );
+  expect(response.status).toBe(201);
 }
 
-/** With `spares` warm sandboxes and recorded instruments. */
-function withSpares(spares: number): KubeSandboxes {
-  return new KubeSandboxes({
-    kube: new Kube(fake.config()),
-    config: { ...config, spares },
-    guildId: GUILD,
-    log,
-    metrics,
-    readyTimeoutMs: 4000,
-    goneTimeoutMs: 4000,
-  });
+function withoutHands(labels: Record<string, string>): Record<string, string> {
+  const copy = { ...labels };
+  delete copy['lolwtf.ca/hands'];
+  return copy;
 }
 
-/** A claimed spare keeps its `mate-spare-` name, so only the label counts. */
-function spareNames(): string[] {
-  return [...fake.sandboxes.entries()]
-    .filter(([, object]) => (object.metadata as any).labels['lolwtf.ca/spare'])
-    .map(([name]) => name);
-}
+describe('the manifest', () => {
+  test('is the sandbox a thread gets, labelled with the hands it speaks', async () => {
+    const r = rig({ config: FULL });
+    expect(await mint(r)).toMatchObject({
+      source: 'fresh',
+      sandbox: NAME,
+      error: null,
+    });
 
-async function until(what: () => boolean, ms = 2000): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!what()) {
-    if (Date.now() > deadline) throw new Error('it never happened');
-    await Bun.sleep(10);
-  }
-}
-
-describe('parsePeers', () => {
-  const ca = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
-  const line = (fields: Record<string, unknown>) => JSON.stringify(fields);
-
-  test('keeps well-formed peers in the order asked, and drops the rest', () => {
-    const printed = [
-      line({ name: 'b', server: 'https://b.example.test:6443', ca }),
-      'jq: error: not json',
-      line({ name: 'a', server: 'https://a.example.test:6443', ca }),
-      // Asked for no such cluster.
-      line({ name: 'c', server: 'https://c.example.test:6443', ca }),
-      // A missing topology key prints `null` into the server.
-      line({ name: 'd', server: 'https://null:null', ca }),
-      line({ name: 'e', server: 'https://e.example.test:6443', ca: '' }),
-      '',
-    ].join('\n');
-    expect(parsePeers(printed, ['a', 'b', 'd', 'e'])).toEqual([
-      { name: 'a', server: 'https://a.example.test:6443', ca },
-      { name: 'b', server: 'https://b.example.test:6443', ca },
-    ]);
-  });
-
-  test('answers nothing for a checkout that printed nothing', () => {
-    expect(parsePeers('', ['folly'])).toEqual([]);
-  });
-});
-
-describe('mint', () => {
-  test('stamps the sandbox a thread gets', async () => {
-    const ref = await sandboxes.mint(THREAD);
-    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
-
-    const sandbox = fake.sandboxes.get(NAME) as Record<string, any>;
+    const sandbox = object(r);
     expect(sandbox.apiVersion).toBe('agents.x-k8s.io/v1beta1');
     expect(sandbox.kind).toBe('Sandbox');
-    expect(sandbox.metadata.labels).toMatchObject({
+    expect(sandbox.metadata.labels).toEqual({
+      'app.kubernetes.io/name': 'mate-sandbox',
+      'app.kubernetes.io/part-of': 'mate',
       'lolwtf.ca/minted-by': 'mate',
+      'lolwtf.ca/guild': GUILD,
+      'lolwtf.ca/hands': '2',
       'lolwtf.ca/surface': 'discord',
       'lolwtf.ca/thread': THREAD.id,
       'lolwtf.ca/channel': THREAD.channelId,
-      'lolwtf.ca/guild': GUILD,
     });
+    expect(sandbox.spec.podTemplate.metadata.labels).toEqual(
+      sandbox.metadata.labels,
+    );
     expect(sandbox.spec.shutdownPolicy).toBe('Delete');
     const ttl = Date.parse(sandbox.spec.shutdownTime) - Date.now();
     expect(ttl).toBeGreaterThan(110 * 60_000);
     expect(ttl).toBeLessThanOrEqual(120 * 60_000);
 
-    const pod = podTemplate();
+    const pod = podTemplate(r);
     expect(pod.runtimeClassName).toBe('kata-clh');
     expect(
       pod.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution
@@ -299,40 +225,18 @@ describe('mint', () => {
 
     const harness = pod.containers[0];
     expect(harness.name).toBe(HARNESS_CONTAINER);
-    expect(harness.image).toBe(config.image);
+    expect(harness.image).toBe(SANDBOX_CONFIG.image);
     expect(harness.imagePullPolicy).toBe('IfNotPresent');
     expect(harness.securityContext.capabilities.drop).toEqual(['ALL']);
     expect(harness.resources).toEqual({
       requests: { cpu: '250m', memory: '512Mi' },
       limits: { cpu: '2000m', memory: '4Gi' },
     });
-    const env = envOf(harness);
-    expect(env.OPENCODE_API_KEY.valueFrom.secretKeyRef).toEqual({
-      name: 'mate-opencode',
-      key: 'OPENCODE_API_KEY',
-    });
-    expect(env.OPENCODE_DISABLE_PROJECT_CONFIG.value).toBe('1');
-    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value)).toEqual({
-      model: 'opencode-go/qwen3.8-flash',
-      instructions: [`${WORKSPACE}/AGENTS.md`],
-      skills: { paths: [`${WORKSPACE}/dotfiles/skills`] },
-      permission: 'allow',
-      autoupdate: false,
-      share: 'disabled',
-    });
-  });
-
-  // A rename would point every sandbox at a missing instruction file.
-  test('names an instruction file the checkout really has', async () => {
-    const root = new URL('../../../AGENTS.md', import.meta.url);
-    expect(await Bun.file(root).exists()).toBe(true);
-  });
-
-  // opencode is silent about a skills path that is missing or empty.
-  test('names a skills directory that really holds skills', async () => {
-    const dir = new URL('../../../dotfiles/skills/', import.meta.url);
-    const skills = [...new Bun.Glob('*/SKILL.md').scanSync(dir.pathname)];
-    expect(skills.length).toBeGreaterThan(0);
+    // The model and its key live in mate's pod; the sandbox runs tools only.
+    const names = Object.keys(envOf(harness));
+    expect(names.filter((n) => n.startsWith('OPENCODE_'))).toEqual([]);
+    expect(names).not.toContain('KTHX_AGENT_TOKEN');
+    expect(envOf(harness).KUBECONFIG.value).toBe('/home/agent/.kube/config');
   });
 
   // mise has no wildcard for disable_tools, so the image lists every repo tool.
@@ -355,8 +259,9 @@ describe('mint', () => {
   });
 
   test('hands both containers the git config the checkout needs', async () => {
-    await sandboxes.mint(THREAD);
-    const pod = podTemplate();
+    const r = rig({ config: FULL });
+    await mint(r);
+    const pod = podTemplate(r);
 
     // fsGroup leaves the emptyDir root uid 0, so git needs safe.directory to
     // trust the repo. The image's agent user has no ident for `git commit`.
@@ -382,8 +287,9 @@ describe('mint', () => {
   });
 
   test('hands the harness the switchboard address and an optional ring token', async () => {
-    await sandboxes.mint(THREAD);
-    const env = envOf(podTemplate().containers[0]);
+    const r = rig({ config: FULL });
+    await mint(r);
+    const env = envOf(podTemplate(r).containers[0]);
 
     expect(env.SWITCHBOARD_URL.value).toBe(
       'http://switchboard.elevenlabs.svc.cluster.local:8080',
@@ -399,8 +305,9 @@ describe('mint', () => {
   });
 
   test('points the harness at Connect and never at a service account', async () => {
-    await sandboxes.mint(THREAD);
-    const env = envOf(podTemplate().containers[0]);
+    const r = rig({ config: FULL });
+    await mint(r);
+    const env = envOf(podTemplate(r).containers[0]);
 
     expect(env.OP_CONNECT_HOST.value).toBe(
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
@@ -417,17 +324,34 @@ describe('mint', () => {
     expect(env.GIT_TERMINAL_PROMPT.value).toBe('0');
   });
 
+  test('hands the harness the kthx origin, and never the agent token', async () => {
+    const r = rig({
+      config: {
+        kthx: {
+          origin: 'https://kthx.example.test',
+          sitesSecret: 'mate-kthx-sites',
+        },
+      },
+    });
+    await mint(r);
+    const env = envOf(podTemplate(r).containers[0]);
+    expect(env.KTHX_ORIGIN.value).toBe('https://kthx.example.test');
+    // mate calls the engine's MCP server itself, with a token only it holds.
+    expect(env.KTHX_AGENT_TOKEN).toBeUndefined();
+  });
+
   // The helper is a shell snippet, so only running git proves its shape.
   test('git fills a github.com credential from the file mate stamped', async () => {
-    await sandboxes.mint(THREAD);
+    const r = rig({ config: FULL });
+    await mint(r);
     const token = tokenFile('ghs-a-token');
 
-    const filled = credential(token, 'fill', 'github.com');
+    const filled = credential(r, token, 'fill', 'github.com');
     expect(filled.stdout.toString()).toContain('username=x-access-token');
     expect(filled.stdout.toString()).toContain('password=ghs-a-token');
 
     // Scoped to the one URL: no other host reaches this helper.
-    const other = credential(token, 'fill', 'gitlab.com');
+    const other = credential(r, token, 'fill', 'gitlab.com');
     expect(other.exitCode).not.toBe(0);
     expect(other.stdout.toString()).not.toContain('password=');
 
@@ -437,16 +361,17 @@ describe('mint', () => {
       decoy,
       '[credential]\n\thelper = "!echo username=somebody; echo password=not-the-token"\n',
     );
-    const contested = credential(token, 'fill', 'github.com', decoy);
+    const contested = credential(r, token, 'fill', 'github.com', decoy);
     expect(contested.stdout.toString()).toContain('username=x-access-token');
   });
 
   // GitHub reports a blank password as a rejected credential, which reads as revoked.
   test('a token that is absent or blank fails the fill rather than answering', async () => {
-    await sandboxes.mint(THREAD);
+    const r = rig({ config: FULL });
+    await mint(r);
 
     for (const contents of [null, '']) {
-      const missing = credential(tokenFile(contents), 'fill', 'github.com');
+      const missing = credential(r, tokenFile(contents), 'fill', 'github.com');
       expect(missing.exitCode).not.toBe(0);
       expect(missing.stdout.toString()).not.toContain('password=');
     }
@@ -454,10 +379,11 @@ describe('mint', () => {
 
   // No token file: a helper that read it before checking the operation would fail.
   test('storing and erasing a credential never read the token', async () => {
-    await sandboxes.mint(THREAD);
+    const r = rig({ config: FULL });
+    await mint(r);
 
     for (const operation of ['approve', 'reject'] as const) {
-      const result = credential(tokenFile(null), operation, 'github.com');
+      const result = credential(r, tokenFile(null), operation, 'github.com');
       expect(result.exitCode).toBe(0);
       expect(result.stdout.toString()).not.toContain('password=');
     }
@@ -466,8 +392,9 @@ describe('mint', () => {
   // gh ignores git's credential helper, so images/mate-sandbox/gh wraps it and
   // reads these variables by name. This test keeps the two in step.
   test('names the environment the image gh wrapper reads', async () => {
-    await sandboxes.mint(THREAD);
-    const env = envOf(podTemplate().containers[0]);
+    const r = rig({ config: FULL });
+    await mint(r);
+    const env = envOf(podTemplate(r).containers[0]);
     const wrapper = await Bun.file(
       new URL('../../../images/mate-sandbox/gh', import.meta.url),
     ).text();
@@ -485,14 +412,9 @@ describe('mint', () => {
   });
 
   test('hands the harness no credential path when none is configured', async () => {
-    sandboxes = new KubeSandboxes({
-      kube: new Kube(fake.config()),
-      config: { ...config, vault: null, github: false, switchboard: null },
-      guildId: GUILD,
-      log,
-    });
-    await sandboxes.mint(THREAD);
-    const env = envOf(podTemplate().containers[0]);
+    const r = rig();
+    await mint(r);
+    const env = envOf(podTemplate(r).containers[0]);
 
     expect(env.GIT_CONFIG_COUNT.value).toBe('3');
     expect(env.OP_CONNECT_HOST).toBeUndefined();
@@ -500,48 +422,17 @@ describe('mint', () => {
     expect(env.MATE_GITHUB_TOKEN_FILE).toBeUndefined();
     expect(env.SWITCHBOARD_URL).toBeUndefined();
     expect(env.SWITCHBOARD_RING_TOKEN).toBeUndefined();
-  });
-
-  test('waits for the controller to report Ready', async () => {
-    fake.readyOnCreate = false;
-    const minted = sandboxes.mint(THREAD);
-    setTimeout(() => fake.markReady(NAME), 60);
-    await minted;
-    expect(fake.pods.has(NAME)).toBe(true);
-  });
-
-  test('says so when it only claimed a sandbox that was already standing', async () => {
-    await sandboxes.mint(THREAD);
-    const again = await sandboxes.mint(THREAD);
-    expect(again.source).toBe('reused');
-  });
-
-  test('gives up when Ready never arrives, saying why and taking the sandbox with it', async () => {
-    fake.readyOnCreate = false;
-    sandboxes = new KubeSandboxes({
-      kube: new Kube(fake.config()),
-      config,
-      guildId: GUILD,
-      log,
-      readyTimeoutMs: 300,
-      goneTimeoutMs: 4000,
-    });
-    await expect(sandboxes.mint(THREAD)).rejects.toThrow(
-      /was not ready in time/,
-    );
-    expect(fake.sandboxes.has(NAME)).toBe(false);
+    expect(env.KUBECONFIG).toBeUndefined();
+    expect(env.KTHX_ORIGIN).toBeUndefined();
   });
 
   test('pulls on every mint when the image is a bare tag', async () => {
-    sandboxes = new KubeSandboxes({
-      kube: new Kube(fake.config()),
-      config: { ...config, image: 'ghcr.io/jonpulsifer/mate-sandbox:latest' },
-      guildId: GUILD,
-      log,
+    const r = rig({
+      config: { image: 'ghcr.io/jonpulsifer/mate-sandbox:latest' },
     });
-    await sandboxes.mint(THREAD);
+    await mint(r);
 
-    const pod = podTemplate();
+    const pod = podTemplate(r);
     expect(pod.initContainers[0].imagePullPolicy).toBe('Always');
     expect(pod.containers[0].imagePullPolicy).toBe('Always');
   });
@@ -553,718 +444,52 @@ describe('mint', () => {
   });
 });
 
-describe('attach', () => {
-  test('execs the harness and opens a fresh session', async () => {
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-
-    const exec = fake.lastExec;
-    expect(exec?.pod).toBe(NAME);
-    expect(exec?.container).toBe(HARNESS_CONTAINER);
-    expect(exec?.command).toEqual(['opencode', 'acp', '--cwd', WORKSPACE]);
-    expect(exec?.protocol).toBe('v4.channel.k8s.io');
-    expect(exec?.authorization).toBe('Bearer fake-token');
-    expect(exec?.stdin.some((line) => line.includes('"initialize"'))).toBe(
-      true,
-    );
-    expect(exec?.stdin.some((line) => line.includes('"session/new"'))).toBe(
-      true,
-    );
-
-    expect(session.id).toMatch(/^ses-/);
-    const stored = fake.sandboxes.get(NAME) as Record<string, any>;
-    expect(stored.metadata.annotations[SESSION_ANNOTATION]).toBe(session.id);
+describe('the mint', () => {
+  test('waits for the controller to report Ready', async () => {
+    const r = rig();
+    r.fake.readyOnCreate = false;
+    const minted = mint(r);
+    await until(() => r.fake.sandboxes.has(NAME));
+    setTimeout(() => r.fake.markReady(NAME), 60);
+    expect((await minted).error).toBeNull();
+    expect(r.fake.pods.has(NAME)).toBe(true);
   });
 
-  test('loads the stored session before opening a new one', async () => {
-    const ref = await attach();
-    const first = fake.sandboxes.get(NAME) as Record<string, any>;
-    const stored = first.metadata.annotations[SESSION_ANNOTATION];
-
-    const again = await sandboxes.attach(ref);
-    expect(again.id).toBe(stored);
-    const last = fake.lastExec;
-    expect(last?.stdin.some((line) => line.includes('"session/load"'))).toBe(
-      true,
-    );
-    expect(last?.stdin.some((line) => line.includes('"session/new"'))).toBe(
-      false,
-    );
-    // A mate that died left its harness running; the reconnect kills it first.
-    expect(fake.execs.map((e) => e.command)).toContainEqual([
-      '/bin/sh',
-      '-c',
-      'pkill -x opencode; exit 0',
-    ]);
+  test('says so when it only claimed a sandbox that was already standing', async () => {
+    const r = rig();
+    await mint(r);
+    expect((await mint(r)).source).toBe('reused');
+    expect(r.log.of('sandbox already existed')).toHaveLength(1);
   });
 
-  test('falls back to a new session when the harness cannot replay', async () => {
-    const ref = await attach();
-    const before = (fake.sandboxes.get(NAME) as Record<string, any>).metadata
-      .annotations[SESSION_ANNOTATION];
-    fake.script = { loadFails: true };
-
-    const again = await sandboxes.attach(ref);
-    expect(again.id).not.toBe(before);
-    expect(fake.lastExec?.stdin.some((l) => l.includes('"session/new"'))).toBe(
-      true,
-    );
-    expect(
-      log.of('acp session/load failed; opening a new session'),
-    ).toHaveLength(1);
+  test('gives up when Ready never arrives, saying why and taking the sandbox with it', async () => {
+    const r = rig({ deps: { readyTimeoutMs: 300 } });
+    r.fake.readyOnCreate = false;
+    const failed = await mint(r);
+    expect(failed.error).toMatch(/was not ready in time/);
+    expect(failed.source).toBe('failed');
+    await until(() => !r.fake.sandboxes.has(NAME));
   });
 
-  test('leaves nothing attached when the object cannot be patched', async () => {
-    const ref = await sandboxes.mint(THREAD);
-    fake.patchFails = true;
-
-    expect(sandboxes.attach(ref)).rejects.toThrow(/forbidden/);
-    await Bun.sleep(20);
-    expect(fake.lastExec?.clientClosed).toBe(true);
-    expect(
-      sandboxes.prompt(
-        { id: 'ses-whatever', sandbox: ref, resumed: false },
-        'hi',
-        new Collect(),
-      ),
-    ).rejects.toThrow(/not attached/);
-  });
-
-  // A credential stamp is a one-shot exec beside the ACP stream.
-  describe('the turn credential', () => {
-    class FakeApp implements TokenSource {
-      minted = 0;
-      readonly revoked: string[] = [];
-      failMint: Error | null = null;
-      async token(): Promise<{ token: string }> {
-        if (this.failMint) throw this.failMint;
-        this.minted += 1;
-        return { token: `ghs-token-${this.minted}` };
-      }
-      async revoke(token: string): Promise<void> {
-        this.revoked.push(token);
-      }
-    }
-
-    let app: FakeApp;
-
-    async function turning() {
-      app = new FakeApp();
-      sandboxes = new KubeSandboxes({
-        kube: new Kube(fake.config()),
-        config,
-        guildId: GUILD,
-        log,
-        metrics,
-        githubApp: app,
-      });
-      const ref = await sandboxes.mint(THREAD);
-      return sandboxes.attach(ref);
-    }
-
-    /** Every one-shot exec that wrote the token file, oldest first. */
-    function stamps() {
-      return fake.execs.filter((e) =>
-        e.command.some((word) => word.includes('.github-token')),
-      );
-    }
-
-    /** The four values one stamp wrote, in the order the script consumes them. */
-    function wrote(at: number) {
-      const stamp = stamps()[at];
-      const [, , , , github, kube, ssh, sshConfig] = stamp?.command ?? [];
-      return { github, kube, ssh, sshConfig };
-    }
-
-    test('writes every credential as an argument and never onto stdin', async () => {
-      const session = await turning();
-      await sandboxes.prompt(session, 'open a pull request', new Collect());
-
-      const [stamp] = stamps();
-      expect(stamp?.container).toBe(HARNESS_CONTAINER);
-      // argv, because the exec stream has no half-close: a command reading
-      // stdin would wait for an EOF that never arrives.
-      expect(stamp?.command.slice(0, 2)).toEqual(['/bin/sh', '-c']);
-      expect(stamp?.command[2]).toContain('umask 077');
-      expect(stamp?.command[2]).toContain('/home/agent/.github-token');
-      expect(stamp?.command[2]).toContain('/home/agent/.kube/config');
-      expect(stamp?.command[2]).toContain('/home/agent/.ssh/id_ed25519');
-      expect(wrote(0).github).toBe('ghs-token-1');
-      expect(stamp?.stdin.join('')).not.toContain('ghs-token-1');
-      expect(metrics.tokenMints).toEqual(['ok']);
-      expect(metrics.tokenStamps).toEqual(['ok']);
+  test('passes over a sandbox an earlier mate minted, and its name', async () => {
+    const r = rig();
+    await plant(r, NAME, withoutHands(sandboxLabels(THREAD, GUILD)));
+    const minted = await mint(r);
+    expect(minted.source).toBe('fresh');
+    expect(minted.sandbox).toMatch(new RegExp(`^${NAME}-[0-9a-f]{4}$`));
+    expect(object(r, minted.sandbox as string).metadata.labels).toMatchObject({
+      'lolwtf.ca/hands': '2',
+      'lolwtf.ca/thread': THREAD.id,
     });
-
-    test('mints cluster access that outlasts the turn, and verifies the apiserver', async () => {
-      const session = await turning();
-      await sandboxes.prompt(
-        session,
-        'why is the pod crashlooping',
-        new Collect(),
-      );
-
-      expect(fake.tokenRequests).toHaveLength(1);
-      const [asked] = fake.tokenRequests;
-      expect(asked?.account).toBe('mate-sandbox-admin');
-      // The token must outlive the longest turn.
-      expect(asked?.expirationSeconds).toBeGreaterThan(
-        config.turnTimeoutMs / 1000,
-      );
-      // Both apiservers accept `api`; folly's federation accepts nothing else.
-      expect(asked?.audiences).toEqual(['api']);
-
-      const kubeconfig = wrote(0).kube ?? '';
-      const parsed = Bun.YAML.parse(kubeconfig) as KubeconfigShape;
-      expect(parsed['current-context']).toBe('offsite');
-      expect(parsed.users).toEqual([
-        { name: 'sandbox', user: { token: 'sa-token-1' } },
-      ]);
-      // The checkout holds no peer topology here, so the context is local only.
-      expect(parsed.clusters.map((c) => c.name)).toEqual(['offsite']);
-      expect(parsed.clusters[0]?.cluster.server).toBe(
-        'https://kubernetes.default.svc:443',
-      );
-      // Never skip-verify on an agent's behalf.
-      expect(kubeconfig).not.toContain('insecure-skip-tls-verify');
-    });
-
-    test('adds a context for each peer cluster the checkout describes', async () => {
-      fake.peerOutput = `${JSON.stringify({
-        name: 'folly',
-        server: 'https://folly.example.test:6443',
-        ca: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n',
-      })}\n`;
-      const session = await turning();
-      await sandboxes.prompt(session, 'is folly healthy', new Collect());
-
-      const parsed = Bun.YAML.parse(wrote(0).kube ?? '') as KubeconfigShape;
-      expect(parsed.clusters.map((c) => c.name)).toEqual(['offsite', 'folly']);
-      const folly = parsed.clusters[1]?.cluster;
-      expect(folly?.server).toBe('https://folly.example.test:6443');
-      expect(
-        Buffer.from(folly?.['certificate-authority-data'] ?? '', 'base64')
-          .toString()
-          .startsWith('-----BEGIN CERTIFICATE-----'),
-      ).toBe(true);
-      expect(parsed.contexts).toContainEqual({
-        name: 'folly',
-        context: { cluster: 'folly', user: 'sandbox' },
-      });
-      expect(parsed['current-context']).toBe('offsite');
-      // Read in the sandbox, from the checkout, and never copied into mate.
-      const read = fake.execs.find((e) =>
-        e.command.some((word) => word.includes('cluster-topology.json')),
-      );
-      expect(read?.command[2]).toContain(
-        '/workspace/clusters/folly/config/cluster-topology.json',
-      );
-      expect(read?.command[2]).toContain(
-        '/workspace/terraform/pki/certs/folly-ca-bundle.pem',
-      );
-    });
-
-    test('truncates everything and hands the token back when the turn ends', async () => {
-      const session = await turning();
-      await sandboxes.prompt(session, 'hi', new Collect());
-
-      // Two stamps: the credentials going in, and empty strings clearing them.
-      expect(stamps()).toHaveLength(2);
-      expect(wrote(1)).toEqual({
-        github: '',
-        kube: '',
-        ssh: '',
-        sshConfig: '',
-      });
-      expect(app.revoked).toEqual(['ghs-token-1']);
-    });
-
-    test('answers the turn anyway when no credential can be minted', async () => {
-      const session = await turning();
-      app.failMint = new Error('422 from GitHub');
-      fake.tokenRequestFails = 'no RBAC for serviceaccounts/token';
-
-      // Without credentials the agent can still read and explain.
-      const result = await sandboxes.prompt(session, 'hi', new Collect());
-      expect(result.stopReason).toBe('end_turn');
-      expect(wrote(0)).toEqual({
-        github: '',
-        kube: '',
-        ssh: '',
-        sshConfig: '',
-      });
-      expect(metrics.tokenMints).toEqual(['mint-failed']);
-      expect(app.revoked).toEqual([]);
-      expect(
-        log.of('could not mint a GitHub token for this turn'),
-      ).toHaveLength(1);
-      expect(
-        log.of('could not mint cluster access for this turn'),
-      ).toHaveLength(1);
-    });
-
-    test('spends the token at once when it cannot be stamped', async () => {
-      const session = await turning();
-      fake.commandFails = 'container not found';
-
-      const result = await sandboxes.prompt(session, 'hi', new Collect());
-      expect(result.stopReason).toBe('end_turn');
-      // It never reached the sandbox, so it is revoked at once.
-      expect(app.revoked).toEqual(['ghs-token-1']);
-      expect(metrics.tokenStamps).toEqual(['stamp-failed']);
-    });
-
-    test('stamps an SSH key and the client config that finds it', async () => {
-      const app = new FakeApp();
-      sandboxes = new KubeSandboxes({
-        kube: new Kube(fake.config()),
-        config,
-        guildId: GUILD,
-        log,
-        metrics,
-        githubApp: app,
-        sshKey: 'PRIVATE-KEY-BYTES',
-      });
-      const ref = await sandboxes.mint(THREAD);
-      const session = await sandboxes.attach(ref);
-      await sandboxes.prompt(session, 'ssh to oldschool', new Collect());
-
-      const first = wrote(0);
-      expect(first.ssh).toBe('PRIVATE-KEY-BYTES');
-      expect(first.sshConfig).toContain('User rowbutt');
-      expect(first.sshConfig).toContain(
-        'IdentityFile /home/agent/.ssh/id_ed25519',
-      );
-      // The agent's home is a fresh emptyDir with no known hosts, so `yes` would refuse all.
-      expect(first.sshConfig).toContain('StrictHostKeyChecking accept-new');
-      // `ssh spore` becomes spore.lolwtf.ca, which has no route from offsite
-      // but one through a folly node.
-      expect(first.sshConfig).toContain('CanonicalizeHostname always');
-      expect(first.sshConfig).toContain('CanonicalDomains lolwtf.ca');
-      expect(first.sshConfig).toMatch(
-        /Host [^\n]*spore\.lolwtf\.ca[^\n]*\n {2}ProxyJump riptide\.lolwtf\.ca/,
-      );
-      // Host * last: ssh takes the first value it finds for each option.
-      const sshConfig = first.sshConfig ?? '';
-      expect(sshConfig.indexOf('Host *')).toBeGreaterThan(
-        sshConfig.indexOf('ProxyJump'),
-      );
-      // umask 077, because ssh refuses a private key others can read.
-      expect(stamps()[0]?.command[2]).toContain('umask 077');
-      expect(stamps()[0]?.command[2]).toContain('mkdir -p /home/agent/.ssh');
-    });
-
-    test('writes no key and no client config when mate holds none', async () => {
-      const session = await turning();
-      await sandboxes.prompt(session, 'hi', new Collect());
-      // A config naming a missing IdentityFile makes every failure look like a rejected key.
-      expect(wrote(0).ssh).toBe('');
-      expect(wrote(0).sshConfig).toBe('');
-    });
-
-    test('stamps nothing at all with no App and no cluster account', async () => {
-      sandboxes = new KubeSandboxes({
-        kube: new Kube(fake.config()),
-        config: { ...config, kubeServiceAccount: null },
-        guildId: GUILD,
-        log,
-      });
-      const ref = await sandboxes.mint(THREAD);
-      const session = await sandboxes.attach(ref);
-      await sandboxes.prompt(session, 'hi', new Collect());
-      expect(fake.tokenRequests).toEqual([]);
-      // Not even a clearing exec: there is nothing to write or clear.
-      expect(stamps()).toEqual([]);
-    });
-  });
-
-  // The CLI's token file is stamped from a Secret at a turn's start and read
-  // back into it at the end, so a site claimed here outlives the sandbox.
-  describe('the kthx sites', () => {
-    const ORIGIN = 'https://kthx.example.test';
-    const MCP = 'http://spindrift.spindrift.svc.cluster.local:3000/mcp';
-    const FILE = '/home/agent/.config/kthx/sites.json';
-    const SECRET = 'mate-kthx-sites';
-    const kthxConfig: SandboxConfig = {
-      ...config,
-      kthx: {
-        origin: ORIGIN,
-        sitesSecret: SECRET,
-        mcpUrl: MCP,
-        agentSecret: 'mate-kthx-agent',
-      },
-    };
-
-    function held(names: Record<string, string>): Sites {
-      return { [ORIGIN]: names };
-    }
-
-    function turning(sandboxConfig = kthxConfig) {
-      const kube = new Kube(fake.config());
-      sandboxes = new KubeSandboxes({
-        kube,
-        config: sandboxConfig,
-        guildId: GUILD,
-        log,
-        metrics,
-        kthxSites: new KthxSites({
-          kube,
-          namespace: fake.namespace,
-          secret: SECRET,
-          log,
-        }),
-      });
-      return sandboxes;
-    }
-
-    /** Every one-shot exec that stamped credentials, oldest first. */
-    function stamps() {
-      return fake.execs.filter((e) =>
-        e.command.some((word) => word.includes('.github-token')),
-      );
-    }
-
-    function secretPatches() {
-      return fake.patches.filter((patch) => patch.name === SECRET);
-    }
-
-    function stored(): Sites {
-      return parseSites(fake.secretValue(SECRET, 'sites.json') ?? '');
-    }
-
-    /** A turn during which the agent leaves `contents` in the CLI's file. */
-    async function turnLeaving(contents: string | null) {
-      fake.script = { chunks: ['one', 'two'], chunkDelayMs: 80 };
-      const ref = await sandboxes.mint(THREAD);
-      const session = await sandboxes.attach(ref);
-      const turn = sandboxes.prompt(session, 'claim a site', new Collect());
-      // After the stamp, before the harvest.
-      await until(() => stamps().length === 1);
-      await Bun.sleep(20);
-      if (contents !== null) fake.files.set(FILE, contents);
-      return { ref, result: await turn };
-    }
-
-    test('hands the harness the origin, the agent token and the MCP server', async () => {
-      await turning().mint(THREAD);
-      const env = envOf(podTemplate().containers[0]);
-
-      expect(env.KTHX_ORIGIN.value).toBe(ORIGIN);
-      // `optional`: the owner mints this token; until then no Secret exists.
-      expect(env.KTHX_AGENT_TOKEN.valueFrom.secretKeyRef).toEqual({
-        name: 'mate-kthx-agent',
-        key: 'KTHX_AGENT_TOKEN',
-        optional: true,
-      });
-      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value).mcp).toEqual({
-        kthx: {
-          type: 'remote',
-          url: MCP,
-          enabled: true,
-          headers: { Authorization: 'Bearer {env:KTHX_AGENT_TOKEN}' },
-          oauth: false,
-          timeout: 10000,
-        },
-      });
-    });
-
-    test('each half stands alone', async () => {
-      await turning({
-        ...kthxConfig,
-        kthx: { ...kthxConfig.kthx, mcpUrl: null },
-      }).mint(THREAD);
-      let env = envOf(podTemplate().containers[0]);
-      expect(env.KTHX_ORIGIN.value).toBe(ORIGIN);
-      expect(env.KTHX_AGENT_TOKEN).toBeUndefined();
-      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value).mcp).toBeUndefined();
-
-      fake.sandboxes.clear();
-      await turning({
-        ...kthxConfig,
-        kthx: { ...kthxConfig.kthx, origin: null },
-      }).mint(THREAD);
-      env = envOf(podTemplate().containers[0]);
-      expect(env.KTHX_ORIGIN).toBeUndefined();
-      expect(env.KTHX_AGENT_TOKEN.valueFrom.secretKeyRef.name).toBe(
-        'mate-kthx-agent',
-      );
-      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value).mcp.kthx.url).toBe(
-        MCP,
-      );
-    });
-
-    test('with neither knob the sandbox is exactly what it was', async () => {
-      const ref = await sandboxes.mint(THREAD);
-      const env = envOf(podTemplate().containers[0]);
-      expect(env.KTHX_ORIGIN).toBeUndefined();
-      expect(env.KTHX_AGENT_TOKEN).toBeUndefined();
-      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value)).not.toHaveProperty(
-        'mcp',
-      );
-
-      // The stamp neither reads nor writes the file, and nothing touches the Secret.
-      const session = await sandboxes.attach(ref);
-      await sandboxes.prompt(session, 'hi', new Collect());
-      for (const exec of fake.execs) {
-        expect(exec.command.join(' ')).not.toContain('kthx');
-      }
-      expect(fake.requests.some((r) => r.path.includes('/secrets/'))).toBe(
-        false,
-      );
-      expect(metrics.siteSyncs).toEqual([]);
-    });
-
-    test('stamps the file from the Secret and truncates it after the turn', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog' })),
-      });
-      const { result } = await turnLeaving(null);
-      expect(result.stopReason).toBe('end_turn');
-
-      const [stamp, retire] = stamps();
-      expect(stamp?.command[2]).toContain('umask 077');
-      expect(stamp?.command[2]).toContain(`"$(dirname ${FILE})"`);
-      expect(stamp?.command[2]).toContain(`printf %s "$5" > ${FILE}`);
-      expect(parseSites(stamp?.command[8] ?? '')).toEqual(
-        held({ blog: 'tok-blog' }),
-      );
-      // Read back unchanged: nothing to save, and the file is cleared.
-      expect(retire?.command[8]).toBe('{}\n');
-      expect(fake.files.get(FILE)).toBe('{}\n');
-      expect(secretPatches()).toEqual([]);
-      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
-    });
-
-    test('a site claimed during the turn is saved under mate s own field manager', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog' })),
-      });
-      const before = fake.secretRevision(SECRET);
-      await turnLeaving(
-        serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
-      );
-
-      const [patch] = secretPatches();
-      expect(secretPatches()).toHaveLength(1);
-      expect(patch?.query).toBe('fieldManager=mate');
-      expect(patch?.contentType).toBe('application/merge-patch+json');
-      expect(patch?.body.metadata).toEqual({ resourceVersion: before });
-      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      expect(fake.files.get(FILE)).toBe('{}\n');
-      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
-      // No token reaches the log.
-      expect(JSON.stringify(log.entries)).not.toContain('tok-shop');
-    });
-
-    test('a site removed during the turn leaves the ledger, and one claimed elsewhere stays', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog', old: 'tok-old' })),
-      });
-      fake.script = { chunks: ['one', 'two'], chunkDelayMs: 80 };
-      const ref = await sandboxes.mint(THREAD);
-      const session = await sandboxes.attach(ref);
-      const turn = sandboxes.prompt(session, 'kthx rm old', new Collect());
-      await until(() => stamps().length === 1);
-      await Bun.sleep(20);
-      // The agent ran `kthx rm old`; another thread claimed `shop` meanwhile.
-      fake.files.set(FILE, serialize(held({ blog: 'tok-blog' })));
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(
-          held({ blog: 'tok-blog', old: 'tok-old', shop: 'tok-shop' }),
-        ),
-      });
-      await turn;
-
-      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-    });
-
-    test('a save that lands on a moved Secret is folded again', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog' })),
-      });
-      fake.script = { chunks: ['one', 'two'], chunkDelayMs: 80 };
-      const ref = await sandboxes.mint(THREAD);
-      const session = await sandboxes.attach(ref);
-      const turn = sandboxes.prompt(session, 'claim a site', new Collect());
-      await until(() => stamps().length === 1);
-      await Bun.sleep(20);
-      fake.files.set(
-        FILE,
-        serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
-      );
-      fake.secretMovesAfterRead = 1;
-      await turn;
-
-      expect(secretPatches()).toHaveLength(2);
-      expect(
-        log.of('kthx sites ledger moved under a save; retrying'),
-      ).toHaveLength(1);
-      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      expect(fake.files.get(FILE)).toBe('{}\n');
-      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
-    });
-
-    test('a failed save leaves the file for the next turn, which heals it', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog' })),
-      });
-      fake.secretPatchFails = true;
-      const claimed = serialize(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      const { ref, result } = await turnLeaving(claimed);
-      expect(result.stopReason).toBe('end_turn');
-
-      // Not truncated: the file is the only copy of the new bearer.
-      expect(fake.files.get(FILE)).toBe(claimed);
-      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
-      expect(metrics.siteSyncs).toEqual(['ok', 'save-failed']);
-      expect(
-        log.of('could not save the sandbox kthx sites into the ledger'),
-      ).toHaveLength(1);
-      // The other credentials were still cleared.
-      expect(stamps()[1]?.command[4]).toBe('');
-
-      // The next turn's start folds the file in before stamping.
-      fake.secretPatchFails = false;
-      fake.script = {};
-      const session = await sandboxes.attach(ref);
-      await sandboxes.prompt(session, 'again', new Collect());
-      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      expect(parseSites(stamps()[2]?.command[8] ?? '')).toEqual(
-        held({ blog: 'tok-blog', shop: 'tok-shop' }),
-      );
-      expect(metrics.siteSyncs).toEqual(['ok', 'save-failed', 'ok', 'ok']);
-    });
-
-    test('a second turn that claims nothing keeps every site the first one did', async () => {
-      turning();
-      fake.putSecret(SECRET, { 'sites.json': serialize(held({})) });
-      const { ref } = await turnLeaving(serialize(held({ blog: 'tok-blog' })));
-      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
-      // Truncated at the end of the turn, so the file is empty when the next
-      // one starts; an empty file is not a removal.
-      expect(fake.files.get(FILE)).toBe('{}\n');
-
-      fake.script = {};
-      const session = await sandboxes.attach(ref);
-      await sandboxes.prompt(session, 'again', new Collect());
-      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
-      expect(parseSites(stamps()[2]?.command[8] ?? '')).toEqual(
-        held({ blog: 'tok-blog' }),
-      );
-      expect(metrics.siteSyncs).toEqual(['ok', 'ok', 'ok', 'ok']);
-    });
-
-    test('a stamp that fails after the fold is never read as a removal', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
-      });
-      fake.writeFails = 'exec did not open';
-      const { result } = await turnLeaving(null);
-      expect(result.stopReason).toBe('end_turn');
-
-      // The file never held the ledger, so nothing in it is missing.
-      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      expect(secretPatches()).toEqual([]);
-      expect(metrics.siteSyncs).toEqual(['ok', 'ok']);
-    });
-
-    test('a file over the limit is read-failed and never saved over', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog' })),
-      });
-      const huge = serialize(
-        held({ blog: 'tok-blog', big: 'x'.repeat(70_000) }),
-      );
-      const { result } = await turnLeaving(huge);
-      expect(result.stopReason).toBe('end_turn');
-
-      expect(fake.files.get(FILE)).toBe(huge);
-      expect(stored()).toEqual(held({ blog: 'tok-blog' }));
-      expect(metrics.siteSyncs).toEqual(['ok', 'read-failed']);
-      expect(
-        String(
-          log.of('could not read the sandbox kthx sites file')[0]?.fields
-            ?.error,
-        ),
-      ).toContain('more than');
-    });
-
-    test('a corrupt file is left alone and never saved over', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog' })),
-      });
-      const { result } = await turnLeaving('{not json');
-      expect(result.stopReason).toBe('end_turn');
-
-      expect(fake.files.get(FILE)).toBe('{not json');
-      expect(secretPatches()).toEqual([]);
-      expect(metrics.siteSyncs).toEqual(['ok', 'read-failed']);
-      expect(log.of('could not read the sandbox kthx sites file')).toHaveLength(
-        1,
-      );
-    });
-
-    test('a missing Secret is logged and the turn still answers', async () => {
-      turning();
-      const { result } = await turnLeaving(null);
-      expect(result.stopReason).toBe('end_turn');
-      // Nothing to stamp, so the file is not written at all.
-      expect(fake.files.has(FILE)).toBe(false);
-      expect(metrics.siteSyncs).toEqual(['save-failed', 'save-failed']);
-      const [entry] = log.of(
-        'could not save the sandbox kthx sites into the ledger',
-      );
-      expect(entry?.fields?.error).toContain('not found');
-    });
-
-    test('teardown keeps what the sandbox still holds', async () => {
-      turning();
-      fake.putSecret(SECRET, {
-        'sites.json': serialize(held({ blog: 'tok-blog' })),
-      });
-      fake.secretPatchFails = true;
-      const { ref } = await turnLeaving(
-        serialize(held({ blog: 'tok-blog', shop: 'tok-shop' })),
-      );
-      fake.secretPatchFails = false;
-
-      await sandboxes.teardown(ref);
-      expect(fake.sandboxes.has(NAME)).toBe(false);
-      expect(stored()).toEqual(held({ blog: 'tok-blog', shop: 'tok-shop' }));
-      expect(metrics.siteSyncs.at(-1)).toBe('ok');
-    });
-
-    test('a teardown of something already gone is still not an error', async () => {
-      turning();
-      await sandboxes.teardown({ name: NAME, thread: THREAD });
-      expect(log.entries.filter((e) => e.level !== 'info')).toEqual([]);
-      expect(metrics.siteSyncs).toEqual([]);
-    });
-  });
-
-  test('caps and redacts what the harness prints', async () => {
-    fake.script = { stderr: 'auth failed: sk-abcd1234efgh5678ijklmnop\n' };
-    const ref = await sandboxes.mint(THREAD);
-    await sandboxes.attach(ref);
-    await Bun.sleep(20);
-
-    const line = log.of('harness stderr')[0]?.fields?.line as string;
-    expect(line).toContain('auth failed');
-    expect(line).not.toContain('sk-abcd1234efgh5678ijklmnop');
-    expect(line).toContain('[redacted]');
+    // The old one is left for boot's condemn pass.
+    expect(r.fake.sandboxes.has(NAME)).toBe(true);
   });
 
   test('ignores a pod it does not own', async () => {
-    const ref = await sandboxes.mint(THREAD);
-    fake.pods.delete(NAME);
-    fake.pods.set('someone-elses', {
+    const r = rig();
+    await plant(r, NAME, sandboxLabels(THREAD, GUILD));
+    r.fake.pods.delete(NAME);
+    r.fake.pods.set('someone-elses', {
       apiVersion: 'v1',
       kind: 'Pod',
       metadata: {
@@ -1275,193 +500,46 @@ describe('attach', () => {
       spec: {},
       status: { phase: 'Running' },
     });
-    expect(sandboxes.attach(ref)).rejects.toThrow(/no running pod/);
+    expect((await mint(r)).error).toMatch(/no running pod/);
   });
 });
 
-describe('prompt', () => {
-  test('streams the harness into the sink and slides the TTL', async () => {
-    fake.script = {
-      chunks: ['AGENTS', '.md:24'],
-      thinking: true,
-      tool: 'read AGENTS.md',
-      cost: 0.0024,
-    };
-    const ref = await sandboxes.mint(THREAD);
-    const minted = (fake.sandboxes.get(NAME) as Record<string, any>).spec
-      .shutdownTime;
-    const session = await sandboxes.attach(ref);
-    const sink = new Collect();
-
-    const result = await sandboxes.prompt(session, 'where is the rule?', sink);
-    expect(result.stopReason).toBe('end_turn');
-    expect(sink.text).toBe('AGENTS.md:24');
-    expect(sink.status).toContain('read AGENTS.md…');
-    expect(sink.status.at(-1)).toBeNull();
-    // Cards keep the harness's call id, and a status-only update keeps the title.
-    expect(sink.cards).toEqual([
-      { id: 'call-1', title: 'read AGENTS.md', state: 'in_progress' },
-      { id: 'call-1', title: 'read AGENTS.md', state: 'complete' },
-    ]);
-
-    expect(log.of('turn ended')[0]?.fields?.cost).toEqual({
-      amount: 0.0024,
-      currency: 'USD',
-    });
-
-    const slide = fake.patches.at(-1);
-    expect(slide?.contentType).toBe('application/merge-patch+json');
-    expect(Object.keys((slide?.body.spec ?? {}) as object)).toEqual([
-      'shutdownTime',
-    ]);
-
-    // A merge patch on one field leaves the rest of the declaration alone.
-    const after = fake.sandboxes.get(NAME) as Record<string, any>;
-    expect(Date.parse(after.spec.shutdownTime)).toBeGreaterThan(
-      Date.parse(minted),
-    );
-    expect(after.spec.shutdownPolicy).toBe('Delete');
-    expect(after.spec.podTemplate.spec.runtimeClassName).toBe('kata-clh');
-    expect(after.metadata.labels['lolwtf.ca/thread']).toBe(THREAD.id);
-  });
-
-  test('reassembles updates split across frames', async () => {
-    fake.script = { chunks: ['split ', 'across ', 'frames'], splitLines: true };
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-    const sink = new Collect();
-    await sandboxes.prompt(session, 'anything', sink);
-    expect(sink.text).toBe('split across frames');
-  });
-
-  test('a stop ends the turn as cancelled', async () => {
-    fake.script = {
-      chunks: ['one ', 'two ', 'three ', 'four ', 'five '],
-      chunkDelayMs: 40,
-    };
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-    const sink = new Collect();
-    const turn = sandboxes.prompt(session, 'count', sink);
-    await Bun.sleep(60);
-    await sandboxes.cancel(session);
-    expect((await turn).stopReason).toBe('cancelled');
-  });
-
-  test('a stop for a session the harness no longer holds is ignored', async () => {
-    const ref = await sandboxes.mint(THREAD);
-    const stale = await sandboxes.attach(ref);
-    fake.script = {
-      chunks: ['one ', 'two ', 'three '],
-      chunkDelayMs: 40,
-      loadFails: true,
-    };
-    const fresh = await sandboxes.attach(ref);
-    expect(fresh.id).not.toBe(stale.id);
-
-    const turn = sandboxes.prompt(fresh, 'count', new Collect());
-    await Bun.sleep(60);
-    await sandboxes.cancel(stale);
-    expect((await turn).stopReason).toBe('end_turn');
-    expect(fake.lastExec?.stdin.some((l) => l.includes('session/cancel'))).toBe(
-      false,
-    );
-  });
-
-  test('a harness that dies mid-turn surfaces the close status', async () => {
-    fake.script = {
-      chunks: ['starting'],
-      closeAfterChunk: 1,
-      closeStatus: {
-        status: 'Failure',
-        reason: 'NonZeroExitCode',
-        message: 'command terminated with exit code 137',
-      },
-    };
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-    expect(sandboxes.prompt(session, 'count', new Collect())).rejects.toThrow(
-      /exit code 137/,
-    );
-  });
-
-  test('refuses a session that is not attached', async () => {
-    const ref = await sandboxes.mint(THREAD);
-    expect(
-      sandboxes.prompt(
-        { id: 'stale', sandbox: ref, resumed: false },
-        'hi',
-        new Collect(),
-      ),
-    ).rejects.toThrow(/not attached/);
-  });
-});
-
-describe('teardown and list', () => {
+describe('release', () => {
   test('deletes the sandbox and waits for it to be gone', async () => {
-    const ref = await attach();
-    await sandboxes.teardown(ref);
-    expect(fake.sandboxes.has(NAME)).toBe(false);
-    expect(fake.pods.has(NAME)).toBe(false);
-    expect(fake.lastExec?.clientClosed).toBe(true);
+    const r = rig();
+    await mint(r);
+    await r.hands.release(THREAD, 'quiet');
+    expect(r.fake.sandboxes.has(NAME)).toBe(false);
+    expect(r.fake.pods.has(NAME)).toBe(false);
+    expect(r.fake.handsExecs.every((e) => e.clientClosed)).toBe(true);
   });
 
-  test('a teardown of something already gone is not an error', async () => {
-    await sandboxes.teardown({ name: NAME, thread: THREAD });
-    expect(fake.sandboxes.size).toBe(0);
-  });
-
-  test('lists only this guild s own sandboxes, thread and channel included', async () => {
-    await sandboxes.mint(THREAD);
-    const other = new KubeSandboxes({
-      kube: new Kube(fake.config()),
-      config,
-      guildId: '1509024936717455999',
-      log,
-    });
-    await other.mint({
-      surface: 'discord',
-      id: '1509024937422356888',
-      channelId: 'c2',
-    });
-
-    const mine = await sandboxes.list();
-    expect(mine).toEqual([{ name: NAME, thread: THREAD, turnInFlight: false }]);
-  });
-
-  test('skips a sandbox with no thread labels', async () => {
-    await sandboxes.mint(THREAD);
-    const stray = fake.sandboxes.get(NAME) as Record<string, any>;
-    fake.sandboxes.set('mate-stray', {
-      ...structuredClone(stray),
-      metadata: {
-        name: 'mate-stray',
-        labels: {
-          'lolwtf.ca/minted-by': 'mate',
-          'lolwtf.ca/guild': GUILD,
-        },
-      },
-    });
-    expect(await sandboxes.list()).toEqual([
-      { name: NAME, thread: THREAD, turnInFlight: false },
-    ]);
-    expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(1);
+  test('a release of something already gone is not an error', async () => {
+    const r = rig();
+    await r.hands.release(THREAD, 'archived');
+    expect(r.fake.sandboxes.size).toBe(0);
+    expect(r.log.entries.filter((e) => e.level !== 'info')).toEqual([]);
   });
 });
 
 describe('the warm pool', () => {
-  test('warms a sandbox that belongs to no thread', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
+  function pool(spares: number): Rig {
+    return rig({ config: { spares } });
+  }
 
-    const [name] = spareNames();
+  test('warms a sandbox that belongs to no thread', async () => {
+    const r = pool(1);
+    await r.hands.ensureSpares();
+
+    const [name] = spareNames(r);
     expect(name).toMatch(/^mate-spare-/);
-    const spare = fake.sandboxes.get(name ?? '') as Record<string, any>;
+    const spare = object(r, name);
     expect(spare.metadata.labels).toEqual({
       'app.kubernetes.io/name': 'mate-sandbox',
       'app.kubernetes.io/part-of': 'mate',
       'lolwtf.ca/minted-by': 'mate',
       'lolwtf.ca/guild': GUILD,
+      'lolwtf.ca/hands': '2',
       'lolwtf.ca/spare': 'true',
     });
     // The pod needs `app.kubernetes.io/name`, which the network policy selects on;
@@ -1474,23 +552,19 @@ describe('the warm pool', () => {
     expect(ttl).toBeGreaterThan(25 * 60_000);
     expect(ttl).toBeLessThanOrEqual(30 * 60_000);
 
-    // Rehydration skips it, without the stray-sandbox warning.
-    expect(await pool.list()).toEqual([]);
-    expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(0);
-
-    await pool.ensureSpares();
-    expect(spareNames()).toHaveLength(1);
+    await r.hands.ensureSpares();
+    expect(spareNames(r)).toHaveLength(1);
   });
 
   test('a thread takes the spare, and the spare takes its labels', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [name] = spareNames();
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [name] = spareNames(r);
 
-    const ref = await pool.mint(THREAD);
-    expect(ref).toEqual({ name: name ?? '', thread: THREAD, source: 'spare' });
+    const minted = await mint(r);
+    expect(minted).toMatchObject({ source: 'spare', sandbox: name });
 
-    const adopted = fake.sandboxes.get(ref.name) as Record<string, any>;
+    const adopted = object(r, name);
     expect(adopted.metadata.labels['lolwtf.ca/thread']).toBe(THREAD.id);
     expect(adopted.metadata.labels['lolwtf.ca/channel']).toBe(THREAD.channelId);
     expect(adopted.metadata.labels['lolwtf.ca/surface']).toBe('discord');
@@ -1499,10 +573,11 @@ describe('the warm pool', () => {
     expect(Date.parse(adopted.spec.shutdownTime) - Date.now()).toBeGreaterThan(
       110 * 60_000,
     );
-    // The spare's clone is as old as the spare, so it is fetched forward first.
-    expect(fake.lastExec?.container).toBe(HARNESS_CONTAINER);
-    // The ref is passed as `$1`, never spliced into the script.
-    expect(fake.lastExec?.command).toEqual([
+    // The spare's clone is as old as the spare, so it is fetched forward first,
+    // and the ref is passed as `$1`, never spliced into the script.
+    const refresh = r.fake.execs.find((e) => e.command[0] === '/bin/sh');
+    expect(refresh?.container).toBe(HARNESS_CONTAINER);
+    expect(refresh?.command).toEqual([
       '/bin/sh',
       '-c',
       `set -e; cd ${WORKSPACE}; git fetch --depth 1 origin "$1"; git reset --hard FETCH_HEAD`,
@@ -1513,289 +588,219 @@ describe('the warm pool', () => {
     expect(adopted.spec.podTemplate.metadata.labels).toEqual(
       adopted.metadata.labels,
     );
-    // Listed as a thread despite its `mate-spare-` name.
-    expect(await pool.list()).toEqual([
-      { name: ref.name, thread: THREAD, turnInFlight: false },
-    ]);
-    await until(() => spareNames().length === 1);
+    await until(() => spareNames(r).length === 1);
   });
 
   test('a second thread cannot take the spare the first one took', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [spare] = spareNames();
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [spare] = spareNames(r);
 
     const [first, second] = await Promise.all([
-      pool.mint(THREAD),
-      pool.mint(OTHER_THREAD),
+      mint(r, THREAD),
+      mint(r, OTHER_THREAD),
     ]);
-    expect(first.name).not.toBe(second.name);
-    expect([first, second].filter((ref) => ref.name === spare)).toHaveLength(1);
-    const loser = first.name === spare ? second : first;
-    expect(loser.name).toBe(sandboxName(loser.thread));
+    expect(first.sandbox).not.toBe(second.sandbox);
+    expect(
+      [first, second].filter((minted) => minted.sandbox === spare),
+    ).toHaveLength(1);
+    const loser = first.sandbox === spare ? second : first;
     expect(loser.source).toBe('fresh');
   });
 
   test('the thread is found again by its label, not by a name it no longer has', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const first = await pool.mint(THREAD);
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const first = await mint(r);
 
-    const again = await pool.mint(THREAD);
-    expect(again.name).toBe(first.name);
+    const again = await mint(r);
+    expect(again.sandbox).toBe(first.sandbox);
     expect(again.source).toBe('reused');
-    expect(log.of('sandbox already existed')).toHaveLength(1);
-    expect(fake.sandboxes.has(sandboxName(THREAD))).toBe(false);
+    expect(r.fake.sandboxes.has(NAME)).toBe(false);
   });
 
-  test('with no pool configured a mint is exactly what it was', async () => {
-    await sandboxes.ensureSpares();
-    expect(fake.requests).toEqual([]);
+  test('a spare an earlier mate minted is never handed out', async () => {
+    const r = pool(1);
+    const labels = withoutHands(sandboxLabels(THREAD, GUILD));
+    for (const key of [
+      'lolwtf.ca/surface',
+      'lolwtf.ca/thread',
+      'lolwtf.ca/channel',
+    ]) {
+      delete labels[key];
+    }
+    await plant(r, 'mate-spare-older', {
+      ...labels,
+      'lolwtf.ca/spare': 'true',
+    });
+    expect((await mint(r)).source).toBe('fresh');
+  });
 
-    const ref = await sandboxes.mint(THREAD);
-    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
-    expect([...fake.sandboxes.keys()]).toEqual([NAME]);
-    // Each extra request is one more way for a mint to fail.
-    expect(
-      fake.requests.map((r) => `${r.method} ${r.query || r.path}`),
-    ).toEqual([
-      `GET labelSelector=${threadQuery}`,
-      'POST /apis/agents.x-k8s.io/v1beta1/namespaces/mate/sandboxes',
-      `GET fieldSelector=metadata.name%3D${NAME}`,
-    ]);
+  test('with no pool configured, a mint never looks for a spare', async () => {
+    const r = rig();
+    await r.hands.ensureSpares();
+    expect(r.fake.requests).toEqual([]);
+
+    expect((await mint(r)).source).toBe('fresh');
+    expect([...r.fake.sandboxes.keys()]).toEqual([NAME]);
+    expect(r.fake.requests.some((q) => q.query.includes('spare'))).toBe(false);
   });
 
   test('renews what it holds, and only what still is one', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [name] = spareNames();
-    const spare = fake.sandboxes.get(name ?? '') as Record<string, any>;
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [name] = spareNames(r);
+    const spare = object(r, name);
     const first = Date.parse(spare.spec.shutdownTime);
 
     await Bun.sleep(10);
-    await pool.ensureSpares();
+    await r.hands.ensureSpares();
     expect(Date.parse(spare.spec.shutdownTime)).toBeGreaterThan(first);
     // The resourceVersion stops a stale renewal overwriting a claimed spare's TTL.
-    const slide = fake.patches.filter((p) => p.name === name).at(-1);
-    const meta = (slide?.body.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.resourceVersion).toBeDefined();
+    const slide = r.fake.patches.filter((p) => p.name === name).at(-1);
+    expect(
+      (slide?.body.metadata as Json | undefined)?.resourceVersion,
+    ).toBeDefined();
   });
 
   test('a call that lands mid-pass gets a pass of its own', async () => {
-    const pool = withSpares(1);
-    fake.readyOnCreate = false;
-    const first = pool.ensureSpares();
-    await until(() => spareNames().length === 1);
+    const r = pool(1);
+    r.fake.readyOnCreate = false;
+    const first = r.hands.ensureSpares();
+    await until(() => spareNames(r).length === 1);
 
     // Joining the pass in flight would report the pool as counted before this call.
-    const second = pool.ensureSpares();
-    fake.markReady(spareNames()[0] ?? '');
+    const second = r.hands.ensureSpares();
+    r.fake.markReady(spareNames(r)[0] ?? '');
     await Promise.all([first, second]);
 
     // Only the second pass had a spare to renew.
     expect(
-      fake.patches.filter((p) => p.name.startsWith('mate-spare-')),
+      r.fake.patches.filter((p) => p.name.startsWith('mate-spare-')),
     ).toHaveLength(1);
   });
 
   test('keeps none of the spares an earlier mate left behind', async () => {
-    const before = withSpares(1);
-    await before.ensureSpares();
-    const [inherited] = spareNames();
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [inherited] = spareNames(r);
 
-    // Nothing on a spare records the image, model or ref it was built from.
-    const after = withSpares(1);
-    await after.ensureSpares();
-    await until(() => !fake.sandboxes.has(inherited ?? ''));
-    expect(spareNames()).toHaveLength(1);
-    expect(spareNames()[0]).not.toBe(inherited);
+    // Nothing on a spare records the image or ref it was built from.
+    r.hands = r.another();
+    await r.hands.ensureSpares();
+    await until(() => !r.fake.sandboxes.has(inherited ?? ''));
+    expect(spareNames(r)).toHaveLength(1);
+    expect(spareNames(r)[0]).not.toBe(inherited);
   });
 
   test('will not hand out a spare whose pod has gone', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [name] = spareNames();
-    fake.markNotReady(name ?? '');
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [name] = spareNames(r);
+    r.fake.markNotReady(name ?? '');
 
-    const ref = await pool.mint(THREAD);
-    expect(ref.name).toBe(NAME);
-    expect(ref.source).toBe('fresh');
+    const minted = await mint(r);
+    expect(minted).toMatchObject({ sandbox: NAME, source: 'fresh' });
   });
 
   test('replaces a spare that stopped being ready', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [broken] = spareNames();
-    const object = fake.sandboxes.get(broken ?? '') as Record<string, any>;
-    const held = Date.parse(object.spec.shutdownTime);
-    fake.markNotReady(broken ?? '');
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [broken] = spareNames(r);
+    const spare = object(r, broken);
+    const held = Date.parse(spare.spec.shutdownTime);
+    r.fake.markNotReady(broken ?? '');
 
-    await pool.ensureSpares();
+    await r.hands.ensureSpares();
     // Not renewed: the TTL is the only thing that removes an unusable spare.
-    expect(Date.parse(object.spec.shutdownTime)).toBe(held);
-    await until(() => !fake.sandboxes.has(broken ?? ''));
-    expect(log.of('condemned a spare that stopped being ready')).toHaveLength(
+    expect(Date.parse(spare.spec.shutdownTime)).toBe(held);
+    await until(() => !r.fake.sandboxes.has(broken ?? ''));
+    expect(r.log.of('condemned a spare that stopped being ready')).toHaveLength(
       1,
     );
     // The resourceVersion stops a condemn landing on a spare a thread just claimed.
-    const took = fake.patches.filter((patch) => patch.name === broken).at(0);
-    const meta = (took?.body.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.resourceVersion).toBeDefined();
+    const took = r.fake.patches.filter((patch) => patch.name === broken).at(0);
+    expect(
+      (took?.body.metadata as Json | undefined)?.resourceVersion,
+    ).toBeDefined();
 
-    const standing = spareNames();
+    const standing = spareNames(r);
     expect(standing).toHaveLength(1);
     expect(standing[0]).not.toBe(broken);
-    expect((await pool.mint(THREAD)).source).toBe('spare');
+    expect((await mint(r)).source).toBe('spare');
   });
 
   test('reports what the pool holds against what it is for', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    expect(metrics.pool).toEqual({ ready: 1, wanted: 1 });
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    expect(r.metrics.pool).toEqual({ ready: 1, wanted: 1 });
 
-    const [broken] = spareNames();
-    fake.markNotReady(broken ?? '');
-    fake.patchFails = true;
-    await pool.ensureSpares();
+    const [broken] = spareNames(r);
+    r.fake.markNotReady(broken ?? '');
+    r.fake.patchFails = true;
+    await r.hands.ensureSpares();
     // One sandbox held, none usable: only this gauge shows a pool that stopped working.
-    expect(metrics.pool).toEqual({ ready: 0, wanted: 1 });
+    expect(r.metrics.pool).toEqual({ ready: 0, wanted: 1 });
   });
 
   test('a spare it could not take out is not joined by a replacement', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [broken] = spareNames();
-    fake.markNotReady(broken ?? '');
-    fake.patchFails = true;
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [broken] = spareNames(r);
+    r.fake.markNotReady(broken ?? '');
+    r.fake.patchFails = true;
 
-    await pool.ensureSpares();
+    await r.hands.ensureSpares();
     // It still holds node room, so a replacement would push the pool past its size.
-    expect(spareNames()).toEqual([broken ?? '']);
+    expect(spareNames(r)).toEqual([broken ?? '']);
     expect(
-      log.of('could not condemn a spare that stopped being ready'),
+      r.log.of('could not condemn a spare that stopped being ready'),
     ).toHaveLength(1);
   });
 
   test('a refresh that fails takes the spare out rather than the thread', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [spare] = spareNames();
-    fake.commandFails = 'fatal: could not read from remote repository';
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [spare] = spareNames(r);
+    r.fake.commandFails = 'fatal: could not read from remote repository';
 
-    const ref = await pool.mint(THREAD);
+    const minted = await mint(r);
     // A spare is only worth handing out with a current checkout.
-    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
+    expect(minted).toMatchObject({ sandbox: NAME, source: 'fresh' });
     expect(
-      log.of('could not bring an adopted spare up to date; minting one'),
+      r.log.of('could not bring an adopted spare up to date; minting one'),
     ).toHaveLength(1);
-    await until(() => !fake.sandboxes.has(spare ?? ''));
+    await until(() => !r.fake.sandboxes.has(spare ?? ''));
   });
 
   test('a spare that cannot be deleted still stops being the thread', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const [spare] = spareNames();
-    fake.commandFails = 'fatal: could not read from remote repository';
-    fake.deleteFails = true;
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const [spare] = spareNames(r);
+    r.fake.commandFails = 'fatal: could not read from remote repository';
+    r.fake.deleteFails = true;
 
-    await pool.mint(THREAD);
+    await mint(r);
     // A failed delete must not leave a second object carrying the thread's labels.
-    const wearing = [...fake.sandboxes.entries()]
-      .filter(([, o]: any) => o.metadata.labels['lolwtf.ca/thread'])
+    const wearing = [...r.fake.sandboxes.entries()]
+      .filter(([, o]) => (o.metadata as Json).labels['lolwtf.ca/thread'])
       .map(([name]) => name);
     expect(wearing).toEqual([NAME]);
-    const condemned = fake.sandboxes.get(spare ?? '') as Record<string, any>;
-    expect(condemned.metadata.labels['lolwtf.ca/spare']).toBe('condemned');
-    expect(await pool.list()).toEqual([
-      { name: NAME, thread: THREAD, turnInFlight: false },
-    ]);
+    expect(object(r, spare).metadata.labels['lolwtf.ca/spare']).toBe(
+      'condemned',
+    );
   });
 
   test('a thread whose sandbox is terminating gets a new one, not a refusal', async () => {
-    const pool = withSpares(1);
-    await pool.ensureSpares();
-    const adopted = await pool.mint(THREAD);
-    await until(() => spareNames().length === 1);
-    fake.terminating(adopted.name);
+    const r = pool(1);
+    await r.hands.ensureSpares();
+    const adopted = await mint(r);
+    await until(() => spareNames(r).length === 1);
+    r.fake.terminating(adopted.sandbox as string);
 
     // Still labelled for the thread but terminating; `reuse` would fail on it.
-    const again = await pool.mint(THREAD);
-    expect(again.name).not.toBe(adopted.name);
+    const again = await mint(r);
+    expect(again.sandbox).not.toBe(adopted.sandbox);
     expect(again.source).toBe('spare');
-  });
-});
-
-describe('the turn mark', () => {
-  test('is on the object while a turn runs and gone when it ends', async () => {
-    fake.script = { chunks: ['one', 'two'], chunkDelayMs: 60 };
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-
-    const turn = sandboxes.prompt(session, 'go', new Collect());
-    await Bun.sleep(30);
-    expect((await sandboxes.list())[0]?.turnInFlight).toBe(true);
-
-    await turn;
-    expect((await sandboxes.list())[0]?.turnInFlight).toBe(false);
-    const object = fake.sandboxes.get(NAME) as Record<string, any>;
-    expect(object.metadata.annotations[TURN_ANNOTATION]).toBeUndefined();
-  });
-
-  test('takes the sandbox with it, so a long turn is not reaped mid-answer', async () => {
-    fake.script = { chunks: ['one', 'two'], chunkDelayMs: 60 };
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-
-    await Bun.sleep(5);
-    const started = Date.now();
-    const turn = sandboxes.prompt(session, 'go', new Collect());
-    await Bun.sleep(30);
-    // A full TTL from the turn's start, which the attach-time deadline, 5 ms older, cannot meet.
-    expect(shutdownTime()).toBeGreaterThanOrEqual(started + TTL_MS);
-    await turn;
-  });
-
-  test('a turn nothing ever finished stays marked for the next mate', async () => {
-    fake.script = { chunks: ['starting'], closeAfterChunk: 1 };
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-
-    await sandboxes.prompt(session, 'go', new Collect()).catch(() => {});
-    expect((await sandboxes.list())[0]?.turnInFlight).toBe(true);
-  });
-
-  test('attach says whether the harness reloaded the session', async () => {
-    const ref = await sandboxes.mint(THREAD);
-    expect((await sandboxes.attach(ref)).resumed).toBe(false);
-    expect((await sandboxes.attach(ref)).resumed).toBe(true);
-
-    fake.script = { loadFails: true };
-    expect((await sandboxes.attach(ref)).resumed).toBe(false);
-  });
-});
-
-describe('what a turn cost', () => {
-  test('is the step in the session total, not the total', async () => {
-    fake.script = { costs: [0.0024, 0.006] };
-    const ref = await sandboxes.mint(THREAD);
-    const session = await sandboxes.attach(ref);
-
-    const first = await sandboxes.prompt(session, 'one', new Collect());
-    const second = await sandboxes.prompt(session, 'two', new Collect());
-    expect(first.costUsd).toBeCloseTo(0.0024, 6);
-    expect(second.costUsd).toBeCloseTo(0.0036, 6);
-  });
-
-  test('is nothing for the first turn of a session the harness reloaded', async () => {
-    fake.script = { costs: [0.0024, 0.006] };
-    const ref = await sandboxes.mint(THREAD);
-    await sandboxes.attach(ref);
-    const resumed = await sandboxes.attach(ref);
-    expect(resumed.resumed).toBe(true);
-
-    const first = await sandboxes.prompt(resumed, 'one', new Collect());
-    const second = await sandboxes.prompt(resumed, 'two', new Collect());
-    expect(first.costUsd).toBeNull();
-    expect(second.costUsd).toBeCloseTo(0.0036, 6);
   });
 });

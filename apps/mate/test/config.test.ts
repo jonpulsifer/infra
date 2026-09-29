@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { readConfig, readSandboxConfig } from '../src/config.ts';
-import { TTL_MS } from '../src/sandboxes.ts';
+import {
+  readBrainConfig,
+  readConfig,
+  readSandboxConfig,
+} from '../src/config.ts';
+import { TTL_MS } from '../src/lease.ts';
 
 const minimal = {
   DISCORD_TOKEN: 'token',
@@ -16,6 +20,7 @@ describe('config from the environment', () => {
     expect(config.maxTurnsPerThread).toBe(30);
     expect(config.maxTurnsPerDay).toBe(120);
     expect(config.maxConcurrent).toBe(3);
+    expect(config.maxSandboxes).toBe(2);
     expect(config.port).toBe(8080);
     expect(config.sessionFile).toBeNull();
     expect([...config.allowedChannelIds]).toEqual([
@@ -43,6 +48,19 @@ describe('config from the environment', () => {
     expect(() =>
       readConfig({ ...minimal, MATE_MAX_CONCURRENT: 'three' }),
     ).toThrow('MATE_MAX_CONCURRENT');
+    expect(() => readConfig({ ...minimal, MATE_MAX_SANDBOXES: '0' })).toThrow(
+      'MATE_MAX_SANDBOXES',
+    );
+  });
+
+  test('the sandbox cap is its own knob, apart from the running turns', () => {
+    const config = readConfig({
+      ...minimal,
+      MATE_MAX_CONCURRENT: '4',
+      MATE_MAX_SANDBOXES: '1',
+    });
+    expect(config.maxConcurrent).toBe(4);
+    expect(config.maxSandboxes).toBe(1);
   });
 
   test('answers threads with the stub unless told otherwise', () => {
@@ -92,10 +110,8 @@ describe('config from the environment', () => {
         image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
         runtimeClass: 'kata-clh',
         namespace: null,
-        secret: 'mate-opencode',
         checkoutRepo: 'https://github.com/jonpulsifer/infra',
         checkoutRef: 'main',
-        model: 'opencode-go/qwen3.8-flash',
         turnTimeoutMs: 45 * 60_000,
         spares: 0,
         vault: null,
@@ -106,10 +122,18 @@ describe('config from the environment', () => {
         kthx: {
           origin: null,
           sitesSecret: 'mate-kthx-sites',
-          mcpUrl: null,
-          agentSecret: 'mate-kthx-agent',
         },
         switchboard: null,
+      },
+      brain: {
+        model: 'opencode-go/qwen3.8-max',
+        thinking: 'medium',
+        modelKeyFile: '/var/run/mate/opencode/api-key',
+        databaseUrl: null,
+        databaseCaFile: '/var/run/mate/db-ca/ca.crt',
+        kthxMcp: null,
+        profileRoot: null,
+        sessionRetentionDays: 14,
       },
       githubApp: null,
       sshKeyFile: null,
@@ -212,49 +236,44 @@ describe('config from the environment', () => {
       MATE_SANDBOXES: 'kube',
       MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
     };
-    expect(readSandboxConfig(kube).kthx).toEqual({
-      origin: null,
-      sitesSecret: 'mate-kthx-sites',
-      mcpUrl: null,
-      agentSecret: 'mate-kthx-agent',
+    const url = 'http://spindrift.spindrift.svc.cluster.local:3000/mcp';
+    const halves = (env: Record<string, string>) => {
+      const choice = readConfig(env).sandboxes;
+      if (choice.mode !== 'kube') throw new Error('expected kube mode');
+      return { cli: choice.sandbox.kthx, mcp: choice.brain.kthxMcp };
+    };
+    expect(halves(kube)).toEqual({
+      cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
+      mcp: null,
     });
 
     // The CLI half alone, with the origin normalised the way the CLI does it.
     expect(
-      readSandboxConfig({
+      halves({
         ...kube,
         MATE_KTHX_ORIGIN: ' https://kthx.example.test/// ',
         MATE_KTHX_SITES_SECRET: 'other-sites',
-      }).kthx,
+      }),
     ).toEqual({
-      origin: 'https://kthx.example.test',
-      sitesSecret: 'other-sites',
-      mcpUrl: null,
-      agentSecret: 'mate-kthx-agent',
+      cli: { origin: 'https://kthx.example.test', sitesSecret: 'other-sites' },
+      mcp: null,
     });
 
-    // The MCP half alone.
+    // The MCP half alone: mate holds the token, and the sandbox sees none of it.
     expect(
-      readSandboxConfig({
-        ...kube,
-        MATE_KTHX_MCP_URL:
-          'http://spindrift.spindrift.svc.cluster.local:3000/mcp',
-        MATE_KTHX_AGENT_SECRET: 'other-agent',
-      }).kthx,
+      halves({ ...kube, MATE_KTHX_MCP_URL: url, KTHX_AGENT_TOKEN: 'kthx_a' }),
     ).toEqual({
-      origin: null,
-      sitesSecret: 'mate-kthx-sites',
-      mcpUrl: 'http://spindrift.spindrift.svc.cluster.local:3000/mcp',
-      agentSecret: 'other-agent',
+      cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
+      mcp: { url, token: 'kthx_a' },
     });
 
     for (const bad of ['kthx.example.test', 'ftp://kthx.example.test', ':']) {
       expect(() =>
         readSandboxConfig({ ...kube, MATE_KTHX_ORIGIN: bad }),
       ).toThrow('MATE_KTHX_ORIGIN must be an http(s) URL');
-      expect(() =>
-        readSandboxConfig({ ...kube, MATE_KTHX_MCP_URL: bad }),
-      ).toThrow('MATE_KTHX_MCP_URL must be an http(s) URL');
+      expect(() => readConfig({ ...kube, MATE_KTHX_MCP_URL: bad })).toThrow(
+        'MATE_KTHX_MCP_URL must be an http(s) URL',
+      );
     }
   });
 
@@ -273,5 +292,98 @@ describe('config from the environment', () => {
     expect(() => readConfig({ ...kube, MATE_SPARES: '-1' })).toThrow(
       'MATE_SPARES',
     );
+  });
+
+  test('the model is provider/model, and qwen3.8-max unless told otherwise', () => {
+    expect(readBrainConfig({}).model).toBe('opencode-go/qwen3.8-max');
+    expect(
+      readBrainConfig({ MATE_MODEL: ' opencode-go/qwen3.8-flash ' }).model,
+    ).toBe('opencode-go/qwen3.8-flash');
+    for (const bad of ['qwen3.8-max', '/qwen', 'opencode-go/', 'a b/c']) {
+      expect(() => readBrainConfig({ MATE_MODEL: bad })).toThrow(
+        'MATE_MODEL must be provider/model',
+      );
+    }
+  });
+
+  test("the thinking level is one of pi's, medium unless told otherwise", () => {
+    expect(readBrainConfig({}).thinking).toBe('medium');
+    expect(readBrainConfig({ MATE_THINKING: 'xhigh' }).thinking).toBe('xhigh');
+    expect(() => readBrainConfig({ MATE_THINKING: 'loud' })).toThrow(
+      'MATE_THINKING must be one of',
+    );
+  });
+
+  test('a setting that moved into mate names its replacement', () => {
+    expect(() =>
+      readConfig({ ...minimal, MATE_SANDBOX_MODEL: 'opencode-go/x' }),
+    ).toThrow('MATE_SANDBOX_MODEL is no longer read; set MATE_MODEL');
+    expect(() =>
+      readConfig({ ...minimal, MATE_OPENCODE_SECRET: 'mate-opencode' }),
+    ).toThrow(
+      'MATE_OPENCODE_SECRET is no longer read; set MATE_MODEL_KEY_FILE',
+    );
+    expect(() => readBrainConfig({ MATE_SANDBOX_MODEL: 'x/y' })).toThrow(
+      'MATE_MODEL',
+    );
+  });
+
+  test('kube mode without a database URL boots with the store down', () => {
+    const kube = {
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+    };
+    const off = readConfig(kube).sandboxes;
+    expect(off.mode === 'kube' && off.brain.databaseUrl).toBeNull();
+    const on = readConfig({
+      ...kube,
+      DATABASE_URL: ' postgresql://app@mate-db-rw.mate:5432/app ',
+      MATE_DB_CA_FILE: '/etc/ca.crt',
+    }).sandboxes;
+    expect(on.mode === 'kube' && on.brain).toMatchObject({
+      databaseUrl: 'postgresql://app@mate-db-rw.mate:5432/app',
+      databaseCaFile: '/etc/ca.crt',
+    });
+  });
+
+  test('the kthx tools need both the MCP URL and the agent token', () => {
+    const url = 'http://spindrift.spindrift.svc.cluster.local:3000/mcp';
+    expect(readBrainConfig({ MATE_KTHX_MCP_URL: url }).kthxMcp).toBeNull();
+    expect(readBrainConfig({ KTHX_AGENT_TOKEN: 'kthx_a' }).kthxMcp).toBeNull();
+    expect(
+      readBrainConfig({ MATE_KTHX_MCP_URL: url, KTHX_AGENT_TOKEN: ' kthx_a\n' })
+        .kthxMcp,
+    ).toEqual({ url, token: 'kthx_a' });
+    expect(() =>
+      readBrainConfig({
+        MATE_KTHX_MCP_URL: 'spindrift',
+        KTHX_AGENT_TOKEN: 'a',
+      }),
+    ).toThrow('MATE_KTHX_MCP_URL must be an http(s) URL');
+  });
+
+  test('sessions are kept 14 days, and 0 keeps them for good', () => {
+    expect(readBrainConfig({}).sessionRetentionDays).toBe(14);
+    expect(
+      readBrainConfig({ MATE_SESSION_RETENTION_DAYS: '0' })
+        .sessionRetentionDays,
+    ).toBe(0);
+    expect(
+      readBrainConfig({ MATE_SESSION_RETENTION_DAYS: '30' })
+        .sessionRetentionDays,
+    ).toBe(30);
+    expect(() =>
+      readBrainConfig({ MATE_SESSION_RETENTION_DAYS: '-1' }),
+    ).toThrow('MATE_SESSION_RETENTION_DAYS');
+  });
+
+  test('the profile and the key file have their own paths', () => {
+    expect(
+      readBrainConfig({
+        MATE_PROFILE_DIR: '/app',
+        MATE_MODEL_KEY_FILE: '/run/key',
+      }),
+    ).toMatchObject({ profileRoot: '/app', modelKeyFile: '/run/key' });
   });
 });

@@ -40,10 +40,16 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/mate-hands/**",
+        "$TURBO_ROOT$/packages/pi-store-postgres/**",
+        "$TURBO_ROOT$/AGENTS.md",
         "$TURBO_ROOT$/dotfiles/skills/**",
+        "$TURBO_ROOT$/.agents/skills/**",
         "$TURBO_ROOT$/mise.toml",
-        "$TURBO_ROOT$/images/mate-sandbox/mise.toml"
+        "$TURBO_ROOT$/images/mate-sandbox/gh",
+        "$TURBO_ROOT$/images/mate-sandbox/mise.toml",
+        "$TURBO_ROOT$/terraform/pki/certs/fml-root.pem"
       ],
+      "env": ["DATABASE_URL", "MATE_TEST_DATABASE_URL"],
       "outputs": []
     },
     "@repo/pi-store-postgres#test": {

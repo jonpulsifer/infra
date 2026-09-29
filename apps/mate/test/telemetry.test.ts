@@ -3,7 +3,9 @@ import { FATAL_CLOSE_CODES } from '../src/gateway.ts';
 import { silentLog } from '../src/log.ts';
 import { getInstruments } from '../src/metrics.ts';
 import {
-  ATTACH_BOUNDARIES,
+  CONNECT_BOUNDARIES,
+  COST_BOUNDARIES,
+  HANDS_CALL_BOUNDARIES,
   MINT_BOUNDARIES,
   otlpEndpoint,
   startTelemetry,
@@ -86,11 +88,14 @@ describe('the SDK', () => {
         ),
       ).toBe(true);
       getInstruments().gatewayClosed(4004, true);
-      getInstruments().minted('ok', {
-        source: 'fresh',
-        mintMs: 42_000,
-        attachMs: 420,
+      getInstruments().minted('ok', { source: 'fresh', mintMs: 42_000 });
+      getInstruments().handsConnected('ok', {
+        reconnect: false,
+        execOpenMs: 420,
+        connectMs: 510,
       });
+      getInstruments().handsCall('exec', 'ok', 90_000);
+      getInstruments().turnEnded('end_turn', { costUsd: 0.4 });
       // The exit flush carries the last counters out before the 15 s export interval.
       await stopTelemetry();
     } finally {
@@ -103,16 +108,24 @@ describe('the SDK', () => {
     expect(sent).toContain('4004');
     // The collector's Prometheus exporter leaves names in this form alone.
     expect(sent).toContain('mate_mint_duration_milliseconds');
-    expect(sent).toContain('mate_attach_duration_milliseconds');
+    expect(sent).toContain('mate_exec_open_milliseconds');
+    expect(sent).not.toContain('mate_attach_duration_milliseconds');
     // The resource attribute the collector turns into the `exported_job` label.
     expect(sent).toContain('service.name');
     // Without these views the SDK's default buckets stop at 10 000 ms, below the mint above.
     expect(boundsOf(sent, 'mate_mint_duration_milliseconds')).toEqual([
       ...MINT_BOUNDARIES,
     ]);
-    expect(boundsOf(sent, 'mate_attach_duration_milliseconds')).toEqual([
-      ...ATTACH_BOUNDARIES,
+    for (const name of [
+      'mate_exec_open_milliseconds',
+      'mate_hands_connect_milliseconds',
+    ]) {
+      expect(boundsOf(sent, name)).toEqual([...CONNECT_BOUNDARIES]);
+    }
+    expect(boundsOf(sent, 'mate_hands_call_milliseconds')).toEqual([
+      ...HANDS_CALL_BOUNDARIES,
     ]);
+    expect(boundsOf(sent, 'mate_turn_cost_usd')).toEqual([...COST_BOUNDARIES]);
   });
 });
 

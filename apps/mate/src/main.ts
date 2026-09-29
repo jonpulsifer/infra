@@ -1,12 +1,21 @@
+import { fileURLToPath } from 'node:url';
 import {
   ComponentType,
   GatewayDispatchEvents,
   InteractionType,
 } from 'discord-api-types/v10';
+import { PiBrain, postgresSessions, type SessionSource } from './brain.ts';
+import type { McpBridge, ModelSetup } from './brain-inputs.ts';
+import type { Brain } from './brain-port.ts';
 import { systemClock } from './clock.ts';
 import { clearGlobalCommands } from './commands.ts';
-import type { GithubAppConfig } from './config.ts';
-import { ConfigError, readConfig, type SlackConfig } from './config.ts';
+import {
+  type BrainConfig,
+  ConfigError,
+  type GithubAppConfig,
+  readConfig,
+  type SlackConfig,
+} from './config.ts';
 import {
   discordInbound,
   discordOver,
@@ -18,23 +27,39 @@ import { createGateway } from './gateway.ts';
 import { GithubApp } from './github-app.ts';
 import { Health } from './health.ts';
 import { KthxSites } from './kthx-sites.ts';
-import { discoverKube, Kube } from './kube.ts';
+import { discoverKube, Kube, type KubeConfig } from './kube.ts';
+import { type Hands, WORKSPACE } from './lease.ts';
 import { jsonLog as log, plain } from './log.ts';
+import { createKthxMcp } from './mcp.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
-import { type Sandboxes, StubSandboxes } from './sandbox.ts';
-import { KubeSandboxes, SPARE_SWEEP_MS } from './sandboxes.ts';
+import { createModelSetup } from './model.ts';
+import { loadSystemPrompts } from './profile.ts';
+import { StubBrain } from './sandbox.ts';
+import { createKubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
 import { openSocket, slackEvent, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
 import { opensshKey } from './ssh-key.ts';
 import {
+  type Database,
+  MemoryThreadStore,
+  openDatabase,
+  PostgresThreadStore,
+} from './store.ts';
+import type { ThreadRef } from './surface.ts';
+import {
   EXPORT_TIMEOUT_MS,
   startTelemetry,
   stopTelemetry,
 } from './telemetry.ts';
-import { Threads } from './threads.ts';
+import type { ThreadStore } from './thread-store.ts';
+import { DRAIN_MS, Threads } from './threads.ts';
 
 const EXIT_CONFIG = 64;
+const DAY_MS = 86_400_000;
+const RETENTION_SWEEP_MS = 3_600_000;
+// The profile beside the source: the repo root, or /app in the image.
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 // Must exceed EXPORT_TIMEOUT_MS, or a slow collector loses the last export,
 // which carries the fatal-close count. The extra second covers shutdown.
 const FLUSH_BUDGET_MS = EXPORT_TIMEOUT_MS + 1_000;
@@ -151,7 +176,6 @@ const kube = kubeConfig ? new Kube(kubeConfig) : null;
 function openKthxSites(kube: Kube): KthxSites | null {
   if (config.sandboxes.mode !== 'kube') return null;
   const { kthx } = config.sandboxes.sandbox;
-  if (kthx.mcpUrl) log.info('kthx mcp on', { url: kthx.mcpUrl });
   if (!kthx.origin) return null;
   log.info('kthx sites ledger on', {
     origin: kthx.origin,
@@ -165,20 +189,144 @@ function openKthxSites(kube: Kube): KthxSites | null {
   });
 }
 
-const sandboxes: Sandboxes =
-  config.sandboxes.mode === 'kube' && kube && kubeConfig
-    ? new KubeSandboxes({
-        kube,
-        config: config.sandboxes.sandbox,
-        guildId: config.guildId,
-        log,
-        metrics: lazyInstruments(),
-        githubApp,
-        kthxSites: openKthxSites(kube),
-        clusterCa: kubeConfig.ca ?? null,
-        sshKey: await readSshKey(config.sandboxes.sshKeyFile),
-      })
-    : new StubSandboxes();
+// A model the catalog lacks is a ConfigError: every turn would fail.
+function openModel(brain: BrainConfig): ModelSetup {
+  try {
+    return createModelSetup({
+      spec: brain.model,
+      thinking: brain.thinking,
+      keyFile: brain.modelKeyFile,
+      log,
+    });
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      log.error('config error', { error: error.message });
+      process.exit(EXIT_CONFIG);
+    }
+    throw error;
+  }
+}
+
+function openMcp(brain: BrainConfig): McpBridge | null {
+  if (!brain.kthxMcp) {
+    if (process.env.MATE_KTHX_MCP_URL?.trim()) {
+      log.warn(
+        'MATE_KTHX_MCP_URL is set without KTHX_AGENT_TOKEN; no kthx tools',
+      );
+    }
+    return null;
+  }
+  log.info('kthx mcp on', { url: brain.kthxMcp.url });
+  const bridge = createKthxMcp({
+    url: brain.kthxMcp.url,
+    token: brain.kthxMcp.token,
+    log,
+    metrics: lazyInstruments(),
+  });
+  bridge.start();
+  return bridge;
+}
+
+interface Wiring {
+  brain: Brain;
+  threadStore: ThreadStore;
+  storeReady: Promise<void>;
+  inherited: readonly ThreadRef[];
+  hands: Hands | null;
+  db: Database | null;
+  mcp: McpBridge | null;
+  sweep: ((before: number) => Promise<void>) | null;
+}
+
+async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
+  if (config.sandboxes.mode !== 'kube') throw new Error('not in kube mode');
+  const { brain: brainConfig, sandbox, sshKeyFile } = config.sandboxes;
+  const db = await openDatabase(brainConfig, log, {
+    metrics: lazyInstruments(),
+  });
+  const setup = openModel(brainConfig);
+  const prompts = await loadSystemPrompts({
+    root: brainConfig.profileRoot ?? REPO_ROOT,
+    workspace: WORKSPACE,
+    checkoutRef: sandbox.checkoutRef,
+    log,
+  });
+  const mcp = openMcp(brainConfig);
+  const hands = createKubeHands({
+    kube,
+    config: sandbox,
+    guildId: config.guildId,
+    maxSandboxes: config.maxSandboxes,
+    log,
+    metrics: lazyInstruments(),
+    githubApp,
+    kthxSites: openKthxSites(kube),
+    clusterCa: kubeConfig.ca ?? null,
+    sshKey: await readSshKey(sshKeyFile),
+  });
+  const inherited = await hands.start().catch((error) => {
+    log.error('the hands could not start', { error: plain(error) });
+    return [];
+  });
+  // With no database the rows live in memory, and every open is refused.
+  const threadStore = db.sql
+    ? new PostgresThreadStore(db.sql)
+    : new MemoryThreadStore();
+  const sessions: SessionSource = db.sql
+    ? postgresSessions(db.sql)
+    : {
+        open: () => Promise.reject(new Error('mate has no database')),
+        delete: async () => {},
+      };
+  const brain = new PiBrain({
+    db,
+    store: threadStore,
+    sessions,
+    hands,
+    setup,
+    prompts,
+    mcp,
+    turnTimeoutMs: sandbox.turnTimeoutMs,
+    log,
+    metrics: lazyInstruments(),
+  });
+  return {
+    brain,
+    threadStore,
+    storeReady: db.ready,
+    inherited,
+    hands,
+    db,
+    mcp,
+    sweep: (before) => brain.sweep(before),
+  };
+}
+
+/** A store with no pool never comes up: its URL or CA is missing. */
+function storeState(db: Database | null): string {
+  if (!db) return 'memory';
+  if (db.sql === null) return 'down';
+  return db.up() ? 'up' : 'migrating';
+}
+
+function stubWiring(): Wiring {
+  // MateNotReporting fires on an absent gauge, and no hands report it here.
+  getInstruments().sandboxesLive(0);
+  return {
+    brain: new StubBrain(),
+    threadStore: new MemoryThreadStore(),
+    storeReady: Promise.resolve(),
+    inherited: [],
+    hands: null,
+    db: null,
+    mcp: null,
+    sweep: null,
+  };
+}
+
+const wiring =
+  kube && kubeConfig ? await kubeWiring(kube, kubeConfig) : stubWiring();
+
 const discord = discordOver(client.api);
 
 async function openSlack(slack: SlackConfig) {
@@ -240,7 +388,10 @@ const slack = config.slack
 
 const threads = new Threads({
   surfaces: [],
-  sandboxes,
+  brain: wiring.brain,
+  store: wiring.threadStore,
+  storeReady: wiring.storeReady,
+  inherited: wiring.inherited,
   clock: systemClock,
   log,
   config,
@@ -366,16 +517,23 @@ async function shutdown(signal: string): Promise<void> {
   // First: envelopes are acked on receipt, so one taken during the drain is
   // lost for good.
   socket?.stop();
-  // While both surfaces can still post, so a thread still waiting to start is
-  // told it never will.
+  // While both surfaces can still post: running turns finish or stay open for
+  // the next process to resume, and queued prompts are told they never started.
   await threads
-    .quiesce()
-    .catch((error) => log.warn('quiesce failed', { error: plain(error) }));
+    .drain(DRAIN_MS)
+    .catch((error) => log.warn('drain failed', { error: plain(error) }));
+  await wiring.hands?.shutdown();
   try {
     await manager.destroy();
   } catch (error) {
     log.warn('gateway destroy failed', { error: plain(error) });
   }
+  await wiring.mcp?.close().catch(() => {});
+  await wiring.db
+    ?.close()
+    .catch((error) =>
+      log.warn('database close failed', { error: plain(error) }),
+    );
   await stopTelemetry().catch((error) =>
     log.warn('metrics shutdown failed', { error: plain(error) }),
   );
@@ -385,12 +543,26 @@ async function shutdown(signal: string): Promise<void> {
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
-const sweep = () =>
-  void sandboxes
-    .ensureSpares()
+const spares = () =>
+  void wiring.hands
+    ?.ensureSpares()
     .catch((error) => log.warn('spare sweep failed', { error: plain(error) }));
-setInterval(sweep, SPARE_SWEEP_MS);
-sweep();
+if (wiring.hands) {
+  setInterval(spares, SPARE_SWEEP_MS);
+  spares();
+}
+
+const retentionDays =
+  config.sandboxes.mode === 'kube'
+    ? config.sandboxes.brain.sessionRetentionDays
+    : 0;
+const retain = () =>
+  void wiring
+    .sweep?.(Date.now() - retentionDays * DAY_MS)
+    .catch((error) =>
+      log.warn('the retention sweep failed', { error: plain(error) }),
+    );
+if (wiring.sweep && retentionDays > 0) setInterval(retain, RETENTION_SWEEP_MS);
 
 // A real mint at boot and on a timer keeps `mate_github_app_ready` current
 // even when no turn has pushed.
@@ -423,7 +595,12 @@ log.info('mate starting', {
   allowedUsers: config.allowedUserIds.size,
   allowedChannels: [...config.allowedChannelIds],
   slack: Boolean(config.slack),
+  model: config.sandboxes.mode === 'kube' ? config.sandboxes.brain.model : null,
+  thinking:
+    config.sandboxes.mode === 'kube' ? config.sandboxes.brain.thinking : null,
   maxConcurrent: config.maxConcurrent,
+  maxSandboxes: config.maxSandboxes,
+  store: storeState(wiring.db),
   quietMinutes: config.quietMs / 60_000,
   turnMinutes:
     config.sandboxes.mode === 'kube'

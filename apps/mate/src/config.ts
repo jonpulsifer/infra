@@ -1,4 +1,5 @@
-import { TTL_MS } from './sandboxes.ts';
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import { TTL_MS } from './lease.ts';
 
 // Installation tokens live 60 minutes, less the 5 the token cache reserves
 // for the final push.
@@ -16,7 +17,10 @@ export interface Config {
   readonly quietMs: number;
   readonly maxTurnsPerThread: number;
   readonly maxTurnsPerDay: number;
+  /** Running turns, across every thread and surface. */
   readonly maxConcurrent: number;
+  /** Sandboxes leased at once; a turn's first tool call waits for one. */
+  readonly maxSandboxes: number;
   readonly port: number;
   /** Where gateway session info is persisted for a resume, or `null` for memory only. */
   readonly sessionFile: string | null;
@@ -38,6 +42,7 @@ export type SandboxesChoice =
   | {
       readonly mode: 'kube';
       readonly sandbox: SandboxConfig;
+      readonly brain: BrainConfig;
       // Outside `sandbox`: `sandboxManifest` turns a `SandboxConfig` into a pod
       // spec, so no secret may be reachable from it.
       readonly githubApp: GithubAppConfig | null;
@@ -45,17 +50,32 @@ export type SandboxesChoice =
       readonly sshKeyFile: string | null;
     };
 
+/** The agent loop in mate's own process: its model, its store and its kthx tools. */
+export interface BrainConfig {
+  /** `provider/model`. */
+  readonly model: string;
+  readonly thinking: ThinkingLevel;
+  /** Read on every request; never copied into the environment. */
+  readonly modelKeyFile: string;
+  /** `null` leaves the store down, which is not a reason to refuse to boot. */
+  readonly databaseUrl: string | null;
+  readonly databaseCaFile: string;
+  /** Both halves or neither: the token is a secret, so it stays out of `SandboxConfig`. */
+  readonly kthxMcp: { readonly url: string; readonly token: string } | null;
+  /** Holds AGENTS.md and the skills; `null` is the repo root beside the source. */
+  readonly profileRoot: string | null;
+  /** 0 keeps every session. */
+  readonly sessionRetentionDays: number;
+}
+
 export interface SandboxConfig {
   /** The harness image every sandbox runs; CD rewrites its digest on mate's Deployment. */
   readonly image: string;
   readonly runtimeClass: string;
   /** Where sandboxes are minted, or `null` for the namespace mate runs in. */
   readonly namespace: string | null;
-  /** The Secret holding the provider key as `OPENCODE_API_KEY`. */
-  readonly secret: string;
   readonly checkoutRepo: string;
   readonly checkoutRef: string;
-  readonly model: string;
   readonly turnTimeoutMs: number;
   /** 0, the default, is off: an idle spare holds a full sandbox's memory. */
   readonly spares: number;
@@ -81,18 +101,14 @@ export interface SandboxConfig {
 }
 
 /**
- * Two halves, each off on `null`: `origin` gives the agent the `kthx` CLI
- * against the private claiming host and keeps its site tokens in a Secret
- * across sandboxes; `mcpUrl` gives opencode the engine's MCP server. Names
- * only, never a token, so `sandboxManifest` may read it.
+ * The `kthx` CLI in the sandbox, off on a `null` origin: it runs against the
+ * private claiming host and keeps its site tokens in a Secret across
+ * sandboxes. Names only, never a token, so `sandboxManifest` may read it.
  */
 export interface KthxConfig {
   readonly origin: string | null;
   /** The Secret whose `sites.json` is the CLI's token file, kept between sandboxes. */
   readonly sitesSecret: string;
-  readonly mcpUrl: string | null;
-  /** The Secret holding the engine's agent token as `KTHX_AGENT_TOKEN`. */
-  readonly agentSecret: string;
 }
 
 // Switchboard fixes the number and the caps server-side; the sandbox holds a
@@ -221,12 +237,77 @@ function httpUrl(env: Env, key: string): string | null {
   return raw;
 }
 
+const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+/** `provider/model`; the catalog check happens where the models are built. */
+const MODEL_SPEC = /^[a-z0-9][a-z0-9-]*\/\S+$/;
+
+// Settings whose meaning moved into mate's own process.
+const RENAMED: Readonly<Record<string, string>> = {
+  MATE_SANDBOX_MODEL: 'MATE_MODEL',
+  MATE_OPENCODE_SECRET:
+    'MATE_MODEL_KEY_FILE, with the Secret mounted into mate as a file',
+};
+
+function refuseRenamed(env: Env): void {
+  for (const [key, replacement] of Object.entries(RENAMED)) {
+    if (env[key]?.trim()) {
+      throw new ConfigError(`${key} is no longer read; set ${replacement}`);
+    }
+  }
+}
+
+function thinking(env: Env): ThinkingLevel {
+  const raw = text(env, 'MATE_THINKING', 'medium');
+  const level = THINKING_LEVELS.find((one) => one === raw);
+  if (!level) {
+    throw new ConfigError(
+      `MATE_THINKING must be one of ${THINKING_LEVELS.join(', ')}, got ${raw}`,
+    );
+  }
+  return level;
+}
+
+function kthxMcp(env: Env): BrainConfig['kthxMcp'] {
+  const url = httpUrl(env, 'MATE_KTHX_MCP_URL');
+  const token = env.KTHX_AGENT_TOKEN?.trim();
+  return url && token ? { url, token } : null;
+}
+
+export function readBrainConfig(env: Env): BrainConfig {
+  refuseRenamed(env);
+  const model = text(env, 'MATE_MODEL', 'opencode-go/qwen3.8-max');
+  if (!MODEL_SPEC.test(model)) {
+    throw new ConfigError(`MATE_MODEL must be provider/model, got ${model}`);
+  }
+  return {
+    model,
+    thinking: thinking(env),
+    modelKeyFile: text(
+      env,
+      'MATE_MODEL_KEY_FILE',
+      '/var/run/mate/opencode/api-key',
+    ),
+    databaseUrl: env.DATABASE_URL?.trim() || null,
+    databaseCaFile: text(env, 'MATE_DB_CA_FILE', '/var/run/mate/db-ca/ca.crt'),
+    kthxMcp: kthxMcp(env),
+    profileRoot: env.MATE_PROFILE_DIR?.trim() || null,
+    sessionRetentionDays: integer(env, 'MATE_SESSION_RETENTION_DAYS', 14, 0),
+  };
+}
+
 function kthx(env: Env): KthxConfig {
   return {
     origin: httpUrl(env, 'MATE_KTHX_ORIGIN')?.replace(/\/+$/, '') ?? null,
     sitesSecret: text(env, 'MATE_KTHX_SITES_SECRET', 'mate-kthx-sites'),
-    mcpUrl: httpUrl(env, 'MATE_KTHX_MCP_URL'),
-    agentSecret: text(env, 'MATE_KTHX_AGENT_SECRET', 'mate-kthx-agent'),
   };
 }
 
@@ -301,14 +382,12 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     image: required(env, 'MATE_SANDBOX_IMAGE'),
     runtimeClass: text(env, 'MATE_SANDBOX_RUNTIME_CLASS', 'kata-clh'),
     namespace: env.MATE_SANDBOX_NAMESPACE?.trim() || null,
-    secret: text(env, 'MATE_OPENCODE_SECRET', 'mate-opencode'),
     checkoutRepo: text(
       env,
       'MATE_CHECKOUT_REPO',
       'https://github.com/jonpulsifer/infra',
     ),
     checkoutRef: text(env, 'MATE_CHECKOUT_REF', 'main'),
-    model: text(env, 'MATE_SANDBOX_MODEL', 'opencode-go/qwen3.8-flash'),
     turnTimeoutMs,
     spares: integer(env, 'MATE_SPARES', 0, 0),
     vault: vault(env),
@@ -329,6 +408,7 @@ function sandboxes(env: Env): SandboxesChoice {
     return {
       mode,
       sandbox,
+      brain: readBrainConfig(env),
       githubApp: githubApp(env, sandbox.checkoutRepo),
       sshKeyFile: env.MATE_SSH_KEY_FILE?.trim() || null,
     };
@@ -351,6 +431,7 @@ function slack(env: Env): SlackConfig | null {
 }
 
 export function readConfig(env: Env): Config {
+  refuseRenamed(env);
   return {
     token: required(env, 'DISCORD_TOKEN'),
     guildId: required(env, 'MATE_GUILD_ID'),
@@ -360,6 +441,7 @@ export function readConfig(env: Env): Config {
     maxTurnsPerThread: integer(env, 'MATE_MAX_TURNS_PER_THREAD', 30),
     maxTurnsPerDay: integer(env, 'MATE_MAX_TURNS_PER_DAY', 120),
     maxConcurrent: integer(env, 'MATE_MAX_CONCURRENT', 3),
+    maxSandboxes: integer(env, 'MATE_MAX_SANDBOXES', 2),
     port: integer(env, 'MATE_PORT', 8080),
     sessionFile: env.MATE_SESSION_FILE?.trim() || null,
     sandboxes: sandboxes(env),

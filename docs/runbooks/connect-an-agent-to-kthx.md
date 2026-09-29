@@ -72,7 +72,7 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 
 ## Give Rowbutt a token
 
-[Rowbutt](../apps/mate.md) runs every command without approval, so the warning above applies in full. Its sandboxes reach the engine in the cluster, and the ExternalSecret `mate-kthx-agent` in namespace `mate` hands each sandbox the token as `KTHX_AGENT_TOKEN`.
+[Rowbutt](../apps/mate.md) runs every command without approval, so the warning above applies in full. mate reaches the engine in the cluster, and the ExternalSecret `mate-kthx-agent` in namespace `mate` gives mate the token as `KTHX_AGENT_TOKEN`. mate bridges the engine's tools into the agent as `kthx_*` tools. mate reads the token when it starts. Reloader restarts mate when the Secret changes, but not when the first sync creates the Secret.
 
 1. Mint an agent token as above.
 2. In the `homelab` vault in 1Password, create an API Credential item titled `mate kthx agent token`.
@@ -85,15 +85,27 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 
    Result: `STATUS` is `SecretSynced`.
 
-5. Delete the ready spare. A sandbox reads the Secret when its pod is created, and the spare was created before the sync.
+5. Read how long ago mate started.
 
    ```bash
-   kubectl --context offsite -n mate delete sandbox -l lolwtf.ca/spare=true
+   kubectl --context offsite -n mate get pods -l app.kubernetes.io/name=mate
    ```
 
-   Result: `sandbox.agents.x-k8s.io "mate-spare-<id>" deleted`, and mate mints a new spare within five minutes.
+   Result: The pod is `Running`, and its `AGE` is the time since it started.
 
-A revoked or expired token makes the `kthx` server fail when OpenCode starts a session, and the agent reports that it has no `kthx` tools. Mint a new token, update the item, and delete the spare again.
+6. If mate started before the sync, restart mate.
+
+   ```bash
+   kubectl --context offsite -n mate rollout restart deploy/mate
+   ```
+
+   Result: `deployment.apps/mate restarted`.
+
+7. In a Rowbutt thread, ask which `kthx` tools the agent has.
+
+   Result: Rowbutt names tools whose names start with `kthx_`.
+
+A revoked or expired token makes the engine refuse mate. After the next restart the agent has no `kthx_*` tools, and until then their calls fail. Mint a new token, and update the item.
 
 ## Revoke a token
 

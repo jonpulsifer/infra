@@ -419,14 +419,13 @@
       groupSlug: 'cloudnative-pg',
     },
     {
-      // opencode is the harness mate execs, not one of the tools the image
-      // hands the agent: a regression in it is a live thread behaving oddly,
-      // not a command that is missing, and the build-time assertion that every
-      // baked binary starts cannot see it. Batched with two dozen unrelated
-      // tool bumps that regression arrives unreviewed and bisects to a commit
-      // that changed everything else too, so the harness pin stays its own
-      // pull request.
-      description: 'opencode: the harness binary is its own pull request',
+      // mate runs its agent loop in its own process. The sandbox image keeps
+      // the opencode binary only for a mate image that still execs it while
+      // the mate and sandbox images roll out, and a later change removes both
+      // the binary and this rule. Until then its pin stays its own pull
+      // request, out of the toolset group, so no bump to it rides along with
+      // two dozen unrelated tools.
+      description: 'opencode: the leftover harness binary is its own pull request',
       matchDepNames: ['opencode-linux-x64'],
       groupName: null,
     },
@@ -444,7 +443,11 @@
     {
       // pi-agent-core requires pi-ai at its own minor, so bumping one alone
       // installs two copies of pi-ai. They are one bump, and as 0.x releases
-      // they stay manual under the npm rule above.
+      // they stay manual under the npm rule above. apps/mate and
+      // packages/pi-store-postgres pin both exactly, because pi's session
+      // storage format is still changing: mate-db holds sessions in it, and a
+      // run left open when mate restarts is resumed by the new version. Merge
+      // a bump while no mate turn is running.
       description: 'pi: agent-core and ai move together',
       matchDatasources: ['npm'],
       matchPackageNames: ['@earendil-works/**'],

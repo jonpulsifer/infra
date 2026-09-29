@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
+import {
+  RESUMING,
+  SANDBOX_CLOSED,
+  STORE_DOWN,
+  THREAD_CLOSED,
+  TURN_WAITING,
+  WAITING,
+} from '../src/notices.ts';
 import { STOPPED } from '../src/reply.ts';
 import type { Surface } from '../src/surface.ts';
 import {
@@ -68,6 +75,8 @@ describe('replaying a thread', () => {
     mate(SANDBOX_CLOSED);
     mate(`${WAITING} (1 ahead)`);
     mate(STOPPED);
+    for (const line of [RESUMING, STORE_DOWN, THREAD_CLOSED]) mate(line);
+    mate(`${TURN_WAITING} · 2 ahead · 40s`);
     discord.posted.push({
       channelId: THREAD,
       id: 'other-bot',
@@ -82,6 +91,9 @@ describe('replaying a thread', () => {
     expect(preamble).not.toContain(SANDBOX_CLOSED);
     expect(preamble).not.toContain(WAITING);
     expect(preamble).not.toContain(STOPPED);
+    for (const line of [RESUMING, STORE_DOWN, THREAD_CLOSED, TURN_WAITING]) {
+      expect(preamble).not.toContain(line);
+    }
     expect(preamble).not.toContain('KubePodCrashLooping');
   });
 

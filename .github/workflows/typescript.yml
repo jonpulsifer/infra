@@ -36,9 +36,9 @@ jobs:
       - id: changed-paths
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
-          # The clusters/, mise.toml and dotfiles/skills/ paths are test inputs.
-          # Keep them in step with the spindrift, mate and switchboard test
-          # inputs in turbo.json.
+          # The clusters/, mise.toml, AGENTS.md, skills, images/mate-sandbox
+          # and terraform/pki paths are test inputs. Keep them in step with the
+          # spindrift, mate and switchboard test inputs in turbo.json.
           files: |
             apps/clankerbanker/**
             apps/hub/**
@@ -62,7 +62,11 @@ jobs:
             packages/pi-store-postgres/**
             packages/typescript-config/**
             dotfiles/skills/**
+            .agents/skills/**
+            AGENTS.md
+            images/mate-sandbox/gh
             images/mate-sandbox/mise.toml
+            terraform/pki/certs/fml-root.pem
             mise.toml
             package.json
             bun.lock

@@ -1,10 +1,10 @@
 ---
 title: Rowbutt
-description: A chat bot, code name mate, that answers the owner in Discord and Slack threads with a coding agent in a sandbox on the offsite cluster.
+description: A chat bot, code name mate, that answers the owner in Discord and Slack threads with a coding agent whose tools run in a sandbox on the offsite cluster.
 status: live
 ---
 
-Rowbutt is a chat bot, code name mate, that gives the owner a coding and operations agent in Discord and Slack. Each thread gets a sandbox, a pod in a Kata microVM on the offsite [Kubernetes](../platform/kubernetes.md) cluster. The sandbox has a clone of this repository and OpenCode, an open-source coding agent. A turn is one prompt and the agent's answer.
+Rowbutt is a chat bot, code name mate, that gives the owner a coding and operations agent in Discord and Slack. mate runs the agent and keeps each thread's conversation in a database. The agent's commands and file edits run in the thread's sandbox, a pod in a Kata microVM on the offsite [Kubernetes](../platform/kubernetes.md) cluster with a clone of this repository. A turn is one prompt and the agent's answer.
 
 ## Use it
 
@@ -28,7 +28,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 | offsite and folly clusters | `cluster-admin` on both, through the contexts `offsite` and `folly` |
 | Hosts | SSH as `rowbutt`, the host user for Rowbutt, which has passwordless sudo on every NixOS host. It reaches both sites' nodes, and folly's Lab Net hosts through riptide. weatherpi4 and oldboy have no route from the sandbox. |
 | Internet | Every host on ports 80 and 443 |
-| [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx` MCP tools, when Secret `mate-kthx-agent` holds an agent token. |
+| [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx_*` tools that mate bridges from the kthx MCP server, when Secret `mate-kthx-agent` holds an agent token. |
 | Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason; Switchboard fixes the number and caps the calls. Parked today, so a ring gets no answer; its page has the state. |
 
 [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox. It guards against accidents only: as `cluster-admin` and root on the hosts, the agent can read mate's Secrets or remove the fence.
@@ -36,12 +36,14 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 ## Limits
 
 - A turn runs at most 45 minutes. A thread has 30 turns, and all threads share 120 in a rolling day.
-- At most two threads have a sandbox at once. Other threads wait in a queue.
-- After 30 quiet minutes, mate deletes the sandbox with any uncommitted work and archives the Discord thread. A reply starts a new sandbox with the newest 40 messages as context.
+- At most two turns run at once, and other threads wait in a queue.
+- At most two threads hold a sandbox at once. A turn that needs one takes the sandbox of a thread idle for 5 minutes, which deletes that thread's uncommitted work, or waits.
+- Credentials and background processes last only for the turn.
+- After 30 quiet minutes, mate deletes the sandbox with any uncommitted work and archives the Discord thread. mate keeps the conversation, so a reply continues it in a new sandbox.
 
 ## How it works
 
-mate is one Bun process, and its ingress admits only the node it runs on. For each thread, it creates a `Sandbox` object, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md). Each turn gets short-lived GitHub and cluster tokens and the `rowbutt` SSH key. The Postgres database `mate-db` is the [session store](mate/how-it-works.md#session-store), with a nightly dump. [How Rowbutt works](mate/how-it-works.md) has the details.
+mate is one Bun process, and its ingress admits only the node it runs on. It runs the agent loop on pi, a TypeScript agent library, against the model in `MATE_MODEL`, and holds the model key. It keeps each thread's session in the Postgres database `mate-db`, the [session store](mate/how-it-works.md#session-store), with a nightly dump. The first tool call of a turn leases the thread's `Sandbox`, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md), and writes short-lived GitHub and cluster tokens and the `rowbutt` SSH key into it. A turn that only talks creates no sandbox. If mate restarts mid-turn, it resumes the turn in a new message. [How Rowbutt works](mate/how-it-works.md) has the details.
 
 ## Operate
 
@@ -49,7 +51,7 @@ mate is one Bun process, and its ingress admits only the node it runs on. For ea
 | --- | --- | --- |
 | `MateGitHubCredentialBroken`, `MateGitHubTokenMintFailing` | mate cannot mint GitHub tokens, so sandboxes cannot push | [Repair the Rowbutt GitHub credential](../runbooks/repair-the-rowbutt-github-credential.md) |
 | `MateKthxSitesSyncFailing` | mate could not read back or save a sandbox's kthx site tokens. A site claimed in that turn may be orphaned. Read the mate log. | |
-| `MateDatabaseDown`, `MateDatabaseVolumeFilling`, `MateDatabaseBackupFailing` | The session store is down, past 80% of its volume, or has no dump from the last 36 hours | [Operate Postgres](../runbooks/operate-postgres.md) |
+| `MateStoreFailing`, `MateDatabaseDown`, `MateDatabaseVolumeFilling`, `MateDatabaseBackupFailing` | mate cannot reach the session store, or the store is down, past 80% of its volume, or has no dump from the last 36 hours | [Operate Postgres](../runbooks/operate-postgres.md) |
 
 The other alerts are in `clusters/offsite/monitoring/mate-rules.yaml`, and each `description` names its fix.
 
@@ -57,6 +59,6 @@ To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/m
 
 ## Reference
 
-- Source: `apps/mate/`, `images/mate-sandbox/` and `packages/mate-hands/`
+- Source: `apps/mate/`, `images/mate-sandbox/`, `packages/mate-hands/` and `packages/pi-store-postgres/`
 - Manifests: `clusters/offsite/apps/mate/`
 - Images: `ghcr.io/jonpulsifer/mate`, `ghcr.io/jonpulsifer/mate-sandbox`

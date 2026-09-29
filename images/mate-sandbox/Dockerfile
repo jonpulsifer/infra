@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# The per-thread sandbox mate execs `opencode acp` in. Its tools are baked in
-# because the agent runs as uid 1337 with no root, and HOME is an emptyDir, so
-# a tool the agent installs goes with the sandbox. The build context is the
-# repo root, so the image can compile packages/mate-hands; the root
-# .dockerignore lets in the files copied from this directory.
+# The per-thread sandbox mate runs the agent's tools in, through mate-hands.
+# Its tools are baked in because the agent runs as uid 1337 with no root, and
+# HOME is an emptyDir, so a tool the agent installs goes with the sandbox. The
+# build context is the repo root, so the image can compile packages/mate-hands;
+# the root .dockerignore lets in the files copied from this directory.
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS base
 
 FROM base AS toolset
@@ -133,10 +133,11 @@ RUN set -eux; \
     tar -xzf archive --no-same-owner -C /out/bin tofu; \
     chmod 0755 /out/bin/* /out/libexec/*
 
-# mate-hands, the tool daemon mate can exec over one pods/exec stream to run
-# the agent's file and shell calls; mate does not use it yet. It imports only
-# Bun's built-ins, so the toolset's bun compiles it with no install. It has
-# its own stage and layer, so a daemon change leaves the tool layers cached.
+# mate-hands, the tool daemon mate execs over one pods/exec stream to run the
+# agent's file and shell calls. mate opens one link per turn, at its first tool
+# call, and shuts it down when the turn ends. It imports only Bun's built-ins,
+# so the toolset's bun compiles it with no install. It has its own stage and
+# layer, so a daemon change leaves the tool layers cached.
 # It starts in HOME, which the agent writes, so it must not load a .env or a
 # bunfig.toml from its working directory.
 FROM toolset AS hands
@@ -195,8 +196,11 @@ COPY images/mate-sandbox/kthx /usr/local/bin/kthx
 
 COPY images/mate-sandbox/mise.toml /etc/mise/config.toml
 
-# The platform package opencode-ai installs on linux/amd64. It needs AVX2;
-# opencode-linux-x64-baseline is the build for nodes without it.
+# mate runs the agent loop in its own process, and no mate in this repo execs
+# opencode. The binary stays so a mate image that still runs `opencode acp`
+# works against this sandbox image while the two roll out, and goes in a later
+# change. It is the platform package opencode-ai installs on linux/amd64, which
+# needs AVX2.
 # renovate: datasource=npm depName=opencode-linux-x64
 ARG OPENCODE_VERSION=1.18.32
 RUN curl -fsSL "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-${OPENCODE_VERSION}.tgz" \
@@ -211,8 +215,10 @@ RUN groupadd -g 1337 agent \
 USER 1337:1337
 WORKDIR /home/agent
 
-# HOME and the XDG roots sit on the pod's emptyDir. opencode's autoupdate and
-# the kthx update check are off because both are root-owned and pinned.
+# HOME and the XDG roots sit on the pod's emptyDir; mate writes each turn's
+# credentials under HOME through mate-hands. The kthx update check and the
+# autoupdate of the opencode binary above are off because both are root-owned
+# and pinned.
 ENV HOME=/home/agent \
     USER=agent \
     XDG_DATA_HOME=/home/agent/.local/share \
@@ -264,7 +270,8 @@ RUN set -eux; \
     grep -q '"protocol":2' "$d/out"; \
     rm -rf "$d"
 
-# sleep is a keepalive: mate execs each session. tini reaps what those sessions
-# orphan and forwards SIGTERM, so a pod delete is prompt.
+# sleep is a keepalive: mate execs a mate-hands daemon for each turn. tini
+# reaps what those daemons orphan and forwards SIGTERM, so a pod delete is
+# prompt.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["sleep", "infinity"]

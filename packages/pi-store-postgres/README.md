@@ -1,6 +1,6 @@
 # @repo/pi-store-postgres
 
-pi-store-postgres keeps [pi](https://www.npmjs.com/package/@earendil-works/pi-agent-core) agent sessions in Postgres. It implements pi-agent-core's `Storage` interface on Bun's built-in `SQL` client, and opens sessions by a caller's own id, such as a thread key. It pins `@earendil-works/pi-agent-core` to one exact version, because pi's session format may change between releases. mate does not use it yet.
+pi-store-postgres keeps [pi](https://www.npmjs.com/package/@earendil-works/pi-agent-core) agent sessions in Postgres. It implements pi-agent-core's `Storage` interface on Bun's built-in `SQL` client, and opens sessions by a caller's own id, such as a thread key. It pins `@earendil-works/pi-agent-core` to one exact version, because pi's session format may change between releases. mate keeps each thread's session here, through `apps/mate/src/store.ts`.
 
 ```ts
 import { SQL } from 'bun';

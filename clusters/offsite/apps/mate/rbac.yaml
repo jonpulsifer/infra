@@ -1,5 +1,5 @@
 ---
-# Scoped to the calls `apps/mate/src/sandboxes.ts` makes. Of the namespace's
+# Scoped to the calls the code in `apps/mate/src/` makes. Of the namespace's
 # Secrets it can read and patch one, the kthx site-token ledger.
 apiVersion: v1
 kind: ServiceAccount

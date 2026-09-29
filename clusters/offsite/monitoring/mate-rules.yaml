@@ -59,54 +59,88 @@ spec:
             message: "Discord closed mate's gateway with code {{ $labels.code }}"
             description: "A close code mate treats as a configuration error, so it exited instead of reconnecting and will crash-loop until the cause is fixed. 4004 is the token — check whether `rowbutt discord bot token` was rotated in 1Password and whether the mate-discord ExternalSecret carried it through. 4013/4014 are the intents, which live in apps/mate/src/gateway.ts and in the developer portal; Message Content is privileged and can be revoked there without anything in git changing."
 
-        # 2 is MATE_MAX_CONCURRENT; 45m outlasts the 30-minute quiet teardown.
-        # min_over_time survives a restart; the offset arm demands a full window.
-        - alert: MateSandboxesAtCap
+        # A turn waits for a sandbox only while every slot's holder is mid-turn
+        # or idle under five minutes. min_over_time survives a restart; the
+        # offset arm demands a full window.
+        - alert: MateSandboxWaitsLong
           expr: |
-            mate_sandboxes_live >= 2
+            mate_sandbox_waiters > 0
             and ignoring(pod, instance)
-            mate_sandboxes_live offset 45m >= 2
-            and min_over_time(mate_sandboxes_live[45m]) >= 2
+            mate_sandbox_waiters offset 15m > 0
+            and min_over_time(mate_sandbox_waiters[15m]) > 0
           for: 0m
           labels:
             severity: warning
           annotations:
-            message: "mate has been at its sandbox cap for three quarters of an hour"
-            description: "Both sandbox slots have been held continuously for forty-five minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is two busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+            message: "mate turns have waited a quarter of an hour for a sandbox"
+            description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
 
-        # `error` is the harness or provider, `sandbox-died` the pod lost
-        # mid-turn. Three in half an hour is the provider, the model or the image.
+        # Turn slots free when a turn ends, so a 10m queue is stuck turns or a
+        # cap too low. It stays under the 30-minute quiet timer, which ends a
+        # wait. min_over_time and the offset arm as above.
+        - alert: MateThreadsQueued
+          expr: |
+            mate_queue_depth > 0
+            and ignoring(pod, instance)
+            mate_queue_depth offset 10m > 0
+            and min_over_time(mate_queue_depth[10m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate threads have waited ten minutes for a turn"
+            description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+
+        # `error` is pi or the provider, `brain-failed` the session store or the
+        # harness. Three in 30m is the key, the model, mate-db or a mate bug.
         - alert: MateTurnsFailing
           expr: |
-            sum(increase(mate_turns_ended_total{reason=~"error|sandbox-died"}[30m])) > 2
+            sum(increase(mate_turns_ended_total{reason=~"error|brain-failed"}[30m])) > 2
             or sum(
-              mate_turns_ended_total{reason=~"error|sandbox-died"}
+              mate_turns_ended_total{reason=~"error|brain-failed"}
               unless ignoring(pod, instance)
-              mate_turns_ended_total{reason=~"error|sandbox-died"} offset 30m
+              mate_turns_ended_total{reason=~"error|brain-failed"} offset 30m
             ) > 2
           for: 0m
           labels:
             severity: warning
           annotations:
             message: "mate turns are failing"
-            description: "More than two turns ended in an error or a dead sandbox in the last thirty minutes. `error` is what the harness reported over ACP — the OpenCode Go key, the model id in MATE_SANDBOX_MODEL, or a region gate on the model. `sandbox-died` is the pod: read `kubectl --context offsite describe sandbox -n mate` and the node's pressure before blaming the harness."
+            description: "More than two turns ended in an error in the last thirty minutes. `error` is a run pi gave up on, usually at the model provider, and `mate_provider_errors_total` says which kind: `auth` is the key in Secret mate-opencode, `limit` the usage cap of the `opencode-go` plan, `timeout` a provider that stopped answering, and `other` anything else, such as a MATE_MODEL the provider refuses. `brain-failed` is the session store or the harness itself failing: read `mate_store_failures_total` by `op`, which MateStoreFailing watches, alongside mate's log (`kubectl --context offsite logs -n mate deploy/mate`), because a `brain-failed` turn with no store failure is a fault in mate's own agent loop. A sandbox that dies mid-turn is a tool error the model sees, not a failed turn."
 
-        # A failed mint leaves no sandbox and no turn, so only this sees it.
-        # `attach-failed`: the Sandbox went Ready but ACP could not open.
+        # A failed mint is a tool error inside a turn, so only this sees it.
+        # `connect-failed`: the Sandbox went Ready but mate-hands did not answer.
         - alert: MateSandboxMintFailing
           expr: |
-            sum(increase(mate_mints_total{result=~"mint-failed|attach-failed"}[30m])) > 2
+            sum(increase(mate_mints_total{result=~"mint-failed|connect-failed"}[30m])) > 2
             or sum(
-              mate_mints_total{result=~"mint-failed|attach-failed"}
+              mate_mints_total{result=~"mint-failed|connect-failed"}
               unless ignoring(pod, instance)
-              mate_mints_total{result=~"mint-failed|attach-failed"} offset 30m
+              mate_mints_total{result=~"mint-failed|connect-failed"} offset 30m
             ) > 2
           for: 0m
           labels:
             severity: warning
           annotations:
             message: "mate cannot give a thread a sandbox"
-            description: "More than two mints or attaches failed in the last thirty minutes, so a human asking mate a question is getting a plain refusal instead of an answer. A mint failure is the Sandbox never going Ready — the harness image digest, the kata-clh runtime class, or the namespace's restricted PSA. An attach failure is `pods/exec` into a Ready pod, which is the Role in ../../apps/mate/rbac.yaml or the harness not starting inside the sandbox."
+            description: "More than two sandbox mints or connects failed in the last thirty minutes, so turns that need a command or a file get tool errors instead of results. A mint failure is the Sandbox never going Ready — the sandbox image digest, the kata-clh runtime class, or the namespace's restricted PSA. A connect is `pods/exec` into a Ready pod and then the mate-hands hello: a failure is the Role in ../../apps/mate/rbac.yaml, or a daemon that speaks another protocol, which mate condemns as too old so the next call mints a new sandbox. `mate_hands_connects_total` by `result` says which."
+
+        # Every op counts: an open, a fault mid-turn, a row write, a migration
+        # or a quarantine.
+        - alert: MateStoreFailing
+          expr: |
+            sum(increase(mate_store_failures_total[30m])) > 2
+            or sum(
+              mate_store_failures_total
+              unless ignoring(pod, instance)
+              mate_store_failures_total offset 30m
+            ) > 2
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate is failing to reach its session store"
+            description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, and `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
 
         # mate test-mints at boot and on a timer; 0 means turns cannot push. No
         # App means no series. Guarded on the Deployment as MateNotReporting is.
@@ -169,7 +203,7 @@ spec:
             severity: warning
           annotations:
             message: "mate is not keeping a sandbox warm"
-            description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so every thread has been paying the full cold start again — tens of seconds of a line saying `booting the sandbox` before a word of the answer. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
+            description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so a thread with no sandbox of its own pays the full cold mint at its turn's first tool call, which waits tens of seconds on the thread's sandbox card. A turn that only talks mints nothing and waits for nothing. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
 
         # 96 is 80% of MATE_MAX_TURNS_PER_DAY. mate's own count resets on each
         # restart and this rolling 24h does not, so the two can disagree.
@@ -182,16 +216,16 @@ spec:
             message: "mate has spent most of its daily turn budget"
             description: "More than 96 of the 120 turns allowed in a rolling day have been taken. Past 120 every thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
 
-        # About twice a full 120-turn day at list price. The turn cap bounds
-        # volume, so this trips when the price per turn moves.
+        # qwen3.8-max lists at $2 and $6 per million input and output tokens.
+        # The turn cap bounds volume, so this trips when the cost per turn moves.
         - alert: MateSpendAboveBudget
-          expr: sum(increase(mate_turn_cost_usd_sum[24h])) > 0.5
+          expr: sum(increase(mate_turn_cost_usd_sum[24h])) > 25
           for: 0m
           labels:
             severity: warning
           annotations:
             message: "mate's reported spend is above its daily budget"
-            description: "The turns of the last rolling day report more than $0.50 of model spend, against a measured $0.002178 for a real turn. Volume is capped at 120 turns/day, so this is the price per turn moving: check MATE_SANDBOX_MODEL on the mate Deployment and what the harness is actually being handed. The number is OpenCode Go's list-price shadow on a flat-rate plan, not a bill."
+            description: "The turns of the last rolling day report more than $25 of model spend. The number is qwen3.8-max's list price from pi's catalog, summed over each run: a shadow of the flat-rate `opencode-go` plan, not a bill. Volume is capped at 120 turns/day, so this is the tokens per turn moving: check MATE_MODEL and MATE_THINKING on the mate Deployment, then which threads run long turns. The threshold is a first estimate; move it once a week of turns shows a normal day."
 
         # mate sleeps to the reset below a 20% reserve; this fires at 40%. The
         # gauge goes absent once `reset_after` passes.

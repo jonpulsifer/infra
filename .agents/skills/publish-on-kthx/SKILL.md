@@ -50,8 +50,11 @@ tailnet with `KTHX_ORIGIN=https://kthx.lolwtf.ca`.
 
 ## Built apps
 
-When the sandbox has an agent token, opencode has a `kthx` MCP server and its
-tools are the console's commands. `docs/runbooks/connect-an-agent-to-kthx.md`
-says what a token can and cannot do, and `docs/apps/kthx/security.md` lists
-the identities. No `kthx` tools in the session means the token is absent,
-expired or revoked; say so rather than retry.
+When mate holds an agent token, it bridges the kthx MCP server's tools into
+the session as `kthx_*` tools, one per console command.
+`docs/runbooks/connect-an-agent-to-kthx.md` says what a token can and cannot
+do, and `docs/apps/kthx/security.md` lists the identities. No `kthx_*` tools
+in the session means mate holds no token, the engine refused it (expired or
+revoked), or mate has not reached the engine since it started; mate retries
+every minute. Say which is likely rather than retry, and do not assume the
+token is bad.

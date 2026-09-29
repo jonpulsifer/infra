@@ -3,10 +3,16 @@
  * about, then two surfaces behind one Threads sharing mate's caps.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { MINT_FAILED, SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
-import { type Script, StubSandboxes } from '../src/sandbox.ts';
+import {
+  RESUMING,
+  STORE_DOWN,
+  THREAD_CLOSED,
+  TURN_WAITING,
+} from '../src/notices.ts';
+import { type Script, StubBrain } from '../src/sandbox.ts';
 import { sandboxName } from '../src/sandboxes.ts';
-import { type Inbound, threadKey } from '../src/surface.ts';
+import { MemoryThreadStore } from '../src/store.ts';
+import { type Inbound, type Surface, threadKey } from '../src/surface.ts';
 import { Threads, type ThreadsConfig } from '../src/threads.ts';
 import { FakeSurface } from './fakesurface.ts';
 import {
@@ -78,18 +84,28 @@ function inThread(
   };
 }
 
-function build(opts: { script?: Script } = {}) {
-  const sandboxes = new StubSandboxes({ clock, script: opts.script });
+function build(
+  opts: {
+    script?: Script;
+    brain?: StubBrain;
+    store?: MemoryThreadStore;
+    surfaces?: Surface[];
+    config?: Partial<ThreadsConfig>;
+  } = {},
+) {
+  const brain = opts.brain ?? new StubBrain({ clock, script: opts.script });
+  const store = opts.store ?? new MemoryThreadStore(clock);
   const threads = new Threads({
-    surfaces: [surface],
-    sandboxes,
+    surfaces: opts.surfaces ?? [surface],
+    brain,
+    store,
     clock,
     log,
-    config,
+    config: { ...config, ...opts.config },
     editCadenceMs: 1_000,
     metrics,
   });
-  return { threads, sandboxes };
+  return { threads, brain, store };
 }
 
 const key = (threadId: string) =>
@@ -115,7 +131,7 @@ describe('a thread on a surface that is not Discord', () => {
       title: 'say hi',
     });
     await clock.advance(5_000);
-    expect(threads.stateOf(key(start.id))).toBe('attached');
+    expect(threads.stateOf(key(start.id))).toBe('idle');
     expect(surface.answerIn(start.id)).toBe('hello there ');
     expect(surface.canvases.get(start.id)?.outcome).toBe('done');
     // The turn names who it answers, which a streaming surface needs.
@@ -143,46 +159,41 @@ describe('a thread on a surface that is not Discord', () => {
     expect(surface.canvases.get(start.id)?.outcome).toBe('done');
   });
 
-  test('a restart under a running turn tells the surface the thread is idle', async () => {
-    const { threads, sandboxes } = build({
+  test('a restart under a running turn clears the working sign and picks the turn up', async () => {
+    const before = build({
       script: () => [{ status: 'thinking…' }, { wait: 10_000_000 }],
     });
     const start = mention('a long job');
-    await threads.onMessage(start);
+    await before.threads.onMessage(start);
     await clock.advance(5_000);
-    expect(threads.stateOf(key(start.id))).toBe('turn');
+    expect(before.threads.stateOf(key(start.id))).toBe('turn');
+    const draining = before.threads.drain(1_000);
+    await clock.advance(10_000);
+    await draining;
 
-    const after = new Threads({
-      surfaces: [surface],
-      sandboxes,
-      clock,
-      log,
-      config,
-      editCadenceMs: 1_000,
-      metrics,
-    });
-    await after.rehydrate();
+    before.brain.restart();
+    const after = build({ brain: before.brain, store: before.store });
+    await after.threads.rehydrate();
+    await clock.advance(5_000);
     // A thread-level working sign outlives the process, so it is settled.
     expect(surface.settled).toEqual([start.id]);
+    expect(surface.linesIn(start.id)).toContain(RESUMING);
+    expect(surface.answerIn(start.id)).toBe('resumed');
+    // The resumed turn answers the person who asked.
+    expect(surface.askers).toEqual([OWNER, OWNER]);
   });
 
   test('a restart over an idle thread tells it nothing', async () => {
-    const { threads, sandboxes } = build({ script: streaming('alpha') });
+    const before = build({ script: streaming('alpha') });
     const start = mention('go');
-    await threads.onMessage(start);
+    await before.threads.onMessage(start);
     await clock.advance(5_000);
 
-    const after = new Threads({
-      surfaces: [surface],
-      sandboxes,
-      clock,
-      log,
-      config,
-      editCadenceMs: 1_000,
-      metrics,
-    });
-    await after.rehydrate();
+    const after = build({ brain: before.brain, store: before.store });
+    await after.threads.rehydrate();
+    await settle();
     expect(surface.settled).toEqual([]);
+    expect(after.threads.stateOf(key(start.id))).toBe('idle');
   });
 
   test('a mention from anyone else, or outside an allowed channel, is silence', async () => {
@@ -196,7 +207,7 @@ describe('a thread on a surface that is not Discord', () => {
   });
 
   test('mate does not answer itself, even unmarked, in a thread it owns', async () => {
-    const { threads, sandboxes } = build({ script: streaming('ok') });
+    const { threads, brain } = build({ script: streaming('ok') });
     const start = mention('start');
     await threads.onMessage(start);
     await clock.advance(5_000);
@@ -206,22 +217,22 @@ describe('a thread on a surface that is not Discord', () => {
       authorIsBot: false,
     });
     await clock.advance(5_000);
-    expect(sandboxes.prompts).toHaveLength(1);
+    expect(brain.prompts).toHaveLength(1);
   });
 
   test("the allowlisted user's reply in a thread mate owns continues it", async () => {
-    const { threads, sandboxes } = build({ script: streaming('ok') });
+    const { threads, brain } = build({ script: streaming('ok') });
     const start = mention('start');
     await threads.onMessage(start);
     await clock.advance(5_000);
     await threads.onMessage(inThread(start.id, 'and again'));
     await clock.advance(5_000);
-    expect(sandboxes.prompts).toEqual(['start', 'and again']);
+    expect(brain.prompts).toEqual(['start', 'and again']);
     expect(surface.askers).toEqual([OWNER, OWNER]);
   });
 
   test('a reply from anyone else in a thread mate owns is silence', async () => {
-    const { threads, sandboxes } = build({ script: streaming('ok') });
+    const { threads, brain } = build({ script: streaming('ok') });
     const start = mention('start');
     await threads.onMessage(start);
     await clock.advance(5_000);
@@ -229,9 +240,9 @@ describe('a thread on a surface that is not Discord', () => {
     await threads.onMessage(stranger);
     await threads.onMessage({ ...stranger, mentionsMe: true });
     await clock.advance(5_000);
-    expect(sandboxes.prompts).toEqual(['start']);
+    expect(brain.prompts).toEqual(['start']);
     expect(surface.askers).toEqual([OWNER]);
-    expect(threads.stateOf(key(start.id))).toBe('attached');
+    expect(threads.stateOf(key(start.id))).toBe('idle');
   });
 
   test("the allowlisted user's Stop ends the turn; anyone else's is ignored", async () => {
@@ -244,25 +255,25 @@ describe('a thread on a surface that is not Discord', () => {
     expect(threads.stateOf(key(start.id))).toBe('turn');
     await threads.onStop(key(start.id), OWNER, async () => {});
     await clock.advance(2_000);
-    expect(threads.stateOf(key(start.id))).toBe('attached');
+    expect(threads.stateOf(key(start.id))).toBe('idle');
     expect(surface.canvases.get(start.id)?.outcome).toBe('stopped');
     expect(surface.answerIn(start.id)).not.toContain('five');
   });
 
-  test('quiet tears the sandbox down and tells the thread, with nothing to archive', async () => {
-    const { threads, sandboxes } = build({ script: streaming('done') });
+  test('quiet releases the thread and tells it, with nothing to archive', async () => {
+    const { threads, brain } = build({ script: streaming('done') });
     const start = mention('go');
     await threads.onMessage(start);
     await clock.advance(5_000);
     await clock.advance(QUIET_MS);
     expect(threads.stateOf(key(start.id))).toBe('closed');
-    expect(sandboxes.liveCount).toBe(0);
-    expect(surface.linesIn(start.id).at(-1)).toBe(SANDBOX_CLOSED);
+    expect(brain.released).toEqual([{ key: key(start.id), reason: 'quiet' }]);
+    expect(surface.linesIn(start.id).at(-1)).toBe(THREAD_CLOSED);
     expect(log.of('archive failed')).toHaveLength(0);
   });
 
-  test('a fresh sandbox is handed what the thread already said', async () => {
-    const { threads, sandboxes } = build({ script: streaming('alpha') });
+  test('a session set aside is handed what the thread already said', async () => {
+    const { threads, brain } = build({ script: streaming('alpha') });
     const start = mention('first question');
     await threads.onMessage(start);
     await clock.advance(5_000);
@@ -270,34 +281,22 @@ describe('a thread on a surface that is not Discord', () => {
     await clock.advance(5_000);
     await clock.advance(QUIET_MS);
 
+    brain.corrupt = true;
     await threads.onMessage(inThread(start.id, 'third question'));
     await clock.advance(5_000);
-    const prompt = sandboxes.prompts.at(-1) ?? '';
+    const prompt = brain.prompts.at(-1) ?? '';
     expect(prompt).toContain('jawn: second question');
-    expect(prompt).not.toContain(SANDBOX_CLOSED);
+    expect(prompt).not.toContain(THREAD_CLOSED);
     expect(prompt.endsWith('third question')).toBe(true);
   });
 
   test('an error is one plain line in the thread, never silence', async () => {
-    const sandboxes = new StubSandboxes({
-      clock,
-      mintFails: 'ImagePullBackOff',
-    });
-    const threads = new Threads({
-      surfaces: [surface],
-      sandboxes,
-      clock,
-      log,
-      config,
-      editCadenceMs: 1_000,
-      metrics,
-    });
+    const { threads, brain } = build();
+    brain.openFails = 'connection refused';
     const start = mention('go');
     await threads.onMessage(start);
     await settle();
-    expect(surface.linesIn(start.id)).toEqual([
-      `${MINT_FAILED}: ImagePullBackOff`,
-    ]);
+    expect(surface.linesIn(start.id)).toEqual([STORE_DOWN]);
   });
 });
 
@@ -395,56 +394,43 @@ describe('two surfaces, one mate', () => {
     };
   };
 
-  test('each comes up on its own and claims only its own sandboxes', async () => {
+  test('each comes up on its own and claims only its own threads', async () => {
     const { discord, surface: discordSurface } = fakeDiscord();
-    const shared = new StubSandboxes({ clock, script: streaming('ok') });
-    const before = new Threads({
+    const before = build({
+      script: streaming('ok'),
       surfaces: [surface, discordSurface],
-      sandboxes: shared,
-      clock,
-      log,
-      config,
-      editCadenceMs: 1_000,
-      metrics,
     });
     const onSlack = mention('slack first');
-    await before.onMessage(onSlack);
-    await before.onMessage(discordMention('discord first'));
+    await before.threads.onMessage(onSlack);
+    await before.threads.onMessage(discordMention('discord first'));
     await clock.advance(5_000);
     const discordThreadId = discord.threads[0]?.id ?? '';
 
     // After a restart surfaces arrive one at a time, and a Discord that never
     // connects must not block Slack's threads.
-    const after = new Threads({
+    const after = build({
+      brain: before.brain,
+      store: before.store,
       surfaces: [],
-      sandboxes: shared,
-      clock,
-      log,
-      config,
-      editCadenceMs: 1_000,
-      metrics,
     });
-    await after.add(surface);
-    expect(after.surfaceNames).toEqual(['slack']);
-    expect(after.stateOf(key(onSlack.id))).toBe('attached');
-    expect(after.stateOf(`discord:${discordThreadId}`)).toBeUndefined();
+    await after.threads.add(surface);
+    await settle();
+    expect(after.threads.surfaceNames).toEqual(['slack']);
+    expect(after.threads.stateOf(key(onSlack.id))).toBe('idle');
+    expect(after.threads.stateOf(`discord:${discordThreadId}`)).toBeUndefined();
 
-    await after.add(discordSurface);
-    expect(after.surfaceNames).toEqual(['slack', 'discord']);
-    expect(after.stateOf(`discord:${discordThreadId}`)).toBe('attached');
+    await after.threads.add(discordSurface);
+    await settle();
+    expect(after.threads.surfaceNames).toEqual(['slack', 'discord']);
+    expect(after.threads.stateOf(`discord:${discordThreadId}`)).toBe('idle');
   });
 
   test('share the concurrency cap, and each is answered on its own', async () => {
     const { discord, surface: discordSurface } = fakeDiscord();
-    const sandboxes = new StubSandboxes({ clock, script: streaming('ok') });
-    const threads = new Threads({
+    const { threads } = build({
+      script: streaming('ok'),
       surfaces: [discordSurface, surface],
-      sandboxes,
-      clock,
-      log,
-      config: { ...config, maxConcurrent: 1 },
-      editCadenceMs: 1_000,
-      metrics,
+      config: { maxConcurrent: 1 },
     });
 
     await threads.onMessage({
@@ -464,18 +450,11 @@ describe('two surfaces, one mate', () => {
     const discordThreadId = discord.threads[0]?.id ?? '';
     expect(threads.stateOf(`discord:${discordThreadId}`)).toBe('turn');
     expect(threads.stateOf(key(second.id))).toBe('waiting');
-    expect(surface.linesIn(second.id)).toEqual([`${WAITING} · next up`]);
+    expect(surface.linesIn(second.id)).toEqual([`${TURN_WAITING} · next up`]);
 
     await clock.advance(5_000);
-    await threads.onThreadArchived({
-      surface: 'discord',
-      channelId: '1509024937422356532',
-      id: discordThreadId,
-    });
-    await settle();
-    await clock.advance(5_000);
-    expect(threads.stateOf(key(second.id))).toBe('attached');
+    expect(threads.stateOf(key(second.id))).toBe('idle');
     expect(surface.answerIn(second.id)).toBe('ok ');
-    expect(discord.contentsIn(discordThreadId).at(-1)).toBe(SANDBOX_CLOSED);
+    expect(discord.contentsIn(discordThreadId).at(-1)).toBe('ok ');
   });
 });

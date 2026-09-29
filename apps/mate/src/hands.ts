@@ -1,7 +1,7 @@
 /**
  * mate's end of mate-hands, the tool daemon in each sandbox: typed calls over
  * one exec stream, cancellation, streamed command output, and a ping that
- * keeps the daemon's watchdog fed. No turn uses it yet.
+ * keeps the daemon's watchdog fed.
  */
 import {
   encode,
@@ -26,6 +26,8 @@ import { type Log, plain } from './log.ts';
 export { HandsError };
 
 export const HANDS_BINARY = '/usr/local/bin/mate-hands';
+/** The sandbox container the daemon, and every one-shot command, runs in. */
+export const HARNESS_CONTAINER = 'harness';
 const HELLO_TIMEOUT_MS = 30_000;
 // Far over the largest answer the daemon sends: a whole file at its read
 // limit, in base64.
@@ -159,6 +161,11 @@ export class HandsClient {
 
   get isClosed(): boolean {
     return this.ended !== null;
+  }
+
+  /** Why the client ended, or `null` while it is open. */
+  get failure(): HandsError | null {
+    return this.ended;
   }
 
   /** Rejects with a `HandsError` whose kind and code say what failed. */

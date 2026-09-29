@@ -1,6 +1,7 @@
 ---
-# mate: the Discord gateway Rowbutt connects through (`apps/mate`). It answers
-# each thread from a Sandbox of its own.
+# mate: Rowbutt's Discord and Slack gateway and its agent loop (`apps/mate`).
+# It holds the model key, keeps each thread's session in mate-db, and runs the
+# agent's tools in a Sandbox of its own per thread.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,11 +25,16 @@ spec:
         app.kubernetes.io/name: mate
         app.kubernetes.io/part-of: mate
       annotations:
-        # The tokens are env vars, mate reads the SSH key once at boot, and the
-        # App key file refreshes on the kubelet's schedule, so Reloader rolls
-        # the pod when one of these Secrets rotates.
-        secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app,mate-sandbox-ssh
+        # The tokens and the database URI are env vars, mate reads the SSH key
+        # and the database CA once at boot, and the App key file refreshes on
+        # the kubelet's schedule, so Reloader rolls the pod when one of these
+        # Secrets rotates. mate reads the model key on every request, so
+        # mate-opencode needs no restart.
+        secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app,mate-sandbox-ssh,mate-kthx-agent,mate-db-app,mate-db-ca
     spec:
+      # On SIGTERM mate lets running turns finish for a while, then closes the
+      # rest for the next pod to resume. 45 seconds covers both steps.
+      terminationGracePeriodSeconds: 45
       # This token mints Sandboxes and execs into them. rbac.yaml scopes it and
       # network-policy.yaml limits its egress.
       serviceAccountName: mate
@@ -88,21 +94,26 @@ spec:
             # of 120 minutes or more, and 55 or more while the GitHub App is set.
             - name: MATE_TURN_MINUTES
               value: "45"
-            # Teardown deletes the sandbox and its uncommitted work. A Slack thread
-            # cannot be archived, so quiet is the only way it frees its slot.
+            # Quiet deletes the thread's sandbox with its uncommitted work and
+            # closes the thread. The session stays, so a reply picks it back up.
             - name: MATE_QUIET_MINUTES
               value: "30"
             - name: MATE_MAX_TURNS_PER_THREAD
               value: "30"
             - name: MATE_MAX_TURNS_PER_DAY
               value: "120"
-            # Capacity: sandboxes do not schedule on the control plane, and offsite
-            # has one other node.
+            # Turns running at once; the rest wait in a queue. A turn holds no
+            # sandbox until its first tool call.
             - name: MATE_MAX_CONCURRENT
+              value: "2"
+            # Sandboxes leased at once. Sandboxes do not schedule on the control
+            # plane, and offsite has one other node. A turn that finds them all
+            # held takes one idle for five minutes, or waits.
+            - name: MATE_MAX_SANDBOXES
               value: "2"
             # A warm spare skips the cold mint. Sandboxes are the largest driver
             # of oldschool's CPU requests, so check KubeCPUOvercommit headroom
-            # before raising concurrency or spares.
+            # before raising MATE_MAX_SANDBOXES or spares.
             - name: MATE_SPARES
               value: "1"
             - name: MATE_PORT
@@ -110,12 +121,34 @@ spec:
             # Unset, mate registers no OTel SDK.
             - name: MATE_OTEL_ENDPOINT
               value: http://opentelemetry-collector.monitoring.svc.cluster.local:4318
-            # `kube` mints a Sandbox per thread; `stub` replies in-process and is
-            # the rollback.
+            # `kube` runs the agent: the loop in this process, a Sandbox per
+            # thread for its tools, and the session store. `stub` replies
+            # in-process and is the rollback.
             - name: MATE_SANDBOXES
               value: kube
-            # Digest-pinned: this image runs agent code with every permission
-            # auto-allowed. CD anchors on the image name beside the digest.
+            # The model, through pi-ai's `opencode-go` provider, and its
+            # reasoning level. mate refuses a level the model does not support.
+            - name: MATE_MODEL
+              value: opencode-go/qwen3.8-max
+            - name: MATE_THINKING
+              value: medium
+            # Read on every request, so a rotated key needs no restart.
+            - name: MATE_MODEL_KEY_FILE
+              value: /var/run/mate/opencode/api-key
+            # The session store (database.yaml). CloudNativePG writes the owner
+            # role's URI, and mate adds sslmode=verify-full against the CA below.
+            # `optional`: with no Secret the store is down, each thread says so,
+            # and the gateway stays up.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mate-db-app
+                  key: uri
+                  optional: true
+            - name: MATE_DB_CA_FILE
+              value: /var/run/mate/db-ca/ca.crt
+            # Digest-pinned: the agent's tool calls run in this image with no
+            # approval step. CD anchors on the image name beside the digest.
             - name: MATE_SANDBOX_IMAGE
               value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:2160dea9f520ae7892406863692eea903d8af3b13ea2bfe9ffd5d07e8a30fb3e
             # The numeric App id, not the client id. mate mints a 1-hour token per
@@ -142,10 +175,20 @@ spec:
             # are kept in the mate-kthx-sites Secret between sandboxes.
             - name: MATE_KTHX_ORIGIN
               value: https://kthx.${SECRET_DOMAIN}
-            # The engine's Service: the public hostname is not reachable from a
-            # sandbox. The bearer is the mate-kthx-agent Secret, read by the pod.
+            # mate bridges the engine's MCP tools into the agent as `kthx_*`
+            # tools. The engine's Service, because mate's egress reaches its web
+            # pods and not the public hostname.
             - name: MATE_KTHX_MCP_URL
               value: http://spindrift.spindrift.svc.cluster.local:3000/mcp
+            # The bearer for the URL above. `optional`: until the owner mints it
+            # (docs/runbooks/connect-an-agent-to-kthx.md) the agent has no kthx
+            # tools.
+            - name: KTHX_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mate-kthx-agent
+                  key: KTHX_AGENT_TOKEN
+                  optional: true
             # Each sandbox gets this address and a ring token from Secret
             # mate-switchboard, so the agent can ring the owner's phone. The
             # number and the caps are switchboard's; the sandbox holds neither.
@@ -169,6 +212,12 @@ spec:
             - name: sandbox-ssh
               mountPath: /var/run/mate/ssh
               readOnly: true
+            - name: opencode
+              mountPath: /var/run/mate/opencode
+              readOnly: true
+            - name: db-ca
+              mountPath: /var/run/mate/db-ca
+              readOnly: true
           # No liveness probe: /healthz is 503 while the identify-budget guard
           # sleeps, and a restart would burn the budget it protects.
           readinessProbe:
@@ -185,12 +234,14 @@ spec:
               drop: ["ALL"]
             seccompProfile:
               type: RuntimeDefault
+          # The agent loop and a hands message of up to 64 MiB share this
+          # process, and an OOM drops the gateway with every running turn.
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 384Mi
             limits:
-              memory: 512Mi
+              memory: 1Gi
       volumes:
         - name: tmp
           emptyDir: {}
@@ -204,4 +255,22 @@ spec:
         - name: sandbox-ssh
           secret:
             secretName: mate-sandbox-ssh
+            optional: true
+        # `optional`, as above: with no Secret every turn fails with the
+        # provider's authentication error.
+        - name: opencode
+          secret:
+            secretName: mate-opencode
+            items:
+              - key: OPENCODE_API_KEY
+                path: api-key
+            optional: true
+        # CloudNativePG's CA certificate alone: the Secret also holds the CA's
+        # key. `optional`, as above: with no CA the session store is down.
+        - name: db-ca
+          secret:
+            secretName: mate-db-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
             optional: true

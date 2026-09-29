@@ -27,44 +27,44 @@ export const MINT_BOUNDARIES = [
   2_000, 3_000, 5_000, 7_500, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000,
 ];
 
-// An attach is two API calls and an ACP handshake on a running VM. The top
-// edge covers the attach timeouts, so a near-timeout attach does not read as
-// a minute.
-export const ATTACH_BOUNDARIES = [
-  100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 150_000,
+// Opening the exec is two API calls; the hello rides it. The top edge covers a
+// connect that waits out a slow kata exec.
+export const CONNECT_BOUNDARIES = [
+  50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000,
 ];
+
+// A file call is milliseconds; an exec runs as long as its command, up to a
+// turn's worth.
+export const HANDS_CALL_BOUNDARIES = [
+  5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 10_000, 60_000, 600_000,
+];
+
+// Sized for qwen3.8-max's list price of about $2/M input and $6/M output.
+export const COST_BOUNDARIES = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+
+function buckets(instrumentName: string, boundaries: number[]): ViewOptions {
+  return {
+    instrumentName,
+    aggregation: {
+      type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
+      options: { boundaries },
+    },
+  };
+}
 
 // The SDK's default buckets stop at 10 000, too low for these milliseconds,
 // and start at 5, far above a turn's cost in USD.
 const VIEWS: ViewOptions[] = [
-  {
-    instrumentName: 'mate_turn_first_token_milliseconds',
-    aggregation: {
-      type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
-      options: { boundaries: [250, 500, 1_000, 2_500, 5_000, 10_000, 30_000] },
-    },
-  },
-  {
-    instrumentName: 'mate_turn_cost_usd',
-    aggregation: {
-      type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
-      options: { boundaries: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1] },
-    },
-  },
-  {
-    instrumentName: 'mate_mint_duration_milliseconds',
-    aggregation: {
-      type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
-      options: { boundaries: MINT_BOUNDARIES },
-    },
-  },
-  {
-    instrumentName: 'mate_attach_duration_milliseconds',
-    aggregation: {
-      type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
-      options: { boundaries: ATTACH_BOUNDARIES },
-    },
-  },
+  // The model thinks before it speaks, and a tool call can come first.
+  buckets(
+    'mate_turn_first_token_milliseconds',
+    [250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 120_000],
+  ),
+  buckets('mate_turn_cost_usd', COST_BOUNDARIES),
+  buckets('mate_mint_duration_milliseconds', MINT_BOUNDARIES),
+  buckets('mate_exec_open_milliseconds', CONNECT_BOUNDARIES),
+  buckets('mate_hands_connect_milliseconds', CONNECT_BOUNDARIES),
+  buckets('mate_hands_call_milliseconds', HANDS_CALL_BOUNDARIES),
 ];
 
 type Env = Record<string, string | undefined>;

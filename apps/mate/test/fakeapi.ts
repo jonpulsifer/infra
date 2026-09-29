@@ -1,10 +1,22 @@
 /**
  * An in-process apiserver: the Sandbox REST shape mate uses, pods behind the
  * controller's `status.selector`, and a `pods/exec` WebSocket that speaks
- * `v4.channel.k8s.io` framing to a scripted ACP agent.
+ * `v4.channel.k8s.io` framing. In hands mode an exec of the mate-hands binary
+ * runs the real daemon; any other command is a one-shot shell.
  */
-import type { Server, ServerWebSocket } from 'bun';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
+import type { Server, ServerWebSocket, Subprocess } from 'bun';
+import { HANDS_BINARY } from '../src/hands.ts';
 import type { KubeConfig } from '../src/kube.ts';
+
+const DAEMON = Bun.resolveSync('@repo/mate-hands/main', import.meta.dir);
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -14,32 +26,33 @@ export const STDOUT = 1;
 export const STDERR = 2;
 export const STATUS = 3;
 
-export function frame(channel: number, text: string): Uint8Array {
-  const body = encoder.encode(text);
+export function frame(channel: number, text: string | Uint8Array): Uint8Array {
+  const body = typeof text === 'string' ? encoder.encode(text) : text;
   const out = new Uint8Array(body.length + 1);
   out[0] = channel;
   out.set(body, 1);
   return out;
 }
 
-export interface AgentScript {
-  /** `session/load` answers with a JSON-RPC error, forcing the `session/new` fallback. */
-  loadFails?: boolean;
-  chunks?: string[];
-  thinking?: boolean;
-  tool?: string;
-  cost?: number;
-  /** One running session total per turn, as ACP reports cost. */
-  costs?: number[];
-  stopReason?: string;
-  stderr?: string;
-  /** Every outbound line is sent as two frames, so the reader must reassemble. */
-  splitLines?: boolean;
-  /** Closes the stream once this many chunks have gone out. */
-  closeAfterChunk?: number;
-  /** Sent on channel 3 before the close. */
-  closeStatus?: unknown;
-  chunkDelayMs?: number;
+/** Where every fake pod keeps the checkout, the agent's home and the daemon's ledger. */
+export interface FakeHands {
+  workspace: string;
+  /** The daemon's `$HOME`, where credentials land. */
+  home: string;
+  /** Each pod's daemons keep their ledger under `<stateRoot>/<pod>`. */
+  stateRoot: string;
+}
+
+/** What the kubelet reports for an exit code. */
+function exitStatus(code: number): unknown {
+  return code === 0
+    ? { status: 'Success' }
+    : {
+        status: 'Failure',
+        reason: 'NonZeroExitCode',
+        message: `command terminated with non-zero exit code: exit status ${code}`,
+        details: { causes: [{ reason: 'ExitCode', message: String(code) }] },
+      };
 }
 
 export interface ExecRecord {
@@ -53,12 +66,14 @@ export interface ExecRecord {
   clientClosed: boolean;
 }
 
+type Daemon = Subprocess<'pipe', 'pipe', 'pipe'>;
+
 interface SocketData {
   exec: ExecRecord;
-  script: AgentScript;
   buffer: string;
-  cancelled: boolean;
-  turns: number;
+  daemon: Daemon | null;
+  /** Answers `hello` for a protocol mate no longer speaks. */
+  old: boolean;
 }
 
 type Json = Record<string, unknown>;
@@ -132,16 +147,25 @@ export class FakeKube {
   readonly sandboxes = new Map<string, Json>();
   readonly pods = new Map<string, Json>();
   readonly secrets = new Map<string, Json>();
-  /** The harness home: what `printf … > path` wrote and `cat path` reads. */
+  /** Without hands: what `printf … > path` wrote and `cat path` reads. */
   readonly files = new Map<string, string>();
   readonly execs: ExecRecord[] = [];
   readonly patches: Patched[] = [];
   readonly requests: { method: string; path: string; query: string }[] = [];
-  script: AgentScript = {};
+  /** Every mate-hands daemon started, by pod. */
+  readonly daemons = new Map<string, Daemon[]>();
+  /** Fails every mate-hands exec with this status, as an image without the binary does. */
+  handsFails: string | null = null;
+  /** mate-hands answers `hello` for protocol 1. */
+  oldHands = false;
+  /** Refuses every mate-hands exec before it opens, as a missing RBAC rule does. */
+  refuseHands = false;
   /** When false, a minted Sandbox stays not-Ready until `markReady` is called. */
   readyOnCreate = true;
   /** Answers every PATCH 403, the way a Role without `patch` does. */
   patchFails = false;
+  /** Holds every Sandbox PATCH this long, as a slow apiserver does. */
+  patchDelayMs = 0;
   /** Answers a Secret PATCH 403 while every other patch still lands. */
   secretPatchFails = false;
   /** This many Secret reads are answered, then the object moves on, as another writer would move it. */
@@ -152,8 +176,6 @@ export class FakeKube {
   commandFails: string | null = null;
   /** Fails only the one-shot execs that write files, so a read still answers. */
   writeFails: string | null = null;
-  /** What the checkout prints for the peer clusters' topology and CA. */
-  peerOutput = '';
   /** Refuses every TokenRequest 403 with this message, as a missing RBAC rule does. */
   tokenRequestFails: string | null = null;
   readonly tokenRequests: {
@@ -170,7 +192,7 @@ export class FakeKube {
   private revision = 1;
   private serial = 0;
 
-  constructor() {
+  constructor(private readonly opts: { hands?: FakeHands } = {}) {
     const fake = this;
     this.server = Bun.serve<SocketData>({
       // Bun's fetch resolves AAAA first with no fallback, so bind IPv4 loopback.
@@ -182,31 +204,34 @@ export class FakeKube {
       },
       websocket: {
         open(ws) {
-          // Any command but the ACP harness is one-shot: it exits and the stream closes.
-          if (!ws.data.exec.command.includes('acp')) {
-            const said =
-              fake.commandFails ??
-              (ws.data.exec.command.some((word) => word.includes('printf %s'))
-                ? fake.writeFails
-                : null);
-            const out = said ? '' : fake.shell(ws.data.exec.command);
-            if (out) ws.send(frame(STDOUT, out));
-            ws.send(
-              frame(
-                STATUS,
-                JSON.stringify(
-                  said
-                    ? { status: 'Failure', message: said }
-                    : { status: 'Success' },
-                ),
-              ),
-            );
-            ws.close(1000, 'command completed');
+          if (ws.data.exec.command[0] === HANDS_BINARY) {
+            fake.startHands(ws);
+            return;
           }
+          // Any other command is one-shot: it exits and the stream closes.
+          const said =
+            fake.commandFails ??
+            (ws.data.exec.command.some((word) => word.includes('printf %s'))
+              ? fake.writeFails
+              : null);
+          const out = said ? '' : fake.shell(ws.data.exec.command);
+          if (out) ws.send(frame(STDOUT, out));
+          ws.send(
+            frame(
+              STATUS,
+              JSON.stringify(
+                said
+                  ? { status: 'Failure', message: said }
+                  : { status: 'Success' },
+              ),
+            ),
+          );
+          ws.close(1000, 'command completed');
         },
         message(ws, message) {
           fake.onStdin(ws, message);
         },
+        // The daemon keeps running: a pods/exec stream to kata delivers no EOF.
         close(ws) {
           ws.data.exec.clientClosed = true;
         },
@@ -226,8 +251,29 @@ export class FakeKube {
     };
   }
 
+  /** Stops the server and every daemon, which kills what each started. */
   stop(): void {
     this.server.stop(true);
+    for (const daemons of this.daemons.values()) {
+      for (const daemon of daemons) {
+        daemon.kill('SIGTERM');
+        // A test may have left it stopped.
+        daemon.kill('SIGCONT');
+      }
+    }
+  }
+
+  /** `stop`, then waits for every daemon to exit. */
+  async close(): Promise<void> {
+    this.stop();
+    await Promise.all(
+      [...this.daemons.values()].flat().map((daemon) => daemon.exited),
+    );
+  }
+
+  /** The mate-hands execs, oldest first. */
+  get handsExecs(): ExecRecord[] {
+    return this.execs.filter((e) => e.command[0] === HANDS_BINARY);
   }
 
   get lastExec(): ExecRecord | undefined {
@@ -268,8 +314,9 @@ export class FakeKube {
     this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
   }
 
-  /** Deletes the pod under a live Sandbox, as a node eviction would. */
+  /** Deletes the pod under a live Sandbox, as a node eviction would, and every process in it. */
   killPod(name: string): void {
+    for (const daemon of this.daemons.get(name) ?? []) daemon.kill('SIGTERM');
     const pod = this.pods.get(name);
     if (!pod) return;
     this.pods.delete(name);
@@ -284,6 +331,7 @@ export class FakeKube {
         name,
         namespace: this.namespace,
         labels: { 'agents.x-k8s.io/sandbox-name-hash': name },
+        uid: `pod-uid-${++this.serial}`,
         ownerReferences: [{ kind: 'Sandbox', name, uid }],
         resourceVersion: String(++this.revision),
       },
@@ -327,20 +375,128 @@ export class FakeKube {
       : Buffer.from(raw, 'base64').toString('utf8');
   }
 
-  // Enough of `sh -c` for the one-shot scripts sandboxes.ts runs: every
+  // Enough of `sh -c` for the one-shot scripts mate runs: every
   // `printf %s "$n" > path` stores an argument, and `cat path` or `head -c n
-  // path` reads one back; an absent path reads as nothing.
+  // path` reads one back; an absent path reads as nothing. With hands they are
+  // real files, where the daemon reads and writes them too.
   private shell(command: string[]): string {
     const [shell, flag, script, ...argv] = command;
     if (shell !== '/bin/sh' || flag !== '-c' || !script) return '';
-    if (script.includes('cluster-topology.json')) return this.peerOutput;
+    const secret = script.includes('umask 077');
     for (const [, index, path] of script.matchAll(
-      /printf %s "\$(\d+)" > (\S+)/g,
+      /printf %s "\$(\d+)" > ([^\s;]+)/g,
     )) {
-      this.files.set(path as string, argv[Number(index)] ?? '');
+      this.put(path as string, argv[Number(index)] ?? '', secret);
     }
-    const read = /(?:cat|head -c \d+) (\S+)/.exec(script);
-    return read ? (this.files.get(read[1] as string) ?? '') : '';
+    const read = /(?:cat|head -c (\d+)) ([^\s;]+)/.exec(script);
+    if (!read) return '';
+    const text = this.take(read[2] as string);
+    return read[1] ? text.slice(0, Number(read[1])) : text;
+  }
+
+  private put(path: string, content: string, secret: boolean): void {
+    if (!this.opts.hands) {
+      this.files.set(path, content);
+      return;
+    }
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(path, content, { mode: secret ? 0o600 : 0o644 });
+  }
+
+  private take(path: string): string {
+    if (!this.opts.hands) return this.files.get(path) ?? '';
+    return existsSync(path) && statSync(path).isFile()
+      ? readFileSync(path, 'utf8')
+      : '';
+  }
+
+  /**
+   * The real daemon, on the checkout and home the test gave, under a
+   * permissive umask so the modes it sets are its own doing.
+   */
+  private startHands(ws: ServerWebSocket<SocketData>): void {
+    const { exec } = ws.data;
+    const hands = this.opts.hands;
+    const refused = hands
+      ? this.handsFails
+      : 'exec: "mate-hands": executable file not found in $PATH';
+    if (refused) {
+      ws.send(
+        frame(STATUS, JSON.stringify({ status: 'Failure', message: refused })),
+      );
+      ws.close(1000, 'command failed');
+      return;
+    }
+    if (this.oldHands) {
+      ws.data.old = true;
+      return;
+    }
+    const args = exec.command.slice(1);
+    const cwd = args.indexOf('--cwd');
+    if (cwd >= 0) args[cwd + 1] = hands?.workspace ?? '';
+    const daemon: Daemon = Bun.spawn(
+      [
+        '/bin/sh',
+        '-c',
+        'umask 000; exec "$@"',
+        'mate-hands',
+        process.execPath,
+        DAEMON,
+        ...args,
+        '--state-dir',
+        join(hands?.stateRoot ?? '', exec.pod),
+      ],
+      {
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          ...process.env,
+          HOME: hands?.home ?? '',
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
+        },
+      },
+    );
+    ws.data.daemon = daemon;
+    this.daemons.set(exec.pod, [...(this.daemons.get(exec.pod) ?? []), daemon]);
+    const send = (bytes: Uint8Array) => {
+      try {
+        ws.send(bytes);
+      } catch {}
+    };
+    const pipe = async (from: ReadableStream<Uint8Array>, channel: number) => {
+      const reader = from.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        send(frame(channel, value));
+      }
+    };
+    const piped = Promise.all([
+      pipe(daemon.stdout, STDOUT),
+      pipe(daemon.stderr, STDERR),
+    ]);
+    void daemon.exited.then(async (code) => {
+      await piped.catch(() => {});
+      if (exec.clientClosed) return;
+      send(frame(STATUS, JSON.stringify(exitStatus(code))));
+      try {
+        ws.close(1000, 'command exited');
+      } catch {}
+    });
+  }
+
+  private answerOld(ws: ServerWebSocket<SocketData>, line: string): void {
+    const request = JSON.parse(line) as Json;
+    if (request.method !== 'hello') return;
+    const { command } = ws.data.exec;
+    const epoch = Number(command[command.indexOf('--epoch') + 1]);
+    ws.send(
+      frame(
+        STDOUT,
+        `${JSON.stringify({ id: request.id, result: { protocol: 1, epoch } })}\n`,
+      ),
+    );
   }
 
   private bump(object: Json): void {
@@ -481,6 +637,7 @@ export class FakeKube {
     }
     if (!sandbox) return status(404, `no sandbox ${name}`, 'NotFound');
     if (request.method === 'PATCH') {
+      if (this.patchDelayMs) await Bun.sleep(this.patchDelayMs);
       if (this.patchFails) {
         return status(403, `sandboxes "${name}" is forbidden`, 'Forbidden');
       }
@@ -573,15 +730,12 @@ export class FakeKube {
       stdin: [],
       clientClosed: false,
     };
+    if (this.refuseHands && exec.command[0] === HANDS_BINARY) {
+      return status(403, `pods "${pod}" is forbidden`, 'Forbidden');
+    }
     this.execs.push(exec);
     const upgraded = server.upgrade(request, {
-      data: {
-        exec,
-        script: this.script,
-        buffer: '',
-        cancelled: false,
-        turns: 0,
-      },
+      data: { exec, buffer: '', daemon: null, old: false },
       headers: protocol ? { 'Sec-WebSocket-Protocol': protocol } : undefined,
     });
     return upgraded
@@ -596,7 +750,13 @@ export class FakeKube {
     const bytes =
       typeof message === 'string' ? encoder.encode(message) : message;
     if (bytes.length === 0 || bytes[0] !== STDIN) return;
-    ws.data.buffer += decoder.decode(bytes.subarray(1));
+    const payload = bytes.subarray(1);
+    const { daemon } = ws.data;
+    if (daemon) {
+      daemon.stdin.write(payload);
+      void daemon.stdin.flush();
+    }
+    ws.data.buffer += decoder.decode(payload);
     for (;;) {
       const at = ws.data.buffer.indexOf('\n');
       if (at < 0) break;
@@ -604,145 +764,7 @@ export class FakeKube {
       ws.data.buffer = ws.data.buffer.slice(at + 1);
       if (!line) continue;
       ws.data.exec.stdin.push(line);
-      void this.dispatch(ws, JSON.parse(line) as Json);
+      if (ws.data.old) this.answerOld(ws, line);
     }
-  }
-
-  private send(ws: ServerWebSocket<SocketData>, message: Json): void {
-    const line = `${JSON.stringify(message)}\n`;
-    if (ws.data.script.splitLines && line.length > 8) {
-      const at = Math.floor(line.length / 2);
-      ws.send(frame(STDOUT, line.slice(0, at)));
-      ws.send(frame(STDOUT, line.slice(at)));
-      return;
-    }
-    ws.send(frame(STDOUT, line));
-  }
-
-  private reply(
-    ws: ServerWebSocket<SocketData>,
-    id: unknown,
-    result: Json,
-  ): void {
-    this.send(ws, { jsonrpc: '2.0', id, result });
-  }
-
-  private notify(
-    ws: ServerWebSocket<SocketData>,
-    sessionId: string,
-    update: Json,
-  ): void {
-    this.send(ws, {
-      jsonrpc: '2.0',
-      method: 'session/update',
-      params: { sessionId, update },
-    });
-  }
-
-  private hangUp(ws: ServerWebSocket<SocketData>): void {
-    const { closeStatus } = ws.data.script;
-    if (closeStatus) ws.send(frame(STATUS, JSON.stringify(closeStatus)));
-    ws.close(1000, 'harness exited');
-  }
-
-  private async dispatch(
-    ws: ServerWebSocket<SocketData>,
-    message: Json,
-  ): Promise<void> {
-    const script = ws.data.script;
-    const params = (message.params ?? {}) as Json;
-    if (script.stderr) ws.send(frame(STDERR, script.stderr));
-    switch (message.method) {
-      case 'initialize':
-        this.reply(ws, message.id, {
-          protocolVersion: params.protocolVersion ?? 1,
-          agentCapabilities: { loadSession: true },
-        });
-        return;
-      case 'session/new':
-        this.reply(ws, message.id, { sessionId: `ses-${++this.serial}` });
-        return;
-      case 'session/load':
-        if (script.loadFails) {
-          this.send(ws, {
-            jsonrpc: '2.0',
-            id: message.id,
-            error: { code: -32603, message: 'no such session' },
-          });
-          return;
-        }
-        this.reply(ws, message.id, {});
-        return;
-      case 'session/cancel':
-        ws.data.cancelled = true;
-        return;
-      case 'session/prompt':
-        await this.runTurn(ws, message, params.sessionId as string);
-        return;
-      default:
-        return;
-    }
-  }
-
-  private async runTurn(
-    ws: ServerWebSocket<SocketData>,
-    message: Json,
-    sessionId: string,
-  ): Promise<void> {
-    const script = ws.data.script;
-    const turn = ws.data.turns++;
-    if (script.thinking) {
-      this.notify(ws, sessionId, {
-        sessionUpdate: 'agent_thought_chunk',
-        content: { type: 'text', text: 'weighing it up' },
-      });
-    }
-    if (script.tool) {
-      this.notify(ws, sessionId, {
-        sessionUpdate: 'tool_call',
-        toolCallId: 'call-1',
-        title: script.tool,
-        status: 'in_progress',
-      });
-    }
-    let sent = 0;
-    for (const chunk of script.chunks ?? ['hello from the harness']) {
-      if (ws.data.cancelled) break;
-      this.notify(ws, sessionId, {
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: chunk },
-      });
-      sent += 1;
-      if (script.closeAfterChunk === sent) {
-        this.hangUp(ws);
-        return;
-      }
-      if (script.chunkDelayMs) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, script.chunkDelayMs),
-        );
-      }
-    }
-    if (script.tool) {
-      this.notify(ws, sessionId, {
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'call-1',
-        status: 'completed',
-      });
-    }
-    const total = script.costs ? script.costs[turn] : script.cost;
-    if (total !== undefined) {
-      this.notify(ws, sessionId, {
-        sessionUpdate: 'usage_update',
-        used: 4096,
-        size: 200_000,
-        cost: { amount: total, currency: 'USD' },
-      });
-    }
-    this.reply(ws, message.id, {
-      stopReason: ws.data.cancelled
-        ? 'cancelled'
-        : (script.stopReason ?? 'end_turn'),
-    });
   }
 }
