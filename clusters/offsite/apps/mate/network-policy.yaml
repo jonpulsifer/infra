@@ -71,6 +71,16 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # The ChatGPT sign-in: the device code, the token exchange and each
+    # refresh go to auth.openai.com; the model answers from chatgpt.com.
+    # apps/mate/test/chatgpt.test.ts checks every host the sign-in reaches.
+    - toFQDNs:
+        - matchName: auth.openai.com
+        - matchName: chatgpt.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
     # mate reaches the API server by the IP in KUBERNETES_SERVICE_HOST, so no
     # FQDN rule can.
     - toEntities:

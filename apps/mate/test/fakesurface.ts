@@ -135,6 +135,9 @@ export class FakeSurface implements Surface {
   /** Tells a rewrite in place from a removal followed by a new post. */
   readonly noticeCalls: NoticeCall[] = [];
   failNotice: Error | null = null;
+  /** Lines only one user sees, kept apart from every thread. */
+  readonly whispers: { channelId: string; userId: string; text: string }[] = [];
+  failWhisper: Error | null = null;
   private serial = 0;
 
   constructor(
@@ -158,6 +161,11 @@ export class FakeSurface implements Surface {
 
   async post(thread: ThreadRef, text: string): Promise<void> {
     this.say(thread.id, text, this.me, 'mate', true);
+  }
+
+  async whisper(thread: ThreadRef, userId: string, text: string) {
+    if (this.failWhisper) throw this.failWhisper;
+    this.whispers.push({ channelId: thread.channelId, userId, text });
   }
 
   async history(
@@ -230,6 +238,7 @@ export class FakeSurface implements Surface {
 
 export type SlackCall =
   | { call: 'post'; channel: string; threadTs: string; text: string }
+  | { call: 'whisper'; channel: string; user: string; text: string }
   | { call: 'edit'; ts: string; text: string; blocks?: SlackBlock[] }
   | { call: 'read'; threadTs: string; ts: string }
   | { call: 'remove'; ts: string }
@@ -261,6 +270,10 @@ export class FakeSlack implements SlackApi {
     const ts = `p-${++this.serial}`;
     this.calls.push({ call: 'post', channel, threadTs, text });
     return ts;
+  }
+
+  async whisper(channel: string, user: string, text: string): Promise<void> {
+    this.calls.push({ call: 'whisper', channel, user, text });
   }
 
   async edit(
@@ -338,6 +351,7 @@ export class FakeSlack implements SlackApi {
     return this.calls.flatMap((c) => {
       if (
         c.call === 'post' ||
+        c.call === 'whisper' ||
         c.call === 'edit' ||
         c.call === 'remove' ||
         c.call === 'read'

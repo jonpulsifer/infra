@@ -1,7 +1,7 @@
 /**
- * mate-db: pi's sessions and mate's `mate_threads`, over one pool. A store
- * that cannot be reached leaves mate up with every open refused, never in a
- * crash loop.
+ * mate-db: pi's sessions, mate's `mate_threads` and `mate_credentials`, over
+ * one pool. A store that cannot be reached leaves mate up with every open
+ * refused, never in a crash loop.
  */
 
 import { migrate } from '@repo/pi-store-postgres';
@@ -150,7 +150,7 @@ function down(ready: Promise<void>): Database {
   return { sql: null, up: () => false, ready, close: async () => {} };
 }
 
-const MIGRATIONS: readonly (readonly [number, string])[] = [
+export const MIGRATIONS: readonly (readonly [number, string])[] = [
   [
     1,
     `CREATE TABLE mate_threads (
@@ -173,6 +173,16 @@ const MIGRATIONS: readonly (readonly [number, string])[] = [
       updated_at BIGINT NOT NULL
     );
     CREATE INDEX mate_threads_state ON mate_threads (state, updated_at)`,
+  ],
+  // `credential` is pi's Credential as JSON. The nightly dump leaves this
+  // table's rows out (database-backup.yaml).
+  [
+    2,
+    `CREATE TABLE mate_credentials (
+      provider TEXT COLLATE "C" PRIMARY KEY,
+      credential TEXT NOT NULL,
+      updated_at BIGINT NOT NULL
+    )`,
   ],
 ];
 

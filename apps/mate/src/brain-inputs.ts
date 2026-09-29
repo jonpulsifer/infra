@@ -7,7 +7,12 @@ import type {
   ExecutionToolContext,
   ThinkingLevel,
 } from '@earendil-works/pi-agent-core';
-import type { Api, Model, Models } from '@earendil-works/pi-ai';
+import type {
+  Api,
+  CredentialStore,
+  Model,
+  Models,
+} from '@earendil-works/pi-ai';
 import type { Clock } from './clock.ts';
 import type { Log } from './log.ts';
 import type { SurfaceName } from './surface.ts';
@@ -18,6 +23,8 @@ export interface ModelSetupOptions {
   readonly thinking: ThinkingLevel;
   /** Read on every request, so a rotated key needs no restart. */
   readonly keyFile: string;
+  /** Holds the ChatGPT sign-in; without one, pi keeps it in memory. */
+  readonly credentials?: CredentialStore;
   readonly log: Log;
 }
 

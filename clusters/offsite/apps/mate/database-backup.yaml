@@ -86,10 +86,12 @@ spec:
               # Keep this major equal to the server's, which the CNPG operator's
               # default image sets, or `pg_dump` refuses the server.
               image: ghcr.io/cloudnative-pg/postgresql:18
+              # The ChatGPT sign-in stays out of the bucket; a restore signs in
+              # again. apps/mate/test/credential-store.test.ts holds this.
               command:
                 - bash
                 - -c
-                - set -euo pipefail; pg_dump -d "$DATABASE_URL" | gzip -9 > /dump/pg.sql.gz
+                - set -euo pipefail; pg_dump -d "$DATABASE_URL" --exclude-table-data=mate_credentials | gzip -9 > /dump/pg.sql.gz
               env:
                 - name: DATABASE_URL
                   valueFrom:

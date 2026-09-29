@@ -38,6 +38,26 @@ export const MINT_FAILED = "⚠️ couldn't start a sandbox";
 export const SANDBOX_LOST =
   '⚠️ the sandbox died, and its files with it — the next command starts a fresh one';
 
+// Answers to the owner's `chatgpt` commands, each the start of its line.
+export const CHATGPT = {
+  codeSent: '🔑 Sent you a sign-in code',
+  codeWaiting: '🔑 A sign-in is already waiting for its code',
+  signedIn: '✅ mate is signed in to ChatGPT',
+  proofFailed: '⚠️ mate is signed in to ChatGPT, but',
+  codeExpired: '⌛ The sign-in code expired unused',
+  interrupted: '🔄 mate restarted before the sign-in finished',
+  notSent: "⚠️ Couldn't send you the code",
+  noWhisper: '⚠️ mate cannot send a sign-in code privately here',
+  deviceRefused: '⚠️ OpenAI refused to start a device sign-in',
+  failed: '⚠️ ChatGPT sign-in failed',
+  signedOut: '🔓 mate signed out of ChatGPT',
+  logoutFailed: '⚠️ mate could not sign out of ChatGPT',
+  paused: '⏸️ ChatGPT is paused',
+  resumed: '▶️ ChatGPT is not paused',
+  // Marked, since an answer may start with the bare word.
+  status: 'ℹ️ ChatGPT: ',
+} as const;
+
 // Posted by earlier versions of mate.
 export const STOPPED_WAITING =
   '💤 gave up waiting for a sandbox — reply to try again';
@@ -66,6 +86,7 @@ const PREFIXES: readonly string[] = [
   SANDBOX_READY,
   MINT_FAILED,
   SANDBOX_LOST,
+  ...Object.values(CHATGPT),
   STOPPED_WAITING,
   SANDBOX_CLOSED,
   ATTACHING,

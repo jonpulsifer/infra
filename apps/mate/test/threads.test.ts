@@ -7,6 +7,7 @@ import {
 } from '../src/brain-port.ts';
 import { CHUNK_BUDGET } from '../src/discord.ts';
 import {
+  CHATGPT,
   DAY_SPENT,
   GAVE_UP_WAITING,
   HARNESS_FAILED,
@@ -25,6 +26,9 @@ import { type Surface, type ThreadRef, threadKey } from '../src/surface.ts';
 import type { ThreadListFilter, ThreadRow } from '../src/thread-store.ts';
 import {
   ABANDON_MS,
+  type Command,
+  type CommandContext,
+  type Commands,
   type Inbound,
   MAX_RESUMES,
   RESTORE_ATTEMPTS,
@@ -141,6 +145,21 @@ function inThread(
   };
 }
 
+/** Takes any message that starts `chatgpt `, and answers it in the thread. */
+class RecordingCommands implements Commands {
+  readonly runs: { text: string; context: CommandContext }[] = [];
+
+  parse(text: string): Command | null {
+    if (!text.startsWith('chatgpt ')) return null;
+    return {
+      run: async (context) => {
+        this.runs.push({ text, context });
+        await context.surface.post(context.thread, `${CHATGPT.status}noted`);
+      },
+    };
+  }
+}
+
 interface BuildOptions {
   script?: Script;
   resumeScript?: Script;
@@ -151,6 +170,7 @@ interface BuildOptions {
   storeReady?: Promise<void>;
   inherited?: readonly ThreadRef[];
   surfaces?: Surface[];
+  commands?: Commands;
 }
 
 function build(opts: BuildOptions = {}) {
@@ -176,6 +196,7 @@ function build(opts: BuildOptions = {}) {
     // Scaled to the scripts below, which write a turn in a few hundred ms.
     runGraceMs: 100,
     metrics,
+    commands: opts.commands,
   });
   return { threads, brain, store };
 }
@@ -323,6 +344,92 @@ describe('starting a thread', () => {
     expect(tooling.brain.leases).toBe(1);
     const threadId = discord.threads[1]!.id;
     expect(discord.inThread(threadId).at(-1)?.subtext).toEqual(['-# ✓ 0s']);
+  });
+});
+
+describe('commands to mate', () => {
+  test('a command in a mate thread runs beside the brain and takes no turn', async () => {
+    const commands = new RecordingCommands();
+    const { threads, brain } = build({ script: streaming('ok'), commands });
+    await threads.onMessage(mention('start'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    const asked = inThread(threadId, 'chatgpt status');
+    await threads.onMessage(asked);
+    await clock.advance(5_000);
+    expect(commands.runs).toEqual([
+      {
+        text: 'chatgpt status',
+        context: { surface, thread: ref(threadId), authorId: OWNER },
+      },
+    ]);
+    expect(brain.prompts).toEqual(['start']);
+    expect(metrics.started).toBe(1);
+    expect(threads.stateOf(key(threadId))).toBe('idle');
+    expect(discord.reactionsOn(threadId, asked.id)).toEqual([]);
+    expect(discord.contentsIn(threadId).at(-1)).toBe(`${CHATGPT.status}noted`);
+  });
+
+  test('a command mid-turn runs at once instead of queueing behind it', async () => {
+    const commands = new RecordingCommands();
+    const { threads, brain } = build({ script: stuck, commands });
+    await threads.onMessage(mention('start'));
+    await clock.advance(1_000);
+    const threadId = discord.threads[0]!.id;
+    expect(threads.stateOf(key(threadId))).toBe('turn');
+    await threads.onMessage(inThread(threadId, 'chatgpt pause'));
+    await settle();
+    expect(commands.runs).toHaveLength(1);
+    expect(brain.prompts).toEqual(['start']);
+  });
+
+  test("a top-level command opens a thread and answers there with no turn, and the thread stays mate's", async () => {
+    const commands = new RecordingCommands();
+    const { threads, brain } = build({ script: streaming('ok'), commands });
+    await threads.onMessage(mention('chatgpt login'));
+    await settle();
+    expect(discord.threads).toHaveLength(1);
+    const threadId = discord.threads[0]!.id;
+    expect(discord.threads[0]?.name).toBe('chatgpt login');
+    expect(commands.runs[0]?.context.thread).toEqual(ref(threadId));
+    expect(brain.prompts).toEqual([]);
+    expect(metrics.started).toBe(0);
+
+    await threads.onMessage(inThread(threadId, 'and a question'));
+    await clock.advance(5_000);
+    expect(brain.prompts).toEqual(['and a question']);
+  });
+
+  test("anyone else's command is silence", async () => {
+    const commands = new RecordingCommands();
+    const { threads } = build({ script: streaming('ok'), commands });
+    await threads.onMessage(mention('start'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    await threads.onMessage(inThread(threadId, 'chatgpt logout', STRANGER));
+    await threads.onMessage(mention('chatgpt logout', { authorId: STRANGER }));
+    await settle();
+    expect(commands.runs).toEqual([]);
+  });
+
+  test('without commands the same words are a prompt', async () => {
+    const { threads, brain } = build({ script: streaming('ok') });
+    await threads.onMessage(mention('chatgpt status'));
+    await clock.advance(5_000);
+    expect(brain.prompts).toEqual(['chatgpt status']);
+  });
+
+  test('a replayed transcript leaves out the commands and their answers', async () => {
+    const commands = new RecordingCommands();
+    const { threads, brain, threadId } = await preCutover({ commands });
+    discord.post(threadId, `<@${ME}> chatgpt status`, OWNER);
+    discord.post(threadId, `${CHATGPT.status}not signed in.`, ME, 'mate');
+    await threads.onMessage(inThread(threadId, 'second question'));
+    await clock.advance(5_000);
+    const prompt = brain.prompts.at(-1) ?? '';
+    expect(prompt).toContain('jawn: first question');
+    expect(prompt).not.toContain('chatgpt status');
+    expect(prompt).not.toContain(CHATGPT.status);
   });
 });
 

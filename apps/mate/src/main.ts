@@ -7,6 +7,7 @@ import {
 import { PiBrain, postgresSessions, type SessionSource } from './brain.ts';
 import type { McpBridge, ModelSetup } from './brain-inputs.ts';
 import type { Brain } from './brain-port.ts';
+import { ChatgptAccount, ChatgptKeeper } from './chatgpt.ts';
 import { systemClock } from './clock.ts';
 import { clearGlobalCommands } from './commands.ts';
 import {
@@ -16,6 +17,7 @@ import {
   readConfig,
   type SlackConfig,
 } from './config.ts';
+import { PostgresCredentialStore } from './credential-store.ts';
 import {
   discordInbound,
   discordOver,
@@ -32,7 +34,7 @@ import { type Hands, WORKSPACE } from './lease.ts';
 import { jsonLog as log, plain } from './log.ts';
 import { createKthxMcp } from './mcp.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
-import { createModelSetup } from './model.ts';
+import { chatgptModel, createModelSetup } from './model.ts';
 import { loadSystemPrompts } from './profile.ts';
 import { StubBrain } from './sandbox.ts';
 import { createKubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
@@ -190,12 +192,16 @@ function openKthxSites(kube: Kube): KthxSites | null {
 }
 
 // A model the catalog lacks is a ConfigError: every turn would fail.
-function openModel(brain: BrainConfig): ModelSetup {
+function openModel(
+  brain: BrainConfig,
+  credentials: PostgresCredentialStore | null,
+): ModelSetup {
   try {
     return createModelSetup({
       spec: brain.model,
       thinking: brain.thinking,
       keyFile: brain.modelKeyFile,
+      credentials: credentials ?? undefined,
       log,
     });
   } catch (error) {
@@ -227,6 +233,12 @@ function openMcp(brain: BrainConfig): McpBridge | null {
   return bridge;
 }
 
+interface Chatgpt {
+  account: ChatgptAccount;
+  keeper: ChatgptKeeper;
+  credentials: PostgresCredentialStore;
+}
+
 interface Wiring {
   brain: Brain;
   threadStore: ThreadStore;
@@ -236,6 +248,31 @@ interface Wiring {
   db: Database | null;
   mcp: McpBridge | null;
   sweep: ((before: number) => Promise<void>) | null;
+  chatgpt: Chatgpt | null;
+}
+
+// Signed in from chat and kept fresh by the keeper; no turn uses it.
+function openChatgpt(
+  setup: ModelSetup,
+  credentials: PostgresCredentialStore,
+): Chatgpt {
+  const keeper = new ChatgptKeeper({
+    models: setup.models,
+    credentials,
+    clock: systemClock,
+    log,
+    metrics: lazyInstruments(),
+  });
+  const account = new ChatgptAccount({
+    models: setup.models,
+    keeper,
+    credentials,
+    model: chatgptModel(setup),
+    lane: { model: setup.model, thinking: setup.thinking },
+    clock: systemClock,
+    log,
+  });
+  return { account, keeper, credentials };
 }
 
 async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
@@ -244,7 +281,10 @@ async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
   const db = await openDatabase(brainConfig, log, {
     metrics: lazyInstruments(),
   });
-  const setup = openModel(brainConfig);
+  const credentials = db.sql
+    ? new PostgresCredentialStore({ db, log, metrics: lazyInstruments() })
+    : null;
+  const setup = openModel(brainConfig, credentials);
   const prompts = await loadSystemPrompts({
     root: brainConfig.profileRoot ?? REPO_ROOT,
     workspace: WORKSPACE,
@@ -299,6 +339,7 @@ async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
     db,
     mcp,
     sweep: (before) => brain.sweep(before),
+    chatgpt: credentials ? openChatgpt(setup, credentials) : null,
   };
 }
 
@@ -321,6 +362,7 @@ function stubWiring(): Wiring {
     db: null,
     mcp: null,
     sweep: null,
+    chatgpt: null,
   };
 }
 
@@ -396,7 +438,9 @@ const threads = new Threads({
   log,
   config,
   metrics: lazyInstruments(),
+  commands: wiring.chatgpt?.account,
 });
+wiring.chatgpt?.keeper.start(wiring.storeReady);
 let me = '';
 
 // Before the gateway: a revoked or rate-limited Discord token, or a wait on
@@ -523,12 +567,19 @@ async function shutdown(signal: string): Promise<void> {
     .drain(DRAIN_MS)
     .catch((error) => log.warn('drain failed', { error: plain(error) }));
   await wiring.hands?.shutdown();
+  wiring.chatgpt?.keeper.stop();
+  // While the surfaces can still post: a sign-in waiting for its code tells
+  // its thread that the code no longer works.
+  await wiring.chatgpt?.account.stop();
   try {
     await manager.destroy();
   } catch (error) {
     log.warn('gateway destroy failed', { error: plain(error) });
   }
   await wiring.mcp?.close().catch(() => {});
+  // Before the pool closes: a refresh still running saves its rotated token,
+  // and one that did not save gets a last try.
+  await wiring.chatgpt?.credentials.close().catch(() => {});
   await wiring.db
     ?.close()
     .catch((error) =>
@@ -601,6 +652,7 @@ log.info('mate starting', {
   maxConcurrent: config.maxConcurrent,
   maxSandboxes: config.maxSandboxes,
   store: storeState(wiring.db),
+  chatgpt: Boolean(wiring.chatgpt),
   quietMinutes: config.quietMs / 60_000,
   turnMinutes:
     config.sandboxes.mode === 'kube'

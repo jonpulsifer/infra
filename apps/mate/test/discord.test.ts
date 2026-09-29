@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { API } from '@discordjs/core';
 import {
   type APIMessageTopLevelComponent,
   ComponentType,
@@ -9,6 +10,7 @@ import {
   DiscordCanvas,
   discordInbound,
   discordKey,
+  discordOver,
   discordThread,
   type OutMessage,
   spoken,
@@ -154,6 +156,54 @@ describe("a card's footer", () => {
     expect(discord.inThread(THREAD).at(-1)?.subtext).toEqual([
       '-# ✓ 1 tool · 0s',
     ]);
+  });
+});
+
+describe('a whisper', () => {
+  test('opens the DM channel with the user and posts there, mentioning nobody', async () => {
+    const calls: unknown[][] = [];
+    const api = {
+      users: {
+        createDM: async (userId: string) => {
+          calls.push(['createDM', userId]);
+          return { id: 'dm-channel' };
+        },
+      },
+      channels: {
+        createMessage: async (channelId: string, body: unknown) => {
+          calls.push(['createMessage', channelId, body]);
+          return { id: 'dm-message' };
+        },
+      },
+    } as unknown as API;
+    const id = await discordOver(api).directMessage(OWNER, {
+      content: 'the code',
+    });
+    expect(id).toBe('dm-message');
+    expect(calls).toEqual([
+      ['createDM', OWNER],
+      [
+        'createMessage',
+        'dm-channel',
+        {
+          content: 'the code',
+          components: [],
+          allowed_mentions: { parse: [] },
+        },
+      ],
+    ]);
+  });
+
+  test('from the surface is a DM in full words, and nothing lands in the thread', async () => {
+    const discord = new FakeDiscord();
+    const surface = discord.surface({
+      me: 'bot',
+      allowedUserIds: new Set([OWNER]),
+      allowedChannelIds: new Set([CHANNEL]),
+    });
+    await surface.whisper?.(discordThread(THREAD, CHANNEL), OWNER, 'the code');
+    expect(discord.dms).toEqual([{ userId: OWNER, content: 'the code' }]);
+    expect(discord.messages).toEqual([]);
   });
 });
 

@@ -96,10 +96,15 @@ describe('the SDK', () => {
       });
       getInstruments().handsCall('exec', 'ok', 90_000);
       getInstruments().turnEnded('end_turn', { costUsd: 0.4 });
+      getInstruments().chatgpt({
+        signedIn: true,
+        expiresAt: Date.now() + 3_600_000,
+      });
       // The exit flush carries the last counters out before the 15 s export interval.
       await stopTelemetry();
     } finally {
       collector.stop(true);
+      getInstruments().chatgpt(null);
     }
 
     expect(bodies).toHaveLength(1);
@@ -109,6 +114,9 @@ describe('the SDK', () => {
     // The collector's Prometheus exporter leaves names in this form alone.
     expect(sent).toContain('mate_mint_duration_milliseconds');
     expect(sent).toContain('mate_exec_open_milliseconds');
+    // The names MateChatGPTSignedOut and MateChatGPTTokenNotRefreshing read.
+    expect(sent).toContain('mate_chatgpt_signed_in');
+    expect(sent).toContain('mate_chatgpt_token_expiry_seconds');
     expect(sent).not.toContain('mate_attach_duration_milliseconds');
     // The resource attribute the collector turns into the `exported_job` label.
     expect(sent).toContain('service.name');

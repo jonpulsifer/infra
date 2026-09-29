@@ -1124,6 +1124,18 @@ describe('the surface', () => {
       clock,
     });
 
+  test('a whisper is a message only the user sees, in the channel and not the thread', async () => {
+    await surface().whisper?.(THREAD, OWNER, 'enter <this> & that');
+    expect(api.calls).toEqual([
+      {
+        call: 'whisper',
+        channel: CHANNEL,
+        user: OWNER,
+        text: 'enter &lt;this&gt; &amp; that',
+      },
+    ]);
+  });
+
   test('a thread needs no call to open: its parent message is the thread', async () => {
     const opened = await surface().openThread(
       {
@@ -1537,6 +1549,21 @@ describe('a Web API call', () => {
       // Every task of the stream is a row of one titled plan block.
       task_display_mode: 'plan',
     });
+  });
+
+  test('a whisper is chat.postEphemeral to one user, with no thread', async () => {
+    const sent: { url: string; body: unknown }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      return Response.json({ ok: true, message_ts: '1.1' });
+    }) as unknown as typeof fetch;
+    await web().whisper(CHANNEL, OWNER, 'the code');
+    expect(sent).toEqual([
+      {
+        url: 'https://slack.com/api/chat.postEphemeral',
+        body: { channel: CHANNEL, user: OWNER, text: 'the code' },
+      },
+    ]);
   });
 
   test("a stop carries the plan's last chunks, and a bare stop sends none", async () => {

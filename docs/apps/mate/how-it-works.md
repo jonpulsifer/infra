@@ -11,9 +11,9 @@ mate is the process behind [Rowbutt](../mate.md). It runs the agent loop for eac
 | --- | --- | --- |
 | mate | Connects to Discord and Slack, runs the agent loop on pi (`@earendil-works/pi-agent-core`), calls the model, bridges the kthx MCP tools, creates Sandboxes and mints tokens | Deployment `mate` in namespace `mate` |
 | Sandbox | One per thread that has run a tool, plus one ready spare. Init container `checkout` clones the repository. mate execs `mate-hands`, the daemon that runs the agent's file and shell calls, in container `harness`. | A pod with runtime class `kata-clh`, a Cloud Hypervisor microVM ([Kubernetes](../../platform/kubernetes.md)), in namespace `mate` on [oldschool](../../hosts/oldschool.md), the offsite worker node |
-| [Session store](#session-store) | Postgres that holds pi's sessions and mate's `mate_threads` table | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
+| [Session store](#session-store) | Postgres that holds pi's sessions and mate's `mate_threads` and `mate_credentials` tables | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
 
-The model is `MATE_MODEL`, through pi-ai's `opencode-go` provider, at the reasoning level in `MATE_THINKING`. The system prompt is a note about the surface and the sandbox, then `AGENTS.md`, then an index of the skills in `dotfiles/skills/` and `.agents/skills/`. The mate image bakes these files, and the agent reads a skill from the sandbox's checkout.
+The model is `MATE_MODEL`, through pi-ai's `opencode-go` provider, at the reasoning level in `MATE_THINKING`. mate also signs in to the owner's ChatGPT subscription through pi-ai's `openai-codex` provider, and no turn uses it. The system prompt is a note about the surface and the sandbox, then `AGENTS.md`, then an index of the skills in `dotfiles/skills/` and `.agents/skills/`. The mate image bakes these files, and the agent reads a skill from the sandbox's checkout.
 
 ## A turn
 
@@ -31,6 +31,7 @@ If the sandbox dies mid-turn, the tool call fails, and the next call starts a ne
 | Model key | A file in mate's pod, from Secret `mate-opencode`, read on every request | The model API |
 | kthx agent token | mate's environment `KTHX_AGENT_TOKEN`, from Secret `mate-kthx-agent` | Every built-apps command but minting tokens, replacing the engine settings and connecting or probing a Target, for 90 days |
 | Database role | mate's environment `DATABASE_URL`, from Secret `mate-db-app` | Owner of database `mate` |
+| ChatGPT sign-in | Row `openai-codex` of table `mate_credentials` in mate-db, which mate alone writes and rotates about every eight days | The owner's ChatGPT subscription, through `chatgpt.com/backend-api` |
 | GitHub App private key | mate's pod, from Secret `mate-github-app` | Signs token requests |
 | GitHub installation token | The file in `$MATE_GITHUB_TOKEN_FILE` | `clanky-bot[bot]` on `jonpulsifer/infra`: contents and pull requests write, actions read |
 | Cluster token | `$KUBECONFIG`, with the contexts `offsite` and `folly` | ServiceAccount `mate-sandbox-admin`, `cluster-admin` on both clusters, for `MATE_TURN_MINUTES` plus 5 minutes |
@@ -38,7 +39,7 @@ If the sandbox dies mid-turn, the tool call fails, and the next call starts a ne
 | kthx site bearers | `/home/agent/.config/kthx/sites.json`, from Secret `mate-kthx-sites` | Every quick site Rowbutt claims |
 | Ring token | Sandbox environment, from Secret `mate-switchboard`, absent until the `switchboard` 1Password item exists | `POST /ring` on [Switchboard](../switchboard.md), which rings one fixed number |
 
-The model key, the kthx agent token, the database role and the App key stay in mate's pod. The files in the sandbox exist from the turn's first tool call to its end. The sandbox is `cluster-admin`, so it can still read every Secret in `mate`.
+The model key, the kthx agent token, the database role and the App key stay in mate's pod. The ChatGPT sign-in stays in mate-db, which the sandbox reaches through Secret `mate-db-app`, so the agent can use the owner's ChatGPT account. [Sign Rowbutt in to ChatGPT](../../runbooks/sign-rowbutt-in-to-chatgpt.md#sign-out) has the kill switch. The files in the sandbox exist from the turn's first tool call to its end. The sandbox is `cluster-admin`, so it can still read every Secret in `mate`.
 
 `MATE_CONNECT_SECRET` is unset, so a sandbox has no 1Password token.
 
@@ -54,7 +55,7 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 
 | Pod | Egress |
 | --- | --- |
-| mate | DNS, Discord, Slack, `api.github.com`, `opencode.ai` on 443, the API server, the OTLP collector, the `mate-db` instance on 5432, the kthx engine's web pods on 3000 |
+| mate | DNS, Discord, Slack, `api.github.com`, `opencode.ai`, `auth.openai.com` and `chatgpt.com` on 443, the API server, the OTLP collector, the `mate-db` instance on 5432, the kthx engine's web pods on 3000 |
 | Sandbox | DNS; the internet on 80 and 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; offsite's nodes on 22; `CILIUM_NATIVE_ROUTING_CIDR`, which holds folly's hosts and API server, on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 
 The microVM isolates the kernel. mate's ingress admits only the node it runs on. The sandbox's policy keeps it away from `mate` and from Alertmanager, whose API takes an alert from anyone, but as `cluster-admin` and root on the nodes it can reach both on purpose.
@@ -65,9 +66,9 @@ No policy selects the `mate-db` instance or the backup Job's pod. The CloudNativ
 
 `clusters/offsite/apps/mate/database.yaml` declares `mate-db`, one Postgres instance on a `local-path` volume. Its database and owner role are both `mate`. CloudNativePG writes the role's credentials to Secret `mate-db-app` and its CA to Secret `mate-db-ca`, and mate connects with `sslmode=verify-full` against that CA. Flux never prunes the `Cluster`, because CloudNativePG deletes the volume with it; removing the store is a deliberate delete.
 
-`packages/pi-store-postgres/` keeps pi's sessions in tables prefixed `pi_`. mate keeps a row per thread in `mate_threads`: its session id, its sandbox and the turn in flight, so a restarted mate finds every open thread. mate deletes the session of a thread closed for more than `MATE_SESSION_RETENTION_DAYS`, 14 by default. If the store is down, mate stays connected and tells each thread that it cannot reach its memory.
+`packages/pi-store-postgres/` keeps pi's sessions in tables prefixed `pi_`. mate keeps a row per thread in `mate_threads`: its session id, its sandbox and the turn in flight, so a restarted mate finds every open thread. `mate_credentials` holds the ChatGPT sign-in, and mate is its only writer. A credential that mate cannot save stays in memory, and mate retries the write every 30 seconds. mate deletes the session of a thread closed for more than `MATE_SESSION_RETENTION_DAYS`, 14 by default. If the store is down, mate stays connected and tells each thread that it cannot reach its memory.
 
-CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped `pg_dump` to `gs://homelab-ng-mate/backups/pg/` at 04:43 UTC. It signs in to Google Cloud as `mate-db-backup@homelab-ng` through workload identity federation, with no key. `terraform/gcp/projects/homelab-ng/mate.tf` declares that account and the bucket, which deletes a dump after 30 days. There is no WAL archive, so a restore loses every write after the last dump.
+CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped `pg_dump` to `gs://homelab-ng-mate/backups/pg/` at 04:43 UTC. The dump leaves out the rows of `mate_credentials`, so a restore needs a new ChatGPT sign-in. It signs in to Google Cloud as `mate-db-backup@homelab-ng` through workload identity federation, with no key. `terraform/gcp/projects/homelab-ng/mate.tf` declares that account and the bucket, which deletes a dump after 30 days. There is no WAL archive, so a restore loses every write after the last dump.
 
 ## Fence
 
@@ -76,6 +77,7 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 ## Rules
 
 - Keep one replica with `strategy: Recreate`. Two pods on Discord both reply, two on Slack each get half the events, and both write each thread's session.
+- Run no second mate against `mate-db`, such as a local run with its `DATABASE_URL`. Both would refresh the one ChatGPT token, and OpenAI refuses a refresh token spent twice.
 - Keep the probe readiness-only. `/healthz` returns 503 while mate waits for Discord's session start limit, so a liveness probe restarts mate and spends more of it.
 - Keep `MATE_TURN_MINUTES` under 55, or mate does not start.
 - Keep `MATE_MAX_SANDBOXES` plus `MATE_SPARES` sandboxes within oldschool's free CPU. Each sandbox requests 500m, and one that does not fit stays `Pending`.
@@ -91,6 +93,8 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/credentials.ts`: the credential files of a turn
 - `apps/mate/src/sandboxes.ts`: the Sandbox, its manifest and the spare pool
 - `apps/mate/src/store.ts`: the connection to `mate-db` and the `mate_threads` table
+- `apps/mate/src/credential-store.ts`: the `mate_credentials` table
+- `apps/mate/src/chatgpt.ts`: the ChatGPT sign-in, the `chatgpt` commands and the keeper that refreshes the token
 - `apps/mate/src/profile.ts`: the system prompt
 - `apps/mate/src/mcp.ts`: the kthx MCP bridge
 - `apps/mate/src/kthx-sites.ts`: the ledger of kthx site bearers

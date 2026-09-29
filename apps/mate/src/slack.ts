@@ -246,6 +246,8 @@ export type SessionStatus = 'processing' | 'active' | 'closed';
 
 export interface SlackApi {
   post(channel: string, threadTs: string, text: string): Promise<string>;
+  /** `chat.postEphemeral`: shown in the channel to `user` alone, and never stored. */
+  whisper(channel: string, user: string, text: string): Promise<void>;
   /**
    * Rewrites a message mate posted. A streamed one goes back whole, as the
    * `blocks` Slack stored for it.
@@ -369,6 +371,9 @@ export function slackWeb(
         text,
       });
       return String(sent.ts);
+    },
+    async whisper(channel, user, text) {
+      await call('chat.postEphemeral', { channel, user, text });
     },
     async edit(channel, ts, text, blocks) {
       await call('chat.update', {
@@ -1189,6 +1194,10 @@ export function slackSurface(deps: SlackSurfaceDeps): Surface {
     // the thread spinning.
     async settle(thread) {
       await deps.api.session(thread.channelId, thread.id, 'active');
+    },
+    // In the channel, not the thread, so no reply in the thread carries it.
+    async whisper(thread, userId, text) {
+      await deps.api.whisper(thread.channelId, userId, escapeSlack(text));
     },
   };
 }

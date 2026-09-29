@@ -259,7 +259,7 @@ tests:
               severity: warning
             exp_annotations:
               message: "mate is failing to reach its session store"
-              description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, and `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
+              description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection, and `credentials` the ChatGPT sign-in, which mate keeps in memory and retries until it saves. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
       - eval_time: 60m
         alertname: MateStoreFailing
         exp_alerts: []
@@ -278,7 +278,7 @@ tests:
               severity: warning
             exp_annotations:
               message: "mate is failing to reach its session store"
-              description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, and `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
+              description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection, and `credentials` the ChatGPT sign-in, which mate keeps in memory and retries until it saves. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
       # Half an hour on, the series is no longer new, so the alert clears.
       - eval_time: 60m
         alertname: MateStoreFailing
@@ -392,6 +392,110 @@ tests:
     alert_rule_test:
       - eval_time: 10m
         alertname: MateGitHubTokenMintFailing
+        exp_alerts: []
+
+  # mate is up and holds no ChatGPT sign-in.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x60
+      - series: 'mate_chatgpt_signed_in{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x60
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: MateChatGPTSignedOut
+        exp_alerts: []
+      - eval_time: 32m
+        alertname: MateChatGPTSignedOut
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate is not signed in to ChatGPT"
+              description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, or OpenAI refused the token refresh. Until the owner signs it in again, mate cannot use ChatGPT. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
+
+  # Signed in, then signed out and back within the half hour: no alert.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x60
+      - series: 'mate_chatgpt_signed_in{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x10 0x20 1x30
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MateChatGPTSignedOut
+        exp_alerts: []
+
+  # mate is gone and the collector still serves its last 0: only MateDown
+  # pages.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 0x60
+      - series: 'mate_chatgpt_signed_in{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x60
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MateChatGPTSignedOut
+        exp_alerts: []
+
+  # With no store the gauge is absent, which never fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x60
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MateChatGPTSignedOut
+        exp_alerts: []
+
+  # The token runs down a minute a minute with no refresh: under a day from
+  # 61m, and an hour of that fires. A refresh at 151m clears it.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x180
+      - series: 'mate_chatgpt_token_expiry_seconds{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 90000-60x150 864000-60x30
+    alert_rule_test:
+      - eval_time: 115m
+        alertname: MateChatGPTTokenNotRefreshing
+        exp_alerts: []
+      - eval_time: 125m
+        alertname: MateChatGPTTokenNotRefreshing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate's ChatGPT token is not refreshing"
+              description: "mate's ChatGPT access token has less than a day left. mate refreshes it once two days are left, so every refresh since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, mate's ChatGPT requests fail until a refresh gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+      - eval_time: 160m
+        alertname: MateChatGPTTokenNotRefreshing
+        exp_alerts: []
+
+  # A token the keeper keeps fresh, then one on a mate that is gone.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x180 0x180
+      - series: 'mate_chatgpt_token_expiry_seconds{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 200000-60x180 3600x180
+    alert_rule_test:
+      - eval_time: 170m
+        alertname: MateChatGPTTokenNotRefreshing
+        exp_alerts: []
+      - eval_time: 350m
+        alertname: MateChatGPTTokenNotRefreshing
         exp_alerts: []
 
   # One failed fold of a sandbox's kthx site tokens, then none for an hour. The

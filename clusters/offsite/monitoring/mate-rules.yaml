@@ -125,8 +125,8 @@ spec:
             message: "mate cannot give a thread a sandbox"
             description: "More than two sandbox mints or connects failed in the last thirty minutes, so turns that need a command or a file get tool errors instead of results. A mint failure is the Sandbox never going Ready — the sandbox image digest, the kata-clh runtime class, or the namespace's restricted PSA. A connect is `pods/exec` into a Ready pod and then the mate-hands hello: a failure is the Role in ../../apps/mate/rbac.yaml, or a daemon that speaks another protocol, which mate condemns as too old so the next call mints a new sandbox. `mate_hands_connects_total` by `result` says which."
 
-        # Every op counts: an open, a fault mid-turn, a row write, a migration
-        # or a quarantine.
+        # Every op counts: an open, a fault mid-turn, a row write, a migration,
+        # a quarantine or a credential read or write.
         - alert: MateStoreFailing
           expr: |
             sum(increase(mate_store_failures_total[30m])) > 2
@@ -140,7 +140,7 @@ spec:
             severity: warning
           annotations:
             message: "mate is failing to reach its session store"
-            description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, and `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
+            description: "mate recorded more than two session-store failures in the last thirty minutes, so threads are told mate cannot reach its memory, or lose a turn mid-run. `op` says where: `open` and `rows` are mate-db unreachable or slow, `migrate` is mate retrying its schema at boot, `fault` a commit that failed mid-turn, `quarantine` a thread whose stored session mate set aside as corrupt and keeps for inspection, and `credentials` the ChatGPT sign-in, which mate keeps in memory and retries until it saves. Check MateDatabaseDown first, then `kubectl cnpg status mate-db -n mate --context offsite` and mate's log: `kubectl --context offsite logs -n mate deploy/mate`. The runbook at https://wiki.lolwtf.ca/runbooks/operate-postgres/ has the database checks."
 
         # mate test-mints at boot and on a timer; 0 means turns cannot push. No
         # App means no series. Guarded on the Deployment as MateNotReporting is.
@@ -172,6 +172,34 @@ spec:
           annotations:
             message: "mate is failing to mint GitHub tokens"
             description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. The runbook at https://wiki.lolwtf.ca/runbooks/repair-the-rowbutt-github-credential/ has the checks."
+
+        # 0 while mate holds no working ChatGPT sign-in; absent without a store,
+        # or before mate has read it. Guarded on the Deployment as above.
+        - alert: MateChatGPTSignedOut
+          expr: |
+            mate_chatgpt_signed_in == 0
+            and on()
+            kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate is not signed in to ChatGPT"
+            description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, or OpenAI refused the token refresh. Until the owner signs it in again, mate cannot use ChatGPT. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
+
+        # The keeper rotates the token at two days left, so under one is a day
+        # of failed refreshes. The gauge is absent while signed out.
+        - alert: MateChatGPTTokenNotRefreshing
+          expr: |
+            mate_chatgpt_token_expiry_seconds < 86400
+            and on()
+            kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "mate's ChatGPT token is not refreshing"
+            description: "mate's ChatGPT access token has less than a day left. mate refreshes it once two days are left, so every refresh since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, mate's ChatGPT requests fail until a refresh gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
 
         # One failed fold is a bearer that may exist only in a sandbox the quiet
         # teardown deletes, so the first counts. `result!="ok"` is the contract.

@@ -30,7 +30,19 @@ export type TurnResumeResult = 'resumed' | 'lost' | 'discarded';
 
 export type ProviderErrorKind = 'limit' | 'auth' | 'timeout' | 'other';
 
-export type StoreOp = 'open' | 'fault' | 'rows' | 'migrate' | 'quarantine';
+export type StoreOp =
+  | 'open'
+  | 'fault'
+  | 'rows'
+  | 'migrate'
+  | 'quarantine'
+  | 'credentials';
+
+export interface ChatgptSignIn {
+  readonly signedIn: boolean;
+  /** When the access token expires, in epoch ms; null while signed out. */
+  readonly expiresAt: number | null;
+}
 
 /** The bounded set a tool's name is counted under. */
 export type ToolLabel = 'bash' | 'read' | 'write' | 'edit' | 'kthx' | 'other';
@@ -55,6 +67,8 @@ export interface Instruments extends HandsInstruments, McpInstruments {
   toolEnded(tool: string, isError: boolean): void;
   providerError(kind: ProviderErrorKind): void;
   storeFailed(op: StoreOp): void;
+  /** `null` reports nothing: mate has no credential store, or has not read it yet. */
+  chatgpt(state: ChatgptSignIn | null): void;
 }
 
 let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
@@ -65,6 +79,7 @@ let latest: { limit: SessionStartLimit; readAt: number } | null = null;
 let appReady: boolean | null = null;
 /** `null` until a bridge is configured, so the gauge is absent without one. */
 let mcp: boolean | null = null;
+let chatgpt: ChatgptSignIn | null = null;
 let live = 0;
 let waiters = 0;
 let queued = 0;
@@ -140,6 +155,19 @@ export function getInstruments(): Instruments {
     if (mcp === null) return;
     result.observe(mcp ? 1 : 0);
   });
+  meter
+    .createObservableGauge('mate_chatgpt_signed_in')
+    .addCallback((result) => {
+      if (chatgpt === null) return;
+      result.observe(chatgpt.signedIn ? 1 : 0);
+    });
+  // Seconds left at collection time, so the alert needs no clock of its own.
+  meter
+    .createObservableGauge('mate_chatgpt_token_expiry_seconds', { unit: 's' })
+    .addCallback((result) => {
+      if (chatgpt?.expiresAt == null) return;
+      result.observe(Math.round((chatgpt.expiresAt - Date.now()) / 1000));
+    });
   const closes = meter.createCounter('mate_gateway_closes_total');
   const mints = meter.createCounter('mate_mints_total');
   const turns = meter.createCounter('mate_turns_total');
@@ -247,6 +275,9 @@ export function getInstruments(): Instruments {
       }),
     providerError: (kind) => providerErrors.add(1, { kind }),
     storeFailed: (op) => storeFailures.add(1, { op }),
+    chatgpt: (state) => {
+      chatgpt = state;
+    },
   };
   cached = { provider, instruments };
   return instruments;
@@ -282,5 +313,6 @@ export function lazyInstruments(): Instruments {
     toolEnded: (tool, isError) => getInstruments().toolEnded(tool, isError),
     providerError: (kind) => getInstruments().providerError(kind),
     storeFailed: (op) => getInstruments().storeFailed(op),
+    chatgpt: (state) => getInstruments().chatgpt(state),
   };
 }

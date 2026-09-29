@@ -119,6 +119,23 @@ function holdsSlot(thread: Thread): boolean {
   );
 }
 
+/** Where a command came from, and so where its answers go. */
+export interface CommandContext {
+  readonly surface: Surface;
+  readonly thread: ThreadRef;
+  readonly authorId: string;
+}
+
+export interface Command {
+  run(context: CommandContext): Promise<void>;
+}
+
+/** Commands to mate itself, which never reach the brain or take a turn. */
+export interface Commands {
+  /** The command a whole message names, its mention stripped, or null for a prompt. */
+  parse(text: string): Command | null;
+}
+
 export type ThreadsConfig = Pick<
   Config,
   'quietMs' | 'maxTurnsPerThread' | 'maxTurnsPerDay' | 'maxConcurrent'
@@ -140,6 +157,7 @@ export interface ThreadsDeps {
   runGraceMs?: number;
   progressCadenceMs?: number;
   metrics?: Instruments;
+  commands?: Commands;
 }
 
 export function stripMention(content: string, me: string): string {
@@ -285,6 +303,7 @@ export class Threads {
       authorId: message.authorId,
       message: { channelId: message.channelId, id: message.id },
     };
+    const command = this.deps.commands?.parse(prompt.text) ?? null;
     const known = message.threadId
       ? this.threads.get(
           threadKey({
@@ -295,7 +314,8 @@ export class Threads {
         )
       : undefined;
     if (known) {
-      this.accept(known, prompt);
+      if (command) this.command(command, known, message.authorId);
+      else this.accept(known, prompt);
       return;
     }
     if (
@@ -319,7 +339,21 @@ export class Threads {
       });
       return;
     }
-    this.accept(this.ensure(surface, ref), prompt);
+    const thread = this.ensure(surface, ref);
+    if (command) this.command(command, thread, message.authorId);
+    else this.accept(thread, prompt);
+  }
+
+  /** Runs beside any turn, and a failure is only logged. */
+  private command(command: Command, thread: Thread, authorId: string): void {
+    void command
+      .run({ surface: thread.surface, thread: thread.ref, authorId })
+      .catch((error) =>
+        this.deps.log.warn('a command failed', {
+          threadId: thread.ref.id,
+          error: plain(error),
+        }),
+      );
   }
 
   async onStop(
@@ -875,9 +909,14 @@ export class Threads {
     for (const queued of thread.pending)
       skip.push(queued.text, queued.raw.trim());
     try {
+      const { commands } = this.deps;
+      const me = thread.surface.me;
       const preamble = await replayPreamble(thread.surface, thread.ref, {
-        me: thread.surface.me,
+        me,
         skip,
+        command: commands
+          ? (text) => commands.parse(stripMention(text, me)) !== null
+          : undefined,
       });
       if (!preamble) return prompt.text;
       this.deps.log.info('replaying the thread transcript', {
