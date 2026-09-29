@@ -222,7 +222,8 @@ export class Tempest {
     now = Date.now(),
   ): Promise<Sample[]> {
     const token = this.token(station);
-    const end = Math.floor(now / 1000);
+    // Floored to the cache TTL, so repeat questions reuse one fetch.
+    const end = Math.floor(now / 1000 / 300) * 300;
     const start = end - hours * 3600;
     const rows = await Promise.all(
       station.deviceIds.map((id) =>

@@ -7,7 +7,6 @@ resources:
   - descheduler
   - elevenlabs
   - hub
-  - weather
   - identity-spike
   - kthx
   - mate
@@ -15,6 +14,7 @@ resources:
   - pbx
   - prowler
   - spindrift
+  - weather
   - ../../base/platform/spindrift-target
   - ../../base/apps/reloader
 patches:

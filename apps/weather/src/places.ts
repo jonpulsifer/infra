@@ -49,22 +49,21 @@ export class Places {
   /** No query means the first configured place: home. */
   async resolve(query?: string): Promise<Place> {
     const text = query?.trim() ?? '';
-    const key = text.toLowerCase();
-    return this.upstream.cached(`place:${key}`, 24 * 3_600_000, async () => {
-      const found = await this.locate(text);
-      const city = await nearestCity(this.upstream, found.point);
-      if (!city) {
-        throw new PlaceNotFound(
-          `no MSC forecast area near ${found.name}; MSC covers Canada only`,
-        );
-      }
-      return {
-        name: found.name,
-        point: found.point,
-        city,
-        timezone: zoneForCity(city.id),
-      };
-    });
+    // Uncached here: each upstream call below caches itself, and a place
+    // resolved while Tempest discovery fails must not outlive the outage.
+    const found = await this.locate(text);
+    const city = await nearestCity(this.upstream, found.point);
+    if (!city) {
+      throw new PlaceNotFound(
+        `no MSC forecast area near ${found.name}; MSC covers Canada only`,
+      );
+    }
+    return {
+      name: found.name,
+      point: found.point,
+      city,
+      timezone: zoneForCity(city.id),
+    };
   }
 
   private async locate(text: string): Promise<NamedPlace> {

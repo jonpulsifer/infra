@@ -2,8 +2,9 @@
  * A streamable-HTTP MCP server's tools, bridged into the brain as pi tools
  * under the server's prefix, such as `kthx_*`. A server that takes a token
  * gets it from mate, which holds it. `combineMcp` joins several bridges into
- * the one the brain sees. Each tool set is sticky: a listing only adds or replaces tools, and a tool
- * whose server is down answers an error instead of leaving the set.
+ * the one the brain sees. Each tool set is sticky: a listing only adds or
+ * replaces tools, and a tool whose server is down answers an error instead of
+ * leaving the set.
  */
 import { createHash } from 'node:crypto';
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';

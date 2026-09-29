@@ -195,7 +195,8 @@ export const operations: readonly Operation[] = [
             (await tempestNear(deps, p)).map(
               async ({ station, distanceKm }) => ({
                 ...(await deps.tempest.conditions(station)),
-                distanceKm,
+                // Coarse, so distances from chosen points never locate a home.
+                distanceKm: Math.round(distanceKm / 5) * 5,
               }),
             ),
           ),
