@@ -25,6 +25,7 @@ import {
   createModels,
   createProvider,
   InMemoryCredentialStore,
+  isContextOverflow,
   isRetryableAssistantError,
   type JsonValue,
   type Model,
@@ -51,6 +52,7 @@ import {
   LIMIT_FIRST_MS,
   type ModelRouter,
   PRIMARY_TIMEOUT_MS,
+  REASONS,
   REJECTED_FIRST_MS,
   RESET_SLACK_MS,
   type RouteEvent,
@@ -938,6 +940,38 @@ describe('when the fallback fails too', () => {
     const spent = await ask(made);
     expect(isRetryableAssistantError(spent)).toBe(false);
   });
+
+  // pi retries, compacts or gives up by the error's words, so no clause may sway it.
+  test.each(Object.entries(REASONS))(
+    "the %s clause leaves pi's verdict on the fallback's error as it was",
+    (_reason, clause) => {
+      const as = (errorMessage: string): AssistantMessage => ({
+        role: 'assistant',
+        content: [],
+        api: QWEN.api,
+        provider: QWEN.provider,
+        model: QWEN.id,
+        usage: { ...ZERO_USAGE },
+        stopReason: 'error',
+        errorMessage,
+        timestamp: 0,
+      });
+      for (const own of [
+        'model is not supported',
+        '503 service unavailable',
+        'Range of input length should be [1, 1000000]',
+      ]) {
+        const routed = as(`${clause}; opencode-go/qwen3.8-max: ${own}`);
+        expect(isRetryableAssistantError(routed)).toBe(
+          isRetryableAssistantError(as(own)),
+        );
+        expect(isContextOverflow(routed, QWEN.contextWindow)).toBe(
+          isContextOverflow(as(own), QWEN.contextWindow),
+        );
+        expect(fallbackError(routed.errorMessage ?? '')).toBe(own);
+      }
+    },
+  );
 });
 
 describe('with no fallback', () => {
