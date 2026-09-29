@@ -75,6 +75,27 @@ export function decodeSlack(text: string): string {
     .replaceAll('&amp;', '&');
 }
 
+/** The parts of a `rich_text` element the replay reads. */
+export interface RichElement {
+  type: string;
+  text?: string;
+  url?: string;
+  name?: string;
+  range?: string;
+  user_id?: string;
+  channel_id?: string;
+  usergroup_id?: string;
+  /** A text's `{ bold, italic, strike, code }`, or a list's `bullet` or `ordered`. */
+  style?: unknown;
+  elements?: RichElement[];
+}
+
+export interface SlackBlock {
+  type: string;
+  text?: unknown;
+  elements?: RichElement[];
+}
+
 export interface SlackMessage {
   ts: string;
   text?: string;
@@ -83,6 +104,82 @@ export interface SlackMessage {
   username?: string;
   subtype?: string;
   thread_ts?: string;
+  blocks?: SlackBlock[];
+}
+
+/**
+ * What mate said in a message: Slack folds a plan's title, and every timeline
+ * card's, into `text`, so the answer is read from the blocks that hold it.
+ */
+export function spokenSlack(message: SlackMessage): string {
+  const blocks = message.blocks ?? [];
+  if (blocks.length === 0) return decodeSlack(message.text ?? '');
+  return blocks.map(blockText).join('');
+}
+
+function blockText(block: SlackBlock): string {
+  if (block.type === 'markdown') {
+    return typeof block.text === 'string' ? block.text : '';
+  }
+  if (block.type !== 'rich_text') return '';
+  return (block.elements ?? []).map(richText).join('');
+}
+
+function richText(element: RichElement): string {
+  const inner = element.elements ?? [];
+  const flat = () => inner.map(inline).join('');
+  switch (element.type) {
+    case 'rich_text_section':
+      return flat();
+    case 'rich_text_list':
+      return `${inner
+        .map(
+          (item, i) =>
+            `${element.style === 'ordered' ? `${i + 1}.` : '-'} ${richText(item)}`,
+        )
+        .join('\n')}\n`;
+    case 'rich_text_preformatted':
+      return `\`\`\`\n${flat()}\n\`\`\`\n`;
+    case 'rich_text_quote':
+      return `> ${flat()}\n`;
+    default:
+      return inline(element);
+  }
+}
+
+// A mention reads back in the escape a human's message carries.
+function inline(element: RichElement): string {
+  switch (element.type) {
+    case 'text':
+      return styled(element.text ?? '', element.style);
+    case 'link':
+      return element.text
+        ? `[${element.text}](${element.url})`
+        : (element.url ?? '');
+    case 'user':
+      return `<@${element.user_id}>`;
+    case 'channel':
+      return `<#${element.channel_id}>`;
+    case 'usergroup':
+      return `<!subteam^${element.usergroup_id}>`;
+    case 'broadcast':
+      return `<!${element.range}>`;
+    case 'emoji':
+      return `:${element.name}:`;
+    default:
+      return element.text ?? '';
+  }
+}
+
+// Back to the markdown mate streamed, so `*stopped*` still reads as a notice.
+function styled(text: string, style: unknown): string {
+  const on = (style ?? {}) as Record<string, unknown>;
+  let out = text;
+  if (on.code) out = `\`${out}\``;
+  if (on.italic) out = `*${out}*`;
+  if (on.bold) out = `**${out}**`;
+  if (on.strike) out = `~~${out}~~`;
+  return out;
 }
 
 // Slack merges `task_update` chunks by `id` into one card it updates in place.
@@ -634,7 +731,10 @@ export function slackSurface(deps: SlackSurfaceDeps): Surface {
           authorId: speaker(message),
           authorName: await author(message),
           authorIsBot: Boolean(message.bot_id),
-          content: decodeSlack(message.text ?? ''),
+          content:
+            message.bot_id === deps.appBotId
+              ? spokenSlack(message)
+              : decodeSlack(message.text ?? ''),
         });
       }
       return read;

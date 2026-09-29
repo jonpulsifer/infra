@@ -7,6 +7,7 @@ import {
   decodeSlack,
   escapeSlack,
   PROCESSING_RENEW_MS,
+  type SlackBlock,
   SlackCanvas,
   SlackError,
   slackEvent,
@@ -19,6 +20,7 @@ import { SocketMode } from '../src/socket.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import type { Inbound, ThreadRef } from '../src/surface.ts';
 import { Threads } from '../src/threads.ts';
+import { replayPreamble } from '../src/transcript.ts';
 import { FakeSlack, FakeSocket } from './fakesurface.ts';
 import {
   FakeClock,
@@ -719,6 +721,131 @@ describe('the surface', () => {
     expect(api.only('session')).toEqual([
       { call: 'session', threadTs: TS, status: 'active' },
     ]);
+  });
+
+  test("mate's own words are read from the blocks, not the text Slack folds its plan into", async () => {
+    const plan = {
+      type: 'plan',
+      title: 'Ran 2 commands in 1 step · 4s',
+      tasks: [{ task_id: 'phase-1', title: 'Looking.', status: 'complete' }],
+    } as SlackBlock;
+    const card = (id: string, title: string) =>
+      ({
+        type: 'task_card',
+        task_id: id,
+        title,
+        status: 'complete',
+      }) as SlackBlock;
+    api.thread.push(
+      {
+        ts: '1.000001',
+        bot_id: BOT,
+        text: 'Ran 2 commands in 1 step · 4s Here is the *fix* for <@U1>:\n• one',
+        blocks: [
+          plan,
+          {
+            type: 'rich_text',
+            elements: [
+              {
+                type: 'rich_text_section',
+                elements: [
+                  { type: 'text', text: 'Here is the ' },
+                  { type: 'text', text: 'fix', style: { bold: true } },
+                  { type: 'text', text: ' for ' },
+                  { type: 'user', user_id: OWNER },
+                  { type: 'text', text: ':\n' },
+                ],
+              },
+              {
+                type: 'rich_text_list',
+                style: 'bullet',
+                elements: [
+                  {
+                    type: 'rich_text_section',
+                    elements: [{ type: 'text', text: 'one' }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ts: '2.000002',
+        bot_id: BOT,
+        text: 'Let me look. $ git status Done &amp; dusted.',
+        blocks: [
+          card('say-1', 'Let me look.'),
+          card('toolu_01', '$ git status'),
+          {
+            type: 'rich_text',
+            elements: [
+              {
+                type: 'rich_text_section',
+                elements: [{ type: 'text', text: 'Done & dusted.' }],
+              },
+            ],
+          },
+        ],
+      },
+      { ts: '3.000003', bot_id: BOT, text: 'a plain &lt;line&gt;' },
+      {
+        ts: '4.000004',
+        user: OWNER,
+        text: `thanks &lt;3 <@${ME}>`,
+        blocks: [{ type: 'rich_text', elements: [] }],
+      },
+    );
+    const page = await surface().history(THREAD, { limit: 10 });
+    expect(page.map((m) => m.content)).toEqual([
+      `thanks <3 <@${ME}>`,
+      'a plain <line>',
+      'Done & dusted.',
+      `Here is the **fix** for <@${OWNER}>:\n- one\n`,
+    ]);
+  });
+
+  test('the replay hands a fresh session the answers, never a plan title', async () => {
+    api.names.set(OWNER, 'jawn');
+    const plan = (title: string) => ({ type: 'plan', title }) as SlackBlock;
+    const said = (text: string, style?: object): SlackBlock => ({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text, style }],
+        },
+      ],
+    });
+    const failed = '⚠️ Failed · 1 command in 1 step · 3s';
+    const ran = 'Ran 1 command in 1 step · 2s';
+    api.thread.push(
+      { ts: '1.000001', user: OWNER, text: 'fix it' },
+      { ts: '2.000002', bot_id: BOT, text: failed, blocks: [plan(failed)] },
+      { ts: '3.000003', user: OWNER, text: 'again' },
+      {
+        ts: '4.000004',
+        bot_id: BOT,
+        text: `${ran} Fixed.`,
+        blocks: [plan(ran), said('Fixed.')],
+      },
+      {
+        ts: '5.000005',
+        bot_id: BOT,
+        text: `${ran} _stopped_`,
+        blocks: [plan(ran), said('stopped', { italic: true })],
+      },
+    );
+    const preamble = await replayPreamble(surface(), THREAD, {
+      me: ME,
+      skip: [],
+    });
+    // A plan alone is no answer, and the stop mark is still a notice.
+    expect(preamble).toContain(
+      '\n\njawn: fix it\njawn: again\nyou: Fixed.\n\n',
+    );
+    expect(preamble).not.toContain('Ran ');
+    expect(preamble).not.toContain('stopped');
   });
 
   test("mate's own answer is mate's, whether or not Slack put a user on it", async () => {
