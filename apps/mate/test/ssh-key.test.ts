@@ -12,6 +12,28 @@ function ed25519() {
   return { pkcs8, pub: Buffer.from(x, 'base64url') };
 }
 
+/** The v2 PKCS#8 form 1Password exports: version 1 and a [1] public key. */
+function v2(pkcs8: string, pub: Buffer): string {
+  const der = Buffer.from(
+    pkcs8
+      .split('\n')
+      .filter((line) => line && !line.startsWith('-----'))
+      .join(''),
+    'base64',
+  );
+  const fields = Buffer.concat([
+    Buffer.from([0x02, 0x01, 0x01]),
+    der.subarray(5),
+    Buffer.from([0x81, 0x21, 0x00]),
+    pub,
+  ]);
+  const body = Buffer.concat([Buffer.from([0x30, fields.length]), fields])
+    .toString('base64')
+    .match(/.{1,64}/g)
+    ?.join('\n');
+  return `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`;
+}
+
 function field(bytes: Buffer): Buffer {
   const length = Buffer.alloc(4);
   length.writeUInt32BE(bytes.length);
@@ -81,6 +103,31 @@ describe('opensshKey', () => {
       expect(derived.stdout.toString().trim()).toBe(authorizedKey(pub));
     },
   );
+
+  test('reads the v2 PKCS#8 form that carries the public key', () => {
+    const { pkcs8, pub } = ed25519();
+    const { secret } = parse(opensshKey(v2(pkcs8, pub)));
+    expect(secret.includes(pub)).toBe(true);
+  });
+
+  test.if(Boolean(Bun.which('ssh-keygen')))(
+    'writes a v2 key OpenSSH loads',
+    () => {
+      const { pkcs8, pub } = ed25519();
+      const dir = mkdtempSync(join(tmpdir(), 'ssh-key-'));
+      const path = join(dir, 'id_ed25519');
+      writeFileSync(path, opensshKey(v2(pkcs8, pub)), { mode: 0o600 });
+      const derived = Bun.spawnSync(['ssh-keygen', '-y', '-f', path]);
+      expect(derived.stderr.toString()).toBe('');
+      expect(derived.stdout.toString().trim()).toBe(authorizedKey(pub));
+    },
+  );
+
+  test('refuses a v2 key whose public key its seed does not derive', () => {
+    const { pkcs8 } = ed25519();
+    const other = ed25519().pub;
+    expect(() => opensshKey(v2(pkcs8, other))).toThrow('does not derive');
+  });
 
   test('passes an OpenSSH key through with one trailing newline', () => {
     const key =
