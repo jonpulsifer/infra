@@ -42,7 +42,7 @@ A breaker that all threads share keeps requests off ChatGPT while it is down:
 
 After the wait, one request tries ChatGPT over SSE, and the other requests stay on the fallback. The breaker is in memory, so a restarted mate tries ChatGPT first. While the fallback answers, the turn's status line starts with ↪️ and names the reason. The first turn of a `limit`, `auth`, `unconfigured` or `rejected` outage ends with one notice.
 
-A request leaves out the other model's reasoning where it sits beside an answer or a tool call. ChatGPT's requests count at $0 in `mate_turn_cost_usd`, so the metric is the fallback's list price. `mate_model_routes_total` counts each request by route and reason.
+A request leaves out the other model's reasoning where it sits beside an answer or a tool call. ChatGPT's requests count at $0 in `mate_turn_cost_usd`, so the metric is the fallback's list price. `mate_model_routes_total` counts each request by route and reason, and `mate_model_primary_failures_total` counts each request that ChatGPT itself failed, which `MateModelPrimaryFailing` reads.
 
 ## Credentials
 

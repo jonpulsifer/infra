@@ -33,7 +33,10 @@ export interface ModelSetupOptions {
   readonly credentials?: CredentialStore;
   readonly log: Log;
   readonly clock?: Clock;
-  readonly metrics?: Pick<Instruments, 'modelRouted' | 'primaryUp'>;
+  readonly metrics?: Pick<
+    Instruments,
+    'modelRouted' | 'primaryFailed' | 'primaryUp'
+  >;
 }
 
 export interface ModelSetup {

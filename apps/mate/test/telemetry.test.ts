@@ -101,6 +101,7 @@ describe('the SDK', () => {
         expiresAt: Date.now() + 3_600_000,
       });
       getInstruments().modelRouted('fallback', 'limit');
+      getInstruments().primaryFailed('transient');
       getInstruments().primaryUp(false);
       // The exit flush carries the last counters out before the 15 s export interval.
       await stopTelemetry();
@@ -122,6 +123,7 @@ describe('the SDK', () => {
     expect(sent).toContain('mate_chatgpt_token_expiry_seconds');
     // The names MateModelPrimaryFailing and the dashboard read.
     expect(sent).toContain('mate_model_routes_total');
+    expect(sent).toContain('mate_model_primary_failures_total');
     expect(sent).toContain('mate_model_primary_up');
     expect(sent).not.toContain('mate_attach_duration_milliseconds');
     // The resource attribute the collector turns into the `exported_job` label.

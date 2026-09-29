@@ -150,7 +150,10 @@ export interface RouteOptions {
   readonly fallback: Fallback | null;
   readonly clock: Clock;
   readonly log: Log;
-  readonly metrics?: Pick<Instruments, 'modelRouted' | 'primaryUp'>;
+  readonly metrics?: Pick<
+    Instruments,
+    'modelRouted' | 'primaryFailed' | 'primaryUp'
+  >;
 }
 
 interface Outage {
@@ -564,6 +567,7 @@ class Router implements ModelRouter {
     };
     const refused = await this.probe();
     if (refused) {
+      this.options.metrics?.primaryFailed(refused);
       if (!fallback) return this.forward(out, options, refused);
       this.fail(refused, attempt);
       return this.toFallback(out, call, context, options, simple, refused);
@@ -646,6 +650,7 @@ class Router implements ModelRouter {
     }
     const status = heard.response?.status ?? null;
     const reason = classify(message, status);
+    this.options.metrics?.primaryFailed(reason);
     this.options.log.warn('ChatGPT failed before answering', {
       reason,
       status,
@@ -765,6 +770,7 @@ class Router implements ModelRouter {
     if (message.stopReason === 'aborted') return;
     const reason = classify(message, heard.response?.status ?? null);
     if (reason !== 'limit' && reason !== 'transient') return;
+    this.options.metrics?.primaryFailed(reason);
     // Its first content ended any trial it was.
     this.fail(
       reason,

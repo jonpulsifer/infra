@@ -15,7 +15,7 @@ import type {
   MintSample,
   TurnSandboxSource,
 } from './lease.ts';
-import type { Route, RouteReason } from './route.ts';
+import type { Failure, Route, RouteReason } from './route.ts';
 import type { StopReason } from './sandbox.ts';
 
 /** `brain-failed`: the brain or its store threw, so the harness never reported an end. */
@@ -72,6 +72,8 @@ export interface Instruments extends HandsInstruments, McpInstruments {
   chatgpt(state: ChatgptSignIn | null): void;
   /** One per request for the primary model; `reason` is null on the primary. */
   modelRouted(route: Route, reason: RouteReason | null): void;
+  /** One per request ChatGPT failed, not the ones the breaker sends past it. */
+  primaryFailed(reason: Failure): void;
   /** `null` reports nothing: no fallback, so nothing routes. */
   primaryUp(up: boolean | null): void;
 }
@@ -196,6 +198,9 @@ export function getInstruments(): Instruments {
   const storeFailures = meter.createCounter('mate_store_failures_total');
   const mcpCalls = meter.createCounter('mate_mcp_calls_total');
   const routes = meter.createCounter('mate_model_routes_total');
+  const primaryFailures = meter.createCounter(
+    'mate_model_primary_failures_total',
+  );
   const firstToken = meter.createHistogram(
     'mate_turn_first_token_milliseconds',
     { unit: 'ms' },
@@ -292,6 +297,7 @@ export function getInstruments(): Instruments {
     },
     modelRouted: (route, reason) =>
       routes.add(1, { route, reason: reason ?? 'none' }),
+    primaryFailed: (reason) => primaryFailures.add(1, { reason }),
     primaryUp: (up) => {
       primary = up;
     },
@@ -332,6 +338,7 @@ export function lazyInstruments(): Instruments {
     storeFailed: (op) => getInstruments().storeFailed(op),
     chatgpt: (state) => getInstruments().chatgpt(state),
     modelRouted: (route, reason) => getInstruments().modelRouted(route, reason),
+    primaryFailed: (reason) => getInstruments().primaryFailed(reason),
     primaryUp: (up) => getInstruments().primaryUp(up),
   };
 }

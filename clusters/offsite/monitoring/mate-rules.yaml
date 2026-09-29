@@ -201,23 +201,31 @@ spec:
             message: "mate's ChatGPT token is not refreshing"
             description: "mate's ChatGPT access token has less than a day left. mate refreshes it once two days are left, so every refresh since then has failed without OpenAI refusing it: auth.openai.com out of reach, which is mate's CiliumNetworkPolicy or DNS, or mate-db failing the write. Read why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. Past its expiry, mate's ChatGPT requests fail until a refresh gets through. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
 
-        # Requests the fallback answered because ChatGPT failed for something
-        # other than its quota or the sign-in. A blip keeps ChatGPT off for a
-        # minute, so six in 30m is more than one. The offset arm as above.
+        # ChatGPT's own failures, not the requests the breaker sends past it
+        # while it waits. A blip is one per running turn, then a trial a minute
+        # on, so six transient or store failures in 30m is an outage. A refusal
+        # keeps ChatGPT off for 15m or more, so one is enough. The offset arms
+        # as above.
         - alert: MateModelPrimaryFailing
           expr: |
-            sum(increase(mate_model_routes_total{route="fallback",reason=~"transient|rejected|store"}[30m])) > 5
+            sum(increase(mate_model_primary_failures_total{reason=~"transient|store"}[30m])) > 5
+            or sum(increase(mate_model_primary_failures_total{reason="rejected"}[30m])) > 0
             or sum(
-              mate_model_routes_total{route="fallback",reason=~"transient|rejected|store"}
+              mate_model_primary_failures_total{reason=~"transient|store"}
               unless ignoring(pod, instance)
-              mate_model_routes_total{route="fallback",reason=~"transient|rejected|store"} offset 30m
+              mate_model_primary_failures_total{reason=~"transient|store"} offset 30m
             ) > 5
+            or sum(
+              mate_model_primary_failures_total{reason="rejected"}
+              unless ignoring(pod, instance)
+              mate_model_primary_failures_total{reason="rejected"} offset 30m
+            ) > 0
           for: 0m
           labels:
             severity: warning
           annotations:
             message: "ChatGPT is failing mate's requests"
-            description: "More than five of mate's model requests in the last thirty minutes went to MATE_FALLBACK_MODEL because ChatGPT failed for a reason other than its usage limit or the sign-in, so turns run on the slower model. `reason` on `mate_model_routes_total` says which: `transient` is chatgpt.com out of reach, a 5xx or a timeout, which is mate's CiliumNetworkPolicy, DNS or OpenAI; `rejected` is ChatGPT refusing the request, such as a model the plan lacks or instructions it will not take; `store` is mate-db, which MateStoreFailing also watches. Mention mate with `chatgpt status` for the last failure, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate | grep 'ChatGPT failed'`. `chatgpt pause` keeps every turn on the fallback while you look. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
+            description: "ChatGPT failed mate's model requests in the last thirty minutes for a reason other than its usage limit or the sign-in: more than five `transient` or `store` failures, or a `rejected` one. MATE_FALLBACK_MODEL answers each of those requests, and the breaker then keeps ChatGPT off for a minute after a `transient` or `store` failure and fifteen minutes or more after a `rejected` one, so turns run on the slower model. `reason` on `mate_model_primary_failures_total` says which: `transient` is chatgpt.com out of reach, a 5xx or a timeout, which is mate's CiliumNetworkPolicy, DNS or OpenAI; `rejected` is ChatGPT refusing the request, such as a model the plan lacks or instructions it will not take; `store` is mate-db, which MateStoreFailing also watches. Mention mate with `chatgpt status` for the last failure, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate | grep 'ChatGPT failed'`. `chatgpt pause` keeps every turn on the fallback while you look. The runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ has the checks."
 
         # One failed fold is a bearer that may exist only in a sandbox the quiet
         # teardown deletes, so the first counts. `result!="ok"` is the contract.

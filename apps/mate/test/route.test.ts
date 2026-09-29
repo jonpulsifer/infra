@@ -971,6 +971,7 @@ describe('a failure before any content', () => {
     expect(answer.stopReason).toBe('aborted');
     expect(made.go.calls).toEqual([]);
     expect(made.router.status().now).toEqual({ route: 'primary' });
+    expect(made.metrics.failures).toEqual([]);
   });
 
   test('a Stop during the trial lets the next request try instead', async () => {
@@ -1001,6 +1002,7 @@ describe('a failure before any content', () => {
     expect(answer.errorMessage).toContain('exceeds the context window');
     expect(made.go.calls).toEqual([]);
     expect(made.router.status().now).toEqual({ route: 'primary' });
+    expect(made.metrics.failures).toEqual([]);
   });
 });
 
@@ -1147,6 +1149,48 @@ describe('a request admitted before the breaker changed', () => {
     expect((await b).provider).toBe('opencode-go');
     expect(made.router.status().now).toEqual({ route: 'primary' });
     expect((await ask(made)).provider).toBe(CHATGPT_PROVIDER);
+  });
+});
+
+describe('the failure count', () => {
+  // MateModelPrimaryFailing reads it, so a blip in a busy minute is one.
+  test('one blip counts one ChatGPT failure, however many requests the breaker then sends past it', async () => {
+    const made = await signedIn();
+    made.codex.script({ fail: 'WebSocket closed 1006', started: true });
+    made.go.script(
+      ...Array.from({ length: 6 }, (_, i): Play => ({ text: `qwen ${i}` })),
+    );
+    for (let i = 0; i < 6; i += 1) {
+      await ask(made);
+      await made.clock.advance(8_000);
+    }
+    expect(made.codex.calls).toHaveLength(1);
+    expect(
+      made.metrics.routes.filter((one) => one.route === 'fallback'),
+    ).toHaveLength(6);
+    expect(made.metrics.failures).toEqual(['transient']);
+  });
+
+  test('counts each request ChatGPT fails, after content, on a trial and at the sign-in, and nothing else', async () => {
+    const made = await signedIn();
+    made.codex.script(
+      { text: 'half an', failAfter: 'WebSocket closed 1006' },
+      { fail: 'model is not supported', status: 400 },
+    );
+    made.go.script({ text: '1' }, { text: '2' }, { text: '3' });
+    await ask(made);
+    expect(made.metrics.failures).toEqual(['transient']);
+    await made.clock.advance(TRANSIENT_MS);
+    await ask(made);
+    expect(made.metrics.failures).toEqual(['transient', 'rejected']);
+    made.store.down = true;
+    await made.clock.advance(REJECTED_FIRST_MS);
+    await ask(made);
+    expect(made.metrics.failures).toEqual(['transient', 'rejected', 'store']);
+    made.router.authBroken();
+    made.router.credentialChanged(false);
+    made.router.pause(made.clock.now() + MINUTE_MS);
+    expect(made.metrics.failures).toHaveLength(3);
   });
 });
 

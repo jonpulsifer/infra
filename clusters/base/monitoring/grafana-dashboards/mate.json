@@ -1754,8 +1754,8 @@
     {
       "id": 31,
       "type": "timeseries",
-      "title": "Model requests per hour, by route and reason",
-      "description": "Each request for MATE_MODEL, by where it went. primary is ChatGPT answering; fallback is qwen3.8-max answering for the reason named: limit, auth, unconfigured, transient, rejected, store or paused. MateModelPrimaryFailing counts fallback requests for transient, rejected and store.",
+      "title": "Model requests and ChatGPT failures per hour",
+      "description": "Each request for MATE_MODEL, by where it went. primary is ChatGPT answering; fallback is qwen3.8-max answering for the reason named: limit, auth, unconfigured, transient, rejected, store or paused. failed counts the requests ChatGPT itself failed, by reason, without the ones the breaker then sent past it. MateModelPrimaryFailing reads failed transient, rejected and store.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1816,6 +1816,15 @@
           "expr": "sum by (route, reason) (rate(mate_model_routes_total[1h])) * 3600 > 0",
           "refId": "A",
           "legendFormat": "{{route}} {{reason}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(mate_model_primary_failures_total[1h])) * 3600 > 0",
+          "refId": "B",
+          "legendFormat": "failed {{reason}}"
         }
       ]
     },
