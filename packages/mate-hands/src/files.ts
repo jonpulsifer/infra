@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import {
+  chmod,
   type FileHandle,
   lstat,
   mkdir,
@@ -22,6 +23,7 @@ import { basename, dirname, join } from 'node:path';
 import {
   type FileErrorCode,
   type FileInfo,
+  type FileWrite,
   fileError,
   HandsError,
   type Limits,
@@ -31,10 +33,24 @@ import {
 
 const CHUNK_BYTES = 64 * 1024;
 
-const { O_APPEND, O_CREAT, O_NOCTTY, O_NONBLOCK, O_RDONLY, O_WRONLY } =
-  constants;
+const {
+  O_APPEND,
+  O_CREAT,
+  O_EXCL,
+  O_NOCTTY,
+  O_NOFOLLOW,
+  O_NONBLOCK,
+  O_RDONLY,
+  O_WRONLY,
+} = constants;
 const READ = O_RDONLY | O_NONBLOCK | O_NOCTTY;
 const WRITE = O_WRONLY | O_CREAT | O_NONBLOCK | O_NOCTTY;
+const TEMP = O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW;
+
+/** A file for `writeFiles`, its path resolved and its content decoded. */
+export type ResolvedWrite = Omit<FileWrite, 'content' | 'encoding'> & {
+  content: string | Buffer;
+};
 
 const ERRNO = new Map<string | undefined, FileErrorCode>([
   ['ABORT_ERR', 'aborted'],
@@ -105,6 +121,36 @@ async function openRegular(path: string, flags: number): Promise<FileHandle> {
     return handle;
   } catch (error) {
     await handle.close().catch(() => {});
+    throw error;
+  }
+}
+
+/** `mkdir -p`, giving each directory it makes `mode` whatever the umask. */
+async function makeParents(dir: string, mode: number): Promise<void> {
+  const first = await mkdir(dir, { recursive: true, mode });
+  if (first === undefined) return;
+  // mkdir's mode passes through the umask, and chmod's does not.
+  for (let at = dir; at.length >= first.length; at = dirname(at)) {
+    await chmod(at, mode);
+    if (at === dirname(at)) return;
+  }
+}
+
+/** Writes a temp file beside `path` and renames it over `path`. */
+async function replace(file: ResolvedWrite, dirMode: number): Promise<void> {
+  const dir = dirname(file.path);
+  await makeParents(dir, dirMode);
+  const temp = join(dir, `.mate-hands-${randomUUID()}`);
+  const handle = await open(temp, TEMP, file.mode);
+  try {
+    await handle.chmod(file.mode);
+    await handle.writeFile(file.content);
+    await handle.sync();
+    await handle.close();
+    await rename(temp, file.path);
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await rm(temp, { force: true });
     throw error;
   }
 }
@@ -257,6 +303,30 @@ export class Files {
     }
     await handle.close();
     return null;
+  }
+
+  async writeFiles(
+    files: ResolvedWrite[],
+    dirMode: number,
+    signal: AbortSignal,
+  ): Promise<{ written: number }> {
+    let written = 0;
+    for (const file of files) {
+      aborted(signal, file.path);
+      try {
+        await replace(file, dirMode);
+      } catch (error) {
+        const { detail } = toFileError(error);
+        const code = detail.kind === 'file' ? detail.code : 'unknown';
+        throw fileError(
+          code,
+          `could not write ${file.path}: ${detail.message}`,
+          file.path,
+        );
+      }
+      written++;
+    }
+    return { written };
   }
 
   async rename(from: string, to: string): Promise<null> {

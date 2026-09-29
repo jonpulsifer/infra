@@ -13,8 +13,8 @@
 import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PROTOCOL_VERSION = 1;
-export const HANDS_VERSION = '0.1.0';
+export const PROTOCOL_VERSION = 2;
+export const HANDS_VERSION = '0.2.0';
 
 export type FileErrorCode =
   | 'aborted'
@@ -53,12 +53,27 @@ export type ProtocolErrorCode =
 export type WireError =
   | { kind: 'file'; code: FileErrorCode; message: string; path?: string }
   | { kind: 'exec'; code: ExecErrorCode; message: string }
-  | { kind: 'protocol'; code: ProtocolErrorCode; message: string };
+  | {
+      kind: 'protocol';
+      code: ProtocolErrorCode;
+      message: string;
+      /** On `superseded`, the epoch of the daemon that owns the sandbox. */
+      epoch?: number;
+    };
 
 export class HandsError extends Error {
   override readonly name = 'HandsError';
   constructor(readonly detail: WireError) {
     super(detail.message);
+  }
+
+  /** The owner's epoch on a `superseded` error, for a retry past it. */
+  get ownerEpoch(): number | undefined {
+    const { detail } = this;
+    if (detail.kind !== 'protocol' || detail.code !== 'superseded') {
+      return undefined;
+    }
+    return Number.isSafeInteger(detail.epoch) ? detail.epoch : undefined;
   }
 }
 
@@ -84,6 +99,15 @@ export function protocolError(
   message: string,
 ): HandsError {
   return new HandsError({ kind: 'protocol', code, message });
+}
+
+export function supersededBy(epoch: number): HandsError {
+  return new HandsError({
+    kind: 'protocol',
+    code: 'superseded',
+    message: `a daemon with epoch ${epoch} owns this sandbox`,
+    epoch,
+  });
 }
 
 export type FileKind = 'file' | 'directory' | 'symlink';
@@ -202,6 +226,11 @@ type WriteParams = {
   encoding?: 'utf8' | 'base64';
 };
 
+export interface FileWrite extends WriteParams {
+  /** Permission bits, which the daemon's umask does not narrow. */
+  mode: number;
+}
+
 export interface Methods {
   hello: { params: NoParams; result: Hello };
   ping: { params: NoParams; result: null };
@@ -214,6 +243,19 @@ export interface Methods {
   readBinaryFile: { params: PathParams; result: string };
   writeFile: { params: WriteParams; result: null };
   appendFile: { params: WriteParams; result: null };
+  /**
+   * Replaces each file through a temp file and a rename, so a symlink at a
+   * path is replaced, not followed. A failure names its path; the files
+   * before it stay written.
+   */
+  writeFiles: {
+    params: {
+      files: FileWrite[];
+      /** The mode of each missing parent it makes. Defaults to 0o700. */
+      dirMode?: number;
+    };
+    result: { written: number };
+  };
   renameFile: { params: { from: string; to: string }; result: null };
   fileInfo: { params: PathParams; result: FileInfo };
   listDir: { params: PathParams; result: FileInfo[] };

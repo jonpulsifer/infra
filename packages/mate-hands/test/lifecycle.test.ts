@@ -143,6 +143,7 @@ describe('epochs', () => {
         kind: 'protocol',
         code: 'superseded',
         message: expect.stringContaining('epoch 9'),
+        epoch: 9,
       });
       expect(await stale.exited).toBe(2);
     }

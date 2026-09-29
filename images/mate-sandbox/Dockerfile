@@ -226,7 +226,7 @@ RUN set -eux; \
     d="$(mktemp -d)"; \
     printf '%s\n' '{"id":1,"method":"hello","params":{}}' \
       | mate-hands --epoch 1 --cwd "$d" --state-dir "$d/state" >"$d/out"; \
-    grep -q '"protocol":1' "$d/out"; \
+    grep -q '"protocol":2' "$d/out"; \
     rm -rf "$d"
 
 # sleep is a keepalive: mate execs each session. tini reaps what those sessions

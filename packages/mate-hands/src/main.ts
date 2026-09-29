@@ -11,7 +11,7 @@ import { HANDS_VERSION } from './protocol.ts';
 
 const USAGE =
   'usage: mate-hands --epoch N [--cwd DIR] [--state-dir DIR] [--watchdog-ms MS] [--max-read-bytes N] [--shell PATH]';
-const DEFAULT_WATCHDOG_MS = 60_000;
+const DEFAULT_WATCHDOG_MS = 30_000;
 const DEFAULT_MAX_READ_BYTES = 8 * 1024 * 1024;
 
 function line(level: string, msg: string, fields?: Fields): void {

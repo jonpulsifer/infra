@@ -6,7 +6,7 @@
  * stream has no half-close, so a client that crashes may never send EOF.
  */
 import { runExec } from './exec.ts';
-import { Files, toFileError } from './files.ts';
+import { Files, type ResolvedWrite, toFileError } from './files.ts';
 import {
   claim,
   type DaemonRecord,
@@ -32,6 +32,7 @@ import {
   type Result,
   resolvePath,
   type ShellOutputUpdate,
+  supersededBy,
 } from './protocol.ts';
 
 export type Fields = Record<string, unknown>;
@@ -65,6 +66,7 @@ const MIB = 1024 * 1024;
 // Updates wait while this much output is unwritten; answers never do.
 const BACKLOG_BYTES = 4 * MIB;
 const DRAIN_MS = 2_000;
+const DIR_MODE = 0o700;
 
 /** Limits for a read cap; a request fits a whole capped file in base64. */
 export function limitsFor(maxReadBytes: number): Limits {
@@ -243,14 +245,7 @@ export class Daemon {
 
   private request(id: number, method: string, params: unknown): void {
     if (this.superseded) {
-      const by = this.superseded.epoch;
-      this.fail(
-        id,
-        protocolError(
-          'superseded',
-          `a daemon with epoch ${by} owns this sandbox`,
-        ),
-      );
+      this.fail(id, supersededBy(this.superseded.epoch));
       void this.stop('superseded', EXIT.superseded);
       return;
     }
@@ -306,6 +301,19 @@ export class Daemon {
     return resolvePath(text(params, key), cwd, home);
   }
 
+  /** Every file is checked before the first is written. */
+  private writes(params: Params): ResolvedWrite[] {
+    const files = params.files;
+    if (!Array.isArray(files) || !files.every(isObject)) {
+      throw bad('files must be a list of objects');
+    }
+    return files.map((file) => ({
+      path: this.path(file),
+      content: content(file),
+      mode: required(mode(file, 'mode'), 'mode'),
+    }));
+  }
+
   private hello(): Hello {
     const { epoch, cwd, home, tmp, watchdogMs, limits } = this.options;
     return {
@@ -346,6 +354,12 @@ export class Daemon {
       this.files.write(this.path(p), content(p), false, signal),
     appendFile: (p, signal) =>
       this.files.write(this.path(p), content(p), true, signal),
+    writeFiles: (p, signal) =>
+      this.files.writeFiles(
+        this.writes(p),
+        mode(p, 'dirMode') ?? DIR_MODE,
+        signal,
+      ),
     renameFile: (p) =>
       this.files.rename(this.path(p, 'from'), this.path(p, 'to')),
     fileInfo: (p) => this.files.fileInfo(this.path(p)),
@@ -414,9 +428,20 @@ function integer(p: Params, key: string): number | undefined {
   return value as number;
 }
 
-function requiredInteger(p: Params, key: string): number {
-  const value = integer(p, key);
+function required<T>(value: T | undefined, key: string): T {
   if (value === undefined) throw bad(`${key} is required`);
+  return value;
+}
+
+function requiredInteger(p: Params, key: string): number {
+  return required(integer(p, key), key);
+}
+
+function mode(p: Params, key: string): number | undefined {
+  const value = integer(p, key);
+  if (value !== undefined && (value < 0 || value > 0o777)) {
+    throw bad(`${key} must be permission bits, 0 to 0o777`);
+  }
   return value;
 }
 
