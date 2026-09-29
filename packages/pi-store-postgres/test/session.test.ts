@@ -4,7 +4,6 @@ import {
   insertEntry,
   setValue,
   value,
-  type Write,
 } from '@earendil-works/pi-agent-core';
 import { SQL } from 'bun';
 import {
@@ -12,6 +11,7 @@ import {
   migrate,
   openSession,
   POSTGRES_STORAGE_VERSION,
+  postgresStorage,
   sessionExists,
 } from '../src/index.ts';
 import {
@@ -112,16 +112,13 @@ describe('the store', () => {
   test('lets one writer at a time assign seqs across Storage instances', async () => {
     const { sql } = database();
     const id = sessionId('writers');
-    const first = await storageFor(sql, id);
-    const second = await storageFor(sql, id);
-    const writes = (label: string, index: number): Write[] => [
-      setValue(value('test.value', `${label}-${index}`), index),
-    ];
+    await storageFor(sql, id);
+    const writers = Array.from({ length: 20 }, () => postgresStorage(sql, id));
 
     const results = await Promise.all(
-      Array.from({ length: 20 }, (_, index) =>
-        (index % 2 === 0 ? first : second).commit(
-          writes(index % 2 === 0 ? 'first' : 'second', index),
+      writers.map((writer, index) =>
+        writer.commit(
+          [setValue(value('test.value', `writer-${index}`), index)],
           ctx,
         ),
       ),
@@ -129,8 +126,7 @@ describe('the store', () => {
 
     const seqs = results.flatMap((result) => result.seqs).sort((a, b) => a - b);
     expect(seqs).toEqual(Array.from({ length: 20 }, (_, index) => index + 1));
-    await first.close(ctx);
-    await second.close(ctx);
+    await Promise.all(writers.map((writer) => writer.close(ctx)));
   });
 
   test('refuses a seq a JS number cannot hold', async () => {

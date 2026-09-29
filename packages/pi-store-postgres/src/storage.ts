@@ -45,20 +45,33 @@ import {
 import { addUsage } from './usage.ts';
 
 /**
- * A commit failed after an earlier attempt of it may have committed. The session
- * is consistent either way; reopen it to learn which.
+ * A commit this Storage made or tried may have been lost, or may have landed
+ * without it learning so: the session is not at the seq the Storage expects,
+ * or the retries ran out while an attempt may have committed. The session is
+ * consistent either way; reopen it to learn which.
  */
 export class CommitOutcomeUnknownError extends Error {
   readonly sessionId: string;
+  /** The seq the session was at when this Storage last knew it. */
   readonly firstSeq: number;
+  /** Where the session was instead, when a commit read it. */
+  readonly foundSeq: number | undefined;
 
-  constructor(sessionId: string, firstSeq: number) {
+  constructor(
+    sessionId: string,
+    firstSeq: number,
+    found: { seq: number } | { cause: unknown },
+  ) {
     super(
-      `pi-store: session ${sessionId} moved past seq ${firstSeq} after a failed commit attempt claimed it`,
+      'seq' in found
+        ? `pi-store: session ${sessionId} is at seq ${found.seq}, not seq ${firstSeq} where this storage left it`
+        : `pi-store: session ${sessionId} ran out of retries after a commit at seq ${firstSeq} may have committed`,
+      'cause' in found ? { cause: found.cause } : undefined,
     );
     this.name = 'CommitOutcomeUnknownError';
     this.sessionId = sessionId;
     this.firstSeq = firstSeq;
+    this.foundSeq = 'seq' in found ? found.seq : undefined;
   }
 }
 
@@ -68,8 +81,11 @@ interface SessionRow {
   usage_payload: string;
 }
 
-/** What one attempt learned before it failed. */
-interface Attempt {
+/**
+ * The first seq of an attempt that failed once it sent COMMIT, until a later
+ * attempt finds next_seq still there.
+ */
+interface Doubt {
   firstSeq?: number;
 }
 
@@ -83,6 +99,13 @@ class PostgresStorage implements Storage {
   private tail: Promise<unknown> = Promise.resolve();
   private state: 'open' | 'closing' | 'closed' = 'open';
   private closing: Promise<void> | undefined;
+  /**
+   * The next_seq this Storage last read or left under the session's locks.
+   * A session has one writer, so any other value means a commit was lost,
+   * such as an asynchronous one in a crash, or one landed that this Storage
+   * could not confirm.
+   */
+  private nextSeq: number | undefined;
 
   constructor(sql: SQL, sessionId: string) {
     this.sql = sql;
@@ -262,32 +285,35 @@ class PostgresStorage implements Storage {
   }
 
   /**
-   * Retries only a commit whose earlier attempts provably did not commit: the
+   * Retries only a commit whose earlier attempts provably did not commit: a
    * retry takes the session's locks, which waits out any attempt still in
-   * flight, and proceeds only while next_seq still equals the first seq an
-   * earlier attempt read.
+   * flight, and proceeds only while next_seq is where this Storage expects
+   * it. Running out of retries while an attempt may have committed leaves
+   * the outcome unknown.
    */
-  private commitWithRetry(writes: Write[]): Promise<CommitResult> {
-    let claimed: number | undefined;
-    return retrying(async () => {
-      const trace: Attempt = {};
-      try {
-        return await this.attempt(writes, claimed, trace);
-      } finally {
-        claimed ??= trace.firstSeq;
+  private async commitWithRetry(writes: Write[]): Promise<CommitResult> {
+    const doubt: Doubt = {};
+    try {
+      return await retrying(() => this.attempt(writes, doubt));
+    } catch (error) {
+      if (
+        doubt.firstSeq === undefined ||
+        error instanceof CommitOutcomeUnknownError
+      ) {
+        throw error;
       }
-    });
+      throw new CommitOutcomeUnknownError(this.sessionId, doubt.firstSeq, {
+        cause: error,
+      });
+    }
   }
 
-  private attempt(
-    writes: Write[],
-    claimed: number | undefined,
-    trace: Attempt,
-  ): Promise<CommitResult> {
+  private async attempt(writes: Write[], doubt: Doubt): Promise<CommitResult> {
     const id = this.sessionId;
+    let left = 0;
     // No nested fragments on `tx`: when the connection drops, Bun rejects
     // them as queries of their own, and nothing is there to catch it.
-    return this.sql.begin(async (tx) => {
+    const result = await this.sql.begin(async (tx) => {
       await (isFrameOnly(writes)
         ? tx`
             SELECT pg_advisory_xact_lock(hashtext(${id})),
@@ -301,25 +327,31 @@ class PostgresStorage implements Storage {
       `;
       if (session === undefined) throw this.unknownSession();
       const firstSeq = int(session.next_seq, 'next_seq');
-      if (claimed !== undefined && firstSeq !== claimed) {
-        throw new CommitOutcomeUnknownError(id, claimed);
+      const expected = this.nextSeq;
+      this.nextSeq = firstSeq;
+      if (expected !== undefined && firstSeq !== expected) {
+        throw new CommitOutcomeUnknownError(id, expected, { seq: firstSeq });
       }
-      trace.firstSeq = firstSeq;
+      doubt.firstSeq = undefined;
 
       const prepared = prepareStorageCommit(writes, firstSeq, Date.now());
       await validate(tx, id, prepared.writes, firstSeq);
       const plan = planCommit(prepared.writes);
       await apply(tx, id, plan);
       const stats = nextStats(statsOf(session), plan);
+      left = firstSeq + prepared.writes.length;
       await tx`
         UPDATE pi_sessions
-        SET next_seq = ${firstSeq + prepared.writes.length},
+        SET next_seq = ${left},
             message_count = ${stats.messageCount},
             usage_payload = ${json(stats.usage, 'session usage')}
         WHERE id = ${id}
       `;
+      doubt.firstSeq = firstSeq;
       return { ...prepared.result, stats };
     });
+    this.nextSeq = left;
+    return result;
   }
 
   private closedError(): Error {

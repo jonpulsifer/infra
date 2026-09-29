@@ -14,7 +14,7 @@ import {
 import { SQL } from 'bun';
 import { CommitOutcomeUnknownError, postgresStorage } from '../src/index.ts';
 import { isFrameOnly } from '../src/plan.ts';
-import { RETRY_WINDOW_MS } from '../src/retry.ts';
+import { isTransient, RETRY_WINDOW_MS } from '../src/retry.ts';
 import { BEGIN, COMMIT, FaultProxy } from './proxy.ts';
 import { sessionId, storageFor, withDatabase } from './support.ts';
 
@@ -117,6 +117,65 @@ describe('a commit whose connection fails', () => {
     expect(stored.map((element) => element.value)).toEqual([0, 1]);
   });
 
+  test('leaves the outcome unknown when the retries run out after COMMIT was sent', async () => {
+    const id = sessionId('sent-then-down');
+    await storageFor(database().sql, id);
+    const storage = await storageFor(proxied, id);
+    await storage.commit([note('root')], ctx);
+    const down = proxy
+      .arm({ match: COMMIT, when: 'after' })
+      .then(() => proxy.stop());
+
+    const failed = storage.commit([note('child', 'root')], ctx);
+    await down;
+
+    const error = await failed.catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
+    expect(error).toMatchObject({ firstSeq: 2, foundSeq: undefined });
+    expect(isTransient((error as Error).cause)).toBe(true);
+    expect(await entryIds(postgresStorage(database().sql, id))).toEqual([
+      'root',
+      'child',
+    ]);
+  });
+
+  test('keeps the connection error when the retries run out before COMMIT was sent', async () => {
+    const id = sessionId('unsent-then-down');
+    await storageFor(database().sql, id);
+    const storage = await storageFor(proxied, id);
+    const down = proxy
+      .arm({ match: 'INSERT INTO pi_entries', when: 'before' })
+      .then(() => proxy.stop());
+
+    const failed = storage.commit([note('root')], ctx);
+    await down;
+
+    const error = await failed.catch((reason: unknown) => reason);
+    expect(error).not.toBeInstanceOf(CommitOutcomeUnknownError);
+    expect(isTransient(error)).toBe(true);
+    expect(await entryIds(postgresStorage(database().sql, id))).toEqual([]);
+  });
+
+  test('keeps the connection error when a retry proved COMMIT never ran', async () => {
+    const id = sessionId('disproved-then-down');
+    await storageFor(database().sql, id);
+    const storage = await storageFor(proxied, id);
+    const down = proxy
+      .arm({ match: COMMIT, when: 'before' })
+      .then(() =>
+        proxy.arm({ match: 'INSERT INTO pi_entries', when: 'before' }),
+      )
+      .then(() => proxy.stop());
+
+    const failed = storage.commit([note('root')], ctx);
+    await down;
+
+    const error = await failed.catch((reason: unknown) => reason);
+    expect(error).not.toBeInstanceOf(CommitOutcomeUnknownError);
+    expect(isTransient(error)).toBe(true);
+    expect(await entryIds(postgresStorage(database().sql, id))).toEqual([]);
+  });
+
   test('is not retried when it breaks pi’s rules', async () => {
     const storage = await proxiedStorage('invalid');
     await storage.commit([note('root')], ctx);
@@ -143,6 +202,24 @@ test('a read is retried when its connection drops', async () => {
   await cut;
 
   expect(read.map((element) => element.value)).toEqual(['b', 'a']);
+});
+
+test('a commit refuses a session another writer moved', async () => {
+  const id = sessionId('overtaken');
+  const first = await storageFor(database().sql, id);
+  await first.commit([note('root')], ctx);
+  await postgresStorage(database().sql, id).commit(
+    [note('other', 'root')],
+    ctx,
+  );
+
+  const error = await first
+    .commit([note('child', 'root')], ctx)
+    .catch((reason: unknown) => reason);
+
+  expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
+  expect(error).toMatchObject({ firstSeq: 2, foundSeq: 3 });
+  expect(await entryIds(first)).toEqual(['root', 'other']);
 });
 
 describe('a server that is down', () => {
@@ -261,6 +338,32 @@ describe('frame commits', () => {
     expect(stored.map((element) => element.value)).toEqual([
       delta('a'),
       delta('b'),
+      delta('c'),
+    ]);
+  });
+
+  test('make the next commit throw when a crash lost one that returned', async () => {
+    const { sql } = database();
+    const id = sessionId('lost-frame');
+    const storage = await storageFor(sql, id);
+    await storage.commit([frame('a')], ctx);
+    await storage.commit([frame('b')], ctx);
+    await sql.begin(async (tx) => {
+      await tx`DELETE FROM pi_list_values WHERE session_id = ${id} AND seq = 2`;
+      await tx`UPDATE pi_sessions SET next_seq = 2 WHERE id = ${id}`;
+    });
+
+    const error = await storage
+      .commit([frame('c')], ctx)
+      .catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
+    expect(error).toMatchObject({ firstSeq: 3, foundSeq: 2 });
+    const reopened = postgresStorage(sql, id);
+    expect((await reopened.commit([frame('c')], ctx)).seqs).toEqual([2]);
+    const stored = await reopened.readList(frames, undefined, ctx);
+    expect(stored.map((element) => element.value)).toEqual([
+      delta('a'),
       delta('c'),
     ]);
   });
