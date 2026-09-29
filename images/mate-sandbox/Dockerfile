@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 #
 # The per-thread sandbox mate execs `opencode acp` in. Its tools are baked in
-# because the sandbox's egress policy blocks their downloads. The build context
-# is the repo root, so the image can compile packages/mate-hands; the root
+# because the agent runs as uid 1337 with no root, and HOME is an emptyDir, so
+# a tool the agent installs goes with the sandbox. The build context is the
+# repo root, so the image can compile packages/mate-hands; the root
 # .dockerignore lets in the files copied from this directory.
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS base
 
@@ -20,6 +21,13 @@ ARG AGE_VERSION=1.3.2
 ARG BAT_VERSION=0.26.1
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.2
+# renovate: datasource=github-releases depName=cilium/cilium-cli
+ARG CILIUM_CLI_VERSION=0.20.1
+# Must equal the operator's version, the appVersion of the chart that
+# clusters/base/platform/cloudnative-pg/helm-release.yaml pins. Renovate reads
+# it from the chart index and bumps it with the chart, in one pull request.
+# renovate: datasource=custom.cnpg-operator depName=cloudnative-pg/cloudnative-pg
+ARG CNPG_VERSION=1.29.1
 # renovate: datasource=github-releases depName=open-policy-agent/conftest
 ARG CONFTEST_VERSION=0.70.1
 # Must equal d2 in the root mise.toml: `docs:diagrams` commits its output.
@@ -37,6 +45,8 @@ ARG FZF_VERSION=0.74.4
 ARG GH_VERSION=2.101.0
 # renovate: datasource=github-releases depName=helm/helm
 ARG HELM_VERSION=4.3.0
+# renovate: datasource=github-releases depName=cilium/hubble
+ARG HUBBLE_VERSION=1.19.4
 # renovate: datasource=github-releases depName=jqlang/jq extractVersion=^jq-(?<version>.*)$
 ARG JQ_VERSION=1.8.2
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
@@ -83,6 +93,8 @@ RUN set -eux; \
     tar -xzf archive --no-same-owner -C /out/bin --strip-components=1 "bat-v${BAT_VERSION}-x86_64-unknown-linux-musl/bat"; \
     arc "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"; \
     unzip -q -j archive bun-linux-x64/bun -d /out/bin; \
+    arc "https://github.com/cilium/cilium-cli/releases/download/v${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz"; \
+    tar -xzf archive --no-same-owner -C /out/bin cilium; \
     arc "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin conftest; \
     arc "https://github.com/terrastruct/d2/releases/download/v${D2_VERSION}/d2-v${D2_VERSION}-linux-amd64.tar.gz"; \
@@ -99,6 +111,10 @@ RUN set -eux; \
     tar -xzf archive --no-same-owner -C /out/libexec --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh"; \
     arc "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin --strip-components=1 linux-amd64/helm; \
+    arc "https://github.com/cilium/hubble/releases/download/v${HUBBLE_VERSION}/hubble-linux-amd64.tar.gz"; \
+    tar -xzf archive --no-same-owner -C /out/bin hubble; \
+    arc "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v${CNPG_VERSION}/kubectl-cnpg_${CNPG_VERSION}_linux_x86_64.tar.gz"; \
+    tar -xzf archive --no-same-owner -C /out/bin kubectl-cnpg; \
     arc "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin kustomize; \
     arc "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64.tar.gz"; \
@@ -132,13 +148,29 @@ RUN /out/bin/bun build --compile --minify \
 FROM base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+      bind9-dnsutils \
+      bsdextrautils \
       ca-certificates \
       curl \
+      file \
       git \
+      iproute2 \
+      less \
+      lsof \
+      make \
+      netcat-openbsd \
       openssh-client \
+      patch \
       procps \
+      psmisc \
       ripgrep \
+      rsync \
       tini \
+      tree \
+      unzip \
+      xxd \
+      xz-utils \
+      zip \
     && rm -rf /var/lib/apt/lists/*
 
 # /usr/local/bin, because HOME is an emptyDir at runtime and Debian's
@@ -194,15 +226,18 @@ ENV HOME=/home/agent \
     KTHX_NO_UPDATE_CHECK=1
 
 # Runs as the sandbox uid, so a binary that cannot start fails the build.
-# helm, kubectl, kustomize and pixlet reject `--version`; ssh has only `-V`.
+# cilium, helm, kubectl, kubectl-cnpg, kustomize and pixlet reject `--version`;
+# ssh has only `-V`.
 RUN set -eux; \
-    for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh jq kthx \
-                mate-hands mise op opencode promtool shellcheck shfmt sops \
-                terraform-docs tofu yq; do \
+    for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh hubble \
+                jq kthx mate-hands mise op opencode promtool shellcheck shfmt \
+                sops terraform-docs tofu yq; do \
       "$tool" --version >/dev/null; \
     done; \
+    cilium version --client >/dev/null; \
     helm version >/dev/null; \
     kubectl version --client >/dev/null; \
+    kubectl cnpg version >/dev/null; \
     kustomize version >/dev/null; \
     pixlet version >/dev/null; \
     ssh -V 2>/dev/null

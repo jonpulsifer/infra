@@ -91,6 +91,23 @@
       versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}',
     },
   ],
+  customDatasources: {
+    // The CloudNativePG operator versions that a cloudnative-pg chart ships,
+    // read from the appVersions in the chart index. The operator's GitHub
+    // releases include versions that no chart ships, such as backports to an
+    // older minor. Each version carries the time of the first chart that
+    // ships it: entries sort oldest first and Renovate keeps the first of a
+    // repeated version. The release-age gate then holds the version exactly
+    // as long as it holds that chart, and without a time it would hold the
+    // version forever.
+    'cnpg-operator': {
+      defaultRegistryUrlTemplate: 'https://cloudnative-pg.github.io/charts/index.yaml',
+      format: 'yaml',
+      transformTemplates: [
+        '{"releases": [entries.`cloudnative-pg`[$not($contains(appVersion, "-"))]^(created).{"version": appVersion, "releaseTimestamp": created}], "sourceUrl": "https://github.com/cloudnative-pg/cloudnative-pg"}',
+      ],
+    },
+  },
   packageRules: [
     // ============================================================
     // cosign is pinned to 2.x deliberately, and must stay there
@@ -385,6 +402,21 @@
       matchDepNames: ['d2', 'terrastruct/d2'],
       groupName: 'd2',
       groupSlug: 'd2',
+    },
+    {
+      // The sandbox's kubectl-cnpg has to be the operator's version. Unlike
+      // opentofu and d2 the two pins are different numbers: the chart is
+      // versioned apart from the operator it ships, its appVersion. The
+      // plugin's versions come from the cnpg-operator datasource above, which
+      // offers only appVersions that a chart ships, so the newest chart and
+      // the newest plugin are a matching pair. The group puts the two bumps in
+      // one pull request, out of the toolset group, and separateMajorMinor
+      // keeps them together when one of them is a major.
+      description: 'cloudnative-pg: the operator chart and the sandbox kubectl-cnpg move together',
+      matchDepNames: ['cloudnative-pg', 'cloudnative-pg/cloudnative-pg'],
+      separateMajorMinor: false,
+      groupName: 'cloudnative-pg',
+      groupSlug: 'cloudnative-pg',
     },
     {
       // opencode is the harness mate execs, not one of the tools the image
