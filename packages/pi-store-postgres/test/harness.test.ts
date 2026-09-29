@@ -144,22 +144,41 @@ async function messageEntries(id: string): Promise<number> {
   return entries.length;
 }
 
+interface Turn {
+  id: string;
+  completed: boolean;
+  effects: string[];
+  /** The writes of each commit the turn made, in order. */
+  commits: readonly Write[][];
+}
+
+/** One uninterrupted turn: the reference each crash is cut from. */
+async function runTurn(): Promise<Turn> {
+  const id = await createdSession();
+  const storage = new InstrumentedStorage(postgresStorage(database().sql, id));
+  const effects: string[] = [];
+  const { harness } = await harnessFor(sessionOver(id, storage), effects);
+  const lane = await harness.lane('main', ctx);
+  storage.clearCommitAttempts();
+  const result = await lane.prompt(PROMPT, undefined, ctx);
+  await harness.close(ctx);
+  return {
+    id,
+    completed: completed(result),
+    effects,
+    commits: storage.getCommitAttempts(),
+  };
+}
+
 describe('the harness on Postgres', () => {
-  let turn: readonly Write[][] = [];
+  let reference: Turn;
+  beforeAll(async () => {
+    reference = await runTurn();
+  });
 
   test('runs a turn and reopens with it', async () => {
-    const id = await createdSession();
-    const storage = new InstrumentedStorage(
-      postgresStorage(database().sql, id),
-    );
-    const effects: string[] = [];
-    const { harness } = await harnessFor(sessionOver(id, storage), effects);
-    const lane = await harness.lane('main', ctx);
-    storage.clearCommitAttempts();
-
-    expect(completed(await lane.prompt(PROMPT, undefined, ctx))).toBe(true);
-    await harness.close(ctx);
-    turn = storage.getCommitAttempts();
+    const { id, effects, commits: turn } = reference;
+    expect(reference.completed).toBe(true);
 
     const frames = turn.filter((writes) =>
       writes.every(
@@ -182,6 +201,7 @@ describe('the harness on Postgres', () => {
   });
 
   test('finishes the turn after a crash at any commit', async () => {
+    const turn = reference.commits;
     expect(turn.length).toBeGreaterThan(0);
     let resumes = 0;
     for (let crashAt = 0; crashAt < turn.length; crashAt++) {

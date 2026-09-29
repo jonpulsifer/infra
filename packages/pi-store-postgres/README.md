@@ -16,6 +16,9 @@ const session = await openSession(sql, { id: threadKey });
 | --- | --- |
 | `migrate(sql)` | Applies the schema. It is idempotent and safe to race. |
 | `openSession(sql, { id, metadata? })` | Creates the session on first use, then reopens it. Returns a `StorageBackedSession<PostgresSessionMetadata>`. |
+| `OpenSessionOptions` | The options `openSession` takes. |
+| `PostgresSessionMetadata` | pi's `SessionMetadata`, plus the caller's `metadata`. |
+| `POSTGRES_STORAGE_VERSION` | The `storageVersion` written to `pi_sessions`. `openSession` refuses a session with any other. |
 | `postgresStorage(sql, id)` | The bare `Storage` for a session that exists. |
 | `deleteSession(sql, id)` | Deletes a session and its rows. A missing session is not an error. |
 | `sessionExists(sql, id)` | Whether the session row exists. |
@@ -36,13 +39,15 @@ The caller owns the pool: nothing here closes `sql`. `metadata` is stored when `
 | `pi_list_values` | pi's append-only lists, such as streamed frames |
 | `pi_usage_ledger` | One row per model request or adjustment |
 
-JSON is stored as `text`: `jsonb` refuses `\u0000` and reorders keys. Key columns use the `"C"` collation, so keys sort by code point, as pi's in-memory store sorts them. Integers are `bigint`; Bun returns those as strings, and the store reads each through `Number()` and refuses one that is not a safe integer. SQLite's `branch_entries` and `branch_meta` index has no port: a branch scan is one recursive query over `pi_entries`, and pi's storage conformance suite checks its semantics.
+JSON is stored as `text`: `jsonb` refuses `\u0000` and reorders keys. Key columns use the `"C"` collation, so keys sort by code point, as pi's in-memory store sorts them. Seqs, counts and timestamps are `bigint`; Bun returns those as strings, and the store reads each through `Number()` and refuses one that is not a safe integer. SQLite's `branch_entries` and `branch_meta` index has no port: a branch scan is one recursive query over `pi_entries`, and pi's storage conformance suite checks its semantics.
 
 ## Commits
 
 Each `commit()` is one transaction. It takes `pg_advisory_xact_lock(hashtext(session_id))`, then the session row `FOR UPDATE`, so one writer at a time assigns seqs whichever process it runs in. Seqs come from pi's `prepareStorageCommit`, pi's `validateCommittedWrites` checks ids and parents, and the totals add in pi's order. Commits from one `Storage` run in the order they were admitted. `close()` refuses new commits and reads from the moment it is called, and resolves once the admitted commits finish.
 
-A commit that hits a lost connection, or a Postgres error that asks for a retry, runs again only when the retry proves the earlier attempt did not commit. The retry takes the same locks, which waits out an attempt still in flight, and proceeds only while `next_seq` equals the first seq an earlier attempt read. Otherwise the commit throws `CommitOutcomeUnknownError`, and the session is consistent either way. A commit that breaks pi's rules fails on its first attempt. Reads retry the same failures, and a commit or a read makes up to four attempts.
+A commit that hits a lost connection, or a Postgres error that asks for a retry, runs again only when the retry proves the earlier attempt did not commit. The retry takes the same locks, which waits out an attempt still in flight, and proceeds only while `next_seq` equals the first seq an earlier attempt read. Otherwise the commit throws `CommitOutcomeUnknownError`, and the session is consistent either way. A commit that breaks pi's rules fails on its first attempt. Reads, `openSession`, `deleteSession` and `sessionExists` retry the same failures.
+
+Each call makes up to four attempts, 0.1 s, 0.3 s and 0.9 s apart, and starts none more than 2 s after the first. A server that refuses connections fails each attempt at once, so the retries ride out about 1.3 s of it. A server that does not answer, such as an address with nothing behind it, holds each attempt for the pool's `connectionTimeout`, which Bun sets to 30 s unless the caller sets it; such a failure is not retried. A call against a server that is down therefore rejects after at most about 2 s plus one `connectionTimeout`. Set `connectionTimeout` on the pool to shorten that.
 
 A commit of nothing but `pi.pending.assistant_frame` appends runs with `synchronous_commit = off`. pi writes one per streamed chunk, and after a crash it rebuilds the partial reply from the frames that survive. Any later synchronous commit flushes the frames before it.
 

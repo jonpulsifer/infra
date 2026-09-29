@@ -30,7 +30,7 @@ import {
 import type { SQL } from 'bun';
 import { scanBranchEntries, scanBranchStructures } from './branch.ts';
 import { type CommitPlan, isFrameOnly, planCommit } from './plan.ts';
-import { ATTEMPTS, backoff, isTransient, retrying } from './retry.ts';
+import { retrying } from './retry.ts';
 import {
   decodeEntry,
   decodeStructure,
@@ -267,18 +267,16 @@ class PostgresStorage implements Storage {
    * flight, and proceeds only while next_seq still equals the first seq an
    * earlier attempt read.
    */
-  private async commitWithRetry(writes: Write[]): Promise<CommitResult> {
+  private commitWithRetry(writes: Write[]): Promise<CommitResult> {
     let claimed: number | undefined;
-    for (let attempt = 1; ; attempt++) {
+    return retrying(async () => {
       const trace: Attempt = {};
       try {
         return await this.attempt(writes, claimed, trace);
-      } catch (error) {
-        if (attempt >= ATTEMPTS || !isTransient(error)) throw error;
+      } finally {
         claimed ??= trace.firstSeq;
-        await backoff(attempt);
       }
-    }
+    });
   }
 
   private attempt(

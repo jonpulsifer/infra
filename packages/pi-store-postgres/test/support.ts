@@ -26,27 +26,47 @@ export interface TestDatabase {
   readonly sql: SQL;
 }
 
+export interface EmptyDatabase {
+  readonly url: string;
+  drop(): Promise<void>;
+}
+
+/** A new database on the test server, with no schema in it. */
+export async function createDatabase(): Promise<EmptyDatabase> {
+  const server = serverUrl();
+  const name = `pi_store_test_${crypto.randomUUID().replaceAll('-', '')}`;
+  const admin = new SQL(server, { max: 1 });
+  try {
+    await admin.unsafe(`CREATE DATABASE "${name}"`);
+  } catch (error) {
+    await admin.close();
+    throw error;
+  }
+  const url = new URL(server);
+  url.pathname = `/${name}`;
+  return {
+    url: url.toString(),
+    async drop() {
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      await admin.close();
+    },
+  };
+}
+
 /** A migrated database of its own for one test file, dropped after it. */
 export function withDatabase(): () => TestDatabase {
-  const name = `pi_store_test_${crypto.randomUUID().replaceAll('-', '')}`;
-  let admin: SQL | undefined;
+  let empty: EmptyDatabase | undefined;
   let current: TestDatabase | undefined;
 
   beforeAll(async () => {
-    const server = serverUrl();
-    admin = new SQL(server, { max: 1 });
-    await admin.unsafe(`CREATE DATABASE "${name}"`);
-    const url = new URL(server);
-    url.pathname = `/${name}`;
-    const sql = new SQL(url.toString(), { max: 4 });
-    await migrate(sql);
-    current = { url: url.toString(), sql };
+    empty = await createDatabase();
+    current = { url: empty.url, sql: new SQL(empty.url, { max: 4 }) };
+    await migrate(current.sql);
   });
 
   afterAll(async () => {
     await current?.sql.close();
-    await admin?.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
-    await admin?.close();
+    await empty?.drop();
   });
 
   return () => {

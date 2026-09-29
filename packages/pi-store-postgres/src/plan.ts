@@ -4,11 +4,12 @@
  * value write replaces an earlier one, and a list delete drops every append
  * before it, stored or not.
  */
-import type {
-  CommittedWrite,
-  Entry,
-  UsageRow,
-  Write,
+import {
+  type CommittedWrite,
+  type Entry,
+  pendingAssistantFrames,
+  type UsageRow,
+  type Write,
 } from '@earendil-works/pi-agent-core';
 import { json } from './rows.ts';
 
@@ -37,7 +38,7 @@ interface ListPlan {
   appends: Element[];
 }
 
-const FRAMES = 'pi.pending.assistant_frame';
+const FRAMES = pendingAssistantFrames('', '').namespace;
 
 function addressKey(address: Address): string {
   return JSON.stringify([address.namespace, address.key]);

@@ -52,7 +52,8 @@ export class FaultProxy {
   private readonly target: { hostname: string; port: number };
   private armed: { cut: Cut; fired: () => void } | undefined;
 
-  constructor(target: string) {
+  /** Listens on `port`, or on a free port when it is 0. */
+  constructor(target: string, port = 0) {
     const upstream = new URL(target);
     this.target = {
       hostname: upstream.hostname,
@@ -60,7 +61,7 @@ export class FaultProxy {
     };
     this.server = Bun.listen<Link>({
       hostname: '127.0.0.1',
-      port: 0,
+      port,
       socket: {
         open: (client) => {
           client.data = {

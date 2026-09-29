@@ -2,15 +2,19 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   appendList,
   BACKGROUND_CONTEXT,
+  deleteList,
   insertEntry,
   list,
+  pendingAssistantFrames,
   type Storage,
   setValue,
   value,
   type Write,
 } from '@earendil-works/pi-agent-core';
 import { SQL } from 'bun';
-import { CommitOutcomeUnknownError } from '../src/index.ts';
+import { CommitOutcomeUnknownError, postgresStorage } from '../src/index.ts';
+import { isFrameOnly } from '../src/plan.ts';
+import { RETRY_WINDOW_MS } from '../src/retry.ts';
 import { BEGIN, COMMIT, FaultProxy } from './proxy.ts';
 import { sessionId, storageFor, withDatabase } from './support.ts';
 
@@ -95,6 +99,24 @@ describe('a commit whose connection fails', () => {
     ]);
   });
 
+  test('is not applied twice when a retry fails before it reads next_seq', async () => {
+    const storage = await proxiedStorage('twice');
+    const events = list<number>('test.list', 'events');
+    await storage.commit([appendList(events, 0)], ctx);
+    const cuts = proxy
+      .arm({ match: COMMIT, when: 'after' })
+      .then(() => proxy.arm({ match: 'FOR UPDATE', when: 'before' }));
+
+    const failed = storage.commit([appendList(events, 1)], ctx);
+    await cuts;
+
+    expect(await failed.catch((reason: unknown) => reason)).toBeInstanceOf(
+      CommitOutcomeUnknownError,
+    );
+    const stored = await storage.readList(events, undefined, ctx);
+    expect(stored.map((element) => element.value)).toEqual([0, 1]);
+  });
+
   test('is not retried when it breaks pi’s rules', async () => {
     const storage = await proxiedStorage('invalid');
     await storage.commit([note('root')], ctx);
@@ -123,33 +145,123 @@ test('a read is retried when its connection drops', async () => {
   expect(read.map((element) => element.value)).toEqual(['b', 'a']);
 });
 
+describe('a server that is down', () => {
+  test('is tried again after it refuses a connection', async () => {
+    const id = sessionId('refused');
+    await storageFor(database().sql, id);
+    const idle = Bun.listen({
+      hostname: '127.0.0.1',
+      port: 0,
+      socket: { data() {} },
+    });
+    const { port } = idle;
+    idle.stop(true);
+    const url = new URL(database().url);
+    url.hostname = '127.0.0.1';
+    url.port = String(port);
+    const sql = new SQL(url.toString(), { max: 1 });
+    let back: FaultProxy | undefined;
+    try {
+      const stats = postgresStorage(sql, id)
+        .getStats(ctx)
+        .catch((reason: unknown) => reason);
+      await Bun.sleep(250);
+      back = new FaultProxy(database().url, port);
+
+      expect(await stats).toMatchObject({ messageCount: 0 });
+      expect(back.sent.length).toBeGreaterThan(0);
+    } finally {
+      await sql.close();
+      back?.stop();
+    }
+  });
+
+  test('is not tried again after a failure slower than the retry window', async () => {
+    let connections = 0;
+    const silent = Bun.listen({
+      hostname: '127.0.0.1',
+      port: 0,
+      socket: {
+        open() {
+          connections++;
+        },
+        data() {},
+      },
+    });
+    const sql = new SQL(
+      `postgres://postgres@127.0.0.1:${silent.port}/postgres`,
+      { max: 1, connectionTimeout: RETRY_WINDOW_MS / 1000 },
+    );
+    try {
+      const failed = await postgresStorage(sql, sessionId('silent'))
+        .commit([note('root')], ctx)
+        .catch((reason: unknown) => reason);
+
+      expect(failed).toMatchObject({ code: 'ERR_POSTGRES_CONNECTION_TIMEOUT' });
+      expect(connections).toBe(1);
+    } finally {
+      await sql.close();
+      silent.stop(true);
+    }
+  }, 10_000);
+});
+
 describe('frame commits', () => {
-  const frames = list<unknown>('pi.pending.assistant_frame', 'op:response');
+  const frames = pendingAssistantFrames('operation', 'response');
+  const delta = (text: string) => ({
+    type: 'text_delta' as const,
+    contentIndex: 0,
+    delta: text,
+  });
+  const frame = (text: string) => appendList(frames, delta(text));
+
+  test('are told apart from every other commit', () => {
+    expect(isFrameOnly([frame('a'), frame('b')])).toBe(true);
+    expect(isFrameOnly([])).toBe(false);
+    expect(
+      isFrameOnly([frame('a'), setValue(value('test.value', 'k'), 'v')]),
+    ).toBe(false);
+    expect(isFrameOnly([deleteList(frames)])).toBe(false);
+    expect(isFrameOnly([appendList(list('test.list', 'k'), 1)])).toBe(false);
+  });
 
   test('skip the WAL flush only when they hold nothing but frames', async () => {
-    const storage = await proxiedStorage('frames');
-    const asynchronous = () =>
-      proxy.sent.filter((message) => message.includes('synchronous_commit'))
-        .length;
+    const id = sessionId('frames');
+    await storageFor(database().sql, id);
+    // Each commit gets a fresh connection: a reused one names a statement
+    // it prepared before instead of sending its text again.
+    const asynchronous = async (writes: Write[]): Promise<boolean> => {
+      const sql = new SQL(proxy.url, { max: 1 });
+      const before = proxy.sent.length;
+      try {
+        await postgresStorage(sql, id).commit(writes, ctx);
+      } finally {
+        await sql.close();
+      }
+      return proxy.sent
+        .slice(before)
+        .some((message) => message.includes('synchronous_commit'));
+    };
 
-    await storage.commit([appendList(frames, { delta: 'a' })], ctx);
-    const afterFrames = asynchronous();
-    expect(afterFrames).toBeGreaterThan(0);
-
-    await storage.commit(
-      [
-        appendList(frames, { delta: 'b' }),
+    expect(await asynchronous([frame('a')])).toBe(true);
+    expect(
+      await asynchronous([
+        frame('b'),
         setValue(value<string>('test.value', 'k'), 'v'),
-      ],
+      ]),
+    ).toBe(false);
+    expect(await asynchronous([note('root')])).toBe(false);
+    expect(await asynchronous([frame('c')])).toBe(true);
+
+    const stored = await postgresStorage(database().sql, id).readList(
+      frames,
+      undefined,
       ctx,
     );
-    await storage.commit([note('root')], ctx);
-    expect(asynchronous()).toBe(afterFrames);
-
-    expect(
-      (await storage.readList(frames, undefined, ctx)).map(
-        (element) => element.value,
-      ),
-    ).toEqual([{ delta: 'a' }, { delta: 'b' }]);
+    expect(stored.map((element) => element.value)).toEqual([
+      delta('a'),
+      delta('b'),
+      delta('c'),
+    ]);
   });
 });

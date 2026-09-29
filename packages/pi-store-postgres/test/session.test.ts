@@ -6,6 +6,7 @@ import {
   value,
   type Write,
 } from '@earendil-works/pi-agent-core';
+import { SQL } from 'bun';
 import {
   deleteSession,
   migrate,
@@ -13,7 +14,12 @@ import {
   POSTGRES_STORAGE_VERSION,
   sessionExists,
 } from '../src/index.ts';
-import { sessionId, storageFor, withDatabase } from './support.ts';
+import {
+  createDatabase,
+  sessionId,
+  storageFor,
+  withDatabase,
+} from './support.ts';
 
 const database = withDatabase();
 const ctx = BACKGROUND_CONTEXT;
@@ -141,12 +147,24 @@ describe('the store', () => {
 });
 
 describe('migrate', () => {
-  test('runs each migration once, even when callers race', async () => {
-    const { sql } = database();
-    await Promise.all([migrate(sql), migrate(sql), migrate(sql)]);
+  test('runs each migration once, even when callers race on a new database', async () => {
+    const fresh = await createDatabase();
+    const sql = new SQL(fresh.url, { max: 1 });
+    const clients = [
+      sql,
+      ...Array.from({ length: 3 }, () => new SQL(fresh.url, { max: 1 })),
+    ];
+    try {
+      await Promise.all(clients.map((client) => migrate(client)));
 
-    const rows = await sql`SELECT version FROM pi_store_migrations`;
-    expect(rows.map((row: { version: number }) => row.version)).toEqual([1]);
+      const rows = await sql`SELECT version FROM pi_store_migrations`;
+      expect(rows.map((row: { version: number }) => row.version)).toEqual([1]);
+      const [tables] = await sql`SELECT to_regclass('pi_sessions') AS sessions`;
+      expect(tables.sessions).toBe('pi_sessions');
+    } finally {
+      await Promise.all(clients.map((client) => client.close()));
+      await fresh.drop();
+    }
   });
 
   test('refuses a schema newer than the code', async () => {
