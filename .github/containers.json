@@ -16,7 +16,8 @@
     "spindrift",
     "spindrift-demo",
     "spindrift-verifier",
-    "switchboard"
+    "switchboard",
+    "weather"
   ],
   "deploy": {
     "actions-runner": [
@@ -56,6 +57,9 @@
     "switchboard": [
       "clusters/folly/apps/pbx/switchboard.yaml",
       "clusters/offsite/apps/elevenlabs/switchboard.yaml"
+    ],
+    "weather": [
+      "clusters/offsite/apps/weather/deployment.yaml"
     ]
   },
   "ignore": [
