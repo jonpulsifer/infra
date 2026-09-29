@@ -13,7 +13,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs the agent loop for eac
 | Sandbox | One per thread that has run a tool, plus one ready spare. Init container `checkout` clones the repository. mate execs `mate-hands`, the daemon that runs the agent's file and shell calls, in container `harness`. | A pod with runtime class `kata-clh`, a Cloud Hypervisor microVM ([Kubernetes](../../platform/kubernetes.md)), in namespace `mate` on [oldschool](../../hosts/oldschool.md), the offsite worker node |
 | [Session store](#session-store) | Postgres that holds pi's sessions and mate's `mate_threads` and `mate_credentials` tables | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
 
-The model is `MATE_MODEL`, through pi-ai's `opencode-go` provider, at the reasoning level in `MATE_THINKING`. mate also signs in to the owner's ChatGPT subscription through pi-ai's `openai-codex` provider, and no turn uses it. The system prompt is a note about the surface and the sandbox, then `AGENTS.md`, then an index of the skills in `dotfiles/skills/` and `.agents/skills/`. The mate image bakes these files, and the agent reads a skill from the sandbox's checkout.
+The model is `MATE_MODEL`, on the owner's ChatGPT subscription through pi-ai's `openai-codex` provider, at the reasoning level in `MATE_THINKING`. When ChatGPT cannot answer, `MATE_FALLBACK_MODEL` answers through pi-ai's `opencode-go` provider, at `MATE_FALLBACK_THINKING`. [Model routing](#model-routing) says when. The system prompt is a note about the surface and the sandbox, then `AGENTS.md`, then an index of the skills in `dotfiles/skills/` and `.agents/skills/`. The mate image bakes these files, and the agent reads a skill from the sandbox's checkout.
 
 ## A turn
 
@@ -24,11 +24,31 @@ The model is `MATE_MODEL`, through pi-ai's `opencode-go` provider, at the reason
 
 If the sandbox dies mid-turn, the tool call fails, and the next call starts a new sandbox.
 
+## Model routing
+
+A router in `apps/mate/src/route.ts` sends each model request to ChatGPT first. If ChatGPT fails before its first text, reasoning or tool call, the router sends the same request to the fallback in the same step, so pi records no failure. pi retries an error after content. Stop, the turn timeout and a context overflow never go to the fallback.
+
+A breaker that all threads share keeps requests off ChatGPT while it is down:
+
+| Reason | ChatGPT stays off |
+| --- | --- |
+| `limit`: the usage limit | Until the reset that OpenAI gives, or 5 minutes, doubling to 2 hours |
+| `auth`: OpenAI refuses the token or its refresh | Until a new token. The first refused token gets one forced rotation. |
+| `unconfigured`: no sign-in | Until a sign-in |
+| `transient`: a 5xx, a timeout, or `chatgpt.com` out of reach | 1 minute |
+| `store`: mate-db cannot be read | 1 minute |
+| `rejected`: any other refusal | 15 minutes, doubling to 2 hours |
+| `paused`: `chatgpt pause` | Until the pause ends, or `chatgpt resume` |
+
+After the wait, one request tries ChatGPT over SSE, and the other requests stay on the fallback. The breaker is in memory, so a restarted mate tries ChatGPT first. While the fallback answers, the turn's status line starts with ↪️ and names the reason. The first turn of a `limit`, `auth`, `unconfigured` or `rejected` outage ends with one notice.
+
+A request leaves out the other model's reasoning where it sits beside an answer or a tool call. ChatGPT's requests count at $0 in `mate_turn_cost_usd`, so the metric is the fallback's list price. `mate_model_routes_total` counts each request by route and reason.
+
 ## Credentials
 
 | Credential | Where it is | Scope |
 | --- | --- | --- |
-| Model key | A file in mate's pod, from Secret `mate-opencode`, read on every request | The model API |
+| Model key | A file in mate's pod, from Secret `mate-opencode`, read on every request | The fallback model's API |
 | kthx agent token | mate's environment `KTHX_AGENT_TOKEN`, from Secret `mate-kthx-agent` | Every built-apps command but minting tokens, replacing the engine settings and connecting or probing a Target, for 90 days |
 | Database role | mate's environment `DATABASE_URL`, from Secret `mate-db-app` | Owner of database `mate` |
 | ChatGPT sign-in | Row `openai-codex` of table `mate_credentials` in mate-db, which mate alone writes and rotates about every eight days | The owner's ChatGPT subscription, through `chatgpt.com/backend-api` |
@@ -95,6 +115,7 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/store.ts`: the connection to `mate-db` and the `mate_threads` table
 - `apps/mate/src/credential-store.ts`: the `mate_credentials` table
 - `apps/mate/src/chatgpt.ts`: the ChatGPT sign-in, the `chatgpt` commands and the keeper that refreshes the token
+- `apps/mate/src/route.ts`: the router between ChatGPT and the fallback, and its breaker
 - `apps/mate/src/profile.ts`: the system prompt
 - `apps/mate/src/mcp.ts`: the kthx MCP bridge
 - `apps/mate/src/kthx-sites.ts`: the ledger of kthx site bearers

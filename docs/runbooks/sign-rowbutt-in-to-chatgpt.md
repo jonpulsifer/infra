@@ -3,7 +3,7 @@ title: Sign Rowbutt in to ChatGPT
 description: Sign mate in to the owner's ChatGPT subscription from chat, check and pause the sign-in, and sign it out.
 ---
 
-This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscription with OpenAI's device code. mate, the process behind Rowbutt, keeps the token in the `mate_credentials` table of mate-db, the [session store](../apps/mate/how-it-works.md#session-store). At boot and every six hours, it refreshes a token with fewer than two days left. Use this runbook to sign in, when `MateChatGPTSignedOut` or `MateChatGPTTokenNotRefreshing` fires, or to cut mate off. While `MATE_MODEL` names an `opencode-go` model, no turn uses ChatGPT.
+This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscription with OpenAI's device code. mate, the process behind Rowbutt, keeps the token in the `mate_credentials` table of mate-db, the [session store](../apps/mate/how-it-works.md#session-store). At boot and every six hours, it refreshes a token with fewer than two days left. Turns use ChatGPT first, and `MATE_FALLBACK_MODEL` when ChatGPT cannot answer. Use this runbook to sign in, when `MateChatGPTSignedOut`, `MateChatGPTTokenNotRefreshing` or `MateModelPrimaryFailing` fires, or to cut mate off.
 
 > [!WARNING]
 > This runbook changes live state by hand. It is an exception to the GitOps rule because OpenAI issues the token to mate, and git cannot hold it. The sandbox is `cluster-admin`, so the agent can read the token in mate-db and use the owner's ChatGPT account. The owner accepts this. The kill switch is [Sign out](#sign-out).
@@ -38,7 +38,7 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
 
 1. Mention Rowbutt with `chatgpt status`.
 
-   Result: mate says `ℹ️ ChatGPT: signed in, token good until`, with a date.
+   Result: mate says `ℹ️ ChatGPT: signed in, token good until`, with a date, and `Now: primary.`
 
 2. Read the ChatGPT lines of the mate log.
 
@@ -50,10 +50,21 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
 
 ## Pause and resume
 
-A pause keeps ChatGPT out of use without a deploy. A restart of mate ends the pause.
+A pause sends every turn to the fallback without a deploy. A restart of mate ends the pause.
 
 1. Say `chatgpt pause` for 60 minutes, or `chatgpt pause <minutes>` for up to 10080.
 2. To end the pause, say `chatgpt resume`.
+
+## Drill the fallback
+
+A drill shows that the fallback model can continue a thread that ChatGPT started.
+
+1. In a thread that ChatGPT answered, say `chatgpt pause 5`.
+2. Ask Rowbutt for a task that runs a command.
+
+   Result: the status line starts with `↪️`, and the fallback model finishes the turn.
+
+3. Say `chatgpt resume`.
 
 ## Sign out
 
@@ -85,6 +96,8 @@ A pause keeps ChatGPT out of use without a deploy. A restart of mate ends the pa
 | `MateChatGPTSignedOut` fires, or `chatgpt status` says `OpenAI refused the token refresh`. | The refresh token is revoked or spent. | Do [Sign in](#sign-in). |
 | `MateChatGPTTokenNotRefreshing` fires. | A day of refreshes failed on egress, DNS or mate-db. | Read the mate log. If `MateStoreFailing` fires, do [Operate Postgres](operate-postgres.md). |
 | After a restore of mate-db, `chatgpt status` says `not signed in`. | The nightly dump leaves out `mate_credentials`. | Do [Sign in](#sign-in). |
+| `MateModelPrimaryFailing` fires. | `chatgpt.com` is out of reach or fails, or refuses the request, such as for a model the plan lacks. | Read the `ChatGPT failed before answering` lines of the mate log. Make sure that `chatgpt.com` is in the network policy on port 443. Check the plan. |
+| A turn ends with `↪️ ChatGPT's usage limit is reached`. | The plan's usage limit is spent. | Wait for the reset. To stop the tries, say `chatgpt pause`. |
 
 ## Related
 

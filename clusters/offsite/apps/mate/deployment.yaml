@@ -126,16 +126,22 @@ spec:
             # in-process and is the rollback.
             - name: MATE_SANDBOXES
               value: kube
-            # The model, through pi-ai's `opencode-go` provider, and its
-            # reasoning level. mate refuses a level the model does not support.
+            # The model, on the owner's ChatGPT subscription through pi-ai's
+            # `openai-codex` provider, and its reasoning level. mate refuses a
+            # level the model does not support.
             - name: MATE_MODEL
-              value: opencode-go/qwen3.8-max
+              value: openai-codex/gpt-6-sol
             - name: MATE_THINKING
               value: medium
-            # `none` routes nothing, so turns reach MATE_MODEL alone.
+            # Answers a request ChatGPT cannot, through pi-ai's `opencode-go`
+            # provider. `none` routes nothing: with MATE_MODEL on
+            # opencode-go/qwen3.8-max, that is the rollback.
             - name: MATE_FALLBACK_MODEL
-              value: none
-            # Read on every request, so a rotated key needs no restart.
+              value: opencode-go/qwen3.8-max
+            - name: MATE_FALLBACK_THINKING
+              value: medium
+            # The fallback's key, read on every request, so a rotated key needs
+            # no restart.
             - name: MATE_MODEL_KEY_FILE
               value: /var/run/mate/opencode/api-key
             # The session store (database.yaml). CloudNativePG writes the owner

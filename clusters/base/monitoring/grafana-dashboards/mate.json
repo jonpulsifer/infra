@@ -1619,7 +1619,7 @@
       "id": 29,
       "type": "timeseries",
       "title": "Provider errors per hour, by kind",
-      "description": "Runs that ended in a provider error. auth is the key in Secret mate-opencode, limit the plan's usage cap, timeout a provider that stopped answering, and other anything else. MateTurnsFailing counts the same runs as error.",
+      "description": "Runs that ended in a provider error. With a fallback, it failed too, and the kind is its own: auth is the key in Secret mate-opencode or the ChatGPT sign-in, limit a plan's usage cap, timeout a provider that stopped answering, and other anything else. MateTurnsFailing counts the same runs as error.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1752,6 +1752,219 @@
       ]
     },
     {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Model requests per hour, by route and reason",
+      "description": "Each request for MATE_MODEL, by where it went. primary is ChatGPT answering; fallback is qwen3.8-max answering for the reason named: limit, auth, unconfigured, transient, rejected, store or paused. MateModelPrimaryFailing counts fallback requests for transient, rejected and store.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (route, reason) (rate(mate_model_routes_total[1h])) * 3600 > 0",
+          "refId": "A",
+          "legendFormat": "{{route}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "ChatGPT answering",
+      "description": "1 while requests go to ChatGPT, 0 while the breaker or a `chatgpt pause` sends them to the fallback. No series means MATE_FALLBACK_MODEL is none, so nothing routes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_model_primary_up",
+          "refId": "A",
+          "legendFormat": "up"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "ChatGPT sign-in",
+      "description": "Days until the ChatGPT access token expires, and 1 while mate holds a working sign-in. mate refreshes the token at two days left, MateChatGPTTokenNotRefreshing fires under one, and MateChatGPTSignedOut on 0. No series means no sign-in to read.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_chatgpt_token_expiry_seconds / 86400",
+          "refId": "A",
+          "legendFormat": "days left"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "mate_chatgpt_signed_in",
+          "refId": "B",
+          "legendFormat": "signed in"
+        }
+      ]
+    },
+    {
       "id": 11,
       "type": "row",
       "title": "Budget",
@@ -1760,7 +1973,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 65
       },
       "panels": []
     },
@@ -1777,7 +1990,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 58
+        "y": 66
       },
       "fieldConfig": {
         "defaults": {
@@ -1924,7 +2137,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Reported spend per hour",
-      "description": "Each run's usage summed at qwen3.8-max's list price from pi's catalog, $2 and $6 per million input and output tokens. The `opencode-go` plan is flat-rate, so this is a shadow of list price, not a bill.",
+      "description": "Each run's usage summed at pi's catalog list price. ChatGPT's requests count at $0, because the subscription is flat-rate, so this is the shadow of the fallback, qwen3.8-max, at $2 and $6 per million input and output tokens. The `opencode-go` plan is flat-rate too, so it is not a bill.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1933,7 +2146,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 58
+        "y": 66
       },
       "fieldConfig": {
         "defaults": {
@@ -1997,7 +2210,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 74
       },
       "panels": []
     },
@@ -2014,7 +2227,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 67
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
@@ -2122,7 +2335,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 67
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
