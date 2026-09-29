@@ -279,7 +279,7 @@
     },
     "packages/mate-hands": {
       "name": "@repo/mate-hands",
-      "version": "0.2.0",
+      "version": "0.1.0",
       "devDependencies": {
         "@repo/typescript-config": "workspace:*",
         "@types/bun": "1.4.2",

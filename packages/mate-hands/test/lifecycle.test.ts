@@ -183,6 +183,44 @@ describe('epochs', () => {
       orphan.kill('SIGKILL');
     }
   });
+
+  test('superseded names the highest live epoch, whatever the order', async () => {
+    const state = scratch('state');
+    const owner = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const pid = owner.pid as number;
+    const start = startTime(pid);
+    for (let epoch = 6; epoch <= 15; epoch++) {
+      writeFileSync(
+        join(state, `${epoch}-${pid}.json`),
+        JSON.stringify({ epoch, pid, start, groups: [] }),
+      );
+    }
+    try {
+      const stale = hands({ epoch: 5, stateDir: state });
+      expect(await stale.error('hello')).toMatchObject({
+        code: 'superseded',
+        epoch: 15,
+      });
+    } finally {
+      owner.kill('SIGKILL');
+    }
+  });
+
+  test('a record not named for its epoch and pid is removed', async () => {
+    const state = scratch('state');
+    const gone = Bun.spawn(['true']);
+    await gone.exited;
+    const planted = {
+      epoch: Number.MAX_SAFE_INTEGER,
+      pid: gone.pid,
+      start: '1',
+      groups: [],
+    };
+    writeFileSync(join(state, '1-1.json'), JSON.stringify(planted));
+    const next = hands({ epoch: 5, stateDir: state });
+    expect(await next.result('ping')).toBeNull();
+    expect(readdirSync(state)).toEqual([`5-${next.pid}.json`]);
+  });
 });
 
 describe('the state directory', () => {

@@ -6,7 +6,7 @@ A daemon kills every process group it started, and exits, on stdin EOF, on `shut
 
 ## Epochs
 
-A daemon records its process groups under `--state-dir`, so a daemon started with a newer `--epoch` kills what an older one left. A record with an epoch at or above a new daemon's supersedes it only while the process that wrote it lives. The new daemon kills a dead one's groups and removes its record, whatever its epoch. A `superseded` error carries the owner's `epoch`, which `HandsError.ownerEpoch` reads, so a client can start its next daemon past it.
+A daemon records its process groups under `--state-dir`, so a daemon started with a newer `--epoch` kills what an older one left. A record with an epoch at or above a new daemon's supersedes it only while the process that wrote it lives. The new daemon kills a dead one's groups and removes its record, whatever its epoch, and removes a record not named for its own epoch and pid. A `superseded` error carries the highest live `epoch`, which `HandsError.ownerEpoch` reads, so a client can start its next daemon past it.
 
 The client refuses a daemon whose `hello` names another `PROTOCOL_VERSION`, so a sandbox built from an older image fails to connect with `mismatch`.
 

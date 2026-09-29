@@ -291,12 +291,13 @@ export class Files {
     aborted(signal, path);
     const handle = await openRegular(path, append ? WRITE | O_APPEND : WRITE);
     try {
-      if (append) {
-        await handle.writeFile(content);
-      } else {
+      if (!append) {
+        // A cancel is honoured only before the truncate, so it never leaves
+        // the file empty.
+        aborted(signal, path);
         await handle.truncate(0);
-        await handle.writeFile(content, { signal });
       }
+      await handle.writeFile(content);
     } catch (error) {
       await handle.close().catch(() => {});
       throw error;

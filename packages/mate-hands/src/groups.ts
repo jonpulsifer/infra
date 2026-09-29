@@ -103,6 +103,10 @@ function groupAlive(group: Group): boolean {
   return isOurs(group) && signal(-group.pgid, 0);
 }
 
+function recordName({ epoch, pid }: Omit<DaemonRecord, 'groups'>): string {
+  return `${epoch}-${pid}.json`;
+}
+
 export class Ledger {
   readonly path: string;
 
@@ -111,7 +115,7 @@ export class Ledger {
     readonly record: Omit<DaemonRecord, 'groups'>,
   ) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    this.path = join(dir, `${record.epoch}-${record.pid}.json`);
+    this.path = join(dir, recordName(record));
   }
 
   save(groups: Group[]): void {
@@ -183,25 +187,28 @@ export type Claim =
   | { superseded: null; killed: DaemonRecord[] };
 
 /**
- * Makes `ledger`'s daemon the owner of the state directory. A live daemon
- * with an epoch at or above its own supersedes it. Every other daemon is
- * killed, then its groups: the older ones, and the dead ones whatever their
- * epoch, so a record a daemon left when it was killed, or one the agent
- * planted, cannot supersede every daemon after it. The caller saves its own
- * record first, so of two daemons that start together the newer one always
- * sees the older.
+ * Makes `ledger`'s daemon the owner of the state directory. The live daemon
+ * with the highest epoch at or above its own supersedes it, so a client can
+ * start its next daemon past that epoch. Every other daemon is killed, then
+ * its groups: the older ones, and the dead ones whatever their epoch, so a
+ * record a daemon left when it was killed, or one the agent planted, cannot
+ * supersede every daemon after it. The caller saves its own record first, so
+ * of two daemons that start together the newer one always sees the older.
  */
 export async function claim(ledger: Ledger): Promise<Claim> {
   const { dir, record } = ledger;
   const others = records(dir).filter(
     (r) => r.epoch !== record.epoch || r.pid !== record.pid,
   );
-  const newer = others.find(
-    (r) => r.epoch >= record.epoch && isLive(r.pid, r.start),
-  );
-  if (newer) return { superseded: newer };
+  const owner = others
+    .filter((r) => r.epoch >= record.epoch && isLive(r.pid, r.start))
+    .reduce<DaemonRecord | null>(
+      (top, r) => (top && top.epoch >= r.epoch ? top : r),
+      null,
+    );
+  if (owner) return { superseded: owner };
   for (const old of others) {
-    const path = join(dir, `${old.epoch}-${old.pid}.json`);
+    const path = join(dir, recordName(old));
     if (isLive(old.pid, old.start)) {
       signal(old.pid, 'SIGKILL');
       await gone(old.pid, old.start);
@@ -223,9 +230,11 @@ function records(dir: string): DaemonRecord[] {
   const found: DaemonRecord[] = [];
   for (const name of readdirSync(dir)) {
     if (!RECORD.test(name)) continue;
-    const record = readRecord(join(dir, name));
-    if (record) found.push(record);
-    else rmSync(join(dir, name), { force: true });
+    const path = join(dir, name);
+    const record = readRecord(path);
+    // A daemon names its record for its epoch and pid, so any other is planted.
+    if (record && name === recordName(record)) found.push(record);
+    else rmSync(path, { force: true });
   }
   return found;
 }

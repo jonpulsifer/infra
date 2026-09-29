@@ -42,7 +42,7 @@ export type ProtocolErrorCode =
   | 'too_large'
   /** Too many calls, commands or readers open at once. */
   | 'busy'
-  /** A daemon with a newer epoch owns the sandbox. */
+  /** A live daemon with an epoch at or above this one owns the sandbox. */
   | 'superseded'
   /** The daemon speaks another protocol version or epoch. */
   | 'mismatch'
