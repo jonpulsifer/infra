@@ -443,6 +443,16 @@
       groupName: 'pi',
       groupSlug: 'pi',
     },
+    {
+      // apps/clankerbanker pins the @x402 packages exactly. They are the
+      // scheme and transport packages of one protocol on top of @x402/core, so
+      // one pull request keeps them on compatible versions.
+      description: 'x402: the @x402 packages move together',
+      matchDatasources: ['npm'],
+      matchPackageNames: ['@x402/**'],
+      groupName: 'x402',
+      groupSlug: 'x402',
+    },
     // ============================================================
     // Flux helm charts
     // ============================================================
