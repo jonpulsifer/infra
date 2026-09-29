@@ -45,6 +45,7 @@ export const CHATGPT = {
   signedIn: '✅ mate is signed in to ChatGPT',
   proofFailed: '⚠️ mate is signed in to ChatGPT, but',
   codeExpired: '⌛ The sign-in code expired unused',
+  interrupted: '🔄 mate restarted before the sign-in finished',
   notSent: "⚠️ Couldn't send you the code",
   noWhisper: '⚠️ mate cannot send a sign-in code privately here',
   deviceRefused: '⚠️ OpenAI refused to start a device sign-in',
@@ -53,7 +54,8 @@ export const CHATGPT = {
   logoutFailed: '⚠️ mate could not sign out of ChatGPT',
   paused: '⏸️ ChatGPT is paused',
   resumed: '▶️ ChatGPT is not paused',
-  status: 'ChatGPT: ',
+  // Marked, since an answer may start with the bare word.
+  status: 'ℹ️ ChatGPT: ',
 } as const;
 
 // Posted by earlier versions of mate.

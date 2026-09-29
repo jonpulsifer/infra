@@ -2,7 +2,14 @@
  * The ChatGPT sign-in through pi's own device flow, refresh and Codex request.
  * A fake fetch plays OpenAI, and any other host fails the test.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  test,
+} from 'bun:test';
 import type { ModelSetup } from '../src/brain-inputs.ts';
 import {
   CHECK_MS,
@@ -19,7 +26,7 @@ import {
   chatgptModel,
   createModelSetup,
 } from '../src/model.ts';
-import { CHATGPT, isNotice } from '../src/notices.ts';
+import { CHATGPT, isNotice, STORE_DOWN } from '../src/notices.ts';
 import type { Surface, ThreadRef } from '../src/surface.ts';
 import { withDatabase } from './db.ts';
 import { FakeSurface } from './fakesurface.ts';
@@ -252,6 +259,7 @@ beforeEach(async () => {
   account = new ChatgptAccount({
     models: setup.models,
     keeper,
+    credentials: store,
     model: chatgptModel(setup),
     lane: { model: setup.model, thinking: setup.thinking },
     clock,
@@ -268,7 +276,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   keeper.stop();
-  account.stop();
+  await account.stop();
+  setSystemTime();
   await store.close();
   globalThis.fetch = original;
 });
@@ -451,6 +460,46 @@ describe('signing in', () => {
     expect(said().at(-1)).toStartWith(CHATGPT.signedIn);
   });
 
+  // pi polls to its own 15-minute deadline on Date.now(), before mate's backstop.
+  test("a code that outlives pi's own poll deadline is said to have expired", async () => {
+    let answer = (_answer: 'pending') => {};
+    openai.pollGate = new Promise((resolve) => {
+      answer = resolve;
+    });
+    const waiting = command('chatgpt login');
+    await until(() => said().length === 1);
+    setSystemTime(new Date(Date.now() + LOGIN_TIMEOUT_MS));
+    answer('pending');
+    await waiting;
+    expect(said().at(-1)).toBe(
+      `${CHATGPT.codeExpired}. Say \`chatgpt login\` for a new one.`,
+    );
+    expect(openai.of('/oauth/token')).toEqual([]);
+    expect(clock.pendingTimers).toBe(0);
+  });
+
+  test('a restart while the code waits tells the thread before mate stops', async () => {
+    openai.pollGate = new Promise(() => {});
+    const waiting = command('chatgpt login');
+    await until(() => said().length === 1);
+    await account.stop();
+    expect(said()).toEqual([
+      `${CHATGPT.codeSent} by DM. It works for 15 minutes.`,
+      `${CHATGPT.interrupted}. Say \`chatgpt login\` again for a new code.`,
+    ]);
+    await waiting;
+    expect(await store.read(CHATGPT_PROVIDER)).toBeUndefined();
+    for (const line of said()) expect(isNotice(line)).toBe(true);
+  });
+
+  test('a store mate cannot read starts no sign-in, so nobody enters a code for nothing', async () => {
+    up = false;
+    await command('chatgpt login');
+    expect(said()).toEqual([STORE_DOWN]);
+    expect(discord.dms).toEqual([]);
+    expect(openai.calls).toEqual([]);
+  });
+
   test('OpenAI refusing the device flow is said with its status', async () => {
     openai.usercode = 404;
     await command('chatgpt login');
@@ -562,7 +611,7 @@ describe('the keeper', () => {
       expect(openai.of('/oauth/token')).toHaveLength(1);
       await command('chatgpt status');
       expect(said().at(-1)).toMatch(
-        /^ChatGPT: signed out, because OpenAI refused the token refresh at \d\d:\d\d UTC\. Say `chatgpt login` to sign in again\./,
+        /^ℹ️ ChatGPT: signed out, because OpenAI refused the token refresh at \d\d:\d\d UTC\. Say `chatgpt login` to sign in again\./,
       );
       await command('chatgpt login');
       expect(keeper.state().state).toBe('good');
@@ -637,14 +686,24 @@ describe('status, logout and pause', () => {
     await keeper.check();
     await command('chatgpt status');
     expect(said()).toEqual([
-      'ChatGPT: not signed in. Say `chatgpt login` to sign in. Turns use opencode-go/qwen3.8-max (medium), not ChatGPT.',
+      `${CHATGPT.status}not signed in. Say \`chatgpt login\` to sign in. Turns use opencode-go/qwen3.8-max (medium), not ChatGPT.`,
     ]);
     await signIn(5);
     await command('chatgpt pause 30');
     await command('chatgpt status');
     expect(said().at(-1)).toMatch(
-      /^ChatGPT: signed in, token good until \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Turns use opencode-go\/qwen3\.8-max \(medium\), not ChatGPT\. Paused until \d\d:\d\d UTC\.$/,
+      /^ℹ️ ChatGPT: signed in, token good until \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Turns use opencode-go\/qwen3\.8-max \(medium\), not ChatGPT\. Paused until \d\d:\d\d UTC\.$/,
     );
+  });
+
+  test('status stays out of a replay, and an answer that starts with the word ChatGPT does not', async () => {
+    await command('chatgpt status');
+    expect(said().map(isNotice)).toEqual([true]);
+    expect(
+      isNotice(
+        'ChatGPT: the free tier caps you at 10 messages; Claude has no such cap.',
+      ),
+    ).toBe(false);
   });
 
   test('logout forgets the credential, and says how to end the tokens at OpenAI', async () => {

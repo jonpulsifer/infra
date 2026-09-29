@@ -16,7 +16,7 @@ import type { CredentialChange } from './credential-store.ts';
 import type { Log } from './log.ts';
 import type { ChatgptSignIn, Instruments } from './metrics.ts';
 import { CHATGPT_PROVIDER } from './model.ts';
-import { CHATGPT } from './notices.ts';
+import { CHATGPT, STORE_DOWN } from './notices.ts';
 import type { Command, CommandContext, Commands } from './threads.ts';
 
 const MINUTE_MS = 60_000;
@@ -326,7 +326,10 @@ export function loginFailure(error: unknown): LoginFailure {
 }
 
 class SignInExpired extends Error {}
+/** A logout ended the sign-in, and says so itself. */
 class SignInCancelled extends Error {}
+/** mate is shutting down, and no process polls the code after it. */
+class SignInInterrupted extends Error {}
 class NotWhispered extends Error {}
 
 /** A surface error's class and code, which name the refusal without quoting the request. */
@@ -342,6 +345,8 @@ function refusal(error: unknown): Record<string, unknown> {
 interface Pending {
   readonly abort: AbortController;
   until: number;
+  /** Settles once the sign-in has ended and a failure is said. */
+  readonly ended: Promise<void>;
 }
 
 type Proof =
@@ -351,6 +356,8 @@ type Proof =
 export interface ChatgptAccountOptions {
   readonly models: Pick<Models, 'login' | 'logout' | 'completeSimple'>;
   readonly keeper: ChatgptKeeper;
+  /** Read before a sign-in starts, since pi saves it only after the code is entered. */
+  readonly credentials: Pick<WatchedCredentials, 'read'>;
   /** Where a sign-in's test request goes; null when pi lists no ChatGPT model. */
   readonly model: Model<Api> | null;
   /** What turns answer with: MATE_MODEL at MATE_THINKING. */
@@ -388,9 +395,12 @@ export class ChatgptAccount implements Commands {
     return this.pausedUntil;
   }
 
-  /** Ends a sign-in that is waiting for its code, on shutdown. */
-  stop(): void {
-    this.pending?.abort.abort(new SignInCancelled());
+  /** On shutdown: ends a sign-in waiting for its code, once its thread is told. */
+  async stop(): Promise<void> {
+    const pending = this.pending;
+    if (!pending) return;
+    pending.abort.abort(new SignInInterrupted());
+    await pending.ended;
   }
 
   private async run(
@@ -415,6 +425,13 @@ export class ChatgptAccount implements Commands {
   private async login(context: CommandContext): Promise<void> {
     const { surface, thread, authorId } = context;
     const { clock, log, models } = this.options;
+    try {
+      await this.options.credentials.read(CHATGPT_PROVIDER);
+    } catch {
+      log.warn('no ChatGPT sign-in starts while mate-db cannot be read');
+      await this.say(context, STORE_DOWN);
+      return;
+    }
     if (this.pending) {
       await this.say(
         context,
@@ -431,9 +448,11 @@ export class ChatgptAccount implements Commands {
       return;
     }
     const abort = new AbortController();
+    const ended = Promise.withResolvers<void>();
     const pending: Pending = {
       abort,
       until: clock.now() + DEVICE_CODE_SECONDS * 1000,
+      ended: ended.promise,
     };
     this.pending = pending;
     const timeout = clock.after(
@@ -480,6 +499,7 @@ export class ChatgptAccount implements Commands {
     } finally {
       clock.cancel(timeout);
       this.pending = null;
+      ended.resolve();
     }
     await told;
     log.info('mate is signed in to ChatGPT');
@@ -489,6 +509,14 @@ export class ChatgptAccount implements Commands {
 
   private async failed(context: CommandContext, reason: unknown) {
     if (reason instanceof SignInCancelled) return;
+    if (reason instanceof SignInInterrupted) {
+      this.options.log.info('mate stops waiting for the ChatGPT sign-in code');
+      await this.say(
+        context,
+        `${CHATGPT.interrupted}. Say \`chatgpt login\` again for a new code.`,
+      );
+      return;
+    }
     const discord = context.surface.name === 'discord';
     if (reason instanceof NotWhispered) {
       this.options.log.warn(

@@ -266,6 +266,7 @@ function openChatgpt(
   const account = new ChatgptAccount({
     models: setup.models,
     keeper,
+    credentials,
     model: chatgptModel(setup),
     lane: { model: setup.model, thinking: setup.thinking },
     clock: systemClock,
@@ -567,7 +568,9 @@ async function shutdown(signal: string): Promise<void> {
     .catch((error) => log.warn('drain failed', { error: plain(error) }));
   await wiring.hands?.shutdown();
   wiring.chatgpt?.keeper.stop();
-  wiring.chatgpt?.account.stop();
+  // While the surfaces can still post: a sign-in waiting for its code tells
+  // its thread that the code no longer works.
+  await wiring.chatgpt?.account.stop();
   try {
     await manager.destroy();
   } catch (error) {
