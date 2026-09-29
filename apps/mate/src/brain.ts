@@ -81,6 +81,8 @@ export const QUARANTINE_LIMIT = 3;
 const QUARANTINE_WINDOW_MS = 3_600_000;
 const FORGET_WAIT_MS = 10_000;
 const SWEEP_BATCH = 100;
+/** How many messages back a resume looks for the calls its run made. */
+const RESUME_LOOKBACK = 16;
 const LANE = 'main';
 const CTX = BACKGROUND_CONTEXT;
 
@@ -353,6 +355,7 @@ export class PiBrain implements Brain {
         tb.interrupted?.operationId ??
         (await tb.lane.inspectExecution(CTX)).current?.id;
       if (!operationId) return { stopReason: 'end_turn' };
+      await this.seedCalls(tb, turn);
       if (turn.abandoned) throw new ClosedUnderTurn();
       turn.lease = tb.hands.beginTurn(this.leaseOptions(turn));
       await turn.lease.warm();
@@ -523,6 +526,35 @@ export class PiBrain implements Brain {
     };
     tb.turn = turn;
     return turn;
+  }
+
+  /**
+   * Titles the calls of the newest assistant message for the resumed card; a
+   * failed read leaves the bare titles.
+   */
+  private async seedCalls(tb: ThreadBrain, turn: Turn): Promise<void> {
+    try {
+      const entries = await tb.lane.findEntries(
+        { type: 'message', order: 'newestFirst', limit: RESUME_LOOKBACK },
+        CTX,
+      );
+      for (const entry of entries) {
+        if (entry.type !== 'message') continue;
+        const { message } = entry;
+        if (!('role' in message) || message.role !== 'assistant') continue;
+        for (const block of message.content) {
+          if (block.type === 'toolCall') {
+            turn.translator.seed(block.id, block.name, block.arguments);
+          }
+        }
+        return;
+      }
+    } catch (error) {
+      this.deps.log.warn('the resumed calls could not be read', {
+        key: tb.key,
+        error: plain(error),
+      });
+    }
   }
 
   private leaseOptions(turn: Turn) {

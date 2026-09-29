@@ -209,6 +209,23 @@ describe('the translator', () => {
     expect(sink.statuses.every((line) => line === null)).toBe(true);
   });
 
+  test('a recovered tool end takes the title of the call seeded before the resume', () => {
+    const key = `sk-${'a1b2c3d4'.repeat(4)}`;
+    turn.seed('c9', 'bash', { command: `curl -H "x: ${key}" && sleep 30` });
+    turn.seed('c10', 'read', { path: '/workspace/notes.txt' });
+    expect(sink.updates).toEqual([]);
+    turn.event(toolEnd('c9', 'bash', true, { recovery: true }));
+    turn.event(toolStart('c10', 'read', { path: '/workspace/other.txt' }));
+    expect(sink.cards).toEqual([
+      {
+        id: 'c9',
+        title: '$ curl -H "x: [redacted]" && sleep 30',
+        state: 'error',
+      },
+      { id: 'c10', title: 'read other.txt', state: 'in_progress' },
+    ]);
+  });
+
   test('a recovered message is drawn once, and a streamed one is not drawn again', () => {
     turn.event(
       event({ type: 'message_start', message: assistant(''), recovery: true }),

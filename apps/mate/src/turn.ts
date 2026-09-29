@@ -169,6 +169,8 @@ function spokenText(message: AgentMessage): string {
 
 export class TurnTranslator {
   private readonly tools = new Map<string, ToolCall>();
+  /** Titles of calls a resumed run made before the restart, by call id. */
+  private readonly seeded = new Map<string, string>();
   private readonly card: SandboxCard;
   private readonly startedAt: number;
   private status: string | null = null;
@@ -199,6 +201,14 @@ export class TurnTranslator {
     this.card.event(event);
   }
 
+  /**
+   * A call made before a restart: pi's recovery can end it without starting
+   * it again, and its end carries no arguments. Nothing is drawn until then.
+   */
+  seed(id: string, name: string, args: unknown): void {
+    this.seeded.set(id, toolTitle(name, args));
+  }
+
   /** Sync and never throws: pi awaits its listeners. */
   event(event: HarnessEvent): void {
     switch (event.type) {
@@ -224,7 +234,10 @@ export class TurnTranslator {
         this.metrics.toolEnded(event.toolName, event.isError);
         this.tool({
           id: event.toolCallId,
-          title: known?.title ?? toolTitle(event.toolName, undefined),
+          title:
+            known?.title ??
+            this.seeded.get(event.toolCallId) ??
+            toolTitle(event.toolName, undefined),
           state: event.isError ? 'error' : 'complete',
         });
         return;

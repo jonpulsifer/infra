@@ -1161,6 +1161,12 @@ describe('a restart mid-turn', () => {
     const resumed = await second.brain.resume(reopened, sink, ASKER);
     expect(resumed.stopReason).toBe('end_turn');
     expect(sink.text).toBe('picked it back up');
+    // pi ends the interrupted bash without starting it again.
+    expect(sink.cards).toContainEqual({
+      id: 'c-bash',
+      title: '$ sleep 30',
+      state: 'error',
+    });
     expect(second.hands.log[0]).toBe('warm');
     const said = await transcript(row.sessionId);
     expect(toolText(said, 'c-bash')).toContain(INTERRUPTED);
