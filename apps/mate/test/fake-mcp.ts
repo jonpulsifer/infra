@@ -1,5 +1,5 @@
 /**
- * A kthx MCP server double, stateless like `apps/spindrift/src/web/mcp-route.ts`:
+ * An MCP server double, stateless like `apps/spindrift/src/web/mcp-route.ts`:
  * one JSON-RPC request per POST, answered as JSON or, in `sse` mode, as one
  * event on a `text/event-stream`.
  */
@@ -164,10 +164,16 @@ export class FakeMcp {
 export class RecordingMcpInstruments implements McpInstruments {
   readonly up: boolean[] = [];
   readonly calls: string[] = [];
-  mcpUp(up: boolean): void {
+  readonly servers = new Set<string>();
+  mcpUp(server: string, up: boolean): void {
+    this.servers.add(server);
     this.up.push(up);
   }
-  mcpCall(result: 'ok' | 'error' | 'unavailable' | 'aborted'): void {
+  mcpCall(
+    server: string,
+    result: 'ok' | 'error' | 'unavailable' | 'aborted',
+  ): void {
+    this.servers.add(server);
     this.calls.push(result);
   }
 }

@@ -28,7 +28,7 @@ import {
 } from '../src/brain-port.ts';
 import { type Clock, type Handle, systemClock } from '../src/clock.ts';
 import { HANDS_BINARY } from '../src/hands.ts';
-import { createKthxMcp } from '../src/mcp.ts';
+import { createMcpBridge } from '../src/mcp.ts';
 import { HARNESS_FAILED, RESUMING } from '../src/notices.ts';
 import type { PromptResult, PromptSink } from '../src/sandbox.ts';
 import type { KubeHands } from '../src/sandboxes.ts';
@@ -574,7 +574,9 @@ describe('a restart mid-turn', () => {
         await held.wait;
         return { content: [{ type: 'text', text: 'too late' }] };
       });
-      const listing = createKthxMcp({
+      const listing = createMcpBridge({
+        name: 'kthx',
+        prefix: 'kthx_',
         url: deploy.url,
         token: TOKEN,
         log: new RecordingLog(),
@@ -600,7 +602,9 @@ describe('a restart mid-turn', () => {
 
       const empty = new FakeMcp({ tools: [] }).start();
       servers.push(empty);
-      const bare = createKthxMcp({
+      const bare = createMcpBridge({
+        name: 'kthx',
+        prefix: 'kthx_',
         url: empty.url,
         token: TOKEN,
         log: new RecordingLog(),

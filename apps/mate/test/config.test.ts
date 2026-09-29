@@ -133,7 +133,7 @@ describe('config from the environment', () => {
         modelKeyFile: '/var/run/mate/opencode/api-key',
         databaseUrl: null,
         databaseCaFile: '/var/run/mate/db-ca/ca.crt',
-        kthxMcp: null,
+        mcpServers: [],
         profileRoot: null,
         sessionRetentionDays: 14,
       },
@@ -242,11 +242,11 @@ describe('config from the environment', () => {
     const halves = (env: Record<string, string>) => {
       const choice = readConfig(env).sandboxes;
       if (choice.mode !== 'kube') throw new Error('expected kube mode');
-      return { cli: choice.sandbox.kthx, mcp: choice.brain.kthxMcp };
+      return { cli: choice.sandbox.kthx, mcp: choice.brain.mcpServers };
     };
     expect(halves(kube)).toEqual({
       cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
-      mcp: null,
+      mcp: [],
     });
 
     // The CLI half alone, with the origin normalised the way the CLI does it.
@@ -258,7 +258,7 @@ describe('config from the environment', () => {
       }),
     ).toEqual({
       cli: { origin: 'https://kthx.example.test', sitesSecret: 'other-sites' },
-      mcp: null,
+      mcp: [],
     });
 
     // The MCP half alone: mate holds the token, and the sandbox sees none of it.
@@ -266,7 +266,7 @@ describe('config from the environment', () => {
       halves({ ...kube, MATE_KTHX_MCP_URL: url, KTHX_AGENT_TOKEN: 'kthx_a' }),
     ).toEqual({
       cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
-      mcp: { url, token: 'kthx_a' },
+      mcp: [{ name: 'kthx', url, token: 'kthx_a' }],
     });
 
     for (const bad of ['kthx.example.test', 'ftp://kthx.example.test', ':']) {
@@ -386,18 +386,41 @@ describe('config from the environment', () => {
 
   test('the kthx tools need both the MCP URL and the agent token', () => {
     const url = 'http://spindrift.spindrift.svc.cluster.local:3000/mcp';
-    expect(readBrainConfig({ MATE_KTHX_MCP_URL: url }).kthxMcp).toBeNull();
-    expect(readBrainConfig({ KTHX_AGENT_TOKEN: 'kthx_a' }).kthxMcp).toBeNull();
+    expect(readBrainConfig({ MATE_KTHX_MCP_URL: url }).mcpServers).toEqual([]);
+    expect(readBrainConfig({ KTHX_AGENT_TOKEN: 'kthx_a' }).mcpServers).toEqual(
+      [],
+    );
     expect(
       readBrainConfig({ MATE_KTHX_MCP_URL: url, KTHX_AGENT_TOKEN: ' kthx_a\n' })
-        .kthxMcp,
-    ).toEqual({ url, token: 'kthx_a' });
+        .mcpServers,
+    ).toEqual([{ name: 'kthx', url, token: 'kthx_a' }]);
     expect(() =>
       readBrainConfig({
         MATE_KTHX_MCP_URL: 'spindrift',
         KTHX_AGENT_TOKEN: 'a',
       }),
     ).toThrow('MATE_KTHX_MCP_URL must be an http(s) URL');
+  });
+
+  test('the weather tools need only the MCP URL, and come after kthx', () => {
+    const kthx = 'http://spindrift.spindrift.svc.cluster.local:3000/mcp';
+    const weather = 'http://weather.weather.svc.cluster.local:8080/mcp';
+    expect(
+      readBrainConfig({ MATE_WEATHER_MCP_URL: weather }).mcpServers,
+    ).toEqual([{ name: 'weather', url: weather, token: null }]);
+    expect(
+      readBrainConfig({
+        MATE_KTHX_MCP_URL: kthx,
+        KTHX_AGENT_TOKEN: 'kthx_a',
+        MATE_WEATHER_MCP_URL: weather,
+      }).mcpServers,
+    ).toEqual([
+      { name: 'kthx', url: kthx, token: 'kthx_a' },
+      { name: 'weather', url: weather, token: null },
+    ]);
+    expect(() => readBrainConfig({ MATE_WEATHER_MCP_URL: 'weather' })).toThrow(
+      'MATE_WEATHER_MCP_URL must be an http(s) URL',
+    );
   });
 
   test('sessions are kept 14 days, and 0 keeps them for good', () => {

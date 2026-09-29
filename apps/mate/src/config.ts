@@ -64,12 +64,23 @@ export interface BrainConfig {
   /** `null` leaves the store down, which is not a reason to refuse to boot. */
   readonly databaseUrl: string | null;
   readonly databaseCaFile: string;
-  /** Both halves or neither: the token is a secret, so it stays out of `SandboxConfig`. */
-  readonly kthxMcp: { readonly url: string; readonly token: string } | null;
+  /**
+   * The MCP servers whose tools the brain loads. kthx needs both halves or is
+   * absent: its token is a secret, so it stays out of `SandboxConfig`.
+   */
+  readonly mcpServers: readonly McpServerConfig[];
   /** Holds AGENTS.md and the skills; `null` is the repo root beside the source. */
   readonly profileRoot: string | null;
   /** 0 keeps every session. */
   readonly sessionRetentionDays: number;
+}
+
+export interface McpServerConfig {
+  /** Also the tool prefix, as `<name>_`. */
+  readonly name: 'kthx' | 'weather';
+  readonly url: string;
+  /** `null` for a server that takes none. */
+  readonly token: string | null;
 }
 
 export interface SandboxConfig {
@@ -287,10 +298,18 @@ function modelSpec(env: Env, key: string, fallback: string): string {
   return model;
 }
 
-function kthxMcp(env: Env): BrainConfig['kthxMcp'] {
-  const url = httpUrl(env, 'MATE_KTHX_MCP_URL');
+function mcpServers(env: Env): McpServerConfig[] {
+  const kthxUrl = httpUrl(env, 'MATE_KTHX_MCP_URL');
   const token = env.KTHX_AGENT_TOKEN?.trim();
-  return url && token ? { url, token } : null;
+  const weatherUrl = httpUrl(env, 'MATE_WEATHER_MCP_URL');
+  return [
+    ...(kthxUrl && token
+      ? [{ name: 'kthx' as const, url: kthxUrl, token }]
+      : []),
+    ...(weatherUrl
+      ? [{ name: 'weather' as const, url: weatherUrl, token: null }]
+      : []),
+  ];
 }
 
 export function readBrainConfig(env: Env): BrainConfig {
@@ -320,7 +339,7 @@ export function readBrainConfig(env: Env): BrainConfig {
     ),
     databaseUrl: env.DATABASE_URL?.trim() || null,
     databaseCaFile: text(env, 'MATE_DB_CA_FILE', '/var/run/mate/db-ca/ca.crt'),
-    kthxMcp: kthxMcp(env),
+    mcpServers: mcpServers(env),
     profileRoot: env.MATE_PROFILE_DIR?.trim() || null,
     sessionRetentionDays: integer(env, 'MATE_SESSION_RETENTION_DAYS', 14, 0),
   };

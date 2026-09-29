@@ -1484,7 +1484,7 @@
           },
           "expr": "mate_mcp_up",
           "refId": "A",
-          "legendFormat": "up"
+          "legendFormat": "{{server}}"
         }
       ]
     },

@@ -1,6 +1,6 @@
 /**
  * What the brain is built from, each made once per process: the model and its
- * key, the system prompt, and the kthx tools bridged from MCP.
+ * key, the system prompt, and the tools bridged from MCP servers.
  */
 import type {
   AgentHarnessTool,
@@ -77,17 +77,25 @@ export type LoadSystemPrompts = (
 
 export type BridgedTool = AgentHarnessTool<ExecutionToolContext>;
 
-/** Every bridged tool's name starts with this. */
+/** Every tool bridged from the kthx server starts with this. */
 export const KTHX_TOOL_PREFIX = 'kthx_';
 
 export interface McpInstruments {
-  mcpUp(up: boolean): void;
-  mcpCall(result: 'ok' | 'error' | 'unavailable' | 'aborted'): void;
+  mcpUp(server: string, up: boolean): void;
+  mcpCall(
+    server: string,
+    result: 'ok' | 'error' | 'unavailable' | 'aborted',
+  ): void;
 }
 
 export interface McpBridgeOptions {
+  /** Names the server in logs, labels and errors, such as `kthx`. */
+  readonly name: string;
+  /** Starts every bridged tool's name, such as `kthx_`. */
+  readonly prefix: string;
   readonly url: string;
-  readonly token: string;
+  /** Sent as a bearer; a server without one gets no Authorization header. */
+  readonly token?: string;
   readonly log: Log;
   readonly clock?: Clock;
   readonly metrics?: McpInstruments;
@@ -108,4 +116,4 @@ export interface McpBridge {
   close(): Promise<void>;
 }
 
-export type CreateKthxMcp = (options: McpBridgeOptions) => McpBridge;
+export type CreateMcpBridge = (options: McpBridgeOptions) => McpBridge;
