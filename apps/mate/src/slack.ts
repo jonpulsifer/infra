@@ -95,6 +95,8 @@ export interface RichElement {
   user_id?: string;
   channel_id?: string;
   usergroup_id?: string;
+  /** An emoji's code points in hex, joined by `-`. */
+  unicode?: string;
   /** A text's `{ bold, italic, strike, code }`, or a list's `bullet` or `ordered`. */
   style?: unknown;
   elements?: RichElement[];
@@ -175,9 +177,23 @@ function inline(element: RichElement): string {
     case 'broadcast':
       return `<!${element.range}>`;
     case 'emoji':
-      return `:${element.name}:`;
+      return emoji(element);
     default:
       return element.text ?? '';
+  }
+}
+
+// The characters mate posted, so a notice stored with its mark as an element
+// still starts with the mark `isNotice` looks for.
+function emoji(element: RichElement): string {
+  try {
+    return String.fromCodePoint(
+      ...(element.unicode ?? '')
+        .split('-')
+        .map((hex) => Number.parseInt(hex, 16)),
+    );
+  } catch {
+    return `:${element.name}:`;
   }
 }
 

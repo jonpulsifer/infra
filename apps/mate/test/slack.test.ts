@@ -3,8 +3,12 @@ import { SANDBOX_CARD_ID } from '../src/lease.ts';
 import { silentLog } from '../src/log.ts';
 import {
   CONNECTING,
+  DAY_SPENT,
+  HARNESS_FAILED,
   MINT_STEPS,
+  RESTARTED,
   SANDBOX_READY,
+  THREAD_CLOSED,
   UNDELIVERED,
 } from '../src/notices.ts';
 import { NO_REPLY, Reply } from '../src/reply.ts';
@@ -15,9 +19,11 @@ import {
   escapeSlack,
   PLAN_ROWS,
   PROCESSING_RENEW_MS,
+  type RichElement,
   type SlackBlock,
   SlackCanvas,
   SlackError,
+  type SlackMessage,
   slackEvent,
   slackInbound,
   slackSessionStopped,
@@ -1032,6 +1038,119 @@ describe('the surface', () => {
       'Done & dusted.',
       `Here is the **fix** for <@${OWNER}>:\n- one\n`,
     ]);
+  });
+
+  test("mate's markdown reads back from the blocks Slack stored it as", async () => {
+    const section = (...elements: RichElement[]): RichElement => ({
+      type: 'rich_text_section',
+      elements,
+    });
+    api.thread.push({
+      ts: '1.000001',
+      bot_id: BOT,
+      text: 'Ran 1 command in 1 step · 1s Result …',
+      blocks: [
+        { type: 'plan', title: 'Ran 1 command in 1 step · 1s' } as SlackBlock,
+        { type: 'markdown', text: '## Result\n' },
+        {
+          type: 'rich_text',
+          elements: [
+            section(
+              { type: 'text', text: 'Run ' },
+              { type: 'text', text: 'bun test', style: { code: true } },
+              { type: 'text', text: ', see ' },
+              { type: 'link', url: 'https://example.com/a', text: 'the page' },
+              { type: 'text', text: ' or ' },
+              { type: 'link', url: 'https://example.com/b' },
+              { type: 'text', text: '.\n' },
+            ),
+            {
+              type: 'rich_text_preformatted',
+              elements: [{ type: 'text', text: 'const a = 1;\nconst b = 2;' }],
+            },
+            {
+              type: 'rich_text_quote',
+              elements: [{ type: 'text', text: 'quoted' }],
+            },
+            {
+              type: 'rich_text_list',
+              style: 'ordered',
+              elements: [
+                section({ type: 'text', text: 'first' }),
+                section({
+                  type: 'text',
+                  text: 'second',
+                  style: { italic: true },
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const [message] = await surface().history(THREAD, { limit: 10 });
+    expect(message?.content).toBe(
+      [
+        '## Result',
+        'Run `bun test`, see [the page](https://example.com/a) or https://example.com/b.',
+        '```',
+        'const a = 1;',
+        'const b = 2;',
+        '```',
+        '> quoted',
+        '1. first',
+        '2. *second*',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('a notice Slack stored with an emoji element is still a notice, and an answer keeps its emoji', async () => {
+    const said = (ts: string, ...elements: RichElement[]): SlackMessage => ({
+      ts,
+      bot_id: BOT,
+      text: 'as Slack folded it',
+      blocks: [
+        {
+          type: 'rich_text',
+          elements: [{ type: 'rich_text_section', elements }],
+        },
+      ],
+    });
+    // A notice's mark comes back as an element holding its code points.
+    const notice = (ts: string, line: string) => {
+      const [mark = ''] = line.split(' ');
+      const unicode = [...mark]
+        .map((character) => character.codePointAt(0)?.toString(16))
+        .join('-');
+      return said(
+        ts,
+        { type: 'emoji', name: 'mark', unicode },
+        { type: 'text', text: line.slice(mark.length) },
+      );
+    };
+    api.thread.push(
+      { ts: '1.000001', user: OWNER, text: 'fix it' },
+      notice('2.000002', RESTARTED),
+      notice('3.000003', `${HARNESS_FAILED}: boom`),
+      notice('4.000004', THREAD_CLOSED),
+      notice('5.000005', `${DAY_SPENT} 120 turns`),
+      notice('6.000006', SANDBOX_READY),
+      said(
+        '7.000007',
+        { type: 'text', text: 'Fixed ' },
+        { type: 'emoji', name: 'white_check_mark', unicode: '2705' },
+        { type: 'text', text: ' ' },
+        { type: 'emoji', name: 'partyparrot' },
+      ),
+    );
+    const preamble = await replayPreamble(surface(), THREAD, {
+      me: ME,
+      skip: [],
+    });
+    expect(preamble).toContain(
+      `\n\n${OWNER}: fix it\nyou: Fixed ✅ :partyparrot:\n\n`,
+    );
   });
 
   test('the replay hands a fresh session the answers, never a plan title', async () => {
