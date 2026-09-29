@@ -185,7 +185,7 @@ spec:
             severity: warning
           annotations:
             message: "mate is not signed in to ChatGPT"
-            description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, or OpenAI refused the token refresh. Until the owner signs it in again, mate cannot use ChatGPT. `chatgpt status` in a mate thread says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, say `chatgpt login` to mate and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
+            description: "mate has held no working ChatGPT sign-in for thirty minutes: nobody has signed it in, someone said `chatgpt logout`, or OpenAI refused the token refresh. Until the owner signs it in again, mate cannot use ChatGPT. Mentioning mate with `chatgpt status` says which, and mate's log says why: `kubectl --context offsite logs -n mate deploy/mate | grep -i chatgpt`. To sign in, mention mate with `chatgpt login` and enter the code it sends privately, as the runbook at https://wiki.lolwtf.ca/runbooks/sign-rowbutt-in-to-chatgpt/ says."
 
         # The keeper rotates the token at two days left, so under one is a day
         # of failed refreshes. The gauge is absent while signed out.

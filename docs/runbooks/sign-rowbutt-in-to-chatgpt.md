@@ -11,13 +11,14 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
 ## Before you start
 
 - Be the user in `MATE_ALLOWED_USER_IDS` on Discord, or in `MATE_SLACK_ALLOWED_USER_IDS` on Slack.
+- Mention Rowbutt with each command. After a restart, mate ignores a reply without the mention in a thread that holds only commands.
 - On Discord, allow direct messages from members of the `homelab` server.
 - Sign in to your own ChatGPT account in a browser.
 - For the log check, get `kubectl` access to offsite ([Get cluster admin access](get-cluster-admin-access.md)).
 
 ## Sign in
 
-1. In an allowed channel, mention Rowbutt with `chatgpt login`. In a Rowbutt thread, say `chatgpt login`.
+1. In an allowed channel or a Rowbutt thread, mention Rowbutt with `chatgpt login`.
 
    Result: mate says in the thread that it sent you a code, which works for 15 minutes.
 
@@ -35,9 +36,9 @@ This runbook signs [Rowbutt](../apps/mate.md) in to the owner's ChatGPT subscrip
 
 ## Check the sign-in
 
-1. In a Rowbutt thread, say `chatgpt status`.
+1. Mention Rowbutt with `chatgpt status`.
 
-   Result: mate says `ChatGPT: signed in, token good until`, with a date.
+   Result: mate says `ℹ️ ChatGPT: signed in, token good until`, with a date.
 
 2. Read the ChatGPT lines of the mate log.
 
@@ -56,7 +57,7 @@ A pause keeps ChatGPT out of use without a deploy. A restart of mate ends the pa
 
 ## Sign out
 
-1. In a Rowbutt thread, say `chatgpt logout`.
+1. Mention Rowbutt with `chatgpt logout`.
 
    Result: mate says `🔓 mate signed out of ChatGPT`, and deletes the token from mate-db.
 
@@ -65,7 +66,7 @@ A pause keeps ChatGPT out of use without a deploy. A restart of mate ends the pa
 
 2. In ChatGPT's security settings, sign out of all sessions.
 
-   Result: OpenAI refuses every token that mate held.
+   Result: OpenAI ends the account's sessions. No test has shown that this also ends an access token mate already holds, which works for up to 10 days.
 
 ## If something goes wrong
 
@@ -77,6 +78,8 @@ A pause keeps ChatGPT out of use without a deploy. A restart of mate ends the pa
 | `Couldn't send you the code by DM` | Discord refuses direct messages from the server. | Allow them, then say `chatgpt login` again. |
 | `OpenAI refused to start a device sign-in (HTTP 404)` | Device code sign-in is off for the ChatGPT account. | Turn it on in ChatGPT's security settings. |
 | `The sign-in code expired unused` | Nobody entered the code in 15 minutes. | Say `chatgpt login` again. |
+| `mate restarted before the sign-in finished` | mate stopped while it waited for the code. | Say `chatgpt login` again. |
+| `mate can't reach its memory right now` after `chatgpt login` | mate-db is down. | Do [Operate Postgres](operate-postgres.md). |
 | `auth.openai.com could not be reached` or `chatgpt.com could not be reached` | mate's egress policy or DNS blocks the host. | Make sure that both hosts are in `clusters/offsite/apps/mate/network-policy.yaml` on port 443. |
 | The test request failed with `HTTP 401` or `HTTP 403`. | The plan does not include Codex, or OpenAI refuses the client. | Check the plan in ChatGPT's settings. |
 | `MateChatGPTSignedOut` fires, or `chatgpt status` says `OpenAI refused the token refresh`. | The refresh token is revoked or spent. | Do [Sign in](#sign-in). |
