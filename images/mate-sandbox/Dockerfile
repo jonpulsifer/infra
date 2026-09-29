@@ -24,8 +24,9 @@ ARG BUN_VERSION=1.4.2
 # renovate: datasource=github-releases depName=cilium/cilium-cli
 ARG CILIUM_CLI_VERSION=0.20.1
 # Must equal the operator's version, the appVersion of the chart that
-# clusters/base/platform/cloudnative-pg/helm-release.yaml pins.
-# renovate: datasource=github-releases depName=cloudnative-pg/cloudnative-pg
+# clusters/base/platform/cloudnative-pg/helm-release.yaml pins. Renovate reads
+# it from the chart index and bumps it with the chart, in one pull request.
+# renovate: datasource=custom.cnpg-operator depName=cloudnative-pg/cloudnative-pg
 ARG CNPG_VERSION=1.29.1
 # renovate: datasource=github-releases depName=open-policy-agent/conftest
 ARG CONFTEST_VERSION=0.70.1
