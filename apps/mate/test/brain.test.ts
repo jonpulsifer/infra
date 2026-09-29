@@ -463,9 +463,11 @@ describe('Stop', () => {
     const faults = plan();
     const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
     const answer = gate();
+    const called = gate();
     const model = faux();
     model.script(
       async () => {
+        called.open();
         await answer.wait;
         return fauxAssistantMessage('streamed into a stalled store');
       },
@@ -477,7 +479,8 @@ describe('Stop', () => {
     });
     const { session } = await opened(built);
     const running = built.brain.prompt(session, 'hi', new Recorder(), ASKER);
-    await Bun.sleep(50);
+    // This run takes the first reply, so it is never left for the third prompt.
+    await called.wait;
     // mate-db stops answering, so every commit from here on waits, and so
     // does the abort, which queues behind them.
     const stalled = gate();
@@ -513,8 +516,10 @@ describe('Stop', () => {
     const faults = plan();
     const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
     const answer = gate();
+    const called = gate();
     const model = faux();
     model.script(async () => {
+      called.open();
       await answer.wait;
       return fauxAssistantMessage('streamed into a stalled store');
     });
@@ -529,7 +534,7 @@ describe('Stop', () => {
         () => null,
         (error: unknown) => error,
       );
-    await Bun.sleep(50);
+    await called.wait;
     const stalled = gate();
     faults.holdCommit = stalled.wait;
     answer.open();
