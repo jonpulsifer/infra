@@ -1,0 +1,17 @@
+[
+  {
+    "_comment": "The context is the repo root because the Dockerfile prunes the workspace; the watch list is what turbo prune actually pulls in.",
+    "image": "weather",
+    "context": ".",
+    "file": "apps/weather/Dockerfile",
+    "platforms": "linux/amd64",
+    "no-cache-filters": "runner",
+    "watch": [
+      "apps/weather",
+      "packages/typescript-config",
+      "package.json",
+      "bun.lock",
+      "turbo.json"
+    ]
+  }
+]

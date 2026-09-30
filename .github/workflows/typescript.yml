@@ -47,6 +47,7 @@ jobs:
             apps/slingshot/**
             apps/spindrift/**
             apps/switchboard/**
+            apps/weather/**
             clusters/folly/apps/pbx/config/**
             clusters/folly/apps/pbx/switchboard.yaml
             clusters/offsite/apps/mate/database-backup.yaml

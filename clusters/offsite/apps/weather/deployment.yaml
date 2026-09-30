@@ -1,0 +1,157 @@
+---
+# The weather API (`apps/weather`): `/v1` for apps and `/mcp` for mate. It has
+# no gateway: mate reaches the Service in-cluster and people reach ingress.yaml
+# over the tailnet, because the Tempest stations locate the family's homes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather
+  labels:
+    app.kubernetes.io/name: weather
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: weather
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: weather
+      annotations:
+        secret.reloader.stakater.com/reload: weather-env
+    spec:
+      automountServiceAccountToken: false
+      # toFQDNs only matches names Cilium's DNS proxy saw resolved through the
+      # policy's rule; ndots 1 keeps the search domains off the upstream names.
+      dnsConfig:
+        options:
+          - {name: ndots, value: "1"}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: weather
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # full `ghcr.io/…/weather…@sha256:` string, so keep it one literal.
+          image: ghcr.io/jonpulsifer/weather:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # The first place is home, where a question with no place is
+            # answered.
+            - name: WEATHER_PLACES
+              value: "debert=45.363,-63.276;halifax=44.649,-63.602;tofield=53.371,-112.666"
+            - name: TEMPESTWX_IGNORE_STATIONS
+              value: "85191"
+            - name: TEMPESTWX_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: weather-env
+                  key: TEMPESTWX_TOKENS
+            - name: WEATHER_PORT
+              value: "8080"
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: {cpu: 20m, memory: 96Mi}
+            limits: {memory: 256Mi}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather
+  labels:
+    app.kubernetes.io/name: weather
+spec:
+  selector:
+    app.kubernetes.io/name: weather
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+# mate and the tailnet proxy reach weather, and weather reaches only its three
+# upstreams.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: weather
+  labels:
+    app.kubernetes.io/name: weather
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: weather
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    # The readinessProbe comes from the node.
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+    # mate's bot pod calls /mcp; the tailscale operator runs ingress.yaml's
+    # proxy in its own namespace.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: mate
+            app.kubernetes.io/name: mate
+        - matchLabels:
+            io.kubernetes.pod.namespace: tailscale
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+          rules:
+            dns:
+              - matchName: api.weather.gc.ca
+              - matchName: swd.weatherflow.com
+              - matchName: novascotia.ca
+    - toFQDNs:
+        - matchName: api.weather.gc.ca
+        - matchName: swd.weatherflow.com
+        - matchName: novascotia.ca
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}

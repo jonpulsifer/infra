@@ -1,8 +1,10 @@
 /**
- * The kthx MCP tools, bridged into the brain as `kthx_*` pi tools. mate holds
- * the agent token and calls the engine's MCP endpoint over streamable HTTP.
- * The tool set is sticky: a listing only adds or replaces tools, and a tool
- * whose server is down answers an error instead of leaving the set.
+ * A streamable-HTTP MCP server's tools, bridged into the brain as pi tools
+ * under the server's prefix, such as `kthx_*`. A server that takes a token
+ * gets it from mate, which holds it. `combineMcp` joins several bridges into
+ * the one the brain sees. Each tool set is sticky: a listing only adds or
+ * replaces tools, and a tool whose server is down answers an error instead of
+ * leaving the set.
  */
 import { createHash } from 'node:crypto';
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -18,12 +20,11 @@ import {
   McpError,
   type Tool as McpTool,
 } from '@modelcontextprotocol/sdk/types.js';
-import {
-  type BridgedTool,
-  type CreateKthxMcp,
-  KTHX_TOOL_PREFIX,
-  type McpBridge,
-  type McpBridgeOptions,
+import type {
+  BridgedTool,
+  CreateMcpBridge,
+  McpBridge,
+  McpBridgeOptions,
 } from './brain-inputs.ts';
 import { type Clock, type Handle, systemClock } from './clock.ts';
 import { plain } from './log.ts';
@@ -32,7 +33,7 @@ import { redact } from './redact.ts';
 export const MCP_CONNECT_TIMEOUT_MS = 10_000;
 export const MCP_CALL_TIMEOUT_MS = 120_000;
 export const MCP_RETRY_MS = 60_000;
-export const UNREACHABLE = 'kthx is unreachable';
+export const unreachable = (name: string) => `${name} is unreachable`;
 /** A result past this many characters is cut, as pi's own tools cut theirs. */
 export const MAX_RESULT_CHARS = 50 * 1024;
 /** pi's providers take tool names of at most 64 characters. */
@@ -58,9 +59,10 @@ interface Connection {
 /** What a failed request says about the server. */
 type Failure = 'answered' | 'unclear' | 'down';
 
-export const createKthxMcp: CreateKthxMcp = (options) => new KthxMcp(options);
+export const createMcpBridge: CreateMcpBridge = (options) =>
+  new ServerBridge(options);
 
-class KthxMcp implements McpBridge {
+class ServerBridge implements McpBridge {
   private readonly clock: Clock;
   private readonly listed = new Map<string, Listed>();
   private readonly names = new Map<string, string>();
@@ -126,12 +128,14 @@ class KthxMcp implements McpBridge {
   }
 
   private async attempt(): Promise<void> {
-    const { url, token, log, metrics } = this.options;
+    const { name, url, token, log, metrics } = this.options;
     const client = new Client({ name: 'mate', version: '1' });
     try {
       await client.connect(
         new StreamableHTTPClientTransport(new URL(url), {
-          requestInit: { headers: { Authorization: `Bearer ${token}` } },
+          requestInit: token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : {},
         }),
         { timeout: MCP_CONNECT_TIMEOUT_MS },
       );
@@ -149,15 +153,15 @@ class KthxMcp implements McpBridge {
       this.open.add(connection);
       this.current = connection;
       this.merge(tools);
-      metrics?.mcpUp(true);
-      log.info('kthx MCP listed', { tools: tools.length });
+      metrics?.mcpUp(name, true);
+      log.info(`${name} MCP listed`, { tools: tools.length });
       this.everListed = true;
       for (const done of [...this.waiters]) done(true);
     } catch (error) {
       await client.close().catch(() => {});
       if (this.closed) return;
-      metrics?.mcpUp(false);
-      log.warn('kthx MCP unreachable', {
+      metrics?.mcpUp(name, false);
+      log.warn(`${name} MCP unreachable`, {
         error: redact(plain(error)),
         retryMs: MCP_RETRY_MS,
       });
@@ -165,7 +169,7 @@ class KthxMcp implements McpBridge {
     this.schedule();
   }
 
-  // While up, each tick lists again, so a command kthx ships after boot reaches
+  // While up, each tick lists again, so a command the server ships after boot reaches
   // the brain and a server that dies between calls shows as down. While down,
   // each tick reconnects.
   private schedule(): void {
@@ -189,7 +193,7 @@ class KthxMcp implements McpBridge {
       const tools = await this.using(connection, listAll);
       if (this.current !== connection) return;
       this.merge(tools);
-      this.options.metrics?.mcpUp(true);
+      this.options.metrics?.mcpUp(this.options.name, true);
     } catch (error) {
       this.down(connection, error);
     }
@@ -219,8 +223,8 @@ class KthxMcp implements McpBridge {
     this.current = null;
     connection.retired = true;
     if (connection.inflight === 0) void this.shut(connection);
-    this.options.metrics?.mcpUp(false);
-    this.options.log.warn('kthx MCP connection lost', {
+    this.options.metrics?.mcpUp(this.options.name, false);
+    this.options.log.warn(`${this.options.name} MCP connection lost`, {
       error: redact(plain(error)),
     });
     void this.connect();
@@ -233,14 +237,14 @@ class KthxMcp implements McpBridge {
 
   private merge(tools: readonly McpTool[]): void {
     let changed = false;
-    for (const tool of namingOrder(tools)) {
+    for (const tool of namingOrder(tools, this.options.prefix)) {
       const name = this.nameFor(tool.name);
       const signature = JSON.stringify([tool.description, tool.inputSchema]);
       if (this.listed.get(name)?.signature === signature) continue;
       const bridged = this.bridge(tool, name);
       const problem = compileProblem(bridged);
       if (problem) {
-        this.options.log.warn('kthx MCP tool dropped', {
+        this.options.log.warn(`${this.options.name} MCP tool dropped`, {
           tool: tool.name,
           error: problem,
         });
@@ -254,7 +258,7 @@ class KthxMcp implements McpBridge {
       try {
         listener();
       } catch (error) {
-        this.options.log.error('kthx MCP listener failed', {
+        this.options.log.error(`${this.options.name} MCP listener failed`, {
           error: plain(error),
         });
       }
@@ -268,15 +272,14 @@ class KthxMcp implements McpBridge {
   private nameFor(mcpName: string): string {
     const known = this.names.get(mcpName);
     if (known) return known;
-    const base = piName(mcpName);
+    const { prefix } = this.options;
+    const base = piName(prefix, mcpName);
     let n = 0;
     let name =
-      base === `${KTHX_TOOL_PREFIX}${mcpName}`
-        ? base
-        : suffixed(base, mcpName, n++);
+      base === `${prefix}${mcpName}` ? base : suffixed(base, mcpName, n++);
     while (this.owners.has(name)) name = suffixed(base, mcpName, n++);
     if (name !== base) {
-      this.options.log.warn('kthx MCP tool renamed', {
+      this.options.log.warn(`${this.options.name} MCP tool renamed`, {
         tool: mcpName,
         name,
         taken: this.owners.get(base),
@@ -290,8 +293,9 @@ class KthxMcp implements McpBridge {
   private bridge(tool: McpTool, name: string): BridgedTool {
     return {
       name,
-      label: `kthx ${tool.name}`,
-      description: tool.description ?? `The kthx ${tool.name} tool.`,
+      label: `${this.options.name} ${tool.name}`,
+      description:
+        tool.description ?? `The ${this.options.name} ${tool.name} tool.`,
       parameters: tool.inputSchema as unknown as TSchema,
       replay: 'never',
       execute: (_id, params, _onUpdate, _toolContext, _invocation, context) =>
@@ -304,11 +308,11 @@ class KthxMcp implements McpBridge {
     args: Record<string, unknown>,
     { abortSignal: signal }: { abortSignal: AbortSignal | undefined },
   ): Promise<AgentToolResult<unknown>> {
-    const { metrics } = this.options;
+    const { name: server, metrics } = this.options;
     const connection = this.current;
     if (!connection) {
-      metrics?.mcpCall('unavailable');
-      throw new Error(UNREACHABLE);
+      metrics?.mcpCall(server, 'unavailable');
+      throw new Error(unreachable(server));
     }
     let result: CallResult;
     try {
@@ -320,25 +324,25 @@ class KthxMcp implements McpBridge {
       );
     } catch (error) {
       if (signal?.aborted) {
-        metrics?.mcpCall('aborted');
-        throw new Error(`kthx ${name} was cancelled`);
+        metrics?.mcpCall(server, 'aborted');
+        throw new Error(`${server} ${name} was cancelled`);
       }
       const failure = classify(error);
       if (failure === 'down') {
-        metrics?.mcpCall('unavailable');
+        metrics?.mcpCall(server, 'unavailable');
         this.down(connection, error);
-        throw new Error(`${UNREACHABLE}: ${redact(plain(error))}`);
+        throw new Error(`${unreachable(server)}: ${redact(plain(error))}`);
       }
-      metrics?.mcpCall('error');
+      metrics?.mcpCall(server, 'error');
       if (failure === 'unclear') void this.check(connection);
       throw new Error(redact(plain(error)));
     }
-    const text = bounded(resultText(result));
+    const text = bounded(server, resultText(result));
     if (result.isError) {
-      metrics?.mcpCall('error');
-      throw new Error(text || `kthx ${name} failed`);
+      metrics?.mcpCall(server, 'error');
+      throw new Error(text || `${server} ${name} failed`);
     }
-    metrics?.mcpCall('ok');
+    metrics?.mcpCall(server, 'ok');
     return { content: [{ type: 'text', text }], details: undefined };
   }
 }
@@ -356,8 +360,8 @@ async function listAll(client: Client): Promise<McpTool[]> {
   return tools;
 }
 
-function piName(mcpName: string): string {
-  return `${KTHX_TOOL_PREFIX}${mcpName}`
+function piName(prefix: string, mcpName: string): string {
+  return `${prefix}${mcpName}`
     .replace(/[^A-Za-z0-9_-]/g, '_')
     .slice(0, MAX_NAME);
 }
@@ -371,9 +375,9 @@ function suffixed(base: string, mcpName: string, n: number): string {
 
 // A name that needs no sanitizing keeps it; the rest go in code-point order,
 // so a hash collision resolves the same way whatever order the server lists in.
-function namingOrder(tools: readonly McpTool[]): McpTool[] {
+function namingOrder(tools: readonly McpTool[], prefix: string): McpTool[] {
   const rank = (tool: McpTool) =>
-    piName(tool.name) === `${KTHX_TOOL_PREFIX}${tool.name}` ? 0 : 1;
+    piName(prefix, tool.name) === `${prefix}${tool.name}` ? 0 : 1;
   return [...tools].sort(
     (a, b) =>
       rank(a) - rank(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
@@ -398,7 +402,7 @@ function compileProblem(tool: BridgedTool): string | null {
 }
 
 // Only a fetch that never reached the server, a refused token or a closed
-// client means kthx is down. Another HTTP error or a timeout may be one
+// client means the server is down. Another HTTP error or a timeout may be one
 // command failing (spindrift answers a command that throws with a 500), so a
 // listing decides.
 function classify(error: unknown): Failure {
@@ -444,7 +448,34 @@ function resultText(result: CallResult): string {
   return parts.join('\n');
 }
 
-function bounded(text: string): string {
+function bounded(server: string, text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text;
-  return `${text.slice(0, MAX_RESULT_CHARS)}\n[kthx output cut to ${MAX_RESULT_CHARS} of ${text.length} characters]`;
+  return `${text.slice(0, MAX_RESULT_CHARS)}\n[${server} output cut to ${MAX_RESULT_CHARS} of ${text.length} characters]`;
+}
+
+/**
+ * One bridge over many. A listing on any server reaches the listener. `ready`
+ * waits for every server at once, so it never takes longer than `timeoutMs`,
+ * and is true only when all have listed.
+ */
+export function combineMcp(bridges: readonly McpBridge[]): McpBridge {
+  return {
+    tools: () => bridges.flatMap((b) => b.tools()),
+    onChange(listener) {
+      const offs = bridges.map((b) => b.onChange(listener));
+      return () => {
+        for (const off of offs) off();
+      };
+    },
+    start() {
+      for (const b of bridges) b.start();
+    },
+    async ready(timeoutMs) {
+      const results = await Promise.all(bridges.map((b) => b.ready(timeoutMs)));
+      return results.every(Boolean);
+    },
+    async close() {
+      await Promise.all(bridges.map((b) => b.close()));
+    },
+  };
 }

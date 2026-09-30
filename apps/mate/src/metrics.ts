@@ -88,8 +88,8 @@ let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
 let latest: { limit: SessionStartLimit; readAt: number } | null = null;
 /** `null` until a preflight has run, and for good where no App is configured. */
 let appReady: boolean | null = null;
-/** `null` until a bridge is configured, so the gauge is absent without one. */
-let mcp: boolean | null = null;
+/** One entry per configured bridge, so the gauge is absent without one. */
+const mcp = new Map<string, boolean>();
 let chatgpt: ChatgptSignIn | null = null;
 /** `null` while no router runs, so the gauge is absent without a fallback. */
 let primary: boolean | null = null;
@@ -165,8 +165,7 @@ export function getInstruments(): Instruments {
     result.observe(appReady ? 1 : 0);
   });
   meter.createObservableGauge('mate_mcp_up').addCallback((result) => {
-    if (mcp === null) return;
-    result.observe(mcp ? 1 : 0);
+    for (const [server, up] of mcp) result.observe(up ? 1 : 0, { server });
   });
   meter
     .createObservableGauge('mate_chatgpt_signed_in')
@@ -276,10 +275,10 @@ export function getInstruments(): Instruments {
     teardown: (reason) => teardowns.add(1, { reason }),
     turnSandbox: (source: TurnSandboxSource) =>
       turnSandboxes.add(1, { source }),
-    mcpUp: (up) => {
-      mcp = up;
+    mcpUp: (server, up) => {
+      mcp.set(server, up);
     },
-    mcpCall: (result) => mcpCalls.add(1, { result }),
+    mcpCall: (server, result) => mcpCalls.add(1, { server, result }),
     turnStarted: () => turns.add(1),
     turnEnded: (reason, sample) => {
       ended.add(1, { reason });
@@ -332,8 +331,8 @@ export function lazyInstruments(): Instruments {
     kthxSitesSynced: (result) => getInstruments().kthxSitesSynced(result),
     teardown: (reason) => getInstruments().teardown(reason),
     turnSandbox: (source) => getInstruments().turnSandbox(source),
-    mcpUp: (up) => getInstruments().mcpUp(up),
-    mcpCall: (result) => getInstruments().mcpCall(result),
+    mcpUp: (server, up) => getInstruments().mcpUp(server, up),
+    mcpCall: (server, result) => getInstruments().mcpCall(server, result),
     turnStarted: () => getInstruments().turnStarted(),
     turnEnded: (reason, sample) => getInstruments().turnEnded(reason, sample),
     turnResumed: (result) => getInstruments().turnResumed(result),

@@ -106,6 +106,16 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # The weather MCP server, by the labels its Service selects. Cilium
+    # resolves the ClusterIP to a backend before the verdict.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: weather
+            app.kubernetes.io/name: weather
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # The OTLP collector alone, by pod labels: the rest of `monitoring` is
     # closed. Cilium resolves the ClusterIP to a backend before the verdict.
     - toEndpoints:

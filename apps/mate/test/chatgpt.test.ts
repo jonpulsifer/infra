@@ -732,6 +732,9 @@ describe('the keeper', () => {
     openai.codex = 401;
     await ask();
     await until(() => setup.router?.status().now.route === 'primary');
+    // The save routes to ChatGPT before the forced rotation returns; a check
+    // made while it runs joins it and answers its `refreshed`.
+    await keeper.check();
     await ask();
     await until(() => keeper.state().state === 'refused');
     expect(metrics.chatgptStates.at(-1)).toEqual({

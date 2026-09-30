@@ -28,12 +28,13 @@ import {
   type McpBridge,
 } from '../src/brain-inputs.ts';
 import {
-  createKthxMcp,
+  combineMcp,
+  createMcpBridge,
   MAX_RESULT_CHARS,
   MCP_CALL_TIMEOUT_MS,
   MCP_CONNECT_TIMEOUT_MS,
   MCP_RETRY_MS,
-  UNREACHABLE,
+  unreachable,
 } from '../src/mcp.ts';
 import {
   eventually,
@@ -43,6 +44,7 @@ import {
 } from './fake-mcp.ts';
 import { FakeClock, RecordingLog } from './support.ts';
 
+const UNREACHABLE = unreachable('kthx');
 const TOKEN = 'kthx_agent_0123456789abcdef0123456789abcdef';
 
 const APP_SCHEMA = {
@@ -85,7 +87,9 @@ function rig(server: FakeMcp): Rig {
   const clock = new FakeClock();
   const log = new RecordingLog();
   const metrics = new RecordingMcpInstruments();
-  const bridge = createKthxMcp({
+  const bridge = createMcpBridge({
+    name: 'kthx',
+    prefix: KTHX_TOOL_PREFIX,
     url: server.url,
     token: TOKEN,
     log,
@@ -180,7 +184,7 @@ async function harnessWith(tools: readonly BridgedTool[]) {
   return { faux, harness };
 }
 
-describe('createKthxMcp', () => {
+describe('createMcpBridge', () => {
   test.each([
     ['JSON', false],
     ['SSE', true],
@@ -625,7 +629,9 @@ describe('createKthxMcp', () => {
 
   test('start, ready and tools never throw, even for a URL that cannot parse', async () => {
     const r = rig(new FakeMcp());
-    const bad = createKthxMcp({
+    const bad = createMcpBridge({
+      name: 'kthx',
+      prefix: KTHX_TOOL_PREFIX,
       url: 'not a url',
       token: TOKEN,
       log: r.log,
@@ -640,5 +646,111 @@ describe('createKthxMcp', () => {
     const waiting = bad.ready(5);
     await r.clock.advance(5);
     expect(await waiting).toBe(false);
+  });
+});
+
+describe('several servers', () => {
+  function weatherRig(server: FakeMcp, clock: FakeClock, log: RecordingLog) {
+    const metrics = new RecordingMcpInstruments();
+    const bridge = createMcpBridge({
+      name: 'weather',
+      prefix: 'weather_',
+      url: server.url,
+      log,
+      clock,
+      metrics,
+    });
+    bridges.push(bridge);
+    return { bridge, metrics };
+  }
+
+  test('a server with no token sends no Authorization header, under its own prefix', async () => {
+    const server = serve(new FakeMcp({ tools: [tool('forecast')] }));
+    const { bridge, metrics } = weatherRig(
+      server,
+      new FakeClock(),
+      new RecordingLog(),
+    );
+    bridge.start();
+    expect(await bridge.ready(MCP_CONNECT_TIMEOUT_MS)).toBe(true);
+
+    expect(bridge.tools().map((t) => [t.name, t.label])).toEqual([
+      ['weather_forecast', 'weather forecast'],
+    ]);
+    expect(server.requests.length).toBeGreaterThan(1);
+    for (const request of server.requests) {
+      expect(request.authorization).toBeNull();
+    }
+    expect(metrics.servers).toEqual(new Set(['weather']));
+  });
+
+  test('one bridge over kthx and weather lists both prefixes and calls each server', async () => {
+    const k = rig(serve(new FakeMcp({ tools: [tool('deploy')] })));
+    k.server.handlers.set('deploy', () => ({
+      content: [{ type: 'text', text: 'deployed' }],
+    }));
+    const wServer = serve(new FakeMcp({ tools: [tool('forecast')] }));
+    wServer.handlers.set('forecast', () => ({
+      content: [{ type: 'text', text: 'sunny' }],
+    }));
+    const w = weatherRig(wServer, k.clock, k.log);
+    const both = combineMcp([k.bridge, w.bridge]);
+    let changes = 0;
+    both.onChange(() => {
+      changes += 1;
+    });
+    both.start();
+    expect(await both.ready(MCP_CONNECT_TIMEOUT_MS)).toBe(true);
+
+    expect(both.tools().map((t) => t.name)).toEqual([
+      'kthx_deploy',
+      'weather_forecast',
+    ]);
+    expect(changes).toBe(2);
+    expect(text(await run(named(both, 'weather_forecast'), { app: 'a' }))).toBe(
+      'sunny',
+    );
+    expect(text(await run(named(both, 'kthx_deploy'), { app: 'a' }))).toBe(
+      'deployed',
+    );
+    expect(k.server.requests.every((q) => q.authorization !== null)).toBe(true);
+    expect(wServer.requests.every((q) => q.authorization === null)).toBe(true);
+  });
+
+  test('one server down leaves the other listed and working, and ready waits no longer than the timeout', async () => {
+    const down = serve(new FakeMcp({ tools: [tool('deploy')] }));
+    await down.stop();
+    const k = rig(down);
+    const wServer = serve(new FakeMcp({ tools: [tool('forecast')] }));
+    wServer.handlers.set('forecast', () => ({
+      content: [{ type: 'text', text: 'sunny' }],
+    }));
+    const w = weatherRig(wServer, k.clock, k.log);
+    const both = combineMcp([k.bridge, w.bridge]);
+    both.start();
+    await eventually(() => k.metrics.up.length === 1, 'the failed attempt');
+    const waiting = both.ready(10_000);
+    await k.clock.advance(10_000);
+    expect(await waiting).toBe(false);
+
+    expect(both.tools().map((t) => t.name)).toEqual(['weather_forecast']);
+    expect(text(await run(named(both, 'weather_forecast'), { app: 'a' }))).toBe(
+      'sunny',
+    );
+    expect(k.metrics.up).toEqual([false]);
+    expect(w.metrics.up).toEqual([true]);
+  });
+
+  test('a call to a server that went down names that server as unreachable', async () => {
+    const server = serve(new FakeMcp({ tools: [tool('forecast')] }));
+    const w = weatherRig(server, new FakeClock(), new RecordingLog());
+    w.bridge.start();
+    expect(await w.bridge.ready(MCP_CONNECT_TIMEOUT_MS)).toBe(true);
+    await server.stop();
+    const message = await failure(
+      run(named(w.bridge, 'weather_forecast'), { app: 'a' }),
+    );
+    expect(message).toContain(unreachable('weather'));
+    expect(message).not.toContain(UNREACHABLE);
   });
 });

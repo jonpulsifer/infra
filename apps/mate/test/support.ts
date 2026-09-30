@@ -276,10 +276,10 @@ export class RecordingInstruments implements Instruments {
   turnSandbox(source: TurnSandboxSource): void {
     this.turnSandboxes.push(source);
   }
-  mcpUp(up: boolean): void {
+  mcpUp(_server: string, up: boolean): void {
     this.mcp = up;
   }
-  mcpCall(result: string): void {
+  mcpCall(_server: string, result: string): void {
     this.mcpCalls.push(result);
   }
   turnStarted(): void {

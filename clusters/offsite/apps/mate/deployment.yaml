@@ -201,6 +201,10 @@ spec:
                   name: mate-kthx-agent
                   key: KTHX_AGENT_TOKEN
                   optional: true
+            # mate bridges the weather service's MCP tools as `weather_*`. It
+            # takes no token.
+            - name: MATE_WEATHER_MCP_URL
+              value: http://weather.weather.svc.cluster.local:8080/mcp
             # Each sandbox gets this address and a ring token from Secret
             # mate-switchboard, so the agent can ring the owner's phone. The
             # number and the caps are switchboard's; the sandbox holds neither.

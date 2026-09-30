@@ -33,7 +33,7 @@ import { KthxSites } from './kthx-sites.ts';
 import { discoverKube, Kube, type KubeConfig } from './kube.ts';
 import { type Hands, WORKSPACE } from './lease.ts';
 import { jsonLog as log, plain } from './log.ts';
-import { createKthxMcp } from './mcp.ts';
+import { combineMcp, createMcpBridge } from './mcp.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
 import { chatgptModel, createModelSetup } from './model.ts';
 import { loadSystemPrompts } from './profile.ts';
@@ -219,21 +219,28 @@ function openModel(
 }
 
 function openMcp(brain: BrainConfig): McpBridge | null {
-  if (!brain.kthxMcp) {
-    if (process.env.MATE_KTHX_MCP_URL?.trim()) {
-      log.warn(
-        'MATE_KTHX_MCP_URL is set without KTHX_AGENT_TOKEN; no kthx tools',
-      );
-    }
-    return null;
+  if (
+    process.env.MATE_KTHX_MCP_URL?.trim() &&
+    !brain.mcpServers.some((server) => server.name === 'kthx')
+  ) {
+    log.warn(
+      'MATE_KTHX_MCP_URL is set without KTHX_AGENT_TOKEN; no kthx tools',
+    );
   }
-  log.info('kthx mcp on', { url: brain.kthxMcp.url });
-  const bridge = createKthxMcp({
-    url: brain.kthxMcp.url,
-    token: brain.kthxMcp.token,
-    log,
-    metrics: lazyInstruments(),
-  });
+  if (brain.mcpServers.length === 0) return null;
+  const bridge = combineMcp(
+    brain.mcpServers.map((server) => {
+      log.info(`${server.name} mcp on`, { url: server.url });
+      return createMcpBridge({
+        name: server.name,
+        prefix: `${server.name}_`,
+        url: server.url,
+        ...(server.token ? { token: server.token } : {}),
+        log,
+        metrics: lazyInstruments(),
+      });
+    }),
+  );
   bridge.start();
   return bridge;
 }

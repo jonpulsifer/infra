@@ -1,0 +1,20 @@
+---
+# The first label of tls.hosts[0] is the tailnet hostname. No Funnel: the API
+# stays on the tailnet.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: weather
+  namespace: weather
+  labels:
+    app.kubernetes.io/name: weather
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: weather
+      port:
+        number: 8080
+  tls:
+    - hosts:
+        - weather
