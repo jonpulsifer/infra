@@ -272,6 +272,12 @@ export class FakeSlack implements SlackApi {
     return ts;
   }
 
+  async postRoot(channel: string, text: string): Promise<string> {
+    const ts = `p-${++this.serial}`;
+    this.calls.push({ call: 'post', channel, threadTs: '', text });
+    return ts;
+  }
+
   async whisper(channel: string, user: string, text: string): Promise<void> {
     this.calls.push({ call: 'whisper', channel, user, text });
   }

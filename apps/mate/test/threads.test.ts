@@ -254,6 +254,27 @@ beforeEach(() => {
   metrics = new RecordingInstruments();
 });
 
+describe('scheduled turns', () => {
+  test('accepts only an authorized destination and does not duplicate a started run', async () => {
+    const slack = new FakeSurface(ME, new Set([OWNER]), new Set([CHANNEL]));
+    const { threads, store } = build({ surfaces: [slack] });
+    const daily = {
+      surface: 'slack' as const,
+      channelId: CHANNEL,
+      id: 'daily-root',
+    };
+    await expect(threads.scheduled(daily, STRANGER, 'check')).rejects.toThrow(
+      'authorized',
+    );
+    await threads.scheduled(daily, OWNER, 'check');
+    await settle();
+    expect(await store.get(threadKey(daily))).toMatchObject({ turns: 1 });
+    await threads.scheduled(daily, OWNER, 'check');
+    await settle();
+    expect(await store.get(threadKey(daily))).toMatchObject({ turns: 1 });
+  });
+});
+
 describe('starting a thread', () => {
   test('a mention from the allowlisted user in an allowed channel opens a public thread and answers there', async () => {
     const { threads, store } = build({ script: streaming('hello there') });

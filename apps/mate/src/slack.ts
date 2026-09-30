@@ -246,6 +246,8 @@ export type SessionStatus = 'processing' | 'active' | 'closed';
 
 export interface SlackApi {
   post(channel: string, threadTs: string, text: string): Promise<string>;
+  /** Create a new root message for an unattended report. */
+  postRoot(channel: string, text: string): Promise<string>;
   /** `chat.postEphemeral`: shown in the channel to `user` alone, and never stored. */
   whisper(channel: string, user: string, text: string): Promise<void>;
   /**
@@ -370,6 +372,10 @@ export function slackWeb(
         thread_ts: threadTs,
         text,
       });
+      return String(sent.ts);
+    },
+    async postRoot(channel, text) {
+      const sent = await call('chat.postMessage', { channel, text });
       return String(sent.ts);
     },
     async whisper(channel, user, text) {

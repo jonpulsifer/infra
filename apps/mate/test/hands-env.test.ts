@@ -225,7 +225,10 @@ async function script(env: ExecutionEnv, root: string): Promise<unknown[]> {
   } else {
     note('reader', reader);
   }
-  note('exec', await exec('echo hi; echo err >&2; exit 3'));
+  // stdout and stderr are separate pipes; either may arrive first. Compare
+  // their content without assuming a cross-pipe order.
+  const mixed = await exec('echo hi; echo err >&2; exit 3');
+  note('exec', { ...mixed, text: mixed.text.split('\n').sort().join('\n') });
   note(
     'exec truncated',
     await exec('for i in $(seq 1 3000); do echo line $i; done', {

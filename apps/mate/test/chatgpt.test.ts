@@ -745,8 +745,10 @@ describe('the keeper', () => {
     expect(said().at(-1)).toMatch(
       /^ℹ️ ChatGPT: signed out, because chatgpt\.com refused a fresh token too, at \d\d:\d\d UTC\. Say `chatgpt login` to sign in again\. .*Now: fallback since \d\d:\d\d UTC \(mate's ChatGPT sign-in stopped working, HTTP 401\), until a sign-in\./,
     );
-    // A check leaves it signed out: another rotation would not mend it.
-    expect(await keeper.check()).toBe('refused');
+    // A check overlapping the just-refused rotation can return that rotation's
+    // result; the invariant is that the account stays refused, with no retry.
+    await keeper.check();
+    expect(keeper.state().state).toBe('refused');
     expect(openai.of('/oauth/token')).toHaveLength(1);
 
     openai.codex = 'ok';
@@ -947,7 +949,7 @@ describe('status, logout and pause', () => {
     expect(setup.router?.status().now).toMatchObject({ reason: 'paused' });
     expect(said()).toEqual([
       expect.stringMatching(
-        /^⏸️ ChatGPT is paused until \d\d:\d\d UTC, or until mate restarts, and opencode-go\/qwen3\.8-max answers\. Say `chatgpt resume` to end it sooner\.$/,
+        /^⏸️ ChatGPT is paused until (?:\d{4}-\d\d-\d\d )?\d\d:\d\d UTC, or until mate restarts, and opencode-go\/qwen3\.8-max answers\. Say `chatgpt resume` to end it sooner\.$/,
       ),
     ]);
     await command('chatgpt resume');

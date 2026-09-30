@@ -90,6 +90,9 @@ spec:
               value: UAR78LSKC
             - name: MATE_SLACK_ALLOWED_CHANNEL_IDS
               value: CARBAMA05,C062BS4GADR
+            # 18:00 America/Halifax; uses the existing mate-db and Slack identity.
+            - name: MATE_CUSTODIAN_CHANNEL
+              value: C062BS4GADR
             # shutdownTime is never more than two hours out, so mate refuses a turn cap
             # of 120 minutes or more, and 55 or more while the GitHub App is set.
             - name: MATE_TURN_MINUTES

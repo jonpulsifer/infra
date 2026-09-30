@@ -95,6 +95,28 @@ describe('config from the environment', () => {
     ).toThrow('non-Slack id');
   });
 
+  test('the daily check is opt-in to an allowed Slack channel', () => {
+    const slack = {
+      ...minimal,
+      MATE_SLACK_BOT_TOKEN: 'xoxb',
+      MATE_SLACK_APP_TOKEN: 'xapp',
+      MATE_SLACK_TEAM_ID: 'TAR78LS82',
+      MATE_SLACK_ALLOWED_USER_IDS: 'UAR78LSKC',
+      MATE_SLACK_ALLOWED_CHANNEL_IDS: 'C062BS4GADR',
+    };
+    expect(readConfig(minimal).custodianChannel).toBeNull();
+    expect(
+      readConfig({ ...slack, MATE_CUSTODIAN_CHANNEL: 'C062BS4GADR' })
+        .custodianChannel,
+    ).toBe('C062BS4GADR');
+    expect(() =>
+      readConfig({ ...slack, MATE_CUSTODIAN_CHANNEL: 'COTHER' }),
+    ).toThrow('allowed Slack channel');
+    expect(() =>
+      readConfig({ ...minimal, MATE_CUSTODIAN_CHANNEL: 'C062BS4GADR' }),
+    ).toThrow('allowed Slack channel');
+  });
+
   test('kube mode needs a harness image and takes the sandbox defaults', () => {
     expect(() => readConfig({ ...minimal, MATE_SANDBOXES: 'kube' })).toThrow(
       'MATE_SANDBOX_IMAGE is required',

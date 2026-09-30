@@ -184,6 +184,14 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
       updated_at BIGINT NOT NULL
     )`,
   ],
+  [
+    3,
+    `CREATE TABLE mate_custodian_runs (
+      day TEXT COLLATE "C" PRIMARY KEY,
+      thread_ts TEXT NULL,
+      created_at BIGINT NOT NULL
+    )`,
+  ],
 ];
 
 /** mate's own tables beside pi's; idempotent and safe to race. */

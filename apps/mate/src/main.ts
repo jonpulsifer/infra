@@ -18,6 +18,7 @@ import {
   type SlackConfig,
 } from './config.ts';
 import { PostgresCredentialStore } from './credential-store.ts';
+import { Custodian, PostgresCustodianLedger } from './custodian.ts';
 import {
   discordInbound,
   discordOver,
@@ -393,6 +394,7 @@ async function openSlack(slack: SlackConfig) {
     allowedChannels: [...slack.allowedChannelIds],
   });
   return {
+    api,
     surface: slackSurface({
       api,
       me: identity.userId,
@@ -448,6 +450,20 @@ const threads = new Threads({
   commands: wiring.chatgpt?.account,
 });
 wiring.chatgpt?.keeper.start(wiring.storeReady);
+const custodian =
+  config.custodianChannel && slack && wiring.db?.sql
+    ? new Custodian({
+        ledger: new PostgresCustodianLedger(wiring.db.sql),
+        slack: slack.api,
+        threads,
+        channel: config.custodianChannel,
+        owner: [...(config.slack?.allowedUserIds ?? [])][0] ?? '',
+        log,
+      })
+    : null;
+if (custodian) void wiring.storeReady.then(() => custodian.start());
+else if (config.custodianChannel)
+  log.warn('custodian disabled: Slack or database unavailable');
 let me = '';
 
 // Before the gateway: a revoked or rate-limited Discord token, or a wait on
@@ -568,6 +584,7 @@ async function shutdown(signal: string): Promise<void> {
   // First: envelopes are acked on receipt, so one taken during the drain is
   // lost for good.
   socket?.stop();
+  custodian?.stop();
   // While both surfaces can still post: running turns finish or stay open for
   // the next process to resume, and queued prompts are told they never started.
   await threads
