@@ -18,6 +18,7 @@ resources:
   - gateway-api-generation.yaml
   - mate-sandbox-reader.yaml
   - node-saturation-rules.yaml
+  - backup-rules.yaml
   - grafana-dashboards
   - helm-repository-grafana.yaml
   - helm-repository-prometheus.yaml
