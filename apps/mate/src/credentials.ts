@@ -1,8 +1,10 @@
 /**
  * A turn's credentials in its sandbox: minted on the turn's first tool call,
  * written over the hands link with `writeFiles`, and blanked when the turn
- * ends. Nothing outlives the turn: the GitHub token is revoked whatever
- * happens, and the cluster token expires on its own.
+ * ends. The thread's profile grants each one: a credential it does not grant
+ * is written empty, and its kthx sites file is never read or folded. Nothing
+ * outlives the turn: the GitHub token is revoked whatever happens, and the
+ * cluster token expires on its own.
  */
 import { HandsError } from '@repo/mate-hands/protocol';
 import { type Clock, type Handle, systemClock } from './clock.ts';
@@ -23,6 +25,7 @@ import {
   type TokenSource,
 } from './lease.ts';
 import { type Log, plain } from './log.ts';
+import { type Grants, type Profile, turnTimeoutMs } from './profiles.ts';
 
 /** Bounds a stamp or a retire: a few small files on a live pod. */
 export const STAMP_TIMEOUT_MS = 15_000;
@@ -162,6 +165,16 @@ export function parsePeer(
   return { name, server, ca: bundle };
 }
 
+/** The ServiceAccount a kube grant mints for, or `null` for no cluster access. */
+export function kubeAccount(
+  config: SandboxConfig,
+  grant: Grants['kube'],
+): string | null {
+  if (grant === 'admin') return config.kubeServiceAccount;
+  if (grant === 'reader') return config.kubeReaderServiceAccount;
+  return null;
+}
+
 export interface CredentialDeps {
   readonly kube: Kube;
   readonly namespace: string;
@@ -196,11 +209,14 @@ export class Credentials {
     this.clock = deps.clock ?? systemClock;
   }
 
-  /** Whether a turn has anything to write at all. */
-  get credentialled(): boolean {
+  /** Whether a turn under `grants` has anything to write at all. */
+  credentialled(grants: Grants): boolean {
     const { githubApp, config, sshKey } = this.deps;
     return Boolean(
-      githubApp || config.kubeServiceAccount || sshKey || this.kthx,
+      (grants.github && githubApp) ||
+        kubeAccount(config, grants.kube) ||
+        (grants.ssh && sshKey) ||
+        (grants.kthxSites && this.kthx),
     );
   }
 
@@ -208,8 +224,12 @@ export class Credentials {
     return this.deps.config.kthx.origin ? (this.deps.kthxSites ?? null) : null;
   }
 
-  turn(): TurnCredentials {
-    return new TurnCredentials(this);
+  turn(profile: Profile): TurnCredentials {
+    return new TurnCredentials(
+      this,
+      profile.grants,
+      turnTimeoutMs(profile, this.deps.config.turnTimeoutMs),
+    );
   }
 
   /**
@@ -383,7 +403,12 @@ export class TurnCredentials {
   private github: string | null = null;
   private sealed = false;
 
-  constructor(private readonly creds: Credentials) {}
+  constructor(
+    private readonly creds: Credentials,
+    private readonly grants: Grants,
+    /** Bounds the cluster token's lifetime. */
+    private readonly turnMs: number,
+  ) {}
 
   /**
    * The turn is over: nothing is written after this, and a token whose mint
@@ -395,9 +420,10 @@ export class TurnCredentials {
 
   /** Never throws, and never fails the turn: a thread that cannot push can still answer. */
   async stamp(target: HandsTarget, client: HandsClient): Promise<void> {
-    const { creds } = this;
-    const { log, metrics, githubApp } = creds.deps;
-    if (!creds.credentialled || this.sealed) return;
+    const { creds, grants } = this;
+    const { log, metrics } = creds.deps;
+    const githubApp = grants.github ? creds.deps.githubApp : null;
+    if (!creds.credentialled(grants) || this.sealed) return;
     this.stamped = true;
     try {
       await bounded(creds.clock, 'stamping credentials', async (signal) => {
@@ -414,10 +440,12 @@ export class TurnCredentials {
             ])
           : '';
         // First, so a save the last turn's end could not make is retried now.
-        const sites = await creds.syncSites(target.sandbox, () =>
-          readSites(client, home, signal),
-        );
-        const ssh = creds.deps.sshKey ?? '';
+        const sites = grants.kthxSites
+          ? await creds.syncSites(target.sandbox, () =>
+              readSites(client, home, signal),
+            )
+          : null;
+        const ssh = grants.ssh ? (creds.deps.sshKey ?? '') : '';
         if (this.sealed) return;
         await client.call(
           'writeFiles',
@@ -464,15 +492,17 @@ export class TurnCredentials {
    * once the ledger holds what it said. Never throws.
    */
   async retire(target: HandsTarget, client: HandsClient | null): Promise<void> {
-    const { creds } = this;
+    const { creds, grants } = this;
     if (!this.stamped) return;
     try {
       await bounded(creds.clock, 'blanking credentials', async (signal) => {
         if (client && !client.isClosed) {
           const { home } = client.hello;
-          const synced = await creds.syncSites(target.sandbox, () =>
-            readSites(client, home, signal),
-          );
+          const synced = grants.kthxSites
+            ? await creds.syncSites(target.sandbox, () =>
+                readSites(client, home, signal),
+              )
+            : null;
           await client.call(
             'writeFiles',
             {
@@ -497,13 +527,15 @@ export class TurnCredentials {
           if (synced) creds.wrote(target.sandbox, {});
           return;
         }
-        const synced = await creds.syncSites(target.sandbox, () =>
-          creds.command(target.pod, [
-            '/bin/sh',
-            '-c',
-            readSitesScript(creds.home),
-          ]),
-        );
+        const synced = grants.kthxSites
+          ? await creds.syncSites(target.sandbox, () =>
+              creds.command(target.pod, [
+                '/bin/sh',
+                '-c',
+                readSitesScript(creds.home),
+              ]),
+            )
+          : null;
         await creds.blank(target.pod, synced !== null);
         if (synced) creds.wrote(target.sandbox, {});
       });
@@ -555,7 +587,7 @@ export class TurnCredentials {
   /** `null` when minting failed; the reason is already logged. */
   private async mintGithub(): Promise<string | null> {
     const { githubApp, log, metrics } = this.creds.deps;
-    if (!githubApp) return null;
+    if (!githubApp || !this.grants.github) return null;
     try {
       const { token } = await githubApp.token();
       metrics?.githubTokenMinted('ok');
@@ -575,11 +607,11 @@ export class TurnCredentials {
    */
   private async mintCluster(signal: AbortSignal): Promise<string | null> {
     const { config, kube, log, namespace } = this.creds.deps;
-    const account = config.kubeServiceAccount;
+    const account = kubeAccount(config, this.grants.kube);
     if (!account) return null;
     const seconds = Math.max(
       TOKEN_FLOOR_SECONDS,
-      Math.ceil(config.turnTimeoutMs / 1000) + TOKEN_SLACK_SECONDS,
+      Math.ceil(this.turnMs / 1000) + TOKEN_SLACK_SECONDS,
     );
     try {
       const minted = await kube.json<{ status?: { token?: string } }>(

@@ -139,6 +139,7 @@ describe('config from the environment', () => {
         vault: null,
         github: false,
         kubeServiceAccount: null,
+        kubeReaderServiceAccount: null,
         kubeContext: 'cluster',
         kubePeers: [],
         kthx: {
@@ -168,6 +169,37 @@ describe('config from the environment', () => {
     expect(() =>
       readConfig({ ...kube, MATE_TURN_MINUTES: String(TTL_MS / 60_000) }),
     ).toThrow('must be under the sandbox TTL');
+  });
+
+  test('read-only profiles get a cluster account only once one is named, and never the admin', () => {
+    const kube = {
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+      MATE_SANDBOX_KUBE_SA: 'mate-sandbox-admin',
+    };
+    expect(readSandboxConfig(kube).kubeReaderServiceAccount).toBeNull();
+    expect(
+      readSandboxConfig({ ...kube, MATE_SANDBOX_KUBE_READER_SA: ' ' })
+        .kubeReaderServiceAccount,
+    ).toBeNull();
+    expect(
+      readSandboxConfig({
+        ...kube,
+        MATE_SANDBOX_KUBE_READER_SA: ' mate-sandbox-reader ',
+      }),
+    ).toMatchObject({
+      kubeServiceAccount: 'mate-sandbox-admin',
+      kubeReaderServiceAccount: 'mate-sandbox-reader',
+    });
+    expect(() =>
+      readSandboxConfig({
+        ...kube,
+        MATE_SANDBOX_KUBE_READER_SA: 'mate-sandbox-admin',
+      }),
+    ).toThrow(
+      'MATE_SANDBOX_KUBE_READER_SA must differ from MATE_SANDBOX_KUBE_SA',
+    );
   });
 
   test('a sandbox reaches its vault only once a Secret names one', () => {

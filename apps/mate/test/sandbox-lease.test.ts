@@ -14,7 +14,7 @@ import {
   type RequestOptions,
 } from '../src/kube.ts';
 import { HANDS_LABEL, START_BUDGET_MS } from '../src/lease.ts';
-import { PREEMPT_IDLE_MS } from '../src/sandbox-lease.ts';
+import { PREEMPT_IDLE_MS, SandboxSlots } from '../src/sandbox-lease.ts';
 import {
   sandboxLabels,
   sandboxManifest,
@@ -27,12 +27,15 @@ import {
   aborting,
   alive,
   begin,
+  CUSTODIAN,
   cleanUp,
   FakeApp,
   GUILD,
   Hooks,
+  OPERATOR,
   OTHER_THREAD,
   pidsIn,
+  RecordingHandsInstruments,
   type Rig,
   rig,
   SANDBOX_CONFIG,
@@ -40,7 +43,7 @@ import {
   THREAD,
   until,
 } from './hands-support.ts';
-import { FakeClock } from './support.ts';
+import { FakeClock, RecordingLog, settle } from './support.ts';
 
 afterEach(cleanUp);
 
@@ -126,7 +129,7 @@ describe('a turn', () => {
       config: { kubeServiceAccount: 'mate-sandbox-admin', github: true },
       deps: { githubApp: app },
     });
-    const turn = begin(r.hands.thread(THREAD, new Hooks()));
+    const turn = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     const summary = await turn.lease.finish();
     turn.end();
     expect(summary).toEqual({ source: 'none', sandbox: null, stamped: false });
@@ -139,7 +142,7 @@ describe('a turn', () => {
   test('mints on its first tool call, and says so in order', async () => {
     const r = rig();
     const hooks = new Hooks();
-    const turn = begin(r.hands.thread(THREAD, hooks));
+    const turn = begin(r.hands.thread(THREAD, hooks, OPERATOR));
     expect(r.fake.sandboxes.size).toBe(0);
     const said = await turn.env.exec('echo hi', undefined, C);
     expect(said.ok && said.value.exitCode).toBe(0);
@@ -168,7 +171,7 @@ describe('a turn', () => {
 
   test('five calls at once share one mint, one connect and one stamp', async () => {
     const r = rig({ config: { kubeServiceAccount: 'mate-sandbox-admin' } });
-    const turn = begin(r.hands.thread(THREAD, new Hooks()));
+    const turn = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     const found = await Promise.all(
       Array.from({ length: 5 }, () => turn.env.exists('.', C)),
     );
@@ -193,7 +196,7 @@ describe('a turn', () => {
     const r = rig();
     r.fake.readyOnCreate = false;
     const hooks = new Hooks();
-    const thread = r.hands.thread(THREAD, hooks);
+    const thread = r.hands.thread(THREAD, hooks, OPERATOR);
     const turn = begin(thread);
     const { context, abort } = aborting();
     const call = turn.env.exec('true', undefined, context);
@@ -229,7 +232,7 @@ describe('a turn', () => {
   test('remembers a failed mint for the rest of the turn, and the next turn retries', async () => {
     const r = rig({ deps: { readyTimeoutMs: 200 } });
     r.fake.readyOnCreate = false;
-    const thread = r.hands.thread(THREAD, new Hooks());
+    const thread = r.hands.thread(THREAD, new Hooks(), OPERATOR);
     const turn = begin(thread);
     const first = await turn.env.exists('.', C);
     const said = first.ok ? '' : first.error.message;
@@ -251,7 +254,7 @@ describe('a turn', () => {
 
   test('the next turn reuses the sandbox, with a full TTL from its start', async () => {
     const r = rig();
-    const thread = r.hands.thread(THREAD, new Hooks());
+    const thread = r.hands.thread(THREAD, new Hooks(), OPERATOR);
     const first = begin(thread);
     expect((await first.env.exists('.', C)).ok).toBe(true);
     await first.lease.finish();
@@ -274,7 +277,7 @@ describe('a turn', () => {
 
   test('a link that drops mid-turn reconnects to the same pod and stamps nothing again', async () => {
     const r = rig({ config: { kubeServiceAccount: 'mate-sandbox-admin' } });
-    const turn = begin(r.hands.thread(THREAD, new Hooks()));
+    const turn = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await turn.env.exists('.', C)).ok).toBe(true);
     const first = r.fake.daemons.get(NAME)?.[0];
     first?.kill('SIGKILL');
@@ -292,7 +295,7 @@ describe('a turn', () => {
   test('a sandbox that dies is lost, replaced once, and not twice', async () => {
     const r = rig();
     const hooks = new Hooks();
-    const turn = begin(r.hands.thread(THREAD, hooks));
+    const turn = begin(r.hands.thread(THREAD, hooks, OPERATOR));
     expect((await turn.env.exists('.', C)).ok).toBe(true);
 
     r.fake.killPod(NAME);
@@ -324,7 +327,7 @@ describe('a turn', () => {
     const r = rig();
     r.fake.oldHands = true;
     const hooks = new Hooks();
-    const turn = begin(r.hands.thread(THREAD, hooks));
+    const turn = begin(r.hands.thread(THREAD, hooks, OPERATOR));
     expect((await turn.env.exists('.', C)).ok).toBe(false);
     expect(turn.kinds()).toEqual([
       'step:creating',
@@ -342,7 +345,7 @@ describe('a turn', () => {
   test('a sandbox it cannot connect to fails the turn once', async () => {
     const r = rig();
     r.fake.refuseHands = true;
-    const turn = begin(r.hands.thread(THREAD, new Hooks()));
+    const turn = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     const first = await turn.env.exists('.', C);
     const said = first.ok ? '' : first.error.message;
     expect(said).toContain('could not reach the sandbox');
@@ -357,10 +360,10 @@ describe('a turn', () => {
 describe('the slots', () => {
   test('a thread waits in line while every slot is busy, and leaves when its turn ends', async () => {
     const r = rig({ deps: { maxSandboxes: 1 } });
-    const a = begin(r.hands.thread(THREAD, new Hooks()));
+    const a = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await a.env.exists('.', C)).ok).toBe(true);
-    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks()));
-    const c = begin(r.hands.thread(THIRD_THREAD, new Hooks()));
+    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks(), OPERATOR));
+    const c = begin(r.hands.thread(THIRD_THREAD, new Hooks(), OPERATOR));
     const bCall = b.env.exists('.', C);
     const cCall = c.env.exists('.', C);
     await until(() => r.metrics.waiters === 2);
@@ -384,12 +387,12 @@ describe('the slots', () => {
     const clock = new FakeClock();
     const r = rig({ deps: { maxSandboxes: 1, clock } });
     const aHooks = new Hooks();
-    const a = begin(r.hands.thread(THREAD, aHooks));
+    const a = begin(r.hands.thread(THREAD, aHooks, OPERATOR));
     expect((await a.env.exists('.', C)).ok).toBe(true);
     await a.lease.finish();
     a.end();
     await clock.advance(PREEMPT_IDLE_MS);
-    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks()));
+    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks(), OPERATOR));
     expect((await b.env.exists('.', C)).ok).toBe(true);
     expect(aHooks.gone).toEqual(['preempted']);
     expect(r.metrics.teardowns).toEqual(['preempted']);
@@ -402,7 +405,7 @@ describe('the slots', () => {
     const clock = new FakeClock();
     const r = rig({ deps: { maxSandboxes: 1, clock } });
     const aHooks = new Hooks();
-    const aThread = r.hands.thread(THREAD, aHooks);
+    const aThread = r.hands.thread(THREAD, aHooks, OPERATOR);
     const first = begin(aThread);
     expect((await first.env.exists('.', C)).ok).toBe(true);
     await first.lease.finish();
@@ -410,7 +413,7 @@ describe('the slots', () => {
     // A turn that has begun holds its slot before it calls a tool.
     const second = begin(aThread);
     await clock.advance(2 * PREEMPT_IDLE_MS);
-    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks()));
+    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks(), OPERATOR));
     let served = false;
     const bCall = b.env.exists('.', C).then((result) => {
       served = true;
@@ -434,10 +437,10 @@ describe('the slots', () => {
   test('a turn that ends while it waits for a slot leaves the line, before its signal aborts', async () => {
     const clock = new FakeClock();
     const r = rig({ deps: { maxSandboxes: 1, clock } });
-    const a = begin(r.hands.thread(THREAD, new Hooks()));
+    const a = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await a.env.exists('.', C)).ok).toBe(true);
     const bHooks = new Hooks();
-    const b = begin(r.hands.thread(OTHER_THREAD, bHooks));
+    const b = begin(r.hands.thread(OTHER_THREAD, bHooks, OPERATOR));
     const { context, abort } = aborting();
     const bCall = b.env.exists('.', context);
     await until(() => r.metrics.waiters === 1);
@@ -463,14 +466,14 @@ describe('the slots', () => {
     const kube = new HeldKube(r, 'thread-list');
     const hands = r.another({ kube });
     const aHooks = new Hooks();
-    const aThread = hands.thread(THREAD, aHooks);
+    const aThread = hands.thread(THREAD, aHooks, OPERATOR);
     const first = begin(aThread);
     expect((await first.env.exists('.', C)).ok).toBe(true);
     await first.lease.finish();
     first.end();
     await clock.advance(PREEMPT_IDLE_MS);
 
-    const b = begin(hands.thread(OTHER_THREAD, new Hooks()));
+    const b = begin(hands.thread(OTHER_THREAD, new Hooks(), OPERATOR));
     const bCall = b.env.exists('.', C);
     await until(() => kube.held === 1);
     const second = begin(aThread);
@@ -492,7 +495,7 @@ describe('the slots', () => {
     const clock = new FakeClock();
     const r = rig({ deps: { maxSandboxes: 1, clock } });
     const aHooks = new Hooks();
-    const aThread = r.hands.thread(THREAD, aHooks);
+    const aThread = r.hands.thread(THREAD, aHooks, OPERATOR);
     const first = begin(aThread);
     expect((await first.env.exists('.', C)).ok).toBe(true);
     await first.lease.finish();
@@ -503,7 +506,7 @@ describe('the slots', () => {
     const patched = () =>
       r.fake.requests.filter((q) => q.method === 'PATCH').length;
     const before = patched();
-    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks()));
+    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks(), OPERATOR));
     const bCall = b.env.exists('.', C);
     await until(() => patched() > before);
     const second = begin(aThread);
@@ -523,7 +526,7 @@ describe('the slots', () => {
       source: 'fresh',
     });
     // Its new slot is busy for the rest of the turn.
-    const c = begin(r.hands.thread(THIRD_THREAD, new Hooks()));
+    const c = begin(r.hands.thread(THIRD_THREAD, new Hooks(), OPERATOR));
     const cCall = c.env.exists('.', C);
     await until(() => r.metrics.waiters === 1);
     await clock.advance(2 * PREEMPT_IDLE_MS);
@@ -536,12 +539,12 @@ describe('the slots', () => {
 
   test('a turn that ends holding no sandbox hands its slot to the head of the line at once', async () => {
     const r = rig({ deps: { maxSandboxes: 1 } });
-    const a = begin(r.hands.thread(THREAD, new Hooks()));
+    const a = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await a.env.exists('.', C)).ok).toBe(true);
     r.fake.killPod(NAME);
     await until(() => a.lease.current() === null);
     expect((await a.env.exists('.', C)).ok).toBe(false);
-    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks()));
+    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks(), OPERATOR));
     const bCall = b.env.exists('.', C);
     await until(() => r.metrics.waiters === 1);
     await a.lease.finish();
@@ -551,10 +554,211 @@ describe('the slots', () => {
   });
 });
 
+// Automation turns share the slots but never take an owner's sandbox.
+describe('the lanes', () => {
+  function slots(capacity: number) {
+    const clock = new FakeClock();
+    const metrics = new RecordingHandsInstruments();
+    const evicted: string[] = [];
+    const made = new SandboxSlots({
+      capacity,
+      clock,
+      log: new RecordingLog(),
+      metrics,
+      evict: async (key) => {
+        evicted.push(key);
+        return true;
+      },
+    });
+    return { slots: made, clock, metrics, evicted };
+  }
+
+  test('an automation waiter never preempts an idle interactive holder, and arms no timer', async () => {
+    const { slots: s, clock, metrics, evicted } = slots(1);
+    s.register('owner');
+    await clock.advance(2 * PREEMPT_IDLE_MS);
+    let served = false;
+    const taken = s.take('custodian', { lane: 'automation' }).then(() => {
+      served = true;
+    });
+    await settle();
+    expect(clock.pendingTimers).toBe(0);
+    expect(metrics.waitersBy).toEqual({ interactive: 0, automation: 1 });
+    await clock.advance(PREEMPT_IDLE_MS);
+    expect(served).toBe(false);
+    expect(evicted).toEqual([]);
+
+    s.release('owner');
+    await taken;
+    expect(s.holds('custodian')).toBe(true);
+    expect(metrics.waitersBy).toEqual({ interactive: 0, automation: 0 });
+  });
+
+  test('an interactive waiter goes ahead of an automation one, and may preempt an idle automation holder', async () => {
+    const { slots: s, clock, metrics, evicted } = slots(1);
+    s.register('custodian', 'automation');
+    const auto: number[] = [];
+    const owner: number[] = [];
+    let ownerServed = false;
+    const autoTake = s.take('responder', {
+      lane: 'automation',
+      onWaiting: (ahead) => auto.push(ahead),
+    });
+    const ownerTake = s
+      .take('owner', { onWaiting: (ahead) => owner.push(ahead) })
+      .then(() => {
+        ownerServed = true;
+      });
+    await settle();
+    expect(auto).toEqual([0, 1]);
+    expect(owner).toEqual([0]);
+    expect(metrics.waitersBy).toEqual({ interactive: 1, automation: 1 });
+
+    await clock.advance(PREEMPT_IDLE_MS);
+    await ownerTake;
+    expect(ownerServed).toBe(true);
+    expect(evicted).toEqual(['custodian']);
+    expect(s.holds('owner')).toBe(true);
+    expect(s.holds('responder')).toBe(false);
+    expect(metrics.waitersBy).toEqual({ interactive: 0, automation: 1 });
+    s.release('owner');
+    await autoTake;
+    expect(s.holds('responder')).toBe(true);
+  });
+
+  test('an interactive waiter evicts an idle interactive holder, never a busy automation one', async () => {
+    const { slots: s, clock, evicted } = slots(2);
+    s.register('owner');
+    s.register('custodian', 'automation');
+    const done = s.use('custodian');
+    await clock.advance(PREEMPT_IDLE_MS);
+    await s.take('other-owner');
+    expect(evicted).toEqual(['owner']);
+    expect(s.holds('custodian')).toBe(true);
+    done?.();
+  });
+
+  describe('an eviction under way for an interactive waiter', () => {
+    function gated() {
+      const clock = new FakeClock();
+      const evicted: string[] = [];
+      let open = () => {};
+      const held = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      const made = new SandboxSlots({
+        capacity: 1,
+        clock,
+        log: new RecordingLog(),
+        evict: async (key, wanted) => {
+          evicted.push(key);
+          await held;
+          return wanted();
+        },
+      });
+      return { slots: made, clock, evicted, open };
+    }
+
+    test('is abandoned when that waiter leaves, so an automation waiter never takes the sandbox', async () => {
+      const { slots: s, clock, evicted, open } = gated();
+      s.register('owner');
+      await clock.advance(2 * PREEMPT_IDLE_MS);
+      let custodianServed = false;
+      const custodian = s.take('custodian', { lane: 'automation' }).then(() => {
+        custodianServed = true;
+      });
+      await settle();
+      expect(evicted).toEqual([]);
+      const leaving = new AbortController();
+      const other = s.take('other-owner', { signal: leaving.signal });
+      await settle();
+      expect(evicted).toEqual(['owner']);
+
+      leaving.abort(new Error('turn over'));
+      await expect(other).rejects.toThrow('turn over');
+      open();
+      await settle();
+      expect(s.holds('owner')).toBe(true);
+      expect(s.holds('custodian')).toBe(false);
+      expect(custodianServed).toBe(false);
+      expect(clock.pendingTimers).toBe(0);
+
+      s.release('owner');
+      await custodian;
+      expect(s.holds('custodian')).toBe(true);
+    });
+
+    test('completes for that waiter while it stays, ahead of an automation waiter', async () => {
+      const { slots: s, clock, evicted, open } = gated();
+      s.register('owner');
+      await clock.advance(2 * PREEMPT_IDLE_MS);
+      void s.take('custodian', { lane: 'automation' });
+      const other = s.take('other-owner');
+      await settle();
+      open();
+      await other;
+      expect(evicted).toEqual(['owner']);
+      expect(s.holds('other-owner')).toBe(true);
+      expect(s.holds('custodian')).toBe(false);
+    });
+  });
+
+  test('an interactive waiter waits behind a busy automation holder, and is served when it goes', async () => {
+    const { slots: s, clock, metrics, evicted } = slots(2);
+    s.register('custodian', 'automation');
+    s.register('owner');
+    const custodianDone = s.use('custodian');
+    const ownerDone = s.use('owner');
+    let served = false;
+    const taken = s.take('other-owner').then(() => {
+      served = true;
+    });
+    await clock.advance(3 * PREEMPT_IDLE_MS);
+    expect(served).toBe(false);
+    expect(evicted).toEqual([]);
+    expect(metrics.waitersBy).toEqual({ interactive: 1, automation: 0 });
+
+    custodianDone?.();
+    s.release('custodian');
+    await taken;
+    expect(s.holds('other-owner')).toBe(true);
+    expect(evicted).toEqual([]);
+    ownerDone?.();
+  });
+
+  test("a custodian thread waits for an owner's idle sandbox to go, and never takes it", async () => {
+    const clock = new FakeClock();
+    const r = rig({ deps: { maxSandboxes: 1, clock } });
+    const ownerHooks = new Hooks();
+    const owner = begin(r.hands.thread(THREAD, ownerHooks, OPERATOR));
+    expect((await owner.env.exists('.', C)).ok).toBe(true);
+    await owner.lease.finish();
+    owner.end();
+    await clock.advance(PREEMPT_IDLE_MS);
+
+    const custodian = begin(
+      r.hands.thread(OTHER_THREAD, new Hooks(), CUSTODIAN),
+    );
+    const call = custodian.env.exists('.', C);
+    await until(() => r.metrics.waitersBy.automation === 1);
+    expect(r.metrics.waiters).toBe(0);
+    await clock.advance(2 * PREEMPT_IDLE_MS);
+    await Bun.sleep(50);
+    expect(ownerHooks.gone).toEqual([]);
+    expect(custodian.kinds()).toEqual(['waiting']);
+
+    await r.hands.release(THREAD, 'quiet');
+    expect((await call).ok).toBe(true);
+    expect(r.metrics.waitersBy.automation).toBe(0);
+    await custodian.lease.finish();
+    custodian.end();
+  });
+});
+
 describe('warm', () => {
   test('reconnects to a standing sandbox with a new epoch, which kills what a dead mate left', async () => {
     const r = rig();
-    const before = begin(r.hands.thread(THREAD, new Hooks()));
+    const before = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     const pids = join(r.workspace, 'pids');
     void before.env.exec(`sleep 300 & echo $! > ${pids}; wait`, undefined, C);
     const [sleeper] = await pidsIn(pids, 1);
@@ -563,7 +767,7 @@ describe('warm', () => {
     const restarted = r.another();
     expect(await restarted.start()).toEqual([]);
     const hooks = new Hooks();
-    const after = begin(restarted.thread(THREAD, hooks));
+    const after = begin(restarted.thread(THREAD, hooks, OPERATOR));
     await after.lease.warm();
     expect(r.fake.handsExecs).toHaveLength(2);
     expect(posts(r)).toBe(1);
@@ -580,7 +784,7 @@ describe('warm', () => {
 
   test('cut short by the end of the turn, it closes what it opens and says nothing', async () => {
     const r = rig();
-    const before = begin(r.hands.thread(THREAD, new Hooks()));
+    const before = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await before.env.exists('.', C)).ok).toBe(true);
     await before.lease.finish();
     before.end();
@@ -588,7 +792,7 @@ describe('warm', () => {
     const kube = new HeldKube(r, 'hands');
     const restarted = r.another({ kube });
     await restarted.start();
-    const turn = begin(restarted.thread(THREAD, new Hooks()));
+    const turn = begin(restarted.thread(THREAD, new Hooks(), OPERATOR));
     const warming = turn.lease.warm();
     await until(() => kube.held === 1);
     await turn.lease.finish();
@@ -606,7 +810,7 @@ describe('warm', () => {
 
   test('with no sandbox standing it mints nothing', async () => {
     const r = rig();
-    const turn = begin(r.hands.thread(THREAD, new Hooks()));
+    const turn = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     await turn.lease.warm();
     expect(posts(r)).toBe(0);
     expect(r.fake.handsExecs).toHaveLength(0);
@@ -622,7 +826,7 @@ describe('the end of a turn', () => {
       config: { kubeServiceAccount: 'mate-sandbox-admin', github: true },
       deps: { githubApp: app },
     });
-    const turn = begin(r.hands.thread(THREAD, new Hooks()));
+    const turn = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await turn.env.exists('.', C)).ok).toBe(true);
     const daemon = r.fake.daemons.get(NAME)?.[0];
     await turn.lease.abandon();
@@ -643,7 +847,7 @@ describe('the end of a turn', () => {
       const r = rig({ config: { kubeServiceAccount: 'mate-sandbox-admin' } });
       const kube = new HeldKube(r, 'hands');
       const hands = r.another({ kube });
-      const turn = begin(hands.thread(THREAD, new Hooks()));
+      const turn = begin(hands.thread(THREAD, new Hooks(), OPERATOR));
       const { context, abort } = aborting();
       const call = turn.env.exists('.', context);
       await until(() => kube.held === 1);
@@ -670,7 +874,7 @@ describe('the end of a turn', () => {
       config: { github: true },
       deps: { githubApp: app },
     });
-    const thread = r.hands.thread(THREAD, new Hooks());
+    const thread = r.hands.thread(THREAD, new Hooks(), OPERATOR);
     const first = begin(thread);
     expect((await first.env.exists('.', C)).ok).toBe(true);
     const summary = await first.lease.finish();
@@ -689,8 +893,8 @@ describe('the end of a turn', () => {
 
   test('shutdown abandons every open lease', async () => {
     const r = rig();
-    const a = begin(r.hands.thread(THREAD, new Hooks()));
-    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks()));
+    const a = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
+    const b = begin(r.hands.thread(OTHER_THREAD, new Hooks(), OPERATOR));
     expect((await a.env.exists('.', C)).ok).toBe(true);
     expect((await b.env.exists('.', C)).ok).toBe(true);
     await r.hands.shutdown();
@@ -715,6 +919,7 @@ describe('boot and release', () => {
       labels,
       config: SANDBOX_CONFIG,
       shutdownTime: new Date(Date.now() + 3_600_000).toISOString(),
+      profile: OPERATOR,
     });
     manifest.metadata.annotations = annotations;
     const kube = new Kube(r.fake.config());
@@ -726,7 +931,7 @@ describe('boot and release', () => {
   }
 
   function unlabelled(thread: ThreadRef): Record<string, string> {
-    const labels = sandboxLabels(thread, GUILD);
+    const labels = sandboxLabels(thread, GUILD, OPERATOR);
     delete labels[HANDS_LABEL];
     return labels;
   }
@@ -746,7 +951,11 @@ describe('boot and release', () => {
       delete spare[key];
     }
     await plant(r, 'mate-spare-old', { ...spare, 'lolwtf.ca/spare': 'true' });
-    await plant(r, 'mate-current', sandboxLabels(THIRD_THREAD, GUILD));
+    await plant(
+      r,
+      'mate-current',
+      sandboxLabels(THIRD_THREAD, GUILD, OPERATOR),
+    );
     r.fake.patchDelayMs = 1_000;
 
     const started = Date.now();
@@ -797,7 +1006,7 @@ describe('boot and release', () => {
   test('release deletes the sandbox and says so, only when there was one', async () => {
     const r = rig();
     const hooks = new Hooks();
-    const turn = begin(r.hands.thread(THREAD, hooks));
+    const turn = begin(r.hands.thread(THREAD, hooks, OPERATOR));
     expect((await turn.env.exists('.', C)).ok).toBe(true);
     await turn.lease.finish();
     turn.end();
@@ -809,7 +1018,7 @@ describe('boot and release', () => {
     expect(r.metrics.live).toBe(0);
 
     const idle = new Hooks();
-    r.hands.thread(OTHER_THREAD, idle);
+    r.hands.thread(OTHER_THREAD, idle, OPERATOR);
     await r.hands.release(OTHER_THREAD, 'quiet');
     expect(idle.gone).toEqual([]);
     expect(r.metrics.teardowns).toEqual(['quiet']);

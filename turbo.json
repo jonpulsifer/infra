@@ -48,9 +48,10 @@
         "$TURBO_ROOT$/images/mate-sandbox/gh",
         "$TURBO_ROOT$/images/mate-sandbox/mise.toml",
         "$TURBO_ROOT$/terraform/pki/certs/fml-root.pem",
-        "$TURBO_ROOT$/clusters/offsite/apps/mate/database-backup.yaml",
-        "$TURBO_ROOT$/clusters/offsite/apps/mate/deployment.yaml",
-        "$TURBO_ROOT$/clusters/offsite/apps/mate/network-policy.yaml"
+        "$TURBO_ROOT$/clusters/offsite/apps/mate/*.yaml",
+        "$TURBO_ROOT$/clusters/base/apps/mate-sandbox-reader/rbac.yaml",
+        "$TURBO_ROOT$/clusters/base/monitoring/mate-sandbox-reader.yaml",
+        "$TURBO_ROOT$/clusters/folly/config/cluster-topology.json"
       ],
       "env": ["DATABASE_URL", "MATE_TEST_DATABASE_URL"],
       "outputs": []

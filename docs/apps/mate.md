@@ -15,19 +15,35 @@ Rowbutt is a chat bot, code name mate, that gives the owner a coding and operati
 
 Mention Rowbutt in one of these channels to open a thread, and reply in it with no mention. Rowbutt ignores messages from every other user.
 
+Start the opening message with `+investigator` after the mention to open a read-only thread. A thread keeps the profile it opened with, and mate refuses a `+name` that is unknown, cannot open from chat, disagrees with the thread's, or is not the first word.
+
 To stop a turn, use Discord's Stop button or Slack's stop control.
 
 `chatgpt login`, `chatgpt status`, `chatgpt logout`, `chatgpt pause [minutes]` and `chatgpt resume` manage Rowbutt's ChatGPT sign-in and whether ChatGPT answers, and never reach the agent. [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md) and [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) have the steps.
 
+## Profiles
+
+A profile sets what a thread may do. `apps/mate/src/profiles.ts` declares them, and mate refuses to start with a bad one.
+
+| Profile | Mode | Started by | Cluster identity | Other access | Budget |
+| --- | --- | --- | --- | --- | --- |
+| `operator` | interactive | The owner's mention | `mate-sandbox-admin` | Everything in [What the agent can do](#what-the-agent-can-do) | The process limits, and the shared interactive day |
+| `custodian` | job | The daily check | `mate-sandbox-admin` | As `operator` | 10 turns a UTC day of its own |
+| `investigator` | interactive | A mention starting `+investigator` | `mate-sandbox-reader`, read-only on both clusters | GET on Prometheus and Alertmanager, and the `weather_*` tools | 20-minute turns, 10 a thread, and the shared interactive day |
+
+- Interactive: the owner's threads, which share the turn slots and the daily count.
+- Automation: a trusted trigger's thread, which runs one turn at a time and closes after 30 quiet minutes.
+- Job: an automation thread that releases its sandbox and closes when its turn ends.
+
 ## Daily custodian
 
-mate starts a daily homelab check at 18:00 `America/Halifax` in Slack `#chatops`, configured by `MATE_CUSTODIAN_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. It checks the clusters, Flux, alerts, backups, hosts and PR status, and reports failures and work that needs the owner. The assignment can fix clear problems through branches and PRs and merge understood PRs once required checks pass and reviews do not block. It does not bypass protections, make live infrastructure changes by hand or apply Atlantis plans without the owner's approval. The scheduled agent has the same sandbox credentials and GitOps rules as an interactive turn.
+mate starts a daily homelab check at 18:00 `America/Halifax` in Slack `#chatops`, configured by `MATE_CUSTODIAN_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. It checks the clusters, Flux, alerts, backups, hosts and PR status, and reports failures and work that needs the owner. The assignment can fix clear problems through branches and PRs and merge understood PRs once required checks pass and reviews do not block. It does not bypass protections, make live infrastructure changes by hand or apply Atlantis plans without the owner's approval. It runs under the `custodian` profile in job mode, with operator's access and 10 turns a UTC day of its own.
 
-mate records the day and Slack root in `mate-db` and retries an unstarted check until midnight Atlantic time. A restart resumes an interrupted turn. If mate stops after Slack accepts the root but before its timestamp reaches the database, a retry can post a second root. `apps/mate/src/custodian.ts` owns this schedule; unset `MATE_CUSTODIAN_CHANNEL` to stop new reports. The daily assignment can merge passing PRs; it escalates unclear or risky changes to the owner.
+mate records the day and Slack root in `mate-db` and posts the assignment into the thread. The thread's row is the attempt, so a refused or failed check is said once in its thread, and a reply runs it again. mate releases the sandbox when the report is done. A restart resumes an interrupted turn. If mate stops after Slack accepts the root but before its timestamp reaches the database, a retry can post a second root. `apps/mate/src/custodian.ts` owns this schedule; unset `MATE_CUSTODIAN_CHANNEL` to stop new reports.
 
 ## What the agent can do
 
-The agent runs every command without approval. The allowlist in [Use it](#use-it) is the only gate on what it can do.
+The agent runs every command without approval. The allowlist in [Use it](#use-it) is the only gate on what it can do. Under `operator` and `custodian` it has this access. The read-only cluster token row in [How Rowbutt works](mate/how-it-works.md#credentials) gives `investigator`'s.
 
 | Access | Scope |
 | --- | --- |
@@ -44,15 +60,16 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 
 ## Limits
 
-- A turn runs at most 45 minutes. A thread has 30 turns, and all threads share 120 in a rolling day.
-- At most two turns run at once, and other threads wait in a queue.
-- At most two threads hold a sandbox at once. A turn that needs one takes the sandbox of a thread idle for 5 minutes, which deletes that thread's uncommitted work, or waits.
+- A turn runs at most 45 minutes. A thread has 30 turns, and all interactive threads share 120 in a rolling day. An investigator turn runs at most 20 minutes, with 10 per thread.
+- At most two interactive turns run at once, and other threads wait in a queue. Automation and job profiles run one turn at a time and have their own daily caps in `mate-db`.
+- At most two threads hold a sandbox at once. A turn that needs one takes the sandbox of a thread idle for 5 minutes, which deletes that thread's uncommitted work, or waits. An automation turn never takes an interactive thread's sandbox, but it can take a free one, so while the custodian runs the owner's threads share one fewer.
+- An investigator reads logs with `kubectl logs`; VictoriaLogs is not reachable from a read-only sandbox.
 - Credentials and background processes last only for the turn.
 - After 30 quiet minutes, mate deletes the sandbox with any uncommitted work and archives the Discord thread. mate keeps the conversation, so a reply continues it in a new sandbox.
 
 ## How it works
 
-mate is one Bun process, and its ingress admits only the node it runs on. It runs the agent loop on pi, a TypeScript agent library, against the model in `MATE_MODEL` on the owner's ChatGPT subscription. When ChatGPT cannot answer, the OpenCode Go model in `MATE_FALLBACK_MODEL` answers, and mate holds its key. It keeps each thread's session in the Postgres database `mate-db`, the [session store](mate/how-it-works.md#session-store), with a nightly dump. The first tool call of a turn leases the thread's `Sandbox`, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md), and writes short-lived GitHub and cluster tokens and the `rowbutt` SSH key into it. A turn that only talks creates no sandbox. If mate restarts mid-turn, it resumes the turn in a new message. [How Rowbutt works](mate/how-it-works.md) has the details.
+mate is one Bun process, and its ingress admits only the node it runs on. It runs the agent loop on pi, a TypeScript agent library, against the model in `MATE_MODEL` on the owner's ChatGPT subscription. When ChatGPT cannot answer, the OpenCode Go model in `MATE_FALLBACK_MODEL` answers, and mate holds its key. It keeps each thread's session in the Postgres database `mate-db`, the [session store](mate/how-it-works.md#session-store), with a nightly dump. The first tool call of a turn leases the thread's `Sandbox`, which the agent-sandbox controller runs on [oldschool](../hosts/oldschool.md), and writes the short-lived GitHub and cluster tokens and the `rowbutt` SSH key that its profile grants into it. A turn that only talks creates no sandbox. If mate restarts mid-turn, it resumes the turn in a new message. [How Rowbutt works](mate/how-it-works.md) has the details.
 
 ## Operate
 
@@ -66,7 +83,10 @@ mate is one Bun process, and its ingress admits only the node it runs on. It run
 
 The other alerts are in `clusters/offsite/monitoring/mate-rules.yaml`, and each `description` names its fix.
 
-To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To take turns off ChatGPT until mate restarts, say `chatgpt pause <minutes>`. CD restarts mate at each new image, so for longer, set `MATE_MODEL` to the fallback's model and `MATE_FALLBACK_MODEL` to `none`, as [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) says. To disable GitHub, cluster, host or phone access, unset `MATE_GITHUB_APP_ID`, `MATE_SANDBOX_KUBE_SA`, `MATE_SSH_KEY_FILE` or `MATE_SWITCHBOARD_URL`. To keep the agent off folly, unset `MATE_SANDBOX_KUBE_PEERS`. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`. To disable the weather tools, unset `MATE_WEATHER_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token.
+To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/mate/deployment.yaml`. To take turns off ChatGPT until mate restarts, say `chatgpt pause <minutes>`. CD restarts mate at each new image, so for longer, set `MATE_MODEL` to the fallback's model and `MATE_FALLBACK_MODEL` to `none`, as [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) says. To disable GitHub, cluster, host or phone access, unset `MATE_GITHUB_APP_ID`, `MATE_SANDBOX_KUBE_SA`, `MATE_SSH_KEY_FILE` or `MATE_SWITCHBOARD_URL`. To disable read-only cluster access, unset `MATE_SANDBOX_KUBE_READER_SA`. To keep the agent off folly, unset `MATE_SANDBOX_KUBE_PEERS`. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`. To disable the weather tools, unset `MATE_WEATHER_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token.
+
+> [!WARNING]
+> An image from before profiles runs every thread as operator. It never sees a read-only sandbox (`lolwtf.ca/minted-by=mate-reader`, its own name), but a reply in an investigator thread runs as operator in a fresh operator sandbox. Before rolling back, delete the read-only sandboxes with `kubectl --context offsite -n mate delete sandboxes -l lolwtf.ca/minted-by=mate-reader` and leave investigator threads closed.
 
 ## Reference
 

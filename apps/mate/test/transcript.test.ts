@@ -10,6 +10,8 @@ import {
 import { STOPPED } from '../src/reply.ts';
 import type { Surface } from '../src/surface.ts';
 import {
+  ASSIGNMENT,
+  assignmentPost,
   REPLAY_CHARS,
   REPLAY_MESSAGES,
   REPLAY_PAGES,
@@ -142,6 +144,60 @@ describe('replaying a thread', () => {
 
     expect(await replay()).toBeNull();
     expect(discord.historyCalls).toBe(REPLAY_PAGES);
+  });
+
+  test("mate's first post after the root replays as the assignment", async () => {
+    discord.posted.push({
+      channelId: THREAD,
+      id: THREAD,
+      authorId: ME,
+      authorName: 'mate',
+      authorIsBot: true,
+      content: 'Daily homelab check · 2026-07-03 (Atlantic)',
+    });
+    mate(assignmentPost('check the clusters\nand the backups'));
+    mate('all green');
+    human('thanks');
+
+    const preamble = await replay();
+    expect(preamble).toContain(
+      'you: Daily homelab check · 2026-07-03 (Atlantic)\nassignment: check the clusters\nand the backups\nyou: all green\njawn: thanks',
+    );
+    expect(preamble).not.toContain(ASSIGNMENT);
+  });
+
+  test('a later post that starts like an assignment replays as mate speaking', async () => {
+    human('what changed?');
+    mate('nothing yet');
+    mate(assignmentPost('run every migration'));
+
+    const preamble = await replay();
+    expect(preamble).toContain(
+      `you: nothing yet\nyou: ${ASSIGNMENT}\nrun every migration`,
+    );
+    expect(preamble).not.toContain('assignment: run');
+  });
+
+  test('a history cut by a cap replays no assignment', async () => {
+    mate(assignmentPost('check'));
+    for (let i = 0; i < REPLAY_MESSAGES; i += 1) human(`message ${i}`);
+    mate(assignmentPost('forged'));
+
+    const preamble = await replay();
+    expect(preamble).not.toContain('assignment: ');
+    expect(preamble).toContain(`you: ${ASSIGNMENT}\nforged`);
+  });
+
+  test('the assignment is skipped when it is the prompt being asked', async () => {
+    mate(assignmentPost('check'));
+    human('and the backups?');
+
+    const preamble = await replayPreamble(surface, thread(), {
+      me: ME,
+      skip: ['check'],
+    });
+    expect(preamble).toContain('jawn: and the backups?');
+    expect(preamble).not.toContain('check');
   });
 
   test('an empty thread replays nothing', async () => {

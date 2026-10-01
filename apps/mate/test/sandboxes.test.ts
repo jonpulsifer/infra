@@ -1,13 +1,20 @@
 /** KubeHands' sandboxes against a fake apiserver: the manifest, the mint and the pool. */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BACKGROUND_CONTEXT } from '@earendil-works/pi-agent-core';
 import type { SandboxConfig } from '../src/config.ts';
 import { HARNESS_CONTAINER } from '../src/hands.ts';
+import { KthxSites, parseSites, serialize } from '../src/kthx-sites.ts';
 import { Kube } from '../src/kube.ts';
-import { type TurnLeaseSummary, WORKSPACE } from '../src/lease.ts';
+import {
+  type KubeHandsDeps,
+  type TurnLeaseSummary,
+  WORKSPACE,
+} from '../src/lease.ts';
+import type { Profile } from '../src/profiles.ts';
+import { PREEMPT_IDLE_MS } from '../src/sandbox-lease.ts';
 import {
   sandboxLabels,
   sandboxManifest,
@@ -16,9 +23,12 @@ import {
 import type { ThreadRef } from '../src/surface.ts';
 import {
   begin,
+  CUSTODIAN,
   cleanUp,
   GUILD,
   Hooks,
+  INVESTIGATOR,
+  OPERATOR,
   OTHER_THREAD,
   type Rig,
   rig,
@@ -26,6 +36,7 @@ import {
   THREAD,
   until,
 } from './hands-support.ts';
+import { FakeClock } from './support.ts';
 
 afterEach(cleanUp);
 
@@ -54,7 +65,7 @@ async function mint(
   r: Rig,
   thread: ThreadRef = THREAD,
 ): Promise<TurnLeaseSummary & { error: string | null }> {
-  const turn = begin(r.hands.thread(thread, new Hooks()));
+  const turn = begin(r.hands.thread(thread, new Hooks(), OPERATOR));
   const result = await turn.env.exists('.', C);
   const summary = await turn.lease.finish();
   turn.end();
@@ -144,6 +155,7 @@ async function plant(
         labels,
         config: SANDBOX_CONFIG,
         shutdownTime: new Date(Date.now() + 3_600_000).toISOString(),
+        profile: OPERATOR,
       }),
     },
   );
@@ -174,6 +186,7 @@ describe('the manifest', () => {
       'lolwtf.ca/minted-by': 'mate',
       'lolwtf.ca/guild': GUILD,
       'lolwtf.ca/hands': '2',
+      'lolwtf.ca/profile': 'operator',
       'lolwtf.ca/surface': 'discord',
       'lolwtf.ca/thread': THREAD.id,
       'lolwtf.ca/channel': THREAD.channelId,
@@ -473,7 +486,7 @@ describe('the mint', () => {
 
   test('passes over a sandbox an earlier mate minted, and its name', async () => {
     const r = rig();
-    await plant(r, NAME, withoutHands(sandboxLabels(THREAD, GUILD)));
+    await plant(r, NAME, withoutHands(sandboxLabels(THREAD, GUILD, OPERATOR)));
     const minted = await mint(r);
     expect(minted.source).toBe('fresh');
     expect(minted.sandbox).toMatch(new RegExp(`^${NAME}-[0-9a-f]{4}$`));
@@ -487,7 +500,7 @@ describe('the mint', () => {
 
   test('ignores a pod it does not own', async () => {
     const r = rig();
-    await plant(r, NAME, sandboxLabels(THREAD, GUILD));
+    await plant(r, NAME, sandboxLabels(THREAD, GUILD, OPERATOR));
     r.fake.pods.delete(NAME);
     r.fake.pods.set('someone-elses', {
       apiVersion: 'v1',
@@ -540,6 +553,7 @@ describe('the warm pool', () => {
       'lolwtf.ca/minted-by': 'mate',
       'lolwtf.ca/guild': GUILD,
       'lolwtf.ca/hands': '2',
+      'lolwtf.ca/profile': 'operator',
       'lolwtf.ca/spare': 'true',
     });
     // The pod needs `app.kubernetes.io/name`, which the network policy selects on;
@@ -621,7 +635,7 @@ describe('the warm pool', () => {
 
   test('a spare an earlier mate minted is never handed out', async () => {
     const r = pool(1);
-    const labels = withoutHands(sandboxLabels(THREAD, GUILD));
+    const labels = withoutHands(sandboxLabels(THREAD, GUILD, OPERATOR));
     for (const key of [
       'lolwtf.ca/surface',
       'lolwtf.ca/thread',
@@ -802,5 +816,426 @@ describe('the warm pool', () => {
     const again = await mint(r);
     expect(again.sandbox).not.toBe(adopted.sandbox);
     expect(again.source).toBe('spare');
+  });
+});
+
+// A sandbox is minted for one profile: its labels, name and env follow the
+// profile's grants, and a read-only one never reaches the kthx ledger.
+describe('profiles', () => {
+  const READER = `${NAME}-r`;
+  const ORIGIN = 'https://kthx.example.test';
+  const SECRET = 'mate-kthx-sites';
+  const SITES = '.config/kthx/sites.json';
+  const LEDGER = serialize({ [ORIGIN]: { blog: 'tok-blog' } });
+  const HOSTILE = serialize({ [ORIGIN]: { blog: 'tok-attacker' } });
+
+  function reader(
+    opts: {
+      config?: Partial<SandboxConfig>;
+      deps?: Partial<KubeHandsDeps>;
+    } = {},
+  ): Rig {
+    return rig({
+      config: {
+        ...FULL,
+        kubeReaderServiceAccount: 'mate-sandbox-reader',
+        kthx: { origin: ORIGIN, sitesSecret: SECRET },
+        ...opts.config,
+      },
+      deps: opts.deps,
+    });
+  }
+
+  function ledgered(r: Rig): KthxSites {
+    return new KthxSites({
+      kube: r.kube,
+      namespace: 'mate',
+      secret: SECRET,
+      log: r.log,
+    });
+  }
+
+  /** The ledger holds one site, and the hands fold sites into it. */
+  function withLedger(r: Rig): Rig {
+    r.fake.putSecret(SECRET, { 'sites.json': LEDGER });
+    r.hands = r.another({ kthxSites: ledgered(r) });
+    return r;
+  }
+
+  function leaveSites(r: Rig, contents: string): void {
+    mkdirSync(dirname(join(r.home, SITES)), { recursive: true });
+    writeFileSync(join(r.home, SITES), contents);
+  }
+
+  /** Nothing read the sandbox's sites file or wrote the ledger. */
+  function ledgerUntouched(r: Rig): void {
+    expect(r.fake.patches.filter((p) => p.name === SECRET)).toEqual([]);
+    expect(r.fake.secretValue(SECRET, 'sites.json')).toBe(LEDGER);
+    expect(r.metrics.siteSyncs).toEqual([]);
+    for (const exec of r.fake.execs) {
+      expect(exec.command.join(' ')).not.toContain('sites.json');
+    }
+  }
+
+  async function mintAs(
+    r: Rig,
+    profile: Profile,
+    thread: ThreadRef = THREAD,
+  ): Promise<TurnLeaseSummary & { error: string | null }> {
+    const turn = begin(r.hands.thread(thread, new Hooks(), profile));
+    const result = await turn.env.exists('.', C);
+    const summary = await turn.lease.finish();
+    turn.end();
+    return { ...summary, error: result.ok ? null : result.error.message };
+  }
+
+  function labelsOf(r: Rig, name: string): Json {
+    return object(r, name).metadata.labels;
+  }
+
+  test('an operator sandbox carries every credential path, and its profile', async () => {
+    const r = reader();
+    await mint(r);
+    expect(labelsOf(r, NAME)['lolwtf.ca/profile']).toBe('operator');
+    expect(Object.keys(envOf(podTemplate(r).containers[0]))).toEqual([
+      'OP_CONNECT_HOST',
+      'OP_CONNECT_TOKEN',
+      'KTHX_ORIGIN',
+      'SWITCHBOARD_URL',
+      'SWITCHBOARD_RING_TOKEN',
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_KEY_0',
+      'GIT_CONFIG_VALUE_0',
+      'GIT_CONFIG_KEY_1',
+      'GIT_CONFIG_VALUE_1',
+      'GIT_CONFIG_KEY_2',
+      'GIT_CONFIG_VALUE_2',
+      'GIT_CONFIG_KEY_3',
+      'GIT_CONFIG_VALUE_3',
+      'GIT_CONFIG_KEY_4',
+      'GIT_CONFIG_VALUE_4',
+      'GIT_TERMINAL_PROMPT',
+      'MATE_GITHUB_TOKEN_FILE',
+      'KUBECONFIG',
+    ]);
+  });
+
+  test('an investigator sandbox has its own name and network, and no write credential', async () => {
+    const r = reader();
+    expect(await mintAs(r, INVESTIGATOR)).toMatchObject({
+      sandbox: READER,
+      source: 'fresh',
+      error: null,
+    });
+    expect(r.fake.sandboxes.has(NAME)).toBe(false);
+    expect(labelsOf(r, READER)).toEqual({
+      'app.kubernetes.io/name': 'mate-sandbox-reader',
+      'app.kubernetes.io/part-of': 'mate',
+      'lolwtf.ca/minted-by': 'mate-reader',
+      'lolwtf.ca/guild': GUILD,
+      'lolwtf.ca/hands': '2',
+      'lolwtf.ca/profile': 'investigator',
+      'lolwtf.ca/checkout': 'closed',
+      'lolwtf.ca/surface': 'discord',
+      'lolwtf.ca/thread': THREAD.id,
+      'lolwtf.ca/channel': THREAD.channelId,
+    });
+    // Minted with the window open, for the clone.
+    expect(
+      sandboxLabels(THREAD, GUILD, INVESTIGATOR)['lolwtf.ca/checkout'],
+    ).toBe('open');
+    const env = envOf(podTemplate(r, READER).containers[0]);
+    for (const name of Object.keys(env)) {
+      expect(name).not.toMatch(/^(SWITCHBOARD_|OP_)/);
+    }
+    expect(env.KTHX_ORIGIN).toBeUndefined();
+    expect(env.MATE_GITHUB_TOKEN_FILE).toBeUndefined();
+    expect(env.GIT_CONFIG_COUNT.value).toBe('3');
+    expect(env.KUBECONFIG.value).toBe('/home/agent/.kube/config');
+
+    const without = sandboxManifest({
+      name: READER,
+      namespace: 'mate',
+      labels: sandboxLabels(THREAD, GUILD, INVESTIGATOR),
+      config: { ...SANDBOX_CONFIG, ...FULL, kubeReaderServiceAccount: null },
+      shutdownTime: new Date().toISOString(),
+      profile: INVESTIGATOR,
+    }) as Json;
+    expect(
+      envOf(without.spec.podTemplate.spec.containers[0]).KUBECONFIG,
+    ).toBeUndefined();
+  });
+
+  test('mate lists both kinds of sandbox; an image from before profiles lists only its own', async () => {
+    const r = reader();
+    await mint(r, OTHER_THREAD);
+    await mintAs(r, INVESTIGATOR);
+    const list = (selector: string) =>
+      r.kube
+        .json<{ items: Json[] }>(
+          '/apis/agents.x-k8s.io/v1beta1/namespaces/mate/sandboxes',
+          { query: { labelSelector: selector } },
+        )
+        .then(({ items }) => items.map((item) => item.metadata.name));
+    expect(
+      await list(
+        `lolwtf.ca/minted-by in (mate,mate-reader),lolwtf.ca/guild=${GUILD}`,
+      ),
+    ).toEqual([sandboxName(OTHER_THREAD), READER]);
+    expect(
+      await list(`lolwtf.ca/minted-by=mate,lolwtf.ca/guild=${GUILD}`),
+    ).toEqual([sandboxName(OTHER_THREAD)]);
+    // Release finds it under the wider selector.
+    await r.hands.release(THREAD, 'quiet');
+    expect(r.fake.sandboxes.has(READER)).toBe(false);
+  });
+
+  test('an investigator never adopts a spare', async () => {
+    const r = reader({ config: { spares: 1 } });
+    await r.hands.ensureSpares();
+    const [spare] = spareNames(r);
+    expect((await mintAs(r, INVESTIGATOR)).source).toBe('fresh');
+    expect(spareNames(r)).toEqual([spare ?? '']);
+  });
+
+  test('a thread keeps its profile: its hands refuse another', () => {
+    const r = reader();
+    r.hands.thread(THREAD, new Hooks(), OPERATOR);
+    expect(() => r.hands.thread(THREAD, new Hooks(), INVESTIGATOR)).toThrow(
+      /held under profile operator, not investigator/,
+    );
+  });
+
+  test('an operator sandbox found for an investigator thread keeps its sites, then is condemned', async () => {
+    const r = withLedger(reader());
+    await mint(r);
+    leaveSites(
+      r,
+      serialize({ [ORIGIN]: { blog: 'tok-blog', shop: 'tok-shop' } }),
+    );
+    // A later mate, with this thread's row born investigator.
+    r.hands = r.another({ kthxSites: ledgered(r) });
+    expect(await mintAs(r, INVESTIGATOR)).toMatchObject({
+      sandbox: READER,
+      source: 'fresh',
+    });
+    expect(
+      r.log.of('a sandbox of this thread is labelled for another profile'),
+    ).toHaveLength(1);
+    expect(parseSites(r.fake.secretValue(SECRET, 'sites.json') ?? '')).toEqual({
+      [ORIGIN]: { blog: 'tok-blog', shop: 'tok-shop' },
+    });
+    await until(() => !r.fake.sandboxes.has(NAME));
+  });
+
+  test('a reader sandbox labelled operator is condemned with no sites read', async () => {
+    const r = withLedger(reader());
+    await plant(r, 'mate-forged', {
+      ...sandboxLabels(THREAD, GUILD, INVESTIGATOR),
+      'lolwtf.ca/profile': 'operator',
+    });
+    leaveSites(r, HOSTILE);
+    expect((await mintAs(r, INVESTIGATOR)).sandbox).toBe(READER);
+    expect(
+      r.log.of('a sandbox of this thread is labelled for another profile'),
+    ).toHaveLength(1);
+    await until(() => !r.fake.sandboxes.has('mate-forged'));
+    ledgerUntouched(r);
+  });
+
+  test('a reader sandbox whose pod came back after the window closed is replaced at once', async () => {
+    const r = reader();
+    expect((await mintAs(r, INVESTIGATOR)).source).toBe('fresh');
+    r.fake.recreatePod(READER);
+    const started = Date.now();
+    const again = await mintAs(r, INVESTIGATOR);
+    expect(again).toMatchObject({ source: 'fresh', error: null });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(
+      r.log.of('condemned a read-only sandbox whose pod cannot clone again'),
+    ).toHaveLength(1);
+  });
+
+  test('a reader sandbox still booting with its window open is waited for and reused', async () => {
+    const r = reader();
+    r.fake.readyOnCreate = false;
+    await plant(r, READER, sandboxLabels(THREAD, GUILD, INVESTIGATOR));
+    setTimeout(() => r.fake.markReady(READER), 60);
+    expect(await mintAs(r, INVESTIGATOR)).toMatchObject({
+      sandbox: READER,
+      source: 'reused',
+      error: null,
+    });
+  });
+
+  test('the window closes on the object, the template and the pod, and Cilium sees it, before the first command', async () => {
+    const r = reader();
+    r.fake.cepLags = 2;
+    expect((await mintAs(r, INVESTIGATOR)).error).toBeNull();
+    const closing = r.fake.patches.find(
+      (p) =>
+        p.name === READER &&
+        (p.body.metadata as Json | undefined)?.labels?.['lolwtf.ca/checkout'],
+    );
+    expect(closing?.body).toEqual({
+      metadata: { labels: { 'lolwtf.ca/checkout': 'closed' } },
+      spec: {
+        podTemplate: {
+          metadata: { labels: { 'lolwtf.ca/checkout': 'closed' } },
+        },
+      },
+    });
+    const pod = r.fake.pods.get(READER) as Json;
+    expect(pod.metadata.labels['lolwtf.ca/checkout']).toBe('closed');
+    const endpoints = r.fake.requests
+      .map((q, at) => ({ ...q, at }))
+      .filter((q) => q.path.includes('/ciliumendpoints/'));
+    expect(endpoints.length).toBeGreaterThanOrEqual(3);
+    const firstExec = r.fake.requests.findIndex((q) =>
+      q.path.endsWith('/exec'),
+    );
+    expect(firstExec).toBeGreaterThan(endpoints.at(-1)?.at ?? -1);
+  });
+
+  test('a window Cilium never sees closed takes the sandbox down and fails the turn', async () => {
+    const r = reader();
+    r.fake.cepLags = Number.MAX_SAFE_INTEGER;
+    const failed = await mintAs(r, INVESTIGATOR);
+    expect(failed.error).toMatch(/could not close its checkout window/);
+    expect(failed.source).toBe('failed');
+    expect(r.fake.handsExecs).toEqual([]);
+    await until(() => !r.fake.sandboxes.has(READER));
+  });
+
+  test('a closed window whose check fails once is checked again, and its sandbox kept', async () => {
+    const r = reader();
+    expect((await mintAs(r, INVESTIGATOR)).error).toBeNull();
+    r.fake.cepFails = 1;
+    expect(await mintAs(r, INVESTIGATOR)).toMatchObject({
+      sandbox: READER,
+      source: 'reused',
+      error: null,
+    });
+    expect(r.fake.cepFails).toBe(0);
+    expect(r.fake.sandboxes.has(READER)).toBe(true);
+  });
+
+  test('a closed window Cilium cannot confirm fails the turn and keeps the sandbox', async () => {
+    const r = reader();
+    const hooks = new Hooks();
+    const thread = r.hands.thread(THREAD, hooks, INVESTIGATOR);
+    const first = begin(thread);
+    expect((await first.env.exists('.', C)).ok).toBe(true);
+    await first.lease.finish();
+    first.end();
+    r.fake.cepState = 'regenerating';
+    const second = begin(thread);
+    const result = await second.env.exists('.', C);
+    expect(result.ok ? null : result.error.message).toMatch(
+      /could not close its checkout window/,
+    );
+    await second.lease.finish();
+    second.end();
+    expect(hooks.gone).toEqual([]);
+    expect(r.fake.sandboxes.has(READER)).toBe(true);
+    expect(r.fake.handsExecs).toHaveLength(1);
+  });
+
+  test('a held sandbox deleted with its window open is gone, and frees its slot', async () => {
+    const r = reader();
+    await plant(r, READER, sandboxLabels(THREAD, GUILD, INVESTIGATOR));
+    await r.hands.start();
+    expect(r.metrics.live).toBe(1);
+    r.fake.cepState = 'regenerating';
+    const hooks = new Hooks();
+    const turn = begin(r.hands.thread(THREAD, hooks, INVESTIGATOR));
+    expect((await turn.env.exists('.', C)).ok).toBe(false);
+    await turn.lease.finish();
+    turn.end();
+    expect(hooks.gone).toEqual(['lost']);
+    await until(() => !r.fake.sandboxes.has(READER));
+    expect(r.metrics.live).toBe(0);
+    expect(r.fake.handsExecs).toEqual([]);
+  });
+
+  test('a reader pod whose window is open again is never spoken to', async () => {
+    const r = reader();
+    const turn = begin(r.hands.thread(THREAD, new Hooks(), INVESTIGATOR));
+    expect((await turn.env.exists('.', C)).ok).toBe(true);
+    const client = turn.lease.current();
+    if (client) turn.lease.drop(client, 'deadline');
+    (r.fake.pods.get(READER) as Json).metadata.labels['lolwtf.ca/checkout'] =
+      'open';
+    expect((await turn.env.exists('.', C)).ok).toBe(false);
+    expect(turn.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'lost',
+        error: expect.stringContaining('still has its checkout window open'),
+      }),
+    );
+    await turn.lease.finish();
+    turn.end();
+  });
+
+  describe('a hostile sites file in a reader sandbox never reaches the ledger', () => {
+    test('on release', async () => {
+      const r = withLedger(reader());
+      await mintAs(r, INVESTIGATOR);
+      leaveSites(r, HOSTILE);
+      await r.hands.release(THREAD, 'quiet');
+      expect(r.fake.sandboxes.has(READER)).toBe(false);
+      ledgerUntouched(r);
+    });
+
+    test('on eviction', async () => {
+      const clock = new FakeClock();
+      const r = reader({ deps: { maxSandboxes: 1, clock } });
+      r.fake.putSecret(SECRET, { 'sites.json': LEDGER });
+      r.hands = r.another({ kthxSites: ledgered(r) });
+      const hooks = new Hooks();
+      const turn = begin(r.hands.thread(THREAD, hooks, INVESTIGATOR));
+      expect((await turn.env.exists('.', C)).ok).toBe(true);
+      await turn.lease.finish();
+      turn.end();
+      leaveSites(r, HOSTILE);
+      await clock.advance(PREEMPT_IDLE_MS);
+      expect((await mintAs(r, INVESTIGATOR, OTHER_THREAD)).error).toBeNull();
+      expect(hooks.gone).toEqual(['preempted']);
+      ledgerUntouched(r);
+    });
+
+    test('on a loss', async () => {
+      const r = withLedger(reader());
+      leaveSites(r, HOSTILE);
+      r.fake.oldHands = true;
+      expect((await mintAs(r, INVESTIGATOR)).error).not.toBeNull();
+      await until(() => !r.fake.sandboxes.has(READER));
+      ledgerUntouched(r);
+    });
+
+    test('at boot, from an earlier mate', async () => {
+      const r = withLedger(reader());
+      await plant(
+        r,
+        READER,
+        withoutHands(sandboxLabels(THREAD, GUILD, INVESTIGATOR)),
+      );
+      leaveSites(r, HOSTILE);
+      expect(await r.hands.start()).toEqual([]);
+      await until(() => !r.fake.sandboxes.has(READER));
+      ledgerUntouched(r);
+    });
+  });
+
+  test('a standing custodian sandbox counts in the automation lane', async () => {
+    const clock = new FakeClock();
+    const r = reader({ deps: { maxSandboxes: 1, clock } });
+    await plant(r, NAME, sandboxLabels(THREAD, GUILD, CUSTODIAN));
+    await r.hands.start();
+    expect(r.metrics.live).toBe(1);
+    // An automation waiter takes an idle automation holder, never an interactive one.
+    await clock.advance(PREEMPT_IDLE_MS);
+    expect((await mintAs(r, CUSTODIAN, OTHER_THREAD)).error).toBeNull();
+    await until(() => !r.fake.sandboxes.has(NAME));
   });
 });

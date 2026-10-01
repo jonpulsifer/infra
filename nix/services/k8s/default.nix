@@ -87,10 +87,11 @@ in
                 claims.sub in [
                   "system:serviceaccount:atlantis:atlantis",
                   "system:serviceaccount:mate:mate-sandbox-admin",
+                  "system:serviceaccount:mate:mate-sandbox-reader",
                   "system:serviceaccount:spindrift:spindrift"
                 ]
               '';
-              message = "only the Atlantis, Rowbutt sandbox and Spindrift service accounts may authenticate across clusters";
+              message = "only the Atlantis, Rowbutt sandbox (admin and reader) and Spindrift service accounts may authenticate across clusters";
             }
           ];
           claimMappings.username.expression = ''"federated:" + claims.sub'';

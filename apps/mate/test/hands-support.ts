@@ -36,6 +36,7 @@ import type {
   TokenSource,
   TurnSandboxSource,
 } from '../src/lease.ts';
+import { type Lane, PROFILES, type Profile } from '../src/profiles.ts';
 import type { TurnLeaseImpl } from '../src/sandbox-lease.ts';
 import { KubeHands } from '../src/sandboxes.ts';
 import type { ThreadRef } from '../src/surface.ts';
@@ -44,9 +45,15 @@ import { RecordingLog } from './support.ts';
 
 export const DAEMON = Bun.resolveSync('@repo/mate-hands/main', import.meta.dir);
 
+export const OPERATOR = PROFILES.get('operator') as Profile;
+export const CUSTODIAN = PROFILES.get('custodian') as Profile;
+export const INVESTIGATOR = PROFILES.get('investigator') as Profile;
+
 export class RecordingHandsInstruments implements HandsInstruments {
   live = 0;
+  /** The interactive lane's waiters. */
   waiters = 0;
+  readonly waitersBy: Record<Lane, number> = { interactive: 0, automation: 0 };
   pool: { ready: number; wanted: number } | null = null;
   readonly mints: MintResult[] = [];
   readonly mintSamples: MintSample[] = [];
@@ -66,8 +73,9 @@ export class RecordingHandsInstruments implements HandsInstruments {
   sandboxesLive(count: number): void {
     this.live = count;
   }
-  sandboxWaiters(count: number): void {
-    this.waiters = count;
+  sandboxWaiters(count: number, lane: Lane): void {
+    this.waitersBy[lane] = count;
+    if (lane === 'interactive') this.waiters = count;
   }
   spares(ready: number, wanted: number): void {
     this.pool = { ready, wanted };
@@ -299,6 +307,7 @@ export const SANDBOX_CONFIG: SandboxConfig = {
   spares: 0,
   vault: null,
   kubeServiceAccount: null,
+  kubeReaderServiceAccount: null,
   kubeContext: 'offsite',
   kubePeers: [],
   github: false,
@@ -416,7 +425,13 @@ export function rig(
         ...opts.deps,
         ...overrides,
       },
-      { workspace, home, expectHome: home, epochs: new Epochs() },
+      {
+        workspace,
+        home,
+        expectHome: home,
+        epochs: new Epochs(),
+        checkout: { closeMs: 2_000, pollMs: 20 },
+      },
     );
   return {
     fake,

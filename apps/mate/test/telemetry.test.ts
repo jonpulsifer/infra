@@ -80,7 +80,7 @@ describe('the SDK', () => {
     try {
       // Minted before the SDK starts: the metrics API has no re-binding proxy,
       // so getInstruments must re-mint once the provider changes.
-      getInstruments().turnStarted();
+      getInstruments().turnStarted('operator', 'interactive');
       expect(
         startTelemetry(
           { MATE_OTEL_ENDPOINT: `http://localhost:${collector.port}` },

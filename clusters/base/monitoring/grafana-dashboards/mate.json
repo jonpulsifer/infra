@@ -159,7 +159,7 @@
       "id": 4,
       "type": "stat",
       "title": "Threads waiting",
-      "description": "Threads waiting for a free turn, first in first out. A turn slot frees as soon as a turn ends, so ten minutes above zero is MateThreadsQueued.",
+      "description": "Interactive threads waiting for a free turn, first in first out. A turn slot frees as soon as a turn ends, so ten minutes above zero is MateThreadsQueued. Automation and job threads queue in their own lane, on the turns panel.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -209,7 +209,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "mate_queue_depth",
+          "expr": "sum(mate_queue_depth{lane!=\"automation\"})",
           "refId": "A",
           "legendFormat": "waiting"
         }
@@ -219,7 +219,7 @@
       "id": 5,
       "type": "stat",
       "title": "Turns (rolling day)",
-      "description": "The same rolling 24h window mate itself counts against MATE_MAX_TURNS_PER_DAY. Past 120 every thread is told the day is spent.",
+      "description": "Interactive turns in the same rolling 24h window mate itself counts against MATE_MAX_TURNS_PER_DAY. Past 120 every interactive thread is told the day is spent. Automation and job profiles have their own caps in mate-db.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -273,9 +273,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "increase(mate_turns_total[24h])",
+          "expr": "sum without (profile, mode) (increase(mate_turns_total{mode!~\"automation|job\"}[24h]))",
           "refId": "A",
-          "legendFormat": "turns"
+          "legendFormat": "interactive"
         }
       ]
     },
@@ -1990,7 +1990,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Turns and sandboxes, running and waiting",
-      "description": "Turns running against MATE_MAX_CONCURRENT and the threads queued behind them, and sandboxes leased against MATE_MAX_SANDBOXES and the turns waiting for one. Ten minutes of queue is MateThreadsQueued; fifteen of sandbox waiting is MateSandboxWaitsLong.",
+      "description": "Turns running and the threads queued behind them, by lane: MATE_MAX_CONCURRENT caps the interactive lane, and the automation lane runs one turn at a time. It also shows the sandboxes leased against MATE_MAX_SANDBOXES and the turns waiting for one. Ten minutes of queue is MateThreadsQueued; fifteen of sandbox waiting is MateSandboxWaitsLong.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2109,18 +2109,18 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "mate_turns_running",
+          "expr": "sum by (lane) (mate_turns_running)",
           "refId": "A",
-          "legendFormat": "turns running"
+          "legendFormat": "turns running ({{lane}})"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "mate_queue_depth",
+          "expr": "sum by (lane) (mate_queue_depth)",
           "refId": "B",
-          "legendFormat": "threads queued"
+          "legendFormat": "threads queued ({{lane}})"
         },
         {
           "datasource": {
@@ -2136,9 +2136,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "mate_sandbox_waiters",
+          "expr": "sum by (lane) (mate_sandbox_waiters)",
           "refId": "D",
-          "legendFormat": "sandbox waiters"
+          "legendFormat": "sandbox waiters ({{lane}})"
         }
       ]
     },

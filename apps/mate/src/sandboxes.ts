@@ -12,7 +12,12 @@ import type {
   SwitchboardConfig,
   VaultConfig,
 } from './config.ts';
-import { Credentials, KUBECONFIG_PATH, TOKEN_PATH } from './credentials.ts';
+import {
+  Credentials,
+  KUBECONFIG_PATH,
+  kubeAccount,
+  TOKEN_PATH,
+} from './credentials.ts';
 import { HARNESS_CONTAINER } from './hands.ts';
 import {
   type Epochs,
@@ -45,6 +50,14 @@ import {
   WORKSPACE,
 } from './lease.ts';
 import { plain } from './log.ts';
+import {
+  DEFAULT_PROFILE,
+  laneOf,
+  type Network,
+  PROFILE_LABEL,
+  PROFILES,
+  type Profile,
+} from './profiles.ts';
 import { redact } from './redact.ts';
 import {
   type LeaseDeps,
@@ -57,9 +70,19 @@ import { type SurfaceName, type ThreadRef, threadKey } from './surface.ts';
 export const SANDBOX_API = 'agents.x-k8s.io/v1beta1';
 const SANDBOXES = '/apis/agents.x-k8s.io/v1beta1';
 const PODS = '/api/v1';
+const CEPS = '/apis/cilium.io/v2';
 
 export const MINTED_BY = 'mate';
+/** `MINTED_BY_LABEL` on a reader-network sandbox, which an image from before profiles never lists. */
+export const MINTED_BY_READER = 'mate-reader';
 export const MINTED_BY_LABEL = 'lolwtf.ca/minted-by';
+/**
+ * On a reader-network sandbox and its pod: `open` while the checkout clones,
+ * the only time its network policy admits github.com, and `closed` before
+ * the agent's first command.
+ */
+export const CHECKOUT_LABEL = 'lolwtf.ca/checkout';
+const READER_NETWORK: Network = 'mate-sandbox-reader';
 export const THREAD_LABEL = 'lolwtf.ca/thread';
 export const CHANNEL_LABEL = 'lolwtf.ca/channel';
 export const SURFACE_LABEL = 'lolwtf.ca/surface';
@@ -108,6 +131,9 @@ const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(cat "$${TOKEN_F
 export const SPARE_TTL_MS = 30 * 60_000;
 export const SPARE_SWEEP_MS = 5 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
+// How long Cilium may take to see a closed checkout window.
+const CHECKOUT_CLOSE_MS = 30_000;
+const CHECKOUT_POLL_MS = 1_000;
 const REFRESH_TIMEOUT_MS = 60_000;
 const GONE_TIMEOUT_MS = 180_000;
 const WATCH_SECONDS = 60;
@@ -117,6 +143,29 @@ const WATCH_IDLE_MS = 1_000;
 const STDERR_LIMIT = 500;
 // CRDs reject strategic merge; a merge patch leaves sibling fields alone.
 const MERGE_PATCH = 'application/merge-patch+json';
+
+/** `labelled`: the pod says `closed`, and its Cilium endpoint does not yet. */
+type CheckoutState = 'open' | 'labelled' | 'closed';
+
+/** A reader sandbox's window did not close; `wasClosed` when its pod said `closed` before the attempt. */
+class CheckoutNotClosed extends Error {
+  constructor(
+    name: string,
+    readonly wasClosed: boolean,
+    cause: unknown,
+  ) {
+    super(
+      `sandbox ${name} could not close its checkout window${cause ? `: ${plain(cause)}` : ''}`,
+    );
+  }
+}
+
+/** A throttled or failing apiserver, or no answer at all, may answer the next read. */
+function passing(error: unknown): boolean {
+  return (
+    !(error instanceof KubeError) || error.status === 429 || error.status >= 500
+  );
+}
 
 interface Condition {
   type: string;
@@ -154,6 +203,16 @@ export function sandboxName(thread: ThreadRef): string {
     );
   }
   return `mate-slack-${thread.channelId.toLowerCase()}-${thread.id.replace('.', '-')}`;
+}
+
+/**
+ * `sandboxName(thread)`, plus `-r` on the reader network. An image from
+ * before profiles reuses a sandbox of its own name that names the thread, so
+ * it must never find a reader sandbox under that name.
+ */
+export function sandboxNameFor(thread: ThreadRef, profile: Profile): string {
+  const name = sandboxName(thread);
+  return profile.sandbox.network === READER_NETWORK ? `${name}-r` : name;
 }
 
 // An adopted spare keeps this name; threads find their sandbox by label.
@@ -277,17 +336,35 @@ export interface SandboxDeclaration {
   labels: Record<string, string>;
   config: SandboxConfig;
   shutdownTime: string;
+  /** Its grants decide what the pod's env holds. */
+  profile: Profile;
 }
 
-function baseLabels(guildId: string): Record<string, string> {
+function defaultProfile(): Profile {
+  return PROFILES.get(DEFAULT_PROFILE) as Profile;
+}
+
+/** The profile a sandbox was minted for; `undefined` for one this code does not declare. */
+function profileOfSandbox(sandbox: Sandbox): Profile | undefined {
+  return PROFILES.get(
+    sandbox.metadata.labels?.[PROFILE_LABEL] ?? DEFAULT_PROFILE,
+  );
+}
+
+function baseLabels(guildId: string, profile: Profile): Record<string, string> {
+  const reader = profile.sandbox.network === READER_NETWORK;
   return {
-    // `sandbox-network-policy.yaml` selects on this; a sandbox without it has
-    // unrestricted egress.
-    'app.kubernetes.io/name': 'mate-sandbox',
+    // A CiliumNetworkPolicy selects each network name; `mate-sandbox-baseline`
+    // default-denies a sandbox whose own policy is missing.
+    'app.kubernetes.io/name': profile.sandbox.network,
     'app.kubernetes.io/part-of': 'mate',
-    [MINTED_BY_LABEL]: MINTED_BY,
+    // An image from before profiles lists `minted-by=mate` only, so it never
+    // sees a reader sandbox.
+    [MINTED_BY_LABEL]: reader ? MINTED_BY_READER : MINTED_BY,
     [GUILD_LABEL]: guildId,
     [HANDS_LABEL]: HANDS,
+    [PROFILE_LABEL]: profile.id,
+    ...(reader ? { [CHECKOUT_LABEL]: 'open' } : {}),
   };
 }
 
@@ -302,17 +379,26 @@ function threadLabels(thread: ThreadRef): Record<string, string> {
 export function sandboxLabels(
   thread: ThreadRef,
   guildId: string,
+  profile: Profile,
 ): Record<string, string> {
-  return { ...baseLabels(guildId), ...threadLabels(thread) };
+  return { ...baseLabels(guildId, profile), ...threadLabels(thread) };
 }
 
+// Minted for the default profile; only a profile with its pod adopts one.
 function spareLabels(guildId: string): Record<string, string> {
-  return { ...baseLabels(guildId), [SPARE_LABEL]: SPARE };
+  return { ...baseLabels(guildId, defaultProfile()), [SPARE_LABEL]: SPARE };
 }
 
 // In a merge patch, null removes a label.
-function claimLabels(thread: ThreadRef): Record<string, string | null> {
-  return { ...threadLabels(thread), [SPARE_LABEL]: null };
+function claimLabels(
+  thread: ThreadRef,
+  profile: Profile,
+): Record<string, string | null> {
+  return {
+    ...threadLabels(thread),
+    [PROFILE_LABEL]: profile.id,
+    [SPARE_LABEL]: null,
+  };
 }
 
 function condemnLabels(): Record<string, string | null> {
@@ -334,6 +420,13 @@ function threadOf(labels: Record<string, string>): ThreadRef | null {
   return { surface, channelId, id };
 }
 
+function templateLabels(sandbox: Sandbox): Record<string, string> {
+  const template = sandbox.spec?.podTemplate as
+    | { metadata?: { labels?: Record<string, string> } }
+    | undefined;
+  return template?.metadata?.labels ?? {};
+}
+
 /** Checked, not selected on: older Discord sandboxes carry only the thread label. */
 function belongsTo(sandbox: Sandbox, thread: ThreadRef): boolean {
   const labels = sandbox.metadata.labels ?? {};
@@ -345,7 +438,9 @@ function belongsTo(sandbox: Sandbox, thread: ThreadRef): boolean {
 }
 
 export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
-  const { name, namespace, labels, config, shutdownTime } = declaration;
+  const { name, namespace, labels, config, shutdownTime, profile } =
+    declaration;
+  const { grants } = profile;
   return {
     apiVersion: SANDBOX_API,
     kind: 'Sandbox',
@@ -420,13 +515,15 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
               image: config.image,
               imagePullPolicy: pullPolicy(config.image),
               env: [
-                ...(config.vault ? connectEnv(config.vault) : []),
-                ...kthxEnv(config.kthx),
-                ...(config.switchboard
+                ...(config.vault && grants.vault
+                  ? connectEnv(config.vault)
+                  : []),
+                ...(grants.kthxSites ? kthxEnv(config.kthx) : []),
+                ...(config.switchboard && grants.switchboard
                   ? switchboardEnv(config.switchboard)
                   : []),
-                ...gitEnv(config.github),
-                ...(config.kubeServiceAccount
+                ...gitEnv(config.github && grants.github),
+                ...(kubeAccount(config, grants.kube)
                   ? [{ name: 'KUBECONFIG', value: KUBECONFIG_FILE }]
                   : []),
               ],
@@ -543,6 +640,8 @@ export interface HandsLayout {
   /** Refuses a daemon with another home; `null` skips the check. */
   readonly expectHome: string | null;
   readonly epochs?: Epochs;
+  /** How long, and how often, to wait for a closed checkout window. */
+  readonly checkout?: { readonly closeMs: number; readonly pollMs: number };
 }
 
 const SANDBOX_LAYOUT: HandsLayout = {
@@ -561,7 +660,7 @@ export class KubeHands implements Hands {
   // Labelled thread sandboxes counted at boot, before their threads open.
   private readonly standing = new Map<
     string,
-    { ref: ThreadRef; name: string }
+    { ref: ThreadRef; name: string; profile: string }
   >();
   private readonly slots: SandboxSlots;
   private readonly credentials: Credentials;
@@ -584,7 +683,7 @@ export class KubeHands implements Hands {
       clock: this.clock,
       log: deps.log,
       metrics: deps.metrics,
-      evict: (key) => this.evict(key),
+      evict: (key, wanted) => this.evict(key, wanted),
     });
     this.credentials = new Credentials({
       kube: deps.kube,
@@ -607,8 +706,8 @@ export class KubeHands implements Hands {
       credentials: this.credentials,
       workspace: layout.workspace,
       home: layout.home,
-      acquire: (ref, onStep) => this.acquire(ref, onStep),
-      find: (ref) => this.findReady(ref),
+      acquire: (ref, profile, onStep) => this.acquire(ref, profile, onStep),
+      find: (ref, profile) => this.findReady(ref, profile),
       link: (handle) => this.link(handle),
       slide: (name) => this.slide(name),
       lose: (name) => this.lose(name),
@@ -620,19 +719,31 @@ export class KubeHands implements Hands {
     return this.deps.config.namespace ?? this.deps.kube.namespace;
   }
 
-  thread(ref: ThreadRef, hooks: ThreadHandsHooks): ThreadHands {
+  thread(
+    ref: ThreadRef,
+    hooks: ThreadHandsHooks,
+    profile: Profile,
+  ): ThreadHands {
     const key = threadKey(ref);
     const known = this.threads.get(key);
     if (known) {
+      if (known.profile.id !== profile.id) {
+        throw new Error(
+          `thread ${key} is held under profile ${known.profile.id}, not ${profile.id}`,
+        );
+      }
       known.hooks = hooks;
       return known;
     }
+    const standing = this.standing.get(key);
     const made = new ThreadHandsImpl(
       ref,
       key,
       hooks,
       this.leaseDeps,
-      this.standing.get(key)?.name ?? null,
+      profile,
+      // Another profile's sandbox is condemned on the first acquire.
+      standing?.profile === profile.id ? standing.name : null,
     );
     this.threads.set(key, made);
     return made;
@@ -702,8 +813,15 @@ export class KubeHands implements Hands {
       if (labels[HANDS_LABEL] === HANDS) {
         if (!thread) continue;
         const key = threadKey(thread);
-        this.standing.set(key, { ref: thread, name: sandbox.metadata.name });
-        this.slots.register(key);
+        this.standing.set(key, {
+          ref: thread,
+          name: sandbox.metadata.name,
+          profile: labels[PROFILE_LABEL] ?? DEFAULT_PROFILE,
+        });
+        this.slots.register(
+          key,
+          laneOf(profileOfSandbox(sandbox) ?? defaultProfile()),
+        );
         continue;
       }
       if (labels[SPARE_LABEL] === CONDEMNED) continue;
@@ -853,12 +971,17 @@ export class KubeHands implements Hands {
   /** Finds, adopts or mints the thread's sandbox, and waits for it to be Ready. */
   private async acquire(
     ref: ThreadRef,
+    profile: Profile,
     onStep: OnMintStep,
   ): Promise<SandboxHandle> {
-    const existing = await this.find(ref);
-    if (existing)
-      return this.handle(await this.reuse(existing, onStep), 'reused');
-    const adopted = await this.adopt(ref, onStep);
+    const existing = await this.find(ref, profile);
+    if (existing) {
+      const reused = await this.reuse(existing, onStep);
+      return this.handle(ref, reused, 'reused', profile);
+    }
+    const adopted = profile.sandbox.spares
+      ? await this.adopt(ref, profile, onStep)
+      : null;
     if (adopted) {
       // Refill in the background: this thread should not wait for it.
       void this.ensureSpares().catch((error) =>
@@ -866,16 +989,41 @@ export class KubeHands implements Hands {
           error: plain(error),
         }),
       );
-      return this.handle(adopted, 'spare');
+      return this.handle(ref, adopted, 'spare', profile);
     }
-    const minted = await this.mintFresh(ref, onStep);
-    return this.handle(minted.sandbox, minted.source);
+    const minted = await this.mintFresh(ref, profile, onStep);
+    return this.handle(ref, minted.sandbox, minted.source, profile);
   }
 
   private async handle(
+    ref: ThreadRef,
     sandbox: Sandbox,
     source: SandboxSource,
+    profile: Profile,
   ): Promise<SandboxHandle> {
+    if (profile.sandbox.network === READER_NETWORK) {
+      try {
+        await this.closeCheckout(sandbox);
+      } catch (error) {
+        // A window closed before this call stays closed, and the next
+        // acquire checks it again; only one left open is deleted.
+        if (error instanceof CheckoutNotClosed && error.wasClosed) throw error;
+        const name = sandbox.metadata.name;
+        await this.destroy(name).catch((failure) =>
+          this.deps.log.warn('could not delete a sandbox left open', {
+            sandbox: name,
+            error: plain(failure),
+          }),
+        );
+        this.credentials.forget(name);
+        const thread = this.threads.get(threadKey(ref));
+        if (thread?.holding === name) {
+          thread.gone(name);
+          thread.tell((hooks) => hooks.onSandboxGone('lost'));
+        }
+        throw error;
+      }
+    }
     const pod = await runningPod(this.deps.kube, this.namespace, sandbox);
     if (!pod) {
       throw new Error(`sandbox ${sandbox.metadata.name} has no running pod`);
@@ -889,10 +1037,81 @@ export class KubeHands implements Hands {
   }
 
   /** The thread's sandbox if it stands Ready; never mints. */
-  private async findReady(ref: ThreadRef): Promise<SandboxHandle | null> {
-    const found = await this.find(ref);
+  private async findReady(
+    ref: ThreadRef,
+    profile: Profile,
+  ): Promise<SandboxHandle | null> {
+    const found = await this.find(ref, profile);
     if (!found || !isReady(found)) return null;
-    return this.handle(found, 'reused');
+    return this.handle(ref, found, 'reused', profile);
+  }
+
+  /**
+   * Before the agent's first command on the reader network: labels the pod
+   * `checkout=closed`, then waits until Cilium's endpoint carries the label,
+   * so the clone's egress is gone. A read the apiserver may answer later is
+   * tried again until the deadline. Throws when either never happens.
+   */
+  private async closeCheckout(sandbox: Sandbox): Promise<void> {
+    const name = sandbox.metadata.name;
+    const { closeMs, pollMs } = this.layout.checkout ?? {
+      closeMs: CHECKOUT_CLOSE_MS,
+      pollMs: CHECKOUT_POLL_MS,
+    };
+    const deadline = Date.now() + closeMs;
+    // Whether the pod said `closed` before this call: null until a read answers.
+    let wasClosed: boolean | null = null;
+    let patched = false;
+    let last: unknown = null;
+    for (;;) {
+      let state: CheckoutState | null = null;
+      try {
+        state = await this.checkoutState(sandbox);
+      } catch (error) {
+        if (!passing(error)) {
+          throw new CheckoutNotClosed(name, wasClosed === true, error);
+        }
+        last = error;
+      }
+      if (state === 'closed') return;
+      if (state) wasClosed ??= state === 'labelled';
+      if (state === 'open' && !patched) {
+        const labels = { [CHECKOUT_LABEL]: 'closed' };
+        await this.patch(name, {
+          metadata: { labels },
+          spec: { podTemplate: { metadata: { labels } } },
+        });
+        patched = true;
+      }
+      if (Date.now() >= deadline) {
+        throw new CheckoutNotClosed(name, wasClosed === true, last);
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+
+  /** The running pod's label, then whether its Cilium endpoint's identity carries it. */
+  private async checkoutState(sandbox: Sandbox): Promise<CheckoutState> {
+    const pod = await runningPod(this.deps.kube, this.namespace, sandbox);
+    if (pod?.metadata.labels?.[CHECKOUT_LABEL] !== 'closed') return 'open';
+    let endpoint: {
+      status?: { state?: string; identity?: { labels?: string[] } };
+    };
+    try {
+      endpoint = await this.deps.kube.json(
+        `${CEPS}/namespaces/${this.namespace}/ciliumendpoints/${pod.metadata.name}`,
+      );
+    } catch (error) {
+      // Cilium has not made the endpoint yet.
+      if (error instanceof KubeError && error.status === 404) return 'labelled';
+      throw error;
+    }
+    const closed =
+      endpoint.status?.state === 'ready' &&
+      (endpoint.status.identity?.labels ?? []).includes(
+        `k8s:${CHECKOUT_LABEL}=closed`,
+      );
+    return closed ? 'closed' : 'labelled';
   }
 
   private link(handle: SandboxHandle): HandsLink {
@@ -937,6 +1156,14 @@ export class KubeHands implements Hands {
     ) {
       throw new SandboxGone(`sandbox ${name} lost its pod ${handle.pod}`);
     }
+    if (
+      sandbox.metadata.labels?.['app.kubernetes.io/name'] === READER_NETWORK &&
+      pod.metadata.labels?.[CHECKOUT_LABEL] !== 'closed'
+    ) {
+      throw new SandboxGone(
+        `sandbox ${name} still has its checkout window open`,
+      );
+    }
     return { sandbox: name, pod: handle.pod };
   }
 
@@ -973,7 +1200,7 @@ export class KubeHands implements Hands {
    * counts. A turn that begins before the condemn keeps the sandbox, and one
    * that begins after it waits for its slot to be taken, then for another.
    */
-  private async evict(key: string): Promise<boolean> {
+  private async evict(key: string, wanted: () => boolean): Promise<boolean> {
     const { log, metrics } = this.deps;
     const inUse = () => {
       const thread = this.threads.get(key);
@@ -981,10 +1208,10 @@ export class KubeHands implements Hands {
     };
     const ref = this.threads.get(key)?.ref ?? this.standing.get(key)?.ref;
     if (!ref) return true;
-    if (inUse()) return false;
+    if (inUse() || !wanted()) return false;
     const found = await this.sandboxesOf(ref);
     for (const sandbox of found) await this.keepSites(sandbox);
-    if (inUse()) return false;
+    if (inUse() || !wanted()) return false;
     const thread = this.threads.get(key);
     for (const sandbox of found) {
       const name = sandbox.metadata.name;
@@ -1004,9 +1231,21 @@ export class KubeHands implements Hands {
     return true;
   }
 
-  /** Best effort, before the delete takes the file with it. */
+  /**
+   * Best effort, before the delete takes the file with it. Only from a pod
+   * whose profile label and network both say it held the sites file: any
+   * other could have written one to overwrite the ledger.
+   */
   private async keepSites(sandbox: Sandbox): Promise<void> {
-    if (!this.credentials.kthx) return;
+    const profile = profileOfSandbox(sandbox);
+    if (
+      !this.credentials.kthx ||
+      !profile?.grants.kthxSites ||
+      sandbox.metadata.labels?.['app.kubernetes.io/name'] !==
+        profile.sandbox.network
+    ) {
+      return;
+    }
     const pod = await runningPod(this.deps.kube, this.namespace, sandbox).catch(
       () => null,
     );
@@ -1049,7 +1288,7 @@ export class KubeHands implements Hands {
   }
 
   private selector(): string {
-    return `${MINTED_BY_LABEL}=${MINTED_BY},${GUILD_LABEL}=${this.deps.guildId}`;
+    return `${MINTED_BY_LABEL} in (${MINTED_BY},${MINTED_BY_READER}),${GUILD_LABEL}=${this.deps.guildId}`;
   }
 
   private handsSelector(): string {
@@ -1070,17 +1309,53 @@ export class KubeHands implements Hands {
 
   /**
    * By label, since an adopted spare's name derives from no thread. A
-   * terminating object is skipped, because `reuse` fails on it.
+   * terminating object is skipped, because `reuse` fails on it. A sandbox
+   * minted for another profile is never handed over: it keeps its sites, if
+   * its own labels grant them, and is condemned.
    */
-  private async find(thread: ThreadRef): Promise<Sandbox | undefined> {
+  private async find(
+    thread: ThreadRef,
+    profile: Profile,
+  ): Promise<Sandbox | undefined> {
     const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
       query: {
         labelSelector: `${this.handsSelector()},${THREAD_LABEL}=${thread.id}`,
       },
     });
-    return list.items.find(
-      (found) => !found.metadata.deletionTimestamp && belongsTo(found, thread),
-    );
+    for (const found of list.items) {
+      if (found.metadata.deletionTimestamp || !belongsTo(found, thread)) {
+        continue;
+      }
+      const name = found.metadata.name;
+      const labelled = found.metadata.labels?.[PROFILE_LABEL];
+      if ((labelled ?? DEFAULT_PROFILE) !== profile.id) {
+        this.deps.log.error(
+          'a sandbox of this thread is labelled for another profile',
+          { sandbox: name, profile: profile.id, labelled },
+        );
+        await this.keepSites(found);
+        await this.condemn(name);
+        this.credentials.forget(name);
+        continue;
+      }
+      // A pod the controller made again after the window closed can never
+      // clone, and would hold the turn until the Ready timeout.
+      if (
+        profile.sandbox.network === READER_NETWORK &&
+        !isReady(found) &&
+        templateLabels(found)[CHECKOUT_LABEL] === 'closed'
+      ) {
+        this.deps.log.info(
+          'condemned a read-only sandbox whose pod cannot clone again',
+          { sandbox: name },
+        );
+        await this.condemn(name);
+        this.credentials.forget(name);
+        continue;
+      }
+      return found;
+    }
+    return undefined;
   }
 
   /** Every sandbox labelled for the thread, whatever protocol it speaks. */
@@ -1110,16 +1385,15 @@ export class KubeHands implements Hands {
 
   private async mintFresh(
     thread: ThreadRef,
+    profile: Profile,
     onStep: OnMintStep,
   ): Promise<{ sandbox: Sandbox; source: SandboxSource }> {
     const { kube } = this.deps;
-    const base = sandboxName(thread);
+    const base = sandboxNameFor(thread, profile);
+    const labels = sandboxLabels(thread, this.deps.guildId, profile);
     onStep('creating');
     let name = base;
-    let response = await this.create(
-      name,
-      sandboxLabels(thread, this.deps.guildId),
-    );
+    let response = await this.create(name, labels, profile);
     if (response.status === 409) {
       await drain(response);
       // `find` saw nothing of ours, so the name is held by a sandbox being
@@ -1128,15 +1402,14 @@ export class KubeHands implements Hands {
       if (
         !holder.metadata.deletionTimestamp &&
         holder.metadata.labels?.[HANDS_LABEL] === HANDS &&
+        (holder.metadata.labels?.[PROFILE_LABEL] ?? DEFAULT_PROFILE) ===
+          profile.id &&
         belongsTo(holder, thread)
       ) {
         return { sandbox: await this.reuse(holder, onStep), source: 'reused' };
       }
       name = `${base}-${crypto.randomUUID().slice(0, 4)}`;
-      response = await this.create(
-        name,
-        sandboxLabels(thread, this.deps.guildId),
-      );
+      response = await this.create(name, labels, profile);
     }
     if (!ok(response)) throw await kubeError(response);
     await drain(response);
@@ -1147,6 +1420,7 @@ export class KubeHands implements Hands {
   private create(
     name: string,
     labels: Record<string, string>,
+    profile: Profile,
     shutdownTime = this.shutdownTime(),
   ): Promise<Response> {
     return this.deps.kube.request(this.path(), {
@@ -1157,6 +1431,7 @@ export class KubeHands implements Hands {
         labels,
         config: this.deps.config,
         shutdownTime,
+        profile,
       }),
     });
   }
@@ -1179,13 +1454,14 @@ export class KubeHands implements Hands {
 
   private async adopt(
     thread: ThreadRef,
+    profile: Profile,
     onStep: OnMintStep,
   ): Promise<Sandbox | null> {
     const { config, log } = this.deps;
     // Pool off: skip the list, so an apiserver hiccup cannot cost a thread
     // its answer.
     if (config.spares === 0) return null;
-    const labels = claimLabels(thread);
+    const labels = claimLabels(thread, profile);
     for (const spare of await this.spares()) {
       if (!isReady(spare)) continue;
       const name = spare.metadata.name;
@@ -1321,6 +1597,7 @@ export class KubeHands implements Hands {
     const response = await this.create(
       name,
       spareLabels(this.deps.guildId),
+      defaultProfile(),
       this.spareShutdownTime(),
     );
     if (!ok(response)) throw await kubeError(response);

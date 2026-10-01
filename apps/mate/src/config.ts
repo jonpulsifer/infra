@@ -105,6 +105,11 @@ export interface SandboxConfig {
    * mate's, in `sandbox-rbac.yaml`.
    */
   readonly kubeServiceAccount: string | null;
+  /**
+   * `null`, the default, gives read-only profiles no cluster access. A
+   * separate account from the admin, in `sandbox-rbac.yaml`.
+   */
+  readonly kubeReaderServiceAccount: string | null;
   /** The kubeconfig context for the cluster mate runs on. */
   readonly kubeContext: string;
   /**
@@ -421,6 +426,18 @@ export function readSandboxConfig(env: Env): SandboxConfig {
       `MATE_TURN_MINUTES must be under ${APP_TURN_CAP_MS / 60_000} minutes while a GitHub App is configured, got ${turnTimeoutMs / 60_000}`,
     );
   }
+  const kubeServiceAccount = env.MATE_SANDBOX_KUBE_SA?.trim() || null;
+  const kubeReaderServiceAccount =
+    env.MATE_SANDBOX_KUBE_READER_SA?.trim() || null;
+  // A deploy typo must not hand read-only profiles the admin.
+  if (
+    kubeReaderServiceAccount &&
+    kubeReaderServiceAccount === kubeServiceAccount
+  ) {
+    throw new ConfigError(
+      'MATE_SANDBOX_KUBE_READER_SA must differ from MATE_SANDBOX_KUBE_SA',
+    );
+  }
   return {
     image: required(env, 'MATE_SANDBOX_IMAGE'),
     runtimeClass: text(env, 'MATE_SANDBOX_RUNTIME_CLASS', 'kata-clh'),
@@ -435,7 +452,8 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     spares: integer(env, 'MATE_SPARES', 0, 0),
     vault: vault(env),
     github: Boolean(env.MATE_GITHUB_APP_ID?.trim()),
-    kubeServiceAccount: env.MATE_SANDBOX_KUBE_SA?.trim() || null,
+    kubeServiceAccount,
+    kubeReaderServiceAccount,
     kubeContext: clusterName(env, 'MATE_SANDBOX_KUBE_CONTEXT', 'cluster'),
     kubePeers: clusterNames(env, 'MATE_SANDBOX_KUBE_PEERS'),
     kthx: kthx(env),

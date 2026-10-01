@@ -1,8 +1,9 @@
 /**
- * The system prompt: a short mate preamble, the repo's AGENTS.md and an index
- * of its skills, read from mate's own copy of the repo once per process. The
- * skills' locations point into the sandbox's checkout, where the model reads
- * them with its tools.
+ * Each profile's system prompt: its preamble, the repo's AGENTS.md and an
+ * index of its skills, read from mate's own copy of the repo once per process.
+ * The skills' locations point into the sandbox's checkout, where the model
+ * reads them with its tools. `brainProfiles` resolves each profile's prompt,
+ * model and turn timeout at boot.
  */
 import { resolve } from 'node:path';
 import {
@@ -13,11 +14,17 @@ import {
 } from '@earendil-works/pi-agent-core';
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import type {
+  BrainProfile,
   LoadSystemPrompts,
+  ModelSetup,
   ProfileOptions,
+  ProfilePrompts,
   SystemPrompts,
 } from './brain-inputs.ts';
+import { ConfigError } from './config.ts';
 import type { Log } from './log.ts';
+import { profileModel } from './model.ts';
+import { PROFILES, type Profile, turnTimeoutMs } from './profiles.ts';
 import type { SurfaceName } from './surface.ts';
 
 /** Later directories win a duplicate skill name. */
@@ -29,42 +36,67 @@ const SURFACES: Record<SurfaceName, string> = {
   slack: 'Slack',
 };
 
-export const loadSystemPrompts: LoadSystemPrompts = async (options) => {
+export const loadSystemPrompts: LoadSystemPrompts = async (
+  options,
+  profiles,
+) => {
   const root = resolve(options.root);
   const env = new NodeExecutionEnv({ cwd: root });
   const [agents, skills] = await Promise.all([
     readAgents(env, root, options.log),
     skillsIndex(env, root, options),
   ]);
-  const prompt = (surface: SurfaceName) =>
+  const prompt = (profile: Profile, surface: SurfaceName) =>
     [
-      preamble(SURFACES[surface], options),
+      profile.preamble(SURFACES[surface], options),
       agents && `# Repository instructions (AGENTS.md)\n\n${agents}`,
       skills,
     ]
       .filter(Boolean)
       .join('\n\n');
-  return {
-    discord: prompt('discord'),
-    slack: prompt('slack'),
-  } satisfies SystemPrompts;
+  return Object.fromEntries(
+    [...profiles].map((profile) => [
+      profile.id,
+      {
+        discord: prompt(profile, 'discord'),
+        slack: prompt(profile, 'slack'),
+      } satisfies SystemPrompts,
+    ]),
+  );
 };
 
-function preamble(
-  surface: string,
-  { workspace, checkoutRef }: ProfileOptions,
-): string {
-  return `You are Rowbutt, the owner's coding and operations agent for this homelab, answering in a ${surface} thread. Your replies post to the thread as Markdown; keep them short.
-
-Your tools run in this thread's own sandbox, a Kata microVM on the offsite cluster, with the infra repository checked out at ${workspace} at \`${checkoutRef}\`. The sandbox starts on your first tool call, which can take a minute, so answer a question that needs no files or commands without tools.
-
-- Credentials (git push, kubectl for the offsite and folly contexts, and ssh) exist only while a turn runs.
-- Background processes do not survive the end of the turn.
-- The sandbox and its uncommitted work are deleted when the thread goes quiet or another thread needs the slot. Commit and push work worth keeping before the turn ends. When that happens, mate says so at the start of the next message.
-- A mate restart can interrupt a running command. Its result then says it was interrupted and its outcome is unknown, so check what it did before you run it again.
-- Nix work runs on the site's build host: \`ssh riptide.lolwtf.ca\` for folly, \`ssh oldschool.lolwtf.ca\` for offsite.
-- Check a change with \`mise run format:check && mise run lint\`, not \`mise run check\`, which needs pwsh.
-- The \`kthx_*\` tools, when listed, act on kthx built apps.`;
+/** ConfigError for a profile model the catalog lacks, or a thinking level it does not support. */
+export function brainProfiles(
+  setup: ModelSetup,
+  prompts: ProfilePrompts,
+  processMs: number,
+  profiles: ReadonlyMap<string, Profile> = PROFILES,
+): ReadonlyMap<string, BrainProfile> {
+  return new Map(
+    [...profiles.values()].map((profile) => {
+      const own = prompts[profile.id];
+      if (!own) {
+        throw new ConfigError(`profile ${profile.id} has no system prompt`);
+      }
+      const model = profile.model
+        ? profileModel(
+            setup,
+            `profile ${profile.id}`,
+            profile.model.spec,
+            profile.model.thinking,
+          )
+        : { model: setup.model, thinking: setup.thinking };
+      return [
+        profile.id,
+        {
+          profile,
+          prompts: own,
+          ...model,
+          turnTimeoutMs: turnTimeoutMs(profile, processMs),
+        },
+      ];
+    }),
+  );
 }
 
 async function readAgents(

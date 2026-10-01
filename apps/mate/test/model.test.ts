@@ -13,6 +13,7 @@ import {
   chatgptModel,
   createModelSetup,
   MODEL_KEY_ENV,
+  profileModel,
 } from '../src/model.ts';
 import { RecordingLog } from './support.ts';
 
@@ -299,5 +300,41 @@ describe('createModelSetup', () => {
       if (saved === undefined) delete process.env[MODEL_KEY_ENV];
       else process.env[MODEL_KEY_ENV] = saved;
     }
+  });
+});
+
+describe('profileModel', () => {
+  test("MATE_MODEL's own spec is the lane's model, so the router still sees it", () => {
+    const routed = setup({ spec: CODEX, fallbackSpec: SPEC });
+    const own = profileModel(routed, 'profile p', CODEX, 'low');
+    expect(own.model).toBe(routed.model);
+    expect(own.model.cost.input).toBe(0);
+    expect(own.thinking).toBe('low');
+  });
+
+  test('another catalog model goes straight to its provider', () => {
+    const made = setup({ spec: CODEX, fallbackSpec: SPEC });
+    const own = profileModel(
+      made,
+      'profile p',
+      'opencode-go/glm-5.1',
+      'medium',
+    );
+    expect(own.model).toBe(
+      made.direct.getModel('opencode-go', 'glm-5.1') as typeof own.model,
+    );
+    expect(own.thinking).toBe('medium');
+  });
+
+  test('refuses a level the model does not support, and a model the catalog lacks', () => {
+    const made = setup();
+    expect(() => profileModel(made, 'profile p', SPEC, 'high')).toThrow(
+      new ConfigError(
+        `profile p=high is not a level ${SPEC} supports: low, medium, xhigh`,
+      ),
+    );
+    expect(() =>
+      profileModel(made, 'profile p', 'opencode-go/no-such-model', 'medium'),
+    ).toThrow(ConfigError);
   });
 });

@@ -15,6 +15,7 @@ import type {
   MintSample,
   TurnSandboxSource,
 } from './lease.ts';
+import { LANES, type Lane, type Mode } from './profiles.ts';
 import type { Failure, Route, RouteReason } from './route.ts';
 import type { StopReason } from './sandbox.ts';
 
@@ -62,11 +63,11 @@ export function toolLabel(tool: string): ToolLabel {
 export interface Instruments extends HandsInstruments, McpInstruments {
   identifyLimit(limit: SessionStartLimit): void;
   gatewayClosed(code: number, fatal: boolean): void;
-  queueDepth(depth: number): void;
-  turnsRunning(count: number): void;
+  queueDepth(depth: number, lane: Lane): void;
+  turnsRunning(count: number, lane: Lane): void;
   /** `null` (no App) reports nothing, since a 0 would fire the alert forever. */
   githubAppReady(ready: boolean | null): void;
-  turnStarted(): void;
+  turnStarted(profile: string, mode: Mode): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
   turnResumed(result: TurnResumeResult): void;
   toolEnded(tool: string, isError: boolean): void;
@@ -94,9 +95,9 @@ let chatgpt: ChatgptSignIn | null = null;
 /** `null` while no router runs, so the gauge is absent without a fallback. */
 let primary: boolean | null = null;
 let live = 0;
-let waiters = 0;
-let queued = 0;
-let running = 0;
+const waiters: Record<Lane, number> = { interactive: 0, automation: 0 };
+const queued: Record<Lane, number> = { interactive: 0, automation: 0 };
+const running: Record<Lane, number> = { interactive: 0, automation: 0 };
 // With no pool configured both stay 0, which keeps a ready-versus-wanted alert
 // quiet.
 let pool = { ready: 0, wanted: 0 };
@@ -145,15 +146,15 @@ export function getInstruments(): Instruments {
   meter
     .createObservableGauge('mate_sandboxes_live')
     .addCallback((result) => result.observe(live));
-  meter
-    .createObservableGauge('mate_sandbox_waiters')
-    .addCallback((result) => result.observe(waiters));
-  meter
-    .createObservableGauge('mate_queue_depth')
-    .addCallback((result) => result.observe(queued));
-  meter
-    .createObservableGauge('mate_turns_running')
-    .addCallback((result) => result.observe(running));
+  meter.createObservableGauge('mate_sandbox_waiters').addCallback((result) => {
+    for (const lane of LANES) result.observe(waiters[lane], { lane });
+  });
+  meter.createObservableGauge('mate_queue_depth').addCallback((result) => {
+    for (const lane of LANES) result.observe(queued[lane], { lane });
+  });
+  meter.createObservableGauge('mate_turns_running').addCallback((result) => {
+    for (const lane of LANES) result.observe(running[lane], { lane });
+  });
   meter
     .createObservableGauge('mate_spares_ready')
     .addCallback((result) => result.observe(pool.ready));
@@ -233,14 +234,14 @@ export function getInstruments(): Instruments {
     sandboxesLive: (count) => {
       live = count;
     },
-    sandboxWaiters: (count) => {
-      waiters = count;
+    sandboxWaiters: (count, lane) => {
+      waiters[lane] = count;
     },
-    queueDepth: (depth) => {
-      queued = depth;
+    queueDepth: (depth, lane) => {
+      queued[lane] = depth;
     },
-    turnsRunning: (count) => {
-      running = count;
+    turnsRunning: (count, lane) => {
+      running[lane] = count;
     },
     spares: (ready, wanted) => {
       pool = { ready, wanted };
@@ -279,7 +280,7 @@ export function getInstruments(): Instruments {
       mcp.set(server, up);
     },
     mcpCall: (server, result) => mcpCalls.add(1, { server, result }),
-    turnStarted: () => turns.add(1),
+    turnStarted: (profile, mode) => turns.add(1, { profile, mode }),
     turnEnded: (reason, sample) => {
       ended.add(1, { reason });
       if (typeof sample.firstTokenMs === 'number') {
@@ -315,9 +316,10 @@ export function lazyInstruments(): Instruments {
     identifyLimit: (limit) => getInstruments().identifyLimit(limit),
     gatewayClosed: (code, fatal) => getInstruments().gatewayClosed(code, fatal),
     sandboxesLive: (count) => getInstruments().sandboxesLive(count),
-    sandboxWaiters: (count) => getInstruments().sandboxWaiters(count),
-    queueDepth: (depth) => getInstruments().queueDepth(depth),
-    turnsRunning: (count) => getInstruments().turnsRunning(count),
+    sandboxWaiters: (count, lane) =>
+      getInstruments().sandboxWaiters(count, lane),
+    queueDepth: (depth, lane) => getInstruments().queueDepth(depth, lane),
+    turnsRunning: (count, lane) => getInstruments().turnsRunning(count, lane),
     spares: (ready, wanted) => getInstruments().spares(ready, wanted),
     minted: (result, sample) => getInstruments().minted(result, sample),
     handsConnected: (result, sample) =>
@@ -333,7 +335,7 @@ export function lazyInstruments(): Instruments {
     turnSandbox: (source) => getInstruments().turnSandbox(source),
     mcpUp: (server, up) => getInstruments().mcpUp(server, up),
     mcpCall: (server, result) => getInstruments().mcpCall(server, result),
-    turnStarted: () => getInstruments().turnStarted(),
+    turnStarted: (profile, mode) => getInstruments().turnStarted(profile, mode),
     turnEnded: (reason, sample) => getInstruments().turnEnded(reason, sample),
     turnResumed: (result) => getInstruments().turnResumed(result),
     toolEnded: (tool, isError) => getInstruments().toolEnded(tool, isError),

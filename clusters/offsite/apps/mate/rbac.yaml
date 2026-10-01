@@ -59,7 +59,7 @@ rules:
     verbs:
       - get
       - patch
-  # Only for the sandbox account; without resourceNames mate could mint a
+  # Only for the sandbox accounts; without resourceNames mate could mint a
   # token for any ServiceAccount here, its own included.
   - apiGroups:
       - ""
@@ -67,8 +67,17 @@ rules:
       - serviceaccounts/token
     resourceNames:
       - mate-sandbox-admin
+      - mate-sandbox-reader
     verbs:
       - create
+  # A read-only sandbox's checkout window closes only once Cilium has the
+  # pod's new label (sandboxes.ts `closeCheckout`).
+  - apiGroups:
+      - cilium.io
+    resources:
+      - ciliumendpoints
+    verbs:
+      - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -173,6 +173,10 @@ spec:
             # turn (sandbox-rbac.yaml).
             - name: MATE_SANDBOX_KUBE_SA
               value: mate-sandbox-admin
+            # get/list/watch on offsite and folly, never Secrets or exec, for
+            # read-only profiles (sandbox-rbac.yaml). mate mints a bound token per turn.
+            - name: MATE_SANDBOX_KUBE_READER_SA
+              value: mate-sandbox-reader
             # The context the token reaches this cluster by, and the clusters
             # that admit it too; the sandbox's checkout says where each is.
             - name: MATE_SANDBOX_KUBE_CONTEXT

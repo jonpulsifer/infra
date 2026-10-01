@@ -136,6 +136,24 @@ export const createModelSetup: CreateModelSetup = ({
   return { models, direct, model: unpriced(model), thinking, router };
 };
 
+/**
+ * A profile's own model. MATE_MODEL's own spec returns `setup.model`, so the
+ * router still sees it; any other model goes straight to its provider.
+ */
+export function profileModel(
+  setup: ModelSetup,
+  name: string,
+  wanted: string,
+  thinking: ThinkingLevel,
+): { model: Model<Api>; thinking: ThinkingLevel } {
+  const model =
+    wanted === spec(setup.model)
+      ? setup.model
+      : lookup(setup.direct, name, wanted);
+  supported(name, model, thinking);
+  return { model, thinking };
+}
+
 /** The model a ChatGPT sign-in proves: the lane's own, or pi's `gpt-6-sol`. */
 export function chatgptModel(setup: ModelSetup): Model<Api> | null {
   if (setup.model.provider === CHATGPT_PROVIDER) return setup.model;

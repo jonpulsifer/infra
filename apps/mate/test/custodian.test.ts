@@ -7,7 +7,7 @@ import {
 } from '../src/custodian.ts';
 import { silentLog } from '../src/log.ts';
 import type { SlackApi } from '../src/slack.ts';
-import type { Threads } from '../src/threads.ts';
+import type { Start, Threads } from '../src/threads.ts';
 import { FakeSlack } from './fakesurface.ts';
 import { FakeClock } from './support.ts';
 
@@ -44,16 +44,19 @@ class Ledger implements CustodianLedger {
   }
 }
 
+type Starts = Pick<Threads, 'start'>;
+
 test('a failed dispatch retries the same saved root', async () => {
   const ledger = new Ledger();
   const slack = new FakeSlack();
   const refs: string[] = [];
-  const threads = {
-    async scheduled(ref: { id: string }) {
+  const threads: Starts = {
+    async start({ ref }: Start) {
       refs.push(ref.id);
       if (refs.length === 1) throw new Error('store unavailable');
+      return true;
     },
-  } as unknown as Threads;
+  };
   const fixed = {
     now: () => at('2026-07-03T21:00:00Z'),
     after: () => ({}),
@@ -76,15 +79,56 @@ test('a failed dispatch retries the same saved root', async () => {
   expect(slack.calls.filter((call) => call.call === 'post')).toHaveLength(1);
 });
 
+test('the day starts its thread under the custodian profile, asked by the owner', async () => {
+  const ledger = new Ledger();
+  const slack = new FakeSlack();
+  const starts: Start[] = [];
+  const threads: Starts = {
+    async start(start: Start) {
+      starts.push(start);
+      return starts.length === 1;
+    },
+  };
+  const fixed = {
+    now: () => at('2026-07-03T21:00:00Z'),
+    after: () => ({}),
+    cancel: () => {},
+    sleep: async () => {},
+  };
+  const job = new Custodian({
+    ledger,
+    slack,
+    threads,
+    channel: 'C062BS4GADR',
+    owner: 'UAR78LSKC',
+    log: silentLog,
+    clock: fixed,
+  });
+  await job.tick();
+  // The thread exists, so the tick does nothing more.
+  await job.tick();
+  job.stop();
+  const first: Start = {
+    ref: { surface: 'slack', channelId: 'C062BS4GADR', id: 'p-1' },
+    profile: 'custodian',
+    asker: 'UAR78LSKC',
+    text: custodianPrompt('2026-07-03'),
+  };
+  expect(starts).toEqual([first, first]);
+  expect(slack.calls).toHaveLength(1);
+});
+
 test('one root and one queued assignment per day, including after restart', async () => {
   const ledger = new Ledger();
   const slack = new FakeSlack();
   const prompts: string[] = [];
-  const threads = {
-    async scheduled(_ref: unknown, _owner: string, text: string) {
-      if (!prompts.includes(text)) prompts.push(text);
+  const threads: Starts = {
+    async start({ text }: Start) {
+      if (prompts.includes(text)) return false;
+      prompts.push(text);
+      return true;
     },
-  } as unknown as Threads;
+  };
   const clock = new FakeClock();
   // FakeClock's initial time is not today's date: inject a minimal fixed clock.
   const fixed = {

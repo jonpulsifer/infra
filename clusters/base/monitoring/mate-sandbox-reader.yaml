@@ -1,0 +1,22 @@
+---
+# Prometheus and Alertmanager through the API server, for read-only Rowbutt
+# sandboxes. A proxied request takes its verb from its HTTP method, so `get`
+# admits GET and refuses a POSTed alert or silence. Add a service here only if
+# no GET on it changes state: VictoriaLogs is left out because, with no auth
+# key set, it detaches partitions and ingests lines on GET. Each cluster's
+# monitoring/mate-sandbox-reader.yaml binds its own subject.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mate-sandbox-reader
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+rules:
+  - apiGroups: [""]
+    resources: [services/proxy]
+    resourceNames:
+      - prom-stack-kube-prometheus-prometheus:9090
+      - prom-stack-kube-prometheus-alertmanager:9093
+    verbs: [get]

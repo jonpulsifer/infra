@@ -28,3 +28,49 @@ subjects:
   - kind: ServiceAccount
     name: mate-sandbox-admin
     namespace: mate
+---
+# The identity of read-only profiles: `view` plus the reads view leaves out
+# (clusters/base/apps/mate-sandbox-reader/). mate mints a bound token per turn,
+# as for the admin. folly admits the same token through the federation in
+# nix/services/k8s/default.nix, and clusters/folly/apps/mate-sandbox/ binds it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mate-sandbox-reader
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mate-sandbox-reader-view
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: mate-sandbox-reader
+    namespace: mate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mate-sandbox-reader
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mate-sandbox-reader
+subjects:
+  - kind: ServiceAccount
+    name: mate-sandbox-reader
+    namespace: mate

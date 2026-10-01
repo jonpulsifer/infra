@@ -1,6 +1,7 @@
 /**
  * The brain: one pi harness per open thread, on lane `main`, in mate's own
- * process. The model streams before any sandbox exists; the hands lease one
+ * process, with the prompt, model, tools and turn timeout of the row's
+ * profile. The model streams before any sandbox exists; the hands lease one
  * on the first tool call. A run a restart cut off stays open in mate-db and
  * resumes, and a harness that faults is closed, drained and opened again.
  */
@@ -27,10 +28,10 @@ import type { RetryPolicy } from '@earendil-works/pi-ai';
 import { deleteSession, openSession } from '@repo/pi-store-postgres';
 import type { SQL } from 'bun';
 import type {
+  BrainProfile,
   BridgedTool,
   McpBridge,
   ModelSetup,
-  SystemPrompts,
 } from './brain-inputs.ts';
 import {
   type Brain,
@@ -55,6 +56,7 @@ import {
   lazyInstruments,
   type ProviderErrorKind,
 } from './metrics.ts';
+import { lists, type Profile, sweepable } from './profiles.ts';
 import { redact } from './redact.ts';
 import { fallbackError, type RouteEvent } from './route.ts';
 import type { PromptResult, PromptSink } from './sandbox.ts';
@@ -135,9 +137,9 @@ export interface PiBrainDeps {
   sessions: SessionSource;
   hands: Hands;
   setup: ModelSetup;
-  prompts: SystemPrompts;
+  /** By profile id; a row naming an absent one opens nothing. */
+  profiles: ReadonlyMap<string, BrainProfile>;
   mcp: McpBridge | null;
-  turnTimeoutMs: number;
   log: Log;
   clock?: Clock;
   metrics?: Instruments;
@@ -173,6 +175,7 @@ interface ThreadBrain {
   readonly ref: ThreadRef;
   readonly hands: ThreadHands;
   row: ThreadRow;
+  profile: BrainProfile;
   harness: AgentHarness<ExecutionToolContext>;
   lane: AgentLane;
   unsubscribe: () => void;
@@ -190,7 +193,7 @@ interface ThreadBrain {
   turn: Turn | null;
 }
 
-/** Stands in for a kthx tool a saved run names but the bridge does not list. */
+/** Stands in for a tool a saved run names but the bridge or the profile does not list. */
 export function unreachableTool(name: string): BridgedTool {
   return {
     name,
@@ -455,7 +458,7 @@ export class PiBrain implements Brain {
     const { store, sessions, log } = this.deps;
     let rows: ThreadRow[];
     try {
-      rows = await store.closedBefore(before, SWEEP_BATCH);
+      rows = await store.closedBefore(before, SWEEP_BATCH, sweepable());
     } catch (error) {
       log.warn('the retention sweep could not list threads', {
         error: plain(error),
@@ -664,8 +667,9 @@ export class PiBrain implements Brain {
   ): Promise<PromptResult> {
     turn.operationId = operationId;
     if (turn.cancelRequested) this.stop(tb, turn);
-    const minutes = this.deps.turnTimeoutMs / 60_000;
-    const timeout = this.clock.after(this.deps.turnTimeoutMs, () => {
+    const ms = tb.profile.turnTimeoutMs;
+    const minutes = ms / 60_000;
+    const timeout = this.clock.after(ms, () => {
       turn.timedOut = true;
       this.abortLane(tb);
       this.giveUp(turn, 'expired', this.timeouts.timeoutGrace);
@@ -955,22 +959,27 @@ export class PiBrain implements Brain {
 
   /** Opens the row's session under a new harness, and reconciles its lane. */
   private async attach(row: ThreadRow): Promise<BrainSession> {
-    const { setup, prompts, sessions } = this.deps;
+    const { setup, sessions } = this.deps;
+    const profile = this.deps.profiles.get(row.profile);
+    if (!profile) {
+      throw new BrainUnavailable(`profile ${row.profile} is not declared`);
+    }
     const session = await sessions.open(row.sessionId);
     let harness: AgentHarness<ExecutionToolContext> | null = null;
     try {
       const known = this.threads.get(row.key);
       const hands =
-        known?.hands ?? this.deps.hands.thread(row.ref, this.hooks(row.key));
+        known?.hands ??
+        this.deps.hands.thread(row.ref, this.hooks(row.key), profile.profile);
       const created = await AgentHarness.create<ExecutionToolContext>(
         {
           session,
           models: setup.models,
-          model: setup.model,
-          thinkingLevel: setup.thinking,
-          tools: this.listedTools(),
+          model: profile.model,
+          thinkingLevel: profile.thinking,
+          tools: this.listedTools(profile.profile),
           toolContext: { env: hands.env },
-          systemPrompt: prompts[row.ref.surface],
+          systemPrompt: profile.prompts[row.ref.surface],
           streamOptions: { timeoutMs: PROVIDER_TIMEOUT_MS },
           ...(this.deps.retry ? { retry: this.deps.retry } : {}),
         },
@@ -980,9 +989,10 @@ export class PiBrain implements Brain {
       const lane = await harness.lane(LANE, CTX);
       const open = created.open.find((operation) => operation.lane === LANE);
       const stats = await session.getStats(CTX);
-      await this.reconcileLane(harness, lane, Boolean(open));
+      await this.reconcileLane(harness, lane, Boolean(open), profile);
       const fresh = {
         row,
+        profile,
         harness,
         lane,
         interrupted: open
@@ -1017,33 +1027,39 @@ export class PiBrain implements Brain {
     }
   }
 
-  /** The base tools and every bridged kthx tool, each name once. */
-  private listedTools(): BridgedTool[] {
+  /**
+   * The base and bridged tools `profile` lists, each name once. The only list
+   * the harness is given, so a tool the profile does not list never runs.
+   */
+  private listedTools(profile: Profile): BridgedTool[] {
     const byName = new Map<string, BridgedTool>();
     for (const tool of [...this.baseTools, ...(this.deps.mcp?.tools() ?? [])]) {
-      if (!byName.has(tool.name)) byName.set(tool.name, tool);
+      if (lists(profile, tool.name) && !byName.has(tool.name)) {
+        byName.set(tool.name, tool);
+      }
     }
     return [...byName.values()];
   }
 
   private reconcile(tb: ThreadBrain, open: boolean): Promise<void> {
     tb.stale = false;
-    return this.reconcileLane(tb.harness, tb.lane, open);
+    return this.reconcileLane(tb.harness, tb.lane, open, tb.profile);
   }
 
   /**
-   * Brings a lane saved by an older mate to today's model, thinking level and
-   * tools. While a run is open the tools are only added to: pi resumes a step
-   * with the names it captured, so each must still resolve.
+   * Brings a lane saved by an older mate to its profile's model, thinking
+   * level and tools. While a run is open the tools are only added to: pi
+   * resumes a step with the names it captured, so each must still resolve.
    */
   private async reconcileLane(
     harness: AgentHarness<ExecutionToolContext>,
     lane: AgentLane,
     open: boolean,
+    profile: BrainProfile,
   ): Promise<void> {
-    const { model, thinking } = this.deps.setup;
+    const { model, thinking } = profile;
     const saved = await lane.getActiveTools(CTX);
-    const listed = this.listedTools();
+    const listed = this.listedTools(profile.profile);
     const names = listed.map((tool) => tool.name);
     const standIns = saved
       .filter((name) => !names.includes(name))

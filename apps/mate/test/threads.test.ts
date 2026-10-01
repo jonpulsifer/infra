@@ -14,8 +14,13 @@ import {
   LIMIT_FALLBACK,
   NEVER_STARTED,
   PRIMARY_REFUSING,
+  PROFILE_GONE,
+  PROFILE_PLACE,
+  PROFILE_UNKNOWN,
+  RECORD_GONE,
   RESTARTED,
   RESUMING,
+  RUNS_AS,
   SIGN_IN_BROKE,
   SIGNED_OUT,
   STORE_DOWN,
@@ -23,7 +28,9 @@ import {
   THREAD_SPENT,
   TURN_WAITING,
   UNDELIVERED,
+  UNRUN,
 } from '../src/notices.ts';
+import { PROFILES, type Profile } from '../src/profiles.ts';
 import { type Script, StubBrain } from '../src/sandbox.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import { type Surface, type ThreadRef, threadKey } from '../src/surface.ts';
@@ -41,6 +48,7 @@ import {
   type ThreadsConfig,
   threadName,
 } from '../src/threads.ts';
+import { assignmentPost } from '../src/transcript.ts';
 import { FakeSurface } from './fakesurface.ts';
 import {
   discordRef,
@@ -77,12 +85,12 @@ class TestStore extends MemoryThreadStore {
   }
 
   /** `failOpen` fails one open, then clears. */
-  override async open(ref: ThreadRef): Promise<ThreadRow> {
+  override async open(ref: ThreadRef, profile: string): Promise<ThreadRow> {
     if (this.gateOpen) await this.gateOpen;
     const failure = this.failOpen;
     this.failOpen = null;
     if (failure) throw failure;
-    return super.open(ref);
+    return super.open(ref, profile);
   }
 }
 
@@ -175,6 +183,7 @@ interface BuildOptions {
   inherited?: readonly ThreadRef[];
   surfaces?: Surface[];
   commands?: Commands;
+  profiles?: ReadonlyMap<string, Profile>;
 }
 
 function build(opts: BuildOptions = {}) {
@@ -201,6 +210,7 @@ function build(opts: BuildOptions = {}) {
     runGraceMs: 100,
     metrics,
     commands: opts.commands,
+    profiles: opts.profiles,
   });
   return { threads, brain, store };
 }
@@ -254,24 +264,750 @@ beforeEach(() => {
   metrics = new RecordingInstruments();
 });
 
-describe('scheduled turns', () => {
-  test('accepts only an authorized destination and does not duplicate a started run', async () => {
-    const slack = new FakeSurface(ME, new Set([OWNER]), new Set([CHANNEL]));
+const daily: ThreadRef = {
+  surface: 'slack',
+  channelId: CHANNEL,
+  id: 'daily-root',
+};
+
+/** An automation profile, which no shipped profile is. */
+const testAuto: Profile = {
+  ...(PROFILES.get('custodian') as Profile),
+  id: 'test-auto',
+  mode: 'automation',
+  budget: { turnMinutes: null, turnsPerThread: null, turnsPerDay: 5 },
+};
+const withAuto: ReadonlyMap<string, Profile> = new Map([
+  ...PROFILES,
+  [testAuto.id, testAuto],
+]);
+
+function slackIn(
+  threadId: string | null,
+  content: string,
+  overrides: Partial<Inbound> = {},
+): Inbound {
+  return {
+    surface: 'slack',
+    id: `s-${++serial}`,
+    channelId: CHANNEL,
+    threadId,
+    authorId: OWNER,
+    authorIsBot: false,
+    content,
+    mentionsMe: false,
+    ...overrides,
+  };
+}
+
+const slackSurface = () =>
+  new FakeSurface(ME, new Set([OWNER]), new Set([CHANNEL]));
+
+describe('trusted starts', () => {
+  test('a stranger, an unknown profile or an interactive profile throws', async () => {
+    const slack = slackSurface();
     const { threads, store } = build({ surfaces: [slack] });
-    const daily = {
-      surface: 'slack' as const,
-      channelId: CHANNEL,
-      id: 'daily-root',
-    };
-    await expect(threads.scheduled(daily, STRANGER, 'check')).rejects.toThrow(
-      'authorized',
+    const start = (profile: string, asker = OWNER) =>
+      threads.start({ ref: daily, profile, asker, text: 'check' });
+    await expect(start('custodian', STRANGER)).rejects.toThrow('authorized');
+    await expect(start('nope')).rejects.toThrow('not nope');
+    await expect(start('operator')).rejects.toThrow('not operator');
+    await expect(start('investigator')).rejects.toThrow('not investigator');
+    await expect(
+      threads.start({
+        ref: { ...daily, channelId: OTHER_CHANNEL },
+        profile: 'custodian',
+        asker: OWNER,
+        text: 'check',
+      }),
+    ).rejects.toThrow('authorized');
+    expect(await store.get(threadKey(daily))).toBeUndefined();
+    expect(slack.posted).toEqual([]);
+  });
+
+  test('creates the row with its profile, posts the assignment and runs one turn, once', async () => {
+    const slack = slackSurface();
+    const { threads, store, brain } = build({
+      surfaces: [slack],
+      script: streaming('all green'),
+    });
+    expect(
+      await threads.start({
+        ref: daily,
+        profile: 'custodian',
+        asker: OWNER,
+        text: 'check',
+      }),
+    ).toBe(true);
+    await clock.advance(5_000);
+    expect(await store.get(threadKey(daily))).toMatchObject({
+      profile: 'custodian',
+      turns: 1,
+    });
+    expect(slack.linesIn('daily-root')).toEqual([assignmentPost('check')]);
+    // The assignment is the prompt, so the replay skips it.
+    expect(brain.prompts).toEqual(['check']);
+    expect(slack.answerIn('daily-root')).toBe('all green ');
+    expect(slack.askers).toEqual([OWNER]);
+    expect(metrics.startedBy).toEqual([{ profile: 'custodian', mode: 'job' }]);
+
+    expect(
+      await threads.start({
+        ref: daily,
+        profile: 'custodian',
+        asker: OWNER,
+        text: 'check',
+      }),
+    ).toBe(false);
+    await clock.advance(5_000);
+    expect(brain.prompts).toEqual(['check']);
+    expect(slack.linesIn('daily-root')).toEqual([assignmentPost('check')]);
+  });
+
+  test('a spent day cap is told once, whatever the trigger does next', async () => {
+    const slack = slackSurface();
+    const { threads, store, brain } = build({ surfaces: [slack] });
+    const day = new Date(clock.now()).toISOString().slice(0, 10);
+    for (let i = 0; i < 10; i += 1) {
+      await store.claimTurn('custodian', day, 10);
+    }
+    const start = () =>
+      threads.start({
+        ref: daily,
+        profile: 'custodian',
+        asker: OWNER,
+        text: 'check',
+      });
+    expect(await start()).toBe(true);
+    await clock.advance(5_000);
+    expect(await start()).toBe(false);
+    await clock.advance(5_000);
+    const spent = `${DAY_SPENT} 10 custodian turns is spent — it resets at 00:00 UTC`;
+    expect(slack.linesIn('daily-root')).toEqual([
+      assignmentPost('check'),
+      spent,
+    ]);
+    expect(brain.prompts).toEqual([]);
+    expect(metrics.started).toBe(0);
+    expect(await store.get(threadKey(daily))).toMatchObject({
+      turns: 0,
+      state: 'closed',
+    });
+  });
+
+  test('a store that is down at the open is told once, and the next start does nothing', async () => {
+    const slack = slackSurface();
+    const { threads, brain } = build({ surfaces: [slack] });
+    brain.openFails = 'connection refused';
+    const start = () =>
+      threads.start({
+        ref: daily,
+        profile: 'custodian',
+        asker: OWNER,
+        text: 'check',
+      });
+    expect(await start()).toBe(true);
+    await settle();
+    brain.openFails = null;
+    expect(await start()).toBe(false);
+    await clock.advance(5_000);
+    expect(slack.linesIn('daily-root')).toEqual([
+      assignmentPost('check'),
+      STORE_DOWN,
+    ]);
+    expect(brain.prompts).toEqual([]);
+  });
+
+  test('a job restored before its first turn says so, and a reply runs it under its profile', async () => {
+    const slack = slackSurface();
+    const before = build({ surfaces: [slack] });
+    await before.store.open(daily, 'custodian');
+    slack.say('daily-root', assignmentPost('check'), ME, 'mate', true);
+
+    const { threads, brain } = rebuild(before, {
+      surfaces: [slack],
+      script: streaming('done'),
+    });
+    await threads.rehydrate();
+    await clock.advance(1_000);
+    expect(slack.linesIn('daily-root')).toEqual([
+      assignmentPost('check'),
+      UNRUN,
+    ]);
+    expect(brain.released).toEqual([
+      { key: threadKey(daily), reason: 'finished' },
+    ]);
+    expect(brain.prompts).toEqual([]);
+
+    await threads.onMessage(slackIn('daily-root', 'go on'));
+    await clock.advance(5_000);
+    expect(brain.prompts).toHaveLength(1);
+    expect(brain.prompts[0]).toContain('assignment: check');
+    expect(brain.prompts[0]).not.toContain('you: 📋');
+    expect(brain.prompts[0]?.endsWith('go on')).toBe(true);
+    expect(metrics.startedBy).toEqual([{ profile: 'custodian', mode: 'job' }]);
+    expect(slack.linesIn('daily-root').filter((l) => l === UNRUN)).toHaveLength(
+      1,
     );
-    await threads.scheduled(daily, OWNER, 'check');
+  });
+  test.each(['quiet', 'archived'])(
+    'a job that leaves the queue %s closes its row and is not told again at the next boot',
+    async (how) => {
+      const slack = slackSurface();
+      const brain = new HeldBrain({ clock, script: stuck });
+      const before = build({ surfaces: [slack], brain });
+      const busy: ThreadRef = { ...daily, id: 'busy-root' };
+      const start = (ref: ThreadRef) =>
+        before.threads.start({
+          ref,
+          profile: 'custodian',
+          asker: OWNER,
+          text: 'check',
+        });
+      expect(await start(busy)).toBe(true);
+      await settle();
+      expect(await start(daily)).toBe(true);
+      await settle();
+      expect(before.threads.stateOf(threadKey(daily))).toBe('waiting');
+      if (how === 'quiet') await clock.advance(QUIET_MS + 1);
+      else await before.threads.onThreadArchived(daily);
+      expect(before.threads.stateOf(threadKey(daily))).toBe('closed');
+      expect(await before.store.get(threadKey(daily))).toMatchObject({
+        state: 'closed',
+        turns: 0,
+      });
+
+      const { threads } = rebuild(before, { surfaces: [slack] });
+      await threads.rehydrate();
+      await clock.advance(1_000);
+      expect(slack.linesIn('daily-root')).not.toContain(UNRUN);
+      expect(brain.opened).not.toContain(threadKey(daily));
+    },
+  );
+
+  test('a reply in a job thread whose closed row was swept runs as the default', async () => {
+    const slack = slackSurface();
+    const { threads, store, brain } = build({
+      surfaces: [slack],
+      script: streaming('ok'),
+    });
+    await threads.start({
+      ref: daily,
+      profile: 'custodian',
+      asker: OWNER,
+      text: 'check',
+    });
+    await clock.advance(5_000);
+    expect(await store.get(threadKey(daily))).toMatchObject({
+      state: 'closed',
+    });
+    await store.delete(threadKey(daily));
+
+    await threads.onMessage(slackIn('daily-root', 'again'));
+    await clock.advance(5_000);
+    expect(await store.get(threadKey(daily))).toMatchObject({
+      profile: 'operator',
+      turns: 1,
+    });
+    expect(brain.prompts).toHaveLength(2);
+    expect(metrics.startedBy.map((s) => s.profile)).toEqual([
+      'custodian',
+      'operator',
+    ]);
+    expect(
+      slack.linesIn('daily-root').some((l) => l.startsWith(PROFILE_GONE)),
+    ).toBe(false);
+  });
+
+  test('a reply in an automation thread of other grants whose row was swept is refused', async () => {
+    const reader: Profile = {
+      ...testAuto,
+      id: 'test-reader',
+      grants: (PROFILES.get('investigator') as Profile).grants,
+      sandbox: (PROFILES.get('investigator') as Profile).sandbox,
+    };
+    const slack = slackSurface();
+    const { threads, store, brain } = build({
+      surfaces: [slack],
+      script: streaming('ok'),
+      profiles: new Map([...PROFILES, [reader.id, reader]]),
+    });
+    await threads.start({
+      ref: daily,
+      profile: 'test-reader',
+      asker: OWNER,
+      text: 'check',
+    });
+    await clock.advance(QUIET_MS + 5_000);
+    expect(await store.get(threadKey(daily))).toMatchObject({
+      state: 'closed',
+    });
+    await store.delete(threadKey(daily));
+
+    await threads.onMessage(slackIn('daily-root', 'again'));
+    await clock.advance(5_000);
+    expect(slack.linesIn('daily-root').at(-1)).toBe(RECORD_GONE);
+    expect(await store.get(threadKey(daily))).toBeUndefined();
+    expect(brain.prompts).toEqual(['check']);
+  });
+});
+
+describe('profiles in chat', () => {
+  test.each([
+    '+investigator x',
+    '+investigator, x',
+    '+investigator: x',
+    '+Investigator x',
+  ])('%p opens an investigator thread and runs x', async (content) => {
+    const { threads, store, brain } = build({ script: streaming('ok') });
+    await threads.onMessage(mention(content));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    expect((await store.get(key(threadId)))?.profile).toBe('investigator');
+    expect(discord.contentsIn(threadId)).toEqual([
+      `${RUNS_AS} investigator`,
+      'ok ',
+    ]);
+    expect(brain.prompts).toEqual(['x']);
+    expect(metrics.startedBy).toEqual([
+      { profile: 'investigator', mode: 'interactive' },
+    ]);
+  });
+
+  test.each(['can you +investigator x', '(+investigator) x'])(
+    'a tag that is not the first word, as in %p, opens no row and runs nothing',
+    async (content) => {
+      const { threads, store, brain } = build({ script: streaming('ok') });
+      const asked = mention(content);
+      await threads.onMessage(asked);
+      await clock.advance(5_000);
+      const threadId = discord.threads[0]!.id;
+      expect(discord.contentsIn(threadId)).toEqual([
+        `${PROFILE_PLACE} start the message with +investigator`,
+      ]);
+      expect(await store.get(key(threadId))).toBeUndefined();
+      expect(brain.prompts).toEqual([]);
+      expect(discord.reactionsOn(CHANNEL, asked.id)).toEqual(['⚠️']);
+      expect(discord.archived).toEqual([threadId]);
+    },
+  );
+
+  test.each(['c++ thing', '+1 nice'])(
+    '%p opens an operator thread as before',
+    async (content) => {
+      const { threads, store, brain } = build({ script: streaming('ok') });
+      await threads.onMessage(mention(content));
+      await clock.advance(5_000);
+      const threadId = discord.threads[0]!.id;
+      expect((await store.get(key(threadId)))?.profile).toBe('operator');
+      expect(brain.prompts).toEqual([content]);
+      expect(discord.contentsIn(threadId)).toEqual(['ok ']);
+    },
+  );
+
+  test.each(['nope', 'custodian'])(
+    '+%s opens a thread only to refuse it, and archives it',
+    async (id) => {
+      const { threads, store, brain } = build({ script: streaming('ok') });
+      const asked = mention(`+${id} x`);
+      await threads.onMessage(asked);
+      await clock.advance(5_000);
+      const threadId = discord.threads[0]!.id;
+      expect(discord.contentsIn(threadId)).toEqual([
+        `${PROFILE_UNKNOWN} +${id} — open one with +operator, +investigator`,
+      ]);
+      expect(await store.get(key(threadId))).toBeUndefined();
+      expect(brain.prompts).toEqual([]);
+      expect(metrics.started).toBe(0);
+      expect(discord.reactionsOn(CHANNEL, asked.id)).toEqual(['⚠️']);
+      expect(discord.archived).toEqual([threadId]);
+      expect(threads.stateOf(key(threadId))).toBeUndefined();
+    },
+  );
+
+  test('a refused thread stays refused when it is adopted after it opens', async () => {
+    const { threads, store, brain } = build({ script: streaming('ok') });
+    await threads.onMessage(mention('+nope x'));
     await settle();
-    expect(await store.get(threadKey(daily))).toMatchObject({ turns: 1 });
-    await threads.scheduled(daily, OWNER, 'check');
+    const threadId = discord.threads[0]!.id;
+    threads.adopt(ref(threadId));
+    const again = inThread(threadId, 'hello?');
+    await threads.onMessage(again);
+    await clock.advance(5_000);
+    const line = `${PROFILE_UNKNOWN} +nope — open one with +operator, +investigator`;
+    expect(discord.contentsIn(threadId)).toEqual([line, line]);
+    expect(discord.reactionsOn(threadId, again.id)).toEqual(['⚠️']);
+    expect(await store.get(key(threadId))).toBeUndefined();
+    expect(brain.prompts).toEqual([]);
+    expect(threads.stateOf(key(threadId))).toBeUndefined();
+  });
+
+  test('a refused thread stays refused when it is adopted before it opens', async () => {
+    const { threads, store, brain } = build({ script: streaming('ok') });
+    const create = discord.createThread.bind(discord);
+    discord.createThread = async (channelId, messageId, name) => {
+      const id = await create(channelId, messageId, name);
+      // Discord's ThreadCreate, landing before openThread resolves.
+      threads.adopt(ref(id));
+      return id;
+    };
+    await threads.onMessage(mention('+custodian x'));
     await settle();
-    expect(await store.get(threadKey(daily))).toMatchObject({ turns: 1 });
+    const threadId = discord.threads[0]!.id;
+    expect(threads.stateOf(key(threadId))).toBeUndefined();
+    await threads.onMessage(inThread(threadId, 'hello?'));
+    await clock.advance(5_000);
+    expect(discord.contentsIn(threadId)).toHaveLength(2);
+    expect(await store.get(key(threadId))).toBeUndefined();
+    expect(brain.prompts).toEqual([]);
+  });
+
+  test('an untagged retry after a failed +investigator open stays investigator when adopted early', async () => {
+    const store = new TestStore(clock);
+    const { threads, brain } = build({ script: streaming('ok'), store });
+    const create = discord.createThread.bind(discord);
+    discord.createThread = async (channelId, messageId, name) => {
+      const id = await create(channelId, messageId, name);
+      // Discord's ThreadCreate, landing before openThread resolves.
+      threads.adopt(ref(id));
+      return id;
+    };
+    store.failOpen = new Error('db down');
+    await threads.onMessage(mention('+investigator x'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    expect(discord.contentsIn(threadId)).toContain(STORE_DOWN);
+    expect(await store.get(key(threadId))).toBeUndefined();
+    await threads.onMessage(inThread(threadId, 'try again'));
+    await clock.advance(5_000);
+    expect((await store.get(key(threadId)))?.profile).toBe('investigator');
+    expect(metrics.startedBy.map((s) => s.profile)).toEqual(['investigator']);
+    expect(brain.prompts).toHaveLength(1);
+  });
+
+  test.each(['custodian', 'nope'])(
+    '+%s in a known thread whose row is not loaded writes no row',
+    async (id) => {
+      const { threads, store, brain } = build({ script: streaming('ok') });
+      threads.adopt(ref('thread-old'));
+      const asked = inThread('thread-old', `+${id} x`);
+      await threads.onMessage(asked);
+      await clock.advance(5_000);
+      expect(discord.contentsIn('thread-old')).toEqual([
+        `${PROFILE_UNKNOWN} +${id} — open one with +operator, +investigator`,
+      ]);
+      expect(discord.reactionsOn('thread-old', asked.id)).toEqual(['⚠️']);
+      expect(await store.get(key('thread-old'))).toBeUndefined();
+      expect(brain.prompts).toEqual([]);
+    },
+  );
+
+  test('a loaded thread refuses another profile and runs an untagged reply as its own', async () => {
+    const { threads, brain } = build({ script: streaming('ok') });
+    await threads.onMessage(mention('+investigator look'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    const other = inThread(threadId, '+operator fix it');
+    await threads.onMessage(other);
+    await clock.advance(5_000);
+    expect(discord.contentsIn(threadId).at(-1)).toBe(
+      `${RUNS_AS} investigator — a thread keeps the profile it opened with; start a new thread for +operator`,
+    );
+    expect(discord.reactionsOn(threadId, other.id)).toEqual(['⚠️']);
+
+    await threads.onMessage(inThread(threadId, 'and the logs?'));
+    await threads.onMessage(inThread(threadId, '+investigator and events?'));
+    await clock.advance(10_000);
+    expect(brain.prompts).toEqual(['look', 'and the logs?', 'and events?']);
+    expect(metrics.startedBy.map((s) => s.profile)).toEqual([
+      'investigator',
+      'investigator',
+      'investigator',
+    ]);
+    expect(
+      discord.contentsIn(threadId).filter((c) => c.startsWith(RUNS_AS)),
+    ).toHaveLength(2);
+  });
+
+  test("a stray tag of the thread's own profile is only words", async () => {
+    const { threads, brain } = build({ script: streaming('ok') });
+    await threads.onMessage(mention('+investigator look'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    await threads.onMessage(inThread(threadId, 'what can +investigator read?'));
+    await threads.onMessage(inThread(threadId, 'could +operator fix it?'));
+    await clock.advance(10_000);
+    expect(brain.prompts).toEqual(['look', 'what can +investigator read?']);
+    expect(discord.contentsIn(threadId)).toContain(
+      `${PROFILE_PLACE} start the message with +operator`,
+    );
+  });
+
+  test('a tagged follow-up while an untagged opener opens is refused, and the opener runs as operator', async () => {
+    const { threads, store, brain } = build({ script: streaming('ok') });
+    const held = gate();
+    store.gateOpen = held.wait;
+    await threads.onMessage(mention('x'));
+    await settle();
+    const threadId = discord.threads[0]!.id;
+    expect(threads.stateOf(key(threadId))).toBe('opening');
+    const late = inThread(threadId, '+investigator y');
+    await threads.onMessage(late);
+    store.gateOpen = null;
+    held.open();
+    await clock.advance(5_000);
+    expect(brain.prompts).toEqual(['x']);
+    expect((await store.get(key(threadId)))?.profile).toBe('operator');
+    expect(discord.contentsIn(threadId)).toEqual([
+      'ok ',
+      `${RUNS_AS} operator — a thread keeps the profile it opened with; start a new thread for +investigator`,
+    ]);
+    expect(discord.reactionsOn(threadId, late.id)).toEqual(['⚠️']);
+    expect(threads.stateOf(key(threadId))).toBe('idle');
+  });
+
+  test('a quick +operator before an investigator row loads is refused', async () => {
+    const { threads, store, brain } = build({ script: streaming('ok') });
+    const held = gate();
+    store.gateOpen = held.wait;
+    await threads.onMessage(mention('+investigator x'));
+    await settle();
+    const threadId = discord.threads[0]!.id;
+    await threads.onMessage(inThread(threadId, '+operator y'));
+    store.gateOpen = null;
+    held.open();
+    await clock.advance(5_000);
+    expect(brain.prompts).toEqual(['x']);
+    expect((await store.get(key(threadId)))?.profile).toBe('investigator');
+    expect(discord.contentsIn(threadId).at(-1)).toBe(
+      `${RUNS_AS} investigator — a thread keeps the profile it opened with; start a new thread for +operator`,
+    );
+  });
+
+  test('a tagged mention in a thread whose closed row is operator is refused at the open', async () => {
+    const slack = slackSurface();
+    const { threads, store, brain } = build({ surfaces: [slack] });
+    const thread: ThreadRef = {
+      surface: 'slack',
+      channelId: CHANNEL,
+      id: '1758.1',
+    };
+    await store.open(thread, 'operator');
+    await store.patch(threadKey(thread), { state: 'closed' });
+    await threads.onMessage(
+      slackIn('1758.1', `<@${ME}> +investigator x`, { mentionsMe: true }),
+    );
+    await clock.advance(5_000);
+    expect(slack.linesIn('1758.1')).toEqual([
+      `${RUNS_AS} operator — a thread keeps the profile it opened with; start a new thread for +investigator`,
+    ]);
+    expect(await store.get(threadKey(thread))).toMatchObject({
+      profile: 'operator',
+      state: 'closed',
+    });
+    expect(brain.prompts).toEqual([]);
+  });
+
+  test('a stray or unknown tag in an existing Slack thread refuses only that message', async () => {
+    const slack = slackSurface();
+    const { threads, store, brain } = build({
+      surfaces: [slack],
+      script: streaming('ok'),
+    });
+    const thread: ThreadRef = {
+      surface: 'slack',
+      channelId: CHANNEL,
+      id: '1758.1',
+    };
+    await store.open(thread, 'operator');
+    await store.patch(threadKey(thread), { state: 'closed' });
+    const at = (text: string) =>
+      slackIn('1758.1', `<@${ME}> ${text}`, { mentionsMe: true });
+    await threads.onMessage(at('should we use +investigator?'));
+    await threads.onMessage(at('+lgtm'));
+    await threads.onMessage(at('never mind, just fix it'));
+    await clock.advance(5_000);
+    expect(slack.linesIn('1758.1').slice(0, 2)).toEqual([
+      `${PROFILE_PLACE} start the message with +investigator`,
+      `${PROFILE_UNKNOWN} +lgtm — open one with +operator, +investigator`,
+    ]);
+    expect(brain.prompts).toEqual(['never mind, just fix it']);
+    expect(await store.get(threadKey(thread))).toMatchObject({
+      profile: 'operator',
+      turns: 1,
+    });
+  });
+
+  test('a row naming an undeclared profile opens nothing', async () => {
+    const { threads, store, brain } = build({ script: streaming('ok') });
+    await store.open(ref('thread-g'), 'ghost');
+    await store.patch(key('thread-g'), { state: 'closed' });
+    threads.adopt(ref('thread-g'));
+    await threads.onMessage(inThread('thread-g', 'hi'));
+    await clock.advance(5_000);
+    expect(discord.contentsIn('thread-g')).toEqual([`${PROFILE_GONE} ghost`]);
+    expect((await store.get(key('thread-g')))?.state).toBe('closed');
+    expect(brain.prompts).toEqual([]);
+  });
+
+  test('a restore closes a row naming an undeclared profile, and logs it once', async () => {
+    const { threads, store } = build();
+    await store.open(ref('thread-g'), 'ghost');
+    await threads.rehydrate();
+    await threads.rehydrate();
+    await settle();
+    const said = 'a thread names a profile this mate does not declare';
+    expect(log.of(said)).toHaveLength(1);
+    expect((await store.get(key('thread-g')))?.state).toBe('closed');
+    expect(threads.stateOf(key('thread-g'))).toBeUndefined();
+  });
+});
+
+describe('lanes', () => {
+  const lanes: Script = (prompt) =>
+    prompt.startsWith('auto') ? stuck(prompt) : streaming('ok')(prompt);
+
+  test('an interactive turn runs beside an automation turn', async () => {
+    const slack = slackSurface();
+    const { threads } = build({
+      surfaces: [surface, slack],
+      profiles: withAuto,
+      script: lanes,
+      config: { maxConcurrent: 1 },
+    });
+    await threads.start({
+      ref: daily,
+      profile: 'test-auto',
+      asker: OWNER,
+      text: 'auto',
+    });
+    await threads.onMessage(mention('hello'));
+    await settle();
+    const threadId = discord.threads[0]!.id;
+    expect(threads.stateOf(threadKey(daily))).toBe('turn');
+    expect(threads.stateOf(key(threadId))).toBe('turn');
+  });
+
+  test('a second automation start queues behind the first and never blocks a chat prompt', async () => {
+    const slack = slackSurface();
+    const { threads } = build({
+      surfaces: [surface, slack],
+      profiles: withAuto,
+      script: lanes,
+      config: { maxConcurrent: 1 },
+    });
+    const other = { ...daily, id: 'other-root' };
+    for (const ref_ of [daily, other]) {
+      await threads.start({
+        ref: ref_,
+        profile: 'test-auto',
+        asker: OWNER,
+        text: 'auto',
+      });
+    }
+    await settle();
+    expect(threads.stateOf(threadKey(daily))).toBe('turn');
+    expect(threads.stateOf(threadKey(other))).toBe('waiting');
+    await threads.onMessage(mention('first'));
+    await threads.onMessage(mention('second'));
+    await settle();
+    const [first, second] = discord.threads.map((t) => t.id) as [
+      string,
+      string,
+    ];
+    expect(threads.stateOf(key(first))).toBe('turn');
+    expect(threads.stateOf(key(second))).toBe('waiting');
+    expect(metrics.queuedBy).toEqual({ interactive: 1, automation: 1 });
+    expect(metrics.runningBy).toEqual({ interactive: 1, automation: 1 });
+    expect(threads.waitingIds).toEqual([key(second), threadKey(other)]);
+
+    await clock.advance(5_000);
+    expect(discord.contentsIn(second)).toEqual(['ok ']);
+    expect(threads.stateOf(threadKey(other))).toBe('waiting');
+    expect(metrics.queuedBy).toEqual({ interactive: 0, automation: 1 });
+  });
+});
+
+describe('modes', () => {
+  test('a job thread is released and archived as soon as its turn ends, with no closing line', async () => {
+    const { threads, brain, store } = build({ script: streaming('done') });
+    const job = discordRef('job-1', CHANNEL);
+    await threads.start({
+      ref: job,
+      profile: 'custodian',
+      asker: OWNER,
+      text: 'check',
+    });
+    await clock.advance(5_000);
+    expect(brain.released).toEqual([
+      { key: threadKey(job), reason: 'finished' },
+    ]);
+    expect(discord.archived).toEqual(['job-1']);
+    expect(discord.contentsIn('job-1')).toEqual([
+      assignmentPost('check'),
+      'done ',
+    ]);
+    expect(threads.stateOf(threadKey(job))).toBe('closed');
+    expect((await store.get(threadKey(job)))?.state).toBe('closed');
+  });
+
+  test('an automation thread waits for quiet', async () => {
+    const slack = slackSurface();
+    const { threads, brain } = build({
+      surfaces: [slack],
+      profiles: withAuto,
+      script: streaming('done'),
+    });
+    await threads.start({
+      ref: daily,
+      profile: 'test-auto',
+      asker: OWNER,
+      text: 'check',
+    });
+    await clock.advance(5_000);
+    expect(threads.stateOf(threadKey(daily))).toBe('idle');
+    expect(brain.released).toEqual([]);
+    await clock.advance(QUIET_MS);
+    expect(brain.released).toEqual([
+      { key: threadKey(daily), reason: 'quiet' },
+    ]);
+    expect(slack.linesIn('daily-root').at(-1)).toBe(THREAD_CLOSED);
+  });
+
+  test("an investigator thread holds its profile's turns per thread", async () => {
+    const { threads, brain } = build({ script: streaming('ok') });
+    await threads.onMessage(mention('+investigator 1'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    for (let i = 2; i <= 11; i += 1) {
+      await threads.onMessage(inThread(threadId, `${i}`));
+      await clock.advance(5_000);
+    }
+    expect(brain.prompts).toHaveLength(10);
+    expect(discord.contentsIn(threadId).at(-1)).toBe(
+      `${THREAD_SPENT} 10 turns — start a new thread`,
+    );
+  });
+
+  test('a restarted mate keeps the thread profile', async () => {
+    const before = build({ script: streaming('ok') });
+    await before.threads.onMessage(mention('+investigator look'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+
+    const after = rebuild(before);
+    await after.threads.rehydrate();
+    await settle();
+    const refused = inThread(threadId, '+operator now fix it');
+    await after.threads.onMessage(refused);
+    await after.threads.onMessage(inThread(threadId, 'and then?'));
+    await clock.advance(5_000);
+    expect(before.brain.prompts).toEqual(['look', 'and then?']);
+    expect(discord.reactionsOn(threadId, refused.id)).toEqual(['⚠️']);
+    expect(metrics.startedBy.at(-1)).toEqual({
+      profile: 'investigator',
+      mode: 'interactive',
+    });
   });
 });
 
@@ -987,7 +1723,7 @@ async function interrupted(
   resumes = 0,
 ) {
   const thread = ref(threadId);
-  const row = await built.store.open(thread);
+  const row = await built.store.open(thread, 'operator');
   const message = { channelId: threadId, id: 'm-asked' };
   await built.store.patch(row.key, {
     turns: 1,
@@ -1051,7 +1787,7 @@ describe('a mate restart', () => {
 
   test('an open run with no turn mark is discarded and says so', async () => {
     const built = build();
-    await built.store.open(ref('thread-1'));
+    await built.store.open(ref('thread-1'), 'operator');
     built.brain.interrupt(key('thread-1'));
     await built.threads.rehydrate();
     await clock.advance(1_000);
@@ -1164,7 +1900,7 @@ describe('a mate restart', () => {
       surfaces: [surface, slack],
     });
     await interrupted(built, 'thread-cut');
-    await built.store.open(ref('thread-2'));
+    await built.store.open(ref('thread-2'), 'operator');
 
     await built.threads.add(surface);
     await settle();
@@ -1480,6 +2216,31 @@ describe('a deleted thread', () => {
     expect(await store.get(key(threadId))).toBeUndefined();
     expect(brain.opened).toEqual([]);
     expect(discord.contentsIn(threadId)).toEqual([]);
+  });
+
+  test('while its profile line posts leaves no row behind and opens no session', async () => {
+    const store = new TestStore(clock);
+    const brain = new HeldBrain({ clock });
+    const { threads } = build({ store, brain });
+    const held = gate();
+    const create = discord.createMessage.bind(discord);
+    let posting = false;
+    discord.createMessage = async (channelId, body) => {
+      posting = true;
+      await held.wait;
+      return create(channelId, body);
+    };
+    await threads.onMessage(mention('+investigator go'));
+    await settle();
+    expect(posting).toBe(true);
+    const threadId = discord.threads[0]!.id;
+    await threads.onThreadDeleted(ref(threadId));
+    expect(brain.forgotten).toEqual([key(threadId)]);
+
+    held.open();
+    await clock.advance(5_000);
+    expect(brain.opened).toEqual([]);
+    expect(await store.get(key(threadId))).toBeUndefined();
   });
 
   test('mid-turn frees its slot for the queue head once the brain has let the turn go', async () => {

@@ -126,7 +126,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate turns have waited a quarter of an hour for a sandbox"
-              description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+              description: "An interactive turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. It takes the slot of any thread idle for five minutes, never a busy one. An automation or job turn, such as the daily custodian, also takes a free slot and keeps it for its whole turn, of up to MATE_TURN_MINUTES. While one runs, the MATE_MAX_CONCURRENT interactive turns and that turn can fill MATE_MAX_SANDBOXES, so this alert is expected until one of those turns ends. Check that first: `mate_turns_running{lane=\"automation\"}` is 1 while one runs, and `kubectl --context offsite get sandboxes -n mate -L lolwtf.ca/profile` names the holders and their profiles. If no automation or job turn runs and MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. If the custodian's turns keep starving the owner's threads, or MATE_MAX_CONCURRENT is above MATE_MAX_SANDBOXES, raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
       - eval_time: 14m
         alertname: MateThreadsQueued
         exp_alerts: []
@@ -142,7 +142,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate threads have waited ten minutes for a turn"
-              description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+              description: "At least one interactive thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT interactive turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running{lane=\"interactive\"}` with `mate_queue_depth{lane=\"interactive\"}`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
 
   # Each wait drops to zero at t=20: a preempted slot, a turn that ended.
   - interval: 1m
@@ -183,7 +183,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate turns have waited a quarter of an hour for a sandbox"
-              description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+              description: "An interactive turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. It takes the slot of any thread idle for five minutes, never a busy one. An automation or job turn, such as the daily custodian, also takes a free slot and keeps it for its whole turn, of up to MATE_TURN_MINUTES. While one runs, the MATE_MAX_CONCURRENT interactive turns and that turn can fill MATE_MAX_SANDBOXES, so this alert is expected until one of those turns ends. Check that first: `mate_turns_running{lane=\"automation\"}` is 1 while one runs, and `kubectl --context offsite get sandboxes -n mate -L lolwtf.ca/profile` names the holders and their profiles. If no automation or job turn runs and MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. If the custodian's turns keep starving the owner's threads, or MATE_MAX_CONCURRENT is above MATE_MAX_SANDBOXES, raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
       - eval_time: 9m
         alertname: MateThreadsQueued
         exp_alerts: []
@@ -199,7 +199,96 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate threads have waited ten minutes for a turn"
-              description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+              description: "At least one interactive thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT interactive turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running{lane=\"interactive\"}` with `mate_queue_depth{lane=\"interactive\"}`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+
+  # An automation turn waits for a turn and a sandbox for the whole window, by
+  # design, while the interactive lane stays clear: neither alert fires.
+  - interval: 1m
+    input_series:
+      - series: 'mate_sandbox_waiters{lane="automation",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x40
+      - series: 'mate_sandbox_waiters{lane="interactive",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x40
+      - series: 'mate_queue_depth{lane="automation",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x40
+      - series: 'mate_queue_depth{lane="interactive",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x40
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: MateSandboxWaitsLong
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: MateThreadsQueued
+        exp_alerts: []
+
+  # The interactive lane waits for its full windows while the automation lane
+  # is clear: each alert fires on the interactive series alone.
+  - interval: 1m
+    input_series:
+      - series: 'mate_sandbox_waiters{lane="interactive",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x5 1x40
+      - series: 'mate_sandbox_waiters{lane="automation",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x45
+      - series: 'mate_queue_depth{lane="interactive",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x5 2x40
+      - series: 'mate_queue_depth{lane="automation",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x45
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: MateSandboxWaitsLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lane: interactive
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate turns have waited a quarter of an hour for a sandbox"
+              description: "An interactive turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. It takes the slot of any thread idle for five minutes, never a busy one. An automation or job turn, such as the daily custodian, also takes a free slot and keeps it for its whole turn, of up to MATE_TURN_MINUTES. While one runs, the MATE_MAX_CONCURRENT interactive turns and that turn can fill MATE_MAX_SANDBOXES, so this alert is expected until one of those turns ends. Check that first: `mate_turns_running{lane=\"automation\"}` is 1 while one runs, and `kubectl --context offsite get sandboxes -n mate -L lolwtf.ca/profile` names the holders and their profiles. If no automation or job turn runs and MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. If the custodian's turns keep starving the owner's threads, or MATE_MAX_CONCURRENT is above MATE_MAX_SANDBOXES, raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+      - eval_time: 16m
+        alertname: MateThreadsQueued
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lane: interactive
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate threads have waited ten minutes for a turn"
+              description: "At least one interactive thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT interactive turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running{lane=\"interactive\"}` with `mate_queue_depth{lane=\"interactive\"}`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+
+  # An interactive turn waits behind a busy automation turn's sandbox for
+  # its full window. That is by design, and the alert fires with a
+  # description that says so before it prescribes a restart.
+  - interval: 1m
+    input_series:
+      - series: 'mate_sandbox_waiters{lane="interactive",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x5 1x40
+      - series: 'mate_sandbox_waiters{lane="automation",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x45
+      - series: 'mate_turns_running{lane="automation",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x45
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: MateSandboxWaitsLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lane: interactive
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate turns have waited a quarter of an hour for a sandbox"
+              description: "An interactive turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. It takes the slot of any thread idle for five minutes, never a busy one. An automation or job turn, such as the daily custodian, also takes a free slot and keeps it for its whole turn, of up to MATE_TURN_MINUTES. While one runs, the MATE_MAX_CONCURRENT interactive turns and that turn can fill MATE_MAX_SANDBOXES, so this alert is expected until one of those turns ends. Check that first: `mate_turns_running{lane=\"automation\"}` is 1 while one runs, and `kubectl --context offsite get sandboxes -n mate -L lolwtf.ca/profile` names the holders and their profiles. If no automation or job turn runs and MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. If the custodian's turns keep starving the owner's threads, or MATE_MAX_CONCURRENT is above MATE_MAX_SANDBOXES, raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
 
   # Turns and mints failing, then stopping; each is summed across its label.
   # No failing series crosses the threshold alone, so each matched value
@@ -697,7 +786,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate turns have waited a quarter of an hour for a sandbox"
-              description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+              description: "An interactive turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. It takes the slot of any thread idle for five minutes, never a busy one. An automation or job turn, such as the daily custodian, also takes a free slot and keeps it for its whole turn, of up to MATE_TURN_MINUTES. While one runs, the MATE_MAX_CONCURRENT interactive turns and that turn can fill MATE_MAX_SANDBOXES, so this alert is expected until one of those turns ends. Check that first: `mate_turns_running{lane=\"automation\"}` is 1 while one runs, and `kubectl --context offsite get sandboxes -n mate -L lolwtf.ca/profile` names the holders and their profiles. If no automation or job turn runs and MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. If the custodian's turns keep starving the owner's threads, or MATE_MAX_CONCURRENT is above MATE_MAX_SANDBOXES, raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
       - eval_time: 45m
         alertname: MateThreadsQueued
         exp_alerts:
@@ -711,7 +800,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate threads have waited ten minutes for a turn"
-              description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+              description: "At least one interactive thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT interactive turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running{lane=\"interactive\"}` with `mate_queue_depth{lane=\"interactive\"}`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
 
   - interval: 30m
     input_series:
@@ -738,7 +827,7 @@ tests:
               instance: 10.101.1.173:8889
             exp_annotations:
               message: "mate has spent most of its daily turn budget"
-              description: "More than 96 of the 120 turns allowed in a rolling day have been taken. Past 120 every thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
+              description: "More than 96 of the 120 interactive turns allowed in a rolling day have been taken. Past 120 every interactive thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
       - eval_time: 900m
         alertname: MateSpendAboveBudget
         exp_alerts:
@@ -747,6 +836,40 @@ tests:
             exp_annotations:
               message: "mate's reported spend is above its daily budget"
               description: "The turns of the last rolling day report more than $25 of model spend. The number is the list price from pi's catalog, summed over each run, with ChatGPT's requests at $0: a shadow of the fallback, qwen3.8-max, on the flat-rate `opencode-go` plan, not a bill. Volume is capped at 120 turns/day, so this is the tokens per turn moving, or the fallback answering more: check `mate_model_routes_total`, MATE_MODEL, MATE_FALLBACK_MODEL and MATE_THINKING on the mate Deployment, then which threads run long turns. The threshold is a first estimate; move it once a week of turns shows a normal day."
+
+  # A job profile's turns have their own cap in mate-db, so they never spend
+  # the interactive budget.
+  - interval: 1m
+    input_series:
+      - series: 'mate_turns_total{mode="job",profile="custodian",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0+1x200
+    alert_rule_test:
+      - eval_time: 200m
+        alertname: MateTurnBudgetNearlySpent
+        exp_alerts: []
+
+  # A series from before the mode label and an interactive profile's series
+  # share the budget: neither crosses 96 alone, and their sum does.
+  - interval: 1m
+    input_series:
+      - series: 'mate_turns_total{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0+1x60
+      - series: 'mate_turns_total{mode="interactive",profile="investigator",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0+1x60
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: MateTurnBudgetNearlySpent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate has spent most of its daily turn budget"
+              description: "More than 96 of the 120 interactive turns allowed in a rolling day have been taken. Past 120 every interactive thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
 
   # A bot connected all day stops reporting the identify budget.
   - interval: 1m

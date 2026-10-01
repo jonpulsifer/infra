@@ -32,6 +32,7 @@ import type {
   TurnResumeResult,
   TurnSample,
 } from '../src/metrics.ts';
+import type { Lane, Mode } from '../src/profiles.ts';
 import type { Failure, Route, RouteReason } from '../src/route.ts';
 import type {
   Canvas,
@@ -201,10 +202,17 @@ export class RecordingInstruments implements Instruments {
   readonly drops: HandsDropReason[] = [];
   readonly mcpCalls: string[] = [];
   started = 0;
+  readonly startedBy: { profile: string; mode: Mode }[] = [];
   live = 0;
+  /** The interactive lane's last value, as `waitersBy.interactive`. */
   waiters = 0;
+  /** The interactive lane's last value, as `queuedBy.interactive`. */
   queued = 0;
+  readonly waitersBy: Record<Lane, number> = { interactive: 0, automation: 0 };
+  readonly queuedBy: Record<Lane, number> = { interactive: 0, automation: 0 };
+  /** The interactive lane's last value, as `runningBy.interactive`. */
   running = 0;
+  readonly runningBy: Record<Lane, number> = { interactive: 0, automation: 0 };
   mcp: boolean | null = null;
   pool: { ready: number; wanted: number } | null = null;
   readonly tokenMints: string[] = [];
@@ -240,14 +248,17 @@ export class RecordingInstruments implements Instruments {
   sandboxesLive(count: number): void {
     this.live = count;
   }
-  sandboxWaiters(count: number): void {
-    this.waiters = count;
+  sandboxWaiters(count: number, lane: Lane = 'interactive'): void {
+    this.waitersBy[lane] = count;
+    if (lane === 'interactive') this.waiters = count;
   }
-  queueDepth(depth: number): void {
-    this.queued = depth;
+  queueDepth(depth: number, lane: Lane = 'interactive'): void {
+    this.queuedBy[lane] = depth;
+    if (lane === 'interactive') this.queued = depth;
   }
-  turnsRunning(count: number): void {
-    this.running = count;
+  turnsRunning(count: number, lane: Lane = 'interactive'): void {
+    this.runningBy[lane] = count;
+    if (lane === 'interactive') this.running = count;
   }
   githubAppReady(ready: boolean | null): void {
     this.appReady = ready;
@@ -282,8 +293,9 @@ export class RecordingInstruments implements Instruments {
   mcpCall(_server: string, result: string): void {
     this.mcpCalls.push(result);
   }
-  turnStarted(): void {
+  turnStarted(profile: string, mode: Mode): void {
     this.started += 1;
+    this.startedBy.push({ profile, mode });
   }
   turnEnded(reason: TurnEnd, sample: TurnSample): void {
     this.turns.push(reason);

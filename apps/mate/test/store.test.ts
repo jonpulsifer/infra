@@ -7,6 +7,7 @@ import { silentLog } from '../src/log.ts';
 import {
   composeUrl,
   isStoreUnavailable,
+  MemoryThreadStore,
   MIGRATIONS,
   migrateThreads,
   openDatabase,
@@ -15,6 +16,7 @@ import {
   storeError,
 } from '../src/store.ts';
 import type { ThreadRef } from '../src/surface.ts';
+import type { ThreadStore } from '../src/thread-store.ts';
 import { withDatabase } from './db.ts';
 import { stallingProxy } from './stall-proxy.ts';
 import { FakeClock, RecordingInstruments, RecordingLog } from './support.ts';
@@ -46,7 +48,7 @@ describe('a thread row', () => {
     const clock = new FakeClock();
     const store = storeAt(clock);
     const thread = ref();
-    const row = await store.open(thread);
+    const row = await store.open(thread, 'operator');
     expect(row).toMatchObject({
       key: `discord:${thread.id}`,
       ref: thread,
@@ -67,7 +69,7 @@ describe('a thread row', () => {
       turns: 7,
     });
     await clock.advance(1_000);
-    const again = await store.open(thread);
+    const again = await store.open(thread, 'operator');
     expect(again).toMatchObject({
       state: 'open',
       sessionId: `${row.key}~1`,
@@ -81,7 +83,7 @@ describe('a thread row', () => {
   test('a patch writes only the columns it is given, and BIGINTs read back as numbers', async () => {
     const clock = new FakeClock();
     const store = storeAt(clock);
-    const row = await store.open(ref());
+    const row = await store.open(ref(), 'operator');
     const turn = {
       asker: 'u1',
       message: { channelId: 'c1', id: 'm1' },
@@ -109,14 +111,14 @@ describe('a thread row', () => {
 
   test('lists by state and surface', async () => {
     const store = storeAt(new FakeClock());
-    const open = await store.open(ref());
+    const open = await store.open(ref(), 'operator');
     const slack: ThreadRef = {
       surface: 'slack',
       channelId: 'C1',
       id: `1758300000.${++serial}`,
     };
-    await store.open(slack);
-    const closed = await store.open(ref());
+    await store.open(slack, 'operator');
+    const closed = await store.open(ref(), 'operator');
     await store.patch(closed.key, { state: 'closed' });
     const discordOpen = await store.list({ state: 'open', surface: 'discord' });
     expect(discordOpen.map((row) => row.key)).toContain(open.key);
@@ -131,17 +133,17 @@ describe('a thread row', () => {
   test('retention finds old closed rows and deletes one only while it is still closed and old', async () => {
     const clock = new FakeClock();
     const store = storeAt(clock);
-    const old = await store.open(ref());
+    const old = await store.open(ref(), 'operator');
     await store.patch(old.key, { state: 'closed' });
-    const reopened = await store.open(ref());
+    const reopened = await store.open(ref(), 'operator');
     await store.patch(reopened.key, { state: 'closed' });
-    const stillOpen = await store.open(ref());
+    const stillOpen = await store.open(ref(), 'operator');
     await clock.advance(60_000);
-    const recent = await store.open(ref());
+    const recent = await store.open(ref(), 'operator');
     await store.patch(recent.key, { state: 'closed' });
     const before = clock.now();
 
-    const found = await store.closedBefore(before, 100);
+    const found = await store.closedBefore(before, 100, ['operator']);
     const keys = found.map((row) => row.key);
     expect(keys).toContain(old.key);
     expect(keys).toContain(reopened.key);
@@ -149,7 +151,7 @@ describe('a thread row', () => {
     expect(keys).not.toContain(recent.key);
 
     // A reply reopened it between the listing and the delete.
-    await store.open(reopened.ref);
+    await store.open(reopened.ref, 'operator');
     expect(await store.deleteClosed(reopened.key, before)).toBeUndefined();
     expect(await store.deleteClosed(recent.key, before)).toBeUndefined();
     expect((await store.deleteClosed(old.key, before))?.key).toBe(old.key);
@@ -159,9 +161,99 @@ describe('a thread row', () => {
 
   test('deletes', async () => {
     const store = storeAt(new FakeClock());
-    const row = await store.open(ref());
+    const row = await store.open(ref(), 'operator');
     await store.delete(row.key);
     expect(await store.get(row.key)).toBeUndefined();
+  });
+});
+
+const stores: [string, (clock: FakeClock) => ThreadStore][] = [
+  ['postgres', storeAt],
+  ['memory', (clock) => new MemoryThreadStore(clock)],
+];
+
+for (const [kind, storeOf] of stores) {
+  describe(`profiles in the ${kind} store`, () => {
+    test('a row keeps the profile it was born with', async () => {
+      const store = storeOf(new FakeClock());
+      const thread = ref();
+      const row = await store.open(thread, 'investigator');
+      expect(row.profile).toBe('investigator');
+      await store.patch(row.key, { state: 'closed' });
+      const again = await store.open(thread, 'operator');
+      expect(again).toMatchObject({ state: 'open', profile: 'investigator' });
+      expect((await store.get(row.key))?.profile).toBe('investigator');
+    });
+
+    test('a daily cap grants its turns and then refuses, apart for each profile and day', async () => {
+      const store = storeOf(new FakeClock());
+      const profile = `p${++serial}`;
+      expect(await store.claimTurn(profile, '2026-10-01', 2)).toBe(true);
+      expect(await store.claimTurn(profile, '2026-10-01', 2)).toBe(true);
+      expect(await store.claimTurn(profile, '2026-10-01', 2)).toBe(false);
+      expect(await store.claimTurn(profile, '2026-10-02', 2)).toBe(true);
+      expect(await store.claimTurn(`${profile}-b`, '2026-10-01', 2)).toBe(true);
+    });
+
+    test('claims racing at the cap grant exactly the cap', async () => {
+      const store = storeOf(new FakeClock());
+      const profile = `p${++serial}`;
+      const granted = await Promise.all(
+        Array.from({ length: 10 }, () =>
+          store.claimTurn(profile, '2026-10-01', 3),
+        ),
+      );
+      expect(granted.filter(Boolean)).toHaveLength(3);
+    });
+
+    test('retention finds closed rows of the profiles it is given only', async () => {
+      const clock = new FakeClock();
+      const store = storeOf(clock);
+      const opened = await Promise.all(
+        ['operator', 'custodian', 'investigator'].map((profile) =>
+          store.open(ref(), profile),
+        ),
+      );
+      for (const row of opened) {
+        await store.patch(row.key, { state: 'closed' });
+      }
+      await clock.advance(1_000);
+      const keys = (
+        await store.closedBefore(clock.now(), 100, ['operator', 'custodian'])
+      ).map((row) => row.key);
+      expect(opened.map((row) => keys.includes(row.key))).toEqual([
+        true,
+        true,
+        false,
+      ]);
+      expect(await store.closedBefore(clock.now(), 100, [])).toEqual([]);
+    });
+  });
+}
+
+describe('a row from before profiles', () => {
+  test('reads, reopens and is swept as the default profile', async () => {
+    const clock = new FakeClock();
+    const store = storeAt(clock);
+    const thread = ref();
+    const key = `discord:${thread.id}`;
+    // As an image from before profiles inserts it.
+    await database().sql`
+      INSERT INTO mate_threads (key, surface, channel_id, thread_id, state,
+        session_id, created_at, updated_at)
+      VALUES (${key}, 'discord', ${thread.channelId}, ${thread.id}, 'closed',
+        ${key}, ${clock.now()}, ${clock.now()})
+    `;
+    expect((await store.get(key))?.profile).toBe('operator');
+    await clock.advance(1_000);
+    const swept = await store.closedBefore(clock.now(), 100, ['operator']);
+    expect(swept.map((row) => row.key)).toContain(key);
+    expect(
+      (await store.closedBefore(clock.now(), 100, ['investigator'])).map(
+        (row) => row.key,
+      ),
+    ).not.toContain(key);
+    expect((await store.open(thread, 'investigator')).profile).toBe('operator');
   });
 });
 
