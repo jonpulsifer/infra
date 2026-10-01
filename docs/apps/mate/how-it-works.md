@@ -93,6 +93,7 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 | Pod | Egress |
 | --- | --- |
 | mate | DNS, Discord, Slack, `api.github.com`, `opencode.ai`, `auth.openai.com` and `chatgpt.com` on 443, the API server, the OTLP collector, the `mate-db` instance on 5432, the kthx engine's web pods on 3000, the weather MCP server's pods on 8080 |
+| `mate-db-restic` | DNS, the `mate-db` instance on 5432, offsite's nodes on 8000 for the restic staging repository on oldschool |
 | Sandbox | DNS; the internet on 80 and 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; offsite's nodes on 22; `CILIUM_NATIVE_ROUTING_CIDR`, which holds folly's hosts and API server, on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 | Read-only sandbox | DNS for `cluster.local`, folly's API server name and `github.com`; this cluster's API server, and folly's by name, on 6443; `github.com` on 443 only while `lolwtf.ca/checkout=open`, which mate closes before the agent's first command |
 
@@ -100,7 +101,7 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 
 The microVM isolates the kernel. mate's ingress admits only the node it runs on. The sandbox's policy keeps it away from `mate` and from Alertmanager, whose API takes an alert from anyone, but as `cluster-admin` and root on the nodes it can reach both on purpose.
 
-No policy selects the `mate-db` instance or the backup Job's pod. The CloudNativePG controller, Prometheus and the kubelet reach the instance, and the Job reaches Google Cloud. A sandbox reaches neither, because its egress leaves out every pod in `mate`.
+No policy selects the `mate-db` instance or the `mate-db-backup` Job's pod. The CloudNativePG controller, Prometheus and the kubelet reach the instance, and that Job reaches Google Cloud. A sandbox reaches neither, because its egress leaves out every pod in `mate`.
 
 ## Session store
 
@@ -108,7 +109,7 @@ No policy selects the `mate-db` instance or the backup Job's pod. The CloudNativ
 
 `packages/pi-store-postgres/` keeps pi's sessions in tables prefixed `pi_`. mate keeps a row per thread in `mate_threads`: its session id, its sandbox and the turn in flight, so a restarted mate finds every open thread. `mate_profile_turns` counts each automation and job profile's turns per UTC day. `mate_credentials` holds the ChatGPT sign-in, and mate is its only writer. A credential that mate cannot save stays in memory, and mate retries the write every 30 seconds. mate deletes the session of a thread closed for more than `MATE_SESSION_RETENTION_DAYS`, 14 by default. If the store is down, mate stays connected and tells each thread that it cannot reach its memory.
 
-CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped `pg_dump` to `gs://homelab-ng-mate/backups/pg/` at 04:43 UTC. The dump leaves out the rows of `mate_credentials`, so a restore needs a new ChatGPT sign-in. It signs in to Google Cloud as `mate-db-backup@homelab-ng` through workload identity federation, with no key. `terraform/gcp/projects/homelab-ng/mate.tf` declares that account and the bucket, which deletes a dump after 30 days. There is no WAL archive, so a restore loses every write after the last dump.
+CronJob `mate-db-backup`, in `database-backup.yaml` beside it, writes a gzipped `pg_dump` to `gs://homelab-ng-mate/backups/pg/` at 04:43 UTC. The dump leaves out the rows of `mate_credentials`, so a restore needs a new ChatGPT sign-in. It signs in to Google Cloud as `mate-db-backup@homelab-ng` through workload identity federation, with no key. `terraform/gcp/projects/homelab-ng/mate.tf` declares that account and the bucket, which deletes a dump after 30 days. CronJob `mate-db-restic`, in `database-restic.yaml`, writes a custom-format `pg_dump` with the same exclusion to offsite's restic staging repository at 01:40 `America/Halifax`, as host `offsite/mate/mate-db` with tag `kind=pg`. It reads the repository key and the rest-server login from Secret `restic`, which `clusters/base/components/restic-backup` declares. There is no WAL archive, so a restore loses every write after the last dump.
 
 ## Fence
 

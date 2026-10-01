@@ -13,4 +13,7 @@ resources:
   - sandbox-reader-network-policy.yaml
   - database.yaml
   - database-backup.yaml
+  - database-restic.yaml
   - deployment.yaml
+components:
+  - ../../../base/components/restic-backup

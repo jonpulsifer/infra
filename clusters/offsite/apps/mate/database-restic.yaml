@@ -1,0 +1,168 @@
+---
+# Nightly `pg_dump` of the session database into the site's restic staging
+# repository on oldschool, which the `backups` namespace copies to GCS.
+# database-backup.yaml's plain dump to the mate bucket runs beside it.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mate-db-restic
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-db-restic
+    app.kubernetes.io/part-of: mate
+    lolwtf.ca/backup: "true"
+spec:
+  schedule: "40 1 * * *"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A missed run is skipped; the next night's dump covers it.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # Three days to read a failed run: `failedJobsHistoryLimit` alone evicts by count.
+      ttlSecondsAfterFinished: 259200
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          # The `mate-db-restic` CiliumNetworkPolicy below selects this label.
+          labels:
+            app.kubernetes.io/name: mate-db-restic
+            app.kubernetes.io/part-of: mate
+        spec:
+          # OnFailure deletes the retried pod when `backoffLimit` is spent, so no
+          # log survives. Never keeps each failed attempt.
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: dump
+              # Keep this major equal to the server's, which the CNPG operator's
+              # default image sets, or `pg_dump` refuses the server.
+              image: ghcr.io/cloudnative-pg/postgresql:18
+              # Uncompressed, so restic deduplicates across nights and compresses
+              # once. The ChatGPT sign-in stays out of the backup; a restore signs
+              # in again.
+              command:
+                - bash
+                - -c
+                - set -euo pipefail; pg_dump -d "$DATABASE_URL" -Fc -Z 0 --exclude-table-data=mate_credentials -f /dump/mate-db.dump
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: mate-db-app
+                      key: uri
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              # The first producer to run creates the staging repository.
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  restic cat config >/dev/null 2>&1 || restic init
+                  exec restic backup --host offsite/mate/mate-db --tag kind=pg /dump/mate-db.dump
+              env:
+                - name: RESTIC_REPOSITORY
+                  valueFrom:
+                    configMapKeyRef:
+                      name: restic
+                      key: RESTIC_REPOSITORY
+                - name: RESTIC_CACHE_DIR
+                  value: /tmp/restic
+                - name: HOME
+                  value: /tmp
+              # RESTIC_PASSWORD, RESTIC_REST_USERNAME and RESTIC_REST_PASSWORD,
+              # from clusters/base/components/restic-backup.
+              envFrom:
+                - secretRef:
+                    name: restic
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: dump
+              emptyDir:
+                sizeLimit: 5Gi
+            - name: tmp
+              emptyDir: {}
+---
+# Egress for the CronJob's pod: the session store and the site's restic staging
+# repository, nothing else. It lives here, not in network-policy.yaml, because
+# apps/mate/test/chatgpt.test.ts reads that file as mate's one policy.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate-db-restic
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-db-restic
+    app.kubernetes.io/part-of: mate
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mate-db-restic
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: mate-db
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # The rest-server on oldschool, a node of this cluster. A CIDR or FQDN rule
+    # never matches this cluster's own nodes while policy-cidr-match-mode is
+    # unset, so they are the host and remote-node entities.
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP

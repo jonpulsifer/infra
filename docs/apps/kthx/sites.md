@@ -58,6 +58,8 @@ Each site has its own Postgres database and role on the `kthx-db` cluster. `KTHX
 
 A nightly `pg_dumpall` at 04:23 UTC writes to `backups/pg/` in the bucket, which keeps each dump 30 days. A restore loses later writes.
 
+CronJob `kthx-sites-restic`, in `clusters/offsite/apps/kthx/sites-backup.yaml`, backs up the `kthx-sites` volume to offsite's restic staging repository at 03:10 `America/Halifax`, as host `offsite/kthx/kthx-sites` with tag `kind=pvc`. Its pod joins the kthx pod on its node and mounts the claim read-only.
+
 This tests production on a throwaway site and leaves its name taken.
 
 ```bash
