@@ -1,0 +1,12 @@
+---
+# This site's staging repository on its rest-server. The server is
+# append-only: a producer adds snapshots and cannot forget them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: restic
+  labels:
+    app.kubernetes.io/name: restic
+    app.kubernetes.io/part-of: backups
+data:
+  RESTIC_REPOSITORY: rest:http://${RESTIC_STAGING_HOST}:8000/${CLUSTER_NAME}/

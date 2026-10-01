@@ -67,7 +67,10 @@ spec:
                   exec restic backup --host offsite/kthx/kthx-sites --tag kind=pvc /sites
               env:
                 - name: RESTIC_REPOSITORY
-                  value: rest:http://oldschool.lolwtf.ca:8000/offsite/
+                  valueFrom:
+                    configMapKeyRef:
+                      name: restic
+                      key: RESTIC_REPOSITORY
                 - name: RESTIC_CACHE_DIR
                   value: /tmp/restic
                 - name: HOME

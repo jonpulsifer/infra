@@ -89,7 +89,10 @@ spec:
                   exec restic backup --host offsite/mate/mate-db --tag kind=pg /dump/mate-db.dump
               env:
                 - name: RESTIC_REPOSITORY
-                  value: rest:http://oldschool.lolwtf.ca:8000/offsite/
+                  valueFrom:
+                    configMapKeyRef:
+                      name: restic
+                      key: RESTIC_REPOSITORY
                 - name: RESTIC_CACHE_DIR
                   value: /tmp/restic
                 - name: HOME
