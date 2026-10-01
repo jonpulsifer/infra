@@ -40,6 +40,7 @@ import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
+import { logWarn } from '../telemetry/index.ts';
 import type { BosunOutbox } from './build/bosun.ts';
 import type { BuildAdapter } from './build/contract.ts';
 import { findBuildRouteDescriptor } from './build/descriptors.ts';
@@ -60,6 +61,7 @@ import {
 } from './deploy/vercel/index.ts';
 import { ClusterDnsPublisher } from './dns/cluster.ts';
 import type { DnsPublisher } from './dns/contract.ts';
+import { type KthxClient, kthxClient } from './kthx.ts';
 import type { SecretStore } from './store/contract.ts';
 import {
   DEFAULT_ENDPOINT as SECRET_MANAGER_DEFAULT_ENDPOINT,
@@ -119,6 +121,8 @@ export interface RegistryOptions {
   readonly storeToken?: () => string | Promise<string>;
   readonly vercelToken?: TokenProvider;
   readonly cloudflareToken?: TokenProvider;
+  /** Replaces the file at `SPINDRIFT_KTHX_TOKEN_PATH`. */
+  readonly kthxToken?: TokenProvider;
   /** One federated token for cloud runtimes and the cloud build service. */
   readonly cloudToken?: () => string | Promise<string>;
   /** Replaces the default repository source stager. */
@@ -235,6 +239,8 @@ export function createAdapterRegistry(
     token: options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
+
+  const kthx = kthxFor(options);
 
   // The bosun route claims against durable state: no database, no outbox.
   const outbox =
@@ -468,6 +474,11 @@ export function createAdapterRegistry(
     dns(): DnsPublisher | null {
       return dns;
     },
+
+    /** `null` unless the installation names kthx's origin, zone and token. */
+    kthx(): KthxClient | null {
+      return kthx;
+    },
   };
 }
 
@@ -568,6 +579,46 @@ function cloudTokenFor(options: RegistryOptions): TokenProvider {
     ...federation,
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
+}
+
+export const KTHX_URL_VARIABLE = 'SPINDRIFT_KTHX_URL';
+/** Restated beside the URL: the deploy gate needs the zone without a call. */
+export const KTHX_ZONE_VARIABLE = 'SPINDRIFT_KTHX_ZONE';
+export const KTHX_TOKEN_PATH_VARIABLE = 'SPINDRIFT_KTHX_TOKEN_PATH';
+
+const KTHX_VARIABLES = [
+  KTHX_URL_VARIABLE,
+  KTHX_ZONE_VARIABLE,
+  KTHX_TOKEN_PATH_VARIABLE,
+] as const;
+
+let kthxGapLogged = false;
+
+/**
+ * The kthx client, only when all three variables are set. A partial set is a
+ * mistake, so the process says once which variable is missing.
+ */
+function kthxFor(options: RegistryOptions): KthxClient | null {
+  const env = options.env ?? Bun.env;
+  const [url, zone, tokenPath] = KTHX_VARIABLES.map(
+    (variable) => env[variable]?.trim() || null,
+  );
+  if (url && zone && tokenPath) {
+    return kthxClient({
+      url,
+      zone,
+      token: options.kthxToken ?? projectedServiceAccountToken(tokenPath),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
+  }
+  const missing = KTHX_VARIABLES.filter((variable) => !env[variable]?.trim());
+  if (missing.length < KTHX_VARIABLES.length && !kthxGapLogged) {
+    kthxGapLogged = true;
+    logWarn('kthx sites are off: a kthx variable is missing', {
+      missing: missing.join(', '),
+    });
+  }
+  return null;
 }
 
 /** The 1Password Connect bearer, read per call so a rotated Secret applies. */

@@ -8,6 +8,7 @@ import type { CloudflareAccounts } from '../adapters/cloudflare.ts';
 import type { DatastoreAdapter } from '../adapters/datastore/contract.ts';
 import type { DeployAdapter } from '../adapters/deploy/contract.ts';
 import type { DnsPublisher } from '../adapters/dns/contract.ts';
+import type { KthxClient } from '../adapters/kthx.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
 import type {
   InstallationManifest,
@@ -86,6 +87,8 @@ export interface AdapterRegistry {
    * when the manifest declares no control-plane Kubernetes Target to carry them.
    */
   dns?(): DnsPublisher | null;
+  /** kthx's engine surface; `null` when the installation names no kthx. */
+  kthx?(): KthxClient | null;
   supplyChain(): SupplyChain;
 }
 
