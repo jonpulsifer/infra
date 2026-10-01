@@ -315,8 +315,8 @@ const HOLDER = /^[a-z0-9-]{1,64}$/;
 const MAX_RESERVE_BYTES = 16 * 1024;
 const RESERVE_BODY_MS = 10_000;
 const MAX_RESERVE_NAMES = 32;
-const ENGINE_PAGE = 50;
-const MAX_ENGINE_PAGE = 200;
+export const ENGINE_PAGE = 50;
+export const MAX_ENGINE_PAGE = 200;
 
 function isLabel(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 63 && LABEL.test(value);

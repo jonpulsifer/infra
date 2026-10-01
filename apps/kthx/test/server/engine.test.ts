@@ -7,10 +7,12 @@ import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { base64urlEncode } from '@repo/archive/bytes';
 import { tarGz } from '../../cli/tar.ts';
 import {
+  ENGINE_PAGE,
   EngineKeys,
   FAILED_RELOAD_MS,
   KEYS_STALE_MS,
   KEYS_TTL_MS,
+  MAX_ENGINE_PAGE,
   RELOAD_WAIT_MS,
 } from '../../server/engine.ts';
 import {
@@ -608,11 +610,21 @@ describe('the admin list', () => {
   });
 
   test('clamps the page size and refuses a cursor that is not a name', async () => {
-    await claimed('clamp');
-    expect((await engine('/sites?limit=99999')).body.items).toHaveLength(1);
-    expect((await engine('/sites?limit=nonsense')).body.items).toHaveLength(1);
-    expect((await engine('/sites?limit=')).body.items).toHaveLength(1);
-    expect((await engine('/sites?limit=0')).body.items).toHaveLength(1);
+    const total = MAX_ENGINE_PAGE + 1;
+    await kthx().sql`
+      insert into sites (name, token_hash)
+      select 'clamp-' || n, 'unused' from generate_series(1, ${total}::int) n
+    `;
+    const sized = async (limit: string) => {
+      const { body } = await engine(`/sites?limit=${limit}`);
+      expect(body.total).toBe(total);
+      expect(body.next).not.toBeNull();
+      return body.items.length;
+    };
+    expect(await sized('99999')).toBe(MAX_ENGINE_PAGE);
+    expect(await sized('nonsense')).toBe(ENGINE_PAGE);
+    expect(await sized('')).toBe(ENGINE_PAGE);
+    expect(await sized('0')).toBe(1);
     expect(await engine('/sites?after=Not%20A%20Name')).toMatchObject({
       status: 400,
       body: { code: 'INVALID_QUERY' },
