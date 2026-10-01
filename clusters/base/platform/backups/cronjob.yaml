@@ -1,0 +1,133 @@
+---
+# Copies this site's staging repository to its GCS bucket, then applies the
+# bucket's retention. RESTIC_PUSH_SCHEDULE in each cluster's cluster-settings
+# sets the day: folly's Starlink uplink pushes once a week. Staging is
+# append-only and only read here; its host prunes it after the push.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-push
+  labels:
+    app.kubernetes.io/name: restic-push
+    app.kubernetes.io/part-of: backups
+    lolwtf.ca/backup: "true"
+spec:
+  schedule: "${RESTIC_PUSH_SCHEDULE}"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A missed run is skipped; the next one copies every snapshot it missed.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # A week to read a failed run, the gap between folly's pushes.
+      ttlSecondsAfterFinished: 604800
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: restic-push
+            app.kubernetes.io/part-of: backups
+        spec:
+          # OnFailure deletes the retried pod when `backoffLimit` is spent, so no
+          # log survives. Never keeps each failed attempt.
+          restartPolicy: Never
+          serviceAccountName: restic-push
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: push
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              # Exit code 10 is restic's "repository does not exist". The new
+              # repository takes staging's chunker parameters, or `copy`
+              # re-chunks every file and nothing deduplicates.
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  rc=0
+                  restic cat config >/dev/null || rc=$?
+                  if [ "$rc" -eq 10 ]; then
+                    restic init --copy-chunker-params --from-repo "$RESTIC_FROM_REPOSITORY"
+                  elif [ "$rc" -ne 0 ]; then
+                    exit "$rc"
+                  fi
+                  restic copy --from-repo "$RESTIC_FROM_REPOSITORY"
+                  restic forget --prune --keep-daily 7 --keep-weekly 8 --keep-monthly 12
+              env:
+                # Bucket and account: terraform/gcp/projects/homelab-ng.
+                - name: RESTIC_REPOSITORY
+                  value: gs:homelab-ng-backups-${CLUSTER_NAME}:/
+                - name: GOOGLE_PROJECT_ID
+                  value: homelab-ng
+                - name: GOOGLE_APPLICATION_CREDENTIALS
+                  value: /var/run/secrets/gcp/gcp-credentials.json
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: RESTIC_PASSWORD
+                - name: RESTIC_FROM_REPOSITORY
+                  valueFrom:
+                    configMapKeyRef:
+                      name: restic
+                      key: RESTIC_REPOSITORY
+                # Every repository shares one key.
+                - name: RESTIC_FROM_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: RESTIC_PASSWORD
+                - name: RESTIC_REST_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: RESTIC_REST_USERNAME
+                - name: RESTIC_REST_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: RESTIC_REST_PASSWORD
+                - name: RESTIC_CACHE_DIR
+                  value: /cache
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: cache
+                  mountPath: /cache
+                - name: tmp
+                  mountPath: /tmp
+                - name: gcp-federation
+                  mountPath: /var/run/secrets/gcp
+                  readOnly: true
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {memory: 2Gi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: cache
+              emptyDir:
+                sizeLimit: 5Gi
+            - name: tmp
+              emptyDir: {}
+            - name: gcp-federation
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/${CLUSTER_NAME}
+                      expirationSeconds: 3600
+                      path: gcp-token
+                  - configMap:
+                      name: restic-push-gcp
