@@ -1,0 +1,97 @@
+---
+# Every backup CronJob carries the label lolwtf.ca/backup: "true", which each
+# cluster's kube-state-metrics exports as label_lolwtf_ca_backup through
+# metricLabelsAllowlist in kube-prometheus.yaml. Host jobs write
+# lab_backup_last_success_timestamp_seconds to the node-exporter textfile
+# directory. Each alert keys on the time of the last success, so it clears on
+# the next good run and never on a Job someone deletes.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: backup
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: backup
+    release: prom-stack
+spec:
+  groups:
+    - name: backup
+      rules:
+        # How old a backup CronJob's last success may be: a day and two hours,
+        # or eight days when its schedule fires less than every two days, as
+        # folly's Wednesday push does. kube-state-metrics computes the next
+        # schedule from the last one, so their difference is the period. A
+        # suspended CronJob exports no next schedule and falls back to a day.
+        - record: cronjob:backup_max_age_seconds
+          expr: |
+            max by (namespace, cronjob) (kube_cronjob_labels{label_lolwtf_ca_backup="true"}) * 0 + 26 * 3600
+              unless on (namespace, cronjob)
+            (kube_cronjob_next_schedule_time - kube_cronjob_status_last_schedule_time > 2 * 86400)
+            or on (namespace, cronjob)
+            max by (namespace, cronjob) (kube_cronjob_labels{label_lolwtf_ca_backup="true"}) * 0 + 8 * 86400
+
+        # The second arm is a CronJob an hour past a schedule it never fired:
+        # suspended, held by a hung run under concurrencyPolicy Forbid, or a
+        # controller that stopped. It catches a job that has never succeeded,
+        # which the first arm cannot see.
+        - alert: BackupJobStale
+          expr: |
+            max by (namespace, cronjob) (time() - kube_cronjob_status_last_successful_time)
+              > on (namespace, cronjob) cronjob:backup_max_age_seconds
+            or
+            max by (namespace, cronjob) (time() - kube_cronjob_next_schedule_time > 3600)
+              and on (namespace, cronjob) kube_cronjob_labels{label_lolwtf_ca_backup="true"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has no recent success"
+            description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The restic repository it writes to holds nothing newer than that success. `kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }}` shows whether it is suspended and when it last ran; `kubectl -n {{ $labels.namespace }} get jobs` names a run still active or one that failed, whose pod logs carry restic's error."
+
+        # Under concurrencyPolicy Forbid at most one run is active, so a last
+        # schedule newer than the last success with nothing active is a run
+        # that ended without succeeding. The next good run clears it.
+        - alert: BackupJobFailed
+          expr: |
+            max by (namespace, cronjob) (
+              kube_cronjob_status_last_schedule_time
+                > on (namespace, cronjob) kube_cronjob_status_last_successful_time
+              or
+              kube_cronjob_status_last_schedule_time
+                unless on (namespace, cronjob) kube_cronjob_status_last_successful_time
+            )
+            and on (namespace, cronjob) kube_cronjob_status_active == 0
+            and on (namespace, cronjob) kube_cronjob_labels{label_lolwtf_ca_backup="true"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "The last run of backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} failed"
+            description: "The most recent run ended without succeeding, and no run is active. `kubectl -n {{ $labels.namespace }} get jobs` names the failed Job; its pods' logs carry the error. An unreachable staging rest-server, a wrong RESTIC_PASSWORD in the restic Secret, or a held repository lock are the usual causes. The alert clears on the next successful run."
+
+        # Each host job rewrites its textfile only on success. The folly
+        # staging prune on spore runs weekly after the push, so it gets eight
+        # days; every other host job runs daily.
+        - alert: HostBackupStale
+          expr: |
+            max by (instance, source) (time() - lab_backup_last_success_timestamp_seconds) > 26 * 3600
+              unless on (instance, source) lab_backup_last_success_timestamp_seconds{instance="spore", source=~".*prune.*"}
+            or
+            max by (instance, source) (time() - lab_backup_last_success_timestamp_seconds{instance="spore", source=~".*prune.*"}) > 8 * 86400
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.source }} on {{ $labels.instance }} last succeeded {{ $value | humanizeDuration }} ago"
+            description: "The host job's last success is older than its window, a day and two hours for a daily job and eight days for spore's weekly staging prune. `systemctl list-timers` on {{ $labels.instance }} shows when its timer last fired, and `journalctl -u` on the unit shows why the run failed. A staging prune that keeps failing leaves the append-only repository growing until its disk fills."
+
+        # The deadman: without the push CronJob's label series, every rule
+        # above is blind to the off-site copy.
+        - alert: BackupPushMissing
+          expr: absent(kube_cronjob_labels{namespace="backups", cronjob="restic-push", label_lolwtf_ca_backup="true"})
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "No backup push CronJob is reporting on this cluster"
+            description: "kube-state-metrics exports no labelled backups/restic-push, so nothing copies the staging repository to GCS and the backup alerts above see no CronJob. The CronJob is gone or has lost the lolwtf.ca/backup label, or kube-state-metrics runs without the metricLabelsAllowlist in this cluster's kube-prometheus.yaml. `kubectl -n backups get cronjob restic-push --show-labels` tells them apart."

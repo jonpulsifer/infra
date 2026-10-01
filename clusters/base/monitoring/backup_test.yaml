@@ -1,0 +1,287 @@
+---
+# promtool tests for backup-rules.yaml, run by `mise run k8s:check-rules`.
+# Timestamps are seconds from the start of each test, so a negative value is in
+# the past. A daily schedule is 86400 seconds apart and a weekly one 604800.
+rule_files:
+  - backup.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # Healthy: a daily job that succeeded an hour ago, a weekly push three days
+  # old with this week's run in flight, and an unlabelled CronJob far past
+  # every window. The push is present, so the deadman is quiet.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_labels{namespace="paperless",cronjob="paperless-db-backup",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x90
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: -3900x90
+      - series: 'kube_cronjob_status_last_successful_time{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: -3600x90
+      - series: 'kube_cronjob_next_schedule_time{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: 82500x90
+      - series: 'kube_cronjob_status_active{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: 0x90
+      - series: 'kube_cronjob_labels{namespace="backups",cronjob="restic-push",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x90
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: -3600x90
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: -259200x90
+      - series: 'kube_cronjob_next_schedule_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: 601200x90
+      - series: 'kube_cronjob_status_active{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: 1x90
+      - series: 'kube_cronjob_labels{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: 1x90
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -3600x90
+      - series: 'kube_cronjob_status_last_successful_time{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -1000000x90
+      - series: 'kube_cronjob_next_schedule_time{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: -10000x90
+      - series: 'kube_cronjob_status_active{namespace="mate",cronjob="mate-db-backup",job="kube-state-metrics"}'
+        values: 0x90
+    promql_expr_test:
+      - expr: cronjob:backup_max_age_seconds
+        eval_time: 5m
+        exp_samples:
+          - labels: 'cronjob:backup_max_age_seconds{namespace="paperless",cronjob="paperless-db-backup"}'
+            value: 93600
+          - labels: 'cronjob:backup_max_age_seconds{namespace="backups",cronjob="restic-push"}'
+            value: 691200
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BackupJobStale
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: BackupJobFailed
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: BackupPushMissing
+        exp_alerts: []
+
+  # A daily job whose run an hour ago failed, with its last success 25h50m
+  # old: the failure fires after 10 minutes, and the success goes stale at
+  # minute 10 and fires 15 minutes later.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_labels{namespace="paperless",cronjob="paperless-db-backup",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x40
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: -3600x40
+      - series: 'kube_cronjob_status_last_successful_time{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: -93000x40
+      - series: 'kube_cronjob_next_schedule_time{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: 82800x40
+      - series: 'kube_cronjob_status_active{namespace="paperless",cronjob="paperless-db-backup",job="kube-state-metrics"}'
+        values: 0x40
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: BackupJobFailed
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: BackupJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: paperless
+              cronjob: paperless-db-backup
+            exp_annotations:
+              message: "The last run of backup CronJob paperless/paperless-db-backup failed"
+              description: "The most recent run ended without succeeding, and no run is active. `kubectl -n paperless get jobs` names the failed Job; its pods' logs carry the error. An unreachable staging rest-server, a wrong RESTIC_PASSWORD in the restic Secret, or a held repository lock are the usual causes. The alert clears on the next successful run."
+      - eval_time: 20m
+        alertname: BackupJobStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupJobStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: paperless
+              cronjob: paperless-db-backup
+            exp_annotations:
+              message: "Backup CronJob paperless/paperless-db-backup has no recent success"
+              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The restic repository it writes to holds nothing newer than that success. `kubectl -n paperless get cronjob paperless-db-backup` shows whether it is suspended and when it last ran; `kubectl -n paperless get jobs` names a run still active or one that failed, whose pod logs carry restic's error."
+
+  # The weekly push may be eight days old: a success 7d23h50m ago goes stale
+  # at minute 10 while this week's run is still active, so only staleness
+  # fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_labels{namespace="backups",cronjob="restic-push",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x40
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: -86400x40
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: -690600x40
+      - series: 'kube_cronjob_next_schedule_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: 518400x40
+      - series: 'kube_cronjob_status_active{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: 1x40
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupJobStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupJobFailed
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupJobStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: backups
+              cronjob: restic-push
+            exp_annotations:
+              message: "Backup CronJob backups/restic-push has no recent success"
+              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The restic repository it writes to holds nothing newer than that success. `kubectl -n backups get cronjob restic-push` shows whether it is suspended and when it last ran; `kubectl -n backups get jobs` names a run still active or one that failed, whose pod logs carry restic's error."
+
+  # A new CronJob that has never succeeded. Its first run failed, so only the
+  # failure fires; a second has never fired at all and is two hours past its
+  # first schedule, so only staleness fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_labels{namespace="hass",cronjob="hass-config-backup",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x30
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="hass",cronjob="hass-config-backup",job="kube-state-metrics"}'
+        values: -600x30
+      - series: 'kube_cronjob_next_schedule_time{namespace="hass",cronjob="hass-config-backup",job="kube-state-metrics"}'
+        values: 85800x30
+      - series: 'kube_cronjob_status_active{namespace="hass",cronjob="hass-config-backup",job="kube-state-metrics"}'
+        values: 0x30
+      - series: 'kube_cronjob_labels{namespace="hass",cronjob="hass-db-backup",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x30
+      - series: 'kube_cronjob_next_schedule_time{namespace="hass",cronjob="hass-db-backup",job="kube-state-metrics"}'
+        values: -7200x30
+      - series: 'kube_cronjob_status_active{namespace="hass",cronjob="hass-db-backup",job="kube-state-metrics"}'
+        values: 0x30
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: hass
+              cronjob: hass-config-backup
+            exp_annotations:
+              message: "The last run of backup CronJob hass/hass-config-backup failed"
+              description: "The most recent run ended without succeeding, and no run is active. `kubectl -n hass get jobs` names the failed Job; its pods' logs carry the error. An unreachable staging rest-server, a wrong RESTIC_PASSWORD in the restic Secret, or a held repository lock are the usual causes. The alert clears on the next successful run."
+      - eval_time: 20m
+        alertname: BackupJobStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: hass
+              cronjob: hass-db-backup
+            exp_annotations:
+              message: "Backup CronJob hass/hass-db-backup has no recent success"
+              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The restic repository it writes to holds nothing newer than that success. `kubectl -n hass get cronjob hass-db-backup` shows whether it is suspended and when it last ran; `kubectl -n hass get jobs` names a run still active or one that failed, whose pod logs carry restic's error."
+
+  # A suspended CronJob exports no next schedule, so even a weekly one is held
+  # to a day: a success two days old fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_labels{namespace="backups",cronjob="restic-push",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x30
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: -172800x30
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: -172000x30
+      - series: 'kube_cronjob_status_active{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: 0x30
+    promql_expr_test:
+      - expr: cronjob:backup_max_age_seconds
+        eval_time: 5m
+        exp_samples:
+          - labels: 'cronjob:backup_max_age_seconds{namespace="backups",cronjob="restic-push"}'
+            value: 93600
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: BackupJobFailed
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: BackupJobStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: backups
+              cronjob: restic-push
+            exp_annotations:
+              message: "Backup CronJob backups/restic-push has no recent success"
+              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The restic repository it writes to holds nothing newer than that success. `kubectl -n backups get cronjob restic-push` shows whether it is suspended and when it last ran; `kubectl -n backups get jobs` names a run still active or one that failed, whose pod logs carry restic's error."
+
+  # Host jobs: a daily one 27 hours old fires, as does a daily job on spore
+  # that is not the prune. The spore prune is quiet at three days and fires
+  # past eight.
+  - interval: 1m
+    input_series:
+      - series: 'lab_backup_last_success_timestamp_seconds{instance="oldschool",source="restic-staging-prune",job="node-exporter"}'
+        values: -97200x30
+      - series: 'lab_backup_last_success_timestamp_seconds{instance="spore",source="restic-staging-prune",job="node-exporter"}'
+        values: -259200x30
+      - series: 'lab_backup_last_success_timestamp_seconds{instance="spore",source="restic-check",job="node-exporter"}'
+        values: -97200x30
+      - series: 'lab_backup_last_success_timestamp_seconds{instance="capsule",source="etcd",job="node-exporter"}'
+        values: -3600x30
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: HostBackupStale
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: HostBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: oldschool
+              source: restic-staging-prune
+            exp_annotations:
+              message: "restic-staging-prune on oldschool last succeeded 1d 3h 20m 0s ago"
+              description: "The host job's last success is older than its window, a day and two hours for a daily job and eight days for spore's weekly staging prune. `systemctl list-timers` on oldschool shows when its timer last fired, and `journalctl -u` on the unit shows why the run failed. A staging prune that keeps failing leaves the append-only repository growing until its disk fills."
+          - exp_labels:
+              severity: warning
+              instance: spore
+              source: restic-check
+            exp_annotations:
+              message: "restic-check on spore last succeeded 1d 3h 20m 0s ago"
+              description: "The host job's last success is older than its window, a day and two hours for a daily job and eight days for spore's weekly staging prune. `systemctl list-timers` on spore shows when its timer last fired, and `journalctl -u` on the unit shows why the run failed. A staging prune that keeps failing leaves the append-only repository growing until its disk fills."
+  - interval: 1m
+    input_series:
+      - series: 'lab_backup_last_success_timestamp_seconds{instance="spore",source="restic-staging-prune",job="node-exporter"}'
+        values: -691200x30
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: HostBackupStale
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: HostBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              source: restic-staging-prune
+            exp_annotations:
+              message: "restic-staging-prune on spore last succeeded 8d 0h 16m 0s ago"
+              description: "The host job's last success is older than its window, a day and two hours for a daily job and eight days for spore's weekly staging prune. `systemctl list-timers` on spore shows when its timer last fired, and `journalctl -u` on the unit shows why the run failed. A staging prune that keeps failing leaves the append-only repository growing until its disk fills."
+
+  # No labelled push CronJob: the deadman fires after an hour.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_labels{namespace="backups",cronjob="restic-push",job="kube-state-metrics"}'
+        values: 1x70
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: BackupPushMissing
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: BackupPushMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: backups
+              cronjob: restic-push
+              label_lolwtf_ca_backup: "true"
+            exp_annotations:
+              message: "No backup push CronJob is reporting on this cluster"
+              description: "kube-state-metrics exports no labelled backups/restic-push, so nothing copies the staging repository to GCS and the backup alerts above see no CronJob. The CronJob is gone or has lost the lolwtf.ca/backup label, or kube-state-metrics runs without the metricLabelsAllowlist in this cluster's kube-prometheus.yaml. `kubectl -n backups get cronjob restic-push --show-labels` tells them apart."

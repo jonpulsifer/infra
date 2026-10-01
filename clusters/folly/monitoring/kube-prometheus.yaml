@@ -244,6 +244,10 @@ spec:
               - *am
         pathType: Prefix
     kube-state-metrics:
+      # Backup CronJobs carry this label; ../../base/monitoring/backup-rules.yaml
+      # selects them by label_lolwtf_ca_backup.
+      metricLabelsAllowlist:
+        - cronjobs=[lolwtf.ca/backup]
       # Gateway API generation series; the config and alerts are in
       # ../../base/monitoring/gateway-api-generation.yaml.
       customResourceState:

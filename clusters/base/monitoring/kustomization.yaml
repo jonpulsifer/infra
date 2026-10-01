@@ -17,6 +17,7 @@ resources:
   - flux-rules.yaml
   - gateway-api-generation.yaml
   - node-saturation-rules.yaml
+  - backup-rules.yaml
   - grafana-dashboards
   - helm-repository-grafana.yaml
   - helm-repository-prometheus.yaml
