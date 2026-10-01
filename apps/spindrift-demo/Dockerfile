@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Static site demo: builds dist/ with build-time git facts, then serves it with bun.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:5f1b5386bd77dd4a5e814361bcf7abcbea93b5ffa0794eb02b71bf503d1cd659 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:5a20e7e0dd4670cff137f90c53157ec9c905d6531a4a9ee17eda4099155410b8 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local
 USER root
