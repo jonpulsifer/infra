@@ -51,7 +51,9 @@ spec:
       - name: SPINDRIFT_PUBLIC_HOSTNAME
         value: spindrift-control.${SPINDRIFT_DOMAIN}
       # kthx quick sites' `control.host` and their zone's apex, served on the
-      # same Apps gateway, so no App may take either.
+      # same Apps gateway, so no App may take either. A reserved name is
+      # checked against every declared zone, so once kthx.dev is one, no App
+      # in any zone may set its vanity to `@`.
       - name: SPINDRIFT_RESERVED_HOSTNAMES
         value: kthx.${SECRET_DOMAIN},kthx.dev
       # The engine reads quick sites from kthx's control host, and reserves a
