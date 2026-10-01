@@ -342,6 +342,37 @@ describe('reservations', () => {
     });
   });
 
+  test('more names than kthx takes at once go in batches of 32', async () => {
+    const labels = Array.from({ length: 70 }, (_, i) => `n${i}`);
+    const { sent, client } = engine(() => json({ holder: 'app-1' }));
+
+    expect(await client().reserve('app-1', labels)).toEqual({
+      ok: true,
+      value: [],
+    });
+    const batches = await Promise.all(
+      sent.map(async (request) => (await request.json()).names),
+    );
+    expect(batches.map((names) => names.length)).toEqual([32, 32, 6]);
+    expect(batches.flat()).toEqual(labels);
+  });
+
+  test('a batch kthx refuses stops the reserve with its answer', async () => {
+    const labels = Array.from({ length: 70 }, (_, i) => `n${i}`);
+    const taken = [{ name: 'n40', by: 'app' }] as const;
+    const { sent, client } = engine(() =>
+      sent.length === 1
+        ? json({ holder: 'app-1' })
+        : json({ code: 'TAKEN', message: 'that name is taken', taken }, 409),
+    );
+
+    expect(await client().reserve('app-1', labels)).toEqual({
+      ok: true,
+      value: taken,
+    });
+    expect(sent).toHaveLength(2);
+  });
+
   test('a release names the holder and each label', async () => {
     const { sent, client } = engine(() =>
       json({ holder: 'app-1', released: ['a', 'b'] }),

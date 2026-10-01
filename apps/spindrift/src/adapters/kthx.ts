@@ -89,6 +89,9 @@ const TIMEOUTS = { list: 3_000, call: 5_000 } as const;
 
 export const KTHX_BODY_LIMIT = 1024 * 1024;
 
+/** The most names kthx takes in one reserve. */
+export const RESERVE_BATCH = 32;
+
 const site = z.object({
   name: z.string(),
   url: z.string(),
@@ -241,20 +244,25 @@ export function kthxClient(options: KthxClientOptions): KthxClient {
       }));
     },
 
+    // A reservation is idempotent and never released by a reserve, so a batch
+    // held before a later one fails only keeps those names from a site.
     async reserve(holder, labels) {
-      const answer = await call(
-        'POST',
-        '/api/engine/reservations',
-        timeouts.call,
-        { holder, names: labels },
-      );
-      if (!answer.ok) return answer;
-      if (answer.status === 200) return { ok: true, value: [] };
-      if (answer.status === 409) {
-        const conflict = taken.safeParse(answer.body);
-        if (conflict.success) return { ok: true, value: conflict.data.taken };
+      for (let start = 0; start < labels.length; start += RESERVE_BATCH) {
+        const answer = await call(
+          'POST',
+          '/api/engine/reservations',
+          timeouts.call,
+          { holder, names: labels.slice(start, start + RESERVE_BATCH) },
+        );
+        if (!answer.ok) return answer;
+        if (answer.status === 200) continue;
+        if (answer.status === 409) {
+          const conflict = taken.safeParse(answer.body);
+          if (conflict.success) return { ok: true, value: conflict.data.taken };
+        }
+        return refusal(answer);
       }
-      return refusal(answer);
+      return { ok: true, value: [] };
     },
 
     async release(holder, labels) {
