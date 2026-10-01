@@ -169,6 +169,22 @@ func TestReconnectsCountTransitions(t *testing.T) {
 	}
 }
 
+// A broker that never connects must export 0, not no series.
+func TestBrokerNeverConnectedExportsZero(t *testing.T) {
+	s := fixedState(t, time.Unix(1000, 0))
+	s.SetBrokerConnected("myflameboss.com", false)
+	if v := only(t, s, "flameboss_broker_connected"); v != 0 {
+		t.Errorf("broker_connected before the first connect = %v, want 0", v)
+	}
+	if got := testutil.CollectAndCount(s, "flameboss_broker_reconnects_total"); got != 0 {
+		t.Errorf("reconnects before the first connect = %d, want 0", got)
+	}
+	s.SetBrokerConnected("myflameboss.com", true)
+	if v := only(t, s, "flameboss_broker_connected"); v != 1 {
+		t.Errorf("broker_connected after connecting = %v, want 1", v)
+	}
+}
+
 func TestControlPlaneDeviceOutlivesNoTelemetry(t *testing.T) {
 	s := fixedState(t, time.Unix(1000, 0))
 	s.SeeDevice(193415, "s2.myflameboss.com")

@@ -1,4 +1,7 @@
-# Cook alerts on the series apps/flameboss exports. Thresholds are in Fahrenheit.
+# Cook alerts on the series apps/flameboss exports. severity: notice marks an
+# event worth a Discord message that is not a fault. Alertmanager's InfoInhibitor
+# mutes severity: info in a namespace with no warning firing, so notice keeps
+# these two out of it. Thresholds are in Fahrenheit.
 # Below-set alerts require pit_reached_target, so the ramp from ambient is quiet.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -21,7 +24,7 @@ spec:
               and (time() - flameboss_cook_start_timestamp_seconds) < 900
           for: 2m
           labels:
-            severity: info
+            severity: notice
           annotations:
             message: "A cook has started on Flame Boss {{ $labels.device }}"
             description: "Telemetry is arriving and the pit has not reached its set temperature yet, so the fire is coming up. The dashboard is Grafana -> Flame Boss; the cook's own log is at https://myflameboss.com/en/cooks. This clears itself once the pit settles."
@@ -91,7 +94,7 @@ spec:
               and on (device) flameboss_cook_active == 1
           for: 1m
           labels:
-            severity: info
+            severity: notice
           annotations:
             message: "Probe {{ $labels.probe }} is at {{ $value | printf \"%.0f\" }}F on Flame Boss {{ $labels.device }}"
             description: "Through the stall and at the usual wrap point, and done for anything poultry. FlameBossMeatProbeAtTarget follows at 203F."
@@ -146,7 +149,7 @@ spec:
             severity: warning
           annotations:
             message: "Cook {{ $labels.device }} has gone quiet"
-            description: "No reading for five minutes from a controller that was cooking. If the cook is over and it was switched off, this resolves by itself half an hour after the last reading. If it is not over, the controller has lost power or wifi and the fire is now unattended."
+            description: "No reading for ten minutes from a controller that was cooking. If the cook is over and it was switched off, this resolves by itself half an hour after the last reading. If it is not over, the controller has lost power or wifi and the fire is now unattended."
 
         - alert: FlameBossCloudUnreachable
           expr: flameboss_broker_connected == 0
