@@ -169,12 +169,43 @@ describe('exactly one row lights, in the desktop rail, for a sample of paths', (
     '/settings/connections',
     '/deploys/1187',
     '/apps/some-app',
+    '/sites/acme',
   ]) {
     test(path, () => {
       const aside = withinAside(shell(path));
       expect(occurrences(aside, 'aria-current="page"')).toBe(1);
     });
   }
+});
+
+describe('a kthx site is under Apps', () => {
+  function withinAside(markup: string): string {
+    const start = markup.indexOf('<aside');
+    return markup.slice(start, markup.indexOf('</aside>', start));
+  }
+
+  test('its workspace lights All apps in the rail', () => {
+    const aside = withinAside(shell('/sites/acme'));
+    const lit = aside.slice(
+      aside.lastIndexOf('<button', aside.indexOf('aria-current="page"')),
+    );
+    expect(lit.slice(0, lit.indexOf('</button>'))).toContain('All apps');
+  });
+
+  test('and Apps on the phone bar', () => {
+    expect(activeKey('/sites/acme', PHONE_NAV)).toBe('apps');
+  });
+
+  test('the crumbs go through Apps to the site', () => {
+    expect(crumbsFor('/sites/acme')).toEqual([
+      { label: 'Apps', path: '/apps' },
+      { label: 'acme' },
+    ]);
+  });
+
+  test('the phone bar keeps seven entries', () => {
+    expect(PHONE_NAV).toHaveLength(7);
+  });
 });
 
 describe('the Apps group draws the rows it is given', () => {

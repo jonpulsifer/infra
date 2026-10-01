@@ -17,12 +17,14 @@
 
 import type {
   AppListItem,
+  AppRowsView,
   ChecklistItem,
   DeployView,
   GrantedRepositoryView,
   LinkedRepoView,
   LogLine,
   RepositoryOptionView,
+  SiteView,
   TargetListItem,
   TargetOptionView,
   VesselListItem,
@@ -1025,6 +1027,117 @@ export const APP_LIST: readonly AppListItem[] = [
     artifact: 'files · sha256:d82a1234',
   },
 ];
+
+/**
+ * The Apps list with kthx sites read: the built Apps, then a first page of
+ * sites, one anonymous, one held and one never deployed.
+ */
+export const APP_ROWS: AppRowsView = {
+  rows: [
+    ...APP_LIST.map((app, index) => ({
+      kind: 'app' as const,
+      key: app.id,
+      app: {
+        ...app,
+        target: ['kubernetes', 'kubernetes', 'cloudrun', 'cloudflare-pages'][
+          index
+        ]!,
+        deployId: 40 + index,
+        at: '2026-08-03T12:00:00.000Z',
+        when: `${index + 2}h ago`,
+      },
+    })),
+    {
+      kind: 'site',
+      key: 'site:acme',
+      site: {
+        name: 'acme',
+        url: 'https://acme.sites.example',
+        owner: 'ada@example.org',
+        release: 7,
+        held: false,
+        createdAt: '2026-07-30T12:00:00.000Z',
+        at: '2026-08-03T11:00:00.000Z',
+        when: '3h ago',
+      },
+    },
+    {
+      kind: 'site',
+      key: 'site:pinned-demo',
+      site: {
+        name: 'pinned-demo',
+        url: 'https://pinned-demo.sites.example',
+        owner: null,
+        release: 3,
+        held: true,
+        createdAt: '2026-07-21T09:00:00.000Z',
+        at: '2026-07-22T09:30:00.000Z',
+        when: '12d ago',
+      },
+    },
+    {
+      kind: 'site',
+      key: 'site:blank',
+      site: {
+        name: 'blank',
+        url: 'https://blank.sites.example',
+        owner: null,
+        release: null,
+        held: false,
+        createdAt: '2026-08-02T08:00:00.000Z',
+      },
+    },
+  ],
+  sites: { state: 'ok', total: 57 },
+  next: 'blank',
+};
+
+/** A held site with three releases, read by a human principal. */
+export const SITE_VIEW: SiteView = {
+  name: 'acme',
+  url: 'https://acme.sites.example',
+  owner: 'ada@example.org',
+  release: 7,
+  held: true,
+  createdAt: '2026-07-30T12:00:00.000Z',
+  at: '2026-08-03T11:00:00.000Z',
+  when: '3h ago',
+  provisioned: true,
+  releases: [
+    {
+      n: 7,
+      digest: `sha256:${'7a1c'.repeat(16)}`,
+      size: 184_320,
+      at: '2026-08-03T11:00:00.000Z',
+    },
+    {
+      n: 6,
+      digest: `sha256:${'6b2d'.repeat(16)}`,
+      size: 181_002,
+      at: '2026-08-01T15:20:00.000Z',
+    },
+    {
+      n: 5,
+      digest: `sha256:${'5c3e'.repeat(16)}`,
+      size: 2_400_000,
+      at: '2026-07-30T12:05:00.000Z',
+    },
+  ],
+  usage: {
+    dbBytes: 1_258_291,
+    filesBytes: 52_428_800,
+    aiRequestsToday: 12,
+    aiTokensToday: 48_210,
+  },
+  quotas: {
+    docBytes: 1_048_576,
+    dbBytes: 104_857_600,
+    fileBytes: 26_214_400,
+    filesBytes: 1_073_741_824,
+    aiRequestsDay: 200,
+    aiTokensDay: 500_000,
+  },
+};
 
 const CLUSTER_CHECKLIST = [
   { name: 'DELIVERY_OPERATOR', met: true },

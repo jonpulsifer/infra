@@ -11,6 +11,7 @@ import {
   ownHostnameClaimedBy,
 } from '../../domain/naming.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { kthxNamesOf, reserveForEdit } from './kthx-names.ts';
 import { namesUnder, placementsFor } from './names.ts';
 
 export const setAppVanityInput = z
@@ -69,6 +70,30 @@ export const setAppVanity: Command<
   }
 
   const placements = await placementsFor(context.db, app.id);
+
+  // Reserved before the write; a failed write leaves the names held by this
+  // App, which only keeps them from a site. A clear mints no name, and the
+  // deploy gate still holds the canonical ones.
+  const kthx = context.adapters.kthx?.() ?? null;
+  if (kthx !== null && input.label !== null) {
+    const refused = await reserveForEdit<SetAppVanityResult>(
+      kthx,
+      app.id,
+      kthxNamesOf(
+        app.name,
+        placements,
+        context.manifest.dns.zones,
+        app.zone,
+        input.label,
+        kthx.zone,
+      ),
+      {
+        path: 'label',
+        subject: `'${input.label}'`,
+      },
+    );
+    if (refused !== null) return refused;
+  }
 
   await context.db
     .update(apps)

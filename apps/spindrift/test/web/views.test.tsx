@@ -8,7 +8,9 @@ import type {
   WorkspaceView,
 } from '../../src/commands/views.ts';
 import { logos } from '../../src/web/client/logos/index.ts';
+import type { AppDeletionControls } from '../../src/web/components/delete-app.tsx';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
+import { AppList, appsEyebrow } from '../../src/web/views/apps/list.tsx';
 import {
   AUTH_NOTE,
   REACH_NOTE,
@@ -28,6 +30,7 @@ import { Overview } from '../../src/web/views/operations/overview.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
 import { TargetList } from '../../src/web/views/targets/list.tsx';
 import {
+  APP_ROWS,
   BUILD_ATTEMPT,
   DEPLOY_SCENARIOS,
   TARGET_LIST,
@@ -1558,5 +1561,159 @@ describe('a commit shows its headline beside the sha', () => {
     );
     expect(markup).toContain('a1b2c3d');
     expect(markup).toContain('feat(web): stop the header wrapping');
+  });
+});
+
+describe('the Apps list holds both kinds', () => {
+  const deletion: AppDeletionControls = {
+    state: { kind: 'idle' },
+    review: () => undefined,
+    confirm: () => undefined,
+    dismiss: () => undefined,
+  };
+  const list = (view = APP_ROWS) =>
+    words(
+      renderToStaticMarkup(
+        <AppList
+          view={view}
+          deletion={deletion}
+          onNavigate={() => undefined}
+        />,
+      ),
+    );
+  const builtOnly = {
+    ...APP_ROWS,
+    rows: APP_ROWS.rows.filter((row) => row.kind === 'app'),
+    next: null,
+  };
+
+  test('the columns say what each row carries', () => {
+    const text = list();
+    for (const header of [
+      'App',
+      'Status',
+      'Deployment',
+      'Domain',
+      'Deployed',
+    ]) {
+      expect(text).toContain(` ${header} `);
+    }
+  });
+
+  test('a built row names its Target and the Deploy behind its status', () => {
+    const text = list();
+    expect(text).toContain('vessel-a/kubernetes · Deploy #40');
+    expect(text).toContain('hub.apps.example');
+    expect(text).toContain('example-org/infra');
+  });
+
+  test('a site row reads its release, owner and domain', () => {
+    const text = list();
+    expect(text).toContain('release 7');
+    expect(text).toContain('ada@example.org');
+    expect(text).toContain('acme.sites.example');
+    // An anonymous claim says so; the scheme is not part of the domain.
+    expect(text).toContain('anonymous');
+    expect(text).not.toContain('https://acme.sites.example');
+  });
+
+  test('held is a gloss on the release, and the site is still Live', () => {
+    const text = list();
+    expect(text).toContain('release 3 · held');
+    expect(
+      renderToStaticMarkup(
+        <AppList
+          view={APP_ROWS}
+          deletion={deletion}
+          onNavigate={() => undefined}
+        />,
+      ),
+    ).toContain('aria-label="pinned-demo, site, Live"');
+  });
+
+  test('a site with no release reads Never deployed, with a hollow dot', () => {
+    const markup = renderToStaticMarkup(
+      <AppList
+        view={APP_ROWS}
+        deletion={deletion}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).toContain('aria-label="blank, site, Never deployed"');
+    const start = markup.indexOf('aria-label="blank, site');
+    const row = markup.slice(start, markup.indexOf('</button>', start));
+    expect(row).toContain('text-status-idle');
+    expect(row).toContain('border border-current');
+  });
+
+  test('an agent principal gets no owner line, not an anonymous one', () => {
+    const [row] = APP_ROWS.rows.filter((each) => each.kind === 'site');
+    if (row?.kind !== 'site') throw new Error('no site row');
+    const { owner: _, ...site } = row.site;
+    const text = list({
+      rows: [{ ...row, site }],
+      sites: { state: 'ok', total: 1 },
+      next: null,
+    });
+    expect(text).not.toContain('ada@example.org');
+    expect(text).not.toContain('anonymous');
+  });
+
+  test('the eyebrow counts every App, then each kind', () => {
+    expect(appsEyebrow(APP_ROWS)).toBe('61 apps · 4 app · 57 site');
+  });
+
+  test('unreadable sites leave the built Apps, and say why', () => {
+    const view = {
+      ...builtOnly,
+      sites: {
+        state: 'unreadable' as const,
+        reason: 'kthx did not answer within 3s',
+      },
+    };
+    expect(appsEyebrow(view)).toBe('4 apps · sites unreadable');
+    const text = list(view);
+    expect(text).toContain('kthx did not answer within 3s');
+    expect(text).not.toContain('Load more sites');
+    expect(text).not.toContain('Every site loaded');
+  });
+
+  test('with sites off, the list is the built Apps alone', () => {
+    const view = { ...builtOnly, sites: { state: 'off' as const } };
+    expect(appsEyebrow(view)).toBe('4 apps');
+    const markup = renderToStaticMarkup(
+      <AppList view={view} deletion={deletion} onNavigate={() => undefined} />,
+    );
+    expect(markup).not.toContain(', site, ');
+    expect(markup).not.toContain('Every site loaded');
+  });
+
+  test('more sites load on request, and the end says so', () => {
+    expect(list()).toContain('Load more sites');
+    const done = list({ ...APP_ROWS, next: null });
+    expect(done).toContain('Every site loaded.');
+    expect(done).not.toContain('Load more sites');
+  });
+
+  test('the filter says it covers the loaded rows only', () => {
+    const markup = renderToStaticMarkup(
+      <AppList
+        view={APP_ROWS}
+        deletion={deletion}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).toContain('aria-label="Filter the loaded Apps"');
+  });
+
+  test('no copy names the engine', () => {
+    const markup = renderToStaticMarkup(
+      <AppList
+        view={APP_ROWS}
+        deletion={deletion}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).not.toMatch(/spindrift/i);
   });
 });

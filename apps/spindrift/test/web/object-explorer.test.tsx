@@ -413,13 +413,17 @@ describe('a ledger filter matches the headline it shows', () => {
     };
     const markup = renderToStaticMarkup(
       <AppList
-        apps={[app]}
+        view={{
+          rows: [{ kind: 'app', key: app.id, app }],
+          sites: { state: 'off' },
+          next: null,
+        }}
         filter="header wrapping"
         deletion={deletion}
         onNavigate={() => undefined}
       />,
     );
-    expect(markup).not.toContain('No App matches');
-    expect(markup).toContain('morrow');
+    expect(markup).not.toContain('No loaded App matches');
+    expect(markup).toContain('aria-label="morrow, app, ');
   });
 });

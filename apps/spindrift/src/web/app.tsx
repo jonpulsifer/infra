@@ -26,6 +26,7 @@ import { DatastoresScreen } from './views/operations/datastores.tsx';
 import { DeploysScreen } from './views/operations/deploys.tsx';
 import { OverviewScreen } from './views/operations/overview.tsx';
 import { SettingsScreen } from './views/settings/layout.tsx';
+import { SiteScreen } from './views/sites/site.tsx';
 import { ArtifactsScreen } from './views/supply-chain/artifacts.tsx';
 import { BuildsScreen } from './views/supply-chain/builds.tsx';
 import { SourcesScreen } from './views/supply-chain/sources.tsx';
@@ -220,6 +221,11 @@ export function SignedIn({
   );
 }
 
+/** A kthx site's name, from `/sites/<name>` only; a bare `/sites` is not one. */
+function siteNameOf(path: string): string | null {
+  return path.match(/^\/sites\/(.+)$/)?.[1] ?? null;
+}
+
 /**
  * Mirrors {@link Screen} branch for branch, from the path alone, so a tab is
  * titled before any fetch returns.
@@ -246,6 +252,8 @@ export function titleOf(path: string): string {
     const buildId = path.replace(/^\/builds\/?/, '');
     return buildId ? pageTitle(`Build #${buildId}`) : pageTitle('Builds');
   }
+  const site = siteNameOf(path);
+  if (site !== null) return pageTitle(site);
   if (path === '/' || path === '') return pageTitle();
   if (path === '/apps') return pageTitle('Apps');
   const appName = path.replace(/^\/apps\//, '').replace(/^\//, '');
@@ -328,6 +336,11 @@ export function Screen({
     ) : (
       <BuildsScreen onNavigate={onNavigate} />
     );
+  }
+  // Sites never live under `/apps/<x>`, where any name is a built App's.
+  const site = siteNameOf(path);
+  if (site !== null) {
+    return <SiteScreen key={site} name={site} onNavigate={onNavigate} />;
   }
   if (path === '/' || path === '')
     return <OverviewScreen onNavigate={onNavigate} />;

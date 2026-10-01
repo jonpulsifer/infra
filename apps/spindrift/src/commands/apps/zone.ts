@@ -9,6 +9,7 @@ import { apps } from '../../db/schema.ts';
 import { coreMintsCanonical, zoneFor } from '../../domain/naming.ts';
 import { targetLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { kthxNamesOf, reserveForEdit } from './kthx-names.ts';
 import { namesUnder, placementsFor } from './names.ts';
 
 export const setAppZoneInput = z
@@ -33,7 +34,7 @@ export const setAppZone: Command<SetAppZoneInput, SetAppZoneResult> = async (
   context,
 ) => {
   const [app] = await context.db
-    .select({ id: apps.id, name: apps.name })
+    .select({ id: apps.id, name: apps.name, vanityDomain: apps.vanityDomain })
     .from(apps)
     .where(eq(apps.id, input.appId))
     .limit(1);
@@ -76,6 +77,29 @@ export const setAppZone: Command<SetAppZoneInput, SetAppZoneResult> = async (
           'so pick a zone that serves every reach this App asks for, or change the reach first.',
       );
     }
+  }
+
+  // Moving out of kthx's zone releases nothing: the live routes keep the old
+  // names until the next Deploy, and only a delete releases.
+  const kthx = context.adapters.kthx?.() ?? null;
+  if (kthx !== null) {
+    const refused = await reserveForEdit<SetAppZoneResult>(
+      kthx,
+      app.id,
+      kthxNamesOf(
+        app.name,
+        placements,
+        zones,
+        input.zone,
+        app.vanityDomain,
+        kthx.zone,
+      ),
+      {
+        path: 'zone',
+        subject: input.zone === null ? 'the default zone' : `'${input.zone}'`,
+      },
+    );
+    if (refused !== null) return refused;
   }
 
   await context.db

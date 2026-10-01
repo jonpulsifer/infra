@@ -21,6 +21,7 @@ import {
   resolveComponentPlacement,
   resolveComponentPlacementInput,
 } from './apps/resolve-placement.ts';
+import { listAppRows, listAppRowsInput } from './apps/rows.ts';
 import { setAppLock, setAppLockInput } from './apps/set-lock.ts';
 import { getAppSource, getAppSourceInput } from './apps/source.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
@@ -119,6 +120,7 @@ import {
   listRepositories,
   listRepositoriesInput,
 } from './repositories/list.ts';
+import { getSite, getSiteInput } from './sites/get.ts';
 import { listSources, listSourcesInput } from './sources/list.ts';
 import {
   forgetRegistryCredential,
@@ -204,6 +206,8 @@ export const commandRegistry = {
   },
   listAllDeploys: { input: listAllDeploysInput, handler: listAllDeploys },
   listApps: { input: listAppsInput, handler: listApps },
+  listAppRows: { input: listAppRowsInput, handler: listAppRows },
+  getSite: { input: getSiteInput, handler: getSite },
   listDeploys: { input: listDeploysInput, handler: listDeploys },
   listTargets: { input: listTargetsInput, handler: listTargets },
   listRepositories: {

@@ -746,6 +746,101 @@ export interface AppListItem extends CommitHeadlineView {
   readonly deployId?: number;
 }
 
+/** The word a row's status reads; the rail and the Apps list share it. */
+export function appStatusWord(
+  app: Pick<AppListItem, 'deployId' | 'faulty' | 'phase'>,
+): string {
+  if (app.deployId === undefined) return 'Never deployed';
+  if (app.faulty) return 'Faulty';
+  return deployPhaseWord(app.phase);
+}
+
+/**
+ * Vessel and adapter, since neither identifies a Target alone. An unplaced App
+ * has no Vessel yet and shows the adapter by itself.
+ */
+export function targetName(vessel: string, adapter: string): string {
+  return vessel ? `${vessel}/${adapter}` : adapter;
+}
+
+/** A kthx site as the Apps list presents it beside built Apps. */
+export interface SiteListItem {
+  readonly name: string;
+  readonly url: string;
+  /**
+   * Human principals only: the tailnet login, or null for an anonymous claim.
+   * Absent for agents.
+   */
+  readonly owner?: string | null;
+  /** The serving release; `null` before the first upload. */
+  readonly release: number | null;
+  readonly held: boolean;
+  readonly createdAt: string;
+  /** When the serving release was uploaded; absent before the first. */
+  readonly at?: string;
+  readonly when?: string;
+}
+
+export interface SiteView extends SiteListItem {
+  /** Whether the site's database exists. */
+  readonly provisioned: boolean;
+  /** Newest first. */
+  readonly releases: readonly {
+    n: number;
+    digest: string;
+    size: number;
+    at: string;
+  }[];
+  readonly usage: {
+    dbBytes: number;
+    filesBytes: number;
+    aiRequestsToday: number;
+    aiTokensToday: number;
+  };
+  readonly quotas: {
+    docBytes: number;
+    dbBytes: number;
+    fileBytes: number;
+    filesBytes: number;
+    aiRequestsDay: number;
+    aiTokensDay: number;
+  };
+}
+
+/** Whether kthx's sites joined the list: not configured, failing, or read. */
+export type SitesReach =
+  | { readonly state: 'off' }
+  | { readonly state: 'unreadable'; readonly reason: string }
+  | { readonly state: 'ok'; readonly total: number };
+
+/** Every row is an App: built here (`app`) or published to kthx (`site`). */
+export type AppRowView =
+  | { readonly kind: 'app'; readonly key: string; readonly app: AppListItem }
+  | {
+      readonly kind: 'site';
+      /** `site:<name>`, which no App id can equal. */
+      readonly key: string;
+      readonly site: SiteListItem;
+    };
+
+export interface AppRowsView {
+  readonly rows: readonly AppRowView[];
+  readonly sites: SitesReach;
+  /** The cursor for the next page of sites; `null` on the last. */
+  readonly next: string | null;
+}
+
+export type SiteResult =
+  | { readonly state: 'ok'; readonly site: SiteView }
+  | { readonly state: 'unreadable'; readonly reason: string };
+
+/** A held site is still Live: holding pins a release, it does not stop it. */
+export function siteStatusWord(
+  site: Pick<SiteListItem, 'release'>,
+): 'Live' | 'Never deployed' {
+  return site.release === null ? 'Never deployed' : 'Live';
+}
+
 /**
  * A cloud boundary's own facts, sent back unchanged on edit: `connectTarget`
  * rewrites the whole row, and these are never proposed to another project.

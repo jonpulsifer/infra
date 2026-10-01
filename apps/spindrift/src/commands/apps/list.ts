@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { artifactSummary } from '../../domain/artifact-name.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
-import { type Command, ok } from '../types.ts';
+import { type Command, type CommandContext, ok } from '../types.ts';
 import type { AppListItem, DeployPhase } from '../views.ts';
 
 /**
@@ -22,7 +22,12 @@ export type ListAppsInput = z.infer<typeof listAppsInput>;
 export const listApps: Command<
   ListAppsInput,
   { apps: readonly AppListItem[] }
-> = async (_input, context) => {
+> = async (_input, context) => ok({ apps: await appListItems(context) });
+
+/** Every built App, newest first, as the list rows present it. */
+export async function appListItems(
+  context: CommandContext,
+): Promise<AppListItem[]> {
   const allApps = await context.db.query.apps.findMany({
     orderBy: (apps, { desc }) => [desc(apps.createdAt)],
     with: {
@@ -47,7 +52,7 @@ export const listApps: Command<
 
   const now = context.clock.now();
 
-  const items = allApps.map((app) => {
+  return allApps.map((app) => {
     let source = 'archive';
     if (app.sourceKind === 'repo') {
       if (app.repository) {
@@ -121,6 +126,4 @@ export const listApps: Command<
       artifact: artifactSummary(deploy?.build),
     } satisfies AppListItem;
   });
-
-  return ok({ apps: items });
-};
+}
