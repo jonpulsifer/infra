@@ -25,7 +25,7 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
-FROM cgr.dev/chainguard/node:latest@sha256:67b35eec824b295fe0cc2a0e230f85adca6caef692725f6abf1581ad1848b04e AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:8da2b6c1f2d287f96906ac1793136fce7e9777aaf261aedb7eca3ddcd0cdf051 AS runner
 ENV NODE_ENV=production \
   MATE_PORT=8080
 WORKDIR /app
