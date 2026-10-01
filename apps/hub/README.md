@@ -37,8 +37,10 @@ In production, the server reads these variables:
   arrays, and the field order depends on the device type.
 - The server and the client bundles each carry a build id. A client reloads
   itself when the id in the snapshot differs from its own.
-- `app/routes/api.exit.ts` stops the process when a client requests `/api/exit`,
-  so the container restarts.
+- `app/routes/api.exit.ts` stops the process on a `POST /api/exit`, so the
+  container restarts. `app/lib/exit-guard.ts` admits only private, tailnet and
+  loopback callers, read from the last `X-Forwarded-For` entry. The optional
+  `EXIT_ALLOWED_CIDRS` replaces those ranges.
 
 ## Build and test
 
