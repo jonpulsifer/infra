@@ -13,6 +13,7 @@ import { type Caller, callerOf } from './caller.ts';
 import { createClient, migrate } from './db.ts';
 import { bucketDepot, type Depot, diskDepot } from './depot.ts';
 import { dbApi } from './documents.ts';
+import { EngineKeys, engineApi } from './engine.ts';
 import { type Config, readConfig } from './env.ts';
 import { filesApi, serveFile } from './files.ts';
 import {
@@ -236,6 +237,9 @@ async function apex(
     // and a project file must not decide where a bearer is sent.
     const url = siteUrl(ctx.config.zone, undefined, ctx.port);
     return ok({ zone: ctx.config.zone, url, docs: `${url}/skill.md` }, ctx.id);
+  }
+  if (segments[1] === 'api' && segments[2] === 'engine') {
+    return engineApi(request, ctx, segments);
   }
   if (path === '/api' || path.startsWith('/api/')) {
     return refuse('NOT_FOUND', ctx.id);
@@ -565,6 +569,8 @@ export function handler(
   depot: Depot,
   pg: Pg = new Pg(config, sql),
 ): Kthx {
+  const engine = config.engine === null ? null : new EngineKeys(config.engine);
+  engine?.warm();
   const answer = async (
     request: Request,
     server?: Bun.Server<unknown>,
@@ -592,6 +598,7 @@ export function handler(
       host,
       port: portOf(request),
       caller,
+      engine,
     };
     const path = decodePath(request.url);
     if (path === null) {

@@ -118,6 +118,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       aiBuildFallbackModel: null,
       trustedProxies: [],
       tailnetProxies: [],
+      engine: null,
       port: 0,
       ...overrides,
     };

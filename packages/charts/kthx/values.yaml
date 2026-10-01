@@ -103,6 +103,16 @@ control:
   # A TLS listener. The tunnel reaches only the HTTP listener, so Cloudflare cannot carry this host.
   listener: ""
 
+# The OIDC issuer whose projected ServiceAccount tokens open `/api/engine/*` on the
+# control host: the kthx engine's read of every site and its name reservations. Empty
+# serves no such path. Set, it needs `audience`, `subject` and `control.host`.
+engine:
+  issuer: ""
+  # The token's audience. Neither API server accepts it, so the token opens kthx only.
+  audience: ""
+  # The engine's ServiceAccount, as `system:serviceaccount:<namespace>:<name>`.
+  subject: ""
+
 # Keyless GCP through a projected token. The pool principal is
 # `offsite:system:serviceaccount:kthx:kthx`, so the ServiceAccount's name and namespace matter.
 gcp:

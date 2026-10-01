@@ -24,6 +24,7 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 | An agent on `/mcp` | An agent token, valid 90 days | Every action except minting tokens, replacing the engine settings, and connecting or probing a Target |
 | kthx on GitHub | The private GitHub App `spindrift-bot` (ID `4576122`), installed on `jonpulsifer` only | Push branches, open pull requests and run workflows in connected repositories |
 | A quick-site owner | Its bearer token or tailnet login | Upload, roll back and delete that site |
+| The engine, at quick sites | A projected ServiceAccount token with audience `kthx`, sent to `/api/engine/*` on the control host | List and read every quick site with its owner login, and reserve and release names under the quick-site zone. It carries no login, so it opens no site and cannot delete every site. |
 | [Rowbutt](../mate.md) | An agent token from Secret `mate-kthx-agent`, which mate's pod holds, and the site bearers in Secret `mate-kthx-sites` | What an agent on `/mcp` can, without approval, and every quick site it claims |
 
 ## Secrets
@@ -41,12 +42,15 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 
 Quick sites trust `Tailscale-User-Login` only on [`kthx.<tailnet>`](../../hosts/index.md#reach-a-host), where `KTHX_ADMIN_LOGINS` can delete every site and free every name. Network policies `kthx` and `kthx-gateway` admit only the Tailscale proxy, Gateway, kubelet and namespace pods. Rate limits key reliably only on traffic that arrives through Cloudflare.
 
+The engine's read of quick sites includes each owner login. That login is no secret inside the cluster: any cluster-admin, Rowbutt's sandbox included, can mint the engine's token or read `kthx-db`. Keeping it from agents is hygiene, and it is no security boundary.
+
 ## Federation
 
 The engine runs as ServiceAccount `spindrift/spindrift` on offsite, with no GCP or cluster key.
 
 - GCP: The `offsite` provider of the `fml-pool` workload identity pool lets it impersonate `spindrift-controller@bluenose` (`terraform/gcp/projects/bluenose/iam.tf`).
 - folly: The API server accepts its token as user `federated:system:serviceaccount:spindrift:spindrift` (`nix/services/k8s/default.nix`).
+- kthx: The quick-site server accepts a token from offsite's issuer with audience `kthx` and subject `system:serviceaccount:spindrift:spindrift` (`clusters/offsite/apps/kthx/helm-release.yaml`). It reads the issuer's keys from `https://oidc.lolwtf.ca/offsite`, and neither API server accepts that audience.
 - Vercel and Cloudflare: none. The engine uses [stored tokens](#secrets).
 
 Quick sites run as `kthx-server@bluenose`, which reaches only bucket `bluenose-kthx`.

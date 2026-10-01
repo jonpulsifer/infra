@@ -36,6 +36,7 @@ Every site answers these paths, and the SDK at `/api/sdk.js` wraps them as `wind
 - You cannot rotate a bearer token or change a site's owner. If you lose the token of a site with no tailnet owner, you lose the site.
 - The builder discards its sites' tokens, so only their owner's login can change them.
 - A deleted name stays taken and answers `410`.
+- A name the engine reserves for a built app reads as taken, and nobody can claim it.
 
 ## How it works
 

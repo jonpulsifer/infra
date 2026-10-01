@@ -116,6 +116,16 @@ spec:
             - name: KTHX_CONTROL_HOST
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.engine.issuer }}
+            # The server refuses to boot with an issuer and no audience, subject or control host.
+            - name: KTHX_ENGINE_ISSUER
+              value: {{ . | quote }}
+            - name: KTHX_ENGINE_AUDIENCE
+              value: {{ required "engine.audience is required with engine.issuer" $.Values.engine.audience | quote }}
+            - name: KTHX_ENGINE_SUBJECT
+              value: {{ required "engine.subject is required with engine.issuer" $.Values.engine.subject | quote }}
+            {{- $_ := required "control.host is required with engine.issuer: the engine surface answers there only" $.Values.control.host }}
+            {{- end }}
             - name: KTHX_BUCKET
               # Empty means no depot: every release archive stays on the local volume, with no error.
               value: {{ required "bucket is required: it is the depot every release archive is durable in" .Values.bucket | quote }}
