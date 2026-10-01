@@ -54,7 +54,7 @@ A Component's `reach` is `none`, `private` or `public`. [Ingress and DNS](../../
 
 `<app>.lolwtf.dev` shows a status page until a Component serves it. kthx writes the record of an App on a zone apex once, and cannot change or delete it.
 
-When the engine has the `SPINDRIFT_KTHX_*` variables, a name an App mints in the quick sites' zone is reserved for the App in kthx first: when its vanity name is set or its zone changes, and before each Deploy. A name a quick site or another App holds refuses the edit or rejects the Deploy. Only deleting the App releases its names, and not while a retained workload still serves them. Two Apps of the same name with a Component of the same name mint one canonical name, so the second one's Deploys are rejected. `apps/spindrift/src/commands/apps/kthx-names.ts` holds the rule.
+When the engine has the `SPINDRIFT_KTHX_*` variables, a name an App mints in the quick sites' zone is reserved for the App in kthx first: when its vanity name is set or its zone changes, and before each Deploy. A name a quick site or another App holds refuses the edit or rejects the Deploy. Only deleting the App releases names: those its placed Components still mint, and none while a retained workload serves them. A name the App reserved through an earlier edit or a deleted Component stays reserved. Two Apps of the same name with a Component of the same name mint one canonical name, so the second one's Deploys are rejected. `apps/spindrift/src/commands/apps/kthx-names.ts` holds the rule.
 
 kthx writes config values to Secret Manager in bluenose, and each Target reads them from there ([Secrets](../../platform/secrets.md)).
 

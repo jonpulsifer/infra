@@ -337,11 +337,13 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     }
   }
 
-  // A retained workload still routes its names, so they stay held.
+  // Only the names this delete tore down go: a retained workload still routes
+  // its names, and a Component deleted earlier may have left one behind.
   const released =
     kthx !== null &&
+    kthxNames.length > 0 &&
     retainedWorkloads.length === 0 &&
-    (await kthx.release(app.id, null)).ok;
+    (await kthx.release(app.id, kthxNames)).ok;
   const retainedNames =
     kthx === null || released
       ? []
