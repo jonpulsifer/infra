@@ -1,6 +1,9 @@
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: tronbyt
+components:
+  - ../../../base/components/restic-backup
 resources:
   - 00-namespace.yaml
   - 01-service.yaml
@@ -11,4 +14,5 @@ resources:
   - 06-rackstat-rbac.yaml
   - 07-rackstat-deployment.yaml
   - 08-rackstat-service.yaml
+  - backup.yaml
   - deployment.yaml
