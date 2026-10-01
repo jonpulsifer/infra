@@ -10,4 +10,5 @@ resources:
   - monitoring.yaml
   - networking.yaml
   - oauth2-proxy.yaml
+  - restore-drill.yaml
   - storage.yaml

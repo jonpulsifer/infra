@@ -37,6 +37,7 @@ sections:
           - platform/network/ingress-and-dns.md
           - platform/network/remote-access.md
       - platform/secrets.md
+      - platform/backups.md
       - platform/pki.md
       - platform/opentofu.md
       - platform/build-and-release.md
@@ -78,6 +79,9 @@ sections:
           - runbooks/apply-a-kubernetes-change.md
           - runbooks/get-cluster-admin-access.md
           - runbooks/operate-postgres.md
+          - runbooks/restore-a-database.md
+          - runbooks/restore-a-volume.md
+          - runbooks/restore-etcd.md
           - runbooks/adopt-the-folly-prometheus-operator-crds.md
       - group: Cloud and network
         items:

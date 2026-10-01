@@ -18,6 +18,9 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md): change `clusters/`, share a resource between the clusters, and make sure Flux applies it
 - [Get cluster admin access](get-cluster-admin-access.md): get `kubectl` access, use the break-glass certificate, and withdraw access
 - [Operate Postgres](operate-postgres.md): connect to, inspect and restart the CloudNativePG databases
+- [Restore a database](restore-a-database.md): restore a Postgres database from a restic snapshot, and run the restore drill
+- [Restore a volume](restore-a-volume.md): restore the files of a volume from a restic snapshot on the host that stores it
+- [Restore etcd](restore-etcd.md): restore the etcd of a control plane from a restic snapshot
 - [Adopt the folly Prometheus Operator CRDs](adopt-the-folly-prometheus-operator-crds.md): move folly's Prometheus Operator CRDs to a HelmRelease, so that chart bumps upgrade them
 
 ## Cloud and network

@@ -92,7 +92,7 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 > [!WARNING]
 > A database not in this table has no backup, and neither has a Datastore in `spindrift-datastores`. If one loses its volume, its data is lost.
 
-A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's restic staging repository on oldschool each night. Each snapshot's host is `offsite/<namespace>/<database>`, with the tag `kind=pg`. The chart's `restic` value sets the repository, and an ExternalSecret named `restic` reads the credentials from 1Password.
+A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's restic staging repository on oldschool each night. Each snapshot's host is `offsite/<namespace>/<database>`, with the tag `kind=pg`. The chart's `restic` value sets the repository, and an ExternalSecret named `restic` reads the credentials from 1Password. [Backups](../platform/backups.md) describes the repositories, the copy to GCS and the retention. To restore a dump, use [Restore a database](restore-a-database.md).
 
 | Database | Backup |
 | --- | --- |
@@ -104,9 +104,17 @@ A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's
 
 1. Read the backup line in the `kubectl cnpg status` output of the database.
 
-   Result: `Continuous Backup not configured`.
+   Result: `Continuous Backup not configured`. CloudNativePG does not back up the databases.
 
-2. Make sure that the last dump is less than a day old. `<cronjob>` is a CronJob from the table, in the namespace of its database.
+2. List the backup CronJobs of the cluster.
+
+   ```bash
+   kubectl get cronjob -A -l lolwtf.ca/backup=true --context <site>
+   ```
+
+   Result: A line for each backup CronJob, with its `SCHEDULE` and `LAST SCHEDULE`.
+
+3. Make sure that the last dump of the database is less than a day old.
 
    ```bash
    kubectl get cronjob <cronjob> -n <namespace> --context <site> -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'
@@ -121,6 +129,7 @@ A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's
 | `flags cannot be placed before plugin name: --context` | `--context` is before `cnpg`. | Put `--context` after the `cnpg` command. |
 | `unknown command "cnpg" for "kubectl"` | The plugin is not installed. | Run `mise install github:cloudnative-pg/cloudnative-pg`. |
 | `cnpg status` shows no primary. | The `Cluster` is in bootstrap or in a restart. | If no primary shows after 5 minutes, read `kubectl cnpg logs cluster`. |
+| `BackupJobStale` or `BackupJobFailed` fires. | A backup CronJob has not succeeded in its window. | Read the logs of each container of the last Job of the CronJob in the alert. |
 | `KthxBackupFailing` fires. | No kthx dump has succeeded for 36 hours. | Read the logs of the last `kthx-db-backup` Job. |
 | `MateDatabaseBackupFailing` fires. | No mate dump has succeeded for 36 hours. | Read the logs of the last `mate-db-backup` Job. A 403 from `upload` is the grant in `terraform/gcp/projects/homelab-ng/mate.tf`. |
 
@@ -129,3 +138,4 @@ A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's
 - [Kubernetes](../platform/kubernetes.md)
 - [kthx](../apps/kthx.md)
 - [How Rowbutt works](../apps/mate/how-it-works.md#session-store)
+- [Backups](../platform/backups.md)
