@@ -29,6 +29,8 @@ import type { VesselLocation } from '../../domain/vessel.ts';
 import { dnsHandleFor } from '../../domain/workload-name.ts';
 import { type ConfigSubject, configSubject, reapKey } from '../config/set.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
+import { kthxNamesOf } from './kthx-names.ts';
+import { placementsFor } from './names.ts';
 
 export const deleteAppInput = z
   .object({
@@ -83,6 +85,11 @@ export type DeleteAppResult =
        * left on the Target to remove by hand.
        */
       readonly retainedWorkloads: readonly string[];
+      /**
+       * Names under kthx's site zone still held for this App, because a
+       * retained workload serves them or kthx did not release them.
+       */
+      readonly retainedNames?: readonly string[];
     } & DeleteAppEffects);
 
 export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
@@ -238,6 +245,20 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
   // Resolved before the rows go: `configSubject` reads the Component and Target.
   const scopes = await reapableScopes(context, pinned, nameOf);
 
+  // Read before the rows go: the placement query joins the desired rows.
+  const kthx = context.adapters.kthx?.() ?? null;
+  const kthxNames =
+    kthx === null
+      ? []
+      : kthxNamesOf(
+          app.name,
+          await placementsFor(context.db, app.id),
+          context.manifest.dns.zones,
+          app.zone,
+          app.vanityDomain,
+          kthx.zone,
+        );
+
   // Torn down before the rows go, so a crash leaves a retryable delete.
   // `destroy` is idempotent, so the retry costs nothing.
   const retainedWorkloads: string[] = [];
@@ -316,7 +337,23 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     }
   }
 
-  return ok({ deleted: true, retainedSecrets, retainedWorkloads, ...effects });
+  // A retained workload still routes its names, so they stay held.
+  const released =
+    kthx !== null &&
+    retainedWorkloads.length === 0 &&
+    (await kthx.release(app.id, null)).ok;
+  const retainedNames =
+    kthx === null || released
+      ? []
+      : kthxNames.map((label) => `${label}.${kthx.zone}`);
+
+  return ok({
+    deleted: true,
+    retainedSecrets,
+    retainedWorkloads,
+    ...(retainedNames.length > 0 ? { retainedNames } : {}),
+    ...effects,
+  });
 };
 
 /**

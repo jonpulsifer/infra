@@ -23,6 +23,7 @@ import {
   type DeployVerdict,
   type ObservedState,
 } from '../adapters/deploy/contract.ts';
+import { kthxRefusal } from '../commands/apps/kthx-names.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
@@ -71,8 +72,11 @@ import {
 
 export interface DeployLoopContext {
   readonly db: Database;
-  /** `dns` publishes vanity records for platform-named Targets. */
-  readonly adapters: Pick<AdapterRegistry, 'deploy' | 'dns'>;
+  /**
+   * `dns` publishes vanity records for platform-named Targets; `kthx` holds the
+   * names minted under its site zone.
+   */
+  readonly adapters: Pick<AdapterRegistry, 'deploy' | 'dns' | 'kthx'>;
   readonly clock: Clock;
   readonly manifest: InstallationManifest;
 }
@@ -304,6 +308,19 @@ export async function runAttempt(
       phase: 'FAILED',
       reason: 'REJECTED',
       detail: `${shadowed} is reserved by this installation, so no App is served on it — rename the Component or change the App's vanity name`,
+    });
+  }
+
+  const kthx = context.adapters.kthx?.() ?? null;
+  const held =
+    kthx === null
+      ? null
+      : await kthxRefusal(kthx, subject.app.id, desired.hostname);
+  if (held !== null) {
+    return settle(context, subject, desired, {
+      phase: 'FAILED',
+      reason: 'REJECTED',
+      detail: held,
     });
   }
 

@@ -20,6 +20,7 @@ import {
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { FakeDnsPublisher } from '../harness/fakes/dns-publisher.ts';
+import { FakeKthx, KTHX_ZONE, withKthxZone } from '../harness/fakes/kthx.ts';
 import {
   fixtureManifest,
   insertVessel,
@@ -571,5 +572,103 @@ describe('what it refuses', () => {
     const remaining = await database().db.select().from(apps);
     expect(remaining).toHaveLength(1);
     expect(remaining[0]?.id).not.toBe(first.app.id);
+  });
+});
+
+describe("names under kthx's zone", () => {
+  function kthxContext(
+    registry: AdapterRegistry,
+    kthx: FakeKthx,
+  ): CommandContext {
+    return {
+      ...context({ ...registry, kthx: () => kthx }),
+      manifest: withKthxZone(manifest, 'first'),
+    };
+  }
+
+  test('confirming releases every label the App holds', async () => {
+    const target = await seedTarget('folly', 'kubernetes');
+    const seeded = await seedApp('gone', { targetId: target.id });
+    const { registry } = fakes();
+    const kthx = new FakeKthx();
+
+    const result = await deleteApp(
+      { name: 'gone', confirm: true },
+      kthxContext(registry, kthx),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) throw new Error('unreachable');
+    expect(kthx.released).toEqual([{ holder: seeded.app.id, labels: null }]);
+    expect(kthx.reserved).toEqual([]);
+    expect('retainedNames' in result.value).toBe(false);
+  });
+
+  test('the review makes no call', async () => {
+    const target = await seedTarget('folly', 'kubernetes');
+    await seedApp('reviewed', { targetId: target.id });
+    const { registry } = fakes();
+    const kthx = new FakeKthx();
+
+    const result = await deleteApp(
+      { name: 'reviewed', confirm: false },
+      kthxContext(registry, kthx),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(kthx.calls).toEqual([]);
+  });
+
+  test('a refused teardown keeps the names held, and says which', async () => {
+    // The retained workload still routes them, so a site must not take them.
+    const target = await seedTarget('folly', 'kubernetes');
+    await seedApp('stuck', { targetId: target.id });
+    const { registry } = fakes({ destroyThrows: 'the cluster said no' });
+    const kthx = new FakeKthx();
+
+    const result = await deleteApp(
+      { name: 'stuck', confirm: true },
+      kthxContext(registry, kthx),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) throw new Error('unreachable');
+    expect(kthx.calls).toEqual([]);
+    expect(result.value.retainedNames).toEqual([`stuck-web.${KTHX_ZONE}`]);
+  });
+
+  test('a release kthx does not answer is reported, and the App still goes', async () => {
+    const target = await seedTarget('folly', 'kubernetes');
+    const seeded = await seedApp('unheard', { targetId: target.id });
+    const { registry } = fakes();
+    const kthx = new FakeKthx({ unreadable: 'kthx did not answer within 5s' });
+
+    const result = await deleteApp(
+      { name: 'unheard', confirm: true },
+      kthxContext(registry, kthx),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) throw new Error('unreachable');
+    expect(kthx.calls).toEqual(['release']);
+    expect(result.value.retainedNames).toEqual([`unheard-web.${KTHX_ZONE}`]);
+    expect(
+      await database().db.select().from(apps).where(eq(apps.id, seeded.app.id)),
+    ).toHaveLength(0);
+  });
+
+  test('an installation that names no kthx keeps the result as it was', async () => {
+    const target = await seedTarget('folly', 'kubernetes');
+    await seedApp('plain', { targetId: target.id });
+    const { registry } = fakes({ destroyThrows: 'the cluster said no' });
+
+    const result = await deleteApp(
+      { name: 'plain', confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) throw new Error('unreachable');
+    expect('retainedNames' in result.value).toBe(false);
   });
 });

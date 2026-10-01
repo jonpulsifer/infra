@@ -12,6 +12,7 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
+import { FakeKthx, KTHX_ZONE, withKthxZone } from '../harness/fakes/kthx.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -37,6 +38,27 @@ function context(): CommandContext {
     adapters: noAdapters,
     manifest,
   };
+}
+
+const kthxManifest = withKthxZone(manifest, 'first');
+
+function kthxContext(
+  kthx: FakeKthx,
+  installation: CommandContext['manifest'] = kthxManifest,
+): CommandContext {
+  return {
+    ...context(),
+    adapters: { ...noAdapters, kthx: () => kthx },
+    manifest: installation,
+  };
+}
+
+async function vanityOf(appId: string): Promise<string | null | undefined> {
+  const [row] = await database()
+    .db.select({ vanityDomain: apps.vanityDomain })
+    .from(apps)
+    .where(eq(apps.id, appId));
+  return row?.vanityDomain;
 }
 
 /** An App with one placed, `private`-reach Component on a cluster Target. */
@@ -186,5 +208,113 @@ describe('setAppVanity', () => {
     if (!result.ok) throw new Error('unreachable');
     expect(result.value.vanity).toBeNull();
     expect(result.value.hostnames).toEqual(['shop-web.apps.example.test']);
+  });
+});
+
+describe("setAppVanity under kthx's zone", () => {
+  test('reserves the canonical and vanity labels for the App before the write', async () => {
+    const { appId } = await seed();
+    const seen: (string | null | undefined)[] = [];
+    const kthx = new FakeKthx();
+    const reserve = kthx.reserve.bind(kthx);
+    kthx.reserve = async (holder, labels) => {
+      seen.push(await vanityOf(appId));
+      return reserve(holder, labels);
+    };
+
+    const result = await setAppVanity(
+      { appId, label: 'shop' },
+      kthxContext(kthx),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(kthx.reserved).toEqual([
+      { holder: appId, labels: ['shop', 'shop-web'] },
+    ]);
+    expect(seen).toEqual([null]);
+    expect(await vanityOf(appId)).toBe('shop');
+  });
+
+  test('a label a kthx site holds is refused, and nothing is written', async () => {
+    const { appId } = await seed();
+    const kthx = new FakeKthx({ taken: [{ name: 'shop', by: 'site' }] });
+
+    const result = await setAppVanity(
+      { appId, label: 'shop' },
+      kthxContext(kthx),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.failure.code).toBe('INVALID_INPUT');
+    const rule = `would take shop.${KTHX_ZONE}, which a kthx site holds`;
+    expect(result.failure.message).toBe(`'shop' ${rule}`);
+    expect(result.failure.issues).toEqual([{ path: 'label', message: rule }]);
+    expect(await vanityOf(appId)).toBeNull();
+  });
+
+  test('a label another App holds is refused with its own sentence', async () => {
+    const { appId } = await seed();
+    const kthx = new FakeKthx({ taken: [{ name: 'shop', by: 'app' }] });
+
+    const result = await setAppVanity(
+      { appId, label: 'shop' },
+      kthxContext(kthx),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.failure.message).toBe(
+      `'shop' would take shop.${KTHX_ZONE}, which another App holds`,
+    );
+    expect(await vanityOf(appId)).toBeNull();
+  });
+
+  test('kthx not answering refuses the edit and leaves the row as it was', async () => {
+    const { appId } = await seed();
+    const kthx = new FakeKthx({ unreadable: 'kthx did not answer within 5s' });
+
+    const result = await setAppVanity(
+      { appId, label: 'shop' },
+      kthxContext(kthx),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toBe(
+      `kthx could not reserve shop.${KTHX_ZONE}, shop-web.${KTHX_ZONE} (kthx did not answer within 5s); nothing changed`,
+    );
+    expect(await vanityOf(appId)).toBeNull();
+  });
+
+  test('changing or clearing the label never releases the old one', async () => {
+    const { appId } = await seed();
+    const kthx = new FakeKthx();
+
+    for (const label of ['shop', 'store', null]) {
+      const result = await setAppVanity({ appId, label }, kthxContext(kthx));
+      expect(result.ok).toBe(true);
+    }
+
+    expect(kthx.released).toEqual([]);
+    expect(kthx.reserved.map((call) => call.labels)).toEqual([
+      ['shop', 'shop-web'],
+      ['shop-web', 'store'],
+      ['shop-web'],
+    ]);
+  });
+
+  test("names outside kthx's zone make no call", async () => {
+    const { appId } = await seed();
+    const kthx = new FakeKthx();
+
+    const result = await setAppVanity(
+      { appId, label: 'shop' },
+      kthxContext(kthx, manifest),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(kthx.calls).toEqual([]);
   });
 });

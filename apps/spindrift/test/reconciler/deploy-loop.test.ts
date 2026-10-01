@@ -47,6 +47,7 @@ import {
   type ScriptedAttempt,
 } from '../harness/fakes/deploy-adapter.ts';
 import { FakeDnsPublisher } from '../harness/fakes/dns-publisher.ts';
+import { FakeKthx, KTHX_ZONE, withKthxZone } from '../harness/fakes/kthx.ts';
 import {
   fixtureManifest,
   insertVessel,
@@ -600,6 +601,111 @@ describe("§9: no App is served on the installation's own names", () => {
     await runDeployPass(context(adapter));
 
     expect(adapter.applied).toHaveLength(1);
+    expect((await deployRow(deploy.id))?.phase).toBe('LIVE');
+  });
+});
+
+describe('§9: kthx holds every name an App mints in its site zone', () => {
+  const kthxManifest = withKthxZone(manifest, 'first');
+
+  function kthxContext(
+    adapter: FakeDeployAdapter,
+    kthx: FakeKthx,
+    installation = kthxManifest,
+  ): DeployLoopContext {
+    return context(adapter, {
+      manifest: installation,
+      adapters: {
+        deploy: (name) => (name === adapter.adapter ? adapter : null),
+        kthx: () => kthx,
+      },
+    });
+  }
+
+  async function withVanity(appId: string, label: string) {
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: label })
+      .where(eq(apps.id, appId));
+  }
+
+  test('names kthx holds for this App deploy', async () => {
+    const { app, deploy } = await pendingDeploy();
+    await withVanity(app.id, 'shop');
+    const kthx = new FakeKthx();
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(kthxContext(adapter, kthx));
+
+    expect(kthx.reserved).toEqual([
+      { holder: app.id, labels: ['shop', 'shop-web'] },
+    ]);
+    expect(kthx.released).toEqual([]);
+    expect(adapter.applied).toHaveLength(1);
+    expect((await deployRow(deploy.id))?.phase).toBe('LIVE');
+  });
+
+  test('a vanity name a kthx site holds is rejected, naming it as the vanity name', async () => {
+    const { app, deploy } = await pendingDeploy();
+    await withVanity(app.id, 'shop');
+    const kthx = new FakeKthx({ taken: [{ name: 'shop', by: 'site' }] });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(kthxContext(adapter, kthx));
+
+    expect(adapter.applied).toHaveLength(0);
+    const row = await deployRow(deploy.id);
+    expect(row?.phase).toBe('FAILED');
+    expect(row?.reason).toBe('REJECTED');
+    expect(row?.detail).toBe(
+      `shop.${KTHX_ZONE} (this App's vanity name) is held by a kthx site — change the App's vanity name or remove the site`,
+    );
+  });
+
+  test('a canonical name another App holds is rejected, naming it as the canonical name', async () => {
+    const { app, deploy } = await pendingDeploy();
+    await withVanity(app.id, 'shop');
+    const kthx = new FakeKthx({
+      taken: [
+        { name: 'shop', by: 'app' },
+        { name: 'shop-web', by: 'app' },
+      ],
+    });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(kthxContext(adapter, kthx));
+
+    expect(adapter.applied).toHaveLength(0);
+    expect((await deployRow(deploy.id))?.detail).toBe(
+      `shop.${KTHX_ZONE} (this App's vanity name) is held by another App — change the App's vanity name; ` +
+        `shop-web.${KTHX_ZONE} (the canonical name) is held by another App — rename the Component`,
+    );
+  });
+
+  test('kthx not answering rejects the Deploy until it does', async () => {
+    const { deploy } = await pendingDeploy();
+    const kthx = new FakeKthx({ unreadable: 'kthx did not answer within 5s' });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(kthxContext(adapter, kthx));
+
+    expect(adapter.applied).toHaveLength(0);
+    const row = await deployRow(deploy.id);
+    expect(row?.reason).toBe('REJECTED');
+    expect(row?.detail).toBe(
+      `kthx could not confirm shop-web.${KTHX_ZONE} is this App's (kthx did not answer within 5s); deploy again once it answers`,
+    );
+  });
+
+  test('names outside the zone make no call', async () => {
+    const { app, deploy } = await pendingDeploy();
+    await withVanity(app.id, 'shop');
+    const kthx = new FakeKthx({ unreadable: 'kthx is down' });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(kthxContext(adapter, kthx, manifest));
+
+    expect(kthx.calls).toEqual([]);
     expect((await deployRow(deploy.id))?.phase).toBe('LIVE');
   });
 });
