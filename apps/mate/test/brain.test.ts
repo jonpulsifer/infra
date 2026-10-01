@@ -18,7 +18,7 @@ import {
   type Write,
 } from '@earendil-works/pi-agent-core';
 import { StorageDecorator } from '@earendil-works/pi-agent-core/harness/session/testing';
-import { createModels } from '@earendil-works/pi-ai';
+import { createModels, type Message } from '@earendil-works/pi-ai';
 import {
   type FauxResponseStep,
   fauxAssistantMessage,
@@ -46,14 +46,17 @@ import {
   unreachableTool,
 } from '../src/brain.ts';
 import type {
+  BrainProfile,
   BridgedTool,
   McpBridge,
   ModelSetup,
+  SystemPrompts,
 } from '../src/brain-inputs.ts';
 import { BrainUnavailable, TurnAbandoned } from '../src/brain-port.ts';
 import { systemClock } from '../src/clock.ts';
 import { silentLog } from '../src/log.ts';
 import { LIMIT_FALLBACK } from '../src/notices.ts';
+import { PROFILES, type Profile } from '../src/profiles.ts';
 import { CHATGPT_PROVIDER, routeModels } from '../src/route.ts';
 import type { PromptSink, Update } from '../src/sandbox.ts';
 import { POOL_OPTIONS, PostgresThreadStore } from '../src/store.ts';
@@ -154,6 +157,46 @@ function thread(): ThreadRef {
   };
 }
 
+const OPERATOR = PROFILES.get('operator') as Profile;
+const INVESTIGATOR = PROFILES.get('investigator') as Profile;
+/** Operator's powers, with a turn cut at 300ms. */
+const SHORT: Profile = { ...OPERATOR, id: 'short' };
+const PROMPTS: Record<string, SystemPrompts> = {
+  operator: { discord: 'You help on Discord.', slack: 'You help on Slack.' },
+  investigator: {
+    discord: 'You look on Discord.',
+    slack: 'You look on Slack.',
+  },
+  short: { discord: 'You hurry on Discord.', slack: 'You hurry on Slack.' },
+};
+
+function brainProfile(
+  setup: ModelSetup,
+  profile: Profile,
+  turnTimeoutMs: number,
+  own: Partial<BrainProfile> = {},
+): [string, BrainProfile] {
+  return [
+    profile.id,
+    {
+      profile,
+      prompts: PROMPTS[profile.id] as SystemPrompts,
+      model: setup.model,
+      thinking: setup.thinking,
+      turnTimeoutMs,
+      ...own,
+    },
+  ];
+}
+
+function profilesFor(setup: ModelSetup): ReadonlyMap<string, BrainProfile> {
+  return new Map([
+    brainProfile(setup, OPERATOR, 60_000),
+    brainProfile(setup, INVESTIGATOR, 1_200_000),
+    brainProfile(setup, SHORT, 300),
+  ]);
+}
+
 interface Built {
   brain: PiBrain;
   hands: LocalHands;
@@ -181,9 +224,8 @@ function build(
     store,
     sessions: postgresSessions(sql),
     setup: model.setup,
-    prompts: { discord: 'You help on Discord.', slack: 'You help on Slack.' },
+    profiles: profilesFor(opts.setup ?? model.setup),
     mcp: null,
-    turnTimeoutMs: 60_000,
     log,
     metrics,
     retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
@@ -193,8 +235,8 @@ function build(
   return { brain, hands, store, log, metrics };
 }
 
-async function opened(built: Built, ref = thread()) {
-  const row = await built.store.open(ref);
+async function opened(built: Built, ref = thread(), profile = 'operator') {
+  const row = await built.store.open(ref, profile);
   const session = await built.brain.open(row);
   return { ref, row, session };
 }
@@ -382,7 +424,7 @@ describe('opening a thread', () => {
 
   test('refuses while the store is not up', async () => {
     const built = build(faux(), { db: { up: () => false } });
-    const row = await built.store.open(thread());
+    const row = await built.store.open(thread(), 'operator');
     await expect(built.brain.open(row)).rejects.toBeInstanceOf(
       BrainUnavailable,
     );
@@ -398,7 +440,7 @@ describe('opening a thread', () => {
       sessions: postgresSessions(dead),
       timeouts: { open: 1_000 },
     });
-    const row = await built.store.open(thread());
+    const row = await built.store.open(thread(), 'operator');
     const started = performance.now();
     await expect(built.brain.open(row)).rejects.toBeInstanceOf(
       BrainUnavailable,
@@ -558,11 +600,8 @@ describe('the turn timeout', () => {
       tool('bash', { command: 'sleep 30' }),
       fauxAssistantMessage('never'),
     );
-    const built = build(model, {
-      turnTimeoutMs: 300,
-      timeouts: { timeoutGrace: 2_000 },
-    });
-    const { session } = await opened(built);
+    const built = build(model, { timeouts: { timeoutGrace: 2_000 } });
+    const { session } = await opened(built, thread(), SHORT.id);
     const result = await built.brain.prompt(
       session,
       'wait',
@@ -589,10 +628,9 @@ describe('the turn timeout', () => {
         root,
         hold: (method) => (method === 'exec' ? exec.wait : null),
       },
-      turnTimeoutMs: 300,
       timeouts: { timeoutGrace: 100, harnessClose: 50, discard: 500 },
     });
-    const { session } = await opened(built);
+    const { session } = await opened(built, thread(), SHORT.id);
     let drain = () => {};
     faults.holdClose = new Promise<void>((resolve) => {
       drain = resolve;
@@ -665,7 +703,7 @@ describe('a session that will not open', () => {
       id.includes('~') ? storage : new Corrupt(storage),
     );
     const built = build(faux(), { sessions });
-    const row = await built.store.open(thread());
+    const row = await built.store.open(thread(), 'operator');
     const session = await built.brain.open(row);
     expect(session.resumed).toBe(false);
     expect(sessions.opened).toEqual([row.key, row.key, `${row.key}~1`]);
@@ -685,7 +723,7 @@ describe('a session that will not open', () => {
       corrupt-- > 0 ? new Corrupt(storage) : storage,
     );
     const built = build(faux(), { sessions });
-    const row = await built.store.open(thread());
+    const row = await built.store.open(thread(), 'operator');
     await built.brain.open(row);
     expect(sessions.opened).toEqual([row.key, row.key]);
     const stored = await built.store.get(row.key);
@@ -715,7 +753,7 @@ describe('a session that will not open', () => {
       const built = build(faux(), {
         sessions: { open: async () => fail(), delete: async () => {} },
       });
-      const row = await built.store.open(thread());
+      const row = await built.store.open(thread(), 'operator');
       await expect(built.brain.open(row)).rejects.toBeInstanceOf(
         BrainUnavailable,
       );
@@ -725,7 +763,7 @@ describe('a session that will not open', () => {
     const bug = build(faux(), {
       retry: { enabled: true, maxRetries: -1, baseDelayMs: 1 },
     });
-    const row = await bug.store.open(thread());
+    const row = await bug.store.open(thread(), 'operator');
     await expect(bug.brain.open(row)).rejects.toBeInstanceOf(BrainUnavailable);
     expect(bug.log.of('the session could not be opened')[0]?.level).toBe(
       'error',
@@ -738,13 +776,13 @@ describe('a session that will not open', () => {
       sessions: sessionsWith((_, storage) => new Corrupt(storage)),
     });
     for (let i = 0; i < 3; i += 1) {
-      const row = await built.store.open(thread());
+      const row = await built.store.open(thread(), 'operator');
       // Each fresh session is corrupt too, so the open still fails.
       await expect(built.brain.open(row)).rejects.toBeInstanceOf(
         BrainUnavailable,
       );
     }
-    const row = await built.store.open(thread());
+    const row = await built.store.open(thread(), 'operator');
     await expect(built.brain.open(row)).rejects.toBeInstanceOf(
       BrainUnavailable,
     );
@@ -1321,7 +1359,9 @@ describe('a sandbox that went away between turns', () => {
     await built.brain.release(row.ref, 'quiet');
     expect((await built.store.get(row.key))?.workspaceReset).toBe('quiet');
 
-    const reopened = await built.brain.open(await built.store.open(row.ref));
+    const reopened = await built.brain.open(
+      await built.store.open(row.ref, 'operator'),
+    );
     await built.brain.prompt(reopened, 'next', new Recorder(), ASKER);
     await built.brain.prompt(reopened, 'and next', new Recorder(), ASKER);
     expect(inputs.at(-2)).toBe(`${resetNote('quiet')}\n\nnext`);
@@ -1334,7 +1374,7 @@ describe('putting threads away', () => {
   test('forget deletes the current session and every quarantined one', async () => {
     const built = build(faux());
     const ref = thread();
-    const row = await built.store.open(ref);
+    const row = await built.store.open(ref, 'operator');
     const { sql } = database();
     for (const id of [row.key, `${row.key}~1`]) {
       await (await openSession(sql, { id })).close(ctx);
@@ -1358,17 +1398,21 @@ describe('putting threads away', () => {
     const rows = new PostgresThreadStore(sql, clock);
     let reply: ThreadRef | null = null;
     const store = Object.assign(Object.create(rows) as PostgresThreadStore, {
-      closedBefore: async (before: number, limit: number) => {
-        const found = await rows.closedBefore(before, limit);
+      closedBefore: async (
+        before: number,
+        limit: number,
+        profiles: readonly string[],
+      ) => {
+        const found = await rows.closedBefore(before, limit, profiles);
         // A reply lands between the listing and the delete.
-        if (reply) await rows.open(reply);
+        if (reply) await rows.open(reply, 'operator');
         return found;
       },
     });
     const built = build(faux(), { store, clock });
-    const old = await rows.open(thread());
-    const reopened = await rows.open(thread());
-    const live = await rows.open(thread());
+    const old = await rows.open(thread(), 'operator');
+    const reopened = await rows.open(thread(), 'operator');
+    const live = await rows.open(thread(), 'operator');
     for (const row of [old, reopened, live]) {
       await (await openSession(sql, { id: row.sessionId })).close(ctx);
     }
@@ -1386,6 +1430,151 @@ describe('putting threads away', () => {
     expect(await sessionExists(sql, reopened.sessionId)).toBe(true);
     expect(await rows.get(live.key)).toBeDefined();
     expect(await sessionExists(sql, live.sessionId)).toBe(true);
+  });
+});
+
+describe('profiles', () => {
+  /** The system prompt and the tool names, replayed from the system messages in order. */
+  function heard(messages: readonly Message[]) {
+    let systemPrompt: string | undefined;
+    const tools = new Set<string>();
+    for (const message of messages) {
+      if (message.role !== 'system') continue;
+      systemPrompt ??=
+        typeof message.content === 'string'
+          ? message.content
+          : message.content.map((block) => block.text).join('');
+      for (const tool of message.toolsAdded ?? []) tools.add(tool.name);
+      for (const tool of message.toolsRemoved ?? []) tools.delete(tool.name);
+    }
+    return { systemPrompt, tools: [...tools].sort() };
+  }
+
+  /** What pi sent the model on each step: the system prompt and the tool names. */
+  function seen(model: Faux, text = 'ok', count = 4) {
+    const asked: ReturnType<typeof heard>[] = [];
+    model.script(
+      ...Array.from(
+        { length: count },
+        (): FauxResponseStep => (context) => {
+          asked.push(heard(context.messages));
+          return fauxAssistantMessage(text);
+        },
+      ),
+    );
+    return asked;
+  }
+
+  const BASE = ['bash', 'edit', 'read', 'write'];
+
+  test('an investigator lane lists the base tools and weather only, before and after the listing changes', async () => {
+    const model = faux();
+    const asked = seen(model);
+    const mcp = new FakeBridge([kthxTool('kthx_x'), kthxTool('weather_y')]);
+    const built = build(model, { mcp });
+    const { session, row } = await opened(built, thread(), 'investigator');
+    await built.brain.prompt(session, 'look', new Recorder(), ASKER);
+    expect(asked[0]?.tools).toEqual([...BASE, 'weather_y'].sort());
+    expect((await lane(row.sessionId))?.activeToolNames?.sort()).toEqual(
+      [...BASE, 'weather_y'].sort(),
+    );
+
+    mcp.set([kthxTool('kthx_x'), kthxTool('kthx_z'), kthxTool('weather_w')]);
+    await built.brain.prompt(session, 'again', new Recorder(), ASKER);
+    expect(asked[1]?.tools).toEqual([...BASE, 'weather_w'].sort());
+  });
+
+  test('an operator lane lists both servers', async () => {
+    const model = faux();
+    const asked = seen(model);
+    const mcp = new FakeBridge([kthxTool('kthx_x'), kthxTool('weather_y')]);
+    const built = build(model, { mcp });
+    const { session } = await opened(built);
+    await built.brain.prompt(session, 'go', new Recorder(), ASKER);
+    expect(asked[0]?.tools).toEqual([...BASE, 'kthx_x', 'weather_y'].sort());
+  });
+
+  test("each profile's prompt for the surface reaches pi, and the hands are made under the profile", async () => {
+    const model = faux();
+    const asked = seen(model);
+    const built = build(model);
+    const slack: ThreadRef = { ...thread(), surface: 'slack' };
+    const investigating = await opened(built, slack, 'investigator');
+    await built.brain.prompt(
+      investigating.session,
+      'look',
+      new Recorder(),
+      ASKER,
+    );
+    const operating = await opened(built);
+    await built.brain.prompt(operating.session, 'go', new Recorder(), ASKER);
+    expect(asked.map((one) => one.systemPrompt)).toEqual([
+      'You look on Slack.',
+      'You help on Discord.',
+    ]);
+    expect(built.hands.profiles).toEqual([
+      { key: investigating.row.key, profile: 'investigator' },
+      { key: operating.row.key, profile: 'operator' },
+    ]);
+  });
+
+  test('a row naming an undeclared profile opens nothing', async () => {
+    const built = build(faux());
+    const row = await built.store.open(thread(), 'nope');
+    await expect(built.brain.open(row)).rejects.toThrow(
+      new BrainUnavailable('profile nope is not declared'),
+    );
+    expect(built.hands.profiles).toEqual([]);
+    expect(built.metrics.storeFailures).toEqual([]);
+  });
+
+  test("a lane saved on another model is brought to its profile's model and level", async () => {
+    const first = faux('faux-new', 'off');
+    first.script(fauxAssistantMessage('new'));
+    const before = build(first);
+    const { session, row } = await opened(before);
+    await before.brain.prompt(session, 'hi', new Recorder(), ASKER);
+    await before.brain.release(row.ref, 'quiet');
+
+    const next = faux('faux-new', 'off');
+    next.script(fauxAssistantMessage('old'));
+    const pinned = next.setup.models.getModel('faux', 'faux-old');
+    if (!pinned) throw new Error('no faux-old');
+    const after = build(next, {
+      profiles: new Map([
+        brainProfile(next.setup, OPERATOR, 60_000, {
+          model: pinned,
+          thinking: 'low',
+        }),
+      ]),
+    });
+    const reopened = await after.brain.open(row);
+    expect(await lane(row.sessionId)).toMatchObject({
+      model: { provider: 'faux', modelId: 'faux-old' },
+      thinkingLevel: 'low',
+    });
+    await after.brain.prompt(reopened, 'hi', new Recorder(), ASKER);
+    expect(next.options.map((one) => one.model)).toEqual(['faux-old']);
+  });
+
+  test('retention leaves investigator rows, whose rebirth would run as operator', async () => {
+    const { sql } = database();
+    const clock = new FakeClock();
+    const rows = new PostgresThreadStore(sql, clock);
+    const built = build(faux(), { store: rows, clock });
+    const operating = await rows.open(thread(), 'operator');
+    const investigating = await rows.open(thread(), 'investigator');
+    for (const row of [operating, investigating]) {
+      await (await openSession(sql, { id: row.sessionId })).close(ctx);
+      await rows.patch(row.key, { state: 'closed' });
+    }
+    await clock.advance(20 * 86_400_000);
+
+    await built.brain.sweep(clock.now() - 14 * 86_400_000);
+    expect(await rows.get(operating.key)).toBeUndefined();
+    expect(await sessionExists(sql, operating.sessionId)).toBe(false);
+    expect((await rows.get(investigating.key))?.profile).toBe('investigator');
+    expect(await sessionExists(sql, investigating.sessionId)).toBe(true);
   });
 });
 

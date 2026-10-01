@@ -1,6 +1,7 @@
 /**
  * An in-process apiserver: the Sandbox REST shape mate uses, pods behind the
- * controller's `status.selector`, and a `pods/exec` WebSocket that speaks
+ * controller's `status.selector` carrying the pod template's labels, each
+ * pod's CiliumEndpoint, and a `pods/exec` WebSocket that speaks
  * `v4.channel.k8s.io` framing. In hands mode an exec of the mate-hands binary
  * runs the real daemon; any other command is a one-shot shell.
  */
@@ -64,6 +65,8 @@ export interface ExecRecord {
   stdin: string[];
   /** Set when the client closes: proof the harness's stdin was never half-closed. */
   clientClosed: boolean;
+  /** The pod's labels when the exec opened. */
+  podLabels: Record<string, string>;
 }
 
 type Daemon = Subprocess<'pipe', 'pipe', 'pipe'>;
@@ -96,19 +99,40 @@ function status(code: number, message: string, reason: string): Response {
   );
 }
 
+const SET_TERM = /^\s*(\S+)\s+in\s+\(([^)]*)\)\s*$/;
+
+// `key=value` and `key in (a,b)` terms; a set's commas do not split terms.
 function matches(object: Json, labelSelector: string | null): boolean {
   if (!labelSelector) return true;
   const labels = ((object.metadata as Json).labels ?? {}) as Record<
     string,
     string
   >;
-  return labelSelector
-    .split(',')
-    .filter(Boolean)
-    .every((term) => {
-      const [key, value] = term.split('=');
-      return key !== undefined && labels[key] === value;
-    });
+  return (labelSelector.match(/[^,(]+(?:\([^)]*\))?/g) ?? []).every((term) => {
+    const set = SET_TERM.exec(term);
+    if (set) {
+      const value = labels[set[1] as string];
+      return (
+        value !== undefined &&
+        (set[2] as string).split(',').some((v) => v.trim() === value)
+      );
+    }
+    const [key, value] = term.split('=');
+    return key !== undefined && labels[key.trim()] === value;
+  });
+}
+
+function labelsOf(object: Json): Record<string, string> {
+  return ((object.metadata as Json).labels ?? {}) as Record<string, string>;
+}
+
+// What the controller copies onto the pod: the template's labels, and its own.
+function podLabels(sandbox: Json, name: string): Record<string, string> {
+  const template = ((sandbox.spec as Json | undefined)?.podTemplate ??
+    {}) as Json;
+  const labels = ((template.metadata as Json | undefined)?.labels ??
+    {}) as Record<string, string>;
+  return { ...labels, 'agents.x-k8s.io/sandbox-name-hash': name };
 }
 
 function named(object: Json, fieldSelector: string | null): boolean {
@@ -178,6 +202,16 @@ export class FakeKube {
   writeFails: string | null = null;
   /** Refuses every TokenRequest 403 with this message, as a missing RBAC rule does. */
   tokenRequestFails: string | null = null;
+  /**
+   * This many CiliumEndpoint reads serve the labels the last read served,
+   * or the pod's first ones, as a Cilium agent that has not caught up does.
+   */
+  cepLags = 0;
+  /** This many CiliumEndpoint reads answer 500, as an apiserver mid-restart does. */
+  cepFails = 0;
+  /** Every CiliumEndpoint's state, as `regenerating` while its agent restarts. */
+  cepState = 'ready';
+  private readonly cepSeen = new Map<string, Record<string, string>>();
   readonly tokenRequests: {
     account: string;
     expirationSeconds: number;
@@ -314,6 +348,18 @@ export class FakeKube {
     this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
   }
 
+  /**
+   * The controller makes the pod again from the current template, as after an
+   * eviction or a crash: the Sandbox is not Ready until `markReady`.
+   */
+  recreatePod(name: string): void {
+    const sandbox = this.sandboxes.get(name);
+    if (!sandbox) throw new Error(`no sandbox ${name}`);
+    this.killPod(name);
+    this.markNotReady(name);
+    this.addPod(name, (sandbox.metadata as Json).uid as string, 'Pending');
+  }
+
   /** Deletes the pod under a live Sandbox, as a node eviction would, and every process in it. */
   killPod(name: string): void {
     for (const daemon of this.daemons.get(name) ?? []) daemon.kill('SIGTERM');
@@ -323,23 +369,59 @@ export class FakeKube {
     this.emit(this.podWatchers, 'DELETED', pod);
   }
 
-  private addPod(name: string, uid: string): void {
+  private addPod(name: string, uid: string, phase = 'Running'): void {
+    const sandbox = this.sandboxes.get(name);
+    const labels = sandbox
+      ? podLabels(sandbox, name)
+      : { 'agents.x-k8s.io/sandbox-name-hash': name };
     const pod: Json = {
       apiVersion: 'v1',
       kind: 'Pod',
       metadata: {
         name,
         namespace: this.namespace,
-        labels: { 'agents.x-k8s.io/sandbox-name-hash': name },
+        labels,
         uid: `pod-uid-${++this.serial}`,
         ownerReferences: [{ kind: 'Sandbox', name, uid }],
         resourceVersion: String(++this.revision),
       },
       spec: {},
-      status: { phase: 'Running' },
+      status: { phase },
     };
     this.pods.set(name, pod);
+    this.cepSeen.set(name, { ...labels });
     this.emit(this.podWatchers, 'ADDED', pod);
+  }
+
+  /** A pod's CiliumEndpoint, its identity from the pod's labels. */
+  private endpoint(name: string): Response {
+    const pod = this.pods.get(name);
+    if (!pod) {
+      return status(404, `ciliumendpoints "${name}" not found`, 'NotFound');
+    }
+    if (this.cepFails > 0) {
+      this.cepFails -= 1;
+      return status(500, 'etcdserver: request timed out', 'InternalError');
+    }
+    let labels = labelsOf(pod);
+    const seen = this.cepSeen.get(name);
+    if (this.cepLags > 0 && seen) {
+      this.cepLags -= 1;
+      labels = seen;
+    } else {
+      this.cepSeen.set(name, { ...labels });
+    }
+    return Response.json({
+      apiVersion: 'cilium.io/v2',
+      kind: 'CiliumEndpoint',
+      metadata: { name, namespace: this.namespace },
+      status: {
+        state: this.cepState,
+        identity: {
+          labels: Object.entries(labels).map(([k, v]) => `k8s:${k}=${v}`),
+        },
+      },
+    });
   }
 
   /** A Secret as the apiserver holds it: `data` values base64. */
@@ -554,6 +636,10 @@ export class FakeKube {
       return this.one(request, path.slice(sandboxes.length + 1), url);
     }
     if (path === pods) return this.list(this.pods, this.podWatchers, url);
+    const endpoints = `/apis/cilium.io/v2/namespaces/${this.namespace}/ciliumendpoints/`;
+    if (path.startsWith(endpoints) && request.method === 'GET') {
+      return this.endpoint(path.slice(endpoints.length));
+    }
     const secrets = `/api/v1/namespaces/${this.namespace}/secrets/`;
     if (path.startsWith(secrets)) {
       return this.secret(request, path.slice(secrets.length), url);
@@ -660,6 +746,12 @@ export class FakeKube {
       merge(sandbox, body);
       this.bump(sandbox);
       this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
+      const pod = this.pods.get(name);
+      if (pod) {
+        (pod.metadata as Json).labels = podLabels(sandbox, name);
+        this.bump(pod);
+        this.emit(this.podWatchers, 'MODIFIED', pod);
+      }
     }
     return Response.json(sandbox);
   }
@@ -729,6 +821,7 @@ export class FakeKube {
       authorization: request.headers.get('authorization'),
       stdin: [],
       clientClosed: false,
+      podLabels: { ...labelsOf(this.pods.get(pod) ?? { metadata: {} }) },
     };
     if (this.refuseHands && exec.command[0] === HANDS_BINARY) {
       return status(403, `pods "${pod}" is forbidden`, 'Forbidden');

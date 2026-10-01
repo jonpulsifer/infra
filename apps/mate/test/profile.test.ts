@@ -3,8 +3,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { SystemPrompts } from '../src/brain-inputs.ts';
-import { AGENTS_FILE, loadSystemPrompts, SKILL_DIRS } from '../src/profile.ts';
+import type { ProfilePrompts, SystemPrompts } from '../src/brain-inputs.ts';
+import { ConfigError } from '../src/config.ts';
+import { createModelSetup } from '../src/model.ts';
+import {
+  AGENTS_FILE,
+  brainProfiles,
+  loadSystemPrompts,
+  SKILL_DIRS,
+} from '../src/profile.ts';
+import {
+  investigatorPreamble,
+  operatorPreamble,
+  PROFILES,
+  type Profile,
+} from '../src/profiles.ts';
 import { RecordingLog } from './support.ts';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
@@ -16,14 +29,15 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
 });
 
+const OPTIONS = { workspace: WORKSPACE, checkoutRef: 'main' };
+
+/** `prompts` is operator's; `all` holds every profile's. */
 async function load(root: string, log = new RecordingLog()) {
-  const prompts = await loadSystemPrompts({
-    root,
-    workspace: WORKSPACE,
-    checkoutRef: 'main',
-    log,
-  });
-  return { prompts, log };
+  const all = await loadSystemPrompts(
+    { root, ...OPTIONS, log },
+    PROFILES.values(),
+  );
+  return { prompts: all.operator as SystemPrompts, all, log };
 }
 
 function locations(prompt: string): string[] {
@@ -107,11 +121,13 @@ describe('loadSystemPrompts', () => {
 
   test('a missing root gives the preamble alone, and logs it', async () => {
     const root = join(tmpdir(), `mate-profile-missing-${Date.now()}`);
-    const { prompts, log } = await load(root);
-    for (const [, prompt] of each(prompts)) {
-      expect(prompt.startsWith('You are Rowbutt')).toBe(true);
-      expect(prompt).not.toContain('# Repository instructions');
-      expect(prompt).not.toContain('<available_skills>');
+    const { all, log } = await load(root);
+    for (const prompts of Object.values(all)) {
+      for (const [, prompt] of each(prompts)) {
+        expect(prompt.startsWith('You are Rowbutt')).toBe(true);
+        expect(prompt).not.toContain('# Repository instructions');
+        expect(prompt).not.toContain('<available_skills>');
+      }
     }
     const missing = log.of('profile file missing').map((e) => e.fields?.path);
     expect(missing.sort()).toEqual(
@@ -158,5 +174,110 @@ describe('loadSystemPrompts', () => {
     expect(prompts.discord).toContain('Deploy from .agents/skills.');
     expect(log.of('duplicate skill name')).toHaveLength(1);
     expect(log.of('profile file missing')).toEqual([]);
+  });
+});
+
+describe('each profile', () => {
+  test('has a prompt for both surfaces', async () => {
+    const { all } = await load(REPO);
+    expect(Object.keys(all).sort()).toEqual([
+      'custodian',
+      'investigator',
+      'operator',
+    ]);
+    for (const prompts of Object.values(all)) {
+      expect(Object.keys(prompts).sort()).toEqual(['discord', 'slack']);
+    }
+  });
+
+  test('starts with its own preamble and shares AGENTS.md and the skills', async () => {
+    const { all } = await load(REPO);
+    const rest = (prompts: ProfilePrompts, id: string, preamble: string) => {
+      const prompt = prompts[id]?.slack ?? '';
+      expect(prompt.startsWith(preamble)).toBe(true);
+      return prompt.slice(preamble.length);
+    };
+    const operator = rest(all, 'operator', operatorPreamble('Slack', OPTIONS));
+    const investigator = rest(
+      all,
+      'investigator',
+      investigatorPreamble('Slack', OPTIONS),
+    );
+    expect(investigator).toBe(operator);
+    expect(investigator).toContain('# Repository instructions (AGENTS.md)');
+    expect(investigator).toContain('<available_skills>');
+    expect(all.custodian).toEqual(all.operator as SystemPrompts);
+  });
+});
+
+describe('brainProfiles', () => {
+  const setup = () =>
+    createModelSetup({
+      spec: 'opencode-go/qwen3.8-max',
+      thinking: 'medium',
+      keyFile: join(tmpdir(), 'mate-profile-no-key'),
+      log: new RecordingLog(),
+    });
+  const prompts = (profiles: Iterable<Profile>): ProfilePrompts =>
+    Object.fromEntries(
+      [...profiles].map((profile) => [
+        profile.id,
+        {
+          discord: `${profile.id} on Discord`,
+          slack: `${profile.id} on Slack`,
+        },
+      ]),
+    );
+
+  test("resolves the process model and each profile's prompt and turn timeout", () => {
+    const made = setup();
+    const profiles = brainProfiles(made, prompts(PROFILES.values()), 2_700_000);
+    expect([...profiles.keys()]).toEqual([...PROFILES.keys()]);
+    const investigator = profiles.get('investigator');
+    expect(investigator?.profile).toBe(PROFILES.get('investigator') as Profile);
+    expect(investigator?.model).toBe(made.model);
+    expect(investigator?.thinking).toBe('medium');
+    expect(investigator?.prompts.slack).toBe('investigator on Slack');
+    expect(investigator?.turnTimeoutMs).toBe(1_200_000);
+    expect(profiles.get('operator')?.turnTimeoutMs).toBe(2_700_000);
+    expect(profiles.get('custodian')?.turnTimeoutMs).toBe(2_700_000);
+  });
+
+  test("a profile's own model resolves from the catalog", () => {
+    const made = setup();
+    const own: Profile = {
+      ...(PROFILES.get('operator') as Profile),
+      model: { spec: 'opencode-go/glm-5.1', thinking: 'high' },
+    };
+    const profiles = brainProfiles(
+      made,
+      prompts([own]),
+      60_000,
+      new Map([[own.id, own]]),
+    );
+    expect(profiles.get('operator')?.model.id).toBe('glm-5.1');
+    expect(profiles.get('operator')?.thinking).toBe('high');
+  });
+
+  test.each([
+    ['opencode-go/no-such-model', 'medium', 'which pi-ai does not list'],
+    ['qwen3.8-max', 'medium', 'must be'],
+    ['opencode-go/qwen3.8-max', 'high', 'is not a level'],
+  ] as const)('refuses a profile model %s at %s', (spec, thinking, why) => {
+    const own: Profile = {
+      ...(PROFILES.get('investigator') as Profile),
+      model: { spec, thinking },
+    };
+    const run = () =>
+      brainProfiles(setup(), prompts([own]), 60_000, new Map([[own.id, own]]));
+    expect(run).toThrow(ConfigError);
+    expect(run).toThrow('profile investigator');
+    expect(run).toThrow(why);
+  });
+
+  test('refuses a profile with no prompt', () => {
+    expect(() => brainProfiles(setup(), {}, 60_000)).toThrow(
+      new ConfigError('profile operator has no system prompt'),
+    );
   });
 });

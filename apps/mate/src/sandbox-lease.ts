@@ -33,6 +33,7 @@ import {
   type TurnSandboxSource,
 } from './lease.ts';
 import { type Log, plain } from './log.ts';
+import { LANES, type Lane, laneOf, type Profile } from './profiles.ts';
 import type { ThreadRef } from './surface.ts';
 
 /** How long a holder sits idle before a waiting thread may take its sandbox. */
@@ -46,6 +47,7 @@ export interface SandboxHandle extends HandsTarget {
 }
 
 interface Holder {
+  readonly lane: Lane;
   busy: number;
   lastUsed: number;
   evicting: boolean;
@@ -53,6 +55,7 @@ interface Holder {
 
 interface Waiter {
   readonly key: string;
+  readonly lane: Lane;
   ahead: number;
   resolve(): void;
   reject(reason: unknown): void;
@@ -65,15 +68,19 @@ export interface SlotsOptions {
   readonly clock: Clock;
   readonly log: Log;
   readonly metrics?: HandsInstruments;
-  /** Takes an idle holder's sandbox away; true once it no longer counts. */
-  evict(key: string): Promise<boolean>;
+  /**
+   * Takes an idle holder's sandbox away; true once it no longer counts. It
+   * gives up, false, once `wanted` is false: the waiter it was for has left.
+   */
+  evict(key: string, wanted: () => boolean): Promise<boolean>;
 }
 
 /**
  * The cap on leased sandboxes, `MATE_MAX_SANDBOXES`. A thread holds a slot
  * from its first acquisition until its sandbox is gone. A holder is busy
  * while a turn or a mint uses it; an idle one can be preempted by a waiting
- * thread once it has sat idle for `PREEMPT_IDLE_MS`.
+ * thread once it has sat idle for `PREEMPT_IDLE_MS`. Both lanes share the
+ * slots, and interactive waiters queue ahead of automation ones.
  */
 export class SandboxSlots {
   private readonly holders = new Map<string, Holder>();
@@ -83,7 +90,7 @@ export class SandboxSlots {
 
   constructor(private readonly opts: SlotsOptions) {
     opts.metrics?.sandboxesLive(0);
-    opts.metrics?.sandboxWaiters(0);
+    for (const lane of LANES) opts.metrics?.sandboxWaiters(0, lane);
   }
 
   holds(key: string): boolean {
@@ -92,15 +99,20 @@ export class SandboxSlots {
 
   /**
    * Resolves once `key` holds a slot: at once when it already does or one is
-   * free. Otherwise it queues, first come first served, and reports its place.
-   * A slot being taken from `key` is waited out first, since its sandbox may
-   * be going.
+   * free. Otherwise it queues, first come first served within its lane, behind
+   * every interactive waiter, and reports its place. A slot being taken from
+   * `key` is waited out first, since its sandbox may be going.
    */
   take(
     key: string,
-    options: { signal?: AbortSignal; onWaiting?(ahead: number): void } = {},
+    options: {
+      lane?: Lane;
+      signal?: AbortSignal;
+      onWaiting?(ahead: number): void;
+    } = {},
   ): Promise<void> {
     const { signal } = options;
+    const lane = options.lane ?? 'interactive';
     if (signal?.aborted) return Promise.reject(signal.reason);
     const held = this.holders.get(key);
     if (held?.evicting && this.eviction) {
@@ -110,7 +122,7 @@ export class SandboxSlots {
     }
     if (held) return Promise.resolve();
     if (this.waiters.length === 0 && this.free()) {
-      this.hold(key);
+      this.hold(key, lane);
       return Promise.resolve();
     }
     return new Promise<void>((resolve, reject) => {
@@ -122,6 +134,7 @@ export class SandboxSlots {
       };
       const waiter: Waiter = {
         key,
+        lane,
         ahead: -1,
         resolve,
         reject,
@@ -129,15 +142,20 @@ export class SandboxSlots {
         detach: () => signal?.removeEventListener('abort', onAbort),
       };
       signal?.addEventListener('abort', onAbort, { once: true });
-      this.waiters.push(waiter);
+      const automation = this.waiters.findIndex((w) => w.lane === 'automation');
+      if (lane === 'interactive' && automation >= 0) {
+        this.waiters.splice(automation, 0, waiter);
+      } else {
+        this.waiters.push(waiter);
+      }
       this.pump();
     });
   }
 
   /** A sandbox already standing counts, whatever the cap: at boot, or found in place. */
-  register(key: string): void {
+  register(key: string, lane: Lane = 'interactive'): void {
     if (this.holders.has(key)) return;
-    this.hold(key);
+    this.hold(key, lane);
   }
 
   /** Busy until the returned function runs; `null` when `key` holds no slot. */
@@ -166,8 +184,9 @@ export class SandboxSlots {
     return this.holders.size < this.opts.capacity;
   }
 
-  private hold(key: string): void {
+  private hold(key: string, lane: Lane): void {
     this.holders.set(key, {
+      lane,
       busy: 0,
       lastUsed: this.opts.clock.now(),
       evicting: false,
@@ -185,7 +204,7 @@ export class SandboxSlots {
           if (!this.eviction) this.preempt();
           break;
         }
-        this.hold(head.key);
+        this.hold(head.key, head.lane);
       }
       this.waiters.shift();
       head.detach();
@@ -194,13 +213,21 @@ export class SandboxSlots {
     this.report();
   }
 
-  /** Evicts the least recently used idle holder, or wakes when one qualifies. */
+  /**
+   * Evicts the least recently used idle holder, or wakes when one qualifies.
+   * An automation waiter never takes an interactive thread's sandbox.
+   */
   private preempt(): void {
     const now = this.opts.clock.now();
+    const head = this.waiters[0];
     let victim: [string, Holder] | null = null;
     let soonest = Number.POSITIVE_INFINITY;
     for (const entry of this.holders) {
       const [, holder] = entry;
+      // Before `soonest`: a holder never chosen must arm no timer, or it spins.
+      if (head?.lane === 'automation' && holder.lane === 'interactive') {
+        continue;
+      }
       if (holder.busy > 0 || holder.evicting) continue;
       soonest = Math.min(soonest, holder.lastUsed + PREEMPT_IDLE_MS);
       if (now - holder.lastUsed < PREEMPT_IDLE_MS) continue;
@@ -218,8 +245,16 @@ export class SandboxSlots {
     }
     const [key, holder] = victim;
     holder.evicting = true;
+    // The queue's head now, which may not be the waiter this began for.
+    const wanted = () => {
+      const next = this.waiters[0];
+      return (
+        Boolean(next) &&
+        !(next?.lane === 'automation' && holder.lane === 'interactive')
+      );
+    };
     this.eviction = this.opts
-      .evict(key)
+      .evict(key, wanted)
       .catch((error: unknown) => {
         this.opts.log.warn('could not preempt an idle sandbox', {
           thread: key,
@@ -232,7 +267,7 @@ export class SandboxSlots {
         holder.evicting = false;
         if (evicted) {
           if (this.holders.get(key) === holder) this.holders.delete(key);
-        } else {
+        } else if (wanted()) {
           // Not again until it has sat idle for another window.
           holder.lastUsed = this.opts.clock.now();
         }
@@ -249,7 +284,12 @@ export class SandboxSlots {
       } catch {}
     });
     this.opts.metrics?.sandboxesLive(this.holders.size);
-    this.opts.metrics?.sandboxWaiters(this.waiters.length);
+    for (const lane of LANES) {
+      this.opts.metrics?.sandboxWaiters(
+        this.waiters.filter((waiter) => waiter.lane === lane).length,
+        lane,
+      );
+    }
   }
 }
 
@@ -263,10 +303,14 @@ export interface LeaseDeps {
   /** Where the daemon runs and what `HandsEnv` resolves paths against. */
   readonly workspace: string;
   readonly home: string;
-  /** Finds, adopts or mints the thread's sandbox, Ready. */
-  acquire(ref: ThreadRef, onStep: OnMintStep): Promise<SandboxHandle>;
-  /** The thread's sandbox when one stands Ready; never mints. */
-  find(ref: ThreadRef): Promise<SandboxHandle | null>;
+  /** Finds, adopts or mints the thread's sandbox for `profile`, Ready. */
+  acquire(
+    ref: ThreadRef,
+    profile: Profile,
+    onStep: OnMintStep,
+  ): Promise<SandboxHandle>;
+  /** The thread's sandbox when one stands Ready for `profile`; never mints. */
+  find(ref: ThreadRef, profile: Profile): Promise<SandboxHandle | null>;
   /** A link to `handle`'s pod; its open fails `SandboxGone` once that pod is not there. */
   link(handle: SandboxHandle): HandsLink;
   slide(name: string): Promise<void>;
@@ -294,6 +338,8 @@ export class ThreadHandsImpl implements ThreadHands {
     readonly key: string,
     public hooks: ThreadHandsHooks,
     private readonly deps: LeaseDeps,
+    /** Fixed for the thread's life: its sandbox is minted for this profile. */
+    readonly profile: Profile,
     holding: string | null = null,
   ) {
     this.holding = holding;
@@ -360,7 +406,7 @@ export class ThreadHandsImpl implements ThreadHands {
   private async run(onStep: OnMintStep): Promise<SandboxHandle> {
     const done = this.deps.slots.use(this.key);
     try {
-      const handle = await this.deps.acquire(this.ref, onStep);
+      const handle = await this.deps.acquire(this.ref, this.profile, onStep);
       if (this.released) {
         await this.deps.discard(handle.sandbox);
         throw new Error('the thread was put away while its sandbox started');
@@ -416,7 +462,7 @@ export class TurnLeaseImpl implements TurnLease, LeaseAccess {
     private readonly deps: LeaseDeps,
   ) {
     this.busy = deps.slots.use(thread.key);
-    this.creds = deps.credentials.turn();
+    this.creds = deps.credentials.turn(thread.profile);
   }
 
   client(signal: AbortSignal | undefined): Promise<HandsClient | LeaseFailure> {
@@ -446,9 +492,9 @@ export class TurnLeaseImpl implements TurnLease, LeaseAccess {
     if (this.closed || this.target) return;
     const { deps, thread } = this;
     try {
-      const found = await deps.find(thread.ref);
+      const found = await deps.find(thread.ref, thread.profile);
       if (!found || this.closed || this.target) return;
-      deps.slots.register(thread.key);
+      deps.slots.register(thread.key, laneOf(thread.profile));
       this.markBusy();
       thread.found(found);
       this.target = found;
@@ -559,6 +605,7 @@ export class TurnLeaseImpl implements TurnLease, LeaseAccess {
     this.state = 'acquiring';
     try {
       await deps.slots.take(thread.key, {
+        lane: laneOf(thread.profile),
         signal: AbortSignal.any([this.options.signal, this.over.signal]),
         onWaiting: (ahead) => this.emit({ kind: 'waiting', ahead }),
       });

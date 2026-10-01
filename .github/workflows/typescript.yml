@@ -50,9 +50,10 @@ jobs:
             apps/weather/**
             clusters/folly/apps/pbx/config/**
             clusters/folly/apps/pbx/switchboard.yaml
-            clusters/offsite/apps/mate/database-backup.yaml
-            clusters/offsite/apps/mate/deployment.yaml
-            clusters/offsite/apps/mate/network-policy.yaml
+            clusters/offsite/apps/mate/*.yaml
+            clusters/base/apps/mate-sandbox-reader/rbac.yaml
+            clusters/base/monitoring/mate-sandbox-reader.yaml
+            clusters/folly/config/cluster-topology.json
             packages/charts/**
             clusters/base/platform/spindrift-target/**
             clusters/offsite/apps/spindrift/**

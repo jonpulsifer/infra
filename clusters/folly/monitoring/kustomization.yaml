@@ -13,6 +13,7 @@ resources:
   - tempo.yaml
   - flameboss.yaml
   - flameboss-rules.yaml
+  - mate-sandbox-reader.yaml
   - pbx-rules.yaml
   - ../../base/monitoring
   - secret.sops.yaml

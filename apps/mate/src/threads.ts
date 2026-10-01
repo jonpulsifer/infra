@@ -1,7 +1,8 @@
 /**
- * The thread state machine. The concurrency cap, the queue and the daily turn
- * budget span every surface. Each thread's memory lives in the brain's store;
- * this engine owns its row in `mate_threads` and the turns it runs.
+ * The thread state machine. The concurrency caps, the queues and the daily turn
+ * budgets span every surface, one lane for interactive profiles and one for
+ * the rest. Each thread's memory lives in the brain's store; this engine owns
+ * its row in `mate_threads` and the turns it runs.
  */
 import {
   type Brain,
@@ -19,14 +20,32 @@ import {
   GAVE_UP_WAITING,
   HARNESS_FAILED,
   NEVER_STARTED,
+  PROFILE_GONE,
+  PROFILE_PLACE,
+  PROFILE_UNKNOWN,
+  RECORD_GONE,
   RESTARTED,
   RESUMING,
+  RUNS_AS,
   STORE_DOWN,
   THREAD_CLOSED,
   THREAD_SPENT,
   TURN_WAITING,
   UNDELIVERED,
+  UNRUN,
 } from './notices.ts';
+import {
+  AUTOMATION_CONCURRENCY,
+  DEFAULT_PROFILE,
+  LANES,
+  type Lane,
+  laneOf,
+  PROFILES,
+  type Profile,
+  profileTag,
+  strayTag,
+  sweepable,
+} from './profiles.ts';
 import { Progress } from './progress.ts';
 import { EDIT_CADENCE_MS, Reply, RUN_GRACE_MS } from './reply.ts';
 import type { PromptResult } from './sandbox.ts';
@@ -46,9 +65,19 @@ import type {
   ThreadStore,
   TurnMark,
 } from './thread-store.ts';
-import { replayPreamble } from './transcript.ts';
+import { assignmentPost, replayPreamble } from './transcript.ts';
 
 export type { Inbound };
+
+/** A trusted trigger's thread. */
+export interface Start {
+  readonly ref: ThreadRef;
+  /** An automation or job profile. */
+  readonly profile: string;
+  /** On the surface's allowlist: Slack's stream recipient and the turn mark's asker. */
+  readonly asker: string;
+  readonly text: string;
+}
 
 export type ThreadState =
   | 'new'
@@ -65,6 +94,8 @@ interface Prompt {
   raw: string;
   authorId: string;
   message: MessageRef;
+  /** The profile this message's own `+id` asked for, checked against the row. */
+  readonly asked: string | null;
 }
 
 interface Thread {
@@ -72,6 +103,8 @@ interface Thread {
   key: string;
   ref: ThreadRef;
   surface: Surface;
+  /** The row's once it loads; until then the profile the thread was created under. */
+  profile: Profile;
   state: ThreadState;
   row: ThreadRow | null;
   session: BrainSession | null;
@@ -94,6 +127,8 @@ interface Thread {
   restoreAttempts: number;
   /** Set once the thread is deleted, so a turn ending late writes nothing. */
   removed: boolean;
+  /** A job restored before its first turn: its release says so. */
+  unrun: boolean;
 }
 
 export const THREAD_NAME_MAX = 100;
@@ -158,6 +193,8 @@ export interface ThreadsDeps {
   progressCadenceMs?: number;
   metrics?: Instruments;
   commands?: Commands;
+  /** Tests add an automation profile; PROFILES otherwise. */
+  profiles?: ReadonlyMap<string, Profile>;
 }
 
 export function stripMention(content: string, me: string): string {
@@ -175,24 +212,53 @@ export function threadName(content: string, me: string): string {
     : first;
 }
 
+function misplaced(stray: string): string {
+  return `${PROFILE_PLACE} start the message with +${stray}`;
+}
+
+function keeps(profile: string, asked: string): string {
+  return `${RUNS_AS} ${profile} — a thread keeps the profile it opened with; start a new thread for +${asked}`;
+}
+
+function utcDay(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
 export class Threads {
   private readonly threads = new Map<string, Thread>();
   private readonly surfaces = new Map<SurfaceName, Surface>();
-  private readonly waiting: string[] = [];
+  private readonly waiting: Record<Lane, string[]> = {
+    interactive: [],
+    automation: [],
+  };
   private readonly dayTurns: number[] = [];
   private readonly backlog: Inbound[] = [];
   private readonly inheritedTold = new Set<string>();
+  /**
+   * Threads mate opened only to refuse a `+id`, with the refusal: never
+   * adopted, and a message in one is refused again.
+   */
+  private readonly refused = new Map<string, string>();
   private readonly metrics: Instruments;
+  private readonly profiles: ReadonlyMap<string, Profile>;
+  private readonly byDefault: Profile;
   private hydrating = 0;
   private storeUp = false;
   private draining = false;
   /** SIGTERM answered the queue; a message from here on is answered at once. */
   private quiesced = false;
   /** Slots of deleted threads whose turn the brain has not let go of yet. */
-  private forgetting = 0;
+  private readonly forgetting: Record<Lane, number> = {
+    interactive: 0,
+    automation: 0,
+  };
 
   constructor(private readonly deps: ThreadsDeps) {
     this.metrics = deps.metrics ?? lazyInstruments();
+    this.profiles = deps.profiles ?? PROFILES;
+    const byDefault = this.profiles.get(DEFAULT_PROFILE);
+    if (!byDefault) throw new Error(`no profile ${DEFAULT_PROFILE}`);
+    this.byDefault = byDefault;
     for (const surface of deps.surfaces) {
       this.surfaces.set(surface.name, surface);
     }
@@ -206,7 +272,7 @@ export class Threads {
   }
 
   get waitingIds(): readonly string[] {
-    return this.waiting;
+    return [...this.waiting.interactive, ...this.waiting.automation];
   }
 
   get surfaceNames(): SurfaceName[] {
@@ -215,6 +281,7 @@ export class Threads {
 
   /** Registers a thread from before a restart, so a reply in it needs no mention. */
   adopt(ref: ThreadRef): void {
+    if (this.refused.has(threadKey(ref))) return;
     const surface = this.surfaces.get(ref.surface);
     if (surface) this.ensure(surface, ref);
   }
@@ -252,7 +319,23 @@ export class Threads {
       for (const row of rows) {
         const surface = this.surfaces.get(row.ref.surface);
         if (!surface) continue;
-        const thread = this.ensure(surface, row.ref);
+        const profile = this.profiles.get(row.profile);
+        if (!profile) {
+          log.error('a thread names a profile this mate does not declare', {
+            threadId: row.ref.id,
+            profile: row.profile,
+          });
+          // Logged once: a reply reopens it under an image that declares it.
+          await store.patch(row.key, { state: 'closed' }).catch((error) => {
+            this.metrics.storeFailed('rows');
+            log.warn('a thread row could not be written', {
+              threadId: row.ref.id,
+              error: plain(error),
+            });
+          });
+          continue;
+        }
+        const thread = this.ensure(surface, row.ref, profile);
         if (thread.state !== 'new') {
           log.warn('rehydrate skipped a thread already in motion', {
             threadId: thread.ref.id,
@@ -260,8 +343,11 @@ export class Threads {
           });
           continue;
         }
+        thread.profile = profile;
         thread.row = row;
         thread.turns = row.turns;
+        // A start cut off between its row and its turn.
+        thread.unrun = profile.mode === 'job' && row.turns === 0 && !row.turn;
         this.to(thread, 'rehydrating');
         restoring.push(thread);
       }
@@ -284,32 +370,52 @@ export class Threads {
     }
   }
 
-  /** Trusted internal trigger. Bot-authored Slack events must never enter onMessage. */
-  async scheduled(ref: ThreadRef, asker: string, text: string): Promise<void> {
+  /**
+   * A trusted internal trigger: opens a thread under an automation or job
+   * profile and queues `text`. The row is the attempt: once it exists no
+   * trigger starts this thread again, so a refused or failed first turn is
+   * told once in the thread, never on every tick. Bot-authored Slack events
+   * must never enter onMessage. False when the thread exists.
+   */
+  async start({ ref, profile: id, asker, text }: Start): Promise<boolean> {
     const surface = this.surfaces.get(ref.surface);
     if (
-      !surface ||
-      !surface.allowedChannelIds.has(ref.channelId) ||
+      !surface?.allowedChannelIds.has(ref.channelId) ||
       !surface.allowedUserIds.has(asker)
     ) {
-      throw new Error(
-        'scheduled report has no authorized destination or owner',
-      );
+      throw new Error('a start has no authorized destination or owner');
+    }
+    const profile = this.profiles.get(id);
+    if (!profile || profile.mode === 'interactive') {
+      throw new Error(`a start runs an automation or job profile, not ${id}`);
     }
     if (this.draining || this.quiesced)
       throw new Error('mate is shutting down');
-    const thread = this.ensure(surface, ref);
-    // A restart may find the root message but not the queued prompt. Requeue
-    // only if no turn has started; an interrupted turn belongs to rehydration.
-    const row = thread.row ?? (await this.deps.store.get(thread.key));
-    if (row && (row.turns > 0 || row.turn)) return;
-    if (thread.pending.length > 0) return;
+    const thread = this.ensure(surface, ref, profile);
+    if (thread.row || thread.pending.length > 0 || thread.state !== 'new') {
+      return false;
+    }
+    if (await this.deps.store.get(thread.key)) return false;
+    thread.profile = profile;
+    const row = await this.deps.store.open(ref, profile.id);
+    thread.row = row;
+    thread.turns = row.turns;
+    // In the thread, so a replay after the session is set aside still has it.
+    await surface.post(ref, assignmentPost(text)).catch((error) =>
+      this.deps.log.warn('the assignment could not be posted', {
+        threadId: ref.id,
+        error: plain(error),
+      }),
+    );
+    if (thread.pending.length > 0 || thread.state !== 'new') return false;
     this.accept(thread, {
       text,
       raw: text,
       authorId: asker,
+      asked: null,
       message: { channelId: ref.channelId, id: ref.id },
     });
+    return true;
   }
 
   async onMessage(message: Inbound): Promise<void> {
@@ -325,23 +431,38 @@ export class Threads {
       this.backlog.push(message);
       return;
     }
-    const prompt = {
-      text: stripMention(message.content, surface.me),
+    const stripped = stripMention(message.content, surface.me);
+    // The tag rides this prompt, so no later message changes what it asked for.
+    const tag = profileTag(stripped);
+    const prompt: Prompt = {
+      text: tag ? tag.text : stripped,
       raw: message.content,
       authorId: message.authorId,
       message: { channelId: message.channelId, id: message.id },
+      asked: tag?.id ?? null,
     };
+    const stray = tag ? null : strayTag(prompt.text, this.profiles.keys());
     const command = this.deps.commands?.parse(prompt.text) ?? null;
-    const known = message.threadId
-      ? this.threads.get(
-          threadKey({
-            surface: surface.name,
-            channelId: message.channelId,
-            id: message.threadId,
-          }),
-        )
-      : undefined;
+    const inside: ThreadRef | null = message.threadId
+      ? {
+          surface: surface.name,
+          channelId: message.channelId,
+          id: message.threadId,
+        }
+      : null;
+    const refusal = inside && this.refused.get(threadKey(inside));
+    if (inside && refusal) {
+      await this.refuse(surface, inside, prompt.message, refusal);
+      return;
+    }
+    const known = inside ? this.threads.get(threadKey(inside)) : undefined;
     if (known) {
+      const line = this.knownRefusal(known, tag?.id ?? null, stray);
+      if (line) {
+        this.mark(known, [prompt.message], 'failed');
+        await this.say(known.surface, known.ref, line);
+        return;
+      }
       if (command) this.command(command, known, message.authorId);
       else this.accept(known, prompt);
       return;
@@ -351,6 +472,14 @@ export class Threads {
       !message.mentionsMe
     ) {
       return;
+    }
+    let profile = this.byDefault;
+    let line: string | null = null;
+    if (stray) line = misplaced(stray);
+    else if (tag) {
+      const asked = this.profiles.get(tag.id);
+      if (asked?.mode === 'interactive') profile = asked;
+      else line = this.unknown(tag.id);
     }
     let ref: ThreadRef;
     try {
@@ -367,9 +496,93 @@ export class Threads {
       });
       return;
     }
-    const thread = this.ensure(surface, ref);
+    if (line) {
+      // A Slack mention inside a thread mate holds no Thread for, perhaps one
+      // with a closed row: refuse this message, not the thread.
+      if (message.threadId && ref.id === message.threadId) {
+        await this.refuse(surface, ref, prompt.message, line);
+        return;
+      }
+      // Before any await: Discord's ThreadCreate can adopt the thread first.
+      const key = threadKey(ref);
+      this.refused.set(key, line);
+      const early = this.threads.get(key);
+      if (early && !early.row && early.pending.length === 0) {
+        this.threads.delete(key);
+      }
+      await this.refuse(surface, ref, prompt.message, line);
+      // So a restarted mate does not adopt it.
+      await surface
+        .archive?.(ref)
+        .catch((error) =>
+          log.warn('archive failed', { threadId: ref.id, error: plain(error) }),
+        );
+      return;
+    }
+    const thread = this.ensure(surface, ref, profile);
+    // Discord's ThreadCreate can adopt the thread first, under the default.
+    if (!thread.row && thread.pending.length === 0) thread.profile = profile;
     if (command) this.command(command, thread, message.authorId);
     else this.accept(thread, prompt);
+  }
+
+  /** Why a message in a known thread runs nothing: its `+id` cannot run here. */
+  private knownRefusal(
+    thread: Thread,
+    asked: string | null,
+    stray: string | null,
+  ): string | null {
+    const loaded = Boolean(thread.row);
+    if (stray && !(loaded && thread.profile.id === stray)) {
+      return misplaced(stray);
+    }
+    if (!asked) return null;
+    if (this.profiles.get(asked)?.mode !== 'interactive') {
+      return this.unknown(asked);
+    }
+    if (loaded && thread.profile.id !== asked) {
+      return keeps(thread.profile.id, asked);
+    }
+    return null;
+  }
+
+  private unknown(asked: string): string {
+    const chat = [...this.profiles.values()]
+      .filter((profile) => profile.mode === 'interactive')
+      .map((profile) => `+${profile.id}`)
+      .join(', ');
+    return `${PROFILE_UNKNOWN} +${asked} — open one with ${chat}`;
+  }
+
+  /** A thread that holds no Thread: the line, and its message marked failed. */
+  private async refuse(
+    surface: Surface,
+    ref: ThreadRef,
+    message: MessageRef,
+    line: string,
+  ): Promise<void> {
+    await this.say(surface, ref, line);
+    await surface.mark?.(message, 'failed').catch((error) =>
+      this.deps.log.warn('a message could not be marked', {
+        threadId: ref.id,
+        mark: 'failed',
+        error: plain(error),
+      }),
+    );
+  }
+
+  /** Posts one line and leaves any status line where it is. */
+  private async say(
+    surface: Surface,
+    ref: ThreadRef,
+    line: string,
+  ): Promise<void> {
+    await surface.post(ref, line).catch((error) =>
+      this.deps.log.warn('message failed', {
+        threadId: ref.id,
+        error: plain(error),
+      }),
+    );
   }
 
   /** Runs beside any turn, and a failure is only logged. */
@@ -421,17 +634,17 @@ export class Threads {
     this.threads.delete(key);
     thread.removed = true;
     const held = holdsSlot(thread);
-    if (held) this.forgetting += 1;
+    const lane = laneOf(thread.profile);
+    if (held) this.forgetting[lane] += 1;
     this.disarmQuiet(thread);
     // The line's redraw timer outlives the thread, so end it here.
     await this.endProgress(thread, null);
-    const at = this.waiting.indexOf(key);
-    if (at >= 0) this.waiting.splice(at, 1);
+    this.unqueue(key);
     this.report();
     try {
       await brain.forget(ref);
     } finally {
-      if (held) this.forgetting -= 1;
+      if (held) this.forgetting[lane] -= 1;
     }
     await store
       .delete(key)
@@ -492,7 +705,12 @@ export class Threads {
     if (timer) clock.cancel(timer);
   }
 
-  private ensure(surface: Surface, ref: ThreadRef): Thread {
+  /** `profile` is the thread's only when this creates it. */
+  private ensure(
+    surface: Surface,
+    ref: ThreadRef,
+    profile: Profile = this.byDefault,
+  ): Thread {
     const key = threadKey(ref);
     let thread = this.threads.get(key);
     if (!thread) {
@@ -500,6 +718,7 @@ export class Threads {
         key,
         ref,
         surface,
+        profile,
         state: 'new',
         row: null,
         session: null,
@@ -513,6 +732,7 @@ export class Threads {
         task: null,
         restoreAttempts: 0,
         removed: false,
+        unrun: false,
       };
       this.threads.set(key, thread);
     }
@@ -532,12 +752,14 @@ export class Threads {
   }
 
   private report(): void {
-    let running = 0;
+    const running: Record<Lane, number> = { interactive: 0, automation: 0 };
     for (const thread of this.threads.values()) {
-      if (thread.state === 'turn') running += 1;
+      if (thread.state === 'turn') running[laneOf(thread.profile)] += 1;
     }
-    this.metrics.turnsRunning(running);
-    this.metrics.queueDepth(this.waiting.length);
+    for (const lane of LANES) {
+      this.metrics.turnsRunning(running[lane], lane);
+      this.metrics.queueDepth(this.waiting[lane].length, lane);
+    }
   }
 
   private accept(thread: Thread, prompt: Prompt): void {
@@ -559,12 +781,12 @@ export class Threads {
         case 'new':
         case 'closed':
           if (thread.pending.length === 0) return;
-          if (this.canStart()) await this.open(thread);
+          if (this.canStart(thread)) await this.open(thread);
           else this.enqueue(thread);
           return;
         case 'idle':
-          if (thread.pending.length === 0) this.armQuiet(thread);
-          else if (this.canStart()) await this.runTurn(thread);
+          if (thread.pending.length === 0) this.rest(thread);
+          else if (this.canStart(thread)) await this.runTurn(thread);
           else this.enqueue(thread);
           return;
         case 'waiting':
@@ -582,35 +804,51 @@ export class Threads {
     }
   }
 
-  /** A slot is free and nobody is ahead in the queue. */
-  private canStart(): boolean {
-    return this.freeSlots() > 0 && this.waiting.length === 0;
+  /** A slot of the thread's lane is free and nobody is ahead in its queue. */
+  private canStart(thread: Thread): boolean {
+    const lane = laneOf(thread.profile);
+    return this.freeSlots(lane) > 0 && this.waiting[lane].length === 0;
   }
 
-  private freeSlots(): number {
+  private freeSlots(lane: Lane): number {
     let held = 0;
     for (const thread of this.threads.values()) {
-      if (holdsSlot(thread)) held += 1;
+      if (holdsSlot(thread) && laneOf(thread.profile) === lane) held += 1;
     }
-    return this.deps.config.maxConcurrent - held - this.forgetting;
+    const slots =
+      lane === 'interactive'
+        ? this.deps.config.maxConcurrent
+        : AUTOMATION_CONCURRENCY;
+    return slots - held - this.forgetting[lane];
   }
 
-  /** Runs after every event that frees a turn slot; the queue head goes first. */
+  /** Runs after every event that frees a turn slot; each queue's head goes first. */
   private pumpWaiting(): void {
     if (this.draining) return;
-    while (this.freeSlots() > 0 && this.waiting.length > 0) {
-      const next = this.threads.get(this.waiting.shift() ?? '');
-      if (next?.state !== 'waiting') continue;
-      if (next.session) void this.runTurn(next);
-      else void this.open(next);
+    for (const lane of LANES) {
+      const queue = this.waiting[lane];
+      while (this.freeSlots(lane) > 0 && queue.length > 0) {
+        const next = this.threads.get(queue.shift() ?? '');
+        if (next?.state !== 'waiting') continue;
+        if (next.session) void this.runTurn(next);
+        else void this.open(next);
+      }
     }
     this.report();
   }
 
+  private unqueue(key: string): void {
+    for (const lane of LANES) {
+      const at = this.waiting[lane].indexOf(key);
+      if (at >= 0) this.waiting[lane].splice(at, 1);
+    }
+  }
+
   private enqueue(thread: Thread): void {
-    this.waiting.push(thread.key);
+    const queue = this.waiting[laneOf(thread.profile)];
+    queue.push(thread.key);
     this.to(thread, 'waiting');
-    const ahead = this.waiting.length - 1;
+    const ahead = queue.length - 1;
     const line = `${TURN_WAITING} · ${ahead > 0 ? `${ahead} ahead` : 'next up'}`;
     if (thread.progress) thread.progress.say(line);
     else {
@@ -627,20 +865,24 @@ export class Threads {
   }
 
   private async leaveQueue(thread: Thread, reason: TeardownReason) {
-    const at = this.waiting.indexOf(thread.key);
-    if (at >= 0) this.waiting.splice(at, 1);
+    this.unqueue(thread.key);
     this.disarmQuiet(thread);
     this.drop(thread);
     if (thread.session) {
       await this.release(thread, reason, { line: null, archive: false });
       return;
     }
+    // A started job's row, opened before its turn could.
+    if (thread.row?.state === 'open') {
+      await this.patch(thread, { state: 'closed' });
+    }
     this.to(thread, 'closed');
   }
 
   /**
    * A slot is held from here: the row, then the session. A store that is down
-   * is one plain line, and the thread goes back to `new`.
+   * is one plain line, and the thread goes back to `new`. The stored row's
+   * profile wins, so a refused open never marks a row open.
    */
   private async open(thread: Thread): Promise<void> {
     const { brain, store } = this.deps;
@@ -648,7 +890,31 @@ export class Threads {
     this.disarmQuiet(thread);
     let session: BrainSession;
     try {
-      const row = await store.open(thread.ref);
+      const asked = thread.pending[0]?.asked ?? null;
+      const stored = await store.get(thread.key);
+      if (thread.removed) return;
+      const id = stored?.profile ?? asked ?? thread.profile.id;
+      if (asked && id !== asked) {
+        return await this.refuseProfile(thread, keeps(id, asked));
+      }
+      const profile = this.profiles.get(id);
+      if (!profile) {
+        return await this.refuseProfile(thread, `${PROFILE_GONE} ${id}`);
+      }
+      // Only `start` births a non-interactive row; chat never does, even for
+      // a thread whose row was swept.
+      if (!stored && profile.mode !== 'interactive') {
+        if (!sweepable(this.profiles).includes(id)) {
+          return await this.refuseProfile(thread, RECORD_GONE);
+        }
+        // Swept with the default's grants: born again as the default, in its
+        // lane, as after a restart.
+        thread.profile = this.byDefault;
+        this.to(thread, 'new');
+        this.pumpWaiting();
+        return await this.pump(thread);
+      }
+      const row = await store.open(thread.ref, profile.id);
       if (thread.removed) {
         // The delete ran while the row opened, so the open wrote it back.
         await store
@@ -656,8 +922,14 @@ export class Threads {
           .catch((error) => this.storeFailed(thread, 'rows', error));
         return;
       }
+      thread.profile = profile;
       thread.row = row;
       thread.turns = row.turns;
+      if (asked && asked !== DEFAULT_PROFILE && row.turns === 0) {
+        await this.tell(thread, `${RUNS_AS} ${profile.id}`);
+        // The delete ran during the post, and its forget found no open to wait on.
+        if (thread.removed) return;
+      }
       // A delete from here on forgets the thread after this open settles.
       session = await brain.open(row);
     } catch (error) {
@@ -680,6 +952,14 @@ export class Threads {
     this.to(thread, 'new');
     this.pumpWaiting();
     await this.tell(thread, STORE_DOWN);
+  }
+
+  /** Like `storeDown`: the row's profile is not the one asked for, or cannot open here. */
+  private async refuseProfile(thread: Thread, line: string): Promise<void> {
+    this.drop(thread);
+    this.to(thread, 'new');
+    this.pumpWaiting();
+    await this.tell(thread, line);
   }
 
   /**
@@ -801,20 +1081,24 @@ export class Threads {
     if (this.draining) return;
     const prompt = thread.pending.shift();
     if (!prompt || !thread.session) return;
-    const refusal = this.budgetRefusal(thread);
+    thread.unrun = false;
+    // A tagged prompt queued while the thread opened or before its row loaded.
+    const refusal =
+      prompt.asked && prompt.asked !== thread.profile.id
+        ? keeps(thread.profile.id, prompt.asked)
+        : this.budgetRefusal(thread);
     if (refusal) {
       this.mark(thread, [prompt.message], 'failed');
       this.drop(thread);
       await this.tell(thread, refusal);
       this.to(thread, 'idle');
       this.pumpWaiting();
-      this.armQuiet(thread);
+      this.rest(thread);
       return;
     }
     thread.turns += 1;
     thread.stopRequested = false;
-    this.dayTurns.push(clock.now());
-    this.metrics.turnStarted();
+    if (thread.profile.mode === 'interactive') this.dayTurns.push(clock.now());
     this.to(thread, 'turn');
     this.disarmQuiet(thread);
     const task = this.turn(thread, prompt);
@@ -826,8 +1110,37 @@ export class Threads {
     const { brain, clock } = this.deps;
     const session = thread.session;
     if (!session) return;
+    const { profile } = thread;
+    const cap = profile.budget.turnsPerDay;
     // The first await after the budget check and dayTurns push, so two turns
-    // starting at once cannot both pass a cap with room for one.
+    // starting at once cannot both pass a cap with room for one. A profile's
+    // own day cap is claimed in the store, atomic across processes.
+    if (cap !== null) {
+      let refusal: string | null = null;
+      try {
+        if (
+          !(await this.deps.store.claimTurn(
+            profile.id,
+            utcDay(clock.now()),
+            cap,
+          ))
+        ) {
+          refusal = `${DAY_SPENT} ${cap} ${profile.id} turns is spent — it resets at 00:00 UTC`;
+        }
+      } catch (error) {
+        this.storeFailed(thread, 'rows', error);
+        refusal = STORE_DOWN;
+      }
+      if (refusal) {
+        thread.turns -= 1;
+        this.mark(thread, [prompt.message], 'failed');
+        this.drop(thread);
+        await this.tell(thread, refusal);
+        await this.turnDone(thread);
+        return;
+      }
+    }
+    this.metrics.turnStarted(profile.id, profile.mode);
     await this.patch(thread, {
       turns: thread.turns,
       turn: {
@@ -1029,9 +1342,13 @@ export class Threads {
 
   private budgetRefusal(thread: Thread): string | null {
     const { config, clock } = this.deps;
-    if (thread.turns >= config.maxTurnsPerThread) {
-      return `${THREAD_SPENT} ${config.maxTurnsPerThread} turns — start a new thread`;
+    const perThread =
+      thread.profile.budget.turnsPerThread ?? config.maxTurnsPerThread;
+    if (thread.turns >= perThread) {
+      return `${THREAD_SPENT} ${perThread} turns — start a new thread`;
     }
+    // Other profiles claim their own day in `turn`.
+    if (thread.profile.mode !== 'interactive') return null;
     const floor = clock.now() - DAY_MS;
     while (this.dayTurns.length > 0 && (this.dayTurns[0] ?? 0) < floor) {
       this.dayTurns.shift();
@@ -1040,6 +1357,17 @@ export class Threads {
       return `${DAY_SPENT} ${config.maxTurnsPerDay} turns is spent — try again later`;
     }
     return null;
+  }
+
+  /** An idle thread with nothing queued: a job is done, any other waits for quiet. */
+  private rest(thread: Thread): void {
+    if (thread.profile.mode !== 'job') {
+      this.armQuiet(thread);
+      return;
+    }
+    const line = thread.unrun ? UNRUN : null;
+    thread.unrun = false;
+    void this.release(thread, 'finished', { line, archive: true });
   }
 
   private armQuiet(thread: Thread): void {

@@ -13,8 +13,9 @@ metadata:
     app.kubernetes.io/name: mate-sandbox
     app.kubernetes.io/part-of: mate
 spec:
-  # Only the label sandboxes.ts stamps: other labels vary, and a selector that
-  # matches nothing fails open.
+  # Only the label sandboxes.ts stamps on this network: other labels vary.
+  # mate-sandbox-baseline, below, holds a sandbox no policy of its own selects
+  # to DNS.
   endpointSelector:
     matchLabels:
       app.kubernetes.io/name: mate-sandbox
@@ -85,3 +86,34 @@ spec:
               protocol: TCP
             - port: "6443"
               protocol: TCP
+---
+# Every sandbox mate mints, whatever its network: one whose own policy is
+# missing gets this DNS-only egress, not open egress. Allow rules add up, so
+# this narrows nothing the others allow. It lives here, apart from
+# sandbox-reader-network-policy.yaml, so losing that file does not lose it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate-sandbox-baseline
+  namespace: mate
+  labels:
+    app.kubernetes.io/part-of: mate
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: lolwtf.ca/hands
+        operator: Exists
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "**.cluster.local"

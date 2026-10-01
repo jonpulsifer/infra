@@ -23,6 +23,18 @@ export const UNDELIVERED = "⚠️ couldn't deliver the reply";
 export const THREAD_SPENT = '🛑 this thread has used its';
 export const DAY_SPENT = '🛑 the daily budget of';
 
+// A thread's profile, and the `+id` refusals.
+export const RUNS_AS = '🔒 this thread runs as';
+export const PROFILE_UNKNOWN = '🚫 no profile opens a thread as';
+export const PROFILE_GONE = "⚠️ this thread's profile is not declared:";
+/** A job or automation thread whose row is gone: chat never births its profile. */
+export const RECORD_GONE =
+  "⚠️ this thread's record is gone — mention mate in a new thread";
+/** A declared `+id` that is not the message's first word. */
+export const PROFILE_PLACE = '🚫 put the profile first:';
+/** A job row restored with no turn run and none marked. */
+export const UNRUN = '⚠️ this assignment never started — reply here to run it';
+
 // The `sandbox` card's titles, drawn inside a turn.
 export const WAITING = '⏳ waiting for a free sandbox';
 export const MINT_STEPS: Record<MintStep, string> = {
@@ -89,6 +101,12 @@ const PREFIXES: readonly string[] = [
   UNDELIVERED,
   THREAD_SPENT,
   DAY_SPENT,
+  RUNS_AS,
+  PROFILE_UNKNOWN,
+  PROFILE_GONE,
+  RECORD_GONE,
+  PROFILE_PLACE,
+  UNRUN,
   WAITING,
   // Spread, so a new mint step is filtered too.
   ...Object.values(MINT_STEPS),

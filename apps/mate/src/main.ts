@@ -5,7 +5,12 @@ import {
   InteractionType,
 } from 'discord-api-types/v10';
 import { PiBrain, postgresSessions, type SessionSource } from './brain.ts';
-import type { McpBridge, ModelSetup } from './brain-inputs.ts';
+import type {
+  BrainProfile,
+  McpBridge,
+  ModelSetup,
+  ProfilePrompts,
+} from './brain-inputs.ts';
 import type { Brain } from './brain-port.ts';
 import { ChatgptAccount, ChatgptKeeper } from './chatgpt.ts';
 import { systemClock } from './clock.ts';
@@ -36,7 +41,8 @@ import { jsonLog as log, plain } from './log.ts';
 import { combineMcp, createMcpBridge } from './mcp.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
 import { chatgptModel, createModelSetup } from './model.ts';
-import { loadSystemPrompts } from './profile.ts';
+import { brainProfiles, loadSystemPrompts } from './profile.ts';
+import { PROFILES, validateProfiles } from './profiles.ts';
 import { StubBrain } from './sandbox.ts';
 import { createKubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
@@ -69,7 +75,13 @@ const FLUSH_BUDGET_MS = EXPORT_TIMEOUT_MS + 1_000;
 
 function loadConfig() {
   try {
-    return readConfig(process.env);
+    const config = readConfig(process.env);
+    if (config.sandboxes.mode === 'kube') {
+      validateProfiles(PROFILES, {
+        turnTimeoutMs: config.sandboxes.sandbox.turnTimeoutMs,
+      });
+    }
+    return config;
   } catch (error) {
     if (error instanceof ConfigError) {
       log.error('config error', { error: error.message });
@@ -218,6 +230,23 @@ function openModel(
   }
 }
 
+// A profile model the catalog lacks is a ConfigError, as for MATE_MODEL.
+function openProfiles(
+  setup: ModelSetup,
+  prompts: ProfilePrompts,
+  turnTimeoutMs: number,
+): ReadonlyMap<string, BrainProfile> {
+  try {
+    return brainProfiles(setup, prompts, turnTimeoutMs);
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      log.error('config error', { error: error.message });
+      process.exit(EXIT_CONFIG);
+    }
+    throw error;
+  }
+}
+
 function openMcp(brain: BrainConfig): McpBridge | null {
   if (
     process.env.MATE_KTHX_MCP_URL?.trim() &&
@@ -300,12 +329,16 @@ async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
     ? new PostgresCredentialStore({ db, log, metrics: lazyInstruments() })
     : null;
   const setup = openModel(brainConfig, credentials);
-  const prompts = await loadSystemPrompts({
-    root: brainConfig.profileRoot ?? REPO_ROOT,
-    workspace: WORKSPACE,
-    checkoutRef: sandbox.checkoutRef,
-    log,
-  });
+  const prompts = await loadSystemPrompts(
+    {
+      root: brainConfig.profileRoot ?? REPO_ROOT,
+      workspace: WORKSPACE,
+      checkoutRef: sandbox.checkoutRef,
+      log,
+    },
+    PROFILES.values(),
+  );
+  const profiles = openProfiles(setup, prompts, sandbox.turnTimeoutMs);
   const mcp = openMcp(brainConfig);
   const hands = createKubeHands({
     kube,
@@ -339,9 +372,8 @@ async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
     sessions,
     hands,
     setup,
-    prompts,
+    profiles,
     mcp,
-    turnTimeoutMs: sandbox.turnTimeoutMs,
     log,
     metrics: lazyInstruments(),
   });

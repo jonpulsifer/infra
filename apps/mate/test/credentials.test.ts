@@ -29,6 +29,8 @@ import {
   FakeApp,
   GUILD,
   Hooks,
+  INVESTIGATOR,
+  OPERATOR,
   type Rig,
   rig,
   SANDBOX_CONFIG,
@@ -57,6 +59,7 @@ interface KubeconfigShape {
 interface Options {
   app?: FakeApp | null;
   cluster?: boolean;
+  reader?: string | null;
   ssh?: string | null;
   peers?: string[];
   kthx?: boolean;
@@ -68,6 +71,7 @@ function credentialled(opts: Options = {}): Rig & { app: FakeApp | null } {
     config: {
       github: Boolean(app),
       kubeServiceAccount: opts.cluster === false ? null : 'mate-sandbox-admin',
+      kubeReaderServiceAccount: opts.reader ?? null,
       kubePeers: opts.peers ?? [],
       kthx: {
         origin: opts.kthx ? ORIGIN : null,
@@ -108,8 +112,8 @@ function writes(r: Rig): string[] {
   );
 }
 
-async function turn(r: Rig, during?: () => void) {
-  const t = begin(r.hands.thread(THREAD, new Hooks()));
+async function turn(r: Rig, during?: () => void, profile = OPERATOR) {
+  const t = begin(r.hands.thread(THREAD, new Hooks(), profile));
   const result = await t.env.exec('true', undefined, C);
   during?.();
   const summary = await t.lease.finish();
@@ -120,7 +124,7 @@ async function turn(r: Rig, during?: () => void) {
 describe('the stamp', () => {
   test('writes each file at 0600 in directories at 0700, whatever the umask', async () => {
     const r = credentialled();
-    const t = begin(r.hands.thread(THREAD, new Hooks()));
+    const t = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await t.env.exec('true', undefined, C)).ok).toBe(true);
 
     expect(read(r, '.github-token')).toBe('ghs-token-1');
@@ -216,7 +220,7 @@ describe('the stamp', () => {
   test('a token that cannot be written is revoked at once', async () => {
     const r = credentialled();
     writeFileSync(home(r, '.ssh'), 'not a directory');
-    const t = begin(r.hands.thread(THREAD, new Hooks()));
+    const t = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await t.env.exec('true', undefined, C)).ok).toBe(true);
     expect(r.metrics.tokenStamps).toEqual(['stamp-failed']);
     expect(r.app?.revoked).toEqual(['ghs-token-1']);
@@ -351,7 +355,7 @@ describe('the retire', () => {
 
   test('with the link gone, a one-shot command blanks them with no secret in argv', async () => {
     const r = credentialled({ ssh: 'PRIVATE-KEY-BYTES' });
-    const t = begin(r.hands.thread(THREAD, new Hooks()));
+    const t = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await t.env.exec('true', undefined, C)).ok).toBe(true);
     const client = t.lease.current();
     if (client) t.lease.drop(client, 'deadline');
@@ -380,7 +384,7 @@ describe('the retire', () => {
     const app = r.app as FakeApp;
     const held = Promise.withResolvers<void>();
     app.hold = held.promise;
-    const t = begin(r.hands.thread(THREAD, new Hooks()));
+    const t = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     const call = t.env.exec('true', undefined, C);
     await until(() => app.asked === 1);
     const abandoning = t.lease.abandon();
@@ -403,7 +407,7 @@ describe('the retire', () => {
       config: { github: true },
       deps: { githubApp: app, clock },
     });
-    const t = begin(r.hands.thread(THREAD, new Hooks()));
+    const t = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     const call = t.env.exec('true', undefined, C);
     await until(() => app.asked === 1);
     await clock.advance(STAMP_TIMEOUT_MS);
@@ -421,7 +425,7 @@ describe('the retire', () => {
 
   test('the token is revoked even when the blanking fails', async () => {
     const r = credentialled();
-    const t = begin(r.hands.thread(THREAD, new Hooks()));
+    const t = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await t.env.exec('true', undefined, C)).ok).toBe(true);
     const client = t.lease.current();
     if (client) t.lease.drop(client, 'deadline');
@@ -663,7 +667,7 @@ describe('the kthx sites', () => {
     r.fake.putSecret(SECRET, {
       'sites.json': serialize(held({ blog: 'tok-blog' })),
     });
-    const labels = sandboxLabels(THREAD, GUILD);
+    const labels = sandboxLabels(THREAD, GUILD, OPERATOR);
     delete labels[HANDS_LABEL];
     const response = await r.kube.request(
       '/apis/agents.x-k8s.io/v1beta1/namespaces/mate/sandboxes',
@@ -675,6 +679,7 @@ describe('the kthx sites', () => {
           labels,
           config: SANDBOX_CONFIG,
           shutdownTime: new Date(Date.now() + 3_600_000).toISOString(),
+          profile: OPERATOR,
         }),
       },
     );
@@ -699,5 +704,92 @@ describe('the kthx sites', () => {
     );
     for (const line of writes(r)) expect(line).not.toContain('sites.json');
     expect(r.metrics.siteSyncs).toEqual([]);
+  });
+});
+
+// A read-only profile's turn gets the reader's cluster token and nothing else,
+// whatever mate holds.
+describe('a read-only turn', () => {
+  const FILE = '.config/kthx/sites.json';
+  const HOSTILE = serialize({ [ORIGIN]: { blog: 'tok-attacker' } });
+
+  function everything(reader: string | null): Rig & { app: FakeApp | null } {
+    const r = credentialled({
+      ssh: 'PRIVATE-KEY-BYTES',
+      peers: ['folly'],
+      kthx: true,
+      reader,
+    });
+    r.fake.putSecret(SECRET, {
+      'sites.json': serialize({ [ORIGIN]: { blog: 'tok-blog' } }),
+    });
+    return r;
+  }
+
+  test('stamps the reader token for its own turn length, and blanks the rest', async () => {
+    const r = everything('mate-sandbox-reader');
+    const ledger = r.fake.secretRevision(SECRET);
+    const { summary } = await turn(
+      r,
+      () => {
+        expect(read(r, '.github-token')).toBe('');
+        expect(read(r, '.ssh/id_ed25519')).toBe('');
+        expect(read(r, '.ssh/config')).toBe('');
+        const parsed = Bun.YAML.parse(
+          read(r, '.kube/config'),
+        ) as KubeconfigShape;
+        expect(parsed.users).toEqual([
+          { name: 'sandbox', user: { token: 'sa-token-1' } },
+        ]);
+        expect(existsSync(home(r, FILE))).toBe(false);
+        // The agent leaves a file that would overwrite the ledger's bearer.
+        mkdirSync(dirname(home(r, FILE)), { recursive: true });
+        writeFileSync(home(r, FILE), HOSTILE);
+      },
+      INVESTIGATOR,
+    );
+    expect(summary.stamped).toBe(true);
+    expect(
+      r.fake.tokenRequests.map(({ account, expirationSeconds }) => ({
+        account,
+        expirationSeconds,
+      })),
+    ).toEqual([{ account: 'mate-sandbox-reader', expirationSeconds: 1500 }]);
+    expect(r.app?.asked).toBe(0);
+    expect(r.metrics.tokenMints).toEqual([]);
+    expect(r.metrics.tokenStamps).toEqual([]);
+    // Never read, written or folded: the file is left as the agent left it.
+    expect(read(r, FILE)).toBe(HOSTILE);
+    expect(r.metrics.siteSyncs).toEqual([]);
+    expect(r.fake.secretRevision(SECRET)).toBe(ledger);
+    expect(r.fake.patches.filter((p) => p.name === SECRET)).toEqual([]);
+    for (const line of writes(r)) expect(line).not.toContain('sites.json');
+    for (const file of ['.github-token', '.kube/config', '.ssh/id_ed25519']) {
+      expect(read(r, file)).toBe('');
+    }
+  });
+
+  test('with no reader account, nothing is minted or written', async () => {
+    const r = everything(null);
+    const { summary } = await turn(r, undefined, INVESTIGATOR);
+    expect(summary.stamped).toBe(false);
+    expect(r.fake.tokenRequests).toEqual([]);
+    expect(r.app?.asked).toBe(0);
+    expect(writes(r)).toEqual([]);
+    expect(existsSync(home(r, '.kube/config'))).toBe(false);
+    expect(r.metrics.siteSyncs).toEqual([]);
+  });
+
+  test('an operator turn on the same mate still gets the admin, the token and the key', async () => {
+    const r = everything('mate-sandbox-reader');
+    await turn(r, () => {
+      expect(read(r, '.github-token')).toBe('ghs-token-1');
+      expect(read(r, '.ssh/id_ed25519')).toBe('PRIVATE-KEY-BYTES');
+    });
+    expect(r.fake.tokenRequests.map((q) => q.account)).toEqual([
+      'mate-sandbox-admin',
+    ]);
+    expect(r.fake.tokenRequests[0]?.expirationSeconds).toBe(600);
+    expect(r.metrics.siteSyncs).toEqual(['ok', 'ok']);
   });
 });

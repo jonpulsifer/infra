@@ -34,6 +34,8 @@ export interface ThreadRow {
   /** Turns taken, held against MATE_MAX_TURNS_PER_THREAD across restarts and reopens. */
   readonly turns: number;
   readonly turn: TurnMark | null;
+  /** Fixed at birth: only the row's insert writes it. A row from before profiles reads as DEFAULT_PROFILE. */
+  readonly profile: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -55,13 +57,19 @@ export interface ThreadListFilter {
 
 export interface ThreadStore {
   get(key: string): Promise<ThreadRow | undefined>;
-  /** Creates the row (session id = key), or marks an existing one open, and returns it. */
-  open(ref: ThreadRef): Promise<ThreadRow>;
+  /** Creates the row (session id = key) under `profile`, or marks an existing one open and keeps its own profile; returns it. */
+  open(ref: ThreadRef, profile: string): Promise<ThreadRow>;
+  /** Counts one turn of `profile` on the UTC `day` if fewer than `cap` were counted; atomic across processes. */
+  claimTurn(profile: string, day: string, cap: number): Promise<boolean>;
   /** Writes only the columns given, and `updatedAt`. */
   patch(key: string, patch: ThreadRowPatch): Promise<void>;
   list(filter: ThreadListFilter): Promise<ThreadRow[]>;
-  /** Closed rows last touched before `before`, oldest first, for the retention sweep. */
-  closedBefore(before: number, limit: number): Promise<ThreadRow[]>;
+  /** Closed rows of `profiles` last touched before `before`, oldest first, for the retention sweep. */
+  closedBefore(
+    before: number,
+    limit: number,
+    profiles: readonly string[],
+  ): Promise<ThreadRow[]>;
   /** Deletes the row only while it is still closed and untouched since `before`; returns it if so. */
   deleteClosed(key: string, before: number): Promise<ThreadRow | undefined>;
   delete(key: string): Promise<void>;

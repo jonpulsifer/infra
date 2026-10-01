@@ -59,37 +59,45 @@ spec:
             message: "Discord closed mate's gateway with code {{ $labels.code }}"
             description: "A close code mate treats as a configuration error, so it exited instead of reconnecting and will crash-loop until the cause is fixed. 4004 is the token — check whether `rowbutt discord bot token` was rotated in 1Password and whether the mate-discord ExternalSecret carried it through. 4013/4014 are the intents, which live in apps/mate/src/gateway.ts and in the developer portal; Message Content is privileged and can be revoked there without anything in git changing."
 
-        # A turn waits for a sandbox only while every slot's holder is mid-turn
-        # or idle under five minutes. min_over_time survives a restart; the
-        # offset arm demands a full window.
+        # An interactive turn waits for a sandbox only while every slot's holder
+        # is mid-turn or idle under five minutes. An automation turn never takes
+        # an interactive thread's sandbox, so it can wait out the 30-minute
+        # quiet timer by design and is not counted. An interactive waiter
+        # behind a busy automation holder is counted, though it waits by
+        # design too: only the description tells a responder so. `!=` also
+        # matches series from before the lane label. min_over_time survives a
+        # restart; the offset arm demands a full window.
         - alert: MateSandboxWaitsLong
           expr: |
-            mate_sandbox_waiters > 0
+            mate_sandbox_waiters{lane!="automation"} > 0
             and ignoring(pod, instance)
-            mate_sandbox_waiters offset 15m > 0
-            and min_over_time(mate_sandbox_waiters[15m]) > 0
+            mate_sandbox_waiters{lane!="automation"} offset 15m > 0
+            and min_over_time(mate_sandbox_waiters{lane!="automation"}[15m]) > 0
           for: 0m
           labels:
             severity: warning
           annotations:
             message: "mate turns have waited a quarter of an hour for a sandbox"
-            description: "A turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. The waiting turn is one of the MATE_MAX_CONCURRENT running turns, and it takes the slot of any thread idle for five minutes. While MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Compare `mate_turns_running` with `mate_sandboxes_live`; `kubectl --context offsite get sandboxes -n mate` names the holders. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. Only with MATE_MAX_CONCURRENT above MATE_MAX_SANDBOXES can running turns hold every slot; then raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
+            description: "An interactive turn has waited fifteen minutes for a sandbox slot, and its thread's sandbox card still says it is waiting. It takes the slot of any thread idle for five minutes, never a busy one. An automation or job turn, such as the daily custodian, also takes a free slot and keeps it for its whole turn, of up to MATE_TURN_MINUTES. While one runs, the MATE_MAX_CONCURRENT interactive turns and that turn can fill MATE_MAX_SANDBOXES, so this alert is expected until one of those turns ends. Check that first: `mate_turns_running{lane=\"automation\"}` is 1 while one runs, and `kubectl --context offsite get sandboxes -n mate -L lolwtf.ca/profile` names the holders and their profiles. If no automation or job turn runs and MATE_MAX_CONCURRENT is at most MATE_MAX_SANDBOXES, as deployed, running turns cannot hold every slot, so this is mate's slot bookkeeping: a holder still busy after its turn ended, a missed wake-up, or a gauge that never came back down. Read mate's log (`kubectl --context offsite logs -n mate deploy/mate`), then restart mate, which rebuilds its slots from the Sandboxes that exist and resumes the running turns: `kubectl --context offsite -n mate rollout restart deploy/mate`. If the custodian's turns keep starving the owner's threads, or MATE_MAX_CONCURRENT is above MATE_MAX_SANDBOXES, raise MATE_MAX_SANDBOXES on the mate Deployment if oldschool's CPU requests allow it."
 
-        # Turn slots free when a turn ends, so a 10m queue is stuck turns or a
-        # cap too low. It stays under the 30-minute quiet timer, which ends a
-        # wait. min_over_time and the offset arm as above.
+        # Interactive turn slots free when a turn ends, so a 10m queue is stuck
+        # turns or a cap too low. It stays under the 30-minute quiet timer,
+        # which ends a wait. Automation and job turns run one at a time behind
+        # turns of up to MATE_TURN_MINUTES and are not counted;
+        # MATE_MAX_CONCURRENT does not change their lane. The lane selector,
+        # min_over_time and the offset arm as above.
         - alert: MateThreadsQueued
           expr: |
-            mate_queue_depth > 0
+            mate_queue_depth{lane!="automation"} > 0
             and ignoring(pod, instance)
-            mate_queue_depth offset 10m > 0
-            and min_over_time(mate_queue_depth[10m]) > 0
+            mate_queue_depth{lane!="automation"} offset 10m > 0
+            and min_over_time(mate_queue_depth{lane!="automation"}[10m]) > 0
           for: 0m
           labels:
             severity: warning
           annotations:
             message: "mate threads have waited ten minutes for a turn"
-            description: "At least one thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running` with `mate_queue_depth`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
+            description: "At least one interactive thread has waited ten minutes for a free turn, and it gives up when it goes quiet at thirty. A slot frees as soon as a turn ends, so every one of the MATE_MAX_CONCURRENT interactive turns has run for that long, or the traffic outgrew the cap. Compare `mate_turns_running{lane=\"interactive\"}` with `mate_queue_depth{lane=\"interactive\"}`, and read mate's log: `kubectl --context offsite logs -n mate deploy/mate`. Stop a runaway turn from its thread, or raise MATE_MAX_CONCURRENT on the mate Deployment."
 
         # `error` is pi or the provider, `brain-failed` the session store or the
         # harness. Three in 30m is the key, the model, mate-db or a mate bug.
@@ -261,16 +269,18 @@ spec:
             message: "mate is not keeping a sandbox warm"
             description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so a thread with no sandbox of its own pays the full cold mint at its turn's first tool call, which waits tens of seconds on the thread's sandbox card. A turn that only talks mints nothing and waits for nothing. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
 
-        # 96 is 80% of MATE_MAX_TURNS_PER_DAY. mate's own count resets on each
-        # restart and this rolling 24h does not, so the two can disagree.
+        # 96 is 80% of MATE_MAX_TURNS_PER_DAY, which interactive profiles share;
+        # automation and job profiles have their own caps in mate-db. `!~` also
+        # matches series from before the mode label. mate's own count resets on
+        # each restart and this rolling 24h does not, so the two can disagree.
         - alert: MateTurnBudgetNearlySpent
-          expr: increase(mate_turns_total[24h]) > 96
+          expr: sum without (profile, mode) (increase(mate_turns_total{mode!~"automation|job"}[24h])) > 96
           for: 0m
           labels:
             severity: warning
           annotations:
             message: "mate has spent most of its daily turn budget"
-            description: "More than 96 of the 120 turns allowed in a rolling day have been taken. Past 120 every thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
+            description: "More than 96 of the 120 interactive turns allowed in a rolling day have been taken. Past 120 every interactive thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
 
         # qwen3.8-max lists at $2 and $6 per million input and output tokens, and
         # ChatGPT counts at 0. The turn cap bounds volume, so this trips when the

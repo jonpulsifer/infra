@@ -13,6 +13,9 @@ export const REPLAY_CHARS = 8_000;
 export const REPLAY_PAGES = 2;
 const PAGE = 100;
 
+/** Heads a trusted trigger's prompt, which mate posts in its thread before any turn. */
+export const ASSIGNMENT = '📋 assignment';
+
 const HEADER = 'Earlier messages in this thread, before this session started:';
 const FOOTER =
   'Those messages are context only. Answer the message that follows.';
@@ -28,7 +31,23 @@ export interface ReplayOptions {
   command?(text: string): boolean;
 }
 
-function render(message: HistoryMessage, me: string): string {
+export function assignmentPost(text: string): string {
+  return `${ASSIGNMENT}\n${text}`;
+}
+
+function assignmentOf(content: string): string | null {
+  const text = content.trim();
+  return text.startsWith(`${ASSIGNMENT}\n`)
+    ? text.slice(ASSIGNMENT.length + 1).trim()
+    : null;
+}
+
+function render(
+  message: HistoryMessage,
+  me: string,
+  assignment = false,
+): string {
+  if (assignment) return `assignment: ${assignmentOf(message.content)}`;
   const who = message.authorId === me ? 'you' : message.authorName;
   return `${who}: ${message.content.trim()}`;
 }
@@ -50,10 +69,14 @@ function eligible(
   }
   const text = message.content.trim();
   if (!text) return false;
-  return !skip.includes(text);
+  return !skip.includes(assignmentOf(text) ?? text);
 }
 
-/** Null when the thread holds nothing worth replaying. */
+/**
+ * Null when the thread holds nothing worth replaying. Only mate's first post
+ * after the root, read with the whole thread, is the assignment: a model reply
+ * can start the same way, but never before every turn.
+ */
 export async function replayPreamble(
   surface: Surface,
   thread: ThreadRef,
@@ -63,11 +86,24 @@ export async function replayPreamble(
   let characters = HEADER.length + FOOTER.length + SEPARATORS;
   let before: string | undefined;
   let full = false;
+  let whole = false;
+  // mate's oldest post past the root so far, kept or not.
+  let first: HistoryMessage | null = null;
   for (let page = 0; page < REPLAY_PAGES && !full; page += 1) {
     const batch = await surface.history(thread, { limit: PAGE, before });
-    if (batch.length === 0) break;
+    if (batch.length === 0) {
+      whole = true;
+      break;
+    }
     before = batch.at(-1)?.id;
     for (const message of batch) {
+      if (
+        message.authorId === options.me &&
+        message.id !== thread.id &&
+        !isNotice(message.content)
+      ) {
+        first = message;
+      }
       if (!eligible(message, surface.allowedUserIds, options)) continue;
       const line = render(message, options.me);
       if (characters + line.length + 1 > REPLAY_CHARS) {
@@ -81,12 +117,22 @@ export async function replayPreamble(
         break;
       }
     }
-    if (batch.length < PAGE) break;
+    if (batch.length < PAGE) {
+      whole = !full;
+      break;
+    }
   }
   if (kept.length === 0) return null;
+  const assignment =
+    whole &&
+    first &&
+    kept.includes(first) &&
+    assignmentOf(first.content) !== null
+      ? first
+      : null;
   const lines = kept
     .reverse()
-    .map((message) => render(message, options.me))
+    .map((message) => render(message, options.me, message === assignment))
     .join('\n');
   return `${HEADER}\n\n${lines}\n\n${FOOTER}\n\n`;
 }

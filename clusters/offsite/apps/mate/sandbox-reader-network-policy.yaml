@@ -1,0 +1,77 @@
+---
+# Read-only sandboxes: DNS and the two API servers on 6443, nothing else.
+# Prometheus and Alertmanager answer through the API server's service proxy,
+# where RBAC admits GET only. No world, no SSH, no pod but kube-dns.
+# sandboxes.ts stamps this name; test/policy.test.ts checks the two agree,
+# since a selector that matches nothing fails open. mate-sandbox-baseline
+# (sandbox-network-policy.yaml) holds the pod to DNS if this file is missing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate-sandbox-reader
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mate-sandbox-reader
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              # The in-cluster API server, through the search domains.
+              - matchPattern: "**.cluster.local"
+              # folly's API server: API_SERVER_HOSTNAME in
+              # clusters/folly/config/cluster-topology.json.
+              - matchName: folly.${SECRET_DOMAIN}
+              # For the checkout window's clone.
+              - matchName: github.com
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # folly's API server, across the site-to-site tunnel: the one address its
+    # name resolves to, not a range of lab hosts and folly's pods.
+    - toFQDNs:
+        - matchName: folly.${SECRET_DOMAIN}
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+---
+# The init container's clone, until mate closes the window: after the
+# Sandbox is Ready, before the agent's first command, mate sets
+# lolwtf.ca/checkout=closed and waits for Cilium to see it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate-sandbox-reader-checkout
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mate-sandbox-reader
+      lolwtf.ca/checkout: open
+  egress:
+    - toFQDNs:
+        - matchName: github.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

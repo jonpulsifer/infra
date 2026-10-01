@@ -21,6 +21,7 @@ import type {
   TurnLeaseOptions,
   TurnLeaseSummary,
 } from '../src/lease.ts';
+import type { Profile } from '../src/profiles.ts';
 import { type ThreadRef, threadKey } from '../src/surface.ts';
 
 /** Methods that answer without a sandbox. */
@@ -40,6 +41,8 @@ export class LocalHands implements Hands {
   readonly log: string[] = [];
   readonly calls: { method: string; path: string | null }[] = [];
   readonly released: { key: string; reason: TeardownReason }[] = [];
+  /** Each `thread` call's profile id, in order. */
+  readonly profiles: { key: string; profile: string }[] = [];
   private readonly threads = new Map<string, LocalThreadHands>();
 
   constructor(readonly options: LocalHandsOptions) {}
@@ -48,8 +51,13 @@ export class LocalHands implements Hands {
     return this.log.filter((entry) => entry === 'acquire').length;
   }
 
-  thread(ref: ThreadRef, hooks: ThreadHandsHooks): ThreadHands {
+  thread(
+    ref: ThreadRef,
+    hooks: ThreadHandsHooks,
+    profile: Profile,
+  ): ThreadHands {
     const key = threadKey(ref);
+    this.profiles.push({ key, profile: profile.id });
     const known = this.threads.get(key);
     if (known) {
       known.hooks = hooks;

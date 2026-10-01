@@ -18,3 +18,37 @@ subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
     name: federated:system:serviceaccount:mate:mate-sandbox-admin
+---
+# A read-only sandbox's per-turn offsite token, which folly admits as this
+# federated user. clusters/base/apps/mate-sandbox-reader/ declares the roles.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mate-sandbox-reader-view
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:mate:mate-sandbox-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mate-sandbox-reader
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mate-sandbox-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:mate:mate-sandbox-reader

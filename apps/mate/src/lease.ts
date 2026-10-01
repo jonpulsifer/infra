@@ -9,6 +9,7 @@ import type { SandboxConfig } from './config.ts';
 import type { KthxSites } from './kthx-sites.ts';
 import type { Kube } from './kube.ts';
 import type { Log } from './log.ts';
+import type { Lane, Profile } from './profiles.ts';
 import type { ThreadRef } from './surface.ts';
 
 export const WORKSPACE = '/workspace';
@@ -45,7 +46,9 @@ export type TeardownReason =
   | 'restart'
   | 'thread-deleted'
   | 'preempted'
-  | 'inherited';
+  | 'inherited'
+  /** A job thread's turn is done. */
+  | 'finished';
 
 /** Why a sandbox a thread held is gone: mate tore it down, or it died. */
 export type SandboxGoneReason = TeardownReason | 'lost';
@@ -122,8 +125,16 @@ export interface ThreadHands {
 }
 
 export interface Hands {
-  /** Creates the thread's hands, or returns them with `hooks` replaced. */
-  thread(ref: ThreadRef, hooks: ThreadHandsHooks): ThreadHands;
+  /**
+   * Creates the thread's hands under `profile`, or returns them with `hooks`
+   * replaced. A thread keeps its profile for life: a sandbox is minted for one
+   * profile and never handed to another, so a different one throws.
+   */
+  thread(
+    ref: ThreadRef,
+    hooks: ThreadHandsHooks,
+    profile: Profile,
+  ): ThreadHands;
   /** Keeps its kthx sites, deletes its sandbox and forgets its hands. Never throws. */
   release(ref: ThreadRef, reason: TeardownReason): Promise<void>;
   /** Pool upkeep, on a timer. */
@@ -192,7 +203,8 @@ export type HandsDropReason =
 /** The instruments the hands record; `metrics.ts` implements them. */
 export interface HandsInstruments {
   sandboxesLive(count: number): void;
-  sandboxWaiters(count: number): void;
+  /** Reported for both lanes on every change; the alerts count the interactive one. */
+  sandboxWaiters(count: number, lane: Lane): void;
   spares(ready: number, wanted: number): void;
   minted(result: MintResult, sample?: MintSample): void;
   handsConnected(result: HandsConnectResult, sample: HandsConnectSample): void;

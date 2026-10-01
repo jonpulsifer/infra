@@ -1,0 +1,20 @@
+---
+# The read-only Rowbutt sandbox's GET on Prometheus and Alertmanager
+# (clusters/base/monitoring/mate-sandbox-reader.yaml), for the federated user
+# folly admits its offsite token as.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mate-sandbox-reader
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mate-sandbox-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:mate:mate-sandbox-reader

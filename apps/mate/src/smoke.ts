@@ -17,7 +17,8 @@ import { WORKSPACE } from './lease.ts';
 import { jsonLog, plain } from './log.ts';
 import { lazyInstruments } from './metrics.ts';
 import { createModelSetup } from './model.ts';
-import { loadSystemPrompts } from './profile.ts';
+import { brainProfiles, loadSystemPrompts } from './profile.ts';
+import { DEFAULT_PROFILE, PROFILES } from './profiles.ts';
 import type { PromptSink, Update } from './sandbox.ts';
 import {
   createKubeHands,
@@ -84,8 +85,8 @@ let readyAt: number | null = null;
 let readySandbox: string | null = null;
 // The same hands, with the lease's ready event timed.
 const hands: Hands = {
-  thread: (ref, hooks) => {
-    const inner = kubeHands.thread(ref, hooks);
+  thread: (ref, hooks, profile) => {
+    const inner = kubeHands.thread(ref, hooks, profile);
     return {
       env: inner.env,
       beginTurn: (options) =>
@@ -197,29 +198,36 @@ async function podOf(name: string): Promise<string | null> {
 
 let failed = false;
 const { store, sessions, close } = await sessionStore();
+// No credential store: a second holder of the ChatGPT refresh token could
+// spend it under mate, so a ChatGPT primary answers on the fallback here.
+const setup = createModelSetup({
+  spec: brainConfig.model,
+  thinking: brainConfig.thinking,
+  fallbackSpec: brainConfig.fallbackModel,
+  fallbackThinking: brainConfig.fallbackThinking,
+  keyFile: brainConfig.modelKeyFile,
+  log: jsonLog,
+});
 const brain = new PiBrain({
   db: { up: () => true },
   store,
   sessions,
   hands,
-  // No credential store: a second holder of the ChatGPT refresh token could
-  // spend it under mate, so a ChatGPT primary answers on the fallback here.
-  setup: createModelSetup({
-    spec: brainConfig.model,
-    thinking: brainConfig.thinking,
-    fallbackSpec: brainConfig.fallbackModel,
-    fallbackThinking: brainConfig.fallbackThinking,
-    keyFile: brainConfig.modelKeyFile,
-    log: jsonLog,
-  }),
-  prompts: await loadSystemPrompts({
-    root: brainConfig.profileRoot ?? REPO_ROOT,
-    workspace: WORKSPACE,
-    checkoutRef: sandbox.checkoutRef,
-    log: jsonLog,
-  }),
+  setup,
+  profiles: brainProfiles(
+    setup,
+    await loadSystemPrompts(
+      {
+        root: brainConfig.profileRoot ?? REPO_ROOT,
+        workspace: WORKSPACE,
+        checkoutRef: sandbox.checkoutRef,
+        log: jsonLog,
+      },
+      PROFILES.values(),
+    ),
+    sandbox.turnTimeoutMs,
+  ),
   mcp: null,
-  turnTimeoutMs: sandbox.turnTimeoutMs,
   log: jsonLog,
 });
 
@@ -233,7 +241,7 @@ try {
     thread: thread.id,
     mode: kill ? 'kill-mid-turn' : 'round-trip',
   });
-  const row = await store.open(thread);
+  const row = await store.open(thread, DEFAULT_PROFILE);
   const session = await brain.open(row);
   const promptedAt = Date.now();
   const sink = new Streaming(promptedAt);

@@ -16,6 +16,7 @@ resources:
   - flux-monitoring.yaml
   - flux-rules.yaml
   - gateway-api-generation.yaml
+  - mate-sandbox-reader.yaml
   - node-saturation-rules.yaml
   - grafana-dashboards
   - helm-repository-grafana.yaml

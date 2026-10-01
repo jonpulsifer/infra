@@ -1,0 +1,57 @@
+---
+# What a read-only Rowbutt sandbox reads beyond `view`, on both clusters:
+# get, list and watch only. RBAC cannot subtract and core `*` holds Secrets,
+# so groups are enumerated. Never add secrets, pods/exec, pods/attach,
+# pods/portforward, nodes/proxy or serviceaccounts/token. Each cluster binds
+# its own subject: clusters/offsite/apps/mate/ and clusters/folly/apps/mate-sandbox/.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mate-sandbox-reader
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+rules:
+  - apiGroups: [""]
+    resources: [nodes, persistentvolumes]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses, volumeattachments, csinodes, csidrivers]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch]
+  - apiGroups: [apiregistration.k8s.io]
+    resources: [apiservices]
+    verbs: [get, list, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+      - validatingadmissionpolicies
+      - validatingadmissionpolicybindings
+    verbs: [get, list, watch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  - apiGroups: [node.k8s.io]
+    resources: [runtimeclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [scheduling.k8s.io]
+    resources: [priorityclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list, watch]
+  # Groups whose kinds hold no Secret values, only references to Secrets by name.
+  - apiGroups:
+      - monitoring.coreos.com
+      - cilium.io
+      - gateway.networking.k8s.io
+      - postgresql.cnpg.io
+      - agents.x-k8s.io
+    resources: ["*"]
+    verbs: [get, list, watch]

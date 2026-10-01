@@ -11,6 +11,7 @@ import type { BrainConfig } from './config.ts';
 import type { SandboxGoneReason } from './lease.ts';
 import { type Log, plain } from './log.ts';
 import type { Instruments } from './metrics.ts';
+import { DEFAULT_PROFILE } from './profiles.ts';
 import { type SurfaceName, type ThreadRef, threadKey } from './surface.ts';
 import type {
   ThreadListFilter,
@@ -192,6 +193,18 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
       created_at BIGINT NOT NULL
     )`,
   ],
+  // `profile` is written only by the INSERT in `open`, so a thread keeps the
+  // profile it was born with; NULL is a row from before profiles, the default.
+  [
+    4,
+    `ALTER TABLE mate_threads ADD COLUMN profile TEXT COLLATE "C" NULL;
+    CREATE TABLE mate_profile_turns (
+      profile TEXT COLLATE "C" NOT NULL,
+      day TEXT COLLATE "C" NOT NULL,
+      turns INTEGER NOT NULL,
+      PRIMARY KEY (profile, day)
+    )`,
+  ],
 ];
 
 /** mate's own tables beside pi's; idempotent and safe to race. */
@@ -232,6 +245,7 @@ interface Row {
   turn_message: string | null;
   turn_started_at: string | number | null;
   turn_resumes: number | null;
+  profile: string | null;
   created_at: string | number;
   updated_at: string | number;
 }
@@ -272,6 +286,7 @@ function toRow(row: Row): ThreadRow {
     workspaceReset: row.workspace_reset as SandboxGoneReason | null,
     turns: row.turns,
     turn,
+    profile: row.profile ?? DEFAULT_PROFILE,
     createdAt: int(row.created_at, 'created_at'),
     updatedAt: int(row.updated_at, 'updated_at'),
   };
@@ -313,14 +328,14 @@ export class PostgresThreadStore implements ThreadStore {
     return row ? toRow(row) : undefined;
   }
 
-  async open(ref: ThreadRef): Promise<ThreadRow> {
+  async open(ref: ThreadRef, profile: string): Promise<ThreadRow> {
     const key = threadKey(ref);
     const now = this.clock.now();
     const [row]: Row[] = await this.sql`
       INSERT INTO mate_threads (key, surface, channel_id, thread_id, state,
-        session_id, created_at, updated_at)
+        session_id, profile, created_at, updated_at)
       VALUES (${key}, ${ref.surface}, ${ref.channelId}, ${ref.id}, 'open',
-        ${key}, ${now}, ${now})
+        ${key}, ${profile}, ${now}, ${now})
       ON CONFLICT (key) DO UPDATE SET state = 'open', updated_at = ${now}
       RETURNING *
     `;
@@ -343,10 +358,29 @@ export class PostgresThreadStore implements ThreadStore {
     return rows.map(toRow);
   }
 
-  async closedBefore(before: number, limit: number): Promise<ThreadRow[]> {
+  async claimTurn(profile: string, day: string, cap: number): Promise<boolean> {
+    const rows = await this.sql`
+      INSERT INTO mate_profile_turns (profile, day, turns)
+      VALUES (${profile}, ${day}, 1)
+      ON CONFLICT (profile, day) DO UPDATE
+        SET turns = mate_profile_turns.turns + 1
+        WHERE mate_profile_turns.turns < ${cap}
+      RETURNING turns
+    `;
+    return rows.length > 0;
+  }
+
+  async closedBefore(
+    before: number,
+    limit: number,
+    profiles: readonly string[],
+  ): Promise<ThreadRow[]> {
+    // `IN ()` is not SQL.
+    if (profiles.length === 0) return [];
     const rows: Row[] = await this.sql`
       SELECT * FROM mate_threads
       WHERE state = 'closed' AND updated_at < ${before}
+        AND COALESCE(profile, ${DEFAULT_PROFILE}) IN ${this.sql(profiles)}
       ORDER BY updated_at, key
       LIMIT ${limit}
     `;
@@ -373,6 +407,8 @@ export class PostgresThreadStore implements ThreadStore {
 /** The same contract in memory: stub mode and the thread tests. */
 export class MemoryThreadStore implements ThreadStore {
   private readonly rows = new Map<string, ThreadRow>();
+  /** Turns counted by `${profile}\n${day}`. */
+  private readonly claimTurns = new Map<string, number>();
 
   constructor(private readonly clock: Clock = systemClock) {}
 
@@ -380,7 +416,7 @@ export class MemoryThreadStore implements ThreadStore {
     return this.rows.get(key);
   }
 
-  async open(ref: ThreadRef): Promise<ThreadRow> {
+  async open(ref: ThreadRef, profile: string): Promise<ThreadRow> {
     const key = threadKey(ref);
     const now = this.clock.now();
     const known = this.rows.get(key);
@@ -396,6 +432,7 @@ export class MemoryThreadStore implements ThreadStore {
           workspaceReset: null,
           turns: 0,
           turn: null,
+          profile,
           createdAt: now,
           updatedAt: now,
         };
@@ -420,9 +457,26 @@ export class MemoryThreadStore implements ThreadStore {
     );
   }
 
-  async closedBefore(before: number, limit: number): Promise<ThreadRow[]> {
+  async claimTurn(profile: string, day: string, cap: number): Promise<boolean> {
+    const key = `${profile}\n${day}`;
+    const turns = this.claimTurns.get(key) ?? 0;
+    if (turns >= cap) return false;
+    this.claimTurns.set(key, turns + 1);
+    return true;
+  }
+
+  async closedBefore(
+    before: number,
+    limit: number,
+    profiles: readonly string[],
+  ): Promise<ThreadRow[]> {
     return [...this.rows.values()]
-      .filter((row) => row.state === 'closed' && row.updatedAt < before)
+      .filter(
+        (row) =>
+          row.state === 'closed' &&
+          row.updatedAt < before &&
+          profiles.includes(row.profile),
+      )
       .sort((a, b) => a.updatedAt - b.updatedAt)
       .slice(0, limit);
   }

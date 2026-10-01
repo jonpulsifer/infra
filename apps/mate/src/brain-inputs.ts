@@ -1,6 +1,7 @@
 /**
  * What the brain is built from, each made once per process: the model and its
- * key, the system prompt, and the tools bridged from MCP servers.
+ * key, the system prompt of each profile, and the tools bridged from MCP
+ * servers.
  */
 import type {
   AgentHarnessTool,
@@ -16,6 +17,7 @@ import type {
 import type { Clock } from './clock.ts';
 import type { Log } from './log.ts';
 import type { Instruments } from './metrics.ts';
+import type { Profile } from './profiles.ts';
 import type { ModelRouter } from './route.ts';
 import type { SurfaceName } from './surface.ts';
 
@@ -70,10 +72,23 @@ export interface ProfileOptions {
 
 export type SystemPrompts = Readonly<Record<SurfaceName, string>>;
 
+/** By profile id, then surface. */
+export type ProfilePrompts = Readonly<Record<string, SystemPrompts>>;
+
 /** Never rejects: a missing file is logged and left out, so mate still boots. */
 export type LoadSystemPrompts = (
   options: ProfileOptions,
-) => Promise<SystemPrompts>;
+  profiles: Iterable<Profile>,
+) => Promise<ProfilePrompts>;
+
+/** A profile as the brain runs it, resolved at boot so nothing in it fails at a turn. */
+export interface BrainProfile {
+  readonly profile: Profile;
+  readonly prompts: SystemPrompts;
+  readonly model: Model<Api>;
+  readonly thinking: ThinkingLevel;
+  readonly turnTimeoutMs: number;
+}
 
 export type BridgedTool = AgentHarnessTool<ExecutionToolContext>;
 

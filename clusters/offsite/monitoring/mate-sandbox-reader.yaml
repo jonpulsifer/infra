@@ -1,0 +1,21 @@
+---
+# The read-only Rowbutt sandbox account's GET on Prometheus and Alertmanager
+# (clusters/base/monitoring/mate-sandbox-reader.yaml). Here, not beside the
+# account in apps/mate/, because offsite's `apps` does not wait for this
+# namespace and `apps/mate/`'s namespace transformer would move it into `mate`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mate-sandbox-reader
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: mate-sandbox-reader
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mate-sandbox-reader
+subjects:
+  - kind: ServiceAccount
+    name: mate-sandbox-reader
+    namespace: mate

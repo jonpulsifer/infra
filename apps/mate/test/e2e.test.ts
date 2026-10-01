@@ -5,13 +5,13 @@
  * daemon.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type AgentMessage,
   BACKGROUND_CONTEXT,
 } from '@earendil-works/pi-agent-core';
-import { createModels } from '@earendil-works/pi-ai';
+import { createModels, type Message } from '@earendil-works/pi-ai';
 import {
   type FauxResponseStep,
   fauxAssistantMessage,
@@ -20,7 +20,11 @@ import {
 } from '@earendil-works/pi-ai/providers/faux';
 import { openSession } from '@repo/pi-store-postgres';
 import { PiBrain, postgresSessions } from '../src/brain.ts';
-import type { McpBridge, ModelSetup } from '../src/brain-inputs.ts';
+import type {
+  McpBridge,
+  ModelSetup,
+  ProfilePrompts,
+} from '../src/brain-inputs.ts';
 import {
   type BrainSession,
   TurnAbandoned,
@@ -28,10 +32,18 @@ import {
 } from '../src/brain-port.ts';
 import { type Clock, type Handle, systemClock } from '../src/clock.ts';
 import { HANDS_BINARY } from '../src/hands.ts';
-import { createMcpBridge } from '../src/mcp.ts';
-import { HARNESS_FAILED, RESUMING } from '../src/notices.ts';
+import { KthxSites, serialize } from '../src/kthx-sites.ts';
+import { combineMcp, createMcpBridge } from '../src/mcp.ts';
+import { HARNESS_FAILED, RESUMING, RUNS_AS } from '../src/notices.ts';
+import { brainProfiles } from '../src/profile.ts';
+import { PROFILES } from '../src/profiles.ts';
 import type { PromptResult, PromptSink } from '../src/sandbox.ts';
-import type { KubeHands } from '../src/sandboxes.ts';
+import {
+  CHECKOUT_LABEL,
+  type KubeHands,
+  sandboxName,
+  sandboxNameFor,
+} from '../src/sandboxes.ts';
 import { PostgresThreadStore } from '../src/store.ts';
 import {
   type Inbound,
@@ -48,6 +60,7 @@ import {
   alive,
   cleanUp,
   FakeApp,
+  INVESTIGATOR,
   pidsIn,
   rig,
   until,
@@ -68,6 +81,12 @@ const INTERRUPTED = 'Tool execution was interrupted';
 const TOKEN = 'kthx_agent_0123456789abcdef0123456789abcdef';
 // Every e2e test runs real daemons, Postgres and several turns.
 const SLOW = 30_000;
+const PROMPTS: ProfilePrompts = Object.fromEntries(
+  [...PROFILES.keys()].map((id) => [
+    id,
+    { discord: 'You help on Discord.', slack: 'You help on Slack.' },
+  ]),
+);
 
 /** Real time, with every timer it armed cancelled at the end of a test. */
 class RealClock implements Clock {
@@ -221,9 +240,8 @@ async function boot(
     sessions: postgresSessions(sql),
     hands,
     setup,
-    prompts: { discord: 'You help on Discord.', slack: 'You help on Slack.' },
+    profiles: brainProfiles(setup, PROMPTS, 60_000),
     mcp,
-    turnTimeoutMs: 60_000,
     log,
     metrics,
     retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
@@ -704,6 +722,210 @@ describe('Stop', () => {
       expect(r.fake.handsExecs).toHaveLength(1);
       expect(r.fake.handsExecs[0]?.command[0]).toBe(HANDS_BINARY);
       expect(r.metrics.turnSandboxes).toEqual(['failed', 'reused']);
+    },
+    SLOW,
+  );
+});
+
+describe('profiles', () => {
+  const ORIGIN = 'https://kthx.example.test';
+  const SITES_SECRET = 'mate-kthx-sites';
+  const LEDGER = serialize({ [ORIGIN]: { blog: 'tok-blog' } });
+  const BASE = ['bash', 'edit', 'read', 'write'];
+
+  /** The tool names pi sent the model, replayed from the system messages in order. */
+  function toolsHeard(messages: readonly Message[]): string[] {
+    const tools = new Set<string>();
+    for (const message of messages) {
+      if (message.role !== 'system') continue;
+      for (const added of message.toolsAdded ?? []) tools.add(added.name);
+      for (const removed of message.toolsRemoved ?? []) {
+        tools.delete(removed.name);
+      }
+    }
+    return [...tools].sort();
+  }
+
+  function bridged(name: string, toolName: string): McpBridge {
+    const server = new FakeMcp({
+      tools: [
+        {
+          name: toolName,
+          description: `${name} ${toolName}`,
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    }).start();
+    servers.push(server);
+    const bridge = createMcpBridge({
+      name,
+      prefix: `${name}_`,
+      url: server.url,
+      token: TOKEN,
+      log: new RecordingLog(),
+    });
+    bridges.push(bridge);
+    return bridge;
+  }
+
+  function envNames(sandbox: unknown): string[] {
+    const spec = (sandbox as { spec: { podTemplate: { spec: unknown } } }).spec
+      .podTemplate.spec as { containers: { env?: { name: string }[] }[] };
+    return (spec.containers[0]?.env ?? []).map((entry) => entry.name);
+  }
+
+  function labelsOf(sandbox: unknown): Record<string, string> {
+    return (sandbox as { metadata: { labels: Record<string, string> } })
+      .metadata.labels;
+  }
+
+  test(
+    'an investigator thread runs read-only, refuses another profile, and an operator thread mints its own sandbox',
+    async () => {
+      const app = new FakeApp();
+      const r = rig({
+        config: {
+          github: true,
+          kubeServiceAccount: 'mate-sandbox-admin',
+          kubeReaderServiceAccount: 'mate-sandbox-reader',
+          kthx: { origin: ORIGIN, sitesSecret: SITES_SECRET },
+        },
+        deps: { githubApp: app, sshKey: 'PRIVATE-KEY-BYTES' },
+      });
+      r.fake.putSecret(SITES_SECRET, { 'sites.json': LEDGER });
+      r.hands = r.another({
+        kthxSites: new KthxSites({
+          kube: r.kube,
+          namespace: 'mate',
+          secret: SITES_SECRET,
+          log: r.log,
+        }),
+      });
+      const mcp = combineMcp([
+        bridged('kthx', 'deploy'),
+        bridged('weather', 'now'),
+      ]);
+      mcp.start();
+      expect(await mcp.ready(5_000)).toBe(true);
+      const heard: string[][] = [];
+      const discord = new SnowflakeDiscord(ME);
+      const mate = await boot(
+        discord,
+        r.hands,
+        faux(
+          (context) => {
+            heard.push(toolsHeard(context.messages));
+            return tool(
+              'bash',
+              {
+                command:
+                  'env; cat ~/.github-token ~/.kube/config ~/.ssh/id_ed25519 ~/.config/kthx/sites.json',
+              },
+              'c-look',
+            );
+          },
+          fauxAssistantMessage('nothing to see'),
+          (context) => {
+            heard.push(toolsHeard(context.messages));
+            return tool('bash', { command: 'true' }, 'c-fix');
+          },
+          fauxAssistantMessage('fixed'),
+        ),
+        mcp,
+      );
+
+      const look = mention('+investigator check');
+      const investigating = await start(mate, discord, look);
+      await settled(mate, investigating.key);
+
+      expect(discord.contentsIn(investigating.threadId)).toEqual([
+        `${RUNS_AS} investigator`,
+        'nothing to see',
+      ]);
+      expect(discord.reactionsOn(CHANNEL, look.id)).toEqual(['✅']);
+      expect((await row(mate, investigating.key)).profile).toBe('investigator');
+      const readerName = sandboxNameFor(investigating.ref, INVESTIGATOR);
+      expect(readerName).toBe(`${sandboxName(investigating.ref)}-r`);
+      expect([...r.fake.sandboxes.keys()]).toEqual([readerName]);
+      const readerSandbox = r.fake.sandboxes.get(readerName);
+      expect(labelsOf(readerSandbox)).toMatchObject({
+        'app.kubernetes.io/name': 'mate-sandbox-reader',
+        'lolwtf.ca/minted-by': 'mate-reader',
+        'lolwtf.ca/profile': 'investigator',
+      });
+      const env = envNames(readerSandbox);
+      expect(env).toContain('KUBECONFIG');
+      for (const name of env) {
+        expect(name).not.toMatch(
+          /^(SWITCHBOARD_|OP_|KTHX_ORIGIN$|MATE_GITHUB_TOKEN_FILE$)/,
+        );
+      }
+      // The window was shut before mate ran anything in the pod.
+      const readerExecs = r.fake.execs.filter((e) => e.pod === readerName);
+      expect(readerExecs[0]?.command[0]).toBe(HANDS_BINARY);
+      for (const exec of readerExecs) {
+        expect(exec.podLabels[CHECKOUT_LABEL]).toBe('closed');
+      }
+      expect(r.fake.tokenRequests).toEqual([
+        {
+          account: 'mate-sandbox-reader',
+          expirationSeconds: 1500,
+          audiences: expect.any(Array),
+        },
+      ]);
+      expect(app.asked).toBe(0);
+      expect(app.minted).toBe(0);
+      const said = toolText(
+        await transcript((await row(mate, investigating.key)).sessionId),
+        'c-look',
+      );
+      // The command ran with the reader's kubeconfig and nothing else.
+      expect(said).toContain('sa-token-1');
+      expect(said).not.toContain('ghs-token');
+      expect(said).not.toContain('PRIVATE-KEY-BYTES');
+      expect(said).not.toContain('tok-blog');
+      for (const file of ['.github-token', '.ssh/id_ed25519', '.ssh/config']) {
+        expect(readFileSync(join(r.home, file), 'utf8')).toBe('');
+      }
+      expect(existsSync(join(r.home, '.config/kthx/sites.json'))).toBe(false);
+      expect(r.fake.patches.filter((p) => p.name === SITES_SECRET)).toEqual([]);
+      expect(r.fake.secretValue(SITES_SECRET, 'sites.json')).toBe(LEDGER);
+      expect(heard[0]).toEqual([...BASE, 'weather_now'].sort());
+
+      const fix = inThread(discord, investigating.threadId, '+operator do it');
+      await mate.threads.onMessage(fix);
+      await eventually(
+        () => discord.reactionsOn(investigating.threadId, fix.id).length > 0,
+        'the refusal',
+      );
+      expect(discord.contentsIn(investigating.threadId).at(-1)).toBe(
+        `${RUNS_AS} investigator — a thread keeps the profile it opened with; start a new thread for +operator`,
+      );
+      expect(discord.reactionsOn(investigating.threadId, fix.id)).toEqual([
+        '⚠️',
+      ]);
+      expect(heard).toHaveLength(1);
+
+      const operating = await start(mate, discord, mention('fix it'));
+      await settled(mate, operating.key);
+
+      expect(discord.contentsIn(operating.threadId).at(-1)).toBe('fixed');
+      expect((await row(mate, operating.key)).profile).toBe('operator');
+      const operatorName = sandboxName(operating.ref);
+      expect([...r.fake.sandboxes.keys()].sort()).toEqual(
+        [operatorName, readerName].sort(),
+      );
+      expect(labelsOf(r.fake.sandboxes.get(operatorName))).toMatchObject({
+        'app.kubernetes.io/name': 'mate-sandbox',
+        'lolwtf.ca/minted-by': 'mate',
+        'lolwtf.ca/profile': 'operator',
+      });
+      expect(r.fake.tokenRequests.map((t) => t.account)).toEqual([
+        'mate-sandbox-reader',
+        'mate-sandbox-admin',
+      ]);
+      expect(app.minted).toBe(1);
+      expect(heard[1]).toEqual([...BASE, 'kthx_deploy', 'weather_now'].sort());
     },
     SLOW,
   );
