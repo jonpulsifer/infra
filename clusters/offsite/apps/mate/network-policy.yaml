@@ -127,3 +127,46 @@ spec:
         - ports:
             - port: "4318"
               protocol: TCP
+---
+# Egress for database-restic.yaml's pod: the session store and the site's
+# restic staging repository, nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate-db-restic
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-db-restic
+    app.kubernetes.io/part-of: mate
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mate-db-restic
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: mate-db
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # The rest-server on oldschool, a node of this cluster. A CIDR or FQDN rule
+    # never matches this cluster's own nodes while policy-cidr-match-mode is
+    # unset, so they are the host and remote-node entities.
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP

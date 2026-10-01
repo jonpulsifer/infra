@@ -1,0 +1,101 @@
+---
+# Nightly restic backup of the chart's `kthx-sites` volume into the site's
+# staging repository on oldschool, which the `backups` namespace copies to GCS.
+# The volume is a ReadWriteOnce local-path directory, so the pod joins the kthx
+# pod on its node and mounts the claim read-only beside it.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kthx-sites-restic
+  namespace: kthx
+  labels:
+    app.kubernetes.io/name: kthx-sites-restic
+    app.kubernetes.io/part-of: kthx
+    lolwtf.ca/backup: "true"
+spec:
+  schedule: "10 3 * * *"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A missed run is skipped; the next night's backup covers it.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # Three days to read a failed run: `failedJobsHistoryLimit` alone evicts by count.
+      ttlSecondsAfterFinished: 259200
+      backoffLimit: 2
+      # A pod left Pending while the kthx pod is down gives up before the next night.
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          # Not the chart's `kthx` labels: they match the Service selector.
+          labels:
+            app.kubernetes.io/name: kthx-sites-restic
+            app.kubernetes.io/part-of: kthx
+        spec:
+          # OnFailure deletes the retried pod when `backoffLimit` is spent, so no
+          # log survives. Never keeps each failed attempt.
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: kthx
+                      app.kubernetes.io/instance: kthx
+          # The namespace enforces the `restricted` Pod Security level. The
+          # chart's uid owns the release directories.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+              # The first producer to run creates the staging repository.
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  restic cat config >/dev/null 2>&1 || restic init
+                  exec restic backup --host offsite/kthx/kthx-sites --tag kind=pvc /sites
+              env:
+                - name: RESTIC_REPOSITORY
+                  value: rest:http://oldschool.lolwtf.ca:8000/offsite/
+                - name: RESTIC_CACHE_DIR
+                  value: /tmp/restic
+                - name: HOME
+                  value: /tmp
+              # RESTIC_PASSWORD, RESTIC_REST_USERNAME and RESTIC_REST_PASSWORD,
+              # from clusters/base/components/restic-backup.
+              envFrom:
+                - secretRef:
+                    name: restic
+              volumeMounts:
+                - name: sites
+                  mountPath: /sites
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {memory: 1Gi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: sites
+              persistentVolumeClaim:
+                claimName: kthx-sites
+                readOnly: true
+            - name: tmp
+              emptyDir:
+                sizeLimit: 2Gi
