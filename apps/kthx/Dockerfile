@@ -30,7 +30,7 @@ COPY --from=pruner /app/out/full/apps/kthx ./apps/kthx
 COPY --from=pruner /app/out/full/packages/kthx ./packages/kthx
 RUN cd /app/apps/kthx && bun run pack
 
-FROM cgr.dev/chainguard/node:latest@sha256:76f000d63c6273bb846673f93ecca205226aea2a4d6d375614b6dea13c4f2e5b AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:67b35eec824b295fe0cc2a0e230f85adca6caef692725f6abf1581ad1848b04e AS runner
 ENV NODE_ENV=production \
   PORT=8080 \
   KTHX_SITES_DIR=/sites
