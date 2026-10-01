@@ -413,7 +413,11 @@ describe('a ledger filter matches the headline it shows', () => {
     };
     const markup = renderToStaticMarkup(
       <AppList
-        apps={[app]}
+        view={{
+          rows: [{ kind: 'app', key: app.id, app }],
+          sites: { state: 'off' },
+          next: null,
+        }}
         filter="header wrapping"
         deletion={deletion}
         onNavigate={() => undefined}

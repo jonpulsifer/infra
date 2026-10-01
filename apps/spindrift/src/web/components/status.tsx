@@ -91,6 +91,24 @@ export function AppDot({
   );
 }
 
+/** A kthx site is live once a release serves, and idle until then. */
+export function SiteDot({
+  release,
+  className,
+}: {
+  readonly release: number | null;
+  readonly className?: string;
+}) {
+  const tone: AppDotTone = release === null ? 'idle' : 'live';
+  return (
+    <Dot
+      aria-hidden="true"
+      hollow={tone === 'idle'}
+      className={cn(APP_DOT_TONE[tone], className)}
+    />
+  );
+}
+
 /**
  * `children` replaces the phase word where a phase alone says too little.
  * `faulty` is the soak's verdict on a `LIVE` release.

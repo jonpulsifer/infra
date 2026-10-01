@@ -13,7 +13,12 @@ import type {
   Clock,
   CommandContext,
 } from '../../src/commands/types.ts';
-import type { AppListItem, DeployPhase } from '../../src/commands/views.ts';
+import type {
+  AppListItem,
+  AppRowsView,
+  DeployPhase,
+  SiteListItem,
+} from '../../src/commands/views.ts';
 import {
   builds,
   componentTargetDesired,
@@ -25,7 +30,12 @@ import {
   type AppDeletionControls,
   DeleteAppButton,
 } from '../../src/web/components/delete-app.tsx';
-import { AppList, AppRow, appHref } from '../../src/web/views/apps/list.tsx';
+import {
+  AppList,
+  AppRow,
+  appHref,
+  SiteRow,
+} from '../../src/web/views/apps/list.tsx';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
   fixtureManifest,
@@ -349,6 +359,30 @@ const TWIN_ROWS: readonly AppListItem[] = [
 
 const IDS = TWIN_ROWS.map((row) => row.id);
 
+const TWIN_VIEW: AppRowsView = {
+  rows: TWIN_ROWS.map((app) => ({ kind: 'app', key: app.id, app })),
+  sites: { state: 'off' },
+  next: null,
+};
+
+// A site may share a built App's name; its key cannot collide with an id.
+const TWIN_SITE: SiteListItem = {
+  name: 'twins',
+  url: 'https://twins.sites.example',
+  release: 2,
+  held: false,
+  createdAt: '2026-07-30T12:00:00.000Z',
+};
+
+const MIXED_VIEW: AppRowsView = {
+  rows: [
+    ...TWIN_VIEW.rows,
+    { kind: 'site', key: 'site:twins', site: TWIN_SITE },
+  ],
+  sites: { state: 'ok', total: 1 },
+  next: null,
+};
+
 const idleDeletion: AppDeletionControls = {
   state: { kind: 'idle' } as AppDeletion,
   review: () => undefined,
@@ -358,7 +392,7 @@ const idleDeletion: AppDeletionControls = {
 
 function rowsOf(onNavigate: (path: string) => void = () => undefined) {
   const tree = AppList({
-    apps: TWIN_ROWS,
+    view: TWIN_VIEW,
     onNavigate,
     deletion: idleDeletion,
   });
@@ -408,7 +442,7 @@ describe('the list renders two same-named rows as two Apps', () => {
 
   test('a filter that matches one twin leaves one row', () => {
     const filtered = AppList({
-      apps: TWIN_ROWS,
+      view: TWIN_VIEW,
       onNavigate: () => undefined,
       deletion: idleDeletion,
       filter: 'twins.apps.example',
@@ -437,6 +471,73 @@ describe('the list renders two same-named rows as two Apps', () => {
       }
     }
     expect(reviewed).toEqual([{ id: IDS[1]!, name: 'twins' }]);
+  });
+});
+
+// The first element in a row's tree that answers a click: the row's button.
+function clickOf(tree: ReactNode): () => void {
+  for (const inner of elements(tree)) {
+    const control = inner.props as { onClick?: () => void };
+    if (control.onClick) return control.onClick;
+  }
+  throw new Error('the row has no button');
+}
+
+describe('a site is an App row of its own kind', () => {
+  function mixedRows() {
+    const tree = AppList({
+      view: MIXED_VIEW,
+      onNavigate: () => undefined,
+      deletion: idleDeletion,
+    });
+    return [...elements(tree)].filter(
+      (element) => element.type === AppRow || element.type === SiteRow,
+    );
+  }
+
+  test('built Apps key by id and the site by its name, so none collide', () => {
+    expect(mixedRows().map((row) => row.key)).toEqual([...IDS, 'site:twins']);
+  });
+
+  test('the site row opens its own workspace, not an App named like it', () => {
+    const visited: string[] = [];
+    const site = mixedRows().find((row) => row.type === SiteRow);
+    if (!site) throw new Error('no site row');
+    clickOf(
+      SiteRow({
+        ...(site.props as Parameters<typeof SiteRow>[0]),
+        onNavigate: (path) => visited.push(path),
+      }),
+    )();
+    expect(visited).toEqual(['/sites/twins']);
+  });
+
+  test('and offers no delete', () => {
+    const site = mixedRows().find((row) => row.type === SiteRow);
+    if (!site) throw new Error('no site row');
+    const tree = SiteRow(site.props as Parameters<typeof SiteRow>[0]);
+    expect(
+      [...elements(tree)].some((element) => element.type === DeleteAppButton),
+    ).toBe(false);
+  });
+
+  test("each row's button names the App, its kind and its status", () => {
+    const labels = mixedRows().map((row) => {
+      const tree =
+        row.type === AppRow
+          ? AppRow(row.props as Parameters<typeof AppRow>[0])
+          : SiteRow(row.props as Parameters<typeof SiteRow>[0]);
+      for (const inner of elements(tree)) {
+        const label = (inner.props as { 'aria-label'?: string })['aria-label'];
+        if (inner.type === 'button' && label) return label;
+      }
+      throw new Error('a row has no labelled button');
+    });
+    expect(labels).toEqual([
+      'twins, app, Never deployed',
+      'twins, app, Never deployed',
+      'twins, site, Live',
+    ]);
   });
 });
 

@@ -21,7 +21,7 @@ import { useState, useSyncExternalStore } from 'react';
 import type { Principal } from '../../commands/types.ts';
 import {
   type AppListItem,
-  deployPhaseWord,
+  appStatusWord,
   isInFlight,
 } from '../../commands/views.ts';
 import { PRODUCT_NAME } from '../brand.ts';
@@ -131,7 +131,13 @@ export const PHONE_NAV: readonly RailDestination[] = [
     path: '/',
     roots: ['/'],
   },
-  { key: 'apps', label: 'Apps', icon: Boxes, path: '/apps', roots: ['/apps'] },
+  {
+    key: 'apps',
+    label: 'Apps',
+    icon: Boxes,
+    path: '/apps',
+    roots: ['/apps', '/sites'],
+  },
   {
     key: 'deploys',
     label: 'Deploys',
@@ -531,7 +537,8 @@ export function AppShell({
     roots: [`/apps/${app.id}`],
   }));
   const winner = activeKey(path, [
-    { key: 'apps:all', roots: ['/apps'] },
+    // A kthx site is an App too, so its workspace lights the whole list.
+    { key: 'apps:all', roots: ['/apps', '/sites'] },
     ...appEntries,
     ...WORKSPACE,
     ...DEVELOPER,
@@ -605,13 +612,7 @@ export function AppShell({
                       collapsed={collapsed}
                       active={winner === `apps:${app.id}`}
                       label={app.name}
-                      detail={
-                        app.deployId === undefined
-                          ? 'Never deployed'
-                          : app.faulty
-                            ? 'Faulty'
-                            : deployPhaseWord(app.phase)
-                      }
+                      detail={appStatusWord(app)}
                       onClick={() => onNavigate(`/apps/${app.id}`)}
                       leading={<AppDot app={app} />}
                       labelClassName="font-mono"

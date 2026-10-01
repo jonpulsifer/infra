@@ -5,11 +5,12 @@
  */
 import { Radio } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type {
-  AppListItem,
-  BuildListItem,
-  DeployLedgerItem,
-  TargetListItem,
+import {
+  type AppListItem,
+  type BuildListItem,
+  type DeployLedgerItem,
+  type TargetListItem,
+  targetName,
 } from '../../../commands/views.ts';
 import {
   DefinitionGrid,
@@ -50,14 +51,6 @@ interface Entry extends ExplorerItem {
 }
 
 type Lane = 'all' | 'attention' | 'inflight' | 'builds' | 'deploys';
-
-/**
- * Vessel and adapter, since neither identifies a Target alone. An unplaced App
- * has no Vessel yet and shows the adapter by itself.
- */
-function targetName(vessel: string, adapter: string): string {
-  return vessel ? `${vessel}/${adapter}` : adapter;
-}
 
 function appTone(phase: AppListItem['phase']): MetricTone {
   if (phase === 'FAILED') return 'destructive';

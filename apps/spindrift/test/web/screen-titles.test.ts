@@ -10,6 +10,8 @@ describe('titleOf', () => {
     ['/apps', 'Apps'],
     ['/apps/hub', 'hub'],
     ['/hub', 'hub'],
+    ['/sites/acme', 'acme'],
+    ['/sites', 'sites'],
     ['/apps/new', 'New App'],
     ['/apps/new/7', 'New App'],
     ['/deploys', 'Deploys'],

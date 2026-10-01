@@ -60,6 +60,14 @@ function trail(path: string): Crumb[] {
     return [{ label: 'Datastores', path: '/datastores' }];
   }
 
+  // A kthx site is an App too, so it sits under Apps.
+  if (head === 'sites' && rest[0]) {
+    return [
+      { label: 'Apps', path: '/apps' },
+      { label: rest[0], path },
+    ];
+  }
+
   // Everything left names an App, including a bare `/<name>`.
   const crumbs: Crumb[] = [{ label: 'Apps', path: '/apps' }];
   const tail = head === 'apps' ? rest : [head];
