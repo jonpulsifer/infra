@@ -31,7 +31,7 @@ tests:
         alertname: FlameBossCookStarted
         exp_alerts:
           - exp_labels:
-              severity: info
+              severity: notice
               device: "193415"
               namespace: monitoring
               service: flameboss
@@ -139,7 +139,7 @@ tests:
         alertname: FlameBossMeatProbeAtWrapPoint
         exp_alerts:
           - exp_labels:
-              severity: info
+              severity: notice
               device: "193415"
               probe: "1"
               namespace: monitoring
@@ -184,7 +184,7 @@ tests:
               service: flameboss
             exp_annotations:
               message: "Cook 193415 has gone quiet"
-              description: "No reading for five minutes from a controller that was cooking. If the cook is over and it was switched off, this resolves by itself half an hour after the last reading. If it is not over, the controller has lost power or wifi and the fire is now unattended."
+              description: "No reading for ten minutes from a controller that was cooking. If the cook is over and it was switched off, this resolves by itself half an hour after the last reading. If it is not over, the controller has lost power or wifi and the fire is now unattended."
       - eval_time: 45m
         alertname: FlameBossCookSilent
         exp_alerts: []

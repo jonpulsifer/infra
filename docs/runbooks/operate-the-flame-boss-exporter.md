@@ -5,9 +5,6 @@ description: Check a cook in the Flame Boss exporter, act on its alerts, change 
 
 This runbook checks and repairs the [Flame Boss exporter](../apps/flameboss.md), changes its alert thresholds, replaces its token and gets cook data. Use it when a cook does not show in Grafana or an alert fires.
 
-> [!WARNING]
-> This runbook restarts the exporter by hand. It is an exception to the GitOps rule because the exporter reads its token only when it starts.
-
 ## Before you start
 
 - Get `kubectl` and `flux` access to folly ([Get cluster admin access](get-cluster-admin-access.md)).
@@ -101,13 +98,13 @@ This runbook checks and repairs the [Flame Boss exporter](../apps/flameboss.md),
 
    Result: The command prints `match`.
 
-7. Restart the exporter.
+7. Wait for the restart. The exporter reads its token only when it starts, and Reloader restarts the Deployment when the Secret changes.
 
    ```bash
-   kubectl --context folly -n monitoring rollout restart deploy/flameboss
+   kubectl --context folly -n monitoring rollout status deploy/flameboss
    ```
 
-   Result: The command prints `deployment.apps/flameboss restarted`.
+   Result: The command prints `deployment "flameboss" successfully rolled out`.
 
 8. Do steps 1, 2 and 4 of [Check a cook](#check-a-cook).
 
@@ -141,18 +138,18 @@ Flame Boss keeps each cook at a 3-second resolution. Anyone with the cook ID can
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| `FlameBossCookStarted` (info) fires. | A cook started less than 15 minutes ago. | No action. |
+| `FlameBossCookStarted` (notice) fires. | A cook started less than 15 minutes ago. | No action. |
 | `FlameBossPitBelowTarget` fires. | The pit reached the set temperature, then stayed more than 25 °F below it for 10 minutes. | Examine the coals and the intake. |
 | `FlameBossFireStarving` fires. | The blower is at 99% or more, and the pit is more than 15 °F below the set temperature for 15 minutes. | Add fuel. Close the lid. |
 | `FlameBossPitAboveTarget` fires. | The pit is more than 30 °F above the set temperature for 10 minutes. | Close the top vent and the lid. |
 | `FlameBossPitProbeDisconnected` fires. | The pit probe is unplugged for 5 minutes. | Connect the pit probe. |
-| `FlameBossMeatProbeAtWrapPoint` (info) fires. | A meat probe is at 165 °F or more. | Wrap the meat. Poultry is done. |
+| `FlameBossMeatProbeAtWrapPoint` (notice) fires. | A meat probe is at 165 °F or more. | Wrap the meat. Poultry is done. |
 | `FlameBossMeatProbeAtTarget` or `FlameBossMeatDone` fires. | A meat probe is at 203 °F, or at the done temperature set on the controller. | Take the meat off the heat. |
 | `FlameBossPitAlarm` fires. | The pit left the range of the controller's pit alarm. | Examine the fire. |
 | `FlameBossLidOpen` fires. | The controller reports the lid open for 5 minutes. | Close the lid. |
 | `FlameBossVentAdvice` (info) fires. | The controller advises closing the vent. | Close the top vent a little. |
 | `FlameBossCookSilent` fires. | No reading for 10 minutes. | If the cook continues, examine the controller power and Wi-Fi. |
-| `FlameBossCloudUnreachable` fires, or no `flameboss_broker_connected` series exists. | The exporter has no connection to a Flame Boss server. If the exporter cannot connect when it starts, it logs no error. | Make sure folly reaches `myflameboss.com:8883`. If it does, do [Replace the Flame Boss token](#replace-the-flame-boss-token). |
+| `FlameBossCloudUnreachable` fires, or `flameboss_broker_connected` is 0. | The exporter has no connection to a Flame Boss server. It exports 0 from start until its first connection. | Make sure folly reaches `myflameboss.com:8883`. If it does, do [Replace the Flame Boss token](#replace-the-flame-boss-token). |
 | `FlameBossExporterDown` fires. | Prometheus cannot scrape the exporter for 15 minutes. | Run `kubectl --context folly -n monitoring get pods -l app.kubernetes.io/name=flameboss`. |
 | No `flameboss_device_server` series during a cook. | The Flame Boss cloud does not report the controller online. | Examine the controller power and Wi-Fi. |
 | No `flameboss_cook` series, and `flameboss_messages_total` does not increase. | The controller sends no readings. | Make sure a cook runs on the controller. |

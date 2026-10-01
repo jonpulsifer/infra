@@ -20,6 +20,9 @@ metadata:
   labels:
     app.kubernetes.io/name: flameboss
     app.kubernetes.io/part-of: monitoring
+  annotations:
+    # The exporter reads its credentials only at startup.
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 1
   # A second pod would export the same cook twice under two instance labels.

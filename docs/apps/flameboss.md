@@ -19,8 +19,9 @@ The Flame Boss is a barbecue controller. It reads a pit probe and three meat pro
 
 - The exporter sends no commands. It cannot change the set temperature or silence an alarm on the controller.
 - A cook's series exist while readings arrive. After 5 minutes without a reading, `flameboss_cook_active` is 0. After 30 minutes, the cook's series go away, so the dashboard is empty between cooks.
-- The info alerts, `FlameBossCookStarted`, `FlameBossMeatProbeAtWrapPoint` and `FlameBossVentAdvice`, reach Discord only while a warning or critical alert fires in the `monitoring` namespace. At other times, the `InfoInhibitor` rule of the kube-prometheus-stack chart suppresses them.
-- If the exporter cannot connect when it starts, it logs no error and exports no `flameboss_broker_connected` series. `FlameBossCloudUnreachable` then does not fire.
+- `FlameBossCookStarted` and `FlameBossMeatProbeAtWrapPoint` have severity `notice`, which the Discord route sends and the `InfoInhibitor` rule of the kube-prometheus-stack chart does not match. `FlameBossVentAdvice` keeps severity `info`, so it reaches Discord only while a warning or critical alert fires in the `monitoring` namespace.
+- Before its first connection, the exporter exports `flameboss_broker_connected` as 0 for the entry server, so `FlameBossCloudUnreachable` fires after 15 minutes if it never connects.
+- The Deployment carries the `reloader.stakater.com/auto` annotation, so a change to the `flameboss-credentials` Secret restarts the exporter, which reads its token only at start.
 
 ## How it works
 

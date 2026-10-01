@@ -93,6 +93,8 @@ func deviceFromTopic(topic string) (int, bool) {
 // Start opens the entry connection. The connect handler announces and
 // subscribes again after every paho reconnect.
 func (r *Relay) Start() error {
+	// 0 until the first connect, so a broker that never answers alerts.
+	r.state.SetBrokerConnected(r.opts.Host, false)
 	c, err := r.dial(r.opts.Host, true)
 	if err != nil {
 		return err
