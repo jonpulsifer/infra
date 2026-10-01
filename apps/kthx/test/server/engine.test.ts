@@ -6,7 +6,13 @@
 import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { base64urlEncode } from '@repo/archive/bytes';
 import { tarGz } from '../../cli/tar.ts';
-import { EngineKeys, KEYS_STALE_MS, KEYS_TTL_MS } from '../../server/engine.ts';
+import {
+  EngineKeys,
+  FAILED_RELOAD_MS,
+  KEYS_STALE_MS,
+  KEYS_TTL_MS,
+  RELOAD_WAIT_MS,
+} from '../../server/engine.ts';
 import {
   ConfigError,
   type EngineConfig,
@@ -422,6 +428,54 @@ describe('the issuer keys', () => {
       code: 'NOT_ENGINE',
       check: 'kid',
     });
+  });
+
+  test('an issuer that hangs past the TTL never holds up a key it already has', async () => {
+    const issuer = issue();
+    let now = Date.parse('2026-10-01T00:00:00Z');
+    let hang = false;
+    const hung: (() => void)[] = [];
+    const keys = new EngineKeys(issuer, {
+      now: () => now,
+      fetch: (input, init) =>
+        hang
+          ? new Promise<Response>((_, reject) => {
+              hung.push(() => reject(new Error('the issuer hung')));
+            })
+          : fetch(input, init),
+    });
+    const token = await mint(
+      issuer,
+      { exp: now / 1000 + 4 * 3600 },
+      SIGNER,
+      now,
+    );
+    expect(await keys.verify(token)).toEqual({ ok: true });
+
+    hang = true;
+    const errors = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      now += KEYS_TTL_MS + 1000;
+      let started = performance.now();
+      expect(await keys.verify(token)).toEqual({ ok: true });
+      expect(performance.now() - started).toBeLessThan(RELOAD_WAIT_MS * 2);
+      expect(hung).toHaveLength(1);
+
+      // Once a reload has failed, the next one is not waited on at all.
+      hung.shift()?.();
+      await Bun.sleep(0);
+      now += FAILED_RELOAD_MS;
+      started = performance.now();
+      expect(await keys.verify(token)).toEqual({ ok: true });
+      expect(performance.now() - started).toBeLessThan(RELOAD_WAIT_MS / 2);
+      expect(hung).toHaveLength(1);
+      expect(await keys.verify(token)).toEqual({ ok: true });
+      expect(hung).toHaveLength(1);
+    } finally {
+      for (const release of hung) release();
+      await Bun.sleep(0);
+      errors.mockRestore();
+    }
   });
 
   test('keeps the last set through failed reloads for a day, then is a 503', async () => {

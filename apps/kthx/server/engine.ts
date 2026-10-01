@@ -34,6 +34,12 @@ export const KEYS_STALE_MS = 24 * 60 * 60 * 1000;
 export const KID_RELOAD_MS = 60 * 1000;
 /** After a failed load, so a down issuer does not cost every request a fetch. */
 export const FAILED_RELOAD_MS = 10 * 1000;
+/**
+ * How long a request holding a set past {@link KEYS_TTL_MS} waits on its
+ * reload before it verifies with that set. Well under the engine's client
+ * timeouts, so a hung issuer never makes held keys look like an outage.
+ */
+export const RELOAD_WAIT_MS = 1000;
 const FETCH_MS = 5000;
 const MAX_ISSUER_BYTES = 64 * 1024;
 /** Either side of `exp` and `nbf`. */
@@ -67,6 +73,7 @@ export class EngineKeys {
   #retryAt = Number.NEGATIVE_INFINITY;
   #kidReloadAt = Number.NEGATIVE_INFINITY;
   #loading: Promise<void> | null = null;
+  #failed = false;
 
   constructor(
     engine: EngineConfig,
@@ -149,9 +156,15 @@ export class EngineKeys {
 
   async #current(): Promise<Map<string, CryptoKey> | null> {
     const now = this.#now();
-    const due = this.#keys === null || now - this.#loadedAt >= KEYS_TTL_MS;
+    const held = this.#usable();
+    const due = held === null || now - this.#loadedAt >= KEYS_TTL_MS;
     if (due && (this.#loading !== null || now >= this.#retryAt)) {
-      await this.#load();
+      const load = this.#load();
+      if (held === null) await load;
+      // A healthy issuer answers inside the wait, so a retired key stops at
+      // the TTL; one that just failed is not waited on at all.
+      else if (!this.#failed)
+        await Promise.race([load, Bun.sleep(RELOAD_WAIT_MS)]);
     }
     return this.#usable();
   }
@@ -170,8 +183,10 @@ export class EngineKeys {
         (keys) => {
           this.#keys = keys;
           this.#loadedAt = this.#now();
+          this.#failed = false;
         },
         (cause: unknown) => {
+          this.#failed = true;
           this.#retryAt = this.#now() + FAILED_RELOAD_MS;
           logCause('engine', 'loading the engine issuer keys', cause);
         },
