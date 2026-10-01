@@ -301,8 +301,28 @@ describe("setAppVanity under kthx's zone", () => {
     expect(kthx.reserved.map((call) => call.labels)).toEqual([
       ['shop', 'shop-web'],
       ['shop-web', 'store'],
-      ['shop-web'],
     ]);
+  });
+
+  test('clearing mints no name, so it needs no answer from kthx', async () => {
+    const { appId } = await seed();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, appId));
+
+    for (const kthx of [
+      new FakeKthx({ unreadable: 'kthx did not answer within 5s' }),
+      new FakeKthx({ taken: [{ name: 'shop-web', by: 'app' }] }),
+    ]) {
+      const result = await setAppVanity(
+        { appId, label: null },
+        kthxContext(kthx),
+      );
+      expect(result.ok).toBe(true);
+      expect(kthx.calls).toEqual([]);
+    }
+    expect(await vanityOf(appId)).toBeNull();
   });
 
   test("names outside kthx's zone make no call", async () => {

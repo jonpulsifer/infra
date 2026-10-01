@@ -72,9 +72,10 @@ export const setAppVanity: Command<
   const placements = await placementsFor(context.db, app.id);
 
   // Reserved before the write; a failed write leaves the names held by this
-  // App, which only keeps them from a site.
+  // App, which only keeps them from a site. A clear mints no name, and the
+  // deploy gate still holds the canonical ones.
   const kthx = context.adapters.kthx?.() ?? null;
-  if (kthx !== null) {
+  if (kthx !== null && input.label !== null) {
     const refused = await reserveForEdit<SetAppVanityResult>(
       kthx,
       app.id,
@@ -88,7 +89,7 @@ export const setAppVanity: Command<
       ),
       {
         path: 'label',
-        subject: input.label === null ? 'this App' : `'${input.label}'`,
+        subject: `'${input.label}'`,
       },
     );
     if (refused !== null) return refused;
