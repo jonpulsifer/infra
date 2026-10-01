@@ -22,6 +22,7 @@ retrofit is the only control-plane node of the offsite [Kubernetes](../platform/
 - etcd, the API server, the controller manager and the scheduler
 - cfssl with the offsite cluster CA. The CA key and the token signer key come from `nix/secrets/retrofit.sops.yaml`. See [PKI](../platform/pki.md).
 - Pods, because the control plane has no taint
+- `etcd-backup`, a daily 02:30 etcd snapshot into offsite's restic staging repository (`nix/services/etcd-backup.nix`)
 
 ## Reach
 
