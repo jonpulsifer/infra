@@ -14,7 +14,7 @@ export function RefreshMenu({ onRefresh, isRefreshing }: RefreshMenuProps) {
   const handleExit = async () => {
     setIsExiting(true);
     try {
-      const response = await fetch('/api/exit');
+      const response = await fetch('/api/exit', { method: 'POST' });
       if (!response.ok) {
         throw new Error('Failed to exit');
       }

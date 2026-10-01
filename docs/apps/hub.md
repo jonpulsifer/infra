@@ -19,7 +19,7 @@ The dashboard shows each station's current readings against their 24-hour low an
 ## Limits
 
 - The dashboard is up to about a minute behind WeatherFlow. The 24-hour lows and highs refresh every 5 minutes.
-- The Restart App item in the refresh menu restarts the server, and it needs no sign-in. Anyone who can reach the dashboard can use it.
+- The Restart App item in the refresh menu restarts the server through `POST /api/exit`, and it needs no sign-in. The server accepts the request only from a LAN, tailnet or loopback address, and a `GET` or a cross-site request gets an error. The hub has no public tunnel, so a caller on the internet never reaches it.
 - The hub hides the station IDs in `TEMPESTWX_IGNORE_STATIONS` in the HelmRelease.
 - The fire restriction is up to 10 minutes behind [BurnSafe](https://novascotia.ca/burnsafe/). BurnSafe has no API, so a change to the page's county table hides the restriction until the parser in `apps/hub/app/lib/burnsafe.ts` follows it.
 
@@ -32,6 +32,10 @@ A second loop reads the BurnSafe page every 10 minutes. `BURNSAFE_COUNTIES` in t
 Each build has a build ID, and the snapshot carries the server's build ID. When the two build IDs differ, the page reloads itself, at most once every 5 minutes. A kiosk shows a new deploy with no restart. The service worker at `/sw.js` serves the last cached page when the network drops.
 
 Flux deploys the hub with the first-party `app` Helm chart, which gives it its own Gateway. The `hub-env` ExternalSecret reads `TEMPESTWX_TOKENS` from 1Password.
+
+## Restart access
+
+`apps/hub/app/lib/exit-guard.ts` decides each `/api/exit` request. It takes the caller from the last `X-Forwarded-For` entry, which the offsite Gateway appends, so an earlier entry that a caller forges does not count. It allows private, tailnet (`100.64.0.0/10`) and loopback ranges. Set `EXIT_ALLOWED_CIDRS` on the HelmRelease to a comma-separated CIDR list to narrow the ranges. A request that carries no forwarded address is refused.
 
 ## Operate
 
