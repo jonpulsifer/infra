@@ -33,7 +33,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: iperf3
-          image: ghcr.io/jonpulsifer/netbench:latest@sha256:28e9b44f7273fe9d344789c39ab1e3108e99cb4121a1cb5bd761e0d9decc5c54
+          image: ghcr.io/jonpulsifer/netbench:latest@sha256:a2fecd4d6e5eba4961bfaa37ac28ea641b56da5acb62111a607514ad128e60d8
           imagePullPolicy: IfNotPresent
           command: ["iperf3", "--server", "--port", "5201"]
           env:
