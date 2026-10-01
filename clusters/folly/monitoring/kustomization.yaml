@@ -14,9 +14,7 @@ resources:
   - flameboss.yaml
   - flameboss-rules.yaml
   - pbx-rules.yaml
- # - picow.yaml
   - ../../base/monitoring
- # - screenpi4.yaml
   - secret.sops.yaml
  # - unpoller
 patches:

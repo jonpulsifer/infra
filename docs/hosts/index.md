@@ -43,7 +43,7 @@ The Kubernetes nodes run no Tailscale client. Off the LAN, the owner reaches the
 
 Each sheet states its host's divergence. These cover more than one host, or a host with no sheet:
 
-- eviropico runs Pimoroni's MicroPython firmware, and no file in git holds its code. `clusters/folly/monitoring/picow.yaml` is a Pico W scrape target that folly does not apply, and may be eviropico's.
+- eviropico runs Pimoroni's MicroPython firmware, and no file in git holds its code.
 - `retrofit.lolwtf.ca` and `oldschool.lolwtf.ca` resolve, and no file in git declares them.
 - capsule and forge are on the tailnet, and `devices.tf` lists neither. forge enrols through the OAuth client in `terraform/network/tailscale/oauth_clients.tf`.
 - `devices.tf` lists nuc, with `tag:folly`, and desktop-g7i75ls, with `tag:offsite`. No sheet or NixOS configuration covers either.
