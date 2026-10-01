@@ -25,6 +25,10 @@ spec:
       ATLANTIS_ENABLE_POLICY_CHECKS: "true"
       ATLANTIS_FAIL_ON_PRE_WORKFLOW_HOOK_ERROR: "true"
       ATLANTIS_WRITE_GIT_CREDS: "true"
+      # Use the image's tofu (images/atlantis/Dockerfile, lockstep with mise.toml).
+      # Downloading picks the newest release matching a root's required_version,
+      # so a new OpenTofu release changes every plan without a commit.
+      ATLANTIS_TF_DOWNLOAD: "false"
       ATLANTIS_AUTOPLAN_MODULES: "true"
       # Default is "**/*.tf*"; also autoplan when the unifi_bgp sidecar configs
       # pulled in via file() change. Scoped to "terraform/**/*.conf" (not an
