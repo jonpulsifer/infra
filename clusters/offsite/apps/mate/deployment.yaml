@@ -162,7 +162,7 @@ spec:
             # Digest-pinned: the agent's tool calls run in this image with no
             # approval step. CD anchors on the image name beside the digest.
             - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:df2da344161213dadaa8f0f00dedf1239d30642ef92ddac148f01f77d48bad84
+              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:bd3ef5c8f38cee0936a9ddbd98a898f067c8e4495a3fff453199ef053b418841
             # The numeric App id, not the client id. mate mints a 1-hour token per
             # turn from the key; a sandbox never holds the key.
             - name: MATE_GITHUB_APP_ID
