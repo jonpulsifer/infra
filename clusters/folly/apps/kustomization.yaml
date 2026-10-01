@@ -15,8 +15,6 @@ resources:
   - netbench
   - open-webui
   - pbx
-  - postgres
-  - redis
   - smiirl
   - spindrift-target
   - ../../base/apps/reloader

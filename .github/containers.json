@@ -1,7 +1,6 @@
 {
   "_comment": "Allowlist for the containers workflow. Every image produced by a Dockerfile under apps/ or images/ must appear in exactly one of these lists. detect-containers.sh fails CI if a Dockerfile is left unclassified, so a new app can't be silently published or silently dropped. 'build' = published to GHCR; 'ignore' = has a Dockerfile but is intentionally not published here.",
   "build": [
-    "ai-agents",
     "ddnsd",
     "flameboss",
     "netbench",
@@ -64,10 +63,6 @@
   },
   "ignore": [
     "bashcurljq",
-    "kernel-builder",
-    "openclaw",
-    "workstation",
-    "hermes",
     "clankerbanker",
     "slingshot"
   ]
