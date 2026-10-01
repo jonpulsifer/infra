@@ -50,7 +50,7 @@ The engine runs as ServiceAccount `spindrift/spindrift` on offsite, with no GCP 
 
 - GCP: The `offsite` provider of the `fml-pool` workload identity pool lets it impersonate `spindrift-controller@bluenose` (`terraform/gcp/projects/bluenose/iam.tf`).
 - folly: The API server accepts its token as user `federated:system:serviceaccount:spindrift:spindrift` (`nix/services/k8s/default.nix`).
-- kthx: The quick-site server accepts a token from offsite's issuer with audience `kthx` and subject `system:serviceaccount:spindrift:spindrift` (`clusters/offsite/apps/kthx/helm-release.yaml`). It reads the issuer's keys from `https://oidc.lolwtf.ca/offsite`, and neither API server accepts that audience.
+- kthx: The quick-site server accepts a token from offsite's issuer with audience `kthx` and subject `system:serviceaccount:spindrift:spindrift` (`clusters/offsite/apps/kthx/helm-release.yaml`). It reads the issuer's keys from `https://oidc.lolwtf.ca/offsite`, and neither API server accepts that audience. The engine sends kthx only that projected token, set by `serviceAccount.token.kthxAudience` in `clusters/offsite/apps/spindrift/helm-release.yaml`. Its other tokens never reach kthx.
 - Vercel and Cloudflare: none. The engine uses [stored tokens](#secrets).
 
 Quick sites run as `kthx-server@bluenose`, which reaches only bucket `bluenose-kthx`.

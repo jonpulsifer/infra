@@ -126,6 +126,10 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- end }}
+            {{- if $top.Values.serviceAccount.token.kthxAudience }}
+            - name: SPINDRIFT_KTHX_TOKEN_PATH
+              value: {{ printf "%s/kthx-token" $top.Values.serviceAccount.token.mountPath | quote }}
+            {{- end }}
             {{- end }}
             {{- if $top.Values.hostname }}
             # The passkey relying party, from the value that renders the Gateway listener and
@@ -210,6 +214,12 @@ spec:
                   items:
                     - key: gcp-credentials.json
                       path: gcp-credentials.json
+              {{- end }}
+              {{- if $top.Values.serviceAccount.token.kthxAudience }}
+              - serviceAccountToken:
+                  audience: {{ $top.Values.serviceAccount.token.kthxAudience | quote }}
+                  expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
+                  path: kthx-token
               {{- end }}
         {{- end }}
 {{- end }}

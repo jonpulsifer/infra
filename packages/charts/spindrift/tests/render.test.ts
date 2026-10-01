@@ -482,3 +482,55 @@ describe('the trust store', () => {
     });
   });
 });
+
+describe('the kthx credential', () => {
+  const tokenSources = (objects: RenderedObject[], name: string) =>
+    (
+      one(objects, 'Deployment', name).spec.template.spec.volumes.find(
+        (volume: { name: string }) => volume.name === 'federated-identity',
+      ).projected.sources as { serviceAccountToken?: unknown }[]
+    ).flatMap((source) =>
+      source.serviceAccountToken ? [source.serviceAccountToken] : [],
+    );
+
+  test('both processes get a third token, for kthx alone, and its path', async () => {
+    const objects = await render({
+      reconciler: { enabled: true },
+      serviceAccount: {
+        token: {
+          gcpAudience: '//iam.example.test/providers/cluster',
+          kthxAudience: 'kthx',
+        },
+      },
+    });
+    for (const name of ['spindrift-web', 'spindrift-reconciler']) {
+      expect(tokenSources(objects, name)).toEqual([
+        { audience: 'api', expirationSeconds: 3600, path: 'token' },
+        {
+          audience: '//iam.example.test/providers/cluster',
+          expirationSeconds: 3600,
+          path: 'gcp-token',
+        },
+        { audience: 'kthx', expirationSeconds: 3600, path: 'kthx-token' },
+      ]);
+      expect(envOf(objects, name)).toContainEqual({
+        name: 'SPINDRIFT_KTHX_TOKEN_PATH',
+        value: '/var/run/secrets/spindrift/kthx-token',
+      });
+    }
+  });
+
+  test('renders neither the token nor its path when the audience is unset', async () => {
+    const objects = await render({ reconciler: { enabled: true } });
+    for (const name of ['spindrift-web', 'spindrift-reconciler']) {
+      expect(tokenSources(objects, name)).toEqual([
+        { audience: 'api', expirationSeconds: 3600, path: 'token' },
+      ]);
+      expect(
+        envOf(objects, name).some(
+          (item) => item.name === 'SPINDRIFT_KTHX_TOKEN_PATH',
+        ),
+      ).toBe(false);
+    }
+  });
+});
