@@ -18,3 +18,8 @@ data:
   # Pinned: the handset's SIP registration and provisioning URL hold this
   # address, set by hand on the phone.
   PBX_SIP_VIP: 10.3.0.100
+
+  # restic's staging rest-server, and the push of it to GCS. Starlink's uplink
+  # carries the push once a week, early Wednesday.
+  RESTIC_STAGING_HOST: spore.lolwtf.ca
+  RESTIC_PUSH_SCHEDULE: "0 5 * * 3"

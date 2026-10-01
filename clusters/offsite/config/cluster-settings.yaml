@@ -7,3 +7,7 @@ metadata:
 data:
   # 1Password item "oauth2-proxy: offsite".
   OAUTH2_PROXY_ITEM: 46xuydwpk5vbw2gld2pzn5o4pq
+
+  # restic's staging rest-server, and the nightly push of it to GCS.
+  RESTIC_STAGING_HOST: oldschool.lolwtf.ca
+  RESTIC_PUSH_SCHEDULE: "0 5 * * *"

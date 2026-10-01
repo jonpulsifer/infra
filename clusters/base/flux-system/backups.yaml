@@ -1,0 +1,24 @@
+---
+# The push to GCS and the `restic` Secret it reads. The schedule and staging
+# host come from cluster-settings, the bucket and audience from the topology.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: backups
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/base/platform/backups
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    # Serves the ClusterSecretStore the ExternalSecret reads.
+    - name: onepassword-connect
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology
