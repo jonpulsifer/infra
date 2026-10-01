@@ -44,6 +44,11 @@ spec:
     # Both volumes are `local-path` on this node. retrofit already holds the
     # control plane and every other CNPG volume.
     node: oldschool
+    # The nightly dump into oldschool's restic staging repository, which the
+    # `backups` push copies to GCS. The `restic` ExternalSecret reads 1Password.
+    restic:
+      repository: rest:http://oldschool.lolwtf.ca:8000/offsite/
+      cluster: ${CLUSTER_NAME}
     # The pool principal holds only workloadIdentityUser on this account, so
     # signed URLs are refused. Declared in terraform/gcp/projects/bluenose/iam.tf.
     gcp:

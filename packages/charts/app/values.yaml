@@ -28,5 +28,20 @@ database:
     enabled: false
     command: "echo 'no migration configured'"
 
+# The nightly `pg_dump` of the database into the site's restic staging repository,
+# `rest:http://<host>:8000/<site>/`. Empty renders no restic objects.
+restic:
+  repository: ""
+  # The cluster in each snapshot's `--host <cluster>/<namespace>/<name>`.
+  cluster: ""
+  schedule: "40 2 * * *"
+  image: restic/restic:0.19.1
+  # Keep this major at or above the server's, which the CNPG operator's default image sets.
+  dumpImage: ghcr.io/cloudnative-pg/postgresql:18
+  scratchSize: 2Gi
+  # Renders the `restic` ExternalSecret. Off when something else writes that Secret.
+  externalSecret: true
+  secretStore: onepassword-connect
+
 networkPolicy:
   enabled: false

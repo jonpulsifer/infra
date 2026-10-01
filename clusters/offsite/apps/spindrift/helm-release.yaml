@@ -86,6 +86,11 @@ spec:
       size: 2Gi
       migration:
         enabled: true
+    # The nightly dump into oldschool's restic staging repository, which the
+    # `backups` push copies to GCS. The `restic` ExternalSecret reads 1Password.
+    restic:
+      repository: rest:http://oldschool.lolwtf.ca:8000/offsite/
+      cluster: ${CLUSTER_NAME}
     reconciler:
       enabled: true
       # The deploy loop shells out to `vercel deploy --prebuilt` for a Vercel

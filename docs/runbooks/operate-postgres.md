@@ -90,19 +90,22 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 ## Check the backups
 
 > [!WARNING]
-> Only the kthx and mate databases have a backup. If another database loses its volume, its data is lost.
+> A database not in this table has no backup, and neither has a Datastore in `spindrift-datastores`. If one loses its volume, its data is lost.
+
+A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's restic staging repository on oldschool each night. Each snapshot's host is `offsite/<namespace>/<database>`, with the tag `kind=pg`. The chart's `restic` value sets the repository, and an ExternalSecret named `restic` reads the credentials from 1Password.
 
 | Database | Backup |
 | --- | --- |
-| kthx (`kthx-db`) | The CronJob `kthx-db-backup` writes a `pg_dumpall` to `gs://bluenose-kthx/backups/pg/` each night. The bucket deletes a dump after 30 days. |
+| kthx (`kthx-db`) | The CronJob `kthx-db-backup` writes a `pg_dumpall` to `gs://bluenose-kthx/backups/pg/` each night. The bucket deletes a dump after 30 days. The CronJob `kthx-db-restic` writes a `pg_dumpall` to restic. |
 | mate (`mate-db`) | The CronJob `mate-db-backup` writes a `pg_dump` to `gs://homelab-ng-mate/backups/pg/` each night. The bucket deletes a dump after 30 days. |
-| The built-apps database (`spindrift-db`) | None. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
+| The built-apps database (`spindrift-db`) | The CronJob `spindrift-db-restic` writes a `pg_dump` to restic. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
+| Prowler (`prowler-db`) | The CronJob `prowler-db-restic` writes a `pg_dump` to restic. |
 
 1. Read the backup line in the `kubectl cnpg status` output of the database.
 
    Result: `Continuous Backup not configured`.
 
-2. Make sure that the last dump is less than a day old. `<cronjob>` is `kthx-db-backup` in `kthx`, or `mate-db-backup` in `mate`.
+2. Make sure that the last dump is less than a day old. `<cronjob>` is a CronJob from the table, in the namespace of its database.
 
    ```bash
    kubectl get cronjob <cronjob> -n <namespace> --context offsite -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'
