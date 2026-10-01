@@ -623,7 +623,7 @@ describe("names under kthx's zone", () => {
     expect('retainedNames' in result.value).toBe(false);
   });
 
-  test("a Component deleted earlier with its workload retained keeps its name held", async () => {
+  test('a Component deleted earlier with its workload retained keeps its name held', async () => {
     // Its route outlived its rows, so this delete never sees it to retain it.
     const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('shop', { targetId: target.id });
