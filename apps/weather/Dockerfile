@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # weather: one Bun process that runs its source as committed, with no build step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:00933e283d1245b19bffede3a8aa63d5e0dc504140a96e164c2d4b31cd15218a AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:c7d70f07634bc08390f3116df1ef17d5ff337371520b2684df05d125fbaf9ad9 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
