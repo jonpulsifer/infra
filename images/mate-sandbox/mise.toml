@@ -33,6 +33,7 @@ disable_tools = [
   "opentofu",
   "powershell",
   "promtool",
+  "restic",
   "rust",
   "shellcheck",
   "shfmt",
