@@ -479,12 +479,12 @@ export async function nuke(
     }
     throw cause;
   }
-  // Every name is claimable again, so the local tokens are dead.
+  // Every site's name is claimable again, so the local tokens are dead.
   forgetWhere((known) => {
     for (const name of Object.keys(known)) delete known[name];
   });
   console.log(
-    `  ${counts.deleted} deleted${counts.failed ? `, ${counts.failed} failed` : ''}; every name is claimable again`,
+    `  ${counts.deleted} deleted${counts.failed ? `, ${counts.failed} failed` : ''}; every site's name is claimable again, and names reserved for built apps stay taken`,
   );
 }
 

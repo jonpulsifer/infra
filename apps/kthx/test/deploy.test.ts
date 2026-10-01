@@ -412,7 +412,9 @@ describe('rollback, release, ls and rm', () => {
 
     const said = await capture(() => nuke({}, () => 'NUKE'));
     expect(said).toContain('1 deleted');
-    expect(said).toContain('claimable again');
+    expect(said).toContain(
+      "every site's name is claimable again, and names reserved for built apps stay taken",
+    );
     expect(nuked).toBe(1);
     expect(sent()).toHaveLength(1);
 
