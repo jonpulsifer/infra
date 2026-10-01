@@ -1,0 +1,142 @@
+{{/*
+Nightly `pg_dump` of the control plane's database into the site's restic staging
+repository. Empty `restic.repository` renders neither object.
+*/}}
+{{- if .Values.database.enabled }}
+{{- with .Values.restic.repository }}
+{{- $db := include "spindrift.databaseName" $ }}
+{{- $namespace := include "spindrift.namespace" $ }}
+{{- $host := printf "%s/%s/%s" (required "restic.cluster is required: it names the snapshot's host" $.Values.restic.cluster) $namespace $db }}
+{{- if $.Values.restic.externalSecret }}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: restic
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "spindrift.labels" $ | nindent 4 }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: {{ $.Values.restic.secretStore }}
+  target:
+    name: restic
+    creationPolicy: Owner
+  data:
+    - secretKey: RESTIC_PASSWORD
+      remoteRef: {key: restic-repository, property: password}
+    - secretKey: RESTIC_REST_USERNAME
+      remoteRef: {key: restic-rest-server, property: username}
+    - secretKey: RESTIC_REST_PASSWORD
+      remoteRef: {key: restic-rest-server, property: password}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $db }}-restic
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "spindrift.labels" $ | nindent 4 }}
+    lolwtf.ca/backup: "true"
+spec:
+  schedule: {{ $.Values.restic.schedule | quote }}
+  timeZone: America/Halifax
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 259200
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "spindrift.selectorLabels" (dict "Release" $.Release "Values" $.Values "Chart" $.Chart "component" "restic") | nindent 12 }}
+            lolwtf.ca/backup: "true"
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # Uncompressed, so restic deduplicates against the previous night.
+            - name: dump
+              image: {{ $.Values.restic.dumpImage | quote }}
+              command:
+                - bash
+                - -c
+                - set -euo pipefail; pg_dump -Fc -Z0 -d "$DATABASE_URL" -f /dump/{{ $db }}.dump
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $db }}-app
+                      key: uri
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          containers:
+            - name: restic
+              image: {{ $.Values.restic.image | quote }}
+              # Exit 10 is restic's "repository does not exist"; any other failure stops here.
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  status=0
+                  restic cat config > /dev/null || status=$?
+                  if [ "$status" -eq 10 ]; then restic init; elif [ "$status" -ne 0 ]; then exit "$status"; fi
+                  exec restic backup --host {{ $host | quote }} --tag kind=pg /dump
+              env:
+                - name: RESTIC_REPOSITORY
+                  value: {{ . | quote }}
+                - name: RESTIC_CACHE_DIR
+                  value: /tmp/restic
+                - name: HOME
+                  value: /tmp
+              envFrom:
+                - secretRef:
+                    name: restic
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 1Gi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: dump
+              emptyDir:
+                sizeLimit: {{ $.Values.restic.scratchSize }}
+            - name: tmp
+              emptyDir: {}
+{{- end }}
+{{- end }}

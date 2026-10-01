@@ -1,6 +1,7 @@
 {{/*
-The control plane's database, with no backups. Its desired-state rows, attempt log and
-config version pins exist nowhere else, so an uninstall keeps the Cluster by default.
+The control plane's database. Its desired-state rows, attempt log and config version
+pins exist nowhere else but the restic dump in `restic.yaml`, so an uninstall keeps the
+Cluster by default.
 */}}
 {{- if .Values.database.enabled }}
 apiVersion: postgresql.cnpg.io/v1

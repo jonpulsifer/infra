@@ -18,6 +18,11 @@ spec:
     fullnameOverride: prowler
     hostname: prowler.${SECRET_DOMAIN}
     envFromSecret: prowler-env
+    # The nightly dump into oldschool's restic staging repository, which the
+    # `backups` push copies to GCS. The `restic` ExternalSecret reads 1Password.
+    restic:
+      repository: rest:http://oldschool.lolwtf.ca:8000/offsite/
+      cluster: ${CLUSTER_NAME}
     gcp:
       # The pool trusts this cluster's SA-token issuer, so the projected token
       # needs no credential. Roles: terraform/gcp/projects/homelab-ng/prowler.tf.

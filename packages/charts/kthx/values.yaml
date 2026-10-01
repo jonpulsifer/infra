@@ -92,6 +92,18 @@ database:
     # Caps the dump's emptyDir, which shares the node's disk with both PVCs.
     scratchSize: 10Gi
 
+# The nightly `pg_dumpall` into the site's restic staging repository,
+# `rest:http://<host>:8000/<site>/`. Empty renders no restic objects.
+restic:
+  repository: ""
+  # The cluster in each snapshot's `--host <cluster>/<namespace>/<name>`.
+  cluster: ""
+  schedule: "10 1 * * *"
+  image: restic/restic:0.19.1
+  # Renders the `restic` ExternalSecret. Off when something else writes that Secret.
+  externalSecret: true
+  secretStore: onepassword-connect
+
 gateway:
   name: spindrift-apps
   namespace: spindrift-apps
