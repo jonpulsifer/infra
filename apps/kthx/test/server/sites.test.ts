@@ -168,6 +168,30 @@ describe('claiming', () => {
     });
   });
 
+  test('a name the engine holds for an app is taken, to a claim and a check', async () => {
+    const held = kthx().name('held');
+    await kthx().sql`
+      insert into reservations (name, holder) values (${held}, 'app-id')
+    `;
+    expect(await claim(held)).toMatchObject({
+      status: 409,
+      body: { code: 'TAKEN' },
+    });
+    const standing = await kthx().fetch(
+      ask(`/api/names/${held}`, { address: address() }),
+    );
+    expect(await standing.json()).toEqual({
+      name: held,
+      available: false,
+      why: 'TAKEN',
+      yours: null,
+    });
+    const [row] = (await kthx().sql`
+      select count(*)::int as sites from sites where name = ${held}
+    `) as { sites: number }[];
+    expect(row?.sites).toBe(0);
+  });
+
   test('the API answers on the apex only', async () => {
     expect((await claim('notes', { host: 'other.kthx.test' })).status).toBe(
       404,

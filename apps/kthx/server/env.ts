@@ -78,7 +78,19 @@ export interface Config {
    * from {@link trustedProxies}, which can span the pod CIDR.
    */
   readonly tailnetProxies: readonly string[];
+  /** `null` answers 404 on every `/api/engine/*` path. */
+  readonly engine: EngineConfig | null;
   readonly port: number;
+}
+
+/**
+ * The OIDC issuer whose projected ServiceAccount tokens open `/api/engine/*`,
+ * and the one audience and subject accepted from it.
+ */
+export interface EngineConfig {
+  readonly issuer: string;
+  readonly audience: string;
+  readonly subject: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -114,6 +126,38 @@ function longEnough(name: string, value: string): string {
     throw new ConfigError(`${name} is shorter than ${KEY_BYTES} bytes`);
   }
   return value;
+}
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+function engineConfig(
+  env: Env,
+  controlHost: string | null,
+): EngineConfig | null {
+  const issuer = env.KTHX_ENGINE_ISSUER?.trim().replace(/\/+$/, '') || null;
+  if (issuer === null) return null;
+  const audience = env.KTHX_ENGINE_AUDIENCE?.trim() || null;
+  const subject = env.KTHX_ENGINE_SUBJECT?.trim() || null;
+  if (audience === null || subject === null) {
+    throw new ConfigError(
+      'KTHX_ENGINE_ISSUER needs KTHX_ENGINE_AUDIENCE and KTHX_ENGINE_SUBJECT',
+    );
+  }
+  // The surface answers on the control host only.
+  if (controlHost === null) {
+    throw new ConfigError('KTHX_ENGINE_ISSUER needs KTHX_CONTROL_HOST');
+  }
+  let url: URL;
+  try {
+    url = new URL(issuer);
+  } catch {
+    throw new ConfigError('KTHX_ENGINE_ISSUER is not a URL');
+  }
+  const secure =
+    url.protocol === 'https:' ||
+    (url.protocol === 'http:' && LOOPBACK.has(url.hostname));
+  if (!secure) throw new ConfigError('KTHX_ENGINE_ISSUER must be https');
+  return { issuer, audience, subject };
 }
 
 export function readConfig(env: Env = Bun.env): Config {
@@ -202,6 +246,7 @@ export function readConfig(env: Env = Bun.env): Config {
     aiBuildFallbackModel,
     trustedProxies: peers(env.KTHX_TRUSTED_PROXIES),
     tailnetProxies,
+    engine: engineConfig(env, controlHost),
     port: Number(env.PORT?.trim() || 8080),
   };
 }

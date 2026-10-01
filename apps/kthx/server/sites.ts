@@ -12,6 +12,7 @@ import type { Caller } from './caller.ts';
 import type { ReleaseRow, SiteRow } from './db.ts';
 import type { Depot } from './depot.ts';
 import { isPlainObject } from './documents.ts';
+import type { EngineKeys } from './engine.ts';
 import type { Config } from './env.ts';
 import {
   dropFiles,
@@ -62,6 +63,11 @@ export const MAX_LIVE_SITES = 5000;
 export const MAX_CLAIMS_PER_DAY = 20;
 /** Uploads per site per UTC day. */
 export const MAX_UPLOADS_PER_DAY = 60;
+/**
+ * The advisory lock class a claim and an engine reservation take per name, so
+ * a race between them on one name has one winner.
+ */
+export const NAME_LOCK = 0x6b746878;
 export const BODY_TIMEOUT_MS = 120_000;
 /** Far above any legal `{name}` body, far below the server's cap. */
 const MAX_CLAIM_BYTES = 64 * 1024;
@@ -81,6 +87,8 @@ export interface Ctx {
   /** The request's port, so a local run answers with a reachable URL. */
   readonly port: string;
   readonly caller: Caller;
+  /** `null` when the engine surface is off. */
+  readonly engine: EngineKeys | null;
 }
 
 function hash(token: string): string {
@@ -294,6 +302,77 @@ async function listSites(
   };
 }
 
+/** A site as the engine reads it, without its token hash. */
+export interface EngineSite {
+  readonly name: string;
+  readonly owner_login: string | null;
+  readonly serving: number | null;
+  readonly held: boolean;
+  readonly created_at: Date;
+  /** The serving release's time. */
+  readonly deployed: Date | null;
+  readonly provisioned: boolean;
+  readonly deleted_at: Date | null;
+}
+
+/**
+ * The directory's keyset walk over every live site, anonymous ones included,
+ * with the columns the public directory leaves out.
+ */
+export async function listSitesForEngine(
+  ctx: Ctx,
+  limit: number,
+  after: string | null,
+): Promise<{
+  total: number;
+  rows: readonly EngineSite[];
+  next: string | null;
+}> {
+  const rows = (await ctx.sql`
+    with mark as (
+      select created_at, name from sites where name = ${after}
+    )
+    select s.name, s.owner_login, s.serving, s.held, s.created_at,
+           r.at as deployed, s.provisioned_at is not null as provisioned,
+           s.deleted_at
+    from sites s
+    left join releases r on r.site = s.name and r.n = s.serving
+    where s.deleted_at is null
+      and (${after}::text is null or exists (
+        select 1 from mark m
+        where s.created_at < m.created_at
+           or (s.created_at = m.created_at and s.name > m.name)
+      ))
+    order by s.created_at desc, s.name asc
+    limit ${limit + 1}
+  `) as EngineSite[];
+  const [count] = (await ctx.sql`
+    select count(*)::int as total from sites where deleted_at is null
+  `) as { total: number }[];
+  const kept = rows.slice(0, limit);
+  return {
+    total: count?.total ?? 0,
+    rows: kept,
+    next: rows.length > limit ? (kept.at(-1)?.name ?? null) : null,
+  };
+}
+
+/** One site for the engine, deleted or not, without asking who opens it. */
+export async function siteForEngine(
+  ctx: Ctx,
+  name: string,
+): Promise<EngineSite | undefined> {
+  const [row] = (await ctx.sql`
+    select s.name, s.owner_login, s.serving, s.held, s.created_at,
+           r.at as deployed, s.provisioned_at is not null as provisioned,
+           s.deleted_at
+    from sites s
+    left join releases r on r.site = s.name and r.n = s.serving
+    where s.name = ${name} limit 1
+  `) as EngineSite[];
+  return row;
+}
+
 export interface Standing {
   /** Never true for a name with a row, deleted or not. */
   readonly available: boolean;
@@ -318,7 +397,14 @@ export async function nameStanding(ctx: Ctx, name: string): Promise<Standing> {
     serving: number | null;
     deleted_at: Date | null;
   }[];
-  if (row === undefined) return { available: true, why: null, yours: null };
+  if (row === undefined) {
+    const [held] = (await ctx.sql`
+      select 1 as held from reservations where name = ${name} limit 1
+    `) as { held: number }[];
+    return held === undefined
+      ? { available: true, why: null, yours: null }
+      : { available: false, why: 'TAKEN', yours: null };
+  }
   const mine = row.deleted_at === null && opensSite(ctx.caller, row);
   return {
     available: false,
@@ -441,13 +527,22 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   if (await ctx.pg.inUse(name)) return refuse('TAKEN', ctx.id);
 
   const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-  // A deleted row still conflicts, keeping its 410. A bearer is minted on every
-  // door: the CLI, agents and devices off the tailnet carry no login.
-  const claimed = (await ctx.sql`
-    insert into sites (name, token_hash, owner_login)
-    values (${name}, ${hash(token)}, ${ctx.caller.login})
-    on conflict do nothing returning name
-  `) as { name: string }[];
+  const claimed = await ctx.sql.begin(async (tx: SQL) => {
+    // Its own statement, so the reads after it see a reservation committed
+    // while this waited for the lock.
+    await tx`select pg_advisory_xact_lock(${NAME_LOCK}::int, hashtext(${name}))`;
+    const [held] = (await tx`
+      select 1 as held from reservations where name = ${name} limit 1
+    `) as { held: number }[];
+    if (held !== undefined) return [];
+    // A deleted row still conflicts, keeping its 410. A bearer is minted on
+    // every door: the CLI, agents and devices off the tailnet carry no login.
+    return (await tx`
+      insert into sites (name, token_hash, owner_login)
+      values (${name}, ${hash(token)}, ${ctx.caller.login})
+      on conflict do nothing returning name
+    `) as { name: string }[];
+  });
   if (claimed.length === 0) return refuse('TAKEN', ctx.id);
 
   // `CREATE DATABASE` cannot join a transaction, so a failure deletes the row;
@@ -486,36 +581,40 @@ const QUOTAS = {
   ai_tokens_day: MAX_AI_TOKENS_DAY,
 } as const;
 
-const inspect: Act = async (_request, ctx, site) => {
+/** A site's releases, usage and quotas, for its owner and for the engine. */
+export async function report(
+  ctx: Ctx,
+  site: Pick<SiteRow, 'name' | 'owner_login' | 'serving' | 'held'>,
+): Promise<Record<string, unknown>> {
   const rows = (await ctx.sql`
     select n, digest, size, at from releases
     where site = ${site.name} order by n desc
   `) as ReleaseRow[];
   const spent = await aiUsage(ctx, site.name);
-  return ok(
-    {
-      name: site.name,
-      url: siteUrl(ctx.config.zone, site.name, ctx.port),
-      owner: site.owner_login,
-      serving: site.serving,
-      held: site.held,
-      releases: rows.map((row) => ({
-        n: row.n,
-        digest: row.digest,
-        size: Number(row.size),
-        at: row.at.toISOString(),
-      })),
-      usage: {
-        db_bytes: await ctx.pg.bytes(site.name),
-        files_bytes: await filesBytes(ctx.sql, site.name),
-        ai_requests_today: spent.requests,
-        ai_tokens_today: spent.tokens,
-      },
-      quotas: QUOTAS,
+  return {
+    name: site.name,
+    url: siteUrl(ctx.config.zone, site.name, ctx.port),
+    owner: site.owner_login,
+    serving: site.serving,
+    held: site.held,
+    releases: rows.map((row) => ({
+      n: row.n,
+      digest: row.digest,
+      size: Number(row.size),
+      at: row.at.toISOString(),
+    })),
+    usage: {
+      db_bytes: await ctx.pg.bytes(site.name),
+      files_bytes: await filesBytes(ctx.sql, site.name),
+      ai_requests_today: spent.requests,
+      ai_tokens_today: spent.tokens,
     },
-    ctx.id,
-  );
-};
+    quotas: QUOTAS,
+  };
+}
+
+const inspect: Act = async (_request, ctx, site) =>
+  ok(await report(ctx, site), ctx.id);
 
 const release: Act = async (request, ctx, site) => {
   // Before the rate limit: a full process is not this caller's doing and must

@@ -21,9 +21,11 @@ export type Code =
   | 'INVALID_MODEL'
   | 'MALFORMED_REQUEST'
   | 'UNAUTHENTICATED'
+  | 'NOT_ENGINE'
   | 'FORBIDDEN'
   | 'PRIVATE'
   | 'NOT_FOUND'
+  | 'NO_SITE'
   | 'METHOD_NOT_ALLOWED'
   | 'TIMEOUT'
   | 'TAKEN'
@@ -37,6 +39,7 @@ export type Code =
   | 'AI_UPSTREAM'
   | 'NO_DOCUMENT'
   | 'BUSY'
+  | 'ISSUER_UNREACHABLE'
   | 'SITE_FULL';
 
 const ERRORS: Record<Code, readonly [number, string]> = {
@@ -77,12 +80,14 @@ const ERRORS: Record<Code, readonly [number, string]> = {
     401,
     'this site is opened with its token: Authorization: Bearer <token>',
   ],
+  NOT_ENGINE: [401, "this path answers the engine's service token only"],
   FORBIDDEN: [403, 'that does not open this site'],
   PRIVATE: [
     403,
     'claiming and site control answer on the private host only; point KTHX_ORIGIN at it',
   ],
   NOT_FOUND: [404, 'there is nothing here'],
+  NO_SITE: [404, 'there is no site by that name'],
   METHOD_NOT_ALLOWED: [405, 'that is not something this path does'],
   TIMEOUT: [408, 'the body was not sent within the time this path waits'],
   TAKEN: [409, 'that name is taken'],
@@ -96,6 +101,10 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   AI_UPSTREAM: [502, 'the ai upstream did not answer'],
   NO_DOCUMENT: [502, 'the answer came back without a web page in it'],
   BUSY: [503, 'the server is full right now; try again in a moment'],
+  ISSUER_UNREACHABLE: [
+    503,
+    "the engine token's issuer could not be read; try again",
+  ],
   SITE_FULL: [507, 'this site is full; delete something to add something'],
 };
 

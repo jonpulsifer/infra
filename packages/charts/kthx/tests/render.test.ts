@@ -393,3 +393,49 @@ describe('the tailnet identity host', () => {
     ).toBe('ingress');
   });
 });
+
+describe('the engine surface', () => {
+  const ENGINE = {
+    issuer: 'https://oidc.example.test/offsite',
+    audience: 'kthx',
+    subject: 'system:serviceaccount:spindrift:spindrift',
+  };
+  const CONTROL = { host: 'kthx.lab.test', listener: 'lab-tls' };
+  const env = async (values: Record<string, unknown>) =>
+    (
+      one(await render(values), 'Deployment').spec.template.spec
+        .containers[0] as { env: { name: string; value?: string }[] }
+    ).env;
+
+  test('renders no engine env unless the issuer is set', async () => {
+    const names = (await env({ ...VALUES, control: CONTROL })).map(
+      (e) => e.name,
+    );
+    expect(names.filter((name) => name.startsWith('KTHX_ENGINE_'))).toEqual([]);
+  });
+
+  test('names the issuer, audience and subject together', async () => {
+    const rendered = await env({ ...VALUES, control: CONTROL, engine: ENGINE });
+    const value = (name: string) =>
+      rendered.find((e) => e.name === name)?.value;
+    expect(value('KTHX_ENGINE_ISSUER')).toBe(ENGINE.issuer);
+    expect(value('KTHX_ENGINE_AUDIENCE')).toBe(ENGINE.audience);
+    expect(value('KTHX_ENGINE_SUBJECT')).toBe(ENGINE.subject);
+  });
+
+  test('refuses to render an issuer the server would refuse to boot with', async () => {
+    // The surface answers on the control host only.
+    await expect(render({ ...VALUES, engine: ENGINE })).rejects.toThrow(
+      'control.host',
+    );
+    for (const key of ['audience', 'subject']) {
+      await expect(
+        render({
+          ...VALUES,
+          control: CONTROL,
+          engine: { ...ENGINE, [key]: '' },
+        }),
+      ).rejects.toThrow(`engine.${key}`);
+    }
+  });
+});
