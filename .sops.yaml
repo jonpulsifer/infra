@@ -42,6 +42,12 @@ creation_rules:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
           # retrofit (ssh-to-age of its ed25519 host key)
           - age1lsh940ctw2v0lmyeqnk3qgh0p57rp0ffh84vc3hg609v84mqfq2sudzcgz
+  - path_regex: nix/secrets/spore\.sops\.ya?ml
+    key_groups:
+      - age:
+          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+          # spore (ssh-to-age of its ed25519 host key)
+          - age1aayks5qa9r0tf58fufzeq2e85a00vpks6xaw0n7zcgss4pws5e8smekkjy
   - path_regex: nix/secrets/forge\.sops\.ya?ml
     key_groups:
       - age:

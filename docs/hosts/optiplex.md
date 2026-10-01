@@ -22,6 +22,7 @@ optiplex is the only control-plane node of the folly [Kubernetes](../platform/ku
 - etcd, the API server, the controller manager and the scheduler
 - cfssl with the folly cluster CA. The CA key and the token signer key come from `nix/secrets/optiplex.sops.yaml`. See [PKI](../platform/pki.md).
 - Pods, because the control plane has no taint
+- `etcd-backup`, a daily 02:30 etcd snapshot into folly's restic staging repository (`nix/services/etcd-backup.nix`)
 
 ## Reach
 

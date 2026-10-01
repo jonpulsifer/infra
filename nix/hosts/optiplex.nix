@@ -4,6 +4,7 @@
 {
   imports = [
     ../profiles/k8s-node.nix
+    ../services/etcd-backup.nix
     ../system/sops.nix
     ../system/tailscale-disable.nix
   ];

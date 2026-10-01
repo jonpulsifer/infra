@@ -12,7 +12,9 @@
     ../services/nfs-server.nix
     ../services/ntp-server.nix
     ../services/pxe-netboot.nix
+    ../services/restic-server.nix
     ../services/spore-native-boot.nix
+    ../system/sops.nix
   ];
 
   # This board and drive run stable at Gen 3, above nvme-hat.nix's Gen 2 default.
@@ -22,6 +24,16 @@
   };
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
+
+  # folly pushes staging to GCS on Wednesdays at 05:00, over Starlink; prune after it.
+  homelab.resticServer = {
+    enable = true;
+    site = "folly";
+    dataDir = "/nfs/data/restic";
+    pruneOnCalendar = "Wed *-*-* 07:00:00 America/Halifax";
+  };
+
+  sops.defaultSopsFile = ../secrets/spore.sops.yaml;
 
   # Root is capped at 32G and each daily generation carries a ~1G rackpi5 boot image, so the
   # fleet's 30d GC fills the disk.
