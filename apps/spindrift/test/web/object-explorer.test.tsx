@@ -423,7 +423,7 @@ describe('a ledger filter matches the headline it shows', () => {
         onNavigate={() => undefined}
       />,
     );
-    expect(markup).not.toContain('No App matches');
-    expect(markup).toContain('morrow');
+    expect(markup).not.toContain('No loaded App matches');
+    expect(markup).toContain('aria-label="morrow, app, ');
   });
 });
