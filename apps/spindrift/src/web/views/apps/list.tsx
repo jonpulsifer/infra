@@ -1,7 +1,8 @@
 /**
  * The App list: Apps built here, then the kthx sites, both as Apps. A built
  * row keys, links and deletes by App id, because App names are not unique; a
- * site row keys by `site:<name>` and only opens its read-only workspace.
+ * site row keys by `site:<name>` and only opens its read-only workspace. An
+ * aside beside it shows the newest Builds and Deploys.
  */
 import { ChevronRight, Plus, Search } from 'lucide-react';
 import type { ReactNode, RefObject } from 'react';
@@ -30,9 +31,11 @@ import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Kbd } from '../../ui/kbd.tsx';
 import { Page } from '../../ui/page.tsx';
+import { SkeletonRows } from '../../ui/skeleton.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { notify } from '../../ui/toast.tsx';
 import { cn } from '../../ui/utils.ts';
+import { type ActivityEntry, activityEntries } from '../operations/activity.ts';
 import { LedgerSkeleton, ScreenFailure } from '../screen.tsx';
 
 /** A stored App address may be either a hostname or an absolute HTTP URL. */
@@ -323,9 +326,134 @@ function SitesFooter({
   );
 }
 
+/** Each read asks for this many, and the aside shows this many of both. */
+export const ACTIVITY_ROWS = 6;
+
+/**
+ * The newest Builds and Deploys beside the list. `entries` is `null` while the
+ * first read is out; a failed read is one line here, never the whole screen.
+ */
+export function ActivityAside({
+  entries,
+  failure = null,
+  onNavigate,
+}: {
+  readonly entries: readonly ActivityEntry[] | null;
+  readonly failure?: string | null;
+  readonly onNavigate: (path: string) => void;
+}) {
+  let body: ReactNode;
+  if (failure !== null) {
+    body = (
+      <p className="px-4 py-3 text-caption text-muted-foreground">
+        Activity could not be read: {failure}
+      </p>
+    );
+  } else if (entries === null) {
+    body = <SkeletonRows rows={3} />;
+  } else if (entries.length === 0) {
+    body = (
+      <p className="px-4 py-3 text-caption text-muted-foreground">
+        No Build or Deploy yet.
+      </p>
+    );
+  } else {
+    body = (
+      <ol>
+        {entries.slice(0, ACTIVITY_ROWS).map((entry) => (
+          <li
+            key={entry.id}
+            className="border-b border-border-soft last:border-b-0"
+          >
+            <button
+              type="button"
+              onClick={() => onNavigate(entry.path)}
+              className="flex w-full min-w-0 flex-col gap-1 px-4 py-2.5 text-left hover:bg-secondary/60"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate font-mono text-body font-semibold tracking-tight">
+                  {entry.title}
+                </span>
+                <Badge tone={entry.tone} className="ml-auto shrink-0">
+                  {entry.status}
+                </Badge>
+              </span>
+              <span className="flex min-w-0 items-baseline gap-2 text-caption text-muted-foreground">
+                <span className="truncate" title={entry.detail}>
+                  {entry.detail}
+                </span>
+                <Timestamp
+                  at={entry.at}
+                  when={entry.when}
+                  className="ml-auto shrink-0 font-mono"
+                />
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  return (
+    <aside
+      aria-label="Activity"
+      className="flex min-w-0 flex-col self-start overflow-hidden rounded-sm border border-border bg-card"
+    >
+      <div className="flex items-center gap-3 border-b border-border-soft bg-secondary/60 px-4 py-2">
+        <h2 className="font-mono text-micro font-bold uppercase tracking-eyebrow text-muted-foreground">
+          Activity
+        </h2>
+        <button
+          type="button"
+          onClick={() => onNavigate('/deploys')}
+          className="ml-auto text-caption text-muted-foreground hover:text-foreground"
+        >
+          View all
+        </button>
+      </div>
+      {body}
+    </aside>
+  );
+}
+
+/** Its own read, so a slow or failed ledger never holds up the list. */
+function AppsActivity({
+  onNavigate,
+}: {
+  readonly onNavigate: (path: string) => void;
+}) {
+  const read = useRead(
+    [
+      ['listBuilds', { limit: ACTIVITY_ROWS }],
+      ['listAllDeploys', { limit: ACTIVITY_ROWS }],
+    ],
+    15_000,
+  );
+  if (read.type === 'error') {
+    return (
+      <ActivityAside
+        entries={null}
+        failure={read.failure.message}
+        onNavigate={onNavigate}
+      />
+    );
+  }
+  return (
+    <ActivityAside
+      entries={
+        read.type === 'success'
+          ? activityEntries(read.value[0].builds, read.value[1].deploys)
+          : null
+      }
+      onNavigate={onNavigate}
+    />
+  );
+}
+
 /**
  * No hooks: the app list identity test calls this as a plain function, so the
- * filter and paging state live in {@link AppsScreen}.
+ * filter and paging state live in {@link AppsScreen}, and the aside's read in
+ * the element it passes as `aside`.
  */
 export function AppList({
   view,
@@ -337,6 +465,7 @@ export function AppList({
   loadingMore = false,
   loadError = null,
   onLoadMore,
+  aside,
 }: {
   view: AppRowsView;
   onNavigate: (path: string) => void;
@@ -347,6 +476,7 @@ export function AppList({
   loadingMore?: boolean;
   loadError?: string | null;
   onLoadMore?: () => void;
+  aside?: ReactNode;
 }) {
   const { rows } = view;
   const needle = filter.trim().toLowerCase();
@@ -366,99 +496,112 @@ export function AppList({
         }
       />
 
-      {view.sites.state === 'unreadable' ? (
-        <p
-          role="status"
-          className="rounded-sm border border-border bg-card px-4 py-3 text-body text-muted-foreground"
-        >
-          kthx sites are missing from this list: {view.sites.reason}
-        </p>
-      ) : null}
-
-      {rows.length === 0 ? (
-        <div className="rounded-sm border border-border bg-card px-6 py-12 text-center">
-          <p className="text-body text-muted-foreground">
-            No Apps yet. Create one to establish its first deployment contract.
-          </p>
-          <Button className="mt-4" onClick={() => onNavigate('/apps/new')}>
-            <Plus aria-hidden="true" className="size-4" /> Create App
-          </Button>
-        </div>
-      ) : (
-        <>
-          <label className="flex max-w-sm items-center gap-2 rounded-sm border border-border bg-card px-3">
-            <Search
-              aria-hidden="true"
-              className="size-4 shrink-0 text-muted-foreground"
-            />
-            <input
-              ref={filterRef}
-              value={filter}
-              onChange={(event) => onFilter?.(event.target.value)}
-              placeholder={`Filter the ${rows.length} loaded Apps`}
-              aria-label="Filter the loaded Apps"
-              className="w-full bg-transparent py-2 text-body outline-none placeholder:text-muted-foreground"
-            />
-            {filter === '' ? <Kbd>/</Kbd> : null}
-          </label>
-
-          <div className="overflow-hidden rounded-sm border border-border bg-card">
-            <div
-              aria-hidden="true"
-              className="hidden border-b border-border-soft bg-secondary/60 lg:flex"
+      {/* Beside the list only from 2xl: narrower, the list's five columns
+          truncate its names. Below that the aside follows the list. */}
+      <div
+        className={cn(
+          'grid items-start gap-6',
+          aside !== undefined && '2xl:grid-cols-[minmax(0,1fr)_20rem]',
+        )}
+      >
+        <div className="flex min-w-0 flex-col gap-6">
+          {view.sites.state === 'unreadable' ? (
+            <p
+              role="status"
+              className="rounded-sm border border-border bg-card px-4 py-3 text-body text-muted-foreground"
             >
-              <div
-                className={cn(
-                  'grid flex-1 gap-x-4 px-4 py-2',
-                  'font-mono text-micro font-bold uppercase tracking-eyebrow text-muted-foreground',
-                  COLUMNS,
-                )}
-              >
-                <span>App</span>
-                <span>Status</span>
-                <span>Deployment</span>
-                <span>Domain</span>
-                <span className="text-right">Deployed</span>
-              </div>
-              <span className="invisible flex">
-                <RowEnd />
-              </span>
-            </div>
+              kthx sites are missing from this list: {view.sites.reason}
+            </p>
+          ) : null}
 
-            {shown.length === 0 ? (
-              <p className="px-4 py-10 text-center text-body text-muted-foreground">
-                No loaded App matches “{filter}”.
+          {rows.length === 0 ? (
+            <div className="rounded-sm border border-border bg-card px-6 py-12 text-center">
+              <p className="text-body text-muted-foreground">
+                No Apps yet. Create one to establish its first deployment
+                contract.
               </p>
-            ) : (
-              <ul>
-                {shown.map((row) =>
-                  row.kind === 'app' ? (
-                    <AppRow
-                      key={row.key}
-                      app={row.app}
-                      onNavigate={onNavigate}
-                      deletion={deletion}
-                    />
-                  ) : (
-                    <SiteRow
-                      key={row.key}
-                      site={row.site}
-                      onNavigate={onNavigate}
-                    />
-                  ),
-                )}
-              </ul>
-            )}
-          </div>
-        </>
-      )}
+              <Button className="mt-4" onClick={() => onNavigate('/apps/new')}>
+                <Plus aria-hidden="true" className="size-4" /> Create App
+              </Button>
+            </div>
+          ) : (
+            <>
+              <label className="flex max-w-sm items-center gap-2 rounded-sm border border-border bg-card px-3">
+                <Search
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+                <input
+                  ref={filterRef}
+                  value={filter}
+                  onChange={(event) => onFilter?.(event.target.value)}
+                  placeholder={`Filter the ${rows.length} loaded Apps`}
+                  aria-label="Filter the loaded Apps"
+                  className="w-full bg-transparent py-2 text-body outline-none placeholder:text-muted-foreground"
+                />
+                {filter === '' ? <Kbd>/</Kbd> : null}
+              </label>
 
-      <SitesFooter
-        view={view}
-        loadingMore={loadingMore}
-        loadError={loadError}
-        onLoadMore={onLoadMore}
-      />
+              <div className="overflow-hidden rounded-sm border border-border bg-card">
+                <div
+                  aria-hidden="true"
+                  className="hidden border-b border-border-soft bg-secondary/60 lg:flex"
+                >
+                  <div
+                    className={cn(
+                      'grid flex-1 gap-x-4 px-4 py-2',
+                      'font-mono text-micro font-bold uppercase tracking-eyebrow text-muted-foreground',
+                      COLUMNS,
+                    )}
+                  >
+                    <span>App</span>
+                    <span>Status</span>
+                    <span>Deployment</span>
+                    <span>Domain</span>
+                    <span className="text-right">Deployed</span>
+                  </div>
+                  <span className="invisible flex">
+                    <RowEnd />
+                  </span>
+                </div>
+
+                {shown.length === 0 ? (
+                  <p className="px-4 py-10 text-center text-body text-muted-foreground">
+                    No loaded App matches “{filter}”.
+                  </p>
+                ) : (
+                  <ul>
+                    {shown.map((row) =>
+                      row.kind === 'app' ? (
+                        <AppRow
+                          key={row.key}
+                          app={row.app}
+                          onNavigate={onNavigate}
+                          deletion={deletion}
+                        />
+                      ) : (
+                        <SiteRow
+                          key={row.key}
+                          site={row.site}
+                          onNavigate={onNavigate}
+                        />
+                      ),
+                    )}
+                  </ul>
+                )}
+              </div>
+            </>
+          )}
+
+          <SitesFooter
+            view={view}
+            loadingMore={loadingMore}
+            loadError={loadError}
+            onLoadMore={onLoadMore}
+          />
+        </div>
+        {aside}
+      </div>
     </Page>
   );
 }
@@ -562,6 +705,7 @@ export function AppsScreen({
         loadingMore={loadingMore}
         loadError={loadError}
         onLoadMore={() => void loadMore()}
+        aside={<AppsActivity onNavigate={onNavigate} />}
       />
       <DeleteAppDialog deletion={deletion} />
     </>
