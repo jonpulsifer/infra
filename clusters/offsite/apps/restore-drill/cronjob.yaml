@@ -1,6 +1,8 @@
 ---
 # Restores the latest kthx Postgres snapshot from the offsite GCS repository
 # into a throwaway Postgres and fails unless kthx's `sites` table has rows.
+# No `lolwtf.ca/backup` label: BackupJobStale would hold a monthly job to an
+# eight-day window. KubeJobFailed alerts on a failed drill.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -8,7 +10,6 @@ metadata:
   labels:
     app.kubernetes.io/name: restore-drill
     app.kubernetes.io/part-of: backups
-    lolwtf.ca/backup: "true"
 spec:
   # After the 05:00 push, so the drill reads the copy that push wrote.
   schedule: "0 6 1 * *"
@@ -53,14 +54,14 @@ spec:
                 - -c
                 - |
                   set -euo pipefail
-                  snapshots=$(restic snapshots --json --tag kind=pg)
+                  snapshots=$(restic snapshots --retry-lock 30m --json --tag kind=pg)
                   host=$(echo "$snapshots" | grep -o '"hostname":"offsite/kthx/[^"]*"' | cut -d'"' -f4 | sort -u || true)
                   if [ -z "$host" ] || [ "$(echo "$host" | wc -l)" -ne 1 ]; then
                     echo "want one kthx host with kind=pg snapshots, got: $host" >&2
                     exit 1
                   fi
-                  restic snapshots --host "$host" --tag kind=pg --latest 1
-                  restic restore latest --host "$host" --tag kind=pg --target /restore
+                  restic snapshots --retry-lock 30m --host "$host" --tag kind=pg --latest 1
+                  restic restore --retry-lock 30m latest --host "$host" --tag kind=pg --target /restore
               env:
                 # Bucket and account: terraform/gcp/projects/homelab-ng.
                 - name: RESTIC_REPOSITORY

@@ -96,7 +96,7 @@ The staging repository has the newest snapshots. Use the GCS copy when the stagi
    Result: No output.
 
 > [!CAUTION]
-> A `pg_dumpall` file creates each database it holds. Drop only the databases that you restore, or the restore stops at `CREATE DATABASE`.
+> A `pg_dumpall` file creates and fills each database it holds, and psql goes on past an error. Drop every database that the dump holds, or the replay loads its rows a second time into a database that still exists.
 
 6. If the dump is plain SQL, drop each database that it holds.
 
@@ -165,7 +165,7 @@ The `restore-drill` CronJob restores the latest kthx `kind=pg` snapshot from the
 | `unexpected HTTP response (401)` | The rest-server login is wrong. | Read the `restic-rest-server` fields again. |
 | `restic snapshots` shows no snapshot for the host. | The backup CronJob has not run, or the GCS copy is behind. | Read the CronJob with `kubectl get cronjob -A -l lolwtf.ca/backup=true --context <site>`. Use staging for folly's newest snapshots. |
 | The drill's `fetch` container prints `want one kthx host`. | No `kind=pg` snapshot of kthx is in GCS, or two hosts match `offsite/kthx/`. | Read `restic snapshots --tag kind=pg` on the offsite GCS repository. |
-| `BackupJobFailed` fires for `restore-drill`. | The last drill failed. | Read the logs of both containers of the last `restore-drill` Job. |
+| `KubeJobFailed` fires for a `restore-drill` Job. | The last drill failed. | Read the logs of both containers of the last `restore-drill` Job. |
 
 ## Related
 
