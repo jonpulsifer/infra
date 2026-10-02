@@ -107,13 +107,13 @@ const NOT_TERRAFORM: Partial<Record<AnyPrerequisite, string>> = {
   CHART_CONTRACT:
     'chart compatibility is a property of the chart version this Target pins, not of any resource Terraform declares',
   VESSEL:
-    'the boundary itself is missing, and Spindrift never creates a vessel (§14) — nor generates the change that would',
+    'the boundary itself is missing, and kthx never creates a vessel (§14) — nor generates the change that would',
   SECRET_STORE:
     'a refused store read does not separate an unreachable endpoint from a missing grant, so no single resource can be named as the one that clears it',
   SIGNER_KEY:
     'a signing key’s algorithm was never observed here, and a key created under the wrong one cannot be changed afterwards',
   ARTIFACTS_PROJECT:
-    'a project is what this row is missing, and Spindrift never creates one (§14)',
+    'a project is what this row is missing, and kthx never creates one (§14)',
 };
 
 /**
@@ -219,7 +219,7 @@ function grantFederatedAccess(subject: RemediationSubject): Remediation {
     return {
       kind: 'none',
       reason:
-        'this installation federates without impersonating a service account, so the principal a grant must name is decided by the pool provider’s attribute mapping rather than by anything Spindrift holds',
+        'this installation federates without impersonating a service account, so the principal a grant must name is decided by the pool provider’s attribute mapping rather than by anything kthx holds',
     };
   }
   const label = identifier(`spindrift_${role.slice(role.indexOf('/') + 1)}`);

@@ -12,7 +12,7 @@ type Completion = OutputOf<'completeCreationDraft'>;
 
 export const UNSAVED_TITLE = 'Nothing was created — this draft is not saved';
 
-export const LOST_TITLE = 'Spindrift did not hear back';
+export const LOST_TITLE = 'kthx did not hear back';
 
 export type DeployOutcome =
   /** The last save was refused, so nothing was sent. */

@@ -14,8 +14,8 @@ test('the name, as each surface spells it', () => {
   expect(PRODUCT_NAME).toBe('kthx');
   expect(WORDMARK).toBe('kthx');
   expect(WORDMARK_GLYPH).toBe('k');
-  // A protocol identifier, so it does not follow the brand.
-  expect(MACHINE_NAME).toBe('spindrift');
+  // Distinct from the per-site MCP, which answers as plain kthx.
+  expect(MACHINE_NAME).toBe('kthx-engine');
 });
 
 describe('pageTitle', () => {

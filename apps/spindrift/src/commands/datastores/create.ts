@@ -55,7 +55,7 @@ export const createDatastore: Command<
   if (target === undefined) {
     return failed(
       'NOT_DEPLOYABLE',
-      `${vessel.name} has no surface Spindrift can host a Datastore on`,
+      `${vessel.name} has no surface kthx can host a Datastore on`,
     );
   }
 

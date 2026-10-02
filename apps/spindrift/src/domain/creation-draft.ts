@@ -410,7 +410,7 @@ export function blockersFor(
       code: 'SOURCE_UNAVAILABLE',
       title: 'No repository is chosen.',
       remediation:
-        'Pick one above. Every repository the GitHub App installation grants is listed, whether Spindrift has connected it or not.',
+        'Pick one above. Every repository the GitHub App installation grants is listed, whether kthx has connected it or not.',
     });
   }
 

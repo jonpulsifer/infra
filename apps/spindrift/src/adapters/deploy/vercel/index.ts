@@ -319,7 +319,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     if (desired.auth === 'proxy') {
       yield this.events.status('FAILED', { reason: 'INTERNAL' });
       return internalFailure(
-        'Vercel has no authenticated edge Spindrift can put in front of a Component (§9)',
+        'Vercel has no authenticated edge kthx can put in front of a Component (§9)',
       );
     }
 

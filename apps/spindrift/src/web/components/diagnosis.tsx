@@ -51,7 +51,7 @@ export function DiagnosisPanel({
         {diagnosis.evidence === null ? null : (
           <Collapsible open={open} onOpenChange={setOpen}>
             <CollapsibleTrigger className="text-[11.5px] font-semibold uppercase tracking-[0.05em] text-muted-foreground hover:text-foreground">
-              {open ? 'Hide' : 'Show'} what Spindrift found
+              {open ? 'Hide' : 'Show'} what kthx found
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-2">
               <LogPane
@@ -113,7 +113,7 @@ export function DriftPanel({
           ) : (
             <>
               Something other than this release is serving{' '}
-              {url ? <code>{url}</code> : 'this Component'}. Spindrift does not
+              {url ? <code>{url}</code> : 'this Component'}. kthx does not
               correct drift on its own; deploying again re-converges it.
             </>
           )}

@@ -43,7 +43,7 @@ export const forgetRegistryCredential: Command<
     host,
     forgotten,
     detail: forgotten
-      ? `Spindrift no longer holds a credential for ${host}. The token itself is still valid — revoke it at the registry if that is why it is being removed.`
-      : `Spindrift held no credential for ${host}`,
+      ? `kthx no longer holds a credential for ${host}. The token itself is still valid — revoke it at the registry if that is why it is being removed.`
+      : `kthx held no credential for ${host}`,
   });
 };

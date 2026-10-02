@@ -268,6 +268,13 @@ describe('the deploy screen, on red', () => {
     expect(markup).toContain('controller accepted the deploy');
   });
 
+  test('offers a disclosure over the evidence it recorded', () => {
+    const view = DEPLOY_SCENARIOS.imageUnpullable;
+    expect(view.diagnosis?.evidence).not.toBeNull();
+
+    expect(words(deploy(view))).toContain('Show what kthx found');
+  });
+
   test('names the two stages separately and marks only the one that failed', () => {
     const view = DEPLOY_SCENARIOS.imageUnpullable;
     const text = words(deploy(view));
@@ -319,7 +326,7 @@ describe('a red deploy that recorded nothing', () => {
   });
 
   test('offers no disclosure over evidence it does not have', () => {
-    expect(markup).not.toContain('what Spindrift found');
+    expect(markup).not.toContain('what kthx found');
   });
 
   test('says the deploy log is live status rather than inventing a line', () => {
@@ -376,7 +383,7 @@ describe('the deploy screen, on green', () => {
   });
 
   test('carries no diagnosis', () => {
-    expect(markup).not.toContain('What Spindrift found');
+    expect(markup).not.toContain('what kthx found');
   });
 });
 
@@ -1134,7 +1141,7 @@ describe('the Targets surface', () => {
     expect(markup).toContain('terraform/projects/cloud/storage.tf');
     expect(markup).toContain('Copy');
     expect(markup).toContain('Open a pull request');
-    expect(markup).toContain('Spindrift changes nothing here');
+    expect(markup).toContain('kthx changes nothing here');
   });
 
   test('a row with no generated change says so rather than showing an empty box', () => {

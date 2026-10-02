@@ -52,7 +52,7 @@ export const useSourceBucket: Command<
   if (!federation) {
     return failed(
       'NOT_DEPLOYABLE',
-      'Workload Identity Federation is not configured for this installation, so Spindrift cannot reach a bucket to check it',
+      'Workload Identity Federation is not configured for this installation, so kthx cannot reach a bucket to check it',
     );
   }
 
@@ -65,7 +65,7 @@ export const useSourceBucket: Command<
   } catch (cause) {
     return failed(
       'NOT_DEPLOYABLE',
-      `Spindrift cannot stage sources to ${input.bucketName}: ${
+      `kthx cannot stage sources to ${input.bucketName}: ${
         cause instanceof Error ? cause.message : 'the permission check failed'
       }`,
     );
@@ -74,7 +74,7 @@ export const useSourceBucket: Command<
   if (!verified.accessible) {
     return failed(
       'NOT_DEPLOYABLE',
-      `Spindrift reached ${input.bucketName} but cannot write to it. Grant the controller's federated identity object create and read on the bucket.`,
+      `kthx reached ${input.bucketName} but cannot write to it. Grant the controller's federated identity object create and read on the bucket.`,
     );
   }
 

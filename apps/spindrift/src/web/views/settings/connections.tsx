@@ -157,7 +157,7 @@ function SourceBucketList({
     >
       {!view.canVerify ? (
         <Notice>
-          Workload Identity Federation is not configured, so Spindrift has no
+          Workload Identity Federation is not configured, so kthx has no
           identity to check a bucket with. Buckets below are what the manifest
           declares and nothing here has confirmed them.
         </Notice>

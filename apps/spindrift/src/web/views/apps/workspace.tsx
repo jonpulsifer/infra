@@ -1920,7 +1920,7 @@ function SourceSection({ app }: { app: string }) {
               title="What it says"
               label={manifest.path}
               text={manifest.text}
-              note="The adopted file itself, as Spindrift read it. Editing it is a pull request against the repository — nothing here writes to it."
+              note="The adopted file itself, as kthx read it. Editing it is a pull request against the repository — nothing here writes to it."
             />
           </div>
         ) : null}
@@ -1982,8 +1982,8 @@ function DomainSection({
         {domain.ambiguous ? (
           <p className="rounded-md border border-destructive bg-destructive-soft px-3 py-2.5 text-sm text-destructive">
             Nothing is published under a name of your own. More than one
-            Component serves, and Spindrift will not choose which one the name
-            means. Leave one serving, or the name stays unused.
+            Component serves, and kthx will not choose which one the name means.
+            Leave one serving, or the name stays unused.
           </p>
         ) : null}
 
@@ -2130,7 +2130,7 @@ function ConfigSection({
         ) : null}
         {configKeys.length === 0 ? (
           <EmptyState title="No configuration is set.">
-            Values are write-only — Spindrift stores one secret per variable and
+            Values are write-only — kthx stores one secret per variable and
             never reads one back, including here.
           </EmptyState>
         ) : (

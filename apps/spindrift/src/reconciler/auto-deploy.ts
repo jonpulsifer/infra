@@ -19,7 +19,7 @@ import type { RepositoryReconciliation } from './repo-loop.ts';
 
 export const AUTO_DEPLOY_PRINCIPAL: Principal = {
   id: 'spindrift:auto-deploy',
-  displayName: 'Spindrift (auto-deploy on push)',
+  displayName: 'kthx (auto-deploy on push)',
 };
 
 export interface AutoDeployContext {

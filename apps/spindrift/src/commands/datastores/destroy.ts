@@ -60,7 +60,7 @@ export const destroyDatastore: Command<
     if (target === undefined) {
       return failed(
         'NOT_REMOVABLE',
-        `${datastoreVesselLabel(datastore.vessel)} has no surface Spindrift can tear a Datastore down through`,
+        `${datastoreVesselLabel(datastore.vessel)} has no surface kthx can tear a Datastore down through`,
       );
     }
     if (!hasTargetConnection(target) || !hasVesselLocation(datastore.vessel)) {

@@ -159,7 +159,7 @@ async function sourceForRerun(
       'NOT_BUILDABLE',
       inherited === null
         ? `${app.name} is deployed from an uploaded archive and '${componentName}' has no bundle of its own, so there is nothing to build for it — upload an archive for this Component, or adopt the artifact a sibling Component already built`
-        : `${app.name}'s uploaded archive was staged at ${inherited}, which no build route can fetch, and an archive cannot be staged again from anything Spindrift holds — upload it again to stage it in the depot`,
+        : `${app.name}'s uploaded archive was staged at ${inherited}, which no build route can fetch, and an archive cannot be staged again from anything kthx holds — upload it again to stage it in the depot`,
     );
   }
 

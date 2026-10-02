@@ -66,7 +66,7 @@ export const setRegistryCredential: Command<
   if (!probe.answers) {
     return failed(
       'NOT_DEPLOYABLE',
-      `Spindrift cannot reach ${host}: ${probe.detail}`,
+      `kthx cannot reach ${host}: ${probe.detail}`,
     );
   }
   if (probe.authenticated === false) {
