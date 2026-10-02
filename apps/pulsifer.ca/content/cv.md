@@ -34,6 +34,7 @@ I was the Engineering Manager for MoonPay's **Site Reliability Engineering** and
 
 - Primary engineer for MoonPay's :cloud: platform architecture and security
 - Security policy owner, and lead for **SOC 2**, **PCI DSS**, and other governance, risk, and compliance work
+- Hands-on owner of business continuity and disaster recovery
 - Onboarded acquired companies' infrastructure through mergers and acquisitions
 - Just-in-time privileged access management in Google Cloud
 - Deployed an internal service catalog
