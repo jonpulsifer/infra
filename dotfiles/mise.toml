@@ -1,16 +1,40 @@
-[vars]
-# mise.work.toml overrides these when MISE_ENV=work. Keys stay flat because mise
-# [vars] has no nested tables.
-git_name = "Jonathan Pulsifer"
-git_github_user = "jonpulsifer"
-git_email = "jonathan@pulsifer.ca"
-git_signingkey = "~/.ssh/id_ed25519"
-git_signingkey_wsl = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v"
-gpg_darwin_program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
-gpg_wsl_program = "/mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe"
-# Empty unless mise.work.toml sets them.
-work_ssh_prefix = ""
-work_instead_of = ""
+[dotfiles]
+# Every source is explicit: an implied source writes "./x" link targets that dangle from $HOME.
+"~/.dotfiles" = { source = "." }
+
+"~/.tmux.conf" = { source = ".tmux.conf" }
+"~/.vimrc" = { source = ".vimrc" }
+"~/.config/.bunfig.toml" = { source = ".config/.bunfig.toml" }
+"~/.config/ghostty/config" = { source = ".config/ghostty/config" }
+"~/.ssh/config" = { source = ".ssh/config" }
+"~/.gnupg/gpg.conf" = { source = ".gnupg/gpg.conf" }
+"~/.config/mise/config.toml" = { source = "mise-global-config.toml" }
+"~/.local/bin" = { mode = "symlink-each", source = ".local/bin" }
+
+"~/.config/git/config" = { source = ".config/git/config" }
+"~/.config/git/config.work" = { source = ".config/git/config.work" }
+"~/.config/git/ignore" = { source = ".config/git/ignore" }
+"~/.config/git/config.local" = { mode = "template", source = ".config/git/config.local.tera", remove_empty = true }
+
+"~/.claude/statusline.sh" = { source = ".claude/statusline.sh" }
+
+"~/.agents/AGENTS.md" = { source = ".agents/AGENTS.md" }
+"~/.claude/CLAUDE.md" = { source = ".agents/AGENTS.md" }
+"~/.codex/AGENTS.md" = { source = ".agents/AGENTS.md" }
+"~/.pi/agent/AGENTS.md" = { source = ".agents/AGENTS.md" }
+"~/.gemini/GEMINI.md" = { source = ".agents/AGENTS.md" }
+"~/.config/opencode/agents/global.md" = { source = ".agents/AGENTS.md" }
+
+"~/.agents/skills" = { mode = "symlink-each", source = "skills", exclude = ["README.md"] }
+"~/.claude/skills" = { mode = "symlink-each", source = "skills", exclude = ["README.md"] }
+"~/.gemini/config/skills" = { mode = "symlink-each", source = "skills", exclude = ["README.md"] }
+
+"~/.pi/agent/agents" = { mode = "symlink-each", source = ".pi/agent/agents" }
+
+# mise.hm.toml turns these off where home-manager writes them.
+"~/.zshenv" = { source = ".zshenv" }
+"~/.config/zsh" = { mode = "symlink-each", source = ".config/zsh" }
+"~/.config/nvim" = { mode = "symlink-each", source = ".config/nvim" }
 
 [tasks.bootstrap]
 description = "Auto-detect OS and delegate to bootstrap:macos, :linux or :windows"
@@ -48,11 +72,129 @@ run = [
 ]
 
 [tasks."dotfiles:deploy"]
-description = "Symlink dotfiles into $HOME"
-run = "bash {{config_root}}/scripts/deploy-dotfiles.sh"
+description = "Apply the [dotfiles] table into $HOME, moving what older deploys leave in the way aside"
+# `mise dotfiles apply` refuses the whole table when a real file sits at a target. Older deploys
+# leave two kinds: read-only copies (mode 444 or 555) from the copy-mode table, and directory
+# links from the symlink script, which symlink-each would write through. Both move into
+# ~/.dotfiles-backup. Anything else in the way stops the deploy and everything moved goes back,
+# so a refused apply leaves $HOME as it was.
+run = '''
+set -eu
+legacy=".local/bin .agents/skills .claude/skills .gemini/config/skills .pi/agent/agents .config/git .config/zsh .config/nvim"
+home="$(cd "$HOME" && pwd -P)"
+# The mise on PATH can sit behind a directory link that this moves.
+mise="$(cd "$(dirname "$(command -v mise)")" && pwd -P)/mise"
+bk="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
+moved=""
+retired=""
+stuck=""
+committed=0
+retire() {
+  mkdir -p "$bk/$(dirname "$1")"
+  mv "$HOME/$1" "$bk/$1"
+  moved="$1
+$moved"
+}
+restore() {
+  while IFS= read -r p; do
+    if [ -n "$p" ]; then mv "$bk/$p" "$HOME/$p"; fi
+  done <<EOF
+$moved
+EOF
+  find "$bk" -depth -type d -empty -delete
+  rmdir "$HOME/.dotfiles-backup" 2>/dev/null || true
+}
+trap 'if [ "$committed" = 0 ] && [ -n "$moved" ]; then restore; echo "dotfiles:deploy: put back everything it moved" >&2; fi' EXIT
+read_only_copy() {
+  d="$(dirname "$1")"
+  [ ! -L "$HOME/$1" ] && [ -f "$HOME/$1" ] &&
+    { [ "$d" = . ] || [ "$(cd "$HOME/$d" && pwd -P)" = "$home/$d" ]; } &&
+    [ -n "$(find "$HOME/$1" -prune \( -perm 444 -o -perm 555 \) -print)" ]
+}
+
+"$mise" dotfiles diff >/dev/null
+if ! out="$("$mise" dotfiles apply --dry-run 2>&1)"; then
+  conflicts="$(printf '%s\n' "$out" | sed -n 's|^  ~/||p')"
+  if [ -z "$conflicts" ]; then printf '%s\n' "$out" >&2; exit 1; fi
+  for dir in $legacy; do
+    if [ -L "$HOME/$dir" ] && printf '%s\n' "$conflicts" | grep -q "^$dir/"; then
+      retire "$dir"
+      retired="$retired $dir"
+    fi
+  done
+  while IFS= read -r c; do
+    skip=0
+    for dir in $retired; do
+      case "$c" in "$dir"/*) skip=1 ;; esac
+    done
+    if [ "$skip" = 1 ]; then continue; fi
+    if read_only_copy "$c"; then retire "$c"; else stuck="$stuck ~/$c"; fi
+  done <<EOF
+$conflicts
+EOF
+  if [ -n "$stuck" ]; then
+    echo "dotfiles:deploy: these are in the way and are not read-only copies, so move them yourself:$stuck" >&2
+    exit 1
+  fi
+  if ! out="$("$mise" dotfiles apply --dry-run 2>&1)"; then printf '%s\n' "$out" >&2; exit 1; fi
+fi
+committed=1
+if [ -n "$moved" ]; then echo "dotfiles:deploy: moved what older deploys leave in the way into $bk"; fi
+"$mise" dotfiles apply --yes
+'''
 run_windows = "pwsh -NoProfile -File '{{config_root}}/windows/deploy-dotfiles.ps1'"
 
 [tasks."dotfiles:check"]
-description = "Resolve every dotfiles link without touching the filesystem"
-run = "bash {{config_root}}/scripts/deploy-dotfiles.sh --dry-run"
+description = "Deploy the dotfiles into scratch homes, fresh and legacy, under each profile and confirm they converge"
+run = '''
+set -eu
+root="$PWD"
+ceiling="$(dirname "$root")"
+seed_legacy() {
+  mkdir -p "$HOME/old" "$HOME/.local" "$HOME/.config/git"
+  cp -R .local/bin "$HOME/old/bin"
+  ln -s "$HOME/old/bin" "$HOME/.local/bin"
+  cp .tmux.conf "$HOME/.tmux.conf"
+  cp .config/git/config "$HOME/.config/git/config"
+  chmod 444 "$HOME/.tmux.conf" "$HOME/.config/git/config"
+}
+check() {
+  scratch="$(mktemp -d)"
+  trap 'chmod -R u+w "$scratch"; rm -rf "$scratch"' EXIT
+  # The ceiling keeps the repo root's tools out of `mise run`, which would resolve each one.
+  export HOME="$scratch" XDG_CONFIG_HOME="$scratch/.config" XDG_STATE_HOME="$scratch/.local/state" \
+    XDG_DATA_HOME="$scratch/.local/share" XDG_CACHE_HOME="$scratch/.cache" \
+    MISE_TRUSTED_CONFIG_PATHS="$root" MISE_CEILING_PATHS="$ceiling" MISE_OFFLINE=1 \
+    MISE_ENV="$1" WSL_DISTRO_NAME="$2"
+  unset MISE_CONFIG_DIR MISE_DATA_DIR MISE_STATE_DIR MISE_CACHE_DIR MISE_GLOBAL_CONFIG_FILE
+  case "$3" in
+    fresh) out="$(mise dotfiles apply --yes 2>&1)" || { printf '%s\n' "$out" >&2; exit 1; } ;;
+    legacy)
+      seed_legacy
+      out="$(mise run dotfiles:deploy 2>&1)" || { printf '%s\n' "$out" >&2; exit 1; }
+      [ -f "$(find "$HOME/.dotfiles-backup" -name .tmux.conf)" ] || { echo "no backup of ~/.tmux.conf" >&2; exit 1; }
+      ;;
+    refused)
+      seed_legacy
+      echo "not a copy" >"$HOME/.vimrc"
+      if out="$(mise run dotfiles:deploy 2>&1)"; then echo "deploy applied over a real ~/.vimrc" >&2; exit 1; fi
+      [ "$(readlink "$HOME/.local/bin")" = "$HOME/old/bin" ] && [ ! -L "$HOME/.tmux.conf" ] &&
+        [ ! -w "$HOME/.tmux.conf" ] && [ "$(cat "$HOME/.vimrc")" = "not a copy" ] &&
+        [ -z "$(find "$HOME/.dotfiles-backup" -type f 2>/dev/null)" ] || { printf '%s\n' "$out" "a refused deploy changed \$HOME" >&2; exit 1; }
+      return 0
+      ;;
+  esac
+  case "$out" in *"mise WARN"*) printf '%s\n' "$out" >&2; exit 1 ;; esac
+  mise dotfiles status --missing >/dev/null || exit 1
+  mise dotfiles diff >/dev/null || exit 1
+}
+for profile in "" hm; do
+  for wsl in "" NixOS; do
+    for home in fresh legacy refused; do
+      (check "$profile" "$wsl" "$home") || { echo "dotfiles:check failed: MISE_ENV='$profile' WSL_DISTRO_NAME='$wsl' home=$home" >&2; exit 1; }
+    done
+  done
+done
+echo "All dotfiles apply and converge."
+'''
 run_windows = "pwsh -NoProfile -File '{{config_root}}/windows/deploy-dotfiles.ps1' -DryRun"

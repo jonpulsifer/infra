@@ -1,0 +1,6 @@
+# Loaded when MISE_ENV includes hm. home-manager writes these on NixOS hosts, and a
+# file it did not create fails its whole activation.
+[dotfiles]
+"~/.zshenv" = { source = ".zshenv", enabled = false }
+"~/.config/zsh" = { source = ".config/zsh", enabled = false }
+"~/.config/nvim" = { source = ".config/nvim", enabled = false }

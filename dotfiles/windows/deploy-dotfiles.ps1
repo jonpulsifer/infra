@@ -1,14 +1,14 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Symlinks the Windows dotfiles into place. The Windows half of
-    scripts/deploy-dotfiles.sh.
+    Symlinks the Windows dotfiles into place. The Windows half of the
+    [dotfiles] table in mise.toml, which `mise dotfiles apply` deploys elsewhere.
 
 .DESCRIPTION
     Every link created here stays on the Windows side of the WSL boundary. The
-    distro keeps its own clone and runs the bash deployer; git is what keeps the
-    two in sync. Symlinking across \\wsl.localhost would mean the profile could
-    not load until the VM woke up, so we do not do it.
+    distro keeps its own clone and applies the [dotfiles] table; git is what
+    keeps the two in sync. Symlinking across \\wsl.localhost would mean the
+    profile could not load until the VM woke up, so we do not do it.
 
     Safe to run repeatedly: an existing link pointing at the right place is left
     alone, and a real file in the way is moved aside before it is replaced.

@@ -19,4 +19,4 @@ The [Rowbutt](https://wiki.lolwtf.ca/apps/mate/) sandbox loads this directory as
 
 ## Deploy
 
-`dotfiles/scripts/deploy-dotfiles.sh` links this directory to `~/.agents/skills`, `~/.claude/skills` and `~/.gemini/config/skills`. NixOS hosts run it on every activation through `nix/system/mise-dotfiles.nix`. On other machines, run `mise run --cd dotfiles bootstrap`.
+The `[dotfiles]` table in `dotfiles/mise.toml` links each file in this directory into `~/.agents/skills`, `~/.claude/skills` and `~/.gemini/config/skills`, and leaves the skills that other tools install there alone. NixOS hosts apply it on every activation through `nix/system/mise-dotfiles.nix`. On other machines, run `mise run --cd dotfiles bootstrap`. A new skill needs no table change, only another apply.

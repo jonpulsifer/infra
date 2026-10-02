@@ -1,0 +1,15 @@
+{%- set wsl = get_env(name="WSL_DISTRO_NAME", default="") != "" -%}
+{%- set work = "work" in get_env(name="MISE_ENV", default="") | split(pat=",") -%}
+{%- if wsl -%}
+# WSL signs through the Windows 1Password agent.
+{% if not work -%}
+[user]
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
+
+{% endif -%}
+[gpg "ssh"]
+	program = /mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe
+{% elif work and os() == "macos" -%}
+[gpg "ssh"]
+	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
+{% endif -%}

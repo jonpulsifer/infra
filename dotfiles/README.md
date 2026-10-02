@@ -2,8 +2,7 @@
 
 The shell, editor, terminal multiplexer, git, SSH and agent configuration for
 macOS, Linux, NixOS and Windows. `mise run bootstrap` installs it. The personal
-identity is the default. `MISE_ENV=work` loads the work git identity from
-`mise.work.toml`.
+git identity is the default, and `.config/git/config.work` holds the work one.
 
 ## Install
 
@@ -15,13 +14,23 @@ mise trust -y dotfiles/mise.toml
 mise run --cd dotfiles bootstrap
 ```
 
-On a work machine, set `MISE_ENV=work` first.
+Run it from the main checkout, not a worktree: the links point into the
+directory it runs from. On a work machine, set `MISE_ENV=work` first. CI and
+the NixOS hosts run mise 2026.10.0, the release `nix/lib/mise.nix` pins.
 
 On macOS, install [Homebrew](https://brew.sh/) first. `bootstrap` installs the
 `Brewfile` and then links the files into `$HOME`. On Linux, it only links the
-files. Each NixOS activation runs `bootstrap` through
-`nix/system/mise-dotfiles.nix`, and `nix/home/jawn.nix` installs the shell
-tools.
+files. Each NixOS activation runs `dotfiles:deploy` from a store copy of this
+directory through `nix/system/mise-dotfiles.nix`, with `MISE_ENV=hm` where
+home-manager runs, and `nix/home/jawn.nix` installs the shell tools.
+
+`bootstrap` links the files with `mise dotfiles apply`, which refuses to
+replace a real file with a link. The read-only copies and the directory links from older
+deploys move into `~/.dotfiles-backup/`; anything else in the way stops the
+deploy and is named. Move it aside and run `bootstrap` again.
+
+`.claude/settings.json` is a seed for `~/.claude/settings.json`, which Claude
+Code writes to. Copy it there by hand.
 
 On Windows, run this in any PowerShell:
 
@@ -42,12 +51,14 @@ Windows keeps its own clone, and no link crosses the WSL boundary. See
 
 ## Layout
 
-- `mise.toml` holds the tasks and the personal identity. `mise.work.toml`
-  overrides the identity.
+- `mise.toml` holds the `[dotfiles]` table and the tasks. `mise.hm.toml`
+  turns off the zsh and nvim entries that home-manager owns.
 - `mise-global-config.toml` becomes `~/.config/mise/config.toml`. It holds the
   global tools, and on Windows the shell tools that Homebrew and home-manager
   install elsewhere.
-- `scripts/deploy-dotfiles.sh` and `windows/deploy-dotfiles.ps1` make the links.
+- `.config/git/config.local.tera` renders `~/.config/git/config.local`: the
+  1Password signing program and key on WSL, and the program on a work Mac.
+- `windows/deploy-dotfiles.ps1` makes the Windows links.
 - `skills/` is linked into the skills directory of each agent CLI.
 - `windows/` holds the Windows installer, the winget configuration, the
   PowerShell profile and the Terminal settings.
@@ -55,7 +66,7 @@ Windows keeps its own clone, and no link crosses the WSL boundary. See
 ## Test
 
 ```bash
-mise run --cd dotfiles dotfiles:check   # print each link and change nothing
+mise run --cd dotfiles dotfiles:check   # deploy into scratch homes; change nothing in $HOME
 mise run check                          # at the repo root: shfmt, shellcheck and PSScriptAnalyzer
 ```
 
