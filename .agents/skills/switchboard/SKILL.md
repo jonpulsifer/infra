@@ -1,8 +1,8 @@
 ---
 name: switchboard
 description: >-
-  Ring the owner's phone through switchboard from a Rowbutt sandbox. Use when
-  the owner asks to be called, rung or phoned, or says "call me".
+  Ring the owner's phone through switchboard. Use when the owner asks to be
+  called, rung or phoned, or says "call me".
 metadata:
   wiki: https://wiki.lolwtf.ca/apps/switchboard/
 ---
@@ -39,3 +39,5 @@ curl -sS --max-time 15 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
 - The reason is one line the agent on the call reads to the owner. Keep it
   short, with no secret in it. Print only the body and the status code; the
   token never goes in a message or a log.
+- A workstation session has no ring token, so the `401` or unset branch
+  applies. Say so and do not look for one.
