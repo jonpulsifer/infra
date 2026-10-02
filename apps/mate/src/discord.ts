@@ -2,7 +2,8 @@
  * Discord as a surface. A turn in flight is one Components V2 card edited in
  * place; the last frame leaves the answer with a one-line subtext footer.
  */
-import type { API } from '@discordjs/core';
+import type { API, Client } from '@discordjs/core';
+import type { WebSocketManager } from '@discordjs/ws';
 import {
   type APIActionRowComponent,
   type APIButtonComponentWithCustomId,
@@ -10,23 +11,29 @@ import {
   type APITextDisplayComponent,
   ButtonStyle,
   ComponentType,
+  GatewayDispatchEvents,
+  InteractionType,
   MessageFlags,
   SeparatorSpacingSize,
 } from 'discord-api-types/v10';
 import { type Clock, duration } from './clock.ts';
+import { clearGlobalCommands, type GlobalCommands } from './commands.ts';
+import type { IdentifyBudget } from './guard.ts';
 import { SANDBOX_CARD_ID } from './lease.ts';
-import { plain } from './log.ts';
+import { type Log, plain } from './log.ts';
 import { oneLine, splitAt } from './reply.ts';
 import type {
   Canvas,
   HistoryMessage,
   HistoryQuery,
   Inbound,
+  Inbox,
   Mark,
   MessageRef,
   Notice,
   Outcome,
   Surface,
+  SurfaceListener,
   ThreadRef,
   ToolCall,
   ToolState,
@@ -470,7 +477,7 @@ export function discordThread(threadId: string, channelId = ''): ThreadRef {
   return { surface: 'discord', channelId, id: threadId };
 }
 
-/** A gateway MESSAGE_CREATE, flattened by `main.ts`. */
+/** A gateway MESSAGE_CREATE, flattened by the listener. */
 export interface DiscordMessage {
   id: string;
   guildId: string | null;
@@ -496,5 +503,157 @@ export function discordInbound(
     authorIsBot: message.authorIsBot,
     content: message.content,
     mentionsMe: message.mentionsMe,
+  };
+}
+
+export interface DiscordGateway {
+  client: Pick<Client, 'on' | 'once'>;
+  manager: Pick<WebSocketManager, 'connect' | 'destroy'>;
+  budget: Pick<IdentifyBudget, 'waitForBudget'>;
+}
+
+export interface DiscordListenerOptions {
+  gateway: DiscordGateway;
+  api: Discord;
+  commands: GlobalCommands;
+  guildId: string;
+  allowedUserIds: ReadonlySet<string>;
+  allowedChannelIds: ReadonlySet<string>;
+  clock: Clock;
+  log: Log;
+}
+
+/** The gateway: the surface joins the threads on Ready, then its events follow. */
+export function discordListener(
+  options: DiscordListenerOptions,
+): SurfaceListener {
+  const { gateway, api, guildId, log } = options;
+  const { client } = gateway;
+  let delivering = false;
+  let me = '';
+
+  function listen(threads: Inbox): void {
+    client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
+      if (!delivering) return;
+      me = data.user.id;
+      await threads.add(
+        discordSurface(api, {
+          me,
+          allowedUserIds: options.allowedUserIds,
+          allowedChannelIds: options.allowedChannelIds,
+          clock: options.clock,
+        }),
+      );
+      log.info('ready', {
+        user: data.user.username,
+        userId: me,
+        applicationId: data.application.id,
+        guilds: data.guilds.length,
+        surfaces: threads.surfaceNames,
+      });
+      try {
+        await clearGlobalCommands(options.commands, data.application.id, log);
+      } catch (error) {
+        log.warn('global command cleanup failed', { error: plain(error) });
+      }
+    });
+
+    client.on(GatewayDispatchEvents.GuildCreate, ({ data }) => {
+      if (!delivering) return;
+      if (data.id !== guildId) {
+        log.warn("ignoring a guild that is not mate's", { guildId: data.id });
+        return;
+      }
+      for (const channel of data.channels) {
+        if (options.allowedChannelIds.has(channel.id)) {
+          log.info('allowed channel', {
+            channelId: channel.id,
+            name: channel.name,
+          });
+        }
+      }
+      for (const thread of data.threads) {
+        if (thread.owner_id === me && thread.parent_id) {
+          threads.adopt(discordThread(thread.id, thread.parent_id));
+        }
+      }
+      log.info('guild ready', {
+        guildId: data.id,
+        activeThreads: data.threads.length,
+      });
+    });
+
+    client.on(GatewayDispatchEvents.ThreadCreate, async ({ data }) => {
+      if (!delivering) return;
+      if (data.guild_id !== guildId || data.owner_id !== me || !data.parent_id)
+        return;
+      threads.adopt(discordThread(data.id, data.parent_id));
+      await api.joinThread(data.id).catch((error) =>
+        log.warn('thread join failed', {
+          threadId: data.id,
+          error: plain(error),
+        }),
+      );
+    });
+
+    client.on(GatewayDispatchEvents.ThreadUpdate, ({ data }) => {
+      if (!delivering) return;
+      if (data.thread_metadata?.archived) {
+        void threads.onThreadArchived(
+          discordThread(data.id, data.parent_id ?? ''),
+        );
+      }
+    });
+
+    client.on(GatewayDispatchEvents.ThreadDelete, ({ data }) => {
+      if (!delivering) return;
+      void threads.onThreadDeleted(
+        discordThread(data.id, data.parent_id ?? ''),
+      );
+    });
+
+    client.on(GatewayDispatchEvents.MessageCreate, ({ data }) => {
+      if (!delivering) return;
+      const inbound = discordInbound(
+        {
+          id: data.id,
+          guildId: data.guild_id ?? null,
+          channelId: data.channel_id,
+          authorId: data.author.id,
+          authorIsBot: data.author.bot ?? false,
+          content: data.content,
+          mentionsMe: data.mentions.some((user) => user.id === me),
+        },
+        guildId,
+      );
+      if (inbound) void threads.onMessage(inbound);
+    });
+
+    client.on(GatewayDispatchEvents.InteractionCreate, ({ data }) => {
+      if (!delivering) return;
+      if (data.type !== InteractionType.MessageComponent) return;
+      if (data.data.component_type !== ComponentType.Button) return;
+      const customId = data.data.custom_id;
+      if (!customId.startsWith(STOP_PREFIX)) return;
+      const userId = data.member?.user.id ?? data.user?.id ?? '';
+      void threads.onStop(customId.slice(STOP_PREFIX.length), userId, () =>
+        api.ackUpdate(data.id, data.token),
+      );
+    });
+  }
+
+  return {
+    async start(threads) {
+      delivering = true;
+      listen(threads);
+      await gateway.budget.waitForBudget(new AbortController().signal);
+      await gateway.manager.connect();
+    },
+    stop() {
+      delivering = false;
+    },
+    async close() {
+      await gateway.manager.destroy();
+    },
   };
 }

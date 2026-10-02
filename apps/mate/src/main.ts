@@ -1,9 +1,4 @@
 import { fileURLToPath } from 'node:url';
-import {
-  ComponentType,
-  GatewayDispatchEvents,
-  InteractionType,
-} from 'discord-api-types/v10';
 import { PiBrain, postgresSessions, type SessionSource } from './brain.ts';
 import type {
   BrainProfile,
@@ -14,7 +9,6 @@ import type {
 import type { Brain } from './brain-port.ts';
 import { ChatgptAccount, ChatgptKeeper } from './chatgpt.ts';
 import { systemClock } from './clock.ts';
-import { clearGlobalCommands } from './commands.ts';
 import {
   type BrainConfig,
   ConfigError,
@@ -24,13 +18,7 @@ import {
 } from './config.ts';
 import { PostgresCredentialStore } from './credential-store.ts';
 import { Custodian, PostgresCustodianLedger } from './custodian.ts';
-import {
-  discordInbound,
-  discordOver,
-  discordSurface,
-  discordThread,
-  STOP_PREFIX,
-} from './discord.ts';
+import { discordListener, discordOver } from './discord.ts';
 import { createGateway } from './gateway.ts';
 import { GithubApp } from './github-app.ts';
 import { Health } from './health.ts';
@@ -55,7 +43,7 @@ import {
   openDatabase,
   PostgresThreadStore,
 } from './store.ts';
-import type { ThreadRef } from './surface.ts';
+import type { SurfaceListener, ThreadRef } from './surface.ts';
 import {
   EXPORT_TIMEOUT_MS,
   startTelemetry,
@@ -416,7 +404,16 @@ function stubWiring(): Wiring {
 const wiring =
   kube && kubeConfig ? await kubeWiring(kube, kubeConfig) : stubWiring();
 
-const discord = discordOver(client.api);
+const discord = discordListener({
+  gateway: { client, manager, budget },
+  api: discordOver(client.api),
+  commands: client.api.applicationCommands,
+  guildId: config.guildId,
+  allowedUserIds: config.allowedUserIds,
+  allowedChannelIds: config.allowedChannelIds,
+  clock: systemClock,
+  log,
+});
 
 async function openSlack(slack: SlackConfig) {
   const api = slackWeb(slack.botToken, { clock: systemClock, log });
@@ -432,20 +429,21 @@ async function openSlack(slack: SlackConfig) {
     allowedUsers: slack.allowedUserIds.size,
     allowedChannels: [...slack.allowedChannelIds],
   });
-  return {
+  const surface = slackSurface({
     api,
-    surface: slackSurface({
-      api,
-      me: identity.userId,
-      appBotId: identity.appBotId,
-      teamId: slack.teamId,
-      allowedUserIds: slack.allowedUserIds,
-      allowedChannelIds: slack.allowedChannelIds,
-      log,
-      clock: systemClock,
-    }),
-    listen(threads: Threads): SocketMode {
-      const socket = new SocketMode({
+    me: identity.userId,
+    appBotId: identity.appBotId,
+    teamId: slack.teamId,
+    allowedUserIds: slack.allowedUserIds,
+    allowedChannelIds: slack.allowedChannelIds,
+    log,
+    clock: systemClock,
+  });
+  let socket: SocketMode | null = null;
+  const listener: SurfaceListener = {
+    async start(threads) {
+      await threads.add(surface);
+      socket = new SocketMode({
         open: () => openSocket(slack.appToken),
         connect: (url) => new WebSocket(url),
         clock: systemClock,
@@ -461,9 +459,13 @@ async function openSlack(slack: SlackConfig) {
           }),
       });
       void socket.run();
-      return socket;
     },
+    stop() {
+      socket?.stop();
+    },
+    async close() {},
   };
+  return { api, listener };
 }
 
 // A Slack failure is not fatal: a crash loop would take Discord down with it.
@@ -503,126 +505,16 @@ const custodian =
 if (custodian) void wiring.storeReady.then(() => custodian.start());
 else if (config.custodianChannel)
   log.warn('custodian disabled: Slack or database unavailable');
-let me = '';
 
 // Before the gateway: a revoked or rate-limited Discord token, or a wait on
 // the identify budget, must not hold Slack back.
-let socket: SocketMode | null = null;
-if (slack) {
-  await threads.add(slack.surface);
-  socket = slack.listen(threads);
-}
-
-client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
-  me = data.user.id;
-  await threads.add(
-    discordSurface(discord, {
-      me,
-      allowedUserIds: config.allowedUserIds,
-      allowedChannelIds: config.allowedChannelIds,
-      clock: systemClock,
-    }),
-  );
-  log.info('ready', {
-    user: data.user.username,
-    userId: me,
-    applicationId: data.application.id,
-    guilds: data.guilds.length,
-    surfaces: threads.surfaceNames,
-  });
-  try {
-    await clearGlobalCommands(
-      client.api.applicationCommands,
-      data.application.id,
-      log,
-    );
-  } catch (error) {
-    log.warn('global command cleanup failed', { error: plain(error) });
-  }
-});
-
-client.on(GatewayDispatchEvents.GuildCreate, ({ data }) => {
-  if (data.id !== config.guildId) {
-    log.warn("ignoring a guild that is not mate's", { guildId: data.id });
-    return;
-  }
-  for (const channel of data.channels) {
-    if (config.allowedChannelIds.has(channel.id)) {
-      log.info('allowed channel', {
-        channelId: channel.id,
-        name: channel.name,
-      });
-    }
-  }
-  for (const thread of data.threads) {
-    if (thread.owner_id === me && thread.parent_id) {
-      threads.adopt(discordThread(thread.id, thread.parent_id));
-    }
-  }
-  log.info('guild ready', {
-    guildId: data.id,
-    activeThreads: data.threads.length,
-  });
-});
-
-client.on(GatewayDispatchEvents.ThreadCreate, async ({ data }) => {
-  if (
-    data.guild_id !== config.guildId ||
-    data.owner_id !== me ||
-    !data.parent_id
-  )
-    return;
-  threads.adopt(discordThread(data.id, data.parent_id));
-  await discord.joinThread(data.id).catch((error) =>
-    log.warn('thread join failed', {
-      threadId: data.id,
-      error: plain(error),
-    }),
-  );
-});
-
-client.on(GatewayDispatchEvents.ThreadUpdate, ({ data }) => {
-  if (data.thread_metadata?.archived) {
-    void threads.onThreadArchived(discordThread(data.id, data.parent_id ?? ''));
-  }
-});
-
-client.on(GatewayDispatchEvents.ThreadDelete, ({ data }) => {
-  void threads.onThreadDeleted(discordThread(data.id, data.parent_id ?? ''));
-});
-
-client.on(GatewayDispatchEvents.MessageCreate, ({ data }) => {
-  const inbound = discordInbound(
-    {
-      id: data.id,
-      guildId: data.guild_id ?? null,
-      channelId: data.channel_id,
-      authorId: data.author.id,
-      authorIsBot: data.author.bot ?? false,
-      content: data.content,
-      mentionsMe: data.mentions.some((user) => user.id === me),
-    },
-    config.guildId,
-  );
-  if (inbound) void threads.onMessage(inbound);
-});
-
-client.on(GatewayDispatchEvents.InteractionCreate, ({ data }) => {
-  if (data.type !== InteractionType.MessageComponent) return;
-  if (data.data.component_type !== ComponentType.Button) return;
-  const customId = data.data.custom_id;
-  if (!customId.startsWith(STOP_PREFIX)) return;
-  const userId = data.member?.user.id ?? data.user?.id ?? '';
-  void threads.onStop(customId.slice(STOP_PREFIX.length), userId, () =>
-    discord.ackUpdate(data.id, data.token),
-  );
-});
+if (slack) await slack.listener.start(threads);
 
 async function shutdown(signal: string): Promise<void> {
   log.info('shutting down', { signal });
   // First: envelopes are acked on receipt, so one taken during the drain is
   // lost for good.
-  socket?.stop();
+  slack?.listener.stop();
   custodian?.stop();
   // While both surfaces can still post: running turns finish or stay open for
   // the next process to resume, and queued prompts are told they never started.
@@ -634,11 +526,13 @@ async function shutdown(signal: string): Promise<void> {
   // While the surfaces can still post: a sign-in waiting for its code tells
   // its thread that the code no longer works.
   await wiring.chatgpt?.account.stop();
+  discord.stop();
   try {
-    await manager.destroy();
+    await discord.close();
   } catch (error) {
     log.warn('gateway destroy failed', { error: plain(error) });
   }
+  await slack?.listener.close();
   await wiring.mcp?.close().catch(() => {});
   // Before the pool closes: a refresh still running saves its rotated token,
   // and one that did not save gets a last try.
@@ -727,5 +621,4 @@ log.info('mate starting', {
       : null,
   port: config.port,
 });
-await budget.waitForBudget(new AbortController().signal);
-await manager.connect();
+await discord.start(threads);
