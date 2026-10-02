@@ -10,19 +10,37 @@ pdf: /cv.pdf
 
 ## Summary
 
-:wave: Hi, I'm Jonathan Pulsifer, a **principal engineer** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with [Open Source][github], **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **security engineer** or **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
+:wave: Hi, I'm Jonathan Pulsifer, a **security engineer** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with [Open Source][github], **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
 
 ## Employment History
 
-### [MoonPay][moonpay], 2021-current
+### [ElevenLabs][elevenlabs], 2026-current
 
-#### Principal Infrastructure & Cloud Security Engineer, 2026-current
+#### Security Engineer
 
-I'm currently the Principal Infrastructure & Cloud Security Engineer at MoonPay, leading the technical implementation of MoonPay's infrastructure and cloud security.
+I'm a Security Engineer at ElevenLabs, working on infrastructure security.
+
+### [MoonPay][moonpay], 2021-2026
+
+#### Principal Infrastructure & Cloud Security Engineer, 2026
+
+I was the Principal Infrastructure & Cloud Security Engineer at MoonPay, leading the technical implementation of MoonPay's infrastructure and cloud security.
 
 #### Engineering Manager
 
-I was the Engineering Manager for MoonPay's **Site Reliability Engineering** and **Cloud Security** teams. I was responsible for the hiring, onboarding, and development of the teams, as well as their day-to-day operations, technical direction, and the overall security posture of MoonPay's infrastructure.
+I was the Engineering Manager for MoonPay's **Site Reliability Engineering** and **Cloud Security** teams. I was responsible for the hiring, onboarding, development, and performance management of the teams, as well as their day-to-day operations, technical direction, vendors, and the overall security posture of MoonPay's infrastructure.
+
+##### Positional Achievements:
+
+- Primary engineer for MoonPay's :cloud: platform architecture and security
+- Security policy owner, and lead for **SOC 2**, **PCI DSS**, and other governance, risk, and compliance work
+- Hands-on owner of business continuity and disaster recovery
+- Onboarded acquired companies' infrastructure through mergers and acquisitions
+- Just-in-time privileged access management in Google Cloud
+- Deployed an internal service catalog
+- Steward of MoonPay's most sensitive :ghost: environments
+- **Moonshot Award** recipient :trophy:
+- Hackathon winner with the Latency Llamas :llama:
 
 ### [Shopify][shop], 2016-2021
 
@@ -158,6 +176,7 @@ Here are some places where I've "kept the lights on" during times of digital tra
 [cncf-ottawa]: https://community.cncf.io/ottawa/
 [cyberop]: https://forces.ca/en/career/cyber-operator/
 [cybertalent]: https://www.sans.org/cybertalent
+[elevenlabs]: https://elevenlabs.io
 [google-developer-profile]: https://developers.google.com/profile/u/jonpulsifer
 [gcp-champion-innovator]: https://cloud.google.com/innovators/champions
 [gcp-quote]: https://cloud.google.com/blog/products/gcp/introducing-grafeas-open-source-api-
