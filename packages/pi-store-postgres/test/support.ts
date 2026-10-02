@@ -1,10 +1,15 @@
 import { afterAll, beforeAll } from 'bun:test';
+import type { JsonValue } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import {
-  BACKGROUND_CONTEXT,
+  type ConversationId,
+  type EntryId,
+  ROOT_CONVERSATION_ID,
   type Storage,
-} from '@earendil-works/pi-agent-core';
+  type StorageWrite,
+} from '@earendil-works/pi-durable';
 import { SQL } from 'bun';
-import { migrate, openSession, postgresStorage } from '../src/index.ts';
+import { migrate } from '../src/index.ts';
 
 /**
  * The server the suite builds its database on. A run without one fails: a
@@ -81,9 +86,36 @@ export function sessionId(label: string): string {
   return `${label}-${crypto.randomUUID()}`;
 }
 
-/** A session row and a bare Storage over it, as pi's conformance suite takes. */
-export async function storageFor(sql: SQL, id: string): Promise<Storage> {
-  const session = await openSession(sql, { id });
-  await session.close(BACKGROUND_CONTEXT);
-  return postgresStorage(sql, id);
+export const ctx = BACKGROUND_CONTEXT;
+
+/** A root conversation entry the tests append to. */
+export function note(
+  id: number,
+  data: JsonValue = { id },
+  conversationId: number = ROOT_CONVERSATION_ID,
+): StorageWrite {
+  return {
+    type: 'entry',
+    value: {
+      id: id as EntryId,
+      conversationId: conversationId as ConversationId,
+      kind: 'test.note',
+      data,
+    },
+  };
+}
+
+export const createRoot: StorageWrite = {
+  type: 'conversation',
+  value: { id: ROOT_CONVERSATION_ID },
+};
+
+export async function entryIds(storage: Storage): Promise<number[]> {
+  const page = await storage.scanEntries(
+    { conversationId: ROOT_CONVERSATION_ID },
+    1000,
+    undefined,
+    ctx,
+  );
+  return page.items.map((entry) => entry.id).reverse();
 }

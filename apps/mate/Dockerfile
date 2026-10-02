@@ -43,7 +43,7 @@ COPY --from=pruner --chmod=755 /app/.agents/skills /app/.agents/skills
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 RUN test -f /app/apps/mate/src/main.ts \
   && test -d /app/apps/mate/node_modules/@discordjs/ws \
-  && test -d /app/apps/mate/node_modules/@earendil-works/pi-agent-core \
+  && test -d /app/apps/mate/node_modules/@earendil-works/pi-durable \
   && test -f /app/apps/mate/node_modules/@repo/mate-hands/src/protocol.ts \
   && test -f /app/apps/mate/node_modules/@repo/pi-store-postgres/src/index.ts \
   && test -f /app/AGENTS.md \

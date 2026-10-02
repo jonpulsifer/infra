@@ -9,7 +9,7 @@ mate is the process behind [Rowbutt](../mate.md). It runs the agent loop for eac
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| mate | Connects to Discord and Slack, runs the agent loop on pi (`@earendil-works/pi-agent-core`), calls the model, bridges the kthx MCP tools, creates Sandboxes and mints tokens | Deployment `mate` in namespace `mate` |
+| mate | Connects to Discord and Slack, runs the agent loop on pi (`@earendil-works/pi-durable`), calls the model, bridges the kthx MCP tools, creates Sandboxes and mints tokens | Deployment `mate` in namespace `mate` |
 | Sandbox | One per thread that has run a tool, plus one ready spare. Init container `checkout` clones the repository. mate execs `mate-hands`, the daemon that runs the agent's file and shell calls, in container `harness`. | A pod with runtime class `kata-clh`, a Cloud Hypervisor microVM ([Kubernetes](../../platform/kubernetes.md)), in namespace `mate` on [oldschool](../../hosts/oldschool.md), the offsite worker node |
 | [Session store](#session-store) | Postgres that holds pi's sessions and mate's `mate_threads`, `mate_profile_turns` and `mate_credentials` tables | CloudNativePG `Cluster` `mate-db` in namespace `mate` |
 
@@ -124,11 +124,11 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - Keep `MATE_MAX_SANDBOXES` plus `MATE_SPARES` sandboxes within oldschool's free CPU. Each sandbox requests 500m, and one that does not fit stays `Pending`.
 - Keep `terminationGracePeriodSeconds` at 45 or more. On SIGTERM mate lets running turns finish, then closes the rest, and the next pod resumes each one in a new message. A resumed command returns as interrupted, with its outcome unknown.
 - Expect background processes to end with the turn, because mate shuts `mate-hands` down at turn end.
-- Bump `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` together, while no turn runs: `mate-db` holds sessions in pi's format, and the new version resumes any open run.
+- Bump `@earendil-works/pi-durable`, `@earendil-works/pi-ai` and `@earendil-works/chord` together, while no turn runs: `mate-db` holds sessions in pi's format, and the new version resumes any open run. pi marks `pi-durable` experimental, so read its changelog before a bump.
 
 ## Where it lives
 
-- `apps/mate/src/brain.ts`: the agent loop, one pi harness per open thread
+- `apps/mate/src/brain.ts`: the agent loop, one pi-durable harness per open thread
 - `apps/mate/src/sandbox-lease.ts`: a turn's lease on its sandbox, and the sandbox cap
 - `apps/mate/src/hands-env.ts`: pi's execution environment over the `mate-hands` stream
 - `apps/mate/src/credentials.ts`: the credential files of a turn

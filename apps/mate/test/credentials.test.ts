@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BACKGROUND_CONTEXT } from '@earendil-works/pi-agent-core';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { parsePeer, STAMP_TIMEOUT_MS } from '../src/credentials.ts';
 import {
   KthxSites,

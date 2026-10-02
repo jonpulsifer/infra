@@ -3,14 +3,14 @@
  * sandbox, and each turn's lease is scripted. It records what the brain asked
  * of it, in order, so a test can tell a chat-only turn from a tool turn.
  */
+import type { Context } from '@earendil-works/chord';
 import {
-  type Context,
   type ExecutionEnv,
   ExecutionError,
   err,
   FileError,
-} from '@earendil-works/pi-agent-core';
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
+} from '@earendil-works/pi-durable/env';
+import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import type {
   Hands,
   LeaseEvent,
@@ -34,6 +34,28 @@ export interface LocalHandsOptions {
   readonly events?: readonly LeaseEvent[];
   /** Holds a call until the promise settles, when it returns one. */
   readonly hold?: (method: string, args: unknown[]) => Promise<void> | null;
+  /** A held call stays held through an abort, as a hung sandbox would. */
+  readonly holdPastAbort?: boolean;
+}
+
+/** False when `context` aborts first, as a real call to the sandbox ends on abort. */
+async function heldUntilAbort(
+  held: Promise<void>,
+  context: Context,
+): Promise<boolean> {
+  const signal = context.abortSignal;
+  if (!signal) return held.then(() => true);
+  if (signal.aborted) return false;
+  let onAbort = () => {};
+  const aborted = new Promise<false>((resolve) => {
+    onAbort = () => resolve(false);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([held.then(() => true as const), aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 export class LocalHands implements Hands {
@@ -138,7 +160,17 @@ export class LocalThreadHands implements ThreadHands {
               this.owner.log.push('exec-aborted'),
             );
           }
-          await this.owner.options.hold?.(method, args);
+          const held = this.owner.options.hold?.(method, args);
+          if (
+            held &&
+            !(await (this.owner.options.holdPastAbort
+              ? held.then(() => true)
+              : heldUntilAbort(held, context)))
+          ) {
+            return method === 'exec'
+              ? err(new ExecutionError('aborted', 'aborted'))
+              : err(new FileError('unknown', 'aborted', path ?? undefined));
+          }
           return value.apply(target, args);
         };
       },

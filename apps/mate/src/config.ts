@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import { TTL_MS } from './lease.ts';
 
 // Installation tokens live 60 minutes, less the 5 the token cache reserves

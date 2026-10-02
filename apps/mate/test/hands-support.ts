@@ -6,11 +6,11 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Context } from '@earendil-works/chord';
 import {
   BACKGROUND_CONTEXT,
-  type Context,
   withAbortSignal,
-} from '@earendil-works/pi-agent-core';
+} from '@earendil-works/chord/context';
 import type { SandboxConfig } from '../src/config.ts';
 import { Epochs } from '../src/hands-env.ts';
 import {

@@ -5,10 +5,7 @@
  * turn should still finish, with the next tool call failing or reminting.
  */
 import { fileURLToPath } from 'node:url';
-import {
-  BACKGROUND_CONTEXT,
-  MemorySessionRepo,
-} from '@earendil-works/pi-agent-core';
+import { MemoryStorage } from '@earendil-works/pi-durable';
 import { PiBrain, postgresSessions, type SessionSource } from './brain.ts';
 import { ConfigError, readBrainConfig, readSandboxConfig } from './config.ts';
 import { discoverKube, Kube } from './kube.ts';
@@ -115,11 +112,10 @@ async function sessionStore(): Promise<{
   close(): Promise<void>;
 }> {
   if (!brainConfig.databaseUrl) {
-    const repo = new MemorySessionRepo();
     return {
       store: new MemoryThreadStore(),
       sessions: {
-        open: (id) => repo.create({ id }, BACKGROUND_CONTEXT),
+        open: async () => new MemoryStorage(),
         delete: async () => {},
       },
       close: async () => {},

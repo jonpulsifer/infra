@@ -430,18 +430,19 @@
       groupSlug: 'prometheus-operator',
     },
     {
-      // pi-agent-core requires pi-ai at its own minor, so bumping one alone
-      // installs two copies of pi-ai. They are one bump, and as 0.x releases
-      // they stay manual under the npm rule above. apps/mate and
-      // packages/pi-store-postgres pin both exactly, because pi's session
-      // storage format is still changing: mate-db holds sessions in it, and a
+      // pi-durable requires pi-ai and chord at its own major, so bumping one
+      // alone installs two copies. They are one bump, and it stays manual:
+      // pi marks pi-durable experimental and changes its API without notice.
+      // apps/mate and packages/pi-store-postgres pin all three exactly,
+      // because mate-db holds sessions in pi-durable's storage format, and a
       // run left open when mate restarts is resumed by the new version. Merge
       // a bump while no mate turn is running.
-      description: 'pi: agent-core and ai move together',
+      description: 'pi: durable, ai and chord move together',
       matchDatasources: ['npm'],
       matchPackageNames: ['@earendil-works/**'],
       groupName: 'pi',
       groupSlug: 'pi',
+      automerge: false,
     },
     {
       // apps/clankerbanker pins the @x402 packages exactly. They are the

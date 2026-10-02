@@ -1,70 +1,76 @@
 # @repo/pi-store-postgres
 
-pi-store-postgres keeps [pi](https://www.npmjs.com/package/@earendil-works/pi-agent-core) agent sessions in Postgres. It implements pi-agent-core's `Storage` interface on Bun's built-in `SQL` client, and opens sessions by a caller's own id, such as a thread key. It pins `@earendil-works/pi-agent-core` to one exact version, because pi's session format may change between releases. mate keeps each thread's session here, through `apps/mate/src/store.ts`.
+pi-store-postgres keeps [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable) sessions in Postgres. It implements pi-durable's `Storage` interface on Bun's built-in `SQL` client, and names each session by a caller's own id, such as a thread key. Many sessions share one database. mate keeps each thread's session here, through `apps/mate/src/store.ts`.
 
 ```ts
 import { SQL } from 'bun';
-import { migrate, openSession } from '@repo/pi-store-postgres';
+import { Harness } from '@earendil-works/pi-durable';
+import { migrate, openStorage } from '@repo/pi-store-postgres';
 
 const sql = new SQL(process.env.DATABASE_URL);
 await migrate(sql);
-const session = await openSession(sql, { id: threadKey });
-// AgentHarness.create({ session, ... })
+const storage = await openStorage(sql, threadKey);
+const harness = await Harness.open(storage, { models, registry }, context);
 ```
 
 | Export | What it does |
 | --- | --- |
 | `migrate(sql)` | Applies the schema. It is idempotent and safe to race. |
-| `openSession(sql, { id, metadata? })` | Creates the session on first use, then reopens it. Returns a `StorageBackedSession<PostgresSessionMetadata>`. |
-| `OpenSessionOptions` | The options `openSession` takes. |
-| `PostgresSessionMetadata` | pi's `SessionMetadata`, plus the caller's `metadata`. |
-| `POSTGRES_STORAGE_VERSION` | The `storageVersion` written to `pi_sessions`. `openSession` refuses a session with any other. |
-| `postgresStorage(sql, id)` | The bare `Storage` for a session that exists. |
-| `deleteSession(sql, id)` | Deletes a session and its rows. A missing session is not an error. |
-| `sessionExists(sql, id)` | Whether the session row exists. |
+| `openStorage(sql, id)` | Creates the session on first use, then reopens it. Returns pi-durable's `Storage`. |
+| `deleteStorage(sql, id)` | Deletes a session and its rows. A missing session is not an error. |
+| `storageExists(sql, id)` | Whether the session row exists. |
 | `CommitOutcomeUnknownError` | A commit this `Storage` made or tried may have been lost, or may have landed unconfirmed. `firstSeq` is the seq the `Storage` expected, `foundSeq` the one a commit found instead, and `cause` the last error when the retries ran out. |
-| `PostgresStoreOptions` | `{ sql }`, for a caller that passes the pool around. |
 
-The caller owns the pool: nothing here closes `sql`. `metadata` is stored when `openSession` creates the session, and read back as `session.metadata.metadata`; a later open ignores it. There is no `SessionRepo`, fork or listing.
+The caller owns the pool: nothing here closes `sql`. `Storage.close()` rejects every later operation with an error that says `closed`, and resolves once the operations it had admitted finish. There is no fork and no listing of sessions.
 
 ## Schema
 
-`src/schema.ts` holds the migrations, recorded in `pi_store_migrations`. The tables port pi's SQLite backend (`001_initial.sql` in `@earendil-works/pi-session-backend-sqlite-node`) with a `pi_` prefix, so they can share a database with the host's own tables:
+`src/schema.ts` holds the migrations, recorded in `pi_store_migrations`. Migration 2 drops the tables of migration 1 and creates the pi-durable schema; no rows are converted. The tables port pi-durable's SQLite backend with a `pi_` prefix, so they can share a database with the host's own tables. Every table carries a `session_id` that references `pi_sessions` with `ON DELETE CASCADE`.
 
 | Table | Holds |
 | --- | --- |
-| `pi_sessions` | One row per session: `next_seq`, `message_count` and the usage totals as JSON |
-| `pi_entries` | The conversation tree; a self-referencing foreign key keeps every parent present |
-| `pi_scalar_values` | pi's keyed values, such as lane state and operation state |
-| `pi_list_values` | pi's append-only lists, such as streamed frames |
-| `pi_usage_ledger` | One row per model request or adjustment |
+| `pi_sessions` | One row per session: the next record id, `next_id`, and the next commit seq, `next_seq` |
+| `pi_record_ids` | The session's id namespace: which kind of record owns each id |
+| `pi_conversations` | Conversation records, with their owner columns |
+| `pi_entries` | Entry records, with `conversation_id`, `head` and the `commit_seq` that stored them |
+| `pi_tasks` | The latest record of each task, with its `status`, `kind`, `abort_requested` and `background` columns |
+| `pi_submissions` | The latest record of each submission, with `request_id` and `status` |
+| `pi_documents` | Document incarnations, with the columns that address them |
+| `pi_document_revisions` | Each document's base and delta revisions, by commit seq |
 
-JSON is stored as `text`: `jsonb` refuses `\u0000` and reorders keys. Key columns use the `"C"` collation, so keys sort by code point, as pi's in-memory store sorts them. Seqs, counts and timestamps are `bigint`; Bun returns those as strings, and the store reads each through `Number()` and refuses one that is not a safe integer. SQLite's `branch_entries` and `branch_meta` index has no port: a branch scan is one recursive query over `pi_entries`, and pi's storage conformance suite checks its semantics.
+Records are JSON stored as `text`: `jsonb` refuses `\u0000` and reorders keys. Indexed strings, which are task kinds, request ids, document kinds and document keys, are stored as their JSON text, so a lone surrogate or NUL survives. Key columns use the `"C"` collation. Ids, seqs and timestamps are `bigint`; Bun returns those as strings, and the store reads each through `Number()` and refuses one that is not a safe integer.
+
+## Ids
+
+`mintId()` takes the next id from `pi_sessions.next_id` with one `UPDATE`, so ids are unique across processes and across `Storage` instances of one session. A commit raises `next_id` past every id it writes, and a minted id that no commit uses is a gap. `mintId()` rejects with `ID space is exhausted` once `next_id` passes `Number.MAX_SAFE_INTEGER`.
 
 ## Commits
 
-Each `commit()` is one transaction. It takes `pg_advisory_xact_lock(hashtext(session_id))`, then the session row `FOR UPDATE`, so one writer at a time assigns seqs whichever process it runs in. Seqs come from pi's `prepareStorageCommit`, pi's `validateCommittedWrites` checks ids and parents, and the totals add in pi's order. Commits from one `Storage` run in the order they were admitted. `close()` refuses new commits and reads from the moment it is called, and resolves once the admitted commits finish.
+Each `commit()` is one transaction. It takes `pg_advisory_xact_lock(hashtext(session_id))`, then the session row `FOR UPDATE`, so one writer at a time assigns seqs whichever process it runs in. A commit's seq is the `next_seq` it read. `src/commit.ts` holds pi-durable's checks, which are the id namespace, document addresses, version transitions and copies, and the table writes. Commits from one `Storage` run in the order they were admitted.
 
-A `Storage` expects to be its session's only writer. It remembers the `next_seq` it last read or left under those locks, and a commit that finds any other value there throws `CommitOutcomeUnknownError` instead of writing: a commit was lost, one landed that the `Storage` could not confirm, or another writer moved the session. The `Storage` then takes the value it found as its own, so its next commit starts from there. A new `Storage`, such as the one `openSession` returns, starts from the value it first reads.
+A failed commit throws one of two classes, which decide what pi-durable's `Session` does next:
 
-A commit that hits a lost connection, or a Postgres error that asks for a retry, runs again only when the retry proves the earlier attempt did not commit. The retry takes the same locks, which waits out an attempt still in flight, and the rule above refuses it unless `next_seq` is still where the earlier attempt read it. An attempt may have committed once it sends `COMMIT`, until a later attempt finds `next_seq` still where it was. A commit whose retries run out while an attempt may have committed throws `CommitOutcomeUnknownError`, with the last error as its `cause`; any other failed commit throws its error itself. The session is consistent either way. A commit that breaks pi's rules fails on its first attempt. Reads, `openSession`, `deleteSession` and `sessionExists` retry the same failures.
-
-Each call makes up to four attempts, 0.1 s, 0.3 s and 0.9 s apart, and starts none more than 2 s after the first. A server that refuses connections fails each attempt at once, so the retries ride out about 1.3 s of it. A server that does not answer, such as an address with nothing behind it, holds each attempt for the pool's `connectionTimeout`, which Bun sets to 30 s unless the caller sets it; such a failure is not retried. A call against a server that is down therefore rejects after at most about 2 s plus one `connectionTimeout`. Set `connectionTimeout` on the pool to shorten that.
-
-A commit of nothing but `pi.pending.assistant_frame` appends runs with `synchronous_commit = off`. pi writes one per streamed chunk, and after a crash it rebuilds the partial reply from the frames that survive. Any later synchronous commit flushes the frames before it. A Postgres crash can lose the last frame commits even after they returned. `next_seq` then sits behind where the `Storage` left it, so the `Storage`'s next commit throws `CommitOutcomeUnknownError` rather than reuse the lost seqs, and a reopened session goes on from the frames that survived.
-
-`bun run --cwd packages/pi-store-postgres bench` times 200 frame commits, one at a time, beside 200 appends of the same size that commit synchronously. It takes the test URL, or `PI_STORE_BENCH_SOCKET` for a Unix socket. The median of three runs on each of two local Postgres 16 servers:
-
-| Server | Frames: commits/s, p50, p99 | Synchronous: commits/s, p50, p99 |
+| Failure | Thrown | The `Session` |
 | --- | --- | --- |
-| Loopback TCP, `fsync` off | 768/s, 1.25 ms, 2.48 ms | 838/s, 1.19 ms, 1.91 ms |
-| Unix socket, `fsync` on | 2859/s, 0.31 ms, 0.93 ms | 506/s, 2.05 ms, 3.28 ms |
+| A rule of the contract, a constraint, or an unknown session, rolled back | A plain `Error`, as pi-durable's SQLite and memory backends throw it | Poisons itself; reopen it |
+| A failed document copy | `StorageRejected`, as the reference wraps it | Carries on |
+| A connection failure whose every attempt provably did not commit | `StorageRejected`, with the connection error as `cause` | Carries on |
+| A commit after `close()` | `StorageRejected` | Carries on |
+| Retries ran out while an attempt may have committed, or `next_seq` is not where the `Storage` left it | `CommitOutcomeUnknownError`, which is not a `StorageRejected` | Poisons itself; reopen it |
 
-A commit is six round trips (`BEGIN`, the lock, the row, the insert, the row update, `COMMIT`), so the network sets the floor. A frame also skips the WAL flush, which is most of a synchronous commit's time when the disk syncs.
+A `Storage` expects to be its session's only writer. It remembers the `next_seq` it read when `openStorage` opened it, or last left under those locks, and a commit that finds any other value there throws `CommitOutcomeUnknownError` instead of writing: a commit was lost, one landed that the `Storage` could not confirm, or another writer moved the session. The `Storage` then takes the value it found as its own.
+
+A commit that hits a lost connection, or a Postgres error that asks for a retry, runs again only when the retry proves the earlier attempt did not commit. The retry takes the same locks, which waits out an attempt still in flight, and the rule above refuses it unless `next_seq` is still where the earlier attempt read it. An attempt may have committed once it sends `COMMIT`, until a later attempt finds `next_seq` still where it was. Reads, `mintId`, `openStorage`, `deleteStorage` and `storageExists` retry the same failures.
+
+Each call makes up to four attempts, 0.1 s, 0.3 s and 0.9 s apart, and starts none more than 2 s after the first. A server that refuses connections fails each attempt at once, so the retries ride out about 1.3 s of it. A server that does not answer holds each attempt for the pool's `connectionTimeout`, which Bun sets to 30 s unless the caller sets it; such a failure is not retried. A call against a server that is down therefore rejects after at most about 2 s plus one `connectionTimeout`. Set `connectionTimeout` on the pool to shorten that.
+
+A document read runs its queries in one read-only `REPEATABLE READ` transaction, so a commit between them cannot replace the base it reads.
+
+`bun run --cwd packages/pi-store-postgres bench` times 200 document deltas and 200 entry appends, one commit at a time. It takes the test URL, or `PI_STORE_BENCH_SOCKET` for a Unix socket. A commit is about eight round trips, so the network sets the floor.
 
 ## Limits
 
-Ids, custom types, namespaces and keys are Postgres `text`: they cannot hold `\u0000` or unpaired surrogates. pi rejects `\u0000` in namespaces and keys, and its own ids are UUIDv7. Nothing prunes a session; `deleteSession` is the only way rows leave.
+A session id is Postgres `text`: it cannot hold `\u0000` or unpaired surrogates. Nothing prunes a session; `deleteStorage` is the only way rows leave.
 
 ## Develop
 
@@ -75,4 +81,4 @@ bun run --cwd packages/pi-store-postgres typecheck
 bun run --cwd packages/pi-store-postgres lint
 ```
 
-The tests need a Postgres server, from `PI_STORE_TEST_DATABASE_URL` or else `DATABASE_URL`, and fail without one. Each test file creates its own database on that server and drops it after. They run every case of pi's storage conformance suite, pi's harness crashed at every commit of one turn and resumed from Postgres, and connection failures cut at chosen protocol messages by a relay in `test/proxy.ts`. CI runs them in the TypeScript workflow against the Postgres that workflow starts.
+The tests need a Postgres server, from `PI_STORE_TEST_DATABASE_URL` or else `DATABASE_URL`, and fail without one. Each test file creates its own database on that server and drops it after. They run pi-durable's storage conformance suite (`test/conformance.test.ts`), the isolation of two sessions and `migrate` (`test/session.test.ts`), pi-durable's `Harness` crashed at every commit of one turn and resumed from Postgres (`test/harness.test.ts`), and connection failures cut at chosen protocol messages by a relay in `test/proxy.ts` (`test/faults.test.ts`). CI runs them in the TypeScript workflow against the Postgres that workflow starts.

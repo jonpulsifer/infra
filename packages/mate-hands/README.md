@@ -1,6 +1,6 @@
 # @repo/mate-hands
 
-mate-hands is the tool daemon in a [mate](../../docs/apps/mate/how-it-works.md) sandbox. mate starts it over one `pods/exec` stream and sends it newline-delimited JSON calls: the file and shell methods of pi-agent-core's `ExecutionEnv`, `writeFiles`, and `hello`, `ping`, `cancel` and `shutdown`. `src/protocol.ts` holds the wire types both sides import, and `apps/mate/src/hands.ts` is mate's client. mate opens one link per turn, at the turn's first tool call, and shuts the daemon down when the turn ends.
+mate-hands is the tool daemon in a [mate](../../docs/apps/mate/how-it-works.md) sandbox. mate starts it over one `pods/exec` stream and sends it newline-delimited JSON calls: the file and shell methods of pi-durable's `ExecutionEnv`, `writeFiles`, and `hello`, `ping`, `cancel` and `shutdown`. `src/protocol.ts` holds the wire types both sides import, and `apps/mate/src/hands.ts` is mate's client. mate opens one link per turn, at the turn's first tool call, and shuts the daemon down when the turn ends.
 
 A daemon kills every process group it started, and exits, on stdin EOF, on `shutdown`, or when no message arrives within `--watchdog-ms`, 30 seconds by default. The client pings every third of that window. Reads stop at `--max-read-bytes`, and every buffer has a limit, listed in the `hello` answer.
 

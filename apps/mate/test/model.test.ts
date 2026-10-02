@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import {
   type CredentialStore,
   InMemoryCredentialStore,
@@ -160,7 +160,10 @@ describe('createModelSetup', () => {
   });
 
   test('a fallback with the smaller context window is warned of, since compaction follows the primary', () => {
-    const made = setup({ spec: CODEX, fallbackSpec: 'opencode-go/glm-5.1' });
+    const made = setup({
+      spec: CODEX,
+      fallbackSpec: 'opencode-go/minimax-m2.7',
+    });
     expect(
       made.log.of('the fallback model has the smaller context window'),
     ).toEqual([
@@ -168,7 +171,7 @@ describe('createModelSetup', () => {
         level: 'warn',
         fields: expect.objectContaining({
           primaryWindow: 272_000,
-          fallbackWindow: 202_752,
+          fallbackWindow: 204_800,
         }),
       }),
     ]);
@@ -317,11 +320,11 @@ describe('profileModel', () => {
     const own = profileModel(
       made,
       'profile p',
-      'opencode-go/glm-5.1',
+      'opencode-go/minimax-m2.7',
       'medium',
     );
     expect(own.model).toBe(
-      made.direct.getModel('opencode-go', 'glm-5.1') as typeof own.model,
+      made.direct.getModel('opencode-go', 'minimax-m2.7') as typeof own.model,
     );
     expect(own.thinking).toBe('medium');
   });

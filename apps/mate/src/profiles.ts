@@ -5,7 +5,7 @@
  * lacks opens nothing. `validateProfiles` runs at boot, and a bad profile is a
  * ConfigError. Code enforces every grant; the preamble only explains them.
  */
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import { ConfigError } from './config.ts';
 
 /** `interactive`: a human's thread. `automation`: a trusted trigger's, quiet-timed. `job`: a trusted trigger's, released when its turn ends. */

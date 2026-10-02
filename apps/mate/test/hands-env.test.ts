@@ -5,27 +5,25 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Context } from '@earendil-works/chord';
 import {
-  AgentHarness,
-  applyShellOutputUpdate,
   BACKGROUND_CONTEXT,
-  type Context,
-  createBashTool,
-  createEditTool,
-  createReadTool,
-  createWriteTool,
-  type ExecutionEnv,
-  MemorySessionRepo,
-  type ShellOutputView,
   withAbortSignal,
-} from '@earendil-works/pi-agent-core';
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
+} from '@earendil-works/chord/context';
 import { createModels } from '@earendil-works/pi-ai';
 import {
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux';
+import {
+  createRegistry,
+  Harness,
+  MemoryStorage,
+} from '@earendil-works/pi-durable';
+import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
+import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
+import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { type Hello, PROTOCOL_VERSION } from '@repo/mate-hands/protocol';
 import { type Clock, systemClock } from '../src/clock.ts';
 import type { HandsClient } from '../src/hands.ts';
@@ -38,6 +36,7 @@ import {
   type LeaseAccess,
   LeaseFailure,
   supersededEpoch,
+  unseen,
 } from '../src/hands-env.ts';
 import type { ExecOptions, ExecStream, Kube } from '../src/kube.ts';
 import type { HandsDropReason } from '../src/lease.ts';
@@ -168,6 +167,11 @@ function shape(result: unknown, root: string): unknown {
   return swap(result);
 }
 
+/** What a tail-keeping reader holds: the last 2000 lines, as the daemon's view drops the final newline. */
+function tailOf(text: string): string {
+  return text.replace(/\n$/, '').split('\n').slice(-2000).join('\n');
+}
+
 /** One script, run the same way against any env rooted at `root`. */
 async function script(env: ExecutionEnv, root: string): Promise<unknown[]> {
   const out: unknown[] = [];
@@ -177,18 +181,18 @@ async function script(env: ExecutionEnv, root: string): Promise<unknown[]> {
     command: string,
     options: Parameters<ExecutionEnv['exec']>[1] = {},
   ) => {
-    let view: ShellOutputView | undefined;
+    let text = '';
     const result = await env.exec(
       command,
       {
         ...options,
-        onUpdate: (update) => {
-          view = applyShellOutputUpdate(view, update);
+        onOutput: (chunk) => {
+          text += chunk;
         },
       },
       C,
     );
-    return { result, text: view?.text ?? '' };
+    return { result, text: tailOf(text) };
   };
   note('write', await env.writeFile('a/b.txt', 'one\ntwo\nthree', C));
   note('append', await env.appendFile('a/b.txt', '\nfour\n', C));
@@ -232,7 +236,7 @@ async function script(env: ExecutionEnv, root: string): Promise<unknown[]> {
   note(
     'exec truncated',
     await exec('for i in $(seq 1 3000); do echo line $i; done', {
-      capture: { limits: { maxBytes: 50 * 1024, maxLines: 2000 }, spill: true },
+      spill: { afterBytes: 50 * 1024, afterLines: 2000 },
     }),
   );
   note('exec cwd', await exec('pwd', { cwd: 'a' }));
@@ -276,6 +280,8 @@ describe('HandsEnv', () => {
       target.remove('a', undefined, C),
       target.createTempDir(undefined, C),
       target.createTempFile(undefined, C),
+      target.truncateFile('a', 0, C),
+      target.flushFile('a', C),
       target.exec('true', { timeout: Number.NaN }, C),
     ];
     lease.failure = new LeaseFailure('no sandbox this turn');
@@ -401,6 +407,77 @@ describe('HandsEnv', () => {
       'Text line reader is closed',
     ]);
     expect(stale.ok ? null : stale.error.path).toBe(join(cwd, 'lines.txt'));
+  });
+
+  test('each env names its own file namespace, and a given id is kept', () => {
+    const { env } = setup();
+    const other = setup().env;
+    expect(env.id).not.toBe(other.id);
+    expect(env.id).toBe(env.id);
+    expect(new HandsEnv({ id: 'thread-1', lease: () => null }).id).toBe(
+      'thread-1',
+    );
+  });
+
+  test('streams every chunk raw and spills the whole output past the thresholds', async () => {
+    const { env } = setup();
+    let seen = '';
+    const result = await env.exec(
+      'for i in $(seq 1 3000); do echo line $i; done',
+      {
+        onOutput: (text) => {
+          seen += text;
+        },
+        spill: { afterBytes: 50 * 1024, afterLines: 2000 },
+      },
+      C,
+    );
+    if (!result.ok) throw result.error;
+    expect(result.value.exitCode).toBe(0);
+    const full = readFileSync(result.value.spillPath as string, 'utf8');
+    expect(full.split('\n')).toHaveLength(3001);
+    expect(seen.trimEnd().endsWith('line 3000')).toBe(true);
+    const quiet = await env.exec('echo hi', { spill: undefined }, C);
+    expect(quiet.ok && quiet.value).toEqual({ exitCode: 0 });
+  });
+
+  test('a command that times out past the threshold still names its spill file', async () => {
+    const { env } = setup();
+    const result = await env.exec(
+      'for i in $(seq 1 3000); do echo line $i; done; sleep 5',
+      { timeout: 1, spill: { afterBytes: 50 * 1024, afterLines: 2000 } },
+      C,
+    );
+    if (result.ok) throw new Error('expected a timeout');
+    expect(result.error.code).toBe('timeout');
+    expect(readFileSync(result.error.spillPath as string, 'utf8')).toContain(
+      'line 3000',
+    );
+  });
+
+  test('an output callback that throws fails the command', async () => {
+    const { env } = setup();
+    const result = await env.exec(
+      'echo hi; sleep 5',
+      {
+        onOutput: () => {
+          throw new Error('boom');
+        },
+      },
+      C,
+    );
+    expect(
+      result.ok ? null : [result.error.code, result.error.message],
+    ).toEqual(['callback_error', 'boom']);
+  });
+
+  test('truncating and flushing a file are not supported', async () => {
+    const { env, lease } = setup();
+    const truncated = await env.truncateFile('a', 0, C);
+    const flushed = await env.flushFile('a', C);
+    expect(truncated.ok ? null : truncated.error.code).toBe('not_supported');
+    expect(flushed.ok ? null : flushed.error.code).toBe('not_supported');
+    expect(lease.asked).toBe(0);
   });
 
   test('cleanup and absolutePath never connect', async () => {
@@ -533,6 +610,8 @@ describe('HandsLink', () => {
   });
 });
 
+const TOOL_USE = { stopReason: 'toolUse' } as const;
+
 describe('a pi harness on the hands', () => {
   test('bash, read, write and edit run in the sandbox', async () => {
     const { env, cwd } = setup();
@@ -540,60 +619,60 @@ describe('a pi harness on the hands', () => {
     const models = createModels();
     models.setProvider(faux.provider);
     faux.setResponses([
-      fauxAssistantMessage([
-        fauxToolCall('write', { path: 'notes.md', content: 'hello hands\n' }),
-      ]),
-      fauxAssistantMessage([fauxToolCall('read', { path: 'notes.md' })]),
-      fauxAssistantMessage([
-        fauxToolCall('edit', {
-          path: 'notes.md',
-          edits: [{ oldText: 'hello', newText: 'goodbye' }],
-        }),
-      ]),
-      fauxAssistantMessage([
-        fauxToolCall('bash', { command: 'cat notes.md; echo "cwd=$(pwd)"' }),
-      ]),
+      fauxAssistantMessage(
+        [fauxToolCall('write', { path: 'notes.md', content: 'hello hands\n' })],
+        TOOL_USE,
+      ),
+      fauxAssistantMessage(
+        [fauxToolCall('read', { path: 'notes.md' })],
+        TOOL_USE,
+      ),
+      fauxAssistantMessage(
+        [
+          fauxToolCall('edit', {
+            path: 'notes.md',
+            edits: [{ oldText: 'hello', newText: 'goodbye' }],
+          }),
+        ],
+        TOOL_USE,
+      ),
+      fauxAssistantMessage(
+        [fauxToolCall('bash', { command: 'cat notes.md; echo "cwd=$(pwd)"' })],
+        TOOL_USE,
+      ),
       fauxAssistantMessage('done'),
     ]);
-    const session = await new MemorySessionRepo().create({ id: 'hands' }, C);
-    const { harness } = await AgentHarness.create(
-      {
-        session,
-        models,
-        model: faux.getModel(),
-        tools: [
-          { ...createReadTool(), replay: 'safe' as const },
-          createWriteTool(),
-          createEditTool(),
-          createBashTool(),
-        ],
-        toolContext: { env },
-        systemPrompt: 'You are a test.',
-      },
+    const registry = createRegistry();
+    registry.install(CodingTools);
+    const harness = await Harness.open(
+      new MemoryStorage(),
+      { models, registry, env: () => env },
       C,
     );
-    const ended: { tool: string; error: boolean; text: string }[] = [];
-    harness.events.on('tool_end', (event) => {
-      const content = (event.result?.content ?? []) as { text?: string }[];
-      ended.push({
-        tool: event.toolName,
-        error: event.isError,
-        text: content.map((c) => c.text ?? '').join(''),
-      });
+    const model = faux.getModel();
+    const root = await harness.root(C, {
+      agent: { model: { provider: model.provider, modelId: model.id } },
     });
-    const lane = await harness.lane('main', C);
-    const result = await lane.prompt('go', undefined, C);
+    const submission = await root.submit({ type: 'input', content: 'go' }, C);
+    const settled = await submission.wait(C);
+    expect(settled.status).toBe('done');
+    const page = await root.entries({}, 50, undefined, C);
+    const results = page.items
+      .filter((entry) => entry.kind === 'pi.tool-result')
+      .reverse()
+      .map((entry) => {
+        const [message] = entry.model ?? [];
+        const content = message?.role === 'toolResult' ? message.content : [];
+        return {
+          error: message?.role === 'toolResult' && message.isError,
+          text: content.map((c) => (c.type === 'text' ? c.text : '')).join(''),
+        };
+      });
     await harness.close(C);
-    expect(result.ok).toBe(true);
-    expect(ended.map((e) => [e.tool, e.error])).toEqual([
-      ['write', false],
-      ['read', false],
-      ['edit', false],
-      ['bash', false],
-    ]);
-    expect(ended[1]?.text).toContain('hello hands');
-    expect(ended[3]?.text).toContain('goodbye hands');
-    expect(ended[3]?.text).toContain(`cwd=${cwd}`);
+    expect(results.map((r) => r.error)).toEqual([false, false, false, false]);
+    expect(results[1]?.text).toContain('hello hands');
+    expect(results[3]?.text).toContain('goodbye hands');
+    expect(results[3]?.text).toContain(`cwd=${cwd}`);
     expect(readFileSync(join(cwd, 'notes.md'), 'utf8')).toBe('goodbye hands\n');
   });
 });
@@ -646,3 +725,24 @@ function failing(): ExecStream {
     close: () => {},
   };
 }
+
+describe('a replaced tail', () => {
+  const cases: [string, string, string, string][] = [
+    ['continues what was delivered', 'one\ntwo\n', 'two\nthree\n', 'three\n'],
+    ['repeats it whole', 'one\ntwo\n', 'one\ntwo\n', ''],
+    ['shares nothing with it', 'one\n', 'nine\nten\n', 'nine\nten\n'],
+    ['overlaps by less than the probe', 'abc', 'cde', 'de'],
+    ['follows nothing', '', 'first\n', 'first\n'],
+    [
+      'overlaps at its second match',
+      `${'ab'.repeat(40)}X${'ab'.repeat(20)}`,
+      `${'ab'.repeat(20)}tail`,
+      'tail',
+    ],
+  ];
+  for (const [name, tail, text, rest] of cases) {
+    test(name, () => {
+      expect(unseen(tail, text)).toBe(rest);
+    });
+  }
+});

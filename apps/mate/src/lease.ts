@@ -3,7 +3,7 @@
  * leases its thread's sandbox on the first tool call, reaches it through one
  * mate-hands link, and gives it back when the turn ends.
  */
-import type { ExecutionEnv } from '@earendil-works/pi-agent-core';
+import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 import type { Clock } from './clock.ts';
 import type { SandboxConfig } from './config.ts';
 import type { KthxSites } from './kthx-sites.ts';

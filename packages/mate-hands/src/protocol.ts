@@ -7,7 +7,7 @@
  * streams `exec.update`, and mate sends `cancel` and `shutdown`.
  *
  * The file and shell shapes mirror the `FileSystem` and `Shell` interfaces of
- * pi-agent-core's `ExecutionEnv`, and error codes are its `FileError` and
+ * pi-durable's `ExecutionEnv`, and error codes are its `FileError` and
  * `ExecutionError` codes, so an adapter maps each one straight across.
  */
 import { posix } from 'node:path';

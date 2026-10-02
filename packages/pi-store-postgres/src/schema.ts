@@ -1,8 +1,9 @@
 /**
- * The Postgres schema for pi sessions, ported from pi's SQLite backend
- * (001_initial.sql). JSON is kept as text: jsonb refuses \u0000 and reorders
- * keys. Keys use the "C" collation so they sort by code point, as pi's
- * in-memory store does.
+ * The Postgres schema for pi-durable sessions, ported from its SQLite backend.
+ * Every table is scoped by session_id. Records are JSON kept as text: jsonb
+ * refuses \u0000 and reorders keys. Indexed strings are stored as JSON text
+ * too, which keeps lone surrogates and NUL lossless. Keys use the "C"
+ * collation so they sort by code point.
  */
 import type { SQL } from 'bun';
 
@@ -76,6 +77,123 @@ const MIGRATIONS: readonly Migration[] = [
         PRIMARY KEY (session_id, id)
       );
       CREATE UNIQUE INDEX pi_usage_ledger_seq ON pi_usage_ledger (session_id, seq);
+    `,
+  },
+  {
+    version: 2,
+    name: 'durable',
+    sql: `
+      DROP TABLE IF EXISTS pi_usage_ledger, pi_list_values, pi_scalar_values,
+        pi_entries, pi_sessions;
+
+      CREATE TABLE pi_sessions (
+        id text COLLATE "C" PRIMARY KEY,
+        created_at bigint NOT NULL,
+        next_id bigint NOT NULL,
+        next_seq bigint NOT NULL
+      );
+
+      CREATE TABLE pi_record_ids (
+        session_id text COLLATE "C" NOT NULL
+          REFERENCES pi_sessions (id) ON DELETE CASCADE,
+        id bigint NOT NULL,
+        record_type text COLLATE "C" NOT NULL,
+        PRIMARY KEY (session_id, id)
+      );
+
+      CREATE TABLE pi_conversations (
+        session_id text COLLATE "C" NOT NULL
+          REFERENCES pi_sessions (id) ON DELETE CASCADE,
+        id bigint NOT NULL,
+        owner_conversation_id bigint,
+        owner_task_id bigint,
+        record text NOT NULL,
+        PRIMARY KEY (session_id, id)
+      );
+      CREATE INDEX pi_conversations_owner_conversation
+        ON pi_conversations (session_id, owner_conversation_id, id);
+      CREATE INDEX pi_conversations_owner_task
+        ON pi_conversations (session_id, owner_task_id, id);
+
+      CREATE TABLE pi_entries (
+        session_id text COLLATE "C" NOT NULL
+          REFERENCES pi_sessions (id) ON DELETE CASCADE,
+        id bigint NOT NULL,
+        conversation_id bigint NOT NULL,
+        head bigint,
+        commit_seq bigint NOT NULL,
+        record text NOT NULL,
+        PRIMARY KEY (session_id, id)
+      );
+      CREATE INDEX pi_entries_conversation
+        ON pi_entries (session_id, conversation_id, id DESC);
+      CREATE INDEX pi_entries_heads
+        ON pi_entries (session_id, conversation_id, id DESC)
+        WHERE head IS NOT NULL;
+
+      CREATE TABLE pi_tasks (
+        session_id text COLLATE "C" NOT NULL
+          REFERENCES pi_sessions (id) ON DELETE CASCADE,
+        id bigint NOT NULL,
+        conversation_id bigint NOT NULL,
+        kind text COLLATE "C" NOT NULL,
+        status text COLLATE "C" NOT NULL,
+        abort_requested boolean NOT NULL,
+        background boolean NOT NULL,
+        record text NOT NULL,
+        PRIMARY KEY (session_id, id)
+      );
+      CREATE INDEX pi_tasks_status ON pi_tasks (session_id, status, id);
+      CREATE INDEX pi_tasks_conversation
+        ON pi_tasks (session_id, conversation_id, id);
+
+      CREATE TABLE pi_submissions (
+        session_id text COLLATE "C" NOT NULL
+          REFERENCES pi_sessions (id) ON DELETE CASCADE,
+        id bigint NOT NULL,
+        conversation_id bigint NOT NULL,
+        request_id text COLLATE "C",
+        status text COLLATE "C" NOT NULL,
+        record text NOT NULL,
+        PRIMARY KEY (session_id, id)
+      );
+      CREATE INDEX pi_submissions_request
+        ON pi_submissions (session_id, conversation_id, request_id);
+      CREATE INDEX pi_submissions_conversation
+        ON pi_submissions (session_id, conversation_id, id);
+      CREATE INDEX pi_submissions_status
+        ON pi_submissions (session_id, status, id);
+
+      CREATE TABLE pi_documents (
+        session_id text COLLATE "C" NOT NULL
+          REFERENCES pi_sessions (id) ON DELETE CASCADE,
+        id bigint NOT NULL,
+        kind text COLLATE "C" NOT NULL,
+        family boolean NOT NULL,
+        key_value text COLLATE "C" NOT NULL,
+        scope_kind text COLLATE "C" NOT NULL,
+        owner_id bigint NOT NULL,
+        created_at bigint NOT NULL,
+        retired_at bigint,
+        record text NOT NULL,
+        PRIMARY KEY (session_id, id)
+      );
+      CREATE INDEX pi_documents_address
+        ON pi_documents (session_id, kind, scope_kind, owner_id, family,
+          key_value, created_at DESC);
+      CREATE INDEX pi_documents_scope
+        ON pi_documents (session_id, scope_kind, owner_id, id);
+
+      CREATE TABLE pi_document_revisions (
+        session_id text COLLATE "C" NOT NULL
+          REFERENCES pi_sessions (id) ON DELETE CASCADE,
+        document_id bigint NOT NULL,
+        seq bigint NOT NULL,
+        kind text COLLATE "C" NOT NULL,
+        version integer NOT NULL,
+        content text NOT NULL,
+        PRIMARY KEY (session_id, document_id, seq)
+      );
     `,
   },
 ];

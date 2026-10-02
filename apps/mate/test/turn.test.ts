@@ -1,7 +1,7 @@
 /** What a turn's events look like on a surface: text, status and cards. */
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { HarnessEvent } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
+import type { AgentEvent } from '@earendil-works/pi-durable';
 import { SANDBOX_CARD_ID } from '../src/lease.ts';
 import {
   CONNECTING,
@@ -37,44 +37,68 @@ class Recorder implements PromptSink {
   }
 }
 
-const base = { lane: 'main', runId: 'run-1', turnId: 'turn-1' };
-
-function event(fields: Record<string, unknown>): HarnessEvent {
-  return { ...base, ...fields } as unknown as HarnessEvent;
+function event(fields: Record<string, unknown>): AgentEvent {
+  return fields as unknown as AgentEvent;
 }
 
 const delta = (type: 'text_delta' | 'thinking_delta', text: string) =>
   event({
     type: 'message_update',
-    message: { role: 'assistant', content: [] },
-    event: { type, contentIndex: 0, delta: text },
+    usage: {},
+    changes: [{ type, contentIndex: 0, delta: text }],
   });
 
-const assistant = (text: string) => ({
+const assistant = (text: string, extra: Record<string, unknown> = {}) => ({
   role: 'assistant',
   content: [
     { type: 'thinking', thinking: 'hmm' },
     { type: 'text', text },
   ],
+  usage: { cost: { total: 0 } },
+  stopReason: 'stop',
+  ...extra,
 });
 
-const toolStart = (id: string, toolName: string, args: unknown) =>
-  event({ type: 'tool_start', toolCallId: id, toolName, args });
+const started = (text: string) =>
+  event({ type: 'message_start', message: assistant(text) });
 
+const ended = (message: Record<string, unknown>) =>
+  event({
+    type: 'message_end',
+    entry: { id: 1, conversationId: 1, kind: 'pi.assistant', model: [message] },
+  });
+
+const toolStart = (id: string, toolName: string, args: unknown) =>
+  event({ type: 'tool_execution_start', toolCallId: id, toolName, args });
+
+/** `isError` null is a tool task that faulted before it wrote a result. */
 const toolEnd = (
   id: string,
   toolName: string,
-  isError = false,
-  extra: Record<string, unknown> = {},
+  isError: boolean | null = false,
 ) =>
   event({
-    type: 'tool_end',
+    type: 'tool_execution_end',
     toolCallId: id,
     toolName,
-    isError,
-    terminate: false,
-    result: { content: [] },
-    ...extra,
+    ...(isError === null
+      ? {}
+      : {
+          entry: {
+            id: 2,
+            conversationId: 1,
+            kind: 'pi.tool-result',
+            model: [
+              {
+                role: 'toolResult',
+                toolCallId: id,
+                toolName,
+                content: [],
+                isError,
+              },
+            ],
+          },
+        }),
   });
 
 let clock: FakeClock;
@@ -86,7 +110,7 @@ beforeEach(() => {
   clock = new FakeClock();
   sink = new Recorder();
   metrics = new RecordingInstruments();
-  turn = new TurnTranslator(sink, clock, metrics);
+  turn = new TurnTranslator(sink, clock, metrics, 3);
 });
 
 describe('a tool call has a title a human can read', () => {
@@ -200,8 +224,8 @@ describe('the translator', () => {
   });
 
   test('a recovered tool end it never saw start opens and closes its card in one step', () => {
-    turn.event(toolEnd('c9', 'bash', true, { recovery: true }));
-    turn.event(toolEnd('c10', 'read', false, { recovery: true }));
+    turn.event(toolEnd('c9', 'bash', null));
+    turn.event(toolEnd('c10', 'read', false));
     expect(sink.cards).toEqual([
       { id: 'c9', title: '$ …', state: 'error' },
       { id: 'c10', title: 'read', state: 'complete' },
@@ -215,7 +239,7 @@ describe('the translator', () => {
     turn.seed('c9', 'bash', { command: `curl -H "x: ${key}" && sleep 30` });
     turn.seed('c10', 'read', { path: '/workspace/notes.txt' });
     expect(sink.updates).toEqual([]);
-    turn.event(toolEnd('c9', 'bash', true, { recovery: true }));
+    turn.event(toolEnd('c9', 'bash', true));
     turn.event(toolStart('c10', 'read', { path: '/workspace/other.txt' }));
     expect(sink.cards).toEqual([
       {
@@ -227,38 +251,32 @@ describe('the translator', () => {
     ]);
   });
 
-  test('a recovered message is drawn once, and a streamed one is not drawn again', () => {
+  test('an answer that arrives whole is drawn once, and a streamed one is not drawn again', () => {
+    turn.event(started('all at once'));
+    turn.event(ended(assistant('all at once')));
+    turn.event(started(''));
+    turn.event(delta('text_delta', ' and'));
+    turn.event(ended(assistant(' and more')));
+    turn.event(ended({ role: 'user', content: 'ignored', timestamp: 0 }));
+    expect(sink.text).toBe('all at once and more');
+  });
+
+  test('a partial a restart cut off is not drawn again; one this turn streamed keeps its text', () => {
     turn.event(
-      event({ type: 'message_start', message: assistant(''), recovery: true }),
+      ended(assistant('said before the restart', { stopReason: 'aborted' })),
     );
-    turn.event(
-      event({
-        type: 'message_end',
-        message: assistant('where I left off'),
-        recovery: true,
-      }),
-    );
-    turn.event(event({ type: 'message_start', message: assistant('') }));
-    turn.event(delta('text_delta', ' and more'));
-    turn.event(event({ type: 'message_end', message: assistant(' and more') }));
-    turn.event(
-      event({
-        type: 'message_end',
-        message: { role: 'user', content: 'ignored' },
-      }),
-    );
-    expect(sink.text).toBe('where I left off and more');
+    expect(sink.text).toBe('');
+    turn.event(started('half'));
+    turn.event(ended(assistant('half an answer', { stopReason: 'aborted' })));
+    expect(sink.text).toBe('half an answer');
   });
 
   test('a retry says so until the model answers', () => {
     turn.event(
       event({
-        type: 'retry_scheduled',
-        step: 'assistant',
+        type: 'auto_retry_start',
         attempt: 1,
-        maxAttempts: 3,
-        delayMs: 2_000,
-        notBefore: 0,
+        at: 0,
         errorMessage: '529',
       }),
     );
@@ -294,29 +312,17 @@ describe('the translator', () => {
   });
 
   test('sums the cost of every request in the run', () => {
-    const usage = (total: number) =>
-      event({
-        type: 'usage',
-        row: { id: 'u', seq: 1, adjustment: false, usage: { cost: { total } } },
-        totals: {},
-      });
-    turn.event(usage(0.25));
-    turn.event(usage(0.5));
-    turn.event(usage(0));
+    const cost = (total: number) =>
+      ended(assistant('', { usage: { cost: { total } } }));
+    turn.event(cost(0.25));
+    turn.event(cost(0.5));
+    turn.event(cost(0));
     expect(turn.costUsd).toBe(0.75);
   });
 
   test('the run ending clears the status line', () => {
     turn.event(toolStart('c1', 'bash', { command: 'sleep 1' }));
-    turn.event(
-      event({
-        type: 'run_end',
-        status: 'aborted',
-        fromTipId: null,
-        tipId: null,
-        endedAt: 0,
-      }),
-    );
+    turn.event(event({ type: 'run_end', inputs: [1] }));
     expect(sink.statuses.at(-1)).toBeNull();
   });
 

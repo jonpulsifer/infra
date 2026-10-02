@@ -2,7 +2,7 @@
  * mate's ChatGPT sign-in: the owner's `chatgpt` commands, the device-code
  * login they start, and the keeper that refreshes the token outside turns.
  */
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import {
   type Api,
   type AuthEvent,
