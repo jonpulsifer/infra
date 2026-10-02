@@ -111,7 +111,6 @@ async function render(
   }
 }
 
-
 const backup = (extra: Record<string, unknown> = {}) => ({
   endpointURL: ENDPOINT,
   item: 'garage-offsite',
@@ -202,10 +201,7 @@ describe.each(CASES)('the $chart database backup', (c) => {
     ]);
     expect(secret.spec.target.template.data.REGION).toBe('garage');
     expect(
-      secret.spec.data.map((d: any) => [
-        d.remoteRef.key,
-        d.remoteRef.property,
-      ]),
+      secret.spec.data.map((d: any) => [d.remoteRef.key, d.remoteRef.property]),
     ).toEqual([
       ['garage-offsite', 'cnpg-access-key-id'],
       ['garage-offsite', 'cnpg-secret-access-key'],
