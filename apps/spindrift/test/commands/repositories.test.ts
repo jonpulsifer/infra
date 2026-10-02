@@ -258,7 +258,11 @@ describe('connecting a repository', () => {
     const failingFetch = (async (input: any) => {
       const urlStr =
         typeof input === 'string' ? input : (input?.url ?? String(input));
-      if (urlStr.includes('/git/') || urlStr.includes('/pulls')) {
+      // Connect reads the default branch's head before it writes anything.
+      const write =
+        urlStr.includes('/pulls') ||
+        (urlStr.includes('/git/') && !urlStr.endsWith('/git/ref/heads/main'));
+      if (write) {
         throw new Error('GitHub API pull request error');
       }
       return fake.fetch(input);
@@ -325,6 +329,23 @@ describe('connecting a repository', () => {
 
     const accepted = await dispatch('connectRepository', input(fake), loop);
     expect(accepted.ok).toBe(true);
+  });
+
+  test('an override on a scope holding spindrift.yaml rewrites that file', async () => {
+    const fake = new FakeGitHub();
+    const base = fake.commitFiles('main', {
+      'services/api/go.mod': 'module api\n',
+      'services/api/spindrift.yaml': AUTHORED_JOB,
+    });
+
+    await connectRepository(input(fake), await context(fake));
+
+    const before = fake.filesAt(base);
+    const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
+    expect(written['services/api/spindrift.yaml']).toContain('kind: service');
+    expect(Object.keys(written).filter((path) => !(path in before))).toEqual([
+      WORKFLOW_PATH,
+    ]);
   });
 });
 
