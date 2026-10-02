@@ -9,8 +9,8 @@ git_signingkey_wsl = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE
 gpg_darwin_program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
 gpg_wsl_program = "/mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe"
 # Empty unless mise.work.toml sets them.
-moonpay_ssh_prefix = ""
-moonpay_instead_of = ""
+work_ssh_prefix = ""
+work_instead_of = ""
 
 [tasks.bootstrap]
 description = "Auto-detect OS and delegate to bootstrap:macos, :linux or :windows"
