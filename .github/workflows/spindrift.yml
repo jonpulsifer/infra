@@ -1,18 +1,18 @@
 # The build caller for this repository, where uploaded archives build. A direct
 # dispatch of the reusable workflow would run the default branch; the local
 # `uses:` runs it at this file's own commit.
-name: spindrift
+name: kthx
 run-name: spindrift ${{ inputs.correlation }}
 
 on:
   workflow_dispatch:
     inputs:
       spec:
-        description: The build request, as JSON. Spindrift fills this in.
+        description: The build request, as JSON. kthx fills this in.
         required: true
         type: string
       correlation:
-        description: How Spindrift finds this run again. Not a build input.
+        description: How kthx finds this run again. Not a build input.
         required: true
         type: string
 

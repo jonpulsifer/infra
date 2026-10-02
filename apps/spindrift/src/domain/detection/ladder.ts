@@ -10,7 +10,7 @@ import {
 } from './dockerfile-context.ts';
 import type { DetectionSource } from './scope.ts';
 import { resolveDetectionScope } from './scope.ts';
-import { parseSpindriftFile } from './spindrift-file.ts';
+import { parseSpindriftFile, readDeclaration } from './spindrift-file.ts';
 import { exists, type SourceTree } from './tree.ts';
 import { deriveWatchPaths } from './watch-paths.ts';
 
@@ -54,7 +54,7 @@ export interface DetectionProposal {
   readonly source: 'detection' | 'spindrift-file' | 'operator';
   readonly kind: ComponentKind;
   readonly kinds: readonly KindOption[];
-  /** Never written to `spindrift.yaml`: it says how the answer was reached, not what the scope is. */
+  /** Never written to the kthx file: it says how the answer was reached, not what the scope is. */
   readonly reason: string;
   readonly build:
     | { readonly frontend: 'dockerfile'; readonly dockerfile: string }
@@ -71,6 +71,8 @@ export type DetectionResult =
       readonly outcome: 'detected';
       readonly scope: string;
       readonly proposal: DetectionProposal;
+      /** The repo-relative kthx file read, when one settled this scope. */
+      readonly declaration?: string;
     }
   | {
       readonly outcome: 'unknown';
@@ -85,8 +87,6 @@ export interface DetectScopeInput {
   readonly source: DetectionSource;
   readonly planner: ZeroConfigPlanner;
 }
-
-const SPINDRIFT_FILE = 'spindrift.yaml';
 
 function joinPath(scope: string, file: string): string {
   return scope === '.' ? file : `${scope}/${file}`;
@@ -112,15 +112,15 @@ export async function detectScope(
   const { scope, prefix } = await resolveDetectionScope(tree, source);
 
   if (source.kind === 'repo') {
-    const document = await tree.readText(joinPath(prefix, SPINDRIFT_FILE));
-    if (document !== null) {
+    const declaration = await readDeclaration(prefix, (path) =>
+      tree.readText(path),
+    );
+    if (declaration !== null) {
       return {
         outcome: 'detected',
         scope,
-        proposal: parseSpindriftFile(
-          document,
-          joinPath(prefix, SPINDRIFT_FILE),
-        ),
+        proposal: parseSpindriftFile(declaration.document, declaration.path),
+        declaration: declaration.path,
       };
     }
   }

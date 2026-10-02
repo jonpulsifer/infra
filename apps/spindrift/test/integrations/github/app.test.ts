@@ -41,12 +41,12 @@ describe('reading a repository', () => {
 
   test('returns null for a file that is not there, and only for that', async () => {
     const fake = new FakeGitHub();
-    const commit = fake.commitFiles('main', { 'spindrift.yaml': 'version: 1' });
+    const commit = fake.commitFiles('main', { 'kthx.yaml': 'version: 1' });
     const { app: github } = await app(fake);
     const ref = { installationId: fake.installationId };
 
     await expect(
-      github.readFile(ref, fake.fullName, commit, 'spindrift.yaml'),
+      github.readFile(ref, fake.fullName, commit, 'kthx.yaml'),
     ).resolves.toBe('version: 1');
     await expect(
       github.readFile(ref, fake.fullName, commit, 'nowhere.yaml'),
@@ -247,8 +247,8 @@ describe('the media types this host serves', () => {
 
   test('file contents are raw only to a client that asked for raw', async () => {
     const fake = new FakeGitHub();
-    fake.commitFiles('main', { 'spindrift.yaml': 'version: 1' });
-    const path = `/repos/${fake.fullName}/contents/spindrift.yaml?ref=main`;
+    fake.commitFiles('main', { 'kthx.yaml': 'version: 1' });
+    const path = `/repos/${fake.fullName}/contents/kthx.yaml?ref=main`;
 
     const raw = await get(fake, path, 'application/vnd.github.raw');
     expect(await raw.text()).toBe('version: 1');

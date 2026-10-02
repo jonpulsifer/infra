@@ -139,7 +139,13 @@ async function configurationScopes(
     commit,
     scopes: found.flatMap((result) =>
       result.outcome === 'detected'
-        ? [{ scope: result.scope, proposal: result.proposal }]
+        ? [
+            {
+              scope: result.scope,
+              proposal: result.proposal,
+              declaration: result.declaration,
+            },
+          ]
         : [],
     ),
   };
@@ -209,7 +215,7 @@ export const connectRepository: Command<
     const at = commit === null ? '' : ` at ${commit.slice(0, 7)}`;
     return failed(
       'NOT_DEPLOYABLE',
-      `Spindrift found nothing it knows how to build in ${input.fullName}${at}. Add a spindrift.yaml or a Dockerfile to the directory you want deployed, then connect it again.`,
+      `kthx found nothing it knows how to build in ${input.fullName}${at}. Add a kthx.yaml or a Dockerfile to the directory you want deployed, then connect it again.`,
     );
   }
 

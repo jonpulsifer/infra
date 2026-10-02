@@ -583,8 +583,9 @@ export interface AppSourceView {
 }
 
 /**
- * The scope's `spindrift.yaml` at the adopted commit, carried whole. `unread`
- * means this installation could not look; `absent` means the file is not there.
+ * The scope's kthx file at the adopted commit, carried whole. `unread` means
+ * this installation could not look; `absent` means no file is there, and
+ * `path` is then where a new one would go.
  */
 export type AppManifestView =
   | { readonly path: string; readonly state: 'present'; readonly text: string }

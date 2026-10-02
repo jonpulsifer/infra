@@ -4,9 +4,13 @@
  * The file is read at the adopted commit, whose config is the one in effect.
  */
 import { z } from 'zod';
+import {
+  type Declaration,
+  declarationPath,
+  readDeclaration,
+} from '../../domain/detection/spindrift-file.ts';
 import type { RepositoryHost } from '../../domain/repository.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
-import { SPINDRIFT_FILE } from '../../integrations/github/config-pr.ts';
 import { type Command, failed, ok } from '../types.ts';
 import type { AppManifestView, AppSourceView } from '../views.ts';
 
@@ -43,8 +47,6 @@ export const getAppSource: Command<
   if (app.sourceKind !== 'repo') return ok({ source: null });
 
   const subpath = app.sourceRepoSubpath ?? '.';
-  const path =
-    subpath === '.' ? SPINDRIFT_FILE : `${subpath}/${SPINDRIFT_FILE}`;
   const repository: ConnectedRepository | null = app.repository ?? null;
 
   return ok({
@@ -60,7 +62,7 @@ export const getAppSource: Command<
       manifest: await manifestAt(
         context.adapters.repository(),
         repository,
-        path,
+        subpath,
       ),
     },
   });
@@ -73,8 +75,9 @@ export const getAppSource: Command<
 async function manifestAt(
   host: RepositoryHost | null,
   repository: ConnectedRepository | null,
-  path: string,
+  subpath: string,
 ): Promise<AppManifestView> {
+  const path = declarationPath(subpath);
   if (repository === null) {
     return {
       path,
@@ -98,13 +101,15 @@ async function manifestAt(
     };
   }
 
-  let document: string | null;
+  let declaration: Declaration | null;
   try {
-    document = await host.readFile(
-      repositoryRefOf(repository),
-      repository.fullName,
-      commit,
-      path,
+    declaration = await readDeclaration(subpath, (candidate) =>
+      host.readFile(
+        repositoryRefOf(repository),
+        repository.fullName,
+        commit,
+        candidate,
+      ),
     );
   } catch (cause) {
     return {
@@ -114,7 +119,7 @@ async function manifestAt(
     };
   }
 
-  return document === null
+  return declaration === null
     ? { path, state: 'absent' }
-    : { path, state: 'present', text: document };
+    : { path: declaration.path, state: 'present', text: declaration.document };
 }

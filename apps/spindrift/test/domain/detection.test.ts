@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { vercelFrameworkOf } from '../../src/domain/detection/declared.ts';
 import {
+  type DetectionProposal,
   detectScope,
   type InferredComponentKind,
   type SourceTree,
@@ -75,48 +76,73 @@ describe('the detection ladder', () => {
     ]);
   });
 
-  test('spindrift.yaml is authoritative and stops the ladder', async () => {
-    let plannerCalls = 0;
+  const mustNotRun: ZeroConfigPlanner = {
+    async plan() {
+      throw new Error('a kthx file stops the ladder before the planner');
+    },
+  };
+
+  const reportJob = (file: string): Omit<DetectionProposal, 'watchPaths'> => ({
+    source: 'spindrift-file',
+    kind: 'job',
+    reason: `${file} asserts this scope is a job`,
+    kinds: [{ kind: 'job', available: true, reason: `asserted by ${file}` }],
+    build: {
+      frontend: 'railpack',
+      buildCommand: 'bun run report',
+      outputDirectory: null,
+    },
+  });
+
+  test('kthx.yaml is authoritative and stops the ladder', async () => {
     const result = await detectScope({
-      tree: fixture('authoritative-file'),
+      tree: fixture('kthx-file'),
       source: { kind: 'repo', subpath: '.' },
-      planner: {
-        async plan() {
-          plannerCalls += 1;
-          return {
-            outcome: 'detected',
-            kind: 'website',
-            reason: 'must not run',
-            kinds: [{ kind: 'website', available: true }],
-            buildCommand: 'bun run build',
-            outputDirectory: 'dist',
-          };
-        },
-      },
+      planner: mustNotRun,
     });
 
-    expect(plannerCalls).toBe(0);
     expect(result).toEqual({
       outcome: 'detected',
       scope: '.',
+      declaration: 'kthx.yaml',
       proposal: {
-        source: 'spindrift-file',
-        kind: 'job',
-        reason: 'spindrift.yaml asserts this scope is a job',
-        kinds: [
-          {
-            kind: 'job',
-            available: true,
-            reason: 'asserted by spindrift.yaml',
-          },
-        ],
-        build: {
-          frontend: 'railpack',
-          buildCommand: 'bun run report',
-          outputDirectory: null,
-        },
+        ...reportJob('kthx.yaml'),
         watchPaths: ['.', 'shared/reporting'],
       },
+    });
+  });
+
+  test('a legacy spindrift.yaml is authoritative when the scope has no kthx.yaml', async () => {
+    const result = await detectScope({
+      tree: fixture('authoritative-file'),
+      source: { kind: 'repo', subpath: '.' },
+      planner: mustNotRun,
+    });
+
+    expect(result).toEqual({
+      outcome: 'detected',
+      scope: '.',
+      declaration: 'spindrift.yaml',
+      proposal: {
+        ...reportJob('spindrift.yaml'),
+        watchPaths: ['.', 'shared/reporting'],
+      },
+    });
+  });
+
+  test('kthx.yaml wins over a spindrift.yaml beside it', async () => {
+    // The legacy file here says `service`; only `kthx.yaml` is read.
+    const result = await detectScope({
+      tree: fixture('both-files'),
+      source: { kind: 'repo', subpath: '.' },
+      planner: mustNotRun,
+    });
+
+    expect(result).toEqual({
+      outcome: 'detected',
+      scope: '.',
+      declaration: 'kthx.yaml',
+      proposal: { ...reportJob('kthx.yaml'), watchPaths: ['.'] },
     });
   });
 

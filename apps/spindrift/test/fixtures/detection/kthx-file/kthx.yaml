@@ -1,0 +1,10 @@
+version: 1
+component:
+  kind: job
+build:
+  frontend: railpack
+  command: bun run report
+  outputDirectory: null
+watchPaths:
+  - .
+  - shared/reporting

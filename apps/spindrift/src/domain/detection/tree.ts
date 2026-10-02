@@ -94,8 +94,8 @@ export interface TreeReader {
 }
 
 /**
- * Pinned to a commit, so the proposal shown and the `spindrift.yaml` written
- * into the configuration PR describe the same revision.
+ * Pinned to a commit, so the proposal shown and the kthx file written into the
+ * configuration PR describe the same revision.
  */
 export function gitHubTree(
   reader: TreeReader,

@@ -23,7 +23,7 @@ on:
         required: true
         type: string
       correlation:
-        description: How Spindrift finds this run again. Not a build input.
+        description: How kthx finds this run again. Not a build input.
         required: true
         type: string
 
@@ -181,6 +181,16 @@ jobs:
           set -euo pipefail
           scope="${ROOT}/${SUBPATH}"
 
+          # The scope's kthx file as core resolves it: `kthx.yaml`, else
+          # `spindrift.yaml`, else empty.
+          declaration=""
+          for candidate in "${scope}/kthx.yaml" "${scope}/spindrift.yaml"; do
+            if [ -f "$candidate" ]; then
+              declaration="$candidate"
+              break
+            fi
+          done
+
           # The same probe ships inside the BuildKit program the other routes
           # run (`buildkit.ts`, DOCKERFILE_CONTEXT_PROBE), and detection
           # mirrors it at inspect time so the sentence the operator read is
@@ -237,8 +247,7 @@ jobs:
           # A scope that declares no output directory *is* the site: there is
           # nothing to run first, and the tree is already what a static Target
           # serves. That is the whole of this arm for a hand-written site, an
-          # uploaded artifact, and anything whose `spindrift.yaml` names no
-          # directory.
+          # uploaded artifact, and anything whose kthx file names no directory.
           #
           # A scope that declares one is the sources of a site rather than the
           # site, so this arm falls through to the ladder below, the ordinary
@@ -294,7 +303,10 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            printf 'lift=%s\n' "$OUTPUT_DIRECTORY" >> "$GITHUB_OUTPUT"
+            {
+              printf 'lift=%s\n' "$OUTPUT_DIRECTORY"
+              printf 'declaration=%s\n' "${declaration##*/}"
+            } >> "$GITHUB_OUTPUT"
           fi
 
           # The scope names the Dockerfile; the Dockerfile names its context.
@@ -337,17 +349,16 @@ jobs:
           # for its own decision. What is read is what Spindrift adopted: the
           # bundle is staged at the App's authoritative commit, and
           # `reconciler/repo-loop.ts` refuses to advance that past a commit
-          # whose `spindrift.yaml` will not parse, so the runner cannot honour
-          # a declaration core rejected.
+          # whose kthx file will not parse, so the runner cannot honour a
+          # declaration core rejected.
           #
           # `select` on the frontend rather than reading `.command` outright: a
           # scope declaring the dockerfile frontend has no railpack command to
           # state, and `// ""` folds the schema's `command: null` onto the same
           # "nothing declared" as an absent file. Both leave the invocation
           # byte-identical to what it was before this block existed.
-          declaration="${scope}/spindrift.yaml"
           build_command=""
-          if [ -f "$declaration" ]; then
+          if [ -n "$declaration" ]; then
             build_command="$(
               yq '.build | select(.frontend == "railpack") | .command // ""' \
                 "$declaration"
@@ -383,7 +394,7 @@ jobs:
                 # On stdout, not stderr: Actions reads workflow commands from a
                 # step's stdout, and an annotation is the only part of this a
                 # reader sees without opening the log.
-                printf '::error::spindrift.yaml: build.command cannot contain a single quote\n'
+                printf '::error::%s: build.command cannot contain a single quote\n' "${declaration##*/}"
                 exit 1
                 ;;
             esac
@@ -808,6 +819,7 @@ jobs:
           SECRET_FILES: ${{ steps.buildsecrets.outputs.secretFiles }}
           SCRATCHFILE: ${{ steps.frontend.outputs.scratchfile }}
           LIFT: ${{ steps.frontend.outputs.lift }}
+          DECLARATION: ${{ steps.frontend.outputs.declaration }}
         run: |
           set -euo pipefail
           # The same two argument sets `Build and push` concatenates, in the
@@ -849,7 +861,7 @@ jobs:
           # the failure worth naming here rather than three steps later as an
           # empty site that deployed green.
           if ! docker cp "${cid}:${from}/." "$site" 2>/dev/null; then
-            echo "::error::the build left nothing at ${from} — ${LIFT} is what this scope's spindrift.yaml names as its output directory, and the build did not create it. Correct outputDirectory, or remove it if this scope is already the site." >&2
+            echo "::error::the build left nothing at ${from} — ${LIFT} is what this scope's ${DECLARATION:-kthx file} names as its output directory, and the build did not create it. Correct outputDirectory, or remove it if this scope is already the site." >&2
             exit 1
           fi
 

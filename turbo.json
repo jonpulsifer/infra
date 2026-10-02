@@ -91,7 +91,9 @@
         "$TURBO_ROOT$/packages/charts/spindrift-app/templates/**",
         "$TURBO_ROOT$/clusters/offsite/apps/spindrift/helm-release.yaml",
         "$TURBO_ROOT$/clusters/base/networking/external-dns/helm-release.yaml",
-        "$TURBO_ROOT$/clusters/*/networking/external-dns/kustomization.yaml"
+        "$TURBO_ROOT$/clusters/*/networking/external-dns/kustomization.yaml",
+        "$TURBO_ROOT$/.github/workflows/spindrift-build.yml",
+        "$TURBO_ROOT$/apps/kthx/cli/main.ts"
       ],
       "env": ["DATABASE_URL"],
       "outputs": []

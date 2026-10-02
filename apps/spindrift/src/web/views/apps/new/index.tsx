@@ -43,6 +43,7 @@ import { notify } from '../../../ui/toast.tsx';
 import { cn } from '../../../ui/utils.ts';
 import { deployDraft } from './deploy.ts';
 import {
+  declarationPathFor,
   type InspectedScope,
   inspection,
   mergeScopes,
@@ -135,7 +136,7 @@ function unreadRepository(
   return [
     {
       code: 'REPOSITORY_UNAVAILABLE',
-      title: `Spindrift could not read ${draft.source.repo}.`,
+      title: `kthx could not read ${draft.source.repo}.`,
       // The Code row already shows the read's message as its reason.
       remediation:
         'Until it can be read, nothing below came from the repository.',
@@ -169,7 +170,7 @@ function reportConfigPullRequest(app: {
       tone: 'success',
       title: `Configuration PR opened: ${configRepository}#${configPullRequest}`,
       detail:
-        'Merging it puts the Spindrift file and the build workflow on the default branch. Until then nothing in this repository is authoritative, and its builds run on the platform repository.',
+        'Merging it puts the kthx file and the build workflow on the default branch. Until then nothing in this repository is authoritative, and its builds run on the platform repository.',
       action: {
         label: 'Review it',
         onSelect: () => {
@@ -183,7 +184,7 @@ function reportConfigPullRequest(app: {
     notify({
       tone: 'destructive',
       title: `${configRepository} is connected, but its configuration PR did not open`,
-      detail: `${configPullRequestError} Open it again from Repositories, or add the Spindrift file and the build workflow by hand.`,
+      detail: `${configPullRequestError} Open it again from Repositories, or add the kthx file and the build workflow by hand.`,
     });
   }
 }
@@ -320,12 +321,11 @@ export function NewApp({
   ];
   const target = targets.find((option) => option.targetId === draft.targetId);
   const choices = repositoryChoices(repos, available);
-  const spindriftFile = spindriftFileFor(
-    (scopes ?? []).find(
-      (scope) =>
-        draft.source.kind === 'repo' && scope.scope === draft.source.subpath,
-    ),
+  const draftScope = (scopes ?? []).find(
+    (scope) =>
+      draft.source.kind === 'repo' && scope.scope === draft.source.subpath,
   );
+  const spindriftFile = spindriftFileFor(draftScope);
   const appNameIssue = issueWith(appNameSchema, draft.appName);
   const componentNameIssue = issueWith(
     componentNameSchema,
@@ -682,7 +682,7 @@ export function NewApp({
       {header(
         title,
         draft.source.kind === 'repo'
-          ? 'Spindrift filled this in from your repository. Change anything that is wrong, then deploy.'
+          ? 'kthx filled this in from your repository. Change anything that is wrong, then deploy.'
           : 'Nothing has read your archive, so check the type and the name below, then deploy.',
       )}
 
@@ -816,7 +816,7 @@ export function NewApp({
                   ? 'Nothing routes to it, so it has no address.'
                   : // Null when the adapter reports its own address after deploy.
                     (target.canonical ??
-                    'Spindrift assigns the address on the first deploy.')
+                    'kthx assigns the address on the first deploy.')
                 : target.reasons
                     .map((reason, index) => target.detail[index] ?? reason)
                     .join('; ')
@@ -945,20 +945,16 @@ export function NewApp({
           title={
             draft.source.connect === true
               ? `Deploy also connects ${draft.source.repo} and opens a pull request`
-              : "What this App's spindrift.yaml would say"
+              : "What this App's kthx file would say"
           }
-          label={
-            draft.source.subpath === '.'
-              ? 'spindrift.yaml'
-              : `${draft.source.subpath}/spindrift.yaml`
-          }
+          label={declarationPathFor(draftScope, draft.source.subpath)}
           note={
             <>
               Committed to{' '}
               <span className="font-mono">{draft.source.repo}</span> on a
-              configuration pull request, alongside one workflow caller.
-              Spindrift adopts it only once that pull request merges into the
-              default branch.
+              configuration pull request, alongside one workflow caller. kthx
+              adopts it only once that pull request merges into the default
+              branch.
             </>
           }
           caveat={
@@ -1128,7 +1124,7 @@ function SourceControls({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') onSettleSubpath();
                 }}
-                hint="Spindrift reads the directory you name and no others. Press Enter to read it."
+                hint="kthx reads the directory you name and no others. Press Enter to read it."
               />
             </>
           )}

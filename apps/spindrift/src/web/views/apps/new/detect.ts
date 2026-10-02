@@ -5,6 +5,10 @@
  */
 
 import type { Draft, DraftAction } from '../../../../domain/creation-draft.ts';
+import {
+  DECLARATION_FILE,
+  declarationPath,
+} from '../../../../domain/detection/spindrift-file.ts';
 import { serializeSpindriftFile } from '../../../../integrations/github/config-pr.ts';
 import type { InputOf, OutputOf } from '../../../client.ts';
 
@@ -20,7 +24,7 @@ export function inspection(
 }
 
 /**
- * The `spindrift.yaml` the configuration pull request commits for this scope,
+ * The kthx file the configuration pull request commits for this scope,
  * from the commit's own serializer. Null when detection proposed nothing.
  */
 export function spindriftFileFor(
@@ -42,6 +46,15 @@ export function spindriftFileFor(
           },
     watchPaths: scope.watchPaths,
   });
+}
+
+/** Where that file lands: the kthx file the scope already holds, if any. */
+export function declarationPathFor(
+  scope: InspectedScope | undefined,
+  subpath: string,
+): string {
+  const held = scope?.outcome === 'detected' ? scope.declaration : null;
+  return declarationPath(subpath, held ?? DECLARATION_FILE);
 }
 
 export function mergeScopes(
@@ -102,8 +115,8 @@ export function outcomeOf(
       act: 'refuse',
       message:
         named?.outcome === 'unsupported'
-          ? `Spindrift does not know how to build ${read.scope} in ${read.fullName}: ${named.detail} Name another directory, or pick the kind yourself.`
-          : `Spindrift read nothing about ${read.scope} in ${read.fullName}. Name another directory, or pick the kind yourself.`,
+          ? `kthx does not know how to build ${read.scope} in ${read.fullName}: ${named.detail} Name another directory, or pick the kind yourself.`
+          : `kthx read nothing about ${read.scope} in ${read.fullName}. Name another directory, or pick the kind yourself.`,
     };
   }
 
@@ -122,7 +135,7 @@ export function outcomeOf(
     act: 'refuse',
     message:
       named?.outcome === 'unsupported'
-        ? `Spindrift does not know how to build ${named.scope} in ${read.fullName}: ${named.detail} Name another directory, or pick the kind yourself.`
-        : `Spindrift found nothing it knows how to build in ${read.fullName}. Every directory it read is listed below with what it found instead — name one yourself and pick the kind, or add a spindrift.yaml.`,
+        ? `kthx does not know how to build ${named.scope} in ${read.fullName}: ${named.detail} Name another directory, or pick the kind yourself.`
+        : `kthx found nothing it knows how to build in ${read.fullName}. Every directory it read is listed below with what it found instead — name one yourself and pick the kind, or add a kthx.yaml.`,
   };
 }

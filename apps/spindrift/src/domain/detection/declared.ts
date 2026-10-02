@@ -275,7 +275,7 @@ export async function planFromDeclarations(
       (await planStaticFiles(tree, scope)) ?? {
         outcome: 'unsupported',
         detail:
-          'package.json declares no framework Spindrift recognizes and no start script. Add a `spindrift.yaml` naming the kind, or a Dockerfile.',
+          'package.json declares no framework kthx recognizes and no start script. Add a `kthx.yaml` naming the kind, or a Dockerfile.',
       }
     );
   }

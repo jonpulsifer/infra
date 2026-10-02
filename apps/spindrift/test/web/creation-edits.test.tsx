@@ -249,7 +249,10 @@ async function mount(draft: Draft) {
   };
 }
 
-const detected = (scope: string): InspectedScope => ({
+const detected = (
+  scope: string,
+  declaration: string | null = null,
+): InspectedScope => ({
   scope,
   outcome: 'detected',
   kind: 'service',
@@ -259,7 +262,7 @@ const detected = (scope: string): InspectedScope => ({
   buildCommand: null,
   outputDirectory: null,
   watchPaths: [scope],
-  configured: false,
+  declaration,
   unavailable: {},
 });
 
@@ -367,13 +370,38 @@ describe('the sentence a read left', () => {
       kind: 'unsupported',
       repo: 'example/almanac',
       scope: 'docs',
-      message: 'Spindrift does not know how to build docs in example/almanac',
+      message: 'kthx does not know how to build docs in example/almanac',
     };
     const named = draftReducer(repoDraft, { type: 'subpath', subpath: 'docs' });
     const moved = draftReducer(named, { type: 'subpath', subpath: 'apps/web' });
 
     expect(standingTrouble(named, about)).toBe(about);
     expect(standingTrouble(moved, about)).toBeNull();
+  });
+});
+
+describe('the file the configuration pull request commits', () => {
+  test('is a new kthx.yaml where the directory holds no kthx file', async () => {
+    scopes = [detected('.')];
+
+    const screen = await mount(repoDraft);
+
+    expect(screen.text()).toContain("What this App's kthx file would say");
+    expect(screen.text()).toContain('kthx.yaml');
+    expect(screen.text()).not.toContain('spindrift.yaml');
+
+    screen.unmount();
+  });
+
+  test('is the legacy spindrift.yaml the directory already holds', async () => {
+    scopes = [detected('.', 'spindrift.yaml')];
+
+    const screen = await mount(repoDraft);
+
+    expect(screen.text()).toContain('spindrift.yaml');
+    expect(screen.text()).not.toContain('kthx.yaml');
+
+    screen.unmount();
   });
 });
 

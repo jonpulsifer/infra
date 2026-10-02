@@ -4,14 +4,17 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { DetectionProposal } from '../../../src/domain/detection/ladder.ts';
-import { parseSpindriftFile } from '../../../src/domain/detection/spindrift-file.ts';
+import {
+  DECLARATION_FILE,
+  parseSpindriftFile,
+} from '../../../src/domain/detection/spindrift-file.ts';
 import { GitHubApp } from '../../../src/integrations/github/app.ts';
 import {
   buildWorkflowCaller,
   CONFIG_BRANCH,
   configurationTransaction,
   openConfigurationPullRequest,
-  SPINDRIFT_FILE,
+  RUN_NAME_PREFIX,
   serializeSpindriftFile,
   WORKFLOW_PATH,
 } from '../../../src/integrations/github/config-pr.ts';
@@ -51,7 +54,7 @@ function app(fake: FakeGitHub, customFetch?: typeof fetch): GitHubApp {
   });
 }
 
-describe('the Spindrift file Spindrift writes', () => {
+describe('the kthx file kthx writes', () => {
   test.each([
     ['a zero-config build', railpack],
     ['a Dockerfile build', dockerfile],
@@ -100,6 +103,7 @@ describe('the Spindrift file Spindrift writes', () => {
 
   test('is block-style YAML a person can edit', () => {
     const written = serializeSpindriftFile(railpack);
+    expect(written).toStartWith('# Managed by kthx, and yours to edit.\n');
     expect(written).toContain('component:\n  kind: website');
     expect(written).toContain('watchPaths:\n  - apps/site');
     expect(written).not.toContain('{');
@@ -119,6 +123,15 @@ describe('the CI caller', () => {
     expect(caller).toContain('packages: write');
     expect(caller).not.toMatch(/secrets\./);
   });
+
+  test('is checked as kthx while its runs keep the name the build route matches', () => {
+    const caller = buildWorkflowCaller(BUILD_WORKFLOW);
+    expect(caller).toContain('\nname: kthx\n');
+    expect(caller).toContain(
+      `\nrun-name: ${RUN_NAME_PREFIX} \${{ inputs.correlation }}\n`,
+    );
+    expect(caller).not.toContain('Spindrift');
+  });
 });
 
 describe('the transaction', () => {
@@ -132,11 +145,36 @@ describe('the transaction', () => {
     });
 
     expect(transaction.files.map((file) => file.path)).toEqual([
-      `apps/site/${SPINDRIFT_FILE}`,
-      `services/api/${SPINDRIFT_FILE}`,
+      'apps/site/kthx.yaml',
+      'services/api/kthx.yaml',
       WORKFLOW_PATH,
     ]);
     expect(transaction.branch).toBe(CONFIG_BRANCH);
+    expect(transaction.title).toBe(
+      'Connect this repository to kthx (2 scopes)',
+    );
+    expect(transaction.commitMessage).toBe('Add kthx configuration');
+    expect(transaction.body).not.toContain('Spindrift');
+  });
+
+  test('writes a legacy file back where it was read, and a new scope as kthx.yaml', () => {
+    const transaction = configurationTransaction({
+      scopes: [
+        {
+          scope: 'apps/site',
+          proposal: railpack,
+          declaration: 'apps/site/spindrift.yaml',
+        },
+        { scope: 'services/api', proposal: dockerfile },
+      ],
+      buildWorkflow: BUILD_WORKFLOW,
+    });
+
+    expect(transaction.files.map((file) => file.path)).toEqual([
+      'apps/site/spindrift.yaml',
+      'services/api/kthx.yaml',
+      WORKFLOW_PATH,
+    ]);
   });
 
   test('puts a root scope’s file at the repository root', () => {
@@ -144,7 +182,7 @@ describe('the transaction', () => {
       scopes: [{ scope: '.', proposal: railpack }],
       buildWorkflow: BUILD_WORKFLOW,
     });
-    expect(transaction.files[0]?.path).toBe(SPINDRIFT_FILE);
+    expect(transaction.files[0]?.path).toBe(DECLARATION_FILE);
   });
 
   test('refuses to be a pull request about nothing', () => {
@@ -179,7 +217,7 @@ describe('opening it against the repository API', () => {
     return { opened, transaction, base };
   }
 
-  test('writes exactly the Spindrift files plus one workflow caller', async () => {
+  test('writes exactly the kthx files plus one workflow caller', async () => {
     const fake = new FakeGitHub();
     const { opened, base } = await open(fake);
 
@@ -190,15 +228,15 @@ describe('opening it against the repository API', () => {
     expect(added.sort()).toEqual(
       [
         WORKFLOW_PATH,
-        `apps/site/${SPINDRIFT_FILE}`,
-        `services/api/${SPINDRIFT_FILE}`,
+        `apps/site/${DECLARATION_FILE}`,
+        `services/api/${DECLARATION_FILE}`,
       ].sort(),
     );
     expect(after['README.md']).toBe('the repository as it was');
     expect(after['apps/site/package.json']).toBe('{}');
     expect(after[WORKFLOW_PATH]).toContain(`uses: ${BUILD_WORKFLOW}`);
     expect(
-      parseSpindriftFile(after[`services/api/${SPINDRIFT_FILE}`] ?? '').build,
+      parseSpindriftFile(after[`services/api/${DECLARATION_FILE}`] ?? '').build,
     ).toEqual(dockerfile.build);
   });
 

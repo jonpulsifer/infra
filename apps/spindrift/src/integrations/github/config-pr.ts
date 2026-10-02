@@ -1,15 +1,14 @@
 /**
  * The configuration pull request: one per repository, one commit holding each
- * scope's `spindrift.yaml` and one CI caller. Nothing takes effect until it is
- * merged to the default branch.
+ * scope's kthx file and one CI caller. Nothing takes effect until it is merged
+ * to the default branch.
  */
 import type { DetectionProposal } from '../../domain/detection/ladder.ts';
+import { declarationPath } from '../../domain/detection/spindrift-file.ts';
 import type {
   RepositoryRef,
   RepositoryWriter,
 } from '../../domain/repository.ts';
-
-export const SPINDRIFT_FILE = 'spindrift.yaml';
 
 export const WORKFLOW_PATH = '.github/workflows/spindrift.yml';
 
@@ -30,6 +29,8 @@ export interface ConfigurationScope {
   /** Repo-relative directory; `.` is the root. */
   readonly scope: string;
   readonly proposal: DetectionProposal;
+  /** The repo-relative kthx file the proposal was read from; written back there. */
+  readonly declaration?: string;
 }
 
 export interface ConfigurationFile {
@@ -71,9 +72,9 @@ export function serializeSpindriftFile(
   proposal: Pick<DetectionProposal, 'kind' | 'build' | 'watchPaths'>,
 ): string {
   const lines = [
-    '# Managed by Spindrift, and yours to edit.',
+    '# Managed by kthx, and yours to edit.',
     '#',
-    '# This file is what Spindrift knows about this directory. Once it is on the',
+    '# This file is what kthx knows about this directory. Once it is on the',
     '# default branch it is authoritative: what is written here wins over what',
     '# detection would otherwise guess.',
     'version: 1',
@@ -105,22 +106,22 @@ export function serializeSpindriftFile(
  * A called workflow can only narrow the token, so permissions are granted here.
  */
 export function buildWorkflowCaller(buildWorkflow: string): string {
-  return `# Managed by Spindrift.
+  return `# Managed by kthx.
 #
-# Spindrift dispatches this workflow when it needs a build. The run happens
-# here, on this repository’s own Actions minutes; everything it does lives in
-# the reusable workflow below, which the platform versions.
-name: ${RUN_NAME_PREFIX}
+# kthx dispatches this workflow when it needs a build. The run happens here,
+# on this repository’s own Actions minutes; everything it does lives in the
+# reusable workflow below, which the platform versions.
+name: kthx
 run-name: ${RUN_NAME_PREFIX} \${{ inputs.correlation }}
 on:
   workflow_dispatch:
     inputs:
       spec:
-        description: The build request, as JSON. Spindrift fills this in.
+        description: The build request, as JSON. kthx fills this in.
         required: true
         type: string
       correlation:
-        description: How Spindrift finds this run again. Not a build input.
+        description: How kthx finds this run again. Not a build input.
         required: true
         type: string
 permissions:
@@ -143,13 +144,13 @@ function pullRequestBody(scopes: readonly ConfigurationScope[]): string {
     )
     .join('\n');
 
-  return `Spindrift wrote this. Merging it into the default branch is what connects this repository — nothing here takes effect until then, and an unmerged or closed pull request changes nothing.
+  return `kthx wrote this. Merging it into the default branch is what connects this repository — nothing here takes effect until then, and an unmerged or closed pull request changes nothing.
 
 | scope | kind | build | proposed by |
 | --- | --- | --- | --- |
 ${rows}
 
-Each \`${SPINDRIFT_FILE}\` is yours to edit, here or later. Once it is on the default branch it wins over detection.
+Each scope's kthx file is yours to edit, here or later. Once it is on the default branch it wins over detection.
 
 \`${WORKFLOW_PATH}\` runs builds for this repository on its own Actions minutes. It calls a reusable workflow the platform versions.
 `;
@@ -167,8 +168,8 @@ export function configurationTransaction(input: {
   }
 
   const files: ConfigurationFile[] = input.scopes.map(
-    ({ scope, proposal }) => ({
-      path: scope === '.' ? SPINDRIFT_FILE : `${scope}/${SPINDRIFT_FILE}`,
+    ({ scope, proposal, declaration }) => ({
+      path: declaration ?? declarationPath(scope),
       contents: serializeSpindriftFile(proposal),
     }),
   );
@@ -181,9 +182,9 @@ export function configurationTransaction(input: {
     input.scopes.length === 1 ? '1 scope' : `${input.scopes.length} scopes`;
   return {
     branch: CONFIG_BRANCH,
-    title: `Connect this repository to Spindrift (${scopeCount})`,
+    title: `Connect this repository to kthx (${scopeCount})`,
     body: pullRequestBody(input.scopes),
-    commitMessage: 'Add Spindrift configuration',
+    commitMessage: 'Add kthx configuration',
     files,
   };
 }
