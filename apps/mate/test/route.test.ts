@@ -12,14 +12,7 @@ import {
   spyOn,
   test,
 } from 'bun:test';
-import {
-  AgentHarness,
-  type AgentHarnessTool,
-  type AgentMessage,
-  BACKGROUND_CONTEXT,
-  MemorySessionRepo,
-  type ThinkingLevel,
-} from '@earendil-works/pi-agent-core';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import {
   type Api,
   type AssistantMessage,
@@ -36,15 +29,24 @@ import {
   isContextOverflow,
   isRetryableAssistantError,
   type JsonValue,
+  type Message,
   type Model,
   type Models,
   type OAuthCredential,
   type SimpleStreamOptions,
+  type ModelThinkingLevel as ThinkingLevel,
   type TranscriptContext,
   Type,
 } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { opencodeGoProvider } from '@earendil-works/pi-ai/providers/opencode-go';
+import {
+  createRegistry,
+  defineExtension,
+  defineTool,
+  Harness,
+  MemoryStorage,
+} from '@earendil-works/pi-durable';
 import {
   LIMIT_FALLBACK,
   PRIMARY_REFUSING,
@@ -462,25 +464,29 @@ const LIMIT_SSE =
   'You have hit your ChatGPT usage limit (prolite plan). Try again in ~30 min.';
 const LIMIT_WS = 'Codex error: The usage limit has been reached';
 
-const echo: AgentHarnessTool<undefined> = {
+const echo = defineTool({
   name: 'echo',
-  label: 'echo',
   description: 'Says its text back.',
   parameters: Type.Object({ text: Type.String() }),
-  execute: async (_id, params) => ({
-    content: [{ type: 'text', text: (params as { text: string }).text }],
-    details: undefined,
-  }),
-};
+  replay: 'safe',
+  execute: async (args) => ({ content: [{ type: 'text', text: args.text }] }),
+});
 
-function said(message: AgentMessage): string {
-  if (!('role' in message)) return 'custom';
+// pi-durable sends no sessionId, so the harness is given Models that add one.
+function withSession(models: Models, sessionId: string): Models {
+  return {
+    ...models,
+    streamSimple: (model, context, options) =>
+      models.streamSimple(model, context, { ...options, sessionId }),
+  };
+}
+
+function said(message: Message): string {
   if (message.role !== 'assistant') return message.role;
   return `${message.provider}/${message.model}:${message.stopReason}`;
 }
 
 describe('the harness', () => {
-  // The research left open whether AgentHarness takes a wrapped Models; this settles it.
   test('runs a tool turn over the routed Models, and the step ChatGPT cannot answer goes to qwen3.8-max inside it', async () => {
     const made = await signedIn({ fallbackThinking: 'low' });
     made.codex.script(
@@ -488,38 +494,40 @@ describe('the harness', () => {
       { fail: LIMIT_WS, started: true },
     );
     made.go.script({ text: 'echo said hi' });
-    const session = await new MemorySessionRepo().create(
-      { id: 'session-1' },
-      ctx,
-    );
-    const { harness } = await AgentHarness.create<undefined>(
+    const registry = createRegistry();
+    registry.install(defineExtension({ name: 'echo', tools: [echo] }));
+    const harness = await Harness.open(
+      new MemoryStorage(),
       {
-        session,
-        models: made.models,
-        model: SOL,
-        thinkingLevel: 'high',
-        tools: [echo],
-        systemPrompt: 'You help.',
-        streamOptions: { timeoutMs: 240_000 },
-        retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
+        models: withSession(made.models, SESSION),
+        registry,
+        settings: {
+          stream: { timeoutMs: 240_000 },
+          retry: { maxRetries: 1, baseDelayMs: 1 },
+        },
       },
       ctx,
     );
     try {
-      const lane = await harness.lane('main', ctx);
-      const run = await lane.prompt('say hi through echo', undefined, ctx);
-      expect(run.ok && 'status' in run.value && run.value.status).toBe(
-        'completed',
-      );
-      const entries = await lane.findEntries(
-        { type: 'message', order: 'newestFirst', limit: 10 },
+      const root = await harness.root(ctx, {
+        agent: {
+          model: { provider: CHATGPT_PROVIDER, modelId: SOL.id },
+          thinkingLevel: 'high',
+          instructions: 'You help.',
+        },
+      });
+      const submission = await root.submit(
+        { type: 'input', content: 'say hi through echo' },
         ctx,
       );
-      const messages = entries
-        .flatMap((entry) => (entry.type === 'message' ? [entry.message] : []))
-        .reverse();
+      expect((await submission.wait(ctx)).status).toBe('done');
+      const page = await root.entries({}, 100, undefined, ctx);
+      const messages = [...page.items]
+        .reverse()
+        .flatMap((entry) => entry.model ?? []);
       expect(messages.map(said)).toEqual([
         'user',
+        'system',
         'openai-codex/gpt-6-sol:toolUse',
         'toolResult',
         'opencode-go/qwen3.8-max:stop',
@@ -531,14 +539,14 @@ describe('the harness', () => {
       ]);
       expect(made.go.calls.map((call) => call.reasoning)).toEqual(['low']);
       expect(made.go.calls[0]?.messages.map((m) => m.role)).toEqual([
-        'system',
         'user',
+        'system',
         'assistant',
         'toolResult',
       ]);
       expect(made.events.map((e) => [e.route, e.reason, e.sessionId])).toEqual([
-        ['primary', null, 'session-1:main'],
-        ['fallback', 'limit', 'session-1:main'],
+        ['primary', null, SESSION],
+        ['fallback', 'limit', SESSION],
       ]);
     } finally {
       await harness.close(ctx);

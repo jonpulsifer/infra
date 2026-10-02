@@ -4,23 +4,24 @@
  * lists again runs on a FakeClock.
  */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { tmpdir } from 'node:os';
 import {
-  AgentHarness,
-  type AgentHarnessToolInvocation,
   BACKGROUND_CONTEXT,
-  type ExecutionEnv,
-  MemorySessionRepo,
   withAbortSignal,
-} from '@earendil-works/pi-agent-core';
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
+} from '@earendil-works/chord/context';
+import { createModels, validateToolArguments } from '@earendil-works/pi-ai';
 import {
-  createModels,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
-  validateToolArguments,
-} from '@earendil-works/pi-ai';
+} from '@earendil-works/pi-ai/providers/faux';
+import {
+  createRegistry,
+  defineExtension,
+  Harness,
+  MemoryStorage,
+  type ToolExecutionApi,
+  type ToolExecutionResult,
+} from '@earendil-works/pi-durable';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   type BridgedTool,
@@ -119,18 +120,31 @@ function run(
   const context = signal
     ? withAbortSignal(signal, BACKGROUND_CONTEXT)
     : BACKGROUND_CONTEXT;
-  return bridged.execute(
-    'call-1',
-    args,
-    () => {},
-    { env: {} as ExecutionEnv },
-    {} as AgentHarnessToolInvocation,
-    context,
-  );
+  return bridged.execute(args, {} as ToolExecutionApi, context);
 }
 
-function text(result: { content: { type: string; text?: string }[] }) {
-  return result.content.map((c) => c.text ?? '').join('');
+function text(result: Pick<ToolExecutionResult, 'content'>) {
+  return (result.content ?? [])
+    .map((c) => (c.type === 'text' ? c.text : ''))
+    .join('');
+}
+
+// The MCP tool a bridged tool calls, seen by the server.
+async function target(server: FakeMcp, bridged: BridgedTool): Promise<string> {
+  const before = server.calls('tools/call').length;
+  await run(bridged, {});
+  return String(server.calls('tools/call')[before]?.params?.name);
+}
+
+async function targets(
+  server: FakeMcp,
+  bridge: McpBridge,
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  for (const bridged of bridge.tools()) {
+    found.set(await target(server, bridged), bridged.name);
+  }
+  return found;
 }
 
 // Lets the timer list again, and waits for that listing to land.
@@ -153,35 +167,28 @@ function slowly(server: FakeMcp, name: string): () => void {
   return () => release();
 }
 
-async function failure(call: Promise<unknown>): Promise<string> {
-  const error = await call.then(
-    () => null,
-    (e: unknown) => e,
-  );
-  if (!(error instanceof Error)) throw new Error('the call did not fail');
-  return error.message;
+async function failure(call: Promise<ToolExecutionResult>): Promise<string> {
+  const result = await call;
+  if (!result.isError) throw new Error('the call did not fail');
+  return text(result);
 }
 
 async function harnessWith(tools: readonly BridgedTool[]) {
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
-  const session = await new MemorySessionRepo().create(
-    { id: `mcp-${Math.random().toString(36).slice(2)}` },
+  const registry = createRegistry();
+  registry.install(defineExtension({ name: 'mcp', tools: [...tools] }));
+  const harness = await Harness.open(
+    new MemoryStorage(),
+    { models, registry },
     BACKGROUND_CONTEXT,
   );
-  const { harness } = await AgentHarness.create(
-    {
-      session,
-      models,
-      model: faux.getModel(),
-      tools: [...tools],
-      toolContext: { env: new NodeExecutionEnv({ cwd: tmpdir() }) },
-      systemPrompt: 'test',
-    },
-    BACKGROUND_CONTEXT,
-  );
-  return { faux, harness };
+  const { provider, id } = faux.getModel();
+  const root = await harness.root(BACKGROUND_CONTEXT, {
+    agent: { model: { provider, modelId: id } },
+  });
+  return { faux, harness, root };
 }
 
 describe('createMcpBridge', () => {
@@ -189,7 +196,7 @@ describe('createMcpBridge', () => {
     ['JSON', false],
     ['SSE', true],
   ])(
-    'lists every tool prefixed, never replayed, with schemas pi validates (%s responses)',
+    'lists every tool prefixed, never replayed after a crash, with schemas pi validates (%s responses)',
     async (_mode, sse) => {
       const server = serve(
         new FakeMcp({
@@ -211,10 +218,9 @@ describe('createMcpBridge', () => {
       ]);
       for (const t of tools) {
         expect(t.name.startsWith(KTHX_TOOL_PREFIX)).toBe(true);
-        expect(t.replay).toBe('never');
+        expect(t.replay).toBe('unsafe');
       }
       const deploy = named(r.bridge, 'kthx_deployApp');
-      expect(deploy.label).toBe('kthx deployApp');
       expect(deploy.description).toBe('The deployApp command');
       const call = { type: 'toolCall' as const, id: 'c', name: deploy.name };
       expect(
@@ -261,7 +267,7 @@ describe('createMcpBridge', () => {
     const r = rig(server);
     await listed(r);
 
-    const { faux, harness } = await harnessWith(r.bridge.tools());
+    const { faux, harness, root } = await harnessWith(r.bridge.tools());
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall('kthx_echo', { app: 'wishin' }), {
         stopReason: 'toolUse',
@@ -271,16 +277,26 @@ describe('createMcpBridge', () => {
       }),
       fauxAssistantMessage('done'),
     ]);
-    const ended: { name: string; isError: boolean; text: string }[] = [];
-    harness.events.on('tool_end', (event) => {
-      ended.push({
-        name: event.toolName,
-        isError: event.isError,
-        text: text(event.result),
-      });
-    });
-    const lane = await harness.lane('main', BACKGROUND_CONTEXT);
-    await lane.prompt('ship it', undefined, BACKGROUND_CONTEXT);
+    const submission = await root.submit(
+      { type: 'input', content: 'ship it' },
+      BACKGROUND_CONTEXT,
+    );
+    await submission.wait(BACKGROUND_CONTEXT);
+    const page = await root.entries({}, 100, undefined, BACKGROUND_CONTEXT);
+    const ended = [...page.items]
+      .reverse()
+      .flatMap((entry) => entry.model ?? [])
+      .flatMap((message) =>
+        message.role === 'toolResult'
+          ? [
+              {
+                name: message.toolName,
+                isError: message.isError,
+                text: text(message),
+              },
+            ]
+          : [],
+      );
     await harness.close(BACKGROUND_CONTEXT);
 
     expect(ended).toEqual([
@@ -337,10 +353,10 @@ describe('createMcpBridge', () => {
     const echo = named(r.bridge, 'kthx_echo');
 
     await server.stop();
-    await expect(run(echo, { app: 'a' })).rejects.toThrow(UNREACHABLE);
+    expect(await failure(run(echo, { app: 'a' }))).toContain(UNREACHABLE);
     await eventually(() => r.metrics.up.length === 3, 'the reconnect');
     expect(r.bridge.tools().map((t) => t.name)).toEqual(['kthx_echo']);
-    await expect(run(echo, { app: 'a' })).rejects.toThrow(UNREACHABLE);
+    expect(await failure(run(echo, { app: 'a' }))).toContain(UNREACHABLE);
     expect(r.metrics.calls).toEqual(['unavailable', 'unavailable']);
     expect(r.metrics.up).toEqual([true, false, false]);
 
@@ -476,6 +492,39 @@ describe('createMcpBridge', () => {
     );
   });
 
+  test('a long multi-line result reaches the model cut once, by the bridge', async () => {
+    const server = serve(new FakeMcp({ tools: [tool('logs')] }));
+    const lines = Array.from({ length: 5_000 }, () => 'x'.repeat(20)).join(
+      '\n',
+    );
+    server.handlers.set('logs', () => ({
+      content: [{ type: 'text', text: lines }],
+    }));
+    const r = rig(server);
+    await listed(r);
+    const { faux, harness, root } = await harnessWith(r.bridge.tools());
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('kthx_logs', { app: 'a' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('done'),
+    ]);
+    const submission = await root.submit(
+      { type: 'input', content: 'logs' },
+      BACKGROUND_CONTEXT,
+    );
+    await submission.wait(BACKGROUND_CONTEXT);
+    const page = await root.entries({}, 100, undefined, BACKGROUND_CONTEXT);
+    const [result] = page.items
+      .flatMap((entry) => entry.model ?? [])
+      .flatMap((message) => (message.role === 'toolResult' ? [message] : []));
+    await harness.close(BACKGROUND_CONTEXT);
+
+    expect(text(result!)).toBe(
+      `${lines.slice(0, MAX_RESULT_CHARS)}\n[kthx output cut to ${MAX_RESULT_CHARS} of ${lines.length} characters]`,
+    );
+  });
+
   test('a call waits for the bridge timeout, not the SDK default', async () => {
     const server = serve(new FakeMcp({ tools: [tool('echo')] }));
     server.handlers.set('echo', () => ({
@@ -531,7 +580,9 @@ describe('createMcpBridge', () => {
     expect(only!.name.startsWith('kthx_site_deploy_with_spaces_xxx')).toBe(
       true,
     );
-    expect(only!.label).toBe(`kthx ${odd}`);
+    expect(await targets(server, r.bridge)).toEqual(
+      new Map([[odd, only!.name]]),
+    );
   });
 
   test('names that sanitize alike stay distinct, and keep their names across listings and tool sets', async () => {
@@ -546,27 +597,25 @@ describe('createMcpBridge', () => {
     const server = serve(new FakeMcp({ tools: names.map((n) => tool(n)) }));
     const r = rig(server);
     await listed(r);
-    const byLabel = () =>
-      new Map(r.bridge.tools().map((t) => [t.label, t.name]));
-    const first = byLabel();
+    const first = await targets(server, r.bridge);
 
     expect(first.size).toBe(5);
     expect(new Set(first.values()).size).toBe(5);
-    expect(first.get('kthx app_deploy')).toBe('kthx_app_deploy');
+    expect(first.get('app_deploy')).toBe('kthx_app_deploy');
     for (const name of first.values()) {
       expect(name).toMatch(/^kthx_[A-Za-z0-9_-]{1,59}$/);
     }
-    expect(first.get('kthx app.deploy')).toMatch(
-      /^kthx_app_deploy_[0-9a-f]{6}$/,
-    );
-    expect(first.get(`kthx ${long}a`)).toHaveLength(64);
-    expect(first.get(`kthx ${long}b`)).toHaveLength(64);
+    expect(first.get('app.deploy')).toMatch(/^kthx_app_deploy_[0-9a-f]{6}$/);
+    expect(first.get(`${long}a`)).toHaveLength(64);
+    expect(first.get(`${long}b`)).toHaveLength(64);
     expect(r.log.of('kthx MCP tool renamed')).toHaveLength(4);
 
     server.tools = [...names.map((n) => tool(n)).reverse(), tool('app/deploy')];
     await relist(r);
-    const second = byLabel();
-    for (const [label, name] of first) expect(second.get(label)).toBe(name);
+    const second = await targets(server, r.bridge);
+    for (const [mcpName, name] of first) {
+      expect(second.get(mcpName)).toBe(name);
+    }
     expect(new Set(second.values()).size).toBe(6);
 
     const reversed = serve(
@@ -574,14 +623,12 @@ describe('createMcpBridge', () => {
     );
     const other = rig(reversed);
     await listed(other);
-    expect(new Map(other.bridge.tools().map((t) => [t.label, t.name]))).toEqual(
-      first,
-    );
+    expect(await targets(reversed, other.bridge)).toEqual(first);
 
     const alone = rig(serve(new FakeMcp({ tools: [tool('app.deploy')] })));
     await listed(alone);
     expect(alone.bridge.tools().map((t) => t.name)).toEqual([
-      first.get('kthx app.deploy')!,
+      first.get('app.deploy')!,
     ]);
 
     const { harness } = await harnessWith(r.bridge.tools());
@@ -674,9 +721,9 @@ describe('several servers', () => {
     bridge.start();
     expect(await bridge.ready(MCP_CONNECT_TIMEOUT_MS)).toBe(true);
 
-    expect(bridge.tools().map((t) => [t.name, t.label])).toEqual([
-      ['weather_forecast', 'weather forecast'],
-    ]);
+    expect(await targets(server, bridge)).toEqual(
+      new Map([['forecast', 'weather_forecast']]),
+    );
     expect(server.requests.length).toBeGreaterThan(1);
     for (const request of server.requests) {
       expect(request.authorization).toBeNull();

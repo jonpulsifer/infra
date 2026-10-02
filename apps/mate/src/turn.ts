@@ -3,7 +3,8 @@
  * `Update`s. Tool calls go out both as cards and as the status line; each
  * surface shows the one it can.
  */
-import type { AgentMessage, HarnessEvent } from '@earendil-works/pi-agent-core';
+import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
+import type { AgentEvent, MessageChange } from '@earendil-works/pi-durable';
 import type { Clock, Handle } from './clock.ts';
 import {
   type LeaseEvent,
@@ -161,11 +162,14 @@ export class SandboxCard {
   }
 }
 
-function spokenText(message: AgentMessage): string {
-  if (!('role' in message) || message.role !== 'assistant') return '';
+function spokenText(message: AssistantMessage): string {
   return message.content
     .map((block) => (block.type === 'text' ? block.text : ''))
     .join('');
+}
+
+function assistant(message: Message | undefined): AssistantMessage | null {
+  return message?.role === 'assistant' ? message : null;
 }
 
 export class TurnTranslator {
@@ -181,8 +185,8 @@ export class TurnTranslator {
   /** Says why the fallback answers, until it streams text or calls a tool. */
   private routing: string | null = null;
   private readonly routes = new Set<Route>();
-  /** Whether the assistant message now open has streamed any text. */
-  private streamed = false;
+  /** The text already sent of the assistant message now open. */
+  private shown = '';
   /** SIGTERM: the card is left as it was, so nothing more is drawn. */
   private stopped = false;
   firstTokenMs: number | null = null;
@@ -192,6 +196,8 @@ export class TurnTranslator {
     private readonly sink: PromptSink,
     private readonly clock: Clock,
     private readonly metrics: Pick<Instruments, 'toolEnded'>,
+    /** pi's retries of one model request, for the status line. */
+    private readonly maxRetries = 0,
   ) {
     this.startedAt = clock.now();
     this.card = new SandboxCard((call) => this.tool(call), clock);
@@ -235,18 +241,22 @@ export class TurnTranslator {
   }
 
   /** Sync and never throws: pi awaits its listeners. */
-  event(event: HarnessEvent): void {
+  event(event: AgentEvent): void {
     switch (event.type) {
-      case 'message_start':
-        if (isAssistant(event.message)) this.streamed = false;
+      case 'message_start': {
+        const message = assistant(event.message);
+        if (!message) return;
+        this.shown = '';
+        this.say(spokenText(message));
         return;
+      }
       case 'message_update':
-        this.update(event.event);
+        for (const change of event.changes) this.update(change);
         return;
       case 'message_end':
-        this.recovered(event.message);
+        this.ended(assistant(event.entry.model?.[0]));
         return;
-      case 'tool_start':
+      case 'tool_execution_start':
         this.retrying = null;
         this.routing = null;
         this.tool({
@@ -255,24 +265,24 @@ export class TurnTranslator {
           state: 'in_progress',
         });
         return;
-      case 'tool_end': {
+      case 'tool_execution_end': {
         const known = this.tools.get(event.toolCallId);
-        this.metrics.toolEnded(event.toolName, event.isError);
+        const result = event.entry?.model?.[0];
+        // No entry: the tool task faulted before it wrote a result.
+        const isError = result?.role !== 'toolResult' || result.isError;
+        this.metrics.toolEnded(event.toolName, isError);
         this.tool({
           id: event.toolCallId,
           title:
             known?.title ??
             this.seeded.get(event.toolCallId) ??
             toolTitle(event.toolName, undefined),
-          state: event.isError ? 'error' : 'complete',
+          state: isError ? 'error' : 'complete',
         });
         return;
       }
-      case 'usage':
-        this.costUsd += event.row.usage.cost.total;
-        return;
-      case 'retry_scheduled':
-        this.retrying = `⏳ the model stumbled — retrying (${event.attempt}/${event.maxAttempts})`;
+      case 'auto_retry_start':
+        this.retrying = `⏳ the model stumbled — retrying (${event.attempt}/${Math.max(event.attempt, this.maxRetries)})`;
         this.refresh();
         return;
       case 'run_end':
@@ -298,35 +308,54 @@ export class TurnTranslator {
     this.card.end();
   }
 
-  private update(
-    event: Extract<HarnessEvent, { type: 'message_update' }>['event'],
-  ) {
-    if (event.type === 'text_delta' && event.delta) {
-      this.firstTokenMs ??= this.clock.now() - this.startedAt;
-      this.sawText = true;
-      this.streamed = true;
-      this.retrying = null;
-      this.routing = null;
-      this.send({ kind: 'text', delta: event.delta });
-      this.refresh();
-    } else if (event.type === 'thinking_delta') {
-      this.thinking = true;
-      this.retrying = null;
-      this.refresh();
+  private update(change: MessageChange): void {
+    switch (change.type) {
+      case 'text_start':
+        if (change.block.type === 'text') this.say(change.block.text);
+        return;
+      case 'text_delta':
+        this.say(change.delta);
+        return;
+      case 'thinking_start':
+      case 'thinking_delta':
+        this.thinking = true;
+        this.retrying = null;
+        this.refresh();
+        return;
+      case 'message':
+        this.rest(change.message);
+        return;
+      default:
+        return;
     }
   }
 
-  // A recovered message arrives whole, with no deltas; it is drawn once.
-  private recovered(message: AgentMessage): void {
-    if (!isAssistant(message)) return;
-    const streamed = this.streamed;
-    this.streamed = false;
-    if (streamed) return;
+  /**
+   * pi commits a partial at most every 100 ms, so a short answer arrives
+   * whole here. A partial a restart cut off ends `aborted` with nothing
+   * shown: its text went to the card of the process that streamed it.
+   */
+  private ended(message: AssistantMessage | null): void {
+    if (!message) return;
+    this.costUsd += message.usage.cost.total;
+    if (message.stopReason !== 'aborted' || this.shown) this.rest(message);
+    this.shown = '';
+  }
+
+  /** Sends what `message` says beyond the text already sent. */
+  private rest(message: AssistantMessage): void {
     const text = spokenText(message);
-    if (!text) return;
+    if (text.startsWith(this.shown)) this.say(text.slice(this.shown.length));
+  }
+
+  private say(delta: string): void {
+    if (!delta) return;
+    this.shown += delta;
     this.firstTokenMs ??= this.clock.now() - this.startedAt;
     this.sawText = true;
-    this.send({ kind: 'text', delta: text });
+    this.retrying = null;
+    this.routing = null;
+    this.send({ kind: 'text', delta });
     this.refresh();
   }
 
@@ -361,8 +390,4 @@ export class TurnTranslator {
   private send(update: Update): void {
     if (!this.stopped) this.sink.update(update);
   }
-}
-
-function isAssistant(message: AgentMessage): boolean {
-  return 'role' in message && message.role === 'assistant';
 }

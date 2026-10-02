@@ -4,9 +4,10 @@
  * resolves paths in the brain, never throws, and gives up on a call the
  * daemon does not answer.
  */
+import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
+import type { Context } from '@earendil-works/chord';
 import {
-  type Context,
   type ExecutionEnv,
   ExecutionError,
   type ExecutionErrorCode,
@@ -15,12 +16,14 @@ import {
   type FileErrorCode,
   type FileInfo,
   ok,
+  type Result,
   type ShellExecOptions,
   type ShellExecResult,
-} from '@earendil-works/pi-agent-core';
+} from '@earendil-works/pi-durable/env';
 import {
   HandsError,
   resolvePath,
+  type ShellOutputUpdate,
   type TextLine,
 } from '@repo/mate-hands/protocol';
 import { type Clock, type Handle, systemClock } from './clock.ts';
@@ -50,7 +53,6 @@ export const OPEN_BACKOFF_MS = 3_000;
 const STDERR_LINE_LIMIT = 500;
 const CLOSE_STATUS_MS = 1_000;
 
-type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 type TextLineReader = Extract<
   Awaited<ReturnType<ExecutionEnv['openTextLineReader']>>,
   { ok: true }
@@ -383,6 +385,8 @@ export interface LeaseAccess {
 }
 
 export interface HandsEnvOptions {
+  /** The file namespace's name; defaults to one unique to this env. */
+  readonly id?: string;
   readonly cwd?: string;
   readonly home?: string;
   /** The running turn's lease, or `null` outside a turn. */
@@ -413,16 +417,19 @@ const ABORTED: Failure = { code: 'aborted', message: 'aborted' };
 const READER_CLOSED = 'Text line reader is closed';
 
 /**
- * pi's `ExecutionEnv` for one thread, the same object for the thread's life,
- * since pi keys its write queue on it. A call outside a turn fails; a call in
- * one leases the thread's sandbox on first use.
+ * pi's `ExecutionEnv` for one thread, the same object for the thread's life.
+ * Its `id` names the thread's sandboxes, which no other thread holds, and pi
+ * keys its write queue on it. A call outside a turn fails; a call in one
+ * leases the thread's sandbox on first use.
  */
 export class HandsEnv implements ExecutionEnv {
+  readonly id: string;
   cwd: string;
   private readonly home: string;
   private readonly clock: Clock;
 
   constructor(private readonly opts: HandsEnvOptions) {
+    this.id = opts.id ?? `mate-hands:${randomUUID()}`;
     this.cwd = opts.cwd ?? WORKSPACE;
     this.home = opts.home ?? AGENT_HOME;
     this.clock = opts.clock ?? systemClock;
@@ -538,6 +545,21 @@ export class HandsEnv implements ExecutionEnv {
     );
   }
 
+  async truncateFile(
+    path: string,
+    _size: number,
+    _context: Context,
+  ): Promise<Result<void, FileError>> {
+    return notSupported('truncateFile', this.resolve(path));
+  }
+
+  async flushFile(
+    path: string,
+    _context: Context,
+  ): Promise<Result<void, FileError>> {
+    return notSupported('flushFile', this.resolve(path));
+  }
+
   renameFile(
     sourcePath: string,
     destinationPath: string,
@@ -644,7 +666,22 @@ export class HandsEnv implements ExecutionEnv {
     options: ShellExecOptions | undefined,
     context: Context,
   ): Promise<Result<ShellExecResult, ExecutionError>> {
-    const onUpdate = options?.onUpdate;
+    const { onOutput, spill } = options ?? {};
+    let spillPath: string | undefined;
+    let tail = '';
+    const onUpdate = (update: ShellOutputUpdate) => {
+      const view = update.kind === 'replace' ? update.output : update.metadata;
+      spillPath = view.spillPath ?? spillPath;
+      // pi takes appended chunks only, and a `replace` carries the whole
+      // tail again: what the earlier chunks already said is left out.
+      const text =
+        update.kind === 'replace'
+          ? unseen(tail, update.output.text)
+          : outputText(update);
+      tail = update.kind === 'replace' ? update.output.text : tail + text;
+      if (tail.length > TAIL_KEPT) tail = tail.slice(-TAIL_KEPT);
+      if (text !== '') onOutput?.(text, context);
+    };
     const params = {
       command,
       cwd: options?.cwd ? this.resolve(options.cwd) : this.cwd,
@@ -653,23 +690,36 @@ export class HandsEnv implements ExecutionEnv {
         ? {}
         : { inheritEnv: options.inheritEnv }),
       ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
-      ...(options?.capture === undefined ? {} : { capture: options.capture }),
-      updates: Boolean(onUpdate),
+      ...(spill === undefined
+        ? {}
+        : {
+            capture: {
+              limits: {
+                maxBytes: wireLimit(spill.afterBytes),
+                maxLines: wireLimit(spill.afterLines),
+                retain: 'tail' as const,
+              },
+              spill: true,
+            },
+          }),
+      updates: Boolean(onOutput || spill),
     };
     const outcome = await this.invoke(
       'exec',
       'exec',
       context,
-      (client, signal) =>
-        client.call('exec', params, {
-          signal,
-          // A throw here is the client's callback_error, as it is pi's.
-          onUpdate: onUpdate && ((update) => onUpdate(update, context)),
-        }),
+      (client, signal) => client.call('exec', params, { signal, onUpdate }),
     );
-    if (outcome.ok) return ok(outcome.value);
+    if (outcome.ok) {
+      const path = outcome.value.spillPath ?? spillPath;
+      const result: ShellExecResult = { exitCode: outcome.value.exitCode };
+      if (path !== undefined) result.spillPath = path;
+      return ok(result);
+    }
     const { code, message } = outcome.failure;
-    return err(new ExecutionError(code as ExecutionErrorCode, message));
+    const error = new ExecutionError(code as ExecutionErrorCode, message);
+    if (spillPath !== undefined) error.spillPath = spillPath;
+    return err(error);
   }
 
   /** Never connects: with no open link there is nothing to release. */
@@ -862,6 +912,48 @@ class HandsLineReader implements TextLineReader {
       .call('reader.close', { reader: this.reader })
       .catch(() => {});
   }
+}
+
+function notSupported(method: string, path: string): Result<never, FileError> {
+  return err(
+    new FileError('not_supported', `the sandbox daemon has no ${method}`, path),
+  );
+}
+
+function outputText(update: ShellOutputUpdate): string {
+  return update.kind === 'replace'
+    ? update.output.text
+    : 'text' in update
+      ? update.text
+      : '';
+}
+
+/** How much delivered output is kept to match a `replace` against. */
+const TAIL_KEPT = 256 * 1024;
+
+/** `text` without its longest start that `tail` already ends with. */
+export function unseen(tail: string, text: string): string {
+  const probe = text.slice(0, 32);
+  if (!probe) return text;
+  for (
+    let at = tail.indexOf(probe, Math.max(0, tail.length - text.length));
+    at >= 0;
+    at = tail.indexOf(probe, at + 1)
+  ) {
+    if (text.startsWith(tail.slice(at))) return text.slice(tail.length - at);
+  }
+  // A start shorter than the probe can still overlap the tail's end.
+  for (let size = Math.min(probe.length - 1, tail.length); size > 0; size--) {
+    if (tail.endsWith(text.slice(0, size))) return text.slice(size);
+  }
+  return text;
+}
+
+/** A positive whole limit on the wire, where JSON has no infinity. */
+function wireLimit(limit: number): number {
+  return Number.isFinite(limit)
+    ? Math.max(1, Math.floor(limit))
+    : Number.MAX_SAFE_INTEGER;
 }
 
 /** A whole count on the wire: pi reads while `lines < maxLines`, so it rounds up. */

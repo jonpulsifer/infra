@@ -5,8 +5,9 @@
  * failure. A breaker shared by every thread keeps requests off ChatGPT while
  * it is known down, and one request at a time tries it again, over SSE.
  */
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import {
+  type AnyModel,
   type Api,
   type AssistantMessage,
   type AssistantMessageEvent,
@@ -15,6 +16,7 @@ import {
   type Context,
   createAssistantMessageEventStream,
   isContextOverflow,
+  isModelType,
   isRetryableAssistantError,
   type Model,
   type Models,
@@ -991,6 +993,10 @@ function passThrough(
   return call(unpriced(model), stripForeignThinking(context, model), options);
 }
 
+function unpricedAny<T extends AnyModel>(model: T): T {
+  return (isModelType(model, 'chat') ? unpriced(model) : model) as T;
+}
+
 /** `inner` with its four request methods routed and ChatGPT's price at 0. */
 function routedModels(inner: Models, route: RouteCall): Models {
   return {
@@ -1001,10 +1007,21 @@ function routedModels(inner: Models, route: RouteCall): Models {
       const model = inner.getModel(provider, id);
       return model && unpriced(model);
     },
+    getModelsOfType: (type, provider) =>
+      inner.getModelsOfType(type, provider).map(unpricedAny),
+    getModelOfType: (type, provider, id) => {
+      const model = inner.getModelOfType(type, provider, id);
+      return model && unpricedAny(model);
+    },
+    getAllModels: (provider) => inner.getAllModels(provider).map(unpricedAny),
     refresh: (options) => inner.refresh(options),
     checkAuth: (id, options) => inner.checkAuth(id, options),
     getAvailable: async (id, options) =>
       (await inner.getAvailable(id, options)).map(unpriced),
+    getAvailableOfType: async (type, id, options) =>
+      (await inner.getAvailableOfType(type, id, options)).map(unpricedAny),
+    getAllAvailable: async (id, options) =>
+      (await inner.getAllAvailable(id, options)).map(unpricedAny),
     getAuth: ((target: string & Model<Api>, overrides) =>
       inner.getAuth(target, overrides)) as Models['getAuth'],
     login: (id, type, interaction) => inner.login(id, type, interaction),
@@ -1023,6 +1040,10 @@ function routedModels(inner: Models, route: RouteCall): Models {
       inner.fetchDeferred(model, handle, options),
     cancelDeferred: (model, handle, options) =>
       inner.cancelDeferred(model, handle, options),
+    generateImages: (model, context, options) =>
+      inner.generateImages(model, context, options),
+    classify: (model, context, options) =>
+      inner.classify(model, context, options),
   };
 }
 

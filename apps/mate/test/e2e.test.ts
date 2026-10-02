@@ -7,10 +7,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  type AgentMessage,
-  BACKGROUND_CONTEXT,
-} from '@earendil-works/pi-agent-core';
 import { createModels, type Message } from '@earendil-works/pi-ai';
 import {
   type FauxResponseStep,
@@ -18,7 +14,6 @@ import {
   fauxProvider,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux';
-import { openSession } from '@repo/pi-store-postgres';
 import { PiBrain, postgresSessions } from '../src/brain.ts';
 import type {
   McpBridge,
@@ -65,6 +60,7 @@ import {
   rig,
   until,
 } from './hands-support.ts';
+import { toolText, transcript } from './stored.ts';
 import {
   discordRef,
   FakeDiscord,
@@ -73,11 +69,10 @@ import {
 } from './support.ts';
 
 const database = withDatabase();
-const ctx = BACKGROUND_CONTEXT;
 const ME = '900000000000000001';
 const OWNER = '308072071949320204';
 const CHANNEL = '1509024937422356532';
-const INTERRUPTED = 'Tool execution was interrupted';
+const INTERRUPTED = 'was interrupted and may have partially run';
 const TOKEN = 'kthx_agent_0123456789abcdef0123456789abcdef';
 // Every e2e test runs real daemons, Postgres and several turns.
 const SLOW = 30_000;
@@ -370,34 +365,6 @@ function epochOf(exec: ExecRecord): number {
   return Number(exec.command[exec.command.indexOf('--epoch') + 1]);
 }
 
-/** The messages pi keeps for a session's main lane, oldest first. */
-async function transcript(sessionId: string): Promise<AgentMessage[]> {
-  const session = await openSession(database().sql, { id: sessionId });
-  const branch = await session.branch('main', ctx);
-  const entries = branch
-    ? await branch.findEntries({ order: 'oldestFirst' }, ctx)
-    : [];
-  await session.close(ctx);
-  return entries.flatMap((entry) =>
-    entry.type === 'message' ? [entry.message] : [],
-  );
-}
-
-function toolText(messages: AgentMessage[], toolCallId: string): string {
-  const result = messages.find(
-    (message) =>
-      'role' in message &&
-      message.role === 'toolResult' &&
-      message.toolCallId === toolCallId,
-  );
-  if (!result || !('content' in result) || typeof result.content === 'string') {
-    return '';
-  }
-  return result.content
-    .map((block) => ('text' in block ? block.text : ''))
-    .join('');
-}
-
 function mode(path: string): number {
   return statSync(path).mode & 0o777;
 }
@@ -465,7 +432,10 @@ describe('a turn', () => {
       const [name] = [...r.fake.sandboxes.keys()];
       expect((await row(mate, key)).sandbox).toBe(name ?? null);
       // The command saw the token the turn stamped.
-      const said = await transcript((await row(mate, key)).sessionId);
+      const said = await transcript(
+        database().sql,
+        (await row(mate, key)).sessionId,
+      );
       expect(toolText(said, 'c-cat')).toContain('ghs-token-1');
 
       for (const file of [
@@ -562,7 +532,10 @@ describe('a restart mid-turn', () => {
       expect(fresh.pod).toBe(old.pod);
       expect(epochOf(fresh)).toBeGreaterThan(epochOf(old));
       await until(() => !alive(pid));
-      const stored = await transcript((await row(second, key)).sessionId);
+      const stored = await transcript(
+        database().sql,
+        (await row(second, key)).sessionId,
+      );
       expect(toolText(stored, 'c-sleep')).toContain(INTERRUPTED);
     },
     SLOW,
@@ -650,7 +623,10 @@ describe('a restart mid-turn', () => {
         ),
       ).toBe(false);
       expect(discord.reactionsOn(CHANNEL, message.id)).toEqual(['✅']);
-      const stored = await transcript((await row(second, key)).sessionId);
+      const stored = await transcript(
+        database().sql,
+        (await row(second, key)).sessionId,
+      );
       expect(toolText(stored, 'c-kthx')).toContain(INTERRUPTED);
       // The turn never needed a sandbox.
       expect(r.fake.sandboxes.size).toBe(0);
@@ -876,7 +852,10 @@ describe('profiles', () => {
       expect(app.asked).toBe(0);
       expect(app.minted).toBe(0);
       const said = toolText(
-        await transcript((await row(mate, investigating.key)).sessionId),
+        await transcript(
+          database().sql,
+          (await row(mate, investigating.key)).sessionId,
+        ),
         'c-look',
       );
       // The command ran with the reader's kubeconfig and nothing else.

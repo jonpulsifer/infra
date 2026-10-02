@@ -1,6 +1,5 @@
 /** mate's rows in mate-db, the pool's server-side timeouts, and the store-down classifier. */
 import { describe, expect, test } from 'bun:test';
-import { HarnessFault } from '@earendil-works/pi-agent-core';
 import { CommitOutcomeUnknownError, migrate } from '@repo/pi-store-postgres';
 import { SQL } from 'bun';
 import { silentLog } from '../src/log.ts';
@@ -403,8 +402,8 @@ describe('a store that cannot be reached', () => {
     ],
     ['refused', connection(undefined, 'ECONNREFUSED'), true],
     [
-      'a harness fault over a lost connection',
-      new HarnessFault('fault', connection('08006')),
+      'a failure wrapping a lost connection',
+      new Error('fault', { cause: connection('08006') }),
       true,
     ],
     ['a unique violation (23505)', connection('23505'), false],

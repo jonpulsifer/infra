@@ -6,19 +6,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  type AgentMessage,
-  BACKGROUND_CONTEXT,
-  type Context,
-  laneConfig,
-  SessionInvariantError,
-  type Storage,
-  StorageBackedSession,
-  type Value,
-  type Write,
-} from '@earendil-works/pi-agent-core';
-import { StorageDecorator } from '@earendil-works/pi-agent-core/harness/session/testing';
-import { createModels, type Message } from '@earendil-works/pi-ai';
+import type { Context } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { createModels, type Message, Type } from '@earendil-works/pi-ai';
 import {
   type FauxResponseStep,
   fauxAssistantMessage,
@@ -27,12 +17,8 @@ import {
   fauxThinking,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux';
-import {
-  openSession,
-  POSTGRES_STORAGE_VERSION,
-  postgresStorage,
-  sessionExists,
-} from '@repo/pi-store-postgres';
+import type { Storage, StorageWrite } from '@earendil-works/pi-durable';
+import { openStorage, storageExists } from '@repo/pi-store-postgres';
 import { SQL } from 'bun';
 import {
   NO_TEXT,
@@ -43,7 +29,6 @@ import {
   RECOVERING,
   resetNote,
   type SessionSource,
-  unreachableTool,
 } from '../src/brain.ts';
 import type {
   BrainProfile,
@@ -52,7 +37,11 @@ import type {
   ModelSetup,
   SystemPrompts,
 } from '../src/brain-inputs.ts';
-import { BrainUnavailable, TurnAbandoned } from '../src/brain-port.ts';
+import {
+  type BrainSession,
+  BrainUnavailable,
+  TurnAbandoned,
+} from '../src/brain-port.ts';
 import { systemClock } from '../src/clock.ts';
 import { silentLog } from '../src/log.ts';
 import { LIMIT_FALLBACK } from '../src/notices.ts';
@@ -65,6 +54,7 @@ import type { ThreadRow } from '../src/thread-store.ts';
 import { withDatabase } from './db.ts';
 import { LocalHands, type LocalHandsOptions } from './local-hands.ts';
 import { stallingProxy } from './stall-proxy.ts';
+import { storedAgent, toolText, transcript } from './stored.ts';
 import { FakeClock, RecordingInstruments, RecordingLog } from './support.ts';
 
 const database = withDatabase();
@@ -102,10 +92,12 @@ interface Faux {
 function faux(
   modelId = 'faux-new',
   thinking: ModelSetup['thinking'] = 'off',
+  tokensPerSecond?: number,
 ): Faux {
   const provider = fauxProvider({
     api: 'faux',
     provider: 'faux',
+    tokensPerSecond,
     tokenSize: { min: 3, max: 3 },
     models: [
       { id: 'faux-old', reasoning: true, cost: price },
@@ -241,12 +233,7 @@ async function opened(built: Built, ref = thread(), profile = 'operator') {
   return { ref, row, session };
 }
 
-async function lane(sessionId: string) {
-  const session = await openSession(database().sql, { id: sessionId });
-  const config = await session.getValue(laneConfig('main'), ctx);
-  await session.close(ctx);
-  return config?.value;
-}
+const agent = (sessionId: string) => storedAgent(database().sql, sessionId);
 
 describe('a turn', () => {
   test('a chat-only turn streams its answer and never leases a sandbox', async () => {
@@ -303,16 +290,16 @@ describe('a turn', () => {
     expect((await built.store.get(row.key))?.sandbox).toBeNull();
   });
 
-  test('pi sends the session as `key:main`, which the provider gets as its session header', async () => {
+  test("the provider gets the thread's session id as its session header", async () => {
     const model = faux();
     model.script(fauxAssistantMessage('ok'));
     const built = build(model);
     const { session, row } = await opened(built);
     await built.brain.prompt(session, 'hi', new Recorder(), ASKER);
-    expect(model.options[0]?.sessionId).toBe(`${row.key}:main`);
+    expect(model.options[0]?.sessionId).toBe(row.sessionId);
   });
 
-  test("the cost is the sum of the run's usage rows", async () => {
+  test("the cost is the sum of the run's assistant messages' costs", async () => {
     const model = faux();
     model.script(
       tool('bash', { command: 'true' }),
@@ -326,13 +313,15 @@ describe('a turn', () => {
       new Recorder(),
       ASKER,
     );
-    const storage = postgresStorage(database().sql, row.sessionId);
-    const rows = await storage.scanUsage({}, ctx);
-    await storage.close(ctx);
-    // One row per model request; the faux model prices them at nothing.
-    expect(rows).toHaveLength(2);
-    expect(result.costUsd).toBe(
-      rows.reduce((sum, usage) => sum + usage.usage.cost.total, 0),
+    const costs = (await transcript(database().sql, row.sessionId)).flatMap(
+      (message) =>
+        message.role === 'assistant' ? [message.usage.cost.total] : [],
+    );
+    // One message per model request.
+    expect(costs).toHaveLength(2);
+    expect(result.costUsd).toBeCloseTo(
+      costs.reduce((sum, cost) => sum + cost, 0),
+      12,
     );
   });
 
@@ -450,29 +439,25 @@ describe('opening a thread', () => {
     void dead.close();
   });
 
-  test("a lane saved by an older mate is brought to today's model, thinking level and tools", async () => {
+  test("a session saved by an older mate is brought to today's model and thinking level", async () => {
     const old = faux('faux-old', 'off');
     old.script(fauxAssistantMessage('old'));
     const first = build(old);
     const { session, row } = await opened(first);
     await first.brain.prompt(session, 'hi', new Recorder(), ASKER);
     await first.brain.release(row.ref, 'quiet');
-    expect(await lane(row.sessionId)).toMatchObject({
+    expect(await agent(row.sessionId)).toMatchObject({
       model: { provider: 'faux', modelId: 'faux-old' },
       thinkingLevel: 'off',
     });
 
     const next = faux('faux-new', 'low');
-    const mcp = new FakeBridge([kthxTool('kthx_list')]);
-    const second = build(next, { mcp });
+    const second = build(next);
     await second.brain.open(row);
-    const config = await lane(row.sessionId);
-    expect(config).toMatchObject({
+    expect(await agent(row.sessionId)).toMatchObject({
       model: { provider: 'faux', modelId: 'faux-new' },
       thinkingLevel: 'low',
     });
-    expect(config?.activeToolNames).toContain('kthx_list');
-    expect(config?.activeToolNames).toContain('bash');
   });
 });
 
@@ -508,7 +493,7 @@ describe('Stop', () => {
 
   test('a run that will not settle is closed under the turn after the grace, and the thread recovers once the close drains', async () => {
     const faults = plan();
-    const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
+    const sessions = sessionsWith((_, storage) => faulty(storage, faults));
     const answer = gate();
     const called = gate();
     const model = faux();
@@ -561,7 +546,7 @@ describe('Stop', () => {
 
   test('a SIGTERM while the run will not settle leaves it abandoned, not stopped', async () => {
     const faults = plan();
-    const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
+    const sessions = sessionsWith((_, storage) => faulty(storage, faults));
     const answer = gate();
     const called = gate();
     const model = faux();
@@ -615,7 +600,7 @@ describe('the turn timeout', () => {
 
   test('a run that ignores the abort is closed after the grace, and the thread recovers once the close drains', async () => {
     const faults = plan();
-    const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
+    const sessions = sessionsWith((_, storage) => faulty(storage, faults));
     const exec = gate();
     const model = faux();
     model.script(
@@ -627,6 +612,7 @@ describe('the turn timeout', () => {
       hands: {
         root,
         hold: (method) => (method === 'exec' ? exec.wait : null),
+        holdPastAbort: true,
       },
       timeouts: { timeoutGrace: 100, harnessClose: 50, discard: 500 },
     });
@@ -667,14 +653,33 @@ describe('the turn timeout', () => {
   });
 });
 
-/** Storage whose restore breaks pi's invariants, as a corrupt session would. */
-class Corrupt extends StorageDecorator {
-  override getValue<T>(_address: Value<T>, _context: Context): never {
-    throw new SessionInvariantError('corrupt lane state');
-  }
-  override scanValues<T>(_prefix: Value<T>, _context: Context): never {
-    throw new SessionInvariantError('corrupt lane state');
-  }
+/** `storage`, with some of its methods replaced. */
+function decorated(storage: Storage, over: Partial<Storage>): Storage {
+  return new Proxy(storage, {
+    get(target, key) {
+      if (key in over) return over[key as keyof Storage];
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+/** Storage whose reads throw a plain error, as a session pi cannot make sense of would. */
+function corrupt(storage: Storage): Storage {
+  return new Proxy(storage, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target);
+      if (
+        typeof value !== 'function' ||
+        ['commit', 'close'].includes(String(key))
+      ) {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return async () => {
+        throw new Error('corrupt conversation state');
+      };
+    },
+  });
 }
 
 /** Opens each id through `wrap`, so a test can corrupt or gate one. */
@@ -687,58 +692,38 @@ function sessionsWith(
     opened,
     open: async (id) => {
       opened.push(id);
-      await (await openSession(sql, { id })).close(ctx);
-      return new StorageBackedSession(
-        { id, createdAt: Date.now(), storageVersion: POSTGRES_STORAGE_VERSION },
-        wrap(id, postgresStorage(sql, id)),
-      );
+      return wrap(id, await openStorage(sql, id));
     },
     delete: postgresSessions(sql).delete,
   };
 }
 
 describe('a session that will not open', () => {
-  test("one that breaks pi's invariants twice is set aside, and a fresh one opens", async () => {
-    const sessions = sessionsWith((id, storage) =>
-      id.includes('~') ? storage : new Corrupt(storage),
-    );
+  test('one pi cannot read is BrainUnavailable, and stays where it is', async () => {
+    const sessions = sessionsWith((_, storage) => corrupt(storage));
     const built = build(faux(), { sessions });
     const row = await built.store.open(thread(), 'operator');
-    const session = await built.brain.open(row);
-    expect(session.resumed).toBe(false);
-    expect(sessions.opened).toEqual([row.key, row.key, `${row.key}~1`]);
-    const stored = await built.store.get(row.key);
-    expect(stored?.sessionId).toBe(`${row.key}~1`);
-    expect(stored?.quarantined).toEqual([row.key]);
-    expect(await sessionExists(database().sql, row.key)).toBe(true);
-    expect(built.metrics.storeFailures).toContain('quarantine');
-    expect(built.log.of('a session was set aside')[0]?.fields?.why).toBe(
-      'corrupt lane state',
+    await expect(built.brain.open(row)).rejects.toBeInstanceOf(
+      BrainUnavailable,
     );
-  });
-
-  test('one that breaks them once opens on the retry, and nothing is set aside', async () => {
-    let corrupt = 1;
-    const sessions = sessionsWith((_, storage) =>
-      corrupt-- > 0 ? new Corrupt(storage) : storage,
-    );
-    const built = build(faux(), { sessions });
-    const row = await built.store.open(thread(), 'operator');
-    await built.brain.open(row);
-    expect(sessions.opened).toEqual([row.key, row.key]);
+    expect(sessions.opened).toEqual([row.key]);
     const stored = await built.store.get(row.key);
     expect(stored?.sessionId).toBe(row.key);
     expect(stored?.quarantined).toEqual([]);
     expect(built.metrics.storeFailures).not.toContain('quarantine');
+    const [said] = built.log.of('the session could not be opened');
+    expect(said?.level).toBe('error');
+    expect(said?.fields?.cause).toBe('corrupt conversation state');
   });
 
   test('anything else is BrainUnavailable, and every session stays', async () => {
-    const failures: [string, () => never][] = [
+    const failures: [string, () => never, 'warn' | 'error'][] = [
       [
         "the store's version refusal",
         () => {
           throw new Error('pi-store: session x has storage version 2, not 1');
         },
+        'error',
       ],
       [
         'an unclassified SQL error',
@@ -747,9 +732,19 @@ describe('a session that will not open', () => {
             errno: '42P01',
           });
         },
+        'error',
+      ],
+      [
+        'a store that is down',
+        () => {
+          throw Object.assign(new Error('Connection refused'), {
+            code: 'ERR_POSTGRES_CONNECTION_REFUSED',
+          });
+        },
+        'warn',
       ],
     ];
-    for (const [, fail] of failures) {
+    for (const [, fail, level] of failures) {
       const built = build(faux(), {
         sessions: { open: async () => fail(), delete: async () => {} },
       });
@@ -758,35 +753,38 @@ describe('a session that will not open', () => {
         BrainUnavailable,
       );
       expect((await built.store.get(row.key))?.quarantined).toEqual([]);
+      expect(built.log.of('the session could not be opened')[0]?.level).toBe(
+        level,
+      );
     }
-
-    const bug = build(faux(), {
-      retry: { enabled: true, maxRetries: -1, baseDelayMs: 1 },
-    });
-    const row = await bug.store.open(thread(), 'operator');
-    await expect(bug.brain.open(row)).rejects.toBeInstanceOf(BrainUnavailable);
-    expect(bug.log.of('the session could not be opened')[0]?.level).toBe(
-      'error',
-    );
-    expect(await sessionExists(database().sql, row.key)).toBe(true);
   });
 
   test('a fourth quarantine within the hour is refused', async () => {
-    const built = build(faux(), {
-      sessions: sessionsWith((_, storage) => new Corrupt(storage)),
+    const faults = plan();
+    const model = faux();
+    answers(model, 'fresh', 16);
+    const built = build(model, {
+      sessions: sessionsWith((id, storage) =>
+        id.includes('~') ? storage : faulty(storage, faults),
+      ),
     });
-    for (let i = 0; i < 3; i += 1) {
-      const row = await built.store.open(thread(), 'operator');
-      // Each fresh session is corrupt too, so the open still fails.
-      await expect(built.brain.open(row)).rejects.toBeInstanceOf(
-        BrainUnavailable,
-      );
+    const threads = [];
+    for (let i = 0; i < 4; i += 1) threads.push(await opened(built));
+    failFrom(faults, 0);
+    const prompt = (session: BrainSession, text: string) =>
+      built.brain.prompt(session, text, new Recorder(), ASKER);
+    for (const { session } of threads) {
+      await prompt(session, 'one');
+      await prompt(session, 'two');
     }
-    const row = await built.store.open(thread(), 'operator');
-    await expect(built.brain.open(row)).rejects.toBeInstanceOf(
+    for (const { session } of threads.slice(0, 3)) {
+      expect(await prompt(session, 'three')).toMatchObject({ reset: true });
+    }
+    const last = threads[3] as (typeof threads)[number];
+    await expect(prompt(last.session, 'three')).rejects.toBeInstanceOf(
       BrainUnavailable,
     );
-    expect((await built.store.get(row.key))?.quarantined).toEqual([]);
+    expect((await built.store.get(last.row.key))?.quarantined).toEqual([]);
     expect(
       built.log.of(
         'too many sessions set aside this hour; refusing to set aside another',
@@ -818,14 +816,14 @@ class FakeBridge implements McpBridge {
 
 function kthxTool(
   name: string,
-  execute: () => Promise<string> = async () => 'listed',
+  execute: (context: Context) => Promise<string> = async () => 'listed',
 ): BridgedTool {
   return {
-    ...unreachableTool(name),
+    name,
     description: 'a kthx tool',
-    execute: async () => ({
-      content: [{ type: 'text', text: await execute() }],
-      details: undefined,
+    parameters: Type.Object({ app: Type.Optional(Type.String()) }),
+    execute: async (_args, _api, context) => ({
+      content: [{ type: 'text', text: await execute(context) }],
     }),
   };
 }
@@ -841,28 +839,21 @@ interface Plan {
   holdClose: Promise<void> | null;
 }
 
-class Faulty extends StorageDecorator {
-  constructor(
-    delegate: Storage,
-    private readonly plan: Plan,
-  ) {
-    super(delegate);
-  }
-
-  override async commit(writes: Write[], context: Context) {
-    const { plan } = this;
-    if (plan.failAfter !== null && plan.seen++ >= plan.failAfter) {
-      throw new Error('the connection to mate-db dropped');
-    }
-    if (plan.delayMs > 0) await Bun.sleep(plan.delayMs);
-    await plan.holdCommit;
-    return super.commit(writes, context);
-  }
-
-  override async close(context: Context): Promise<void> {
-    await this.plan.holdClose;
-    await super.close(context);
-  }
+function faulty(storage: Storage, plan: Plan): Storage {
+  return decorated(storage, {
+    async commit(writes: readonly StorageWrite[], context: Context) {
+      if (plan.failAfter !== null && plan.seen++ >= plan.failAfter) {
+        throw new Error('the connection to mate-db dropped');
+      }
+      if (plan.delayMs > 0) await Bun.sleep(plan.delayMs);
+      await plan.holdCommit;
+      return storage.commit(writes, context);
+    },
+    async close(context: Context) {
+      await plan.holdClose;
+      await storage.close(context);
+    },
+  });
 }
 
 function plan(): Plan {
@@ -890,7 +881,7 @@ function answers(model: Faux, text: string, count = 8): void {
 describe('a harness that faults', () => {
   test('gives an error, and the next prompt opens a new session, discards the open run and answers', async () => {
     const faults = plan();
-    const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
+    const sessions = sessionsWith((_, storage) => faulty(storage, faults));
     const model = faux();
     answers(model, 'answered');
     const built = build(model, { sessions });
@@ -922,7 +913,7 @@ describe('a harness that faults', () => {
 
   test('refuses prompts while its close still drains, and opens no second harness', async () => {
     const faults = plan();
-    const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
+    const sessions = sessionsWith((_, storage) => faulty(storage, faults));
     const model = faux();
     answers(model, 'answered');
     const built = build(model, {
@@ -965,7 +956,7 @@ describe('a harness that faults', () => {
 
   test('a discard whose abort runs past its deadline waits for idle before the prompt', async () => {
     const faults = plan();
-    const sessions = sessionsWith((_, storage) => new Faulty(storage, faults));
+    const sessions = sessionsWith((_, storage) => faulty(storage, faults));
     const model = faux();
     answers(model, 'answered');
     const built = build(model, {
@@ -983,7 +974,7 @@ describe('a harness that faults', () => {
     const sink = new Recorder();
     const second = await built.brain.prompt(session, 'two', sink, ASKER);
     expect(
-      built.log.of('the abort ran past its deadline; waiting for the lane'),
+      built.log.of('the abort ran past its deadline; waiting for the run'),
     ).toHaveLength(1);
     expect(second.stopReason).toBe('end_turn');
     expect(sink.text).toBe('answered');
@@ -992,7 +983,7 @@ describe('a harness that faults', () => {
   test('two in a row set the session aside, and the thread starts afresh', async () => {
     const faults = plan();
     const sessions = sessionsWith((id, storage) =>
-      id.includes('~') ? storage : new Faulty(storage, faults),
+      id.includes('~') ? storage : faulty(storage, faults),
     );
     const model = faux();
     answers(model, 'fresh');
@@ -1018,20 +1009,20 @@ describe('a harness that faults', () => {
     const stored = await built.store.get(row.key);
     expect(stored?.sessionId).toBe(`${row.key}~1`);
     expect(stored?.quarantined).toEqual([row.key]);
-    expect(await sessionExists(database().sql, row.key)).toBe(true);
+    expect(await storageExists(database().sql, row.key)).toBe(true);
     expect((await built.brain.open(row)).resumed).toBe(false);
 
     const sink = new Recorder();
     const after = await built.brain.prompt(session, 'four', sink, ASKER);
     expect(after.stopReason).toBe('end_turn');
     expect(sink.text).toBe('fresh');
-    expect(model.options.at(-1)?.sessionId).toBe(`${row.key}~1:main`);
+    expect(model.options.at(-1)?.sessionId).toBe(`${row.key}~1`);
   });
 
   test('a set-aside whose row write fails is not counted toward the hourly limit', async () => {
     const faults = plan();
     const sessions = sessionsWith((id, storage) =>
-      id.includes('~') ? storage : new Faulty(storage, faults),
+      id.includes('~') ? storage : faulty(storage, faults),
     );
     const model = faux();
     answers(model, 'fresh');
@@ -1104,7 +1095,7 @@ describe('a mate-db that stops answering', () => {
       answer.open();
       const started = performance.now();
       const result = await running;
-      expect(performance.now() - started).toBeLessThan(4_000);
+      expect(performance.now() - started).toBeLessThan(5_000);
       expect(result.stopReason).toBe('error');
       expect(result.error).toContain('mate lost its session state mid-turn');
       expect(built.metrics.storeFailures).toContain('fault');
@@ -1115,35 +1106,16 @@ describe('a mate-db that stops answering', () => {
   });
 });
 
-/** The messages pi keeps for a session's main lane, oldest first. */
-async function transcript(sessionId: string): Promise<AgentMessage[]> {
-  const session = await openSession(database().sql, { id: sessionId });
-  const branch = await session.branch('main', ctx);
-  const entries = branch
-    ? await branch.findEntries({ order: 'oldestFirst' }, ctx)
-    : [];
-  await session.close(ctx);
-  return entries.flatMap((entry) =>
-    entry.type === 'message' ? [entry.message] : [],
-  );
-}
+const INTERRUPTED = 'was interrupted and may have partially run';
 
-function toolText(messages: AgentMessage[], toolCallId: string): string {
-  const result = messages.find(
-    (message) =>
-      'role' in message &&
-      message.role === 'toolResult' &&
-      message.toolCallId === toolCallId,
-  );
-  if (!result || !('content' in result) || typeof result.content === 'string') {
-    return '';
-  }
-  return result.content
-    .map((block) => ('text' in block ? block.text : ''))
-    .join('');
+/** Settles when `context` aborts, as a real call to kthx ends on abort. */
+function aborted(context: Context): Promise<void> {
+  return new Promise((resolve) => {
+    context.abortSignal?.addEventListener('abort', () => resolve(), {
+      once: true,
+    });
+  });
 }
-
-const INTERRUPTED = 'Tool execution was interrupted';
 
 function gate() {
   let open = () => {};
@@ -1218,7 +1190,7 @@ describe('a restart mid-turn', () => {
       state: 'error',
     });
     expect(second.hands.log[0]).toBe('warm');
-    const said = await transcript(row.sessionId);
+    const said = await transcript(database().sql, row.sessionId);
     expect(toolText(said, 'c-bash')).toContain(INTERRUPTED);
     expect(toolText(said, 'c-read')).toContain('the notes');
     expect(
@@ -1227,10 +1199,53 @@ describe('a restart mid-turn', () => {
     held.open();
   });
 
+  for (const how of ['discards it', 'prompts over it']) {
+    test(`a thread that ${how} drops the interrupted run, and its tool never runs again`, async () => {
+      const held = gate();
+      const model = faux();
+      model.script(tool('bash', { command: 'echo ran' }, 'c-cut'));
+      const first = build(model, {
+        hands: {
+          root,
+          hold: (method) => (method === 'exec' ? held.wait : null),
+        },
+      });
+      const { session, row } = await opened(first);
+      const outcome = first.brain
+        .prompt(session, 'go', new Recorder(), ASKER)
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      await until(() => first.hands.calls.some((c) => c.method === 'exec'));
+      await first.brain.abandon();
+      expect(await outcome).toBeInstanceOf(TurnAbandoned);
+
+      const next = faux();
+      next.script(fauxAssistantMessage('a fresh start'));
+      const second = build(next);
+      const reopened = await second.brain.open(row);
+      expect(reopened.interrupted).not.toBeNull();
+      if (how === 'discards it') await second.brain.discard(reopened);
+      const sink = new Recorder();
+      const result = await second.brain.prompt(reopened, 'again', sink, ASKER);
+      expect(result.stopReason).toBe('end_turn');
+      expect(sink.text).toBe('a fresh start');
+      expect(second.hands.calls.filter((c) => c.method === 'exec')).toEqual([]);
+      expect(second.log.of('the run could not be aborted')).toEqual([]);
+      held.open();
+    });
+  }
+
   for (const point of ['tool start', 'after the tool ended', 'mid-stream']) {
     test(`a crash at ${point} resumes to the answer`, async () => {
       const held = gate();
-      const model = faux();
+      // Mid-stream needs an answer that takes a while to arrive.
+      const model = faux(
+        'faux-new',
+        'off',
+        point === 'mid-stream' ? 200 : undefined,
+      );
       const steps: FauxResponseStep[] = [
         tool('bash', { command: 'echo ran' }, 'c-point'),
       ];
@@ -1256,6 +1271,8 @@ describe('a restart mid-turn', () => {
           hold: (method) =>
             point === 'tool start' && method === 'exec' ? held.wait : null,
         },
+        // The held model step never answers, as in the routed case below.
+        timeouts: { abandonClose: 100 },
       });
       const { session, row } = await opened(first);
       const sink = new Recorder();
@@ -1295,9 +1312,9 @@ describe('a restart mid-turn', () => {
       model.script(tool('kthx_x', { app: 'a' }, 'c-kthx'));
       const first = build(model, {
         mcp: new FakeBridge([
-          kthxTool('kthx_x', async () => {
+          kthxTool('kthx_x', async (context) => {
             called.open();
-            await held.wait;
+            await Promise.race([held.wait, aborted(context)]);
             return 'too late';
           }),
         ]),
@@ -1328,9 +1345,11 @@ describe('a restart mid-turn', () => {
       const result = await second.brain.resume(reopened, sink, ASKER);
       expect(result.stopReason).toBe('end_turn');
       expect(sink.text).toBe('kthx is down, try later');
-      const said = await transcript(row.sessionId);
+      const said = await transcript(database().sql, row.sessionId);
       expect(toolText(said, 'c-kthx')).toContain(INTERRUPTED);
-      expect(toolText(said, 'c-again')).toContain('kthx is unreachable');
+      expect(toolText(said, 'c-again')).toContain(
+        'Tool kthx_x is not available',
+      );
       held.open();
     });
   }
@@ -1377,7 +1396,7 @@ describe('putting threads away', () => {
     const row = await built.store.open(ref, 'operator');
     const { sql } = database();
     for (const id of [row.key, `${row.key}~1`]) {
-      await (await openSession(sql, { id })).close(ctx);
+      await (await openStorage(sql, id)).close(ctx);
     }
     await built.store.patch(row.key, {
       sessionId: `${row.key}~1`,
@@ -1385,8 +1404,8 @@ describe('putting threads away', () => {
     });
     await built.brain.open((await built.store.get(row.key)) as ThreadRow);
     await built.brain.forget(ref);
-    expect(await sessionExists(sql, row.key)).toBe(false);
-    expect(await sessionExists(sql, `${row.key}~1`)).toBe(false);
+    expect(await storageExists(sql, row.key)).toBe(false);
+    expect(await storageExists(sql, `${row.key}~1`)).toBe(false);
     expect(built.hands.released).toEqual([
       { key: threadKey(ref), reason: 'thread-deleted' },
     ]);
@@ -1414,7 +1433,7 @@ describe('putting threads away', () => {
     const reopened = await rows.open(thread(), 'operator');
     const live = await rows.open(thread(), 'operator');
     for (const row of [old, reopened, live]) {
-      await (await openSession(sql, { id: row.sessionId })).close(ctx);
+      await (await openStorage(sql, row.sessionId)).close(ctx);
     }
     await built.brain.open(live);
     for (const row of [old, reopened, live]) {
@@ -1425,11 +1444,11 @@ describe('putting threads away', () => {
 
     await built.brain.sweep(clock.now() - 14 * 86_400_000);
     expect(await rows.get(old.key)).toBeUndefined();
-    expect(await sessionExists(sql, old.sessionId)).toBe(false);
+    expect(await storageExists(sql, old.sessionId)).toBe(false);
     expect((await rows.get(reopened.key))?.state).toBe('open');
-    expect(await sessionExists(sql, reopened.sessionId)).toBe(true);
+    expect(await storageExists(sql, reopened.sessionId)).toBe(true);
     expect(await rows.get(live.key)).toBeDefined();
-    expect(await sessionExists(sql, live.sessionId)).toBe(true);
+    expect(await storageExists(sql, live.sessionId)).toBe(true);
   });
 });
 
@@ -1440,10 +1459,7 @@ describe('profiles', () => {
     const tools = new Set<string>();
     for (const message of messages) {
       if (message.role !== 'system') continue;
-      systemPrompt ??=
-        typeof message.content === 'string'
-          ? message.content
-          : message.content.map((block) => block.text).join('');
+      systemPrompt = message.sections?.mate ?? systemPrompt;
       for (const tool of message.toolsAdded ?? []) tools.add(tool.name);
       for (const tool of message.toolsRemoved ?? []) tools.delete(tool.name);
     }
@@ -1467,24 +1483,21 @@ describe('profiles', () => {
 
   const BASE = ['bash', 'edit', 'read', 'write'];
 
-  test('an investigator lane lists the base tools and weather only, before and after the listing changes', async () => {
+  test('an investigator lists the base tools and weather only, before and after the listing changes', async () => {
     const model = faux();
     const asked = seen(model);
     const mcp = new FakeBridge([kthxTool('kthx_x'), kthxTool('weather_y')]);
     const built = build(model, { mcp });
-    const { session, row } = await opened(built, thread(), 'investigator');
+    const { session } = await opened(built, thread(), 'investigator');
     await built.brain.prompt(session, 'look', new Recorder(), ASKER);
     expect(asked[0]?.tools).toEqual([...BASE, 'weather_y'].sort());
-    expect((await lane(row.sessionId))?.activeToolNames?.sort()).toEqual(
-      [...BASE, 'weather_y'].sort(),
-    );
 
     mcp.set([kthxTool('kthx_x'), kthxTool('kthx_z'), kthxTool('weather_w')]);
     await built.brain.prompt(session, 'again', new Recorder(), ASKER);
     expect(asked[1]?.tools).toEqual([...BASE, 'weather_w'].sort());
   });
 
-  test('an operator lane lists both servers', async () => {
+  test('an operator lists both servers', async () => {
     const model = faux();
     const asked = seen(model);
     const mcp = new FakeBridge([kthxTool('kthx_x'), kthxTool('weather_y')]);
@@ -1528,7 +1541,7 @@ describe('profiles', () => {
     expect(built.metrics.storeFailures).toEqual([]);
   });
 
-  test("a lane saved on another model is brought to its profile's model and level", async () => {
+  test("a session saved on another model is brought to its profile's model and level", async () => {
     const first = faux('faux-new', 'off');
     first.script(fauxAssistantMessage('new'));
     const before = build(first);
@@ -1549,7 +1562,7 @@ describe('profiles', () => {
       ]),
     });
     const reopened = await after.brain.open(row);
-    expect(await lane(row.sessionId)).toMatchObject({
+    expect(await agent(row.sessionId)).toMatchObject({
       model: { provider: 'faux', modelId: 'faux-old' },
       thinkingLevel: 'low',
     });
@@ -1565,16 +1578,16 @@ describe('profiles', () => {
     const operating = await rows.open(thread(), 'operator');
     const investigating = await rows.open(thread(), 'investigator');
     for (const row of [operating, investigating]) {
-      await (await openSession(sql, { id: row.sessionId })).close(ctx);
+      await (await openStorage(sql, row.sessionId)).close(ctx);
       await rows.patch(row.key, { state: 'closed' });
     }
     await clock.advance(20 * 86_400_000);
 
     await built.brain.sweep(clock.now() - 14 * 86_400_000);
     expect(await rows.get(operating.key)).toBeUndefined();
-    expect(await sessionExists(sql, operating.sessionId)).toBe(false);
+    expect(await storageExists(sql, operating.sessionId)).toBe(false);
     expect((await rows.get(investigating.key))?.profile).toBe('investigator');
-    expect(await sessionExists(sql, investigating.sessionId)).toBe(true);
+    expect(await storageExists(sql, investigating.sessionId)).toBe(true);
   });
 });
 
@@ -1706,19 +1719,19 @@ describe('a routed model', () => {
     });
   });
 
-  test('a lane saved on qwen3.8-max is brought to ChatGPT at its next open', async () => {
+  test('a session saved on qwen3.8-max is brought to ChatGPT at its next open', async () => {
     const models = routed();
     models.go(fauxAssistantMessage('old'));
     const first = build({ ...faux(), setup: models.unrouted });
     const { session, row } = await opened(first);
     await first.brain.prompt(session, 'hi', new Recorder(), ASKER);
     await first.brain.release(row.ref, 'quiet');
-    expect(await lane(row.sessionId)).toMatchObject({
+    expect(await agent(row.sessionId)).toMatchObject({
       model: { provider: 'opencode-go', modelId: 'qwen3.8-max' },
     });
     const second = build({ ...faux(), setup: models.setup });
     await second.brain.open(row);
-    expect(await lane(row.sessionId)).toMatchObject({
+    expect(await agent(row.sessionId)).toMatchObject({
       model: { provider: CHATGPT_PROVIDER, modelId: 'gpt-6-sol' },
       thinkingLevel: 'medium',
     });

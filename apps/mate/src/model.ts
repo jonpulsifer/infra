@@ -5,7 +5,7 @@
  * ChatGPT provider signs in through the credential store instead. With a
  * fallback, requests for a ChatGPT primary go through the router.
  */
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import {
   type Api,
   clampThinkingLevel,

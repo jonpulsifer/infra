@@ -1,23 +1,22 @@
 /**
- * Commit throughput for one streamed reply: 200 frame appends, one commit
- * each, as pi writes them, beside 200 appends of the same size that commit
- * synchronously. Runs in a database of its own on the server that
- * PI_STORE_TEST_DATABASE_URL or DATABASE_URL names, or as user postgres
- * through the Unix socket PI_STORE_BENCH_SOCKET names, since Bun's URLs have
- * no socket form.
+ * Commit throughput for the two writes a streamed reply makes: 200 document
+ * deltas, one commit each, and 200 entry appends, one commit each. Runs in a
+ * database of its own on the server that PI_STORE_TEST_DATABASE_URL or
+ * DATABASE_URL names, or as user postgres through the Unix socket
+ * PI_STORE_BENCH_SOCKET names, since Bun's URLs have no socket form.
  *
  *   bun run --cwd packages/pi-store-postgres bench
  */
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import {
-  appendList,
-  BACKGROUND_CONTEXT,
-  list,
-  pendingAssistantFrames,
-  type Storage,
-  type ValueList,
-} from '@earendil-works/pi-agent-core';
+  type ConversationId,
+  type DocumentId,
+  type EntryId,
+  ROOT_CONVERSATION_ID,
+  type StorageWrite,
+} from '@earendil-works/pi-durable';
 import { SQL } from 'bun';
-import { migrate, openSession, postgresStorage } from '../src/index.ts';
+import { migrate, openStorage } from '../src/index.ts';
 
 const COMMITS = 200;
 const WARMUP = 20;
@@ -39,33 +38,20 @@ function connect(database: string | undefined, max: number): SQL {
   return new SQL(url.toString(), { max });
 }
 
-function frame(index: number) {
-  return {
-    type: 'text_delta' as const,
-    contentIndex: 0,
-    delta: `token ${index} of a streamed reply `,
-  };
-}
+const DOCUMENT = 2 as DocumentId;
 
-async function run<T>(
-  storage: Storage,
-  address: ValueList<T>,
-  element: (index: number) => T,
+async function run(
+  write: (index: number) => StorageWrite,
+  storage: Awaited<ReturnType<typeof openStorage>>,
 ) {
-  for (let index = 0; index < WARMUP; index++) {
-    await storage.commit(
-      [appendList(address, element(index))],
-      BACKGROUND_CONTEXT,
-    );
-  }
+  const commit = (index: number) =>
+    storage.commit([write(index)], BACKGROUND_CONTEXT);
+  for (let index = 0; index < WARMUP; index++) await commit(index);
   const latencies: number[] = [];
   const started = performance.now();
-  for (let index = 0; index < COMMITS; index++) {
+  for (let index = WARMUP; index < WARMUP + COMMITS; index++) {
     const before = performance.now();
-    await storage.commit(
-      [appendList(address, element(index))],
-      BACKGROUND_CONTEXT,
-    );
+    await commit(index);
     latencies.push(performance.now() - before);
   }
   const seconds = (performance.now() - started) / 1000;
@@ -91,18 +77,46 @@ try {
       current_setting('synchronous_commit') AS synchronous_commit
   `;
   console.log(settings);
-  await (await openSession(sql, { id: 'bench' })).close(BACKGROUND_CONTEXT);
-  const storage = postgresStorage(sql, 'bench');
+  const storage = await openStorage(sql, 'bench');
+  await storage.commit(
+    [
+      { type: 'conversation', value: { id: ROOT_CONVERSATION_ID } },
+      {
+        type: 'document.create',
+        record: {
+          id: DOCUMENT,
+          kind: 'bench.live',
+          scope: { kind: 'session' },
+        },
+        content: { kind: 'base', version: 1, value: { text: '' } },
+      },
+    ],
+    BACKGROUND_CONTEXT,
+  );
   console.table({
-    'frames (asynchronous commit)': await run(
+    'document delta': await run(
+      (index) => ({
+        type: 'document.change',
+        id: DOCUMENT,
+        content: {
+          kind: 'delta',
+          version: 1,
+          ops: [['s', ['text'], `token ${index} of a streamed reply `]],
+        },
+      }),
       storage,
-      pendingAssistantFrames('operation', 'response'),
-      frame,
     ),
-    'same-size list (synchronous)': await run(
+    'entry append': await run(
+      (index) => ({
+        type: 'entry',
+        value: {
+          id: (1000 + index) as EntryId,
+          conversationId: ROOT_CONVERSATION_ID as ConversationId,
+          kind: 'bench.note',
+          data: { text: `token ${index} of a streamed reply ` },
+        },
+      }),
       storage,
-      list('bench.list', 'response'),
-      frame,
     ),
   });
   await storage.close(BACKGROUND_CONTEXT);

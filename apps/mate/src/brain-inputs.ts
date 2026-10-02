@@ -4,16 +4,13 @@
  * servers.
  */
 import type {
-  AgentHarnessTool,
-  ExecutionToolContext,
-  ThinkingLevel,
-} from '@earendil-works/pi-agent-core';
-import type {
   Api,
   CredentialStore,
   Model,
   Models,
+  ModelThinkingLevel as ThinkingLevel,
 } from '@earendil-works/pi-ai';
+import type { ToolRegistration } from '@earendil-works/pi-durable';
 import type { Clock } from './clock.ts';
 import type { Log } from './log.ts';
 import type { Instruments } from './metrics.ts';
@@ -90,7 +87,7 @@ export interface BrainProfile {
   readonly turnTimeoutMs: number;
 }
 
-export type BridgedTool = AgentHarnessTool<ExecutionToolContext>;
+export type BridgedTool = ToolRegistration;
 
 /** Every tool bridged from the kthx server starts with this. */
 export const KTHX_TOOL_PREFIX = 'kthx_';

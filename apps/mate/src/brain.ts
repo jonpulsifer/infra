@@ -1,31 +1,41 @@
 /**
- * The brain: one pi harness per open thread, on lane `main`, in mate's own
- * process, with the prompt, model, tools and turn timeout of the row's
- * profile. The model streams before any sandbox exists; the hands lease one
- * on the first tool call. A run a restart cut off stays open in mate-db and
- * resumes, and a harness that faults is closed, drained and opened again.
+ * The brain: one pi-durable harness per open thread, over the thread's own
+ * session in mate-db, in mate's own process, with the prompt, model, tools
+ * and turn timeout of the row's profile. The model streams before any sandbox
+ * exists; the hands lease one on the first tool call. A run a restart cut off
+ * stays pending in mate-db and resumes, and a harness that faults is closed,
+ * drained and opened again.
  */
+
+import type { Context } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
+import type { Models } from '@earendil-works/pi-ai';
 import {
-  AgentHarness,
-  type AgentLane,
-  BACKGROUND_CONTEXT,
-  type Context,
+  type AgentEvent,
+  type AgentEventStream,
+  type Conversation,
+  ConversationBusy,
+  type ConversationRetryPolicy,
+  createRegistry,
+  DEFAULT_RETRY_POLICY,
+  defineExtension,
+  type Extension,
+  Harness,
+  type Registry,
+  type SettledSubmissionRecord,
+  type SnapshotEvent,
+  type Storage,
+  type SubmissionId,
+  section,
+  watchEvents,
+} from '@earendil-works/pi-durable';
+import {
   createBashTool,
   createEditTool,
   createReadTool,
   createWriteTool,
-  type ExecutionToolContext,
-  HarnessClosed,
-  type HarnessEvent,
-  type HarnessEventType,
-  HarnessFault,
-  type OperationResultRecord,
-  type Session,
-  SessionInvariantError,
-  withCancel,
-} from '@earendil-works/pi-agent-core';
-import type { RetryPolicy } from '@earendil-works/pi-ai';
-import { deleteSession, openSession } from '@repo/pi-store-postgres';
+} from '@earendil-works/pi-durable/tools';
+import { deleteStorage, openStorage } from '@repo/pi-store-postgres';
 import type { SQL } from 'bun';
 import type {
   BrainProfile,
@@ -84,9 +94,8 @@ export const QUARANTINE_LIMIT = 3;
 const QUARANTINE_WINDOW_MS = 3_600_000;
 const FORGET_WAIT_MS = 10_000;
 const SWEEP_BATCH = 100;
-/** How many messages back a resume looks for the calls its run made. */
-const RESUME_LOOKBACK = 16;
-const LANE = 'main';
+/** The one extension of a thread's registry: its profile's prompt and tools. */
+const EXTENSION = 'mate';
 const CTX = BACKGROUND_CONTEXT;
 
 export const RECOVERING =
@@ -97,26 +106,15 @@ export const SET_ASIDE =
 export const NO_TEXT =
   '[mate: this message has no text. mate passes on only the text of a message, not its attachments.]';
 
-const ROUTED: readonly HarnessEventType[] = [
-  'message_start',
-  'message_update',
-  'message_end',
-  'tool_start',
-  'tool_end',
-  'usage',
-  'run_end',
-  'retry_scheduled',
-];
-
 export interface SessionSource {
-  open(id: string): Promise<Session>;
+  open(id: string): Promise<Storage>;
   delete(id: string): Promise<void>;
 }
 
 export function postgresSessions(sql: SQL): SessionSource {
   return {
-    open: (id) => openSession(sql, { id }),
-    delete: (id) => deleteSession(sql, id),
+    open: (id) => openStorage(sql, id),
+    delete: (id) => deleteStorage(sql, id),
   };
 }
 
@@ -143,8 +141,8 @@ export interface PiBrainDeps {
   log: Log;
   clock?: Clock;
   metrics?: Instruments;
-  /** pi's provider retries; tests shorten the backoff. */
-  retry?: RetryPolicy;
+  /** pi's retries of a model request; tests shorten the backoff. */
+  retry?: Partial<ConversationRetryPolicy>;
   timeouts?: Partial<BrainTimeouts>;
 }
 
@@ -153,8 +151,10 @@ interface Turn {
   /** Aborted when the turn ends: it bounds a wait for a sandbox slot. */
   readonly leaseStop: AbortController;
   lease: TurnLease | null;
-  /** Set once the run is admitted; pi's events route here from then on. */
-  operationId: string | null;
+  /** Set once the run is admitted. */
+  submission: SubmissionId | null;
+  /** pi's events route here from just before the prompt is submitted. */
+  live: boolean;
   cancelRequested: boolean;
   timedOut: boolean;
   /** SIGTERM closed the harness under this turn. */
@@ -162,6 +162,9 @@ interface Turn {
   /** Resolves when a timeout or a Stop gives up waiting for the run to settle. */
   readonly cutOff: Promise<CutOff>;
   cut(why: CutOff): void;
+  /** Rejects when the session under the run is poisoned: the run will never settle. */
+  readonly poisoned: Promise<never>;
+  poison(error: unknown): void;
   /** The one timer that arms `cut`, after a timeout or a Stop. */
   grace: Handle | null;
   readonly done: Promise<void>;
@@ -176,9 +179,12 @@ interface ThreadBrain {
   readonly hands: ThreadHands;
   row: ThreadRow;
   profile: BrainProfile;
-  harness: AgentHarness<ExecutionToolContext>;
-  lane: AgentLane;
-  unsubscribe: () => void;
+  harness: Harness;
+  root: Conversation;
+  registry: Registry;
+  events: AgentEventStream;
+  /** The run the store held open at attach, and the calls it had made. */
+  open: OpenRun | null;
   interrupted: InterruptedRun | null;
   resumed: boolean;
   workspaceReset: SandboxGoneReason | null;
@@ -188,23 +194,83 @@ interface ThreadBrain {
   /** The broken harness's close, which drains the commits it admitted. */
   closing: Promise<void> | null;
   closed: boolean;
-  /** The MCP listing changed since the lane was reconciled. */
-  stale: boolean;
   turn: Turn | null;
 }
 
-/** Stands in for a tool a saved run names but the bridge or the profile does not list. */
-export function unreachableTool(name: string): BridgedTool {
-  return {
-    name,
-    label: name,
-    description: 'A kthx tool. kthx is unreachable right now.',
-    parameters: { type: 'object', additionalProperties: true },
-    replay: 'never',
-    execute: async () => {
-      throw new Error('kthx is unreachable');
-    },
+interface OpenRun {
+  readonly submission: SubmissionId;
+  readonly calls: readonly { id: string; name: string; args: unknown }[];
+}
+
+/** A pi call that threw: the session's storage failed, or its data breaks pi's rules. */
+class HarnessFault extends Error {
+  override readonly name = 'HarnessFault';
+  constructor(cause: unknown) {
+    super('the pi session failed', { cause });
+  }
+}
+
+/** pi rejects every call on a closed harness with one of these messages. */
+function isClosed(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message === 'Harness is closed' ||
+      error.message === 'Session is closed')
+  );
+}
+
+/**
+ * `models` with the session id on every request: pi-durable sends none, and
+ * the router names a request's thread by it. Methods stay bound to `models`.
+ */
+function withSession(models: Models, sessionId: string): Models {
+  const tagged = {
+    streamSimple: ((model, context, options) =>
+      models.streamSimple(model, context, {
+        ...options,
+        sessionId,
+      })) satisfies Models['streamSimple'],
+    completeSimple: ((model, context, options) =>
+      models.completeSimple(model, context, {
+        ...options,
+        sessionId,
+      })) satisfies Models['completeSimple'],
   };
+  return new Proxy(models, {
+    get(target, key) {
+      if (key in tagged) return tagged[key as keyof typeof tagged];
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+/** The run a snapshot shows open, with the calls of its newest assistant message. */
+function openRun(snapshot: SnapshotEvent): OpenRun | null {
+  const submission = snapshot.run?.inputs[0];
+  if (submission === undefined) return null;
+  for (const entry of [...snapshot.entries].reverse()) {
+    const message = entry.model?.[0];
+    if (message?.role !== 'assistant') continue;
+    return {
+      submission,
+      calls: message.content.flatMap((block) =>
+        block.type === 'toolCall'
+          ? [{ id: block.id, name: block.name, args: block.arguments }]
+          : [],
+      ),
+    };
+  }
+  return { submission, calls: [] };
+}
+
+/** When the newest user message was placed, as far as the transcript says. */
+function lastAsked(snapshot: SnapshotEvent): number | null {
+  for (const entry of [...snapshot.entries].reverse()) {
+    const message = entry.model?.[0];
+    if (message?.role === 'user') return message.timestamp;
+  }
+  return null;
 }
 
 export function resetNote(reason: SandboxGoneReason): string {
@@ -232,31 +298,13 @@ export function providerErrorKind(routed: string): ProviderErrorKind {
   return 'other';
 }
 
-/**
- * What broke: pi wraps every storage or invariant failure in a `HarnessFault`
- * whose message never changes, and keeps the real error as its cause.
- */
+/** What broke: a `HarnessFault` keeps the real error as its cause. */
 function explain(error: unknown): string {
   const cause =
     error instanceof HarnessFault && error.cause !== undefined
       ? error.cause
       : error;
   return redact(storeError(cause));
-}
-
-/** A restored session that breaks pi's own invariants. */
-function isCorrupt(error: unknown): boolean {
-  const inner = error instanceof HarnessFault ? error.cause : error;
-  return (
-    inner instanceof SessionInvariantError ||
-    error instanceof SessionInvariantError
-  );
-}
-
-function sameNames(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const sorted = [...b].sort();
-  return [...a].sort().every((name, at) => name === sorted[at]);
 }
 
 function errorResult(error: string, turn?: Turn): PromptResult {
@@ -298,13 +346,16 @@ export class PiBrain implements Brain {
       ...deps.timeouts,
     };
     this.baseTools = [
-      { ...createReadTool<ExecutionToolContext>(), replay: 'safe' },
-      createWriteTool<ExecutionToolContext>(),
-      createEditTool<ExecutionToolContext>(),
-      createBashTool<ExecutionToolContext>(),
+      { ...createReadTool(), replay: 'safe' },
+      createWriteTool(),
+      createEditTool(),
+      createBashTool(),
     ];
+    // Replaces the extension in place: a request under way keeps its tools.
     deps.mcp?.onChange(() => {
-      for (const tb of this.threads.values()) tb.stale = true;
+      for (const tb of this.threads.values()) {
+        tb.registry.install(this.extension(tb.profile, tb.ref));
+      }
     });
     deps.setup.router?.onRoute((event) => this.routed(event));
   }
@@ -340,8 +391,8 @@ export class PiBrain implements Brain {
       const said = text.trim() ? text : NO_TEXT;
       const input = reset ? `${resetNote(reset)}\n\n${said}` : said;
       turn.lease = tb.hands.beginTurn(this.leaseOptions(turn));
-      const admitted = await this.admit(tb, input);
-      if (typeof admitted !== 'string') return admitted;
+      const admitted = await this.admit(tb, turn, input);
+      if (typeof admitted !== 'number') return admitted;
       if (tb.workspaceReset) {
         tb.workspaceReset = null;
         this.write(tb.key, { workspaceReset: null });
@@ -361,17 +412,17 @@ export class PiBrain implements Brain {
       if (this.deps.mcp) {
         await this.deps.mcp.ready(this.timeouts.mcpBootWait);
       }
-      if (tb.stale) await this.reconcile(tb, true);
-      const operationId =
-        tb.interrupted?.operationId ??
-        (await tb.lane.inspectExecution(CTX)).current?.id;
-      if (!operationId) return { stopReason: 'end_turn' };
-      await this.seedCalls(tb, turn);
+      const open = tb.interrupted ? tb.open : null;
+      if (!open) return { stopReason: 'end_turn' };
+      for (const call of open.calls) {
+        turn.translator.seed(call.id, call.name, call.args);
+      }
       if (turn.abandoned) throw new ClosedUnderTurn();
       turn.lease = tb.hands.beginTurn(this.leaseOptions(turn));
       await turn.lease.warm();
       tb.interrupted = null;
-      return await this.drive(tb, turn, operationId);
+      turn.live = true;
+      return await this.drive(tb, turn, open.submission);
     });
   }
 
@@ -393,7 +444,7 @@ export class PiBrain implements Brain {
     const tb = this.threads.get(session.key);
     const turn = tb?.turn;
     if (!tb || !turn) return;
-    if (turn.operationId) this.stop(tb, turn);
+    if (turn.submission !== null) this.stop(tb, turn);
     else turn.cancelRequested = true;
   }
 
@@ -519,7 +570,7 @@ export class PiBrain implements Brain {
   private routed(event: RouteEvent): void {
     if (!event.sessionId) return;
     for (const tb of this.threads.values()) {
-      if (`${tb.row.sessionId}:${LANE}` !== event.sessionId) continue;
+      if (tb.row.sessionId !== event.sessionId) continue;
       tb.turn?.translator.routed(event);
       return;
     }
@@ -534,11 +585,25 @@ export class PiBrain implements Brain {
     const cutOff = new Promise<CutOff>((settle) => {
       cut = settle;
     });
+    let poison = (_: unknown) => {};
+    const poisoned = new Promise<never>((_, reject) => {
+      poison = reject;
+    });
+    // Nothing races it until the run is driven.
+    poisoned.catch(() => {});
     const turn: Turn = {
-      translator: new TurnTranslator(sink, this.clock, this.metrics),
+      translator: new TurnTranslator(
+        sink,
+        this.clock,
+        this.metrics,
+        this.deps.retry?.maxRetries ?? DEFAULT_RETRY_POLICY.maxRetries,
+      ),
       leaseStop: new AbortController(),
       lease: null,
-      operationId: null,
+      submission: null,
+      live: false,
+      poisoned,
+      poison,
       cancelRequested: false,
       timedOut: false,
       abandoned: false,
@@ -550,35 +615,6 @@ export class PiBrain implements Brain {
     };
     tb.turn = turn;
     return turn;
-  }
-
-  /**
-   * Titles the calls of the newest assistant message for the resumed card; a
-   * failed read leaves the bare titles.
-   */
-  private async seedCalls(tb: ThreadBrain, turn: Turn): Promise<void> {
-    try {
-      const entries = await tb.lane.findEntries(
-        { type: 'message', order: 'newestFirst', limit: RESUME_LOOKBACK },
-        CTX,
-      );
-      for (const entry of entries) {
-        if (entry.type !== 'message') continue;
-        const { message } = entry;
-        if (!('role' in message) || message.role !== 'assistant') continue;
-        for (const block of message.content) {
-          if (block.type === 'toolCall') {
-            turn.translator.seed(block.id, block.name, block.arguments);
-          }
-        }
-        return;
-      }
-    } catch (error) {
-      this.deps.log.warn('the resumed calls could not be read', {
-        key: tb.key,
-        error: plain(error),
-      });
-    }
   }
 
   private leaseOptions(turn: Turn) {
@@ -619,8 +655,8 @@ export class PiBrain implements Brain {
 
   /**
    * Before a prompt: a broken harness is opened again once its old one has
-   * drained, and a lane whose tools changed is reconciled. Returns an error
-   * result when the thread cannot take the prompt yet.
+   * drained. Returns an error result when the thread cannot take the prompt
+   * yet.
    */
   private async ready(tb: ThreadBrain): Promise<PromptResult | null> {
     if (tb.broken) {
@@ -632,26 +668,32 @@ export class PiBrain implements Brain {
         return errorResult(RECOVERING);
       }
     }
-    if (tb.stale) await this.reconcile(tb, false);
     return null;
   }
 
-  /** Admits the prompt; a lane still busy with a run is aborted first, once. */
+  /** Admits the prompt; a conversation still busy with a run is aborted first, once. */
   private async admit(
     tb: ThreadBrain,
+    turn: Turn,
     input: string,
-  ): Promise<string | PromptResult> {
+  ): Promise<SubmissionId | PromptResult> {
     for (let attempt = 0; ; attempt++) {
-      const admission = await tb.lane.accept(
-        { kind: 'prompt', prompt: input },
-        CTX,
-      );
-      if (admission.ok) return admission.value.operationId;
-      const error = admission.error;
-      if (error._tag === 'Closed') throw new ClosedUnderTurn(error.message);
-      if (error._tag !== 'LaneBusy') return errorResult(error.message);
+      turn.live = true;
+      try {
+        const submission = await this.pi(() =>
+          tb.root.submit(
+            { type: 'input', content: input, whenBusy: 'reject' },
+            CTX,
+          ),
+        );
+        return submission.id;
+      } catch (error) {
+        if (!(error instanceof ConversationBusy)) throw error;
+      }
+      // The discarded run's last events are not this turn's to draw.
+      turn.live = false;
       tb.interrupted = {
-        operationId: error.operationId,
+        operationId: String(tb.open?.submission ?? ''),
         startedAt: this.clock.now(),
       };
       if (attempt > 0 || !(await this.discardOpen(tb))) {
@@ -660,37 +702,53 @@ export class PiBrain implements Brain {
     }
   }
 
+  /** Runs a pi call: a closed harness is the turn's close, any other failure a fault. */
+  private async pi<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof ConversationBusy) throw error;
+      if (isClosed(error)) throw new ClosedUnderTurn(plain(error));
+      throw new HarnessFault(error);
+    }
+  }
+
   private async drive(
     tb: ThreadBrain,
     turn: Turn,
-    operationId: string,
+    id: SubmissionId,
   ): Promise<PromptResult> {
-    turn.operationId = operationId;
+    turn.submission = id;
     if (turn.cancelRequested) this.stop(tb, turn);
     const ms = tb.profile.turnTimeoutMs;
     const minutes = ms / 60_000;
     const timeout = this.clock.after(ms, () => {
       turn.timedOut = true;
-      this.abortLane(tb);
+      this.abortRun(tb);
       this.giveUp(turn, 'expired', this.timeouts.timeoutGrace);
     });
     try {
-      const driven = await Promise.race([
-        tb.lane.drive(
-          { operationId, waitForRetry: true, pollDeferred: true },
-          CTX,
-        ),
+      const settling = this.pi(async () => {
+        const submission = await tb.harness.submission(id, CTX);
+        if (!submission) throw new Error(`pi lost submission ${id}`);
+        return submission.wait(CTX);
+      });
+      // A cut-off turn leaves the wait behind; the close rejects it.
+      settling.catch(() => {});
+      const settled = await Promise.race([
+        settling,
         turn.cutOff,
+        turn.poisoned,
       ]);
-      if (driven === 'expired' || driven === 'stopped') {
+      if (settled === 'expired' || settled === 'stopped') {
         // SIGTERM's close is already under way, and its run stays open.
         if (turn.abandoned) throw new ClosedUnderTurn();
         this.deps.log.warn('the run would not settle; closing its harness', {
           key: tb.key,
-          after: driven,
+          after: settled,
         });
         await this.closeBroken(tb);
-        return driven === 'expired'
+        return settled === 'expired'
           ? errorResult(`turn ran past ${minutes} min`, turn)
           : {
               stopReason: 'cancelled',
@@ -698,17 +756,8 @@ export class PiBrain implements Brain {
               costUsd: turn.translator.costUsd,
             };
       }
-      if (!driven.ok) {
-        if (driven.error._tag === 'Closed') {
-          throw new ClosedUnderTurn(driven.error.message);
-        }
-        throw new HarnessFault(driven.error.message, driven.error);
-      }
-      if (driven.value.kind !== 'settled') {
-        return errorResult('the run is still waiting on the model', turn);
-      }
       tb.faults = 0;
-      return this.outcome(turn, driven.value.outcome, minutes);
+      return this.outcome(turn, settled, minutes);
     } finally {
       this.clock.cancel(timeout);
     }
@@ -716,7 +765,7 @@ export class PiBrain implements Brain {
 
   /** Stop: the run is aborted, and closed under the turn if it will not settle. */
   private stop(tb: ThreadBrain, turn: Turn): void {
-    this.abortLane(tb);
+    this.abortRun(tb);
     this.giveUp(turn, 'stopped', this.timeouts.stopGrace);
   }
 
@@ -727,17 +776,19 @@ export class PiBrain implements Brain {
 
   private outcome(
     turn: Turn,
-    outcome: OperationResultRecord,
+    settled: SettledSubmissionRecord,
     minutes: number,
   ): PromptResult {
     const result = {
       firstTokenMs: turn.translator.firstTokenMs,
       costUsd: turn.translator.costUsd,
     };
-    switch (outcome.status) {
-      case 'completed':
-      case 'declined':
-        return { stopReason: 'end_turn', ...result };
+    if (settled.status === 'done') return { stopReason: 'end_turn', ...result };
+    const detail =
+      typeof settled.detail === 'string' && settled.detail
+        ? settled.detail
+        : null;
+    switch (settled.reason) {
       case 'aborted':
         return turn.timedOut
           ? {
@@ -746,11 +797,19 @@ export class PiBrain implements Brain {
               error: `turn ran past ${minutes} min`,
             }
           : { stopReason: 'cancelled', ...result };
-      case 'failed': {
-        const message = outcome.error?.message ?? 'the run failed';
+      case 'model_error': {
+        const message = detail ?? 'the run failed';
         this.metrics.providerError(providerErrorKind(message));
         return { ...result, stopReason: 'error', error: redact(message) };
       }
+      default:
+        return {
+          ...result,
+          stopReason: 'error',
+          error: redact(
+            `the run ended unanswered (${settled.reason})${detail ? `: ${detail}` : ''}`,
+          ),
+        };
     }
   }
 
@@ -761,16 +820,11 @@ export class PiBrain implements Brain {
     error: unknown,
   ): Promise<PromptResult> {
     if (error instanceof BrainUnavailable) throw error;
-    const closed =
-      error instanceof ClosedUnderTurn || error instanceof HarnessClosed;
+    const closed = error instanceof ClosedUnderTurn;
     if (closed && turn.abandoned) {
       throw new TurnAbandoned('mate is shutting down');
     }
-    if (
-      error instanceof TypeError ||
-      error instanceof RangeError ||
-      !(closed || error instanceof HarnessFault || isCorrupt(error))
-    ) {
+    if (!(closed || error instanceof HarnessFault)) {
       this.deps.log.error('the turn hit a bug in mate', {
         key: tb.key,
         error: plain(error),
@@ -818,8 +872,8 @@ export class PiBrain implements Brain {
     return tb.closing;
   }
 
-  private abortLane(tb: ThreadBrain): void {
-    void tb.lane.abort(CTX).catch((error) =>
+  private abortRun(tb: ThreadBrain): void {
+    void tb.root.abort(CTX).catch((error) =>
       this.deps.log.warn('the run could not be aborted', {
         key: tb.key,
         error: plain(error),
@@ -828,21 +882,22 @@ export class PiBrain implements Brain {
   }
 
   /**
-   * Aborts the open run durably. pi's reconcile drive ignores the caller's
-   * signal, so a deadline that fires is followed by a wait for idle.
+   * Aborts the open run durably. A deadline that fires cancels only the wait,
+   * not the abort, so it is followed by a wait for idle.
    */
   private async discardOpen(tb: ThreadBrain): Promise<boolean> {
     const deadline = this.timeouts.discard;
-    const abort = (ctx: Context) => tb.lane.abort(ctx);
+    const abort = (ctx: Context) => this.pi(() => tb.root.abort(ctx));
     if ((await this.bounded(abort, deadline)) === 'late') {
       this.deps.log.info(
-        'the abort ran past its deadline; waiting for the lane',
+        'the abort ran past its deadline; waiting for the run',
         { key: tb.key },
       );
-      const idle = (ctx: Context) => tb.lane.waitForIdle(ctx);
+      const idle = (ctx: Context) => this.pi(() => tb.root.waitForIdle(ctx));
       if ((await this.bounded(idle, deadline)) === 'late') return false;
     }
     tb.interrupted = null;
+    tb.open = null;
     return true;
   }
 
@@ -876,21 +931,13 @@ export class PiBrain implements Brain {
         existing.faults = 0;
       }
     }
+    // pi has no error that says a stored session is corrupt: one it cannot
+    // open after a rollback fails the same way. So a session that will not
+    // open stays where it is, and only faults mid-turn set one aside.
     try {
       return await this.attach(current);
-    } catch (first) {
-      if (!isCorrupt(first)) throw this.unavailable(current, first);
-      try {
-        return await this.attach(current);
-      } catch (second) {
-        if (!isCorrupt(second)) throw this.unavailable(current, second);
-        const fresh = await this.quarantine(current, explain(second));
-        try {
-          return await this.attach(fresh);
-        } catch (third) {
-          throw this.unavailable(fresh, third);
-        }
-      }
+    } catch (error) {
+      throw this.unavailable(current, error);
     }
   }
 
@@ -957,54 +1004,77 @@ export class PiBrain implements Brain {
     return fresh;
   }
 
-  /** Opens the row's session under a new harness, and reconciles its lane. */
+  /** Opens the row's session under a new harness, on its profile's model. */
   private async attach(row: ThreadRow): Promise<BrainSession> {
     const { setup, sessions } = this.deps;
     const profile = this.deps.profiles.get(row.profile);
     if (!profile) {
       throw new BrainUnavailable(`profile ${row.profile} is not declared`);
     }
-    const session = await sessions.open(row.sessionId);
-    let harness: AgentHarness<ExecutionToolContext> | null = null;
+    const known = this.threads.get(row.key);
+    const hands =
+      known?.hands ??
+      this.deps.hands.thread(row.ref, this.hooks(row.key), profile.profile);
+    const registry = createRegistry();
+    registry.install(this.extension(profile, row.ref));
+    const storage = await sessions.open(row.sessionId);
+    let harness: Harness | null = null;
     try {
-      const known = this.threads.get(row.key);
-      const hands =
-        known?.hands ??
-        this.deps.hands.thread(row.ref, this.hooks(row.key), profile.profile);
-      const created = await AgentHarness.create<ExecutionToolContext>(
+      // A failed open closes its own harness, and the storage under it.
+      const opened: Harness = await Harness.open(
+        storage,
         {
-          session,
-          models: setup.models,
-          model: profile.model,
-          thinkingLevel: profile.thinking,
-          tools: this.listedTools(profile.profile),
-          toolContext: { env: hands.env },
-          systemPrompt: profile.prompts[row.ref.surface],
-          streamOptions: { timeoutMs: PROVIDER_TIMEOUT_MS },
-          ...(this.deps.retry ? { retry: this.deps.retry } : {}),
+          models: withSession(setup.models, row.sessionId),
+          registry,
+          settings: {
+            stream: { timeoutMs: PROVIDER_TIMEOUT_MS },
+            ...(this.deps.retry ? { retry: this.deps.retry } : {}),
+          },
+          env: () => hands.env,
+          now: () => this.clock.now(),
+          onReport: (error) => {
+            if (harness) this.reported(row.key, harness, error);
+          },
         },
         CTX,
       );
-      harness = created.harness;
-      const lane = await harness.lane(LANE, CTX);
-      const open = created.open.find((operation) => operation.lane === LANE);
-      const stats = await session.getStats(CTX);
-      await this.reconcileLane(harness, lane, Boolean(open), profile);
+      harness = opened;
+      const model = {
+        provider: profile.model.provider,
+        modelId: profile.model.id,
+      };
+      const root = await opened.root(CTX, {
+        agent: { model, thinkingLevel: profile.thinking },
+      });
+      const events = await watchEvents(opened, root.id, CTX);
+      const { agent } = events.snapshot;
+      if (
+        agent.model?.provider !== model.provider ||
+        agent.model.modelId !== model.modelId ||
+        agent.thinkingLevel !== profile.thinking
+      ) {
+        await root.configure({ model, thinkingLevel: profile.thinking }, CTX);
+      }
+      const open = openRun(events.snapshot);
       const fresh = {
         row,
         profile,
-        harness,
-        lane,
+        harness: opened,
+        root,
+        registry,
+        events,
+        open,
         interrupted: open
-          ? { operationId: open.operationId, startedAt: open.startedAt }
+          ? {
+              operationId: String(open.submission),
+              startedAt: lastAsked(events.snapshot) ?? this.clock.now(),
+            }
           : null,
-        resumed: stats.messageCount > 0,
+        resumed: events.snapshot.entries.length > 0,
         broken: false,
         closing: null,
         closed: false,
-        stale: false,
       };
-      known?.unsubscribe();
       const tb: ThreadBrain = known
         ? Object.assign(known, fresh)
         : {
@@ -1014,22 +1084,34 @@ export class PiBrain implements Brain {
             workspaceReset: row.workspaceReset,
             faults: 0,
             turn: null,
-            unsubscribe: () => {},
             ...fresh,
           };
-      tb.unsubscribe = this.subscribe(row.key, harness);
+      this.subscribe(row.key, opened, events);
       this.threads.set(row.key, tb);
+      // A listing that changed while this opened reached no registry.
+      registry.install(this.extension(profile, row.ref));
       return this.sessionOf(tb);
     } catch (error) {
       if (harness) await harness.close(CTX).catch(() => {});
-      else await session.close(CTX).catch(() => {});
-      throw error;
+      throw new HarnessFault(error);
     }
   }
 
+  /** The profile's prompt for the thread's surface, and the tools it lists. */
+  private extension(profile: BrainProfile, ref: ThreadRef): Extension {
+    return defineExtension({
+      name: EXTENSION,
+      tools: this.listedTools(profile.profile),
+      sections: [
+        section('mate', () => profile.prompts[ref.surface], { tag: false }),
+      ],
+    });
+  }
+
   /**
-   * The base and bridged tools `profile` lists, each name once. The only list
-   * the harness is given, so a tool the profile does not list never runs.
+   * The base and bridged tools `profile` lists, each name once. The only
+   * tools the thread's registry holds, so one the profile does not list never
+   * runs.
    */
   private listedTools(profile: Profile): BridgedTool[] {
     const byName = new Map<string, BridgedTool>();
@@ -1041,56 +1123,16 @@ export class PiBrain implements Brain {
     return [...byName.values()];
   }
 
-  private reconcile(tb: ThreadBrain, open: boolean): Promise<void> {
-    tb.stale = false;
-    return this.reconcileLane(tb.harness, tb.lane, open, tb.profile);
-  }
-
-  /**
-   * Brings a lane saved by an older mate to its profile's model, thinking
-   * level and tools. While a run is open the tools are only added to: pi
-   * resumes a step with the names it captured, so each must still resolve.
-   */
-  private async reconcileLane(
-    harness: AgentHarness<ExecutionToolContext>,
-    lane: AgentLane,
-    open: boolean,
-    profile: BrainProfile,
-  ): Promise<void> {
-    const { model, thinking } = profile;
-    const saved = await lane.getActiveTools(CTX);
-    const listed = this.listedTools(profile.profile);
-    const names = listed.map((tool) => tool.name);
-    const standIns = saved
-      .filter((name) => !names.includes(name))
-      .map(unreachableTool);
-    await harness.setTools([...listed, ...standIns], CTX);
-    const { configuredModel } = await lane.inspectExecution(CTX);
-    if (
-      configuredModel.provider !== model.provider ||
-      configuredModel.modelId !== model.id
-    ) {
-      await lane.setModel({ provider: model.provider, modelId: model.id }, CTX);
-    }
-    if ((await lane.getThinkingLevel(CTX)) !== thinking) {
-      await lane.setThinkingLevel(thinking, CTX);
-    }
-    const desired = open ? [...new Set([...saved, ...names])] : names;
-    if (!sameNames(saved, desired)) await lane.setActiveTools(desired, CTX);
-  }
-
-  /** One sync listener per event type, routed to the running turn. */
+  /** Routes the harness's event batches to the running turn. */
   private subscribe(
     key: string,
-    harness: AgentHarness<ExecutionToolContext>,
-  ): () => void {
-    const current = () => {
+    harness: Harness,
+    events: AgentEventStream,
+  ): void {
+    const route = (event: AgentEvent) => {
       const tb = this.threads.get(key);
-      return tb?.harness === harness ? tb : undefined;
-    };
-    const route = (event: HarnessEvent) => {
-      const turn = current()?.turn;
-      if (!turn?.operationId) return;
+      const turn = tb?.harness === harness ? tb.turn : null;
+      if (!turn?.live) return;
       try {
         turn.translator.event(event);
       } catch (error) {
@@ -1101,27 +1143,44 @@ export class PiBrain implements Brain {
         });
       }
     };
-    const offs = ROUTED.map((type) => harness.events.on(type, route));
-    offs.push(
-      harness.events.on('fault', (event) => {
-        const tb = current();
-        if (tb) tb.broken = true;
-        this.deps.log.error('the harness reported a fault', {
-          key,
-          code: event.code,
-          message: event.message,
-        });
-      }),
-      harness.events.on('handler_error', (event) =>
-        this.deps.log.warn('a harness handler failed', {
-          key,
-          error: event.error,
-        }),
-      ),
-    );
-    return () => {
-      for (const off of offs) off();
+    events.start(async (batch) => {
+      for (const event of batch) route(event);
+    });
+  }
+
+  /**
+   * pi reports what it cannot throw to a caller. Two reports leave the run
+   * never settling, so the running turn faults. A commit the store refused
+   * because mate-db is down is retried for as long as it stays down. A
+   * storage failure of unknown outcome poisons the session, which an empty
+   * commit tells.
+   */
+  private reported(key: string, harness: Harness, error: unknown): void {
+    this.deps.log.warn('pi reported a failure', {
+      key,
+      error: plain(error),
+      cause: redact(storeError(error)),
+    });
+    const current = () => {
+      const tb = this.threads.get(key);
+      return tb?.harness === harness ? tb : null;
     };
+    const tb = current();
+    if (tb && isStoreUnavailable(error)) {
+      tb.broken = true;
+      tb.turn?.poison(new HarnessFault(error));
+      return;
+    }
+    void harness
+      .commit(() => undefined, CTX)
+      .catch((poison) => {
+        const tb = current();
+        if (!tb || isClosed(poison)) return;
+        tb.broken = true;
+        // The poison error only says to reopen; its cause says why.
+        const why = poison instanceof Error ? poison.cause : undefined;
+        tb.turn?.poison(new HarnessFault(why ?? poison));
+      });
   }
 
   private hooks(key: string): ThreadHandsHooks {
@@ -1164,7 +1223,6 @@ export class PiBrain implements Brain {
     const tb = this.threads.get(key);
     if (tb) {
       this.threads.delete(key);
-      tb.unsubscribe();
       await this.within(
         tb.harness.close(CTX).catch(() => {}),
         this.timeouts.harnessClose,

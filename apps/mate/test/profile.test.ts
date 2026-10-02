@@ -247,7 +247,7 @@ describe('brainProfiles', () => {
     const made = setup();
     const own: Profile = {
       ...(PROFILES.get('operator') as Profile),
-      model: { spec: 'opencode-go/glm-5.1', thinking: 'high' },
+      model: { spec: 'opencode-go/minimax-m2.7', thinking: 'high' },
     };
     const profiles = brainProfiles(
       made,
@@ -255,7 +255,7 @@ describe('brainProfiles', () => {
       60_000,
       new Map([[own.id, own]]),
     );
-    expect(profiles.get('operator')?.model.id).toBe('glm-5.1');
+    expect(profiles.get('operator')?.model.id).toBe('minimax-m2.7');
     expect(profiles.get('operator')?.thinking).toBe('high');
   });
 

@@ -5,14 +5,8 @@
  * reads them with its tools. `brainProfiles` resolves each profile's prompt,
  * model and turn timeout at boot.
  */
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import {
-  BACKGROUND_CONTEXT,
-  formatSkillsForSystemPrompt,
-  loadSkills,
-  type Skill,
-} from '@earendil-works/pi-agent-core';
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node';
 import type {
   BrainProfile,
   LoadSystemPrompts,
@@ -22,9 +16,14 @@ import type {
   SystemPrompts,
 } from './brain-inputs.ts';
 import { ConfigError } from './config.ts';
-import type { Log } from './log.ts';
+import { type Log, plain } from './log.ts';
 import { profileModel } from './model.ts';
 import { PROFILES, type Profile, turnTimeoutMs } from './profiles.ts';
+import {
+  formatSkillsForSystemPrompt,
+  loadSkills,
+  type Skill,
+} from './skills.ts';
 import type { SurfaceName } from './surface.ts';
 
 /** Later directories win a duplicate skill name. */
@@ -41,10 +40,9 @@ export const loadSystemPrompts: LoadSystemPrompts = async (
   profiles,
 ) => {
   const root = resolve(options.root);
-  const env = new NodeExecutionEnv({ cwd: root });
   const [agents, skills] = await Promise.all([
-    readAgents(env, root, options.log),
-    skillsIndex(env, root, options),
+    readAgents(root, options.log),
+    skillsIndex(root, options),
   ]);
   const prompt = (profile: Profile, surface: SurfaceName) =>
     [
@@ -99,30 +97,27 @@ export function brainProfiles(
   );
 }
 
-async function readAgents(
-  env: NodeExecutionEnv,
-  root: string,
-  log: Log,
-): Promise<string | null> {
+async function readAgents(root: string, log: Log): Promise<string | null> {
   const path = `${root}/${AGENTS_FILE}`;
-  const text = await env.readTextFile(path, BACKGROUND_CONTEXT);
-  if (text.ok && text.value.trim()) return text.value.trim();
-  log.warn('profile file missing', {
-    path,
-    error: text.ok ? 'the file is empty' : text.error.message,
-  });
+  let error = 'the file is empty';
+  try {
+    const text = (await readFile(path, 'utf8')).trim();
+    if (text) return text;
+  } catch (cause) {
+    error = plain(cause);
+  }
+  log.warn('profile file missing', { path, error });
   return null;
 }
 
 async function skillsIndex(
-  env: NodeExecutionEnv,
   root: string,
   { workspace, log }: ProfileOptions,
 ): Promise<string> {
   const dirs = SKILL_DIRS.map((dir) => `${root}/${dir}`);
   let loaded: Skill[] = [];
   try {
-    const result = await loadSkills(env, dirs, BACKGROUND_CONTEXT);
+    const result = await loadSkills(dirs);
     for (const diagnostic of result.diagnostics) {
       log.warn('skill diagnostic', {
         code: diagnostic.code,

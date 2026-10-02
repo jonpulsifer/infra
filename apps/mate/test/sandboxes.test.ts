@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { BACKGROUND_CONTEXT } from '@earendil-works/pi-agent-core';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { SandboxConfig } from '../src/config.ts';
 import { HARNESS_CONTAINER } from '../src/hands.ts';
 import { KthxSites, parseSites, serialize } from '../src/kthx-sites.ts';

@@ -2,32 +2,10 @@
  * Row codecs. Bun's SQL returns bigint columns as strings, so every integer is
  * read through `int`, which refuses any value a JS number cannot hold.
  */
-import type {
-  Entry,
-  EntryStructure,
-  UsageRow,
-} from '@earendil-works/pi-agent-core';
+import type { Cursor, Page } from '@earendil-works/pi-durable';
 
-export interface StructureRow {
-  id: string;
-  parent_id: string | null;
-  seq: string | number;
-  type: Entry['type'];
-  custom_type: string | null;
-  timestamp: string | number;
-}
-
-export interface EntryRow extends StructureRow {
-  payload: string;
-}
-
-export interface UsageLedgerRow {
-  id: string;
-  seq: string | number;
-  entry_id: string | null;
-  adjustment: boolean;
-  usage: string;
-  details: string | null;
+export interface RecordRow {
+  record: string;
 }
 
 export function int(value: unknown, column: string): number {
@@ -51,53 +29,33 @@ export function json(value: unknown, what: string): string {
   return text;
 }
 
-/** The entry minus the fields that have columns of their own. */
-export function entryPayload(entry: Entry): string {
-  const {
-    id: _id,
-    parentId: _parentId,
-    seq: _seq,
-    timestamp: _timestamp,
-    type: _type,
-    customType: _customType,
-    ...payload
-  } = entry;
-  return json(payload, `entry ${entry.id}`);
-}
-
-export function decodeStructure(row: StructureRow): EntryStructure {
-  return {
-    id: row.id,
-    parentId: row.parent_id,
-    seq: int(row.seq, 'seq'),
-    timestamp: int(row.timestamp, 'timestamp'),
-    type: row.type,
-    ...(row.custom_type === null ? {} : { customType: row.custom_type }),
-  };
-}
-
-export function decodeEntry(row: EntryRow): Entry {
-  return { ...JSON.parse(row.payload), ...decodeStructure(row) } as Entry;
-}
-
-export function decodeUsage(row: UsageLedgerRow): UsageRow {
-  return {
-    id: row.id,
-    seq: int(row.seq, 'seq'),
-    usage: JSON.parse(row.usage),
-    ...(row.entry_id === null ? {} : { entryId: row.entry_id }),
-    adjustment: row.adjustment,
-    ...(row.details === null ? {} : { details: JSON.parse(row.details) }),
-  };
-}
-
 /**
- * A page size as `Array.prototype.slice` reads pi's in-memory limits:
- * undefined or infinite means all, anything else truncates and floors at 0.
+ * Indexed strings are stored as their JSON text, so a lone surrogate or NUL
+ * in a kind, key or request id is neither refused nor replaced by Postgres.
  */
-export function pageSize(limit: number | undefined): number | undefined {
-  if (limit === undefined) return undefined;
-  const size = Math.trunc(Math.max(0, limit));
-  if (Number.isNaN(size)) return 0;
-  return size > Number.MAX_SAFE_INTEGER ? undefined : size;
+export function indexed(value: string): string {
+  return JSON.stringify(value);
+}
+
+export function decode<T>(row: RecordRow): T {
+  return JSON.parse(row.record) as T;
+}
+
+export function cursorAfter(cursor: Cursor | undefined): number | undefined {
+  const after = cursor?.after;
+  if (after === undefined) return undefined;
+  if (typeof after !== 'number' || !Number.isSafeInteger(after)) {
+    throw new TypeError('Invalid storage cursor');
+  }
+  return after;
+}
+
+/** Turns a scan of up to `limit + 1` rows into a page and its continuation. */
+export function page<T extends { id: number }>(
+  values: readonly T[],
+  limit: number,
+): Page<T, Cursor> {
+  const items = values.slice(0, limit);
+  if (values.length <= limit) return { items };
+  return { items, next: { after: items.at(-1)!.id } };
 }

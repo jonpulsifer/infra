@@ -7,9 +7,10 @@
  * leaving the set.
  */
 import { createHash } from 'node:crypto';
-import type { AgentToolResult } from '@earendil-works/pi-agent-core';
+import type { Context } from '@earendil-works/chord';
 import type { TSchema } from '@earendil-works/pi-ai';
 import { validateToolArguments } from '@earendil-works/pi-ai';
+import type { ToolExecutionResult } from '@earendil-works/pi-durable';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   StreamableHTTPClientTransport,
@@ -40,6 +41,12 @@ export const MAX_RESULT_CHARS = 50 * 1024;
 const MAX_NAME = 64;
 /** `_` and six hex characters of the MCP name's SHA-256. */
 const SUFFIX = 7;
+
+/** The bridge cuts a result itself, at characters; the harness's own cut would cut it again. */
+const UNBOUNDED_BY_HARNESS = {
+  maxBytes: MAX_RESULT_CHARS * 4 + 1024,
+  maxLines: Number.MAX_SAFE_INTEGER,
+} as const;
 
 type CallResult = Awaited<ReturnType<Client['callTool']>>;
 
@@ -293,26 +300,26 @@ class ServerBridge implements McpBridge {
   private bridge(tool: McpTool, name: string): BridgedTool {
     return {
       name,
-      label: `${this.options.name} ${tool.name}`,
       description:
         tool.description ?? `The ${this.options.name} ${tool.name} tool.`,
       parameters: tool.inputSchema as unknown as TSchema,
-      replay: 'never',
-      execute: (_id, params, _onUpdate, _toolContext, _invocation, context) =>
-        this.call(tool.name, params as Record<string, unknown>, context),
+      replay: 'unsafe',
+      outputLimits: UNBOUNDED_BY_HARNESS,
+      execute: (args, _api, context) =>
+        this.call(tool.name, args as Record<string, unknown>, context),
     };
   }
 
   private async call(
     name: string,
     args: Record<string, unknown>,
-    { abortSignal: signal }: { abortSignal: AbortSignal | undefined },
-  ): Promise<AgentToolResult<unknown>> {
+    { abortSignal: signal }: Context,
+  ): Promise<ToolExecutionResult> {
     const { name: server, metrics } = this.options;
     const connection = this.current;
     if (!connection) {
       metrics?.mcpCall(server, 'unavailable');
-      throw new Error(unreachable(server));
+      return failed(unreachable(server));
     }
     let result: CallResult;
     try {
@@ -331,20 +338,24 @@ class ServerBridge implements McpBridge {
       if (failure === 'down') {
         metrics?.mcpCall(server, 'unavailable');
         this.down(connection, error);
-        throw new Error(`${unreachable(server)}: ${redact(plain(error))}`);
+        return failed(`${unreachable(server)}: ${redact(plain(error))}`);
       }
       metrics?.mcpCall(server, 'error');
       if (failure === 'unclear') void this.check(connection);
-      throw new Error(redact(plain(error)));
+      return failed(redact(plain(error)));
     }
     const text = bounded(server, resultText(result));
     if (result.isError) {
       metrics?.mcpCall(server, 'error');
-      throw new Error(text || `${server} ${name} failed`);
+      return failed(text || `${server} ${name} failed`);
     }
     metrics?.mcpCall(server, 'ok');
-    return { content: [{ type: 'text', text }], details: undefined };
+    return { content: [{ type: 'text', text }] };
   }
+}
+
+function failed(text: string): ToolExecutionResult {
+  return { content: [{ type: 'text', text }], isError: true };
 }
 
 async function listAll(client: Client): Promise<McpTool[]> {
