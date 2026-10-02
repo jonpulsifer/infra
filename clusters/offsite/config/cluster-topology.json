@@ -18,6 +18,7 @@
     "CILIUM_NATIVE_ROUTING_CIDR": "10.0.0.0/9",
     "LB_RANGE": "10.89.0.64/26",
     "BGP_GATEWAY_ASN": "64512",
-    "BGP_CILIUM_ASN": "64513"
+    "BGP_CILIUM_ASN": "64513",
+    "NODE_ADDRESSES": "{\"retrofit\":\"10.89.0.10\",\"oldschool\":\"10.89.0.11\"}"
   }
 }

@@ -1,8 +1,8 @@
 # offsite UniFi
 
-OpenTofu root for the offsite UniFi gateway: networks, WANs, WLANs and the gateway's BGP config. See [Network](https://wiki.lolwtf.ca/platform/network/) on the wiki, and [Routing and firewall](https://wiki.lolwtf.ca/platform/network/routing-and-firewall/) for the BGP routes and zone policies.
+OpenTofu root for the offsite UniFi gateway: networks, WANs, WLANs, the Kubernetes nodes' DHCP reservations and the gateway's BGP config. See [Network](https://wiki.lolwtf.ca/platform/network/) on the wiki, and [Routing and firewall](https://wiki.lolwtf.ca/platform/network/routing-and-firewall/) for the BGP routes and zone policies.
 
-`topology.tf` reads `clusters/offsite/config/cluster-topology.json`. `bgp.conf` is the FRR config for the gateway. This root declares no firewall policies, because the offsite Kubernetes network is in the built-in `Internal` zone. If that network moves to a custom zone, copy folly's cross-site policies from `terraform/network/unifi/folly/firewall.tf`.
+`topology.tf` reads `clusters/offsite/config/cluster-topology.json`. `k8s.tf` reserves each node's `NODE_ADDRESSES` value on the MAC that `clients.yaml` holds for it. `bgp.conf` is the FRR config for the gateway. This root declares no firewall policies, because the offsite Kubernetes network is in the built-in `Internal` zone. If that network moves to a custom zone, copy folly's cross-site policies from `terraform/network/unifi/folly/firewall.tf`.
 
 ## Develop
 
@@ -16,7 +16,7 @@ A local plan needs Google credentials for the state bucket and `OP_SERVICE_ACCOU
 
 ## Deploy
 
-Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/unifi/offsite`.
+Atlantis plans this root on a pull request that changes a `.tf` or `.conf` file in it. A change to only `clients.yaml` or `cluster-topology.json` does not autoplan, so comment `atlantis plan -d terraform/network/unifi/offsite`. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/unifi/offsite`.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -24,13 +24,13 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
-| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.55 |
+| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.57 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.55.0 |
+| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.57.0 |
 
 ## Modules
 
@@ -43,6 +43,7 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | Name | Type |
 | ---- | ---- |
 | [unifi_bgp.offsite](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/bgp) | resource |
+| [unifi_client.k8s_nodes](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
 | [unifi_network.default](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_wan.internet_1](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/wan) | resource |

@@ -19,9 +19,13 @@ required_keys := {
 	"LB_RANGE",
 	"BGP_GATEWAY_ASN",
 	"BGP_CILIUM_ASN",
+	"NODE_ADDRESSES",
 }
 
 cidr_keys := {"K8S_NODE_CIDR", "CILIUM_POD_CIDR", "SERVICE_CIDR", "CILIUM_NATIVE_ROUTING_CIDR", "LB_RANGE"}
+
+# A DNS label, which is also what the kubelet registers as the node name.
+hostname_pattern := `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`
 
 # Keys are the range names that the overlap denial prints.
 range_kind := {
@@ -127,6 +131,14 @@ all_facts_present(i) if {
 }
 
 dns_entries(facts) := split(facts.CLUSTER_DNS, ",")
+
+# The data stays flat strings, so the hostname-to-address map is a JSON object
+# written as one string.
+node_addresses(facts) := nodes if {
+	json.is_valid(facts.NODE_ADDRESSES)
+	nodes := json.unmarshal(facts.NODE_ADDRESSES)
+	is_object(nodes)
+}
 
 deny contains msg if {
 	some i, _ in docs
@@ -261,6 +273,69 @@ deny contains msg if {
 	is_canonical_cidr(facts[key])
 	not net.cidr_contains(facts.CILIUM_NATIVE_ROUTING_CIDR, facts[key])
 	msg := sprintf("%s: CILIUM_NATIVE_ROUTING_CIDR must contain %s", [doc_path(i), key])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	not node_addresses(doc_data(i))
+	msg := sprintf("%s: NODE_ADDRESSES must be a JSON object of hostname to IPv4 address", [doc_path(i)])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	count(node_addresses(doc_data(i))) == 0
+	msg := sprintf("%s: NODE_ADDRESSES must name at least one node", [doc_path(i)])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	some name, _ in node_addresses(doc_data(i))
+	not regex.match(hostname_pattern, name)
+	msg := sprintf("%s: NODE_ADDRESSES key %q must be a hostname", [doc_path(i), name])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	some name, address in node_addresses(doc_data(i))
+	not ipv4_to_int(address)
+	msg := sprintf("%s: NODE_ADDRESSES value for %s must be an IPv4 address", [doc_path(i), name])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	facts := doc_data(i)
+	is_canonical_cidr(facts.K8S_NODE_CIDR)
+	some name, address in node_addresses(facts)
+	ipv4_to_int(address)
+	not net.cidr_contains(facts.K8S_NODE_CIDR, address)
+	msg := sprintf("%s: NODE_ADDRESSES value for %s must be in K8S_NODE_CIDR", [doc_path(i), name])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	nodes := node_addresses(doc_data(i))
+	some first, second in nodes
+	some other, _ in nodes
+	first < other
+	nodes[other] == second
+	msg := sprintf("%s: NODE_ADDRESSES gives %s to both %s and %s", [doc_path(i), second, first, other])
+}
+
+# One schedulable control plane, reached at its own address: no VIP.
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	facts := doc_data(i)
+	nodes := node_addresses(facts)
+	addresses := {address | some _, address in nodes}
+	not facts.API_SERVER_IP in addresses
+	msg := sprintf("%s: API_SERVER_IP must be the address of a node in NODE_ADDRESSES", [doc_path(i)])
 }
 
 deny contains msg if {

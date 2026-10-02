@@ -60,6 +60,31 @@ resource "cloudflare_dns_record" "offsite_lolwtf_ca" {
   ttl     = 1
 }
 
+# offsite's nodes, by hostname. folly's are next to their DHCP reservations in
+# terraform/network/unifi/folly/k8s.tf, from the same topology key.
+resource "cloudflare_dns_record" "offsite_nodes" {
+  for_each = jsondecode(local.topology.offsite.NODE_ADDRESSES)
+
+  zone_id = cloudflare_zone.lolwtf_ca.id
+  name    = "${each.key}.${cloudflare_zone.lolwtf_ca.name}"
+  type    = "A"
+  content = each.value
+  proxied = false
+  ttl     = 1
+}
+
+# Both records exist, made by hand before this root declared them. The first
+# apply adopts them; a later PR removes these blocks.
+import {
+  to = cloudflare_dns_record.offsite_nodes["retrofit"]
+  id = "6db37c857d0c3631bea427fab3301e89/38c602ba200d92710d0b8d86cf84654f"
+}
+
+import {
+  to = cloudflare_dns_record.offsite_nodes["oldschool"]
+  id = "6db37c857d0c3631bea427fab3301e89/b4c2f68960aca083a7a4f0a2305ee740"
+}
+
 output "cloudflare_tunnel_token_folly" {
   sensitive = true
   value     = module.tunnel_folly.cloudflare_tunnel_token

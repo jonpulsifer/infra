@@ -20,6 +20,7 @@ folly := {
 		"LB_RANGE": "10.3.0.64/26",
 		"BGP_GATEWAY_ASN": "64512",
 		"BGP_CILIUM_ASN": "64513",
+		"NODE_ADDRESSES": `{"optiplex":"10.3.0.10","shale":"10.3.0.11","riptide":"10.3.0.12"}`,
 	},
 }
 
@@ -41,6 +42,7 @@ offsite := {
 		"LB_RANGE": "10.89.0.64/26",
 		"BGP_GATEWAY_ASN": "64512",
 		"BGP_CILIUM_ASN": "64513",
+		"NODE_ADDRESSES": `{"retrofit":"10.89.0.10","oldschool":"10.89.0.11"}`,
 	},
 }
 
@@ -85,6 +87,26 @@ test_missing_required_fact_is_denied_with_local_diagnostic if {
 test_overlapping_lb_range_is_denied_with_local_diagnostic if {
 	overlapping_lb := with_fact(folly, "LB_RANGE", folly.data.K8S_NODE_CIDR)
 	"overlapping-lb.json: LB_RANGE must not overlap K8S_NODE_CIDR" in deny with input as [wrap(overlapping_lb, "overlapping-lb.json")]
+}
+
+test_node_addresses_that_are_not_a_json_object_are_denied if {
+	list_of_nodes := with_fact(folly, "NODE_ADDRESSES", `["10.3.0.10"]`)
+	"list.json: NODE_ADDRESSES must be a JSON object of hostname to IPv4 address" in deny with input as [wrap(list_of_nodes, "list.json")]
+}
+
+test_node_outside_the_node_cidr_is_denied_with_local_diagnostic if {
+	stray_node := with_fact(folly, "NODE_ADDRESSES", `{"optiplex":"10.3.0.10","stray":"10.89.0.11"}`)
+	"stray.json: NODE_ADDRESSES value for stray must be in K8S_NODE_CIDR" in deny with input as [wrap(stray_node, "stray.json")]
+}
+
+test_two_nodes_at_one_address_are_denied if {
+	shared_address := with_fact(folly, "NODE_ADDRESSES", `{"optiplex":"10.3.0.10","shale":"10.3.0.10"}`)
+	"shared.json: NODE_ADDRESSES gives 10.3.0.10 to both optiplex and shale" in deny with input as [wrap(shared_address, "shared.json")]
+}
+
+test_api_server_that_is_not_a_node_is_denied if {
+	api_vip := with_fact(folly, "API_SERVER_IP", "10.3.0.9")
+	"vip.json: API_SERVER_IP must be the address of a node in NODE_ADDRESSES" in deny with input as [wrap(api_vip, "vip.json")]
 }
 
 test_cross_cluster_address_space_collision_is_denied if {

@@ -31,26 +31,6 @@ locals {
       key_expiry_disabled = true
       tags                = ["tag:folly"]
     }
-    "oldschool" = {
-      key_expiry_disabled = true
-      tags                = ["tag:offsite"]
-    }
-    "optiplex" = {
-      key_expiry_disabled = true
-      tags                = ["tag:folly"]
-    }
-    "retrofit" = {
-      key_expiry_disabled = true
-      tags                = ["tag:offsite"]
-    }
-    "riptide" = {
-      key_expiry_disabled = true
-      tags                = ["tag:folly"]
-    }
-    "shale" = {
-      key_expiry_disabled = true
-      tags                = []
-    }
     "spore" = {
       key_expiry_disabled = true
       tags                = ["tag:folly"]

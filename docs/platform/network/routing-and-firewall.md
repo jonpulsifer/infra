@@ -19,7 +19,7 @@ folly holds Lab Net and Kubernetes in a custom `Lab` zone. offsite has no custom
 
 ## Rules
 
-- A new node needs its `bgp-enabled` label in `clusters/<site>/bootstrap/node-labels.tf` and a `neighbor <ip> peer-group HOMELAB` line in its site's FRR file, or it has no BGP session.
+- A new node needs its `bgp-enabled` label in `clusters/<site>/bootstrap/node-labels.tf` and a `neighbor <ip> peer-group HOMELAB` line in its site's FRR file, or it has no BGP session. The `<ip>` is the node's `NODE_ADDRESSES` value in its cluster's [topology file](../../reference/topology.md), copied by hand.
 - After a topology change, edit the literal addresses in both FRR files, or the gateways drop the new routes.
 - In a folly policy that allows cross-site traffic, list the node subnet, VIP pool and pod pool as sources. Pod packets enter `Lab` on the node's interface, and the `Lab` to `Vpn` chain ends in a DROP.
 - Keep the policy `folly_lb_to_nest_lan`, or replies from folly VIPs to offsite's Default network drop. folly pods and nodes cannot open connections to that network.
