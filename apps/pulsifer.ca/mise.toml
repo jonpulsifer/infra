@@ -1,7 +1,7 @@
 [tools]
 hugo = "0.167.0"
 "aqua:tailwindlabs/tailwindcss" = "4.3.3"
-pandoc = "3.11"
+pandoc = "3.12"
 "aqua:typst/typst" = "0.15.1"
 
 [tasks.css]
