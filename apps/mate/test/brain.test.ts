@@ -233,6 +233,23 @@ async function opened(built: Built, ref = thread(), profile = 'operator') {
   return { ref, row, session };
 }
 
+/**
+ * Prompts once the old harness has drained. A refusal while it drains opens
+ * nothing, so asking again changes no count a test reads.
+ */
+async function promptOnceDrained(
+  built: Built,
+  session: Awaited<ReturnType<typeof opened>>['session'],
+  input: string,
+  sink: Recorder,
+) {
+  for (let attempt = 0; ; attempt++) {
+    const result = await built.brain.prompt(session, input, sink, ASKER);
+    if (result.error !== RECOVERING || attempt >= 300) return result;
+    await Bun.sleep(10);
+  }
+}
+
 const agent = (sessionId: string) => storedAgent(database().sql, sessionId);
 
 describe('a turn', () => {
@@ -536,9 +553,8 @@ describe('Stop', () => {
 
     faults.holdCommit = null;
     stalled.open();
-    await Bun.sleep(50);
     const sink = new Recorder();
-    const third = await built.brain.prompt(session, 'three', sink, ASKER);
+    const third = await promptOnceDrained(built, session, 'three', sink);
     expect(third.stopReason).toBe('end_turn');
     expect(sink.text).toBe('answered');
     expect(sessions.opened).toHaveLength(2);
@@ -644,9 +660,8 @@ describe('the turn timeout', () => {
     faults.holdClose = null;
     drain();
     exec.open();
-    await Bun.sleep(20);
     const sink = new Recorder();
-    const third = await built.brain.prompt(session, 'three', sink, ASKER);
+    const third = await promptOnceDrained(built, session, 'three', sink);
     expect(third.stopReason).toBe('end_turn');
     expect(sink.text).toBe('answered');
     expect(sessions.opened).toHaveLength(2);
@@ -946,9 +961,8 @@ describe('a harness that faults', () => {
     faults.failAfter = null;
     faults.holdClose = null;
     drain();
-    await Bun.sleep(20);
     const sink = new Recorder();
-    const third = await built.brain.prompt(session, 'three', sink, ASKER);
+    const third = await promptOnceDrained(built, session, 'three', sink);
     expect(third.stopReason).toBe('end_turn');
     expect(sink.text).toBe('answered');
     expect(sessions.opened).toHaveLength(2);
@@ -961,16 +975,17 @@ describe('a harness that faults', () => {
     answers(model, 'answered');
     const built = build(model, {
       sessions,
-      // The abort makes two delayed commits, so it always runs past the
-      // deadline, and the idle wait after it has most of a deadline to spare.
-      timeouts: { discard: 190 },
+      // The abort makes three delayed commits, 450 ms of sleep, so it always
+      // runs past the deadline, and the idle wait after it has most of a
+      // deadline to spare on a slow runner.
+      timeouts: { discard: 400 },
     });
     const { session } = await opened(built);
     failFrom(faults, 1);
     await built.brain.prompt(session, 'one', new Recorder(), ASKER);
 
     faults.failAfter = null;
-    faults.delayMs = 100;
+    faults.delayMs = 150;
     const sink = new Recorder();
     const second = await built.brain.prompt(session, 'two', sink, ASKER);
     expect(
