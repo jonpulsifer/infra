@@ -5,6 +5,8 @@ description: Deploy the NixOS configuration of a host from your machine or from 
 
 Use this runbook to deploy a host before its daily auto-upgrade, to restore the previous generation, or to rename the partitions of a Kubernetes node.
 
+GitHub Actions builds and Cachix serves. A target pulls the store paths it needs from Cachix and builds the rest, as [Build host and cache](../platform/nixos/build-host-and-cache.md) describes.
+
 ## Before you start
 
 - Run `mise run devshell`.
@@ -15,11 +17,10 @@ Use this runbook to deploy a host before its daily auto-upgrade, to restore the 
 
 `<host>` is the host name in `nix/hosts/default.nix`.
 
-| Host | `<target>` | `<build-host>` |
-| --- | --- | --- |
-| `folly` node | `<host>.lolwtf.ca` | `riptide.lolwtf.ca` |
-| `offsite` node | `<host>.lolwtf.ca` | `<target>` |
-| Raspberry Pi | `<host>.<tailnet>` | `forge.lolwtf.ca` |
+| Host | `<target>` |
+| --- | --- |
+| Kubernetes node | `<host>.lolwtf.ca` |
+| Raspberry Pi | `<host>.<tailnet>` |
 
 `<tailnet>` is the `tailnet` key in `terraform/network/tailscale/fleet.tf.json`.
 
@@ -28,10 +29,13 @@ Use this runbook to deploy a host before its daily auto-upgrade, to restore the 
 > [!CAUTION]
 > Auto-upgrade rebuilds each host from `main` once a day and removes a change deployed from a branch. The Pi 4 hosts have no auto-upgrade.
 
+> [!NOTE]
+> CI pushes to Cachix only from `main`, so the target builds the store paths that a branch changes.
+
 1. Deploy the configuration.
 
    ```bash
-   nixos-rebuild boot --sudo --flake .#<host> --build-host <build-host> --target-host <target>
+   nixos-rebuild boot --sudo --flake .#<host> --build-host <target> --target-host <target>
    ```
 
    If the change must be active now, use `switch` in place of `boot`. If the host is a Raspberry Pi, add `--no-reexec`.
@@ -52,7 +56,7 @@ Use this runbook to deploy a host before its daily auto-upgrade, to restore the 
 
 ## Deploy from GitHub Actions
 
-The `nixos-deploy` workflow builds and deploys a Pi 4 host. Its `tag:ci` identity reaches only `tag:pi4` devices, so it cannot deploy the Pi Zero hosts that it lists. No Pi Zero runs its NixOS config.
+The `nixos-deploy` workflow builds a host on an arm64 runner and deploys a Pi 4 host over Tailscale. Its `tag:ci` identity reaches only `tag:pi4` devices, so it cannot deploy the Pi Zero hosts that it lists. No Pi Zero runs its NixOS config. To deploy any other Raspberry Pi, use [Deploy a change](#deploy-a-change).
 
 1. Run the workflow.
 
