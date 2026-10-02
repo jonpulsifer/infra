@@ -22,7 +22,9 @@ On macOS, install [Homebrew](https://brew.sh/) first. `bootstrap` installs the
 `Brewfile` and then links the files into `$HOME`. On Linux, it only links the
 files. Each NixOS activation runs `dotfiles:deploy` from a store copy of this
 directory through `nix/system/mise-dotfiles.nix`, with `MISE_ENV=hm` where
-home-manager runs, and `nix/home/jawn.nix` installs the shell tools.
+home-manager runs, and `nix/home/jawn.nix` installs the shell tools. On a
+NixOS host with home-manager, a manual run needs `MISE_ENV=hm` too, because
+mise replaces any existing symlink at a target.
 
 `bootstrap` links the files with `mise dotfiles apply`, which refuses to
 replace a real file with a link. The read-only copies and the directory links from older

@@ -80,6 +80,22 @@ description = "Apply the [dotfiles] table into $HOME, moving what older deploys 
 # so a refused apply leaves $HOME as it was.
 run = '''
 set -eu
+# mise replaces a link at a target, so a run without the hm profile would take over home-manager's.
+case ",${MISE_ENV:-}," in
+  *,hm,*) ;;
+  *)
+    for f in .zshenv .config/zsh/.zshrc; do
+      if [ -L "$HOME/$f" ]; then
+        case "$(readlink "$HOME/$f")" in
+          *home-manager-files*)
+            echo "dotfiles:deploy: home-manager links ~/$f, so set MISE_ENV=hm and run it again" >&2
+            exit 1
+            ;;
+        esac
+      fi
+    done
+    ;;
+esac
 legacy=".local/bin .agents/skills .claude/skills .gemini/config/skills .pi/agent/agents .config/git .config/zsh .config/nvim"
 home="$(cd "$HOME" && pwd -P)"
 # The mise on PATH can sit behind a directory link that this moves.
@@ -158,6 +174,25 @@ seed_legacy() {
   cp .config/git/config "$HOME/.config/git/config"
   chmod 444 "$HOME/.tmux.conf" "$HOME/.config/git/config"
 }
+# home-manager links each file it writes into its home-manager-files output.
+hm_links=".zshenv .config/zsh/.zshrc .config/nvim/init.lua"
+seed_hm() {
+  for f in $hm_links; do
+    mkdir -p "$HOME/hm/home-manager-files/$(dirname "$f")" "$HOME/$(dirname "$f")"
+    echo home-manager >"$HOME/hm/home-manager-files/$f"
+    ln -s "$HOME/hm/home-manager-files/$f" "$HOME/$f"
+  done
+}
+hm_intact() {
+  for f in $hm_links; do
+    [ "$(readlink "$HOME/$f")" = "$HOME/hm/home-manager-files/$f" ] || { echo "dotfiles:check: ~/$f does not link to home-manager's file" >&2; return 1; }
+  done
+}
+# Every path in $HOME but mise's own state.
+listing() {
+  find "$HOME" \( -path "$HOME/.cache" -o -path "$HOME/.local/state" -o -path "$HOME/.local/share" \) -prune -o \
+    ! -path "$HOME/.local" -print | sort
+}
 check() {
   scratch="$(mktemp -d)"
   trap 'chmod -R u+w "$scratch"; rm -rf "$scratch"' EXIT
@@ -167,6 +202,9 @@ check() {
     MISE_TRUSTED_CONFIG_PATHS="$root" MISE_CEILING_PATHS="$ceiling" MISE_OFFLINE=1 \
     MISE_ENV="$1" WSL_DISTRO_NAME="$2"
   unset MISE_CONFIG_DIR MISE_DATA_DIR MISE_STATE_DIR MISE_CACHE_DIR MISE_GLOBAL_CONFIG_FILE
+  hm=0
+  case ",$1," in *,hm,*) hm=1 ;; esac
+  if [ "$hm" = 1 ]; then seed_hm; fi
   case "$3" in
     fresh) out="$(mise dotfiles apply --yes 2>&1)" || { printf '%s\n' "$out" >&2; exit 1; } ;;
     legacy)
@@ -181,16 +219,34 @@ check() {
       [ "$(readlink "$HOME/.local/bin")" = "$HOME/old/bin" ] && [ ! -L "$HOME/.tmux.conf" ] &&
         [ ! -w "$HOME/.tmux.conf" ] && [ "$(cat "$HOME/.vimrc")" = "not a copy" ] &&
         [ -z "$(find "$HOME/.dotfiles-backup" -type f 2>/dev/null)" ] || { printf '%s\n' "$out" "a refused deploy changed \$HOME" >&2; exit 1; }
+      if [ "$hm" = 1 ]; then hm_intact || exit 1; fi
+      return 0
+      ;;
+    home-manager)
+      seed_hm
+      before="$(listing)"
+      if out="$(mise run dotfiles:deploy 2>&1)"; then echo "deploy without the hm profile applied over home-manager's links" >&2; exit 1; fi
+      case "$out" in *MISE_ENV=hm*) ;; *) printf '%s\n' "$out" "the deploy did not ask for MISE_ENV=hm" >&2; exit 1 ;; esac
+      hm_intact || exit 1
+      [ "$(listing)" = "$before" ] || { printf '%s\n' "$out" "a refused deploy changed \$HOME" >&2; exit 1; }
       return 0
       ;;
   esac
   case "$out" in *"mise WARN"*) printf '%s\n' "$out" >&2; exit 1 ;; esac
   mise dotfiles status --missing >/dev/null || exit 1
   mise dotfiles diff >/dev/null || exit 1
+  if [ "$hm" = 1 ]; then
+    hm_intact || exit 1
+  else
+    case "$(readlink "$HOME/.zshenv")" in "$root"/*) ;; *) echo "dotfiles:check: ~/.zshenv does not link into $root" >&2; exit 1 ;; esac
+  fi
 }
 for profile in "" hm; do
+  homes="fresh legacy refused"
+  # Without the hm profile the deploy must refuse a home that home-manager links into.
+  if [ -z "$profile" ]; then homes="$homes home-manager"; fi
   for wsl in "" NixOS; do
-    for home in fresh legacy refused; do
+    for home in $homes; do
       (check "$profile" "$wsl" "$home") || { echo "dotfiles:check failed: MISE_ENV='$profile' WSL_DISTRO_NAME='$wsl' home=$home" >&2; exit 1; }
     done
   done
