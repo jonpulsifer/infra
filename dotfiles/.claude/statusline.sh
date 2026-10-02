@@ -64,7 +64,7 @@ G_AGENT=$'\xEF\x91\xAA'        # U+F46A nf-oct-hubot
 G_FILE=$'\xEF\x80\x96'         # U+F016 nf-fa-file_o
 G_PLUS=$'\xEF\x91\x97'         # U+F457 nf-oct-diff_added
 G_MINUS=$'\xEF\x91\x98'        # U+F458 nf-oct-diff_removed
-G_WALLET='🌕'                  # MoonPay's brand moon
+G_WALLET=$'\xEF\x83\x96'       # U+F0D6 nf-fa-money
 
 fmt_tok() {
   local n=$1

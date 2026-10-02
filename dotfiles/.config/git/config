@@ -39,13 +39,13 @@
 	insteadOf = https://github.com/jonpulsifer/
 
 # Work profile conditional includes
-[includeIf "gitdir:~/src/github.com/moonpay/"]
+[includeIf "gitdir:~/src/github.com/elevenlabs/"]
 	path = config.work
 
-[includeIf "hasconfig:remote.*.url:git@github.com:moonpay/**"]
+[includeIf "hasconfig:remote.*.url:git@github.com:elevenlabs/**"]
 	path = config.work
 
-[includeIf "hasconfig:remote.*.url:git@github.com:MoonPay/**"]
+[includeIf "hasconfig:remote.*.url:git@github.com:ElevenLabs/**"]
 	path = config.work
 
 [alias]
