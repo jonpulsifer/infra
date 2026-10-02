@@ -47,6 +47,7 @@ function context(
     getSiteAnswer === null
       ? null
       : {
+          origin: 'https://kthx.test',
           zone: 'kthx.test',
           getSite: (name) => {
             asked.push(name);

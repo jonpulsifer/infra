@@ -21,6 +21,13 @@ const SUPPLY_CHAIN: Record<string, string> = {
   artifacts: 'Artifacts',
 };
 
+/** The Developer pages, each one segment with no index above it. */
+const DEVELOPER: Record<string, string> = {
+  cli: 'CLI',
+  sdk: 'SDK',
+  mcp: 'MCP',
+};
+
 function sentence(segment: string): string {
   return segment.charAt(0).toUpperCase() + segment.slice(1);
 }
@@ -53,6 +60,11 @@ function trail(path: string): Crumb[] {
     const crumbs: Crumb[] = [{ label: 'Deploys', path: '/deploys' }];
     if (rest[0]) crumbs.push({ label: `#${rest[0]}`, path });
     return crumbs;
+  }
+
+  const developer = DEVELOPER[head];
+  if (developer !== undefined && rest.length === 0) {
+    return [{ label: developer, path }];
   }
 
   // A Datastore id is a uuid, so the trail stops at the noun.

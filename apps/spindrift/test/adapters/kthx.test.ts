@@ -420,6 +420,14 @@ describe('the registry builds kthx only from all three variables', () => {
     expect(registry.kthx?.()?.zone).toBe('kthx.test');
   });
 
+  test('the client restates its origin without a trailing slash', async () => {
+    const registry = createAdapterRegistry({
+      manifest: await fixtureManifest(),
+      env: { ...ALL, [KTHX_URL_VARIABLE]: `${ORIGIN}/` },
+    });
+    expect(registry.kthx?.()?.origin).toBe(ORIGIN);
+  });
+
   test('any one missing gives null', async () => {
     const manifest = await fixtureManifest();
     expect(createAdapterRegistry({ manifest, env: {} }).kthx?.()).toBeNull();

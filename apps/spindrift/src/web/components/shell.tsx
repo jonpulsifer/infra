@@ -1,6 +1,7 @@
 import {
   Bot,
   Boxes,
+  Code,
   Database,
   Hammer,
   LayoutDashboard,
@@ -13,6 +14,7 @@ import {
   Search,
   Server,
   Settings,
+  Terminal,
   WifiOff,
   Zap,
 } from 'lucide-react';
@@ -99,15 +101,10 @@ export const WORKSPACE: readonly RailDestination[] = [
   },
 ];
 
-/** MCP opens the identity settings, where agent tokens are minted. */
 export const DEVELOPER: readonly RailDestination[] = [
-  {
-    key: 'mcp',
-    label: 'MCP',
-    icon: Bot,
-    path: '/settings/identity',
-    roots: ['/settings/identity'],
-  },
+  { key: 'cli', label: 'CLI', icon: Terminal, path: '/cli', roots: ['/cli'] },
+  { key: 'sdk', label: 'SDK', icon: Code, path: '/sdk', roots: ['/sdk'] },
+  { key: 'mcp', label: 'MCP', icon: Bot, path: '/mcp', roots: ['/mcp'] },
 ];
 
 /** Lights for any `/settings` path no more specific entry claims. */
@@ -120,8 +117,9 @@ export const FOOTER_SETTINGS: RailDestination = {
 };
 
 /**
- * The phone bar: Apps is one link, and Targets and MCP fold into Settings.
- * Datastores and Functions keep their own, since no Settings tab reaches them.
+ * The phone bar: Apps is one link, and Targets folds into Settings. Datastores
+ * and Functions keep their own, since no Settings tab reaches them. The
+ * Developer pages are a search away.
  */
 export const PHONE_NAV: readonly RailDestination[] = [
   {
