@@ -773,7 +773,7 @@ export const dispatchBuild = async (
       context,
       subject,
       'NOT_BUILDABLE',
-      `${component.name} is placed on a Vercel Target, which builds through the platform's own framework builder — and nothing in this scope's package.json names a framework Spindrift recognises. Vercel performs no detection of its own: a build with no framework is built as a plain directory of files and would serve this project's sources with no functions at all, so it is refused instead.`,
+      `${component.name} is placed on a Vercel Target, which builds through the platform's own framework builder — and nothing in this scope's package.json names a framework kthx recognises. Vercel performs no detection of its own: a build with no framework is built as a plain directory of files and would serve this project's sources with no functions at all, so it is refused instead.`,
       { kind: 'waits' },
     );
   }

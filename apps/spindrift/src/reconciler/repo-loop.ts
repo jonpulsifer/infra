@@ -190,7 +190,7 @@ export async function reconcileRepository(
       return freeze(
         context,
         stored,
-        'Spindrift can no longer read this repository',
+        'kthx can no longer read this repository',
       );
     }
     return {
@@ -284,7 +284,7 @@ export async function reconcileRepository(
         return freeze(
           context,
           repository,
-          'Spindrift can no longer read this repository',
+          'kthx can no longer read this repository',
         );
       }
       return {

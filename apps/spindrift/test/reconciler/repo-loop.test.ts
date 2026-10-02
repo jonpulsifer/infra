@@ -605,7 +605,7 @@ describe('losing access', () => {
     expect(pass).toMatchObject({ outcome: 'frozen' });
     const row = await reload(repository.id);
     expect(row.access).toBe('frozen');
-    expect(row.frozenReason).toContain('no longer read this repository');
+    expect(row.frozenReason).toBe('kthx can no longer read this repository');
     expect(row.frozenAt).toEqual(NOW);
     // Source-driven changes stop; nothing that is running is touched.
     expect(await snapshot()).toEqual(before);
