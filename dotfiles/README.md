@@ -56,8 +56,8 @@ Windows keeps its own clone, and no link crosses the WSL boundary. See
 - `mise-global-config.toml` becomes `~/.config/mise/config.toml`. It holds the
   global tools, and on Windows the shell tools that Homebrew and home-manager
   install elsewhere.
-- `.config/git/config.local.tera` renders `~/.config/git/config.local`: the
-  1Password signing program and key on WSL, and the program on a work Mac.
+- `.config/git/config.local.tera` renders `~/.config/git/config.local`, the
+  1Password signing program and key, on WSL only.
 - `windows/deploy-dotfiles.ps1` makes the Windows links.
 - `skills/` is linked into the skills directory of each agent CLI.
 - `windows/` holds the Windows installer, the winget configuration, the
