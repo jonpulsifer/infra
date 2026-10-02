@@ -46,6 +46,7 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 - Keep `backup-crypt` in 1Password. Without it the GCS copy cannot be read.
 - Label each backup CronJob `lolwtf.ca/backup: "true"`. `BackupJobStale` and `BackupJobFailed` watch only those.
 - Give a new database an `ObjectStore` and a `ScheduledBackup`. It has no backup without them.
+- Give a re-created `Cluster` a new `backup.serverName`. The plugin refuses a prefix that holds WAL; [Recover a re-created database](../runbooks/recover-a-re-created-database.md) has the steps.
 
 ## Where it lives
 
@@ -60,6 +61,7 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 ## Related
 
 - [Restore a database](../runbooks/restore-a-database.md)
+- [Recover a re-created database](../runbooks/recover-a-re-created-database.md)
 - [Restore a volume](../runbooks/restore-a-volume.md)
 - [Restore etcd](../runbooks/restore-etcd.md)
 - [Restore from the GCS copy](../runbooks/restore-from-the-gcs-copy.md)

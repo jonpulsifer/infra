@@ -80,6 +80,7 @@ sections:
           - runbooks/get-cluster-admin-access.md
           - runbooks/operate-postgres.md
           - runbooks/restore-a-database.md
+          - runbooks/recover-a-re-created-database.md
           - runbooks/restore-a-volume.md
           - runbooks/restore-etcd.md
           - runbooks/restore-from-the-gcs-copy.md
