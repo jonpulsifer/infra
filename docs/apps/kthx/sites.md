@@ -60,7 +60,7 @@ Each site has its own Postgres database and role on the `kthx-db` cluster. `KTHX
 
 A nightly `pg_dumpall` at 04:23 UTC writes to `backups/pg/` in the bucket, which keeps each dump 30 days. A restore loses later writes.
 
-Velero backs up the `kthx-sites` volume nightly, because the kthx pod has the annotation `backup.velero.io/backup-volumes: sites`. The volume is a hostPath volume until [Migrate a local-path volume](../../runbooks/migrate-a-local-path-volume.md) moves it, and Velero skips it until then. CloudNativePG archives `kthx-db` to offsite's Garage.
+Velero backs up the `kthx-sites` volume nightly, because the kthx pod has the annotation `backup.velero.io/backup-volumes: sites`. CloudNativePG archives `kthx-db` to offsite's Garage.
 
 This tests production on a throwaway site and leaves its name taken.
 

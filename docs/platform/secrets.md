@@ -42,7 +42,7 @@ Git declares no auth method, mount, policy or client for OpenBao. Flux deploys t
 
 A sealed OpenBao cannot read its storage. The pod unseals itself with the GCP KMS key `openbao` through workload identity. If `oidc.lolwtf.ca` or the folly token signer fails, a restarted pod stays sealed.
 
-Velero backs up the volume `data-vault-openbao-0` each night, because the pod has the annotation `backup.velero.io/backup-volumes`. The copy is best effort: it reads the Raft files while the server writes them, so a backup can be inconsistent. The volume is a hostPath volume until [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md) moves it, and Velero skips it until then.
+Velero backs up the volume `data-vault-openbao-0` each night, because the pod has the annotation `backup.velero.io/backup-volumes`. The copy is best effort: it reads the Raft files while the server writes them, so a backup can be inconsistent.
 
 ## Rules
 
