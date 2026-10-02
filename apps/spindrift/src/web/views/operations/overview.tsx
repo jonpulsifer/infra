@@ -63,7 +63,7 @@ export function verdict(counts: {
   if (counts.apps === 0) {
     return {
       headline: 'Nothing is running yet.',
-      lede: 'Create an App and Spindrift will build it, place it on a Target, and put an address in front of it.',
+      lede: 'Create an App and kthx will build it, place it on a Target, and put an address in front of it.',
     };
   }
   if (counts.failedApps > 0) {

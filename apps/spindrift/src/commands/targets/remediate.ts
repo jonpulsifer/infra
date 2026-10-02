@@ -104,7 +104,7 @@ export const openPrerequisiteRemediation: Command<
     // The destination's vessel can differ from the vessel the row is on.
     return failed(
       'NOT_DEPLOYABLE',
-      `${remediation.destination.vessel} declares no Terraform root, so there is nowhere to open this change — the stanza names what a root would contain, and creating one is not something Spindrift does`,
+      `${remediation.destination.vessel} declares no Terraform root, so there is nowhere to open this change — the stanza names what a root would contain, and creating one is not something kthx does`,
     );
   }
 
@@ -157,7 +157,7 @@ export const openPrerequisiteRemediation: Command<
           : String(cause);
     return failed(
       'NOT_DEPLOYABLE',
-      `Spindrift could not open a pull request on ${repository}: ${detail}`,
+      `kthx could not open a pull request on ${repository}: ${detail}`,
     );
   }
 };

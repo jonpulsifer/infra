@@ -24,7 +24,7 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Spindrift Pods Ready",
+      "title": "kthx Engine Pods Ready",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -62,7 +62,7 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Spindrift Pod Restarts",
+      "title": "kthx Engine Pod Restarts",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -135,7 +135,7 @@
     {
       "id": 4,
       "type": "logs",
-      "title": "Spindrift Logs",
+      "title": "kthx Engine Logs",
       "datasource": {
         "type": "victoriametrics-logs-datasource",
         "uid": "victorialogs"
@@ -165,7 +165,7 @@
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Spindrift",
+  "title": "kthx Engine",
   "uid": "spindrift",
   "version": 1,
   "weekStart": ""

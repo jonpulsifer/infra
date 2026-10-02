@@ -231,7 +231,7 @@ function ConnectCluster({
         </Button>
         {scan.state === 'idle' ? (
           <p className="text-xs text-muted-foreground">
-            Spindrift asks the cluster what it runs, and offers what it finds.
+            kthx asks the cluster what it runs, and offers what it finds.
           </p>
         ) : null}
         {scan.state === 'idle' || scan.state === 'failed' ? (
@@ -405,7 +405,7 @@ function ClusterComponents({
       <Component
         icon={<Waypoints aria-hidden="true" className="size-4" />}
         title="Delivery"
-        because="The GitOps operator applies the App chart. Spindrift writes its object through the API — never manifests to a repository (§6)."
+        because="The GitOps operator applies the App chart. kthx writes its object through the API — never manifests to a repository (§6)."
         required
       >
         <div className="grid gap-4 md:grid-cols-2">
@@ -452,7 +452,7 @@ function ClusterComponents({
                 label="Chart repository"
                 value={repoUrl}
                 onChange={(event) => setRepoUrl(event.target.value)}
-                hint="Where the App chart is fetched from. Argo resolves it with credentials Spindrift never sees, so nothing here was read."
+                hint="Where the App chart is fetched from. Argo resolves it with credentials kthx never sees, so nothing here was read."
               />
               <Field
                 name="argo-revision"
@@ -482,7 +482,7 @@ function ClusterComponents({
       <Component
         icon={<Server aria-hidden="true" className="size-4" />}
         title="Workloads"
-        because="Where an App's release lands. Spindrift never creates the namespace (§7)."
+        because="Where an App's release lands. kthx never creates the namespace (§7)."
         required
       >
         <Choice

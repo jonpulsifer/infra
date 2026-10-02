@@ -241,8 +241,8 @@ function RemediationDisclosure({
             </Button>
           ) : null}
           <span className="text-[11px] text-subtle">
-            Spindrift changes nothing here. Applying this is what clears the
-            row, and the standing check is what notices.
+            kthx changes nothing here. Applying this is what clears the row, and
+            the standing check is what notices.
           </span>
         </div>
         {state.type === 'opened' ? (
@@ -355,7 +355,7 @@ export function TargetList({
         <ProviderTargets
           name="Cloudflare"
           logo="cloudflare"
-          description="One account is one connection. Spindrift reads what is in it — zones, Workers, Pages — and each surface it can deploy to becomes a Target."
+          description="One account is one connection. kthx reads what is in it — zones, Workers, Pages — and each surface it can deploy to becomes a Target."
           inventory={<CloudflareAccountDetail accounts={cloudflareAccounts} />}
           targets={cloudflareSurfaces}
           pending={cloudflarePending}
@@ -373,7 +373,7 @@ export function TargetList({
           connecting={connecting}
           onConnect={onConnect}
           onChanged={onChanged}
-          empty="Add a cluster with the connection facts Spindrift can verify, or declare it in Installation first."
+          empty="Add a cluster with the connection facts kthx can verify, or declare it in Installation first."
           adding={adding}
           onAddingChange={setAdding}
           clusterProposal={clusterProposal}
@@ -435,10 +435,10 @@ export function TargetList({
             Deployment targets
           </h1>
           <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-            Where Spindrift can deploy apps. Give a cluster's address and
-            Spindrift reads what it runs; what you include is what an App's
-            release blends into. The installation manifest declares the same
-            thing, and health is the standing checklist afterwards.
+            Where kthx can deploy apps. Give a cluster's address and kthx reads
+            what it runs; what you include is what an App's release blends into.
+            The installation manifest declares the same thing, and health is the
+            standing checklist afterwards.
           </p>
         </div>
       </header>
@@ -1278,8 +1278,8 @@ function DisconnectTargetControl({
         </p>
       )}
       <p className="mt-2 text-xs text-muted-foreground">
-        Workloads keep serving. Spindrift stops reconciling them and marks the
-        Target disconnected.
+        Workloads keep serving. kthx stops reconciling them and marks the Target
+        disconnected.
       </p>
       {state.type === 'review' ? (
         <div className="mt-3 flex flex-wrap gap-2">

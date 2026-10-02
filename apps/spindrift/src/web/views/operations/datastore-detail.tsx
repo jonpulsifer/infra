@@ -26,7 +26,7 @@ function absence(datastore: DatastoreDetailView): string {
     return `${datastore.target} could not be read: ${datastore.objectError}`;
   }
   if (datastore.provenance === 'external') {
-    return 'Externally authored — Spindrift provisioned nothing, so there is no object it can read.';
+    return 'Externally authored — kthx provisioned nothing, so there is no object it can read.';
   }
   if (!datastore.provisioned) {
     return 'Nothing has been provisioned yet, so there is no object to read.';
@@ -116,7 +116,7 @@ export function DatastoreDetail({
         <Declaration
           title="Runtime configuration"
           label={`${datastore.engine} object`}
-          note={`Read from ${datastore.target} just now — the object as the API server holds it, not what Spindrift asked for. Its status is where a Datastore that is not LIVE says why.`}
+          note={`Read from ${datastore.target} just now — the object as the API server holds it, not what kthx asked for. Its status is where a Datastore that is not LIVE says why.`}
           text={datastore.object}
         />
       )}

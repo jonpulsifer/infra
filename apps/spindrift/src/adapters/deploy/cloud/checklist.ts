@@ -85,7 +85,7 @@ export function cloudChecklist(
       VESSEL: {
         met: false,
         assessed: true,
-        detail: `${subject.scope} does not exist, and Spindrift never creates a vessel (§14)`,
+        detail: `${subject.scope} does not exist, and kthx never creates a vessel (§14)`,
       },
     });
   }
@@ -185,7 +185,7 @@ export function tokenChecklist(
       VESSEL: {
         met: false,
         assessed: true,
-        detail: `the ${subject.noun} ${subject.vessel} does not exist, and Spindrift never creates a vessel (§14)`,
+        detail: `the ${subject.noun} ${subject.vessel} does not exist, and kthx never creates a vessel (§14)`,
       },
     });
   }

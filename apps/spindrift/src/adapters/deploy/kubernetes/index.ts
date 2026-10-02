@@ -340,7 +340,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const labels = (namespace.metadata?.labels ?? {}) as Record<string, string>;
     if (labels['app.kubernetes.io/managed-by'] !== 'spindrift') {
       throw new Error(
-        `namespace ${name} carries no app.kubernetes.io/managed-by=spindrift, so it is not Spindrift's to delete`,
+        `namespace ${name} carries no app.kubernetes.io/managed-by=spindrift, so it is not the engine's to delete`,
       );
     }
     await api.delete({ apiVersion: 'v1', plural: 'namespaces', name });
@@ -1019,7 +1019,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // Unreadable pods fail the check: only an empty read is zero skew.
     const unreadable = (why: string): [boolean, string] => [
       false,
-      `Spindrift could not read this cluster's pods (${why}), so the value contract this Target renders under is unknown`,
+      `kthx could not read this cluster's pods (${why}), so the value contract this Target renders under is unknown`,
     ];
 
     let pods: KubernetesObject[] | null;
@@ -1064,7 +1064,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
     return [
       found.every((contract) => contract === VALUES_CONTRACT),
-      `this Target is running objects rendered under value contract ${found.join(', ')}; this Spindrift renders ${VALUES_CONTRACT}`,
+      `this Target is running objects rendered under value contract ${found.join(', ')}; this engine renders ${VALUES_CONTRACT}`,
     ];
   }
 

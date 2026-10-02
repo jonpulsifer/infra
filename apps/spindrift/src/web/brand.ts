@@ -14,10 +14,10 @@ export const WORDMARK = 'kthx';
 export const WORDMARK_GLYPH = 'k';
 
 /**
- * The MCP endpoint's `serverInfo.name`. Clients may pin it, so renaming it
- * breaks them.
+ * The MCP endpoint's `serverInfo.name`. Clients may pin it. Plain kthx is the
+ * name each site's own MCP answers with, so the engine's carries a suffix.
  */
-export const MACHINE_NAME = 'spindrift';
+export const MACHINE_NAME = 'kthx-engine';
 
 export function pageTitle(page?: string): string {
   return page === undefined ? PRODUCT_NAME : `${page} · ${PRODUCT_NAME}`;

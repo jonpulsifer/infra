@@ -45,7 +45,7 @@ export const useArtifactRegistry: Command<
   if (!probe.answers) {
     return failed(
       'NOT_DEPLOYABLE',
-      `Spindrift cannot push artifacts to ${input.namespace}: ${probe.detail}`,
+      `kthx cannot push artifacts to ${input.namespace}: ${probe.detail}`,
     );
   }
 

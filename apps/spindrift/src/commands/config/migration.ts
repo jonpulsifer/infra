@@ -115,7 +115,7 @@ export function demandSentence(
 ): string {
   return (
     `${keys.join(', ')} ${keys.length === 1 ? 'is' : 'are'} configured through a store ` +
-    `${targetName} cannot reach, and Spindrift never reads a value back — supply ` +
+    `${targetName} cannot reach, and kthx never reads a value back — supply ` +
     `${keys.length === 1 ? 'it' : 'them'} to finish the move`
   );
 }

@@ -48,13 +48,13 @@ function pullRequestBody(input: {
   readonly path: string;
   readonly summary: string;
 }): string {
-  return `Spindrift wrote this. It checks ${input.subject} on a standing loop, found \`${input.prerequisite}\` unmet, and this is the change that clears it.
+  return `kthx wrote this. It checks ${input.subject} on a standing loop, found \`${input.prerequisite}\` unmet, and this is the change that clears it.
 
 ${input.summary}
 
 Merging this is not what clears the row — applying it is. Once it has been applied, the next pass of that loop observes the boundary again and the row goes green on its own; nothing has to be pressed here afterwards. An unmerged or closed pull request changes nothing at all.
 
-The only file touched is \`${input.path}\`, and the only thing added to it is the stanza below the diff. Spindrift enables no service, creates no identity and mutates no boundary itself — it reads, states what is missing, and opens this.
+The only file touched is \`${input.path}\`, and the only thing added to it is the stanza below the diff. kthx enables no service, creates no identity and mutates no boundary itself — it reads, states what is missing, and opens this.
 `;
 }
 

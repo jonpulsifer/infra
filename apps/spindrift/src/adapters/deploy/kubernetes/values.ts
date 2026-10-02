@@ -52,7 +52,7 @@ export function operatorValuesIssues(
     if (VALUE_CLASSES[key as ValueClass] === 'spindrift') {
       issues.push({
         path: key,
-        message: `${key} values are Spindrift's to write, not an operator's`,
+        message: `${key} values are the engine's to write, not an operator's`,
       });
     }
   }

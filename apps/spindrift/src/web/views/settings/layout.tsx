@@ -149,11 +149,11 @@ function ConnectionsSettings({
         Connected systems
       </h2>
       <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-        Every system outside Spindrift that Spindrift holds an address for. Each
-        provider keeps its concrete state and actions in one ruled row, and the
-        order is the supply chain: where code comes from, where a Source is
-        staged, where a Source becomes an Artifact, where an Artifact is pushed,
-        and where it runs.
+        Every system outside kthx that kthx holds an address for. Each provider
+        keeps its concrete state and actions in one ruled row, and the order is
+        the supply chain: where code comes from, where a Source is staged, where
+        a Source becomes an Artifact, where an Artifact is pushed, and where it
+        runs.
       </p>
       <div className="mt-6 divide-y divide-border border-y border-border">
         <RepositoriesScreen embedded />

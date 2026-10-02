@@ -457,7 +457,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
           logs,
           // The platform's own preamble failed before the developer's code ran.
           'ARTIFACT_UNAVAILABLE',
-          `run ${run.id} in ${repository} failed in “${scaffolding}”, a step of Spindrift's own build workflow rather than of the App's build`,
+          `run ${run.id} in ${repository} failed in “${scaffolding}”, a step of kthx's own build workflow rather than of the App's build`,
           { runId: run.id, conclusion, step: scaffolding },
         );
       }

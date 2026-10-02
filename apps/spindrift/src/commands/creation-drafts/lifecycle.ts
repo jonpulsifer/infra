@@ -810,7 +810,7 @@ async function revalidate(
       code: 'TARGET_UNAVAILABLE',
       title: `${targetRowLabel(selectedTarget)} cannot take uploaded finished files.`,
       remediation:
-        'Choose a static Target for this supplied artifact, or upload source that Spindrift can build for this Target.',
+        'Choose a static Target for this supplied artifact, or upload source that kthx can build for this Target.',
     });
   }
   const needsBuilder =
