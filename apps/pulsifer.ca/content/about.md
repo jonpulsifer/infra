@@ -8,9 +8,9 @@ draft: false
 
 Greetings. I'm **@jonpulsifer**, welcome to my cyber zen garden.
 
-I'm currently the **Principal Infrastructure & Cloud Security Engineer** at [MoonPay](https://moonpay.com).
+I'm currently a **Security Engineer** at [ElevenLabs](https://elevenlabs.io), working on infrastructure security.
 
-Previously, I was a [Staff Security Engineer][1] working on Kubernetes :blue_heart: at [Shopify](https://shopify.ca), and before that I was a [Cyber Operator][2] :anchor: in the Royal Canadian Navy.
+Previously, I was the Principal Infrastructure & Cloud Security Engineer at [MoonPay](https://moonpay.com) and a [Staff Security Engineer][1] working on Kubernetes :blue_heart: at [Shopify](https://shopify.ca). Before that I was a [Cyber Operator][2] :anchor: in the Royal Canadian Navy.
 
 :raised_hand: I am **not** open for employment. You can still take a look at [my resume]({{< relref "/cv" >}}) and if you think I might be a good fit, email [jonathan@pulsifer.ca](mailto:jonathan@pulsifer.ca) or contact me using one of the social icons at the bottom... but don't get your hopes up :smile:
 
