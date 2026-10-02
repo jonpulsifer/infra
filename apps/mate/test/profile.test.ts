@@ -110,7 +110,7 @@ describe('loadSystemPrompts', () => {
         'Commit and push work worth keeping before the turn ends',
         'mate says so at the start of the next message',
         'its outcome is unknown, so check what it did before you run it again',
-        '`ssh riptide.lolwtf.ca` for folly, `ssh oldschool.lolwtf.ca` for offsite',
+        'Nix builds run in CI, not here. Open a PR, which CI evaluates; a merge to `main` builds and pushes to Cachix',
         '`mise run format:check && mise run lint`, not `mise run check`',
         'The `kthx_*` tools, when listed, act on kthx built apps',
       ]) {

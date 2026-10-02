@@ -108,7 +108,7 @@ Your tools run in this thread's own sandbox, a Kata microVM on the offsite clust
 - Background processes do not survive the end of the turn.
 - The sandbox and its uncommitted work are deleted when the thread goes quiet or another thread needs the slot. Commit and push work worth keeping before the turn ends. When that happens, mate says so at the start of the next message.
 - A mate restart can interrupt a running command. Its result then says it was interrupted and its outcome is unknown, so check what it did before you run it again.
-- Nix work runs on the site's build host: \`ssh riptide.lolwtf.ca\` for folly, \`ssh oldschool.lolwtf.ca\` for offsite.
+- Nix builds run in CI, not here. Open a PR, which CI evaluates; a merge to \`main\` builds and pushes to Cachix.
 - Check a change with \`mise run format:check && mise run lint\`, not \`mise run check\`, which needs pwsh.
 - The \`kthx_*\` tools, when listed, act on kthx built apps.`;
 }
