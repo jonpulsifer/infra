@@ -3,4 +3,4 @@
 git_email = "jonathan.pulsifer@elevenlabs.io"
 git_signingkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay"
 work_ssh_prefix = "git@github.com:elevenlabs/"
-work_instead_of = "git@github.com:ElevenLabs/,https://github.com/elevenlabs/"
+work_instead_of = "https://github.com/elevenlabs/"

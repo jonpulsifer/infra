@@ -6,5 +6,4 @@
 	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
 
 [url "git@github.com:elevenlabs/"]
-	insteadOf = git@github.com:ElevenLabs/
 	insteadOf = https://github.com/elevenlabs/

@@ -45,9 +45,6 @@
 [includeIf "hasconfig:remote.*.url:git@github.com:elevenlabs/**"]
 	path = config.work
 
-[includeIf "hasconfig:remote.*.url:git@github.com:ElevenLabs/**"]
-	path = config.work
-
 [alias]
 	ad = add
 	boop = commit --allow-empty -m '🫵 boop'
