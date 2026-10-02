@@ -37,10 +37,9 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The hosts read theirs from SOPS under `garage/`. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
 
-## Drift
+## Volumes
 
-- Velero skips a PVC bound to a hostPath volume. Earlier local-path volumes are hostPath. jellyfin, open-webui, vault and the kthx sites volume have no Velero copy until [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md).
-- The restic repositories still sit at the root of both GCS buckets, on spore at `/nfs/data/restic` and on oldschool at `/mnt/disks/restic`. The owner deletes them.
+Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `local` volume with [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md) before relying on its backup.
 
 ## Rules
 
