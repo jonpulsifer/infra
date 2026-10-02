@@ -1,11 +1,15 @@
+import { Client, type Gateway } from '@discordjs/core';
+import { REST } from '@discordjs/rest';
 import {
   type APIMessageTopLevelComponent,
   ComponentType,
+  type GatewayDispatchEvents,
 } from 'discord-api-types/v10';
 import type { Clock, Handle } from '../src/clock.ts';
 import {
   type Discord,
   DiscordCanvas,
+  type DiscordGateway,
   discordSurface,
   type OutMessage,
   STOP_PREFIX,
@@ -494,4 +498,47 @@ export class FakeDiscord implements Discord {
 
 export function discordRef(id: string, channelId: string): ThreadRef {
   return { surface: 'discord', channelId, id };
+}
+
+type Dispatch = Parameters<Parameters<Gateway['on']>[1]>[0];
+
+/** A real `Client` over a gateway that only the test dispatches on. */
+export class FakeGateway implements DiscordGateway {
+  readonly client: Client;
+  connects = 0;
+  destroys = 0;
+  /** While set, the identify budget waits on it. */
+  gateBudget: Promise<void> | null = null;
+  readonly budget = {
+    waitForBudget: async (_signal: AbortSignal) => {
+      if (this.gateBudget) await this.gateBudget;
+    },
+  };
+  readonly manager = {
+    connect: async () => {
+      this.connects += 1;
+    },
+    destroy: async () => {
+      this.destroys += 1;
+    },
+  };
+  private deliver: ((dispatch: Dispatch, shardId: number) => unknown) | null =
+    null;
+
+  constructor() {
+    const gateway: Gateway = {
+      getShardCount: () => 1,
+      on: (_event, listener) => {
+        this.deliver = listener;
+        return gateway;
+      },
+      send: () => {},
+    };
+    this.client = new Client({ rest: new REST(), gateway });
+  }
+
+  /** One gateway event, its payload only as complete as the test needs. */
+  dispatch(t: GatewayDispatchEvents, d: unknown): void {
+    this.deliver?.({ t, d, op: 0, s: 1 } as Dispatch, 0);
+  }
 }

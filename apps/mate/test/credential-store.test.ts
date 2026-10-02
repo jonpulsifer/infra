@@ -367,7 +367,7 @@ describe('a write that fails', () => {
   });
 });
 
-// main.ts closes the pool as soon as close() returns, then exits.
+// mate closes the pool as soon as close() returns, then main.ts exits.
 describe('closing', () => {
   test('waits for a rotation still running, and saves it before it returns', async () => {
     const store = open();

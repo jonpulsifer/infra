@@ -174,8 +174,6 @@ export interface KubeHandsDeps {
   goneTimeoutMs?: number;
 }
 
-export type CreateKubeHands = (deps: KubeHandsDeps) => Hands;
-
 export type MintResult = 'ok' | 'mint-failed' | 'connect-failed';
 
 /** Only finished steps are timed. */

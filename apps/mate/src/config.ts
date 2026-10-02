@@ -24,7 +24,13 @@ export interface Config {
   readonly port: number;
   /** Where gateway session info is persisted for a resume, or `null` for memory only. */
   readonly sessionFile: string | null;
-  readonly sandboxes: SandboxesChoice;
+  readonly sandbox: SandboxConfig;
+  readonly brain: BrainConfig;
+  // Outside `sandbox`: `sandboxManifest` turns a `SandboxConfig` into a pod
+  // spec, so no secret may be reachable from it.
+  readonly githubApp: GithubAppConfig | null;
+  /** `null` for no host access. Outside `sandbox`, as `githubApp` is. */
+  readonly sshKeyFile: string | null;
   /** The second surface, or `null` when mate answers on Discord alone. */
   readonly slack: SlackConfig | null;
   /** A daily 18:00 America/Halifax report, disabled without a channel. */
@@ -38,19 +44,6 @@ export interface SlackConfig {
   readonly allowedUserIds: ReadonlySet<string>;
   readonly allowedChannelIds: ReadonlySet<string>;
 }
-
-export type SandboxesChoice =
-  | { readonly mode: 'stub' }
-  | {
-      readonly mode: 'kube';
-      readonly sandbox: SandboxConfig;
-      readonly brain: BrainConfig;
-      // Outside `sandbox`: `sandboxManifest` turns a `SandboxConfig` into a pod
-      // spec, so no secret may be reachable from it.
-      readonly githubApp: GithubAppConfig | null;
-      /** `null` for no host access. Outside `sandbox`, as `githubApp` is. */
-      readonly sshKeyFile: string | null;
-    };
 
 /** The agent loop in mate's own process: its model, its store and its kthx tools. */
 export interface BrainConfig {
@@ -461,22 +454,6 @@ export function readSandboxConfig(env: Env): SandboxConfig {
   };
 }
 
-function sandboxes(env: Env): SandboxesChoice {
-  const mode = text(env, 'MATE_SANDBOXES', 'stub');
-  if (mode === 'stub') return { mode };
-  if (mode === 'kube') {
-    const sandbox = readSandboxConfig(env);
-    return {
-      mode,
-      sandbox,
-      brain: readBrainConfig(env),
-      githubApp: githubApp(env, sandbox.checkoutRepo),
-      sshKeyFile: env.MATE_SSH_KEY_FILE?.trim() || null,
-    };
-  }
-  throw new ConfigError(`MATE_SANDBOXES must be stub or kube, got ${mode}`);
-}
-
 // Opt-in; setting only one of the two tokens is a `ConfigError`.
 function slack(env: Env): SlackConfig | null {
   const bot = env.MATE_SLACK_BOT_TOKEN?.trim();
@@ -503,6 +480,7 @@ export function readConfig(env: Env): Config {
       'MATE_CUSTODIAN_CHANNEL must be an allowed Slack channel',
     );
   }
+  const sandbox = readSandboxConfig(env);
   return {
     token: required(env, 'DISCORD_TOKEN'),
     guildId: required(env, 'MATE_GUILD_ID'),
@@ -515,7 +493,10 @@ export function readConfig(env: Env): Config {
     maxSandboxes: integer(env, 'MATE_MAX_SANDBOXES', 2),
     port: integer(env, 'MATE_PORT', 8080),
     sessionFile: env.MATE_SESSION_FILE?.trim() || null,
-    sandboxes: sandboxes(env),
+    sandbox,
+    brain: readBrainConfig(env),
+    githubApp: githubApp(env, sandbox.checkoutRepo),
+    sshKeyFile: env.MATE_SSH_KEY_FILE?.trim() || null,
     slack: slack(env),
     custodianChannel,
   };

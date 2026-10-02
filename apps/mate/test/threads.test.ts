@@ -31,7 +31,6 @@ import {
   UNRUN,
 } from '../src/notices.ts';
 import { PROFILES, type Profile } from '../src/profiles.ts';
-import { type Script, StubBrain } from '../src/sandbox.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import { type Surface, type ThreadRef, threadKey } from '../src/surface.ts';
 import type { ThreadListFilter, ThreadRow } from '../src/thread-store.ts';
@@ -50,6 +49,7 @@ import {
 } from '../src/threads.ts';
 import { assignmentPost } from '../src/transcript.ts';
 import { FakeSurface } from './fakesurface.ts';
+import { type Script, StubBrain } from './stub-brain.ts';
 import {
   discordRef,
   FakeClock,
@@ -1750,6 +1750,23 @@ describe('a mate restart', () => {
     expect(discord.historyCalls).toBe(0);
     expect(before.brain.prompts.at(-1)).toBe('still there?');
     expect(discord.contentsIn(threadId).at(-1)).toBe('back ');
+  });
+
+  test('a surface added without rehydrating leaves the stored threads alone, and still answers', async () => {
+    const built = build({ surfaces: [], script: streaming('fresh') });
+    const cut = await interrupted(built, 'thread-cut');
+    await built.store.open(ref('thread-idle'), 'operator');
+
+    await built.threads.add(surface, { rehydrate: false });
+    await built.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    expect(built.threads.stateOf(cut.key)).toBeUndefined();
+    expect(built.threads.stateOf(key('thread-idle'))).toBeUndefined();
+    expect(built.brain.resumes).toEqual([]);
+    expect(discord.contentsIn('thread-cut')).toEqual([]);
+    expect((await built.store.get(cut.key))?.turn?.resumes).toBe(0);
+    const opened = discord.threads[0]!.id;
+    expect(discord.contentsIn(opened).at(-1)).toBe('fresh ');
   });
 
   test('an interrupted run resumes into a fresh card for the person it answers, and its mark lands', async () => {

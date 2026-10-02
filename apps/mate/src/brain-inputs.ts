@@ -8,6 +8,7 @@ import type {
   CredentialStore,
   Model,
   Models,
+  Provider,
   ModelThinkingLevel as ThinkingLevel,
 } from '@earendil-works/pi-ai';
 import type { ToolRegistration } from '@earendil-works/pi-durable';
@@ -30,6 +31,8 @@ export interface ModelSetupOptions {
   readonly keyFile: string;
   /** Holds the ChatGPT sign-in; without one, pi keeps it in memory. */
   readonly credentials?: CredentialStore;
+  /** What a spec may name; OpenCode Go's and ChatGPT's when absent. */
+  readonly providers?: readonly Provider[];
   readonly log: Log;
   readonly clock?: Clock;
   readonly metrics?: Pick<
@@ -50,14 +53,6 @@ export interface ModelSetup {
   readonly router: ModelRouter | null;
 }
 
-/**
- * Throws `ConfigError` for a provider mate does not register, a model the
- * catalog lacks, a thinking level outside pi-ai's
- * `getSupportedThinkingLevels(model)`, or a fallback that is the primary or
- * backs a primary other than ChatGPT.
- */
-export type CreateModelSetup = (options: ModelSetupOptions) => ModelSetup;
-
 export interface ProfileOptions {
   /** Holds AGENTS.md, dotfiles/skills and .agents/skills: the repo root, or /app in the image. */
   readonly root: string;
@@ -71,12 +66,6 @@ export type SystemPrompts = Readonly<Record<SurfaceName, string>>;
 
 /** By profile id, then surface. */
 export type ProfilePrompts = Readonly<Record<string, SystemPrompts>>;
-
-/** Never rejects: a missing file is logged and left out, so mate still boots. */
-export type LoadSystemPrompts = (
-  options: ProfileOptions,
-  profiles: Iterable<Profile>,
-) => Promise<ProfilePrompts>;
 
 /** A profile as the brain runs it, resolved at boot so nothing in it fails at a turn. */
 export interface BrainProfile {
@@ -127,5 +116,3 @@ export interface McpBridge {
   ready(timeoutMs: number): Promise<boolean>;
   close(): Promise<void>;
 }
-
-export type CreateMcpBridge = (options: McpBridgeOptions) => McpBridge;

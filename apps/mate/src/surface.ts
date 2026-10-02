@@ -116,3 +116,31 @@ export interface Surface {
    */
   whisper?(thread: ThreadRef, userId: string, text: string): Promise<void>;
 }
+
+export interface AddOptions {
+  /**
+   * False leaves the surface's stored threads where they are: a process that
+   * shares mate-db with the running mate must not open or resume its threads.
+   */
+  readonly rehydrate?: boolean;
+}
+
+/** Where a listener delivers inbound: `Threads`, as a surface sees it. */
+export interface Inbox {
+  readonly surfaceNames: readonly SurfaceName[];
+  add(surface: Surface, options?: AddOptions): Promise<void>;
+  adopt(ref: ThreadRef): void;
+  onMessage(message: Inbound): Promise<void>;
+  onStop(key: string, userId: string, ack: () => Promise<void>): Promise<void>;
+  onThreadArchived(ref: ThreadRef): Promise<void>;
+  onThreadDeleted(ref: ThreadRef): Promise<void>;
+}
+
+/** A surface's connection, which brings its inbound to the threads. */
+export interface SurfaceListener {
+  /** Adds the surface to `threads` and delivers its inbound there. */
+  start(threads: Inbox): Promise<void>;
+  /** Delivers no more inbound; the surface can still post. */
+  stop(): void;
+  close(): Promise<void>;
+}

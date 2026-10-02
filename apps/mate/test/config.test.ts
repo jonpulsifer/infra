@@ -11,6 +11,7 @@ const minimal = {
   MATE_GUILD_ID: '1509024936717455381',
   MATE_ALLOWED_USER_IDS: '308072071949320204',
   MATE_ALLOWED_CHANNEL_IDS: '1509024937422356532, 1509024937422356533',
+  MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
 };
 
 describe('config from the environment', () => {
@@ -63,13 +64,6 @@ describe('config from the environment', () => {
     expect(config.maxSandboxes).toBe(1);
   });
 
-  test('answers threads with the stub unless told otherwise', () => {
-    expect(readConfig(minimal).sandboxes).toEqual({ mode: 'stub' });
-    expect(() =>
-      readConfig({ ...minimal, MATE_SANDBOXES: 'kubernetes' }),
-    ).toThrow('MATE_SANDBOXES must be stub or kube');
-  });
-
   test('the slack surface is off unless both of its tokens are set', () => {
     expect(readConfig(minimal).slack).toBeNull();
     expect(() =>
@@ -117,17 +111,12 @@ describe('config from the environment', () => {
     ).toThrow('allowed Slack channel');
   });
 
-  test('kube mode needs a harness image and takes the sandbox defaults', () => {
-    expect(() => readConfig({ ...minimal, MATE_SANDBOXES: 'kube' })).toThrow(
+  test('needs a harness image and takes the sandbox defaults', () => {
+    expect(() => readConfig({ ...minimal, MATE_SANDBOX_IMAGE: ' ' })).toThrow(
       'MATE_SANDBOX_IMAGE is required',
     );
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    };
-    expect(readConfig(kube).sandboxes).toEqual({
-      mode: 'kube',
+    const { sandbox, brain, githubApp, sshKeyFile } = readConfig(minimal);
+    expect({ sandbox, brain, githubApp, sshKeyFile }).toEqual({
       sandbox: {
         image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
         runtimeClass: 'kata-clh',
@@ -163,29 +152,24 @@ describe('config from the environment', () => {
       githubApp: null,
       sshKeyFile: null,
     });
-    expect(() => readConfig({ ...kube, MATE_TURN_MINUTES: '0' })).toThrow(
+    expect(() => readConfig({ ...minimal, MATE_TURN_MINUTES: '0' })).toThrow(
       'MATE_TURN_MINUTES',
     );
     expect(() =>
-      readConfig({ ...kube, MATE_TURN_MINUTES: String(TTL_MS / 60_000) }),
+      readConfig({ ...minimal, MATE_TURN_MINUTES: String(TTL_MS / 60_000) }),
     ).toThrow('must be under the sandbox TTL');
   });
 
   test('read-only profiles get a cluster account only once one is named, and never the admin', () => {
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-      MATE_SANDBOX_KUBE_SA: 'mate-sandbox-admin',
-    };
-    expect(readSandboxConfig(kube).kubeReaderServiceAccount).toBeNull();
+    const admin = { ...minimal, MATE_SANDBOX_KUBE_SA: 'mate-sandbox-admin' };
+    expect(readSandboxConfig(admin).kubeReaderServiceAccount).toBeNull();
     expect(
-      readSandboxConfig({ ...kube, MATE_SANDBOX_KUBE_READER_SA: ' ' })
+      readSandboxConfig({ ...admin, MATE_SANDBOX_KUBE_READER_SA: ' ' })
         .kubeReaderServiceAccount,
     ).toBeNull();
     expect(
       readSandboxConfig({
-        ...kube,
+        ...admin,
         MATE_SANDBOX_KUBE_READER_SA: ' mate-sandbox-reader ',
       }),
     ).toMatchObject({
@@ -194,7 +178,7 @@ describe('config from the environment', () => {
     });
     expect(() =>
       readSandboxConfig({
-        ...kube,
+        ...admin,
         MATE_SANDBOX_KUBE_READER_SA: 'mate-sandbox-admin',
       }),
     ).toThrow(
@@ -203,14 +187,9 @@ describe('config from the environment', () => {
   });
 
   test('a sandbox reaches its vault only once a Secret names one', () => {
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    };
-    expect(readSandboxConfig(kube).vault).toBeNull();
+    expect(readSandboxConfig(minimal).vault).toBeNull();
     expect(
-      readSandboxConfig({ ...kube, MATE_CONNECT_SECRET: 'mate-onepassword' })
+      readSandboxConfig({ ...minimal, MATE_CONNECT_SECRET: 'mate-onepassword' })
         .vault,
     ).toEqual({
       connectHost:
@@ -220,19 +199,14 @@ describe('config from the environment', () => {
   });
 
   test('a sandbox can ring the owner only once a switchboard URL is set', () => {
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    };
-    expect(readSandboxConfig(kube).switchboard).toBeNull();
+    expect(readSandboxConfig(minimal).switchboard).toBeNull();
     expect(
-      readSandboxConfig({ ...kube, MATE_SWITCHBOARD_SECRET: 'ring' })
+      readSandboxConfig({ ...minimal, MATE_SWITCHBOARD_SECRET: 'ring' })
         .switchboard,
     ).toBeNull();
     expect(
       readSandboxConfig({
-        ...kube,
+        ...minimal,
         MATE_SWITCHBOARD_URL:
           ' http://switchboard.elevenlabs.svc.cluster.local:8080 ',
       }).switchboard,
@@ -242,7 +216,7 @@ describe('config from the environment', () => {
     });
     expect(
       readSandboxConfig({
-        ...kube,
+        ...minimal,
         MATE_SWITCHBOARD_URL: 'http://switchboard:8080',
         MATE_SWITCHBOARD_SECRET: 'ring',
       }).switchboard,
@@ -250,17 +224,12 @@ describe('config from the environment', () => {
   });
 
   test('the GitHub App is off until an id is set, and is never on the sandbox config', () => {
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    };
-    const off = readConfig(kube).sandboxes;
-    expect(off.mode === 'kube' && off.githubApp).toBeNull();
-    expect(readSandboxConfig(kube).github).toBe(false);
+    expect(readConfig(minimal).githubApp).toBeNull();
+    expect(readSandboxConfig(minimal).github).toBe(false);
 
-    const on = readConfig({ ...kube, MATE_GITHUB_APP_ID: '334190' }).sandboxes;
-    expect(on.mode === 'kube' && on.githubApp).toEqual({
+    expect(
+      readConfig({ ...minimal, MATE_GITHUB_APP_ID: '334190' }).githubApp,
+    ).toEqual({
       appId: '334190',
       keyFile: '/var/run/mate/github-app/private-key',
       owner: 'jonpulsifer',
@@ -268,18 +237,18 @@ describe('config from the environment', () => {
     });
     // The sandbox gets the flag and never the App key.
     expect(
-      readSandboxConfig({ ...kube, MATE_GITHUB_APP_ID: '334190' }).github,
+      readSandboxConfig({ ...minimal, MATE_GITHUB_APP_ID: '334190' }).github,
     ).toBe(true);
     expect(
       Object.keys(
-        readSandboxConfig({ ...kube, MATE_GITHUB_APP_ID: '334190' }),
+        readSandboxConfig({ ...minimal, MATE_GITHUB_APP_ID: '334190' }),
       ).some((key) => /key|app/i.test(key)),
     ).toBe(false);
 
     // A turn could outlive its hour-long installation token.
     expect(() =>
       readConfig({
-        ...kube,
+        ...minimal,
         MATE_GITHUB_APP_ID: '334190',
         MATE_TURN_MINUTES: '55',
       }),
@@ -287,18 +256,12 @@ describe('config from the environment', () => {
   });
 
   test('kthx is two independent halves, each off until its URL is set', () => {
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    };
     const url = 'http://spindrift.spindrift.svc.cluster.local:3000/mcp';
     const halves = (env: Record<string, string>) => {
-      const choice = readConfig(env).sandboxes;
-      if (choice.mode !== 'kube') throw new Error('expected kube mode');
-      return { cli: choice.sandbox.kthx, mcp: choice.brain.mcpServers };
+      const config = readConfig(env);
+      return { cli: config.sandbox.kthx, mcp: config.brain.mcpServers };
     };
-    expect(halves(kube)).toEqual({
+    expect(halves(minimal)).toEqual({
       cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
       mcp: [],
     });
@@ -306,7 +269,7 @@ describe('config from the environment', () => {
     // The CLI half alone, with the origin normalised the way the CLI does it.
     expect(
       halves({
-        ...kube,
+        ...minimal,
         MATE_KTHX_ORIGIN: ' https://kthx.example.test/// ',
         MATE_KTHX_SITES_SECRET: 'other-sites',
       }),
@@ -317,7 +280,11 @@ describe('config from the environment', () => {
 
     // The MCP half alone: mate holds the token, and the sandbox sees none of it.
     expect(
-      halves({ ...kube, MATE_KTHX_MCP_URL: url, KTHX_AGENT_TOKEN: 'kthx_a' }),
+      halves({
+        ...minimal,
+        MATE_KTHX_MCP_URL: url,
+        KTHX_AGENT_TOKEN: 'kthx_a',
+      }),
     ).toEqual({
       cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
       mcp: [{ name: 'kthx', url, token: 'kthx_a' }],
@@ -325,9 +292,9 @@ describe('config from the environment', () => {
 
     for (const bad of ['kthx.example.test', 'ftp://kthx.example.test', ':']) {
       expect(() =>
-        readSandboxConfig({ ...kube, MATE_KTHX_ORIGIN: bad }),
+        readSandboxConfig({ ...minimal, MATE_KTHX_ORIGIN: bad }),
       ).toThrow('MATE_KTHX_ORIGIN must be an http(s) URL');
-      expect(() => readConfig({ ...kube, MATE_KTHX_MCP_URL: bad })).toThrow(
+      expect(() => readConfig({ ...minimal, MATE_KTHX_MCP_URL: bad })).toThrow(
         'MATE_KTHX_MCP_URL must be an http(s) URL',
       );
     }
@@ -335,17 +302,12 @@ describe('config from the environment', () => {
 
   // A spare holds a whole sandbox's memory.
   test('keeps no warm spares unless a number is given', () => {
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    };
-    const read = (env: Record<string, string>) =>
-      readConfig(env).sandboxes as { sandbox: { spares: number } };
-    expect(read(kube).sandbox.spares).toBe(0);
-    expect(read({ ...kube, MATE_SPARES: '1' }).sandbox.spares).toBe(1);
-    expect(read({ ...kube, MATE_SPARES: '0' }).sandbox.spares).toBe(0);
-    expect(() => readConfig({ ...kube, MATE_SPARES: '-1' })).toThrow(
+    const spares = (env: Record<string, string>) =>
+      readConfig(env).sandbox.spares;
+    expect(spares(minimal)).toBe(0);
+    expect(spares({ ...minimal, MATE_SPARES: '1' })).toBe(1);
+    expect(spares({ ...minimal, MATE_SPARES: '0' })).toBe(0);
+    expect(() => readConfig({ ...minimal, MATE_SPARES: '-1' })).toThrow(
       'MATE_SPARES',
     );
   });
@@ -419,20 +381,14 @@ describe('config from the environment', () => {
     );
   });
 
-  test('kube mode without a database URL boots with the store down', () => {
-    const kube = {
-      ...minimal,
-      MATE_SANDBOXES: 'kube',
-      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    };
-    const off = readConfig(kube).sandboxes;
-    expect(off.mode === 'kube' && off.brain.databaseUrl).toBeNull();
+  test('without a database URL mate boots with the store down', () => {
+    expect(readConfig(minimal).brain.databaseUrl).toBeNull();
     const on = readConfig({
-      ...kube,
+      ...minimal,
       DATABASE_URL: ' postgresql://app@mate-db-rw.mate:5432/app ',
       MATE_DB_CA_FILE: '/etc/ca.crt',
-    }).sandboxes;
-    expect(on.mode === 'kube' && on.brain).toMatchObject({
+    });
+    expect(on.brain).toMatchObject({
       databaseUrl: 'postgresql://app@mate-db-rw.mate:5432/app',
       databaseCaFile: '/etc/ca.crt',
     });

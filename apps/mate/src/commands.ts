@@ -1,7 +1,7 @@
 import type { ApplicationCommandsAPI } from '@discordjs/core';
 import type { Log } from './log.ts';
 
-type Commands = Pick<
+export type GlobalCommands = Pick<
   ApplicationCommandsAPI,
   'getGlobalCommands' | 'bulkOverwriteGlobalCommands'
 >;
@@ -9,7 +9,7 @@ type Commands = Pick<
 // Global commands belong to the application, so any a previous user of this
 // token registered stay in the guild until overwritten. mate has none.
 export async function clearGlobalCommands(
-  api: Commands,
+  api: GlobalCommands,
   applicationId: string,
   log: Log,
 ): Promise<string[]> {

@@ -404,7 +404,7 @@ export class PostgresThreadStore implements ThreadStore {
   }
 }
 
-/** The same contract in memory: stub mode and the thread tests. */
+/** The same contract in memory: mate with no database, and the thread tests. */
 export class MemoryThreadStore implements ThreadStore {
   private readonly rows = new Map<string, ThreadRow>();
   /** Turns counted by `${profile}\n${day}`. */

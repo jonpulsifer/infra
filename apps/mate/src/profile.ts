@@ -9,7 +9,6 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type {
   BrainProfile,
-  LoadSystemPrompts,
   ModelSetup,
   ProfileOptions,
   ProfilePrompts,
@@ -35,10 +34,11 @@ const SURFACES: Record<SurfaceName, string> = {
   slack: 'Slack',
 };
 
-export const loadSystemPrompts: LoadSystemPrompts = async (
-  options,
-  profiles,
-) => {
+/** Never rejects: a missing file is logged and left out, so mate still boots. */
+export async function loadSystemPrompts(
+  options: ProfileOptions,
+  profiles: Iterable<Profile>,
+): Promise<ProfilePrompts> {
   const root = resolve(options.root);
   const [agents, skills] = await Promise.all([
     readAgents(root, options.log),
@@ -61,7 +61,7 @@ export const loadSystemPrompts: LoadSystemPrompts = async (
       } satisfies SystemPrompts,
     ]),
   );
-};
+}
 
 /** ConfigError for a profile model the catalog lacks, or a thinking level it does not support. */
 export function brainProfiles(

@@ -36,7 +36,6 @@ import {
 } from './kube.ts';
 import {
   AGENT_HOME,
-  type CreateKubeHands,
   HANDS_LABEL,
   type Hands,
   type KubeHandsDeps,
@@ -1682,5 +1681,3 @@ function redactStderr(text: string): string {
 async function drain(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => {});
 }
-
-export const createKubeHands: CreateKubeHands = (deps) => new KubeHands(deps);

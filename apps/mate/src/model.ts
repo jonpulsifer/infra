@@ -13,10 +13,11 @@ import {
   getSupportedThinkingLevels,
   type Model,
   type Models,
+  type Provider,
 } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { opencodeGoProvider } from '@earendil-works/pi-ai/providers/opencode-go';
-import type { CreateModelSetup, ModelSetup } from './brain-inputs.ts';
+import type { ModelSetup, ModelSetupOptions } from './brain-inputs.ts';
 import { systemClock } from './clock.ts';
 import { ConfigError } from './config.ts';
 import { type Log, plain } from './log.ts';
@@ -30,22 +31,24 @@ import {
 
 export { CHATGPT_PROVIDER } from './route.ts';
 
-const PROVIDERS: ReadonlySet<string> = new Set([
-  'opencode-go',
-  CHATGPT_PROVIDER,
-]);
 /** The only variable pi-ai's OpenCode Go provider reads its key from. */
 export const MODEL_KEY_ENV = 'OPENCODE_API_KEY';
 /** The ChatGPT model a sign-in's test request goes to while turns use another. */
 export const CHATGPT_MODEL = 'gpt-6-sol';
 
+/** What production registers: the fallback's provider, then ChatGPT's. */
+export function defaultProviders(): Provider[] {
+  return [opencodeGoProvider(), openaiCodexProvider()];
+}
+
 function lookup(models: Models, name: string, wanted: string): Model<Api> {
   const slash = wanted.indexOf('/');
   const provider = slash > 0 ? wanted.slice(0, slash) : '';
   const id = slash > 0 ? wanted.slice(slash + 1) : '';
-  if (!PROVIDERS.has(provider) || !id) {
+  const registered = models.getProviders().map((one) => one.id);
+  if (!registered.includes(provider) || !id) {
     throw new ConfigError(
-      `${name} must be ${[...PROVIDERS].join('/<model> or ')}/<model>, got ${wanted}`,
+      `${name} must be ${registered.join('/<model> or ')}/<model>, got ${wanted}`,
     );
   }
   const model = models.getModel(provider, id);
@@ -66,17 +69,24 @@ function supported(name: string, model: Model<Api>, level: ThinkingLevel) {
   }
 }
 
-export const createModelSetup: CreateModelSetup = ({
+/**
+ * Throws `ConfigError` for a provider not in `providers`, a model the
+ * catalog lacks, a thinking level outside pi-ai's
+ * `getSupportedThinkingLevels(model)`, or a fallback that is the primary or
+ * backs a primary other than ChatGPT.
+ */
+export function createModelSetup({
   spec: wanted,
   thinking,
   fallbackSpec = null,
   fallbackThinking = null,
   keyFile,
   credentials,
+  providers = defaultProviders(),
   log,
   clock = systemClock,
   metrics,
-}) => {
+}: ModelSetupOptions): ModelSetup {
   const readKey = keyReader(keyFile, log);
   const direct = createModels({
     credentials,
@@ -86,8 +96,7 @@ export const createModelSetup: CreateModelSetup = ({
       fileExists: () => Promise.resolve(false),
     },
   });
-  direct.setProvider(opencodeGoProvider());
-  direct.setProvider(openaiCodexProvider());
+  for (const provider of providers) direct.setProvider(provider);
   const model = lookup(direct, 'MATE_MODEL', wanted);
   supported('MATE_THINKING', model, thinking);
   const chatgpt = model.provider === CHATGPT_PROVIDER;
@@ -134,7 +143,7 @@ export const createModelSetup: CreateModelSetup = ({
     metrics,
   });
   return { models, direct, model: unpriced(model), thinking, router };
-};
+}
 
 /**
  * A profile's own model. MATE_MODEL's own spec returns `setup.model`, so the
