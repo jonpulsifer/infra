@@ -116,6 +116,11 @@ spec:
             - name: KTHX_CONTROL_HOST
               value: {{ . | quote }}
             {{- end }}
+            {{- if .Values.control.console }}
+            # The landing's Console link: the control host, whose other paths the console serves.
+            - name: KTHX_CONSOLE_URL
+              value: {{ printf "https://%s" (required "control.console is served on control.host" .Values.control.host) | quote }}
+            {{- end }}
             {{- with .Values.engine.issuer }}
             # The server refuses to boot with an issuer and no audience, subject or control host.
             - name: KTHX_ENGINE_ISSUER

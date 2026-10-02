@@ -274,6 +274,21 @@ describe('the console on the private host', () => {
     ]);
   });
 
+  test('is linked from the landing only when there is one', async () => {
+    const consoleUrl = async (values: Record<string, unknown>) =>
+      (
+        one(await render(values), 'Deployment').spec.template.spec
+          .containers[0] as { env: { name: string; value?: string }[] }
+      ).env.find((e) => e.name === 'KTHX_CONSOLE_URL')?.value;
+
+    expect(await consoleUrl({ ...VALUES, control: CONTROL })).toBe(
+      `https://${CONTROL.host}`,
+    );
+    const { console: _, ...bare } = CONTROL;
+    expect(await consoleUrl({ ...VALUES, control: bare })).toBeUndefined();
+    expect(await consoleUrl(VALUES)).toBeUndefined();
+  });
+
   test('refuses a console with no namespace', async () => {
     await expect(
       render({

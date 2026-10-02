@@ -69,23 +69,26 @@ let landing: Promise<string> | null = null;
 
 /**
  * Tells the page what a browser cannot see: the zone (a private host's name is
- * not it), claim and admin rights, and the tailnet login. These are hints only;
- * every route decides again from the request.
+ * not it), claim and admin rights, the tailnet login and the console's address.
+ * These are hints only; every route decides again from the request.
  */
 async function landingHtml(
   zone: string,
   caller: Caller,
   admin: boolean,
+  consoleUrl: string | null,
 ): Promise<string> {
   landing ??= Bun.file(LANDING_PATH).text();
   const who =
     caller.login === null ? '' : ` data-login="${attribute(caller.login)}"`;
   const onTailnet = caller.door === 'identity';
   const identity = onTailnet ? ` data-identity${who}` : '';
+  const linked =
+    consoleUrl === null ? '' : ` data-console="${attribute(consoleUrl)}"`;
   const body = onTailnet ? await whole(landing) : await slim(landing);
   return body.replace(
     '<html lang="en">',
-    `<html lang="en" data-zone="${zone}"${caller.control ? '' : ' data-readonly'}${admin ? ' data-admin' : ''}${identity}>`,
+    `<html lang="en" data-zone="${zone}"${caller.control ? '' : ' data-readonly'}${admin ? ' data-admin' : ''}${identity}${linked}>`,
   );
 }
 
@@ -253,6 +256,7 @@ async function apex(
       ctx.config.zone,
       ctx.caller,
       opensZone(ctx.caller, ctx.config),
+      ctx.config.consoleUrl,
     );
     return new Response(page, {
       headers: {

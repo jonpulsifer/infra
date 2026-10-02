@@ -119,6 +119,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       trustedProxies: [],
       tailnetProxies: [],
       engine: null,
+      consoleUrl: null,
       port: 0,
       ...overrides,
     };

@@ -108,6 +108,28 @@ describe('the private host', () => {
   });
 });
 
+describe('the Console link', () => {
+  const CONSOLE = `https://${PRIVATE}/`;
+  const linked = withServer({ controlHost: PRIVATE, consoleUrl: CONSOLE });
+
+  test('is named on every door when the installation has a console', async () => {
+    for (const [host, readonly] of [
+      [ZONE, ' data-readonly'],
+      [PRIVATE, ''],
+    ] as const) {
+      const page = await linked().fetch(ask('/', { host }));
+      expect(await page.text()).toContain(
+        `<html lang="en" data-zone="${ZONE}"${readonly} data-console="${CONSOLE}">`,
+      );
+    }
+  });
+
+  test('stays out of GET /api', async () => {
+    const response = await linked().fetch(ask('/api', { host: ZONE }));
+    expect(JSON.stringify(await response.json())).not.toContain(PRIVATE);
+  });
+});
+
 describe('GET /api on the apex', () => {
   test('states the zone on both hosts, which is how the CLI finds a site', async () => {
     for (const host of [ZONE, PRIVATE]) {
@@ -139,5 +161,22 @@ describe('the config', () => {
       readConfig({ ...env, KTHX_CONTROL_HOST: ' Ops.Lab.Test ' }).controlHost,
     ).toBe('ops.lab.test');
     expect(readConfig(env).controlHost).toBeNull();
+  });
+
+  test('takes only an https console address', () => {
+    expect(readConfig(env).consoleUrl).toBeNull();
+    expect(
+      readConfig({ ...env, KTHX_CONSOLE_URL: ' https://ops.lab.test ' })
+        .consoleUrl,
+    ).toBe('https://ops.lab.test/');
+    for (const url of [
+      'http://ops.lab.test',
+      'javascript:alert(1)',
+      'ops.lab.test',
+    ]) {
+      expect(() => readConfig({ ...env, KTHX_CONSOLE_URL: url })).toThrow(
+        'KTHX_CONSOLE_URL',
+      );
+    }
   });
 });
