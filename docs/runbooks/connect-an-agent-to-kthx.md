@@ -70,6 +70,10 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 
    Result: A number larger than zero.
 
+5. Ask the client to call `getDeveloperSurfaces`. The tool is read-only.
+
+   Result: The endpoint's private and public URLs, and the quick-site origin and zone.
+
 ## Give Rowbutt a token
 
 [Rowbutt](../apps/mate.md) runs every command without approval, so the warning above applies in full. mate reaches the engine in the cluster, and the ExternalSecret `mate-kthx-agent` in namespace `mate` gives mate the token as `KTHX_AGENT_TOKEN`. mate bridges the engine's tools into the agent as `kthx_*` tools. mate reads the token when it starts. Reloader restarts mate when the Secret changes, but not when the first sync creates the Secret.
