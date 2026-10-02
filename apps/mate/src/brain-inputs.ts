@@ -54,7 +54,7 @@ export interface ModelSetup {
 }
 
 export interface ProfileOptions {
-  /** Holds AGENTS.md, dotfiles/skills and .agents/skills: the repo root, or /app in the image. */
+  /** Holds the persona, dotfiles/.agents/AGENTS.md, AGENTS.md, dotfiles/skills and .agents/skills: the repo root, or /app in the image. */
   readonly root: string;
   /** Where each sandbox checks the repo out; skill locations point here. */
   readonly workspace: string;
