@@ -55,6 +55,8 @@ export interface KthxSiteDetail extends KthxSite {
 }
 
 export interface KthxClient {
+  /** The control host's origin, with no trailing slash. */
+  readonly origin: string;
   /** The DNS zone kthx serves sites under, restated so no call is needed. */
   readonly zone: string;
   listSites(page: {
@@ -196,6 +198,7 @@ export function kthxClient(options: KthxClientOptions): KthxClient {
   }
 
   return {
+    origin,
     zone: options.zone,
 
     async listSites(page) {

@@ -19,6 +19,9 @@ import { NewAppScreen } from './views/apps/new/index.tsx';
 import { WorkspaceScreen } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
 import { Onboarding } from './views/auth/onboarding.tsx';
+import { CliScreen } from './views/developer/cli.tsx';
+import { McpScreen } from './views/developer/mcp.tsx';
+import { SdkScreen } from './views/developer/sdk.tsx';
 import { FunctionScreen } from './views/functions/editor.tsx';
 import { FunctionsScreen } from './views/functions/list.tsx';
 import { DatastoreScreen } from './views/operations/datastore-detail.tsx';
@@ -221,6 +224,13 @@ export function SignedIn({
   );
 }
 
+/** The Developer pages, matched whole and before an App name could claim them. */
+const DEVELOPER_TITLES: Readonly<Record<string, string>> = {
+  '/cli': 'CLI',
+  '/sdk': 'SDK',
+  '/mcp': 'MCP',
+};
+
 /** A kthx site's name, from `/sites/<name>` only; a bare `/sites` is not one. */
 function siteNameOf(path: string): string | null {
   return path.match(/^\/sites\/(.+)$/)?.[1] ?? null;
@@ -254,6 +264,8 @@ export function titleOf(path: string): string {
   }
   const site = siteNameOf(path);
   if (site !== null) return pageTitle(site);
+  const developer = DEVELOPER_TITLES[path];
+  if (developer !== undefined) return pageTitle(developer);
   if (path === '/' || path === '') return pageTitle();
   if (path === '/apps') return pageTitle('Apps');
   const appName = path.replace(/^\/apps\//, '').replace(/^\//, '');
@@ -342,6 +354,9 @@ export function Screen({
   if (site !== null) {
     return <SiteScreen key={site} name={site} onNavigate={onNavigate} />;
   }
+  if (path === '/cli') return <CliScreen />;
+  if (path === '/sdk') return <SdkScreen />;
+  if (path === '/mcp') return <McpScreen onNavigate={onNavigate} />;
   if (path === '/' || path === '')
     return <OverviewScreen onNavigate={onNavigate} />;
   if (path === '/apps') return <AppsScreen onNavigate={onNavigate} />;

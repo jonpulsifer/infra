@@ -114,12 +114,15 @@ describe('the active-entry rule: the most specific matching root wins', () => {
     expect(activeKey('/storage', ALL)).toBe('targets');
   });
 
-  test('the agent-tokens path lights MCP, not Settings', () => {
-    expect(activeKey('/settings/identity', ALL)).toBe('mcp');
+  test('the Developer pages light their own entries', () => {
+    expect(activeKey('/cli', ALL)).toBe('cli');
+    expect(activeKey('/sdk', ALL)).toBe('sdk');
+    expect(activeKey('/mcp', ALL)).toBe('mcp');
   });
 
-  test('every other /settings section lights Settings', () => {
+  test('every /settings section lights Settings, identity included', () => {
     for (const path of [
+      '/settings/identity',
       '/settings/connections',
       '/settings/installation',
       '/settings/notifications',
@@ -170,6 +173,8 @@ describe('exactly one row lights, in the desktop rail, for a sample of paths', (
     '/deploys/1187',
     '/apps/some-app',
     '/sites/acme',
+    '/cli',
+    '/mcp',
   ]) {
     test(path, () => {
       const aside = withinAside(shell(path));

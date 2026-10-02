@@ -63,6 +63,7 @@ type ListSites = KthxClient['listSites'];
 function fakeKthx(listSites: ListSites) {
   const calls: Parameters<ListSites>[0][] = [];
   const client: KthxClient = {
+    origin: 'https://kthx.test',
     zone: 'kthx.test',
     listSites: (page) => {
       calls.push(page);

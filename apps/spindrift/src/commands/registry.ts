@@ -90,6 +90,10 @@ import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { listDeploys, listDeploysInput } from './deploys/list.ts';
 import { listAllDeploys, listAllDeploysInput } from './deploys/list-all.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
+import {
+  getDeveloperSurfaces,
+  getDeveloperSurfacesInput,
+} from './developer/surfaces.ts';
 import { deleteFunction, deleteFunctionInput } from './functions/delete.ts';
 import { getFunction, getFunctionInput } from './functions/get.ts';
 import { listFunctions, listFunctionsInput } from './functions/list.ts';
@@ -208,6 +212,10 @@ export const commandRegistry = {
   listApps: { input: listAppsInput, handler: listApps },
   listAppRows: { input: listAppRowsInput, handler: listAppRows },
   getSite: { input: getSiteInput, handler: getSite },
+  getDeveloperSurfaces: {
+    input: getDeveloperSurfacesInput,
+    handler: getDeveloperSurfaces,
+  },
   listDeploys: { input: listDeploysInput, handler: listDeploys },
   listTargets: { input: listTargetsInput, handler: listTargets },
   listRepositories: {

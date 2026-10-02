@@ -76,6 +76,27 @@ const VERBS: readonly PaletteItem[] = [
     hint: 'Settings',
     path: '/settings/identity',
   },
+  {
+    id: 'go:/cli',
+    group: 'Go to',
+    label: 'CLI',
+    hint: 'Developer',
+    path: '/cli',
+  },
+  {
+    id: 'go:/sdk',
+    group: 'Go to',
+    label: 'SDK',
+    hint: 'Developer',
+    path: '/sdk',
+  },
+  {
+    id: 'go:/mcp',
+    group: 'Go to',
+    label: 'MCP',
+    hint: 'Developer',
+    path: '/mcp',
+  },
 ];
 
 export function paletteItems(

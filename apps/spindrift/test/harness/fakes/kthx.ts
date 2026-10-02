@@ -10,6 +10,8 @@ import type { InstallationManifest } from '../../../src/config/manifest.ts';
 
 export const KTHX_ZONE = 'kthx.example.test';
 
+export const KTHX_ORIGIN = 'https://kthx-control.example.test';
+
 /**
  * The manifest with kthx's zone serving both reaches. `first`: an unpinned App
  * falls into it; `last`: only a pin reaches it.
@@ -42,6 +44,7 @@ export interface RecordedKthxCall {
 }
 
 export class FakeKthx implements KthxClient {
+  readonly origin = KTHX_ORIGIN;
   readonly zone = KTHX_ZONE;
   readonly reserved: RecordedKthxCall[] = [];
   readonly released: RecordedKthxCall[] = [];
