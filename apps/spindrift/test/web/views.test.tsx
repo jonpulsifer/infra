@@ -268,6 +268,13 @@ describe('the deploy screen, on red', () => {
     expect(markup).toContain('controller accepted the deploy');
   });
 
+  test('offers a disclosure over the evidence it recorded', () => {
+    const view = DEPLOY_SCENARIOS.imageUnpullable;
+    expect(view.diagnosis?.evidence).not.toBeNull();
+
+    expect(words(deploy(view))).toContain('Show what kthx found');
+  });
+
   test('names the two stages separately and marks only the one that failed', () => {
     const view = DEPLOY_SCENARIOS.imageUnpullable;
     const text = words(deploy(view));
@@ -376,7 +383,7 @@ describe('the deploy screen, on green', () => {
   });
 
   test('carries no diagnosis', () => {
-    expect(markup).not.toContain('What kthx found');
+    expect(markup).not.toContain('what kthx found');
   });
 });
 
