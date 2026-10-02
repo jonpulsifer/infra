@@ -44,10 +44,13 @@ type ArmRun = {
   dockerArgv: string[];
   /** Null when the step wrote no railpack config. */
   config: unknown;
+  /** What the step wrote to `$GITHUB_OUTPUT`. */
+  outputs: string;
 };
 
 async function runArm(
   files: Readonly<Record<string, string>>,
+  env: Readonly<Record<string, string>> = {},
 ): Promise<ArmRun> {
   const workspace = await mkdtemp(join(tmpdir(), 'spindrift-declaration-arm-'));
   try {
@@ -80,6 +83,7 @@ async function runArm(
         ARTIFACT_TYPE: 'image',
         GITHUB_OUTPUT: outputPath,
         RUNNER_TEMP: workspace,
+        ...env,
       },
       stdout: 'pipe',
       stderr: 'pipe',
@@ -101,17 +105,21 @@ async function runArm(
       // A trailing newline from `printf '%s\n'`, not an empty argument.
       dockerArgv: argv === '' ? [] : argv.replace(/\n$/, '').split('\n'),
       config,
+      outputs: await readFile(outputPath, 'utf8'),
     };
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 }
 
-async function declared(document: string): Promise<{
+async function declared(
+  document: string,
+  file = 'kthx.yaml',
+): Promise<{
   run: ArmRun;
   parsed: string | null;
 }> {
-  const run = await runArm({ [`${SUBPATH}/spindrift.yaml`]: document });
+  const run = await runArm({ [`${SUBPATH}/${file}`]: document });
   const proposal = parseSpindriftFile(document);
   return {
     run,
@@ -164,6 +172,7 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     // and calls it a success.
     const { run, parsed } = await declared(
       await readFile(VIEW_COUNTER, 'utf8'),
+      'spindrift.yaml',
     );
     expect(run.code).toBe(0);
     expect(configuredCommand(run)).toBe('go build -o out ./cmd');
@@ -179,7 +188,36 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     expect(run.dockerArgv.at(-1)).toBe('/out/railpack-plan.json');
   });
 
-  test('no `spindrift.yaml` at all builds exactly as it did before', async () => {
+  test('a legacy spindrift.yaml is read when the scope has no kthx.yaml', async () => {
+    const { run, parsed } = await declared(
+      RAILPACK('go build -o out ./cmd'),
+      'spindrift.yaml',
+    );
+    expect(run.code).toBe(0);
+    expect(configuredCommand(run)).toBe('go build -o out ./cmd');
+    expect(configuredCommand(run)).toBe(parsed);
+  });
+
+  test('kthx.yaml wins over a spindrift.yaml beside it', async () => {
+    const run = await runArm({
+      [`${SUBPATH}/kthx.yaml`]: RAILPACK('go build -o out ./cmd'),
+      [`${SUBPATH}/spindrift.yaml`]: RAILPACK('make legacy'),
+    });
+    expect(run.code).toBe(0);
+    expect(configuredCommand(run)).toBe('go build -o out ./cmd');
+  });
+
+  test('a files build that lifts names the kthx file it read for the lift step', async () => {
+    const run = await runArm(
+      { [`${SUBPATH}/spindrift.yaml`]: RAILPACK('null') },
+      { ARTIFACT_TYPE: 'files', OUTPUT_DIRECTORY: 'dist' },
+    );
+    expect(run.code).toBe(0);
+    expect(run.outputs).toContain('lift=dist\n');
+    expect(run.outputs).toContain('declaration=spindrift.yaml\n');
+  });
+
+  test('no kthx file at all builds exactly as it did before', async () => {
     // `--config-file` fails when its file is absent.
     const run = await runArm({});
     expect(run.code).toBe(0);
@@ -209,8 +247,7 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     // Core never advances an App's commit past an unparseable file, so this
     // is reachable only when something is already wrong.
     const run = await runArm({
-      [`${SUBPATH}/spindrift.yaml`]:
-        'build:\n  frontend: railpack\n   nope: [\n',
+      [`${SUBPATH}/kthx.yaml`]: 'build:\n  frontend: railpack\n   nope: [\n',
     });
     expect(run.code).not.toBe(0);
     expect(run.dockerArgv).toEqual([]);
@@ -249,14 +286,17 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     expect(configuredCommand(run)).toBe(parsed);
   });
 
-  test('a single quote is refused rather than silently re-split', async () => {
-    // railpack wraps a string command as `sh -c '<cmd>'` with no escaping.
-    const { run } = await declared(RAILPACK("echo it's fine"));
-    expect(run.code).not.toBe(0);
-    // An `::error::` annotation, on stdout, which is where Actions reads them.
-    expect(run.output).toContain(
-      '::error::spindrift.yaml: build.command cannot contain a single quote',
-    );
-    expect(run.dockerArgv).toEqual([]);
-  });
+  test.each(['kthx.yaml', 'spindrift.yaml'])(
+    'a single quote is refused rather than silently re-split, naming %s',
+    async (file) => {
+      // railpack wraps a string command as `sh -c '<cmd>'` with no escaping.
+      const { run } = await declared(RAILPACK("echo it's fine"), file);
+      expect(run.code).not.toBe(0);
+      // An `::error::` annotation, on stdout, which is where Actions reads them.
+      expect(run.output).toContain(
+        `::error::${file}: build.command cannot contain a single quote`,
+      );
+      expect(run.dockerArgv).toEqual([]);
+    },
+  );
 });

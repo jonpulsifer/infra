@@ -73,7 +73,43 @@ async function connectedApp(
 }
 
 describe('getAppSource', () => {
-  test('reads the scope’s spindrift.yaml at the adopted commit', async () => {
+  test('reads the scope’s kthx.yaml at the adopted commit', async () => {
+    const fake = new FakeGitHub();
+    const adopted = fake.commitFiles('main', {
+      'services/api/kthx.yaml': SPINDRIFT_YAML,
+      'services/api/Dockerfile': 'FROM scratch\n',
+    });
+
+    const name = await connectedApp(fake, adopted, 'services/api');
+    const result = await getAppSource({ app: name }, context(fake));
+    if (!result.ok) throw new Error(result.failure.message);
+
+    expect(result.value.source?.manifest).toEqual({
+      path: 'services/api/kthx.yaml',
+      state: 'present',
+      text: SPINDRIFT_YAML,
+    });
+  });
+
+  test('reads kthx.yaml over a spindrift.yaml beside it', async () => {
+    const fake = new FakeGitHub();
+    const adopted = fake.commitFiles('main', {
+      'services/api/kthx.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': 'version: 1\ncomponent:\n  kind: job\n',
+    });
+
+    const name = await connectedApp(fake, adopted, 'services/api');
+    const result = await getAppSource({ app: name }, context(fake));
+    if (!result.ok) throw new Error(result.failure.message);
+
+    expect(result.value.source?.manifest).toEqual({
+      path: 'services/api/kthx.yaml',
+      state: 'present',
+      text: SPINDRIFT_YAML,
+    });
+  });
+
+  test('reads a legacy spindrift.yaml at the adopted commit when there is no kthx.yaml', async () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
@@ -113,8 +149,9 @@ describe('getAppSource', () => {
     const result = await getAppSource({ app: name }, context(fake));
     if (!result.ok) throw new Error(result.failure.message);
 
+    // Absent names where a new file would go.
     expect(result.value.source?.manifest).toEqual({
-      path: 'services/api/spindrift.yaml',
+      path: 'services/api/kthx.yaml',
       state: 'absent',
     });
   });

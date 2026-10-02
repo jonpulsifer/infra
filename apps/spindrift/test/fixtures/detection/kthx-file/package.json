@@ -1,0 +1,7 @@
+{
+  "name": "fixture-kthx-file",
+  "private": true,
+  "scripts": {
+    "report": "bun run report.ts"
+  }
+}

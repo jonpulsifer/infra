@@ -1,9 +1,44 @@
 /**
- * Parses a scope's `spindrift.yaml`. Once it exists the file is the source of
- * truth, so malformed or unknown input stops reconciliation.
+ * Finds and parses a scope's kthx file. Once it exists the file is the source
+ * of truth, so malformed or unknown input stops reconciliation.
  */
 import { z } from 'zod';
 import type { DetectionProposal } from './ladder.ts';
+
+/**
+ * The names a scope's declaration may have, first match wins. New scopes are
+ * written as the first; the second is read forever.
+ */
+export const DECLARATION_FILES = ['kthx.yaml', 'spindrift.yaml'] as const;
+
+export const DECLARATION_FILE = DECLARATION_FILES[0];
+
+/** `.` is the repository root. */
+export function declarationPath(
+  scope: string,
+  file: string = DECLARATION_FILE,
+): string {
+  return scope === '.' ? file : `${scope}/${file}`;
+}
+
+export interface Declaration {
+  /** Repo-relative. */
+  readonly path: string;
+  readonly document: string;
+}
+
+/** A read that throws stops the search, so the caller decides what it means. */
+export async function readDeclaration(
+  scope: string,
+  read: (path: string) => Promise<string | null>,
+): Promise<Declaration | null> {
+  for (const file of DECLARATION_FILES) {
+    const path = declarationPath(scope, file);
+    const document = await read(path);
+    if (document !== null) return { path, document };
+  }
+  return null;
+}
 
 const scopedPathSchema = z
   .string()
@@ -50,7 +85,7 @@ function formatIssues(error: z.ZodError): string {
 
 export function parseSpindriftFile(
   document: string,
-  source = 'spindrift.yaml',
+  source: string = DECLARATION_FILE,
 ): DetectionProposal {
   let decoded: unknown;
   try {
@@ -67,7 +102,7 @@ export function parseSpindriftFile(
   const parsed = spindriftFileSchema.safeParse(decoded);
   if (!parsed.success) {
     throw new Error(
-      `${source}: invalid Spindrift file: ${formatIssues(parsed.error)}`,
+      `${source}: invalid kthx file: ${formatIssues(parsed.error)}`,
     );
   }
 
@@ -80,7 +115,7 @@ export function parseSpindriftFile(
       {
         kind: component.kind,
         available: true,
-        reason: 'asserted by spindrift.yaml',
+        reason: `asserted by ${source.slice(source.lastIndexOf('/') + 1)}`,
       },
     ],
     build:

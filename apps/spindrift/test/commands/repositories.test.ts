@@ -14,10 +14,10 @@ import type {
 } from '../../src/commands/types.ts';
 import { repositories } from '../../src/db/schema.ts';
 import type { DetectionProposal } from '../../src/domain/detection/ladder.ts';
+import { DECLARATION_FILE } from '../../src/domain/detection/spindrift-file.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
 import {
   CONFIG_BRANCH,
-  SPINDRIFT_FILE,
   WORKFLOW_PATH,
 } from '../../src/integrations/github/config-pr.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -27,6 +27,20 @@ import { fixtureManifest } from '../harness/installation.ts';
 const database = withIsolatedDatabase();
 
 const NOW = new Date('2026-07-28T12:00:00.000Z');
+
+/** Says `job`, which detection never infers, so a test can tell who answered. */
+const AUTHORED_JOB = [
+  'version: 1',
+  'component:',
+  '  kind: job',
+  'build:',
+  '  frontend: railpack',
+  '  command: bun run nightly',
+  '  outputDirectory: null',
+  'watchPaths:',
+  '  - .',
+  '',
+].join('\n');
 
 const proposal: DetectionProposal = {
   source: 'detection',
@@ -127,7 +141,7 @@ describe('connecting a repository', () => {
     expect(fake.head('main')).toBe(base);
     const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
     expect(Object.keys(written).sort()).toEqual(
-      ['README.md', WORKFLOW_PATH, `services/api/${SPINDRIFT_FILE}`].sort(),
+      ['README.md', WORKFLOW_PATH, `services/api/${DECLARATION_FILE}`].sort(),
     );
   });
 
@@ -244,7 +258,11 @@ describe('connecting a repository', () => {
     const failingFetch = (async (input: any) => {
       const urlStr =
         typeof input === 'string' ? input : (input?.url ?? String(input));
-      if (urlStr.includes('/git/') || urlStr.includes('/pulls')) {
+      // Connect reads the default branch's head before it writes anything.
+      const write =
+        urlStr.includes('/pulls') ||
+        (urlStr.includes('/git/') && !urlStr.endsWith('/git/ref/heads/main'));
+      if (write) {
         throw new Error('GitHub API pull request error');
       }
       return fake.fetch(input);
@@ -312,6 +330,23 @@ describe('connecting a repository', () => {
     const accepted = await dispatch('connectRepository', input(fake), loop);
     expect(accepted.ok).toBe(true);
   });
+
+  test('an override on a scope holding spindrift.yaml rewrites that file', async () => {
+    const fake = new FakeGitHub();
+    const base = fake.commitFiles('main', {
+      'services/api/go.mod': 'module api\n',
+      'services/api/spindrift.yaml': AUTHORED_JOB,
+    });
+
+    await connectRepository(input(fake), await context(fake));
+
+    const before = fake.filesAt(base);
+    const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
+    expect(written['services/api/spindrift.yaml']).toContain('kind: service');
+    expect(Object.keys(written).filter((path) => !(path in before))).toEqual([
+      WORKFLOW_PATH,
+    ]);
+  });
 });
 
 /**
@@ -319,7 +354,7 @@ describe('connecting a repository', () => {
  * writes describes the code there now.
  */
 describe('connecting a repository without being told what is in it', () => {
-  test('detects the root and writes the Spindrift file it implies', async () => {
+  test('detects the root and writes the kthx file it implies', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', GO_SERVICE);
 
@@ -334,9 +369,9 @@ describe('connecting a repository without being told what is in it', () => {
 
     const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
     expect(Object.keys(written).sort()).toEqual(
-      ['README.md', 'go.mod', WORKFLOW_PATH, SPINDRIFT_FILE].sort(),
+      ['README.md', 'go.mod', WORKFLOW_PATH, DECLARATION_FILE].sort(),
     );
-    expect(written[SPINDRIFT_FILE]).toContain('kind: service');
+    expect(written['kthx.yaml']).toContain('kind: service');
     // The body says whether detection or an operator proposed the file.
     expect(fake.pulls[0]?.body).toContain('detection');
   });
@@ -367,35 +402,41 @@ describe('connecting a repository without being told what is in it', () => {
     // so discovery reads past the workspace list.
     expect(
       Object.keys(written)
-        .filter((path) => path.endsWith(SPINDRIFT_FILE))
+        .filter((path) => path.endsWith(DECLARATION_FILE))
         .sort(),
-    ).toEqual([`apps/api/${SPINDRIFT_FILE}`, `apps/web/${SPINDRIFT_FILE}`]);
+    ).toEqual([`apps/api/${DECLARATION_FILE}`, `apps/web/${DECLARATION_FILE}`]);
   });
 
-  test('an in-repo spindrift.yaml is what gets written back, unchanged', async () => {
+  test('an in-repo kthx.yaml is what gets written back, unchanged', async () => {
     const fake = new FakeGitHub();
-    const authored = [
-      'version: 1',
-      'component:',
-      '  kind: job',
-      'build:',
-      '  frontend: railpack',
-      '  command: bun run nightly',
-      '  outputDirectory: null',
-      'watchPaths:',
-      '  - .',
-      '',
-    ].join('\n');
     fake.commitFiles('main', {
       'go.mod': 'module example.com/app\n',
-      [SPINDRIFT_FILE]: authored,
+      'kthx.yaml': AUTHORED_JOB,
     });
 
     await connectRepository({ fullName: fake.fullName }, await context(fake));
 
     const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
     // Detection would say `service`; the authored file wins.
-    expect(written[SPINDRIFT_FILE]).toContain('kind: job');
+    expect(written['kthx.yaml']).toContain('kind: job');
+  });
+
+  test('a legacy spindrift.yaml is written back where it was read', async () => {
+    const fake = new FakeGitHub();
+    const base = fake.commitFiles('main', {
+      'go.mod': 'module example.com/app\n',
+      'spindrift.yaml': AUTHORED_JOB,
+    });
+
+    await connectRepository({ fullName: fake.fullName }, await context(fake));
+
+    const before = fake.filesAt(base);
+    const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
+    expect(written['spindrift.yaml']).toContain('kind: job');
+    // No second file appears beside it to outrank it.
+    expect(Object.keys(written).filter((path) => !(path in before))).toEqual([
+      WORKFLOW_PATH,
+    ]);
   });
 
   test('refuses, and writes no row, when nothing in the repository is buildable', async () => {
@@ -436,9 +477,9 @@ describe('connecting a repository without being told what is in it', () => {
     const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
     expect(
       Object.keys(written)
-        .filter((path) => path.endsWith(SPINDRIFT_FILE))
+        .filter((path) => path.endsWith(DECLARATION_FILE))
         .sort(),
-    ).toEqual([`apps/api/${SPINDRIFT_FILE}`]);
+    ).toEqual([`apps/api/${DECLARATION_FILE}`]);
   });
 });
 
@@ -473,7 +514,7 @@ describe('inspecting a repository before connecting it', () => {
         buildCommand: null,
         outputDirectory: null,
         watchPaths: ['.', 'go.mod'],
-        configured: false,
+        declaration: null,
         // Ruled-out kinds carry a reason, so the creation flow can show them
         // disabled.
         unavailable: {
@@ -486,6 +527,40 @@ describe('inspecting a repository before connecting it', () => {
     expect(fake.pulls).toEqual([]);
     expect(await database().db.select().from(repositories)).toEqual([]);
   });
+
+  test.each([
+    [{ 'kthx.yaml': AUTHORED_JOB }, 'kthx.yaml'],
+    [{ 'spindrift.yaml': AUTHORED_JOB }, 'spindrift.yaml'],
+    [
+      {
+        'kthx.yaml': AUTHORED_JOB,
+        'spindrift.yaml': AUTHORED_JOB.replace('kind: job', 'kind: service'),
+      },
+      'kthx.yaml',
+    ],
+  ] as const)(
+    'names the file that settled a scope: %o',
+    async (files, named) => {
+      const fake = new FakeGitHub();
+      fake.commitFiles('main', {
+        'go.mod': 'module example.com/app\n',
+        ...files,
+      });
+
+      const result = await inspectRepository(
+        { fullName: fake.fullName },
+        await context(fake),
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.scopes[0]).toMatchObject({
+        outcome: 'detected',
+        kind: 'job',
+        declaration: named,
+      });
+    },
+  );
 
   test('a Dockerfile settles how to build and not what the thing is', async () => {
     const fake = new FakeGitHub();

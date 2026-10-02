@@ -8,13 +8,16 @@ import type { Clock } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { apps, type Repository, repositories } from '../db/schema.ts';
 import type { DetectionProposal } from '../domain/detection/ladder.ts';
-import { parseSpindriftFile } from '../domain/detection/spindrift-file.ts';
+import {
+  type Declaration,
+  parseSpindriftFile,
+  readDeclaration,
+} from '../domain/detection/spindrift-file.ts';
 import {
   type RepositoryReader,
   type RepositoryRef,
   repositoryRefOf,
 } from '../domain/repository.ts';
-import { SPINDRIFT_FILE } from '../integrations/github/config-pr.ts';
 import { GitHubAccessError } from '../integrations/github/http.ts';
 import type { WebhookDelivery } from '../integrations/github/webhook.ts';
 import {
@@ -47,7 +50,7 @@ export type ScopeOutcome =
   | {
       readonly scope: string;
       readonly appId: string;
-      /** No `SPINDRIFT_FILE` at this scope; detection still applies. */
+      /** No kthx file at this scope; detection still applies. */
       readonly outcome: 'absent';
     }
   | {
@@ -104,12 +107,6 @@ export type RepositoryReconciliation =
       readonly outcome: 'unavailable';
       readonly detail: string;
     };
-
-/** A `null` or `.` subpath is the repository root. */
-function spindriftPath(subpath: string | null): string {
-  const scope = subpath ?? '.';
-  return scope === '.' ? SPINDRIFT_FILE : `${scope}/${SPINDRIFT_FILE}`;
-}
 
 /** Writes only the repository row: a freeze never reaches what is deployed. */
 async function freeze(
@@ -190,11 +187,7 @@ export async function reconcileRepository(
     }
   } catch (cause) {
     if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
-      return freeze(
-        context,
-        stored,
-        'Spindrift can no longer read this repository',
-      );
+      return freeze(context, stored, 'kthx can no longer read this repository');
     }
     return {
       repositoryId: stored.id,
@@ -275,22 +268,19 @@ export async function reconcileRepository(
   const previous = repository.authoritativeCommit;
   const outcomes: ScopeOutcome[] = [];
   for (const app of scoped) {
+    // A `null` subpath is the repository root.
     const scope = app.subpath ?? '.';
-    const path = spindriftPath(app.subpath);
-    let document: string | null;
+    let declaration: Declaration | null;
     try {
-      document = await context.host.readFile(
-        ref,
-        repository.fullName,
-        head,
-        path,
+      declaration = await readDeclaration(scope, (path) =>
+        context.host.readFile(ref, repository.fullName, head, path),
       );
     } catch (cause) {
       if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
         return freeze(
           context,
           repository,
-          'Spindrift can no longer read this repository',
+          'kthx can no longer read this repository',
         );
       }
       return {
@@ -301,14 +291,14 @@ export async function reconcileRepository(
       };
     }
 
-    if (document === null) {
+    if (declaration === null) {
       outcomes.push({ scope, appId: app.id, outcome: 'absent' });
       continue;
     }
 
     let proposal: DetectionProposal;
     try {
-      proposal = parseSpindriftFile(document, path);
+      proposal = parseSpindriftFile(declaration.document, declaration.path);
     } catch (cause) {
       outcomes.push({
         scope,
@@ -321,16 +311,17 @@ export async function reconcileRepository(
 
     let changed = true;
     if (previous !== null) {
-      // Compared with the adopted commit's file: a force-push, revert or merge
-      // moves the branch without saying what a scope's file now says.
+      // Compared with the adopted commit's file, resolved at that commit: a
+      // force-push, revert or merge moves the branch without saying what a
+      // scope's file now says, and a rename alone changes nothing.
       const before = await readScopeFile(
         context,
         ref,
         repository,
         previous,
-        path,
+        scope,
       );
-      changed = before !== document;
+      changed = before !== declaration.document;
     }
 
     outcomes.push({
@@ -447,10 +438,13 @@ async function readScopeFile(
   ref: RepositoryRef,
   repository: Repository,
   commit: string,
-  path: string,
+  scope: string,
 ): Promise<string | null> {
   try {
-    return await context.host.readFile(ref, repository.fullName, commit, path);
+    const declaration = await readDeclaration(scope, (path) =>
+      context.host.readFile(ref, repository.fullName, commit, path),
+    );
+    return declaration?.document ?? null;
   } catch {
     // A collected commit or rewritten history reads as changed, never as a
     // failed pass.

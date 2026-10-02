@@ -53,8 +53,8 @@ export type InspectedScope =
       /** Where a static rendering would lift files from, when there is one. */
       readonly outputDirectory: string | null;
       readonly watchPaths: readonly string[];
-      /** True when an in-repo `spindrift.yaml` already settled this. */
-      readonly configured: boolean;
+      /** The kthx file that settled this, by name; null when detection did. */
+      readonly declaration: string | null;
       /** Each kind detection ruled out, with the sentence that ruled it out. */
       readonly unavailable: Readonly<Partial<Record<ComponentKind, string>>>;
     }
@@ -76,7 +76,11 @@ export interface InspectRepositoryResult {
   readonly canConnect: boolean;
 }
 
-function viewOf(scope: string, proposal: DetectionProposal): InspectedScope {
+function viewOf(
+  scope: string,
+  proposal: DetectionProposal,
+  declaration: string | undefined,
+): InspectedScope {
   return {
     scope,
     outcome: 'detected',
@@ -96,7 +100,10 @@ function viewOf(scope: string, proposal: DetectionProposal): InspectedScope {
         ? proposal.build.outputDirectory
         : null,
     watchPaths: proposal.watchPaths,
-    configured: proposal.source === 'spindrift-file',
+    declaration:
+      declaration === undefined
+        ? null
+        : declaration.slice(declaration.lastIndexOf('/') + 1),
     unavailable: Object.fromEntries(
       proposal.kinds
         .filter((option) => !option.available)
@@ -143,7 +150,7 @@ export const inspectRepository: Command<
     );
     scopes = found.map((result) =>
       result.outcome === 'detected'
-        ? viewOf(result.scope, result.proposal)
+        ? viewOf(result.scope, result.proposal, result.declaration)
         : {
             scope: result.scope,
             outcome: 'unsupported' as const,

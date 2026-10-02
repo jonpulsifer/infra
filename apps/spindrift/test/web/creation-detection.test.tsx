@@ -47,7 +47,7 @@ const detected = (
   buildCommand: null,
   outputDirectory: null,
   watchPaths: [scope],
-  configured: false,
+  declaration: null,
   unavailable: { job: 'jobs are asserted, never inferred' },
 });
 

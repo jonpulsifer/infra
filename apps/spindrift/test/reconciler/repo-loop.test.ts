@@ -150,7 +150,7 @@ async function reload(repositoryId: string) {
 }
 
 describe('adopting the default branch', () => {
-  test('adopts a scope’s Spindrift file and records the commit', async () => {
+  test('adopts a scope’s legacy spindrift.yaml and records the commit', async () => {
     const fake = new FakeGitHub();
     const commit = fake.commitFiles('main', {
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
@@ -185,7 +185,7 @@ describe('adopting the default branch', () => {
     expect((await reload(repository.id)).authoritativeCommit).toBe(commit);
   });
 
-  test('a scope with no Spindrift file is absent, not an error', async () => {
+  test('a scope with no kthx file is absent, not an error', async () => {
     const fake = new FakeGitHub();
     const commit = fake.commitFiles('main', { 'README.md': 'nothing here' });
     const { repository } = await connect(fake);
@@ -234,6 +234,64 @@ describe('adopting the default branch', () => {
     expect(pass.outcome === 'adopted' && pass.scopes[0]).toMatchObject({
       outcome: 'adopted',
       changed: false,
+    });
+  });
+
+  test('adopts a scope’s kthx.yaml', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'services/api/kthx.yaml': SPINDRIFT_YAML });
+    const { repository } = await connect(fake);
+
+    const pass = await reconcileRepository(await context(fake), repository);
+
+    expect(pass.outcome === 'adopted' && pass.scopes[0]).toMatchObject({
+      outcome: 'adopted',
+      proposal: {
+        source: 'spindrift-file',
+        reason: 'services/api/kthx.yaml asserts this scope is a service',
+      },
+    });
+  });
+
+  test('renaming spindrift.yaml to kthx.yaml alone changes nothing', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'services/api/spindrift.yaml': SPINDRIFT_YAML });
+    const { repository } = await connect(fake);
+    const loop = await context(fake);
+    await reconcileRepository(loop, repository);
+
+    fake.commitFiles('main', { 'services/api/kthx.yaml': SPINDRIFT_YAML });
+    const pass = await reconcileRepository(loop, await reload(repository.id));
+
+    expect(pass.outcome).toBe('adopted');
+    expect(pass.outcome === 'adopted' && pass.scopes[0]).toMatchObject({
+      outcome: 'adopted',
+      changed: false,
+    });
+  });
+
+  test('a kthx.yaml added beside spindrift.yaml is what the scope now says', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'services/api/spindrift.yaml': SPINDRIFT_YAML });
+    const { repository } = await connect(fake);
+    const loop = await context(fake);
+    await reconcileRepository(loop, repository);
+
+    fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/kthx.yaml': SPINDRIFT_YAML.replace(
+        'bun run build',
+        'bun run release',
+      ),
+    });
+    const pass = await reconcileRepository(loop, await reload(repository.id));
+
+    expect(pass.outcome === 'adopted' && pass.scopes[0]).toMatchObject({
+      outcome: 'adopted',
+      changed: true,
+      proposal: {
+        build: { frontend: 'railpack', buildCommand: 'bun run release' },
+      },
     });
   });
 
@@ -315,7 +373,7 @@ describe('a pass that is not going to dispatch', () => {
     expect((await reload(repository.id)).authoritativeCommit).toBe(pushed);
   });
 
-  test('does not read one scope’s Spindrift file', async () => {
+  test('does not read one scope’s kthx file', async () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
       'services/api/spindrift.yaml': SPINDRIFT_YAML,
@@ -547,7 +605,7 @@ describe('losing access', () => {
     expect(pass).toMatchObject({ outcome: 'frozen' });
     const row = await reload(repository.id);
     expect(row.access).toBe('frozen');
-    expect(row.frozenReason).toContain('no longer read this repository');
+    expect(row.frozenReason).toBe('kthx can no longer read this repository');
     expect(row.frozenAt).toEqual(NOW);
     // Source-driven changes stop; nothing that is running is touched.
     expect(await snapshot()).toEqual(before);

@@ -36,12 +36,15 @@ import {
   DEFAULT_MINIMUM_BUILD_LEVEL,
 } from '../../domain/build-route.ts';
 import { vercelFrameworkOf } from '../../domain/detection/declared.ts';
-import { parseSpindriftFile } from '../../domain/detection/spindrift-file.ts';
+import {
+  type Declaration,
+  parseSpindriftFile,
+  readDeclaration,
+} from '../../domain/detection/spindrift-file.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
 import { targetLabel } from '../../domain/target.ts';
-import { SPINDRIFT_FILE } from '../../integrations/github/config-pr.ts';
 import { isFetchableBundleLocation } from '../../storage/archives.ts';
 import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
 import { reconcilerDispatchAttempts } from '../../telemetry/index.ts';
@@ -254,7 +257,7 @@ async function vercelFrameworkFor(
 }
 
 /**
- * Read from the scope's `SPINDRIFT_FILE` at this build's commit. Every unknown
+ * Read from the scope's kthx file at this build's commit. Every unknown
  * answers `null`, which ships the scope as it stands.
  */
 async function outputDirectoryFor(
@@ -275,26 +278,24 @@ async function outputDirectoryFor(
   const host = context.adapters.repository();
   if (host === null) return null;
 
-  const path =
-    input.source.subpath === '.'
-      ? SPINDRIFT_FILE
-      : `${input.source.subpath}/${SPINDRIFT_FILE}`;
-
-  let document: string | null;
+  const { repository, source } = input;
+  let declaration: Declaration | null;
   try {
-    document = await host.readFile(
-      repositoryRefOf(input.repository),
-      input.repository.fullName,
-      input.source.commit,
-      path,
+    declaration = await readDeclaration(source.subpath, (path) =>
+      host.readFile(
+        repositoryRefOf(repository),
+        repository.fullName,
+        source.commit,
+        path,
+      ),
     );
   } catch {
     return null;
   }
-  if (document === null) return null;
+  if (declaration === null) return null;
 
   try {
-    const proposal = parseSpindriftFile(document, path);
+    const proposal = parseSpindriftFile(declaration.document, declaration.path);
     return proposal.build.frontend === 'railpack'
       ? proposal.build.outputDirectory
       : null;
@@ -772,7 +773,7 @@ export const dispatchBuild = async (
       context,
       subject,
       'NOT_BUILDABLE',
-      `${component.name} is placed on a Vercel Target, which builds through the platform's own framework builder — and nothing in this scope's package.json names a framework Spindrift recognises. Vercel performs no detection of its own: a build with no framework is built as a plain directory of files and would serve this project's sources with no functions at all, so it is refused instead.`,
+      `${component.name} is placed on a Vercel Target, which builds through the platform's own framework builder — and nothing in this scope's package.json names a framework kthx recognises. Vercel performs no detection of its own: a build with no framework is built as a plain directory of files and would serve this project's sources with no functions at all, so it is refused instead.`,
       { kind: 'waits' },
     );
   }

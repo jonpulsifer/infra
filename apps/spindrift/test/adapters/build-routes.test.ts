@@ -531,6 +531,8 @@ describe('the hosted build route', () => {
     // flags `${` inside a plain string.
     const expression = ['${', '{ inputs.correlation }', '}'].join('');
     expect(caller).toContain(`run-name: ${RUN_NAME_PREFIX} ${expression}`);
+    // `name` is only the check text the repository shows; nothing matches on it.
+    expect(caller).toContain('\nname: kthx\n');
   });
 
   test('carries a registry credential only where a seal key is configured', () => {

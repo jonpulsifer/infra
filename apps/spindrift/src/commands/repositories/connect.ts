@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { repositories } from '../../db/schema.ts';
 import { declaredPlanner } from '../../domain/detection/declared.ts';
 import { scanRepository } from '../../domain/detection/discover.ts';
+import { readDeclaration } from '../../domain/detection/spindrift-file.ts';
 import { gitHubTree } from '../../domain/detection/tree.ts';
 import type {
   RepositoryHost,
@@ -99,37 +100,45 @@ async function configurationScopes(
   defaultBranch: string,
 ): Promise<{
   readonly scopes: ConfigurationScope[];
-  /** The revision detection read, or null when nothing needed reading. */
-  readonly commit: string | null;
+  /** The revision read. */
+  readonly commit: string;
 }> {
+  // Resolved now, so a branch that moved since the inspection is read as it is.
+  const commit = await host.branchHead(ref, input.fullName, defaultBranch);
+
   if (input.overrides !== undefined) {
-    // An override states what to write, so the branch is not read.
+    // An override states what to write; the branch is read only for where.
     return {
-      commit: null,
-      scopes: input.overrides.map(({ scope, kind, build, watchPaths }) => ({
-        scope,
-        proposal: {
-          source: 'operator' as const,
-          kind,
-          reason: `an operator asserted this scope is a ${kind}`,
-          kinds: (['service', 'website', 'job'] as const).map((candidate) =>
-            candidate === kind
-              ? { kind: candidate, available: true as const }
-              : {
-                  kind: candidate,
-                  available: false as const,
-                  reason: 'the operator selected another kind',
-                },
-          ),
-          build,
-          watchPaths,
-        },
-      })),
+      commit,
+      scopes: await Promise.all(
+        input.overrides.map(async ({ scope, kind, build, watchPaths }) => ({
+          scope,
+          proposal: {
+            source: 'operator' as const,
+            kind,
+            reason: `an operator asserted this scope is a ${kind}`,
+            kinds: (['service', 'website', 'job'] as const).map((candidate) =>
+              candidate === kind
+                ? { kind: candidate, available: true as const }
+                : {
+                    kind: candidate,
+                    available: false as const,
+                    reason: 'the operator selected another kind',
+                  },
+            ),
+            build,
+            watchPaths,
+          },
+          declaration: (
+            await readDeclaration(scope, (path) =>
+              host.readFile(ref, input.fullName, commit, path),
+            )
+          )?.path,
+        })),
+      ),
     };
   }
 
-  // Resolved now, so a branch that moved since the inspection is read as it is.
-  const commit = await host.branchHead(ref, input.fullName, defaultBranch);
   const found = await scanRepository(
     gitHubTree(host, ref, input.fullName, commit),
     declaredPlanner(),
@@ -139,7 +148,13 @@ async function configurationScopes(
     commit,
     scopes: found.flatMap((result) =>
       result.outcome === 'detected'
-        ? [{ scope: result.scope, proposal: result.proposal }]
+        ? [
+            {
+              scope: result.scope,
+              proposal: result.proposal,
+              declaration: result.declaration,
+            },
+          ]
         : [],
     ),
   };
@@ -192,7 +207,7 @@ export const connectRepository: Command<
   }
 
   let scopes: ConfigurationScope[];
-  let commit: string | null;
+  let commit: string;
   try {
     ({ scopes, commit } = await configurationScopes(
       input,
@@ -206,10 +221,9 @@ export const connectRepository: Command<
 
   if (scopes.length === 0) {
     // No row: the repo loop would reconcile a scopeless one forever.
-    const at = commit === null ? '' : ` at ${commit.slice(0, 7)}`;
     return failed(
       'NOT_DEPLOYABLE',
-      `Spindrift found nothing it knows how to build in ${input.fullName}${at}. Add a spindrift.yaml or a Dockerfile to the directory you want deployed, then connect it again.`,
+      `kthx found nothing it knows how to build in ${input.fullName} at ${commit.slice(0, 7)}. Add a kthx.yaml or a Dockerfile to the directory you want deployed, then connect it again.`,
     );
   }
 

@@ -1,0 +1,8 @@
+{
+  "name": "fixture-both-files",
+  "private": true,
+  "scripts": {
+    "report": "bun run report.ts",
+    "start": "bun run server.ts"
+  }
+}

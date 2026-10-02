@@ -1,0 +1,9 @@
+version: 1
+component:
+  kind: service
+build:
+  frontend: railpack
+  command: null
+  outputDirectory: null
+watchPaths:
+  - .

@@ -163,7 +163,7 @@ export function RepositoryList({
             GitHub repositories
           </h1>
           <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-            Pick a repository. Spindrift reads it, writes the configuration it
+            Pick a repository. kthx reads it, writes the configuration it
             implies, and opens one pull request — merging that is what connects
             it.
           </p>
@@ -524,7 +524,7 @@ function ScanPanel({
         </Button>
         <p className="text-xs text-muted-foreground">
           {deployable.length === 0
-            ? 'Add a spindrift.yaml or a Dockerfile to the directory you want deployed.'
+            ? 'Add a kthx.yaml or a Dockerfile to the directory you want deployed.'
             : 'Opens one pull request. Nothing takes effect until it merges.'}
         </p>
       </div>
@@ -551,10 +551,10 @@ function DetectedScope({ scope }: { scope: InspectedScope }) {
           <Icon aria-hidden="true" className="size-3" />
           {scope.kind}
         </Badge>
-        {scope.configured ? (
+        {scope.declaration !== null ? (
           <Badge tone="idle">
             <FileCode aria-hidden="true" className="size-3" />
-            spindrift.yaml
+            {scope.declaration}
           </Badge>
         ) : null}
         <span className="ml-auto font-mono text-[11px] text-muted-foreground">
