@@ -1,9 +1,9 @@
 ---
 name: terraform
 description: >-
-  Change, validate or plan the OpenTofu root modules under terraform/ and
-  clusters/<site>/bootstrap/. Use when editing .tf files, reading a plan, or
-  when a change needs an Atlantis apply.
+  Change, validate or plan the OpenTofu root modules under terraform/,
+  clusters/<site>/bootstrap/ and clusters/<site>/talos/. Use when editing .tf
+  files, reading a plan, or when a change needs an Atlantis apply.
 metadata:
   runbook: docs/runbooks/apply-an-opentofu-change.md
   wiki: https://wiki.lolwtf.ca/runbooks/apply-an-opentofu-change/
@@ -41,6 +41,13 @@ beyond them.
 - Network facts come from the topology files through
   `terraform/modules/cluster-topology`, which a root instantiates in its
   `topology.tf`.
+- A `clusters/<site>/talos/` root calls `terraform/modules/talos-cluster`,
+  the Talos Linux machine configuration of one cluster. A plan touches no
+  node: the secrets bundle is an ephemeral 1Password read, and the provider
+  skips its live refresh in write-only mode. An apply reaches every node on
+  port 50000 and reboots each node whose `image` changes. The module's
+  README has the inputs. `clusters/<site>/config/cluster-topology.json`
+  validates that root in CI once the root exists.
 - `terraform/pki` uses the `opentofu/tls` provider for `max_path_length`, and
   the `terraform` binary cannot install that provider.
 - CI runs `tofu test` in each directory with a changed `.tf` or `.tftest.hcl`
