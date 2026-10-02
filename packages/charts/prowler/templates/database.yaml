@@ -35,6 +35,16 @@ metadata:
     {{- include "prowler.labels" . | nindent 4 }}
 spec:
   instances: {{ .Values.database.instances }}
+  monitoring:
+    # CNPG's PodMonitor carries no release label; offsite's Prometheus selects every PodMonitor.
+    enablePodMonitor: true
+  {{- if .Values.backup.endpointURL }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: garage
+  {{- end }}
   enableSuperuserAccess: false
   storage:
     {{- with .Values.database.storageClass }}

@@ -13,6 +13,13 @@ metadata:
     helm.sh/resource-policy: keep
 spec:
   instances: 1
+  {{- if .Values.backup.endpointURL }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: garage
+  {{- end }}
   # Break-glass access for when the control role locks itself out of a site database.
   enableSuperuserAccess: true
   storage:
