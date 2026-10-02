@@ -961,16 +961,17 @@ describe('a harness that faults', () => {
     answers(model, 'answered');
     const built = build(model, {
       sessions,
-      // The abort makes two delayed commits, so it always runs past the
-      // deadline, and the idle wait after it has most of a deadline to spare.
-      timeouts: { discard: 190 },
+      // The abort makes three delayed commits, 450 ms of sleep, so it always
+      // runs past the deadline, and the idle wait after it has most of a
+      // deadline to spare on a slow runner.
+      timeouts: { discard: 400 },
     });
     const { session } = await opened(built);
     failFrom(faults, 1);
     await built.brain.prompt(session, 'one', new Recorder(), ASKER);
 
     faults.failAfter = null;
-    faults.delayMs = 100;
+    faults.delayMs = 150;
     const sink = new Recorder();
     const second = await built.brain.prompt(session, 'two', sink, ASKER);
     expect(
