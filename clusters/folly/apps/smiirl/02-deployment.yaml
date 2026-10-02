@@ -19,6 +19,8 @@ spec:
       labels:
         app.kubernetes.io/name: smiirl
         app.kubernetes.io/part-of: smiirl
+      annotations:
+        backup.velero.io/backup-volumes: data
     spec:
       automountServiceAccountToken: false
       securityContext:

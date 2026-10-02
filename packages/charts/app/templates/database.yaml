@@ -8,6 +8,13 @@ metadata:
     {{- include "app.labels" . | nindent 4 }}
 spec:
   instances: {{ .Values.database.instances }}
+  {{- if .Values.backup.endpointURL }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: garage
+  {{- end }}
   enableSuperuserAccess: false
   storage:
     storageClass: local-path

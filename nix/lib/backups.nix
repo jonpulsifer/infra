@@ -1,22 +1,19 @@
-# Backup facts shared by the restic staging servers and the host backup jobs. Each site backs up
-# into a restic staging repository on one of its own hosts; the clusters copy it to GCS.
+# Backup facts shared by the Garage hosts and the host backup jobs. Each site backs up into a
+# Garage S3 store on one of its own hosts; the clusters copy it to GCS.
 { pkgs }:
 let
   fleet = import ./fleet.nix;
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
 in
 rec {
-  port = 8000;
+  s3Port = 3900;
 
-  stagingHosts = {
+  garageHosts = {
     folly = "spore";
     offsite = "oldschool";
   };
 
-  # rest-server serves each site's repository at /<site>/ under its data directory.
-  repository = site: "rest:http://${stagingHosts.${site}}.${fleet.dnsZone}:${toString port}/${site}/";
-
-  restUsername = "restic";
+  s3Endpoint = site: "http://${garageHosts.${site}}.${fleet.dnsZone}:${toString s3Port}";
 
   # Writes lab_backup_last_success_timestamp_seconds for one source into the node-exporter
   # textfile directory. Run it as root, and only after the job succeeds.

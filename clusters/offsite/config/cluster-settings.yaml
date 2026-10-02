@@ -8,6 +8,7 @@ data:
   # 1Password item "oauth2-proxy: offsite".
   OAUTH2_PROXY_ITEM: 46xuydwpk5vbw2gld2pzn5o4pq
 
-  # restic's staging rest-server, and the nightly push of it to GCS.
-  RESTIC_STAGING_HOST: oldschool.lolwtf.ca
-  RESTIC_PUSH_SCHEDULE: "0 5 * * *"
+  # Garage in this cluster, on oldschool's host network, is the S3 endpoint for
+  # backups. Its push to GCS runs nightly.
+  GARAGE_S3_ENDPOINT: http://oldschool.lolwtf.ca:3900
+  BACKUP_PUSH_SCHEDULE: "0 5 * * *"

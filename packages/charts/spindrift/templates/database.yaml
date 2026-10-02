@@ -1,6 +1,6 @@
 {{/*
 The control plane's database. Its desired-state rows, attempt log and config version
-pins exist nowhere else but the restic dump in `restic.yaml`, so an uninstall keeps the
+pins exist nowhere else but the Garage backup in `backup.yaml`, so an uninstall keeps the
 Cluster by default.
 */}}
 {{- if .Values.database.enabled }}
@@ -18,6 +18,16 @@ metadata:
   {{- end }}
 spec:
   instances: {{ .Values.database.instances }}
+  monitoring:
+    # CNPG's PodMonitor carries no release label; offsite's Prometheus selects every PodMonitor.
+    enablePodMonitor: true
+  {{- if .Values.backup.endpointURL }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: garage
+  {{- end }}
   enableSuperuserAccess: false
   storage:
     storageClass: {{ .Values.database.storageClass }}

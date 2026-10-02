@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - arc-system.yaml
   - backups.yaml
+  - barman-cloud.yaml
   - cloudnative-pg.yaml
   - external-secrets-operator.yaml
   - gcp-secret-manager.yaml
@@ -13,3 +14,4 @@ resources:
   - spindrift-datastore-store.yaml
   - spindrift-policy.yaml
   - valkey-operator.yaml
+  - velero.yaml

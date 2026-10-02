@@ -1,11 +1,8 @@
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-components:
-  - ../../../base/components/restic-backup
 resources:
   - namespace.yaml
   - helm-repository.yaml
   - helm-release.yaml
-  - backup.yaml
 namespace: open-webui

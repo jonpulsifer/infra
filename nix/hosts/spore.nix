@@ -9,10 +9,10 @@
   imports = [
     ../profiles/pi5-nvme.nix
     ../services/coredns-sinkhole.nix
+    ../services/garage.nix
     ../services/nfs-server.nix
     ../services/ntp-server.nix
     ../services/pxe-netboot.nix
-    ../services/restic-server.nix
     ../services/spore-native-boot.nix
     ../system/sops.nix
   ];
@@ -25,12 +25,10 @@
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
-  # folly pushes staging to GCS on Wednesdays at 05:00, over Starlink; prune after it.
-  homelab.resticServer = {
+  homelab.garage = {
     enable = true;
     site = "folly";
-    dataDir = "/nfs/data/restic";
-    pruneOnCalendar = "Wed *-*-* 07:00:00 America/Halifax";
+    dataDir = "/nfs/data/garage";
   };
 
   sops.defaultSopsFile = ../secrets/spore.sops.yaml;

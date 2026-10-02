@@ -1,0 +1,12 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: vmware-tanzu
+  # The kustomization sets the same namespace. Renovate ignores the
+  # kustomization and pairs this source with the HelmRelease by the namespace
+  # written here, so without it Renovate never bumps the chart.
+  namespace: velero
+spec:
+  interval: 24h
+  url: https://vmware-tanzu.github.io/helm-charts

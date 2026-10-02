@@ -13,6 +13,8 @@ spec:
   template:
     metadata:
       labels: *labels
+      annotations:
+        backup.velero.io/backup-volumes: tronbyt-data
     spec:
       automountServiceAccountToken: false
       # A service link sets TRONBYT_PORT to tcp://<ip>:8000, which overrides the

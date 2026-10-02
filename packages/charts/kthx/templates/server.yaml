@@ -85,6 +85,10 @@ spec:
     metadata:
       labels:
         {{- include "kthx.labels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "kthx.fullname" . }}
       automountServiceAccountToken: false

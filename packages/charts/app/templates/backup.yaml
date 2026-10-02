@@ -1,0 +1,75 @@
+{{/*
+Continuous WAL archive and a daily base backup of the database through the CNPG
+barman-cloud plugin into the site's Garage. Empty `backup.endpointURL` renders nothing.
+*/}}
+{{- if .Values.database.enabled }}
+{{- with .Values.backup.endpointURL }}
+{{- $db := include "app.databaseName" $ }}
+{{- $namespace := (include "app.fullname" $) }}
+{{- if $.Values.backup.externalSecret }}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: garage-cnpg
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: {{ $.Values.backup.secretStore }}
+  target:
+    name: garage-cnpg
+    creationPolicy: Owner
+    template:
+      data:
+        ACCESS_KEY_ID: "{{ "{{ .accessKeyId }}" }}"
+        ACCESS_SECRET_KEY: "{{ "{{ .secretAccessKey }}" }}"
+        REGION: {{ $.Values.backup.region | quote }}
+  data:
+    - secretKey: accessKeyId
+      remoteRef: {key: {{ required "backup.item is required: it is the 1Password item holding the Garage keys" $.Values.backup.item | quote }}, property: cnpg-access-key-id}
+    - secretKey: secretAccessKey
+      remoteRef: {key: {{ $.Values.backup.item | quote }}, property: cnpg-secret-access-key}
+---
+{{- end }}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: garage
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+spec:
+  retentionPolicy: {{ $.Values.backup.retention | quote }}
+  configuration:
+    destinationPath: {{ printf "s3://%s/%s/" $.Values.backup.bucket $namespace | quote }}
+    endpointURL: {{ . | quote }}
+    s3Credentials:
+      accessKeyId: {name: garage-cnpg, key: ACCESS_KEY_ID}
+      secretAccessKey: {name: garage-cnpg, key: ACCESS_SECRET_KEY}
+      region: {name: garage-cnpg, key: REGION}
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $db }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+spec:
+  schedule: {{ $.Values.backup.schedule | quote }}
+  method: plugin
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: {{ $db }}
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+{{- end }}
+{{- end }}

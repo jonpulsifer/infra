@@ -1,6 +1,7 @@
 ---
-# The push to GCS and the `restic` Secret it reads. The schedule and staging
-# host come from cluster-settings, the bucket and audience from the topology.
+# The encrypted push of Garage's buckets to GCS and the `backup-push` Secret it
+# reads. The schedule and Garage endpoint come from cluster-settings, the
+# bucket, audience and 1Password item from the topology.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

@@ -1,4 +1,4 @@
-# A daily etcd snapshot from a control-plane node into its site's restic staging repository.
+# A daily etcd snapshot from a control-plane node into its site's Garage store.
 {
   config,
   lib,
@@ -19,11 +19,11 @@ in
     }
   ];
 
-  sops.secrets."restic/repository-password".mode = "0400";
-  sops.secrets."restic/rest-server-password".mode = "0400";
+  sops.secrets."garage/etcd/id".mode = "0400";
+  sops.secrets."garage/etcd/secret".mode = "0400";
 
   systemd.services.etcd-backup = {
-    description = "Snapshot etcd into the ${k8s.network} restic staging repository";
+    description = "Snapshot etcd into the ${k8s.network} Garage store";
     after = [
       "etcd.service"
       "network-online.target"
@@ -34,16 +34,17 @@ in
       ETCDCTL_CACERT = etcdClient.caFile;
       ETCDCTL_CERT = etcdClient.certFile;
       ETCDCTL_KEY = etcdClient.keyFile;
-      RESTIC_REPOSITORY = backups.repository k8s.network;
-      RESTIC_PASSWORD_FILE = config.sops.secrets."restic/repository-password".path;
-      RESTIC_REST_USERNAME = backups.restUsername;
-      RESTIC_CACHE_DIR = "/var/cache/etcd-backup";
+      RCLONE_CONFIG_GARAGE_TYPE = "s3";
+      RCLONE_CONFIG_GARAGE_PROVIDER = "Other";
+      RCLONE_CONFIG_GARAGE_ENDPOINT = backups.s3Endpoint k8s.network;
+      RCLONE_CONFIG_GARAGE_REGION = "garage";
+      RCLONE_CONFIG_GARAGE_FORCE_PATH_STYLE = "true";
+      RCLONE_CONFIG_GARAGE_NO_CHECK_BUCKET = "true";
     };
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "etcd-backup";
       StateDirectoryMode = "0700";
-      CacheDirectory = "etcd-backup";
       Nice = 19;
       IOSchedulingClass = "idle";
       ExecStartPost = backups.heartbeat "etcd";
@@ -51,14 +52,13 @@ in
     script = ''
       set -euo pipefail
       trap 'rm -f ${snapshot} ${snapshot}.part' EXIT
-      RESTIC_REST_PASSWORD=$(<${config.sops.secrets."restic/rest-server-password".path})
-      export RESTIC_REST_PASSWORD
+      RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID=$(<${config.sops.secrets."garage/etcd/id".path})
+      RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY=$(<${config.sops.secrets."garage/etcd/secret".path})
+      export RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY
       ${config.services.etcd.package}/bin/etcdctl snapshot save ${snapshot}
-      ${pkgs.restic}/bin/restic backup \
-        --host ${k8s.network}/etcd/${config.networking.hostName} \
-        --tag kind=etcd \
-        --retry-lock 30m \
-        ${snapshot}
+      ${pkgs.rclone}/bin/rclone copyto ${snapshot} \
+        "garage:etcd/${config.networking.hostName}/$(date -u +%Y%m%dT%H%M%SZ).db"
+      ${pkgs.rclone}/bin/rclone delete --min-age 14d "garage:etcd/${config.networking.hostName}/"
     '';
   };
 

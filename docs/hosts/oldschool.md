@@ -21,7 +21,7 @@ oldschool is the worker node of the offsite [Kubernetes](../platform/kubernetes.
 
 - Pods. `/mnt/disks` holds the `local-path` volumes on oldschool, including the [kthx](../apps/kthx.md) sites volume. `KthxSitesDiskFilling` fires when it has less than 25% free.
 - yarr, from `nix/services/yarr.nix`
-- offsite's [backup](../platform/backups.md) staging repository for restic, served append-only by rest-server on TCP 8000 from `/mnt/disks/restic` (`nix/services/restic-server.nix`). `restic-staging-prune` prunes it daily at 07:00, after offsite's nightly push to GCS.
+- offsite's [backup](../platform/backups.md) Garage store, a StatefulSet in `clusters/offsite/garage/` on the host network, with data in `/mnt/disks/garage`. The old restic repository is still in `/mnt/disks/restic`.
 
 ## Reach
 

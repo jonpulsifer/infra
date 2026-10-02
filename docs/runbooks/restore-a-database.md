@@ -1,9 +1,9 @@
 ---
 title: Restore a database
-description: Open a restic repository, find a Postgres snapshot, and restore it into a CloudNativePG database, or run the restore drill.
+description: Recover a Postgres database from its barman backups in Garage into a scratch CloudNativePG cluster, copy the data back, and run the restore drill.
 ---
 
-Use this runbook to restore a Postgres database from a restic snapshot, or to test the backups with the restore drill. [Backups](../platform/backups.md) describes the repositories and what each snapshot holds. The other restore runbooks open a repository with the steps in [Open a repository](#open-a-repository).
+Use this runbook to restore a Postgres database from the backups of the barman-cloud plugin, or to test the backups with the restore drill. [Backups](../platform/backups.md) describes the stores and the retention. The recovery makes a scratch cluster from a base backup and the WAL, and then copies the data into the live database.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because git holds no data, only the declaration of the database.
@@ -11,134 +11,119 @@ Use this runbook to restore a Postgres database from a restic snapshot, or to te
 ## Before you start
 
 - Get `kubectl` access, as [Get cluster admin access](get-cluster-admin-access.md) describes.
-- Install the tools in `mise.toml`, which include `restic`, `op`, `gcloud` and `flux`, and sign in to `op`.
 - Install `kubectl-cnpg`, as [Operate Postgres](operate-postgres.md#before-you-start) describes.
-- To read a staging repository, be on the LAN of its site or on the tailnet.
+- If Garage has lost the `cnpg` bucket, follow [Restore from the GCS copy](restore-from-the-gcs-copy.md) first.
 
-`<site>` is `folly` or `offsite`. The staging host is `spore` for folly and `oldschool` for offsite.
+`<site>` is `folly` or `offsite`. `<cluster>` is the CloudNativePG `Cluster`, and `<owner>` is the role that owns `<database>`.
 
-## Open a repository
+## Recover the database
 
-The staging repository has the newest snapshots. Use the GCS copy when the staging host is down. The GCS copy of folly can be a week older than staging.
-
-1. Put the repository key in the environment.
+1. Read the backups of the database.
 
    ```bash
-   export RESTIC_PASSWORD="$(op read 'op://homelab/restic-repository/password')"
+   kubectl get backup -n <namespace> --context <site>
    ```
 
-2. To use staging, set the repository and the rest-server login.
+   Result: A row for each backup, with the phase `completed`.
+
+2. Write `recovery.yaml`. For a point in time, add `recoveryTarget.targetTime` under `bootstrap.recovery`.
+
+   ```yaml
+   apiVersion: postgresql.cnpg.io/v1
+   kind: Cluster
+   metadata:
+     name: <cluster>-restore
+     namespace: <namespace>
+   spec:
+     instances: 1
+     storage:
+       storageClass: local-path
+       size: <size of the live volume>
+     bootstrap:
+       recovery:
+         source: origin
+         database: <database>
+         owner: <owner>
+     externalClusters:
+       - name: origin
+         plugin:
+           name: barman-cloud.cloudnative-pg.io
+           parameters:
+             barmanObjectName: garage
+             serverName: <cluster>
+   ```
+
+3. Create the scratch cluster.
 
    ```bash
-   export RESTIC_REPOSITORY="rest:http://<staging-host>.lolwtf.ca:8000/<site>/"
-   export RESTIC_REST_USERNAME="$(op read 'op://homelab/restic-rest-server/username')"
-   export RESTIC_REST_PASSWORD="$(op read 'op://homelab/restic-rest-server/password')"
+   kubectl create -f recovery.yaml --context <site>
    ```
 
-3. To use GCS, sign in to GCP and set the repository.
+4. Wait until the scratch cluster is ready.
 
    ```bash
-   gcloud auth application-default login
-   export GOOGLE_PROJECT_ID=homelab-ng
-   export RESTIC_REPOSITORY="gs:homelab-ng-backups-<site>:/"
+   kubectl wait --for=condition=Ready cluster.postgresql.cnpg.io/<cluster>-restore -n <namespace> --timeout=30m --context <site>
    ```
 
-4. List the snapshots of one kind.
+   Result: `cluster.postgresql.cnpg.io/<cluster>-restore condition met`.
+
+5. Count the rows of a table that the app always fills.
 
    ```bash
-   restic snapshots --tag kind=pg
+   kubectl cnpg psql <cluster>-restore -n <namespace> --context <site> -- -d <database> -At -c 'select count(*) from <table>'
    ```
 
-   Result: A table of snapshots, with the `ID`, `Time`, `Host` and `Paths` of each. The host is `<site>/<namespace>/<name>`.
+   Result: A number above zero.
 
-## Restore a database
+## Copy the data into the live database
 
-`<cluster>` is the CloudNativePG `Cluster`, and `<owner>` is the role that owns `<database>`.
-
-1. Restore the snapshot to a local directory.
-
-   ```bash
-   restic restore <snapshot-id> --target ./restore
-   ```
-
-   Result: The dump file under `./restore`, at the path that `restic snapshots` shows.
-
-2. Stop the writers of the database. Suspend the HelmRelease or Kustomization that applies the app, then scale the app to zero.
+1. Stop the writers of the database. Suspend the HelmRelease or Kustomization that applies the app, then scale the app to zero.
 
    ```bash
    flux suspend helmrelease <release> -n <namespace> --context <site>
    kubectl scale deployment <app> -n <namespace> --replicas 0 --context <site>
    ```
 
-3. Find the primary pod.
+2. Find the primary pod of each cluster.
 
    ```bash
    kubectl cnpg status <cluster> -n <namespace> --context <site>
+   kubectl cnpg status <cluster>-restore -n <namespace> --context <site>
    ```
 
-   Result: The pod name on the `Primary instance` line.
+   Result: The pod name on the `Primary instance` line of each.
 
-4. Read the first five bytes of the dump. A `.gz` file is plain SQL.
+3. Dump the scratch database to a local file.
 
    ```bash
-   head -c 5 <dump>
+   kubectl exec <restore-primary> -n <namespace> -c postgres --context <site> --      pg_dump -Fc -d <database> > restore.dump
    ```
 
-   Result: `PGDMP` for a `pg_dump -Fc` archive. Other output is plain SQL from `pg_dumpall`.
+   Result: A `restore.dump` file.
 
-5. If the dump is a `PGDMP` archive, restore it over the database.
+4. Restore the dump over the live database.
 
    ```bash
-   kubectl exec -i <primary> -n <namespace> -c postgres --context <site> -- \
-     pg_restore --clean --if-exists --no-owner --role=<owner> -d <database> < <dump>
+   kubectl exec -i <primary> -n <namespace> -c postgres --context <site> --      pg_restore --clean --if-exists --no-owner --role=<owner> -d <database> < restore.dump
    ```
 
    Result: No output.
 
-> [!CAUTION]
-> A `pg_dumpall` file creates and fills each database it holds, and psql goes on past an error. Drop every database that the dump holds, or the replay loads its rows a second time into a database that still exists.
-
-6. If the dump is plain SQL, drop each database that it holds.
+5. Delete the scratch cluster, then resume the release. Flux scales the app back to its declared replicas.
 
    ```bash
-   kubectl cnpg psql <cluster> -n <namespace> --context <site> -- -c 'drop database <database> with (force)'
-   ```
-
-   Result: `DROP DATABASE`.
-
-7. Replay the plain SQL dump.
-
-   ```bash
-   gzip -dc <dump> | kubectl exec -i <primary> -n <namespace> -c postgres --context <site> -- psql -X -q -d postgres
-   ```
-
-   Result: An error for each role that exists, such as `role "postgres" already exists`.
-
-> [!NOTE]
-> The kthx dump has no role passwords. A role that the replay creates has no password until kthx or the owner sets one.
-
-8. Count the rows of a table that the app always fills.
-
-   ```bash
-   kubectl cnpg psql <cluster> -n <namespace> --context <site> -- -d <database> -At -c 'select count(*) from <table>'
-   ```
-
-   Result: A number above zero.
-
-9. Resume the release. Flux scales the app back to its declared replicas.
-
-   ```bash
+   kubectl delete cluster.postgresql.cnpg.io/<cluster>-restore -n <namespace> --context <site>
    flux resume helmrelease <release> -n <namespace> --context <site>
    ```
 
 ## Run the restore drill
 
-The `restore-drill` CronJob restores the latest kthx `kind=pg` snapshot from the offsite GCS bucket into a throwaway Postgres. It fails unless the `sites` table of the `kthx` database has rows.
+The `restore-drill` CronJob recovers the kthx database from offsite's Garage into a throwaway cluster. It fails unless the `sites` table of the `kthx` database has rows.
 
 1. Start a drill.
 
    ```bash
-   kubectl create job restore-drill-now --from=cronjob/restore-drill -n backups --context offsite
+   kubectl create job restore-drill-now --from=cronjob/restore-drill -n restore-drill --context offsite
    ```
 
    Result: `job.batch/restore-drill-now created`.
@@ -146,26 +131,24 @@ The `restore-drill` CronJob restores the latest kthx `kind=pg` snapshot from the
 2. Read the result.
 
    ```bash
-   kubectl logs job/restore-drill-now -c drill -n backups --context offsite
+   kubectl logs job/restore-drill-now -c drill -n restore-drill --context offsite
    ```
 
-   Result: `restored <file>: <n> rows in kthx.sites`.
+   Result: `recovered kthx-db: <n> rows in kthx.sites`.
 
 3. Delete the Job.
 
    ```bash
-   kubectl delete job restore-drill-now -n backups --context offsite
+   kubectl delete job restore-drill-now -n restore-drill --context offsite
    ```
 
 ## If something goes wrong
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| `Fatal: wrong password or no key found` | `RESTIC_PASSWORD` is not the `restic-repository` password. | Read the password from 1Password again. |
-| `unexpected HTTP response (401)` | The rest-server login is wrong. | Read the `restic-rest-server` fields again. |
-| `restic snapshots` shows no snapshot for the host. | The backup CronJob has not run, or the GCS copy is behind. | Read the CronJob with `kubectl get cronjob -A -l lolwtf.ca/backup=true --context <site>`. Use staging for folly's newest snapshots. |
-| The drill's `fetch` container prints `want one kthx host`. | No `kind=pg` snapshot of kthx is in GCS, or two hosts match `offsite/kthx/`. | Read `restic snapshots --tag kind=pg` on the offsite GCS repository. |
-| `KubeJobFailed` fires for a `restore-drill` Job. | The last drill failed. | Read the logs of both containers of the last `restore-drill` Job. |
+| `kubectl get backup` shows no `completed` backup. | The `ScheduledBackup` has not run, or Garage is unreachable. | Run `kubectl get scheduledbackup -n <namespace> --context <site>`. Read `kubectl cnpg status <cluster>` for the archive state. |
+| The scratch cluster stays in `Setting up primary`. | The recovery pod cannot read the `garage` ObjectStore. | Read the logs of the `<cluster>-restore-1-full-recovery` pod. |
+| `KubeJobFailed` fires for a `restore-drill` Job. | The last drill failed. | Read the logs of the `drill` container, and `kubectl get cluster -n restore-drill`. |
 
 ## Related
 
