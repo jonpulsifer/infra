@@ -11,6 +11,21 @@ else federates with nothing and every depot read and write 403s. A
 {{- define "kthx.databaseName" -}}kthx-db{{- end }}
 
 {{/*
+Refuses a recovery that archives into the prefix it recovers from: the plugin checks
+the archive is empty on the first WAL and the Cluster sticks at `Expected empty archive`.
+*/}}
+{{- define "kthx.backupPrefixes" -}}
+{{- with .Values.backup.recoverFrom }}
+{{- if not $.Values.backup.endpointURL }}
+{{- fail "backup.recoverFrom needs backup.endpointURL: the recovery reads the garage ObjectStore" }}
+{{- end }}
+{{- if eq . (default (include "kthx.databaseName" $) $.Values.backup.serverName) }}
+{{- fail (printf "backup.recoverFrom %q is the prefix this Cluster archives to: set backup.serverName to a new one" .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 `helm.sh/chart` is deliberately absent from every object here.
 
 This chart is reconciled `Revision` from the in-repo GitRepository, so

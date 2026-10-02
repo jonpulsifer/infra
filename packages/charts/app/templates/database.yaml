@@ -1,4 +1,5 @@
 {{- if .Values.database.enabled }}
+{{- include "app.backupPrefixes" . }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -14,12 +15,28 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: garage
+        {{- with .Values.backup.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
   {{- end }}
   enableSuperuserAccess: false
   storage:
     storageClass: local-path
     size: {{ .Values.database.size }}
   bootstrap:
+  {{- if .Values.backup.recoverFrom }}
+    recovery:
+      source: origin
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: garage
+          serverName: {{ .Values.backup.recoverFrom | quote }}
+  {{- else }}
     initdb:
       database: {{ .Values.database.name }}
       owner: {{ .Values.database.name }}
@@ -27,4 +44,5 @@ spec:
       localeCollate: C
       localeCType: C
       dataChecksums: true
+  {{- end }}
 {{- end }}
