@@ -45,6 +45,8 @@ The counter is on folly's `iot` network, where DHCP gives capsule and spore as D
 
 No alerts watch the counter. See [Operate the Smiirl counter](../runbooks/operate-the-smiirl-counter.md).
 
+The CronJob `smiirl-backup` copies `smiirl-data` to folly's restic staging repository each night.
+
 ## Reference
 
 - Source and API contract: `apps/smiirl/`

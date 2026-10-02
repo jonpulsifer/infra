@@ -1,11 +1,13 @@
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: jellyfin
 components:
   - ../../../base/components/restic-backup
 resources:
-  - namespace.yaml
-  - helm-repository.yaml
-  - helm-release.yaml
+  - 00-namespace.yaml
+  - 01-service.yaml
+  - 02-pvc.yaml
+  - 03-gateway.yaml
   - backup.yaml
-namespace: open-webui
+  - deployment.yaml

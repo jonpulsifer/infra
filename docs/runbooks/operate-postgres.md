@@ -100,6 +100,7 @@ A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's
 | mate (`mate-db`) | The CronJob `mate-db-backup` writes a `pg_dump` to `gs://homelab-ng-mate/backups/pg/` each night. The bucket deletes a dump after 30 days. |
 | The built-apps database (`spindrift-db`) | The CronJob `spindrift-db-restic` writes a `pg_dump` to restic. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
 | Prowler (`prowler-db`) | The CronJob `prowler-db-restic` writes a `pg_dump` to restic. |
+| tronbyt (`tronbyt`, on folly) | The CronJob `tronbyt-db-backup` writes a `pg_dump` to folly's restic staging repository each night, with the restic host `folly/tronbyt/tronbyt`. |
 
 1. Read the backup line in the `kubectl cnpg status` output of the database.
 
@@ -108,7 +109,7 @@ A chart's restic CronJob, `<database>-restic`, dumps the database into offsite's
 2. Make sure that the last dump is less than a day old. `<cronjob>` is a CronJob from the table, in the namespace of its database.
 
    ```bash
-   kubectl get cronjob <cronjob> -n <namespace> --context offsite -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'
+   kubectl get cronjob <cronjob> -n <namespace> --context <site> -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'
    ```
 
    Result: The time of the last successful dump, in UTC.

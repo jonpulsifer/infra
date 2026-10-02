@@ -42,6 +42,8 @@ Git declares no auth method, mount, policy or client for OpenBao. Flux deploys t
 
 A sealed OpenBao cannot read its storage. The pod unseals itself with the GCP KMS key `openbao` through workload identity. If `oidc.lolwtf.ca` or the folly token signer fails, a restarted pod stays sealed.
 
+The CronJob `vault-backup` copies the files of the volume `data-vault-openbao-0` to folly's restic staging repository each night. The copy is best effort: it reads the Raft files while the server writes them, so a snapshot can be inconsistent.
+
 ## Rules
 
 - Keep a recovery copy of each host secret in a `homelab` item titled `<host> <thing>`. If the operator key and the host key are lost, SOPS cannot decrypt the file.
