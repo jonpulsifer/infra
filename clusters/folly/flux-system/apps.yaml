@@ -15,6 +15,8 @@ spec:
     # Flux dry-runs every object before applying any, so one missing CRD, such
     # as the CNPG Cluster kind, refuses the whole overlay.
     - name: cloudnative-pg
+    # The barman-cloud plugin's ObjectStore kind, for the same reason.
+    - name: barman-cloud
     - name: monitoring
     # The CRDs only: the dry-run needs the Sandbox kinds, not their controller.
     - name: agent-sandbox-crds

@@ -1,6 +1,6 @@
 ---
-# The monthly restore drill. It runs in the `backups` namespace as the
-# `restic-push` ServiceAccount, which the `backups` Kustomization declares.
+# The monthly restore drill. It owns the `restore-drill` namespace and recovers
+# kthx's database from Garage into a throwaway CNPG Cluster there.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -14,8 +14,13 @@ spec:
     kind: GitRepository
     name: infra
   dependsOn:
-    - name: backups
+    # The ObjectStore and Cluster kinds the drill creates.
+    - name: barman-cloud
+    # Serves the ClusterSecretStore the ExternalSecret reads.
+    - name: onepassword-connect
   postBuild:
     substituteFrom:
       - kind: ConfigMap
         name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology

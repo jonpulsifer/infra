@@ -6,6 +6,11 @@ metadata:
   namespace: tronbyt
 spec:
   instances: 1
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: garage
   bootstrap:
     initdb:
       database: tronbyt
@@ -24,5 +29,55 @@ spec:
   storage:
     storageClass: local-path
     size: 256Mi
-  monitoring:
-    enablePodMonitor: true
+---
+# CNPG's own PodMonitor carries no `release: prom-stack`, which folly's
+# Prometheus selects on. CNPGBackupStale reads this scrape.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: tronbyt
+  namespace: tronbyt
+  labels:
+    release: prom-stack
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: tronbyt
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: garage
+  namespace: tronbyt
+spec:
+  retentionPolicy: 30d
+  configuration:
+    destinationPath: s3://cnpg/tronbyt/
+    endpointURL: ${GARAGE_S3_ENDPOINT}
+    s3Credentials:
+      accessKeyId: {name: garage-cnpg, key: ACCESS_KEY_ID}
+      secretAccessKey: {name: garage-cnpg, key: ACCESS_SECRET_KEY}
+      region: {name: garage-cnpg, key: REGION}
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+# CNPG schedules in UTC: this is 01:00-04:00 in America/Halifax all year.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: tronbyt
+  namespace: tronbyt
+spec:
+  schedule: "0 20 5 * * *"
+  immediate: true
+  backupOwnerReference: self
+  method: plugin
+  cluster:
+    name: tronbyt
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

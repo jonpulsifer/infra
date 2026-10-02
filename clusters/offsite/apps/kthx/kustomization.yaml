@@ -6,6 +6,3 @@ resources:
   - namespace.yaml
   - external-secret.yaml
   - helm-release.yaml
-  - sites-backup.yaml
-components:
-  - ../../../base/components/restic-backup

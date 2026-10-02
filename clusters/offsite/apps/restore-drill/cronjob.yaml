@@ -1,17 +1,18 @@
 ---
-# Restores the latest kthx Postgres snapshot from the offsite GCS repository
-# into a throwaway Postgres and fails unless kthx's `sites` table has rows.
-# No `lolwtf.ca/backup` label: BackupJobStale would hold a monthly job to an
-# eight-day window. KubeJobFailed alerts on a failed drill.
+# Recovers kthx's database from the offsite Garage barman store into a
+# throwaway CNPG Cluster and fails unless kthx's `sites` table has rows. The
+# Cluster is deleted on every exit. No `lolwtf.ca/backup` label:
+# BackupJobStale would hold a monthly job to an eight-day window.
+# KubeJobFailed alerts on a failed drill.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: restore-drill
+  namespace: restore-drill
   labels:
     app.kubernetes.io/name: restore-drill
     app.kubernetes.io/part-of: backups
 spec:
-  # After the 05:00 push, so the drill reads the copy that push wrote.
   schedule: "0 6 1 * *"
   timeZone: ${TIMEZONE}
   concurrencyPolicy: Forbid
@@ -22,8 +23,8 @@ spec:
     spec:
       # A week to read a failed run.
       ttlSecondsAfterFinished: 604800
-      backoffLimit: 1
-      activeDeadlineSeconds: 3600
+      backoffLimit: 0
+      activeDeadlineSeconds: 5400
       template:
         metadata:
           labels:
@@ -33,142 +34,54 @@ spec:
           # OnFailure deletes the retried pod when `backoffLimit` is spent, so no
           # log survives. Never keeps each failed attempt.
           restartPolicy: Never
-          # The GCP account is the push job's, which has read access to the bucket.
-          serviceAccountName: restic-push
-          automountServiceAccountToken: false
-          # 26 is `postgres` in the CNPG image; initdb refuses a UID with no passwd entry.
+          serviceAccountName: restore-drill
           securityContext:
             runAsNonRoot: true
-            runAsUser: 26
-            runAsGroup: 26
-            fsGroup: 26
+            runAsUser: 65534
+            runAsGroup: 65534
             seccompProfile:
               type: RuntimeDefault
-          initContainers:
-            # The snapshot host is offsite/kthx/<name>; the drill takes whichever
-            # single kthx host carries `kind=pg`, and fails on none or several.
-            - name: fetch
-              image: docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
-              command:
-                - sh
-                - -c
-                - |
-                  set -euo pipefail
-                  snapshots=$(restic snapshots --retry-lock 30m --json --tag kind=pg)
-                  host=$(echo "$snapshots" | grep -o '"hostname":"offsite/kthx/[^"]*"' | cut -d'"' -f4 | sort -u || true)
-                  if [ -z "$host" ] || [ "$(echo "$host" | wc -l)" -ne 1 ]; then
-                    echo "want one kthx host with kind=pg snapshots, got: $host" >&2
-                    exit 1
-                  fi
-                  restic snapshots --retry-lock 30m --host "$host" --tag kind=pg --latest 1
-                  restic restore --retry-lock 30m latest --host "$host" --tag kind=pg --target /restore
-              env:
-                # Bucket and account: terraform/gcp/projects/homelab-ng.
-                - name: RESTIC_REPOSITORY
-                  value: gs:homelab-ng-backups-offsite:/
-                - name: GOOGLE_PROJECT_ID
-                  value: homelab-ng
-                - name: GOOGLE_APPLICATION_CREDENTIALS
-                  value: /var/run/secrets/gcp/gcp-credentials.json
-                - name: RESTIC_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: restic
-                      key: RESTIC_PASSWORD
-                - name: RESTIC_CACHE_DIR
-                  value: /tmp/cache
-                - name: HOME
-                  value: /tmp
-              volumeMounts:
-                - name: restore
-                  mountPath: /restore
-                - name: tmp
-                  mountPath: /tmp
-                - name: gcp-federation
-                  mountPath: /var/run/secrets/gcp
-                  readOnly: true
-              resources:
-                requests: {cpu: 100m, memory: 256Mi}
-                limits: {memory: 1Gi}
-              securityContext:
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                capabilities:
-                  drop: ["ALL"]
           containers:
-            # Plain SQL from `pg_dumpall` replays through psql, where the existing
-            # `postgres` role is an expected error; a custom-format dump uses pg_restore.
             - name: drill
-              # Keep this major equal to the dump's; an older pg_restore refuses a newer archive.
-              image: ghcr.io/cloudnative-pg/postgresql:18
+              image: docker.io/alpine/k8s:1.36.5@sha256:094adf64cdc4827377cdbe7ea5747472ce115f9fbc64a4e35970ec66777f9a00
               command:
                 - bash
                 - -c
                 - |
                   set -euo pipefail
-                  dump=$(find /restore -type f)
-                  if [ "$(find /restore -type f | wc -l)" -ne 1 ]; then
-                    echo "want one dump file in the snapshot, got: $dump" >&2
-                    exit 1
-                  fi
-                  mkdir -p /pg/run
-                  initdb -D /pg/data -U postgres -A trust -E UTF8 --locale=C --no-sync >/dev/null
-                  pg_ctl -D /pg/data -l /pg/postgres.log -w start \
-                    -o "-c listen_addresses='' -c unix_socket_directories=/pg/run -c fsync=off"
-                  if gzip -t "$dump" 2>/dev/null; then
-                    gzip -dc "$dump" | psql -X -q -d postgres >/dev/null
-                  elif [ "$(head -c 5 "$dump")" = PGDMP ]; then
-                    pg_restore --create --no-owner --no-privileges -d postgres "$dump"
-                  else
-                    psql -X -q -d postgres -f "$dump" >/dev/null
-                  fi
-                  rows=$(psql -X -At -d kthx -c 'select count(*) from sites')
-                  echo "restored $dump: $rows rows in kthx.sites"
-                  pg_ctl -D /pg/data -m fast stop
+                  cleanup() { kubectl delete cluster.postgresql.cnpg.io/kthx-drill --ignore-not-found --wait=true --timeout=10m; }
+                  trap cleanup EXIT
+                  cleanup
+                  kubectl create -f /drill/cluster.yaml
+                  kubectl wait --for=condition=Ready cluster.postgresql.cnpg.io/kthx-drill --timeout=75m
+                  rows=$(kubectl exec kthx-drill-1 -c postgres -- psql -X -At -d kthx -c 'select count(*) from sites')
+                  echo "recovered kthx-db: $rows rows in kthx.sites"
                   case "$rows" in
                     '' | 0 | *[!0-9]*)
-                      echo "kthx.sites has no rows after the restore" >&2
+                      echo "kthx.sites has no rows after the recovery" >&2
                       exit 1
                       ;;
                   esac
               env:
-                - name: PGHOST
-                  value: /pg/run
-                - name: PGUSER
-                  value: postgres
                 - name: HOME
                   value: /tmp
               volumeMounts:
-                - name: restore
-                  mountPath: /restore
+                - name: cluster
+                  mountPath: /drill
                   readOnly: true
-                - name: pg
-                  mountPath: /pg
                 - name: tmp
                   mountPath: /tmp
               resources:
-                requests: {cpu: 100m, memory: 256Mi}
-                limits: {memory: 2Gi}
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {memory: 256Mi}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
           volumes:
-            - name: restore
-              emptyDir:
-                sizeLimit: 10Gi
-            - name: pg
-              emptyDir:
-                sizeLimit: 20Gi
+            - name: cluster
+              configMap:
+                name: restore-drill-cluster
             - name: tmp
               emptyDir: {}
-            - name: gcp-federation
-              projected:
-                sources:
-                  - serviceAccountToken:
-                      audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
-                      expirationSeconds: 3600
-                      path: gcp-token
-                  - configMap:
-                      name: restore-drill-gcp

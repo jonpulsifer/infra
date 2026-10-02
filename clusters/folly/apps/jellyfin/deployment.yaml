@@ -20,6 +20,8 @@ spec:
   template:
     metadata:
       labels: *labels
+      annotations:
+        backup.velero.io/backup-volumes: jellyfin-config
     spec:
       securityContext:
         seccompProfile:

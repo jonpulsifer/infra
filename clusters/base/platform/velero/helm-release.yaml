@@ -1,0 +1,96 @@
+---
+# The intervals, history and upgrade policy are set here because the apps
+# overlays' HelmRelease patches do not reach clusters/base/platform.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: velero
+  namespace: velero
+spec:
+  interval: 5m0s
+  maxHistory: 2
+  chart:
+    spec:
+      chart: velero
+      version: 12.2.0
+      sourceRef:
+        kind: HelmRepository
+        name: vmware-tanzu
+      interval: 10m0s
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: 5
+  values:
+    image:
+      repository: docker.io/velero/velero
+      tag: v1.18.4
+      digest: sha256:c89fb5b6d1fd6afd368e0f483e6f5555fd62851a1eada8ac5c72482e674ca17b
+    initContainers:
+      - name: velero-plugin-for-aws
+        image: docker.io/velero/velero-plugin-for-aws:v1.14.4@sha256:c85a7fa803569e3128c33e4f5766f84ab156c8d171c9f1dd2715581d45ce98fa
+        volumeMounts:
+          - mountPath: /target
+            name: plugins
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 512Mi}
+    configuration:
+      uploaderType: kopia
+      defaultVolumesToFsBackup: false
+      backupStorageLocation:
+        - name: default
+          default: true
+          provider: aws
+          bucket: velero
+          config:
+            region: garage
+            s3ForcePathStyle: "true"
+            s3Url: ${GARAGE_S3_ENDPOINT}
+          credential:
+            name: velero-s3
+            key: cloud
+    credentials:
+      useSecret: true
+      existingSecret: velero-s3
+    snapshotsEnabled: false
+    deployNodeAgent: true
+    nodeAgent:
+      # The NixOS kubelet's root directory is /var/lib/kubernetes, not the
+      # chart's /var/lib/kubelet.
+      podVolumePath: /var/lib/kubernetes/pods
+      pluginVolumePath: /var/lib/kubernetes/plugins
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {memory: 2Gi}
+    metrics:
+      serviceMonitor:
+        enabled: true
+        additionalLabels:
+          release: prom-stack
+      nodeAgentPodMonitor:
+        enabled: true
+        additionalLabels:
+          release: prom-stack
+    # Named `daily` so the Schedule, its metrics label and the runbooks agree;
+    # the chart's `schedules` would prefix the release name.
+    extraObjects:
+      - apiVersion: velero.io/v1
+        kind: Schedule
+        metadata:
+          name: daily
+          namespace: velero
+        spec:
+          schedule: CRON_TZ=${TIMEZONE} 0 2 * * *
+          template:
+            ttl: 720h
+            snapshotVolumes: false
+            includedNamespaces: ["*"]
+            excludedResources:
+              - events
+              - events.events.k8s.io

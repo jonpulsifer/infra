@@ -3,8 +3,10 @@
 # cluster's kube-state-metrics exports as label_lolwtf_ca_backup through
 # metricLabelsAllowlist in kube-prometheus.yaml. Host jobs write
 # lab_backup_last_success_timestamp_seconds to the node-exporter textfile
-# directory. Each alert keys on the time of the last success, so it clears on
-# the next good run and never on a Job someone deletes.
+# directory. Velero exports velero_backup_last_* per Schedule, and the
+# barman-cloud plugin exports the time of a database's last backup. Each alert
+# keys on the time of the last success, so it clears on the next good run and
+# never on a Job someone deletes.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -46,7 +48,7 @@ spec:
             severity: warning
           annotations:
             message: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has no recent success"
-            description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The restic repository it writes to holds nothing newer than that success. `kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }}` shows whether it is suspended and when it last ran; `kubectl -n {{ $labels.namespace }} get jobs` names a run still active or one that failed, whose pod logs carry restic's error."
+            description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The encrypted copy in GCS holds nothing newer than that success. `kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }}` shows whether it is suspended and when it last ran; `kubectl -n {{ $labels.namespace }} get jobs` names a run still active or one that failed, whose pod logs carry rclone's error."
 
         # Under concurrencyPolicy Forbid at most one run is active, so a last
         # schedule newer than the last success with nothing active is a run
@@ -67,31 +69,83 @@ spec:
             severity: warning
           annotations:
             message: "The last run of backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} failed"
-            description: "The most recent run ended without succeeding, and no run is active. `kubectl -n {{ $labels.namespace }} get jobs` names the failed Job; its pods' logs carry the error. An unreachable staging rest-server, a wrong RESTIC_PASSWORD in the restic Secret, or a held repository lock are the usual causes. The alert clears on the next successful run."
+            description: "The most recent run ended without succeeding, and no run is active. `kubectl -n {{ $labels.namespace }} get jobs` names the failed Job; its pods' logs carry the error. An unreachable Garage or GCS, a wrong crypt password in the backup-push Secret, or a cryptcheck that found the copy differs from Garage are the usual causes. The alert clears on the next successful run."
 
-        # Each host job rewrites its textfile only on success. The folly
-        # staging prune on spore runs weekly after the push, so it gets eight
-        # days; every other host job runs daily.
+        # Each host job rewrites its textfile only on success, and every host
+        # job runs daily.
         - alert: HostBackupStale
           expr: |
             max by (instance, source) (time() - lab_backup_last_success_timestamp_seconds) > 26 * 3600
-              unless on (instance, source) lab_backup_last_success_timestamp_seconds{instance="spore", source=~".*prune.*"}
-            or
-            max by (instance, source) (time() - lab_backup_last_success_timestamp_seconds{instance="spore", source=~".*prune.*"}) > 8 * 86400
           for: 15m
           labels:
             severity: warning
           annotations:
             message: "{{ $labels.source }} on {{ $labels.instance }} last succeeded {{ $value | humanizeDuration }} ago"
-            description: "The host job's last success is older than its window, a day and two hours for a daily job and eight days for spore's weekly staging prune. `systemctl list-timers` on {{ $labels.instance }} shows when its timer last fired, and `journalctl -u` on the unit shows why the run failed. A staging prune that keeps failing leaves the append-only repository growing until its disk fills."
+            description: "The host job's last success is older than a day and two hours. `systemctl list-timers` on {{ $labels.instance }} shows when its timer last fired, and `journalctl -u` on the unit shows why the run failed. An etcd snapshot that keeps failing leaves the control plane's only restore point ageing."
 
-        # The deadman: without the push CronJob's label series, every rule
-        # above is blind to the off-site copy.
+        # Counters, not velero_backup_last_status: the schedule controller
+        # resets that gauge to 1 every minute, so a failure never holds it at 0.
+        - alert: VeleroBackupFailed
+          expr: |
+            max by (schedule) (increase(velero_backup_failure_total{schedule="daily"}[26h])) > 0
+            or
+            max by (schedule) (increase(velero_backup_partial_failure_total{schedule="daily"}[26h])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "A Velero backup of schedule {{ $labels.schedule }} failed in the last day"
+            description: "A backup of the schedule ended Failed or PartiallyFailed within 26 hours. `kubectl -n velero get backups` names it, and `velero backup logs <name>` or `kubectl -n velero describe backup <name>` carries the errors. An unreachable Garage, a full bucket or a node agent that cannot read a pod volume are the usual causes. The alert clears 26 hours after the last failure."
+
+        # Velero skips a pod volume it cannot read, such as one on a hostPath
+        # PV, with a warning and still marks the backup Completed.
+        - alert: VeleroBackupWarnings
+          expr: max by (schedule) (increase(velero_backup_warning_total{schedule="daily"}[26h])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "A Velero backup of schedule {{ $labels.schedule }} completed with warnings in the last day"
+            description: "A backup of the schedule completed with warnings within 26 hours. `velero backup describe <name> --details` lists them. A pod volume on a hostPath PV is skipped with a warning and has no copy until it moves to a `local` PV through the Migrate a local-path volume runbook. The alert clears 26 hours after the last warning."
+
+        # The second arm covers a Schedule that has never produced a completed
+        # backup, which has no timestamp to age.
+        - alert: VeleroBackupStale
+          expr: |
+            time() - max by (schedule) (velero_backup_last_successful_timestamp{schedule="daily"}) > 36 * 3600
+            or
+            absent(velero_backup_last_successful_timestamp{schedule="daily"})
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "No Velero backup of schedule daily has completed in a day and a half"
+            description: "The `daily` Schedule's last completed backup is older than 36 hours, or Velero exports no such time at all: the Schedule is paused or gone, the controller is down or is not being scraped, or every run since has failed. `kubectl -n velero get schedule,backups` shows which, and `kubectl -n velero get pods` shows whether the server and node agents run."
+
+        # The plugin reads each database's backup catalog from Garage into its
+        # ObjectStore and exports the newest completed backup as a timestamp,
+        # 0 when the catalog holds none. Only databases whose PodMonitor is
+        # scraped appear here. The restore drill's throwaway Cluster reads
+        # another database's catalog and is left out.
+        - alert: CNPGBackupStale
+          expr: |
+            max by (namespace, cluster) (
+              time() - barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace!="restore-drill"}
+            ) > 36 * 3600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "Database {{ $labels.namespace }}/{{ $labels.cluster }} has no backup newer than a day and a half"
+            description: "The barman-cloud plugin's newest completed backup of the database is older than 36 hours, or the catalog holds none. `kubectl cnpg status {{ $labels.cluster }} -n {{ $labels.namespace }}` lists the backups and the WAL archive, `kubectl get scheduledbackup,backup -n {{ $labels.namespace }}` shows the runs that failed, and the ObjectStore's status says whether the plugin can reach Garage."
+
+        # The deadman: without the push CronJob's label series, every CronJob
+        # rule above is blind to the off-site copy.
         - alert: BackupPushMissing
-          expr: absent(kube_cronjob_labels{namespace="backups", cronjob="restic-push", label_lolwtf_ca_backup="true"})
+          expr: absent(kube_cronjob_labels{namespace="backups", cronjob="backup-push", label_lolwtf_ca_backup="true"})
           for: 1h
           labels:
             severity: warning
           annotations:
             message: "No backup push CronJob is reporting on this cluster"
-            description: "kube-state-metrics exports no labelled backups/restic-push, so nothing copies the staging repository to GCS and the backup alerts above see no CronJob. The CronJob is gone or has lost the lolwtf.ca/backup label, or kube-state-metrics runs without the metricLabelsAllowlist in this cluster's kube-prometheus.yaml. `kubectl -n backups get cronjob restic-push --show-labels` tells them apart."
+            description: "kube-state-metrics exports no labelled backups/backup-push, so nothing copies Garage's buckets to GCS and the backup alerts above see no CronJob. The CronJob is gone or has lost the lolwtf.ca/backup label, or kube-state-metrics runs without the metricLabelsAllowlist in this cluster's kube-prometheus.yaml. `kubectl -n backups get cronjob backup-push --show-labels` tells them apart."

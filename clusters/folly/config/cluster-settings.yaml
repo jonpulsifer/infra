@@ -19,7 +19,7 @@ data:
   # address, set by hand on the phone.
   PBX_SIP_VIP: 10.3.0.100
 
-  # restic's staging rest-server, and the push of it to GCS. Starlink's uplink
-  # carries the push once a week, early Wednesday.
-  RESTIC_STAGING_HOST: spore.lolwtf.ca
-  RESTIC_PUSH_SCHEDULE: "0 5 * * 3"
+  # Garage on spore, outside the cluster, is the S3 endpoint for backups. Its
+  # push to GCS goes out on Starlink's uplink once a week, early Wednesday.
+  GARAGE_S3_ENDPOINT: http://spore.lolwtf.ca:3900
+  BACKUP_PUSH_SCHEDULE: "0 5 * * 3"

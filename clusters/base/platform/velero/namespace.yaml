@@ -1,0 +1,14 @@
+---
+# The node agent mounts the kubelet's pods directory from the host to read pod volumes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    kustomize.toolkit.fluxcd.io/prune: enabled
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/warn-version: latest

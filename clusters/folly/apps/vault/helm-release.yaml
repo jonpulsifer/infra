@@ -18,6 +18,8 @@ spec:
       enabled: false
     server:
       enabled: true
+      annotations:
+        backup.velero.io/backup-volumes: data
       ingress:
         enabled: true
         annotations:
