@@ -18,7 +18,12 @@ import type {
 import { ConfigError } from './config.ts';
 import { type Log, plain } from './log.ts';
 import { profileModel } from './model.ts';
-import { PROFILES, type Profile, turnTimeoutMs } from './profiles.ts';
+import {
+  effectiveGrants,
+  PROFILES,
+  type Profile,
+  turnTimeoutMs,
+} from './profiles.ts';
 import {
   formatSkillsForSystemPrompt,
   loadSkills,
@@ -61,7 +66,7 @@ export async function loadSystemPrompts(
         profile.preamble(SURFACES[surface], options),
         rules &&
           `# Owner's standing instructions (global AGENTS.md)\n\n${rules}`,
-        `# Overrides for this deployment\n\n${profile.overrides(profile.grants)}`,
+        `# Overrides for this deployment\n\n${profile.overrides(effectiveGrants(profile.grants, options.configured))}`,
         agents && `# Repository instructions (AGENTS.md)\n\n${agents}`,
         skills,
       ]

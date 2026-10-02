@@ -58,6 +58,26 @@ export interface Grants {
   readonly vault: boolean;
 }
 
+/** What this deployment configured for a grant to give anything: the GitHub App, 1Password Connect and each ServiceAccount. */
+export interface Configured {
+  readonly github: boolean;
+  readonly vault: boolean;
+  readonly kube: Readonly<Record<NonNullable<Grants['kube']>, boolean>>;
+}
+
+/** The grants a sandbox holds here, so the overrides claim no access that config leaves out. */
+export function effectiveGrants(
+  grants: Grants,
+  configured: Configured,
+): Grants {
+  return {
+    ...grants,
+    github: grants.github && configured.github,
+    vault: grants.vault && configured.vault,
+    kube: grants.kube && configured.kube[grants.kube] ? grants.kube : null,
+  };
+}
+
 export interface Budget {
   /** null takes MATE_TURN_MINUTES, and never more: the token lifetimes follow it. */
   readonly turnMinutes: number | null;
@@ -144,7 +164,7 @@ export function operatorOverrides(grants: Grants): string {
       'The project authorizes the following, so the rule that merges and production deploys need authorization is satisfied: you may merge pull requests you opened as clanky-bot[bot] once their required checks pass and no review blocks them, and you may comment `atlantis apply` on a pull request you opened after you have read its plan.',
     'Never bypass branch protection, never run `tofu apply`, and never `kubectl apply` to author state.',
     github &&
-      "A task that forbids a merge or an apply wins; the daily check forbids an apply without the owner's approval.",
+      "A task that forbids a merge or an apply wins; the daily check forbids an apply without the owner's approval. An assignment's own merge rule replaces the limit to pull requests you opened.",
   ];
   const bullets = [
     authorization.filter(Boolean).join(' '),

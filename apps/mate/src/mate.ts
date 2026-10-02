@@ -201,6 +201,14 @@ export class Mate {
         root: brainConfig.profileRoot ?? REPO_ROOT,
         workspace: WORKSPACE,
         checkoutRef: sandbox.checkoutRef,
+        configured: {
+          github: githubApp !== null,
+          vault: sandbox.vault !== null,
+          kube: {
+            admin: sandbox.kubeServiceAccount !== null,
+            reader: sandbox.kubeReaderServiceAccount !== null,
+          },
+        },
         log,
       },
       PROFILES.values(),

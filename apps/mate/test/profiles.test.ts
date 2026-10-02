@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ConfigError } from '../src/config.ts';
 import {
   type BaseTool,
+  effectiveGrants,
   type Grants,
   investigatorPreamble,
   lists,
@@ -306,6 +307,15 @@ describe('the overrides', () => {
     expect(custodian.overrides(custodian.grants)).toBe(text);
   });
 
+  // The daily check's assignment merges pull requests it did not open.
+  test("custodian's let an assignment's merge rule replace the own-PR limit", () => {
+    const text = custodian.overrides(custodian.grants);
+    expect(text).toContain(
+      "An assignment's own merge rule replaces the limit to pull requests you opened.",
+    );
+    expect(text).toContain('A task that forbids a merge or an apply wins');
+  });
+
   test('claim no merge or apply without a GitHub token', () => {
     const text = operator.overrides({ ...operator.grants, github: false });
     expect(text).not.toContain('merge pull requests');
@@ -322,6 +332,33 @@ describe('the overrides', () => {
     });
     expect(text).not.toContain('cluster-admin');
     expect(text).not.toContain('`op`');
+  });
+
+  test('effective grants drop what config leaves out', () => {
+    const none = {
+      github: false,
+      vault: false,
+      kube: { admin: false, reader: false },
+    };
+    expect(effectiveGrants(operator.grants, none)).toEqual({
+      ...operator.grants,
+      github: false,
+      vault: false,
+      kube: null,
+    });
+    expect(
+      effectiveGrants(investigator.grants, {
+        ...none,
+        kube: { admin: false, reader: true },
+      }),
+    ).toEqual(investigator.grants);
+    expect(
+      effectiveGrants(investigator.grants, {
+        github: true,
+        vault: true,
+        kube: { admin: true, reader: false },
+      }),
+    ).toEqual({ ...investigator.grants, kube: null });
   });
 
   test("investigator's grant nothing", () => {

@@ -15,7 +15,7 @@ import type { ToolRegistration } from '@earendil-works/pi-durable';
 import type { Clock } from './clock.ts';
 import type { Log } from './log.ts';
 import type { Instruments } from './metrics.ts';
-import type { Profile } from './profiles.ts';
+import type { Configured, Profile } from './profiles.ts';
 import type { ModelRouter } from './route.ts';
 import type { SurfaceName } from './surface.ts';
 
@@ -59,6 +59,8 @@ export interface ProfileOptions {
   /** Where each sandbox checks the repo out; skill locations point here. */
   readonly workspace: string;
   readonly checkoutRef: string;
+  /** Each profile's overrides are built from its grants that this config backs. */
+  readonly configured: Configured;
   readonly log: Log;
 }
 

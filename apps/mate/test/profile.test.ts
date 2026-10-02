@@ -32,7 +32,16 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
 });
 
-const OPTIONS = { workspace: WORKSPACE, checkoutRef: 'main' };
+const CONFIGURED = {
+  github: true,
+  vault: true,
+  kube: { admin: true, reader: true },
+};
+const OPTIONS = {
+  workspace: WORKSPACE,
+  checkoutRef: 'main',
+  configured: CONFIGURED,
+};
 const PROFILE_INPUTS = [
   PERSONA_FILE,
   OWNER_AGENTS_FILE,
@@ -84,9 +93,13 @@ function selfAndParents(path: string): string[] {
 }
 
 /** `prompts` is operator's; `all` holds every profile's. */
-async function load(root: string, log = new RecordingLog()) {
+async function load(
+  root: string,
+  log = new RecordingLog(),
+  configured = CONFIGURED,
+) {
   const all = await loadSystemPrompts(
-    { root, ...OPTIONS, log },
+    { root, ...OPTIONS, configured, log },
     PROFILES.values(),
   );
   return { prompts: all.operator as SystemPrompts, all, log };
@@ -384,6 +397,49 @@ describe('each profile', () => {
     const { prompts } = await load(REPO);
     for (const [, prompt] of each(prompts)) {
       expect(prompt).toContain(`${OWNER_HEADING}\n\n${owner}\n\n`);
+    }
+  });
+
+  test('claims only the access this deployment configures', async () => {
+    const overrides = (prompt: string) =>
+      prompt.slice(
+        prompt.indexOf(OVERRIDES_HEADING),
+        prompt.indexOf(REPO_HEADING),
+      );
+    const full = await load(REPO);
+    for (const id of ['operator', 'custodian']) {
+      const text = overrides(full.all[id]?.slack ?? '');
+      for (const claim of [
+        'merge pull requests',
+        "An assignment's own merge rule replaces the limit to pull requests you opened.",
+        '`atlantis apply`',
+        'push to keep work',
+        'cluster-admin',
+        '`op` reaches 1Password',
+      ]) {
+        expect(text).toContain(claim);
+      }
+    }
+    const bare = await load(REPO, new RecordingLog(), {
+      github: false,
+      vault: false,
+      kube: { admin: false, reader: true },
+    });
+    for (const id of ['operator', 'custodian']) {
+      for (const [, prompt] of each(bare.all[id] as SystemPrompts)) {
+        const text = overrides(prompt);
+        expect(text).toContain('never run `tofu apply`');
+        for (const claim of [
+          'merge pull requests',
+          'merge rule',
+          'atlantis apply',
+          'push',
+          'cluster-admin',
+          '`op`',
+        ]) {
+          expect(text).not.toContain(claim);
+        }
+      }
     }
   });
 
