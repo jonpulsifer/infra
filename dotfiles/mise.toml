@@ -56,3 +56,25 @@ run_windows = "pwsh -NoProfile -File '{{config_root}}/windows/deploy-dotfiles.ps
 description = "Resolve every dotfiles link without touching the filesystem"
 run = "bash {{config_root}}/scripts/deploy-dotfiles.sh --dry-run"
 run_windows = "pwsh -NoProfile -File '{{config_root}}/windows/deploy-dotfiles.ps1' -DryRun"
+
+[tasks."pi:setup"]
+description = "Install the mate pi package and seed pi's settings on this workstation"
+# The seed fills only missing keys, so pi's own writes and local edits stay.
+run = '''
+agent="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+settings="$agent/settings.json"
+mkdir -p "$agent"
+[ -f "$settings" ] || printf '{}\n' > "$settings"
+jq empty "$settings"
+if jq -e '.packages // [] | map(.source? // .) | index("npm:pi-mcp-adapter")' "$settings" >/dev/null; then
+  pi remove npm:pi-mcp-adapter
+fi
+pi install "$HOME/.dotfiles/pi/mate"
+tmp="$(mktemp "$settings.XXXXXX")"
+if jq -s '.[1] * .[0]' "$settings" '{{config_root}}/pi/settings.seed.json' > "$tmp"; then
+  mv "$tmp" "$settings"
+else
+  rm -f "$tmp"
+  exit 1
+fi
+'''
