@@ -43,7 +43,7 @@ spec:
         - name: switchboard
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # full `ghcr.io/…/switchboard…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:c94e13ce2a57a0dc825c454ed237fa7089c5c28bc6c98c3169aaa25cc84be87e
+          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:6119a3ed2b5c810db4cb235fe226d107a96a1a53d8ef07cb532c9cce9165b308
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
