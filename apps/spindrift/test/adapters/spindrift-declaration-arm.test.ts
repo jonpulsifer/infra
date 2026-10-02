@@ -23,7 +23,7 @@ const FRONTEND_STEP = 'Choose the frontend';
 const SUBPATH = 'apps/view-counter';
 const VIEW_COUNTER = join(
   import.meta.dir,
-  '../../../../apps/view-counter/spindrift.yaml',
+  '../../../../apps/view-counter/kthx.yaml',
 );
 
 async function frontendScript(): Promise<string> {

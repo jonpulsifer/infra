@@ -1,16 +1,15 @@
-# Managed by Spindrift, and yours to edit.
+# Managed by kthx, and yours to edit.
 #
-# This file is what Spindrift knows about this directory. Once it is on the
+# This file is what kthx knows about this directory. Once it is on the
 # default branch it is authoritative: what is written here wins over what
 # detection would otherwise guess.
 version: 1
 component:
   kind: service
 build:
-  frontend: railpack
-  command: null
-  outputDirectory: null
+  frontend: dockerfile
+  file: Dockerfile
 watchPaths:
-  - apps/bosun
+  - apps/netbench
   - package.json
   - bun.lock

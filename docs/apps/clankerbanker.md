@@ -34,7 +34,7 @@ A person can also scan a QR code on the web page and send USDC from a phone. Tho
 
 clankerbanker is a Bun and Hono service. The x402 middleware puts the quote in the `PAYMENT-REQUIRED` header, and the PayAI facilitator verifies and settles each payment on chain. `PAY_TO_EVM` and `PAY_TO_SOLANA` name the receiving addresses. If neither is set, every paid route answers 503.
 
-kthx builds the app from `apps/clankerbanker/` and its `spindrift.yaml`, and runs it as Deployment `clankerbanker-web` in namespace `app-clankerbanker`. Auto-deploy is off on the App, so a merge does not deploy. Start a Build on the App in kthx. kthx keeps the settings as App config in Secret Manager. The ledger, the stored values and the bearer tokens are in the kthx Datastore `clankerbanker`, a CloudNativePG cluster in namespace `spindrift-datastores`.
+kthx builds the app from `apps/clankerbanker/` and its `kthx.yaml`, and runs it as Deployment `clankerbanker-web` in namespace `app-clankerbanker`. Auto-deploy is off on the App, so a merge does not deploy. Start a Build on the App in kthx. kthx keeps the settings as App config in Secret Manager. The ledger, the stored values and the bearer tokens are in the kthx Datastore `clankerbanker`, a CloudNativePG cluster in namespace `spindrift-datastores`.
 
 Cloudflare holds the `clankerbanker.ca` zone. The [kthx Apps tunnel](../platform/network/ingress-and-dns.md#public-names) carries the apex and `*.clankerbanker.ca` to the offsite Apps Gateway. `www` redirects to the apex.
 

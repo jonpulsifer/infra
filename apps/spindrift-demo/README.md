@@ -59,7 +59,7 @@ never reach the page.
 logs its backend identity and `SPINDRIFT_BUILD` at the start of every
 execution.
 
-## Why only one of them carries a `spindrift.yaml`
+## Why only one of them carries a `kthx.yaml`
 
 The root scope declares its Dockerfile frontend. Nothing below it declares
 anything, and each absence says something different.

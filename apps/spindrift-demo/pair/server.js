@@ -1,6 +1,6 @@
 // The pair's service entrypoint: renders the runs job.js records in Valkey. Both
 // Components get the same REDIS_URL from the valkey Datastore on their App.
-// Deploy as a service (a website gets no REDIS_URL); no spindrift.yaml, as its two Components differ in kind.
+// Deploy as a service (a website gets no REDIS_URL); no kthx.yaml, as its two Components differ in kind.
 // Node built-ins only and no Dockerfile: railpack builds it with this directory as context.
 
 import { createServer } from 'node:http';
