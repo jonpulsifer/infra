@@ -158,6 +158,47 @@ describe('setAppVanity', () => {
     expect(result.failure.message).toContain(own);
   });
 
+  test('a reserved zone apex refuses the apex for an App in any other zone', async () => {
+    const { appId } = await seed();
+    const reserved = 'sites.example.test';
+    const withReservedZone: CommandContext = {
+      ...context(),
+      manifest: {
+        ...manifest,
+        controlPlane: {
+          ...manifest.controlPlane,
+          reservedHostnames: [
+            ...manifest.controlPlane.reservedHostnames,
+            reserved,
+          ],
+        },
+        dns: {
+          zones: [
+            ...manifest.dns.zones,
+            { name: reserved, reaches: ['public'] },
+          ],
+        },
+      },
+    };
+
+    const apex = await setAppVanity({ appId, label: '@' }, withReservedZone);
+    expect(apex.ok).toBe(false);
+    if (apex.ok) throw new Error('unreachable');
+    expect(apex.failure.code).toBe('INVALID_INPUT');
+    expect(apex.failure.message).toContain(reserved);
+
+    const label = await setAppVanity(
+      { appId, label: 'shop' },
+      withReservedZone,
+    );
+    expect(label.ok).toBe(true);
+    if (!label.ok) throw new Error('unreachable');
+    expect(label.value.hostnames).toEqual([
+      'shop-web.apps.example.test',
+      'shop.apps.example.test',
+    ]);
+  });
+
   test('a label that only starts with one of them is its own name', async () => {
     const { appId } = await seed();
     const result = await setAppVanity(

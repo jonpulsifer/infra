@@ -50,10 +50,19 @@ spec:
     env:
       - name: SPINDRIFT_PUBLIC_HOSTNAME
         value: spindrift-control.${SPINDRIFT_DOMAIN}
-      # kthx quick sites' `control.host`, served on the same Apps gateway, so
-      # no App may take it.
+      # kthx quick sites' `control.host` and their zone's apex, served on the
+      # same Apps gateway, so no App may take either. A reserved name is
+      # checked against every declared zone, so once kthx.dev is one, no App
+      # in any zone may set its vanity to `@`.
       - name: SPINDRIFT_RESERVED_HOSTNAMES
-        value: kthx.${SECRET_DOMAIN}
+        value: kthx.${SECRET_DOMAIN},kthx.dev
+      # The engine reads quick sites from kthx's control host, and reserves a
+      # name in kthx before it mints one under the quick-site zone. The zone is
+      # restated so the deploy gate needs no call to learn it.
+      - name: SPINDRIFT_KTHX_URL
+        value: https://kthx.${SECRET_DOMAIN}
+      - name: SPINDRIFT_KTHX_ZONE
+        value: kthx.dev
     # The Secret carries only the one-time enrolment token and optional
     # integration credentials.
     envFromSecret: spindrift-env
@@ -76,6 +85,9 @@ spec:
         # as well as this cluster's own root. `kube-root-ca.crt` carries only the
         # latter. See ca-bundle.yaml.
         caConfigMap: spindrift-ca-bundle
+        # kthx accepts this audience from this ServiceAccount, checked against
+        # offsite's public OIDC issuer (clusters/offsite/apps/kthx/helm-release.yaml).
+        kthxAudience: kthx
     ingress:
       enabled: true
     # The control plane's own database, including the installation manifest

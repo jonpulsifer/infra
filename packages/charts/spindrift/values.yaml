@@ -15,6 +15,9 @@ serviceAccount:
     # The service account the federated identity impersonates, as a
     # `generateAccessToken` url. Empty uses the federated identity's own grants.
     gcpImpersonationUrl: ""
+    # The audience kthx accepts on its engine surface. Set, both processes get a projected
+    # token at `kthx-token`, the only credential the engine sends to kthx.
+    kthxAudience: ""
     expirationSeconds: 3600
     mountPath: /var/run/secrets/spindrift
     # The one file `NODE_EXTRA_CA_CERTS` reads. Node does no partial-chain verification, so it
