@@ -76,7 +76,7 @@ A request leaves out the other model's reasoning where it sits beside an answer 
 | kthx site bearers | `/home/agent/.config/kthx/sites.json`, from Secret `mate-kthx-sites` | Every quick site Rowbutt claims |
 | Ring token | Sandbox environment, from Secret `mate-switchboard`, absent until the `switchboard` 1Password item exists | `POST /ring` on [Switchboard](../switchboard.md), which rings one fixed number |
 
-The model key, the kthx agent token, the database role and the App key stay in mate's pod. The ChatGPT sign-in stays in mate-db, which an operator sandbox reaches through Secret `mate-db-app`, so the agent can use the owner's ChatGPT account. [Sign Rowbutt in to ChatGPT](../../runbooks/sign-rowbutt-in-to-chatgpt.md#sign-out) has the kill switch. The files in the sandbox exist from the turn's first tool call to its end. An operator sandbox is `cluster-admin`, so it can still read every Secret in `mate`.
+The model key, the kthx agent token, the database role and the App key stay in mate's pod. mate reads and refreshes the ChatGPT sign-in only while `MATE_MODEL` is a ChatGPT model and mate-db has a URL and a CA. The ChatGPT sign-in stays in mate-db, which an operator sandbox reaches through Secret `mate-db-app`, so the agent can use the owner's ChatGPT account. [Sign Rowbutt in to ChatGPT](../../runbooks/sign-rowbutt-in-to-chatgpt.md#sign-out) has the kill switch. The files in the sandbox exist from the turn's first tool call to its end. An operator sandbox is `cluster-admin`, so it can still read every Secret in `mate`.
 
 `MATE_CONNECT_SECRET` is unset, so a sandbox has no 1Password token. A read-only sandbox gets no GitHub token, SSH key, kthx sites file, ring token or Connect token.
 
@@ -127,6 +127,7 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 
 ## Where it lives
 
+- `apps/mate/src/mate.ts`: the process, built from its config, its clock, its cluster, its database and its chat surfaces, with its timers and the order it stops in
 - `apps/mate/src/brain.ts`: the agent loop, one pi-durable harness per open thread
 - `apps/mate/src/sandbox-lease.ts`: a turn's lease on its sandbox, and the sandbox cap
 - `apps/mate/src/hands-env.ts`: pi's execution environment over the `mate-hands` stream

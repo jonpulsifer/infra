@@ -8,6 +8,7 @@ import type {
   CredentialStore,
   Model,
   Models,
+  Provider,
   ModelThinkingLevel as ThinkingLevel,
 } from '@earendil-works/pi-ai';
 import type { ToolRegistration } from '@earendil-works/pi-durable';
@@ -30,6 +31,8 @@ export interface ModelSetupOptions {
   readonly keyFile: string;
   /** Holds the ChatGPT sign-in; without one, pi keeps it in memory. */
   readonly credentials?: CredentialStore;
+  /** What a spec may name; OpenCode Go's and ChatGPT's when absent. */
+  readonly providers?: readonly Provider[];
   readonly log: Log;
   readonly clock?: Clock;
   readonly metrics?: Pick<
@@ -51,7 +54,7 @@ export interface ModelSetup {
 }
 
 /**
- * Throws `ConfigError` for a provider mate does not register, a model the
+ * Throws `ConfigError` for a provider not in `providers`, a model the
  * catalog lacks, a thinking level outside pi-ai's
  * `getSupportedThinkingLevels(model)`, or a fallback that is the primary or
  * backs a primary other than ChatGPT.

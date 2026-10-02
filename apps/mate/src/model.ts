@@ -13,6 +13,7 @@ import {
   getSupportedThinkingLevels,
   type Model,
   type Models,
+  type Provider,
 } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { opencodeGoProvider } from '@earendil-works/pi-ai/providers/opencode-go';
@@ -30,22 +31,24 @@ import {
 
 export { CHATGPT_PROVIDER } from './route.ts';
 
-const PROVIDERS: ReadonlySet<string> = new Set([
-  'opencode-go',
-  CHATGPT_PROVIDER,
-]);
 /** The only variable pi-ai's OpenCode Go provider reads its key from. */
 export const MODEL_KEY_ENV = 'OPENCODE_API_KEY';
 /** The ChatGPT model a sign-in's test request goes to while turns use another. */
 export const CHATGPT_MODEL = 'gpt-6-sol';
 
+/** What production registers: the fallback's provider, then ChatGPT's. */
+export function defaultProviders(): Provider[] {
+  return [opencodeGoProvider(), openaiCodexProvider()];
+}
+
 function lookup(models: Models, name: string, wanted: string): Model<Api> {
   const slash = wanted.indexOf('/');
   const provider = slash > 0 ? wanted.slice(0, slash) : '';
   const id = slash > 0 ? wanted.slice(slash + 1) : '';
-  if (!PROVIDERS.has(provider) || !id) {
+  const registered = models.getProviders().map((one) => one.id);
+  if (!registered.includes(provider) || !id) {
     throw new ConfigError(
-      `${name} must be ${[...PROVIDERS].join('/<model> or ')}/<model>, got ${wanted}`,
+      `${name} must be ${registered.join('/<model> or ')}/<model>, got ${wanted}`,
     );
   }
   const model = models.getModel(provider, id);
@@ -73,6 +76,7 @@ export const createModelSetup: CreateModelSetup = ({
   fallbackThinking = null,
   keyFile,
   credentials,
+  providers = defaultProviders(),
   log,
   clock = systemClock,
   metrics,
@@ -86,8 +90,7 @@ export const createModelSetup: CreateModelSetup = ({
       fileExists: () => Promise.resolve(false),
     },
   });
-  direct.setProvider(opencodeGoProvider());
-  direct.setProvider(openaiCodexProvider());
+  for (const provider of providers) direct.setProvider(provider);
   const model = lookup(direct, 'MATE_MODEL', wanted);
   supported('MATE_THINKING', model, thinking);
   const chatgpt = model.provider === CHATGPT_PROVIDER;

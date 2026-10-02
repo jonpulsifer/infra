@@ -1,65 +1,59 @@
 /**
- * mate end to end: the thread engine drives the pi brain on pi-ai's faux
- * model, which keeps its sessions in Postgres and reaches sandboxes through
- * the kube hands on a fake apiserver whose pods run the real mate-hands
- * daemon.
+ * mate end to end: the whole process as `Mate` composes it, on pi-ai's faux
+ * model, with its sessions in Postgres, its Discord listener on a fake
+ * gateway, and its sandboxes on a fake apiserver whose pods run the real
+ * mate-hands daemon.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createModels, type Message } from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 import {
   type FauxResponseStep,
   fauxAssistantMessage,
-  fauxProvider,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux';
-import { PiBrain, postgresSessions } from '../src/brain.ts';
-import type {
-  McpBridge,
-  ModelSetup,
-  ProfilePrompts,
-} from '../src/brain-inputs.ts';
-import {
-  type BrainSession,
-  TurnAbandoned,
-  type TurnContext,
-} from '../src/brain-port.ts';
-import { type Clock, type Handle, systemClock } from '../src/clock.ts';
+import type { Server } from 'bun';
+import type { McpServerConfig } from '../src/config.ts';
 import { HANDS_BINARY } from '../src/hands.ts';
-import { KthxSites, serialize } from '../src/kthx-sites.ts';
-import { combineMcp, createMcpBridge } from '../src/mcp.ts';
+import { Epochs } from '../src/hands-env.ts';
+import { serialize } from '../src/kthx-sites.ts';
+import { Mate } from '../src/mate.ts';
 import { HARNESS_FAILED, RESUMING, RUNS_AS } from '../src/notices.ts';
-import { brainProfiles } from '../src/profile.ts';
-import { PROFILES } from '../src/profiles.ts';
-import type { PromptResult, PromptSink } from '../src/sandbox.ts';
 import {
   CHECKOUT_LABEL,
-  type KubeHands,
   sandboxName,
   sandboxNameFor,
 } from '../src/sandboxes.ts';
 import { PostgresThreadStore } from '../src/store.ts';
-import {
-  type Inbound,
-  type Surface,
-  type ThreadRef,
-  threadKey,
-} from '../src/surface.ts';
+import { type ThreadRef, threadKey } from '../src/surface.ts';
 import type { ThreadRow } from '../src/thread-store.ts';
-import { Threads } from '../src/threads.ts';
 import { withDatabase } from './db.ts';
 import { FakeMcp } from './fake-mcp.ts';
 import type { ExecRecord } from './fakeapi.ts';
 import {
   alive,
   cleanUp,
-  FakeApp,
   INVESTIGATOR,
   pidsIn,
+  type Rig,
   rig,
+  tempDir,
   until,
 } from './hands-support.ts';
+import {
+  CHANNEL,
+  type ConfigOverrides,
+  DiscordDriver,
+  eventually,
+  fauxModel,
+  ME,
+  mateConfig,
+  OWNER,
+  RealClock,
+  testDatabase,
+} from './mate-support.ts';
 import { toolText, transcript } from './stored.ts';
 import {
   discordRef,
@@ -69,52 +63,10 @@ import {
 } from './support.ts';
 
 const database = withDatabase();
-const ME = '900000000000000001';
-const OWNER = '308072071949320204';
-const CHANNEL = '1509024937422356532';
 const INTERRUPTED = 'was interrupted and may have partially run';
 const TOKEN = 'kthx_agent_0123456789abcdef0123456789abcdef';
 // Every e2e test runs real daemons, Postgres and several turns.
 const SLOW = 30_000;
-const PROMPTS: ProfilePrompts = Object.fromEntries(
-  [...PROFILES.keys()].map((id) => [
-    id,
-    { discord: 'You help on Discord.', slack: 'You help on Slack.' },
-  ]),
-);
-
-/** Real time, with every timer it armed cancelled at the end of a test. */
-class RealClock implements Clock {
-  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
-
-  now(): number {
-    return Date.now();
-  }
-
-  after(ms: number, fn: () => void): Handle {
-    const timer = setTimeout(() => {
-      this.timers.delete(timer);
-      fn();
-    }, ms);
-    this.timers.add(timer);
-    return timer;
-  }
-
-  cancel(handle: Handle): void {
-    const timer = handle as ReturnType<typeof setTimeout>;
-    clearTimeout(timer);
-    this.timers.delete(timer);
-  }
-
-  sleep(ms: number, signal?: AbortSignal): Promise<void> {
-    return systemClock.sleep(ms, signal);
-  }
-
-  stop(): void {
-    for (const timer of this.timers) clearTimeout(timer);
-    this.timers.clear();
-  }
-}
 
 let snowflake = 1509024937422357000n;
 
@@ -132,52 +84,71 @@ class SnowflakeDiscord extends FakeDiscord {
   }
 }
 
-/** PiBrain as it is, with what each prompt and resume settled to. */
-class WatchedBrain extends PiBrain {
-  readonly outcomes: (PromptResult | unknown)[] = [];
+/** GitHub's App endpoints, minting `ghs-token-<n>` and recording revokes. */
+class FakeGitHub {
+  minted = 0;
+  readonly revoked: string[] = [];
+  private readonly server: Server<never>;
 
-  override async prompt(
-    session: BrainSession,
-    text: string,
-    sink: PromptSink,
-    turn: TurnContext,
-  ): Promise<PromptResult> {
-    return this.watch(super.prompt(session, text, sink, turn));
+  constructor() {
+    const fake = this;
+    this.server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        const { pathname } = new URL(request.url);
+        if (request.method === 'GET' && pathname.endsWith('/installation')) {
+          return Response.json({ id: 42, app_slug: 'clanky-bot' });
+        }
+        if (request.method === 'POST' && pathname.endsWith('/access_tokens')) {
+          fake.minted += 1;
+          return Response.json({
+            token: `ghs-token-${fake.minted}`,
+            expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+          });
+        }
+        if (request.method === 'DELETE') {
+          const bearer = request.headers.get('authorization') ?? '';
+          fake.revoked.push(bearer.replace(/^Bearer /, ''));
+          return new Response(null, { status: 204 });
+        }
+        return Response.json({ message: 'nope' }, { status: 418 });
+      },
+    });
   }
 
-  override async resume(
-    session: BrainSession,
-    sink: PromptSink,
-    turn: TurnContext,
-  ): Promise<PromptResult> {
-    return this.watch(super.resume(session, sink, turn));
+  get base(): string {
+    return `http://127.0.0.1:${this.server.port}`;
   }
 
-  private async watch(running: Promise<PromptResult>): Promise<PromptResult> {
-    try {
-      const result = await running;
-      this.outcomes.push(result);
-      return result;
-    } catch (error) {
-      this.outcomes.push(error);
-      throw error;
-    }
+  stop(): void {
+    this.server.stop(true);
   }
 }
 
-function faux(...steps: FauxResponseStep[]): ModelSetup {
-  const provider = fauxProvider({
-    api: 'faux',
-    provider: 'faux',
-    tokenSize: { min: 3, max: 3 },
-    models: [{ id: 'faux', reasoning: true }],
+/** The App's id and key file, and the SSH key file, as mate's pod mounts them. */
+function keys(): Pick<ConfigOverrides, 'githubApp' | 'sshKeyFile'> {
+  const dir = tempDir('keys');
+  const app = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
   });
-  const models = createModels();
-  models.setProvider(provider.provider);
-  const model = provider.getModel('faux');
-  if (!model) throw new Error('no faux model');
-  provider.setResponses(steps);
-  return { models, direct: models, model, thinking: 'off', router: null };
+  writeFileSync(join(dir, 'app.pem'), app.privateKey);
+  const ssh = generateKeyPairSync('ed25519');
+  writeFileSync(
+    join(dir, 'ssh.pem'),
+    ssh.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+  );
+  return {
+    githubApp: {
+      appId: '5027196',
+      keyFile: join(dir, 'app.pem'),
+      owner: 'jonpulsifer',
+      repo: 'infra',
+    },
+    sshKeyFile: join(dir, 'ssh.pem'),
+  };
 }
 
 const tool = (
@@ -189,156 +160,111 @@ const tool = (
     stopReason: 'toolUse',
   });
 
-/** One mate process: its engine, brain and hands over a shared cluster and database. */
-interface Mate {
-  readonly threads: Threads;
-  readonly brain: WatchedBrain;
-  readonly hands: KubeHands;
-  readonly store: PostgresThreadStore;
-  readonly surface: Surface;
+/** One mate process over a shared cluster and database. */
+interface Booted {
+  readonly mate: Mate;
+  readonly discord: DiscordDriver;
   readonly clock: RealClock;
   readonly log: RecordingLog;
   readonly metrics: RecordingInstruments;
 }
 
-const mates: Mate[] = [];
-const servers: FakeMcp[] = [];
-const bridges: McpBridge[] = [];
+const booted: Booted[] = [];
+const servers: { stop(): unknown }[] = [];
 
 afterEach(async () => {
-  for (const mate of mates.splice(0)) mate.clock.stop();
-  await Promise.all(bridges.splice(0).map((bridge) => bridge.close()));
+  for (const one of booted.splice(0)) {
+    await one.mate.stop();
+    one.clock.stop();
+  }
   await Promise.all(servers.splice(0).map((server) => server.stop()));
   await cleanUp();
 });
 
 async function boot(
-  discord: FakeDiscord,
-  hands: KubeHands,
-  setup: ModelSetup,
-  mcp: McpBridge | null = null,
-): Promise<Mate> {
-  const { sql } = database();
+  api: FakeDiscord,
+  cluster: Rig,
+  steps: FauxResponseStep[],
+  overrides: ConfigOverrides & { githubApiBase?: string } = {},
+): Promise<Booted> {
+  const { githubApiBase, ...config } = overrides;
   const clock = new RealClock();
   const log = new RecordingLog();
   const metrics = new RecordingInstruments();
-  const store = new PostgresThreadStore(sql);
-  const surface = discord.surface({
-    me: ME,
-    allowedUserIds: new Set([OWNER]),
-    allowedChannelIds: new Set([CHANNEL]),
+  const model = fauxModel();
+  model.respond(...steps);
+  const discord = new DiscordDriver(api, clock, log);
+  const mate = new Mate({
+    config: mateConfig(config),
     clock,
-  });
-  const brain = new WatchedBrain({
-    db: { up: () => true },
-    store,
-    sessions: postgresSessions(sql),
-    hands,
-    setup,
-    profiles: brainProfiles(setup, PROMPTS, 60_000),
-    mcp,
     log,
     metrics,
-    retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
-    timeouts: { mcpBootWait: 2_000 },
-  });
-  const threads = new Threads({
-    surfaces: [],
-    brain,
-    store,
-    storeReady: Promise.resolve(),
-    inherited: await hands.start(),
-    clock,
-    log,
-    config: {
-      quietMs: 3_600_000,
-      maxTurnsPerThread: 30,
-      maxTurnsPerDay: 120,
-      maxConcurrent: 3,
+    kube: cluster.fake.config(),
+    database: testDatabase(database().sql),
+    surfaces: { discord: discord.listener, slack: null },
+    providers: [model.provider],
+    tuning: {
+      threads: { editCadenceMs: 20, runGraceMs: 20 },
+      brain: {
+        retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
+        timeouts: { mcpBootWait: 5_000 },
+      },
+      hands: {
+        readyTimeoutMs: 4000,
+        goneTimeoutMs: 4000,
+        layout: {
+          workspace: cluster.workspace,
+          home: cluster.home,
+          expectHome: cluster.home,
+          epochs: new Epochs(),
+          checkout: { closeMs: 2_000, pollMs: 20 },
+        },
+      },
+      drainMs: 0,
+      ...(githubApiBase ? { githubApiBase } : {}),
     },
-    editCadenceMs: 20,
-    runGraceMs: 20,
-    metrics,
   });
-  await threads.add(surface);
-  const mate = { threads, brain, hands, store, surface, clock, log, metrics };
-  mates.push(mate);
-  return mate;
+  const one = { mate, discord, clock, log, metrics };
+  booted.push(one);
+  await mate.start();
+  await discord.ready();
+  await eventually(() => log.of('ready').length > 0, 'the Discord surface');
+  return one;
 }
 
 /** SIGTERM as main runs it, with no time left for turns to finish. */
-async function sigterm(mate: Mate): Promise<void> {
-  await mate.threads.drain(0);
-  await mate.hands.shutdown();
-}
+const sigterm = (one: Booted) => one.mate.stop();
 
-let serial = 0;
-
-function mention(content: string): Inbound {
-  return {
-    surface: 'discord',
-    id: `m-${++serial}`,
-    channelId: CHANNEL,
-    threadId: CHANNEL,
-    authorId: OWNER,
-    authorIsBot: false,
-    content: `<@${ME}> ${content}`,
-    mentionsMe: true,
-  };
-}
-
-function inThread(
-  discord: FakeDiscord,
-  threadId: string,
-  content: string,
-): Inbound {
-  discord.post(threadId, content, OWNER);
-  return {
-    surface: 'discord',
-    id: `m-${++serial}`,
-    channelId: threadId,
-    threadId,
-    authorId: OWNER,
-    authorIsBot: false,
-    content,
-    mentionsMe: false,
-  };
-}
-
-/** Starts a thread with `message` and returns where it lives. */
-async function start(mate: Mate, discord: FakeDiscord, message: Inbound) {
-  const before = discord.threads.length;
-  await mate.threads.onMessage(message);
-  const threadId = discord.threads[before]?.id;
-  if (!threadId) throw new Error('no thread was opened');
+/** Opens a thread with a mention and returns the message and where it lives. */
+async function start(one: Booted, content: string) {
+  const before = one.discord.api.threads.length;
+  const message = one.discord.mention(content);
+  await eventually(
+    () => one.discord.api.threads.length > before,
+    'the thread to open',
+  );
+  const threadId = one.discord.api.threads[before]?.id as string;
   const ref: ThreadRef = discordRef(threadId, CHANNEL);
-  return { threadId, ref, key: threadKey(ref) };
+  return { message, threadId, ref, key: threadKey(ref) };
 }
 
-async function eventually(
-  check: () => boolean | Promise<boolean>,
-  what: string,
-  ms = 10_000,
-): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await Bun.sleep(10);
-  }
-}
-
-async function row(mate: Mate, key: string): Promise<ThreadRow> {
-  const found = await mate.store.get(key);
+async function row(key: string): Promise<ThreadRow> {
+  const found = await new PostgresThreadStore(database().sql).get(key);
   if (!found) throw new Error(`no row for ${key}`);
   return found;
 }
 
-/** The turn and every write after it are done. */
-async function settled(mate: Mate, key: string): Promise<void> {
+/** The turn is marked on its message, and every write after it is done. */
+async function settled(
+  api: FakeDiscord,
+  where: { channelId: string; message: string },
+  key: string,
+  mark = '✅',
+): Promise<void> {
   await eventually(
     async () =>
-      mate.threads.stateOf(key) === 'idle' &&
-      (await row(mate, key)).turn === null,
+      api.reactionsOn(where.channelId, where.message).includes(mark) &&
+      (await row(key)).turn === null,
     `${key} to settle`,
   );
 }
@@ -377,29 +303,30 @@ function gate() {
   return { wait, open };
 }
 
+function mcpServer(name: McpServerConfig['name'], server: FakeMcp) {
+  return { name, url: server.url, token: name === 'kthx' ? TOKEN : null };
+}
+
 describe('a turn', () => {
   test(
     'a chat-only turn answers and creates no Sandbox',
     async () => {
       const r = rig();
       const discord = new SnowflakeDiscord(ME);
-      const mate = await boot(
-        discord,
-        r.hands,
-        faux(fauxAssistantMessage('hello there')),
-      );
-      const message = mention('hi');
-      const { threadId, key } = await start(mate, discord, message);
-      await settled(mate, key);
+      const mate = await boot(discord, r, [
+        fauxAssistantMessage('hello there'),
+      ]);
+      const { message, threadId, key } = await start(mate, 'hi');
+      await settled(discord, { channelId: CHANNEL, message }, key);
 
       expect(discord.contentsIn(threadId).at(-1)).toBe('hello there');
-      expect(discord.reactionsOn(CHANNEL, message.id)).toEqual(['✅']);
+      expect(discord.reactionsOn(CHANNEL, message)).toEqual(['✅']);
       expect(r.fake.sandboxes.size).toBe(0);
       expect(r.fake.execs).toEqual([]);
       expect(
         r.fake.requests.filter((request) => request.method === 'POST'),
       ).toEqual([]);
-      expect(r.metrics.turnSandboxes).toEqual(['none']);
+      expect(mate.metrics.turnSandboxes).toEqual(['none']);
     },
     SLOW,
   );
@@ -407,35 +334,39 @@ describe('a turn', () => {
   test(
     'a tool turn creates one Sandbox and one hands exec, and leaves each stamped file blank at 0600',
     async () => {
-      const app = new FakeApp();
-      const r = rig({
-        config: { github: true, kubeServiceAccount: 'mate-sandbox-admin' },
-        deps: { githubApp: app, sshKey: 'PRIVATE-KEY-BYTES' },
-      });
+      const github = new FakeGitHub();
+      servers.push(github);
+      const r = rig();
       const discord = new SnowflakeDiscord(ME);
       const mate = await boot(
         discord,
-        r.hands,
-        faux(
+        r,
+        [
           tool('bash', { command: 'cat ~/.github-token' }, 'c-cat'),
           fauxAssistantMessage('the token is there'),
-        ),
+        ],
+        {
+          ...keys(),
+          sandbox: { github: true, kubeServiceAccount: 'mate-sandbox-admin' },
+          githubApiBase: github.base,
+        },
       );
-      const message = mention('check the token');
-      const { threadId, key } = await start(mate, discord, message);
-      await settled(mate, key);
+      // The boot preflight mints the token a turn then reuses.
+      await eventually(
+        () => mate.log.of('github app ready').length > 0,
+        'the preflight',
+      );
+      const { message, threadId, key } = await start(mate, 'check the token');
+      await settled(discord, { channelId: CHANNEL, message }, key);
 
       expect(discord.contentsIn(threadId).at(-1)).toBe('the token is there');
-      expect(discord.reactionsOn(CHANNEL, message.id)).toEqual(['✅']);
+      expect(discord.reactionsOn(CHANNEL, message)).toEqual(['✅']);
       expect(r.fake.sandboxes.size).toBe(1);
       expect(r.fake.handsExecs).toHaveLength(1);
       const [name] = [...r.fake.sandboxes.keys()];
-      expect((await row(mate, key)).sandbox).toBe(name ?? null);
+      expect((await row(key)).sandbox).toBe(name ?? null);
       // The command saw the token the turn stamped.
-      const said = await transcript(
-        database().sql,
-        (await row(mate, key)).sessionId,
-      );
+      const said = await transcript(database().sql, (await row(key)).sessionId);
       expect(toolText(said, 'c-cat')).toContain('ghs-token-1');
 
       for (const file of [
@@ -448,8 +379,9 @@ describe('a turn', () => {
         expect(readFileSync(path, 'utf8')).toBe('');
         expect(mode(path)).toBe(0o600);
       }
-      expect(app.revoked).toEqual(['ghs-token-1']);
-      expect(r.metrics.turnSandboxes).toEqual(['fresh']);
+      expect(github.minted).toBe(1);
+      expect(github.revoked).toEqual(['ghs-token-1']);
+      expect(mate.metrics.turnSandboxes).toEqual(['fresh']);
     },
     SLOW,
   );
@@ -462,19 +394,14 @@ describe('a restart mid-turn', () => {
       const r = rig();
       const discord = new SnowflakeDiscord(ME);
       const pidFile = join(r.workspace, 'sleep.pid');
-      const first = await boot(
-        discord,
-        r.hands,
-        faux(
-          tool(
-            'bash',
-            { command: 'echo $$ > sleep.pid; exec sleep 300' },
-            'c-sleep',
-          ),
+      const first = await boot(discord, r, [
+        tool(
+          'bash',
+          { command: 'echo $$ > sleep.pid; exec sleep 300' },
+          'c-sleep',
         ),
-      );
-      const message = mention('run the long job');
-      const { threadId, key } = await start(first, discord, message);
+      ]);
+      const { message, threadId, key } = await start(first, 'run the long job');
       const [pid] = await pidsIn(pidFile, 1);
       if (pid === undefined) throw new Error('no sleep pid');
       await eventually(
@@ -491,15 +418,14 @@ describe('a restart mid-turn', () => {
       await sigterm(first);
       await Bun.sleep(200);
 
-      expect(first.brain.outcomes).toHaveLength(1);
-      expect(first.brain.outcomes[0]).toBeInstanceOf(TurnAbandoned);
       // Nothing posted, and the card keeps its partial state and Stop button.
       expect(shown(discord, threadId)).toEqual(card);
       expect(card.at(-1)?.hasStop).toBe(true);
-      expect(discord.reactionsOn(CHANNEL, message.id)).toEqual(['👀']);
-      expect((await row(first, key)).turn).toMatchObject({
+      expect(discord.reactionsOn(CHANNEL, message)).toEqual(['👀']);
+      expect(first.metrics.turns).toEqual([]);
+      expect((await row(key)).turn).toMatchObject({
         asker: OWNER,
-        message: { channelId: CHANNEL, id: message.id },
+        message: { channelId: CHANNEL, id: message },
         resumes: 0,
       });
       // The daemon was told to cancel before the link closed, and nothing
@@ -510,22 +436,18 @@ describe('a restart mid-turn', () => {
       expect(sent).toContain('cancel');
       expect(sent.indexOf('cancel')).toBeLessThan(sent.indexOf('shutdown'));
       expect(link.clientClosed).toBe(true);
+      expect(first.discord.gateway.destroys).toBe(1);
 
-      const second = await boot(
-        discord,
-        r.another(),
-        faux(fauxAssistantMessage('picked it back up')),
-      );
-      await settled(second, key);
+      const second = await boot(discord, r, [
+        fauxAssistantMessage('picked it back up'),
+      ]);
+      await settled(discord, { channelId: CHANNEL, message }, key);
 
       const said = discord.contentsIn(threadId);
       expect(said.slice(card.length)).toEqual([RESUMING, 'picked it back up']);
-      expect(discord.reactionsOn(CHANNEL, message.id)).toEqual(['✅']);
-      expect(second.brain.outcomes).toEqual([
-        expect.objectContaining({ stopReason: 'end_turn' }),
-      ]);
+      expect(discord.reactionsOn(CHANNEL, message)).toEqual(['✅']);
       expect(second.metrics.resumes).toEqual(['resumed']);
-      expect((await row(second, key)).turn).toBeNull();
+      expect(second.metrics.turns).toEqual(['end_turn']);
       // The new mate reconnected with a newer epoch, and no sleep survived.
       expect(r.fake.handsExecs).toHaveLength(2);
       const [old, fresh] = r.fake.handsExecs as [ExecRecord, ExecRecord];
@@ -534,7 +456,7 @@ describe('a restart mid-turn', () => {
       await until(() => !alive(pid));
       const stored = await transcript(
         database().sql,
-        (await row(second, key)).sessionId,
+        (await row(key)).sessionId,
       );
       expect(toolText(stored, 'c-sleep')).toContain(INTERRUPTED);
     },
@@ -565,54 +487,31 @@ describe('a restart mid-turn', () => {
         await held.wait;
         return { content: [{ type: 'text', text: 'too late' }] };
       });
-      const listing = createMcpBridge({
-        name: 'kthx',
-        prefix: 'kthx_',
-        url: deploy.url,
-        token: TOKEN,
-        log: new RecordingLog(),
-      });
-      bridges.push(listing);
-      listing.start();
-      expect(await listing.ready(5_000)).toBe(true);
       const first = await boot(
         discord,
-        r.hands,
-        faux(tool('kthx_deploy', { app: 'wishin' }, 'c-kthx')),
-        listing,
+        r,
+        [tool('kthx_deploy', { app: 'wishin' }, 'c-kthx')],
+        { brain: { mcpServers: [mcpServer('kthx', deploy)] } },
       );
-      const message = mention('deploy wishin');
-      const { threadId, key } = await start(first, discord, message);
+      const { message, threadId, key } = await start(first, 'deploy wishin');
       await eventually(
         () => deploy.calls('tools/call').length === 1,
         'the kthx call',
       );
       await sigterm(first);
-      await listing.close();
       held.open();
 
       const empty = new FakeMcp({ tools: [] }).start();
       servers.push(empty);
-      const bare = createMcpBridge({
-        name: 'kthx',
-        prefix: 'kthx_',
-        url: empty.url,
-        token: TOKEN,
-        log: new RecordingLog(),
-      });
-      bridges.push(bare);
-      bare.start();
       const second = await boot(
         discord,
-        r.another(),
-        faux(fauxAssistantMessage('kthx went quiet; try again later')),
-        bare,
+        r,
+        [fauxAssistantMessage('kthx went quiet; try again later')],
+        { brain: { mcpServers: [mcpServer('kthx', empty)] } },
       );
-      await settled(second, key);
+      await settled(discord, { channelId: CHANNEL, message }, key);
 
-      expect(second.brain.outcomes).toEqual([
-        expect.objectContaining({ stopReason: 'end_turn' }),
-      ]);
+      expect(second.metrics.turns).toEqual(['end_turn']);
       const said = discord.contentsIn(threadId);
       expect(said).toContain(RESUMING);
       expect(said.at(-1)).toBe('kthx went quiet; try again later');
@@ -622,10 +521,10 @@ describe('a restart mid-turn', () => {
           'configured_tools_unavailable',
         ),
       ).toBe(false);
-      expect(discord.reactionsOn(CHANNEL, message.id)).toEqual(['✅']);
+      expect(discord.reactionsOn(CHANNEL, message)).toEqual(['✅']);
       const stored = await transcript(
         database().sql,
-        (await row(second, key)).sessionId,
+        (await row(key)).sessionId,
       );
       expect(toolText(stored, 'c-kthx')).toContain(INTERRUPTED);
       // The turn never needed a sandbox.
@@ -642,51 +541,35 @@ describe('Stop', () => {
       const r = rig();
       r.fake.readyOnCreate = false;
       const discord = new SnowflakeDiscord(ME);
-      const mate = await boot(
-        discord,
-        r.hands,
-        faux(
-          tool('bash', { command: 'true' }, 'c-first'),
-          tool('bash', { command: 'echo again' }, 'c-again'),
-          fauxAssistantMessage('ran it again'),
-        ),
-      );
-      const message = mention('run it');
-      const { threadId, key } = await start(mate, discord, message);
+      const mate = await boot(discord, r, [
+        tool('bash', { command: 'true' }, 'c-first'),
+        tool('bash', { command: 'echo again' }, 'c-again'),
+        fauxAssistantMessage('ran it again'),
+      ]);
+      const { message, threadId, key } = await start(mate, 'run it');
       await eventually(() => r.fake.sandboxes.size === 1, 'the mint');
       const [name] = [...r.fake.sandboxes.keys()] as [string];
 
-      await mate.threads.onStop(key, OWNER, async () => {});
-      // Well inside the rig's 4 s wait for Ready: Stop never waits out a mint.
+      mate.discord.stop(key);
+      // Well inside the 4 s wait for Ready: Stop never waits out a mint.
       await eventually(
         async () =>
-          mate.threads.stateOf(key) === 'idle' &&
-          (await row(mate, key)).turn === null,
+          discord.reactionsOn(CHANNEL, message).includes('⏹️') &&
+          (await row(key)).turn === null,
         'the stopped turn',
         2_000,
       );
-      expect(mate.brain.outcomes).toEqual([
-        expect.objectContaining({ stopReason: 'cancelled' }),
-      ]);
-      await eventually(
-        () => discord.reactionsOn(CHANNEL, message.id).includes('⏹️'),
-        'the stopped mark',
-      );
+      expect(mate.metrics.turns).toEqual(['cancelled']);
       expect(r.fake.handsExecs).toEqual([]);
 
       r.fake.markReady(name);
       await eventually(
-        async () => (await row(mate, key)).sandbox === name,
+        async () => (await row(key)).sandbox === name,
         'the mint to land against the thread',
       );
 
-      const again = inThread(discord, threadId, 'try again');
-      await mate.threads.onMessage(again);
-      await eventually(
-        () => discord.reactionsOn(threadId, again.id).includes('✅'),
-        'the second turn',
-      );
-      await settled(mate, key);
+      const again = mate.discord.say(threadId, 'try again');
+      await settled(discord, { channelId: threadId, message: again }, key);
       expect(discord.contentsIn(threadId).at(-1)).toBe('ran it again');
       expect(r.fake.sandboxes.size).toBe(1);
       expect(
@@ -697,7 +580,7 @@ describe('Stop', () => {
       ).toHaveLength(1);
       expect(r.fake.handsExecs).toHaveLength(1);
       expect(r.fake.handsExecs[0]?.command[0]).toBe(HANDS_BINARY);
-      expect(r.metrics.turnSandboxes).toEqual(['failed', 'reused']);
+      expect(mate.metrics.turnSandboxes).toEqual(['failed', 'reused']);
     },
     SLOW,
   );
@@ -722,26 +605,18 @@ describe('profiles', () => {
     return [...tools].sort();
   }
 
-  function bridged(name: string, toolName: string): McpBridge {
+  function serving(toolName: string): FakeMcp {
     const server = new FakeMcp({
       tools: [
         {
           name: toolName,
-          description: `${name} ${toolName}`,
+          description: toolName,
           inputSchema: { type: 'object', properties: {} },
         },
       ],
     }).start();
     servers.push(server);
-    const bridge = createMcpBridge({
-      name,
-      prefix: `${name}_`,
-      url: server.url,
-      token: TOKEN,
-      log: new RecordingLog(),
-    });
-    bridges.push(bridge);
-    return bridge;
+    return server;
   }
 
   function envNames(sandbox: unknown): string[] {
@@ -758,37 +633,16 @@ describe('profiles', () => {
   test(
     'an investigator thread runs read-only, refuses another profile, and an operator thread mints its own sandbox',
     async () => {
-      const app = new FakeApp();
-      const r = rig({
-        config: {
-          github: true,
-          kubeServiceAccount: 'mate-sandbox-admin',
-          kubeReaderServiceAccount: 'mate-sandbox-reader',
-          kthx: { origin: ORIGIN, sitesSecret: SITES_SECRET },
-        },
-        deps: { githubApp: app, sshKey: 'PRIVATE-KEY-BYTES' },
-      });
+      const github = new FakeGitHub();
+      servers.push(github);
+      const r = rig();
       r.fake.putSecret(SITES_SECRET, { 'sites.json': LEDGER });
-      r.hands = r.another({
-        kthxSites: new KthxSites({
-          kube: r.kube,
-          namespace: 'mate',
-          secret: SITES_SECRET,
-          log: r.log,
-        }),
-      });
-      const mcp = combineMcp([
-        bridged('kthx', 'deploy'),
-        bridged('weather', 'now'),
-      ]);
-      mcp.start();
-      expect(await mcp.ready(5_000)).toBe(true);
       const heard: string[][] = [];
       const discord = new SnowflakeDiscord(ME);
       const mate = await boot(
         discord,
-        r.hands,
-        faux(
+        r,
+        [
           (context) => {
             heard.push(toolsHeard(context.messages));
             return tool(
@@ -806,20 +660,44 @@ describe('profiles', () => {
             return tool('bash', { command: 'true' }, 'c-fix');
           },
           fauxAssistantMessage('fixed'),
-        ),
-        mcp,
+        ],
+        {
+          ...keys(),
+          sandbox: {
+            github: true,
+            kubeServiceAccount: 'mate-sandbox-admin',
+            kubeReaderServiceAccount: 'mate-sandbox-reader',
+            kthx: { origin: ORIGIN, sitesSecret: SITES_SECRET },
+          },
+          brain: {
+            mcpServers: [
+              mcpServer('kthx', serving('deploy')),
+              mcpServer('weather', serving('now')),
+            ],
+          },
+          githubApiBase: github.base,
+        },
+      );
+      await eventually(
+        () => mate.log.of('github app ready').length > 0,
+        'the preflight',
       );
 
-      const look = mention('+investigator check');
-      const investigating = await start(mate, discord, look);
-      await settled(mate, investigating.key);
+      const investigating = await start(mate, '+investigator check');
+      await settled(
+        discord,
+        { channelId: CHANNEL, message: investigating.message },
+        investigating.key,
+      );
 
       expect(discord.contentsIn(investigating.threadId)).toEqual([
         `${RUNS_AS} investigator`,
         'nothing to see',
       ]);
-      expect(discord.reactionsOn(CHANNEL, look.id)).toEqual(['✅']);
-      expect((await row(mate, investigating.key)).profile).toBe('investigator');
+      expect(discord.reactionsOn(CHANNEL, investigating.message)).toEqual([
+        '✅',
+      ]);
+      expect((await row(investigating.key)).profile).toBe('investigator');
       const readerName = sandboxNameFor(investigating.ref, INVESTIGATOR);
       expect(readerName).toBe(`${sandboxName(investigating.ref)}-r`);
       expect([...r.fake.sandboxes.keys()]).toEqual([readerName]);
@@ -849,19 +727,20 @@ describe('profiles', () => {
           audiences: expect.any(Array),
         },
       ]);
-      expect(app.asked).toBe(0);
-      expect(app.minted).toBe(0);
+      // Only the boot preflight minted, and nothing was revoked.
+      expect(github.minted).toBe(1);
+      expect(github.revoked).toEqual([]);
       const said = toolText(
         await transcript(
           database().sql,
-          (await row(mate, investigating.key)).sessionId,
+          (await row(investigating.key)).sessionId,
         ),
         'c-look',
       );
       // The command ran with the reader's kubeconfig and nothing else.
       expect(said).toContain('sa-token-1');
       expect(said).not.toContain('ghs-token');
-      expect(said).not.toContain('PRIVATE-KEY-BYTES');
+      expect(said).not.toContain('OPENSSH PRIVATE KEY');
       expect(said).not.toContain('tok-blog');
       for (const file of ['.github-token', '.ssh/id_ed25519', '.ssh/config']) {
         expect(readFileSync(join(r.home, file), 'utf8')).toBe('');
@@ -871,25 +750,26 @@ describe('profiles', () => {
       expect(r.fake.secretValue(SITES_SECRET, 'sites.json')).toBe(LEDGER);
       expect(heard[0]).toEqual([...BASE, 'weather_now'].sort());
 
-      const fix = inThread(discord, investigating.threadId, '+operator do it');
-      await mate.threads.onMessage(fix);
+      const fix = mate.discord.say(investigating.threadId, '+operator do it');
       await eventually(
-        () => discord.reactionsOn(investigating.threadId, fix.id).length > 0,
+        () => discord.reactionsOn(investigating.threadId, fix).length > 0,
         'the refusal',
       );
       expect(discord.contentsIn(investigating.threadId).at(-1)).toBe(
         `${RUNS_AS} investigator — a thread keeps the profile it opened with; start a new thread for +operator`,
       );
-      expect(discord.reactionsOn(investigating.threadId, fix.id)).toEqual([
-        '⚠️',
-      ]);
+      expect(discord.reactionsOn(investigating.threadId, fix)).toEqual(['⚠️']);
       expect(heard).toHaveLength(1);
 
-      const operating = await start(mate, discord, mention('fix it'));
-      await settled(mate, operating.key);
+      const operating = await start(mate, 'fix it');
+      await settled(
+        discord,
+        { channelId: CHANNEL, message: operating.message },
+        operating.key,
+      );
 
       expect(discord.contentsIn(operating.threadId).at(-1)).toBe('fixed');
-      expect((await row(mate, operating.key)).profile).toBe('operator');
+      expect((await row(operating.key)).profile).toBe('operator');
       const operatorName = sandboxName(operating.ref);
       expect([...r.fake.sandboxes.keys()].sort()).toEqual(
         [operatorName, readerName].sort(),
@@ -903,7 +783,9 @@ describe('profiles', () => {
         'mate-sandbox-reader',
         'mate-sandbox-admin',
       ]);
-      expect(app.minted).toBe(1);
+      // The operator turn stamped the preflight's token, then revoked it.
+      expect(github.minted).toBe(1);
+      expect(github.revoked).toEqual(['ghs-token-1']);
       expect(heard[1]).toEqual([...BASE, 'kthx_deploy', 'weather_now'].sort());
     },
     SLOW,

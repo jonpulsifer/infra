@@ -40,9 +40,11 @@ A switch in the Deployment stays through restarts.
 2. Set `MATE_FALLBACK_MODEL` to `none`.
 3. Merge the change in a pull request.
 
-   Result: after Flux rolls mate, `chatgpt status` says that turns do not use ChatGPT.
+   Result: after Flux rolls mate, its `mate starting` log line shows `"chatgpt":false`. mate neither refreshes the ChatGPT token nor answers `chatgpt` commands, and the model answers a `chatgpt` command as a prompt.
 
 4. To switch back, revert the change in a pull request.
+
+   Result: mate answers `chatgpt status` again. If it says mate is not signed in, do [Sign Rowbutt in to ChatGPT](sign-rowbutt-in-to-chatgpt.md).
 
 ## Drill the fallback
 
