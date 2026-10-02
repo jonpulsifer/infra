@@ -8,7 +8,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 ## Before you start
 
 - Get Atlantis access ([Apply an OpenTofu change](apply-an-opentofu-change.md)), the operator age key ([Manage SOPS secrets](manage-sops-secrets.md)), and offsite access ([Get cluster admin access](get-cluster-admin-access.md)).
-- Choose the console hostname, `<hostname>`. The first passkey is registered to it, so browsers must reach it.
+- The console hostname, `<hostname>`, is kthx's `control.host` in `clusters/offsite/apps/kthx/helm-release.yaml`. The first passkey is registered to it, so browsers must reach it.
 - `<public-hostname>` is the `SPINDRIFT_PUBLIC_HOSTNAME` value in `helm-release.yaml`. The Cloudflare tunnel forwards the GitHub webhook and `/mcp` to it.
 - For another namespace, change `spindrift` in `namespace.yaml` and on each line that this command prints:
 
@@ -22,7 +22,10 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 `clusters/offsite/apps/spindrift/` is the installation, and `packages/charts/spindrift/values.yaml` describes its values. A Target is where kthx deploys built apps.
 
-1. Set `hostname` in `helm-release.yaml` to `<hostname>`.
+1. In `helm-release.yaml`, set `hostname` to `<hostname>` and `ingress.enabled` to `false`.
+
+   kthx's `kthx-control` route is the console's edge. `control.console` in `clusters/offsite/apps/kthx/helm-release.yaml` names this Service, and `kthx-route-grant.yaml` admits the route.
+
 2. Make sure each Kubernetes Target cluster declares an Apps Gateway and binds the Target ClusterRoles.
 
    offsite declares both in `gateway.yaml` and `target-rbac.yaml`, and folly in `clusters/folly/apps/spindrift-target/`.

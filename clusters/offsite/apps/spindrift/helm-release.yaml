@@ -41,21 +41,24 @@ spec:
     # carry — the manifest below has to satisfy both.
     image: ghcr.io/jonpulsifer/spindrift:latest@sha256:c27e967ac67a4ec6dc2f015ce81b18374543dbe6e5ece8819ad4a190fd318715
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
-    # the zone is read rather than restated. external-dns publishes the record
-    # from the HTTPRoute and cert-manager issues the certificate, so this line
-    # is the whole of what makes the UI reachable with TLS.
-    hostname: spindrift.${SECRET_DOMAIN}
+    # the zone is read rather than restated. This is kthx's `control.host`: the
+    # `kthx-control` route in `kthx` sends every path but `/api` and `/cli` to
+    # this Service, publishes the record and serves the Apps Gateway's wildcard
+    # certificate, so this release renders no edge of its own.
+    hostname: kthx.${SECRET_DOMAIN}
     # The public name the tunnel forwards the webhook, the bosun outbox, and
     # `/mcp` on. Every other route answers on `hostname` alone.
     env:
       - name: SPINDRIFT_PUBLIC_HOSTNAME
         value: spindrift-control.${SPINDRIFT_DOMAIN}
-      # kthx quick sites' `control.host` and their zone's apex, served on the
-      # same Apps gateway, so no App may take either. A reserved name is
+      # kthx quick sites' `control.host`, which the console shares, and their
+      # zone's apex are served on the Apps Gateway, so no App may take either.
+      # This zone's `spindrift` label is held too: a reservation, not an
+      # alias, so no App answers on a name a browser knows. A reserved name is
       # checked against every declared zone, so once kthx.dev is one, no App
       # in any zone may set its vanity to `@`.
       - name: SPINDRIFT_RESERVED_HOSTNAMES
-        value: kthx.${SECRET_DOMAIN},kthx.dev
+        value: spindrift.${SECRET_DOMAIN},kthx.${SECRET_DOMAIN},kthx.dev
       # The engine reads quick sites from kthx's control host, and reserves a
       # name in kthx before it mints one under the quick-site zone. The zone is
       # restated so the deploy gate needs no call to learn it.
@@ -88,8 +91,10 @@ spec:
         # kthx accepts this audience from this ServiceAccount, checked against
         # offsite's public OIDC issuer (clusters/offsite/apps/kthx/helm-release.yaml).
         kthxAudience: kthx
+    # kthx's control route is the edge, so the chart's own Gateway and route
+    # would be a second, plaintext door to the console.
     ingress:
-      enabled: true
+      enabled: false
     # The control plane's own database, including the installation manifest
     # singleton. Both processes wait for the image's committed migration journal
     # before becoming Ready.

@@ -114,6 +114,10 @@ control:
   host: ""
   # A TLS listener. The tunnel reaches only the HTTP listener, so Cloudflare cannot carry this host.
   listener: ""
+  # The Service that answers every path on the control host but `/api` and `/cli`, as
+  # `{name, namespace, port}`. A ReferenceGrant in its namespace must admit this
+  # namespace's HTTPRoutes. Empty sends the whole host to kthx.
+  console: {}
 
 # The OIDC issuer whose projected ServiceAccount tokens open `/api/engine/*` on the
 # control host: the kthx engine's read of every site and its name reservations. Empty

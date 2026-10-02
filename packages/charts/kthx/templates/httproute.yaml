@@ -47,7 +47,29 @@ spec:
   hostnames:
     - {{ . | quote }}
   rules:
+  {{- with $.Values.control.console }}
+    {{- /* One object for the whole host: Cilium splits rules that share a match key across two routes. */}}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+        - path:
+            type: PathPrefix
+            value: /cli
+      backendRefs:
+        - name: {{ include "kthx.fullname" $ }}
+          port: {{ $.Values.port }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ required "control.console.name names the console Service" .name }}
+          namespace: {{ required "control.console.namespace names the console Service's namespace" .namespace }}
+          port: {{ required "control.console.port names the console Service's port" .port }}
+  {{- else }}
     - backendRefs:
         - name: {{ include "kthx.fullname" $ }}
           port: {{ $.Values.port }}
+  {{- end }}
 {{- end }}

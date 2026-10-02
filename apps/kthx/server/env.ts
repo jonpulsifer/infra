@@ -80,6 +80,8 @@ export interface Config {
   readonly tailnetProxies: readonly string[];
   /** `null` answers 404 on every `/api/engine/*` path. */
   readonly engine: EngineConfig | null;
+  /** The engine's console, which the landing links to; `null` shows no link. */
+  readonly consoleUrl: string | null;
   readonly port: number;
 }
 
@@ -158,6 +160,23 @@ function engineConfig(
     (url.protocol === 'http:' && LOOPBACK.has(url.hostname));
   if (!secure) throw new ConfigError('KTHX_ENGINE_ISSUER must be https');
   return { issuer, audience, subject };
+}
+
+// The link is rendered into every door's landing, so a plaintext or script URL
+// is refused at boot rather than served.
+function consoleUrl(env: Env): string | null {
+  const raw = env.KTHX_CONSOLE_URL?.trim() || null;
+  if (raw === null) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ConfigError('KTHX_CONSOLE_URL is not a URL');
+  }
+  if (url.protocol !== 'https:') {
+    throw new ConfigError('KTHX_CONSOLE_URL must be https');
+  }
+  return url.href;
 }
 
 export function readConfig(env: Env = Bun.env): Config {
@@ -247,6 +266,7 @@ export function readConfig(env: Env = Bun.env): Config {
     trustedProxies: peers(env.KTHX_TRUSTED_PROXIES),
     tailnetProxies,
     engine: engineConfig(env, controlHost),
+    consoleUrl: consoleUrl(env),
     port: Number(env.PORT?.trim() || 8080),
   };
 }

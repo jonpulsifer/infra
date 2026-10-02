@@ -25,7 +25,7 @@ data:
             { "name": "K6_PROMETHEUS_RW_SERVER_URL", "value": "http://prom-stack-kube-prometheus-prometheus.monitoring.svc:9090/api/v1/write" },
             { "name": "K6_PROMETHEUS_RW_TREND_STATS", "value": "p(95),p(99),min,max,avg" },
             { "name": "TARGET_APP_URL", "value": "https://infra-pair.${SPINDRIFT_DOMAIN}/healthz" },
-            { "name": "TARGET_CONTROL_PLANE_URL", "value": "https://spindrift.${SECRET_DOMAIN}/healthz" },
+            { "name": "TARGET_CONTROL_PLANE_URL", "value": "https://kthx.${SECRET_DOMAIN}/healthz" },
             { "name": "TARGET_EDGE_URL", "value": "https://k6-rust-check.${SPINDRIFT_DOMAIN}/" }
           ]
         }

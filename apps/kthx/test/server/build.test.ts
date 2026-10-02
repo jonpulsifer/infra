@@ -850,6 +850,8 @@ describe('the page every door serves', () => {
       expect(html).toContain('kthx.dev</title>');
       expect(tag).toContain(`data-zone="${ZONE}"`);
       expect(tag).not.toContain('data-identity');
+      // No console is configured here, so no door links to one.
+      expect(tag).not.toContain('data-console');
       expect(html).toContain('<div class="deck">');
       expect(html).toContain('Select a name');
       expect(html).toContain('Drop a zip file or an index.html file');

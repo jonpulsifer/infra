@@ -25,6 +25,13 @@ spec:
     control:
       host: kthx.${SECRET_DOMAIN}
       listener: spindrift-apps-tls-secret-domain
+      # kthx keeps `/api` and `/cli` on this host; the engine's console takes
+      # every other path. The engine's `hostname` is this host, and
+      # clusters/offsite/apps/spindrift/kthx-route-grant.yaml admits the route.
+      console:
+        name: spindrift
+        namespace: spindrift
+        port: 3000
     # Output `kthx_bucket` of terraform/gcp/projects/bluenose. kthx has only
     # objectAdmin on it, without `storage.buckets.get`, so nothing may preflight it.
     bucket: bluenose-kthx

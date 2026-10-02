@@ -72,6 +72,7 @@ a{color:inherit}
 .jack{margin:0;font-family:var(--mono);font-size:12.5px;color:var(--cool);letter-spacing:.1em;text-transform:uppercase}
 .jack .dots::after{content:"";display:inline-block;width:3ch;text-align:left;animation:dots 1.2s steps(4,end) infinite}
 .jack.on .dots::after{animation:none;content:""}
+#console{font-family:var(--mono);font-size:12.5px;color:var(--ink-3);letter-spacing:.06em}
 @keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
 .big{font-family:var(--disp);font-weight:900;font-size:clamp(26px,6.25vw,74px);line-height:.95;letter-spacing:.02em;text-transform:uppercase;display:flex;align-items:baseline;justify-content:center;flex-wrap:nowrap;white-space:nowrap;animation:slip 7s steps(1) 3s infinite;will-change:transform,filter}
 .big .l{display:inline-block;animation:popin .7s var(--spring) calc(var(--i) * 70ms) both;will-change:transform}
@@ -424,6 +425,7 @@ html[data-identity] .foot{display:none}
   <div class="herobox">
     <p class="jack" id="jack">&gt; <span id="jackText">connection in progress</span><span class="dots"></span></p>
     <h1 class="big" aria-label="kthx.dev"><span class="l" style="--i:0">k</span><span class="l" style="--i:1">t</span><span class="l" style="--i:2">h</span><span class="l" style="--i:3">x</span><span class="bdot" aria-hidden="true"></span><span class="l dev" style="--i:5">dev</span></h1>
+    <a id="console" href="/" hidden>Console (lab and tailnet only)</a>
   </div>
 </section>
 
@@ -683,6 +685,8 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const SPRING = getComputedStyle(root).getPropertyValue("--spring").trim();
 for (const el of document.querySelectorAll("#zone, #footzone")) el.textContent = (el.id === "zone" ? "." : "") + ZONE;
 $("#cli1").textContent = $("#cli2").textContent = `https://plum-otter-41.${ZONE}`;
+/* the console is private, so the server names it only on an installation that has one */
+if (root.dataset.console) { const link = $("#console"); link.href = root.dataset.console; link.hidden = false; }
 
 /* the tokens are the sites: whoever holds one owns the name */
 const STORE = "kthx.sites";
