@@ -48,7 +48,7 @@ JSON-RPC node. Nothing leaves the process.
 
 ## Deploy
 
-kthx built apps builds `Dockerfile` as `spindrift.yaml` declares, and runs the
+kthx built apps builds `Dockerfile` as `kthx.yaml` declares, and runs the
 app on the `offsite` cluster behind the `spindrift-apps` Gateway in
 `clusters/offsite/apps/spindrift/gateway.yaml`. No manifest for the app is in
 `clusters/`. The DNS zone is `terraform/network/cloudflare/clankerbanker.ca.tf`.
