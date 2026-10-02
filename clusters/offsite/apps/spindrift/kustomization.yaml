@@ -6,6 +6,7 @@ resources:
   - build-namespace.yaml
   - gateway.yaml
   - status-route.yaml
+  - kthx-route-grant.yaml
   - ca-bundle.yaml
   - secret.sops.yaml
   - oci-repository.yaml

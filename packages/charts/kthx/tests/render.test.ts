@@ -223,6 +223,67 @@ describe('the private host', () => {
   });
 });
 
+describe('the console on the private host', () => {
+  const CONSOLE = { name: 'console', namespace: 'console-ns', port: 3000 };
+  const CONTROL = {
+    host: 'kthx.lab.test',
+    listener: 'lab-tls',
+    console: CONSOLE,
+  };
+  const routes = async () =>
+    (await render({ ...VALUES, control: CONTROL })).filter(
+      (o) => o.kind === 'HTTPRoute',
+    );
+
+  test('shares the one control route, with kthx keeping /api and /cli', async () => {
+    const all = await routes();
+    expect(all).toHaveLength(2);
+    const control = all.find(
+      (r) => r.metadata.name === 'kthx-control',
+    ) as Rendered;
+    expect(control.spec.parentRefs[0].sectionName).toBe(CONTROL.listener);
+    expect(control.spec.hostnames).toEqual([CONTROL.host]);
+
+    const rules: { matches: any[]; backendRefs: any[] }[] = control.spec.rules;
+    expect(rules).toHaveLength(2);
+    const paths = rules.flatMap((rule) =>
+      rule.matches.map((m) => `${m.path.type} ${m.path.value}`),
+    );
+    expect(paths).toEqual([
+      'PathPrefix /api',
+      'PathPrefix /cli',
+      'PathPrefix /',
+    ]);
+
+    expect(rules.map((rule) => rule.backendRefs)).toEqual([
+      [{ name: 'kthx', port: 8080 }],
+      [CONSOLE],
+    ]);
+  });
+
+  test('never reaches the public route', async () => {
+    const zone = (await routes()).find(
+      (r) => r.metadata.name === 'kthx',
+    ) as Rendered;
+    // A ReferenceGrant trusts every route in this namespace, so only the chart keeps
+    // the console off the internet-facing hosts.
+    expect(JSON.stringify(zone.spec)).not.toContain(CONSOLE.name);
+    expect(JSON.stringify(zone.spec)).not.toContain(CONSOLE.namespace);
+    expect(zone.spec.rules).toEqual([
+      { backendRefs: [{ name: 'kthx', port: 8080 }] },
+    ]);
+  });
+
+  test('refuses a console with no namespace', async () => {
+    await expect(
+      render({
+        ...VALUES,
+        control: { ...CONTROL, console: { ...CONSOLE, namespace: '' } },
+      }),
+    ).rejects.toThrow('control.console.namespace');
+  });
+});
+
 describe('the nightly dump', () => {
   const dumpPodSpec = async () =>
     one(await render(), 'CronJob').spec.jobTemplate.spec.template.spec;

@@ -42,6 +42,8 @@ Every site answers these paths, and the SDK at `/api/sdk.js` wraps them as `wind
 
 Cloudflare sends `kthx.dev` and `*.kthx.dev` through the kthx Apps tunnel to the `spindrift-apps` Gateway ([kthx](../kthx.md#how-it-works)). The kthx server picks the site from the `Host` header. The `kthx` namespace's `app.kubernetes.io/part-of: spindrift` label lets its routes attach to that Gateway. Keep it.
 
+On `kthx.lolwtf.ca`, the HTTPRoute `kthx-control` sends `/api` and `/cli` to kthx and every other path to the engine's console, so the CLI and the console share that host. `control.console` in `clusters/offsite/apps/kthx/helm-release.yaml` declares the split.
+
 An upload becomes a numbered release, stored as `releases/<sha256>.tar.gz` in the `bluenose-kthx` bucket and unpacked to a `local-path` volume. `kthx rollback` holds an older release until `kthx release`.
 
 Each site has its own Postgres database and role on the `kthx-db` cluster. `KTHX_PG_KEY` derives each role's password, so a restore needs no stored passwords.

@@ -3,7 +3,7 @@ title: Connect an agent to kthx
 description: Mint an agent token in the kthx console and connect an MCP client to the kthx engine, which serves each console command as a tool.
 ---
 
-Use this runbook to give an MCP client the commands of the kthx built-apps console. The kthx engine on offsite serves each command in `apps/spindrift/src/commands/registry.ts` as a Model Context Protocol (MCP) tool at `https://spindrift-control.lolwtf.dev/mcp`. The endpoint accepts only an agent token, which you mint in the console at `https://spindrift.lolwtf.ca`. A token lasts 90 days. The console shows it once, because kthx stores only its SHA-256 hash.
+Use this runbook to give an MCP client the commands of the kthx built-apps console. The kthx engine on offsite serves each command in `apps/spindrift/src/commands/registry.ts` as a Model Context Protocol (MCP) tool at `https://spindrift-control.lolwtf.dev/mcp`. The endpoint accepts only an agent token, which you mint in the console at `https://kthx.lolwtf.ca`. A token lasts 90 days. The console shows it once, because kthx stores only its SHA-256 hash.
 
 ## Before you start
 
@@ -16,7 +16,7 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 > [!NOTE]
 > An agent token cannot mint another token. The browser session cookie does not work as a bearer token.
 
-1. Open `https://spindrift.lolwtf.ca`.
+1. Open `https://kthx.lolwtf.ca`.
 2. Sign in with your passkey.
 3. Go to Settings, then Identity.
 4. In the "Agent tokens" card, select "Mint an agent token".
@@ -69,6 +69,10 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
    ```
 
    Result: A number larger than zero.
+
+5. Ask the client to call `getDeveloperSurfaces`. The tool is read-only.
+
+   Result: The endpoint's private and public URLs, and the quick-site origin and zone.
 
 ## Give Rowbutt a token
 

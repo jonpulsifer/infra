@@ -42,6 +42,8 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 
 Quick sites trust `Tailscale-User-Login` only on [`kthx.<tailnet>`](../../hosts/index.md#reach-a-host), where `KTHX_ADMIN_LOGINS` can delete every site and free its name. Names the engine reserves for built apps stay taken. Network policies `kthx` and `kthx-gateway` admit only the Tailscale proxy, Gateway, kubelet and namespace pods. Rate limits key reliably only on traffic that arrives through Cloudflare.
 
+The console shares an origin with kthx's `/api` and `/cli` on `kthx.lolwtf.ca`, so kthx's same-origin write guard trusts console script.
+
 The engine's read of quick sites includes each owner login. That login is no secret inside the cluster: any cluster-admin, Rowbutt's sandbox included, can mint the engine's token or read `kthx-db`. Keeping it from agents is hygiene, and it is no security boundary.
 
 ## Federation

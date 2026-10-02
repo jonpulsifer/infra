@@ -1,6 +1,6 @@
 ---
 # The App edge: its own Gateway and LB address, so App traffic cannot crowd
-# `cluster-gateway` or the control plane's `spindrift-gateway`.
+# `cluster-gateway`.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: Gateway
 metadata:
