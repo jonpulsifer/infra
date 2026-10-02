@@ -12,7 +12,6 @@ import {
   UNDELIVERED,
 } from '../src/notices.ts';
 import { NO_REPLY, Reply } from '../src/reply.ts';
-import { type Script, StubBrain } from '../src/sandbox.ts';
 import {
   DETAILS_MAX,
   decodeSlack,
@@ -37,6 +36,7 @@ import type { Inbound, ThreadRef, ToolCall } from '../src/surface.ts';
 import { Threads } from '../src/threads.ts';
 import { replayPreamble } from '../src/transcript.ts';
 import { FakeSlack, FakeSocket } from './fakesurface.ts';
+import { type Script, StubBrain } from './stub-brain.ts';
 import {
   FakeClock,
   RecordingInstruments,

@@ -31,7 +31,6 @@ import {
   UNRUN,
 } from '../src/notices.ts';
 import { PROFILES, type Profile } from '../src/profiles.ts';
-import { type Script, StubBrain } from '../src/sandbox.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import { type Surface, type ThreadRef, threadKey } from '../src/surface.ts';
 import type { ThreadListFilter, ThreadRow } from '../src/thread-store.ts';
@@ -50,6 +49,7 @@ import {
 } from '../src/threads.ts';
 import { assignmentPost } from '../src/transcript.ts';
 import { FakeSurface } from './fakesurface.ts';
+import { type Script, StubBrain } from './stub-brain.ts';
 import {
   discordRef,
   FakeClock,

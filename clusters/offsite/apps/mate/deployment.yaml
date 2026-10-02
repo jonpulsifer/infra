@@ -124,9 +124,9 @@ spec:
             # Unset, mate registers no OTel SDK.
             - name: MATE_OTEL_ENDPOINT
               value: http://opentelemetry-collector.monitoring.svc.cluster.local:4318
-            # `kube` runs the agent: the loop in this process, a Sandbox per
-            # thread for its tools, and the session store. `stub` replies
-            # in-process and is the rollback.
+            # mate ignores this. An older image reads it, and without it replies
+            # from an in-process stub instead of running the agent, so keep it
+            # while a rollback can reach such an image.
             - name: MATE_SANDBOXES
               value: kube
             # The model, on the owner's ChatGPT subscription through pi-ai's

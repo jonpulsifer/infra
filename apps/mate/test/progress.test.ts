@@ -12,12 +12,12 @@ import {
   STORE_DOWN,
   TURN_WAITING,
 } from '../src/notices.ts';
-import { type Script, StubBrain } from '../src/sandbox.ts';
 import { escapeSlack, SlackNotice } from '../src/slack.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import type { Inbound, ThreadRef } from '../src/surface.ts';
 import { Threads, type ThreadsConfig } from '../src/threads.ts';
 import { FakeSlack, FakeSurface } from './fakesurface.ts';
+import { type Script, StubBrain } from './stub-brain.ts';
 import {
   FakeClock,
   FakeDiscord,

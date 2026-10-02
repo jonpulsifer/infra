@@ -9,12 +9,12 @@ import {
   THREAD_CLOSED,
   TURN_WAITING,
 } from '../src/notices.ts';
-import { type Script, StubBrain } from '../src/sandbox.ts';
 import { sandboxName } from '../src/sandboxes.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import { type Inbound, type Surface, threadKey } from '../src/surface.ts';
 import { Threads, type ThreadsConfig } from '../src/threads.ts';
 import { FakeSurface } from './fakesurface.ts';
+import { type Script, StubBrain } from './stub-brain.ts';
 import {
   FakeClock,
   FakeDiscord,

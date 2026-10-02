@@ -31,7 +31,6 @@ import { getInstruments, lazyInstruments } from './metrics.ts';
 import { chatgptModel, createModelSetup } from './model.ts';
 import { brainProfiles, loadSystemPrompts } from './profile.ts';
 import { PROFILES, validateProfiles } from './profiles.ts';
-import { StubBrain } from './sandbox.ts';
 import { createKubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
 import { openSocket, slackEvent, slackSurface, slackWeb } from './slack.ts';
@@ -64,11 +63,7 @@ const FLUSH_BUDGET_MS = EXPORT_TIMEOUT_MS + 1_000;
 function loadConfig() {
   try {
     const config = readConfig(process.env);
-    if (config.sandboxes.mode === 'kube') {
-      validateProfiles(PROFILES, {
-        turnTimeoutMs: config.sandboxes.sandbox.turnTimeoutMs,
-      });
-    }
+    validateProfiles(PROFILES, { turnTimeoutMs: config.sandbox.turnTimeoutMs });
     return config;
   } catch (error) {
     if (error instanceof ConfigError) {
@@ -119,13 +114,9 @@ const { client, manager, budget } = createGateway({
 });
 // An unreadable key is not fatal: with one replica, refusing to boot would
 // take both chat surfaces down over the credential for pushing.
-const githubApp =
-  config.sandboxes.mode === 'kube' && config.sandboxes.githubApp
-    ? await openGithubApp(
-        config.sandboxes.githubApp,
-        config.sandboxes.sandbox.turnTimeoutMs,
-      )
-    : null;
+const githubApp = config.githubApp
+  ? await openGithubApp(config.githubApp, config.sandbox.turnTimeoutMs)
+  : null;
 
 async function openGithubApp(
   app: GithubAppConfig,
@@ -171,14 +162,12 @@ async function readSshKey(path: string | null): Promise<string | null> {
   }
 }
 
-const kubeConfig =
-  config.sandboxes.mode === 'kube' ? await discoverKube() : null;
-const kube = kubeConfig ? new Kube(kubeConfig) : null;
+const kubeConfig = await discoverKube();
+const kube = new Kube(kubeConfig);
 
 // The ledger lives in mate's own namespace, whichever one holds the sandboxes.
 function openKthxSites(kube: Kube): KthxSites | null {
-  if (config.sandboxes.mode !== 'kube') return null;
-  const { kthx } = config.sandboxes.sandbox;
+  const { kthx } = config.sandbox;
   if (!kthx.origin) return null;
   log.info('kthx sites ledger on', {
     origin: kthx.origin,
@@ -273,10 +262,10 @@ interface Wiring {
   threadStore: ThreadStore;
   storeReady: Promise<void>;
   inherited: readonly ThreadRef[];
-  hands: Hands | null;
-  db: Database | null;
+  hands: Hands;
+  db: Database;
   mcp: McpBridge | null;
-  sweep: ((before: number) => Promise<void>) | null;
+  sweep: (before: number) => Promise<void>;
   chatgpt: Chatgpt | null;
 }
 
@@ -308,8 +297,7 @@ function openChatgpt(
 }
 
 async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
-  if (config.sandboxes.mode !== 'kube') throw new Error('not in kube mode');
-  const { brain: brainConfig, sandbox, sshKeyFile } = config.sandboxes;
+  const { brain: brainConfig, sandbox, sshKeyFile } = config;
   const db = await openDatabase(brainConfig, log, {
     metrics: lazyInstruments(),
   });
@@ -379,30 +367,12 @@ async function kubeWiring(kube: Kube, kubeConfig: KubeConfig): Promise<Wiring> {
 }
 
 /** A store with no pool never comes up: its URL or CA is missing. */
-function storeState(db: Database | null): string {
-  if (!db) return 'memory';
+function storeState(db: Database): string {
   if (db.sql === null) return 'down';
   return db.up() ? 'up' : 'migrating';
 }
 
-function stubWiring(): Wiring {
-  // MateNotReporting fires on an absent gauge, and no hands report it here.
-  getInstruments().sandboxesLive(0);
-  return {
-    brain: new StubBrain(),
-    threadStore: new MemoryThreadStore(),
-    storeReady: Promise.resolve(),
-    inherited: [],
-    hands: null,
-    db: null,
-    mcp: null,
-    sweep: null,
-    chatgpt: null,
-  };
-}
-
-const wiring =
-  kube && kubeConfig ? await kubeWiring(kube, kubeConfig) : stubWiring();
+const wiring = await kubeWiring(kube, kubeConfig);
 
 const discord = discordListener({
   gateway: { client, manager, budget },
@@ -492,7 +462,7 @@ const threads = new Threads({
 });
 wiring.chatgpt?.keeper.start(wiring.storeReady);
 const custodian =
-  config.custodianChannel && slack && wiring.db?.sql
+  config.custodianChannel && slack && wiring.db.sql
     ? new Custodian({
         ledger: new PostgresCustodianLedger(wiring.db.sql),
         slack: slack.api,
@@ -521,7 +491,7 @@ async function shutdown(signal: string): Promise<void> {
   await threads
     .drain(DRAIN_MS)
     .catch((error) => log.warn('drain failed', { error: plain(error) }));
-  await wiring.hands?.shutdown();
+  await wiring.hands.shutdown();
   wiring.chatgpt?.keeper.stop();
   // While the surfaces can still post: a sign-in waiting for its code tells
   // its thread that the code no longer works.
@@ -538,7 +508,7 @@ async function shutdown(signal: string): Promise<void> {
   // and one that did not save gets a last try.
   await wiring.chatgpt?.credentials.close().catch(() => {});
   await wiring.db
-    ?.close()
+    .close()
     .catch((error) =>
       log.warn('database close failed', { error: plain(error) }),
     );
@@ -553,24 +523,19 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 const spares = () =>
   void wiring.hands
-    ?.ensureSpares()
+    .ensureSpares()
     .catch((error) => log.warn('spare sweep failed', { error: plain(error) }));
-if (wiring.hands) {
-  setInterval(spares, SPARE_SWEEP_MS);
-  spares();
-}
+setInterval(spares, SPARE_SWEEP_MS);
+spares();
 
-const retentionDays =
-  config.sandboxes.mode === 'kube'
-    ? config.sandboxes.brain.sessionRetentionDays
-    : 0;
+const retentionDays = config.brain.sessionRetentionDays;
 const retain = () =>
   void wiring
-    .sweep?.(Date.now() - retentionDays * DAY_MS)
+    .sweep(Date.now() - retentionDays * DAY_MS)
     .catch((error) =>
       log.warn('the retention sweep failed', { error: plain(error) }),
     );
-if (wiring.sweep && retentionDays > 0) setInterval(retain, RETENTION_SWEEP_MS);
+if (retentionDays > 0) setInterval(retain, RETENTION_SWEEP_MS);
 
 // A real mint at boot and on a timer keeps `mate_github_app_ready` current
 // even when no turn has pushed.
@@ -598,27 +563,19 @@ if (githubApp) {
 }
 
 log.info('mate starting', {
-  sandboxes: config.sandboxes.mode,
   guildId: config.guildId,
   allowedUsers: config.allowedUserIds.size,
   allowedChannels: [...config.allowedChannelIds],
   slack: Boolean(config.slack),
-  model: config.sandboxes.mode === 'kube' ? config.sandboxes.brain.model : null,
-  thinking:
-    config.sandboxes.mode === 'kube' ? config.sandboxes.brain.thinking : null,
-  fallback:
-    config.sandboxes.mode === 'kube'
-      ? config.sandboxes.brain.fallbackModel
-      : null,
+  model: config.brain.model,
+  thinking: config.brain.thinking,
+  fallback: config.brain.fallbackModel,
   maxConcurrent: config.maxConcurrent,
   maxSandboxes: config.maxSandboxes,
   store: storeState(wiring.db),
   chatgpt: Boolean(wiring.chatgpt),
   quietMinutes: config.quietMs / 60_000,
-  turnMinutes:
-    config.sandboxes.mode === 'kube'
-      ? config.sandboxes.sandbox.turnTimeoutMs / 60_000
-      : null,
+  turnMinutes: config.sandbox.turnTimeoutMs / 60_000,
   port: config.port,
 });
 await discord.start(threads);
