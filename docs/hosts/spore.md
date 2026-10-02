@@ -22,7 +22,7 @@ spore is a Raspberry Pi 5 that serves NFS, x86 netboot, forge's boot image, and 
 - NFS for `clusters/folly/storage/` (`nfs-server.nix`)
 - [Netboot](../platform/nixos/netboot.md) for x86 PXE and [rackpi5](rackpi5.md) (`pxe-netboot.nix`, `spore-native-boot.nix`)
 - [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time) (`coredns-sinkhole.nix`, `ntp-server.nix`)
-- folly's [backup](../platform/backups.md) staging repository for restic, served append-only by rest-server on TCP 8000 from `/nfs/data/restic` (`restic-server.nix`). `restic-staging-prune` prunes it on Wednesdays at 07:00, after folly's weekly push to GCS.
+- folly's [backup](../platform/backups.md) Garage store, with data in `/nfs/data/garage` (`garage.nix`). The old restic repository is still in `/nfs/data/restic`.
 
 ## Reach
 

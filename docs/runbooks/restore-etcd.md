@@ -1,6 +1,6 @@
 ---
 title: Restore etcd
-description: Restore the etcd of a cluster's control plane from a restic kind=etcd snapshot, when the etcd data is lost or corrupt.
+description: Restore the etcd of a cluster's control plane from a snapshot in Garage, when the etcd data is lost or corrupt.
 ---
 
 Use this runbook when the etcd data of a control plane is lost or corrupt. etcd is the database of the Kubernetes API server. Each cluster has one etcd member, on [optiplex](../hosts/optiplex.md) for folly and on [retrofit](../hosts/retrofit.md) for offsite. The restore returns every Kubernetes object to its state at the snapshot time. Flux then applies `main` again. [Backups](../platform/backups.md) describes the snapshots.
@@ -11,33 +11,43 @@ Use this runbook when the etcd data of a control plane is lost or corrupt. etcd 
 ## Before you start
 
 - Get SSH access to the control plane, with `sudo`.
-- Install the tools in `mise.toml`, which include `restic`, `op` and `gcloud`, and sign in to `op`.
-- Open the repository of the site, as [Open a repository](restore-a-database.md#open-a-repository) describes.
+- Sign in to `op`.
 
 `<site>` is `folly` or `offsite`. `<control-plane>` is `optiplex` or `retrofit`.
 
 ## Get the snapshot
 
-1. List the etcd snapshots.
+1. Put the Garage remote in the environment. Use the `etcd` key of the site.
 
    ```bash
-   restic snapshots --tag kind=etcd
+   export RCLONE_CONFIG_GARAGE_TYPE=s3 RCLONE_CONFIG_GARAGE_PROVIDER=Other RCLONE_CONFIG_GARAGE_REGION=garage
+   export RCLONE_CONFIG_GARAGE_ENDPOINT=<GARAGE_S3_ENDPOINT>
+   export RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID="$(op read 'op://homelab/garage-<site>/etcd-access-key-id')"
+   export RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY="$(op read 'op://homelab/garage-<site>/etcd-secret-access-key')"
    ```
 
-   Result: A table of snapshots. `Paths` is the snapshot file or its directory.
+   `<GARAGE_S3_ENDPOINT>` is the value in `clusters/<site>/config/cluster-settings.yaml`.
 
-2. Restore the newest snapshot to a local directory.
+2. If Garage has lost the `etcd` bucket, follow [Restore from the GCS copy](restore-from-the-gcs-copy.md).
+
+3. List the snapshots of the control plane.
 
    ```bash
-   restic restore <snapshot-id> --target ./restore
+   rclone lsl garage:etcd/<control-plane>/
    ```
 
-   Result: A `.db` file under `./restore`.
+   Result: One `<UTC timestamp>.db` file for each daily snapshot of the last 14 days.
 
-3. Copy the file to the control plane.
+4. Copy the newest snapshot to your machine.
 
    ```bash
-   scp ./restore/<path>/<file>.db <control-plane>.lolwtf.ca:/tmp/etcd-snapshot.db
+   rclone copyto garage:etcd/<control-plane>/<file>.db ./etcd-snapshot.db
+   ```
+
+5. Copy the file to the control plane.
+
+   ```bash
+   scp ./etcd-snapshot.db <control-plane>.lolwtf.ca:/tmp/etcd-snapshot.db
    ```
 
 ## Restore etcd

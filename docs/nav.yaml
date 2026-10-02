@@ -82,6 +82,8 @@ sections:
           - runbooks/restore-a-database.md
           - runbooks/restore-a-volume.md
           - runbooks/restore-etcd.md
+          - runbooks/restore-from-the-gcs-copy.md
+          - runbooks/migrate-a-local-path-volume.md
           - runbooks/adopt-the-folly-prometheus-operator-crds.md
       - group: Cloud and network
         items:
