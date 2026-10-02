@@ -32,7 +32,7 @@ export const APP = '900000000000000002';
 
 /** Real time, with every timer it armed cancelled at the end of a test. */
 export class RealClock implements Clock {
-  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly timers = new Map<ReturnType<typeof setTimeout>, number>();
 
   now(): number {
     return Date.now();
@@ -43,8 +43,13 @@ export class RealClock implements Clock {
       this.timers.delete(timer);
       fn();
     }, ms);
-    this.timers.add(timer);
+    this.timers.set(timer, ms);
     return timer;
+  }
+
+  /** The delay of each timer still armed. */
+  armed(): number[] {
+    return [...this.timers.values()];
   }
 
   cancel(handle: Handle): void {
@@ -58,7 +63,7 @@ export class RealClock implements Clock {
   }
 
   stop(): void {
-    for (const timer of this.timers) clearTimeout(timer);
+    for (const timer of this.timers.keys()) clearTimeout(timer);
     this.timers.clear();
   }
 }

@@ -141,33 +141,6 @@ async function openSlack(slack: SlackConfig): Promise<SlackSide> {
   return { api, listener };
 }
 
-const kube = await discoverKube();
-const database = await openDatabase(config.brain, log, {
-  metrics: lazyInstruments(),
-});
-const { slack } = config;
-const mate = new Mate({
-  config,
-  clock: systemClock,
-  log,
-  metrics: lazyInstruments(),
-  kube,
-  database,
-  surfaces: {
-    discord: discordListener({
-      gateway: { client, manager, budget },
-      api: discordOver(client.api),
-      commands: client.api.applicationCommands,
-      guildId: config.guildId,
-      allowedUserIds: config.allowedUserIds,
-      allowedChannelIds: config.allowedChannelIds,
-      clock: systemClock,
-      log,
-    }),
-    slack: slack ? () => openSlack(slack) : null,
-  },
-});
-
 async function shutdown(signal: string): Promise<void> {
   log.info('shutting down', { signal });
   await mate.stop();
@@ -177,8 +150,43 @@ async function shutdown(signal: string): Promise<void> {
   server.stop(true);
   process.exit(0);
 }
-process.on('SIGINT', () => void shutdown('SIGINT'));
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+const kube = await discoverKube();
+const database = await openDatabase(config.brain, log, {
+  metrics: lazyInstruments(),
+});
+const { slack } = config;
+const discord = discordListener({
+  gateway: { client, manager, budget },
+  api: discordOver(client.api),
+  commands: client.api.applicationCommands,
+  guildId: config.guildId,
+  allowedUserIds: config.allowedUserIds,
+  allowedChannelIds: config.allowedChannelIds,
+  clock: systemClock,
+  log,
+});
+const mate = new Mate({
+  config,
+  clock: systemClock,
+  log,
+  metrics: lazyInstruments(),
+  kube,
+  database,
+  surfaces: {
+    discord: {
+      ...discord,
+      // Mate starts Discord once its core is built. A signal before then
+      // ends the process at once, as no turn has run yet to drain.
+      start: (threads) => {
+        process.on('SIGINT', () => void shutdown('SIGINT'));
+        process.on('SIGTERM', () => void shutdown('SIGTERM'));
+        return discord.start(threads);
+      },
+    },
+    slack: slack ? () => openSlack(slack) : null,
+  },
+});
 
 try {
   await mate.start();

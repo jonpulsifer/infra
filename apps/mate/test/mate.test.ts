@@ -11,12 +11,16 @@ import {
 import type { SQL } from 'bun';
 import type { BrainConfig } from '../src/config.ts';
 import { PostgresCredentialStore } from '../src/credential-store.ts';
+import { CUSTODIAN_INTERVAL_MS } from '../src/custodian.ts';
 import type { KubeConfig } from '../src/kube.ts';
 import { Mate, type SlackSide } from '../src/mate.ts';
+import { MCP_RETRY_MS } from '../src/mcp.ts';
 import { CHATGPT_PROVIDER } from '../src/model.ts';
 import { CHATGPT } from '../src/notices.ts';
+import { SPARE_SWEEP_MS } from '../src/sandboxes.ts';
 import { threadKey } from '../src/surface.ts';
 import { withDatabase } from './db.ts';
+import { FakeMcp } from './fake-mcp.ts';
 import { FakeKube } from './fakeapi.ts';
 import { FakeSlack, FakeSurface } from './fakesurface.ts';
 import { cleanUp } from './hands-support.ts';
@@ -51,6 +55,8 @@ const CHATGPT_PRIMARY: Partial<BrainConfig> = {
 };
 // 20:00 in Halifax, after the custodian's 18:00.
 const EVENING = Date.UTC(2026, 5, 15, 23);
+// 09:00 in Halifax, when the custodian only waits.
+const MORNING = Date.UTC(2026, 5, 15, 12);
 
 /** A clock that reads `from` at its start, and runs at real speed. */
 class ShiftedClock extends RealClock {
@@ -284,11 +290,18 @@ function gate() {
 }
 
 describe('stopping', () => {
-  test('stops Slack first, lets Discord deliver through the drain, then closes Discord, Slack and the database in turn', async () => {
+  test('stops Slack, the custodian and the spare sweep first, lets Discord deliver through the drain, then closes Discord, Slack and the database in turn', async () => {
+    const clock = new ShiftedClock(MORNING);
     let asked = false;
     const one = await boot({
       slack: 'open',
       drainMs: 10_000,
+      clock,
+      config: {
+        custodianChannel: SLACK_CHANNEL,
+        // Apart from the custodian's interval.
+        sandbox: { turnTimeoutMs: 120_000 },
+      },
       models: [
         (_context, options) =>
           new Promise((resolve) => {
@@ -302,10 +315,20 @@ describe('stopping', () => {
     const { message, threadId } = await mention(one, 'take your time');
     const key = threadKey(discordRef(threadId, CHANNEL));
     await eventually(() => asked, 'the running turn');
+    await eventually(
+      () =>
+        [CUSTODIAN_INTERVAL_MS, SPARE_SWEEP_MS].every((ms) =>
+          clock.armed().includes(ms),
+        ),
+      'the custodian and the sweep',
+    );
 
     const stopping = one.mate.stop();
     await settle();
     expect(one.events).toEqual(['slack.start', 'slack.stop']);
+    // Nothing starts a turn while the drain waits.
+    expect(clock.armed()).not.toContain(CUSTODIAN_INTERVAL_MS);
+    expect(clock.armed()).not.toContain(SPARE_SWEEP_MS);
 
     // The drain waits for the turn, and Discord still delivers its Stop.
     one.discord.stop(key);
@@ -321,6 +344,37 @@ describe('stopping', () => {
       'database.close',
     ]);
     expect(one.discord.gateway.destroys).toBe(1);
+  });
+
+  test('leaves no timer armed, as a caller that never exits needs', async () => {
+    const mcp = new FakeMcp({
+      tools: [{ name: 'deploy', inputSchema: { type: 'object' } }],
+    }).start();
+    try {
+      const clock = new ShiftedClock(MORNING);
+      const one = await boot({
+        slack: 'open',
+        clock,
+        config: {
+          custodianChannel: SLACK_CHANNEL,
+          brain: {
+            sessionRetentionDays: 30,
+            mcpServers: [{ name: 'kthx', url: mcp.url, token: null }],
+          },
+        },
+      });
+      await eventually(
+        () => clock.armed().filter((ms) => ms === MCP_RETRY_MS).length === 2,
+        'the custodian and the MCP bridge',
+      );
+      expect(clock.armed()).toContain(SPARE_SWEEP_MS);
+
+      await one.mate.stop();
+
+      expect(clock.armed()).toEqual([]);
+    } finally {
+      await mcp.stop();
+    }
   });
 
   test('a sign-in waiting for its code hears that it no longer works before Discord closes', async () => {
@@ -467,7 +521,7 @@ describe('a degraded start', () => {
     expect(await asks(one, 'hello')).toEqual(['no hosts today']);
   });
 
-  test('inherits nothing when the hands cannot count the standing sandboxes', async () => {
+  test('starts and answers when the hands cannot count the standing sandboxes', async () => {
     const refusing = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,

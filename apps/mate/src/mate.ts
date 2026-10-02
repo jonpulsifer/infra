@@ -454,7 +454,7 @@ export class Mate {
   }
 
   private openMcp(): McpBridge | null {
-    const { config, log, metrics } = this.edges;
+    const { config, clock, log, metrics } = this.edges;
     const { mcpServers } = config.brain;
     if (mcpServers.length === 0) return null;
     const bridge = combineMcp(
@@ -466,6 +466,7 @@ export class Mate {
           url: server.url,
           ...(server.token ? { token: server.token } : {}),
           log,
+          clock,
           metrics,
         });
       }),

@@ -29,6 +29,7 @@ import {
 import { PostgresThreadStore } from '../src/store.ts';
 import { type ThreadRef, threadKey } from '../src/surface.ts';
 import type { ThreadRow } from '../src/thread-store.ts';
+import { ABANDON_WAIT_MS } from '../src/threads.ts';
 import { withDatabase } from './db.ts';
 import { FakeMcp } from './fake-mcp.ts';
 import type { ExecRecord } from './fakeapi.ts';
@@ -415,7 +416,10 @@ describe('a restart mid-turn', () => {
       await Bun.sleep(200);
       const card = shown(discord, threadId);
 
+      const stopping = Date.now();
       await sigterm(first);
+      // Inside the wait for abandoned turns: the prompt settled, not hung.
+      expect(Date.now() - stopping).toBeLessThan(ABANDON_WAIT_MS);
       await Bun.sleep(200);
 
       // Nothing posted, and the card keeps its partial state and Stop button.

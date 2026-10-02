@@ -333,6 +333,32 @@ const mate = new Mate({
   database,
   surfaces: { discord: terminal.listener, slack: null },
 });
+
+// Forgetting the thread releases its sandbox and deletes its session and row:
+// the running mate resumes a marked turn it finds at its next boot.
+async function forget(): Promise<void> {
+  const { thread, inbox } = terminal;
+  if (!thread || !inbox) return;
+  await inbox.onThreadDeleted(thread).catch((error) =>
+    jsonLog.warn('the smoke thread could not be deleted', {
+      error: plain(error),
+    }),
+  );
+}
+
+let interrupted = false;
+async function interrupt(signal: string): Promise<void> {
+  if (interrupted) return;
+  interrupted = true;
+  jsonLog.warn('smoke interrupted', { signal });
+  await forget();
+  await mate.stop();
+  process.exit(1);
+}
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+  process.on(signal, () => void interrupt(signal));
+}
+
 try {
   await mate.start();
 } catch (error) {
@@ -413,8 +439,6 @@ try {
     ? reason === null || reason === 'error' || reason === 'brain-failed'
     : reason !== 'end_turn';
 
-  // Forgetting the thread releases its sandbox and deletes its session and
-  // row: the fake thread must not rehydrate at mate's next boot.
   const thread = terminal.thread;
   if (thread) {
     const pod = killed ? null : await podOf(thread);
@@ -440,14 +464,7 @@ try {
   failed = true;
   jsonLog.error('smoke failed', { error: plain(error) });
 } finally {
-  const { thread, inbox } = terminal;
-  if (thread && inbox && !deleted) {
-    await inbox.onThreadDeleted(thread).catch((error) =>
-      jsonLog.warn('the smoke thread could not be deleted', {
-        error: plain(error),
-      }),
-    );
-  }
+  if (!deleted) await forget();
   await mate.stop();
 }
 
