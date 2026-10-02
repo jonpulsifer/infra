@@ -1,6 +1,6 @@
 ---
 title: oldschool
-description: An HP EliteDesk 800 G3 mini PC that is the offsite cluster's worker node and also runs yarr.
+description: An HP EliteDesk 800 G3 mini PC that is the offsite cluster's worker node.
 specs:
   vendor: HP
   model: EliteDesk 800 G3 DM 35W
@@ -15,12 +15,11 @@ specs:
   tpm: none
 ---
 
-oldschool is the worker node of the offsite [Kubernetes](../platform/kubernetes.md) cluster. It also runs yarr, a media download stack, outside Kubernetes. `nix/hosts/oldschool.nix` configures it.
+oldschool is the worker node of the offsite [Kubernetes](../platform/kubernetes.md) cluster. `nix/hosts/oldschool.nix` configures it.
 
 ## What it runs
 
 - Pods. `/mnt/disks` holds the `local-path` volumes on oldschool, including the [kthx](../apps/kthx.md) sites volume. `KthxSitesDiskFilling` fires when it has less than 25% free.
-- yarr, from `nix/services/yarr.nix`
 - offsite's [backup](../platform/backups.md) Garage store, a StatefulSet in `clusters/offsite/garage/` on the host network, with data in `/mnt/disks/garage`.
 
 ## Reach
@@ -29,5 +28,4 @@ Reach it at `oldschool.lolwtf.ca`. See [Reach a host](index.md#reach-a-host).
 
 ## Quirks
 
-- A second admin account, `quiker` from `nix/system/quiker.nix`, is in `wheel`.
 - oldschool holds a `harmonia-cache-key` secret and a 200 GB root for [harmonia](../platform/nixos/build-host-and-cache.md), a Nix binary cache, which is not enabled.
