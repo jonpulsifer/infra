@@ -187,11 +187,7 @@ export async function reconcileRepository(
     }
   } catch (cause) {
     if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
-      return freeze(
-        context,
-        stored,
-        'kthx can no longer read this repository',
-      );
+      return freeze(context, stored, 'kthx can no longer read this repository');
     }
     return {
       repositoryId: stored.id,
