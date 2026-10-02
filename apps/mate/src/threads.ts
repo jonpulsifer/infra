@@ -50,6 +50,7 @@ import { Progress } from './progress.ts';
 import { EDIT_CADENCE_MS, Reply, RUN_GRACE_MS } from './reply.ts';
 import type { PromptResult } from './sandbox.ts';
 import {
+  type AddOptions,
   type Inbound,
   type Mark,
   type MessageRef,
@@ -290,9 +291,9 @@ export class Threads {
    * Surfaces connect independently, so each rehydrates only its own threads.
    * Returns once the rows are in memory; opens and resumes run behind it.
    */
-  async add(surface: Surface): Promise<void> {
+  async add(surface: Surface, options: AddOptions = {}): Promise<void> {
     this.surfaces.set(surface.name, surface);
-    await this.rehydrate(surface.name);
+    if (options.rehydrate ?? true) await this.rehydrate(surface.name);
   }
 
   /**

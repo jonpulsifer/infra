@@ -23,7 +23,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type {
   BridgedTool,
-  CreateMcpBridge,
   McpBridge,
   McpBridgeOptions,
 } from './brain-inputs.ts';
@@ -66,8 +65,9 @@ interface Connection {
 /** What a failed request says about the server. */
 type Failure = 'answered' | 'unclear' | 'down';
 
-export const createMcpBridge: CreateMcpBridge = (options) =>
-  new ServerBridge(options);
+export function createMcpBridge(options: McpBridgeOptions): McpBridge {
+  return new ServerBridge(options);
+}
 
 class ServerBridge implements McpBridge {
   private readonly clock: Clock;

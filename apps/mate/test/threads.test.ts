@@ -1752,6 +1752,23 @@ describe('a mate restart', () => {
     expect(discord.contentsIn(threadId).at(-1)).toBe('back ');
   });
 
+  test('a surface added without rehydrating leaves the stored threads alone, and still answers', async () => {
+    const built = build({ surfaces: [], script: streaming('fresh') });
+    const cut = await interrupted(built, 'thread-cut');
+    await built.store.open(ref('thread-idle'), 'operator');
+
+    await built.threads.add(surface, { rehydrate: false });
+    await built.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    expect(built.threads.stateOf(cut.key)).toBeUndefined();
+    expect(built.threads.stateOf(key('thread-idle'))).toBeUndefined();
+    expect(built.brain.resumes).toEqual([]);
+    expect(discord.contentsIn('thread-cut')).toEqual([]);
+    expect((await built.store.get(cut.key))?.turn?.resumes).toBe(0);
+    const opened = discord.threads[0]!.id;
+    expect(discord.contentsIn(opened).at(-1)).toBe('fresh ');
+  });
+
   test('an interrupted run resumes into a fresh card for the person it answers, and its mark lands', async () => {
     const built = build({ script: streaming('new') });
     const { key: threadKey_, message } = await interrupted(built, 'thread-1');

@@ -17,7 +17,7 @@ import {
 } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { opencodeGoProvider } from '@earendil-works/pi-ai/providers/opencode-go';
-import type { CreateModelSetup, ModelSetup } from './brain-inputs.ts';
+import type { ModelSetup, ModelSetupOptions } from './brain-inputs.ts';
 import { systemClock } from './clock.ts';
 import { ConfigError } from './config.ts';
 import { type Log, plain } from './log.ts';
@@ -69,7 +69,13 @@ function supported(name: string, model: Model<Api>, level: ThinkingLevel) {
   }
 }
 
-export const createModelSetup: CreateModelSetup = ({
+/**
+ * Throws `ConfigError` for a provider not in `providers`, a model the
+ * catalog lacks, a thinking level outside pi-ai's
+ * `getSupportedThinkingLevels(model)`, or a fallback that is the primary or
+ * backs a primary other than ChatGPT.
+ */
+export function createModelSetup({
   spec: wanted,
   thinking,
   fallbackSpec = null,
@@ -80,7 +86,7 @@ export const createModelSetup: CreateModelSetup = ({
   log,
   clock = systemClock,
   metrics,
-}) => {
+}: ModelSetupOptions): ModelSetup {
   const readKey = keyReader(keyFile, log);
   const direct = createModels({
     credentials,
@@ -137,7 +143,7 @@ export const createModelSetup: CreateModelSetup = ({
     metrics,
   });
   return { models, direct, model: unpriced(model), thinking, router };
-};
+}
 
 /**
  * A profile's own model. MATE_MODEL's own spec returns `setup.model`, so the
