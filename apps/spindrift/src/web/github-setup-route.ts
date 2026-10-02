@@ -30,10 +30,11 @@ function respond(status: number, body: string): Response {
   });
 }
 
+// The console routes by hash; a bare `/repos` is a server path nothing serves.
 function seeRepositories(): Response {
   return new Response(null, {
     status: 303,
-    headers: { Location: '/repos', 'Cache-Control': 'no-store' },
+    headers: { Location: '/#/repos', 'Cache-Control': 'no-store' },
   });
 }
 

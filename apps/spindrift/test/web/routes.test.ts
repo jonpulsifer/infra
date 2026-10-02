@@ -128,6 +128,14 @@ const served = webRoutes(
 
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
 
+// The console shares its host with kthx, and the Gateway sends these first
+// segments to kthx, so a console route under one would never be reached.
+const KTHX_SEGMENTS = ['api', 'cli'];
+
+function underKthx(path: string): boolean {
+  return KTHX_SEGMENTS.includes(path.split('/')[1] ?? '');
+}
+
 describe('what the web process serves', () => {
   test('is the client, the probes, auth, and commands — nothing else', () => {
     expect(Object.keys(served).sort()).toEqual(
@@ -189,6 +197,15 @@ describe('what the web process serves', () => {
     expect(await (probe as Response).clone().text()).toBe('ok\n');
   });
 
+  test('no route sits under a path kthx owns on the shared host', () => {
+    expect(['/api', '/cli/kthx.tgz', '/apix'].map(underKthx)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(Object.keys(served).filter(underKthx)).toEqual([]);
+  });
+
   test('the client is served at the root and nowhere else', () => {
     // The client routes by hash, so no screen has a server route. `STATUS_PATH`
     // is a catch-all for App status pages and never serves the client.
@@ -221,6 +238,14 @@ describe('the production client comes from a built bundle', () => {
     for (const file of files.filter((name) => name !== 'index.html')) {
       expect(routes[`/${file}`]).toBeDefined();
     }
+  });
+
+  test('no emitted file sits under a path kthx owns on the shared host', async () => {
+    const dist = join(APP, 'dist');
+    if ((await readdir(dist).catch(() => null)) === null) return;
+
+    const routes = await bundleRoutes(dist);
+    expect(Object.keys(routes).filter(underKthx)).toEqual([]);
   });
 
   test('hashed assets are immutable and the document is not', async () => {

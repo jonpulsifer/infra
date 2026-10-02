@@ -32,6 +32,12 @@
       } catch {
         document.documentElement.setAttribute("data-theme", "dark");
       }
+      // kthx's landing kept site owner bearers under this key when it held this
+      // origin. Console script never reads them, so a browser that still holds
+      // them sheds them on its first console load.
+      try {
+        localStorage.removeItem("kthx.sites");
+      } catch {}
     </script>
     <link rel="stylesheet" href="./styles.css" />
     <!--
