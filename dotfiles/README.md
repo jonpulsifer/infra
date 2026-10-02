@@ -53,8 +53,10 @@ Windows keeps its own clone, and no link crosses the WSL boundary. See
   the workstation, the hipster theme, prompts and status line, and extensions
   that give pi the weather, kthx and `.mcp.json` MCP servers and this repo's
   `.agents/skills` in other repos. `mise run --cd dotfiles pi:setup` installs
-  it from `~/.dotfiles/pi/mate` and fills missing keys of pi's
-  `settings.json` from `pi/settings.seed.json`.
+  it from `~/.dotfiles/pi/mate`, fills missing keys of pi's `settings.json`
+  from `pi/settings.seed.json`, and removes links into `.pi/agent` and copies
+  of this repo's files from pi's `extensions`, `prompts` and `themes`. It runs
+  on Linux and macOS only.
 - `windows/` holds the Windows installer, the winget configuration, the
   PowerShell profile and the Terminal settings.
 
