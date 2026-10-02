@@ -36,9 +36,10 @@ jobs:
       - id: changed-paths
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
-          # The clusters/, mise.toml, AGENTS.md, skills, images/mate-sandbox
-          # and terraform/pki paths are test inputs. Keep them in step with the
-          # spindrift, mate and switchboard test inputs in turbo.json.
+          # The clusters/, mise.toml, AGENTS.md, skills, images/mate-sandbox,
+          # terraform/pki and spindrift-build.yml paths are test inputs. Keep
+          # them in step with the spindrift, mate and switchboard test inputs
+          # in turbo.json.
           files: |
             apps/clankerbanker/**
             apps/hub/**
@@ -78,6 +79,7 @@ jobs:
             turbo.json
             biome.json
             .github/workflows/typescript.yml
+            .github/workflows/spindrift-build.yml
       - id: classify
         env:
           ANY_CHANGED: ${{ steps.changed-paths.outputs.any_changed }}
