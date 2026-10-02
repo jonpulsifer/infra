@@ -22,7 +22,7 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 | --- | --- | --- |
 | The owner | A console passkey, enrolled once with `SPINDRIFT_ENROLMENT_TOKEN` | Every console and MCP action |
 | An agent on `/mcp` | An agent token, valid 90 days | Every action except minting tokens, replacing the engine settings, and connecting or probing a Target |
-| kthx on GitHub | The private GitHub App `spindrift-bot` (ID `4576122`), installed on `jonpulsifer` only | Push branches, open pull requests and run workflows in connected repositories |
+| kthx on GitHub | The private GitHub App `kthx-bot` (ID `4576122`), installed on `jonpulsifer` only | Push branches, open pull requests and run workflows in connected repositories |
 | A quick-site owner | Its bearer token or tailnet login | Upload, roll back and delete that site |
 | The engine, at quick sites | A projected ServiceAccount token with audience `kthx`, sent to `/api/engine/*` on the control host | List and read every quick site with its owner login, and reserve and release names under the quick-site zone. It carries no login, so it opens no site and cannot delete every site. |
 | [Rowbutt](../mate.md) | An agent token from Secret `mate-kthx-agent`, which mate's pod holds, and the site bearers in Secret `mate-kthx-sites` | What an agent on `/mcp` can, without approval, and every quick site it claims |
