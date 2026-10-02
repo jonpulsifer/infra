@@ -92,7 +92,7 @@ describe('the setup landing', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
-  test('the code leg converts, stores the identity, and returns to /repos', async () => {
+  test('the code leg converts, stores the identity, and returns to the Repositories screen', async () => {
     const { auth, land } = serve();
     const state = new URL(
       (await auth!.setup(OPERATOR.id)).action,
@@ -102,7 +102,7 @@ describe('the setup landing', () => {
       `?code=temporary-code&state=${encodeURIComponent(state ?? '')}`,
     );
     expect(response.status).toBe(303);
-    expect(response.headers.get('Location')).toBe('/repos');
+    expect(response.headers.get('Location')).toBe('/#/repos');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
 
     const [row] = await database().db.select().from(githubApp);
@@ -128,7 +128,7 @@ describe('the setup landing', () => {
     // No keyring: this leg never needs the App identity.
     const response = await land('?installation_id=99999');
     expect(response.status).toBe(303);
-    expect(response.headers.get('Location')).toBe('/repos');
+    expect(response.headers.get('Location')).toBe('/#/repos');
   });
 
   test('neither leg is a 400, and a POST is not how GitHub arrives', async () => {
