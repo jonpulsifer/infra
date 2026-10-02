@@ -29,7 +29,7 @@ mise run dotfiles:check   # deploy into scratch homes under each profile; change
 - **The WSL boundary**: Windows and the distro each keep their own clone, and nothing symlinks between them. Do not "simplify" this to one clone — `$PROFILE` must resolve before the WSL VM is awake, and Windows bootstraps first so that it can install WSL. See [Install a Windows desktop](../docs/runbooks/install-a-windows-desktop.md).
 - **Profiles**: `MISE_ENV=hm` loads `mise.hm.toml`, which leaves zsh and nvim to home-manager; NixOS activation sets it where home-manager runs. On a NixOS host with home-manager, a manual run needs `MISE_ENV=hm` too, because mise replaces any existing symlink at a target; `dotfiles:deploy` refuses to run without it. `MISE_ENV=work` drops the personal WSL signing key from the rendered `~/.config/git/config.local`, and `.config/git/config.work` applies in work repos via Git `[includeIf]`.
 - **Git signing**: `.config/git/config` includes `config.local`, which `mise dotfiles` renders from `.config/git/config.local.tera`: the 1Password signing program and key on WSL. Elsewhere it renders empty and is not written, and a work Mac gets its 1Password program from `.config/git/config.work`.
-- **Skills**: source under `skills/`; each file is linked into `~/.agents/skills`, `~/.claude/skills`, and `~/.gemini/config/skills`.
+- **Skills**: source under `skills/`; each skill is linked into `~/.agents/skills`, `~/.claude/skills`, and `~/.gemini/config/skills`.
 - **Claude settings**: `.claude/settings.json` is a seed, not a table entry. Claude Code writes its own changes to `~/.claude/settings.json`, so copy the seed there by hand.
 
 ## Git workflow
