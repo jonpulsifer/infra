@@ -148,11 +148,20 @@ rules:
       - postgresql.cnpg.io
     resources:
       - clusters
+      - scheduledbackups
     verbs:
       - create
       - delete
       - get
       - patch
+  # Finds the one store in backup/ that a Postgres Datastore archives to. The
+  # engine never writes it.
+  - apiGroups:
+      - barmancloud.cnpg.io
+    resources:
+      - objectstores
+    verbs:
+      - list
   - apiGroups:
       - valkey.io
     resources:

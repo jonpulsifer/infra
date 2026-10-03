@@ -10,6 +10,7 @@ Every change to the lab ships from git. A pull request (PR) declares the change,
 | Change | Applied by | When |
 | --- | --- | --- |
 | An OpenTofu root under `terraform/` or `clusters/<site>/bootstrap/` | [Atlantis](opentofu.md), the server that applies OpenTofu from PRs | When someone comments `atlantis apply` on the PR. Atlantis then merges the PR. |
+| The Talos Linux machine configuration of a cluster, an OpenTofu root under `clusters/<site>/talos/` | Atlantis, over the Talos API of each node | When someone comments `atlantis apply` on the PR. A node whose installer image changes reboots. |
 | A Kubernetes manifest under `clusters/` | Flux, the GitOps controller in each cluster | At the next sync of `main` after the merge |
 | A NixOS host under `nix/` | The host's auto-upgrade, or `nixos-rebuild` | At the next daily [auto-upgrade](nixos.md#auto-upgrade) after the merge |
 | A first-party image | `containers.yml`, then Flux | After the merge, the workflow builds the image and opens a PR that pins its digest. See [Build and release](build-and-release.md). |
@@ -30,7 +31,7 @@ Auto-upgrade rebuilds a host from `main` each day. [NixOS](nixos.md#auto-upgrade
 ## Rules
 
 - Do not run `kubectl apply` to change state. Use `kubectl`, `flux get` and `flux reconcile` to inspect or to force a sync.
-- Do not run `tofu apply` on your machine. It takes the state lock from Atlantis and causes drift.
+- Do not run `tofu apply` on your machine. It takes the state lock from Atlantis and causes drift. The one exception is the owner's: `talosctl bootstrap` and the first `tofu apply` of a `clusters/<site>/talos/` root, once per rebuilt cluster, until Flux syncs it. Atlantis owns the root from the next PR.
 - Apply an OpenTofu PR before you merge it, as [OpenTofu and Atlantis](opentofu.md#rules) says.
 - Merge a host change on the day you deploy it from a branch. The next auto-upgrade rebuilds the host from `main` and removes the change.
 

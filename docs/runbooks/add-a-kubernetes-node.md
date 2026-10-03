@@ -10,7 +10,6 @@ Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (re
 - Run `mise run devshell`.
 - You need physical access to the host and a USB drive.
 - You need SSH access to the host as `jawn`.
-- `<build-host>` is `riptide.lolwtf.ca` for a `folly` node. For an `offsite` node, use another `offsite` node, such as `oldschool.lolwtf.ca`.
 
 ## Declare the node
 

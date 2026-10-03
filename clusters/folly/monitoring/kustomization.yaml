@@ -33,3 +33,21 @@ patches:
       - op: replace
         path: /spec/maxHistory
         value: 2
+  # VictoriaLogs is shared with offsite, so folly adds its own affinity. No node
+  # is tainted, so this term alone keeps log writes off the control-plane
+  # node's disk, which etcd shares.
+  - target:
+      group: helm.toolkit.fluxcd.io
+      version: v2
+      kind: HelmRelease
+      name: victoria-logs
+    patch: |-
+      - op: add
+        path: /spec/values/server/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/control-plane
+                      operator: DoesNotExist

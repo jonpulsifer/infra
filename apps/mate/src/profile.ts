@@ -1,5 +1,6 @@
 /**
- * Each profile's system prompt: its preamble, the repo's AGENTS.md and an
+ * Each profile's system prompt: the shared persona, its preamble, the owner's
+ * global AGENTS.md, its overrides of those rules, the repo's AGENTS.md and an
  * index of its skills, read from mate's own copy of the repo once per process.
  * The skills' locations point into the sandbox's checkout, where the model
  * reads them with its tools. `brainProfiles` resolves each profile's prompt,
@@ -17,7 +18,12 @@ import type {
 import { ConfigError } from './config.ts';
 import { type Log, plain } from './log.ts';
 import { profileModel } from './model.ts';
-import { PROFILES, type Profile, turnTimeoutMs } from './profiles.ts';
+import {
+  effectiveGrants,
+  PROFILES,
+  type Profile,
+  turnTimeoutMs,
+} from './profiles.ts';
 import {
   formatSkillsForSystemPrompt,
   loadSkills,
@@ -28,6 +34,12 @@ import type { SurfaceName } from './surface.ts';
 /** Later directories win a duplicate skill name. */
 export const SKILL_DIRS = ['dotfiles/skills', '.agents/skills'] as const;
 export const AGENTS_FILE = 'AGENTS.md';
+/** Shared with the owner's local pi package, so it holds no capability claims. */
+export const PERSONA_FILE = 'dotfiles/pi/mate/persona.md';
+export const OWNER_AGENTS_FILE = 'dotfiles/.agents/AGENTS.md';
+/** Only when the persona file is missing or empty, so the model keeps an identity. */
+export const FALLBACK_PERSONA =
+  "You are Rowbutt, the owner's coding and operations agent for this homelab.";
 
 const SURFACES: Record<SurfaceName, string> = {
   discord: 'Discord',
@@ -40,26 +52,30 @@ export async function loadSystemPrompts(
   profiles: Iterable<Profile>,
 ): Promise<ProfilePrompts> {
   const root = resolve(options.root);
-  const [agents, skills] = await Promise.all([
-    readAgents(root, options.log),
+  const [persona, owner, agents, skills] = await Promise.all([
+    readProfileFile(root, PERSONA_FILE, options.log),
+    readProfileFile(root, OWNER_AGENTS_FILE, options.log),
+    readProfileFile(root, AGENTS_FILE, options.log),
     skillsIndex(root, options),
   ]);
-  const prompt = (profile: Profile, surface: SurfaceName) =>
-    [
-      profile.preamble(SURFACES[surface], options),
-      agents && `# Repository instructions (AGENTS.md)\n\n${agents}`,
-      skills,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+  const prompts = (profile: Profile): SystemPrompts => {
+    const rules = owner && ownerRules(owner, profile, options.log);
+    const prompt = (surface: SurfaceName) =>
+      [
+        persona ?? FALLBACK_PERSONA,
+        profile.preamble(SURFACES[surface], options),
+        rules &&
+          `# Owner's standing instructions (global AGENTS.md)\n\n${rules}`,
+        `# Overrides for this deployment\n\n${profile.overrides(effectiveGrants(profile.grants, options.configured))}`,
+        agents && `# Repository instructions (AGENTS.md)\n\n${agents}`,
+        skills,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+    return { discord: prompt('discord'), slack: prompt('slack') };
+  };
   return Object.fromEntries(
-    [...profiles].map((profile) => [
-      profile.id,
-      {
-        discord: prompt(profile, 'discord'),
-        slack: prompt(profile, 'slack'),
-      } satisfies SystemPrompts,
-    ]),
+    [...profiles].map((profile) => [profile.id, prompts(profile)]),
   );
 }
 
@@ -97,8 +113,12 @@ export function brainProfiles(
   );
 }
 
-async function readAgents(root: string, log: Log): Promise<string | null> {
-  const path = `${root}/${AGENTS_FILE}`;
+async function readProfileFile(
+  root: string,
+  file: string,
+  log: Log,
+): Promise<string | null> {
+  const path = `${root}/${file}`;
   let error = 'the file is empty';
   try {
     const text = (await readFile(path, 'utf8')).trim();
@@ -108,6 +128,27 @@ async function readAgents(root: string, log: Log): Promise<string | null> {
   }
   log.warn('profile file missing', { path, error });
   return null;
+}
+
+/** The title, the Priority line and the profile's `## ` sections; a missing section is logged. */
+function ownerRules(
+  text: string,
+  { id, ownerSections }: Profile,
+  log: Log,
+): string {
+  if (!ownerSections) return text;
+  const [head = '', ...sections] = text.split(/^(?=## )/m);
+  const name = (section: string) =>
+    (section.split('\n', 1)[0] ?? '').slice(3).trim();
+  const found = new Set(sections.map(name));
+  for (const section of ownerSections) {
+    if (!found.has(section)) {
+      log.warn('owner instructions section missing', { profile: id, section });
+    }
+  }
+  return [head, ...sections.filter((s) => ownerSections.includes(name(s)))]
+    .join('')
+    .trim();
 }
 
 async function skillsIndex(
