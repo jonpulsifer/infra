@@ -3,7 +3,7 @@ title: Restore a database
 description: Recover a Postgres database from its barman backups in Garage into a scratch CloudNativePG cluster, copy the data back, and run the restore drill.
 ---
 
-Use this runbook to restore a Postgres database from the backups of the barman-cloud plugin, or to test the backups with the restore drill. [Backups](../platform/backups.md) describes the stores and the retention. The recovery makes a scratch cluster from a base backup and the WAL, and then copies the data into the live database.
+Use this runbook to restore a Postgres database from the backups of the barman-cloud plugin, or to test the backups with the restore drill. [Backups](../platform/backups.md) describes the stores and the retention. The recovery makes a scratch cluster from a base backup and the WAL, and then copies the data into the live database. If the live `Cluster` is gone, follow [Recover a re-created database](recover-a-re-created-database.md) instead.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because git holds no data, only the declaration of the database.
@@ -52,6 +52,8 @@ Use this runbook to restore a Postgres database from the backups of the barman-c
              barmanObjectName: garage
              serverName: <cluster>
    ```
+
+   `serverName` is the prefix the live `Cluster` archives under: its `backup.serverName`, or its name when that is empty.
 
 3. Create the scratch cluster.
 
@@ -153,6 +155,7 @@ The `restore-drill` CronJob recovers the kthx database from offsite's Garage int
 ## Related
 
 - [Backups](../platform/backups.md)
+- [Recover a re-created database](recover-a-re-created-database.md)
 - [Operate Postgres](operate-postgres.md)
 - [Restore a volume](restore-a-volume.md)
 - [Restore etcd](restore-etcd.md)

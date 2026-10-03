@@ -47,6 +47,7 @@ Each API server also accepts tokens from the other cluster, for the ServiceAccou
 - Keep `<cluster>-ca-chain.pem` out of `services.kubernetes.caFile`. That option also sets the client CA, so the API server would accept every client certificate under the FML Root.
 - After Atlantis applies a new CA or signer, follow the rotation steps in `terraform/pki/README.md`. After a same-key reissue, cfssl and kube-controller-manager keep the old certificate until they restart.
 - For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
+- On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one.
 
 ## Where it lives
 

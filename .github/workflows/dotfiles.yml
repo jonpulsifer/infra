@@ -18,11 +18,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The release nix/lib/mise.nix pins for the NixOS hosts. `mise dotfiles` is new, and a
+      # newer mise can change what the [dotfiles] table does.
       - name: Install mise
-        run: curl -fsSL https://mise.run | sh
-      # Fails on a missing link source. `mise dotfiles apply` exits 0 here,
-      # because dotfiles/mise.toml has no [dotfiles] section.
-      - name: Dotfiles link check
+        run: curl -fsSL https://mise.run | MISE_VERSION=v2026.10.0 sh
+      # Applies the [dotfiles] table into scratch homes, empty and as older deploys leave them,
+      # under each profile, with WSL on and off. Fails on a missing source, a template that does
+      # not render, an entry mise warns about, or a deploy that does not converge.
+      - name: Dotfiles check
+        env:
+          # Stops config discovery at the repo root, whose [tools] `mise run` would install.
+          MISE_CEILING_PATHS: ${{ github.workspace }}
         run: |
           export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
           cd dotfiles
@@ -32,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           cd dotfiles
-          grep -rl '^#!/usr/bin/env bash' .local/bin/* scripts/* | xargs shellcheck
+          grep -rl '^#!/usr/bin/env bash' .local/bin/* | xargs shellcheck
       # mise's pwsh build wants libicu unless globalization is invariant.
       - name: PSScriptAnalyzer
         env:

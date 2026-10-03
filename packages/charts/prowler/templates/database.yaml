@@ -26,6 +26,7 @@ only the part that is load-bearing.
 Superuser itself is still not required: `pg_trgm`, the only extension, is
 trusted from PG13 on.
 */}}
+{{- include "prowler.backupPrefixes" . }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -44,6 +45,9 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: garage
+        {{- with .Values.backup.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
   {{- end }}
   enableSuperuserAccess: false
   storage:
@@ -52,6 +56,19 @@ spec:
     {{- end }}
     size: {{ .Values.database.size }}
   bootstrap:
+  {{- if .Values.backup.recoverFrom }}
+    recovery:
+      source: origin
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: garage
+          serverName: {{ .Values.backup.recoverFrom | quote }}
+  {{- else }}
     initdb:
       database: {{ .Values.database.name }}
       owner: {{ .Values.database.name }}
@@ -59,6 +76,7 @@ spec:
       localeCollate: C
       localeCType: C
       dataChecksums: true
+  {{- end }}
   managed:
     roles:
       - name: {{ .Values.database.name }}

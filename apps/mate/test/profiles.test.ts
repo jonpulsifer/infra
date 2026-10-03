@@ -142,6 +142,7 @@ describe('validateProfiles', () => {
     ['the admin identity', reader({ kube: 'admin' })],
     ['a GitHub token', reader({ github: true })],
     ['an SSH key', reader({ ssh: true })],
+    ['a talosconfig', reader({ talos: true })],
     ['the kthx sites file', reader({ kthxSites: true })],
     ['the ring token', reader({ switchboard: true })],
     ['1Password Connect', reader({ vault: true })],
@@ -178,6 +179,7 @@ describe('the declared profiles', () => {
       kube: 'admin',
       github: true,
       ssh: true,
+      talos: true,
       kthxSites: true,
       switchboard: true,
       vault: true,
@@ -186,6 +188,7 @@ describe('the declared profiles', () => {
       kube: 'reader',
       github: false,
       ssh: false,
+      talos: false,
       kthxSites: false,
       switchboard: false,
       vault: false,
@@ -262,7 +265,8 @@ describe('the preambles', () => {
 
 Your tools run in this thread's own sandbox, a Kata microVM on the offsite cluster, with the infra repository checked out at /workspace at \`main\`. The sandbox starts on your first tool call, which can take a minute, so answer a question that needs no files or commands without tools.
 
-- Credentials (git push, kubectl for the offsite and folly contexts, and ssh) exist only while a turn runs.
+- Credentials (git push, kubectl for the offsite and folly contexts, talosctl, and ssh) exist only while a turn runs.
+- \`talosctl --context <offsite|folly>\` reads Talos nodes as \`os:reader\`, which cannot read file contents or change a node. It fails against a NixOS node, and while \`~/.talos/config\` is empty.
 - Background processes do not survive the end of the turn.
 - The sandbox and its uncommitted work are deleted when the thread goes quiet or another thread needs the slot. Commit and push work worth keeping before the turn ends. When that happens, mate says so at the start of the next message.
 - A mate restart can interrupt a running command. Its result then says it was interrupted and its outcome is unknown, so check what it did before you run it again.

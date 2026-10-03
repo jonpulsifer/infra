@@ -14,8 +14,11 @@ in
   programs.zsh.enable = true;
 
   # Nix installs only the mise binary; mise manages runtimes and shims under ~/.local/share/mise.
-  # armv6l has no mise release or cache, so the pi-zero profile turns this off.
-  environment.systemPackages = lib.optional config.homelab.fleet.miseDotfiles pkgs.mise;
+  # It is the release pinned in ../lib/mise.nix, which has no armv6l build, so the pi-zero profile
+  # turns this off.
+  environment.systemPackages = lib.optional config.homelab.fleet.miseDotfiles (
+    pkgs.callPackage ../lib/mise.nix { }
+  );
 
   users.mutableUsers = false;
   users.users.root.hashedPassword = consolePasswordHash;

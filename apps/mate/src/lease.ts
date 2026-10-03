@@ -169,6 +169,7 @@ export interface KubeHandsDeps {
   kthxSites?: KthxSites | null;
   clusterCa?: string | null;
   sshKey?: string | null;
+  talosconfig?: string | null;
   ttlMs?: number;
   readyTimeoutMs?: number;
   goneTimeoutMs?: number;

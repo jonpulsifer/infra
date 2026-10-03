@@ -1,6 +1,7 @@
 {{/*
 The Postgres instance that holds a database and a login role per site.
 */}}
+{{- include "kthx.backupPrefixes" . }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -19,6 +20,9 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: garage
+        {{- with .Values.backup.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
   {{- end }}
   # Break-glass access for when the control role locks itself out of a site database.
   enableSuperuserAccess: true
@@ -41,6 +45,20 @@ spec:
     # CNPG's PodMonitor carries no release label; offsite's Prometheus selects every PodMonitor.
     enablePodMonitor: true
   bootstrap:
+  {{- if .Values.backup.recoverFrom }}
+    # The backup carries every site database and role, so the recovery needs no post-init SQL.
+    recovery:
+      source: origin
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: garage
+          serverName: {{ .Values.backup.recoverFrom | quote }}
+  {{- else }}
     initdb:
       database: {{ .Values.database.name }}
       owner: {{ .Values.database.name }}
@@ -52,6 +70,7 @@ spec:
         # Granted once here, not through `spec.managed.roles`: reconciling the role strips the
         # ADMIN OPTION on site roles that site delete needs to terminate their backends.
         - ALTER ROLE {{ .Values.database.name }} CREATEDB CREATEROLE
+  {{- end }}
 ---
 {{/*
 Nightly `pg_dumpall` of the whole instance into the depot's `backups/`, which a

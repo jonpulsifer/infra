@@ -3,6 +3,9 @@
 	email = jonathan@pulsifer.ca
 	signingkey = ~/.ssh/id_ed25519
 
+[include]
+	path = config.local
+
 [github]
 	user = jonpulsifer
 

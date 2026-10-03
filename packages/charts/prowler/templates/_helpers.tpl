@@ -63,6 +63,21 @@ app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 {{ include "prowler.fullname" . }}-db
 {{- end }}
 
+{{/*
+Refuses a recovery that archives into the prefix it recovers from: the plugin checks
+the archive is empty on the first WAL and the Cluster sticks at `Expected empty archive`.
+*/}}
+{{- define "prowler.backupPrefixes" -}}
+{{- with .Values.backup.recoverFrom }}
+{{- if not $.Values.backup.endpointURL }}
+{{- fail "backup.recoverFrom needs backup.endpointURL: the recovery reads the garage ObjectStore" }}
+{{- end }}
+{{- if eq . (default (include "prowler.databaseName" $) $.Values.backup.serverName) }}
+{{- fail (printf "backup.recoverFrom %q is the prefix this Cluster archives to: set backup.serverName to a new one" .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- define "prowler.valkeyName" -}}
 {{ include "prowler.fullname" . }}-valkey
 {{- end }}

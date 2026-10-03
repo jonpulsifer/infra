@@ -71,6 +71,13 @@ backup:
   secretStore: onepassword-connect
   # 1Password item holding the Garage keys, e.g. garage-offsite.
   item: ""
+  # The prefix under the namespace's path that the Cluster archives to. Empty uses the
+  # Cluster's name. A re-created Cluster takes a new one, such as `<cluster>-2`: the plugin
+  # refuses to archive into a prefix that holds WAL.
+  serverName: ""
+  # A prefix of the same store to recover from in place of `initdb`: the serverName the
+  # Cluster had before it was re-created. Read at creation only; drop it once recovered.
+  recoverFrom: ""
 
 valkey:
   # A plain Valkey; `templates/valkey.yaml` says why the cluster operator cannot serve Celery.

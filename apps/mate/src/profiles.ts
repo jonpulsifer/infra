@@ -50,6 +50,8 @@ export interface Grants {
   /** The installation token, minted with github-app.ts's permissions, or none. */
   readonly github: boolean;
   readonly ssh: boolean;
+  /** The `os:reader` talosconfig for the nodes' Talos API, when MATE_TALOSCONFIG_FILE names one. */
+  readonly talos: boolean;
   /** Stamps the kthx sites file and folds it back into the ledger: both or neither. */
   readonly kthxSites: boolean;
   /** Pod env for the sandbox's life: the ring token. */
@@ -128,7 +130,8 @@ export function operatorPreamble(
 
 Your tools run in this thread's own sandbox, a Kata microVM on the offsite cluster, with the infra repository checked out at ${workspace} at \`${checkoutRef}\`. The sandbox starts on your first tool call, which can take a minute, so answer a question that needs no files or commands without tools.
 
-- Credentials (git push, kubectl for the offsite and folly contexts, and ssh) exist only while a turn runs.
+- Credentials (git push, kubectl for the offsite and folly contexts, talosctl, and ssh) exist only while a turn runs.
+- \`talosctl --context <offsite|folly>\` reads Talos nodes as \`os:reader\`, which cannot read file contents or change a node. It fails against a NixOS node, and while \`~/.talos/config\` is empty.
 - Background processes do not survive the end of the turn.
 - The sandbox and its uncommitted work are deleted when the thread goes quiet or another thread needs the slot. Commit and push work worth keeping before the turn ends. When that happens, mate says so at the start of the next message.
 - A mate restart can interrupt a running command. Its result then says it was interrupted and its outcome is unknown, so check what it did before you run it again.
@@ -196,14 +199,17 @@ const FULL: Grants = {
   kube: 'admin',
   github: true,
   ssh: true,
+  talos: true,
   kthxSites: true,
   switchboard: true,
   vault: true,
 };
+// No talosconfig: the mate-sandbox-reader network does not reach the nodes.
 const READER: Grants = {
   kube: 'reader',
   github: false,
   ssh: false,
+  talos: false,
   kthxSites: false,
   switchboard: false,
   vault: false,
@@ -276,6 +282,7 @@ export function sameGrants(a: Grants, b: Grants): boolean {
     a.kube === b.kube &&
     a.github === b.github &&
     a.ssh === b.ssh &&
+    a.talos === b.talos &&
     a.kthxSites === b.kthxSites &&
     a.switchboard === b.switchboard &&
     a.vault === b.vault
@@ -409,11 +416,16 @@ export function validateProfiles(
         grants.kube === 'admin' ||
         grants.github ||
         grants.ssh ||
+        grants.talos ||
         grants.kthxSites ||
         grants.switchboard ||
         grants.vault
       ) {
-        fail(id, 'the mate-sandbox-reader network holds no write grant');
+        // talos reads only, but this network does not reach the nodes.
+        fail(
+          id,
+          'the mate-sandbox-reader network holds no grant but the reader identity',
+        );
       }
       if (
         tools.mcp.some(

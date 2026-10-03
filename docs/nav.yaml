@@ -78,8 +78,10 @@ sections:
         items:
           - runbooks/apply-a-kubernetes-change.md
           - runbooks/get-cluster-admin-access.md
+          - runbooks/issue-a-talosconfig.md
           - runbooks/operate-postgres.md
           - runbooks/restore-a-database.md
+          - runbooks/recover-a-re-created-database.md
           - runbooks/restore-a-volume.md
           - runbooks/restore-etcd.md
           - runbooks/restore-from-the-gcs-copy.md

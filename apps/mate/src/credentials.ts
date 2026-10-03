@@ -36,29 +36,37 @@ const DIR_MODE = 0o700;
 // credential helper, `gh` and kubectl find them.
 export const TOKEN_PATH = '.github-token';
 export const KUBECONFIG_PATH = '.kube/config';
+// talosctl's default path under HOME, so no env points at it.
+export const TALOSCONFIG_PATH = '.talos/config';
 const SSH_DIR = '.ssh';
 const SSH_KEY_PATH = `${SSH_DIR}/id_ed25519`;
 const SSH_CONFIG_PATH = `${SSH_DIR}/config`;
 // Where the kthx CLI keeps its site tokens under the image's XDG_CONFIG_HOME.
 const SITES_PATH = '.config/kthx/sites.json';
 
-// folly's Lab Net has no route from offsite, but folly's nodes do, and the
-// Lab zone admits them. optiplex, folly's only control plane, is not the hop.
+// folly's Lab Net has no route from offsite, so its hosts are reached through
+// a jump host that offsite routes to and the folly firewall admits on 22:
+// MATE_SANDBOX_LAB_JUMP. optiplex, folly's only control plane, is never it.
 const LAB_NET_HOSTS = ['spore', 'capsule', 'forge', 'cloudpi4', 'homepi4'];
-const LAB_NET_JUMP = 'riptide.lolwtf.ca';
+const LAB_DOMAIN = 'lolwtf.ca';
 
 // `always` canonicalizes a short name before the Host blocks match, proxied
 // or not. accept-new: home is a fresh emptyDir with no known hosts, so `yes`
 // refuses every host, and `no` would accept a changed key.
-export function sshClientConfig(home: string): string {
+export function sshClientConfig(home: string, jump: string): string {
+  // A jump host on Lab Net is reached directly, or ssh would jump through it
+  // to reach itself.
+  const proxied = LAB_NET_HOSTS.map((host) => `${host}.${LAB_DOMAIN}`).filter(
+    (host) => host !== jump && host !== `${jump}.${LAB_DOMAIN}`,
+  );
   return [
     'CanonicalizeHostname always',
-    'CanonicalDomains lolwtf.ca',
+    `CanonicalDomains ${LAB_DOMAIN}`,
     'CanonicalizeMaxDots 0',
     'CanonicalizeFallbackLocal yes',
     '',
-    `Host ${LAB_NET_HOSTS.map((host) => `${host}.lolwtf.ca`).join(' ')}`,
-    `  ProxyJump ${LAB_NET_JUMP}`,
+    `Host ${proxied.join(' ')}`,
+    `  ProxyJump ${jump}`,
     '',
     // Its wired port has no link; it answers on the lab WLAN.
     'Host homepi4.lolwtf.ca',
@@ -73,8 +81,6 @@ export function sshClientConfig(home: string): string {
     '',
   ].join('\n');
 }
-
-export const SSH_CLIENT_CONFIG = sshClientConfig(AGENT_HOME);
 
 const CLUSTER_URL = 'https://kubernetes.default.svc:443';
 // Both apiservers list `api` in --api-audiences, and folly's federation admits
@@ -186,6 +192,8 @@ export interface CredentialDeps {
   readonly kthxSites?: KthxSites | null;
   readonly clusterCa?: string | null;
   readonly sshKey?: string | null;
+  /** The `os:reader` talosconfig, with a context per cluster; `null` until the Secret exists. */
+  readonly talosconfig?: string | null;
   /** Where one-shot commands write, with no daemon to say where home is. */
   readonly home?: string;
 }
@@ -211,11 +219,12 @@ export class Credentials {
 
   /** Whether a turn under `grants` has anything to write at all. */
   credentialled(grants: Grants): boolean {
-    const { githubApp, config, sshKey } = this.deps;
+    const { githubApp, config, sshKey, talosconfig } = this.deps;
     return Boolean(
       (grants.github && githubApp) ||
         kubeAccount(config, grants.kube) ||
         (grants.ssh && sshKey) ||
+        (grants.talos && talosconfig) ||
         (grants.kthxSites && this.kthx),
     );
   }
@@ -328,16 +337,18 @@ export class Credentials {
       '-c',
       [
         'umask 077',
-        `mkdir -p ${home}/${SSH_DIR} "$(dirname ${home}/${KUBECONFIG_PATH})"${
+        `mkdir -p ${home}/${SSH_DIR} "$(dirname ${home}/${KUBECONFIG_PATH})" "$(dirname ${home}/${TALOSCONFIG_PATH})"${
           sites ? ` "$(dirname ${sitesFile})"` : ''
         }`,
         `printf %s "$1" > ${home}/${TOKEN_PATH}`,
         `printf %s "$2" > ${home}/${KUBECONFIG_PATH}`,
         `printf %s "$3" > ${home}/${SSH_KEY_PATH}`,
         `printf %s "$4" > ${home}/${SSH_CONFIG_PATH}`,
-        ...(sites ? [`printf %s "$5" > ${sitesFile}`] : []),
+        `printf %s "$5" > ${home}/${TALOSCONFIG_PATH}`,
+        ...(sites ? [`printf %s "$6" > ${sitesFile}`] : []),
       ].join('; '),
       'mate',
+      '',
       '',
       '',
       '',
@@ -446,6 +457,7 @@ export class TurnCredentials {
             )
           : null;
         const ssh = grants.ssh ? (creds.deps.sshKey ?? '') : '';
+        const talos = grants.talos ? (creds.deps.talosconfig ?? '') : '';
         if (this.sealed) return;
         await client.call(
           'writeFiles',
@@ -456,7 +468,10 @@ export class TurnCredentials {
                 kube,
                 ssh,
                 // No key, no client config pointing ssh at one.
-                sshConfig: ssh ? sshClientConfig(home) : '',
+                sshConfig: ssh
+                  ? sshClientConfig(home, creds.deps.config.labJump)
+                  : '',
+                talos,
               }),
               ...(sites
                 ? [file(`${home}/${SITES_PATH}`, serialize(sites))]
@@ -512,6 +527,7 @@ export class TurnCredentials {
                   kube: '',
                   ssh: '',
                   sshConfig: '',
+                  talos: '',
                 }),
                 // `{}` and not nothing: the CLI reads an empty file as corrupt.
                 ...(synced
@@ -670,6 +686,7 @@ interface CredentialValues {
   kube: string;
   ssh: string;
   sshConfig: string;
+  talos: string;
 }
 
 function file(path: string, content: string) {
@@ -682,6 +699,7 @@ function credentialFiles(home: string, values: CredentialValues) {
     file(`${home}/${KUBECONFIG_PATH}`, values.kube),
     file(`${home}/${SSH_KEY_PATH}`, values.ssh),
     file(`${home}/${SSH_CONFIG_PATH}`, values.sshConfig),
+    file(`${home}/${TALOSCONFIG_PATH}`, values.talos),
   ];
 }
 
