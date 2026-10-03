@@ -13,7 +13,7 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 | [riptide](riptide.md) | folly worker with a GPU | folly | HP EliteDesk 800 G5 Desktop Mini | NixOS | live |
 | [shale](shale.md) | folly worker | folly | HP EliteDesk 800 G2 DM | NixOS | live |
 | [retrofit](retrofit.md) | offsite control plane and cluster CA | offsite | HP EliteDesk 800 G2 DM | NixOS | live |
-| [oldschool](oldschool.md) | offsite worker and yarr media downloads | offsite | HP EliteDesk 800 G3 DM | NixOS | live |
+| [oldschool](oldschool.md) | offsite worker | offsite | HP EliteDesk 800 G3 DM | NixOS | live |
 | [spore](spore.md) | NFS, x86 netboot, forge's boot image, DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [capsule](capsule.md) | DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [forge](forge.md) | arm64 build host | folly | Raspberry Pi 5, NVMe | NixOS | live |
