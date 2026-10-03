@@ -49,7 +49,7 @@ spec:
         - name: mate
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/mate…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/mate:latest@sha256:a5f2addb0e31f801ee2d1e3d61208328070cfd2fb08ffe10a07473a953c3177d
+          image: ghcr.io/jonpulsifer/mate:latest@sha256:bbfc55f542dc4ff17cb1e6606130e5887a88bd47f5ab9704cf82314645b66bdd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -162,7 +162,7 @@ spec:
             # Digest-pinned: the agent's tool calls run in this image with no
             # approval step. CD anchors on the image name beside the digest.
             - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:db61897dbb551fca468e08ef15fe1d08bb8995e3b906a6428835d47ed9fe6310
+              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:d51a032ca7bc17d9e0d6241f12925cb761dac86ec8eb22db80eef810c7458bc9
             # The numeric App id, not the client id. mate mints a 1-hour token per
             # turn from the key; a sandbox never holds the key.
             - name: MATE_GITHUB_APP_ID
