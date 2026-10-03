@@ -3,6 +3,8 @@
  * and the order it stops in, seen at the edges it was given.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Provider } from '@earendil-works/pi-ai';
 import {
   type FauxResponseStep,
@@ -23,7 +25,7 @@ import { withDatabase } from './db.ts';
 import { FakeMcp } from './fake-mcp.ts';
 import { FakeKube } from './fakeapi.ts';
 import { FakeSlack, FakeSurface } from './fakesurface.ts';
-import { cleanUp } from './hands-support.ts';
+import { cleanUp, tempDir } from './hands-support.ts';
 import {
   CHANNEL,
   type ConfigOverrides,
@@ -43,6 +45,7 @@ import {
   RecordingLog,
   settle,
 } from './support.ts';
+import { ADMIN_CRT, talosconfig } from './talos-certs.ts';
 
 const database = withDatabase();
 const SLACK_USER = 'U0OWNER';
@@ -519,6 +522,32 @@ describe('a degraded start', () => {
       }),
     ]);
     expect(await asks(one, 'hello')).toEqual(['no hosts today']);
+  });
+
+  test('runs without node access until the talosconfig exists, quietly', async () => {
+    const one = await boot({
+      config: { talosconfigFile: '/nonexistent/talos/config' },
+      models: [fauxAssistantMessage('no nodes yet')],
+    });
+    expect(one.log.of('no sandbox talosconfig yet')).toHaveLength(1);
+    expect(one.log.of('the sandbox talosconfig could not be read')).toEqual([]);
+    expect(await asks(one, 'hello')).toEqual(['no nodes yet']);
+  });
+
+  test('refuses a talosconfig that grants more than os:reader, and still answers', async () => {
+    const file = join(tempDir('talos'), 'config');
+    writeFileSync(file, talosconfig({ folly: ADMIN_CRT }));
+    const one = await boot({
+      config: { talosconfigFile: file },
+      models: [fauxAssistantMessage('no admin for you')],
+    });
+    expect(one.log.of('the sandbox talosconfig could not be read')).toEqual([
+      expect.objectContaining({
+        level: 'error',
+        fields: expect.objectContaining({ file }),
+      }),
+    ]);
+    expect(await asks(one, 'hello')).toEqual(['no admin for you']);
   });
 
   test('starts and answers when the hands cannot count the standing sandboxes', async () => {

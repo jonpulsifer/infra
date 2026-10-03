@@ -67,6 +67,9 @@ ARG SHELLCHECK_VERSION=0.11.0
 ARG SHFMT_VERSION=3.14.1
 # renovate: datasource=github-releases depName=getsops/sops
 ARG SOPS_VERSION=3.13.3
+# The clusters' Talos API client; keep it on their Talos minor.
+# renovate: datasource=github-releases depName=siderolabs/talos
+ARG TALOSCTL_VERSION=1.14.2
 # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
 ARG TERRAFORM_DOCS_VERSION=0.24.0
 # Must equal opentofu in the root mise.toml: the repo's tasks run this binary
@@ -86,6 +89,7 @@ RUN set -eux; \
     raw kubectl "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
     raw shfmt   "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"; \
     raw sops    "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64"; \
+    raw talosctl "https://github.com/siderolabs/talos/releases/download/v${TALOSCTL_VERSION}/talosctl-linux-amd64"; \
     raw yq      "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"; \
     arc "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin --strip-components=1 age/age age/age-keygen; \
@@ -219,8 +223,8 @@ ENV HOME=/home/agent \
     KTHX_NO_UPDATE_CHECK=1
 
 # Runs as the sandbox uid, so a binary that cannot start fails the build.
-# cilium, helm, kubectl, kubectl-cnpg, kustomize and pixlet reject `--version`;
-# ssh has only `-V`.
+# cilium, helm, kubectl, kubectl-cnpg, kustomize, pixlet and talosctl reject
+# `--version`; ssh has only `-V`.
 RUN set -eux; \
     for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh hubble \
                 jq kthx mate-hands mise op promtool shellcheck shfmt \
@@ -233,6 +237,7 @@ RUN set -eux; \
     kubectl cnpg version >/dev/null; \
     kustomize version >/dev/null; \
     pixlet version >/dev/null; \
+    talosctl version --client >/dev/null; \
     ssh -V 2>/dev/null
 
 # `gh auth token` needs no network. Through the wrapper it must print the token

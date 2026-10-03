@@ -310,6 +310,7 @@ export const SANDBOX_CONFIG: SandboxConfig = {
   kubeReaderServiceAccount: null,
   kubeContext: 'offsite',
   kubePeers: [],
+  labJump: 'capsule.lolwtf.ca',
   github: false,
   kthx: {
     origin: null,

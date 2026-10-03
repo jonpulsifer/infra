@@ -138,6 +138,7 @@ function smokeConfig(env: Record<string, string | undefined>): Config {
     },
     githubApp: null,
     sshKeyFile: null,
+    talosconfigFile: null,
     slack: null,
     custodianChannel: null,
   };

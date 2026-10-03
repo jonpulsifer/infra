@@ -31,6 +31,11 @@ export interface Config {
   readonly githubApp: GithubAppConfig | null;
   /** `null` for no host access. Outside `sandbox`, as `githubApp` is. */
   readonly sshKeyFile: string | null;
+  /**
+   * The `os:reader` talosconfig for the nodes' Talos API, or `null` for none.
+   * Outside `sandbox`, as `sshKeyFile` is. A missing file is the same as `null`.
+   */
+  readonly talosconfigFile: string | null;
   /** The second surface, or `null` when mate answers on Discord alone. */
   readonly slack: SlackConfig | null;
   /** A daily 18:00 America/Halifax report, disabled without a channel. */
@@ -110,6 +115,12 @@ export interface SandboxConfig {
    * `clusters/`; the sandbox's checkout says where each is and what CA it has.
    */
   readonly kubePeers: readonly string[];
+  /**
+   * The host the sandbox's ssh reaches folly's Lab Net hosts through, which
+   * offsite routes to and the folly firewall admits on 22. A name, never a
+   * key, so `sandboxManifest` may read it.
+   */
+  readonly labJump: string;
   readonly kthx: KthxConfig;
   /** `null`, the default, gives the sandbox no way to ring the owner. */
   readonly switchboard: SwitchboardConfig | null;
@@ -196,6 +207,17 @@ function slackIds(env: Env, key: string): ReadonlySet<string> {
 
 /** A cluster name is also a path segment and a kubeconfig name. */
 const CLUSTER_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/** A host name as ssh_config takes it: no user, port or option can ride in. */
+const HOST_NAME =
+  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+function hostName(env: Env, key: string, fallback: string): string {
+  const value = text(env, key, fallback);
+  if (!HOST_NAME.test(value)) {
+    throw new ConfigError(`${key} is not a host name: ${value}`);
+  }
+  return value;
+}
 
 function clusterName(env: Env, key: string, fallback: string): string {
   const value = text(env, key, fallback);
@@ -449,6 +471,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     kubeReaderServiceAccount,
     kubeContext: clusterName(env, 'MATE_SANDBOX_KUBE_CONTEXT', 'cluster'),
     kubePeers: clusterNames(env, 'MATE_SANDBOX_KUBE_PEERS'),
+    labJump: hostName(env, 'MATE_SANDBOX_LAB_JUMP', 'capsule.lolwtf.ca'),
     kthx: kthx(env),
     switchboard: switchboard(env),
   };
@@ -497,6 +520,7 @@ export function readConfig(env: Env): Config {
     brain: readBrainConfig(env),
     githubApp: githubApp(env, sandbox.checkoutRepo),
     sshKeyFile: env.MATE_SSH_KEY_FILE?.trim() || null,
+    talosconfigFile: env.MATE_TALOSCONFIG_FILE?.trim() || null,
     slack: slack(env),
     custodianChannel,
   };

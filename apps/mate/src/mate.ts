@@ -37,6 +37,7 @@ import {
   PostgresThreadStore,
 } from './store.ts';
 import type { SurfaceListener } from './surface.ts';
+import { readerTalosconfig } from './talosconfig.ts';
 import { DRAIN_MS, Threads, type ThreadsDeps } from './threads.ts';
 
 const DAY_MS = 86_400_000;
@@ -221,6 +222,7 @@ export class Mate {
         kthxSites: this.openKthxSites(kube),
         clusterCa: this.edges.kube.ca ?? null,
         sshKey: await this.readSshKey(config.sshKeyFile),
+        talosconfig: await this.readTalosconfig(config.talosconfigFile),
         ...handsTuning,
       },
       layout,
@@ -430,6 +432,26 @@ export class Mate {
     } catch (error) {
       this.edges.log.error('the sandbox SSH key could not be read', {
         keyFile: path,
+        error: plain(error),
+      });
+      return null;
+    }
+  }
+
+  // Read once at boot, as the SSH key is. The Secret's mount is optional, so
+  // a missing file is the talosconfig not issued yet, not a fault.
+  private async readTalosconfig(path: string | null): Promise<string | null> {
+    if (!path) return null;
+    const file = Bun.file(path);
+    try {
+      if (!(await file.exists())) {
+        this.edges.log.info('no sandbox talosconfig yet', { file: path });
+        return null;
+      }
+      return readerTalosconfig(await file.text());
+    } catch (error) {
+      this.edges.log.error('the sandbox talosconfig could not be read', {
+        file: path,
         error: plain(error),
       });
       return null;
