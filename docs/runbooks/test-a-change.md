@@ -20,8 +20,7 @@ Use this runbook before you open a pull request. It gives the local command for 
 | --- | --- | --- |
 | `docs/`, a `.md` file, or `.agents/` | `mise run docs:check` | `wiki.yml` |
 | `apps/wiki/` | `bun run --cwd apps/wiki test`, then `mise run docs:build` | `wiki.yml` |
-| `nix/`, `flake.nix`, `flake.lock`, `dotfiles/`, or a topology JSON file | `mise run nix:check` | `nix-ci.yaml` |
-| One NixOS host | `NIX_REMOTE=ssh-ng://<build-host> HOST=<host> mise run nix:build` | None before the merge |
+| `nix/`, `flake.nix`, `flake.lock`, `dotfiles/`, or a topology JSON file | `mise run nix:check` | `nix-ci.yaml`, which builds only after the merge to `main` |
 | `clusters/` or `packages/charts/` | `mise run k8s:render-apps`, then `mise run k8s:check-rules` | `kustomize.yml` |
 | One directory under `clusters/<site>/` with a `kustomization.yaml` | `kubectl kustomize clusters/<site>/<dir>` | None |
 | `clusters/<site>/config/cluster-topology.json` | `conftest verify -p .github/policy`, then the `conftest test` command in `topology-contract.yml` | `topology-contract.yml` |
@@ -35,8 +34,6 @@ Use this runbook before you open a pull request. It gives the local command for 
 | `dotfiles/` | `mise -C dotfiles run dotfiles:check` | `dotfiles.yml` |
 | `.github/scripts/validation-impact.sh` | `mise run validation-impact:test` | `terraform.yml` |
 | `.github/scripts/cd-*.sh` or `.github/workflows/containers.yml` | `mise run cd-digest:test` | `containers.yml` |
-
-`<build-host>` is the machine that builds the host, from the table in [Deploy a NixOS host](deploy-a-nixos-host.md#before-you-start).
 
 1. List the files that the branch changes.
 
@@ -82,5 +79,5 @@ Use this runbook before you open a pull request. It gives the local command for 
 
 - [Apply an OpenTofu change](apply-an-opentofu-change.md): the OpenTofu checks and the Atlantis apply.
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md): the Flux path.
-- [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host after the build.
+- [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host after the checks pass.
 - [Build and release](../platform/build-and-release.md): CI routing and the workflows.

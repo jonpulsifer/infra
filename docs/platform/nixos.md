@@ -14,7 +14,7 @@ Each Linux host in the lab runs NixOS, a Linux distribution that builds each sys
 | disko | Partitions and mounts the disk | Each Kubernetes node |
 | sops-nix | Decrypts host secrets with the SSH host key | Hosts that import `nix/system/sops.nix` |
 | [Netboot](nixos/netboot.md) | Serves x86 PXE boot and forge's signed RAM-boot image | spore |
-| [Build host and cache](nixos/build-host-and-cache.md) | Arm64 builds and the Nix caches | forge and Cachix |
+| [Build host and cache](nixos/build-host-and-cache.md) | CI builds and the Nix caches | GitHub Actions, Cachix and forge |
 
 ## Registry
 
