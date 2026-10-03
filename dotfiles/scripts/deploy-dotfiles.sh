@@ -69,9 +69,6 @@ link_file "${DOTFILES_DIR}/skills" "${HOME}/.claude/skills"
 link_file "${DOTFILES_DIR}/skills" "${HOME}/.gemini/config/skills"
 
 link_file "${DOTFILES_DIR}/.pi/agent/agents" "${HOME}/.pi/agent/agents"
-link_file "${DOTFILES_DIR}/.pi/agent/extensions" "${HOME}/.pi/agent/extensions"
-link_file "${DOTFILES_DIR}/.pi/agent/prompts" "${HOME}/.pi/agent/prompts"
-link_file "${DOTFILES_DIR}/.pi/agent/themes" "${HOME}/.pi/agent/themes"
 link_file "${DOTFILES_DIR}/.claude/settings.json" "${HOME}/.claude/settings.json"
 link_file "${DOTFILES_DIR}/.claude/statusline.sh" "${HOME}/.claude/statusline.sh"
 

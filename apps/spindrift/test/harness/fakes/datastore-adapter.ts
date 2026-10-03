@@ -22,6 +22,7 @@ export interface FakeDatastoreAdapterOptions {
   permitThrows?: string;
   /** `permit` returns `false`: the backend had nothing to write. */
   permitNoops?: boolean;
+  protectThrows?: string;
 }
 
 export class FakeDatastoreAdapter implements DatastoreAdapter {
@@ -32,6 +33,7 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
   readonly destroyed: DatastoreRef[] = [];
   readonly observed: DatastoreRef[] = [];
   readonly permits: { ref: DatastoreRef; namespaces: readonly string[] }[] = [];
+  readonly protects: DatastoreRef[] = [];
 
   /** Each ref's states, oldest first; the last one repeats. */
   private readonly states = new Map<DatastoreRef, DatastoreState[]>();
@@ -97,6 +99,14 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
       throw new Error(this.options.permitThrows);
     }
     return !this.options.permitNoops;
+  }
+
+  async protect(_target: DeployTarget, ref: DatastoreRef): Promise<boolean> {
+    this.protects.push(ref);
+    if (this.options.protectThrows !== undefined) {
+      throw new Error(this.options.protectThrows);
+    }
+    return true;
   }
 
   async destroy(_target: DeployTarget, ref: DatastoreRef): Promise<void> {

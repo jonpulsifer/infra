@@ -69,7 +69,7 @@ export interface BrainConfig {
    * absent: its token is a secret, so it stays out of `SandboxConfig`.
    */
   readonly mcpServers: readonly McpServerConfig[];
-  /** Holds AGENTS.md and the skills; `null` is the repo root beside the source. */
+  /** Holds the persona, the owner's and the repo's AGENTS.md, and the skills; `null` is the repo root beside the source. */
   readonly profileRoot: string | null;
   /** 0 keeps every session. */
   readonly sessionRetentionDays: number;

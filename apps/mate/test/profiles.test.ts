@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ConfigError } from '../src/config.ts';
 import {
   type BaseTool,
+  effectiveGrants,
   type Grants,
   investigatorPreamble,
   lists,
@@ -258,9 +259,9 @@ describe('strayTag', () => {
 });
 
 describe('the preambles', () => {
-  test('operator keeps the text it had before profiles', () => {
+  test("operator's preamble holds the surface and sandbox facts only", () => {
     expect(operatorPreamble('Slack', OPTIONS)).toBe(
-      `You are Rowbutt, the owner's coding and operations agent for this homelab, answering in a Slack thread. Your replies post to the thread as Markdown; keep them short.
+      `You are answering in a Slack thread. Your replies post to the thread as Markdown; keep them short.
 
 Your tools run in this thread's own sandbox, a Kata microVM on the offsite cluster, with the infra repository checked out at /workspace at \`main\`. The sandbox starts on your first tool call, which can take a minute, so answer a question that needs no files or commands without tools.
 
@@ -269,7 +270,7 @@ Your tools run in this thread's own sandbox, a Kata microVM on the offsite clust
 - Background processes do not survive the end of the turn.
 - The sandbox and its uncommitted work are deleted when the thread goes quiet or another thread needs the slot. Commit and push work worth keeping before the turn ends. When that happens, mate says so at the start of the next message.
 - A mate restart can interrupt a running command. Its result then says it was interrupted and its outcome is unknown, so check what it did before you run it again.
-- Nix work runs on the site's build host: \`ssh riptide.lolwtf.ca\` for folly, \`ssh oldschool.lolwtf.ca\` for offsite.
+- Nix builds run in CI, not here. Open a PR, which CI evaluates; a merge to \`main\` builds and pushes to Cachix.
 - Check a change with \`mise run format:check && mise run lint\`, not \`mise run check\`, which needs pwsh.
 - The \`kthx_*\` tools, when listed, act on kthx built apps.`,
     );
@@ -284,5 +285,91 @@ Your tools run in this thread's own sandbox, a Kata microVM on the offsite clust
     expect(text).not.toContain('kthx_');
     expect(text.toLowerCase()).not.toContain('victoria-logs');
     expect(text).toContain('A 401 from folly');
+  });
+
+  // The persona file says who is speaking; a preamble that did too would
+  // contradict it.
+  test.each([
+    ['operator', operatorPreamble],
+    ['investigator', investigatorPreamble],
+  ])('%s leaves the identity to the persona', (_, preamble) => {
+    expect(preamble('Slack', OPTIONS)).not.toContain('You are Rowbutt');
+  });
+});
+
+describe('the overrides', () => {
+  test("operator's are built from its grants", () => {
+    const text = operator.overrides(operator.grants);
+    for (const claim of [
+      'pull requests you opened as clanky-bot[bot]',
+      '`atlantis apply`',
+      'cluster-admin',
+      '`op` reaches 1Password',
+    ]) {
+      expect(text).toContain(claim);
+    }
+    expect(custodian.overrides(custodian.grants)).toBe(text);
+  });
+
+  // The daily check's assignment merges pull requests it did not open.
+  test("custodian's let an assignment's merge rule replace the own-PR limit", () => {
+    const text = custodian.overrides(custodian.grants);
+    expect(text).toContain(
+      "An assignment's own merge rule replaces the limit to pull requests you opened.",
+    );
+    expect(text).toContain('A task that forbids a merge or an apply wins');
+  });
+
+  test('claim no merge or apply without a GitHub token', () => {
+    const text = operator.overrides({ ...operator.grants, github: false });
+    expect(text).not.toContain('merge pull requests');
+    expect(text).not.toContain('`atlantis apply`');
+    expect(text).not.toContain('push to keep work');
+    expect(text).toContain('never run `tofu apply`');
+  });
+
+  test('claim no cluster-admin or 1Password without those grants', () => {
+    const text = operator.overrides({
+      ...operator.grants,
+      kube: 'reader',
+      vault: false,
+    });
+    expect(text).not.toContain('cluster-admin');
+    expect(text).not.toContain('`op`');
+  });
+
+  test('effective grants drop what config leaves out', () => {
+    const none = {
+      github: false,
+      vault: false,
+      kube: { admin: false, reader: false },
+    };
+    expect(effectiveGrants(operator.grants, none)).toEqual({
+      ...operator.grants,
+      github: false,
+      vault: false,
+      kube: null,
+    });
+    expect(
+      effectiveGrants(investigator.grants, {
+        ...none,
+        kube: { admin: false, reader: true },
+      }),
+    ).toEqual(investigator.grants);
+    expect(
+      effectiveGrants(investigator.grants, {
+        github: true,
+        vault: true,
+        kube: { admin: true, reader: false },
+      }),
+    ).toEqual({ ...investigator.grants, kube: null });
+  });
+
+  test("investigator's grant nothing", () => {
+    const text = investigator.overrides(investigator.grants);
+    expect(text).toContain('You are read-only');
+    expect(text).not.toContain('clanky-bot[bot]');
+    expect(text).not.toContain('atlantis apply');
+    expect(text).not.toContain('cluster-admin');
   });
 });
