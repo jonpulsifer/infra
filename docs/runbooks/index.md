@@ -17,6 +17,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md): change `clusters/`, share a resource between the clusters, and make sure Flux applies it
 - [Get cluster admin access](get-cluster-admin-access.md): get `kubectl` access, use the break-glass certificate, and withdraw access
+- [Issue a talosconfig](issue-a-talosconfig.md): mint the owner's and Rowbutt's Talos API credentials and store them in 1Password
 - [Operate Postgres](operate-postgres.md): connect to, inspect and restart the CloudNativePG databases
 - [Restore a database](restore-a-database.md): restore a Postgres database from its barman backups, and run the restore drill
 - [Restore a volume](restore-a-volume.md): restore the files of a volume from a Velero backup
