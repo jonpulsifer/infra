@@ -39,10 +39,6 @@ locals {
       key_expiry_disabled = true
       tags                = []
     }
-    "tinytower" = {
-      key_expiry_disabled = false
-      tags                = []
-    }
     "weatherpi4" = {
       key_expiry_disabled = true
       tags                = ["tag:pi4"]
