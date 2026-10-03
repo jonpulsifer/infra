@@ -51,10 +51,6 @@
       url = "https://github.com/rowbutt.keys";
       flake = false;
     };
-    wannabekeys = {
-      url = "https://github.com/wannabehero.keys";
-      flake = false;
-    };
   };
 
   # Hosts are declared in nix/hosts/default.nix; every per-host output below derives from it.
