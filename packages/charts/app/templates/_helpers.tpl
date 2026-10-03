@@ -67,6 +67,21 @@ Database cluster name
 {{- end }}
 
 {{/*
+Refuses a recovery that archives into the prefix it recovers from: the plugin checks
+the archive is empty on the first WAL and the Cluster sticks at `Expected empty archive`.
+*/}}
+{{- define "app.backupPrefixes" -}}
+{{- with .Values.backup.recoverFrom }}
+{{- if not $.Values.backup.endpointURL }}
+{{- fail "backup.recoverFrom needs backup.endpointURL: the recovery reads the garage ObjectStore" }}
+{{- end }}
+{{- if eq . (default (include "app.databaseName" $) $.Values.backup.serverName) }}
+{{- fail (printf "backup.recoverFrom %q is the prefix this Cluster archives to: set backup.serverName to a new one" .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Migration job name - includes image tag for immutability
 */}}
 {{- define "app.migrationName" -}}

@@ -4,6 +4,7 @@ pins exist nowhere else but the Garage backup in `backup.yaml`, so an uninstall 
 Cluster by default.
 */}}
 {{- if .Values.database.enabled }}
+{{- include "spindrift.backupPrefixes" . }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -27,12 +28,28 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: garage
+        {{- with .Values.backup.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
   {{- end }}
   enableSuperuserAccess: false
   storage:
     storageClass: {{ .Values.database.storageClass }}
     size: {{ .Values.database.size }}
   bootstrap:
+  {{- if .Values.backup.recoverFrom }}
+    recovery:
+      source: origin
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: garage
+          serverName: {{ .Values.backup.recoverFrom | quote }}
+  {{- else }}
     initdb:
       database: {{ .Values.database.name }}
       owner: {{ .Values.database.name }}
@@ -40,4 +57,5 @@ spec:
       localeCollate: C
       localeCType: C
       dataChecksums: true
+  {{- end }}
 {{- end }}

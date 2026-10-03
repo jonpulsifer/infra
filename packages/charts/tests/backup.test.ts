@@ -215,4 +215,66 @@ describe.each(CASES)('the $chart database backup', (c) => {
   test('refuses an ExternalSecret with no 1Password item', async () => {
     await expect(withBackup({ item: '' })).rejects.toThrow('backup.item');
   });
+
+  test('archives under backup.serverName in place of the Cluster name', async () => {
+    const cluster = (await withBackup({ serverName: `${c.database}-2` })).find(
+      (o) => o.kind === 'Cluster' && o.metadata.name === c.database,
+    ) as Rendered;
+    expect(cluster.spec.plugins[0].parameters).toEqual({
+      barmanObjectName: 'garage',
+      serverName: `${c.database}-2`,
+    });
+    expect(cluster.spec.bootstrap.initdb).toBeDefined();
+    expect(cluster.spec.externalClusters).toBeUndefined();
+  });
+
+  test('recovers a re-created Cluster from the old prefix and archives under the new one', async () => {
+    const cluster = (
+      await withBackup({
+        serverName: `${c.database}-2`,
+        recoverFrom: c.database,
+      })
+    ).find(
+      (o) => o.kind === 'Cluster' && o.metadata.name === c.database,
+    ) as Rendered;
+    expect(cluster.spec.plugins[0].parameters.serverName).toBe(
+      `${c.database}-2`,
+    );
+    expect(cluster.spec.bootstrap.initdb).toBeUndefined();
+    expect(cluster.spec.bootstrap.recovery).toMatchObject({ source: 'origin' });
+    expect(cluster.spec.bootstrap.recovery.database).toBeString();
+    expect(cluster.spec.bootstrap.recovery.owner).toBe(
+      cluster.spec.bootstrap.recovery.database,
+    );
+    expect(cluster.spec.externalClusters).toEqual([
+      {
+        name: 'origin',
+        plugin: {
+          name: 'barman-cloud.cloudnative-pg.io',
+          parameters: { barmanObjectName: 'garage', serverName: c.database },
+        },
+      },
+    ]);
+  });
+
+  test('refuses a recovery that archives into the prefix it recovers from', async () => {
+    await expect(withBackup({ recoverFrom: c.database })).rejects.toThrow(
+      'backup.serverName',
+    );
+    await expect(
+      withBackup({
+        serverName: `${c.database}-2`,
+        recoverFrom: `${c.database}-2`,
+      }),
+    ).rejects.toThrow('backup.serverName');
+  });
+
+  test('refuses a recovery with no store to read', async () => {
+    await expect(
+      render(c.chart, c.namespace, {
+        ...c.values,
+        backup: { recoverFrom: c.database },
+      }),
+    ).rejects.toThrow('backup.endpointURL');
+  });
 });
