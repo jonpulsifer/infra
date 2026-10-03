@@ -70,6 +70,16 @@ spec:
         # on `cluster`.
         externalLabels:
           cluster: ${CLUSTER_NAME}
+        # No node is tainted, so this term alone keeps the TSDB's writes off the
+        # control-plane node's disk, which etcd shares. The chart merges it with
+        # its soft podAntiAffinity.
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/control-plane
+                      operator: DoesNotExist
         storageSpec:
           volumeClaimTemplate:
             spec:
