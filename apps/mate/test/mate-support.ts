@@ -112,6 +112,7 @@ export function mateConfig(overrides: ConfigOverrides = {}): Config {
     },
     githubApp: null,
     sshKeyFile: null,
+    talosconfigFile: null,
     slack: null,
     custodianChannel: null,
     ...rest,

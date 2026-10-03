@@ -115,8 +115,9 @@ describe('config from the environment', () => {
     expect(() => readConfig({ ...minimal, MATE_SANDBOX_IMAGE: ' ' })).toThrow(
       'MATE_SANDBOX_IMAGE is required',
     );
-    const { sandbox, brain, githubApp, sshKeyFile } = readConfig(minimal);
-    expect({ sandbox, brain, githubApp, sshKeyFile }).toEqual({
+    const { sandbox, brain, githubApp, sshKeyFile, talosconfigFile } =
+      readConfig(minimal);
+    expect({ sandbox, brain, githubApp, sshKeyFile, talosconfigFile }).toEqual({
       sandbox: {
         image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
         runtimeClass: 'kata-clh',
@@ -131,6 +132,7 @@ describe('config from the environment', () => {
         kubeReaderServiceAccount: null,
         kubeContext: 'cluster',
         kubePeers: [],
+        labJump: 'capsule.lolwtf.ca',
         kthx: {
           origin: null,
           sitesSecret: 'mate-kthx-sites',
@@ -151,6 +153,7 @@ describe('config from the environment', () => {
       },
       githubApp: null,
       sshKeyFile: null,
+      talosconfigFile: null,
     });
     expect(() => readConfig({ ...minimal, MATE_TURN_MINUTES: '0' })).toThrow(
       'MATE_TURN_MINUTES',
@@ -184,6 +187,39 @@ describe('config from the environment', () => {
     ).toThrow(
       'MATE_SANDBOX_KUBE_READER_SA must differ from MATE_SANDBOX_KUBE_SA',
     );
+  });
+
+  test('Lab Net is reached through capsule unless another host is named, and only a host name', () => {
+    expect(readSandboxConfig(minimal).labJump).toBe('capsule.lolwtf.ca');
+    expect(
+      readSandboxConfig({
+        ...minimal,
+        MATE_SANDBOX_LAB_JUMP: ' spore.lolwtf.ca ',
+      }).labJump,
+    ).toBe('spore.lolwtf.ca');
+    for (const bad of [
+      'root@spore',
+      'spore:2222',
+      'spore\n  ProxyCommand x',
+      '-oFoo',
+    ]) {
+      expect(() =>
+        readSandboxConfig({ ...minimal, MATE_SANDBOX_LAB_JUMP: bad }),
+      ).toThrow('MATE_SANDBOX_LAB_JUMP is not a host name');
+    }
+  });
+
+  test('a talosconfig is read only once a file is named, outside the sandbox config', () => {
+    expect(readConfig(minimal).talosconfigFile).toBeNull();
+    expect(
+      readConfig({
+        ...minimal,
+        MATE_TALOSCONFIG_FILE: ' /var/run/mate/talos/config ',
+      }).talosconfigFile,
+    ).toBe('/var/run/mate/talos/config');
+    expect(
+      Object.keys(readSandboxConfig(minimal)).some((key) => /talos/i.test(key)),
+    ).toBe(false);
   });
 
   test('a sandbox reaches its vault only once a Secret names one', () => {

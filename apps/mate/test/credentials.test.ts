@@ -61,6 +61,8 @@ interface Options {
   cluster?: boolean;
   reader?: string | null;
   ssh?: string | null;
+  talos?: string | null;
+  jump?: string;
   peers?: string[];
   kthx?: boolean;
 }
@@ -73,12 +75,17 @@ function credentialled(opts: Options = {}): Rig & { app: FakeApp | null } {
       kubeServiceAccount: opts.cluster === false ? null : 'mate-sandbox-admin',
       kubeReaderServiceAccount: opts.reader ?? null,
       kubePeers: opts.peers ?? [],
+      ...(opts.jump ? { labJump: opts.jump } : {}),
       kthx: {
         origin: opts.kthx ? ORIGIN : null,
         sitesSecret: SECRET,
       },
     },
-    deps: { githubApp: app, sshKey: opts.ssh ?? null },
+    deps: {
+      githubApp: app,
+      sshKey: opts.ssh ?? null,
+      talosconfig: opts.talos ?? null,
+    },
   });
   if (opts.kthx) {
     r.hands = r.another({
@@ -181,12 +188,64 @@ describe('the stamp', () => {
       expect(config).toContain('StrictHostKeyChecking accept-new');
       expect(config).toContain('CanonicalizeHostname always');
       expect(config).toMatch(
-        /Host [^\n]*spore\.lolwtf\.ca[^\n]*\n {2}ProxyJump riptide\.lolwtf\.ca/,
+        /Host [^\n]*spore\.lolwtf\.ca[^\n]*\n {2}ProxyJump capsule\.lolwtf\.ca/,
       );
+      // The jump host is reached directly, not through itself.
+      expect(config).not.toMatch(/Host [^\n]*capsule\.lolwtf\.ca/);
+      expect(config).not.toContain('riptide');
       expect(config.indexOf('Host *')).toBeGreaterThan(
         config.indexOf('ProxyJump'),
       );
     });
+  });
+
+  test('the Lab Net jump host is the one the config names', async () => {
+    const r = credentialled({
+      ssh: 'PRIVATE-KEY-BYTES',
+      jump: 'spore.lolwtf.ca',
+    });
+    await turn(r, () => {
+      const config = read(r, '.ssh/config');
+      expect(config).toMatch(
+        /Host [^\n]*capsule\.lolwtf\.ca[^\n]*\n {2}ProxyJump spore\.lolwtf\.ca/,
+      );
+      expect(config).not.toMatch(/Host [^\n]*spore\.lolwtf\.ca/);
+    });
+  });
+
+  test('a talosconfig is written where talosctl looks, for the operator only', async () => {
+    const r = credentialled({ talos: 'TALOSCONFIG-BYTES' });
+    await turn(r, () => {
+      expect(read(r, '.talos/config')).toBe('TALOSCONFIG-BYTES');
+      expect(mode(home(r, '.talos/config'))).toBe(0o600);
+      expect(mode(home(r, '.talos'))).toBe(0o700);
+    });
+    expect(read(r, '.talos/config')).toBe('');
+
+    const investigator = credentialled({
+      app: null,
+      cluster: false,
+      reader: 'mate-sandbox-reader',
+      talos: 'TALOSCONFIG-BYTES',
+    });
+    await turn(
+      investigator,
+      () => expect(read(investigator, '.talos/config')).toBe(''),
+      INVESTIGATOR,
+    );
+  });
+
+  test('a talosconfig alone is reason enough to stamp', async () => {
+    const r = credentialled({ app: null, cluster: false, talos: 'TALOS' });
+    const { summary } = await turn(r, () => {
+      expect(read(r, '.talos/config')).toBe('TALOS');
+    });
+    expect(summary.stamped).toBe(true);
+  });
+
+  test('no talosconfig, and the file is empty', async () => {
+    const r = credentialled();
+    await turn(r, () => expect(read(r, '.talos/config')).toBe(''));
   });
 
   test('no key, and no client config pointing ssh at one', async () => {
@@ -338,7 +397,7 @@ describe('the peers', () => {
 
 describe('the retire', () => {
   test('blanks every file and revokes the token', async () => {
-    const r = credentialled({ ssh: 'PRIVATE-KEY-BYTES' });
+    const r = credentialled({ ssh: 'PRIVATE-KEY-BYTES', talos: 'TALOS' });
     const { summary } = await turn(r);
     expect(summary.stamped).toBe(true);
     for (const file of [
@@ -346,6 +405,7 @@ describe('the retire', () => {
       '.kube/config',
       '.ssh/id_ed25519',
       '.ssh/config',
+      '.talos/config',
     ]) {
       expect(read(r, file)).toBe('');
     }
@@ -354,7 +414,7 @@ describe('the retire', () => {
   });
 
   test('with the link gone, a one-shot command blanks them with no secret in argv', async () => {
-    const r = credentialled({ ssh: 'PRIVATE-KEY-BYTES' });
+    const r = credentialled({ ssh: 'PRIVATE-KEY-BYTES', talos: 'TALOS-BYTES' });
     const t = begin(r.hands.thread(THREAD, new Hooks(), OPERATOR));
     expect((await t.env.exec('true', undefined, C)).ok).toBe(true);
     const client = t.lease.current();
@@ -366,14 +426,20 @@ describe('the retire', () => {
       e.command.some((word) => word.includes('printf %s')),
     );
     expect(blank?.command.slice(0, 2)).toEqual(['/bin/sh', '-c']);
-    expect(blank?.command.slice(4)).toEqual(['', '', '', '']);
+    expect(blank?.command.slice(4)).toEqual(['', '', '', '', '']);
     for (const exec of r.fake.execs) {
       const argv = exec.command.join(' ');
       expect(argv).not.toContain('ghs-token');
       expect(argv).not.toContain('sa-token');
       expect(argv).not.toContain('PRIVATE-KEY-BYTES');
+      expect(argv).not.toContain('TALOS-BYTES');
     }
-    for (const file of ['.github-token', '.kube/config', '.ssh/id_ed25519']) {
+    for (const file of [
+      '.github-token',
+      '.kube/config',
+      '.ssh/id_ed25519',
+      '.talos/config',
+    ]) {
       expect(read(r, file)).toBe('');
     }
     expect(r.app?.revoked).toEqual(['ghs-token-1']);

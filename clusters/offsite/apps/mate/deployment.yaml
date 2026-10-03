@@ -25,12 +25,12 @@ spec:
         app.kubernetes.io/name: mate
         app.kubernetes.io/part-of: mate
       annotations:
-        # The tokens and the database URI are env vars, mate reads the SSH key
-        # and the database CA once at boot, and the App key file refreshes on
-        # the kubelet's schedule, so Reloader rolls the pod when one of these
-        # Secrets rotates. mate reads the model key on every request, so
-        # mate-opencode needs no restart.
-        secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app,mate-sandbox-ssh,mate-kthx-agent,mate-db-app,mate-db-ca
+        # The tokens and the database URI are env vars, mate reads the SSH key,
+        # the talosconfig and the database CA once at boot, and the App key
+        # file refreshes on the kubelet's schedule, so Reloader rolls the pod
+        # when one of these Secrets rotates. mate reads the model key on every
+        # request, so mate-opencode needs no restart.
+        secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app,mate-sandbox-ssh,mate-sandbox-talos,mate-kthx-agent,mate-db-app,mate-db-ca
     spec:
       # On SIGTERM mate lets running turns finish for a while, then closes the
       # rest for the next pod to resume. 45 seconds covers both steps.
@@ -187,6 +187,17 @@ spec:
             # sudo. mate stamps it into the sandbox per turn and clears it after.
             - name: MATE_SSH_KEY_FILE
               value: /var/run/mate/ssh/private-key
+            # The host the sandbox's ssh jumps through to folly's Lab Net hosts.
+            # riptide, a folly node, until offsite has a route to Lab Net and
+            # folly's firewall admits the sandbox on capsule's port 22; mate's
+            # default is capsule, which stays NixOS when the nodes move to Talos.
+            - name: MATE_SANDBOX_LAB_JUMP
+              value: riptide.lolwtf.ca
+            # An os:reader talosconfig with a context per cluster, stamped into
+            # the sandbox per turn and cleared after. mate refuses a file with
+            # any other role, and reads a missing one as none.
+            - name: MATE_TALOSCONFIG_FILE
+              value: /var/run/mate/talos/config
             # The private claiming host, which a sandbox reaches; its site tokens
             # are kept in the mate-kthx-sites Secret between sandboxes.
             - name: MATE_KTHX_ORIGIN
@@ -232,6 +243,9 @@ spec:
             - name: sandbox-ssh
               mountPath: /var/run/mate/ssh
               readOnly: true
+            - name: sandbox-talos
+              mountPath: /var/run/mate/talos
+              readOnly: true
             - name: opencode
               mountPath: /var/run/mate/opencode
               readOnly: true
@@ -275,6 +289,15 @@ spec:
         - name: sandbox-ssh
           secret:
             secretName: mate-sandbox-ssh
+            optional: true
+        # `optional`, as above: until the 1Password item exists a sandbox gets
+        # no talosconfig.
+        - name: sandbox-talos
+          secret:
+            secretName: mate-sandbox-talos
+            items:
+              - key: talosconfig
+                path: config
             optional: true
         # `optional`, as above: with no Secret every turn fails with the
         # provider's authentication error.

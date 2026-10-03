@@ -1,21 +1,37 @@
 ---
 title: Get cluster admin access
-description: Get kubectl access to folly and offsite with eight-hour tokens, use the break-glass certificate when tokens fail, and withdraw access through git.
+description: Get kubectl access to folly and offsite with eight-hour tokens through talosctl or SSH, use the break-glass certificate when tokens fail, and withdraw access.
 ---
 
-Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, or to withdraw it. Each kubectl context uses an eight-hour token for the `operator` ServiceAccount in `kube-system`, which has the `cluster-admin` ClusterRole. `kube-jit-token` mints the token over SSH on the control plane when kubectl needs one. The kubeconfig also holds a break-glass client certificate for each cluster, an emergency credential that works when tokens fail.
+Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, or to withdraw it. Each kubectl context uses an eight-hour token for the `operator` ServiceAccount in `kube-system`, which has the `cluster-admin` ClusterRole. The kubeconfig also holds a break-glass client certificate for each cluster, for when tokens fail.
+
+| Path | For a cluster | Certificate from | Token minted |
+| --- | --- | --- | --- |
+| Talos | Named by a context in `~/.talos/config` | `talosctl kubeconfig` | Locally, as the break-glass user |
+| SSH | With no such context | `sudo kubectl` on the control plane | Over SSH |
+
+Both control planes run NixOS, so both clusters take the SSH path.
 
 ## Before you start
 
-- You need SSH access as `jawn` to the control planes, [optiplex](../hosts/optiplex.md) and [retrofit](../hosts/retrofit.md).
 - Install the dotfiles, so that `update-kubeconfigs` and `kube-jit-token` are in `~/.local/bin`.
 - You need `kubectl` and `jq`.
+- For the SSH path, you need SSH access as `jawn` to the control planes, [optiplex](../hosts/optiplex.md) and [retrofit](../hosts/retrofit.md).
+- For the Talos path, you need `talosctl`, `op` and the item that [Issue a talosconfig](issue-a-talosconfig.md) creates.
 
 `<site>` is `folly` or `offsite`.
 
 ## Get a kubeconfig
 
-1. Write the kubeconfig.
+1. If the cluster runs Talos, add its admin context to `~/.talos/config`.
+
+   ```bash
+   talosctl config remove <site> --noconfirm   # an old context; merge renames a duplicate
+   op document get talos-<site>-admin --vault homelab --out-file /dev/shm/talos-<site>
+   talosctl config merge /dev/shm/talos-<site> && rm /dev/shm/talos-<site>
+   ```
+
+2. Write the kubeconfig.
 
    ```bash
    update-kubeconfigs
@@ -23,7 +39,7 @@ Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, 
 
    Result: `[SUCCESS] Successfully updated kubeconfig at <path>`, and the contexts `folly` and `offsite`. The old file is at `~/.kube/config.backup.<time>`.
 
-2. Make sure that the token works on each cluster.
+3. Make sure that the token works on each cluster.
 
    ```bash
    kubectl --context <site> get nodes
@@ -36,7 +52,7 @@ Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, 
 If `kube-jit-token` fails, do this procedure.
 
 > [!NOTE]
-> The break-glass user is the `O=system:masters` client certificate of the control plane. The API server checks it with a different authenticator from tokens, so it works when the ServiceAccount, its binding or the token API fails.
+> The break-glass user is an `O=system:masters` client certificate. The API server checks it with a different authenticator from tokens, so it works when the ServiceAccount, its binding or the token API fails.
 
 1. Run the kubectl command that failed with `--user <site>-breakglass`.
 
@@ -47,7 +63,7 @@ If `kube-jit-token` fails, do this procedure.
    Result: Each node shows `Ready`.
 
 2. If the certificate has expired, run `update-kubeconfigs` again.
-3. If both users fail, run kubectl on the control plane.
+3. If both users fail on the SSH path, run kubectl on the control plane.
 
    ```bash
    ssh optiplex.lolwtf.ca sudo kubectl get nodes   # folly
@@ -56,12 +72,18 @@ If `kube-jit-token` fails, do this procedure.
 
    Result: Each node shows `Ready`.
 
+4. If both users fail on the Talos path, check the control plane.
+
+   ```bash
+   talosctl --context <site> health
+   ```
+
 ## Withdraw access
 
-Use this procedure if you lose a workstation or an SSH key that can reach the control planes.
+Use this procedure if you lose a workstation, an SSH key or a talosconfig.
 
 > [!WARNING]
-> A lost workstation also holds the break-glass certificates. The API server cannot revoke a certificate. Only a rotation of the cluster CA withdraws them, as [PKI](../platform/pki.md) describes.
+> A lost workstation also holds the break-glass certificates and the talosconfig. Nothing can revoke them. Only a CA rotation withdraws them, as [PKI](../platform/pki.md) describes.
 
 > [!NOTE]
 > The `config` Flux Kustomization applies `clusters/base/operator-rbac.yaml` to both clusters. If you delete the binding with `kubectl`, Flux creates it again.
@@ -118,11 +140,14 @@ Use this procedure if you lose a workstation or an SSH key that can reach the co
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | `update-kubeconfigs` prints `Failed to fetch kubeconfig from <site>`. | SSH to the control plane failed. | Make sure that `ssh <address> true` works for the address that the script prints. |
-| The script connects to a wrong address. | The script reads `API_SERVER_IP` from `clusters/<site>/config/cluster-topology.json` in the checkout that it is linked from, and that checkout is out of date. | Pull the checkout, or set `INFRA_DIR` to an up-to-date one. |
-| kubectl prints `kube-jit-token: minting through <address> failed`. | SSH or `sudo` on the control plane failed. | Read the rest of the message. Use the break-glass certificate. |
+| The same message says `with talosctl`. | The Talos API failed. A NixOS control plane has none. | Run `talosctl --context <site> version`, or remove a NixOS cluster's context. |
+| The script connects to a wrong address. | The checkout that the script is linked from has an old `clusters/<site>/config/cluster-topology.json`. | Pull the checkout, or set `INFRA_DIR` to an up-to-date one. |
+| kubectl prints `kube-jit-token: minting through <address> failed`. | SSH or `sudo` on the control plane failed. | Use the break-glass certificate. |
+| kubectl prints `kube-jit-token: minting as <site>-breakglass failed`. | The admin certificate expired. | Run `update-kubeconfigs`. |
 | The `operator` binding comes back after you delete it. | Flux applies `clusters/base/operator-rbac.yaml`. | Remove it in git, as [Withdraw access](#withdraw-access) describes. |
 
 ## Related
 
 - [Kubernetes](../platform/kubernetes.md)
-- [PKI](../platform/pki.md): the cluster CAs.
+- [Issue a talosconfig](issue-a-talosconfig.md)
+- [PKI](../platform/pki.md): the cluster CAs and the talosconfig certificates.

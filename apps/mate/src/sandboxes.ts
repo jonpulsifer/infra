@@ -695,6 +695,7 @@ export class KubeHands implements Hands {
       kthxSites: deps.kthxSites,
       clusterCa: deps.clusterCa,
       sshKey: deps.sshKey,
+      talosconfig: deps.talosconfig,
       home: layout.home,
     });
     this.leaseDeps = {
