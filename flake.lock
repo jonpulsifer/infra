@@ -265,8 +265,7 @@
         "nixpkgs": "nixpkgs_3",
         "rowbuttkeys": "rowbuttkeys",
         "sops-nix": "sops-nix",
-        "unstable": "unstable",
-        "wannabekeys": "wannabekeys"
+        "unstable": "unstable"
       }
     },
     "rowbuttkeys": {
@@ -315,18 +314,6 @@
         "ref": "nixos-unstable",
         "repo": "nixpkgs",
         "type": "github"
-      }
-    },
-    "wannabekeys": {
-      "flake": false,
-      "locked": {
-        "narHash": "sha256-851D0BWN5/IN030Wcx3aKhpeC1pnWP3EZEcz5+0g4hQ=",
-        "type": "file",
-        "url": "https://github.com/wannabehero.keys"
-      },
-      "original": {
-        "type": "file",
-        "url": "https://github.com/wannabehero.keys"
       }
     }
   },
