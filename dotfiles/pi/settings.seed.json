@@ -1,0 +1,7 @@
+{
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-6-sol",
+  "defaultThinkingLevel": "medium",
+  "theme": "hipster-night",
+  "quietStartup": true
+}

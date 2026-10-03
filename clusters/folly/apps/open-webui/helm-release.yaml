@@ -16,6 +16,10 @@ spec:
   values:
     podAnnotations:
       backup.velero.io/backup-volumes: data
+    # The pipelines a user uploads live only on this volume.
+    pipelines:
+      podAnnotations:
+        backup.velero.io/backup-volumes: data
     ingress:
       enabled: true
       annotations:

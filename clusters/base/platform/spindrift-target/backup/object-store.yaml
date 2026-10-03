@@ -1,0 +1,42 @@
+---
+# The store a Postgres Datastore archives to. The engine adds the barman-cloud
+# plugin and a ScheduledBackup to each Datastore when this namespace holds
+# exactly one ObjectStore, so a second store here stops new ones archiving.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: garage
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: spindrift
+spec:
+  retentionPolicy: 30d
+  configuration:
+    destinationPath: s3://cnpg/spindrift-datastores/
+    endpointURL: ${GARAGE_S3_ENDPOINT}
+    s3Credentials:
+      accessKeyId: {name: garage-cnpg, key: ACCESS_KEY_ID}
+      secretAccessKey: {name: garage-cnpg, key: ACCESS_SECRET_KEY}
+      region: {name: garage-cnpg, key: REGION}
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+# The engine's Clusters carry no PodMonitor, and CNPGBackupStale reads the
+# plugin's backup timestamp from this scrape. folly's Prometheus selects on
+# the release label; offsite's selects every PodMonitor.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: datastores
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: spindrift
+    release: prom-stack
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics

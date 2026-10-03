@@ -8,7 +8,7 @@ import { readdirSync } from 'node:fs';
 import { HANDS_LABEL } from '../src/lease.ts';
 import { NETWORKS } from '../src/profiles.ts';
 import { CHECKOUT_LABEL, sandboxLabels } from '../src/sandboxes.ts';
-import { GUILD, INVESTIGATOR, THREAD } from './hands-support.ts';
+import { GUILD, INVESTIGATOR, OPERATOR, THREAD } from './hands-support.ts';
 
 type Json = Record<string, any>;
 
@@ -228,5 +228,20 @@ describe('the read-only sandbox account', () => {
       rule.resources.includes('serviceaccounts/token'),
     );
     expect(minting?.resourceNames).toContain(reader);
+  });
+});
+
+describe("the operator's overrides", () => {
+  // The prompt tells the model it may comment `atlantis apply`; Atlantis
+  // decides whether that comment applies.
+  test('claim an apply only the Atlantis policy grants', async () => {
+    expect(OPERATOR.overrides(OPERATOR.grants)).toContain(
+      'comment `atlantis apply`',
+    );
+    const appliers = await Bun.file(
+      new URL('clusters/offsite/apps/atlantis/policies/appliers.rego', ROOT),
+    ).text();
+    const set = /atlantis_appliers := \{([^}]*)\}/.exec(appliers)?.[1] ?? '';
+    expect(set).toContain('"clanky-bot[bot]"');
   });
 });

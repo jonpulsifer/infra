@@ -111,7 +111,7 @@
     "keys": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-TVKzmJVGX3vNSix9pFdMPr8HwxZbGEg3ebQiODW3Mq4=",
+        "narHash": "sha256-iIY0/FtcM1gLEsweaM8YqOBYMd3N8e+QI+joQgQ2km8=",
         "type": "file",
         "url": "https://github.com/jonpulsifer.keys"
       },

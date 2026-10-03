@@ -90,6 +90,21 @@
       datasourceTemplate: '{{#if datasource}}{{{datasource}}}{{else}}docker{{/if}}',
       versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}',
     },
+    {
+      // The annotated-dependency manager above reads .env, .sh and .yaml, and
+      // its value pattern does not fit a quoted HCL string.
+      customType: 'regex',
+      description: 'Talos OS and Kubernetes pins in the Talos roots',
+      managerFilePatterns: [
+        '/^clusters/[^/]+/talos/.+\\.tf$/',
+      ],
+      matchStrings: [
+        // # renovate: datasource=github-releases depName=siderolabs/talos
+        // talos_version = "v1.14.2"
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\n\\s*\\S+\\s*=\\s*"(?<currentValue>[^"]+)"',
+      ],
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}',
+    },
   ],
   customDatasources: {
     // The CloudNativePG operator versions that a cloudnative-pg chart ships,
@@ -217,6 +232,17 @@
       matchDepNames:    ['onepassword'],
       groupName: 'terraform 1password provider',
       groupSlug: 'terraform-1password-provider',
+    },
+    {
+      description:      'Terraform Talos provider',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchDepNames:    ['talos'],
+      // 0.x: a minor can change how talos_machine applies and upgrades a
+      // node. Read the release notes before the apply.
+      automerge: false,
+      groupName: 'terraform talos provider',
+      groupSlug: 'terraform-talos-provider',
     },
     // ============================================================
     // Semantic commit formatting
@@ -535,6 +561,29 @@
       matchManagers: ['nix'],
       matchPackageNames: ['dotfiles'],
       automerge: true,
+    },
+    // ============================================================
+    // Talos roots — an apply reboots nodes, so a pin is never merged unapplied
+    // ============================================================
+    {
+      // Atlantis applies a Talos root on the PR. An apply that changes the
+      // installer image reboots the control plane and then the workers, and
+      // one that changes the Kubernetes version upgrades every node's
+      // Kubernetes components. A green plan is not an apply, so these pins
+      // wait for the owner to apply each root and merge by hand.
+      description: 'Talos roots: review and apply by hand, one minor at a time',
+      matchFileNames: ['clusters/*/talos/*.tf'],
+      automerge: false,
+      rebaseWhen: 'behind-base-branch',
+      semanticCommitScope: 'talos',
+    },
+    {
+      // Talos 1.14 supports Kubernetes 1.33 to 1.37, and the Talos roots pin
+      // one minor below the ceiling. The owner lifts the bound one minor at
+      // a time.
+      description: 'Kubernetes stays inside the Talos support matrix until the owner lifts it',
+      matchDepNames: ['ghcr.io/siderolabs/kubelet'],
+      allowedVersions: '<1.37',
     },
     // ============================================================
     // Blocked

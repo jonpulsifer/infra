@@ -20,6 +20,7 @@ kubens = "latest"
 "github:cloudnative-pg/cloudnative-pg" = { version = "latest", exe = "kubectl-cnpg" }
 claude-code = "latest"
 opencode = "latest"
+pi = "latest"
 gh = "latest"
 node = "latest"
 

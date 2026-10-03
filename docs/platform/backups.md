@@ -53,6 +53,7 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 - `nix/services/garage.nix`, `nix/services/etcd-backup.nix`: Garage on spore, and the etcd snapshots
 - `clusters/offsite/garage/`: offsite's Garage
 - `clusters/base/platform/velero/`, `barman-cloud/`, `backups/`: Velero, the plugin and `backup-push`
+- `clusters/base/platform/spindrift-target/backup/`: the store the kthx Datastores archive to
 - `clusters/offsite/apps/restore-drill/`: the restore drill
 - `clusters/<site>/config/cluster-settings.yaml`: `GARAGE_S3_ENDPOINT`, `BACKUP_PUSH_SCHEDULE`
 - `terraform/gcp/projects/homelab-ng/backups.tf`: the buckets

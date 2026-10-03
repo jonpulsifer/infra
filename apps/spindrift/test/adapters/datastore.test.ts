@@ -16,6 +16,7 @@ import type { DeployTarget } from '../../src/adapters/deploy/contract.ts';
 import {
   FakeKubernetes,
   type FakeKubernetesOptions,
+  type FakeObject,
 } from '../harness/fakes/kubernetes-api.ts';
 
 function targetOn(fake: FakeKubernetes): DeployTarget {
@@ -34,6 +35,15 @@ function targetOn(fake: FakeKubernetes): DeployTarget {
         sourceRef: { name: 'charts', namespace: 'delivery' },
       },
     },
+  };
+}
+
+/** An installation-provided barman ObjectStore in the datastore namespace. */
+function aStore(name: string): FakeObject {
+  return {
+    apiVersion: 'barmancloud.cnpg.io/v1',
+    kind: 'ObjectStore',
+    metadata: { name, namespace: 'spindrift-datastores' },
   };
 }
 
@@ -76,6 +86,72 @@ describe('provision', () => {
     expect(fake.requests.at(-1)?.contentType).toBe(
       'application/apply-patch+yaml',
     );
+    // No ObjectStore in the namespace: the Cluster archives nowhere and no
+    // schedule is written, rather than one naming a store that is not there.
+    expect(object?.spec).not.toHaveProperty('plugins');
+    expect(fake.all('scheduledbackups')).toEqual([]);
+  });
+
+  test('archives to the one ObjectStore the datastore namespace holds', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+
+    await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 4,
+    });
+
+    const cluster = fake.get('clusters/spindrift-datastores/orders');
+    expect(cluster?.spec).toMatchObject({
+      plugins: [
+        {
+          name: 'barman-cloud.cloudnative-pg.io',
+          isWALArchiver: true,
+          parameters: { barmanObjectName: 'vault' },
+        },
+      ],
+    });
+    // Still one write: the schedule's first backup would meet a Cluster that
+    // is still bootstrapping, so `protect` adds it once the Cluster is Ready.
+    expect(fake.pathsOf('PATCH')).toHaveLength(1);
+  });
+
+  test('a grant that does not reach ObjectStores provisions as before', async () => {
+    const { fake, adapter, target } = adapterOn({
+      forbidden: ['objectstores'],
+    });
+
+    await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+
+    expect(
+      fake.get('clusters/spindrift-datastores/orders')?.spec,
+    ).not.toHaveProperty('plugins');
+  });
+
+  test('with several stores in the namespace it archives to none of them', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: {
+        'objectstores/spindrift-datastores/vault': aStore('vault'),
+        'objectstores/spindrift-datastores/attic': aStore('attic'),
+      },
+    });
+
+    await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+
+    expect(
+      fake.get('clusters/spindrift-datastores/orders')?.spec,
+    ).not.toHaveProperty('plugins');
+    expect(fake.all('scheduledbackups')).toEqual([]);
   });
 
   test('writes a ValkeyCluster with durable storage for valkey', async () => {
@@ -501,6 +577,177 @@ describe('destroy', () => {
     await adapter.destroy(target, ref);
     expect(fake.get('clusters/spindrift-datastores/orders')).toBeUndefined();
     await adapter.destroy(target, ref);
+  });
+
+  test('takes the backup schedule with it, which nothing else collects', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+    const ref = await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+    await adapter.protect(target, ref);
+    expect(fake.all('scheduledbackups')).toHaveLength(1);
+
+    await adapter.destroy(target, ref);
+
+    expect(fake.all('scheduledbackups')).toEqual([]);
+  });
+});
+
+/**
+ * A Datastore provisioned before its installation offered a store, brought
+ * under that store by the datastore loop.
+ */
+describe('protect', () => {
+  test('schedules a daily base backup for a Ready Cluster that archives', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+    const ref = await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 4,
+    });
+
+    expect(await adapter.protect(target, ref)).toBe(true);
+
+    const schedule = fake.get('scheduledbackups/spindrift-datastores/orders');
+    expect(schedule?.apiVersion).toBe('postgresql.cnpg.io/v1');
+    expect(schedule?.spec).toMatchObject({
+      method: 'plugin',
+      immediate: true,
+      backupOwnerReference: 'self',
+      cluster: { name: 'orders' },
+      pluginConfiguration: { name: 'barman-cloud.cloudnative-pg.io' },
+    });
+    // Six fields, seconds first, in UTC: 02:00-03:00 in Halifax all year.
+    expect(schedule?.spec).toMatchObject({
+      schedule: expect.stringMatching(/^0 \d{1,2} 6 \* \* \*$/),
+    });
+  });
+
+  test('two base backups do not start on the same minute by default', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+    for (const name of ['orders', 'ledger']) {
+      const ref = await adapter.provision(target, {
+        name,
+        engine: 'postgres',
+        storageGiB: 1,
+      });
+      await adapter.protect(target, ref);
+    }
+
+    const schedules = fake
+      .all('scheduledbackups')
+      .map((item) => (item.spec as { schedule: string }).schedule);
+    expect(new Set(schedules).size).toBe(2);
+  });
+
+  test('archives a Cluster written before the store existed, then schedules it', async () => {
+    const { fake, adapter, target } = adapterOn();
+    const ref = await adapter.provision(target, {
+      name: 'ledger',
+      engine: 'postgres',
+      storageGiB: 10,
+    });
+    fake.place('objectstores/spindrift-datastores/vault', aStore('vault'));
+
+    expect(await adapter.protect(target, ref)).toBe(true);
+
+    const cluster = fake.get('clusters/spindrift-datastores/ledger');
+    expect(cluster?.spec).toMatchObject({
+      instances: 1,
+      storage: { size: '10Gi' },
+      bootstrap: { initdb: { database: 'ledger', owner: 'ledger' } },
+      plugins: [{ parameters: { barmanObjectName: 'vault' } }],
+    });
+    // The instance restarts to load the plugin, so the first pass leaves the
+    // schedule, whose immediate backup would fail against it.
+    expect(fake.all('scheduledbackups')).toEqual([]);
+
+    await adapter.protect(target, ref);
+    expect(
+      fake.get('scheduledbackups/spindrift-datastores/ledger'),
+    ).toBeDefined();
+  });
+
+  test('a Cluster that is not Ready yet gets no schedule', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+      status: () => ({
+        conditions: [
+          { type: 'Ready', status: 'False', message: 'bootstrapping' },
+        ],
+      }),
+    });
+    const ref = await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+
+    expect(await adapter.protect(target, ref)).toBe(true);
+    expect(fake.all('scheduledbackups')).toEqual([]);
+  });
+
+  test('writes nothing while the namespace offers no store', async () => {
+    const { fake, adapter, target } = adapterOn();
+    const ref = await adapter.provision(target, {
+      name: 'ledger',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+    const writes = fake.pathsOf('PATCH').length;
+
+    expect(await adapter.protect(target, ref)).toBe(false);
+    expect(fake.pathsOf('PATCH')).toHaveLength(writes);
+  });
+
+  test('leaves a valkey alone: the store is for Postgres', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+    const ref = await adapter.provision(target, {
+      name: 'sessions',
+      engine: 'valkey',
+      storageGiB: 1,
+    });
+
+    expect(await adapter.protect(target, ref)).toBe(false);
+    expect(fake.all('scheduledbackups')).toEqual([]);
+  });
+
+  test('leaves a Datastore in the legacy namespace alone', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-apps/vault': aStore('vault') },
+    });
+
+    expect(
+      await adapter.protect(target, 'postgres/spindrift-apps/orders'),
+    ).toBe(false);
+    expect(fake.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('a Cluster deleted out of band is not written back', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+    const ref = await adapter.provision(target, {
+      name: 'ledger',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+    fake.remove('clusters/spindrift-datastores/ledger');
+    const writes = fake.pathsOf('PATCH').length;
+
+    expect(await adapter.protect(target, ref)).toBe(false);
+    expect(fake.pathsOf('PATCH')).toHaveLength(writes);
+    expect(fake.get('clusters/spindrift-datastores/ledger')).toBeUndefined();
   });
 });
 

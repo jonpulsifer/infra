@@ -18,7 +18,7 @@ This page defines the lab's own terms, and the tool terms that have a lab-specif
 | Bootstrap root | The OpenTofu root in `clusters/<site>/bootstrap/` that installs Flux on a cluster | [How changes ship](../platform/how-changes-ship.md#kubernetes) |
 | Break-glass certificate | A `system:masters` client certificate for use when tokens fail | [Get cluster admin access](../runbooks/get-cluster-admin-access.md#use-the-break-glass-certificate) |
 | Build | One run of a kthx build route | [Built apps](../apps/kthx/built-apps.md#builds) |
-| Build host | The machine that builds a NixOS closure before a deploy | [Build host and cache](../platform/nixos/build-host-and-cache.md) |
+| Build host | A machine that runs Nix builds for other machines over SSH, such as forge | [Build host and cache](../platform/nixos/build-host-and-cache.md) |
 | Build route | Where a kthx Build runs, chosen by its SLSA level | [Built apps](../apps/kthx/built-apps.md#builds) |
 | Built app | An App that kthx builds from a repository or archive, signs and deploys | [Built apps](../apps/kthx/built-apps.md) |
 | cathy | The office phone, a Cisco SPA504G | [PBX](../apps/pbx.md) |
