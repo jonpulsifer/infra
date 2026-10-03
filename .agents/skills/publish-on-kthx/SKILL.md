@@ -23,7 +23,9 @@ is the API reference a quick site's own code uses: `window.kthx`, `/api/db`,
 In a Rowbutt sandbox, `KTHX_ORIGIN` is preset and `kthx` is on `PATH`. Bearers
 persist across sandboxes: mate keeps `$XDG_CONFIG_HOME/kthx/sites.json` in
 Secret `mate-kthx-sites` and stamps it in at the start of each turn, so
-`kthx ls` lists every site Rowbutt has claimed.
+`kthx ls` lists every site Rowbutt has claimed. Elsewhere, such as the owner's
+workstation, set `KTHX_ORIGIN=https://kthx.lolwtf.ca`, which answers on the
+lab, the offsite LAN or the tailnet.
 
 ```bash
 kthx init --name <name> <dir>   # claims the name; writes <dir>/kthx.json
@@ -45,16 +47,14 @@ printf '%s\n' <name> | kthx rm  # deletes the site; the name stays taken
   the site's source lives here.
 - A lost bearer is a lost site. Do not edit `sites.json` by hand.
 
-From a human's shell the same commands work on the lab, the offsite LAN or the
-tailnet with `KTHX_ORIGIN=https://kthx.lolwtf.ca`.
-
 ## Built apps
 
-When mate holds an agent token, it bridges the kthx MCP server's tools into
-the session as `kthx_*` tools, one per console command.
+The kthx MCP server has one tool per console command. Rowbutt gets them as
+`kthx_*` tools when mate holds an agent token. pi on the owner's workstation
+gets them as `mcp__kthx__*` tools from the `mate` pi package, with the owner's
+workstation token and never the bot's; load them with `tool_search`.
 `docs/runbooks/connect-an-agent-to-kthx.md` says what a token can and cannot
-do, and `docs/apps/kthx/security.md` lists the identities. No `kthx_*` tools
-in the session means mate holds no token, the engine refused it (expired or
-revoked), or mate has not reached the engine since it started; mate retries
-every minute. Say which is likely rather than retry, and do not assume the
-token is bad.
+do, and `docs/apps/kthx/security.md` lists the identities. No kthx tools in
+the session means no token, an expired or revoked token, or, for Rowbutt, that
+mate has not reached the engine since it started; mate retries every minute.
+Say which is likely rather than retry, and do not assume the token is bad.

@@ -18,6 +18,7 @@ import {
   type Fetcher,
   KubernetesApi,
   type KubernetesObject,
+  KubernetesRequestError,
   type TokenProvider,
 } from '../deploy/kubernetes/api.ts';
 import { REJECTION_EVENTS } from '../deploy/kubernetes/diagnose.ts';
@@ -58,6 +59,26 @@ const NETWORK_POLICY = {
   kind: 'NetworkPolicy',
   plural: 'networkpolicies',
 } as const;
+
+/**
+ * The CloudNativePG backup objects. The installation provides the store in the
+ * datastore namespace; a Postgres Datastore archives to it when there is
+ * exactly one, so the engine never has to name a bucket.
+ */
+const OBJECT_STORE = {
+  apiVersion: 'barmancloud.cnpg.io/v1',
+  kind: 'ObjectStore',
+  plural: 'objectstores',
+} as const;
+
+const SCHEDULED_BACKUP = {
+  apiVersion: 'postgresql.cnpg.io/v1',
+  kind: 'ScheduledBackup',
+  plural: 'scheduledbackups',
+} as const;
+
+/** The plugin that archives WAL and takes base backups into an ObjectStore. */
+const BARMAN_PLUGIN = 'barman-cloud.cloudnative-pg.io';
 
 /**
  * Both operators suffix this name for child objects and pods; 50 leaves room
@@ -104,13 +125,22 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     // Never an App's namespace: a Datastore outlives its Apps. A ref naming
     // another namespace stays there, since CloudNativePG cannot move a PVC.
     const namespace = datastoreNamespaceFor(connection);
-    const object = this.object(namespace, request);
+    const api = this.api(connection);
+    const size = `${request.storageGiB}Gi`;
+    // Archiving from the first WAL segment; the base backup schedule waits for
+    // `protect`, since a backup of a Cluster still bootstrapping fails.
+    const object =
+      request.engine === 'postgres'
+        ? postgresObject(
+            namespace,
+            request.name,
+            size,
+            await storeIn(api, namespace),
+          )
+        : valkeyObject(namespace, request.name, size);
     // Server-side apply keeps this idempotent without a read-first check that
     // would race the operator.
-    await this.api(connection).apply(
-      object,
-      ENGINE_KINDS[request.engine].plural,
-    );
+    await api.apply(object, ENGINE_KINDS[request.engine].plural);
     return refOf(request.engine, namespace, request.name);
   }
 
@@ -191,14 +221,73 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       namespace: parsed.namespace,
       name: parsed.name,
     });
-    // Nothing garbage-collects the policy. Outside the datastore namespace the
-    // Role grants no networkpolicies, and a 403 would make the row undeletable.
+    // Nothing garbage-collects the policy or the backup schedule. Outside the
+    // datastore namespace the Role grants neither, and a 403 would make the
+    // row undeletable.
     if (parsed.namespace !== datastoreNamespaceFor(connection)) return;
     await this.api(connection).delete({
       ...NETWORK_POLICY,
       namespace: parsed.namespace,
       name: policyName(parsed.name),
     });
+    if (parsed.engine === 'postgres') {
+      await this.api(connection).delete({
+        ...SCHEDULED_BACKUP,
+        namespace: parsed.namespace,
+        name: parsed.name,
+      });
+    }
+  }
+
+  /**
+   * Re-applies the Cluster with the namespace's ObjectStore as its WAL
+   * archiver, then adds its daily ScheduledBackup once the Cluster is Ready
+   * with the archiver already in place: the schedule's first backup runs on
+   * creation, and fails against an instance still restarting to load the
+   * plugin. `false` for a Valkey, for a ref outside the datastore namespace,
+   * and when the namespace offers no store or more than one: the engine does
+   * not guess where a database's history goes.
+   */
+  async protect(target: DeployTarget, ref: DatastoreRef): Promise<boolean> {
+    const connection = connectionOf(target);
+    const parsed = parseRef(ref);
+    if (connection === null || parsed === null) return false;
+    if (parsed.engine !== 'postgres') return false;
+    if (parsed.namespace !== datastoreNamespaceFor(connection)) return false;
+
+    const api = this.api(connection);
+    const store = await storeIn(api, parsed.namespace);
+    if (store === null) return false;
+
+    const live = await api.get({
+      apiVersion: ENGINE_KINDS.postgres.apiVersion,
+      plural: ENGINE_KINDS.postgres.plural,
+      namespace: parsed.namespace,
+      name: parsed.name,
+    });
+    const spec = live?.spec as
+      | { storage?: { size?: unknown }; plugins?: { name?: string }[] }
+      | undefined;
+    // The size comes from the live object: the request that provisioned it is
+    // not kept, and a whole-object apply is the only safe one. Omitting a field
+    // this manager owns would release it, and the operator then drops it.
+    const size = spec?.storage?.size;
+    if (typeof size !== 'string') return false;
+
+    await api.apply(
+      postgresObject(parsed.namespace, parsed.name, size, store),
+      ENGINE_KINDS.postgres.plural,
+    );
+    const archiving = (spec?.plugins ?? []).some(
+      (plugin) => plugin.name === BARMAN_PLUGIN,
+    );
+    if (archiving && postgresStatus(live!).phase === 'LIVE') {
+      await api.apply(
+        scheduledBackup(parsed.namespace, parsed.name),
+        SCHEDULED_BACKUP.plural,
+      );
+    }
+    return true;
   }
 
   /**
@@ -322,83 +411,6 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     });
   }
 
-  private object(
-    namespace: string,
-    request: DatastoreRequest,
-  ): KubernetesObject {
-    const kind = ENGINE_KINDS[request.engine];
-    const metadata = {
-      name: request.name,
-      namespace,
-      labels: {
-        'app.kubernetes.io/managed-by': 'spindrift',
-        'app.kubernetes.io/name': request.name,
-      },
-    };
-    const size = `${request.storageGiB}Gi`;
-
-    // No `storageClass`: the cluster default decides, and naming one would put
-    // an installation fact in the software.
-    if (request.engine === 'postgres') {
-      return {
-        apiVersion: kind.apiVersion,
-        kind: kind.kind,
-        metadata,
-        // ponytail: one instance, no scheduled backup. Raise `instances` and
-        // add `backup.barmanObjectStore`, on the request, once one needs it.
-        spec: {
-          instances: 1,
-          bootstrap: {
-            initdb: {
-              database: identifier(request.name),
-              owner: identifier(request.name),
-            },
-          },
-          storage: { size },
-        },
-      };
-    }
-    return {
-      apiVersion: kind.apiVersion,
-      kind: kind.kind,
-      metadata,
-      // A single primary, like `instances: 1`. `persistence` is set because the
-      // operator's default is ephemeral.
-      spec: {
-        shards: 1,
-        replicas: 0,
-        persistence: { size },
-        // The namespace enforces restricted Pod Security and the operator
-        // sets no security context, so without this every pod is refused.
-        //
-        // `runAsUser` because the valkey image has no `USER` and would be
-        // refused as root. 999/1000 is the valkey user that image creates.
-        podSecurityContext: {
-          runAsNonRoot: true,
-          runAsUser: 999,
-          runAsGroup: 1000,
-          // The volume, group-owned so the same identity can write it.
-          fsGroup: 1000,
-          seccompProfile: { type: 'RuntimeDefault' },
-        },
-        // Container-only fields `restricted` demands. The operator builds two
-        // containers; the exporter sidecar has its own field, below.
-        containers: [
-          {
-            name: 'server',
-            securityContext: {
-              allowPrivilegeEscalation: false,
-              capabilities: { drop: ['ALL'] },
-            },
-          },
-        ],
-        // Off: the pod block runs every container as the valkey uid, which the
-        // exporter image has no reason to accept. `enabled` has no CRD default.
-        exporter: { enabled: false },
-      },
-    };
-  }
-
   private async connectionFor(
     api: KubernetesApi,
     parsed: ParsedRef,
@@ -422,6 +434,165 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       ? null
       : `redis://${service}.${parsed.namespace}.svc:6379`;
   }
+}
+
+function metadataOf(
+  namespace: string,
+  name: string,
+): KubernetesObject['metadata'] {
+  return {
+    name,
+    namespace,
+    labels: {
+      'app.kubernetes.io/managed-by': 'spindrift',
+      'app.kubernetes.io/name': name,
+    },
+  };
+}
+
+/**
+ * No `storageClass`: the cluster default decides, and naming one would put an
+ * installation fact in the software. `store` names the namespace's
+ * ObjectStore, or `null` for a Cluster that archives nowhere.
+ */
+function postgresObject(
+  namespace: string,
+  name: string,
+  size: string,
+  store: string | null,
+): KubernetesObject {
+  const kind = ENGINE_KINDS.postgres;
+  return {
+    apiVersion: kind.apiVersion,
+    kind: kind.kind,
+    metadata: metadataOf(namespace, name),
+    // ponytail: one instance. Raise `instances` on the request once one needs it.
+    spec: {
+      instances: 1,
+      ...(store === null
+        ? {}
+        : {
+            plugins: [
+              {
+                name: BARMAN_PLUGIN,
+                isWALArchiver: true,
+                parameters: { barmanObjectName: store },
+              },
+            ],
+          }),
+      bootstrap: {
+        initdb: {
+          database: identifier(name),
+          owner: identifier(name),
+        },
+      },
+      storage: { size },
+    },
+  };
+}
+
+function valkeyObject(
+  namespace: string,
+  name: string,
+  size: string,
+): KubernetesObject {
+  const kind = ENGINE_KINDS.valkey;
+  return {
+    apiVersion: kind.apiVersion,
+    kind: kind.kind,
+    metadata: metadataOf(namespace, name),
+    // A single primary, like `instances: 1`. `persistence` is set because the
+    // operator's default is ephemeral.
+    spec: {
+      shards: 1,
+      replicas: 0,
+      persistence: { size },
+      // The namespace enforces restricted Pod Security and the operator
+      // sets no security context, so without this every pod is refused.
+      //
+      // `runAsUser` because the valkey image has no `USER` and would be
+      // refused as root. 999/1000 is the valkey user that image creates.
+      podSecurityContext: {
+        runAsNonRoot: true,
+        runAsUser: 999,
+        runAsGroup: 1000,
+        // The volume, group-owned so the same identity can write it.
+        fsGroup: 1000,
+        seccompProfile: { type: 'RuntimeDefault' },
+      },
+      // Container-only fields `restricted` demands. The operator builds two
+      // containers; the exporter sidecar has its own field, below.
+      containers: [
+        {
+          name: 'server',
+          securityContext: {
+            allowPrivilegeEscalation: false,
+            capabilities: { drop: ['ALL'] },
+          },
+        },
+      ],
+      // Off: the pod block runs every container as the valkey uid, which the
+      // exporter image has no reason to accept. `enabled` has no CRD default.
+      exporter: { enabled: false },
+    },
+  };
+}
+
+/**
+ * A daily base backup through the plugin; WAL archiving is continuous. The
+ * first runs on creation, so a Datastore has a recovery point within minutes.
+ * Backup objects are owned by the schedule, and the store's retention policy,
+ * not this object, prunes the archive.
+ */
+function scheduledBackup(namespace: string, name: string): KubernetesObject {
+  return {
+    apiVersion: SCHEDULED_BACKUP.apiVersion,
+    kind: SCHEDULED_BACKUP.kind,
+    metadata: metadataOf(namespace, name),
+    spec: {
+      schedule: backupSchedule(name),
+      method: 'plugin',
+      immediate: true,
+      backupOwnerReference: 'self',
+      cluster: { name },
+      pluginConfiguration: { name: BARMAN_PLUGIN },
+    },
+  };
+}
+
+/**
+ * CloudNativePG's six-field cron, in UTC. The hour is fixed; the minute is
+ * spread by name so a fleet's base backups never all start together.
+ */
+function backupSchedule(name: string): string {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return `0 ${hash % 60} 6 * * *`;
+}
+
+/**
+ * The namespace's one ObjectStore, or `null`. A cluster without the kind (no
+ * plugin installed) and a grant that does not reach it both offer none, so
+ * provisioning works as before. Several stores offer no default either.
+ */
+async function storeIn(
+  api: KubernetesApi,
+  namespace: string,
+): Promise<string | null> {
+  const stores = await api
+    .list({
+      apiVersion: OBJECT_STORE.apiVersion,
+      plural: OBJECT_STORE.plural,
+      namespace,
+    })
+    .catch((error: unknown) => {
+      if (error instanceof KubernetesRequestError && error.status === 403) {
+        return null;
+      }
+      throw error;
+    });
+  if (stores === null || stores.length !== 1) return null;
+  return stores[0]!.metadata.name;
 }
 
 interface RefusalEvent {

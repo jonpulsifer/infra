@@ -1,6 +1,6 @@
 ---
 title: Connect an agent to kthx
-description: Mint an agent token in the kthx console and connect an MCP client to the kthx engine, which serves each console command as a tool.
+description: Mint an agent token in the kthx console and connect an MCP client, Rowbutt or the owner's workstation to the kthx engine, which serves each console command as a tool.
 ---
 
 Use this runbook to give an MCP client the commands of the kthx built-apps console. The kthx engine on offsite serves each command in `apps/spindrift/src/commands/registry.ts` as a Model Context Protocol (MCP) tool at `https://spindrift-control.lolwtf.dev/mcp`. The endpoint accepts only an agent token, which you mint in the console at `https://kthx.lolwtf.ca`. A token lasts 90 days. The console shows it once, because kthx stores only its SHA-256 hash.
@@ -110,6 +110,38 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
    Result: Rowbutt names tools whose names start with `kthx_`.
 
 A revoked or expired token makes the engine refuse mate. After the next restart the agent has no `kthx_*` tools, and until then their calls fail. Mint a new token, and update the item.
+
+## Give the workstation a token
+
+The `mate` pi package connects pi on the owner's workstation to the engine. `dotfiles/pi/mate/extensions/mcp.ts` reads the token with `op read` when pi starts, so the token never enters pi's environment. pi names the tools `mcp__kthx__*`.
+
+> [!WARNING]
+> pi asks for no approval before each call, so the warning in [Connect a client](#connect-a-client) applies in full. The owner accepts this for the workstation token.
+
+1. Mint an agent token as above. Do not use Rowbutt's token.
+2. In the `homelab` vault in 1Password, create an API Credential item titled `workstation kthx agent token`.
+3. Put the token in the item's `credential` field.
+4. Put the date 90 days after the mint in the item's `expires` field.
+5. Make sure that the item resolves. The command does not print the token.
+
+   ```bash
+   op read 'op://homelab/workstation kthx agent token/credential' >/dev/null && echo resolves
+   ```
+
+   Result: The command prints `resolves`.
+
+6. Start pi from a shell where `op` is signed in.
+7. Ask pi to call the kthx tool `getDeveloperSurfaces`. The tool is read-only.
+
+   Result: The endpoint's private and public URLs, and the quick-site origin and zone.
+
+The extension sends this `Authorization` header, a command that pi runs in a shell:
+
+```text
+!t=$(op read 'op://homelab/workstation kthx agent token/credential') && printf 'Bearer %s' "$t"
+```
+
+If `op` fails, pi reports that `kthx` failed and starts without it. pi reads the token once when it starts, so restart pi after you replace the token.
 
 ## Revoke a token
 

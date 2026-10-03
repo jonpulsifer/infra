@@ -17,7 +17,9 @@ needs beyond it.
 
 ## Reach it
 
-- Rowbutt has the `weather_*` tools. Call them directly.
+- If the session lists the weather server's tools, call them directly. The
+  tool names below are the server's own: Rowbutt names them `weather_<tool>`,
+  and pi names them `mcp__weather__<tool>`.
 - Anywhere else, use HTTP on the tailnet. `<tailnet>` is `locals.fleet.tailnet` in
   `terraform/network/tailscale/fleet.tf.json`:
 

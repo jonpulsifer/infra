@@ -10,7 +10,6 @@ Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (re
 - Run `mise run devshell`.
 - You need physical access to the host and a USB drive.
 - You need SSH access to the host as `jawn`.
-- `<build-host>` is `riptide.lolwtf.ca` for a `folly` node. For an `offsite` node, use another `offsite` node, such as `oldschool.lolwtf.ca`.
 
 ## Declare the node
 
@@ -30,17 +29,9 @@ Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (re
 
    Result: The command completes without an error.
 
-6. Build the closure of the host.
-
-   ```bash
-   NIX_REMOTE=ssh-ng://<build-host> HOST=<host> mise run nix:build
-   ```
-
-   Result: The command prints the store path of the closure.
-
-7. If the host has the `folly` tag, add it to `static_records` in `terraform/network/unifi/folly/k8s.tf`.
-8. Open a pull request.
-9. If the host has the `folly` tag, apply the OpenTofu change, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes.
+6. If the host has the `folly` tag, add it to `static_records` in `terraform/network/unifi/folly/k8s.tf`.
+7. Open a pull request.
+8. If the host has the `folly` tag, apply the OpenTofu change, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes.
 
 ## Install the node
 

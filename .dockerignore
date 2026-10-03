@@ -9,6 +9,8 @@
 !bun.lock
 !turbo.json
 !AGENTS.md
+!dotfiles/pi/mate/persona.md
+!dotfiles/.agents/AGENTS.md
 !dotfiles/skills
 !.agents/skills
 !images/mate-sandbox/gh

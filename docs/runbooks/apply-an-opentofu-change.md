@@ -3,7 +3,7 @@ title: Apply an OpenTofu change
 description: Change an OpenTofu root, check it on your machine, and apply it through Atlantis on the pull request.
 ---
 
-Use this runbook to change the OpenTofu code in `terraform/` or `clusters/<site>/bootstrap/`. OpenTofu (`tofu`) is the open-source fork of Terraform. A root is a directory whose `.tf` files declare a `backend` block, and each root has its own state. A module is a directory of `.tf` files that roots call, such as a directory in `terraform/modules/`. Atlantis is the server that plans and applies roots from pull request comments. A successful apply merges the pull request.
+Use this runbook to change the OpenTofu code in `terraform/`, `clusters/<site>/bootstrap/` or `clusters/<site>/talos/`. OpenTofu (`tofu`) is the open-source fork of Terraform. A root is a directory whose `.tf` files declare a `backend` block, and each root has its own state. A module is a directory of `.tf` files that roots call, such as a directory in `terraform/modules/`. Atlantis is the server that plans and applies roots from pull request comments. A successful apply merges the pull request.
 
 > [!CAUTION]
 > Do not run `tofu apply` on your machine. A local apply competes with Atlantis for the state lock, and the live resources then differ from the state.
@@ -93,7 +93,7 @@ Use this runbook to change the OpenTofu code in `terraform/` or `clusters/<site>
    atlantis plan -d <root>
    ```
 
-5. Read each plan. If a plan replaces or deletes a resource that you did not change, do not apply it.
+5. Read each plan. If a plan replaces or deletes a resource that you did not change, do not apply it. In a `clusters/<site>/talos/` root, a changed `image` on a `talos_machine` reboots that node on apply, and a changed `kubernetes_version` on `talos_cluster` upgrades the Kubernetes components of every node.
 
 > [!CAUTION]
 > If you plan with `-target`, the apply still merges the pull request. The resources outside the target stay unapplied.

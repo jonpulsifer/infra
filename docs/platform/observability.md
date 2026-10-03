@@ -43,6 +43,7 @@ The k6 operator on folly runs each new TestRun, a k6 test, in a runner Job. Each
 
 - Label each ServiceMonitor and PrometheusRule, and each PodMonitor on folly, `release: prom-stack`, or Prometheus ignores it. offsite selects every PodMonitor.
 - Route only `/insert` of VictoriaLogs out of the cluster. It has no authentication, so another path exposes every log.
+- Keep Prometheus, VictoriaLogs and Tempo off folly's control-plane node. Each carries a `nodeAffinity` that excludes `node-role.kubernetes.io/control-plane`, because their writes share the disk that etcd uses.
 - Run `mise run k8s:check-rules` after a rule change, or a broken rule fails CI.
 
 ## Where it lives
