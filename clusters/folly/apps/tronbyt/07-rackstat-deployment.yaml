@@ -35,10 +35,11 @@ spec:
               value: http://prom-stack-kube-prometheus-prometheus.monitoring.svc:9090
             - name: CLUSTER_NAME
               value: ${CLUSTER_NAME}
-            # offsite is its API VIP, literal because Flux substitutes only this
-            # cluster's topology. lb is Grafana's VIP, a route the UDM learns by BGP.
+            # offsite is its API server by its API_SERVER_HOSTNAME, a Cloudflare
+            # record from its topology: Flux substitutes only this cluster's.
+            # lb is Grafana's VIP, a route the UDM learns by BGP.
             - name: PROBES
-              value: wan=1.1.1.1:443,offsite=10.89.0.10:6443,lb=10.3.0.66:443
+              value: wan=1.1.1.1:443,offsite=offsite.lolwtf.ca:6443,lb=10.3.0.66:443
             - name: ROOT_KUSTOMIZATION
               value: apps
           livenessProbe:

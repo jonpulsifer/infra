@@ -28,23 +28,14 @@ lab:
     hostname: nuc-wifi
     ip: 30
 
+# A node's address is NODE_ADDRESSES in clusters/folly/config/cluster-topology.json;
+# k8s.tf reserves it on the MAC here. The offsite nodes are in
+# ../offsite/clients.yaml.
 k8s:
   nuc:
     mac: 1c:69:7a:01:2a:ef
     dev-id: 3592
     skip_forget_on_destroy: false
-  800g2:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: ec:8e:b5:72:35:24
-  800g2-2:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: 40:b0:34:f3:90:bd
-  800g3-1:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: ac:e2:d3:0d:90:66
   800g3-2:
     dev-id: 2847
     skip_forget_on_destroy: false
@@ -57,6 +48,10 @@ k8s:
     dev-id: 2847
     skip_forget_on_destroy: false
     mac: 38:22:e2:2d:96:44
+  shale:
+    dev-id: 2847
+    skip_forget_on_destroy: false
+    mac: ec:8e:b5:72:35:24
 
 rpis:
   pikvm:

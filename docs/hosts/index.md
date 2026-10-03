@@ -32,7 +32,8 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 
 | Hosts | Name | Declared in |
 | --- | --- | --- |
-| folly nodes | `<host>.lolwtf.ca` | `static_records` in `terraform/network/unifi/folly/k8s.tf` |
+| folly nodes | `<host>.lolwtf.ca` | `static_records` in `terraform/network/unifi/folly/k8s.tf`, from `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json` |
+| offsite nodes | `<host>.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json` |
 | Hosts on [Lab Net](../platform/network.md#networks) | `<host>.lolwtf.ca` | The `lab` and `rpis` entries with an `ip` in `terraform/network/unifi/folly/clients.yaml` |
 | offsite control plane | `offsite.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `API_SERVER_IP` in `clusters/offsite/config/cluster-topology.json` |
 | Tailnet devices | `<host>.<tailnet>` | `terraform/network/tailscale/devices.tf`. `<tailnet>` is the `tailnet` key in `terraform/network/tailscale/fleet.tf.json`. |
@@ -44,7 +45,6 @@ The Kubernetes nodes run no Tailscale client. Off the LAN, the owner reaches the
 Each sheet states its host's divergence. These cover more than one host, or a host with no sheet:
 
 - eviropico runs Pimoroni's MicroPython firmware, and no file in git holds its code.
-- `retrofit.lolwtf.ca` and `oldschool.lolwtf.ca` resolve, and no file in git declares them.
 - capsule and forge are on the tailnet, and `devices.tf` lists neither. forge enrols through the OAuth client in `terraform/network/tailscale/oauth_clients.tf`.
 - `devices.tf` lists nuc, with `tag:folly`, and desktop-g7i75ls, with `tag:offsite`. No sheet or NixOS configuration covers either.
-- `devices.tf` lists the five Kubernetes nodes, which run no Tailscale client. Their tailnet names do not answer, and `dotfiles/.ssh/config` sends `ssh retrofit` and `ssh oldschool` to them.
+- The five Kubernetes nodes run no Tailscale client, and `devices.tf` does not list them. Their tailnet entries stay in the admin console, and `dotfiles/.ssh/config` sends `ssh retrofit` and `ssh oldschool` to those names, which do not answer.

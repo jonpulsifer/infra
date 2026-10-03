@@ -1,0 +1,7 @@
+# A node's address is NODE_ADDRESSES in clusters/offsite/config/cluster-topology.json;
+# k8s.tf reserves it on the MAC here.
+k8s:
+  retrofit:
+    mac: 40:b0:34:f3:90:bd
+  oldschool:
+    mac: ac:e2:d3:0d:90:66

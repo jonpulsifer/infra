@@ -11,7 +11,7 @@ An app attaches an HTTPRoute to its cluster's shared `cluster-gateway`, or decla
 
 external-dns publishes each route's name as an A record at its Gateway's load-balancer address (VIP). The VIP is private, so the name works on the LAN, and over the [tailnet](remote-access.md) for the owner. With policy `sync` and `txtOwnerId` set to `CLUSTER_NAME`, each cluster deletes its own records when their routes go.
 
-Hosts resolve as `<host>.lolwtf.ca`, from `static_records` in `terraform/network/unifi/folly/k8s.tf` and from each `lab` and `rpis` entry with an `ip` in `terraform/network/unifi/folly/clients.yaml`. `terraform/network/cloudflare/lolwtf.ca.tf` publishes each cluster's `API_SERVER_HOSTNAME`.
+Hosts resolve as `<host>.lolwtf.ca`. The Kubernetes nodes come from `NODE_ADDRESSES` in each cluster's [topology file](../../reference/topology.md): folly's through `static_records` in `terraform/network/unifi/folly/k8s.tf`, offsite's through `terraform/network/cloudflare/lolwtf.ca.tf`, which also publishes each cluster's `API_SERVER_HOSTNAME`. Lab hosts come from each `lab` and `rpis` entry with an `ip` in `terraform/network/unifi/folly/clients.yaml`.
 
 ## Public names
 

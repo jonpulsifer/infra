@@ -29,9 +29,17 @@ Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (re
 
    Result: The command completes without an error.
 
-6. If the host has the `folly` tag, add it to `static_records` in `terraform/network/unifi/folly/k8s.tf`.
-7. Open a pull request.
-8. If the host has the `folly` tag, apply the OpenTofu change, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes.
+6. Build the closure of the host.
+
+   ```bash
+   NIX_REMOTE=ssh-ng://<build-host> HOST=<host> mise run nix:build
+   ```
+
+   Result: The command prints the store path of the closure.
+
+7. Add the host and a free address in `K8S_NODE_CIDR` to `NODE_ADDRESSES` in `clusters/<site>/config/cluster-topology.json`, and its MAC under `k8s` in `terraform/network/unifi/<site>/clients.yaml`.
+8. Open a pull request.
+9. Apply the OpenTofu change to `terraform/network/unifi/<site>`, and for an `offsite` node to `terraform/network/cloudflare`, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes. The pull request changes no `.tf` file, so comment `atlantis plan -d <root>` for each root first.
 
 ## Install the node
 
