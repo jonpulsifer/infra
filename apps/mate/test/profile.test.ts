@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ProfilePrompts, SystemPrompts } from '../src/brain-inputs.ts';
 import { ConfigError } from '../src/config.ts';
@@ -9,7 +9,10 @@ import { createModelSetup } from '../src/model.ts';
 import {
   AGENTS_FILE,
   brainProfiles,
+  FALLBACK_PERSONA,
   loadSystemPrompts,
+  OWNER_AGENTS_FILE,
+  PERSONA_FILE,
   SKILL_DIRS,
 } from '../src/profile.ts';
 import {
@@ -29,12 +32,74 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
 });
 
-const OPTIONS = { workspace: WORKSPACE, checkoutRef: 'main' };
+const CONFIGURED = {
+  github: true,
+  vault: true,
+  kube: { admin: true, reader: true },
+};
+const OPTIONS = {
+  workspace: WORKSPACE,
+  checkoutRef: 'main',
+  configured: CONFIGURED,
+};
+const PROFILE_INPUTS = [
+  PERSONA_FILE,
+  OWNER_AGENTS_FILE,
+  AGENTS_FILE,
+  ...SKILL_DIRS,
+];
+const OWNER_HEADING = "# Owner's standing instructions (global AGENTS.md)";
+const OVERRIDES_HEADING = '# Overrides for this deployment';
+const REPO_HEADING = '# Repository instructions (AGENTS.md)';
+
+async function repoText(file: string): Promise<string> {
+  return (await Bun.file(join(REPO, file)).text()).trim();
+}
+
+/** The persona, the owner's file and AGENTS.md, but `without`. */
+function writeProfileFiles(root: string, without?: string): void {
+  const files: Record<string, string> = {
+    [PERSONA_FILE]: 'You are Testbutt.\n',
+    [OWNER_AGENTS_FILE]:
+      '# Owner\n\nPriority.\n\n## Protect\n\n- Guard.\n\n## Communicate\n\n- Talk.\n',
+    [AGENTS_FILE]: 'Rules.\n',
+  };
+  for (const [file, text] of Object.entries(files)) {
+    if (file === without) continue;
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), text);
+  }
+}
+
+/** A root holding every profile input but `without`. */
+function rootWithout(without: string): string {
+  const root = mkdtempSync(join(tmpdir(), 'mate-profile-'));
+  dirs.push(root);
+  writeProfileFiles(root, without);
+  for (const dir of SKILL_DIRS) {
+    mkdirSync(join(root, dir, 'deploy'), { recursive: true });
+    writeFileSync(
+      join(root, dir, 'deploy', 'SKILL.md'),
+      '---\nname: deploy\ndescription: Deploy it.\n---\n\nSteps.\n',
+    );
+  }
+  return root;
+}
+
+/** The path and each of its parents: `a/b/c`, `a/b`, `a`. */
+function selfAndParents(path: string): string[] {
+  const parts = path.split('/');
+  return parts.map((_, i) => parts.slice(0, parts.length - i).join('/'));
+}
 
 /** `prompts` is operator's; `all` holds every profile's. */
-async function load(root: string, log = new RecordingLog()) {
+async function load(
+  root: string,
+  log = new RecordingLog(),
+  configured = CONFIGURED,
+) {
   const all = await loadSystemPrompts(
-    { root, ...OPTIONS, log },
+    { root, ...OPTIONS, configured, log },
     PROFILES.values(),
   );
   return { prompts: all.operator as SystemPrompts, all, log };
@@ -64,6 +129,45 @@ describe('the profile mate bakes into its image', () => {
     expect(await Bun.file(join(REPO, AGENTS_FILE)).exists()).toBe(true);
   });
 
+  test('has the persona the local pi package shares', async () => {
+    expect(await repoText(PERSONA_FILE)).toStartWith('You are Rowbutt');
+  });
+
+  // The investigator reads only these sections of the owner's file.
+  test("has the owner's instructions with the sections the investigator reads", async () => {
+    const text = await repoText(OWNER_AGENTS_FILE);
+    expect(text).toMatch(/^## Protect$/m);
+    expect(text).toMatch(/^## Communicate$/m);
+  });
+
+  // turbo prune leaves these out, so each needs its own way into the image, a
+  // rebuild when it changes, and a test run when it changes.
+  test.each(PROFILE_INPUTS)(
+    '%s reaches the image and the tests',
+    async (file) => {
+      const paths = selfAndParents(file);
+      const dockerfile = (await repoText('apps/mate/Dockerfile')).split('\n');
+      expect(
+        dockerfile.some(
+          (line) =>
+            line.startsWith('COPY ') &&
+            line.split(/\s+/).includes(`/app/${file}`),
+        ),
+      ).toBe(true);
+      const ignore = (await repoText('.dockerignore')).split('\n');
+      expect(paths.some((path) => ignore.includes(`!${path}`))).toBe(true);
+      const [build] = JSON.parse(await repoText('apps/mate/build.json'));
+      expect(paths.some((path) => build.watch.includes(path))).toBe(true);
+      const turbo = JSON.parse(await repoText('turbo.json'));
+      const inputs: string[] = turbo.tasks['mate#test'].inputs;
+      expect(
+        [file, ...paths.map((path) => `${path}/**`)].some((input) =>
+          inputs.includes(`$TURBO_ROOT$/${input}`),
+        ),
+      ).toBe(true);
+    },
+  );
+
   // loadSkills is silent about a directory that is missing or empty.
   test.each([...SKILL_DIRS])('holds skills in %s', (dir) => {
     const skills = [...new Bun.Glob('*/SKILL.md').scanSync(join(REPO, dir))];
@@ -83,6 +187,7 @@ describe('loadSystemPrompts', () => {
     }
     expect(log.of('duplicate skill name')).toEqual([]);
     expect(log.of('profile file missing')).toEqual([]);
+    expect(log.of('owner instructions section missing')).toEqual([]);
   });
 
   test('includes AGENTS.md', async () => {
@@ -119,26 +224,80 @@ describe('loadSystemPrompts', () => {
     }
   });
 
-  test('a missing root gives the preamble alone, and logs it', async () => {
+  test('a missing root gives the fallback persona, the preamble and the overrides, and logs it', async () => {
     const root = join(tmpdir(), `mate-profile-missing-${Date.now()}`);
     const { all, log } = await load(root);
     for (const prompts of Object.values(all)) {
       for (const [, prompt] of each(prompts)) {
         expect(prompt.startsWith('You are Rowbutt')).toBe(true);
+        expect(prompt.startsWith(`${FALLBACK_PERSONA}\n\n`)).toBe(true);
+        expect(prompt).not.toContain('# Owner');
+        expect(prompt).toContain(OVERRIDES_HEADING);
         expect(prompt).not.toContain('# Repository instructions');
         expect(prompt).not.toContain('<available_skills>');
       }
     }
     const missing = log.of('profile file missing').map((e) => e.fields?.path);
     expect(missing.sort()).toEqual(
-      [AGENTS_FILE, ...SKILL_DIRS].map((file) => `${root}/${file}`).sort(),
+      PROFILE_INPUTS.map((file) => `${root}/${file}`).sort(),
     );
+  });
+
+  test('a missing persona gives the fallback, and logs it', async () => {
+    const root = rootWithout(PERSONA_FILE);
+    const { all, log } = await load(root);
+    for (const prompts of Object.values(all)) {
+      for (const [, prompt] of each(prompts)) {
+        expect(prompt.startsWith(`${FALLBACK_PERSONA}\n\n`)).toBe(true);
+        expect(prompt).toContain(OWNER_HEADING);
+        expect(prompt).toContain(`${REPO_HEADING}\n\nRules.`);
+      }
+    }
+    expect(log.of('profile file missing').map((e) => e.fields?.path)).toEqual([
+      `${root}/${PERSONA_FILE}`,
+    ]);
+  });
+
+  test("a missing owner's file drops its section and keeps the overrides", async () => {
+    const root = rootWithout(OWNER_AGENTS_FILE);
+    const { all, log } = await load(root);
+    for (const prompts of Object.values(all)) {
+      for (const [, prompt] of each(prompts)) {
+        expect(prompt.startsWith('You are Testbutt.\n\n')).toBe(true);
+        expect(prompt).not.toContain('# Owner');
+        expect(prompt).toContain(OVERRIDES_HEADING);
+        expect(prompt).toContain(`${REPO_HEADING}\n\nRules.`);
+      }
+    }
+    expect(log.of('profile file missing').map((e) => e.fields?.path)).toEqual([
+      `${root}/${OWNER_AGENTS_FILE}`,
+    ]);
+  });
+
+  test("an owner's file without a section the investigator reads is logged", async () => {
+    const root = rootWithout(OWNER_AGENTS_FILE);
+    mkdirSync(dirname(join(root, OWNER_AGENTS_FILE)), { recursive: true });
+    writeFileSync(
+      join(root, OWNER_AGENTS_FILE),
+      '# Owner\n\n## Protect\n\n- Guard.\n\n## Delegate\n\n- Hand off.',
+    );
+    const { all, log } = await load(root);
+    expect(all.investigator?.slack).toContain(
+      `${OWNER_HEADING}\n\n# Owner\n\n## Protect\n\n- Guard.\n\n${OVERRIDES_HEADING}`,
+    );
+    expect(log.of('owner instructions section missing')).toEqual([
+      {
+        level: 'warn',
+        msg: 'owner instructions section missing',
+        fields: { profile: 'investigator', section: 'Communicate' },
+      },
+    ]);
   });
 
   test('a skills directory with no skills is logged, and the other still indexes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mate-profile-'));
     dirs.push(root);
-    writeFileSync(join(root, AGENTS_FILE), 'Rules.\n');
+    writeProfileFiles(root);
     mkdirSync(join(root, 'dotfiles/skills'), { recursive: true });
     mkdirSync(join(root, '.agents/skills/deploy'), { recursive: true });
     writeFileSync(
@@ -165,7 +324,7 @@ describe('loadSystemPrompts', () => {
         `---\nname: deploy\ndescription: Deploy from ${dir}.\n---\n\nSteps.\n`,
       );
     }
-    writeFileSync(join(root, AGENTS_FILE), 'Rules.\n');
+    writeProfileFiles(root);
 
     const { prompts, log } = await load(root);
     expect(locations(prompts.discord)).toEqual([
@@ -190,12 +349,13 @@ describe('each profile', () => {
     }
   });
 
-  test('starts with its own preamble and shares AGENTS.md and the skills', async () => {
+  test('starts with the persona and its own preamble, and shares AGENTS.md and the skills', async () => {
+    const persona = await repoText(PERSONA_FILE);
     const { all } = await load(REPO);
     const rest = (prompts: ProfilePrompts, id: string, preamble: string) => {
       const prompt = prompts[id]?.slack ?? '';
-      expect(prompt.startsWith(preamble)).toBe(true);
-      return prompt.slice(preamble.length);
+      expect(prompt.startsWith(`${persona}\n\n${preamble}\n\n`)).toBe(true);
+      return prompt.slice(prompt.indexOf(REPO_HEADING));
     };
     const operator = rest(all, 'operator', operatorPreamble('Slack', OPTIONS));
     const investigator = rest(
@@ -204,9 +364,103 @@ describe('each profile', () => {
       investigatorPreamble('Slack', OPTIONS),
     );
     expect(investigator).toBe(operator);
-    expect(investigator).toContain('# Repository instructions (AGENTS.md)');
+    expect(investigator).toStartWith(REPO_HEADING);
     expect(investigator).toContain('<available_skills>');
     expect(all.custodian).toEqual(all.operator as SystemPrompts);
+  });
+
+  test('orders the persona, preamble, owner rules, overrides, AGENTS.md and skills', async () => {
+    const persona = await repoText(PERSONA_FILE);
+    const { all } = await load(REPO);
+    for (const [id, preamble] of [
+      ['operator', operatorPreamble],
+      ['investigator', investigatorPreamble],
+    ] as const) {
+      const prompt = all[id]?.discord ?? '';
+      const at = [
+        persona,
+        preamble('Discord', OPTIONS),
+        OWNER_HEADING,
+        OVERRIDES_HEADING,
+        REPO_HEADING,
+        '<available_skills>',
+      ].map((part) => prompt.indexOf(part));
+      expect(at[0]).toBe(0);
+      for (let i = 1; i < at.length; i++) {
+        expect(at[i]).toBeGreaterThan(at[i - 1] as number);
+      }
+    }
+  });
+
+  test("operator reads all of the owner's instructions", async () => {
+    const owner = await repoText(OWNER_AGENTS_FILE);
+    const { prompts } = await load(REPO);
+    for (const [, prompt] of each(prompts)) {
+      expect(prompt).toContain(`${OWNER_HEADING}\n\n${owner}\n\n`);
+    }
+  });
+
+  test('claims only the access this deployment configures', async () => {
+    const overrides = (prompt: string) =>
+      prompt.slice(
+        prompt.indexOf(OVERRIDES_HEADING),
+        prompt.indexOf(REPO_HEADING),
+      );
+    const full = await load(REPO);
+    for (const id of ['operator', 'custodian']) {
+      const text = overrides(full.all[id]?.slack ?? '');
+      for (const claim of [
+        'merge pull requests',
+        "An assignment's own merge rule replaces the limit to pull requests you opened.",
+        '`atlantis apply`',
+        'push to keep work',
+        'cluster-admin',
+        '`op` reaches 1Password',
+      ]) {
+        expect(text).toContain(claim);
+      }
+    }
+    const bare = await load(REPO, new RecordingLog(), {
+      github: false,
+      vault: false,
+      kube: { admin: false, reader: true },
+    });
+    for (const id of ['operator', 'custodian']) {
+      for (const [, prompt] of each(bare.all[id] as SystemPrompts)) {
+        const text = overrides(prompt);
+        expect(text).toContain('never run `tofu apply`');
+        for (const claim of [
+          'merge pull requests',
+          'merge rule',
+          'atlantis apply',
+          'push',
+          'cluster-admin',
+          '`op`',
+        ]) {
+          expect(text).not.toContain(claim);
+        }
+      }
+    }
+  });
+
+  test("investigator reads only the owner's Protect and Communicate", async () => {
+    const { all } = await load(REPO);
+    for (const [, prompt] of each(all.investigator as SystemPrompts)) {
+      const own = prompt.slice(0, prompt.indexOf(REPO_HEADING));
+      expect(own).toContain('## Protect');
+      expect(own).toContain('## Communicate');
+      for (const absent of [
+        '## Operate',
+        '## Git and PRs',
+        '## Validate',
+        '## Delegate',
+        'atlantis apply',
+        'cluster-admin',
+      ]) {
+        expect(own).not.toContain(absent);
+      }
+      expect(own.toLowerCase()).not.toContain('merge');
+    }
   });
 });
 

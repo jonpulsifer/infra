@@ -100,6 +100,7 @@ sections:
           - runbooks/install-kthx.md
           - runbooks/connect-an-agent-to-kthx.md
           - runbooks/repair-the-rowbutt-github-credential.md
+          - runbooks/rotate-the-rowbutt-slack-token.md
           - runbooks/sign-rowbutt-in-to-chatgpt.md
           - runbooks/operate-the-rowbutt-model-fallback.md
           - runbooks/operate-the-smiirl-counter.md

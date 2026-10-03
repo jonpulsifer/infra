@@ -40,8 +40,9 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 ## Apps
 
 - [Install kthx](install-kthx.md): install the kthx engine on the offsite cluster
-- [Connect an agent to kthx](connect-an-agent-to-kthx.md): mint an agent token and connect an MCP client
+- [Connect an agent to kthx](connect-an-agent-to-kthx.md): mint an agent token and connect an MCP client, Rowbutt or the workstation
 - [Repair the Rowbutt GitHub credential](repair-the-rowbutt-github-credential.md): check, rotate and replace the GitHub App credential of Rowbutt
+- [Rotate the Rowbutt Slack token](rotate-the-rowbutt-slack-token.md): replace Rowbutt's Slack App-Level Token, and revoke tokens that other clients hold
 - [Sign Rowbutt in to ChatGPT](sign-rowbutt-in-to-chatgpt.md): sign mate in to the owner's ChatGPT subscription from chat, and sign it out
 - [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md): check which model answers Rowbutt, keep turns off ChatGPT, and drill the fallback
 - [Operate the Smiirl counter](operate-the-smiirl-counter.md): check, calibrate and repair the Smiirl counter
