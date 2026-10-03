@@ -37,6 +37,15 @@ spec:
             http:
               endpoint: 0.0.0.0:4318
       # The default local trace storage and WAL sit under the PVC's /var/tempo.
+    # No node is tainted, so this term alone keeps trace writes off the
+    # control-plane node's disk, which etcd shares.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
     service:
       type: ClusterIP
     persistence:

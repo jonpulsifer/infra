@@ -2,11 +2,12 @@
 
 set -euo pipefail
 
-script="$(dirname "$0")/validation-impact.sh"
+script="$(cd "$(dirname "$0")" && pwd)/validation-impact.sh"
 
+# Routes paths from the repository root, or from an optional fixture tree.
 assert_targets() {
-  local name="$1" paths="$2" expected="$3" actual
-  actual=$(printf '%s\n' "$paths" | "$script" targets)
+  local name="$1" paths="$2" expected="$3" tree="${4:-.}" actual
+  actual=$(cd "$tree" && printf '%s\n' "$paths" | "$script" targets)
   if [[ "$actual" != "$expected" ]]; then
     printf 'FAIL: %s\nexpected:\n%s\nactual:\n%s\n' "$name" "$expected" "$actual" >&2
     exit 1
@@ -16,6 +17,10 @@ assert_targets() {
 assert_targets 'both topology ConfigMaps validate Nix' \
   $'clusters/folly/config/cluster-topology.json\nclusters/offsite/config/cluster-topology.json' \
   'nix:flake-check'
+
+assert_targets 'every path routes when changed-files escapes the separators' \
+  $'clusters/folly/config/cluster-topology.json\\\nterraform/network/unifi/offsite/k8s.tf\\\nterraform/network/tailscale/devices.tf' \
+  $'nix:flake-check\nterraform:terraform/network/tailscale\nterraform:terraform/network/unifi/offsite'
 
 assert_targets 'the Nix workflow validates its routing target' \
   '.github/workflows/nix-ci.yaml' \
@@ -69,3 +74,44 @@ for root in clusters/folly/bootstrap clusters/offsite/bootstrap; do
     exit 1
   fi
 done
+
+# A Talos root under clusters/<site>/talos is a validation root, and its
+# site's topology ConfigMap validates it. No such root exists yet, so a
+# fixture tree with one for folly stands in for the repository.
+fixture=$(mktemp -d)
+trap 'rm -rf "$fixture"' EXIT
+mkdir -p "$fixture"/clusters/{folly,offsite}/{bootstrap,config} \
+  "$fixture/clusters/folly/talos" "$fixture/terraform/modules/talos-cluster"
+for root in clusters/folly/bootstrap clusters/offsite/bootstrap clusters/folly/talos; do
+  printf 'terraform {\n  backend "gcs" {}\n}\n' >"$fixture/$root/main.tf"
+done
+touch "$fixture/terraform/modules/talos-cluster/main.tf" \
+  "$fixture"/clusters/{folly,offsite}/config/cluster-topology.json
+
+fixture_roots=$(cd "$fixture" && "$script" terraform-roots)
+if ! grep -qxF clusters/folly/talos <<<"$fixture_roots"; then
+  echo 'FAIL: Terraform root list omits a Talos root' >&2
+  exit 1
+fi
+if grep -qxF clusters/offsite/talos <<<"$fixture_roots"; then
+  echo 'FAIL: Terraform root list names a Talos root that does not exist' >&2
+  exit 1
+fi
+
+assert_targets 'a Talos root file validates its Talos root' \
+  'clusters/folly/talos/talos.tf' \
+  'terraform:clusters/folly/talos' "$fixture"
+
+assert_targets 'the topology ConfigMap validates its Talos root once that root exists' \
+  'clusters/folly/config/cluster-topology.json' \
+  $'nix:flake-check\nterraform:clusters/folly/talos' "$fixture"
+
+assert_targets 'the topology ConfigMap of a site without a Talos root validates Nix alone' \
+  'clusters/offsite/config/cluster-topology.json' \
+  'nix:flake-check' "$fixture"
+
+fixture_script_targets=$(cd "$fixture" && printf '%s\n' '.github/scripts/validation-impact.sh' | "$script" targets)
+if ! grep -qxF 'terraform:clusters/folly/talos' <<<"$fixture_script_targets"; then
+  echo 'FAIL: routing module changes do not validate a Talos root' >&2
+  exit 1
+fi

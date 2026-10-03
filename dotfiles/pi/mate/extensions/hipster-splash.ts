@@ -1,9 +1,10 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { VERSION } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CAT_LOGO = [
 	"        ╭──────────────────╮        ",
@@ -16,6 +17,8 @@ const CAT_LOGO = [
 	"        ◜▔◝      ◜▔◝               ",
 ];
 
+// pi exposes no list of loaded extensions, so this package's own directory counts too.
+const PACKAGE_EXTENSIONS = path.dirname(realpathSync(fileURLToPath(import.meta.url)));
 const AUTO_DISMISS_SECONDS = 18;
 const MAX_RESOURCE_ITEMS = 9;
 
@@ -96,7 +99,11 @@ function contextFiles(cwd: string): string[] {
 }
 
 function countExtensionFiles(cwd: string): number {
-	const dirs = [path.join(os.homedir(), ".pi", "agent", "extensions"), path.join(cwd, ".pi", "extensions")];
+	const dirs = [
+		PACKAGE_EXTENSIONS,
+		path.join(os.homedir(), ".pi", "agent", "extensions"),
+		path.join(cwd, ".pi", "extensions"),
+	];
 	const names = new Set<string>();
 	for (const dir of dirs) {
 		if (!existsSync(dir)) continue;

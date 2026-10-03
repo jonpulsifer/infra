@@ -17,7 +17,7 @@ forge is the lab's native arm64 build host, a Raspberry Pi 5 on [Lab Net](../pla
 
 ## What it runs
 
-- Nix builds for the [Raspberry Pi deploys](../runbooks/deploy-a-nixos-host.md), including the armv6l cross-builds
+- The build host role, which runs Nix builds for other machines over SSH, including the armv6l cross-builds
 - Docker with buildx for arm64 images
 - harmonia, a Nix binary cache behind nginx on port 80, which the firewall blocks. No host trusts its key.
 

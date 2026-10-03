@@ -24,8 +24,8 @@ what an agent needs beyond it.
   only for the paths in its filter. Read which jobs ran before you call a
   change tested.
 - `nix flake check` evaluates every host and builds nothing. `nix-ci.yaml`
-  builds the hosts only after a merge to `main`, so build each changed host
-  on its build host, as the runbook's `nix:build` row shows.
+  builds only after a merge to `main`. Do not build a host closure in WSL or
+  in a sandbox.
 - `mise run k8s:render-apps` renders both clusters. It also runs
   `helm template` on each in-repo chart that a rendered HelmRelease names, with
   that release's values. Run it for a chart change too. It names and skips a

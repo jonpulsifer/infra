@@ -1,6 +1,6 @@
 ---
 title: riptide
-description: An HP EliteDesk 800 G5 mini PC that is a folly worker node with an Intel GPU and the build host for folly deploys.
+description: An HP EliteDesk 800 G5 mini PC that is a folly worker node with an Intel GPU.
 specs:
   vendor: HP
   model: EliteDesk 800 G5 Desktop Mini
@@ -15,12 +15,11 @@ specs:
   tpm: TPM 2.0 (Infineon), working
 ---
 
-riptide is a worker node in the folly [Kubernetes](../platform/kubernetes.md) cluster with an Intel GPU for pods. It is also the build host for folly node deploys. `nix/hosts/riptide.nix` configures it.
+riptide is a worker node in the folly [Kubernetes](../platform/kubernetes.md) cluster with an Intel GPU for pods. `nix/hosts/riptide.nix` configures it.
 
 ## What it runs
 
 - Pods. `jellyfin` claims the Intel GPU as `gpu.intel.com/i915`.
-- The builds for folly node deploys. See [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md).
 
 ## Reach
 

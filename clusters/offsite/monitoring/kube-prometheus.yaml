@@ -175,6 +175,9 @@ spec:
         enabled: true
         storageClassName: local-path
         size: 1Gi
+      # Dashboards come from git; the volume keeps what the UI adds.
+      podAnnotations:
+        backup.velero.io/backup-volumes: storage
     kube-state-metrics:
       # Backup CronJobs carry this label; ../../base/monitoring/backup-rules.yaml
       # selects them by label_lolwtf_ca_backup.

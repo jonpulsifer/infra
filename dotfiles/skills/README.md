@@ -6,7 +6,7 @@ Personal agent skills that the dotfiles deploy links into each agent CLI's skill
 
 Create `<name>/SKILL.md` with `name` and `description` frontmatter. Start the description with "Use when" and name concrete triggers, in 1024 characters or fewer.
 
-The skills pass work to each other through a gitignored context directory in the working repository, which each `SKILL.md` names. context-builder writes `context.md`, planner writes `plan.md`, and reviewer and submit-pr read them. The pi prompt aliases for these skills are in `dotfiles/.pi/agent/prompts/`.
+The skills pass work to each other through a gitignored context directory in the working repository, which each `SKILL.md` names. context-builder writes `context.md`, planner writes `plan.md`, and reviewer and submit-pr read them. The pi prompt aliases for these skills are in `dotfiles/pi/mate/prompts/`.
 
 ## Test
 
@@ -15,7 +15,7 @@ bun run --cwd apps/mate test
 mise run --cd dotfiles dotfiles:check
 ```
 
-The [Rowbutt](https://wiki.lolwtf.ca/apps/mate/) sandbox loads this directory as extra skills (`apps/mate/src/sandboxes.ts`), and the `apps/mate` tests fail if it holds no `*/SKILL.md`. `dotfiles:check` deploys the `[dotfiles]` table into scratch homes under each profile, and fails on a missing source, a template that does not render, or a mise warning.
+The [Rowbutt](https://wiki.lolwtf.ca/apps/mate/) sandbox loads this directory as extra skills (`apps/mate/src/sandboxes.ts`), and mate indexes it into its system prompt (`SKILL_DIRS` in `apps/mate/src/profile.ts`). The `apps/mate` tests fail if it holds no `*/SKILL.md`. `dotfiles:check` deploys the `[dotfiles]` table into scratch homes under each profile and fails on missing sources, templates that do not render, or mise warnings.
 
 ## Deploy
 

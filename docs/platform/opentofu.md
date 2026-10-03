@@ -9,7 +9,7 @@ OpenTofu is the open-source fork of Terraform. The lab uses it to declare the ne
 
 | Part | Job | Where it lives |
 | --- | --- | --- |
-| Root | Has a `backend "gcs"` block | Under `terraform/`, and `clusters/<site>/bootstrap/` |
+| Root | Has a `backend "gcs"` block | Under `terraform/`, `clusters/<site>/bootstrap/`, and `clusters/<site>/talos/` for a cluster on Talos Linux |
 | Module | Shared code that roots call | `terraform/modules/`, and a `modules/` directory in some roots |
 | State | One object for each root in the `homelab-ng` bucket | The `prefix` in the root's `backend` block, which often differs from the root's path |
 | Atlantis | Plans, applies and merges PRs | `clusters/offsite/apps/atlantis/` |
@@ -30,6 +30,7 @@ A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR
 - Add every GitHub identity that opens PRs to `atlantis_users` in `only-me.rego`. `atlantis/plan` is a required check on every PR, so a PR from an unlisted GitHub identity is blocked.
 - Read network facts through `terraform/modules/cluster-topology`, which reads the [topology files](../reference/topology.md).
 - Keep `terraform/pki` on OpenTofu. Its `opentofu/tls` provider is only on the OpenTofu registry.
+- A plan of a `clusters/<site>/talos/` root touches no node. An apply that changes the installer image reboots the nodes, the control plane first, and one that changes `kubernetes_version` upgrades the Kubernetes components, so read the plan before you comment `atlantis apply`.
 
 ## Where it lives
 
@@ -37,6 +38,7 @@ A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR
 - `clusters/offsite/apps/atlantis/policies/only-me.rego`: `atlantis_users`, who can plan
 - `clusters/offsite/apps/atlantis/policies/appliers.rego`: `atlantis_appliers`, who can apply and import
 - `clusters/base/atlantis-bootstrap-rbac.yaml`: the `cluster-admin` binding
+- `terraform/modules/talos-cluster/`: the Talos Linux machine configuration of one cluster, which a `clusters/<site>/talos/` root calls. Its README has the inputs.
 - `mise.toml`: the `tf:*` tasks. No CI job checks the README tables that `tf:docs` writes.
 
 ## Related

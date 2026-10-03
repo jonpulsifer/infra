@@ -12,6 +12,8 @@
       "packages/pi-store-postgres",
       "packages/typescript-config",
       "AGENTS.md",
+      "dotfiles/pi/mate/persona.md",
+      "dotfiles/.agents/AGENTS.md",
       "dotfiles/skills",
       ".agents/skills",
       ".dockerignore",

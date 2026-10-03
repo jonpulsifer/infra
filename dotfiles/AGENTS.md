@@ -31,6 +31,10 @@ mise run dotfiles:check   # deploy into scratch homes under each profile; change
 - **Git signing**: `.config/git/config` includes `config.local`, which `mise dotfiles` renders from `.config/git/config.local.tera`: the 1Password signing program and key on WSL. Elsewhere it renders empty and is not written, and a work Mac gets its 1Password program from `.config/git/config.work`.
 - **Skills**: source under `skills/`; each skill is linked into `~/.agents/skills`, `~/.claude/skills`, and `~/.gemini/config/skills`.
 - **Claude settings**: `.claude/settings.json` is a seed, not a table entry. Claude Code writes its own changes to `~/.claude/settings.json`, so copy the seed there by hand.
+- **Profiles**: `MISE_ENV=work` loads `mise.work.toml` identity overrides and activates `.config/git/config.work` via Git `[includeIf]`.
+- **Skills**: source under `skills/`; deployed directly to `~/.agents/skills`, `~/.claude/skills`, and `~/.gemini/config/skills`.
+- **pi package**: `pi/mate/` is a local pi package, loaded in place from `~/.dotfiles/pi/mate` (`mise run pi:setup` installs it, seeds `~/.pi/agent/settings.json` from `pi/settings.seed.json`, filling only missing keys, and removes links into `.pi/agent` and copies of this repo's files from pi's `extensions`, `prompts` and `themes`; it runs on Linux and macOS only). Its extensions put `persona.md` then `workstation.md` into pi's system prompt and register the weather, kthx and `.mcp.json` MCP servers; `mcp.ts` and `repo-skills.ts` find the repo root by the package's real path, so moving the package breaks them. `apps/mate` bakes `persona.md` and `.agents/AGENTS.md` into Rowbutt's system prompt, so an edit to either rebuilds the mate image, and `persona.md` must claim no capability; local-only facts go in `workstation.md`. `~/.pi/agent/agents` is still a link to `.pi/agent/agents`.
+
 
 ## Git workflow
 

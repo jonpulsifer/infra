@@ -30,4 +30,4 @@ Reach it at `oldschool.lolwtf.ca`. See [Reach a host](index.md#reach-a-host).
 ## Quirks
 
 - A second admin account, `quiker` from `nix/system/quiker.nix`, is in `wheel`.
-- oldschool holds a `harmonia-cache-key` secret and a 200 GB root for [harmonia](../platform/nixos/build-host-and-cache.md), a Nix binary cache, which is not enabled.
+- The root partition is 200 GB, not the fleet's 100 GB default.

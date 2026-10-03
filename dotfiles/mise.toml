@@ -254,3 +254,70 @@ done
 echo "All dotfiles apply and converge."
 '''
 run_windows = "pwsh -NoProfile -File '{{config_root}}/windows/deploy-dotfiles.ps1' -DryRun"
+
+[tasks."pi:setup"]
+description = "Install the mate pi package and seed pi's settings on this workstation"
+# The seed fills only missing keys, so pi's own writes and local edits stay.
+# The package provides pi's extensions, prompts and themes, so the cleanup
+# removes links into dotfiles/.pi/agent and copies of this repo's files from
+# them, and leaves what other tools write there.
+run = '''
+dotfiles="$HOME/.dotfiles"
+pkg="$dotfiles/pi/mate"
+agent="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+settings="$agent/settings.json"
+mkdir -p "$agent"
+[ -f "$settings" ] || printf '{}\n' > "$settings"
+jq empty "$settings"
+if jq -e '.packages // [] | map(.source? // .) | index("npm:pi-mcp-adapter")' "$settings" >/dev/null; then
+  pi remove npm:pi-mcp-adapter
+fi
+pi install "$pkg"
+tmp="$(mktemp "$settings.XXXXXX")"
+if jq -s '.[1] * .[0]' "$settings" '{{config_root}}/pi/settings.seed.json' > "$tmp"; then
+  mv "$tmp" "$settings"
+else
+  rm -f "$tmp"
+  exit 1
+fi
+
+# A file matches the package's copy, or a version git history holds at the
+# old path, which the package's copy may have moved on from.
+shipped() {
+  name="$(basename "$2")"
+  [ -f "$pkg/$1/$name" ] && cmp -s "$2" "$pkg/$1/$name" && return 0
+  blob="$(git hash-object "$2")" || return 1
+  git -C "$dotfiles" log --format= --raw --no-abbrev --no-renames -- ".pi/agent/$1/$name" 2>/dev/null |
+    grep -qF " $blob "
+}
+for kind in extensions prompts themes; do
+  dir="$agent/$kind"
+  if [ -L "$dir" ]; then
+    case "$(readlink "$dir")" in
+    */dotfiles/.pi/agent/*)
+      rm "$dir"
+      mkdir "$dir"
+      echo "Removed the link $dir from the old deploy"
+      ;;
+    esac
+  fi
+  if [ -L "$dir" ] || [ ! -d "$dir" ]; then
+    continue
+  fi
+  for entry in "$dir"/*; do
+    if [ -L "$entry" ]; then
+      case "$(readlink "$entry")" in
+      */dotfiles/.pi/agent/*)
+        rm "$entry"
+        echo "Removed the link $entry from the old deploy"
+        ;;
+      esac
+    elif [ -f "$entry" ] && shipped "$kind" "$entry"; then
+      rm "$entry"
+      echo "Removed $entry, a copy of the package's $kind/$(basename "$entry")"
+    fi
+  done
+done
+'''
+# pi's agent directory and the cleanup above assume a POSIX shell.
+run_windows = "echo pi:setup runs on Linux and macOS only 1>&2 & exit 1"
