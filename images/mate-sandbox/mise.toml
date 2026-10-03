@@ -38,6 +38,7 @@ disable_tools = [
   "shellcheck",
   "shfmt",
   "sops",
+  "talosctl",
   "terraform",
   "terraform-docs",
   "velero",
