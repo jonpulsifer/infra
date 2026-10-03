@@ -15,8 +15,8 @@ bun run --cwd apps/mate test
 mise run --cd dotfiles dotfiles:check
 ```
 
-mate indexes this directory into [Rowbutt](https://wiki.lolwtf.ca/apps/mate/)'s system prompt (`SKILL_DIRS` in `apps/mate/src/profile.ts`), the sandbox's checkout holds the files, and the `apps/mate` tests fail if it holds no `*/SKILL.md`. `dotfiles:check` prints each link the deploy would make and changes nothing.
+The [Rowbutt](https://wiki.lolwtf.ca/apps/mate/) sandbox loads this directory as extra skills (`apps/mate/src/sandboxes.ts`), and mate indexes it into its system prompt (`SKILL_DIRS` in `apps/mate/src/profile.ts`). The `apps/mate` tests fail if it holds no `*/SKILL.md`. `dotfiles:check` deploys the `[dotfiles]` table into scratch homes under each profile and fails on missing sources, templates that do not render, or mise warnings.
 
 ## Deploy
 
-`dotfiles/scripts/deploy-dotfiles.sh` links this directory to `~/.agents/skills`, `~/.claude/skills` and `~/.gemini/config/skills`. NixOS hosts run it on every activation through `nix/system/mise-dotfiles.nix`. On other machines, run `mise run --cd dotfiles bootstrap`.
+The `[dotfiles]` table in `dotfiles/mise.toml` links each skill in this directory into `~/.agents/skills`, `~/.claude/skills` and `~/.gemini/config/skills`, and leaves the skills that other tools install there alone. NixOS hosts apply it on every activation through `nix/system/mise-dotfiles.nix`. On other machines, run `mise run --cd dotfiles bootstrap`. A new skill needs no table change, only another apply.
