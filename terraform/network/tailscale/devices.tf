@@ -31,10 +31,6 @@ locals {
       key_expiry_disabled = true
       tags                = ["tag:folly"]
     }
-    "spore" = {
-      key_expiry_disabled = true
-      tags                = ["tag:folly"]
-    }
     "tallboy" = {
       key_expiry_disabled = true
       tags                = []
