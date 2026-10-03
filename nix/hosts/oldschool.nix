@@ -15,8 +15,9 @@
 
   sops.defaultSopsFile = ../secrets/oldschool.sops.yaml;
 
-  # bosun does not run here, and nothing else deletes its textfile, which would export a frozen pool.
+  # Retired jobs must not leave stale node-exporter metrics that keep alerts firing.
   systemd.tmpfiles.rules = [
     "r /var/lib/prometheus-node-exporter-text-files/bosun.prom"
+    "r /var/lib/prometheus-node-exporter-text-files/lab-backup-restic-staging-prune.prom"
   ];
 }
