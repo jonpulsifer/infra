@@ -89,17 +89,19 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 
 ## Check the backups
 
-Each database has a barman `ObjectStore` named `garage` in its namespace, a `ScheduledBackup`, and WAL archiving through the barman-cloud plugin. The store is the `cnpg` bucket of the site's Garage, under `<namespace>/`. A chart's `backup` value sets the endpoint and the 1Password item. [Backups](../platform/backups.md) describes the schedule, the copy to GCS and the retention. To restore a database, use [Restore a database](restore-a-database.md).
+Each database except `mate-db` has a barman `ObjectStore` named `garage` in its namespace, a `ScheduledBackup`, and WAL archiving through the barman-cloud plugin. The store is the `cnpg` bucket of the site's Garage, under `<namespace>/`. A chart's `backup` value sets the endpoint and the 1Password item. [Backups](../platform/backups.md) describes the schedule, the copy to GCS and the retention. To restore a database, use [Restore a database](restore-a-database.md).
+
+A Postgres Datastore in `spindrift-datastores` archives to that namespace's `garage` store, which `clusters/base/platform/spindrift-target/backup/` declares. The kthx engine owns each Datastore's `Cluster` and `ScheduledBackup`. It turns the plugin on when it provisions a Datastore, and on an older one at the hourly check of an attached Datastore. The first check after the `Cluster` is ready with the plugin adds the `ScheduledBackup`. A Datastore attached to no App is not checked.
 
 | Database | Extra backup |
 | --- | --- |
 | kthx (`kthx-db`) | The CronJob `kthx-db-backup` writes a `pg_dumpall` to `gs://bluenose-kthx/backups/pg/` each night. The bucket deletes a dump after 30 days. |
-| mate (`mate-db`) | The CronJob `mate-db-backup` writes a `pg_dump` to `gs://homelab-ng-mate/backups/pg/` each night. The bucket deletes a dump after 30 days. |
+| mate (`mate-db`) | Its only backup. The CronJob `mate-db-backup` writes a `pg_dump` to `gs://homelab-ng-mate/backups/pg/` each night, without the ChatGPT sign-in. The bucket deletes a dump after 30 days. |
 | The built-apps database (`spindrift-db`) | None. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
-| Prowler (`prowler-db`), tronbyt (`tronbyt`, on folly) | None. |
+| Prowler (`prowler-db`), tronbyt (`tronbyt`, on folly), the Datastores | None. |
 
 > [!WARNING]
-> A database that has no `ObjectStore` has no backup, and neither has a Datastore in `spindrift-datastores`. If one loses its volume, its data is lost.
+> A database with neither an `ObjectStore` nor a dump has no backup. If it loses its volume, its data is lost.
 
 1. Read the backup lines in the `kubectl cnpg status` output of the database.
 

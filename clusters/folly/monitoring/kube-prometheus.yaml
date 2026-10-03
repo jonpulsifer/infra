@@ -203,6 +203,10 @@ spec:
         enabled: true
         storageClassName: local-path
         size: 1Gi
+      # Dashboards come from git; the volume keeps what the UI adds, such as
+      # public dashboard links.
+      podAnnotations:
+        backup.velero.io/backup-volumes: storage
     alertmanager:
       config:
         route:

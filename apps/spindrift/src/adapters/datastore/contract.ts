@@ -75,6 +75,13 @@ export interface DatastoreAdapter {
   ): Promise<boolean>;
 
   /**
+   * Puts the Datastore under the backup its Target provides. Re-asserted on
+   * the same schedule as `permit`, so idempotent; `false` means the Target
+   * provides none for this Datastore and nothing was written.
+   */
+  protect?(target: DeployTarget, ref: DatastoreRef): Promise<boolean>;
+
+  /**
    * The backend's own object, verbatim, for a person diagnosing it. Absent, or
    * `null` when the object is gone, both render as nothing to show.
    */

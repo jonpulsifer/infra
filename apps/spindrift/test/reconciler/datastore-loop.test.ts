@@ -439,3 +439,53 @@ describe('the network exception', () => {
     expect(reports).toEqual([]);
   });
 });
+
+describe('the backup', () => {
+  test('is re-asserted whenever the exception is, and not otherwise', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    const backend = new FakeDatastoreAdapter();
+    const db = database().db;
+    const context = { db, adapters: adaptersFor(backend), clock };
+
+    await runDatastorePass(context);
+    await runDatastorePass(context);
+    const later: Clock = {
+      now: () => new Date('2024-06-01T02:00:00.000Z'),
+    };
+    await runDatastorePass({ ...context, clock: later });
+
+    // Once on attach, once past the reassert window: a store the installation
+    // adds later reaches a Datastore provisioned before it, within the hour.
+    expect(backend.protects).toEqual([row.ref!, row.ref!]);
+    expect(backend.permits).toHaveLength(2);
+  });
+
+  test('a refused backup still lets the exception through', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    const backend = new FakeDatastoreAdapter({
+      protectThrows: 'scheduledbackups is forbidden: RBAC: no policy matched',
+    });
+
+    const reports = await runDatastorePass({
+      db: database().db,
+      adapters: adaptersFor(backend),
+      clock,
+    });
+
+    expect(backend.protects).toEqual([row.ref!]);
+    expect(backend.permits).toEqual([
+      { ref: row.ref!, namespaces: ['app-storefront'] },
+    ]);
+    expect(reports[0]?.permitted).toBe(true);
+  });
+});

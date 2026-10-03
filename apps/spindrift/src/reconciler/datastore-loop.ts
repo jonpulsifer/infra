@@ -1,6 +1,8 @@
 /**
  * Polls each managed Datastore's `observe` into its row, and keeps the network
- * exception admitting the attached App's namespace in step with `app_id`.
+ * exception admitting the attached App's namespace in step with `app_id`. On
+ * the same cadence it re-asserts the backup the Target provides, so a store
+ * added after a Datastore was provisioned still reaches it.
  */
 import { and, eq, isNotNull, or } from 'drizzle-orm';
 import type { DatastoreState } from '../adapters/datastore/contract.ts';
@@ -104,30 +106,47 @@ export async function runDatastorePass(
       (row.permittedAt === null ||
         now.getTime() - row.permittedAt.getTime() >= PERMIT_REASSERT_MS);
     let permitted = false;
-    if (
-      adapter.permit !== undefined &&
-      (desired !== row.permittedNamespace || stale)
-    ) {
-      try {
-        // `false`: the adapter wrote nothing, so the namespace is not recorded.
-        permitted = await adapter.permit(
-          target,
-          row.ref,
-          desired === null ? [] : [desired],
-        );
-      } catch (error) {
-        // Not a `continue`: the poll below still runs, and the unrecorded
-        // write is retried next pass.
-        logWarn('a Datastore network exception was refused', {
-          'spindrift.datastore.id': row.id,
-          'spindrift.datastore.namespace': desired ?? '(none)',
-          'spindrift.target': targetLabel({
-            vessel: row.vessel.name,
-            adapter: row.target.adapter,
-          }),
-          'spindrift.error':
-            error instanceof Error ? error.message : String(error),
-        });
+    if (desired !== row.permittedNamespace || stale) {
+      const label = targetLabel({
+        vessel: row.vessel.name,
+        adapter: row.target.adapter,
+      });
+      // The backup first: a refused exception must not skip it. Its result is
+      // not recorded; `permitted_at` paces both writes.
+      //
+      // ponytail: a Datastore attached to no App is never re-asserted, so one
+      // older than its store archives nowhere until it is attached.
+      if (adapter.protect !== undefined) {
+        try {
+          await adapter.protect(target, row.ref);
+        } catch (error) {
+          logWarn('a Datastore backup was refused', {
+            'spindrift.datastore.id': row.id,
+            'spindrift.target': label,
+            'spindrift.error':
+              error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      if (adapter.permit !== undefined) {
+        try {
+          // `false`: the adapter wrote nothing, so the namespace is not recorded.
+          permitted = await adapter.permit(
+            target,
+            row.ref,
+            desired === null ? [] : [desired],
+          );
+        } catch (error) {
+          // Not a `continue`: the poll below still runs, and the unrecorded
+          // write is retried next pass.
+          logWarn('a Datastore network exception was refused', {
+            'spindrift.datastore.id': row.id,
+            'spindrift.datastore.namespace': desired ?? '(none)',
+            'spindrift.target': label,
+            'spindrift.error':
+              error instanceof Error ? error.message : String(error),
+          });
+        }
       }
       if (permitted) {
         await context.db
