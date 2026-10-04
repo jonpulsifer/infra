@@ -39,6 +39,8 @@ type cook struct {
 	meatTriggered [3]bool
 	pitAlarmAt    time.Time
 	ventAdviceAt  time.Time
+
+	history history
 }
 
 type device struct {
@@ -134,7 +136,7 @@ func (s *State) CountMessage(id int, name string) {
 }
 
 // Temps applies a temps uplink. A new cookID starts a new cook, so the settled
-// flag and start time never carry over.
+// flag, start time and history never carry over.
 func (s *State) Temps(id int, m Temps) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -142,7 +144,7 @@ func (s *State) Temps(id int, m Temps) {
 	now := s.now()
 
 	if d.cook == nil || d.cook.cookID != m.CookID {
-		d.cook = &cook{cookID: m.CookID, startedAt: now}
+		d.cook = &cook{cookID: m.CookID, startedAt: now, history: newHistory()}
 	}
 	c := d.cook
 	c.receivedAt = now
@@ -165,6 +167,31 @@ func (s *State) Temps(id int, m Temps) {
 	if c.pitPlugged && fahrenheit(c.pitDeci) >= fahrenheit(c.setDeci)-pitAtTarget {
 		c.reachedSet = true
 	}
+	c.history.record(now.Sub(c.startedAt), c.reading())
+}
+
+// reading is the cook's current temperatures as a history bucket.
+func (c *cook) reading() bucket {
+	b := bucket{pitSeries: probeUnplugged, setSeries: c.setDeci}
+	if c.pitPlugged {
+		b[pitSeries] = c.pitDeci
+	}
+	copy(b[probeSeries:], c.probesDeci[:])
+	return b
+}
+
+// liveCook returns the device's cook, or nil once it has been quiet past retire,
+// dropping it. Collect and Snapshot both read through here so that the series
+// and the document retire a cook together.
+func (s *State) liveCook(d *device, now time.Time) *cook {
+	if d.cook != nil && now.Sub(d.cook.receivedAt) > s.retire {
+		d.cook = nil
+	}
+	return d.cook
+}
+
+func (s *State) active(c *cook, now time.Time) bool {
+	return now.Sub(c.receivedAt) <= s.stale
 }
 
 // Labels records probe names. values[0] is the pit; 1-3 are the meat probes.
@@ -366,18 +393,14 @@ func (s *State) Collect(ch chan<- prometheus.Metric) {
 			gauge(descSupply, float64(*d.supplyDeciV)/10, dev)
 		}
 
-		c := d.cook
-		if c == nil {
-			continue
-		}
 		// Dropping a retired cook's series resolves the silence alert.
-		if now.Sub(c.receivedAt) > s.retire {
-			d.cook = nil
+		c := s.liveCook(d, now)
+		if c == nil {
 			continue
 		}
 
 		gauge(descCook, 1, dev, strconv.Itoa(c.cookID))
-		gauge(descCookActive, boolValue(now.Sub(c.receivedAt) <= s.stale), dev)
+		gauge(descCookActive, boolValue(s.active(c, now)), dev)
 		gauge(descCookStart, float64(c.startedAt.Unix()), dev)
 		gauge(descDataAt, float64(c.dataAt.Unix()), dev)
 		gauge(descTarget, fahrenheit(c.setDeci), dev)

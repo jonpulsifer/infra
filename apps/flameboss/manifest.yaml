@@ -1,0 +1,7 @@
+---
+id: flameboss
+name: Flame Boss
+summary: Live barbecue cooks
+desc: Follows a Flame Boss cook through the flameboss exporter - a pixel fire that burns with the blower, each meat probe on its way to the pull temperature, and the cook's history. Alerts jump the rotation.
+author: jonpulsifer
+supports2x: true

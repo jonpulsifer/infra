@@ -2,6 +2,7 @@
 # event worth a Discord message that is not a fault. Alertmanager's InfoInhibitor
 # mutes severity: info in a namespace with no warning firing, so notice keeps
 # these two out of it. Thresholds are in Fahrenheit.
+# apps/flameboss/flameboss.star is the Tidbyt display's copy of these thresholds.
 # Below-set alerts require pit_reached_target, so the ramp from ambient is quiet.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
