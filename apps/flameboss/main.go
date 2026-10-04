@@ -1,4 +1,5 @@
-// flameboss exports one barbecue's cook telemetry as Prometheus metrics.
+// flameboss exports one barbecue's cook telemetry as Prometheus metrics, and as
+// a JSON snapshot at /api/cook for the Tidbyt app.
 //
 // The controller publishes to Flame Boss's cloud MQTT brokers, not to the lab.
 // This process holds the account's MQTT credentials, follows each controller to
@@ -99,6 +100,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.Handle("/api/cook", cookHandler(state))
 	// Process liveness only. The barbecue is off most of the week, so cook or
 	// cloud state would keep the pod unready for days.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {

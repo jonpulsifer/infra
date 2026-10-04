@@ -4,7 +4,7 @@ description: A Go exporter on folly that reads barbecue cooks from Flame Boss's 
 status: live
 ---
 
-The Flame Boss is a barbecue controller. It reads a pit probe and three meat probes, and runs a blower fan to hold the pit at a set temperature. The controller sends its readings only to Flame Boss's cloud. The `flameboss` exporter on the folly [Kubernetes](../platform/kubernetes.md) cluster reads them from that cloud into Prometheus. The owner watches a cook on a Grafana dashboard and gets its alerts in Discord.
+The Flame Boss is a barbecue controller. It reads a pit probe and three meat probes, and runs a blower fan to hold the pit at a set temperature. The controller sends its readings only to Flame Boss's cloud. The `flameboss` exporter on the folly [Kubernetes](../platform/kubernetes.md) cluster reads them from that cloud into Prometheus. The owner watches a cook on a Grafana dashboard and the lab's Tidbyt displays, and gets its alerts in Discord.
 
 ## Use it
 
@@ -13,12 +13,15 @@ The Flame Boss is a barbecue controller. It reads a pit probe and three meat pro
 | Dashboard | Flame Boss, at `https://grafana.lolwtf.ca/d/flameboss-cook` | Clients that route to folly's load-balancer range, with a Grafana sign-in |
 | Alerts | Discord, through Alertmanager on folly | The owner's Discord channel |
 | Metrics | `/metrics` on port `8080` of the `flameboss` Service in `monitoring` | Prometheus, or `kubectl port-forward` |
+| Cook snapshot | `/api/cook` on the same port, as JSON | Pods in folly, such as Tronbyt |
+| Tidbyt app | `flameboss`, described in [Tidbyt apps](tidbyt.md) | The displays that Tronbyt shows it on |
 | Cook log | `https://myflameboss.com/en/cooks/<cook_id>` | Anyone with the cook ID, with no sign-in |
 
 ## Limits
 
+- The exporter keeps a cook in memory. A restart starts the `/api/cook` graph, the elapsed time and the reached-set latch again, and forgets the lid and alarm events. Probe names and alarm settings return when the controller sends them.
 - The exporter sends no commands. It cannot change the set temperature or silence an alarm on the controller.
-- A cook's series exist while readings arrive. After 5 minutes without a reading, `flameboss_cook_active` is 0. After 30 minutes, the cook's series go away, so the dashboard is empty between cooks.
+- A cook's series exist while readings arrive. After 5 minutes without a reading, `flameboss_cook_active` is 0. After 30 minutes, the cook's series and its `/api/cook` entry go away, so the dashboard is empty between cooks and the Tidbyt app hides.
 - `FlameBossCookStarted` and `FlameBossMeatProbeAtWrapPoint` have severity `notice`, which the Discord route sends and the `InfoInhibitor` rule of the kube-prometheus-stack chart does not match. `FlameBossVentAdvice` keeps severity `info`, so it reaches Discord only while a warning or critical alert fires in the `monitoring` namespace.
 - Before its first connection, the exporter exports `flameboss_broker_connected` as 0 for the entry server, so `FlameBossCloudUnreachable` fires after 15 minutes if it never connects.
 - The Deployment carries the `reloader.stakater.com/auto` annotation, so a change to the `flameboss-credentials` Secret restarts the exporter, which reads its token only at start.
@@ -37,7 +40,7 @@ The rules watch the pit, the meat probes, the controller's alarms and the export
 
 ## Reference
 
-- Source, protocol and metrics: `apps/flameboss/`
+- Source, protocol, metrics and the Tidbyt app: `apps/flameboss/`
 - Manifests: `clusters/folly/monitoring/flameboss.yaml`
 - Alerts: `clusters/folly/monitoring/flameboss-rules.yaml`, tested by `clusters/folly/monitoring/flameboss_test.yaml`
 - Dashboard: `clusters/folly/monitoring/grafana-dashboards/flameboss.json`

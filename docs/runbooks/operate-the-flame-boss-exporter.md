@@ -58,7 +58,7 @@ This runbook checks and repairs the [Flame Boss exporter](../apps/flameboss.md),
 > [!NOTE]
 > Flux owns the live `flameboss` PrometheusRule and restores it from git.
 
-1. Edit the threshold in `clusters/folly/monitoring/flameboss-rules.yaml`.
+1. Edit the threshold in `clusters/folly/monitoring/flameboss-rules.yaml`, and its copy at the top of `apps/flameboss/flameboss.star`.
 2. Change the matching values in `clusters/folly/monitoring/flameboss_test.yaml`.
 3. Run the rule checks.
 
