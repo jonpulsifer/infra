@@ -36,7 +36,7 @@ spec:
         - name: weather
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # full `ghcr.io/…/weather…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/weather:latest@sha256:ed799f14510790ee3a61c68d96ce43f1a7e149062d89bb55489e3c08b02aff7f
+          image: ghcr.io/jonpulsifer/weather:latest@sha256:812b428650a699fcd166578703b1b107077951b3edfc43cbe7dc7fc4cce4617d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
