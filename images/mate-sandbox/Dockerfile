@@ -38,7 +38,7 @@ ARG DELTA_VERSION=0.19.2
 # renovate: datasource=github-releases depName=eza-community/eza
 ARG EZA_VERSION=0.23.5
 # renovate: datasource=github-releases depName=fluxcd/flux2
-ARG FLUX_VERSION=2.9.5
+ARG FLUX_VERSION=2.9.6
 # renovate: datasource=github-releases depName=junegunn/fzf
 ARG FZF_VERSION=0.74.4
 # renovate: datasource=github-releases depName=cli/cli
