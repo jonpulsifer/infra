@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # One image, two processes: `web` is the default command and the chart starts
 # `reconciler` with its own. The client ships as prebuilt files in dist/.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:f3c473420ab4e712150e12a4f2f71ed76a616208aed56c24070945676d08b52d AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:d402f6a7511ca30c4acd9132e04ef52ed77617e6ff20643cc4167c5517c16fa1 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
