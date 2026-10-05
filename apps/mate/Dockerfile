@@ -14,7 +14,7 @@ FROM base AS pruner
 # At least 2.11.2: 2.10.3's prune drops a nested lockfile entry that pi-ai's
 # dependencies need, and the frozen install then refuses it.
 # renovate: datasource=npm depName=turbo
-ARG TURBO_VERSION=2.11.4
+ARG TURBO_VERSION=2.11.5
 WORKDIR /app
 COPY . .
 RUN bun x "turbo@${TURBO_VERSION}" prune mate --docker
