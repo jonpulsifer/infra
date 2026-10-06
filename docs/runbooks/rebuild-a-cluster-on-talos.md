@@ -19,7 +19,7 @@ Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd a
 
 - Set `SOPS_AGE_KEY_FILE` to the operator key, as [Manage SOPS secrets](manage-sops-secrets.md) describes.
 - You need write access to objects in the `homelab-ng` state bucket.
-- On folly, `main` must hold the `monitoring-crds` Flux Kustomization, as [Adopt the folly Prometheus Operator CRDs](adopt-the-folly-prometheus-operator-crds.md) describes.
+- On folly, the `monitoring-crds` Flux Kustomization must be ready: `flux --context folly get kustomization monitoring-crds -n flux-system`.
 - `clusters/offsite/apps/atlantis/kubeconfig-hook.sh` and Rowbutt must read the CA only from `clusters/<site>/config/kubernetes-ca.pem`, not `terraform/pki/certs/`.
 - On folly, `MATE_SANDBOX_LAB_JUMP` in `clusters/offsite/apps/mate/deployment.yaml` on `main` must not name a folly node, and that change must be deployed. A Talos node runs no sshd, so Rowbutt loses its Lab Net SSH when that node leaves NixOS.
 - Open the cutover pull request as a draft: the Talos root, the Talos values in `clusters/<site>/networking/cilium/helm-release.yaml` and `clusters/<site>/config/cluster-settings.yaml`, and a new `serverName` for each CloudNativePG `Cluster`.
