@@ -81,7 +81,7 @@ describe('a dispatch refusal the operator can see', () => {
         name: overrides.appName ?? `app-${crypto.randomUUID().slice(0, 8)}`,
         sourceKind: 'repo',
         sourceRepoUrl: 'jonpulsifer/infra',
-        sourceRepoSubpath: 'apps/spindrift-demo/plain',
+        sourceRepoSubpath: 'apps/kthx-engine-demo/plain',
       })
       .returning();
     const [component] = await ctx.db

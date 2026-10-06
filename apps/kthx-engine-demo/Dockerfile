@@ -13,7 +13,7 @@ ARG BUILD_BRANCH=unknown
 ARG BUILD_TIME
 WORKDIR /app
 COPY . .
-RUN cd apps/spindrift-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
+RUN cd apps/kthx-engine-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
 
 FROM cgr.dev/chainguard/node:latest@sha256:1ae8ed719c65888716078a52ce2166767e091f0b1072a79f6b42becba6e1ad44 AS runner
 # ARGs are scoped to a stage; redeclare it so serve.ts can report SPINDRIFT_BUILD.
@@ -23,8 +23,8 @@ ENV NODE_ENV=production \
   SPINDRIFT_BUILD=${BUILD_COMMIT}
 WORKDIR /app
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
-COPY --from=builder --chmod=755 /app/apps/spindrift-demo/dist ./dist
-COPY --from=builder --chmod=755 /app/apps/spindrift-demo/serve.ts ./serve.ts
+COPY --from=builder --chmod=755 /app/apps/kthx-engine-demo/dist ./dist
+COPY --from=builder --chmod=755 /app/apps/kthx-engine-demo/serve.ts ./serve.ts
 USER 65532:65532
 EXPOSE 3000
 ENTRYPOINT []

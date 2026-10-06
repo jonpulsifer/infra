@@ -3,7 +3,7 @@ title: Connect an agent to kthx
 description: Mint an agent token in the kthx console and connect an MCP client, Rowbutt or the owner's workstation to the kthx engine, which serves each console command as a tool.
 ---
 
-Use this runbook to give an MCP client the commands of the kthx built-apps console. The kthx engine on offsite serves each command in `apps/spindrift/src/commands/registry.ts` as a Model Context Protocol (MCP) tool at `https://spindrift-control.lolwtf.dev/mcp`. The endpoint accepts only an agent token, which you mint in the console at `https://kthx.lolwtf.ca`. A token lasts 90 days. The console shows it once, because kthx stores only its SHA-256 hash.
+Use this runbook to give an MCP client the commands of the kthx built-apps console. The kthx engine on offsite serves each command in `apps/kthx-engine/src/commands/registry.ts` as a Model Context Protocol (MCP) tool at `https://spindrift-control.lolwtf.dev/mcp`. The endpoint accepts only an agent token, which you mint in the console at `https://kthx.lolwtf.ca`. A token lasts 90 days. The console shows it once, because kthx stores only its SHA-256 hash.
 
 ## Before you start
 

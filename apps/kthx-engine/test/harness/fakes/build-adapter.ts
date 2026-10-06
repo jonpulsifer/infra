@@ -151,7 +151,7 @@ export function fakeDigest(label: string): string {
 
 /**
  * An in-toto v1 statement with the bundle digest at the path `SlsaVerifier` and
- * `apps/spindrift-verifier` read it from.
+ * `apps/kthx-engine-verifier` read it from.
  */
 export function fakeStatement(input: {
   builderId: string;

@@ -25,7 +25,7 @@ bun run test         # renderer and MCP tests against test/fixtures/
   by `docs/nav.yaml`, and writes each page, `search.json`, `graph.json`,
   `pages.json` and `404.html`. It does not render `docs/agents/`.
 - `build.ts` copies `docs/assets/` and the diagrams in
-  `apps/spindrift/src/web/client/diagrams/` to `/assets/`.
+  `apps/kthx-engine/src/web/client/diagrams/` to `/assets/`.
 - `functions/mcp.ts` serves `pages.json` at `/mcp` as the tools `list_pages`,
   `read_page` and `search`.
 - The build fails and lists each problem: missing frontmatter, a page missing

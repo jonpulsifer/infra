@@ -25,7 +25,7 @@ File names are lowercase kebab-case. List every page in `docs/nav.yaml`, or the 
 | Host | The host name | The host name |
 | Runbook | The title in kebab-case | An imperative verb first, as in Deploy a NixOS host |
 
-The product in `apps/spindrift/` is kthx. Write `spindrift` only as a path.
+The product in `apps/kthx-engine/` is kthx, and its engine is the kthx engine. Write `spindrift` only where a path, an image or a Kubernetes object still carries it, such as `clusters/offsite/apps/spindrift/`.
 
 Document what runs today. A parked app gets a short page with `status: parked`. `STATUSES` in `apps/wiki/build.ts` lists the valid `status` values.
 

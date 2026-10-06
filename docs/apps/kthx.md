@@ -43,5 +43,5 @@ Flux deploys quick sites from `packages/charts/kthx/` in git. It deploys the eng
 ## Reference
 
 - Quick sites: `apps/kthx/`, `packages/kthx/`, `packages/charts/kthx/` and `clusters/offsite/apps/kthx/`. Image `ghcr.io/jonpulsifer/kthx`.
-- Built apps: `apps/spindrift/`, `packages/charts/spindrift/`, `packages/charts/spindrift-app/`, `clusters/offsite/apps/spindrift/` and `clusters/base/platform/spindrift-target/`. Image `ghcr.io/jonpulsifer/spindrift`.
+- Built apps: `apps/kthx-engine/`, `packages/charts/spindrift/`, `packages/charts/spindrift-app/`, `clusters/offsite/apps/spindrift/` and `clusters/base/platform/spindrift-target/`. Image `ghcr.io/jonpulsifer/spindrift`.
 - Cloud: `terraform/network/cloudflare/kthx.dev.tf`, `terraform/network/cloudflare/spindrift.tf` and `terraform/gcp/projects/bluenose/`
