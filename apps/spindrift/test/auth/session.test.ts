@@ -10,9 +10,10 @@ import {
 } from '../../src/auth/enrol.ts';
 import {
   beginSignIn,
-  clearedSessionCookie,
+  clearedSessionCookies,
   closeSession,
   completeSignIn,
+  LEGACY_SESSION_COOKIE,
   resolveSession,
   SESSION_COOKIE,
   SESSION_LIFETIME_MS,
@@ -140,18 +141,51 @@ describe('a session is opaque', () => {
 });
 
 describe('the cookie it travels in', () => {
-  test('is not reachable from script and does not leave the site', () => {
-    const header = sessionCookie('a-token');
-    expect(header).toContain('HttpOnly');
-    expect(header).toContain('Secure');
-    expect(header).toContain('SameSite=Lax');
-    expect(header).toContain('Path=/');
-    expect(header).toContain('Max-Age=86400');
+  test('is a __Host- cookie no sibling host can set', () => {
+    // The prefix holds only with `Secure`, `Path=/` and no `Domain`.
+    expect(SESSION_COOKIE).toBe('__Host-kthx_session');
+    expect(sessionCookie('a-token')).toBe(
+      '__Host-kthx_session=a-token; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400',
+    );
   });
 
-  test('and clearing it sends an expiry rather than a blank value', () => {
+  test('and clearing it expires both names rather than blanking them', () => {
     // A browser keeps a blank cookie and forgets only an expired one.
-    expect(clearedSessionCookie()).toContain('Max-Age=0');
+    expect(clearedSessionCookies()).toEqual([
+      '__Host-kthx_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+      'spindrift_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+    ]);
+  });
+});
+
+describe('the legacy cookie name', () => {
+  const legacy = (token: string) =>
+    new Request(RELYING_PARTY.origin, {
+      headers: { cookie: `${LEGACY_SESSION_COOKIE}=${token}` },
+    });
+
+  test('still opens the session it was issued for', async () => {
+    const clock = movableClock();
+    const { deps, token } = await enrolled(clock);
+    expect(await resolveSession(legacy(token), deps)).not.toBeNull();
+  });
+
+  test('loses to the new name when a request carries both', async () => {
+    const clock = movableClock();
+    const { deps, token } = await enrolled(clock);
+    const both = new Request(RELYING_PARTY.origin, {
+      headers: {
+        cookie: `${LEGACY_SESSION_COOKIE}=${token}; ${SESSION_COOKIE}=not-a-session`,
+      },
+    });
+    expect(await resolveSession(both, deps)).toBeNull();
+  });
+
+  test('is revoked by signing out, as the new name is', async () => {
+    const clock = movableClock();
+    const { deps, token } = await enrolled(clock);
+    await closeSession(legacy(token), deps);
+    expect(await resolveSession(legacy(token), deps)).toBeNull();
   });
 });
 

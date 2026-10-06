@@ -11,6 +11,7 @@ import {
 } from '../../src/auth/enrol.ts';
 import {
   AGENT_TOKEN_LIFETIME_MS,
+  LEGACY_SESSION_COOKIE,
   listAgentTokens,
   openAgentToken,
   resolveAgentToken,
@@ -105,6 +106,19 @@ describe('neither key turns the other lock', () => {
     // The session is live, so the refusal below is about the surface.
     expect(await resolveSession(cookie(sessionToken), deps)).not.toBeNull();
     expect(await resolveAgentToken(bearer(sessionToken), deps)).toBeNull();
+  });
+
+  test('neither session cookie name opens the bearer surface', async () => {
+    const clock = movableClock();
+    const { deps, sessionToken } = await enrolled(clock);
+
+    const both = new Request(RELYING_PARTY.origin, {
+      headers: {
+        cookie: `${SESSION_COOKIE}=${sessionToken}; ${LEGACY_SESSION_COOKIE}=${sessionToken}`,
+      },
+    });
+    expect(await resolveSession(both, deps)).not.toBeNull();
+    expect(await resolveAgentToken(both, deps)).toBeNull();
   });
 
   test('an agent token is not a session cookie', async () => {
