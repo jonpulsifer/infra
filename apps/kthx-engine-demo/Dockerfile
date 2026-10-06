@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Static site demo: builds dist/ with build-time git facts, then serves it with bun.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:bf001bf3f41c93a78827f729f003372ff0565d2341a31474b5627ea1b4a14420 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:9cc1ea0327a4658a0bee134864055768b0a06ffb8ef27ae4bb1a6254226ebda2 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local
 USER root
@@ -15,7 +15,7 @@ WORKDIR /app
 COPY . .
 RUN cd apps/kthx-engine-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
 
-FROM cgr.dev/chainguard/node:latest@sha256:1ae8ed719c65888716078a52ce2166767e091f0b1072a79f6b42becba6e1ad44 AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:890c242118f6624fde2cdf8d8b03808e6f46c09eda8cf6a1c963a7abcbd8e9f0 AS runner
 # ARGs are scoped to a stage; redeclare it so serve.ts can report SPINDRIFT_BUILD.
 ARG BUILD_COMMIT=unknown
 ENV NODE_ENV=production \
