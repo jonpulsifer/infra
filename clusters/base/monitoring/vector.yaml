@@ -80,6 +80,8 @@ spec:
           address: 127.0.0.1:6051
           decoding:
             codec: json
+        internal_metrics:
+          type: internal_metrics
       transforms:
         # VictoriaLogs reads the line from `_msg`; both sources write `message`.
         # One transform per source, so each sink labels only its own stream.
@@ -137,6 +139,14 @@ spec:
             del(."talos-time")
             del(.port)
       sinks:
+        # The chart names a container port after the sink, kebab-cased and cut to
+        # 15 characters, and the PodMonitor scrapes `prom-exporter`. On the host
+        # network it listens on the node's address, as node-exporter does.
+        prom_exporter:
+          type: prometheus_exporter
+          inputs:
+            - internal_metrics
+          address: 0.0.0.0:9598
         # The loki sink appends /loki/api/v1/push itself; a full path gets a 400.
         victoria_logs_kubernetes:
           type: loki
