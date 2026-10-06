@@ -14,7 +14,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 | barman-cloud plugin | Archives each database's base backups and WAL, through an `ObjectStore` named `garage` | The `cloudnative-pg` namespace |
 | `etcd-backup` | Snapshots etcd | [optiplex](../hosts/optiplex.md) and [retrofit](../hosts/retrofit.md) |
 | `backup-push` | Syncs each bucket to GCS through an rclone crypt remote | The `backups` namespace |
-| `restore-drill` | Recovers the kthx database into a throwaway cluster | The `restore-drill` namespace on offsite |
+| `restore-drill` | Recovers the kthx database on offsite, and the tronbyt database on folly, into a throwaway cluster | The `restore-drill` namespace on each site |
 
 ## Schedule
 
@@ -24,7 +24,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 | CNPG `ScheduledBackup` | Daily, 01:00 to 04:00 Halifax |
 | etcd snapshot | 02:30 Halifax |
 | `backup-push` | `BACKUP_PUSH_SCHEDULE`: weekly on folly, because of Starlink, and daily on offsite |
-| `restore-drill` | The 1st of the month, 06:00 Halifax |
+| `restore-drill` | 06:00 Halifax: the 1st of the month on offsite, the 15th on folly |
 
 ## Retention
 
@@ -54,7 +54,7 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 - `clusters/offsite/garage/`: offsite's Garage
 - `clusters/base/platform/velero/`, `barman-cloud/`, `backups/`: Velero, the plugin and `backup-push`
 - `clusters/base/platform/spindrift-target/backup/`: the store the kthx Datastores archive to
-- `clusters/offsite/apps/restore-drill/`: the restore drill
+- `clusters/offsite/apps/restore-drill/`, `clusters/folly/apps/restore-drill/`: the restore drill
 - `clusters/<site>/config/cluster-settings.yaml`: `GARAGE_S3_ENDPOINT`, `BACKUP_PUSH_SCHEDULE`
 - `terraform/gcp/projects/homelab-ng/backups.tf`: the buckets
 - `clusters/base/monitoring/backup-rules.yaml`: the alerts
