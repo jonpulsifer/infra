@@ -7,7 +7,7 @@ metadata:
     pod-policies.kyverno.io/autogen-controllers: none
     policies.kyverno.io/category: Software Supply Chain Security
     policies.kyverno.io/description: >-
-      Admit Spindrift workloads only when every digest-pinned image has a
+      Admit kthx workloads only when every digest-pinned image has a
       signature from the trusted-builds signer.
 spec:
   background: true

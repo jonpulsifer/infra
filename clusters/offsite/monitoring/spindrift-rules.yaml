@@ -26,8 +26,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            message: "A Spindrift deploy attempt landed FAILED"
-            description: "kind=deploy outcome=FAILED in the last 15m. Check the Spindrift deploys ledger (`/deploys`) for the reason and blame Spindrift already diagnosed."
+            message: "A kthx deploy attempt landed FAILED"
+            description: "kind=deploy outcome=FAILED in the last 15m. Check the kthx deploys ledger (`/deploys`) for the reason and the blame the kthx engine already diagnosed."
 
         # The reconciler holding the claim died or hung mid-apply; another
         # attempt still settles the row.
@@ -42,5 +42,5 @@ spec:
           labels:
             severity: warning
           annotations:
-            message: "A Spindrift reconciler died or hung mid-deploy"
-            description: "kind=deploy outcome=LOST in the last 15m: an attempt's claim was reclaimed rather than settling the row. The deploy itself may still land via a later attempt — check the Spindrift deploys ledger (`/deploys`) and the reconciler pod's own restarts/logs."
+            message: "A kthx engine reconciler died or hung mid-deploy"
+            description: "kind=deploy outcome=LOST in the last 15m: an attempt's claim was reclaimed rather than settling the row. The deploy itself may still land via a later attempt — check the kthx deploys ledger (`/deploys`) and the reconciler pod's own restarts/logs."

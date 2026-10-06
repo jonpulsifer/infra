@@ -1,4 +1,4 @@
-name: spindrift-charts
+name: kthx-charts
 
 # Pushes packages/charts/spindrift and spindrift-app to GHCR at their Chart.yaml
 # versions; apps/spindrift/test/conformance/ checks that each consumer's OCIRepository
