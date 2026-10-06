@@ -95,7 +95,7 @@ describe('story 101: dispatch backoff and signed-URL ordering', () => {
         name,
         sourceKind: 'repo',
         sourceRepoUrl: 'jonpulsifer/infra',
-        sourceRepoSubpath: 'apps/spindrift',
+        sourceRepoSubpath: 'apps/kthx-engine',
       })
       .returning();
     const [component] = await ctx.db

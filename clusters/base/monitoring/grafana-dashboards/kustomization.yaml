@@ -10,7 +10,7 @@ configMapGenerator:
       - bosun.json
       - flux.json
       - mate.json
-      - spindrift.json
+      - kthx-engine.json
 generatorOptions:
   disableNameSuffixHash: true
   annotations:

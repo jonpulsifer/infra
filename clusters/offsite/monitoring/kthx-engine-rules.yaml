@@ -5,17 +5,17 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: spindrift
+  name: kthx-engine
   namespace: monitoring
   labels:
     lolwtf.ca/service: spindrift
     release: prom-stack
 spec:
   groups:
-    - name: spindrift
+    - name: kthx-engine
       rules:
         # A terminal FAILED, not a retry. The Deploy row carries the reason.
-        - alert: SpindriftDeployFailed
+        - alert: KthxEngineDeployFailed
           expr: |
             increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"}[15m]) > 0
             or (
@@ -31,7 +31,7 @@ spec:
 
         # The reconciler holding the claim died or hung mid-apply; another
         # attempt still settles the row.
-        - alert: SpindriftDeployLost
+        - alert: KthxEngineDeployLost
           expr: |
             increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"}[15m]) > 0
             or (

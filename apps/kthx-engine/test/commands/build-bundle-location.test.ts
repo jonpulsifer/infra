@@ -58,7 +58,7 @@ describe('the bundle location a route is dispatched with', () => {
         name: `app-${sourceKind}-${location.length}`,
         sourceKind,
         sourceRepoUrl: 'jonpulsifer/infra',
-        sourceRepoSubpath: 'apps/spindrift',
+        sourceRepoSubpath: 'apps/kthx-engine',
       })
       .returning();
     const [component] = await ctx.db

@@ -1,6 +1,6 @@
 name: Container Benchmark
 
-# One cold docker build of apps/spindrift/Dockerfile on dockerd's embedded
+# One cold docker build of apps/kthx-engine/Dockerfile on dockerd's embedded
 # BuildKit.
 
 on:
@@ -27,5 +27,5 @@ jobs:
           DOCKER_BUILDKIT: '1'
         run: |
           time docker build --no-cache --pull \
-            -f apps/spindrift/Dockerfile \
+            -f apps/kthx-engine/Dockerfile \
             -t bench/spindrift:local .

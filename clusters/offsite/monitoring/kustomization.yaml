@@ -5,7 +5,7 @@ resources:
   - secret.sops.yaml
   - kube-prometheus.yaml
   - tempo.yaml
-  - spindrift-rules.yaml
+  - kthx-engine-rules.yaml
   - kthx-rules.yaml
   - mate-rules.yaml
   - mate-sandbox-reader.yaml

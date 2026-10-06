@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/jonpulsifer/infra/apps/spindrift-verifier/pkg/verifier"
+	"github.com/jonpulsifer/infra/apps/kthx-engine-verifier/pkg/verifier"
 )
 
 func main() {

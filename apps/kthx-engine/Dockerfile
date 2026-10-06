@@ -41,8 +41,8 @@ WORKDIR /app
 # The chart runs uid 65532 on a read-only root filesystem, so files are copied
 # world-readable.
 COPY --from=deps --chmod=755 /app ./
-COPY --from=builder --chmod=755 /app/apps/spindrift/src ./apps/spindrift/src
-COPY --from=builder --chmod=755 /app/apps/spindrift/dist ./apps/spindrift/dist
+COPY --from=builder --chmod=755 /app/apps/kthx-engine/src ./apps/kthx-engine/src
+COPY --from=builder --chmod=755 /app/apps/kthx-engine/dist ./apps/kthx-engine/dist
 # `deps` has each workspace's package.json and symlink but no source, and the
 # server imports archive source at run time. `pruner` has no node_modules to copy.
 COPY --from=pruner --chmod=755 /app/out/full/packages/archive ./packages/archive
@@ -50,13 +50,13 @@ COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=supply-chain-tools /spindrift-verifier /usr/local/bin/spindrift-verifier
 # Fail the build when a chart command's module is missing. @repo/archive is
 # checked through its node_modules symlink, the path the server resolves.
-RUN test -f /app/apps/spindrift/src/web/server.ts \
-  && test -f /app/apps/spindrift/src/reconciler/main.ts \
-  && test -f /app/apps/spindrift/src/db/migrate.ts \
-  && test -f /app/apps/spindrift/src/db/wait-for-schema.ts \
-  && test -f /app/apps/spindrift/src/db/migrations/meta/_journal.json \
-  && test -f /app/apps/spindrift/node_modules/@repo/archive/archive-format.ts
-WORKDIR /app/apps/spindrift
+RUN test -f /app/apps/kthx-engine/src/web/server.ts \
+  && test -f /app/apps/kthx-engine/src/reconciler/main.ts \
+  && test -f /app/apps/kthx-engine/src/db/migrate.ts \
+  && test -f /app/apps/kthx-engine/src/db/wait-for-schema.ts \
+  && test -f /app/apps/kthx-engine/src/db/migrations/meta/_journal.json \
+  && test -f /app/apps/kthx-engine/node_modules/@repo/archive/archive-format.ts
+WORKDIR /app/apps/kthx-engine
 USER 65532:65532
 EXPOSE 3000
 ENTRYPOINT []

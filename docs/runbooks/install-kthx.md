@@ -3,7 +3,7 @@ title: Install kthx
 description: Install the kthx engine on the offsite cluster, from the OpenTofu roots to the first passkey.
 ---
 
-Use this runbook to install the kthx engine on the offsite cluster, or to rebuild it. The engine is the `web` and `reconciler` processes of `apps/spindrift/` and their database. [kthx](../apps/kthx.md#use-it) lists the live addresses.
+Use this runbook to install the kthx engine on the offsite cluster, or to rebuild it. The engine is the `web` and `reconciler` processes of `apps/kthx-engine/` and their database. [kthx](../apps/kthx.md#use-it) lists the live addresses.
 
 ## Before you start
 

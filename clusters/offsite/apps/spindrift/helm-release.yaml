@@ -39,7 +39,7 @@ spec:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
     # carry — the manifest below has to satisfy both.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:238060213d0cf4cd5a9ea33403afb5adf0bdc20acd661fd98baa5b045d5cc601
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:bffef9301e7f727db7a18a8711b1df2e2c946db400dc762da0d1e565c4655a7b
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. This is kthx's `control.host`: the
     # `kthx-control` route in `kthx` sends every path but `/api` and `/cli` to

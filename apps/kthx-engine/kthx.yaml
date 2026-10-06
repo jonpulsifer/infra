@@ -10,6 +10,4 @@ build:
   frontend: dockerfile
   file: Dockerfile
 watchPaths:
-  - apps/spindrift-verifier
-  - package.json
-  - bun.lock
+  - apps/kthx-engine

@@ -11,7 +11,7 @@ detail in `docs/` and `.agents/skills/`.
 
 The owner is the human who runs this lab. A controller is named for what it
 is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
-`apps/spindrift`, is a controller that builds and deploys each built app.
+`apps/kthx-engine`, is a controller that builds and deploys each built app.
 
 ## Hard rules
 

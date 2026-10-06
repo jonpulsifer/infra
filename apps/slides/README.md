@@ -6,7 +6,7 @@ git is byte-for-byte what gets served.
 
 | Deck | Subject | Served at |
 | --- | --- | --- |
-| `spindrift/` | The deploy control plane in `apps/spindrift` | `spindrift-slides-web.web.app` |
+| `spindrift/` | The deploy control plane in `apps/kthx-engine` | `spindrift-slides-web.web.app` |
 | `bosun/` | The microVM CI runner pool in `apps/bosun` | `bosun-slides-web.web.app` |
 
 They are one chart series printed with two plates: identical tokens, layout and

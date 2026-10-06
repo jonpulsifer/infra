@@ -2,7 +2,7 @@
 
 Four scopes, one per shape of App worth demonstrating. **A scope is an App** —
 `sourceRepoSubpath` is a column on `apps`, not on `components`
-(`apps/spindrift/src/db/schema.ts`) — and no scope imports another, because
+(`apps/kthx-engine/src/db/schema.ts`) — and no scope imports another, because
 railpack builds with the scope as its context and a module one directory up is
 not in the build.
 
@@ -67,10 +67,10 @@ anything, and each absence says something different.
 `railpack/` is the demo of detection choosing for itself, so a file asserting
 the answer would remove the thing being demonstrated. `pair/` has no single
 answer to assert: `component.kind` in that file is one value
-(`apps/spindrift/src/domain/detection/kthx-file.ts`) and the scope carries
+(`apps/kthx-engine/src/domain/detection/kthx-file.ts`) and the scope carries
 a service and a job. Detection could not have proposed the job half anyway —
 it infers only `service` and `website`, `Exclude<ComponentKind, 'job'>` in
-`apps/spindrift/src/domain/detection/ladder.ts`, because nothing about a tree
+`apps/kthx-engine/src/domain/detection/ladder.ts`, because nothing about a tree
 of files says whether it should be served or run once. So the kind is named per
 Component, at creation, which is where it belonged.
 
@@ -115,7 +115,7 @@ second directory — it is a second way of running the first one, which is what
 Attach one `valkey` Datastore to the App and deploy. Both Components are handed
 the same `REDIS_URL`, because a Datastore attaches to the App and its variable
 name is fixed by the engine — `REDIS_URL` for valkey, `DATABASE_URL` for
-postgres (`apps/spindrift/src/domain/desired-state.ts`). Neither entrypoint
+postgres (`apps/kthx-engine/src/domain/desired-state.ts`). Neither entrypoint
 declares a store and neither names the other. There is nothing to wire.
 
 Three things it is worth watching for, in order:

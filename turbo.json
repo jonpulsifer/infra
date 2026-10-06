@@ -120,7 +120,7 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/docs/**",
-        "$TURBO_ROOT$/apps/spindrift/src/web/client/diagrams/**"
+        "$TURBO_ROOT$/apps/kthx-engine/src/web/client/diagrams/**"
       ],
       "outputs": ["dist/**"]
     },

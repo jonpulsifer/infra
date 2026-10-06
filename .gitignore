@@ -23,7 +23,7 @@ out/
 *.tgz
 # Source that happens to be named after one: spindrift's build adapter is the
 # contract for build backends, not a build output.
-!apps/spindrift/src/adapters/build/
+!apps/kthx-engine/src/adapters/build/
 
 # ─── Agent / AI Tooling ──────────────────────────────────────────────────────
 # Ignore local/personal Claude config, but track the shared session-start hook

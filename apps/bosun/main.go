@@ -1,6 +1,6 @@
 // bosun keeps a warm pool of "skiffs" — ephemeral cloud-hypervisor microVMs,
 // each serving exactly one GitHub Actions job before halting. It is a peer
-// of apps/spindrift, not part of it.
+// of apps/kthx-engine, not part of it.
 //
 // A JIT-registered runner is ephemeral by construction: GitHub hands an
 // already-booted skiff a matching job unprompted, so bosun never learns a

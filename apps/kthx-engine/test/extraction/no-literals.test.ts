@@ -196,7 +196,7 @@ function findForeignImports(files: SourceFile[]): string[] {
       if (specifier.startsWith('.')) {
         const resolved = join(APP, file.path, '..', specifier);
         if (relative(APP, resolved).startsWith('..')) {
-          offenders.push(`${where} escapes apps/spindrift/`);
+          offenders.push(`${where} escapes apps/kthx-engine/`);
         }
         continue;
       }
@@ -406,7 +406,7 @@ describe('the scanners catch a deliberately dirty file', () => {
   test('an import reaching out of the package', () => {
     expect(
       findForeignImports(dirty("import { x } from '../../hub/app/x.ts';")),
-    ).toEqual(["src/dirty.ts: '../../hub/app/x.ts' escapes apps/spindrift/"]);
+    ).toEqual(["src/dirty.ts: '../../hub/app/x.ts' escapes apps/kthx-engine/"]);
   });
 
   test('an undeclared dependency', () => {

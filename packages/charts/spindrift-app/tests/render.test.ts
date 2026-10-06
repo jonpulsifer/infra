@@ -173,7 +173,7 @@ describe('the deploy label', () => {
 });
 
 describe('the value contract', () => {
-  // The number itself is checked in `apps/spindrift`'s suite.
+  // The number itself is checked in `apps/kthx-engine`'s suite.
   test('every rendered object carries the version it was rendered under', async () => {
     // Helm ignores unknown values, so each object records the contract it was rendered under.
     const chart = await chartMetadata();
