@@ -11,18 +11,40 @@ Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd a
 ## Before you start
 
 - Run `mise run devshell`, and sign in to `op`.
+- Set `OP_ACCOUNT` to your 1Password sign-in address. The `onepassword` provider of `clusters/<site>/talos/` and `clusters/<site>/bootstrap/` then uses the desktop app.
+
+  ```bash
+  export OP_ACCOUNT=<sign-in address>
+  ```
+
 - Set `SOPS_AGE_KEY_FILE` to the operator key, as [Manage SOPS secrets](manage-sops-secrets.md) describes.
 - You need write access to objects in the `homelab-ng` state bucket.
 - On folly, `main` must hold the `monitoring-crds` Flux Kustomization, as [Adopt the folly Prometheus Operator CRDs](adopt-the-folly-prometheus-operator-crds.md) describes.
 - `clusters/offsite/apps/atlantis/kubeconfig-hook.sh` and Rowbutt must read the CA only from `clusters/<site>/config/kubernetes-ca.pem`, not `terraform/pki/certs/`.
+- On folly, `MATE_SANDBOX_LAB_JUMP` in `clusters/offsite/apps/mate/deployment.yaml` on `main` must not name a folly node, and that change must be deployed. A Talos node runs no sshd, so Rowbutt loses its Lab Net SSH when that node leaves NixOS.
 - Open the cutover pull request as a draft: the Talos root, the Talos values in `clusters/<site>/networking/cilium/helm-release.yaml` and `clusters/<site>/config/cluster-settings.yaml`, and a new `serverName` for each CloudNativePG `Cluster`.
 
 `<site>` is `folly` or `offsite`, and `<checkout>` is a checkout of the cutover branch. `<cp>` is `API_SERVER_IP` in `clusters/<site>/config/cluster-topology.json`.
 
 ## Freeze the cluster
 
-1. Take a last barman backup of each database, as [Recover a re-created database](recover-a-re-created-database.md#take-a-last-backup) describes.
-2. Make sure that the newest `daily` Velero backup holds each volume that you restore.
+> [!NOTE]
+> The flux-operator can resume its own Kustomization. The old cluster stops when its control plane leaves NixOS.
+
+1. Stop Flux on the old cluster, so that it does not undo the next step.
+
+   ```bash
+   flux --context <site> -n flux-system suspend kustomization --all
+   ```
+
+2. Stop the writers of each database. On folly, that is the `tronbyt` Deployment.
+
+   ```bash
+   kubectl --context folly -n tronbyt scale deploy/tronbyt --replicas 0
+   ```
+
+3. Take a last barman backup of each database, as [Recover a re-created database](recover-a-re-created-database.md#take-a-last-backup) describes.
+4. Make sure that the newest `daily` Velero backup holds each volume that you restore.
 
    ```bash
    velero backup describe <backup> --details --kubecontext <site>
@@ -30,13 +52,10 @@ Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd a
 
    Result: A `Pod Volume Backups` list with each volume and the phase `Completed`.
 
-> [!NOTE]
-> The flux-operator can resume its own Kustomization. The old cluster stops when its control plane leaves NixOS.
-
-3. Stop Flux on the old cluster.
+5. Record the kthx engine's releases on the cluster. Flux does not recreate them.
 
    ```bash
-   flux --context <site> -n flux-system suspend kustomization --all
+   kubectl --context <site> -n spindrift-apps get hr
    ```
 
 ## Make the secrets bundle
@@ -57,11 +76,17 @@ The owner does this section, because it decrypts the signing key.
    ```
 
 2. Boot the control plane into the Talos installer, as [Install Talos on a node](install-talos-on-a-node.md) describes.
-3. Mark the cutover pull request ready, and merge it. No NixOS control plane is left to apply it.
+3. Mark the cutover pull request ready, and wait for the Atlantis plan comment. Then merge it with the admin bypass. No NixOS control plane is left to apply it, and `atlantis/apply` stays pending because the plan has creates. Do not comment `atlantis apply`.
+
+   ```bash
+   gh pr ready <number>
+   gh pr merge <number> --admin --merge
+   ```
+
 4. Apply the control plane, and create etcd.
 
    ```bash
-   tofu -chdir=clusters/<site>/talos apply \
+   tofu -chdir=clusters/<site>/talos apply -lock-timeout=10m \
      -target=module.talos.talos_machine.controlplane -target=module.talos.talos_cluster.this
    ```
 
@@ -79,7 +104,7 @@ The owner does this section, because it decrypts the signing key.
 2. Apply the root.
 
    ```bash
-   tofu -chdir=clusters/<site>/talos apply
+   tofu -chdir=clusters/<site>/talos apply -lock-timeout=10m
    ```
 
    Result: `Apply complete!`. Each node registers `NotReady` about one minute later.
@@ -92,9 +117,9 @@ The owner does this section, because it decrypts the signing key.
 
 ## Install the CNI and Flux
 
-Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking. Flux adopts both Helm releases.
+Cilium's values need the Prometheus Operator CRDs, and its chart renders the `cilium` GatewayClass only when the Gateway API CRDs exist. Flux needs pod networking. Flux adopts both Helm releases and the Gateway API CRDs.
 
-1. Install the CRDs.
+1. Install the Prometheus Operator CRDs.
 
    ```bash
    helm --kube-context <site> install prometheus-operator-crds prometheus-operator-crds \
@@ -103,7 +128,15 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
      -n flux-system --create-namespace --set 'crds.annotations.helm\.sh/resource-policy=keep'
    ```
 
-2. Render `clusters/<site>/networking` as Flux does. The decrypted values stay in the shell and on `/dev/shm`.
+2. Install the Gateway API CRDs at the tag that the `gateway-api` GitRepository pins.
+
+   ```bash
+   kubectl --context <site> create -k \
+     "https://github.com/kubernetes-sigs/gateway-api/config/crd/experimental?ref=$(yq '.spec.ref.tag' clusters/<site>/networking/git-repository-gateway-api.yaml)"
+   kubectl --context <site> wait --for condition=established crd/gatewayclasses.gateway.networking.k8s.io --timeout 5m
+   ```
+
+3. Render `clusters/<site>/networking` as Flux does. The decrypted values stay in the shell and on `/dev/shm`.
 
    ```bash
    cd <checkout>; set -a
@@ -115,7 +148,7 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
    kubectl kustomize clusters/<site>/networking | flux envsubst --strict > /dev/shm/networking.yaml
    ```
 
-3. Install Cilium.
+4. Install Cilium.
 
    ```bash
    yq 'select(.kind == "HelmRelease" and .metadata.name == "cilium") | .spec.values' /dev/shm/networking.yaml \
@@ -123,7 +156,7 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
          --version "$(yq '.spec.ref.tag' clusters/<site>/networking/cilium/oci-repository.yaml)"
    ```
 
-4. Create the pod IP pool, then delete the render.
+5. Create the pod IP pool, then delete the render.
 
    ```bash
    kubectl --context <site> wait --for condition=established crd/ciliumpodippools.cilium.io --timeout 5m
@@ -133,14 +166,22 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
 
    Result: Each node is `Ready` within a few minutes.
 
-5. Apply the bootstrap root. It installs CoreDNS and Flux. Talos labels the nodes, so `node-labels.tf` only forgets the old labels.
+6. Create the Secret `sops-age` with the operator key. Flux decrypts with it, and git does not declare it.
+
+   ```bash
+   kubectl --context <site> -n flux-system create secret generic sops-age --from-file=age.agekey="$SOPS_AGE_KEY_FILE"
+   ```
+
+   Result: `secret/sops-age created`.
+
+7. Apply the bootstrap root. It installs CoreDNS and Flux. Talos labels the nodes, so `node-labels.tf` only forgets the old labels.
 
    ```bash
    tofu -chdir=clusters/<site>/bootstrap init
    tofu -chdir=clusters/<site>/bootstrap apply
    ```
 
-6. Make sure that Flux applies `main`.
+8. Make sure that Flux applies `main`.
 
    ```bash
    flux --context <site> get kustomizations
@@ -151,13 +192,21 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
 
 ## Restore the data
 
-1. Recover each database with a barman archive, as [Recover a re-created database](recover-a-re-created-database.md) describes. On folly, that is `tronbyt`.
-2. Restore each volume from step 2 of the freeze, as [Restore a volume](restore-a-volume.md) describes.
+1. Make sure that each database recovers, as [Check the recovery](recover-a-re-created-database.md#check-the-recovery) describes, including its base backup under the new prefix. The cutover pull request declares each new `serverName`, so Flux creates each `Cluster` with its recovery. On folly, that is `tronbyt` in `clusters/folly/apps/tronbyt/04-database.yaml`.
+2. Restore each volume from step 4 of the freeze, as [Restore a volume](restore-a-volume.md) describes.
 
 > [!NOTE]
-> Flux does not recreate kthx engine objects, and no runbook covers the recovery of an engine Datastore.
+> Flux does not recreate kthx engine objects, and no runbook covers the recovery of an engine Datastore. The engine owns its namespaces and releases, so never create them by hand.
 
-3. On offsite, recover the `clankerbanker` Datastore in `spindrift-datastores` from its barman archive.
+3. Deploy each App from step 5 of the freeze again, in the kthx console. Then make sure that the engine created its release.
+
+   ```bash
+   kubectl --context <site> -n spindrift-apps get hr
+   ```
+
+   Result: Each release from the freeze is `True`.
+
+4. On offsite, recover the `clankerbanker` Datastore in `spindrift-datastores` from its barman archive.
 
 ## Finish
 
@@ -180,6 +229,8 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The plan fails with `Create the talos-<site>-secrets Secure Note`. | `secrets_item_uuid` is the placeholder. | Make the bundle. |
+| A local `tofu apply` fails with `Error acquiring the state lock`. | An Atlantis plan holds the lock. | Wait for the plan comment, then apply again. If no plan runs, do [Release a stale state lock](release-a-stale-state-lock.md). |
+| A Flux Kustomization fails with `secret "sops-age" not found`. | The Secret was not created. | Do step 6 of [Install the CNI and Flux](#install-the-cni-and-flux). |
 | The `cilium` HelmRelease shows `MissingRollbackTarget`. | The upgrade timed out before both operator replicas had a node. | Run `flux --context <site> reconcile hr cilium -n kube-system --reset --force`. |
 | The bootstrap root plans changes to `kubernetes_labels.nodes`. | `node-labels.tf` still declares the resource. | Replace it with a `removed` block, as `clusters/folly/bootstrap/node-labels.tf` does. |
 | Atlantis, Rowbutt or the kthx engine fails TLS to the API server. | `kubernetes-ca.pem` holds the old CA, or a pull request predates it. | Pin the new CA, as [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md#pin-the-new-ca) describes, or rebase the pull request. |

@@ -33,7 +33,7 @@ The owner runs this runbook, because it decrypts the signing key. Run it before 
    ```bash
    op item template get "Secure Note" \
      | jq --rawfile n secrets.yaml '.title="talos-<site>-secrets" | .fields |= map(if .id=="notesPlain" then .value=$n else . end)' \
-     | op item create --vault homelab --template - --format json | jq -r .id
+     | op item create --vault homelab - --format json | jq -r .id
    ```
 
    Result: The UUID of the item.

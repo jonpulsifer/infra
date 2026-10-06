@@ -79,9 +79,6 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
    kubectl --context <site> get svc -A --field-selector spec.type=LoadBalancer
    ```
 
-> [!NOTE]
-> Cilium starts before the Gateway API CRDs exist. Whether cilium-operator then serves the Gateway API without a restart is not known.
-
 5. Make sure that the Gateway API works.
 
    ```bash
@@ -220,12 +217,20 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 > [!NOTE]
 > `clusters/folly/apps/falco/helm-release.yaml` allows the NixOS `.runc-wrapped` binary, which a Talos node does not have. The rule matches nothing there.
 
+8. Make sure that the kthx engine's releases on the cluster are ready.
+
+   ```bash
+   kubectl --context <site> -n spindrift-apps get hr
+   ```
+
+   Result: Each row is `True`. After a rebuild, each release from the freeze in [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md#freeze-the-cluster) is there.
+
 ## If something goes wrong
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | `cilium-dbg bgp peers` shows no session. | The node lacks the `bgp-enabled` label, or the gateway has no neighbor for it. | Read the node's labels and `terraform/network/unifi/`. |
-| No `cilium` GatewayClass. | cilium-operator started before the CRDs. | Run `kubectl --context <site> -n kube-system rollout restart deploy/cilium-operator`. |
+| No `cilium` GatewayClass. | Cilium was installed before the Gateway API CRDs, so its chart did not render the class. | Run `flux --context <site> reconcile hr cilium -n kube-system --force`, then `kubectl --context <site> -n kube-system rollout restart deploy/cilium-operator`. |
 | The federated plan shows `x509`. | `clusters/<site>/config/kubernetes-ca.pem` holds the old CA, or the pull request predates it. | Pin the new CA, as [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md#pin-the-new-ca) describes, or rebase the pull request. |
 | The etcd snapshot Job fails in `snapshot`. | The Talos API refuses the role, or the Secret `etcd-snapshot-talos` is missing. | Read `kubectl -n backups get serviceaccounts.talos.dev etcd-snapshot-talos -o yaml` for its status. |
 | A sandbox pod fails only on Talos. | Workload isolation. | Read `talosctl -n <addr> logs sandboxd`. |
