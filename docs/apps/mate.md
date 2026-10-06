@@ -39,7 +39,7 @@ A profile sets what a thread may do. `apps/mate/src/profiles.ts` declares them, 
 
 mate starts a daily homelab check at 18:00 `America/Halifax` in Slack `#chatops`, configured by `MATE_CUSTODIAN_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. It checks the clusters, Flux, alerts, backups, hosts and PR status, and reports failures and work that needs the owner. The assignment can fix clear problems through branches and PRs and merge understood PRs once required checks pass and reviews do not block. It does not bypass protections, make live infrastructure changes by hand or apply Atlantis plans without the owner's approval. It runs under the `custodian` profile in job mode, with operator's access and 10 turns a UTC day of its own.
 
-mate records the day and Slack root in `mate-db` and posts the assignment into the thread. The thread's row is the attempt, so a refused or failed check is said once in its thread, and a reply runs it again. mate releases the sandbox when the report is done. A restart resumes an interrupted turn. If mate stops after Slack accepts the root but before its timestamp reaches the database, a retry can post a second root. `apps/mate/src/custodian.ts` owns this schedule; unset `MATE_CUSTODIAN_CHANNEL` to stop new reports.
+mate records the day and Slack root in `mate-db` and posts the assignment into the thread. The thread's row is the attempt, so a refused or failed check is said once in its thread, and a reply runs it again. A reply to the report, such as `fix 2`, runs a `custodian` turn with the report in its session. mate releases the sandbox when the report is done. A restart resumes an interrupted turn. If mate stops after Slack accepts the root but before its timestamp reaches the database, a retry can post a second root. `apps/mate/src/custodian.ts` owns this schedule; unset `MATE_CUSTODIAN_CHANNEL` to stop new reports.
 
 ## What the agent can do
 
@@ -65,7 +65,9 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 - At most two threads hold a sandbox at once. A turn that needs one takes the sandbox of a thread idle for 5 minutes, which deletes that thread's uncommitted work, or waits. An automation turn never takes an interactive thread's sandbox, but it can take a free one, so while the custodian runs the owner's threads share one fewer.
 - An investigator reads logs with `kubectl logs`; VictoriaLogs is not reachable from a read-only sandbox.
 - Credentials and background processes last only for the turn.
-- After 30 quiet minutes, mate deletes the sandbox with any uncommitted work and archives the Discord thread. mate keeps the conversation, so a reply continues it in a new sandbox.
+- After 30 quiet minutes, mate deletes the sandbox with any uncommitted work and archives the Discord thread. mate keeps the conversation, so a reply continues it in a new sandbox, across restarts too.
+- Slack retries a message for about six minutes, so one sent while mate is down for longer gets no answer.
+- The agent sees a file on a message only as its name, type and size.
 
 ## How it works
 
