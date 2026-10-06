@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # mate: one Bun process that runs its source as committed, with no build step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:bf001bf3f41c93a78827f729f003372ff0565d2341a31474b5627ea1b4a14420 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:9cc1ea0327a4658a0bee134864055768b0a06ffb8ef27ae4bb1a6254226ebda2 AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.2
 ENV BUN_INSTALL=/usr/local \
@@ -25,7 +25,7 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
-FROM cgr.dev/chainguard/node:latest@sha256:1ae8ed719c65888716078a52ce2166767e091f0b1072a79f6b42becba6e1ad44 AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:890c242118f6624fde2cdf8d8b03808e6f46c09eda8cf6a1c963a7abcbd8e9f0 AS runner
 ENV NODE_ENV=production \
   MATE_PORT=8080
 WORKDIR /app
