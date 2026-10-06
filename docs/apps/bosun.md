@@ -29,6 +29,6 @@ With `services.bosun.kthxEngine` set, Bosun also claims [kthx](kthx/built-apps.m
 - `nix/images/hull-*.nix`: the hulls, registered in `nix/hosts/default.nix`.
 - Workflows in `.github/workflows/` that run on a skiff label wait for a runner that does not exist.
 - `nix/secrets/bosun.sops.yaml`: Bosun's key on the GitHub App that Bosun shares with kthx.
-- `terraform/network/cloudflare/spindrift.tf`: routes the Bosun build queue, `/internal/bosun/` on `spindrift-control.lolwtf.dev`, to the kthx engine.
+- `terraform/network/cloudflare/kthx-engine.tf`: routes the Bosun build queue, `/internal/bosun/` on `spindrift-control.lolwtf.dev`, to the kthx engine.
 - `clusters/base/monitoring/grafana-dashboards/bosun.json`: a dashboard on both clusters, with no data.
 - `nix/hosts/riptide.nix` and `nix/hosts/oldschool.nix` delete `bosun.prom` from the node-exporter textfile directory.

@@ -1,6 +1,6 @@
 # Public App names reach the cluster here. The origin is the Apps' own Gateway,
 # with its own listeners and address, so App traffic cannot crowd the shared one.
-module "tunnel_spindrift" {
+module "tunnel_kthx_engine" {
   source     = "./modules/tunnel"
   account_id = local.fml_account_id
   zone_id    = cloudflare_zone.lolwtf_dev.id
@@ -63,16 +63,26 @@ module "tunnel_spindrift" {
   }
 }
 
+moved {
+  from = module.tunnel_spindrift
+  to   = module.tunnel_kthx_engine
+}
+
 # A wildcard is safe here: nothing in this zone is hand-managed. Unserved names reach
 # the status route in clusters/offsite/apps/spindrift; exact records outrank this one.
-resource "cloudflare_dns_record" "spindrift_apps_wildcard" {
+resource "cloudflare_dns_record" "kthx_engine_apps_wildcard" {
   zone_id = cloudflare_zone.lolwtf_dev.id
   comment = "terraform managed"
   name    = "*.${cloudflare_zone.lolwtf_dev.name}"
-  content = module.tunnel_spindrift.cloudflare_tunnel_url
+  content = module.tunnel_kthx_engine.cloudflare_tunnel_url
   type    = "CNAME"
   proxied = true
   ttl     = 1
+}
+
+moved {
+  from = cloudflare_dns_record.spindrift_apps_wildcard
+  to   = cloudflare_dns_record.kthx_engine_apps_wildcard
 }
 
 # Nothing in kthx.dev is hand-managed either: every name is a site.
@@ -80,7 +90,7 @@ resource "cloudflare_dns_record" "kthx_sites_wildcard" {
   zone_id = cloudflare_zone.kthx_dev.id
   comment = "terraform managed"
   name    = "*.${cloudflare_zone.kthx_dev.name}"
-  content = module.tunnel_spindrift.cloudflare_tunnel_url
+  content = module.tunnel_kthx_engine.cloudflare_tunnel_url
   type    = "CNAME"
   proxied = true
   ttl     = 1
@@ -91,7 +101,7 @@ resource "cloudflare_dns_record" "kthx_apex" {
   zone_id = cloudflare_zone.kthx_dev.id
   comment = "terraform managed"
   name    = cloudflare_zone.kthx_dev.name
-  content = module.tunnel_spindrift.cloudflare_tunnel_url
+  content = module.tunnel_kthx_engine.cloudflare_tunnel_url
   type    = "CNAME"
   proxied = true
   ttl     = 1
@@ -99,15 +109,15 @@ resource "cloudflare_dns_record" "kthx_apex" {
 
 # External Secrets delivers the tunnel token from 1Password, so no decrypted
 # value enters git.
-resource "onepassword_item" "spindrift_cloudflared" {
+resource "onepassword_item" "kthx_engine_cloudflared" {
   vault    = local.vault_id
   title    = "spindrift cloudflared"
   category = "password"
 
-  password_wo = module.tunnel_spindrift.cloudflare_tunnel_token
+  password_wo = module.tunnel_kthx_engine.cloudflare_tunnel_token
   # Rotate the write-only field whenever Cloudflare issues a different token.
   password_wo_version = parseint(
-    substr(sha256(module.tunnel_spindrift.cloudflare_tunnel_token), 0, 7),
+    substr(sha256(module.tunnel_kthx_engine.cloudflare_tunnel_token), 0, 7),
     16,
   )
 
@@ -116,6 +126,11 @@ resource "onepassword_item" "spindrift_cloudflared" {
     "kubernetes",
     "spindrift",
   ]
+}
+
+moved {
+  from = onepassword_item.spindrift_cloudflared
+  to   = onepassword_item.kthx_engine_cloudflared
 }
 
 # No Access application on this zone: `reach: private` records hold RFC1918

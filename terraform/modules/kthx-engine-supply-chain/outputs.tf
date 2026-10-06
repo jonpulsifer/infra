@@ -1,5 +1,5 @@
 output "attestor" {
-  description = "Binary Authorization attestor id (projects/*/attestors/*) — what terraform/modules/spindrift-vessel's attestor variable takes"
+  description = "Binary Authorization attestor id (projects/*/attestors/*) — what terraform/modules/kthx-engine-vessel's attestor variable takes"
   value       = local.attestor_id
 }
 

@@ -4,7 +4,7 @@ OpenTofu root for `bluenose`, the GCP project that kthx runs in and deploys buil
 
 A vessel is a boundary that kthx deploys into, and `bluenose` is the home vessel. This root owns the boundary, and kthx owns what it deploys inside it. Build artifacts and signing keys are in `terraform/gcp/projects/trusted-builds/`.
 
-`vessel.tf` calls the `spindrift-vessel` and `vessel-network` modules for the parts that every vessel project has. The subnet comes from `config/vessel-topology.json`. The other files hold what only the home vessel has: service accounts and their federation, buckets, and the Firebase project. `storage.tf` also holds the `kthx` bucket, which the kthx server reads as `KTHX_BUCKET`.
+`vessel.tf` calls the `kthx-engine-vessel` and `vessel-network` modules for the parts that every vessel project has. The subnet comes from `config/vessel-topology.json`. The other files hold what only the home vessel has: service accounts and their federation, buckets, and the Firebase project. `storage.tf` also holds the `kthx` bucket, which the kthx server reads as `KTHX_BUCKET`.
 
 kthx proposes Terraform for unmet prerequisites into `services.tf`, `iam.tf` and `storage.tf`, and reads those files to skip what they already declare. Keep `vessel_services` in `services.tf` and `spindrift_project_roles` in `iam.tf`. A new vessel project needs a backend, providers, those two lists and the module call.
 

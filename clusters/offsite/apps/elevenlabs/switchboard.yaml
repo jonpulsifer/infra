@@ -2,12 +2,12 @@
 # Switchboard (`apps/switchboard`) rings the owner's cell through the
 # pbx-switchboard agent and the phone number's outbound trunk, which the
 # reconciler builds from the existing sub-account 168847_elevenlabs
-# (external-secret.yaml). It is parked at zero replicas until the item
-# `switchboard` (to-number, ring-token, alert-token) exists in the 1Password
-# vault `homelab` and fills the Secret switchboard-config below. To unpark it,
-# set replicas to 1 here and merge, once the image below is a build that
-# resolves the agent by name (apps/switchboard/src/agent.ts): an older build
-# exits 64 for want of SWITCHBOARD_AGENT_ID.
+# (external-secret.yaml). The item `switchboard` (to-number, ring-token,
+# alert-token) in the 1Password vault `homelab` fills the Secret
+# switchboard-config below. To park it, drop `switchboard` from offsite's
+# alertmanagerConfigSelector first, then set replicas to 0 here. The image must
+# be a build that resolves the agent by name (apps/switchboard/src/agent.ts):
+# an older build exits 64 for want of SWITCHBOARD_AGENT_ID.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,7 +15,7 @@ metadata:
   labels:
     app.kubernetes.io/name: switchboard
 spec:
-  replicas: 0
+  replicas: 1
   # The daily caps and the cooldown live in the process, so two pods would
   # double them.
   strategy:
@@ -48,7 +48,7 @@ spec:
         - name: switchboard
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # full `ghcr.io/…/switchboard…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:9a997c3b75eabd7380a570c63b04ae9daf393b88ff370160b5352321f871b2c4
+          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:56a608c26fdb082862f472180d63aff733af1bb618d0e133853b60f48227afbe
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -193,8 +193,8 @@ spec:
             - {port: "443", protocol: TCP}
 ---
 # The cell number and the two bearer tokens, from the 1Password item
-# `switchboard`. Until the item exists this ExternalSecret errors, and the
-# parked Deployment asks for no Secret.
+# `switchboard`. Until the item has all three fields this ExternalSecret
+# errors and the pod waits for the Secret.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:

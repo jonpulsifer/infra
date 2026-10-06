@@ -3,7 +3,7 @@ module "firebase_project_policies" {
   project = local.project
 }
 
-resource "google_firebase_project" "spindrift" {
+resource "google_firebase_project" "kthx_engine" {
   provider = google-beta
   project  = local.project
 
@@ -11,4 +11,9 @@ resource "google_firebase_project" "spindrift" {
     module.vessel,
     module.firebase_project_policies,
   ]
+}
+
+moved {
+  from = google_firebase_project.spindrift
+  to   = google_firebase_project.kthx_engine
 }
