@@ -33,6 +33,12 @@ export interface SocketModeDeps {
    * cannot answer.
    */
   claim?(eventId: string, eventTime: number): Promise<boolean>;
+  /**
+   * False for an event that can change nothing, such as mate's own edits, so
+   * it skips the claim and never waits on the store. Every event is claimed
+   * without it.
+   */
+  answers?(payload: EventPayload): boolean;
   /** Epoch ms: this process's start, the cutoff while no claim can answer. */
   since: number;
   /** An event dropped for its age, already acknowledged. */
@@ -51,6 +57,8 @@ export const RECONNECT_MAX_MS = 30_000;
  * answered: claims are kept a day, and an hour-old prompt is stale news.
  */
 export const REPLAY_WINDOW_MS = 60 * 60_000;
+/** A claim that takes longer falls back to the start-time cutoff. */
+export const CLAIM_TIMEOUT_MS = 3_000;
 
 export class SocketMode {
   private readonly seen = new Set<string>();
@@ -148,6 +156,10 @@ export class SocketMode {
   private event(payload: EventPayload | undefined): void {
     const id = payload?.event_id;
     if (!payload || !id || this.remember(id)) return;
+    if (this.deps.answers && !this.deps.answers(payload)) {
+      this.deps.onEvent(payload);
+      return;
+    }
     this.admitting = this.admitting
       .then(() => this.admit(payload, id))
       .catch((error) =>
@@ -174,17 +186,7 @@ export class SocketMode {
       );
       return;
     }
-    let first: boolean | null = null;
-    if (this.deps.claim) {
-      try {
-        first = await this.deps.claim(id, at);
-      } catch (error) {
-        log.warn('a slack event could not be claimed', {
-          eventId: id,
-          error: plain(error),
-        });
-      }
-    }
+    const first = await this.claim(id, at);
     if (first === false) {
       log.info('slack redelivered an event already handled', { eventId: id });
       return;
@@ -198,6 +200,29 @@ export class SocketMode {
       return;
     }
     this.deps.onEvent(payload);
+  }
+
+  /** Null when the store cannot answer in time. */
+  private async claim(id: string, at: number): Promise<boolean | null> {
+    const { claim, clock, log } = this.deps;
+    if (!claim) return null;
+    const timer = new AbortController();
+    try {
+      return await Promise.race([
+        claim(id, at),
+        clock.sleep(CLAIM_TIMEOUT_MS, timer.signal).then(() => {
+          throw new Error(`no answer in ${CLAIM_TIMEOUT_MS} ms`);
+        }),
+      ]);
+    } catch (error) {
+      log.warn('a slack event could not be claimed', {
+        eventId: id,
+        error: plain(error),
+      });
+      return null;
+    } finally {
+      timer.abort();
+    }
   }
 
   private stale(payload: EventPayload, id: string, msg: string): void {

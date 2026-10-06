@@ -138,6 +138,7 @@ async function openSlack(slack: SlackConfig): Promise<SlackSide> {
               return claims.claim(id, at);
             }
           : undefined,
+        answers: events.answers,
         onEvent: events.onEvent,
         onStale: events.onStale,
       });

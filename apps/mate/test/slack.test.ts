@@ -31,7 +31,12 @@ import {
   slackWeb,
   TITLE_CADENCE_MS,
 } from '../src/slack.ts';
-import { REPLAY_WINDOW_MS, SocketMode } from '../src/socket.ts';
+import {
+  CLAIM_TIMEOUT_MS,
+  type EventPayload,
+  REPLAY_WINDOW_MS,
+  SocketMode,
+} from '../src/socket.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import type { Inbound, ThreadRef, ToolCall } from '../src/surface.ts';
 import { Threads } from '../src/threads.ts';
@@ -1716,6 +1721,7 @@ describe('the socket', () => {
     since?: number;
     sockets?: FakeSocket[];
     claim?: (eventId: string, eventTime: number) => Promise<boolean>;
+    answers?: (payload: EventPayload) => boolean;
   }) {
     const sockets = opts.sockets ?? [new FakeSocket()];
     let next = 0;
@@ -1729,6 +1735,7 @@ describe('the socket', () => {
       log,
       since: opts.since ?? 0,
       claim: opts.claim,
+      answers: opts.answers,
       onEvent: (payload) => events.push(payload),
       onStale: (payload) => stale.push(payload),
     });
@@ -1894,6 +1901,49 @@ describe('the socket', () => {
     socket.stop();
   });
 
+  test('an event that changes nothing skips the claim and waits on no other', async () => {
+    const claimed: string[] = [];
+    const { socket, sockets, events } = drive({
+      claim: async (eventId) => {
+        claimed.push(eventId);
+        await clock.sleep(1_000);
+        return true;
+      },
+      answers: (payload) => payload.event_id !== 'EvEdit',
+    });
+    void socket.run();
+    await settle();
+    const wire = sockets[0] as FakeSocket;
+    wire.deliver(envelope('e1', 'EvAsk'));
+    wire.deliver(envelope('e2', 'EvEdit'));
+    await settle();
+    expect(events).toEqual([expect.objectContaining({ event_id: 'EvEdit' })]);
+    await clock.advance(1_000);
+    expect(events).toHaveLength(2);
+    expect(claimed).toEqual(['EvAsk']);
+    socket.stop();
+  });
+
+  test('a claim the store does not answer in time falls back to the start-time cutoff', async () => {
+    const { socket, sockets, events, stale } = drive({
+      since: clock.now(),
+      claim: () => new Promise<boolean>(() => {}),
+    });
+    void socket.run();
+    await settle();
+    const wire = sockets[0] as FakeSocket;
+    wire.deliver(envelope('e1', 'EvOld', nowS() - 60));
+    wire.deliver(envelope('e2', 'EvNew', nowS()));
+    await clock.advance(CLAIM_TIMEOUT_MS - 1);
+    expect(events).toEqual([]);
+    await clock.advance(1);
+    expect(stale).toEqual([expect.objectContaining({ event_id: 'EvOld' })]);
+    await clock.advance(CLAIM_TIMEOUT_MS);
+    expect(events).toEqual([expect.objectContaining({ event_id: 'EvNew' })]);
+    expect(log.of('a slack event could not be claimed')).toHaveLength(2);
+    socket.stop();
+  });
+
   test('an event older than the replay window is not answered, claimed or not', async () => {
     const shared = claims();
     const { socket, sockets, events, stale } = drive({
@@ -1947,6 +1997,46 @@ describe('the socket', () => {
     expect(events).toHaveLength(1);
     expect(second.acks).toEqual(['e9']);
     socket.stop();
+  });
+});
+
+describe('the events that need a claim', () => {
+  const answers = (event: Record<string, unknown>) =>
+    slackEvents({
+      me: ME,
+      allowedUserIds: new Set([OWNER]),
+      threads: { onMessage: async () => {}, onStop: async () => {} },
+      metrics: new RecordingInstruments(),
+      log,
+    }).answers({ event_id: 'Ev1', event });
+  const message = { type: 'message', channel: CHANNEL, ts: TS, text: 'hi' };
+
+  test("the owner's message and the owner's stop", () => {
+    expect(answers({ ...message, user: OWNER })).toBe(true);
+    expect(
+      answers({
+        type: 'agent_session_stopped',
+        channel: CHANNEL,
+        thread_ts: TS,
+        user: OWNER,
+      }),
+    ).toBe(true);
+  });
+
+  test("not mate's own posts and edits, nor anyone off the allowlist", () => {
+    expect(answers({ ...message, user: ME, bot_id: 'B1' })).toBe(false);
+    expect(
+      answers({ ...message, subtype: 'message_changed', hidden: true }),
+    ).toBe(false);
+    expect(answers({ ...message, user: 'U0STRANGER' })).toBe(false);
+    expect(
+      answers({
+        type: 'agent_session_stopped',
+        channel: CHANNEL,
+        thread_ts: TS,
+        user: 'U0STRANGER',
+      }),
+    ).toBe(false);
   });
 });
 

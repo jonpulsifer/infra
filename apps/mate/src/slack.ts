@@ -1331,6 +1331,7 @@ export interface SlackEventsDeps {
 export function slackEvents(deps: SlackEventsDeps): {
   onEvent(payload: EventPayload): void;
   onStale(payload: EventPayload): void;
+  answers(payload: EventPayload): boolean;
 } {
   const ignored = (event: SlackEvent, reason: InboundDropReason) => {
     if (event.type !== 'message' || event.bot_id || !event.user) return;
@@ -1357,5 +1358,16 @@ export function slackEvents(deps: SlackEventsDeps): {
         ignored: (event) => ignored(event, 'subtype'),
       }),
     onStale: (payload) => ignored(payload.event ?? {}, 'stale'),
+    answers: (payload) => {
+      const event = payload.event ?? {};
+      const stop = slackSessionStopped(event);
+      if (stop) return deps.allowedUserIds.has(stop.userId);
+      const inbound = slackInbound(event, deps.me);
+      return Boolean(
+        inbound &&
+          !inbound.authorIsBot &&
+          deps.allowedUserIds.has(inbound.authorId),
+      );
+    },
   };
 }
