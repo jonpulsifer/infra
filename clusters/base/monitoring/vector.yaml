@@ -32,6 +32,8 @@ spec:
         value: "true"
     podMonitor:
       enabled: true
+      additionalLabels:
+        release: prom-stack
     image:
       repository: docker.io/timberio/vector
       tag: 0.58.0-debian
