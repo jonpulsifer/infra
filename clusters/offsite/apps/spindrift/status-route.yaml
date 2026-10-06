@@ -18,7 +18,7 @@ spec:
   # The dedicated App zone only. Elsewhere this wildcard would answer for names
   # Terraform or kthx owns, and Cilium splits two routes on one wildcard 50/50.
   hostnames:
-    - "*.${SPINDRIFT_DOMAIN}"
+    - "*.${KTHX_ENGINE_DOMAIN}"
   rules:
     - backendRefs:
         - name: spindrift

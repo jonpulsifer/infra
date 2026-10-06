@@ -19,7 +19,7 @@ spec:
           dnsZones:
             - ${SECRET_DOMAIN}
             - ${GATEWAY_ZONE}
-            - ${SPINDRIFT_DOMAIN}
+            - ${KTHX_ENGINE_DOMAIN}
             - embarrassing.ca
             - wishin.app
             - clankerbanker.ca

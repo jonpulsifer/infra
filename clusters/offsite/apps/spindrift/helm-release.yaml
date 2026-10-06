@@ -50,7 +50,7 @@ spec:
     # `/mcp` on. Every other route answers on `hostname` alone.
     env:
       - name: KTHX_ENGINE_PUBLIC_HOSTNAME
-        value: spindrift-control.${SPINDRIFT_DOMAIN}
+        value: spindrift-control.${KTHX_ENGINE_DOMAIN}
       # kthx quick sites' `control.host`, which the console shares, and their
       # zone's apex are served on the Apps Gateway, so no App may take either.
       # This zone's `spindrift` label is held too: a reservation, not an

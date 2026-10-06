@@ -9,6 +9,7 @@ data:
   CERT_CLUSTER_ISSUER: letsencrypt-production
   # Both clusters mint App names in this one zone; each deletes only records
   # its own external-dns txtOwnerId claims.
+  KTHX_ENGINE_DOMAIN: lolwtf.dev
   SPINDRIFT_DOMAIN: lolwtf.dev
   # Node paths that follow the host OS, set to the NixOS values. A cluster
   # overrides them in its own cluster-settings.yaml when its nodes change OS.
