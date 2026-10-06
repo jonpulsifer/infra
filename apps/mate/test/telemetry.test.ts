@@ -103,6 +103,7 @@ describe('the SDK', () => {
       getInstruments().modelRouted('fallback', 'limit');
       getInstruments().primaryFailed('transient');
       getInstruments().primaryUp(false);
+      getInstruments().inboundDropped('slack', 'stale');
       // The exit flush carries the last counters out before the 15 s export interval.
       await stopTelemetry();
     } finally {
@@ -125,6 +126,7 @@ describe('the SDK', () => {
     expect(sent).toContain('mate_model_routes_total');
     expect(sent).toContain('mate_model_primary_failures_total');
     expect(sent).toContain('mate_model_primary_up');
+    expect(sent).toContain('mate_inbound_dropped_total');
     expect(sent).not.toContain('mate_attach_duration_milliseconds');
     // The resource attribute the collector turns into the `exported_job` label.
     expect(sent).toContain('service.name');

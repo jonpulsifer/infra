@@ -24,13 +24,19 @@ import {
   SlackError,
   type SlackMessage,
   slackEvent,
+  slackEvents,
   slackInbound,
   slackSessionStopped,
   slackSurface,
   slackWeb,
   TITLE_CADENCE_MS,
 } from '../src/slack.ts';
-import { SocketMode } from '../src/socket.ts';
+import {
+  CLAIM_TIMEOUT_MS,
+  type EventPayload,
+  REPLAY_WINDOW_MS,
+  SocketMode,
+} from '../src/socket.ts';
 import { MemoryThreadStore } from '../src/store.ts';
 import type { Inbound, ThreadRef, ToolCall } from '../src/surface.ts';
 import { Threads } from '../src/threads.ts';
@@ -132,6 +138,44 @@ describe('reading a message off the socket', () => {
       ME,
     );
     expect(inbound?.threadId).toBe(TS);
+  });
+
+  test('a message with a file is read, and the file is named for the model, never fetched', () => {
+    const inbound = slackInbound(
+      {
+        type: 'message',
+        subtype: 'file_share',
+        channel: CHANNEL,
+        ts: '1758300100.000400',
+        thread_ts: TS,
+        user: OWNER,
+        text: 'what is this &lt;error&gt;?',
+        files: [
+          { name: 'screenshot.png', mimetype: 'image/png', size: 250_880 },
+          { title: 'build log' },
+        ],
+      },
+      ME,
+    );
+    expect(inbound?.threadId).toBe(TS);
+    expect(inbound?.content).toBe(
+      'what is this <error>?\n\n[attached files you cannot open: screenshot.png (image/png, 245 KB); build log. Ask for their text if it matters.]',
+    );
+    expect(
+      slackInbound(
+        {
+          type: 'message',
+          subtype: 'file_share',
+          channel: CHANNEL,
+          ts: '1758300100.000500',
+          user: OWNER,
+          files: [{ name: 'trace.txt', mimetype: 'text/plain', size: 12 }],
+        },
+        ME,
+      )?.content,
+    ).toBe(
+      '[attached files you cannot open: trace.txt (text/plain, 12 B). Ask for their text if it matters.]',
+    );
   });
 
   test("mate's own post comes back with a bot id and no subtype, and is marked a bot", () => {
@@ -1202,6 +1246,32 @@ describe('the surface', () => {
     expect(older.map((m) => m.content)).toEqual(['first & oldest']);
   });
 
+  test("a human's file reads back in the history as it arrived, so the replay skips the prompt", async () => {
+    api.thread.push({
+      ts: '1.000001',
+      user: OWNER,
+      text: 'look',
+      files: [{ name: 'a.log', mimetype: 'text/plain', size: 2_048 }],
+    });
+    const [message] = await surface().history(THREAD, { limit: 10 });
+    expect(message?.content).toBe(
+      slackInbound(
+        {
+          type: 'message',
+          subtype: 'file_share',
+          channel: CHANNEL,
+          ts: '1.000001',
+          thread_ts: TS,
+          user: OWNER,
+          text: 'look',
+          files: [{ name: 'a.log', mimetype: 'text/plain', size: 2_048 }],
+        },
+        ME,
+      )?.content,
+    );
+    expect(message?.content).toContain('a.log (text/plain, 2 KB)');
+  });
+
   test('teardown closes the thread’s agent session', async () => {
     // Slack never closes an agent session on its own.
     await surface().archive?.(THREAD);
@@ -1647,10 +1717,16 @@ describe('a Web API call', () => {
 });
 
 describe('the socket', () => {
-  function drive(opts: { since?: number; sockets?: FakeSocket[] }) {
+  function drive(opts: {
+    since?: number;
+    sockets?: FakeSocket[];
+    claim?: (eventId: string, eventTime: number) => Promise<boolean>;
+    answers?: (payload: EventPayload) => boolean;
+  }) {
     const sockets = opts.sockets ?? [new FakeSocket()];
     let next = 0;
     const events: unknown[] = [];
+    const stale: unknown[] = [];
     const socket = new SocketMode({
       open: async () => `wss://wss-primary.slack.com/link/${next}`,
       connect: () =>
@@ -1658,12 +1734,29 @@ describe('the socket', () => {
       clock,
       log,
       since: opts.since ?? 0,
+      claim: opts.claim,
+      answers: opts.answers,
       onEvent: (payload) => events.push(payload),
+      onStale: (payload) => stale.push(payload),
     });
-    return { socket, sockets, clock, events };
+    return { socket, sockets, clock, events, stale };
   }
 
-  const envelope = (id: string, eventId: string, at = 9_999) => ({
+  /** mate-db's claims, shared by every process a test runs. */
+  function claims() {
+    const handled = new Set<string>();
+    return {
+      handled,
+      claim: async (eventId: string) => {
+        if (handled.has(eventId)) return false;
+        handled.add(eventId);
+        return true;
+      },
+    };
+  }
+
+  const nowS = () => Math.floor(clock.now() / 1000);
+  const envelope = (id: string, eventId: string, at = nowS()) => ({
     type: 'events_api',
     envelope_id: id,
     payload: {
@@ -1681,6 +1774,7 @@ describe('the socket', () => {
     wire.deliver(envelope('e1', 'Ev1'));
     wire.deliver(envelope('e2', 'Ev1'));
     expect(wire.acks).toEqual(['e1', 'e2']);
+    await settle();
     expect(events).toHaveLength(1);
     socket.stop();
   });
@@ -1711,7 +1805,7 @@ describe('the socket', () => {
       envelope_id: 'e7',
       payload: {
         event_id: 'Ev7',
-        event_time: 9_999,
+        event_time: nowS(),
         event: {
           type: 'agent_session_stopped',
           channel: CHANNEL,
@@ -1722,19 +1816,149 @@ describe('the socket', () => {
       },
     });
     expect(wire.acks).toEqual(['e7']);
+    await settle();
     expect(events).toHaveLength(1);
     socket.stop();
   });
 
-  test('an event Slack buffered from before this process is not answered', async () => {
-    const { socket, sockets, events } = drive({ since: 10_000_000 });
+  test('an event sent while mate restarted is answered by the next process, once', async () => {
+    const shared = claims();
+    const sentWhileDown = nowS() - 90;
+    const before = drive({ since: clock.now() - 600_000, claim: shared.claim });
+    void before.socket.run();
+    await settle();
+    (before.sockets[0] as FakeSocket).deliver(
+      envelope('e1', 'EvHandled', sentWhileDown - 30),
+    );
+    await settle();
+    expect(before.events).toHaveLength(1);
+    before.socket.stop();
+
+    const after = drive({ since: clock.now(), claim: shared.claim });
+    void after.socket.run();
+    await settle();
+    const wire = after.sockets[0] as FakeSocket;
+    // Slack's retries of both: one the last process answered, one it never saw.
+    wire.deliver(envelope('e2', 'EvHandled', sentWhileDown - 30));
+    wire.deliver(envelope('e3', 'EvMissed', sentWhileDown));
+    await settle();
+    expect(wire.acks).toEqual(['e2', 'e3']);
+    expect(after.events).toEqual([
+      expect.objectContaining({ event_id: 'EvMissed' }),
+    ]);
+    expect(after.stale).toEqual([]);
+    expect(log.of('slack redelivered an event already handled')).toHaveLength(
+      1,
+    );
+    after.socket.stop();
+  });
+
+  test('events keep their order while their claims are read', async () => {
+    const shared = claims();
+    let first = true;
+    const { socket, sockets, events } = drive({
+      claim: async (eventId) => {
+        if (first) {
+          first = false;
+          await clock.sleep(1_000);
+        }
+        return shared.claim(eventId);
+      },
+    });
     void socket.run();
     await settle();
-    (sockets[0] as FakeSocket).deliver(envelope('e1', 'Ev1', 9_000));
-    expect(events).toHaveLength(0);
+    const wire = sockets[0] as FakeSocket;
+    wire.deliver(envelope('e1', 'Ev1'));
+    wire.deliver(envelope('e2', 'Ev2'));
+    await clock.advance(1_000);
+    await settle();
+    expect(events.map((e) => (e as { event_id: string }).event_id)).toEqual([
+      'Ev1',
+      'Ev2',
+    ]);
+    socket.stop();
+  });
+
+  test('without a claim, an event from before this process is not answered', async () => {
+    const { socket, sockets, events, stale } = drive({
+      since: clock.now(),
+      claim: async () => {
+        throw new Error('connection refused');
+      },
+    });
+    void socket.run();
+    await settle();
+    const wire = sockets[0] as FakeSocket;
+    wire.deliver(envelope('e1', 'Ev1', nowS() - 60));
+    wire.deliver(envelope('e2', 'Ev2', nowS()));
+    await settle();
+    expect(events).toEqual([expect.objectContaining({ event_id: 'Ev2' })]);
+    expect(stale).toEqual([expect.objectContaining({ event_id: 'Ev1' })]);
     expect(
       log.of('slack replayed an event from before this process'),
     ).toHaveLength(1);
+    expect(log.of('a slack event could not be claimed')).toHaveLength(2);
+    socket.stop();
+  });
+
+  test('an event that changes nothing skips the claim and waits on no other', async () => {
+    const claimed: string[] = [];
+    const { socket, sockets, events } = drive({
+      claim: async (eventId) => {
+        claimed.push(eventId);
+        await clock.sleep(1_000);
+        return true;
+      },
+      answers: (payload) => payload.event_id !== 'EvEdit',
+    });
+    void socket.run();
+    await settle();
+    const wire = sockets[0] as FakeSocket;
+    wire.deliver(envelope('e1', 'EvAsk'));
+    wire.deliver(envelope('e2', 'EvEdit'));
+    await settle();
+    expect(events).toEqual([expect.objectContaining({ event_id: 'EvEdit' })]);
+    await clock.advance(1_000);
+    expect(events).toHaveLength(2);
+    expect(claimed).toEqual(['EvAsk']);
+    socket.stop();
+  });
+
+  test('a claim the store does not answer in time falls back to the start-time cutoff', async () => {
+    const { socket, sockets, events, stale } = drive({
+      since: clock.now(),
+      claim: () => new Promise<boolean>(() => {}),
+    });
+    void socket.run();
+    await settle();
+    const wire = sockets[0] as FakeSocket;
+    wire.deliver(envelope('e1', 'EvOld', nowS() - 60));
+    wire.deliver(envelope('e2', 'EvNew', nowS()));
+    await clock.advance(CLAIM_TIMEOUT_MS - 1);
+    expect(events).toEqual([]);
+    await clock.advance(1);
+    expect(stale).toEqual([expect.objectContaining({ event_id: 'EvOld' })]);
+    await clock.advance(CLAIM_TIMEOUT_MS);
+    expect(events).toEqual([expect.objectContaining({ event_id: 'EvNew' })]);
+    expect(log.of('a slack event could not be claimed')).toHaveLength(2);
+    socket.stop();
+  });
+
+  test('an event older than the replay window is not answered, claimed or not', async () => {
+    const shared = claims();
+    const { socket, sockets, events, stale } = drive({
+      since: 0,
+      claim: shared.claim,
+    });
+    void socket.run();
+    await settle();
+    (sockets[0] as FakeSocket).deliver(
+      envelope('e1', 'Ev1', nowS() - REPLAY_WINDOW_MS / 1000 - 1),
+    );
+    await settle();
+    expect(events).toEqual([]);
+    expect(stale).toHaveLength(1);
+    expect(shared.handled.size).toBe(0);
     socket.stop();
   });
 
@@ -1769,9 +1993,50 @@ describe('the socket', () => {
     await clock.advance(1_000);
     await settle();
     second.deliver(envelope('e9', 'Ev9'));
+    await settle();
     expect(events).toHaveLength(1);
     expect(second.acks).toEqual(['e9']);
     socket.stop();
+  });
+});
+
+describe('the events that need a claim', () => {
+  const answers = (event: Record<string, unknown>) =>
+    slackEvents({
+      me: ME,
+      allowedUserIds: new Set([OWNER]),
+      threads: { onMessage: async () => {}, onStop: async () => {} },
+      metrics: new RecordingInstruments(),
+      log,
+    }).answers({ event_id: 'Ev1', event });
+  const message = { type: 'message', channel: CHANNEL, ts: TS, text: 'hi' };
+
+  test("the owner's message and the owner's stop", () => {
+    expect(answers({ ...message, user: OWNER })).toBe(true);
+    expect(
+      answers({
+        type: 'agent_session_stopped',
+        channel: CHANNEL,
+        thread_ts: TS,
+        user: OWNER,
+      }),
+    ).toBe(true);
+  });
+
+  test("not mate's own posts and edits, nor anyone off the allowlist", () => {
+    expect(answers({ ...message, user: ME, bot_id: 'B1' })).toBe(false);
+    expect(
+      answers({ ...message, subtype: 'message_changed', hidden: true }),
+    ).toBe(false);
+    expect(answers({ ...message, user: 'U0STRANGER' })).toBe(false);
+    expect(
+      answers({
+        type: 'agent_session_stopped',
+        channel: CHANNEL,
+        thread_ts: TS,
+        user: 'U0STRANGER',
+      }),
+    ).toBe(false);
   });
 });
 
@@ -1816,13 +2081,16 @@ describe('a turn stopped from Slack', () => {
       metrics,
     });
     // The same wiring the socket gets.
+    const events = slackEvents({
+      me: ME,
+      allowedUserIds: new Set([OWNER]),
+      threads,
+      metrics,
+      log,
+    });
     const deliver = (event: Record<string, unknown>) =>
-      slackEvent(event, ME, {
-        stopped: (stop) =>
-          void threads.onStop(stop.key, stop.userId, async () => {}),
-        message: (inbound) => void threads.onMessage(inbound),
-      });
-    return { threads, metrics, deliver };
+      events.onEvent({ event_id: `Ev${TS}`, event });
+    return { threads, metrics, deliver, events };
   }
 
   const ask = {
@@ -1896,6 +2164,29 @@ describe('a turn stopped from Slack', () => {
       expect(api.only('session').at(-1)?.status).toBe('active');
     });
   }
+
+  test("an allowlisted human's message that never reaches the threads is counted, and nobody else's", async () => {
+    const { metrics, events } = build(streaming('one'));
+    const message = (overrides: Record<string, unknown>) => ({
+      event: { ...ask, ...overrides },
+    });
+    events.onEvent(message({ subtype: 'channel_join' }));
+    events.onEvent(message({ subtype: 'message_changed', hidden: true }));
+    events.onEvent(message({ subtype: 'channel_join', user: STRANGER }));
+    events.onEvent(message({ subtype: 'bot_message', bot_id: BOT }));
+    events.onStale(message({ text: 'secret words' }));
+    events.onStale(message({ user: STRANGER }));
+    events.onStale({ event: stopping() });
+    await clock.advance(3_000);
+    expect(metrics.inboundDrops).toEqual([
+      { surface: 'slack', reason: 'subtype' },
+      { surface: 'slack', reason: 'stale' },
+    ]);
+    expect(api.only('start')).toEqual([]);
+    const logged = log.of('an inbound message was ignored');
+    expect(logged).toHaveLength(2);
+    expect(JSON.stringify(logged)).not.toContain('secret');
+  });
 
   test('a torn-down thread closes its agent session', async () => {
     const { threads, deliver } = build(streaming('one'));

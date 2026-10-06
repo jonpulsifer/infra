@@ -22,21 +22,22 @@ import type { IdentifyBudget } from './guard.ts';
 import { SANDBOX_CARD_ID } from './lease.ts';
 import { type Log, plain } from './log.ts';
 import { oneLine, splitAt } from './reply.ts';
-import type {
-  Canvas,
-  HistoryMessage,
-  HistoryQuery,
-  Inbound,
-  Inbox,
-  Mark,
-  MessageRef,
-  Notice,
-  Outcome,
-  Surface,
-  SurfaceListener,
-  ThreadRef,
-  ToolCall,
-  ToolState,
+import {
+  type Canvas,
+  type HistoryMessage,
+  type HistoryQuery,
+  type Inbound,
+  type Inbox,
+  type Mark,
+  type MessageRef,
+  type Notice,
+  type Outcome,
+  type Surface,
+  type SurfaceListener,
+  type ThreadRef,
+  type ToolCall,
+  type ToolState,
+  withAttachments,
 } from './surface.ts';
 
 export type StopRow = APIActionRowComponent<APIButtonComponentWithCustomId>;
@@ -192,7 +193,10 @@ export function discordOver(api: API): Discord {
         authorId: message.author.id,
         authorName: message.author.global_name ?? message.author.username,
         authorIsBot: message.author.bot ?? false,
-        content: spoken(message),
+        content: withAttachments(
+          spoken(message),
+          discordFiles(message.attachments),
+        ),
       }));
     },
     async editMessage(channelId, messageId, body) {
@@ -486,6 +490,22 @@ export interface DiscordMessage {
   authorIsBot: boolean;
   content: string;
   mentionsMe: boolean;
+  attachments?: readonly DiscordFile[];
+}
+
+/** The fields of a Discord attachment mate describes; it never downloads one. */
+export interface DiscordFile {
+  filename: string;
+  content_type?: string;
+  size: number;
+}
+
+export function discordFiles(files: readonly DiscordFile[] | undefined) {
+  return (files ?? []).map((file) => ({
+    name: file.filename,
+    type: file.content_type ?? null,
+    bytes: file.size,
+  }));
 }
 
 export function discordInbound(
@@ -501,7 +521,10 @@ export function discordInbound(
     threadId: message.channelId,
     authorId: message.authorId,
     authorIsBot: message.authorIsBot,
-    content: message.content,
+    content: withAttachments(
+      message.content,
+      discordFiles(message.attachments),
+    ),
     mentionsMe: message.mentionsMe,
   };
 }
@@ -623,6 +646,7 @@ export function discordListener(
           authorIsBot: data.author.bot ?? false,
           content: data.content,
           mentionsMe: data.mentions.some((user) => user.id === me),
+          attachments: data.attachments,
         },
         guildId,
       );

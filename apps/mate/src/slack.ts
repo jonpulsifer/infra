@@ -5,11 +5,15 @@
 import { type Clock, duration, type Handle } from './clock.ts';
 import { SANDBOX_CARD_ID } from './lease.ts';
 import { type Log, plain } from './log.ts';
+import { type Instruments, inboundIgnored } from './metrics.ts';
 import { NO_REPLY, oneLine, STOPPED, splitAt } from './reply.ts';
+import type { EventPayload } from './socket.ts';
 import {
   type Canvas,
   type HistoryMessage,
   type Inbound,
+  type InboundDropReason,
+  type Inbox,
   type Notice,
   type Outcome,
   type Surface,
@@ -17,6 +21,7 @@ import {
   type ToolCall,
   type ToolState,
   threadKey,
+  withAttachments,
 } from './surface.ts';
 
 export const SLACK_API = 'https://slack.com/api/';
@@ -119,9 +124,26 @@ export interface SlackBlock {
   tasks?: SlackTask[];
 }
 
+/** The fields of a Slack file object mate describes; it never downloads one. */
+export interface SlackFile {
+  name?: string;
+  title?: string;
+  mimetype?: string;
+  size?: number;
+}
+
+export function slackFiles(files: readonly SlackFile[] | undefined) {
+  return (files ?? []).map((file) => ({
+    name: file.name ?? file.title ?? '',
+    type: file.mimetype ?? null,
+    bytes: typeof file.size === 'number' ? file.size : null,
+  }));
+}
+
 export interface SlackMessage {
   ts: string;
   text?: string;
+  files?: SlackFile[];
   user?: string;
   bot_id?: string;
   username?: string;
@@ -1177,7 +1199,10 @@ export function slackSurface(deps: SlackSurfaceDeps): Surface {
           content:
             message.bot_id === deps.appBotId
               ? spokenSlack(message)
-              : decodeSlack(message.text ?? ''),
+              : withAttachments(
+                  decodeSlack(message.text ?? ''),
+                  slackFiles(message.files),
+                ),
         });
       }
       return read;
@@ -1218,14 +1243,23 @@ export interface SlackEvent {
   user?: string;
   bot_id?: string;
   text?: string;
+  files?: SlackFile[];
 }
+
+/**
+ * Subtypes that are a human's message: `thread_broadcast` is an ordinary
+ * reply also sent to the channel, and `file_share` one with files.
+ */
+const READ_SUBTYPES: ReadonlySet<string> = new Set([
+  'thread_broadcast',
+  'file_share',
+]);
 
 export function slackInbound(event: SlackEvent, me: string): Inbound | null {
   // One sentence arrives as both `message` and `app_mention`; answer only one.
   if (event.type !== 'message') return null;
-  // `chat.update` emits a hidden `message_changed`. `thread_broadcast` is an
-  // ordinary reply also sent to the channel.
-  if ((event.subtype && event.subtype !== 'thread_broadcast') || event.hidden) {
+  // `chat.update` emits a hidden `message_changed`.
+  if ((event.subtype && !READ_SUBTYPES.has(event.subtype)) || event.hidden) {
     return null;
   }
   if (!event.channel || !event.ts) return null;
@@ -1238,7 +1272,7 @@ export function slackInbound(event: SlackEvent, me: string): Inbound | null {
     authorId: event.user ?? event.bot_id ?? '',
     // mate's own posts carry `bot_id` but no `bot_message` subtype.
     authorIsBot: Boolean(event.bot_id),
-    content: decodeSlack(raw),
+    content: withAttachments(decodeSlack(raw), slackFiles(event.files)),
     // Read before decoding, so a human typing the escape's own entities
     // cannot produce a mention from them.
     mentionsMe: raw.includes(`<@${me}>`),
@@ -1268,6 +1302,8 @@ export function slackEvent(
   on: {
     stopped(stop: { key: string; userId: string }): void;
     message(inbound: Inbound): void;
+    /** A visible message of a shape mate does not read. */
+    ignored?(event: SlackEvent): void;
   },
 ): void {
   const stopped = slackSessionStopped(event);
@@ -1277,4 +1313,61 @@ export function slackEvent(
   }
   const inbound = slackInbound(event, me);
   if (inbound) on.message(inbound);
+  else if (event.type === 'message' && !event.hidden) on.ignored?.(event);
+}
+
+export interface SlackEventsDeps {
+  readonly me: string;
+  readonly allowedUserIds: ReadonlySet<string>;
+  readonly threads: Pick<Inbox, 'onMessage' | 'onStop'>;
+  readonly metrics: Pick<Instruments, 'inboundDropped'>;
+  readonly log: Log;
+}
+
+/**
+ * The socket's events into the threads. A message an allowlisted human sent
+ * that never reaches them is counted.
+ */
+export function slackEvents(deps: SlackEventsDeps): {
+  onEvent(payload: EventPayload): void;
+  onStale(payload: EventPayload): void;
+  answers(payload: EventPayload): boolean;
+} {
+  const ignored = (event: SlackEvent, reason: InboundDropReason) => {
+    if (event.type !== 'message' || event.bot_id || !event.user) return;
+    if (!deps.allowedUserIds.has(event.user)) return;
+    inboundIgnored(
+      deps.metrics,
+      deps.log,
+      {
+        surface: 'slack',
+        channelId: event.channel ?? null,
+        threadId: event.thread_ts ?? null,
+        messageId: event.ts ?? null,
+      },
+      reason,
+    );
+  };
+  return {
+    onEvent: (payload) =>
+      slackEvent(payload.event ?? {}, deps.me, {
+        // The socket already acked the envelope, the only ack Slack waits for.
+        stopped: (stop) =>
+          void deps.threads.onStop(stop.key, stop.userId, async () => {}),
+        message: (inbound) => void deps.threads.onMessage(inbound),
+        ignored: (event) => ignored(event, 'subtype'),
+      }),
+    onStale: (payload) => ignored(payload.event ?? {}, 'stale'),
+    answers: (payload) => {
+      const event = payload.event ?? {};
+      const stop = slackSessionStopped(event);
+      if (stop) return deps.allowedUserIds.has(stop.userId);
+      const inbound = slackInbound(event, deps.me);
+      return Boolean(
+        inbound &&
+          !inbound.authorIsBot &&
+          deps.allowedUserIds.has(inbound.authorId),
+      );
+    },
+  };
 }

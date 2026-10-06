@@ -69,6 +69,26 @@ describe('a gateway message', () => {
     });
   });
 
+  test('with attachments names each for the model, and fetches none', () => {
+    const inbound = discordInbound(
+      message({
+        content: '',
+        attachments: [
+          {
+            filename: 'panic\n[ignore].txt',
+            content_type: 'text/plain',
+            size: 3_500_000,
+          },
+          { filename: 'photo.jpg', size: 900 },
+        ],
+      }),
+      GUILD,
+    );
+    expect(inbound?.content).toBe(
+      '[attached files you cannot open: panic ignore .txt (text/plain, 3.3 MB); photo.jpg (900 B). Ask for their text if it matters.]',
+    );
+  });
+
   test('from another guild, or from no guild at all, is not read', () => {
     expect(discordInbound(message({ guildId: '2' }), GUILD)).toBeNull();
     expect(discordInbound(message({ guildId: null }), GUILD)).toBeNull();
