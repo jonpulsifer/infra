@@ -1,4 +1,4 @@
-# The Spindrift control plane: one image, two processes, its own database.
+# The kthx engine control plane: one image, two processes, its own database.
 
 image: ""
 

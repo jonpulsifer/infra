@@ -21,14 +21,14 @@ Rendered on the route's own condition — same `serving` and `reach` test — so
 name is published exactly when something is listening on it, and `reach: none`
 publishes nothing at all.
 */}}
-{{- if and (include "spindrift-app.serving" .) (ne .Values.app.reach "none") }}
+{{- if and (include "kthx-app.serving" .) (ne .Values.app.reach "none") }}
 {{- $private := eq .Values.app.reach "private" }}
 {{/*
 The three facts `reach` decides, resolved once. `private` is an A record at the
 gateway's own load-balancer address, unproxied: RFC1918, so the record type *is*
 the boundary and no policy has to be attached to it. `public` is a proxied CNAME
 at the Target's tunnel, whose ingress stays the single static wildcard rule
-Terraform owns — Spindrift never writes tunnel config (§9).
+Terraform owns — the kthx engine never writes tunnel config (§9).
 */}}
 {{- $recordType := ternary "A" "CNAME" $private }}
 {{- $target := ternary .Values.platform.dns.privateAddress .Values.platform.dns.tunnelHostname $private }}
@@ -39,12 +39,12 @@ Terraform owns — Spindrift never writes tunnel config (§9).
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
-  name: {{ include "spindrift-app.fullname" . }}
+  name: {{ include "kthx-app.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "spindrift-app.labels" . | nindent 4 }}
+    {{- include "kthx-app.labels" . | nindent 4 }}
   annotations:
-    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+    {{- include "kthx-app.contractAnnotations" . | nindent 4 }}
 spec:
   endpoints:
     {{/*

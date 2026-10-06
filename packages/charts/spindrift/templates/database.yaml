@@ -4,14 +4,14 @@ pins exist nowhere else but the Garage backup in `backup.yaml`, so an uninstall 
 Cluster by default.
 */}}
 {{- if .Values.database.enabled }}
-{{- include "spindrift.backupPrefixes" . }}
+{{- include "kthx-engine.backupPrefixes" . }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: {{ include "spindrift.databaseName" . }}
-  namespace: {{ include "spindrift.namespace" . }}
+  name: {{ include "kthx-engine.databaseName" . }}
+  namespace: {{ include "kthx-engine.namespace" . }}
   labels:
-    {{- include "spindrift.labels" . | nindent 4 }}
+    {{- include "kthx-engine.labels" . | nindent 4 }}
   {{- if .Values.database.keepOnDelete }}
   annotations:
     # CNPG deletes the data PVC with the Cluster, whatever the storage class reclaims.

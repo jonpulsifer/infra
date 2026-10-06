@@ -9,8 +9,8 @@ metadata:
   annotations:
     # Holds external-dns off these wildcards, which Terraform owns. Both
     # spellings: external-dns v0.22.0 changed the prefix with no fallback.
-    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
-    external-dns.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
 spec:
   # No sectionName: names arrive over TLS from the lab and over HTTP from the tunnel.
   parentRefs:

@@ -6,26 +6,26 @@ value, so this template never asks which of them it is rendering.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "spindrift-app.fullname" . }}
+  name: {{ include "kthx-app.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "spindrift-app.labels" . | nindent 4 }}
+    {{- include "kthx-app.labels" . | nindent 4 }}
   annotations:
-    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+    {{- include "kthx-app.contractAnnotations" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "spindrift-app.selectorLabels" . | nindent 6 }}
+      {{- include "kthx-app.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "spindrift-app.podLabels" . | nindent 8 }}
+        {{- include "kthx-app.podLabels" . | nindent 8 }}
       annotations:
-        {{- include "spindrift-app.contractAnnotations" . | nindent 8 }}
+        {{- include "kthx-app.contractAnnotations" . | nindent 8 }}
         {{- with .Values.shared.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      {{- include "spindrift-app.podSpec" . | nindent 6 }}
+      {{- include "kthx-app.podSpec" . | nindent 6 }}
 {{- end }}

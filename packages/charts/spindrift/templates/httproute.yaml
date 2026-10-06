@@ -9,17 +9,17 @@ rule to route to, so the edge does no path matching.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
 metadata:
-  name: {{ include "spindrift.fullname" . }}-http-route
-  namespace: {{ include "spindrift.namespace" . }}
+  name: {{ include "kthx-engine.fullname" . }}-http-route
+  namespace: {{ include "kthx-engine.namespace" . }}
   labels:
-    {{- include "spindrift.labels" . | nindent 4 }}
+    {{- include "kthx-engine.labels" . | nindent 4 }}
 spec:
   parentRefs:
-    - name: {{ include "spindrift.fullname" . }}-gateway
+    - name: {{ include "kthx-engine.fullname" . }}-gateway
   hostnames:
     - {{ .Values.hostname }}
   rules:
     - backendRefs:
-        - name: {{ include "spindrift.fullname" . }}
+        - name: {{ include "kthx-engine.fullname" . }}
           port: {{ .Values.port }}
 {{- end }}

@@ -73,19 +73,19 @@ that publishes instead, so a `kubectl get -o yaml` says where the record went.
 The bypass concern the old comment named lives in the NetworkPolicy, which
 covers every Component whatever its reach.
 */}}
-{{- if and (include "spindrift-app.serving" .) (ne .Values.app.reach "none") }}
+{{- if and (include "kthx-app.serving" .) (ne .Values.app.reach "none") }}
 {{- if not .Values.platform.gateway.name }}
 {{- fail "platform.gateway.name is required for a Component whose reach is not none: a route with no gateway attaches to nothing" }}
 {{- end }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: {{ include "spindrift-app.fullname" . }}
+  name: {{ include "kthx-app.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "spindrift-app.labels" . | nindent 4 }}
+    {{- include "kthx-app.labels" . | nindent 4 }}
   annotations:
-    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+    {{- include "kthx-app.contractAnnotations" . | nindent 4 }}
     {{/*
     Both spellings: external-dns v0.22.0 moved the default annotation prefix
     with no fallback, and a controller reads exactly one of them. A hold-out
@@ -93,8 +93,8 @@ metadata:
     all — the route source would claim this Component's own name at the shared
     gateway's address. Carrying the pair makes moving the pin inert.
     */}}
-    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
-    external-dns.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
 spec:
   parentRefs:
     - name: {{ .Values.platform.gateway.name }}
@@ -126,6 +126,6 @@ spec:
                 - x-auth-request-user
       {{- end }}
       backendRefs:
-        - name: {{ include "spindrift-app.fullname" . }}
-          port: {{ include "spindrift-app.port" . }}
+        - name: {{ include "kthx-app.fullname" . }}
+          port: {{ include "kthx-app.port" . }}
 {{- end }}
