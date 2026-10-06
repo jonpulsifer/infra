@@ -122,6 +122,72 @@ func TestVerify_BuilderMismatch(t *testing.T) {
 	}
 }
 
+func statementBuiltBy(builderID string) json.RawMessage {
+	return json.RawMessage(`{
+		"_type": "https://in-toto.io/Statement/v1",
+		"predicateType": "https://slsa.dev/provenance/v1",
+		"predicate": {
+			"buildDefinition": {
+				"externalParameters": {
+					"bundleDigest": "` + testBundle + `"
+				}
+			},
+			"runDetails": {
+				"builder": {
+					"id": "` + builderID + `"
+				}
+			}
+		}
+	}`)
+}
+
+func TestVerify_BuilderIDAliases(t *testing.T) {
+	const legacy = "https://spindrift.dev/builders/in-cluster"
+	const current = "https://kthx.dev/builders/in-cluster"
+	cases := []struct {
+		name     string
+		expected string
+		got      string
+		ok       bool
+	}{
+		{"current expected, current claimed", current, current, true},
+		{"current expected, legacy claimed", current, legacy, true},
+		{"legacy expected, current claimed", legacy, current, true},
+		{"legacy expected, legacy claimed", legacy, legacy, true},
+		{"current expected, foreign claimed", current, "https://github.com/actions/runner/github-hosted", false},
+		{"foreign expected, legacy claimed", "https://github.com/actions/runner/github-hosted", legacy, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := VerificationRequest{
+				Version: "v1",
+				Artifact: Artifact{
+					Digest: testDigest,
+					Refs:   []string{"registry.example.test/apps/shop@" + testDigest},
+				},
+				Provenance: Provenance{
+					Statement:    statementBuiltBy(tc.got),
+					ClaimedLevel: 1,
+				},
+				Expectations: Expectations{
+					Backend:           "in-cluster",
+					ExpectedBuilderID: tc.expected,
+					MinimumLevel:      1,
+					BundleDigest:      testBundle,
+				},
+			}
+
+			resp := Verify(req, mockNow)
+			if resp.OK != tc.ok {
+				t.Fatalf("expected OK %v, got %v; message: %s", tc.ok, resp.OK, resp.Message)
+			}
+			if tc.ok && resp.Assessment.BuilderID != tc.got {
+				t.Errorf("expected the assessment to record the claimed builder %s, got %s", tc.got, resp.Assessment.BuilderID)
+			}
+		})
+	}
+}
+
 func TestVerify_BundleDigestMismatch(t *testing.T) {
 	req := VerificationRequest{
 		Version: "v1",

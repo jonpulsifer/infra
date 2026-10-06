@@ -7,11 +7,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
 
 var slsaVersionRegex = regexp.MustCompile(`(?i)slsa[^/]*/v(\d+(?:\.\d+)?)`)
+
+// builderIDAliases lists builder IDs that name one builder. Attestations under
+// a legacy ID stay valid forever, so an entry is never removed.
+var builderIDAliases = [][]string{
+	{"https://kthx.dev/builders/in-cluster", "https://spindrift.dev/builders/in-cluster"},
+}
+
+// builderIDMatches reports whether got names the expected builder, under its
+// own ID or an alias of it.
+func builderIDMatches(expected, got string) bool {
+	if got == expected {
+		return true
+	}
+	for _, ids := range builderIDAliases {
+		if slices.Contains(ids, expected) && slices.Contains(ids, got) {
+			return true
+		}
+	}
+	return false
+}
 
 // Verify checks req.Provenance against req.Expectations.
 func Verify(req VerificationRequest, now func() time.Time) VerificationResponse {
@@ -69,7 +90,7 @@ func Verify(req VerificationRequest, now func() time.Time) VerificationResponse 
 	}
 
 	extractedBuilderID := extractBuilderID(stmt)
-	if extractedBuilderID != "" && req.Expectations.ExpectedBuilderID != "" && extractedBuilderID != req.Expectations.ExpectedBuilderID {
+	if extractedBuilderID != "" && req.Expectations.ExpectedBuilderID != "" && !builderIDMatches(req.Expectations.ExpectedBuilderID, extractedBuilderID) {
 		return VerificationResponse{
 			Version: "v1",
 			OK:      false,
@@ -277,4 +298,3 @@ func extractSubjectDigest(stmt map[string]interface{}) string {
 	}
 	return "sha256:" + h
 }
-

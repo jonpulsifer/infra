@@ -1087,7 +1087,7 @@ jobs:
                 predicateType: "https://slsa.dev/provenance/v1",
                 predicate: {
                   buildDefinition: {
-                    buildType: "https://spindrift.dev/buildtypes/github-actions/v1",
+                    buildType: "https://kthx.dev/buildtypes/github-actions/v1",
                     externalParameters: {
                       bundleDigest: $bundleDigest,
                       workflow: $workflow

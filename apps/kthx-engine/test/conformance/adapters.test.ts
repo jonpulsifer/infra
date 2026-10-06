@@ -147,7 +147,9 @@ deployAdapterSuite(
               values?: { shared?: { podAnnotations?: Record<string, string> } };
             }
           | undefined;
-        return spec?.values?.shared?.podAnnotations?.[RESTART_STAMP] ?? null;
+        return (
+          spec?.values?.shared?.podAnnotations?.[RESTART_STAMP.key] ?? null
+        );
       },
     };
   },
@@ -171,7 +173,7 @@ deployAdapterSuite(
       restartMark: () => {
         const template = api.service(workloadId(desiredState('image')))
           ?.template as { annotations?: Record<string, string> } | undefined;
-        return template?.annotations?.[RESTART_STAMP] ?? null;
+        return template?.annotations?.[RESTART_STAMP.key] ?? null;
       },
     };
   },
@@ -309,7 +311,7 @@ buildAdapterSuite('in-cluster', () => {
             name: 'build-pod',
             namespace: 'builds',
             // The fake cluster filters pods on this label.
-            labels: { [JOB_LABEL]: 'spindrift-build-conformance' },
+            labels: { [JOB_LABEL.key]: 'spindrift-build-conformance' },
           },
         },
       ],

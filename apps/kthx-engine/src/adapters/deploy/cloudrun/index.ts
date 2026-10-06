@@ -22,6 +22,7 @@ import {
   targetLabel,
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
+import { stamped } from '../../object-keys.ts';
 import { cloudChecklist, cloudSurfaceProbe } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
 import { cloudWriteFailure, orderedChecklist } from '../cloud/verdict.ts';
@@ -581,7 +582,9 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       path,
       query: { updateMask: 'template.annotations' },
       body: {
-        template: { annotations: { ...annotations, [RESTART_STAMP]: at } },
+        template: {
+          annotations: { ...annotations, ...stamped(RESTART_STAMP, at) },
+        },
       },
     });
     if (!written.ok) {
@@ -591,7 +594,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     }
     return {
       kind: 'restarted',
-      detail: `service ${placed.id} stamped ${RESTART_STAMP}=${at}; a new revision of the same image is rolling out`,
+      detail: `service ${placed.id} stamped ${RESTART_STAMP.key}=${at}; a new revision of the same image is rolling out`,
     };
   }
 
