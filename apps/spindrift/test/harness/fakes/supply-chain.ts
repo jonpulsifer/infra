@@ -292,7 +292,7 @@ export class FakeVerifierProcess implements ProcessExecutor {
     // Only the configured signer's key is trusted, never the bundle's own.
     if (bundle.publicKey !== publicKeyOf(signerKey)) {
       return failed(
-        'signature did not verify: bundle public key is not the trusted Spindrift signer\n',
+        'signature did not verify: bundle public key does not match the trusted kthx signer\n',
       );
     }
     const ok =

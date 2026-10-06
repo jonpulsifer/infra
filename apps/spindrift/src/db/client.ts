@@ -13,7 +13,7 @@ export function databaseUrl(env: Env = Bun.env): string {
   const url = env.DATABASE_URL?.trim();
   if (!url) {
     throw new DatabaseConfigError(
-      'DATABASE_URL is not set: Spindrift has no database to connect to',
+      'DATABASE_URL is not set: the kthx engine has no database to connect to',
     );
   }
   return url;

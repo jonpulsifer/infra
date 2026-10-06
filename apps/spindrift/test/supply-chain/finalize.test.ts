@@ -649,7 +649,7 @@ describe('a signature that is signed and re-verified, not asserted', () => {
 
     expect(admitted.ok).toBe(false);
     if (admitted.ok) return;
-    expect(admitted.reason).toContain('not the trusted Spindrift signer');
+    expect(admitted.reason).toContain('does not match the trusted kthx signer');
   });
 
   test('a tampered signature is refused', async () => {
