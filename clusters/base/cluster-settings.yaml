@@ -10,3 +10,9 @@ data:
   # Both clusters mint App names in this one zone; each deletes only records
   # its own external-dns txtOwnerId claims.
   SPINDRIFT_DOMAIN: lolwtf.dev
+  # Node paths that follow the host OS, set to the NixOS values. A cluster
+  # overrides them in its own cluster-settings.yaml when its nodes change OS.
+  # KUBELET_ROOT is the kubelet's root directory. NODE_DATA_ROOT is the
+  # node-local data volume that local-path PVs and media live on.
+  KUBELET_ROOT: /var/lib/kubernetes
+  NODE_DATA_ROOT: /mnt/disks

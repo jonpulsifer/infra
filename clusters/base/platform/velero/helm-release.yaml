@@ -61,10 +61,10 @@ spec:
     snapshotsEnabled: false
     deployNodeAgent: true
     nodeAgent:
-      # The NixOS kubelet's root directory is /var/lib/kubernetes, not the
+      # The kubelet root directory comes from cluster-settings, not the
       # chart's /var/lib/kubelet.
-      podVolumePath: /var/lib/kubernetes/pods
-      pluginVolumePath: /var/lib/kubernetes/plugins
+      podVolumePath: ${KUBELET_ROOT}/pods
+      pluginVolumePath: ${KUBELET_ROOT}/plugins
       resources:
         requests: {cpu: 50m, memory: 256Mi}
         limits: {memory: 2Gi}
