@@ -24,3 +24,4 @@ spec:
   values:
     fullnameOverride: intel-device-plugin-gpu
     nodeFeatureRule: false
+    bypathMode: none
