@@ -64,7 +64,7 @@ spec:
                       echo "garage:$bucket is empty and its GCS copy is not; refusing to sync" >&2
                       exit 1
                     fi
-                    rclone sync "garage:$bucket" "crypt:$bucket" --stats 1m --stats-one-line
+                    rclone sync "garage:$bucket" "crypt:$bucket" --stats 1m --stats-one-line --stats-log-level NOTICE
                     rclone cryptcheck "garage:$bucket" "crypt:$bucket"
                   done
               env:
