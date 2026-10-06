@@ -51,7 +51,7 @@ const proposal: DetectionProposal = {
   watchPaths: ['services/api'],
 };
 
-const SPINDRIFT_YAML = [
+const DECLARATION_YAML = [
   'version: 1',
   'component:',
   '  kind: service',
@@ -153,7 +153,7 @@ describe('adopting the default branch', () => {
   test('adopts a scope’s legacy spindrift.yaml and records the commit', async () => {
     const fake = new FakeGitHub();
     const commit = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository, app } = await connect(fake);
 
@@ -167,7 +167,7 @@ describe('adopting the default branch', () => {
         outcome: 'adopted',
         proposal: {
           ...proposal,
-          source: 'spindrift-file',
+          source: 'kthx-file',
           // The workspace shows this as where the Component's kind came from.
           reason: 'services/api/spindrift.yaml asserts this scope is a service',
           kinds: [
@@ -202,7 +202,7 @@ describe('adopting the default branch', () => {
   test('a second pass over an unchanged branch adopts nothing again', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository } = await connect(fake);
     const loop = await context(fake);
@@ -216,7 +216,7 @@ describe('adopting the default branch', () => {
   test('reports whether a scope actually changed between adopted commits', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'first',
     });
     const { repository } = await connect(fake);
@@ -225,7 +225,7 @@ describe('adopting the default branch', () => {
 
     // A commit that moves the branch without touching the scope's file.
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'second',
     });
     const pass = await reconcileRepository(loop, await reload(repository.id));
@@ -239,7 +239,7 @@ describe('adopting the default branch', () => {
 
   test('adopts a scope’s kthx.yaml', async () => {
     const fake = new FakeGitHub();
-    fake.commitFiles('main', { 'services/api/kthx.yaml': SPINDRIFT_YAML });
+    fake.commitFiles('main', { 'services/api/kthx.yaml': DECLARATION_YAML });
     const { repository } = await connect(fake);
 
     const pass = await reconcileRepository(await context(fake), repository);
@@ -247,7 +247,7 @@ describe('adopting the default branch', () => {
     expect(pass.outcome === 'adopted' && pass.scopes[0]).toMatchObject({
       outcome: 'adopted',
       proposal: {
-        source: 'spindrift-file',
+        source: 'kthx-file',
         reason: 'services/api/kthx.yaml asserts this scope is a service',
       },
     });
@@ -255,12 +255,14 @@ describe('adopting the default branch', () => {
 
   test('renaming spindrift.yaml to kthx.yaml alone changes nothing', async () => {
     const fake = new FakeGitHub();
-    fake.commitFiles('main', { 'services/api/spindrift.yaml': SPINDRIFT_YAML });
+    fake.commitFiles('main', {
+      'services/api/spindrift.yaml': DECLARATION_YAML,
+    });
     const { repository } = await connect(fake);
     const loop = await context(fake);
     await reconcileRepository(loop, repository);
 
-    fake.commitFiles('main', { 'services/api/kthx.yaml': SPINDRIFT_YAML });
+    fake.commitFiles('main', { 'services/api/kthx.yaml': DECLARATION_YAML });
     const pass = await reconcileRepository(loop, await reload(repository.id));
 
     expect(pass.outcome).toBe('adopted');
@@ -272,14 +274,16 @@ describe('adopting the default branch', () => {
 
   test('a kthx.yaml added beside spindrift.yaml is what the scope now says', async () => {
     const fake = new FakeGitHub();
-    fake.commitFiles('main', { 'services/api/spindrift.yaml': SPINDRIFT_YAML });
+    fake.commitFiles('main', {
+      'services/api/spindrift.yaml': DECLARATION_YAML,
+    });
     const { repository } = await connect(fake);
     const loop = await context(fake);
     await reconcileRepository(loop, repository);
 
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
-      'services/api/kthx.yaml': SPINDRIFT_YAML.replace(
+      'services/api/spindrift.yaml': DECLARATION_YAML,
+      'services/api/kthx.yaml': DECLARATION_YAML.replace(
         'bun run build',
         'bun run release',
       ),
@@ -298,7 +302,7 @@ describe('adopting the default branch', () => {
   test('a commit carrying an unparseable file is rejected whole', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository } = await connect(fake);
     const loop = await context(fake);
@@ -346,13 +350,13 @@ describe('a pass that is not going to dispatch', () => {
   test('refreshes the row and leaves the transition for a pass that will', async () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const repository = await alreadyAdopted(fake, adopted);
     const loop = await context(fake);
 
     const pushed = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'pushed',
     });
     const read = await reconcileRepository(loop, await reload(repository.id), {
@@ -376,12 +380,12 @@ describe('a pass that is not going to dispatch', () => {
   test('does not read one scope’s kthx file', async () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const repository = await alreadyAdopted(fake, adopted);
     const loop = await context(fake);
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'pushed',
     });
 
@@ -405,14 +409,14 @@ describe('claiming a transition exactly once', () => {
   test('two passes observing the same new commit adopt it once', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository } = await connect(fake);
     const loop = await context(fake);
     await reconcileRepository(loop, repository);
 
     const pushed = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'pushed',
     });
     // The webhook and poll passes each read the row before the branch, so the
@@ -432,7 +436,7 @@ describe('claiming a transition exactly once', () => {
   test('a repository adopting its very first commit still adopts', async () => {
     const fake = new FakeGitHub();
     const first = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     // With nothing adopted yet, the compare-and-swap matches a null column.
     const { repository } = await connect(fake);
@@ -497,7 +501,7 @@ describe('an unmerged configuration pull request', () => {
     // A merge moves the default branch, the only authoritative act.
     const merged = fake.commitFiles('main', {
       'README.md': 'unconnected',
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const pass = await reconcileRepository(loop, await reload(repository.id));
 
@@ -591,7 +595,7 @@ describe('losing access', () => {
   test('freezes the repository and leaves every Deploy intact', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository, app } = await connect(fake);
     await liveDeploy(app.id);
@@ -629,7 +633,7 @@ describe('losing access', () => {
   test('a later pass that can read again clears the freeze', async () => {
     const fake = new FakeGitHub();
     const commit = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository } = await connect(fake);
     const loop = await context(fake);
@@ -667,7 +671,7 @@ describe('a verified webhook delivery', () => {
   test('a default-branch push reconciles that repository now', async () => {
     const fake = new FakeGitHub();
     const commit = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository } = await connect(fake);
 
@@ -686,7 +690,7 @@ describe('a verified webhook delivery', () => {
   test('a push to any other ref does nothing at all', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository } = await connect(fake);
     const loop = await context(fake);
@@ -779,7 +783,7 @@ describe('a renamed repository', () => {
   test('the poll follows the rename, and a delivery under the new name then matches', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository, app } = await connect(fake);
     const loop = await context(fake);
@@ -787,7 +791,7 @@ describe('a renamed repository', () => {
 
     fake.rename('example/renamed');
     const pushed = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'pushed',
     });
     const delivery = {
@@ -817,7 +821,7 @@ describe('a renamed repository', () => {
     expect(renamedApp?.url).toBe('https://git.invalid/example/renamed');
 
     const again = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'again',
     });
     const passes = await applyWebhookDelivery(loop, {
@@ -887,12 +891,12 @@ describe('a push the API has not caught up to', () => {
   /** A repository at `adopted` whose ref does not show `pushed` yet. */
   async function lagged(fake: FakeGitHub) {
     const adopted = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
     });
     const { repository } = await connect(fake);
     await reconcileRepository(await context(fake), repository);
     const pushed = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'README.md': 'pushed',
     });
     fake.setHead('main', adopted);

@@ -15,7 +15,10 @@ import { FakeGcpDiscovery } from '../harness/fakes/gcp-discovery-api.ts';
 import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 
 test('the installation token provider follows the projected path', async () => {
-  const path = join('/tmp', `spindrift-identity-token-${crypto.randomUUID()}`);
+  const path = join(
+    '/tmp',
+    `kthx-engine-identity-token-${crypto.randomUUID()}`,
+  );
   await Bun.write(path, 'first-token\n');
 
   try {

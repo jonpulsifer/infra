@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { repositories } from '../../db/schema.ts';
 import { declaredPlanner } from '../../domain/detection/declared.ts';
 import { scanRepository } from '../../domain/detection/discover.ts';
-import { readDeclaration } from '../../domain/detection/spindrift-file.ts';
+import { readDeclaration } from '../../domain/detection/kthx-file.ts';
 import { gitHubTree } from '../../domain/detection/tree.ts';
 import type {
   RepositoryHost,

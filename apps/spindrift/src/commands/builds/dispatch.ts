@@ -38,9 +38,9 @@ import {
 import { vercelFrameworkOf } from '../../domain/detection/declared.ts';
 import {
   type Declaration,
-  parseSpindriftFile,
+  parseKthxFile,
   readDeclaration,
-} from '../../domain/detection/spindrift-file.ts';
+} from '../../domain/detection/kthx-file.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
@@ -295,7 +295,7 @@ async function outputDirectoryFor(
   if (declaration === null) return null;
 
   try {
-    const proposal = parseSpindriftFile(declaration.document, declaration.path);
+    const proposal = parseKthxFile(declaration.document, declaration.path);
     return proposal.build.frontend === 'railpack'
       ? proposal.build.outputDirectory
       : null;

@@ -31,7 +31,7 @@ async function frontendScript(): Promise<string> {
 async function runArm(
   files: Readonly<Record<string, string>>,
 ): Promise<{ outputs: Record<string, string>; workspace: string }> {
-  const workspace = await mkdtemp(join(tmpdir(), 'spindrift-context-arm-'));
+  const workspace = await mkdtemp(join(tmpdir(), 'kthx-engine-context-arm-'));
   const root = join(workspace, 'bundle');
   for (const [name, contents] of Object.entries(files)) {
     await mkdir(dirname(join(root, name)), { recursive: true });

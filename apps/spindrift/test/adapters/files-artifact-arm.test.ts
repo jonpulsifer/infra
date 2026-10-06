@@ -38,7 +38,7 @@ async function runArm(input: {
   outputDirectory?: string;
   vercelFramework?: string;
 }): Promise<{ outputs: Record<string, string>; workspace: string }> {
-  const workspace = await mkdtemp(join(tmpdir(), 'spindrift-files-arm-'));
+  const workspace = await mkdtemp(join(tmpdir(), 'kthx-engine-files-arm-'));
   const root = join(workspace, 'bundle');
   const scope = join(root, 'site');
   await mkdir(scope, { recursive: true });
@@ -199,7 +199,7 @@ describe('“Build with the platform’s own builder”', () => {
   }
 
   test('stages the two trees and lifts a symlinked function into the manifest', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'spindrift-vercel-arm-'));
+    const workspace = await mkdtemp(join(tmpdir(), 'kthx-engine-vercel-arm-'));
     try {
       const scope = join(workspace, 'scope');
       const bin = join(workspace, 'bin');

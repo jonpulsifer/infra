@@ -78,6 +78,8 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'verify-signature',
   // A logo mark name.
   'google-cloud',
+  // A proposal source name.
+  'kthx-file',
   // The source bucket in DEFAULT_PLACEHOLDER_MANIFEST.
   'bluenose-spindrift-source',
   // Header names used outside src/web/, listed one at a time so the rest of
@@ -97,8 +99,8 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'trace-v1',
 ]);
 
-/** The product's own label prefix, the same in every installation. */
-const PRODUCT_NAMESPACE = /^spindrift-/;
+/** The product's own prefixes, the same in every installation. */
+const PRODUCT_NAMESPACE = /^(kthx-engine|spindrift)-/;
 
 /** An abbreviated commit or digest prefix, which has the project-id shape. */
 const OBJECT_ID = /^[0-9a-f]{6,40}$/;

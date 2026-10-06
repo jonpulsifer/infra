@@ -38,7 +38,7 @@ jobs:
         with:
           # The clusters/, mise.toml, AGENTS.md, persona, skills, .dockerignore,
           # images/mate-sandbox, terraform/pki and spindrift-build.yml paths are
-          # test inputs. Keep them in step with the spindrift, mate and
+          # test inputs. Keep them in step with the kthx-engine, mate and
           # switchboard test inputs in turbo.json.
           files: |
             apps/clankerbanker/**

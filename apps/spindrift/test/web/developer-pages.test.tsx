@@ -1,7 +1,7 @@
 // The CLI, SDK and MCP pages: static renders of each state, held to the kthx
 // sources they describe so a page cannot promise a verb, a member or a tool
 // that kthx lacks. Turbo reruns this file on a change to a kthx source it
-// reads only when spindrift#test.inputs in turbo.json names that source.
+// reads only when kthx-engine#test.inputs in turbo.json names that source.
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';

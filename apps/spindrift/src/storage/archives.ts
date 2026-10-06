@@ -70,7 +70,7 @@ export function isFetchableBundleLocation(
 export function storageDir(): string {
   const custom = process.env.SPINDRIFT_STORAGE_DIR?.trim();
   if (custom) return custom;
-  return join(tmpdir(), 'spindrift-archives');
+  return join(tmpdir(), 'kthx-engine-archives');
 }
 
 export function digestOfBytes(bytes: Uint8Array): string {

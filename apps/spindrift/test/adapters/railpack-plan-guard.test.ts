@@ -45,7 +45,7 @@ async function guardScript(): Promise<string> {
 }
 
 async function guard(plan: Plan): Promise<Plan> {
-  const workspace = await mkdtemp(join(tmpdir(), 'spindrift-plan-guard-'));
+  const workspace = await mkdtemp(join(tmpdir(), 'kthx-engine-plan-guard-'));
   try {
     const planPath = join(workspace, 'railpack-plan.json');
     await writeFile(planPath, JSON.stringify(plan));
@@ -146,7 +146,7 @@ describe('“Make the plan check its own start command”', () => {
   test('the appended check rejects the package archive that shipped', async () => {
     // `go build -o` on a non-main package writes an ar archive at 0644, and
     // Linux runs nothing without an execute bit, even for root.
-    const workspace = await mkdtemp(join(tmpdir(), 'spindrift-plan-guard-'));
+    const workspace = await mkdtemp(join(tmpdir(), 'kthx-engine-plan-guard-'));
     try {
       await writeFile(join(workspace, 'out'), '!<arch>\n__.PKGDEF', {
         mode: 0o644,

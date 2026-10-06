@@ -38,7 +38,7 @@ import { buildOutbox } from '../storage/build-outbox.ts';
 import { cachedBundle, rememberBundle } from '../storage/bundle-cache.ts';
 import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
-import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
+import { KthxEngineSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
 import { logWarn } from '../telemetry/index.ts';
 import type { BosunOutbox } from './build/bosun.ts';
@@ -225,7 +225,7 @@ export function createAdapterRegistry(
     new CosignSigner({ key: options.manifest.supplyChain.signer }),
     // Admission re-verifies the recorded signature against the recorded digest,
     // pinned to the manifest's signer.
-    new SpindriftSignatureVerifier({
+    new KthxEngineSignatureVerifier({
       signerKey: options.manifest.supplyChain.signer,
     }),
   );

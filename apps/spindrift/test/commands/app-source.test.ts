@@ -13,9 +13,12 @@ import { fixtureManifest } from '../harness/installation.ts';
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 
-const SPINDRIFT_YAML = ['version: 1', 'component:', '  kind: service', ''].join(
-  '\n',
-);
+const DECLARATION_YAML = [
+  'version: 1',
+  'component:',
+  '  kind: service',
+  '',
+].join('\n');
 
 function context(fake: FakeGitHub | null): CommandContext {
   const host =
@@ -76,7 +79,7 @@ describe('getAppSource', () => {
   test('reads the scope’s kthx.yaml at the adopted commit', async () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
-      'services/api/kthx.yaml': SPINDRIFT_YAML,
+      'services/api/kthx.yaml': DECLARATION_YAML,
       'services/api/Dockerfile': 'FROM scratch\n',
     });
 
@@ -87,14 +90,14 @@ describe('getAppSource', () => {
     expect(result.value.source?.manifest).toEqual({
       path: 'services/api/kthx.yaml',
       state: 'present',
-      text: SPINDRIFT_YAML,
+      text: DECLARATION_YAML,
     });
   });
 
   test('reads kthx.yaml over a spindrift.yaml beside it', async () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
-      'services/api/kthx.yaml': SPINDRIFT_YAML,
+      'services/api/kthx.yaml': DECLARATION_YAML,
       'services/api/spindrift.yaml': 'version: 1\ncomponent:\n  kind: job\n',
     });
 
@@ -105,14 +108,14 @@ describe('getAppSource', () => {
     expect(result.value.source?.manifest).toEqual({
       path: 'services/api/kthx.yaml',
       state: 'present',
-      text: SPINDRIFT_YAML,
+      text: DECLARATION_YAML,
     });
   });
 
   test('reads a legacy spindrift.yaml at the adopted commit when there is no kthx.yaml', async () => {
     const fake = new FakeGitHub();
     const adopted = fake.commitFiles('main', {
-      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'services/api/spindrift.yaml': DECLARATION_YAML,
       'services/api/Dockerfile': 'FROM scratch\n',
     });
     // A later commit that adoption has not reached.
@@ -133,7 +136,7 @@ describe('getAppSource', () => {
     expect(source?.manifest).toEqual({
       path: 'services/api/spindrift.yaml',
       state: 'present',
-      text: SPINDRIFT_YAML,
+      text: DECLARATION_YAML,
     });
   });
 
@@ -142,7 +145,7 @@ describe('getAppSource', () => {
     const adopted = fake.commitFiles('main', {
       'services/api/Dockerfile': 'FROM scratch\n',
       // Outside the scope, so not this App's.
-      'spindrift.yaml': SPINDRIFT_YAML,
+      'spindrift.yaml': DECLARATION_YAML,
     });
 
     const name = await connectedApp(fake, adopted, 'services/api');

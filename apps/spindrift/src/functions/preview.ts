@@ -25,7 +25,7 @@ export async function runPreview(
   const timeoutMs = options.timeoutMs ?? PREVIEW_TIMEOUT_MS;
   const started = performance.now();
   const logs: FunctionLogEntry[] = [];
-  const file = join(tmpdir(), `spindrift-preview-${crypto.randomUUID()}.mjs`);
+  const file = join(tmpdir(), `kthx-engine-preview-${crypto.randomUUID()}.mjs`);
   // Owner-only: the source sits in a shared tmpdir until the run ends.
   await writeFile(file, source, { mode: 0o600 });
 

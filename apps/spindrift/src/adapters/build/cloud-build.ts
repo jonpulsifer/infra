@@ -441,7 +441,7 @@ const METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
 
 /** `/workspace` is the only volume a build's steps share. */
-const DIGEST_PATH = '/workspace/spindrift-digest';
+const DIGEST_PATH = '/workspace/kthx-engine-digest';
 
 /**
  * The full image: `sign-and-create` is a `beta` command, and slim images cannot

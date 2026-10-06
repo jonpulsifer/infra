@@ -65,7 +65,7 @@ export async function attested(
   stubs: Record<string, string>,
   env: Record<string, string> = {},
 ): Promise<string[]> {
-  const directory = await mkdtemp(join(tmpdir(), 'spindrift-attest-'));
+  const directory = await mkdtemp(join(tmpdir(), 'kthx-engine-attest-'));
   try {
     const bin = join(directory, 'bin');
     for (const [name, body] of Object.entries(stubs)) {

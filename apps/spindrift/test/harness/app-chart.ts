@@ -26,7 +26,7 @@ export async function renderAppChart(
   values: unknown,
   namespace = 'spindrift-apps',
 ): Promise<RenderedObject[]> {
-  const file = join(tmpdir(), `spindrift-values-${crypto.randomUUID()}.json`);
+  const file = join(tmpdir(), `kthx-engine-values-${crypto.randomUUID()}.json`);
   await Bun.write(file, JSON.stringify(values));
   try {
     const helm = Bun.spawn(

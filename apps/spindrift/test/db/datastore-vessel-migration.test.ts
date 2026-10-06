@@ -30,7 +30,7 @@ afterEach(async () => {
 }, 15_000);
 
 async function cleanDatabase() {
-  const database = `spindrift_datastore_${crypto.randomUUID().replaceAll('-', '')}`;
+  const database = `kthx_engine_datastore_${crypto.randomUUID().replaceAll('-', '')}`;
   const admin = new SQL(databaseUrl());
   await admin.unsafe(`CREATE DATABASE "${database}"`);
   const url = new URL(databaseUrl());
@@ -51,7 +51,7 @@ async function databaseBeforeVesselAnchor() {
   const at = journal.entries.findIndex((entry) => entry.tag === VESSEL_ANCHOR);
   expect(at).toBeGreaterThan(0);
   const previousEntries = journal.entries.slice(0, at);
-  const folder = await mkdtemp(join(tmpdir(), 'spindrift-migrations-'));
+  const folder = await mkdtemp(join(tmpdir(), 'kthx-engine-migrations-'));
   try {
     await mkdir(join(folder, 'meta'));
     await writeFile(

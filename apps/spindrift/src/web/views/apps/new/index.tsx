@@ -46,9 +46,9 @@ import {
   declarationPathFor,
   type InspectedScope,
   inspection,
+  kthxFileFor,
   mergeScopes,
   outcomeOf,
-  spindriftFileFor,
 } from './detect.ts';
 import { blockersFor, type Draft, draftReducer, ENTRIES } from './draft.ts';
 import {
@@ -325,7 +325,7 @@ export function NewApp({
     (scope) =>
       draft.source.kind === 'repo' && scope.scope === draft.source.subpath,
   );
-  const spindriftFile = spindriftFileFor(draftScope);
+  const kthxFile = kthxFileFor(draftScope);
   const appNameIssue = issueWith(appNameSchema, draft.appName);
   const componentNameIssue = issueWith(
     componentNameSchema,
@@ -940,7 +940,7 @@ export function NewApp({
         Connecting a repository also commits this file, so the title states that
         consent.
       */}
-      {spindriftFile !== null && draft.source.kind === 'repo' ? (
+      {kthxFile !== null && draft.source.kind === 'repo' ? (
         <Declaration
           title={
             draft.source.connect === true
@@ -962,7 +962,7 @@ export function NewApp({
               ? undefined
               : `${draft.source.repo} is already connected, so Deploy commits nothing.`
           }
-          text={spindriftFile}
+          text={kthxFile}
         />
       ) : null}
 

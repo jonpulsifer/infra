@@ -1,5 +1,5 @@
 /**
- * The Kubernetes adapter's chart values. `Chart.yaml` is in `spindrift#test`'s
+ * The Kubernetes adapter's chart values. `Chart.yaml` is in `kthx-engine#test`'s
  * turbo inputs, so a chart-only change reruns the contract check.
  */
 

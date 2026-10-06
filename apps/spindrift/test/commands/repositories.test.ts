@@ -13,8 +13,8 @@ import type {
   CommandContext,
 } from '../../src/commands/types.ts';
 import { repositories } from '../../src/db/schema.ts';
+import { DECLARATION_FILE } from '../../src/domain/detection/kthx-file.ts';
 import type { DetectionProposal } from '../../src/domain/detection/ladder.ts';
-import { DECLARATION_FILE } from '../../src/domain/detection/spindrift-file.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
 import {
   CONFIG_BRANCH,

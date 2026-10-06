@@ -76,7 +76,7 @@ async function stagerAgainst(fake: FakeGitHub): Promise<{
   const federation: FederationOptions = {
     audience: '//iam.googleapis.com/projects/1/locations/global/p/x',
     tokenUrl: 'https://sts.example.test/token',
-    tokenPath: '/tmp/spindrift-fake-token',
+    tokenPath: '/tmp/kthx-engine-fake-token',
     impersonationUrl: null,
     readToken: async () => 'projected-jwt',
     fetch: depotFetch,

@@ -1,5 +1,5 @@
 {
-  "name": "spindrift-demo-pair",
+  "name": "kthx-engine-demo-pair",
   "private": true,
   "type": "module",
   "description": "One scope, two Components: a job writes and a service reads it back, through a Datastore neither declares.",

@@ -8,8 +8,8 @@ import type { Draft, DraftAction } from '../../../../domain/creation-draft.ts';
 import {
   DECLARATION_FILE,
   declarationPath,
-} from '../../../../domain/detection/spindrift-file.ts';
-import { serializeSpindriftFile } from '../../../../integrations/github/config-pr.ts';
+} from '../../../../domain/detection/kthx-file.ts';
+import { serializeKthxFile } from '../../../../integrations/github/config-pr.ts';
 import type { InputOf, OutputOf } from '../../../client.ts';
 
 export type InspectedScope = OutputOf<'inspectRepository'>['scopes'][number];
@@ -27,11 +27,9 @@ export function inspection(
  * The kthx file the configuration pull request commits for this scope,
  * from the commit's own serializer. Null when detection proposed nothing.
  */
-export function spindriftFileFor(
-  scope: InspectedScope | undefined,
-): string | null {
+export function kthxFileFor(scope: InspectedScope | undefined): string | null {
   if (scope === undefined || scope.outcome !== 'detected') return null;
-  return serializeSpindriftFile({
+  return serializeKthxFile({
     kind: scope.kind,
     build:
       scope.frontend === 'dockerfile'

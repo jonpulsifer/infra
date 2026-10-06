@@ -67,7 +67,7 @@ const buildSchema = z.discriminatedUnion('frontend', [
   }),
 ]);
 
-const spindriftFileSchema = z.strictObject({
+const kthxFileSchema = z.strictObject({
   version: z.literal(1),
   component: componentSchema,
   build: buildSchema,
@@ -83,7 +83,7 @@ function formatIssues(error: z.ZodError): string {
     .join('; ');
 }
 
-export function parseSpindriftFile(
+export function parseKthxFile(
   document: string,
   source: string = DECLARATION_FILE,
 ): DetectionProposal {
@@ -99,7 +99,7 @@ export function parseSpindriftFile(
     );
   }
 
-  const parsed = spindriftFileSchema.safeParse(decoded);
+  const parsed = kthxFileSchema.safeParse(decoded);
   if (!parsed.success) {
     throw new Error(
       `${source}: invalid kthx file: ${formatIssues(parsed.error)}`,
@@ -108,7 +108,7 @@ export function parseSpindriftFile(
 
   const { component, build, watchPaths } = parsed.data;
   return {
-    source: 'spindrift-file',
+    source: 'kthx-file',
     kind: component.kind,
     reason: `${source} asserts this scope is a ${component.kind}`,
     kinds: [

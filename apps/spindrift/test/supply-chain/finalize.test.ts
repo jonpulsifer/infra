@@ -8,7 +8,7 @@ import {
   CosignSigner,
   type SignatureVerifier,
 } from '../../src/supply-chain/sign.ts';
-import { SpindriftSignatureVerifier } from '../../src/supply-chain/signature.ts';
+import { KthxEngineSignatureVerifier } from '../../src/supply-chain/signature.ts';
 import type {
   BackendProvenanceAssessment,
   ProcessExecutor,
@@ -358,7 +358,7 @@ describe('the pinned verify-signature process boundary', () => {
       },
     };
 
-    const checked = await new SpindriftSignatureVerifier({
+    const checked = await new KthxEngineSignatureVerifier({
       executable: '/usr/local/bin/spindrift-verifier',
       processes,
       signerKey: '/etc/spindrift/signer.pem',
@@ -396,7 +396,7 @@ describe('the pinned verify-signature process boundary', () => {
       },
     };
 
-    const checked = await new SpindriftSignatureVerifier({
+    const checked = await new KthxEngineSignatureVerifier({
       processes,
       signerKey: '/etc/spindrift/signer.pem',
     }).verify({
@@ -603,7 +603,7 @@ describe('a signature that is signed and re-verified, not asserted', () => {
     const processes = new FakeVerifierProcess();
     const signature = await signOnce(processes);
 
-    const admitted = await new SpindriftSignatureVerifier({
+    const admitted = await new KthxEngineSignatureVerifier({
       processes,
       signerKey: TEST_SIGNER_KEY,
     }).verify({ artifactDigest: DIGEST, signature });
@@ -617,7 +617,7 @@ describe('a signature that is signed and re-verified, not asserted', () => {
     const processes = new FakeVerifierProcess();
     const signature = await signOnce(processes);
 
-    const admitted = await new SpindriftSignatureVerifier({
+    const admitted = await new KthxEngineSignatureVerifier({
       processes,
       signerKey: TEST_SIGNER_KEY,
     }).verify({ artifactDigest: `sha256:${'e'.repeat(64)}`, signature });
@@ -642,7 +642,7 @@ describe('a signature that is signed and re-verified, not asserted', () => {
       },
     };
 
-    const admitted = await new SpindriftSignatureVerifier({
+    const admitted = await new KthxEngineSignatureVerifier({
       processes: new FakeVerifierProcess(),
       signerKey: TEST_SIGNER_KEY,
     }).verify({ artifactDigest: DIGEST, signature: forged });
@@ -666,7 +666,7 @@ describe('a signature that is signed and re-verified, not asserted', () => {
       },
     };
 
-    const admitted = await new SpindriftSignatureVerifier({
+    const admitted = await new KthxEngineSignatureVerifier({
       processes,
       signerKey: TEST_SIGNER_KEY,
     }).verify({ artifactDigest: DIGEST, signature: tampered });

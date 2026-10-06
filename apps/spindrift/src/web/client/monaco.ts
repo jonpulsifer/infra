@@ -187,7 +187,7 @@ function readTokens(dark: boolean) {
 function applyTheme(ns: MonacoNamespace): void {
   const dark = isDarkTheme();
   const t = readTokens(dark);
-  ns.editor.defineTheme('spindrift', {
+  ns.editor.defineTheme('kthx', {
     base: dark ? 'vs-dark' : 'vs',
     inherit: true,
     colors: {
@@ -219,7 +219,7 @@ function applyTheme(ns: MonacoNamespace): void {
       { token: 'delimiter', foreground: bare(t.ink2) },
     ],
   });
-  ns.editor.setTheme('spindrift');
+  ns.editor.setTheme('kthx');
 }
 
 /** Wraps `editor.create` so the caller's options apply over these defaults. */
@@ -228,7 +228,7 @@ function installDefaultOptions(ns: MonacoNamespace): void {
     getComputedStyle(document.body).getPropertyValue('--font-mono').trim() ||
     'ui-monospace, SFMono-Regular, Menlo, monospace';
   const defaults: Record<string, unknown> = {
-    theme: 'spindrift',
+    theme: 'kthx',
     fontFamily,
     fontSize: 13,
     lineHeight: 20,

@@ -83,7 +83,7 @@ describe('the detection ladder', () => {
   };
 
   const reportJob = (file: string): Omit<DetectionProposal, 'watchPaths'> => ({
-    source: 'spindrift-file',
+    source: 'kthx-file',
     kind: 'job',
     reason: `${file} asserts this scope is a job`,
     kinds: [{ kind: 'job', available: true, reason: `asserted by ${file}` }],

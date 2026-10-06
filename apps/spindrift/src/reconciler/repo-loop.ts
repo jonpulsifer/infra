@@ -7,12 +7,12 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Clock } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { apps, type Repository, repositories } from '../db/schema.ts';
-import type { DetectionProposal } from '../domain/detection/ladder.ts';
 import {
   type Declaration,
-  parseSpindriftFile,
+  parseKthxFile,
   readDeclaration,
-} from '../domain/detection/spindrift-file.ts';
+} from '../domain/detection/kthx-file.ts';
+import type { DetectionProposal } from '../domain/detection/ladder.ts';
 import {
   type RepositoryReader,
   type RepositoryRef,
@@ -298,7 +298,7 @@ export async function reconcileRepository(
 
     let proposal: DetectionProposal;
     try {
-      proposal = parseSpindriftFile(declaration.document, declaration.path);
+      proposal = parseKthxFile(declaration.document, declaration.path);
     } catch (cause) {
       outcomes.push({
         scope,

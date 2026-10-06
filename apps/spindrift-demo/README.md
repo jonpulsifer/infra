@@ -67,7 +67,7 @@ anything, and each absence says something different.
 `railpack/` is the demo of detection choosing for itself, so a file asserting
 the answer would remove the thing being demonstrated. `pair/` has no single
 answer to assert: `component.kind` in that file is one value
-(`apps/spindrift/src/domain/detection/spindrift-file.ts`) and the scope carries
+(`apps/spindrift/src/domain/detection/kthx-file.ts`) and the scope carries
 a service and a job. Detection could not have proposed the job half anyway —
 it infers only `service` and `website`, `Exclude<ComponentKind, 'job'>` in
 `apps/spindrift/src/domain/detection/ladder.ts`, because nothing about a tree

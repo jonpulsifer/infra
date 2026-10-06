@@ -577,7 +577,7 @@ describe('the hosted build route', () => {
     const sealed = await sealForRun(auth, SEAL_KEYPAIR.publicKey);
 
     // The workflow reads the key from a file, never from `SEAL_KEY`.
-    const dir = mkdtempSync(join(tmpdir(), 'spindrift-seal-'));
+    const dir = mkdtempSync(join(tmpdir(), 'kthx-engine-seal-'));
     const keyFile = join(dir, 'seal-key.pem');
     writeFileSync(keyFile, SEAL_KEYPAIR.privateKey);
     try {
@@ -734,8 +734,8 @@ describe('the cloud build route', () => {
     }
     // Steps share the pushed digest through the workspace instead of
     // re-deriving it.
-    expect(api.programs[0]).toContain('/workspace/spindrift-digest');
-    expect(program).toContain('/workspace/spindrift-digest');
+    expect(api.programs[0]).toContain('/workspace/kthx-engine-digest');
+    expect(program).toContain('/workspace/kthx-engine-digest');
   });
 
   test('the manifests under the index are attested too', async () => {
@@ -790,7 +790,7 @@ describe('the cloud build route', () => {
     await run(route.build(archiveSource(), cloudSpec));
 
     expect(api.steps[0]).toHaveLength(1);
-    expect(api.programs[0]).not.toContain('/workspace/spindrift-digest');
+    expect(api.programs[0]).not.toContain('/workspace/kthx-engine-digest');
   });
 
   test('a malformed signer fails the submit rather than skipping the attestation', async () => {
