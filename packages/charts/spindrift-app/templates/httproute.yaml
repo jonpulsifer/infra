@@ -93,8 +93,8 @@ metadata:
     all — the route source would claim this Component's own name at the shared
     gateway's address. Carrying the pair makes moving the pin inert.
     */}}
-    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
-    external-dns.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
 spec:
   parentRefs:
     - name: {{ .Values.platform.gateway.name }}
