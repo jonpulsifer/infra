@@ -1,8 +1,8 @@
 # folly bootstrap
 
-The OpenTofu root that installs CoreDNS and Flux on the folly cluster and labels its nodes. [Kubernetes](https://wiki.lolwtf.ca/platform/kubernetes/) describes what it creates.
+The OpenTofu root that installs CoreDNS and Flux on the folly cluster. [Kubernetes](https://wiki.lolwtf.ca/platform/kubernetes/) describes what it creates.
 
-It calls `terraform/modules/flux-bootstrap` with `flux-values.yaml`, which points Flux at `clusters/folly/flux-system`. `node-labels.tf` sets each node's role and `bgp-enabled` labels. State is in `gs://homelab-ng/clusters/folly/bootstrap`.
+It calls `terraform/modules/flux-bootstrap` with `flux-values.yaml`, which points Flux at `clusters/folly/flux-system`. Talos labels the nodes, so `node-labels.tf` only removes the old node labels from state. State is in `gs://homelab-ng/clusters/folly/bootstrap`.
 
 ## Develop
 
