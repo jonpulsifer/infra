@@ -20,6 +20,19 @@ export function legacyEnvName(name: string): string {
   return `${LEGACY_ENV_PREFIX}${name.slice(ENV_PREFIX.length)}`;
 }
 
+const ENGINE_ENV_VARS = new Set<string>();
+
+/**
+ * Declares one of the engine's variables, so the boot check covers it. Other
+ * `SPINDRIFT_*` names in the environment, such as the Service links Kubernetes
+ * injects, are not the engine's and are left alone.
+ */
+export function engineEnvVar<const Name extends string>(name: Name): Name {
+  legacyEnvName(name);
+  ENGINE_ENV_VARS.add(name);
+  return name;
+}
+
 function isSet(value: string | undefined): value is string {
   return value !== undefined && value.trim() !== '';
 }
@@ -40,11 +53,9 @@ export function readEnv(env: Env, name: string): string | undefined {
   return isSet(current) ? current : fallback;
 }
 
-/** Fails a process at boot on any `SPINDRIFT_*` that disagrees with its new name. */
+/** Fails a process at boot on any declared variable whose two names disagree. */
 export function assertEnvConsistent(env: Env): void {
-  for (const key of Object.keys(env)) {
-    if (key.startsWith(LEGACY_ENV_PREFIX)) {
-      readEnv(env, `${ENV_PREFIX}${key.slice(LEGACY_ENV_PREFIX.length)}`);
-    }
+  for (const name of ENGINE_ENV_VARS) {
+    readEnv(env, name);
   }
 }

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FederationOptions } from '@repo/archive/federation';
 import { uploadToGcsBucket } from '@repo/archive/gcs';
-import { readEnv } from '../config/env.ts';
+import { engineEnvVar, readEnv } from '../config/env.ts';
 import { sharedServicesOf } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
 import type { BundleRetention } from '../domain/source-bundle.ts';
@@ -29,7 +29,9 @@ export interface SourceDepot {
 }
 
 /** Bucket override for an operator running the process outside its chart. */
-export const ARTIFACTS_BUCKET_VAR = 'KTHX_ENGINE_ARTIFACTS_BUCKET';
+export const ARTIFACTS_BUCKET_VAR = engineEnvVar(
+  'KTHX_ENGINE_ARTIFACTS_BUCKET',
+);
 
 /**
  * `null` with no bucket or no federation. No per-request override: a caller may
@@ -68,7 +70,7 @@ export function isFetchableBundleLocation(
   return scheme !== undefined && FETCHABLE_SCHEMES.has(scheme);
 }
 
-export const STORAGE_DIR_VAR = 'KTHX_ENGINE_STORAGE_DIR';
+export const STORAGE_DIR_VAR = engineEnvVar('KTHX_ENGINE_STORAGE_DIR');
 
 export function storageDir(): string {
   const custom = readEnv(process.env, STORAGE_DIR_VAR)?.trim();

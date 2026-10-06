@@ -7,7 +7,7 @@ import { createPrivateKey } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Clock } from '../../commands/types.ts';
-import { readEnv } from '../../config/env.ts';
+import { engineEnvVar, readEnv } from '../../config/env.ts';
 import type { CredentialKeyring } from '../../crypto/credential-envelope.ts';
 import type { Database } from '../../db/client.ts';
 import { githubApp } from '../../db/schema.ts';
@@ -61,10 +61,14 @@ export interface GitHubAppIdentity {
   readonly clientId: string;
 }
 
-export const GITHUB_APP_ID_VAR = 'KTHX_ENGINE_GITHUB_APP_ID';
+export const GITHUB_APP_ID_VAR = engineEnvVar('KTHX_ENGINE_GITHUB_APP_ID');
 /** PEM, PKCS#1 or PKCS#8. */
-export const GITHUB_APP_PRIVATE_KEY_VAR = 'KTHX_ENGINE_GITHUB_APP_PRIVATE_KEY';
-export const GITHUB_WEBHOOK_SECRET_VAR = 'KTHX_ENGINE_GITHUB_WEBHOOK_SECRET';
+export const GITHUB_APP_PRIVATE_KEY_VAR = engineEnvVar(
+  'KTHX_ENGINE_GITHUB_APP_PRIVATE_KEY',
+);
+export const GITHUB_WEBHOOK_SECRET_VAR = engineEnvVar(
+  'KTHX_ENGINE_GITHUB_WEBHOOK_SECRET',
+);
 
 export function hasGitHubAppEnvIdentity(
   env: Record<string, string | undefined>,

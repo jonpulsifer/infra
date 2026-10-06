@@ -7,7 +7,7 @@ import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
 import { resolveAgentToken } from '../auth/session.ts';
 import { type Principal, systemClock } from '../commands/types.ts';
-import { assertEnvConsistent, readEnv } from '../config/env.ts';
+import { assertEnvConsistent, engineEnvVar, readEnv } from '../config/env.ts';
 import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
 import {
   currentStoredManifest,
@@ -28,7 +28,7 @@ import { type StreamSocketData, streamWebSocket } from './streams.ts';
  * Read from the installation Secret, never the manifest, which operators share.
  * Unset means enrolment is impossible.
  */
-export const ENROLMENT_TOKEN_VAR = 'KTHX_ENGINE_ENROLMENT_TOKEN';
+export const ENROLMENT_TOKEN_VAR = engineEnvVar('KTHX_ENGINE_ENROLMENT_TOKEN');
 
 import {
   httpRequestCounter,

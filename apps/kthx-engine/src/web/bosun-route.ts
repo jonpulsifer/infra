@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import { deadlineFrom, type Sleeper } from '../adapters/build/route.ts';
 import type { Clock } from '../commands/types.ts';
+import { engineEnvVar } from '../config/env.ts';
 import type { Database } from '../db/client.ts';
 import { recordClaimPoll } from '../storage/bosun-poll.ts';
 import { buildOutbox } from '../storage/build-outbox.ts';
@@ -22,7 +23,7 @@ export const BOSUN_PATHS = [
 ] as const;
 
 /** An installation Secret key read at boot, never from the manifest. */
-export const BOSUN_SECRET_VAR = 'KTHX_ENGINE_BOSUN_SECRET';
+export const BOSUN_SECRET_VAR = engineEnvVar('KTHX_ENGINE_BOSUN_SECRET');
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 // A claim with nothing to hand out holds the connection this long, then answers

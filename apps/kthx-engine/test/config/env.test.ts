@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   assertEnvConsistent,
   EnvConflictError,
+  engineEnvVar,
   legacyEnvName,
   readEnv,
 } from '../../src/config/env.ts';
@@ -54,10 +55,13 @@ describe('readEnv', () => {
 
   test('refuses a name outside the engine prefix', () => {
     expect(() => legacyEnvName('DATABASE_URL')).toThrow('KTHX_ENGINE_');
+    expect(() => engineEnvVar('DATABASE_URL')).toThrow('KTHX_ENGINE_');
   });
 });
 
 describe('assertEnvConsistent', () => {
+  engineEnvVar('KTHX_ENGINE_KTHX_ZONE');
+
   test('passes an environment with only one name of each variable', () => {
     expect(() =>
       assertEnvConsistent({
@@ -68,12 +72,23 @@ describe('assertEnvConsistent', () => {
     ).not.toThrow();
   });
 
-  test('fails boot on any old name that disagrees with its new one', () => {
+  test('fails boot on a declared variable whose two names disagree', () => {
     expect(() =>
       assertEnvConsistent({
         KTHX_ENGINE_KTHX_ZONE: 'kthx.dev',
         SPINDRIFT_KTHX_ZONE: 'kthx.test',
       }),
     ).toThrow(/KTHX_ENGINE_KTHX_ZONE and SPINDRIFT_KTHX_ZONE/);
+  });
+
+  test('leaves Service links Kubernetes injects under both prefixes alone', () => {
+    expect(() =>
+      assertEnvConsistent({
+        KTHX_ENGINE_SERVICE_HOST: '10.0.0.1',
+        SPINDRIFT_SERVICE_HOST: '10.0.0.2',
+        KTHX_ENGINE_PORT: 'tcp://10.0.0.1:3000',
+        SPINDRIFT_PORT: 'tcp://10.0.0.2:3000',
+      }),
+    ).not.toThrow();
   });
 });

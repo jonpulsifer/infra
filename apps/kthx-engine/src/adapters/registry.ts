@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { canonicalGzip } from '@repo/archive/archive-format';
 import { workloadIdentityToken } from '@repo/archive/federation';
 import type { AdapterRegistry } from '../commands/types.ts';
-import { readEnv } from '../config/env.ts';
+import { engineEnvVar, readEnv } from '../config/env.ts';
 import {
   type BuildRouteConfig,
   type StoreAdapter,
@@ -74,7 +74,9 @@ import { VercelSecretStore } from './store/vercel.ts';
 export const SERVICE_ACCOUNT_TOKEN_PATH =
   '/var/run/secrets/kubernetes.io/serviceaccount/token';
 /** Installer-declared path for the reconciler's audience-scoped token. */
-export const IDENTITY_TOKEN_PATH_VAR = 'KTHX_ENGINE_IDENTITY_TOKEN_PATH';
+export const IDENTITY_TOKEN_PATH_VAR = engineEnvVar(
+  'KTHX_ENGINE_IDENTITY_TOKEN_PATH',
+);
 
 export class AdapterUnavailableError extends Error {
   override readonly name = 'AdapterUnavailableError';
@@ -582,10 +584,12 @@ function cloudTokenFor(options: RegistryOptions): TokenProvider {
   });
 }
 
-export const KTHX_URL_VARIABLE = 'KTHX_ENGINE_KTHX_URL';
+export const KTHX_URL_VARIABLE = engineEnvVar('KTHX_ENGINE_KTHX_URL');
 /** Restated beside the URL: the deploy gate needs the zone without a call. */
-export const KTHX_ZONE_VARIABLE = 'KTHX_ENGINE_KTHX_ZONE';
-export const KTHX_TOKEN_PATH_VARIABLE = 'KTHX_ENGINE_KTHX_TOKEN_PATH';
+export const KTHX_ZONE_VARIABLE = engineEnvVar('KTHX_ENGINE_KTHX_ZONE');
+export const KTHX_TOKEN_PATH_VARIABLE = engineEnvVar(
+  'KTHX_ENGINE_KTHX_TOKEN_PATH',
+);
 
 const KTHX_VARIABLES = [
   KTHX_URL_VARIABLE,
@@ -625,7 +629,7 @@ function kthxFor(options: RegistryOptions): KthxClient | null {
 }
 
 /** The 1Password Connect bearer, read per call so a rotated Secret applies. */
-export const STORE_TOKEN_VARIABLE = 'KTHX_ENGINE_STORE_TOKEN';
+export const STORE_TOKEN_VARIABLE = engineEnvVar('KTHX_ENGINE_STORE_TOKEN');
 
 export function storeToken(env: Record<string, string | undefined> = Bun.env) {
   return (): string => {
@@ -643,14 +647,14 @@ export function storeToken(env: Record<string, string | undefined> = Bun.env) {
  * The Vercel bearer, read per call like {@link storeToken}. Vercel offers no
  * inbound federation, so this is a long-lived operator token.
  */
-export const VERCEL_TOKEN_VARIABLE = 'KTHX_ENGINE_VERCEL_TOKEN';
+export const VERCEL_TOKEN_VARIABLE = engineEnvVar('KTHX_ENGINE_VERCEL_TOKEN');
 
 /**
  * The team the Vercel config store writes in. Deploys use each Target's own
  * team, so a Target on another team deploys but holds no config. Unset, there
  * is no Vercel store.
  */
-export const VERCEL_TEAM_VARIABLE = 'KTHX_ENGINE_VERCEL_TEAM';
+export const VERCEL_TEAM_VARIABLE = engineEnvVar('KTHX_ENGINE_VERCEL_TEAM');
 
 export function vercelTeam(
   env: Record<string, string | undefined> = Bun.env,
@@ -678,7 +682,9 @@ export function vercelToken(
  * ponytail: one account per installation. Move it to a per-vessel sealed row
  * when a second account is needed.
  */
-export const CLOUDFLARE_TOKEN_VARIABLE = 'KTHX_ENGINE_CLOUDFLARE_TOKEN';
+export const CLOUDFLARE_TOKEN_VARIABLE = engineEnvVar(
+  'KTHX_ENGINE_CLOUDFLARE_TOKEN',
+);
 
 export function cloudflareToken(
   env: Record<string, string | undefined> = Bun.env,

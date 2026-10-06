@@ -4,7 +4,7 @@
  */
 
 import { loadDeploymentFederation } from '@repo/archive/federation-credential';
-import { readEnv } from './env.ts';
+import { engineEnvVar, readEnv } from './env.ts';
 import {
   type AuthoredManifest,
   type InstallationManifest,
@@ -16,20 +16,23 @@ import { upgradeManifestDocument } from './manifest-upgrade.ts';
  * Set by the chart only when it renders a default-deny NetworkPolicy admitting
  * the configured trusted Gateway peers.
  */
-export const TRUSTED_GATEWAY_BOUNDARY_VAR =
-  'KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY';
+export const TRUSTED_GATEWAY_BOUNDARY_VAR = engineEnvVar(
+  'KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY',
+);
 
 /** Set by the chart from the `hostname` that renders the Gateway. */
-export const HOSTNAME_VAR = 'KTHX_ENGINE_HOSTNAME';
+export const HOSTNAME_VAR = engineEnvVar('KTHX_ENGINE_HOSTNAME');
 
 /** The public name a tunnel forwards the machine routes on. */
-export const PUBLIC_HOSTNAME_VAR = 'KTHX_ENGINE_PUBLIC_HOSTNAME';
+export const PUBLIC_HOSTNAME_VAR = engineEnvVar('KTHX_ENGINE_PUBLIC_HOSTNAME');
 
 /** Comma-separated names served on the Apps gateway that no App may take. */
-export const RESERVED_HOSTNAMES_VAR = 'KTHX_ENGINE_RESERVED_HOSTNAMES';
+export const RESERVED_HOSTNAMES_VAR = engineEnvVar(
+  'KTHX_ENGINE_RESERVED_HOSTNAMES',
+);
 
 /** Also telemetry's `service.version`. Unset resolves to `null` here. */
-export const VERSION_VAR = 'KTHX_ENGINE_VERSION';
+export const VERSION_VAR = engineEnvVar('KTHX_ENGINE_VERSION');
 
 /**
  * The relying party of an in-cluster-only deployment, which serves no origin.

@@ -5,9 +5,11 @@
 
 import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
 import { z } from 'zod';
-import { readEnv } from '../config/env.ts';
+import { engineEnvVar, readEnv } from '../config/env.ts';
 
-export const CREDENTIAL_KEYRING_VAR = 'KTHX_ENGINE_CREDENTIAL_KEYRING';
+export const CREDENTIAL_KEYRING_VAR = engineEnvVar(
+  'KTHX_ENGINE_CREDENTIAL_KEYRING',
+);
 
 export type CredentialPurpose =
   | 'spindrift-github-app-key'
