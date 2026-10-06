@@ -71,7 +71,7 @@ describe('an App choosing its build route', () => {
         name: 'plainboi',
         sourceKind: 'repo',
         sourceRepoUrl: 'jonpulsifer/infra',
-        sourceRepoSubpath: 'apps/spindrift-demo/plain',
+        sourceRepoSubpath: 'apps/kthx-engine-demo/plain',
       })
       .returning();
     appId = app!.id;

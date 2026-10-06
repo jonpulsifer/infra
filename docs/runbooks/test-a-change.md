@@ -72,7 +72,7 @@ Use this runbook before you open a pull request. It gives the local command for 
 | `docs:check` prints `MISSING` and a path. | A page names a repository path that does not exist. | Correct the path in the page. |
 | `docs:check` prints `BROKEN`, a file and a wiki reference. | The file points at a page path that the wiki does not serve. The wiki has no redirects. | Point the reference at the current path of the page. |
 | `docs:check` prints `past tense in docs`. | A page describes history. | Describe the current state. |
-| `bun run test` cannot connect to Postgres. | The [kthx](../apps/kthx.md) tests in `apps/spindrift/` need a database. | Set `DATABASE_URL`, as `apps/spindrift/README.md` describes. |
+| `bun run test` cannot connect to Postgres. | The [kthx](../apps/kthx.md) tests in `apps/kthx-engine/` need a database. | Set `DATABASE_URL`, as `apps/kthx-engine/README.md` describes. |
 | `mise tasks ls` exits with an error. | mise does not trust the configuration of the checkout. | Run `mise trust`. |
 
 ## Related

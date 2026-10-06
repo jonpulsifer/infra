@@ -44,7 +44,7 @@ This page defines the lab's own terms, and the tool terms that have a lab-specif
 | `infra` GitRepository | Flux's copy of this repository | [How changes ship](../platform/how-changes-ship.md#kubernetes) |
 | kthx | The lab's hosting product, with quick sites and built apps | [kthx](../apps/kthx.md) |
 | kthx Apps tunnel | The Cloudflare Tunnel named `spindrift`, for public kthx names | [Ingress and DNS](../platform/network/ingress-and-dns.md#public-names) |
-| kthx engine | The controller in `apps/spindrift` that builds and deploys built apps | [kthx](../apps/kthx.md#how-it-works) |
+| kthx engine | The controller in `apps/kthx-engine` that builds and deploys built apps | [kthx](../apps/kthx.md#how-it-works) |
 | Lab Net | The folly network for lab hosts | [Network](../platform/network.md#networks) |
 | Lab resolvers | capsule and spore, which serve lab DNS and time | [Ingress and DNS](../platform/network/ingress-and-dns.md#lab-dns-and-time) |
 | mate | The code name and process of Rowbutt | [How Rowbutt works](../apps/mate/how-it-works.md) |

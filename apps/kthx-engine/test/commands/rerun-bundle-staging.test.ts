@@ -107,7 +107,7 @@ describe('the bundle a rerun stages', () => {
         name,
         sourceKind: options.sourceKind ?? 'repo',
         sourceRepoUrl: `https://github.com/jonpulsifer/${name}.git`,
-        sourceRepoSubpath: 'apps/spindrift',
+        sourceRepoSubpath: 'apps/kthx-engine',
         repositoryId: repository?.id ?? null,
       })
       .returning();
@@ -391,7 +391,7 @@ describe('the bundle a rerun stages', () => {
       .where(eq(builds.id, result.value.buildId));
     expect(row?.bundleLocation).toBe(FRESH_LOCATION);
     // The App's declared subpath wins over the predecessor's placeholder.
-    expect(row?.bundleSubpath).toBe('apps/spindrift');
+    expect(row?.bundleSubpath).toBe('apps/kthx-engine');
   });
 
   test("a Component's first Build stages the App's source and subpath", async () => {
@@ -415,7 +415,7 @@ describe('the bundle a rerun stages', () => {
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
     expect(row?.bundleLocation).toBe(FRESH_LOCATION);
-    expect(row?.bundleSubpath).toBe('apps/spindrift');
+    expect(row?.bundleSubpath).toBe('apps/kthx-engine');
   });
 
   describe('a rebuild asked for against a succeeded Build', () => {

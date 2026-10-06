@@ -1,6 +1,6 @@
 # kthx built apps
 
-`apps/spindrift` is the engine behind kthx built apps. It connects a GitHub
+`apps/kthx-engine` is the engine behind kthx built apps. It connects a GitHub
 repository, builds each app in it, deploys the build to a Target, and returns a
 URL. See [Built apps](https://wiki.lolwtf.ca/apps/kthx/built-apps/).
 

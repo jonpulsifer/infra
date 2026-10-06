@@ -8,7 +8,7 @@ on:
       - 'docs/**'
       - 'apps/wiki/**'
       # The wiki serves these diagrams at /assets/.
-      - 'apps/spindrift/src/web/client/diagrams/**'
+      - 'apps/kthx-engine/src/web/client/diagrams/**'
       # The docs contract checks wiki links in these, and the wiki keeps no redirects.
       - '**/*.md'
       - '.agents/**'
@@ -22,7 +22,7 @@ on:
       - 'docs/**'
       - 'apps/wiki/**'
       # The wiki serves these diagrams at /assets/.
-      - 'apps/spindrift/src/web/client/diagrams/**'
+      - 'apps/kthx-engine/src/web/client/diagrams/**'
       # The docs contract checks wiki links in these, and the wiki keeps no redirects.
       - '**/*.md'
       - '.agents/**'

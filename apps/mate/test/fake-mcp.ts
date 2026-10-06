@@ -1,5 +1,5 @@
 /**
- * An MCP server double, stateless like `apps/spindrift/src/web/mcp-route.ts`:
+ * An MCP server double, stateless like `apps/kthx-engine/src/web/mcp-route.ts`:
  * one JSON-RPC request per POST, answered as JSON or, in `sse` mode, as one
  * event on a `text/event-stream`.
  */
