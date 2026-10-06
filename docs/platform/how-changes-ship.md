@@ -31,7 +31,7 @@ Auto-upgrade rebuilds a host from `main` each day. [NixOS](nixos.md#auto-upgrade
 ## Rules
 
 - Do not run `kubectl apply` to change state. Use `kubectl`, `flux get` and `flux reconcile` to inspect or to force a sync.
-- Do not run `tofu apply` on your machine. It takes the state lock from Atlantis and causes drift. The one exception is the owner's: `talosctl bootstrap` and the first `tofu apply` of a `clusters/<site>/talos/` root, once per rebuilt cluster, until Flux syncs it. Atlantis owns the root from the next PR.
+- Do not run `tofu apply` on your machine. It takes the state lock from Atlantis and causes drift. The one exception is the owner's: `talosctl bootstrap` and the first `tofu apply` of the `clusters/<site>/talos/` and `clusters/<site>/bootstrap/` roots, once per rebuilt cluster, until Flux syncs it. [Rebuild a cluster on Talos](../runbooks/rebuild-a-cluster-on-talos.md) has the steps. Atlantis owns both roots from the next PR.
 - Apply an OpenTofu PR before you merge it, as [OpenTofu and Atlantis](opentofu.md#rules) says.
 - Merge a host change on the day you deploy it from a branch. The next auto-upgrade rebuilds the host from `main` and removes the change.
 

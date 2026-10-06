@@ -9,6 +9,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host's configuration, restore its previous generation, or rename a node's partitions
 - [Add a Kubernetes node](add-a-kubernetes-node.md): declare a new x86_64 node and install it
+- [Install Talos on a node](install-talos-on-a-node.md): boot a NixOS node into the Talos installer with kexec, and check its volumes
 - [Change the forge EEPROM](change-the-forge-eeprom.md): change forge's boot settings and keep its HTTP boot fallback
 - [Install a Windows desktop](install-a-windows-desktop.md): install and update the owner's Windows configuration
 - [Install Windows monitoring](install-windows-monitoring.md): add a desktop to folly's Prometheus and repair its agents
@@ -17,6 +18,8 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md): change `clusters/`, share a resource between the clusters, and make sure Flux applies it
 - [Get cluster admin access](get-cluster-admin-access.md): get `kubectl` access, use the break-glass certificate, and withdraw access
+- [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md): replace a cluster's NixOS nodes with Talos, bootstrap etcd, Cilium and Flux, and restore its backups
+- [Verify a Talos cluster](verify-a-talos-cluster.md): check the nodes, network, identity and workloads of a cluster that runs Talos
 - [Issue a talosconfig](issue-a-talosconfig.md): mint the owner's and Rowbutt's Talos API credentials and store them in 1Password
 - [Operate Postgres](operate-postgres.md): connect to, inspect and restart the CloudNativePG databases
 - [Restore a database](restore-a-database.md): restore a Postgres database from its barman backups, and run the restore drill
@@ -25,6 +28,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Restore from the GCS copy](restore-from-the-gcs-copy.md): copy a Garage bucket back from the encrypted GCS copy
 - [Migrate a local-path volume](migrate-a-local-path-volume.md): move a hostPath volume to a `local` volume so that Velero can back it up
 - [Restore etcd](restore-etcd.md): restore the etcd of a control plane from a snapshot in Garage
+- [Restore etcd on Talos](restore-etcd-on-talos.md): wipe a Talos control plane's `ETCD` volume and bootstrap etcd from a snapshot
 - [Adopt the folly Prometheus Operator CRDs](adopt-the-folly-prometheus-operator-crds.md): make sure that folly's `prometheus-operator-crds` HelmRelease adopted the CRDs that kube-prometheus-stack installed
 
 ## Cloud and network

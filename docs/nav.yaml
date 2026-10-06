@@ -71,6 +71,7 @@ sections:
         items:
           - runbooks/deploy-a-nixos-host.md
           - runbooks/add-a-kubernetes-node.md
+          - runbooks/install-talos-on-a-node.md
           - runbooks/change-the-forge-eeprom.md
           - runbooks/install-a-windows-desktop.md
           - runbooks/install-windows-monitoring.md
@@ -78,12 +79,15 @@ sections:
         items:
           - runbooks/apply-a-kubernetes-change.md
           - runbooks/get-cluster-admin-access.md
+          - runbooks/rebuild-a-cluster-on-talos.md
+          - runbooks/verify-a-talos-cluster.md
           - runbooks/issue-a-talosconfig.md
           - runbooks/operate-postgres.md
           - runbooks/restore-a-database.md
           - runbooks/recover-a-re-created-database.md
           - runbooks/restore-a-volume.md
           - runbooks/restore-etcd.md
+          - runbooks/restore-etcd-on-talos.md
           - runbooks/restore-from-the-gcs-copy.md
           - runbooks/migrate-a-local-path-volume.md
           - runbooks/adopt-the-folly-prometheus-operator-crds.md
