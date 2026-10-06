@@ -12,7 +12,7 @@ import type {
 } from './sign.ts';
 import { bunProcessExecutor, type ProcessExecutor } from './verify.ts';
 
-export interface SpindriftSignatureVerifierOptions {
+export interface KthxEngineSignatureVerifierOptions {
   readonly executable?: string;
   readonly processes?: ProcessExecutor;
   /**
@@ -22,19 +22,19 @@ export interface SpindriftSignatureVerifierOptions {
   readonly signerKey: string;
 }
 
-export class SpindriftSignatureVerifier implements SignatureVerifier {
+export class KthxEngineSignatureVerifier implements SignatureVerifier {
   private readonly executable: string;
   private readonly processes: ProcessExecutor;
   private readonly signerKey: string;
 
-  constructor(options: SpindriftSignatureVerifierOptions) {
+  constructor(options: KthxEngineSignatureVerifierOptions) {
     this.executable = options.executable ?? 'spindrift-verifier';
     this.processes = options.processes ?? bunProcessExecutor;
     this.signerKey = options.signerKey;
   }
 
   async verify(input: VerifySignatureInput): Promise<SignatureVerification> {
-    const directory = await mkdtemp(join(tmpdir(), 'spindrift-admission-'));
+    const directory = await mkdtemp(join(tmpdir(), 'kthx-engine-admission-'));
     const bundlePath = join(directory, 'bundle.json');
     try {
       await writeFile(bundlePath, JSON.stringify(input.signature.bundle), {

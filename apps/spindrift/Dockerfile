@@ -12,7 +12,7 @@ RUN apk add --no-cache bash curl unzip \
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN bun x turbo@2.10.3 prune spindrift --docker
+RUN bun x turbo@2.10.3 prune kthx-engine --docker
 
 # Everything, so the client can be compiled.
 FROM base AS builder
@@ -21,7 +21,7 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
-RUN bun run build --filter=spindrift
+RUN bun run build --filter=kthx-engine
 
 # Production dependencies only, so no bundler or Tailwind. src/web/server.ts must
 # not import HTML; test/web/routes.test.ts enforces it.

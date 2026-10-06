@@ -8,9 +8,9 @@ import {
   type DockerfileBuildContext,
   dockerfileBuildContext,
 } from './dockerfile-context.ts';
+import { parseKthxFile, readDeclaration } from './kthx-file.ts';
 import type { DetectionSource } from './scope.ts';
 import { resolveDetectionScope } from './scope.ts';
-import { parseSpindriftFile, readDeclaration } from './spindrift-file.ts';
 import { exists, type SourceTree } from './tree.ts';
 import { deriveWatchPaths } from './watch-paths.ts';
 
@@ -51,7 +51,7 @@ export interface ZeroConfigPlanner {
 }
 
 export interface DetectionProposal {
-  readonly source: 'detection' | 'spindrift-file' | 'operator';
+  readonly source: 'detection' | 'kthx-file' | 'operator';
   readonly kind: ComponentKind;
   readonly kinds: readonly KindOption[];
   /** Never written to the kthx file: it says how the answer was reached, not what the scope is. */
@@ -119,7 +119,7 @@ export async function detectScope(
       return {
         outcome: 'detected',
         scope,
-        proposal: parseSpindriftFile(declaration.document, declaration.path),
+        proposal: parseKthxFile(declaration.document, declaration.path),
         declaration: declaration.path,
       };
     }

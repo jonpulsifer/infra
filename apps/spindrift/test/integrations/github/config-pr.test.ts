@@ -3,11 +3,11 @@
  * fake models, and on each written file parsing back to what was meant.
  */
 import { describe, expect, test } from 'bun:test';
-import type { DetectionProposal } from '../../../src/domain/detection/ladder.ts';
 import {
   DECLARATION_FILE,
-  parseSpindriftFile,
-} from '../../../src/domain/detection/spindrift-file.ts';
+  parseKthxFile,
+} from '../../../src/domain/detection/kthx-file.ts';
+import type { DetectionProposal } from '../../../src/domain/detection/ladder.ts';
 import { GitHubApp } from '../../../src/integrations/github/app.ts';
 import {
   buildWorkflowCaller,
@@ -15,7 +15,7 @@ import {
   configurationTransaction,
   openConfigurationPullRequest,
   RUN_NAME_PREFIX,
-  serializeSpindriftFile,
+  serializeKthxFile,
   WORKFLOW_PATH,
 } from '../../../src/integrations/github/config-pr.ts';
 import { FakeGitHub } from '../../harness/fakes/github-api.ts';
@@ -59,13 +59,13 @@ describe('the kthx file kthx writes', () => {
     ['a zero-config build', railpack],
     ['a Dockerfile build', dockerfile],
   ] as const)('round-trips through its own parser: %s', (_name, proposal) => {
-    const parsed = parseSpindriftFile(serializeSpindriftFile(proposal));
+    const parsed = parseKthxFile(serializeKthxFile(proposal));
 
     expect(parsed.kind).toBe(proposal.kind);
     expect(parsed.build).toEqual(proposal.build);
     expect(parsed.watchPaths).toEqual(proposal.watchPaths);
     // An in-repo file outranks detection.
-    expect(parsed.source).toBe('spindrift-file');
+    expect(parsed.source).toBe('kthx-file');
   });
 
   test('round-trips a zero-config build that declares neither command', () => {
@@ -77,9 +77,7 @@ describe('the kthx file kthx writes', () => {
         outputDirectory: null,
       },
     };
-    expect(parseSpindriftFile(serializeSpindriftFile(bare)).build).toEqual(
-      bare.build,
-    );
+    expect(parseKthxFile(serializeKthxFile(bare)).build).toEqual(bare.build);
   });
 
   test.each(['true', 'false', 'null', '~', '3', '1.5'])(
@@ -95,14 +93,14 @@ describe('the kthx file kthx writes', () => {
           outputDirectory: null,
         },
       };
-      expect(parseSpindriftFile(serializeSpindriftFile(typed)).build).toEqual(
+      expect(parseKthxFile(serializeKthxFile(typed)).build).toEqual(
         typed.build,
       );
     },
   );
 
   test('is block-style YAML a person can edit', () => {
-    const written = serializeSpindriftFile(railpack);
+    const written = serializeKthxFile(railpack);
     expect(written).toStartWith('# Managed by kthx, and yours to edit.\n');
     expect(written).toContain('component:\n  kind: website');
     expect(written).toContain('watchPaths:\n  - apps/site');
@@ -236,7 +234,7 @@ describe('opening it against the repository API', () => {
     expect(after['apps/site/package.json']).toBe('{}');
     expect(after[WORKFLOW_PATH]).toContain(`uses: ${BUILD_WORKFLOW}`);
     expect(
-      parseSpindriftFile(after[`services/api/${DECLARATION_FILE}`] ?? '').build,
+      parseKthxFile(after[`services/api/${DECLARATION_FILE}`] ?? '').build,
     ).toEqual(dockerfile.build);
   });
 

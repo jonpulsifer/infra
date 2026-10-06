@@ -3,8 +3,9 @@
  * scope's kthx file and one CI caller. Nothing takes effect until it is merged
  * to the default branch.
  */
+
+import { declarationPath } from '../../domain/detection/kthx-file.ts';
 import type { DetectionProposal } from '../../domain/detection/ladder.ts';
-import { declarationPath } from '../../domain/detection/spindrift-file.ts';
 import type {
   RepositoryRef,
   RepositoryWriter,
@@ -64,10 +65,10 @@ function scalar(value: string): string {
 }
 
 /**
- * Parses back through `parseSpindriftFile` to the same proposal. `kinds` is
+ * Parses back through `parseKthxFile` to the same proposal. `kinds` is
  * left out because it records what detection considered.
  */
-export function serializeSpindriftFile(
+export function serializeKthxFile(
   // Narrowed so the creation screen can preview the file from an inspection.
   proposal: Pick<DetectionProposal, 'kind' | 'build' | 'watchPaths'>,
 ): string {
@@ -170,7 +171,7 @@ export function configurationTransaction(input: {
   const files: ConfigurationFile[] = input.scopes.map(
     ({ scope, proposal, declaration }) => ({
       path: declaration ?? declarationPath(scope),
-      contents: serializeSpindriftFile(proposal),
+      contents: serializeKthxFile(proposal),
     }),
   );
   files.push({

@@ -9,8 +9,8 @@ import {
 } from '../../src/adapters/store/gcp-secret-manager.ts';
 import { StoreRequestError } from '../../src/adapters/store/http.ts';
 import {
+  ITEM_SECTION,
   OnePasswordStore,
-  SPINDRIFT_SECTION,
 } from '../../src/adapters/store/onepassword.ts';
 import { FakeOnePasswordConnect } from '../harness/fakes/onepassword-connect.ts';
 import { FakeSecretManager } from '../harness/fakes/secret-manager-api.ts';
@@ -71,13 +71,13 @@ describe('1Password over Connect', () => {
       vault: { id: connect.vault },
       category: 'API_CREDENTIAL',
       title: 'invoices/web/metal/DATABASE_URL',
-      sections: [{ id: SPINDRIFT_SECTION }],
+      sections: [{ id: ITEM_SECTION }],
       fields: [
         {
           type: 'CONCEALED',
           label: 'DATABASE_URL',
           value: 'postgres://x',
-          section: { id: SPINDRIFT_SECTION },
+          section: { id: ITEM_SECTION },
         },
       ],
     });

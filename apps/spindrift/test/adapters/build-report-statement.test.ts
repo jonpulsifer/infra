@@ -59,7 +59,7 @@ async function reportScript(): Promise<string> {
  * is what is under test.
  */
 async function runReportStep(docker: string = UNREACHABLE) {
-  const directory = await mkdtemp(join(tmpdir(), 'spindrift-report-'));
+  const directory = await mkdtemp(join(tmpdir(), 'kthx-engine-report-'));
   try {
     const script = join(directory, 'report.sh');
     await writeFile(script, await reportScript());

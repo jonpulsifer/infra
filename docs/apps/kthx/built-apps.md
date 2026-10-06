@@ -39,7 +39,7 @@ Deleting an App deletes its namespace. Removing a `static` Component spends its 
 
 ## Builds
 
-A file in each scope of a repository states the scope's kind and build, and it wins over detection. kthx reads `kthx.yaml`, or `spindrift.yaml` when a scope has none. Connecting a repository writes `kthx.yaml` into a scope that has neither. `apps/spindrift/src/domain/detection/spindrift-file.ts` holds the schema.
+A file in each scope of a repository states the scope's kind and build, and it wins over detection. kthx reads `kthx.yaml`, or `spindrift.yaml` when a scope has none. Connecting a repository writes `kthx.yaml` into a scope that has neither. `apps/spindrift/src/domain/detection/kthx-file.ts` holds the schema.
 
 A Build uses the first route, in Settings rank order, whose SLSA (Supply-chain Levels for Software Artifacts) build level meets the Target's minimum, 2 by default. An App can pin one route.
 

@@ -57,7 +57,7 @@ describe('zip', () => {
     const which = Bun.spawnSync(['which', 'unzip']);
     if (which.exitCode !== 0) return;
 
-    const path = join(tmpdir(), `spindrift-zip-${crypto.randomUUID()}.zip`);
+    const path = join(tmpdir(), `kthx-engine-zip-${crypto.randomUUID()}.zip`);
     await Bun.write(
       path,
       zip([

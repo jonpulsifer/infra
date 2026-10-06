@@ -8,7 +8,7 @@ import {
   type Declaration,
   declarationPath,
   readDeclaration,
-} from '../../domain/detection/spindrift-file.ts';
+} from '../../domain/detection/kthx-file.ts';
 import type { RepositoryHost } from '../../domain/repository.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { type Command, failed, ok } from '../types.ts';

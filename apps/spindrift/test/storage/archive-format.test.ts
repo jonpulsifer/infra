@@ -230,7 +230,7 @@ describe('the wire format of a staged bundle', () => {
   test('every upload it accepts becomes something `tar -xz` extracts', async () => {
     for (const [format, upload] of Object.entries(ACCEPTED)) {
       const normalized = normalizeArchive(`upload.${format}`, upload);
-      const workspace = await mkdtemp(join(tmpdir(), 'spindrift-bundle-'));
+      const workspace = await mkdtemp(join(tmpdir(), 'kthx-engine-bundle-'));
       try {
         // The real `tar` binary, because it is what a builder runs.
         const proc = Bun.spawn(['tar', '-xz', '-C', workspace], {

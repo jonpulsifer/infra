@@ -344,7 +344,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
 
   test('each chart consumer pins the version its Chart.yaml carries', async () => {
     // A version ahead of its tag ships nothing, and a tag ahead of the push
-    // cannot pull. turbo.json's `spindrift#test:chart-pins` inputs list these.
+    // cannot pull. turbo.json's `kthx-engine#test:chart-pins` inputs list these.
     const consumers: [string, string][] = [
       ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
       [

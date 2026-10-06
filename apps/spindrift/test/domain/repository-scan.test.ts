@@ -288,7 +288,7 @@ describe('discovering what is in a repository', () => {
 
     expect(found[0]).toMatchObject({
       outcome: 'detected',
-      proposal: { source: 'spindrift-file', kind: 'job' },
+      proposal: { source: 'kthx-file', kind: 'job' },
     });
   });
 });

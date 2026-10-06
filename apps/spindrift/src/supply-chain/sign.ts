@@ -150,7 +150,7 @@ export class CosignSigner implements ArtifactSigner {
   }
 
   async sign(artifact: Artifact): Promise<CoreSignature> {
-    const directory = await mkdtemp(join(tmpdir(), 'spindrift-signature-'));
+    const directory = await mkdtemp(join(tmpdir(), 'kthx-engine-signature-'));
     const bundlePath = join(directory, 'bundle.json');
     try {
       const command = this.signCommand(artifact, bundlePath);

@@ -17,7 +17,7 @@ export const VALUES_CONTRACT = '5';
 
 /** The chart's top-level keys, by who may write them. */
 export const VALUE_CLASSES = {
-  app: 'spindrift',
+  app: 'engine',
   /** Per Target; never rendered into. */
   platform: 'operator',
   /** Our value wins where both write. */
@@ -49,7 +49,7 @@ export function operatorValuesIssues(
       });
       continue;
     }
-    if (VALUE_CLASSES[key as ValueClass] === 'spindrift') {
+    if (VALUE_CLASSES[key as ValueClass] === 'engine') {
       issues.push({
         path: key,
         message: `${key} values are the engine's to write, not an operator's`,

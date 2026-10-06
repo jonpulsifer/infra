@@ -38,5 +38,5 @@ await cp(await monacoSource(), join(OUT, MONACO_BASE), { recursive: true });
 
 const bytes = result.outputs.reduce((total, output) => total + output.size, 0);
 console.log(
-  `spindrift client → dist/ (${result.outputs.length} files, ${(bytes / 1024).toFixed(1)} KiB)`,
+  `kthx-engine client → dist/ (${result.outputs.length} files, ${(bytes / 1024).toFixed(1)} KiB)`,
 );

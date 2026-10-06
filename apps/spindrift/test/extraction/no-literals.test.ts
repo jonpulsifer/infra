@@ -97,8 +97,8 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'trace-v1',
 ]);
 
-/** The product's own label prefix, the same in every installation. */
-const PRODUCT_NAMESPACE = /^spindrift-/;
+/** The product's own prefixes, the same in every installation. */
+const PRODUCT_NAMESPACE = /^(kthx|spindrift)-/;
 
 /** An abbreviated commit or digest prefix, which has the project-id shape. */
 const OBJECT_ID = /^[0-9a-f]{6,40}$/;

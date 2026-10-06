@@ -233,7 +233,7 @@ export async function start(
     maxRequestBodySize: 32 * 1024 * 1024,
   });
 
-  logInfo(`spindrift web → ${server.url} (${manifest.installation.name})`, {
+  logInfo(`kthx-engine web → ${server.url} (${manifest.installation.name})`, {
     url: String(server.url),
     installation: manifest.installation.name,
   });

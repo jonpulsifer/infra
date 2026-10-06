@@ -85,7 +85,7 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
-    "spindrift#test": {
+    "kthx-engine#test": {
       "dependsOn": ["build"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -104,7 +104,7 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
-    "spindrift#test:chart-pins": {
+    "kthx-engine#test:chart-pins": {
       "inputs": [
         "test/conformance/second-target-admission.test.ts",
         "$TURBO_ROOT$/packages/charts/spindrift/Chart.yaml",

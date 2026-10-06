@@ -170,4 +170,4 @@ export class OnePasswordStore implements SecretStore {
   }
 }
 
-export { itemTitle as itemTitleFor, SECTION as SPINDRIFT_SECTION };
+export { itemTitle as itemTitleFor, SECTION as ITEM_SECTION };

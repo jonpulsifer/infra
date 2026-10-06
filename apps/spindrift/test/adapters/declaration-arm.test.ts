@@ -1,6 +1,6 @@
 /**
  * Runs the shipped zero-config arm over real trees with a recording `docker`,
- * and checks the shell reader agrees with `parseSpindriftFile`.
+ * and checks the shell reader agrees with `parseKthxFile`.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -13,7 +13,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { parseSpindriftFile } from '../../src/domain/detection/spindrift-file.ts';
+import { parseKthxFile } from '../../src/domain/detection/kthx-file.ts';
 
 const WORKFLOW = join(
   import.meta.dir,
@@ -52,7 +52,9 @@ async function runArm(
   files: Readonly<Record<string, string>>,
   env: Readonly<Record<string, string>> = {},
 ): Promise<ArmRun> {
-  const workspace = await mkdtemp(join(tmpdir(), 'spindrift-declaration-arm-'));
+  const workspace = await mkdtemp(
+    join(tmpdir(), 'kthx-engine-declaration-arm-'),
+  );
   try {
     const root = join(workspace, 'bundle');
     for (const [name, contents] of Object.entries(files)) {
@@ -120,7 +122,7 @@ async function declared(
   parsed: string | null;
 }> {
   const run = await runArm({ [`${SUBPATH}/${file}`]: document });
-  const proposal = parseSpindriftFile(document);
+  const proposal = parseKthxFile(document);
   return {
     run,
     parsed:

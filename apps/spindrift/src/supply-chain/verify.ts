@@ -120,7 +120,7 @@ export class SlsaVerifier implements ProvenanceVerifier {
       };
     }
 
-    const directory = await mkdtemp(join(tmpdir(), 'spindrift-provenance-'));
+    const directory = await mkdtemp(join(tmpdir(), 'kthx-engine-provenance-'));
     const provenancePath = join(directory, 'provenance.json');
     try {
       await writeFile(

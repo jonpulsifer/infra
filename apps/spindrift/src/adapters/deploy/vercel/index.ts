@@ -153,7 +153,7 @@ async function runVercelCli(
   }
   // HOME is writable scratch apart from the tree: the root filesystem is
   // read-only, and the CLI declines to deploy `$HOME` yet still exits 0.
-  const home = await mkdtemp(join(tmpdir(), 'spindrift-vercel-home-'));
+  const home = await mkdtemp(join(tmpdir(), 'kthx-engine-vercel-home-'));
   try {
     const proc = Bun.spawn(
       [
@@ -386,7 +386,7 @@ export class VercelDeployAdapter implements DeployAdapter {
 
     // A Build Output tree deploys through the CLI; a `files` upload, below.
     if (desired.artifact.type === 'vercel-output') {
-      const directory = await mkdtemp(join(tmpdir(), 'spindrift-vercel-'));
+      const directory = await mkdtemp(join(tmpdir(), 'kthx-engine-vercel-'));
       let result: PrebuiltDeployResult;
       try {
         await extractTree(files, directory);

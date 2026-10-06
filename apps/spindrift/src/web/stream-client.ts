@@ -272,7 +272,7 @@ export function subscribeFunctionLog(
 }
 
 function streamUrl(path: string): string {
-  if (typeof location === 'undefined') return `ws://spindrift.invalid${path}`;
+  if (typeof location === 'undefined') return `ws://kthx-engine.invalid${path}`;
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${location.host}${path}`;
 }

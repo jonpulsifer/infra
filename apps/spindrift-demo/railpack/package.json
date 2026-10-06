@@ -1,8 +1,8 @@
 {
-  "name": "spindrift-demo-railpack",
+  "name": "kthx-engine-demo-railpack",
   "private": true,
   "type": "module",
-  "description": "Zero-config service demo: no Dockerfile, so Spindrift builds it with railpack.",
+  "description": "Zero-config service demo: no Dockerfile, so kthx builds it with railpack.",
   "scripts": {
     "build": "node build.js",
     "start": "node server.js"

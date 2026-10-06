@@ -1,6 +1,6 @@
 /**
  * A fake `spindrift-verifier` process under the real {@link SlsaVerifier},
- * {@link CosignSigner} and {@link SpindriftSignatureVerifier}. It signs with
+ * {@link CosignSigner} and {@link KthxEngineSignatureVerifier}. It signs with
  * real Ed25519 keys derived from the signer reference.
  */
 import {
@@ -22,7 +22,7 @@ import {
   type SignatureVerifier,
   type VerifySignatureInput,
 } from '../../../src/supply-chain/sign.ts';
-import { SpindriftSignatureVerifier } from '../../../src/supply-chain/signature.ts';
+import { KthxEngineSignatureVerifier } from '../../../src/supply-chain/signature.ts';
 import {
   type ProcessExecutor,
   type ProcessResult,
@@ -393,7 +393,10 @@ export class SupplyChainHarness extends CoreSupplyChain {
       new CosignSigner({ key: TEST_SIGNER_KEY, processes, now }),
     );
     const signatureVerifier = new RecordingSignatureVerifier(
-      new SpindriftSignatureVerifier({ processes, signerKey: TEST_SIGNER_KEY }),
+      new KthxEngineSignatureVerifier({
+        processes,
+        signerKey: TEST_SIGNER_KEY,
+      }),
       signatureAnswer,
     );
     super(verifier, signer, signatureVerifier);

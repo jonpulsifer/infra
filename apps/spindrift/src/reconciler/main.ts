@@ -4,7 +4,7 @@ import { startReconciler } from './start.ts';
 
 const shutdown = new AbortController();
 const stop = (): void => {
-  console.log('spindrift reconciler → stopping');
+  console.log('kthx-engine reconciler → stopping');
   shutdown.abort();
 };
 process.once('SIGINT', stop);
@@ -15,7 +15,7 @@ try {
     signal: shutdown.signal,
     onStarted: (manifest) =>
       console.log(
-        `spindrift reconciler → running (${manifest.installation.name})`,
+        `kthx-engine reconciler → running (${manifest.installation.name})`,
       ),
     onEvent: report,
   });
@@ -37,18 +37,18 @@ function report(event: ReconcilerProcessEvent): void {
   if (event.type === 'failure') {
     reconcilerErrorCounter.add(1, { loop: event.loop });
     logError(
-      `spindrift reconciler → ${event.loop} loop failed; retrying in ${event.retryInMs}ms`,
+      `kthx-engine reconciler → ${event.loop} loop failed; retrying in ${event.retryInMs}ms`,
       event.cause,
       { loop: event.loop, retryInMs: event.retryInMs },
     );
   } else if (event.type === 'disabled') {
     logWarn(
-      `spindrift reconciler → ${event.loop} loop disabled: ${event.reason}`,
+      `kthx-engine reconciler → ${event.loop} loop disabled: ${event.reason}`,
       { loop: event.loop, reason: event.reason },
     );
   } else {
     reconcilerLoopCounter.add(1, { loop: event.loop });
-    logInfo(`spindrift reconciler → ${event.loop} loop processed event`, {
+    logInfo(`kthx-engine reconciler → ${event.loop} loop processed event`, {
       loop: event.loop,
     });
   }

@@ -71,7 +71,7 @@ function adminSession(): SQL {
 
 /** Random, so test processes running side by side cannot collide. */
 function schemaName(): string {
-  return `spindrift_test_${crypto.randomUUID().replaceAll('-', '')}`;
+  return `kthx_engine_test_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
 /**

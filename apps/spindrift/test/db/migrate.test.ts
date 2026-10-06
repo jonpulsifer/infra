@@ -30,7 +30,7 @@ afterEach(async () => {
 }, 15_000);
 
 async function cleanDatabase() {
-  const database = `spindrift_migrate_${crypto.randomUUID().replaceAll('-', '')}`;
+  const database = `kthx_engine_migrate_${crypto.randomUUID().replaceAll('-', '')}`;
   const admin = new SQL(databaseUrl());
   await admin.unsafe(`CREATE DATABASE "${database}"`);
   const url = new URL(databaseUrl());
@@ -92,7 +92,7 @@ describe('committed migrations', () => {
       [key: string]: unknown;
     };
     const previousEntries = journal.entries.slice(0, -1);
-    const folder = await mkdtemp(join(tmpdir(), 'spindrift-migrations-'));
+    const folder = await mkdtemp(join(tmpdir(), 'kthx-engine-migrations-'));
     try {
       await mkdir(join(folder, 'meta'));
       await writeFile(

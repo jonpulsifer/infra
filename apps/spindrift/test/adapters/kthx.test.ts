@@ -243,7 +243,7 @@ describe('failures are sentences', () => {
     const { sent, client } = engine(() => json({}));
     const read = await client({
       token: projectedServiceAccountToken(
-        `/tmp/spindrift-kthx-token-${crypto.randomUUID()}`,
+        `/tmp/kthx-engine-kthx-token-${crypto.randomUUID()}`,
       ),
     }).getSite('acme');
     expect(read).toEqual({
