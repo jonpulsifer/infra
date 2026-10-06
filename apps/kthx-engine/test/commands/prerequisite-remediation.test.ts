@@ -213,6 +213,8 @@ describe('opening the change on a surface', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.branch).toBe(legacy);
+    expect(result.value.pullRequest).toBe(7);
+    expect(fake.pulls.filter((pull) => pull.state === 'open')).toHaveLength(1);
     expect(
       fake.filesAt(fake.head(legacy)!)['terraform/projects/cloud/services.tf'],
     ).toContain('"run.googleapis.com"');

@@ -71,6 +71,8 @@ export interface FakeActionsOptions {
   statusFailures?: number;
   /** The caller files the repository has; unset, every dispatch is accepted. */
   callers?: readonly string[];
+  /** Dispatches that answer `500` before the endpoint serves. */
+  dispatchFailures?: number;
 }
 
 /** The run-name prefix each caller stamps; the legacy caller keeps its own. */
@@ -156,6 +158,7 @@ export class FakeGitHub {
   private runNumber = 0;
   private listCalls = 0;
   private statusCalls = 0;
+  private dispatchCalls = 0;
   private tokenCounter = 0;
   private readonly now: () => Date;
   private readonly runs: FakeRun[] = [];
@@ -176,6 +179,7 @@ export class FakeGitHub {
       logStatus: options.actions?.logStatus ?? 200,
       listFailures: options.actions?.listFailures ?? 0,
       statusFailures: options.actions?.statusFailures ?? 0,
+      dispatchFailures: options.actions?.dispatchFailures ?? 0,
     };
     this.callers = options.actions?.callers ?? null;
   }
@@ -397,6 +401,10 @@ export class FakeGitHub {
     const dispatch = rest.match(/^\/actions\/workflows\/([^/]+)\/dispatches$/);
     if (dispatch && method === 'POST') {
       const workflow = decodeURIComponent(dispatch[1] ?? '');
+      this.dispatchCalls += 1;
+      if (this.dispatchCalls <= this.actions.dispatchFailures) {
+        return this.json({ message: 'Server Error' }, 500);
+      }
       if (this.callers !== null && !this.callers.includes(workflow)) {
         return this.notFound();
       }
@@ -709,6 +717,11 @@ export class FakeGitHub {
     }
 
     if (rest === '/pulls' && method === 'POST') {
+      // GitHub refuses a second open pull request for one head.
+      const head = String(body.head ?? '');
+      if (this.pulls.some((p) => p.head === head && p.state === 'open')) {
+        return this.json({ message: 'Validation Failed' }, 422);
+      }
       this.pullNumber += 1;
       const pull: RecordedPullRequest = {
         number: this.pullNumber,

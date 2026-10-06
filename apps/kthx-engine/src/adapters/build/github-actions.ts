@@ -8,9 +8,10 @@ import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type { RepositoryRef } from '../../domain/repository.ts';
 import {
   CALLER_WORKFLOW_FILES,
+  correlatedRunName,
   isCorrelatedRunName,
-  RUN_NAME_PREFIX,
 } from '../../integrations/github/config-pr.ts';
+import { GitHubAccessError } from '../../integrations/github/http.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -231,7 +232,6 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     // The dispatch id where there is one, so the run name says which attempt it is.
     const correlation =
       dispatchId ?? (this.options.correlation ?? (() => crypto.randomUUID()))();
-    const runName = `${RUN_NAME_PREFIX} ${correlation}`;
 
     // Dispatch already refused a held secret without a seal key, so reaching the
     // throw below is a programming error.
@@ -317,6 +317,11 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
             at: now(),
             line: `could not dispatch ${file} in ${candidate}: ${detail}`,
           };
+          // Only a missing file moves on to the legacy caller. Any other
+          // refusal may have started the run, so this repository is done.
+          const missing =
+            error instanceof GitHubAccessError && error.status === 404;
+          if (!missing) continue dispatch;
         }
       }
     }
@@ -329,6 +334,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       );
     }
 
+    const runName = correlatedRunName(workflow, correlation);
     yield {
       type: 'log',
       at: now(),

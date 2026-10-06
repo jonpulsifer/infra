@@ -326,6 +326,22 @@ describe('the hosted build route', () => {
     ]);
     // The new caller was tried first and refused.
     expect(text(events)).toContain('could not dispatch kthx.yml');
+    // The log names the run by the title the legacy caller stamps.
+    expect(text(events)).toContain('as “spindrift fixed-correlation”');
+  });
+
+  test('a dispatch refused for any reason but a missing file tries no legacy caller', async () => {
+    const { host, route } = hostedRoute({ actions: { dispatchFailures: 1 } });
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    // A 5xx may still have started the run, so a second dispatch could build twice.
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') {
+      expect(result.reason).toBe('TARGET_UNREACHABLE');
+    }
+    expect(text(events)).toContain('could not dispatch kthx.yml');
+    expect(text(events)).not.toContain('could not dispatch spindrift.yml');
+    expect(host.dispatches).toEqual([]);
   });
 
   test('a repository with both callers runs the new one alone', async () => {

@@ -39,6 +39,18 @@ export const RUN_NAME_PREFIX = 'kthx';
 /** Read only: a legacy caller still stamps this one. */
 export const LEGACY_RUN_NAME_PREFIX = 'spindrift';
 
+/** The run name `workflow` stamps; the legacy caller keeps its own prefix. */
+export function correlatedRunName(
+  workflow: string,
+  correlation: string,
+): string {
+  const prefix =
+    workflow === fileName(LEGACY_WORKFLOW_PATH)
+      ? LEGACY_RUN_NAME_PREFIX
+      : RUN_NAME_PREFIX;
+  return `${prefix} ${correlation}`;
+}
+
 /** Whether a caller stamped this run name for this correlation. */
 export function isCorrelatedRunName(
   name: string | null,

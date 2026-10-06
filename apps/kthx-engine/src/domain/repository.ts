@@ -143,7 +143,7 @@ export interface RepositoryWriter {
       readonly base: string;
     },
   ): Promise<number>;
-  /** The open pull request whose head is `branch`, or `null`. */
+  /** The open pull request whose head is `branch`, or `null`; throws when it cannot tell. */
   findOpenPullRequest?(
     ref: RepositoryRef,
     fullName: string,

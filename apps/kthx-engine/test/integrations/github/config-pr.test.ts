@@ -57,26 +57,6 @@ function app(fake: FakeGitHub, customFetch?: typeof fetch): GitHubApp {
   });
 }
 
-/** GitHub refuses a second open pull request for one head, which the fake does not. */
-function refusingDuplicates(fake: FakeGitHub): typeof fetch {
-  return (async (request: Request) => {
-    const url = new URL(request.url);
-    if (request.method === 'POST' && url.pathname.endsWith('/pulls')) {
-      const { head } = (await request.clone().json()) as { head: string };
-      const standing = fake.pulls.some(
-        (pull) => pull.head === head && pull.state === 'open',
-      );
-      if (standing) {
-        return new Response(JSON.stringify({ message: 'Validation Failed' }), {
-          status: 422,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-    }
-    return fake.fetch(request);
-  }) as typeof fetch;
-}
-
 describe('the kthx file kthx writes', () => {
   test.each([
     ['a zero-config build', railpack],
@@ -367,7 +347,10 @@ describe('opening it against the repository API', () => {
     expect(fake.head(CONFIG_BRANCH)).toBe(second.opened.commit);
     // The second run patches the existing ref instead of creating it again.
     expect(
-      fake.requests.filter((request) => request.method === 'PATCH'),
+      fake.requests.filter(
+        (request) =>
+          request.method === 'PATCH' && request.path.includes('/git/refs/'),
+      ),
     ).toHaveLength(2);
     expect(
       fake.requests.filter(
@@ -375,6 +358,9 @@ describe('opening it against the repository API', () => {
           request.method === 'POST' && request.path.endsWith('/git/refs'),
       ),
     ).toHaveLength(1);
+    // GitHub refuses a second pull request for the branch, so the first is reused.
+    expect(second.opened.number).toBe(first.opened.number);
+    expect(fake.pulls).toHaveLength(1);
   });
 
   test('recovers existing open pull request number when POST /pulls fails', async () => {
@@ -414,7 +400,7 @@ describe('opening it against the repository API', () => {
       state: 'open',
     });
 
-    const { opened, transaction } = await open(fake, refusingDuplicates(fake));
+    const { opened, transaction } = await open(fake);
 
     expect(opened.number).toBe(7);
     expect(opened.branch).toBe(LEGACY_CONFIG_BRANCH);
@@ -438,11 +424,28 @@ describe('opening it against the repository API', () => {
       state: 'closed',
     });
 
-    const { opened } = await open(fake, refusingDuplicates(fake));
+    const { opened } = await open(fake);
 
     expect(opened.branch).toBe(CONFIG_BRANCH);
     expect(opened.number).not.toBe(7);
     expect(fake.head(LEGACY_CONFIG_BRANCH)).toBe(stale);
+  });
+
+  test('a failed lookup of the legacy branch opens nothing', async () => {
+    const fake = new FakeGitHub();
+    // A legacy pull request may stand behind the failure, so guessing "none"
+    // would open a second one beside it.
+    const failingLookup = (async (request: Request) => {
+      const url = new URL(request.url);
+      if (request.method === 'GET' && url.pathname.endsWith('/pulls')) {
+        return new Response('{}', { status: 502 });
+      }
+      return fake.fetch(request);
+    }) as typeof fetch;
+
+    await expect(open(fake, failingLookup)).rejects.toThrow('502');
+    expect(fake.pulls).toHaveLength(0);
+    expect(fake.head(CONFIG_BRANCH)).toBeUndefined();
   });
 
   test('presents the installation authorization without exposing it to callers', async () => {
