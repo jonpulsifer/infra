@@ -709,7 +709,7 @@ describe('datastore delivery', () => {
   });
 
   test('a job gets its connections too', async () => {
-    // Both workloads build the container through `spindrift-app.podSpec`.
+    // Both workloads build the container through `kthx-app.podSpec`.
     const variables = env(
       one(
         await render({ ...ATTACHED, app: { ...ATTACHED.app, kind: 'job' } }),

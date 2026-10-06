@@ -6,10 +6,10 @@ unchanged release reuses the finished Job. A Job is immutable, so the pod omits 
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "spindrift.migrationName" . }}
-  namespace: {{ include "spindrift.namespace" . }}
+  name: {{ include "kthx-engine.migrationName" . }}
+  namespace: {{ include "kthx-engine.namespace" . }}
   labels:
-    {{- include "spindrift.labels" . | nindent 4 }}
+    {{- include "kthx-engine.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
 spec:
   # Retry until the database is reachable: the migration is idempotent, and a spent
@@ -18,7 +18,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "spindrift.selectorLabels" (dict "Release" .Release "Values" .Values "Chart" .Chart "component" "migration") | nindent 8 }}
+        {{- include "kthx-engine.selectorLabels" (dict "Release" .Release "Values" .Values "Chart" .Chart "component" "migration") | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       {{- if .Values.sandbox }}
@@ -41,7 +41,7 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "spindrift.databaseName" . }}-app
+                  name: {{ include "kthx-engine.databaseName" . }}-app
                   key: uri
           {{- with .Values.envFromSecret }}
           envFrom:

@@ -12,10 +12,10 @@ the same credential rather than a Spindrift-shaped one only Spindrift reads.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "spindrift.fullname" . }}-federated-identity
-  namespace: {{ include "spindrift.namespace" . }}
+  name: {{ include "kthx-engine.fullname" . }}-federated-identity
+  namespace: {{ include "kthx-engine.namespace" . }}
   labels:
-    {{- include "spindrift.labels" . | nindent 4 }}
+    {{- include "kthx-engine.labels" . | nindent 4 }}
 data:
   gcp-credentials.json: |-
     {

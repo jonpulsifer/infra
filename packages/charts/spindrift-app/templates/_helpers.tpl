@@ -4,7 +4,7 @@ The release's object name: one App's one Component.
 Both names are already DNS labels — the canonical hostname is minted from the
 same two — so this composes rather than sanitizes.
 */}}
-{{- define "spindrift-app.fullname" -}}
+{{- define "kthx-app.fullname" -}}
 {{- printf "%s-%s" .Values.app.name .Values.app.component | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -14,7 +14,7 @@ Selector labels: what a Deployment's selector and a Service's selector match on.
 **Immutable by construction.** A selector cannot be edited on an existing
 Deployment, so nothing that changes deploy to deploy belongs here.
 */}}
-{{- define "spindrift-app.selectorLabels" -}}
+{{- define "kthx-app.selectorLabels" -}}
 app.kubernetes.io/name: {{ .Values.app.component }}
 app.kubernetes.io/part-of: {{ .Values.app.name }}
 {{- end }}
@@ -22,8 +22,8 @@ app.kubernetes.io/part-of: {{ .Values.app.name }}
 {{/*
 Common labels, on every object this chart renders.
 */}}
-{{- define "spindrift-app.labels" -}}
-{{ include "spindrift-app.selectorLabels" . }}
+{{- define "kthx-app.labels" -}}
+{{ include "kthx-app.selectorLabels" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/component: {{ .Values.app.kind }}
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
@@ -35,8 +35,8 @@ Pod template labels: the common set plus the one label that moves per deploy.
 Neither delivery flavour's applied-object enumeration covers pods, so this
 label is how a pod is traced back to the Deploy that placed it.
 */}}
-{{- define "spindrift-app.podLabels" -}}
-{{ include "spindrift-app.labels" . }}
+{{- define "kthx-app.podLabels" -}}
+{{ include "kthx-app.labels" . }}
 {{- with .Values.app.deployId }}
 spindrift.dev/deploy: {{ . | quote }}
 {{- end }}
@@ -50,7 +50,7 @@ The value-contract version from `Chart.yaml`, stamped onto every object, so an
 object in a cluster can be traced to the contract it was rendered under without
 holding the chart that did it.
 */}}
-{{- define "spindrift-app.contractAnnotations" -}}
+{{- define "kthx-app.contractAnnotations" -}}
 spindrift.dev/values-contract: {{ index .Chart.Annotations "spindrift.dev/values-contract" | quote }}
 {{- end }}
 
@@ -58,7 +58,7 @@ spindrift.dev/values-contract: {{ index .Chart.Annotations "spindrift.dev/values
 The port this Component serves on. A website arrives normalized to a service
 with a fixed port, so this never needs to know which non-job kind it rendered.
 */}}
-{{- define "spindrift-app.port" -}}
+{{- define "kthx-app.port" -}}
 {{- .Values.app.port }}
 {{- end }}
 
@@ -66,7 +66,7 @@ with a fixed port, so this never needs to know which non-job kind it rendered.
 Whether this Component serves traffic at all. A job is the only workload branch
 and never serves.
 */}}
-{{- define "spindrift-app.serving" -}}
+{{- define "kthx-app.serving" -}}
 {{- if and (ne .Values.app.kind "job") .Values.app.expose }}true{{ end }}
 {{- end }}
 
@@ -77,7 +77,7 @@ Hardening is fixed with no per-App opt-out, so every security field here is a
 literal rather than a value. Readiness on the port, no liveness probe; a job
 has no port to probe.
 */}}
-{{- define "spindrift-app.container" -}}
+{{- define "kthx-app.container" -}}
 - name: app
   image: {{ .Values.app.image | quote }}
   imagePullPolicy: IfNotPresent
@@ -92,11 +92,11 @@ has no port to probe.
   {{- if ne .Values.app.kind "job" }}
   ports:
     - name: http
-      containerPort: {{ include "spindrift-app.port" . }}
+      containerPort: {{ include "kthx-app.port" . }}
       protocol: TCP
   readinessProbe:
     tcpSocket:
-      port: {{ include "spindrift-app.port" . }}
+      port: {{ include "kthx-app.port" . }}
   {{- end }}
   env:
     # readOnlyRootFilesystem below leaves /tmp as the only writable path, so
@@ -113,7 +113,7 @@ has no port to probe.
     # probe knocks on 8080 forever, and the release times out with a container
     # that started perfectly well.
     - name: PORT
-      value: {{ include "spindrift-app.port" . | quote }}
+      value: {{ include "kthx-app.port" . | quote }}
     {{- end }}
     {{- range .Values.app.env }}
     - name: {{ .name }}
@@ -150,7 +150,7 @@ has no port to probe.
       # the boundary is the Secret, not the layout of it.
       valueFrom:
         secretKeyRef:
-          name: {{ include "spindrift-app.fullname" $ }}-datastores
+          name: {{ include "kthx-app.fullname" $ }}-datastores
           key: {{ .secretKey }}
       {{- else }}
       # No credential to reference: this engine, as this platform runs it,
@@ -180,7 +180,7 @@ has no port to probe.
 {{/*
 The pod spec around that container, likewise shared by both workload objects.
 */}}
-{{- define "spindrift-app.podSpec" -}}
+{{- define "kthx-app.podSpec" -}}
 automountServiceAccountToken: false
 securityContext:
   runAsNonRoot: true
@@ -194,7 +194,7 @@ imagePullSecrets:
   {{- toYaml . | nindent 2 }}
 {{- end }}
 containers:
-  {{- include "spindrift-app.container" . | nindent 2 }}
+  {{- include "kthx-app.container" . | nindent 2 }}
 volumes:
   - name: tmp
     emptyDir: {}
