@@ -1,10 +1,10 @@
 ---
 title: Switchboard
-description: A Bun service with two roles, a live board of the folly PBX's calls and a ringer on offsite, parked, that phones the owner through an ElevenLabs voice agent.
+description: A Bun service with two roles, a live board of the folly PBX's calls and a ringer on offsite that phones the owner through an ElevenLabs voice agent.
 status: live
 ---
 
-Switchboard is one image with two roles, which `SWITCHBOARD_ROLE` picks. The [board](switchboard/board.md) shows the folly PBX's calls. The ringer, this page, rings the owner's cell for mate and Alertmanager: ElevenLabs dials it over voip.ms and hands the call to the `pbx-switchboard` agent, which says one message. The ringer's Deployment is parked at zero replicas until the 1Password item `switchboard` exists.
+Switchboard is one image with two roles, which `SWITCHBOARD_ROLE` picks. The [board](switchboard/board.md) shows the folly PBX's calls. The ringer, this page, rings the owner's cell for mate and Alertmanager: ElevenLabs dials it over voip.ms and hands the call to the `pbx-switchboard` agent, which says one message.
 
 ## Use it
 
