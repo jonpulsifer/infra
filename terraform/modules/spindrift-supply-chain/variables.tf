@@ -32,7 +32,7 @@ variable "verifier_agents" {
 
 variable "repository" {
   type        = string
-  description = "Artifact Registry repository id the reader/writer grants attach to. The module never creates it — the repository may be shared with non-kthx-engine consumers, so it stays declared where it lives."
+  description = "Artifact Registry repository id the reader/writer grants attach to. The module never creates it — the repository may be shared with consumers other than the kthx engine, so it stays declared where it lives."
 }
 
 variable "registry_readers" {
