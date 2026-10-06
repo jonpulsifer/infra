@@ -16,6 +16,7 @@ resources:
   - mate-sandbox-reader.yaml
   - pbx-rules.yaml
   - etcd-snapshot-rules.yaml
+  - node-storage-rules.yaml
   - ../../base/monitoring
   - secret.sops.yaml
  # - unpoller
