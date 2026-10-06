@@ -35,11 +35,11 @@ spec:
     - name: spindrift-apps-tls
       protocol: HTTPS
       port: 443
-      hostname: "*.${SPINDRIFT_DOMAIN}"
+      hostname: "*.${KTHX_ENGINE_DOMAIN}"
       tls:
         certificateRefs:
           - kind: Secret
-            name: wildcard-${SPINDRIFT_DOMAIN}
+            name: wildcard-${KTHX_ENGINE_DOMAIN}
       allowedRoutes:
         namespaces:
           from: Selector

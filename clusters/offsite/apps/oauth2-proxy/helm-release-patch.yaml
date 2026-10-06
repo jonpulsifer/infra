@@ -7,8 +7,8 @@ spec:
   values:
     # A map: an omitted key keeps the base's value, the other cluster's domain.
     extraArgs:
-      redirect-url: https://oauth2.${SPINDRIFT_DOMAIN}/oauth2/callback
+      redirect-url: https://oauth2.${KTHX_ENGINE_DOMAIN}/oauth2/callback
       # Zone-wide: sign-in sets the CSRF cookie at the App's host and reads it at
       # the callback host. The cost: `auth: none` Apps here receive the session.
-      cookie-domain: .${SPINDRIFT_DOMAIN}
-      whitelist-domain: .${SPINDRIFT_DOMAIN}
+      cookie-domain: .${KTHX_ENGINE_DOMAIN}
+      whitelist-domain: .${KTHX_ENGINE_DOMAIN}
