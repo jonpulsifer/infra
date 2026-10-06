@@ -187,12 +187,6 @@ spec:
             # sudo. mate stamps it into the sandbox per turn and clears it after.
             - name: MATE_SSH_KEY_FILE
               value: /var/run/mate/ssh/private-key
-            # The host the sandbox's ssh jumps through to folly's Lab Net hosts.
-            # riptide, a folly node, until offsite has a route to Lab Net and
-            # folly's firewall admits the sandbox on capsule's port 22; mate's
-            # default is capsule, which stays NixOS when the nodes move to Talos.
-            - name: MATE_SANDBOX_LAB_JUMP
-              value: riptide.lolwtf.ca
             # An os:reader talosconfig with a context per cluster, stamped into
             # the sandbox per turn and cleared after. mate refuses a file with
             # any other role, and reads a missing one as none.
