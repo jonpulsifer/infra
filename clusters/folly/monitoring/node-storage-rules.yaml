@@ -1,0 +1,26 @@
+---
+# local-path's helper pod creates a claim's directory with DirectoryOrCreate,
+# so a node whose `data` user volume is not mounted puts new claims on
+# EPHEMERAL without an error. /var is EPHEMERAL's mount point on Talos.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: node-storage
+  namespace: monitoring
+  labels:
+    release: prom-stack
+spec:
+  groups:
+    - name: node-storage
+      rules:
+        - alert: NodeDataVolumeMissing
+          expr: |
+            node_filesystem_size_bytes{mountpoint="/var"}
+              unless on (instance) node_filesystem_size_bytes{mountpoint="/var/mnt/data"}
+              and on (instance) label_replace(kube_node_info, "instance", "$1", "node", "(.*)")
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            message: "{{ $labels.instance }} has no data volume at /var/mnt/data"
+            description: "The node's `data` user volume is not mounted, so new local-path claims and jellyfin's media land on EPHEMERAL. `talosctl -n {{ $labels.instance }} get volumestatus u-data` and `talosctl -n {{ $labels.instance }} get mountstatus` show why."

@@ -1,6 +1,6 @@
 # Slow etcd crashes single-replica controllers, which recover on backoff before
-# KubePodCrashLooping's 15m holds. etcd listens on loopback, so this reads the
-# API server's etcd latency.
+# KubePodCrashLooping's 15m holds. This reads the API server's etcd latency,
+# which both clusters have; offsite's etcd listens on loopback only.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

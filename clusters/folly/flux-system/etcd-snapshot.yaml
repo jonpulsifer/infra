@@ -1,0 +1,27 @@
+---
+# A daily etcd snapshot through the Talos API into spore's Garage. The
+# talos.dev ServiceAccount kind exists only on a Talos control plane, so this
+# stays per site while offsite runs NixOS.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: etcd-snapshot
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/folly/etcd-snapshot
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    # Creates the backups namespace.
+    - name: backups
+    # Serves the ClusterSecretStore the ExternalSecret reads.
+    - name: onepassword-connect
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology

@@ -6,17 +6,29 @@ metadata:
   namespace: tronbyt
 spec:
   instances: 1
+  # serverName is one prefix per generation of this Cluster. Recovery reads
+  # the previous one, tronbyt; recover-a-re-created-database removes it once
+  # tronbyt-2 holds a base backup.
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true
       parameters:
         barmanObjectName: garage
+        serverName: tronbyt-2
   bootstrap:
-    initdb:
+    recovery:
+      source: tronbyt
       database: tronbyt
       owner: tronbyt
       secret:
         name: tronbyt-db
+  externalClusters:
+    - name: tronbyt
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: garage
+          serverName: tronbyt
   # Requests keep the database out of BestEffort, which the kubelet evicts
   # first. No CPU limit, as with the app.
   # Sized to observed peaks of 11m CPU and 91Mi.

@@ -1,0 +1,39 @@
+---
+# promtool tests for node-storage-rules.yaml, run by `mise run k8s:check-rules`.
+# rule_files names the rendered PrometheusRule; kustomization.yaml omits this file.
+rule_files:
+  - node-storage.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # riptide has its data volume, shale lost it, and spore is not a node.
+  - interval: 1m
+    input_series:
+      - series: 'kube_node_info{node="riptide",job="kube-state-metrics"}'
+        values: 1x20
+      - series: 'kube_node_info{node="shale",job="kube-state-metrics"}'
+        values: 1x20
+      - series: 'node_filesystem_size_bytes{instance="riptide",mountpoint="/var",job="node-exporter"}'
+        values: 85899345920x20
+      - series: 'node_filesystem_size_bytes{instance="riptide",mountpoint="/var/mnt/data",job="node-exporter"}'
+        values: 168577466368x20
+      - series: 'node_filesystem_size_bytes{instance="shale",mountpoint="/var",job="node-exporter"}'
+        values: 137438953472x20
+      - series: 'node_filesystem_size_bytes{instance="spore",mountpoint="/var",job="node-exporter"}'
+        values: 137438953472x20
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: NodeDataVolumeMissing
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: NodeDataVolumeMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: shale
+              mountpoint: /var
+              job: node-exporter
+            exp_annotations:
+              message: "shale has no data volume at /var/mnt/data"
+              description: "The node's `data` user volume is not mounted, so new local-path claims and jellyfin's media land on EPHEMERAL. `talosctl -n shale get volumestatus u-data` and `talosctl -n shale get mountstatus` show why."

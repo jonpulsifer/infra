@@ -11,7 +11,7 @@ The lab runs two Kubernetes clusters on NixOS hosts: `folly` at home and `offsit
 | --- | --- | --- |
 | Control plane | Runs the API server, etcd and pods | [optiplex](../hosts/optiplex.md) on folly, [retrofit](../hosts/retrofit.md) on offsite |
 | Workers | Run pods | [riptide](../hosts/riptide.md) and [shale](../hosts/shale.md) on folly, [oldschool](../hosts/oldschool.md) on offsite |
-| Bootstrap root | The OpenTofu root module that labels the nodes and installs CoreDNS, `flux-operator` and the `FluxInstance`, the object that `flux-operator` installs Flux from | Atlantis |
+| Bootstrap root | The OpenTofu root module that installs CoreDNS, `flux-operator` and the `FluxInstance`, the object that `flux-operator` installs Flux from. On offsite it also labels the nodes | Atlantis |
 | Flux | Applies `clusters/` from the `infra` GitRepository | The `flux-system` namespace |
 | Shared controllers | CloudNativePG, External Secrets, Kyverno and others | Both clusters |
 | Storage | `local-path` volumes, and NFS volumes from [spore](../hosts/spore.md) | Both clusters, NFS on folly |

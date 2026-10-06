@@ -139,3 +139,4 @@ Use this runbook when the etcd data of a control plane is lost or corrupt. etcd 
 - [Backups](../platform/backups.md)
 - [Kubernetes](../platform/kubernetes.md)
 - [Deploy a NixOS host](deploy-a-nixos-host.md)
+- [Restore etcd on Talos](restore-etcd-on-talos.md)

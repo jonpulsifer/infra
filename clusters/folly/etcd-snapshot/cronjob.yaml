@@ -1,0 +1,133 @@
+---
+# Snapshots the control plane's etcd through the Talos API and copies it to
+# Garage as etcd/<cluster>/<UTC>.db, keeping 14 days. The talosctl image has
+# no shell, so the snapshot is an init container and rclone the main one,
+# sharing an emptyDir. BackupJobStale and BackupJobFailed watch the
+# lolwtf.ca/backup label, and EtcdSnapshotMissing watches that it exists.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: etcd-snapshot
+  labels:
+    app.kubernetes.io/name: etcd-snapshot
+    app.kubernetes.io/part-of: backups
+    lolwtf.ca/backup: "true"
+spec:
+  schedule: "30 2 * * *"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A missed run is skipped; the next day's snapshot is as good.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 604800
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: etcd-snapshot
+            app.kubernetes.io/part-of: backups
+        spec:
+          # OnFailure deletes the retried pod when `backoffLimit` is spent, so no
+          # log survives. Never keeps each failed attempt.
+          restartPolicy: Never
+          # The Talos API only; no Kubernetes API.
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: snapshot
+              # The Talos version in clusters/folly/talos/talos.tf.
+              image: ghcr.io/siderolabs/talosctl:v1.14.2@sha256:b655ae1c73789c4789fcf6fbd61c8f45400ed4b3bd9892a26092fcd4d8d95d86
+              # The talosconfig's endpoint is the talos.default Service, which
+              # forwards to the control plane named here.
+              args: ["--nodes", "${API_SERVER_IP}", "etcd", "snapshot", "/snapshot/etcd.db"]
+              env:
+                - name: TALOSCONFIG
+                  value: /var/run/secrets/talos.dev/config
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: talos-secrets
+                  mountPath: /var/run/secrets/talos.dev
+                  readOnly: true
+                - name: snapshot
+                  mountPath: /snapshot
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          containers:
+            - name: upload
+              image: docker.io/rclone/rclone:1.75.1@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  rclone copyto /snapshot/etcd.db "garage:etcd/${CLUSTER_NAME}/$(date -u +%Y%m%dT%H%M%SZ).db"
+                  rclone delete --min-age 14d "garage:etcd/${CLUSTER_NAME}/"
+              env:
+                - name: RCLONE_CONFIG_GARAGE_TYPE
+                  value: s3
+                - name: RCLONE_CONFIG_GARAGE_PROVIDER
+                  value: Other
+                - name: RCLONE_CONFIG_GARAGE_ENDPOINT
+                  value: ${GARAGE_S3_ENDPOINT}
+                - name: RCLONE_CONFIG_GARAGE_REGION
+                  value: garage
+                # Garage's layout creates the bucket; rclone must not try.
+                - name: RCLONE_CONFIG_GARAGE_NO_CHECK_BUCKET
+                  value: "true"
+                - name: RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: etcd-snapshot-garage
+                      key: GARAGE_ACCESS_KEY_ID
+                - name: RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: etcd-snapshot-garage
+                      key: GARAGE_SECRET_ACCESS_KEY
+                - name: RCLONE_CONFIG
+                  value: /tmp/rclone.conf
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: snapshot
+                  mountPath: /snapshot
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: talos-secrets
+              secret:
+                secretName: etcd-snapshot-talos
+            - name: snapshot
+              emptyDir:
+                # A snapshot is about the size of the etcd database, which the
+                # 8 GiB ETCD volume bounds.
+                sizeLimit: 8Gi
+            - name: tmp
+              emptyDir: {}

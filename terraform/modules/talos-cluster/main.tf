@@ -15,7 +15,8 @@ locals {
 }
 
 # The secrets bundle is a 1Password Secure Note whose note is secrets.yaml
-# (the `talosctl gen secrets` shape, with the imported FML keys). Ephemeral:
+# (the `talosctl gen secrets` shape, with the imported service-account signing
+# key; the Kubernetes CA is the bundle's own). Ephemeral:
 # never in plan or state. The provider's ephemeral item (v3.3.1) exposes
 # note_value but no sections or files, which is why it is a note. Its os CA
 # is also what mints the os:admin client certificate below.

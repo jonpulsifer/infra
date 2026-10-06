@@ -1,0 +1,23 @@
+---
+# The deadman for clusters/folly/etcd-snapshot. BackupJobStale and
+# BackupJobFailed watch the CronJob once it reports; this fires when it does not.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: etcd-snapshot
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: backup
+    release: prom-stack
+spec:
+  groups:
+    - name: etcd-snapshot
+      rules:
+        - alert: EtcdSnapshotMissing
+          expr: absent(kube_cronjob_labels{namespace="backups", cronjob="etcd-snapshot", label_lolwtf_ca_backup="true"})
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "No etcd snapshot CronJob is reporting on this cluster"
+            description: "kube-state-metrics exports no labelled backups/etcd-snapshot, so nothing snapshots etcd and BackupJobStale sees no CronJob. The CronJob is gone or has lost the lolwtf.ca/backup label, the etcd-snapshot Kustomization is failing, or kube-state-metrics runs without the metricLabelsAllowlist. `kubectl -n backups get cronjob etcd-snapshot --show-labels` and `flux get kustomization etcd-snapshot` tell them apart."

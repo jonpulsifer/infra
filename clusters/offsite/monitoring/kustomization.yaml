@@ -28,3 +28,71 @@ patches:
       - op: replace
         path: /spec/maxHistory
         value: 2
+  # offsite's NixOS nodes keep their journal stream until they run Talos.
+  - target:
+      group: helm.toolkit.fluxcd.io
+      version: v2
+      kind: HelmRelease
+      name: vector
+    patch: |-
+      - op: add
+        path: /spec/values/extraVolumes
+        value:
+          - name: journal
+            hostPath:
+              path: /var/log/journal
+          - name: machine-id
+            hostPath:
+              path: /etc/machine-id
+      - op: add
+        path: /spec/values/extraVolumeMounts
+        value:
+          - name: journal
+            mountPath: /var/log/journal
+            readOnly: true
+          - name: machine-id
+            mountPath: /etc/machine-id
+            readOnly: true
+      - op: add
+        path: /spec/values/customConfig/sources/journald
+        value:
+          type: journald
+          journal_directory: /var/log/journal
+      - op: add
+        path: /spec/values/customConfig/transforms/journald_message
+        value:
+          type: remap
+          inputs:
+            - journald
+          source: |
+            ._msg = del(.message)
+      - op: add
+        path: /spec/values/customConfig/sinks/victoria_logs_journald
+        value:
+          type: loki
+          inputs:
+            - journald_message
+          endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert
+          tenant_id: "1"
+          encoding:
+            codec: json
+          dangerously_allow_unconfined_template_resolution: true
+          labels:
+            job: "systemd-journal"
+            cluster: "${CLUSTER_NAME}"
+            host: "{{`{{ host }}`}}"
+      - op: add
+        path: /spec/values/customConfig/tests/-
+        value:
+          name: journald messages are copied to _msg unchanged
+          input:
+            insert_at: journald_message
+            type: log
+            log_fields:
+              message: "a plain systemd line"
+          outputs:
+            - extract_from: journald_message
+              conditions:
+                - type: vrl
+                  source: |
+                    assert_eq!(._msg, "a plain systemd line")

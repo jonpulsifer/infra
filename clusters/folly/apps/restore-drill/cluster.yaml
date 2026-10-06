@@ -27,4 +27,5 @@ spec:
         name: barman-cloud.cloudnative-pg.io
         parameters:
           barmanObjectName: tronbyt
-          serverName: tronbyt
+          # tronbyt's serverName in clusters/folly/apps/tronbyt/04-database.yaml.
+          serverName: tronbyt-2

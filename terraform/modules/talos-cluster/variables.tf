@@ -52,7 +52,7 @@ variable "op_vault" {
 
 variable "secrets_item_uuid" {
   type        = string
-  description = "UUID of the 1Password Secure Note whose note is this cluster's secrets.yaml (talosctl gen secrets shape, with the imported FML keys)."
+  description = "UUID of the 1Password Secure Note whose note is this cluster's secrets.yaml (talosctl gen secrets shape, with the imported service-account signing key)."
 }
 
 variable "nodes" {

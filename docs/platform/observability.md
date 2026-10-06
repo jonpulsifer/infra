@@ -10,7 +10,7 @@ The monitoring stack collects metrics, logs and traces from the [Kubernetes](kub
 | Part | Job | Where it runs |
 | --- | --- | --- |
 | Prometheus, Alertmanager, Grafana | Metrics for 30 days or 16 GB, alerts, dashboards | The `prom-stack` HelmRelease |
-| Vector, VictoriaLogs | Ship pod and journal logs, and store them for one month | Each node, each cluster |
+| Vector, VictoriaLogs | Ship pod logs and the nodes' logs, and store them for one month | Each node, each cluster |
 | OpenTelemetry Collector, Tempo | Receive traces over OTLP, the OpenTelemetry protocol, and store them | Each cluster |
 | node exporter | Host metrics | Each node, and NixOS hosts with `homelab.fleet.metrics` |
 
@@ -29,7 +29,7 @@ Clients that route to a cluster's load-balancer range reach its addresses.
 
 Alertmanager routes every alert to Discord, and on offsite a firing `critical` alert to the owner's phone as well. [Alerting](observability/alerting.md) has the routes, the selector rules and who can post an alert.
 
-The in-cluster log streams carry `cluster` and a `job` of `kubernetes` or `systemd-journal`. Vector also listens on each node's loopback for Talos service and kernel logs, the streams `job="talos"` (with `host` and `service`) and `job="talos-kernel"` (with `host`). No node runs Talos, so both are empty. The desktop streams carry `job="windows-eventlog"`, `host`, `channel` and `level`. Query logs in Grafana, or directly with the header `AccountID: 1`.
+The in-cluster log streams carry `cluster` and a `job` of `kubernetes`, `talos` (with `host` and `service`) or `talos-kernel` (with `host`). Vector listens on each node's loopback for the Talos service and kernel logs. offsite's NixOS nodes send `systemd-journal` instead, through a patch in `clusters/offsite/monitoring/kustomization.yaml`. The desktop streams carry `job="windows-eventlog"`, `host`, `channel` and `level`. Query logs in Grafana, or directly with the header `AccountID: 1`.
 
 ## Targets outside Kubernetes
 

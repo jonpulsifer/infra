@@ -23,3 +23,8 @@ data:
   # push to GCS goes out on Starlink's uplink once a week, early Wednesday.
   GARAGE_S3_ENDPOINT: http://spore.lolwtf.ca:3900
   BACKUP_PUSH_SCHEDULE: "0 5 * * 3"
+
+  # folly's nodes run Talos: the kubelet's own root, and the `data` user
+  # volume that clusters/folly/talos/patches.tf mounts on every node.
+  KUBELET_ROOT: /var/lib/kubelet
+  NODE_DATA_ROOT: /var/mnt/data

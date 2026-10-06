@@ -42,20 +42,6 @@ spec:
     # binds 127.0.0.1 only.
     podHostNetwork: true
     dnsPolicy: ClusterFirstWithHostNet
-    extraVolumes:
-      - name: journal
-        hostPath:
-          path: /var/log/journal
-      - name: machine-id
-        hostPath:
-          path: /etc/machine-id
-    extraVolumeMounts:
-      - name: journal
-        mountPath: /var/log/journal
-        readOnly: true
-      - name: machine-id
-        mountPath: /etc/machine-id
-        readOnly: true
     customConfig:
       data_dir: /vector-data-dir
       api:
@@ -65,11 +51,9 @@ spec:
       sources:
         kubernetes_logs:
           type: kubernetes_logs
-        journald:
-          type: journald
-          journal_directory: /var/log/journal
         # The Talos machine config's machine.logging.destinations and
-        # KmsgLogConfig name these two ports. NixOS nodes send nothing here.
+        # KmsgLogConfig name these two ports. NixOS nodes send nothing here;
+        # offsite's kustomization.yaml adds their journal while they remain.
         talos_service:
           type: socket
           mode: tcp
@@ -85,8 +69,8 @@ spec:
         internal_metrics:
           type: internal_metrics
       transforms:
-        # VictoriaLogs reads the line from `_msg`; both sources write `message`.
-        # One transform per source, so each sink labels only its own stream.
+        # VictoriaLogs reads the line from `_msg`. One transform per source, so
+        # each sink labels only its own stream.
         kubernetes_message:
           type: remap
           inputs:
@@ -107,12 +91,6 @@ spec:
               msg = replace(msg, r'https://discord\.com/api/webhooks/\S+', "https://discord.com/api/webhooks/<redacted>")
               ._msg = msg
             }
-        journald_message:
-          type: remap
-          inputs:
-            - journald
-          source: |
-            ._msg = del(.message)
         # Talos lines carry msg, talos-level, talos-service and talos-time. The
         # node name comes from the DaemonSet, not the line or the peer address.
         talos_service_message:
@@ -166,19 +144,6 @@ spec:
             pod: "{{`{{ kubernetes.pod_name }}`}}"
             container: "{{`{{ kubernetes.container_name }}`}}"
             node: "{{`{{ kubernetes.pod_node_name }}`}}"
-        victoria_logs_journald:
-          type: loki
-          inputs:
-            - journald_message
-          endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert
-          tenant_id: "1"
-          encoding:
-            codec: json
-          dangerously_allow_unconfined_template_resolution: true
-          labels:
-            job: "systemd-journal"
-            cluster: "${CLUSTER_NAME}"
-            host: "{{`{{ host }}`}}"
         victoria_logs_talos:
           type: loki
           inputs:
@@ -349,19 +314,6 @@ spec:
                 - type: vrl
                   source: |
                     assert_eq!(._msg, "Authorization: Bearer sk_live_abcdef0123456789")
-
-        - name: journald messages are copied to _msg unchanged
-          input:
-            insert_at: journald_message
-            type: log
-            log_fields:
-              message: "a plain systemd line"
-          outputs:
-            - extract_from: journald_message
-              conditions:
-                - type: vrl
-                  source: |
-                    assert_eq!(._msg, "a plain systemd line")
 
         - name: a talos service line gets _msg, host, service, level and its own time
           input:
