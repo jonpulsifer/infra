@@ -172,11 +172,11 @@ export function authRoutes(
       if (request.method !== 'POST') {
         return refuse('METHOD_NOT_ALLOWED', 'signing out is a POST');
       }
-      const cookie = await endSession(request, deps);
-      return Response.json(
-        { ok: true, value: null },
-        { status: 200, headers: { 'set-cookie': cookie } },
-      );
+      const headers = new Headers();
+      for (const cookie of await endSession(request, deps)) {
+        headers.append('set-cookie', cookie);
+      }
+      return Response.json({ ok: true, value: null }, { status: 200, headers });
     },
 
     // `claimed` rides with the principal so the shell picks its first screen

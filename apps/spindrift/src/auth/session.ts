@@ -2,7 +2,7 @@
  * Browser sessions, agent tokens and passkey sign-in. A token is 32 random
  * bytes; its row holds only the SHA-256.
  */
-import { and, desc, eq, gt } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import type { Clock, Principal, PrincipalKind } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { credentials, sessions, users } from '../db/schema.ts';
@@ -19,7 +19,16 @@ import {
   verifyAssertion,
 } from './webauthn.ts';
 
-export const SESSION_COOKIE = 'spindrift_session';
+/**
+ * Built Apps share the console's registrable domain, so a sibling host could
+ * set a plain-named cookie here. `__Host-` makes the browser refuse one that
+ * names a `Domain`, lacks `Secure` or is scoped below `/`.
+ */
+export const SESSION_COOKIE = '__Host-kthx_session';
+
+// Transitional: still read so a deploy signs nobody out, and moved to
+// `SESSION_COOKIE` on the response. Drop it a release after this name ships.
+export const LEGACY_SESSION_COOKIE = 'spindrift_session';
 
 /** Enforced by the row's expiry at every read, not the cookie's `Max-Age`. */
 export const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -63,44 +72,84 @@ export async function hashToken(token: string): Promise<string> {
   return base64urlEncode(new Uint8Array(digest));
 }
 
+function cookieHeader(name: string, value: string, maxAge: number): string {
+  return [
+    `${name}=${value}`,
+    'Path=/',
+    'HttpOnly',
+    'Secure',
+    'SameSite=Lax',
+    `Max-Age=${maxAge}`,
+  ].join('; ');
+}
+
 /**
  * Every command is a POST, and `SameSite=Lax` withholds the cookie from a
  * cross-site POST while still sending it on a followed link.
  */
 export function sessionCookie(token: string): string {
-  return [
-    `${SESSION_COOKIE}=${token}`,
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=Lax',
-    `Max-Age=${SESSION_LIFETIME_MS / 1000}`,
-  ].join('; ');
+  return cookieHeader(SESSION_COOKIE, token, SESSION_LIFETIME_MS / 1000);
 }
 
 /** A blank cookie is still sent; only `Max-Age=0` makes the browser drop it. */
-export function clearedSessionCookie(): string {
-  return [
-    `${SESSION_COOKIE}=`,
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=Lax',
-    'Max-Age=0',
-  ].join('; ');
+export function clearedSessionCookies(): readonly string[] {
+  return [SESSION_COOKIE, LEGACY_SESSION_COOKIE].map((name) =>
+    cookieHeader(name, '', 0),
+  );
 }
 
-export function sessionTokenOf(request: Request): string | null {
+function cookieOf(request: Request, name: string): string | null {
   const header = request.headers.get('cookie');
   if (header === null) return null;
   for (const part of header.split(';')) {
-    const [name, ...rest] = part.trim().split('=');
-    if (name === SESSION_COOKIE) {
+    const [key, ...rest] = part.trim().split('=');
+    if (key === name) {
       const value = rest.join('=');
       return value === '' ? null : value;
     }
   }
   return null;
+}
+
+export function sessionTokenOf(request: Request): string | null {
+  return (
+    cookieOf(request, SESSION_COOKIE) ??
+    cookieOf(request, LEGACY_SESSION_COOKIE)
+  );
+}
+
+const setsCookie = (response: Response, name: string): boolean =>
+  response.headers.getSetCookie().some((value) => value.startsWith(`${name}=`));
+
+/**
+ * Expires a legacy cookie on the response, and first copies it to the new
+ * name when it still opens a session and the response sets none of its own.
+ * Read after the handler, so a sign-out is never undone.
+ */
+export async function migrateLegacySession(
+  request: Request,
+  response: Response,
+  deps: SessionStore,
+): Promise<Response> {
+  const legacy = cookieOf(request, LEGACY_SESSION_COOKIE);
+  if (legacy === null || setsCookie(response, LEGACY_SESSION_COOKIE)) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  if (
+    cookieOf(request, SESSION_COOKIE) === null &&
+    !setsCookie(response, SESSION_COOKIE) &&
+    (await resolveToken(deps, legacy, 'browser')) !== null
+  ) {
+    headers.append('set-cookie', sessionCookie(legacy));
+  }
+  headers.append('set-cookie', cookieHeader(LEGACY_SESSION_COOKIE, '', 0));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 /** The only place the plaintext token exists; the database holds its hash. */
@@ -333,11 +382,13 @@ export async function closeSession(
   request: Request,
   deps: AuthDeps,
 ): Promise<void> {
-  const token = sessionTokenOf(request);
-  if (token === null) return;
+  const tokens = [SESSION_COOKIE, LEGACY_SESSION_COOKIE]
+    .map((name) => cookieOf(request, name))
+    .filter((token) => token !== null);
+  if (tokens.length === 0) return;
   await deps.db.delete(sessions).where(
     and(
-      eq(sessions.tokenHash, await hashToken(token)),
+      inArray(sessions.tokenHash, await Promise.all(tokens.map(hashToken))),
       // Signing out never revokes an agent token.
       eq(sessions.kind, 'browser'),
     ),
@@ -345,15 +396,15 @@ export async function closeSession(
 }
 
 /**
- * Revokes the row and returns the cookie that expires it; either half alone
+ * Revokes the row and returns the cookies that expire it; either half alone
  * leaves a credential alive.
  */
 export async function endSession(
   request: Request,
   deps: AuthDeps,
-): Promise<string> {
+): Promise<readonly string[]> {
   await closeSession(request, deps);
-  return clearedSessionCookie();
+  return clearedSessionCookies();
 }
 
 /** Readable without a session: `beginSignIn` tells anyone `NOT_ENROLLED`. */
