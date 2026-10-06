@@ -20,7 +20,7 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 
 | Caller | Credential | Can |
 | --- | --- | --- |
-| The owner | A console passkey, enrolled once with `SPINDRIFT_ENROLMENT_TOKEN` | Every console and MCP action |
+| The owner | A console passkey, enrolled once with `KTHX_ENGINE_ENROLMENT_TOKEN` | Every console and MCP action |
 | An agent on `/mcp` | An agent token, valid 90 days | Every action except minting tokens, replacing the engine settings, and connecting or probing a Target |
 | kthx on GitHub | The private GitHub App `kthx-bot` (ID `4576122`), installed on `jonpulsifer` only | Push branches, open pull requests and run workflows in connected repositories |
 | A quick-site owner | Its bearer token or tailnet login | Upload, roll back and delete that site |
@@ -29,14 +29,14 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 
 ## Secrets
 
-`clusters/offsite/apps/spindrift/secret.sops.yaml` holds the engine's secrets.
+`clusters/offsite/apps/spindrift/secret.sops.yaml` holds the engine's secrets. Its keys carry the old `SPINDRIFT_` prefix, which the engine reads when the `KTHX_ENGINE_` name is unset.
 
 | Secret | Also in | If missing |
 | --- | --- | --- |
 | Enrolment token | | Nobody can enrol a passkey |
 | Vercel and Cloudflare tokens | | Their Targets cannot connect |
 | GitHub App key | 1Password and `nix/secrets/bosun.sops.yaml`. Update all three before you delete an old key. | kthx has no GitHub App until the console creates one |
-| `SPINDRIFT_GITHUB_WEBHOOK_SECRET` | | The engine refuses every GitHub webhook |
+| `KTHX_ENGINE_GITHUB_WEBHOOK_SECRET` | | The engine refuses every GitHub webhook |
 
 ## Quick-site trust
 

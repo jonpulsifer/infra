@@ -7,6 +7,7 @@ import { createPrivateKey } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Clock } from '../../commands/types.ts';
+import { readEnv } from '../../config/env.ts';
 import type { CredentialKeyring } from '../../crypto/credential-envelope.ts';
 import type { Database } from '../../db/client.ts';
 import { githubApp } from '../../db/schema.ts';
@@ -60,16 +61,17 @@ export interface GitHubAppIdentity {
   readonly clientId: string;
 }
 
-export const GITHUB_APP_ID_VAR = 'SPINDRIFT_GITHUB_APP_ID';
+export const GITHUB_APP_ID_VAR = 'KTHX_ENGINE_GITHUB_APP_ID';
 /** PEM, PKCS#1 or PKCS#8. */
-export const GITHUB_APP_PRIVATE_KEY_VAR = 'SPINDRIFT_GITHUB_APP_PRIVATE_KEY';
-export const GITHUB_WEBHOOK_SECRET_VAR = 'SPINDRIFT_GITHUB_WEBHOOK_SECRET';
+export const GITHUB_APP_PRIVATE_KEY_VAR = 'KTHX_ENGINE_GITHUB_APP_PRIVATE_KEY';
+export const GITHUB_WEBHOOK_SECRET_VAR = 'KTHX_ENGINE_GITHUB_WEBHOOK_SECRET';
 
 export function hasGitHubAppEnvIdentity(
   env: Record<string, string | undefined>,
 ): boolean {
   return Boolean(
-    env[GITHUB_APP_ID_VAR]?.trim() && env[GITHUB_APP_PRIVATE_KEY_VAR]?.trim(),
+    readEnv(env, GITHUB_APP_ID_VAR)?.trim() &&
+      readEnv(env, GITHUB_APP_PRIVATE_KEY_VAR)?.trim(),
   );
 }
 
@@ -126,8 +128,8 @@ export class GitHubAppAuth {
   constructor(private readonly options: GitHubAppAuthOptions) {}
 
   private envIdentity(): (GitHubAppIdentity & { pem: string }) | null {
-    const appId = this.options.env[GITHUB_APP_ID_VAR]?.trim();
-    const pem = this.options.env[GITHUB_APP_PRIVATE_KEY_VAR]?.trim();
+    const appId = readEnv(this.options.env, GITHUB_APP_ID_VAR)?.trim();
+    const pem = readEnv(this.options.env, GITHUB_APP_PRIVATE_KEY_VAR)?.trim();
     if (!appId || !pem) return null;
     return {
       appId,
@@ -499,7 +501,7 @@ export async function githubAppWebhookSecret(
   keyring: CredentialKeyring | null,
   env: Record<string, string | undefined> = Bun.env,
 ): Promise<string | null> {
-  const supplied = env[GITHUB_WEBHOOK_SECRET_VAR]?.trim();
+  const supplied = readEnv(env, GITHUB_WEBHOOK_SECRET_VAR)?.trim();
   if (supplied) return supplied;
   if (keyring === null) return null;
   const row = await db.query.githubApp.findFirst({

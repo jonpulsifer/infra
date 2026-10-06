@@ -7,6 +7,7 @@ import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
 import { resolveAgentToken } from '../auth/session.ts';
 import { type Principal, systemClock } from '../commands/types.ts';
+import { assertEnvConsistent, readEnv } from '../config/env.ts';
 import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
 import {
   currentStoredManifest,
@@ -27,7 +28,7 @@ import { type StreamSocketData, streamWebSocket } from './streams.ts';
  * Read from the installation Secret, never the manifest, which operators share.
  * Unset means enrolment is impossible.
  */
-export const ENROLMENT_TOKEN_VAR = 'SPINDRIFT_ENROLMENT_TOKEN';
+export const ENROLMENT_TOKEN_VAR = 'KTHX_ENGINE_ENROLMENT_TOKEN';
 
 import {
   httpRequestCounter,
@@ -106,6 +107,7 @@ export async function start(
   client: Record<string, ClientRoute>,
   { development }: { development: boolean },
 ): Promise<void> {
+  assertEnvConsistent(Bun.env);
   initTelemetry('web');
 
   const db = createDb();
@@ -157,7 +159,7 @@ export async function start(
       name: manifest.installation.name,
       origin: `https://${manifest.controlPlane.hostname}`,
     },
-    enrolmentToken: Bun.env[ENROLMENT_TOKEN_VAR]?.trim() || null,
+    enrolmentToken: readEnv(Bun.env, ENROLMENT_TOKEN_VAR)?.trim() || null,
     gateway: manifest.auth.gateway,
   };
 
@@ -181,7 +183,7 @@ export async function start(
     {
       db,
       clock: systemClock,
-      secret: Bun.env[BOSUN_SECRET_VAR]?.trim() || null,
+      secret: readEnv(Bun.env, BOSUN_SECRET_VAR)?.trim() || null,
     },
     {
       authenticate: (request) => authenticateRequest(request, auth),

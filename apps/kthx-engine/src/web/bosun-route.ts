@@ -22,7 +22,7 @@ export const BOSUN_PATHS = [
 ] as const;
 
 /** An installation Secret key read at boot, never from the manifest. */
-export const BOSUN_SECRET_VAR = 'SPINDRIFT_BOSUN_SECRET';
+export const BOSUN_SECRET_VAR = 'KTHX_ENGINE_BOSUN_SECRET';
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 // A claim with nothing to hand out holds the connection this long, then answers

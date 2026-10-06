@@ -49,7 +49,7 @@ spec:
     # The public name the tunnel forwards the webhook, the bosun outbox, and
     # `/mcp` on. Every other route answers on `hostname` alone.
     env:
-      - name: SPINDRIFT_PUBLIC_HOSTNAME
+      - name: KTHX_ENGINE_PUBLIC_HOSTNAME
         value: spindrift-control.${SPINDRIFT_DOMAIN}
       # kthx quick sites' `control.host`, which the console shares, and their
       # zone's apex are served on the Apps Gateway, so no App may take either.
@@ -57,14 +57,14 @@ spec:
       # alias, so no App answers on a name a browser knows. A reserved name is
       # checked against every declared zone, so once kthx.dev is one, no App
       # in any zone may set its vanity to `@`.
-      - name: SPINDRIFT_RESERVED_HOSTNAMES
+      - name: KTHX_ENGINE_RESERVED_HOSTNAMES
         value: spindrift.${SECRET_DOMAIN},kthx.${SECRET_DOMAIN},kthx.dev
       # The engine reads quick sites from kthx's control host, and reserves a
       # name in kthx before it mints one under the quick-site zone. The zone is
       # restated so the deploy gate needs no call to learn it.
-      - name: SPINDRIFT_KTHX_URL
+      - name: KTHX_ENGINE_KTHX_URL
         value: https://kthx.${SECRET_DOMAIN}
-      - name: SPINDRIFT_KTHX_ZONE
+      - name: KTHX_ENGINE_KTHX_ZONE
         value: kthx.dev
     # The Secret carries only the one-time enrolment token and optional
     # integration credentials.

@@ -3,6 +3,7 @@
  * `Bun.serve` matches by path alone, so each route is confined to its hosts here.
  */
 import { isIPv4, isIPv6 } from 'node:net';
+import { readEnv } from '../config/env.ts';
 import { BOSUN_PATHS } from './bosun-route.ts';
 import { MCP_PATH } from './mcp-route.ts';
 import { HEALTH_PATH, READY_PATH } from './routes.ts';
@@ -10,8 +11,8 @@ import { STATUS_PATH } from './status-route.ts';
 import { WEBHOOK_PATH } from './webhook-route.ts';
 
 /** The Service in front of the web pod, as the chart names it. */
-export const SERVICE_NAME_VAR = 'SPINDRIFT_SERVICE_NAME';
-export const SERVICE_NAMESPACE_VAR = 'SPINDRIFT_SERVICE_NAMESPACE';
+export const SERVICE_NAME_VAR = 'KTHX_ENGINE_SERVICE_NAME';
+export const SERVICE_NAMESPACE_VAR = 'KTHX_ENGINE_SERVICE_NAMESPACE';
 
 export interface ServedHosts {
   /** Every route answers here. */
@@ -29,8 +30,8 @@ export interface ServedHosts {
 export function inClusterHostnames(
   env: Record<string, string | undefined>,
 ): string[] {
-  const service = env[SERVICE_NAME_VAR]?.trim().toLowerCase();
-  const namespace = env[SERVICE_NAMESPACE_VAR]?.trim().toLowerCase();
+  const service = readEnv(env, SERVICE_NAME_VAR)?.trim().toLowerCase();
+  const namespace = readEnv(env, SERVICE_NAMESPACE_VAR)?.trim().toLowerCase();
   if (!service || !namespace) return [];
   const qualified = `${service}.${namespace}.svc`;
   return [

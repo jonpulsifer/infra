@@ -501,7 +501,7 @@ export function AppShell({
 }: {
   readonly path: string;
   readonly principal: Principal;
-  /** The server's `SPINDRIFT_VERSION`, or `null` when none is set. */
+  /** The server's `KTHX_ENGINE_VERSION`, or `null` when none is set. */
   readonly version?: string | null;
   /** Fetched in an effect when omitted, and a static render runs no effects. */
   readonly apps?: readonly AppListItem[];
