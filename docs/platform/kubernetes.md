@@ -32,7 +32,6 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 | RuntimeClass | Isolation |
 | --- | --- |
 | `gvisor` | gVisor, a user-space kernel (`runsc`) |
-| `kata` | A QEMU microVM |
 | `kata-clh` | A Cloud Hypervisor microVM |
 
 [Rowbutt](../apps/mate.md) sandboxes run on `kata-clh`. The `packages/charts/app/` chart runs pods on `gvisor` unless its `sandbox` value is false.
