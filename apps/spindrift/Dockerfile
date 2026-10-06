@@ -32,7 +32,7 @@ COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
 # First-party stand-in for the cosign and slsa-verifier CLIs.
-FROM ghcr.io/jonpulsifer/spindrift-verifier:latest@sha256:45fc2c6c8ebdd97a1c630274177cb7ce4a9460045a8269b23d91cfdc34201b41 AS supply-chain-tools
+FROM ghcr.io/jonpulsifer/spindrift-verifier:latest@sha256:0836208bc34f05a8c95d64be3da1a6d5a4926478db9359ed1db72d1ffd9f4ff4 AS supply-chain-tools
 
 FROM cgr.dev/chainguard/node:latest@sha256:1ae8ed719c65888716078a52ce2166767e091f0b1072a79f6b42becba6e1ad44 AS runner
 ENV NODE_ENV=production \
