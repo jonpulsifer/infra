@@ -8,6 +8,7 @@ import { sql } from 'drizzle-orm';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
 import type { GatewayDeps } from '../auth/gateway.ts';
 import { authRoutes } from '../auth/routes.ts';
+import { migrateLegacySession, type SessionStore } from '../auth/session.ts';
 import type { Database } from '../db/client.ts';
 import { type BosunRouteDeps, bosunRoutes } from './bosun-route.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
@@ -64,15 +65,45 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...client,
     [HEALTH_PATH]: new Response('ok\n'),
     [READY_PATH]: () => readyResponse(auth.db),
-    ...authRoutes(auth),
-    ...commandRoutes(deps),
-    ...streamRoutes(deps),
-    ...attemptLogTextRoutes(deps),
-    ...uploadRoutes(deps),
+    ...carryLegacySession(
+      {
+        ...authRoutes(auth),
+        ...commandRoutes(deps),
+        ...streamRoutes(deps),
+        ...attemptLogTextRoutes(deps),
+        ...uploadRoutes(deps),
+        ...githubSetupRoutes(githubSetup),
+      },
+      auth,
+    ),
     ...webhookRoutes(webhook),
     ...bosunRoutes(bosun),
-    ...githubSetupRoutes(githubSetup),
     ...mcpRoutes(mcp),
     ...statusRoutes(status),
   };
+}
+
+type SessionRoute = (
+  request: Request,
+  ...rest: never[]
+) => Promise<Response | undefined> | Response | undefined;
+
+/**
+ * Only the routes that read the session cookie. Static client routes cannot
+ * set one, so the shell's first session read moves it.
+ */
+function carryLegacySession<Routes extends Record<string, SessionRoute>>(
+  routes: Routes,
+  deps: SessionStore,
+): Routes {
+  const carried: Record<string, SessionRoute> = {};
+  for (const [path, handler] of Object.entries(routes)) {
+    carried[path] = async (request: Request, ...rest: never[]) => {
+      const response = await handler(request, ...rest);
+      return response === undefined
+        ? response
+        : migrateLegacySession(request, response, deps);
+    };
+  }
+  return carried as Routes;
 }

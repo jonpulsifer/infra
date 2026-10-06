@@ -225,14 +225,22 @@ describe('the production client comes from a built bundle', () => {
 
   test('every emitted file becomes exactly one route', async () => {
     const dist = join(APP, 'dist');
-    const files = await readdir(dist).catch(() => null);
-    if (files === null) {
+    const entries = await readdir(dist, {
+      withFileTypes: true,
+      recursive: true,
+    }).catch(() => null);
+    if (entries === null) {
       // No build has run; the test above covers the missing bundle.
       return;
     }
+    const files = entries
+      .filter((entry) => entry.isFile() && entry.parentPath === dist)
+      .map((entry) => entry.name);
 
     const routes = await bundleRoutes(dist);
-    expect(Object.keys(routes)).toHaveLength(files.length);
+    expect(Object.keys(routes)).toHaveLength(
+      entries.filter((entry) => entry.isFile()).length,
+    );
     // The document's relative `./chunk-….js` references resolve to the hashed names.
     expect(routes['/']).toBeDefined();
     for (const file of files.filter((name) => name !== 'index.html')) {
@@ -273,6 +281,7 @@ describe('the production entry carries no build toolchain', () => {
     'react-dom',
     'lucide-react',
     '@radix-ui/react-slot',
+    'monaco-editor',
   ];
 
   // `packages: 'external'` leaves every package import standing. Specifiers are

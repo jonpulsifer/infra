@@ -42,7 +42,9 @@ import type {
   Canvas,
   HistoryMessage,
   HistoryQuery,
+  InboundDropReason,
   Surface,
+  SurfaceName,
   ThreadRef,
 } from '../src/surface.ts';
 
@@ -200,6 +202,10 @@ export class RecordingInstruments implements Instruments {
   readonly tools: { tool: string; isError: boolean }[] = [];
   readonly providerErrors: ProviderErrorKind[] = [];
   readonly storeFailures: StoreOp[] = [];
+  readonly inboundDrops: {
+    surface: SurfaceName;
+    reason: InboundDropReason;
+  }[] = [];
   readonly turnSandboxes: TurnSandboxSource[] = [];
   readonly connects: HandsConnectResult[] = [];
   readonly calls: { method: string; result: HandsCallResult }[] = [];
@@ -316,6 +322,9 @@ export class RecordingInstruments implements Instruments {
   }
   storeFailed(op: StoreOp): void {
     this.storeFailures.push(op);
+  }
+  inboundDropped(surface: SurfaceName, reason: InboundDropReason): void {
+    this.inboundDrops.push({ surface, reason });
   }
   teardown(reason: TeardownReason): void {
     this.teardowns.push(reason);

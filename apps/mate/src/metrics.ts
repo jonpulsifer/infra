@@ -15,9 +15,11 @@ import type {
   MintSample,
   TurnSandboxSource,
 } from './lease.ts';
+import type { Log } from './log.ts';
 import { LANES, type Lane, type Mode } from './profiles.ts';
 import type { Failure, Route, RouteReason } from './route.ts';
 import type { StopReason } from './sandbox.ts';
+import type { InboundDropReason, SurfaceName } from './surface.ts';
 
 /** `brain-failed`: the brain or its store threw, so the harness never reported an end. */
 export type TurnEnd = StopReason | 'brain-failed';
@@ -73,6 +75,8 @@ export interface Instruments extends HandsInstruments, McpInstruments {
   toolEnded(tool: string, isError: boolean): void;
   providerError(kind: ProviderErrorKind): void;
   storeFailed(op: StoreOp): void;
+  /** An allowlisted human's message that ran nothing and said nothing. */
+  inboundDropped(surface: SurfaceName, reason: InboundDropReason): void;
   /** `null` reports nothing: mate has no credential store, or has not read it yet. */
   chatgpt(state: ChatgptSignIn | null): void;
   /** One per request for the primary model; `reason` is null on the primary. */
@@ -81,6 +85,25 @@ export interface Instruments extends HandsInstruments, McpInstruments {
   primaryFailed(reason: Failure): void;
   /** `null` reports nothing: no fallback, so nothing routes. */
   primaryUp(up: boolean | null): void;
+}
+
+/** Where an ignored message was, never what it said. */
+export interface IgnoredMessage {
+  readonly surface: SurfaceName;
+  readonly channelId: string | null;
+  readonly threadId: string | null;
+  readonly messageId: string | null;
+}
+
+/** An allowlisted human's message that ran nothing and said nothing: counted, and logged without its words. */
+export function inboundIgnored(
+  metrics: Pick<Instruments, 'inboundDropped'>,
+  log: Log,
+  message: IgnoredMessage,
+  reason: InboundDropReason,
+): void {
+  metrics.inboundDropped(message.surface, reason);
+  log.info('an inbound message was ignored', { ...message, reason });
 }
 
 let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
@@ -200,6 +223,7 @@ export function getInstruments(): Instruments {
   const toolCalls = meter.createCounter('mate_tool_calls_total');
   const providerErrors = meter.createCounter('mate_provider_errors_total');
   const storeFailures = meter.createCounter('mate_store_failures_total');
+  const inboundDrops = meter.createCounter('mate_inbound_dropped_total');
   const mcpCalls = meter.createCounter('mate_mcp_calls_total');
   const routes = meter.createCounter('mate_model_routes_total');
   const primaryFailures = meter.createCounter(
@@ -296,6 +320,8 @@ export function getInstruments(): Instruments {
       }),
     providerError: (kind) => providerErrors.add(1, { kind }),
     storeFailed: (op) => storeFailures.add(1, { op }),
+    inboundDropped: (surface, reason) =>
+      inboundDrops.add(1, { surface, reason }),
     chatgpt: (state) => {
       chatgpt = state;
     },
@@ -341,6 +367,8 @@ export function lazyInstruments(): Instruments {
     toolEnded: (tool, isError) => getInstruments().toolEnded(tool, isError),
     providerError: (kind) => getInstruments().providerError(kind),
     storeFailed: (op) => getInstruments().storeFailed(op),
+    inboundDropped: (surface, reason) =>
+      getInstruments().inboundDropped(surface, reason),
     chatgpt: (state) => getInstruments().chatgpt(state),
     modelRouted: (route, reason) => getInstruments().modelRouted(route, reason),
     primaryFailed: (reason) => getInstruments().primaryFailed(reason),

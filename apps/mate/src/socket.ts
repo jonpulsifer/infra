@@ -27,8 +27,22 @@ export interface SocketModeDeps {
   log: Log;
   /** One events_api payload, already acknowledged. */
   onEvent(payload: EventPayload): void;
-  /** Epoch ms. Older events are Slack's replay buffer, and are dropped. */
+  /**
+   * Records the event as handled, in mate-db so it holds across restarts and
+   * replicas: false when a process already handled it. Throws when the store
+   * cannot answer.
+   */
+  claim?(eventId: string, eventTime: number): Promise<boolean>;
+  /**
+   * False for an event that can change nothing, such as mate's own edits, so
+   * it skips the claim and never waits on the store. Every event is claimed
+   * without it.
+   */
+  answers?(payload: EventPayload): boolean;
+  /** Epoch ms: this process's start, the cutoff while no claim can answer. */
   since: number;
+  /** An event dropped for its age, already acknowledged. */
+  onStale?(payload: EventPayload): void;
   /** How many connections this app should have. More than one splits events. */
   expected?: number;
 }
@@ -37,11 +51,21 @@ export interface SocketModeDeps {
 export const SEEN_LIMIT = 512;
 export const RECONNECT_MS = 1_000;
 export const RECONNECT_MAX_MS = 30_000;
+/**
+ * Slack retries an event it could not deliver for about six minutes, so an
+ * event sent while mate restarts arrives late. One older than this is not
+ * answered: claims are kept a day, and an hour-old prompt is stale news.
+ */
+export const REPLAY_WINDOW_MS = 60 * 60_000;
+/** A claim that takes longer falls back to the start-time cutoff. */
+export const CLAIM_TIMEOUT_MS = 3_000;
 
 export class SocketMode {
   private readonly seen = new Set<string>();
   private readonly order: string[] = [];
   private socket: SocketLike | null = null;
+  /** Events are admitted one at a time, so a claim never reorders them. */
+  private admitting = Promise.resolve();
   private stopped = false;
   private backoff = RECONNECT_MS;
 
@@ -132,13 +156,78 @@ export class SocketMode {
   private event(payload: EventPayload | undefined): void {
     const id = payload?.event_id;
     if (!payload || !id || this.remember(id)) return;
-    if ((payload.event_time ?? 0) * 1000 < this.deps.since) {
-      this.deps.log.info('slack replayed an event from before this process', {
-        eventId: id,
-      });
+    if (this.deps.answers && !this.deps.answers(payload)) {
+      this.deps.onEvent(payload);
+      return;
+    }
+    this.admitting = this.admitting
+      .then(() => this.admit(payload, id))
+      .catch((error) =>
+        this.deps.log.warn('a slack event could not be handled', {
+          eventId: id,
+          error: plain(error),
+        }),
+      );
+  }
+
+  /**
+   * Answers an event no process has handled, however late Slack's retry
+   * brings it. Without a claim only events since this process started are
+   * answered, since one from before may already have been.
+   */
+  private async admit(payload: EventPayload, id: string): Promise<void> {
+    const { clock, log } = this.deps;
+    const at = (payload.event_time ?? 0) * 1000;
+    if (at < clock.now() - REPLAY_WINDOW_MS) {
+      this.stale(
+        payload,
+        id,
+        'slack delivered an event past the replay window',
+      );
+      return;
+    }
+    const first = await this.claim(id, at);
+    if (first === false) {
+      log.info('slack redelivered an event already handled', { eventId: id });
+      return;
+    }
+    if (first === null && at < this.deps.since) {
+      this.stale(
+        payload,
+        id,
+        'slack replayed an event from before this process',
+      );
       return;
     }
     this.deps.onEvent(payload);
+  }
+
+  /** Null when the store cannot answer in time. */
+  private async claim(id: string, at: number): Promise<boolean | null> {
+    const { claim, clock, log } = this.deps;
+    if (!claim) return null;
+    const timer = new AbortController();
+    try {
+      return await Promise.race([
+        claim(id, at),
+        clock.sleep(CLAIM_TIMEOUT_MS, timer.signal).then(() => {
+          throw new Error(`no answer in ${CLAIM_TIMEOUT_MS} ms`);
+        }),
+      ]);
+    } catch (error) {
+      log.warn('a slack event could not be claimed', {
+        eventId: id,
+        error: plain(error),
+      });
+      return null;
+    } finally {
+      timer.abort();
+    }
+  }
+
+  private stale(payload: EventPayload, id: string, msg: string): void {
+    this.deps.log.info(msg, { eventId: id });
+    this.deps.onStale?.(payload);
   }
 
   /** True when this event has already been handled. */

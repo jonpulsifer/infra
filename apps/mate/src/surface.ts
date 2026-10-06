@@ -32,6 +32,47 @@ export interface Inbound {
   readonly mentionsMe: boolean;
 }
 
+/** A file on an inbound message, described but never fetched. */
+export interface Attachment {
+  readonly name: string;
+  /** The MIME type, when the surface gives one. */
+  readonly type: string | null;
+  readonly bytes: number | null;
+}
+
+const ATTACHMENT_NAME_MAX = 100;
+
+function size(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The message's text with a line naming each file on it, so the model knows a
+ * file came with it. The name is the sender's own, folded onto one line.
+ */
+export function withAttachments(
+  content: string,
+  files: readonly Attachment[],
+): string {
+  if (files.length === 0) return content;
+  const listed = files.map((file) => {
+    const name = file.name.replace(/[\s[\]]+/g, ' ').trim() || 'unnamed';
+    const facts = [
+      file.type,
+      file.bytes === null ? null : size(file.bytes),
+    ].filter(Boolean);
+    const short =
+      name.length > ATTACHMENT_NAME_MAX
+        ? `${name.slice(0, ATTACHMENT_NAME_MAX - 1)}…`
+        : name;
+    return facts.length > 0 ? `${short} (${facts.join(', ')})` : short;
+  });
+  const note = `[attached files you cannot open: ${listed.join('; ')}. Ask for their text if it matters.]`;
+  return content.trim() ? `${content}\n\n${note}` : note;
+}
+
 export interface HistoryMessage {
   id: string;
   authorId: string;
@@ -45,6 +86,19 @@ export interface HistoryQuery {
   /** Only messages older than this id, which is how a replay pages backwards. */
   before?: string;
 }
+
+/**
+ * Why an allowlisted human's message ran nothing and said nothing: no mention
+ * outside a thread mate holds, a channel mate does not open threads in, a
+ * thread that could not be created, a Slack event older than the replay
+ * window, or a Slack message shape mate does not read.
+ */
+export type InboundDropReason =
+  | 'no-mention'
+  | 'channel'
+  | 'thread-create'
+  | 'stale'
+  | 'subtype';
 
 export type Outcome = 'done' | 'stopped' | 'failed';
 

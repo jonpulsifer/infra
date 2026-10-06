@@ -159,7 +159,7 @@ func TestSign_BundleFromAnotherSignerIsRefusedAtAdmission(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a bundle signed by another key was admitted; expected refusal")
 	}
-	if !strings.Contains(err.Error(), "does not match the trusted Spindrift signer") {
+	if !strings.Contains(err.Error(), "does not match the trusted kthx signer") {
 		t.Errorf("expected a signer-mismatch refusal, got: %v", err)
 	}
 }

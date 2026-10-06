@@ -25,7 +25,7 @@
     "@opentelemetry/semantic-conventions": "^1.30.0",
     "@repo/mate-hands": "workspace:*",
     "@repo/pi-store-postgres": "workspace:*",
-    "discord-api-types": "0.38.55",
+    "discord-api-types": "0.38.56",
     "zod": "4.6.5"
   },
   "devDependencies": {

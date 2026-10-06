@@ -30,7 +30,7 @@ spec:
       path: /nfs/data/k8s-provisioned
       mountOptions:
         - hard
-        - nfsvers=3
+        - nfsvers=4.2
         - timeo=600
         - retrans=2
         - noatime

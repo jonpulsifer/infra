@@ -5,7 +5,7 @@
 # HOME is an emptyDir, so a tool the agent installs goes with the sandbox. The
 # build context is the repo root, so the image can compile packages/mate-hands;
 # the root .dockerignore lets in the files copied from this directory.
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS base
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS base
 
 FROM base AS toolset
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.1
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.2
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.9.18
+ARG MISE_VERSION=2026.10.0
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
@@ -75,7 +75,7 @@ ARG TERRAFORM_DOCS_VERSION=0.24.0
 # Must equal opentofu in the root mise.toml: the repo's tasks run this binary
 # in its place.
 # renovate: datasource=github-releases depName=opentofu/opentofu
-ARG TOFU_VERSION=1.13.0
+ARG TOFU_VERSION=1.13.1
 # renovate: datasource=github-releases depName=mikefarah/yq
 ARG YQ_VERSION=4.54.1
 
@@ -188,7 +188,7 @@ COPY images/mate-sandbox/gh /usr/local/bin/gh
 # The CLI comes from the image that serves it, so the sandbox runs the build
 # the apex serves. It is a Bun bundle: `kthx` on PATH is the shim copied in
 # below, and `kthx upgrade` would install a second copy the shim never runs.
-COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:f36ca379686e5d0b9ee9e4e9478e24e757084b26f36d96a8816632c137cb6b8a /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
+COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:a7b7b9136ee1d95df170ef12975db157d8f564a19575cfe2bf64c76c89fac580 /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
 RUN set -eux; \
     mkdir -m 0755 -p /usr/local/lib/kthx; \
     tar -xzf /tmp/kthx.tgz --no-same-owner -C /usr/local/lib/kthx --strip-components=1 \

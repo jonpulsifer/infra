@@ -84,7 +84,7 @@ export class OnePasswordStore implements SecretStore {
         vault: { id: this.vault },
         title,
         category: 'API_CREDENTIAL',
-        sections: [{ id: SECTION, label: 'Spindrift' }],
+        sections: [{ id: SECTION, label: 'kthx' }],
         fields: [
           { type: 'CONCEALED', label: key, value, section: { id: SECTION } },
         ],

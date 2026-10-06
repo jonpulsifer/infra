@@ -6,7 +6,7 @@ description: Move a PersistentVolumeClaim from a hostPath volume to a local volu
 Use this runbook for a claim whose volume is a hostPath volume. Velero skips a claim bound to a hostPath volume. The `local-path` StorageClass creates `local` volumes for new claims, and each earlier claim keeps its hostPath volume. The procedure copies the files to a temporary claim, recreates the original claim on a `local` volume, and copies the files back. [Backups](../platform/backups.md) lists the claims that need it.
 
 > [!WARNING]
-> This procedure changes live state by hand. It is an exception to the GitOps rule because git holds no data, only the declaration of the claim. Deleting the original claim deletes its volume and its files.
+> This procedure changes live state by hand. It is an exception to the GitOps rule because git holds no data, only the declaration of the claim. Keep the original volume until the workload and its backup pass verification.
 
 ## Before you start
 
@@ -83,9 +83,21 @@ Use this runbook for a claim whose volume is a hostPath volume. Velero skips a c
          command:
            - sh
            - -c
-           - cp -a /from/. /to/ && echo "from $(find /from | wc -l) to $(find /to | wc -l)"
+           - |
+             set -eu
+             cp -a /from/. /to/
+             cd /from
+             find . -type f -print0 > /tmp/from.files
+             xargs -0 sha256sum < /tmp/from.files > /tmp/from.unsorted
+             sort /tmp/from.unsorted > /tmp/from.sha
+             cd /to
+             find . -type f -print0 > /tmp/to.files
+             xargs -0 sha256sum < /tmp/to.files > /tmp/to.unsorted
+             sort /tmp/to.unsorted > /tmp/to.sha
+             diff -u /tmp/from.sha /tmp/to.sha > /dev/null
+             echo "File checksums match"
          volumeMounts:
-           - {name: from, mountPath: /from}
+           - {name: from, mountPath: /from, readOnly: true}
            - {name: to, mountPath: /to}
      volumes:
        - name: from
@@ -98,18 +110,19 @@ Use this runbook for a claim whose volume is a hostPath volume. Velero skips a c
 
    Result: `pod/migrate-copy condition met`.
 
-7. Compare the file counts of the two claims. Delete the copy pod.
+7. Verify the checksums of the two claims. Delete the copy pod.
 
    ```bash
    kubectl logs migrate-copy -n <namespace> --context <site>
    kubectl delete pod migrate-copy -n <namespace> --context <site>
    ```
 
-   Result: `from <n> to <n>`, with the same count twice.
+   Result: `File checksums match`. If the copy fails, keep both claims and inspect the pod before continuing.
 
-8. Delete the original claim, then recreate it from `pvc.json`.
+8. Retain the original volume, then delete and recreate its claim from `pvc.json`. Use the volume name from step 1.
 
    ```bash
+   kubectl patch pv <pv> --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}' --context <site>
    kubectl delete pvc <pvc> -n <namespace> --context <site>
    kubectl create -f pvc.json -n <namespace> --context <site>
    ```
@@ -132,11 +145,13 @@ Use this runbook for a claim whose volume is a hostPath volume. Velero skips a c
     flux resume helmrelease <release> -n <namespace> --context <site>
     ```
 
-12. When the workload works, delete the temporary claim and `pvc.json`.
+12. Verify the workload and its backup, as the next section describes, before deleting the temporary claim and `pvc.json`.
 
     ```bash
     kubectl delete pvc <pvc>-migrate -n <namespace> --context <site>
     ```
+
+    The original PV stays `Released`, with its files on the node. Keep it until the recovery window closes; reclaim it separately after confirming the new copy.
 
 ## Check the backup
 

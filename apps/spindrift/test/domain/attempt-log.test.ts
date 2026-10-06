@@ -270,6 +270,8 @@ describe('attempt log: resume cursor', () => {
 });
 
 describe('attempt log: line ceiling', () => {
+  // Filling and paging the full ceiling takes about 6s on a shared runner.
+  const CEILING_TIMEOUT_MS = 30_000;
   const MARKER = `output truncated after ${MAX_ATTEMPT_LOG_LINES} lines; the runner keeps the rest`;
 
   /** Pages through the stream, since one read returns at most 500 entries. */
@@ -304,94 +306,102 @@ describe('attempt log: line ceiling', () => {
     `);
   }
 
-  test('the line past the ceiling becomes one marker naming the run; later lines are dropped; a status still lands', async () => {
-    const { app, component, build } = await seedAttempt();
-    const scope = { appId: app.id, componentId: component.id };
-    const attempt = { ...scope, buildId: build.id };
-    // Set first: the marker reads runUrl when it is written.
-    const runUrl = 'https://github.com/example/app/actions/runs/1234';
-    await database()
-      .db.update(builds)
-      .set({ runUrl })
-      .where(eq(builds.id, build.id));
-    await fillToCeiling(scope, { buildId: build.id });
+  test(
+    'the line past the ceiling becomes one marker naming the run; later lines are dropped; a status still lands',
+    async () => {
+      const { app, component, build } = await seedAttempt();
+      const scope = { appId: app.id, componentId: component.id };
+      const attempt = { ...scope, buildId: build.id };
+      // Set first: the marker reads runUrl when it is written.
+      const runUrl = 'https://github.com/example/app/actions/runs/1234';
+      await database()
+        .db.update(builds)
+        .set({ runUrl })
+        .where(eq(builds.id, build.id));
+      await fillToCeiling(scope, { buildId: build.id });
 
-    await recordBuildEvent(database().db, attempt, {
-      type: 'log',
-      line: 'one past the ceiling',
-      resource: 'build',
-    });
-    await recordBuildEvent(database().db, attempt, {
-      type: 'log',
-      line: 'two past the ceiling',
-    });
-    // A new connection has no cached count, so it counts the table and drops
-    // the line instead of writing a second marker.
-    const resurrected = createDb(database().connect());
-    await recordBuildEvent(resurrected, attempt, {
-      type: 'log',
-      line: 'three past the ceiling, from a fresh process',
-    });
-    await recordBuildEvent(database().db, attempt, {
-      type: 'status',
-      phase: 'FAILED',
-      reason: 'BUILD_FAILED',
-    });
+      await recordBuildEvent(database().db, attempt, {
+        type: 'log',
+        line: 'one past the ceiling',
+        resource: 'build',
+      });
+      await recordBuildEvent(database().db, attempt, {
+        type: 'log',
+        line: 'two past the ceiling',
+      });
+      // A new connection has no cached count, so it counts the table and drops
+      // the line instead of writing a second marker.
+      const resurrected = createDb(database().connect());
+      await recordBuildEvent(resurrected, attempt, {
+        type: 'log',
+        line: 'three past the ceiling, from a fresh process',
+      });
+      await recordBuildEvent(database().db, attempt, {
+        type: 'status',
+        phase: 'FAILED',
+        reason: 'BUILD_FAILED',
+      });
 
-    const entries = await everything({
-      componentId: component.id,
-      buildId: build.id,
-    });
-    // The ceiling's lines, the marker and the verdict.
-    expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
-    const lines = entries.filter((entry) => entry.type === 'log');
-    expect(lines).toHaveLength(MAX_ATTEMPT_LOG_LINES + 1);
-    expect(lines.at(-1)).toMatchObject({
-      line: `${MARKER} at ${runUrl}`,
-      resource: null,
-    });
-    expect(lines.filter((entry) => entry.line.startsWith(MARKER))).toHaveLength(
-      1,
-    );
-    expect(entries.at(-1)).toMatchObject({
-      type: 'status',
-      phase: 'FAILED',
-      reason: 'BUILD_FAILED',
-    });
-  });
+      const entries = await everything({
+        componentId: component.id,
+        buildId: build.id,
+      });
+      // The ceiling's lines, the marker and the verdict.
+      expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
+      const lines = entries.filter((entry) => entry.type === 'log');
+      expect(lines).toHaveLength(MAX_ATTEMPT_LOG_LINES + 1);
+      expect(lines.at(-1)).toMatchObject({
+        line: `${MARKER} at ${runUrl}`,
+        resource: null,
+      });
+      expect(
+        lines.filter((entry) => entry.line.startsWith(MARKER)),
+      ).toHaveLength(1);
+      expect(entries.at(-1)).toMatchObject({
+        type: 'status',
+        phase: 'FAILED',
+        reason: 'BUILD_FAILED',
+      });
+    },
+    CEILING_TIMEOUT_MS,
+  );
 
-  test('a deploy leg is capped the same way, through the same writer', async () => {
-    const { app, component, build, deploy } = await seedAttempt();
-    const scope = { appId: app.id, componentId: component.id };
-    const attempt = { ...scope, deployId: deploy.id };
-    await fillToCeiling(scope, { deployId: deploy.id });
+  test(
+    'a deploy leg is capped the same way, through the same writer',
+    async () => {
+      const { app, component, build, deploy } = await seedAttempt();
+      const scope = { appId: app.id, componentId: component.id };
+      const attempt = { ...scope, deployId: deploy.id };
+      await fillToCeiling(scope, { deployId: deploy.id });
 
-    await recordDeployEvent(database().db, attempt, {
-      type: 'log',
-      line: 'one past the ceiling',
-    });
-    await recordDeployEvent(database().db, attempt, {
-      type: 'log',
-      line: 'two past the ceiling',
-    });
-    await recordDeployEvent(database().db, attempt, {
-      type: 'status',
-      phase: 'LIVE',
-    });
+      await recordDeployEvent(database().db, attempt, {
+        type: 'log',
+        line: 'one past the ceiling',
+      });
+      await recordDeployEvent(database().db, attempt, {
+        type: 'log',
+        line: 'two past the ceiling',
+      });
+      await recordDeployEvent(database().db, attempt, {
+        type: 'status',
+        phase: 'LIVE',
+      });
 
-    const entries = await everything({
-      componentId: component.id,
-      buildId: build.id,
-      deployId: deploy.id,
-    });
-    expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
-    expect(entries.at(-2)).toMatchObject({
-      attemptKind: 'deploy',
-      type: 'log',
-      line: MARKER,
-    });
-    expect(entries.at(-1)).toMatchObject({ type: 'status', phase: 'LIVE' });
-  });
+      const entries = await everything({
+        componentId: component.id,
+        buildId: build.id,
+        deployId: deploy.id,
+      });
+      expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
+      expect(entries.at(-2)).toMatchObject({
+        attemptKind: 'deploy',
+        type: 'log',
+        line: MARKER,
+      });
+      expect(entries.at(-1)).toMatchObject({ type: 'status', phase: 'LIVE' });
+    },
+    CEILING_TIMEOUT_MS,
+  );
 
   test('under the ceiling every line is kept, counted from where the table already was', async () => {
     const { app, component, build } = await seedAttempt();

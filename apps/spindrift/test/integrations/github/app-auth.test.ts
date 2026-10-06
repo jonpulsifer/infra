@@ -328,7 +328,7 @@ describe('the manifest-flow setup', () => {
     );
     const manifest = JSON.parse(setup.manifest);
     expect(manifest).toMatchObject({
-      name: 'spindrift-example',
+      name: 'kthx-example',
       public: true,
       redirect_url: 'https://spindrift.example.test/internal/github/setup',
       setup_url: 'https://spindrift.example.test/internal/github/setup',

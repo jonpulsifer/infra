@@ -10,4 +10,5 @@ resources:
   - networking.yaml
   - nodes.yaml
   - oauth2-proxy.yaml
+  - restore-drill.yaml
   - storage.yaml

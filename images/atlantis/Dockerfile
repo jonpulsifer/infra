@@ -4,7 +4,7 @@ USER root
 # Replaces the OpenTofu the base image bundles. Must equal opentofu in the root
 # mise.toml, so a local plan runs the version Atlantis applies with.
 # renovate: datasource=github-releases depName=opentofu/opentofu
-ARG OPENTOFU_VERSION=1.13.0
+ARG OPENTOFU_VERSION=1.13.1
 RUN apk add --no-cache unzip \
     && curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip \
     && unzip -o /tmp/tofu.zip -d /usr/local/bin/ \

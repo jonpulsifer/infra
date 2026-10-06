@@ -279,7 +279,7 @@ export class GitHubAppAuth {
     );
     const origin = `https://${this.options.controlPlaneHostname}`;
     const manifest = {
-      name: `spindrift-${this.options.installationName}`,
+      name: `kthx-${this.options.installationName}`,
       url: origin,
       public: true,
       redirect_url: `${origin}/internal/github/setup`,

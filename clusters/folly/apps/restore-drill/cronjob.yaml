@@ -1,0 +1,87 @@
+---
+# Recovers tronbyt's database from the Garage barman store into a throwaway
+# CNPG Cluster and fails unless the recovered database holds tables. The
+# Cluster is deleted on every exit. No `lolwtf.ca/backup` label:
+# BackupJobStale would hold a monthly job to an eight-day window.
+# KubeJobFailed alerts on a failed drill.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restore-drill
+  namespace: restore-drill
+  labels:
+    app.kubernetes.io/name: restore-drill
+    app.kubernetes.io/part-of: backups
+spec:
+  schedule: "0 6 15 * *"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # A week to read a failed run.
+      ttlSecondsAfterFinished: 604800
+      backoffLimit: 0
+      activeDeadlineSeconds: 5400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: restore-drill
+            app.kubernetes.io/part-of: backups
+        spec:
+          # OnFailure deletes the retried pod when `backoffLimit` is spent, so no
+          # log survives. Never keeps each failed attempt.
+          restartPolicy: Never
+          serviceAccountName: restore-drill
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drill
+              image: docker.io/alpine/k8s:1.37.1@sha256:712dc5385d1c1a3f83b747fa9e40f64d433a97f72ff42f9755ff7dd1f62846e4
+              command:
+                - bash
+                - -c
+                - |
+                  set -euo pipefail
+                  cleanup() { kubectl delete cluster.postgresql.cnpg.io/tronbyt-drill --ignore-not-found --wait=true --timeout=10m; }
+                  trap cleanup EXIT
+                  cleanup
+                  kubectl create -f /drill/cluster.yaml
+                  kubectl wait --for=condition=Ready cluster.postgresql.cnpg.io/tronbyt-drill --timeout=75m
+                  tables=$(kubectl exec tronbyt-drill-1 -c postgres -- psql -X -At -d tronbyt -c "select count(*) from information_schema.tables where table_schema = 'public'")
+                  echo "recovered tronbyt: $tables tables in the public schema"
+                  case "$tables" in
+                    '' | 0 | *[!0-9]*)
+                      echo "tronbyt has no tables after the recovery" >&2
+                      exit 1
+                      ;;
+                  esac
+              env:
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: cluster
+                  mountPath: /drill
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: cluster
+              configMap:
+                name: restore-drill-cluster
+            - name: tmp
+              emptyDir: {}

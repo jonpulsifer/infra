@@ -35,6 +35,11 @@ spec:
     image:
       repository: docker.io/timberio/vector
       tag: 0.58.0-debian
+    # Talos sends its service and kernel logs to loopback, and a host process
+    # cannot reach a pod address, so the agent shares the host network and
+    # binds 127.0.0.1 only.
+    podHostNetwork: true
+    dnsPolicy: ClusterFirstWithHostNet
     extraVolumes:
       - name: journal
         hostPath:
@@ -53,13 +58,28 @@ spec:
       data_dir: /vector-data-dir
       api:
         enabled: true
-        address: 0.0.0.0:8686
+        # On the host network: never on the LAN.
+        address: 127.0.0.1:8686
       sources:
         kubernetes_logs:
           type: kubernetes_logs
         journald:
           type: journald
           journal_directory: /var/log/journal
+        # The Talos machine config's machine.logging.destinations and
+        # KmsgLogConfig name these two ports. NixOS nodes send nothing here.
+        talos_service:
+          type: socket
+          mode: tcp
+          address: 127.0.0.1:6050
+          decoding:
+            codec: json
+        talos_kernel:
+          type: socket
+          mode: tcp
+          address: 127.0.0.1:6051
+          decoding:
+            codec: json
       transforms:
         # VictoriaLogs reads the line from `_msg`; both sources write `message`.
         # One transform per source, so each sink labels only its own stream.
@@ -89,6 +109,33 @@ spec:
             - journald
           source: |
             ._msg = del(.message)
+        # Talos lines carry msg, talos-level, talos-service and talos-time. The
+        # node name comes from the DaemonSet, not the line or the peer address.
+        talos_service_message:
+          type: remap
+          inputs:
+            - talos_service
+          source: |
+            ._msg = strip_whitespace(string(del(.msg)) ?? "")
+            .host = get_env_var!("VECTOR_SELF_NODE_NAME")
+            .service = del(."talos-service")
+            .level = del(."talos-level")
+            ts, err = parse_timestamp(string(."talos-time") ?? "", "%+")
+            if err == null { .timestamp = ts }
+            del(."talos-time")
+            del(.port)
+        talos_kernel_message:
+          type: remap
+          inputs:
+            - talos_kernel
+          source: |
+            ._msg = strip_whitespace(string(del(.msg)) ?? "")
+            .host = get_env_var!("VECTOR_SELF_NODE_NAME")
+            .level = del(."talos-level")
+            ts, err = parse_timestamp(string(."talos-time") ?? "", "%+")
+            if err == null { .timestamp = ts }
+            del(."talos-time")
+            del(.port)
       sinks:
         # The loki sink appends /loki/api/v1/push itself; a full path gets a 400.
         victoria_logs_kubernetes:
@@ -120,8 +167,37 @@ spec:
             job: "systemd-journal"
             cluster: "${CLUSTER_NAME}"
             host: "{{`{{ host }}`}}"
-      # Vector's own unit tests for the redaction above. Run them with
-      # `nix shell nixpkgs#vector -c vector test <(yq '.spec.values.customConfig' clusters/base/monitoring/vector.yaml)`.
+        victoria_logs_talos:
+          type: loki
+          inputs:
+            - talos_service_message
+          endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert
+          tenant_id: "1"
+          encoding:
+            codec: json
+          dangerously_allow_unconfined_template_resolution: true
+          labels:
+            job: "talos"
+            cluster: "${CLUSTER_NAME}"
+            host: "{{`{{ host }}`}}"
+            service: "{{`{{ service }}`}}"
+        victoria_logs_talos_kernel:
+          type: loki
+          inputs:
+            - talos_kernel_message
+          endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert
+          tenant_id: "1"
+          encoding:
+            codec: json
+          dangerously_allow_unconfined_template_resolution: true
+          labels:
+            job: "talos-kernel"
+            cluster: "${CLUSTER_NAME}"
+            host: "{{`{{ host }}`}}"
+      # Vector's own unit tests for the transforms above. Render the chart's
+      # config, then run them:
+      # `helm template vector vector --repo https://helm.vector.dev --version 0.58.0 -f <(yq '.spec.values' clusters/base/monitoring/vector.yaml) | yq 'select(.kind == "ConfigMap") | .data["vector.yaml"]' > vector.yaml`
+      # `CLUSTER_NAME=test VECTOR_SELF_NODE_NAME=node vector test vector.yaml`
       tests:
         - name: redacts an SRTP inline key in pbx SDP
           input:
@@ -274,3 +350,47 @@ spec:
                 - type: vrl
                   source: |
                     assert_eq!(._msg, "a plain systemd line")
+
+        - name: a talos service line gets _msg, host, service, level and its own time
+          input:
+            insert_at: talos_service_message
+            type: log
+            log_fields:
+              msg: "[talos] apply config request: immediate true, on reboot false"
+              talos-level: info
+              talos-service: machined
+              talos-time: "2021-11-10T10:48:49.294858021Z"
+              host: 127.0.0.1
+              port: 41234
+          outputs:
+            - extract_from: talos_service_message
+              conditions:
+                - type: vrl
+                  source: |
+                    assert_eq!(._msg, "[talos] apply config request: immediate true, on reboot false")
+                    assert_eq!(.host, get_env_var!("VECTOR_SELF_NODE_NAME"))
+                    assert_eq!(.service, "machined")
+                    assert_eq!(.level, "info")
+                    assert_eq!(.timestamp, t'2021-11-10T10:48:49.294858021Z')
+                    assert!(!exists(."talos-time"))
+                    assert!(!exists(.port))
+
+        - name: a talos kernel line loses its trailing newline
+          input:
+            insert_at: talos_kernel_message
+            type: log
+            log_fields:
+              msg: "eth0: link up\n"
+              talos-level: notice
+              talos-time: "2021-11-10T10:48:49.294858021Z"
+              facility: kern
+              host: 127.0.0.1
+          outputs:
+            - extract_from: talos_kernel_message
+              conditions:
+                - type: vrl
+                  source: |
+                    assert_eq!(._msg, "eth0: link up")
+                    assert_eq!(.host, get_env_var!("VECTOR_SELF_NODE_NAME"))
+                    assert_eq!(.level, "notice")
+                    assert_eq!(.facility, "kern")

@@ -122,7 +122,7 @@ func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey strin
 		return fmt.Errorf("could not derive the trusted public key: %w", err)
 	}
 	if bundle.PublicKey != base64.StdEncoding.EncodeToString(expectedPubDER) {
-		return errors.New("bundle public key does not match the trusted Spindrift signer")
+		return errors.New("bundle public key does not match the trusted kthx signer")
 	}
 
 	pubDER, err := base64.StdEncoding.DecodeString(bundle.PublicKey)

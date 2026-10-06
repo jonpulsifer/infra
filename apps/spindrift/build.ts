@@ -1,8 +1,11 @@
 // Bundles the client into dist/. Bun.build follows the HTML entry's script and
-// style tags, so there is no entry list to maintain.
-import { rm } from 'node:fs/promises';
+// style tags, so there is no entry list to maintain. Monaco's AMD tree is
+// copied beside it, at the path the server serves it from.
+import { cp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import tailwind from 'bun-plugin-tailwind';
+import { MONACO_BASE } from './src/web/monaco-path.ts';
+import { monacoSource } from './src/web/monaco-source.ts';
 
 const OUT = join(import.meta.dir, 'dist');
 
@@ -30,6 +33,8 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
+
+await cp(await monacoSource(), join(OUT, MONACO_BASE), { recursive: true });
 
 const bytes = result.outputs.reduce((total, output) => total + output.size, 0);
 console.log(

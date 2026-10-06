@@ -6,23 +6,16 @@ metadata:
 handler: runsc
 ---
 # podFixed charges each microVM's guest kernel and VMM, which run outside the
-# pod cgroup. nix/services/k8s/kata.nix registers both handlers on every node.
-apiVersion: node.k8s.io/v1
-kind: RuntimeClass
-metadata:
-  name: kata
-handler: kata
-overhead:
-  podFixed:
-    cpu: 250m
-    # An estimate: no workload runs under the QEMU handler.
-    memory: 192Mi
----
+# pod cgroup. nix/services/k8s/kata.nix registers the kata handler, Cloud
+# Hypervisor, on every node.
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
   name: kata-clh
-handler: kata-clh
+  # handler is immutable, so Flux deletes and recreates the class to change it.
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+handler: kata
 overhead:
   podFixed:
     cpu: 250m
