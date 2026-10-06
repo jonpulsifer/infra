@@ -135,6 +135,44 @@ describe('reading a message off the socket', () => {
     expect(inbound?.threadId).toBe(TS);
   });
 
+  test('a message with a file is read, and the file is named for the model, never fetched', () => {
+    const inbound = slackInbound(
+      {
+        type: 'message',
+        subtype: 'file_share',
+        channel: CHANNEL,
+        ts: '1758300100.000400',
+        thread_ts: TS,
+        user: OWNER,
+        text: 'what is this &lt;error&gt;?',
+        files: [
+          { name: 'screenshot.png', mimetype: 'image/png', size: 250_880 },
+          { title: 'build log' },
+        ],
+      },
+      ME,
+    );
+    expect(inbound?.threadId).toBe(TS);
+    expect(inbound?.content).toBe(
+      'what is this <error>?\n\n[attached files you cannot open: screenshot.png (image/png, 245 KB); build log. Ask for their text if it matters.]',
+    );
+    expect(
+      slackInbound(
+        {
+          type: 'message',
+          subtype: 'file_share',
+          channel: CHANNEL,
+          ts: '1758300100.000500',
+          user: OWNER,
+          files: [{ name: 'trace.txt', mimetype: 'text/plain', size: 12 }],
+        },
+        ME,
+      )?.content,
+    ).toBe(
+      '[attached files you cannot open: trace.txt (text/plain, 12 B). Ask for their text if it matters.]',
+    );
+  });
+
   test("mate's own post comes back with a bot id and no subtype, and is marked a bot", () => {
     const inbound = slackInbound(
       {
@@ -1201,6 +1239,32 @@ describe('the surface', () => {
       before: '2.000002',
     });
     expect(older.map((m) => m.content)).toEqual(['first & oldest']);
+  });
+
+  test("a human's file reads back in the history as it arrived, so the replay skips the prompt", async () => {
+    api.thread.push({
+      ts: '1.000001',
+      user: OWNER,
+      text: 'look',
+      files: [{ name: 'a.log', mimetype: 'text/plain', size: 2_048 }],
+    });
+    const [message] = await surface().history(THREAD, { limit: 10 });
+    expect(message?.content).toBe(
+      slackInbound(
+        {
+          type: 'message',
+          subtype: 'file_share',
+          channel: CHANNEL,
+          ts: '1.000001',
+          thread_ts: TS,
+          user: OWNER,
+          text: 'look',
+          files: [{ name: 'a.log', mimetype: 'text/plain', size: 2_048 }],
+        },
+        ME,
+      )?.content,
+    );
+    expect(message?.content).toContain('a.log (text/plain, 2 KB)');
   });
 
   test('teardown closes the thread’s agent session', async () => {

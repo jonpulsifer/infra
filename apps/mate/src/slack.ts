@@ -21,6 +21,7 @@ import {
   type ToolCall,
   type ToolState,
   threadKey,
+  withAttachments,
 } from './surface.ts';
 
 export const SLACK_API = 'https://slack.com/api/';
@@ -123,9 +124,26 @@ export interface SlackBlock {
   tasks?: SlackTask[];
 }
 
+/** The fields of a Slack file object mate describes; it never downloads one. */
+export interface SlackFile {
+  name?: string;
+  title?: string;
+  mimetype?: string;
+  size?: number;
+}
+
+export function slackFiles(files: readonly SlackFile[] | undefined) {
+  return (files ?? []).map((file) => ({
+    name: file.name ?? file.title ?? '',
+    type: file.mimetype ?? null,
+    bytes: typeof file.size === 'number' ? file.size : null,
+  }));
+}
+
 export interface SlackMessage {
   ts: string;
   text?: string;
+  files?: SlackFile[];
   user?: string;
   bot_id?: string;
   username?: string;
@@ -1181,7 +1199,10 @@ export function slackSurface(deps: SlackSurfaceDeps): Surface {
           content:
             message.bot_id === deps.appBotId
               ? spokenSlack(message)
-              : decodeSlack(message.text ?? ''),
+              : withAttachments(
+                  decodeSlack(message.text ?? ''),
+                  slackFiles(message.files),
+                ),
         });
       }
       return read;
@@ -1222,14 +1243,23 @@ export interface SlackEvent {
   user?: string;
   bot_id?: string;
   text?: string;
+  files?: SlackFile[];
 }
+
+/**
+ * Subtypes that are a human's message: `thread_broadcast` is an ordinary
+ * reply also sent to the channel, and `file_share` one with files.
+ */
+const READ_SUBTYPES: ReadonlySet<string> = new Set([
+  'thread_broadcast',
+  'file_share',
+]);
 
 export function slackInbound(event: SlackEvent, me: string): Inbound | null {
   // One sentence arrives as both `message` and `app_mention`; answer only one.
   if (event.type !== 'message') return null;
-  // `chat.update` emits a hidden `message_changed`. `thread_broadcast` is an
-  // ordinary reply also sent to the channel.
-  if ((event.subtype && event.subtype !== 'thread_broadcast') || event.hidden) {
+  // `chat.update` emits a hidden `message_changed`.
+  if ((event.subtype && !READ_SUBTYPES.has(event.subtype)) || event.hidden) {
     return null;
   }
   if (!event.channel || !event.ts) return null;
@@ -1242,7 +1272,7 @@ export function slackInbound(event: SlackEvent, me: string): Inbound | null {
     authorId: event.user ?? event.bot_id ?? '',
     // mate's own posts carry `bot_id` but no `bot_message` subtype.
     authorIsBot: Boolean(event.bot_id),
-    content: decodeSlack(raw),
+    content: withAttachments(decodeSlack(raw), slackFiles(event.files)),
     // Read before decoding, so a human typing the escape's own entities
     // cannot produce a mention from them.
     mentionsMe: raw.includes(`<@${me}>`),
