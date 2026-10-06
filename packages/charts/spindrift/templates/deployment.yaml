@@ -106,20 +106,16 @@ spec:
               value: {{ $top.Values.port | quote }}
             {{- if $process.serves }}
             # The machine routes also answer on this Service's in-cluster names.
-            - name: SPINDRIFT_SERVICE_NAME
-              value: {{ include "kthx-engine.fullname" $top | quote }}
-            - name: SPINDRIFT_SERVICE_NAMESPACE
-              value: {{ include "kthx-engine.namespace" $top | quote }}
+            {{- include "kthx-engine.env" (dict "name" "SERVICE_NAME" "value" (include "kthx-engine.fullname" $top)) | nindent 12 }}
+            {{- include "kthx-engine.env" (dict "name" "SERVICE_NAMESPACE" "value" (include "kthx-engine.namespace" $top)) | nindent 12 }}
             {{- end }}
             {{- if contains "@" $top.Values.image }}
             # The footer's version: `sha256:` and 12 hex characters, as `shortDigest` prints it. A
             # tag-only image sets none, which hides the footer.
-            - name: SPINDRIFT_VERSION
-              value: {{ $top.Values.image | splitList "@" | last | trunc 19 | quote }}
+            {{- include "kthx-engine.env" (dict "name" "VERSION" "value" ($top.Values.image | splitList "@" | last | trunc 19)) | nindent 12 }}
             {{- end }}
             {{- if $process.federates }}
-            - name: SPINDRIFT_IDENTITY_TOKEN_PATH
-              value: {{ printf "%s/token" $top.Values.serviceAccount.token.mountPath | quote }}
+            {{- include "kthx-engine.env" (dict "name" "IDENTITY_TOKEN_PATH" "value" (printf "%s/token" $top.Values.serviceAccount.token.mountPath)) | nindent 12 }}
             - name: NODE_EXTRA_CA_CERTS
               value: {{ printf "%s/ca.crt" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- if $top.Values.serviceAccount.token.gcpAudience }}
@@ -127,20 +123,17 @@ spec:
               value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- end }}
             {{- if $top.Values.serviceAccount.token.kthxAudience }}
-            - name: SPINDRIFT_KTHX_TOKEN_PATH
-              value: {{ printf "%s/kthx-token" $top.Values.serviceAccount.token.mountPath | quote }}
+            {{- include "kthx-engine.env" (dict "name" "KTHX_TOKEN_PATH" "value" (printf "%s/kthx-token" $top.Values.serviceAccount.token.mountPath)) | nindent 12 }}
             {{- end }}
             {{- end }}
             {{- if $top.Values.hostname }}
             # The passkey relying party, from the value that renders the Gateway listener and
             # HTTPRoute. A release with no hostname enrols nobody.
-            - name: SPINDRIFT_HOSTNAME
-              value: {{ $top.Values.hostname | quote }}
+            {{- include "kthx-engine.env" (dict "name" "HOSTNAME" "value" $top.Values.hostname) | nindent 12 }}
             {{- end }}
             {{- if $top.Values.gatewayAuth.enabled }}
             # Rendered only beside the NetworkPolicy in gateway-auth.yaml.
-            - name: SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY
-              value: "true"
+            {{- include "kthx-engine.env" (dict "name" "TRUSTED_GATEWAY_BOUNDARY" "value" "true") | nindent 12 }}
             {{- end }}
             {{- if $top.Values.database.enabled }}
             - name: DATABASE_URL
@@ -150,8 +143,12 @@ spec:
                   key: uri
             {{- end }}
             {{- range $top.Values.env }}
+            {{- if hasPrefix "KTHX_ENGINE_" .name }}
+            {{- include "kthx-engine.env" (dict "name" (trimPrefix "KTHX_ENGINE_" .name) "value" .value) | nindent 12 }}
+            {{- else }}
             - name: {{ .name }}
               value: {{ .value | quote }}
+            {{- end }}
             {{- end }}
           {{- with $top.Values.envFromSecret }}
           envFrom:

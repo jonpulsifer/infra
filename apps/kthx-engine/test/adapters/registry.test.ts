@@ -103,7 +103,7 @@ test('discovery reaches the cloud with the registry-wide token', async () => {
 
 /**
  * Google access tokens expire in an hour, so the Secret Manager store uses the
- * federated token and never `SPINDRIFT_STORE_TOKEN`.
+ * federated token and never `KTHX_ENGINE_STORE_TOKEN`.
  */
 test('the cloud store writes with the federated token, not a stored one', async () => {
   const yaml = await Bun.file(

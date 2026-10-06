@@ -25,12 +25,14 @@ import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
+import { readEnv } from '../config/env.ts';
+import { VERSION_VAR } from '../config/manifest.ts';
 
 const OTLP_ENDPOINT =
   process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
   'http://opentelemetry-collector.monitoring.svc.cluster.local:4318';
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || 'spindrift';
-const SERVICE_VERSION = process.env.SPINDRIFT_VERSION || '1.0.0';
+const SERVICE_VERSION = readEnv(process.env, VERSION_VAR) || '1.0.0';
 
 let sdkInstance: NodeSDK | null = null;
 

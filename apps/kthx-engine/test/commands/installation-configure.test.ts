@@ -131,7 +131,7 @@ describe('configuring an installation', () => {
     if (!result.ok) {
       expect(result.failure.code).toBe('NOT_DEPLOYABLE');
       expect(result.failure.message).toContain(
-        'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+        'KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY',
       );
     }
     expect((await storedManifest())?.auth.gateway).toBeNull();
