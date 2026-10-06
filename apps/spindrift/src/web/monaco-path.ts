@@ -6,8 +6,13 @@
 /** Pinned in package.json too; test/web/monaco.test.ts holds them equal. */
 export const MONACO_VERSION = '0.52.2';
 
-/**
- * The version is in the path, so every file under it is cached as immutable.
- * The prefix sits outside the paths kthx owns on the shared host.
- */
+/** The prefix sits outside the paths kthx owns on the shared host. */
 export const MONACO_BASE = `/vendor/monaco/${MONACO_VERSION}/vs`;
+
+/**
+ * The loader's `vs` path. Monaco starts every worker from a `blob:` URL and
+ * hands it this base, where a path with no origin cannot resolve.
+ */
+export function monacoLoaderBase(origin: string): string {
+  return new URL(MONACO_BASE, origin).href;
+}

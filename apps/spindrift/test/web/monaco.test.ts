@@ -4,7 +4,11 @@ import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BundleMissingError, monacoRoutes } from '../../src/web/bundle.ts';
-import { MONACO_BASE, MONACO_VERSION } from '../../src/web/monaco-path.ts';
+import {
+  MONACO_BASE,
+  MONACO_VERSION,
+  monacoLoaderBase,
+} from '../../src/web/monaco-path.ts';
 import { monacoSource } from '../../src/web/monaco-source.ts';
 
 const APP = join(import.meta.dir, '../..');
@@ -58,6 +62,29 @@ describe('the served Monaco tree', () => {
     await expect(monacoRoutes(join(APP, 'no-monaco-here'))).rejects.toThrow(
       BundleMissingError,
     );
+  });
+
+  test('an unreadable tree surfaces its own error', async () => {
+    const error = await monacoRoutes(join(APP, 'package.json')).catch(
+      (cause: unknown) => cause,
+    );
+    expect(error).not.toBeInstanceOf(BundleMissingError);
+    expect((error as NodeJS.ErrnoException).code).toBe('ENOTDIR');
+  });
+});
+
+// Monaco starts each worker from a `blob:` URL, which no origin-less path
+// resolves against, so the language workers fail to load without the origin.
+describe('the loader base', () => {
+  test('carries the origin', () => {
+    expect(monacoLoaderBase('https://console.example')).toBe(
+      `https://console.example${MONACO_BASE}`,
+    );
+  });
+
+  test('is what the client hands the AMD loader', async () => {
+    const client = await Bun.file(join(APP, 'src/web/client/monaco.ts')).text();
+    expect(client).toContain('vs: monacoLoaderBase(location.origin)');
   });
 });
 

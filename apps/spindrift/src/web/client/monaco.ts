@@ -1,9 +1,9 @@
 /**
  * Monaco, loaded from the console's own origin through its AMD loader. Loaded
  * once per tab, because `javascriptDefaults` is global and each open would
- * reconfigure it. Same-origin workers need no `MonacoEnvironment`.
+ * reconfigure it.
  */
-import { MONACO_BASE } from '../monaco-path.ts';
+import { MONACO_BASE, monacoLoaderBase } from '../monaco-path.ts';
 
 export interface MonacoModel {
   dispose(): void;
@@ -281,7 +281,7 @@ export async function loadMonaco(): Promise<MonacoNamespace> {
     () =>
       new Promise<MonacoNamespace>((resolve) => {
         const { require } = amdWindow();
-        require.config({ paths: { vs: MONACO_BASE } });
+        require.config({ paths: { vs: monacoLoaderBase(location.origin) } });
         require(['vs/editor/editor.main'], () => {
           // `window.monaco` exists only once this callback fires.
           const { monaco } = amdWindow();

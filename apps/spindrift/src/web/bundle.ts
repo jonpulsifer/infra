@@ -20,8 +20,7 @@ const NEVER = 'no-cache';
 const DOCUMENT = 'index.html';
 const MONACO_LOADER = 'loader.js';
 
-// `Bun.serve` clones this per request; the lazy `Bun.file` holds no bytes, and
-// it sets the content type from the extension.
+// `Bun.serve` clones this per request; the lazy `Bun.file` holds no bytes.
 function fileResponse(path: string, cacheControl: string): Response {
   return new Response(Bun.file(path), {
     headers: { 'cache-control': cacheControl },
@@ -75,7 +74,8 @@ export async function monacoRoutes(
       withFileTypes: true,
       recursive: true,
     });
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     entries = [];
   }
   const files = entries

@@ -102,6 +102,7 @@ describe('the client bundle', () => {
   });
 
   test('loads nothing from a CDN', async () => {
+    // Top level only: the copied Monaco tree names URLs in its docs and licences.
     const files = await readdir(DIST);
     for (const file of files.filter((name) => /\.(js|html|css)$/.test(name))) {
       const text = await Bun.file(join(DIST, file)).text();
