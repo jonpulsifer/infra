@@ -5,16 +5,6 @@
 # (the config.system.build attribute published as a package, unused for a package); packageSystem
 # (the packages.<system> the result publishes under, default x86_64-linux).
 {
-  optiplex = {
-    tags = [ "folly" ];
-  };
-  riptide = {
-    tags = [ "folly" ];
-  };
-  shale = {
-    tags = [ "folly" ];
-  };
-
   oldschool = {
     tags = [ "offsite" ];
   };

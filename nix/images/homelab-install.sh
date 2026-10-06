@@ -6,7 +6,7 @@ homelab-install — partition, format, and install a homelab host with disko
 
 Usage: homelab-install <host> [flake-ref]
 
-  <host>       NixOS host name (optiplex, riptide, shale, oldschool, retrofit)
+  <host>       NixOS host name (oldschool, retrofit)
   [flake-ref]  Flake to install from (default: ${flake_default})
                  branch: github:jonpulsifer/infra/my-branch
                  local:  /mnt/infra  or  .

@@ -10,7 +10,7 @@ pki_dir="$repo_root/terraform/pki"
 certs_dir="$pki_dir/certs"
 
 if (($# == 0)); then
-  echo "usage: $0 <folly|offsite> [<folly|offsite> ...]" >&2
+  echo "usage: $0 offsite" >&2
   exit 2
 fi
 
@@ -26,8 +26,9 @@ if ((${#missing[@]})); then
   exit 1
 fi
 
+# folly runs Talos: its cluster CA is its secrets bundle's own, and the bundle
+# carries its signer key, so this script writes neither.
 declare -A control_plane=(
-  [folly]="optiplex"
   [offsite]="retrofit"
 )
 

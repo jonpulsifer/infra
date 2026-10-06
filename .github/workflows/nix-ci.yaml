@@ -64,7 +64,7 @@ jobs:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
-      - run: nix build .#nixosConfigurations.optiplex.config.system.build.toplevel
+      - run: nix build .#nixosConfigurations.retrofit.config.system.build.toplevel
   spore:
     name: Build native Spore package and host
     runs-on: ubuntu-24.04-arm

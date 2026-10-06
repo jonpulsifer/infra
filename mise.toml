@@ -130,7 +130,7 @@ run = "nix flake check"
 [tasks."nix:build"]
 description = "Build one host's system closure without deploying (set HOST)"
 run = [
-  "bash -lc 'if [ -z \"${HOST:-}\" ]; then echo \"Set HOST, e.g. HOST=optiplex mise run nix:build\"; exit 1; fi; nix build \".#nixosConfigurations.$HOST.config.system.build.toplevel\" --no-link --print-out-paths'",
+  "bash -lc 'if [ -z \"${HOST:-}\" ]; then echo \"Set HOST, e.g. HOST=retrofit mise run nix:build\"; exit 1; fi; nix build \".#nixosConfigurations.$HOST.config.system.build.toplevel\" --no-link --print-out-paths'",
 ]
 
 [tasks."ts:check"]

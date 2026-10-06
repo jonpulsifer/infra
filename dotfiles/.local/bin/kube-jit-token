@@ -27,7 +27,7 @@
 # thing the certificate could never do.
 set -euo pipefail
 
-host=${1:?the control-plane host to mint through, e.g. optiplex.lolwtf.ca}
+host=${1:?the control-plane host to mint through, e.g. retrofit.lolwtf.ca}
 account=${2:-operator}
 namespace=${3:-kube-system}
 ttl=${4:-8h}

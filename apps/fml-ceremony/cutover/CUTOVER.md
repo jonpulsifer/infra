@@ -10,6 +10,10 @@ asserts this document still lists them in this order, so the runbook cannot
 drift away from the thing that was checked. Run the model with
 `mise run pki:cutover`.
 
+folly runs Talos, and its cluster CA is the one in its secrets bundle, outside
+the FML chain. `post-rotate.sh` refuses `folly`. Steps 5 and 15 to 19, and
+folly's half of `model.go`, are stale until the model drops folly.
+
 ## What makes this safe
 
 The per-cluster Kubernetes CA **keys survive**. Only their certificates

@@ -36,16 +36,18 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
   the wiki are public. If `sops -d` produced it, it stays out.
 - Never commit to `main`. Open a branch and a PR, and let CI, Atlantis and Flux
   apply it.
-- A host configuration deployed from a branch reverts at the host's next
+- A NixOS host configuration deployed from a branch reverts at the host's next
   auto-upgrade, which rebuilds from `main` every day. Merge the change promptly.
   The Pi 4 hosts have no auto-upgrade and change only when deployed. No Pi Zero
-  runs its NixOS config.
+  runs its NixOS config. The folly nodes run Talos Linux, have no auto-upgrade,
+  and change only through an Atlantis apply of `clusters/folly/talos/`.
 
 ## How changes ship
 
 | Layer | Applies through | When |
 | --- | --- | --- |
 | OpenTofu | Atlantis on the PR | Atlantis plans the changed roots. A comment of `atlantis apply` applies them and merges the PR. |
+| Talos Linux | Atlantis on the PR, through a `clusters/<site>/talos/` root | On `atlantis apply`. A node whose installer image changes reboots. |
 | Kubernetes | Flux | After a merge to `main` |
 | NixOS | `nixos-rebuild` | On a deploy, and at the daily auto-upgrade from `main` on hosts that have one |
 | Wiki | `.github/workflows/wiki.yml` to Cloudflare Pages | After a merge to `main` |
@@ -72,9 +74,9 @@ one exists.
 
 | Path | What is there |
 | --- | --- |
-| `nix/` | NixOS configuration for every host, and the image builds. Hosts are declared in `nix/hosts/default.nix`. |
+| `nix/` | NixOS configuration for every NixOS host, and the image builds. Hosts are declared in `nix/hosts/default.nix`. |
 | `clusters/` | Kubernetes manifests for `folly` and `offsite`. `clusters/base/` is shared by both. |
-| `terraform/` | OpenTofu root modules, with the network under `network/` and reusable modules under `modules/`. Each `clusters/<site>/bootstrap/` is a root too. |
+| `terraform/` | OpenTofu root modules, with the network under `network/` and reusable modules under `modules/`. Each `clusters/<site>/bootstrap/` and `clusters/<site>/talos/` is a root too. |
 | `apps/` | First-party services and tools. |
 | `packages/` | Shared libraries and the Helm charts Flux installs. |
 | `images/` | Base and tool OCI images. |
