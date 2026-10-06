@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { MONACO_BASE } from '../../src/web/monaco-path.ts';
 
 const APP = join(import.meta.dir, '../..');
 
@@ -74,7 +75,10 @@ describe('the client bundle', () => {
   });
 
   test('stays within the ceiling cutting that edge bought back', async () => {
-    const files = await readdir(DIST);
+    // Monaco's tree is copied, not bundled, and sits in a directory.
+    const files = (await readdir(DIST, { withFileTypes: true }))
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name);
     const sizes = await Promise.all(
       files.map(async (file) => (await stat(join(DIST, file))).size),
     );
@@ -86,5 +90,22 @@ describe('the client bundle', () => {
     // size with the command registry back in: ~3 MiB more JS, doubled by its map.
     const CEILING_BYTES = 7.5 * 1024 * 1024;
     expect(bytes).toBeLessThan(CEILING_BYTES);
+  });
+
+  test('carries Monaco at the path the console loads it from', async () => {
+    expect(await Bun.file(join(DIST, MONACO_BASE, 'loader.js')).exists()).toBe(
+      true,
+    );
+    expect(
+      await Bun.file(join(DIST, MONACO_BASE, 'editor/editor.main.js')).exists(),
+    ).toBe(true);
+  });
+
+  test('loads nothing from a CDN', async () => {
+    const files = await readdir(DIST);
+    for (const file of files.filter((name) => /\.(js|html|css)$/.test(name))) {
+      const text = await Bun.file(join(DIST, file)).text();
+      expect(text).not.toContain('cdn.jsdelivr.net');
+    }
   });
 });

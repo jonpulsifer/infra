@@ -3,7 +3,12 @@
  * client on demand. It lives apart from `server.ts` because that import pulls
  * the compile toolchain into any module graph that holds it.
  */
+import { monacoRoutes } from './bundle.ts';
 import index from './client/index.html';
+import { monacoSource } from './monaco-source.ts';
 import { start } from './serve.ts';
 
-await start({ '/': index }, { development: true });
+await start(
+  { '/': index, ...(await monacoRoutes(await monacoSource())) },
+  { development: true },
+);

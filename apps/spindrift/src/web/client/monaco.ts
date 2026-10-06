@@ -1,10 +1,9 @@
 /**
- * Monaco, loaded from the CDN through its own AMD loader. Loaded once per tab,
- * because `javascriptDefaults` is global and each open would reconfigure it.
+ * Monaco, loaded from the console's own origin through its AMD loader. Loaded
+ * once per tab, because `javascriptDefaults` is global and each open would
+ * reconfigure it. Same-origin workers need no `MonacoEnvironment`.
  */
-
-const VERSION = '0.52.2';
-const BASE = `https://cdn.jsdelivr.net/npm/monaco-editor@${VERSION}/min/vs`;
+import { MONACO_BASE } from '../monaco-path.ts';
 
 export interface MonacoModel {
   dispose(): void;
@@ -104,7 +103,7 @@ function amdWindow(): { require: AmdRequire; monaco: MonacoNamespace } {
 function loadScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = `${BASE}/loader.js`;
+    script.src = `${MONACO_BASE}/loader.js`;
     script.onload = () => resolve();
     script.onerror = () =>
       reject(new Error('Failed to load the Monaco loader script'));
@@ -282,7 +281,7 @@ export async function loadMonaco(): Promise<MonacoNamespace> {
     () =>
       new Promise<MonacoNamespace>((resolve) => {
         const { require } = amdWindow();
-        require.config({ paths: { vs: BASE } });
+        require.config({ paths: { vs: MONACO_BASE } });
         require(['vs/editor/editor.main'], () => {
           // `window.monaco` exists only once this callback fires.
           const { monaco } = amdWindow();
