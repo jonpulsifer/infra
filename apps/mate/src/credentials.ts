@@ -140,7 +140,7 @@ export function peerPaths(
 ): { topology: string; ca: string } {
   return {
     topology: `${workspace}/clusters/${peer}/config/cluster-topology.json`,
-    ca: `${workspace}/terraform/pki/certs/${peer}-ca-bundle.pem`,
+    ca: `${workspace}/clusters/${peer}/config/kubernetes-ca.pem`,
   };
 }
 

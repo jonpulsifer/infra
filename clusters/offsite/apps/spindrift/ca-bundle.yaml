@@ -7,8 +7,9 @@ metadata:
   name: spindrift-ca-bundle
   namespace: spindrift
 data:
-  # offsite's CA, then folly's full chain: folly's apiserver sends no
-  # intermediates, and the runtime trusts only a path to a self-signed root.
+  # offsite's chain and folly's pin, clusters/folly/config/kubernetes-ca.pem:
+  # no apiserver sends intermediates, and the runtime trusts only a path to a
+  # self-signed root.
   ca.crt: |
     -----BEGIN CERTIFICATE-----
     MIIDlTCCA0egAwIBAgIRAMtdp3vPuipD5b42JEniXcgwBQYDK2VwMDYxNDAyBgNV
