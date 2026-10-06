@@ -68,13 +68,13 @@ let
       virtiofsd = "${pkgs.virtiofsd}/bin/virtiofsd";
       passt = lib.getExe' pkgs.passt "passt";
     };
-    spindrift =
-      if cfg.spindrift == null then
+    kthxEngine =
+      if cfg.kthxEngine == null then
         null
       else
         {
-          inherit (cfg.spindrift) url tokenFile classes;
-          pollInterval = cfg.spindrift.pollInterval;
+          inherit (cfg.kthxEngine) url tokenFile classes;
+          pollInterval = cfg.kthxEngine.pollInterval;
         };
   };
 in
@@ -82,6 +82,13 @@ in
   # nixpkgs ships an unrelated `services.bosun` (Stack Exchange's monitoring
   # daemon); disabling it claims the name.
   disabledModules = [ "services/monitoring/bosun.nix" ];
+
+  imports = [
+    (lib.mkRenamedOptionModule
+      [ "services" "bosun" "spindrift" ]
+      [ "services" "bosun" "kthxEngine" ]
+    )
+  ];
 
   options.services.bosun = {
     enable = mkEnableOption "the bosun warm pool of microVM Actions runners";
@@ -105,7 +112,7 @@ in
     github = mkOption {
       description = ''
         Identity bosun authenticates to GitHub with: an installation of the
-        shared Spindrift+bosun GitHub App, rather than a personal access
+        shared kthx engine and bosun GitHub App, rather than a personal access
         token. Minting a JIT config needs `Administration: write` on
         {option}`services.bosun.repo`, which this installation must grant.
       '';
@@ -114,7 +121,7 @@ in
           appId = mkOption {
             type = types.ints.positive;
             description = ''
-              ID of the shared Spindrift+bosun GitHub App. Public -- fine in
+              ID of the shared kthx engine and bosun GitHub App. Public -- fine in
               the Nix store, unlike the key below.
             '';
           };
@@ -122,7 +129,7 @@ in
             type = types.path;
             description = ''
               File holding the shared App's private key -- the same PEM
-              Spindrift's installation Secret carries, by operator choice
+              kthx engine's installation Secret carries, by operator choice
               (GitHub Apps support per-consumer keys, but this fleet rotates
               one key for both). Read once at startup and never logged.
             '';
@@ -324,15 +331,15 @@ in
       );
     };
 
-    spindrift = mkOption {
+    kthxEngine = mkOption {
       default = null;
       description = ''
-        Turns this host into a Spindrift build source alongside its GitHub
-        warm pool: bosun long-polls {option}`spindrift.url` for a build
-        request in one of {option}`spindrift.classes`, boots a skiff of that
+        Turns this host into a kthx engine build source alongside its GitHub
+        warm pool: bosun long-polls {option}`kthxEngine.url` for a build
+        request in one of {option}`kthxEngine.classes`, boots a skiff of that
         class with the request written into its share instead of a JIT
         config, and posts the result back once the skiff halts. null (the
-        default) means this host never talks to Spindrift.
+        default) means this host never talks to the kthx engine.
 
         A class serving builds should set its own `warm = 0`: a build skiff
         boots on claim rather than ahead of time the way a GitHub-registered
@@ -343,11 +350,11 @@ in
           options = {
             url = mkOption {
               type = types.str;
-              description = "Base URL of the Spindrift instance whose outbox this host claims builds from.";
+              description = "Base URL of the kthx engine whose outbox this host claims builds from.";
             };
             tokenFile = mkOption {
               type = types.path;
-              description = "File holding the bearer token bosun authenticates to Spindrift with.";
+              description = "File holding the bearer token bosun authenticates to the kthx engine with.";
             };
             classes = mkOption {
               type = types.listOf types.str;
@@ -361,7 +368,7 @@ in
               default = "30s";
               description = ''
                 Wait before retrying after a failed claim. Not the poll
-                cadence itself -- the claim call long-polls Spindrift
+                cadence itself -- the claim call long-polls the kthx engine
                 server-side, so a successful round trip is the wait.
               '';
             };

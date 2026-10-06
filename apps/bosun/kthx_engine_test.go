@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// fakeSpindrift fakes the claim, heartbeat and result endpoints.
-type fakeSpindrift struct {
+// fakeKthxEngine fakes the claim, heartbeat and result endpoints.
+type fakeKthxEngine struct {
 	mu sync.Mutex
 
 	claims       []*buildClaim // popped front-to-back by ClaimBuild
@@ -33,7 +33,7 @@ type postedResult struct {
 	res      buildResult
 }
 
-func (f *fakeSpindrift) ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error) {
+func (f *fakeKthxEngine) ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.claimErr != nil {
@@ -47,7 +47,7 @@ func (f *fakeSpindrift) ClaimBuild(ctx context.Context, classes []string) (*buil
 	return c, nil
 }
 
-func (f *fakeSpindrift) Heartbeat(ctx context.Context, id, claimant string) error {
+func (f *fakeKthxEngine) Heartbeat(ctx context.Context, id, claimant string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.heartbeats = append(f.heartbeats, id)
@@ -55,7 +55,7 @@ func (f *fakeSpindrift) Heartbeat(ctx context.Context, id, claimant string) erro
 	return f.heartbeatErr
 }
 
-func (f *fakeSpindrift) PostResult(ctx context.Context, id, claimant string, res buildResult) error {
+func (f *fakeKthxEngine) PostResult(ctx context.Context, id, claimant string, res buildResult) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.resultErr != nil {
@@ -65,16 +65,16 @@ func (f *fakeSpindrift) PostResult(ctx context.Context, id, claimant string, res
 	return nil
 }
 
-func (f *fakeSpindrift) postedResults() []postedResult {
+func (f *fakeKthxEngine) postedResults() []postedResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]postedResult(nil), f.results...)
 }
 
 // poolBuildSource wires builds into a real warm pool, as production does.
-func poolBuildSource(p *pool, sd spindriftClient) *buildSource {
+func poolBuildSource(p *pool, engine kthxEngineClient) *buildSource {
 	return &buildSource{
-		sd: sd,
+		engine: engine,
 		spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
 			return p.spawn(ctx, p.buildBerth(claim))
 		},
@@ -94,9 +94,9 @@ func TestBuildSourcePostsTheResultTheGuestLeftBehind(t *testing.T) {
 	writeFile(t, filepath.Join(resultDir, "build.log"), "build ok\n")
 
 	s := &skiff{paths: skiffPaths{diagDir: diagDir}, done: make(chan struct{})}
-	sd := &fakeSpindrift{}
+	engine := &fakeKthxEngine{}
 	b := &buildSource{
-		sd:     sd,
+		engine: engine,
 		spawn:  func(context.Context, *buildClaim) (*skiff, error) { return s, nil },
 		logger: testLogger(),
 		stats:  newMetrics(),
@@ -115,7 +115,7 @@ func TestBuildSourcePostsTheResultTheGuestLeftBehind(t *testing.T) {
 		t.Fatal("runBuild did not return after the skiff was gone")
 	}
 
-	results := sd.postedResults()
+	results := engine.postedResults()
 	if len(results) != 1 {
 		t.Fatalf("want 1 posted result, got %d", len(results))
 	}
@@ -124,7 +124,7 @@ func TestBuildSourcePostsTheResultTheGuestLeftBehind(t *testing.T) {
 	}
 }
 
-func TestSDClientClaimBuildDecodes200(t *testing.T) {
+func TestEngineClientClaimBuildDecodes200(t *testing.T) {
 	var gotBody map[string]any
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/bosun/claim", func(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +143,7 @@ func TestSDClientClaimBuildDecodes200(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c := &sdClient{httpClient: server.Client(), token: "test-token", base: server.URL}
+	c := &engineClient{httpClient: server.Client(), token: "test-token", base: server.URL}
 	claim, err := c.ClaimBuild(context.Background(), []string{"skiff-build"})
 	if err != nil {
 		t.Fatalf("ClaimBuild: %v", err)
@@ -157,7 +157,7 @@ func TestSDClientClaimBuildDecodes200(t *testing.T) {
 	}
 }
 
-func TestSDClientClaimBuildReturnsNilOn204(t *testing.T) {
+func TestEngineClientClaimBuildReturnsNilOn204(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/bosun/claim", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -165,7 +165,7 @@ func TestSDClientClaimBuildReturnsNilOn204(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
+	c := &engineClient{httpClient: server.Client(), token: "t", base: server.URL}
 	claim, err := c.ClaimBuild(context.Background(), []string{"skiff-build"})
 	if err != nil {
 		t.Fatalf("ClaimBuild: %v", err)
@@ -175,7 +175,7 @@ func TestSDClientClaimBuildReturnsNilOn204(t *testing.T) {
 	}
 }
 
-func TestSDClientClaimBuildErrorsOn500(t *testing.T) {
+func TestEngineClientClaimBuildErrorsOn500(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/bosun/claim", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
@@ -183,13 +183,13 @@ func TestSDClientClaimBuildErrorsOn500(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
+	c := &engineClient{httpClient: server.Client(), token: "t", base: server.URL}
 	if _, err := c.ClaimBuild(context.Background(), []string{"skiff-build"}); err == nil {
 		t.Fatal("expected error on 500")
 	}
 }
 
-func TestSDClientPostResultSendsBodyAndAuth(t *testing.T) {
+func TestEngineClientPostResultSendsBodyAndAuth(t *testing.T) {
 	var gotBody map[string]any
 	var gotAuth string
 	mux := http.NewServeMux()
@@ -203,7 +203,7 @@ func TestSDClientPostResultSendsBodyAndAuth(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c := &sdClient{httpClient: server.Client(), token: "test-token", base: server.URL}
+	c := &engineClient{httpClient: server.Client(), token: "test-token", base: server.URL}
 	err := c.PostResult(context.Background(), "build-1", "", buildResult{Status: buildSucceeded, Log: "ok"})
 	if err != nil {
 		t.Fatalf("PostResult: %v", err)
@@ -216,7 +216,7 @@ func TestSDClientPostResultSendsBodyAndAuth(t *testing.T) {
 	}
 }
 
-func TestSDClientHeartbeatReportsALostClaim(t *testing.T) {
+func TestEngineClientHeartbeatReportsALostClaim(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/bosun/requests/build-1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"code":"NOT_FOUND"}`, http.StatusNotFound)
@@ -224,7 +224,7 @@ func TestSDClientHeartbeatReportsALostClaim(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
+	c := &engineClient{httpClient: server.Client(), token: "t", base: server.URL}
 	err := c.Heartbeat(context.Background(), "build-1", "claim-1")
 	if !errors.Is(err, errClaimLost) {
 		t.Fatalf("want errClaimLost, got %v", err)
@@ -235,9 +235,9 @@ func TestSDClientHeartbeatReportsALostClaim(t *testing.T) {
 func TestRunBuildKillsTheSkiffWhenTheClaimIsLost(t *testing.T) {
 	ch := newFakeProc()
 	s := &skiff{build: true, paths: skiffPaths{diagDir: t.TempDir()}, ch: ch, done: make(chan struct{})}
-	sd := &fakeSpindrift{heartbeatErr: errClaimLost}
+	engine := &fakeKthxEngine{heartbeatErr: errClaimLost}
 	b := &buildSource{
-		sd:             sd,
+		engine:         engine,
 		spawn:          func(context.Context, *buildClaim) (*skiff, error) { return s, nil },
 		logger:         testLogger(),
 		stats:          newMetrics(),
@@ -271,12 +271,12 @@ func TestRunBuildKillsTheSkiffWhenTheClaimIsLost(t *testing.T) {
 	if got := s.reason(); got != exitCancelled {
 		t.Fatalf("exit reason: got %q, want %q", got, exitCancelled)
 	}
-	if got := sd.postedResults(); len(got) != 0 {
+	if got := engine.postedResults(); len(got) != 0 {
 		t.Fatalf("a lost claim should post nothing, got %+v", got)
 	}
 }
 
-func TestSDClientHeartbeatPostsToTheRequestID(t *testing.T) {
+func TestEngineClientHeartbeatPostsToTheRequestID(t *testing.T) {
 	called := false
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/bosun/requests/build-1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
@@ -286,7 +286,7 @@ func TestSDClientHeartbeatPostsToTheRequestID(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
+	c := &engineClient{httpClient: server.Client(), token: "t", base: server.URL}
 	if err := c.Heartbeat(context.Background(), "build-1", ""); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestSDClientHeartbeatPostsToTheRequestID(t *testing.T) {
 }
 
 // An empty claimant sends no parameter at all.
-func TestSDClientCarriesTheClaimantWhenThereIsOne(t *testing.T) {
+func TestEngineClientCarriesTheClaimantWhenThereIsOne(t *testing.T) {
 	var heartbeatQuery, resultQuery string
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/bosun/requests/build-1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +310,7 @@ func TestSDClientCarriesTheClaimantWhenThereIsOne(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
+	c := &engineClient{httpClient: server.Client(), token: "t", base: server.URL}
 	if err := c.Heartbeat(context.Background(), "build-1", "claim/one"); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
@@ -329,9 +329,9 @@ func TestSDClientCarriesTheClaimantWhenThereIsOne(t *testing.T) {
 }
 
 func TestRunBuildHandsBackTheClaimant(t *testing.T) {
-	sd := &fakeSpindrift{}
+	engine := &fakeKthxEngine{}
 	b := &buildSource{
-		sd:     sd,
+		engine: engine,
 		logger: testLogger(),
 		stats:  newMetrics(),
 		spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
@@ -340,7 +340,7 @@ func TestRunBuildHandsBackTheClaimant(t *testing.T) {
 	}
 	b.runBuild(context.Background(), &buildClaim{ID: "build-1", Claimant: "claim-1"})
 
-	posted := sd.postedResults()
+	posted := engine.postedResults()
 	if len(posted) != 1 || posted[0].claimant != "claim-1" {
 		t.Fatalf("expected the claim's token on the posted result, got %+v", posted)
 	}

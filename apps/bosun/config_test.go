@@ -166,29 +166,64 @@ func TestLoadConfigRejectsAPersistingClassNameThatWouldEscapeItsImageName(t *tes
 	}
 }
 
-func TestLoadConfigDefaultsSpindriftPollInterval(t *testing.T) {
+func TestLoadConfigDefaultsKthxEnginePollInterval(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
 		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 0}},
-		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/run/secrets/spindrift", "classes": ["skiff-build"]}
+		"kthxEngine": {"url": "https://engine.example", "tokenFile": "/run/secrets/engine", "classes": ["skiff-build"]}
 	}`)
 
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.Spindrift == nil {
-		t.Fatal("spindrift config should be set")
+	if cfg.KthxEngine == nil {
+		t.Fatal("kthxEngine config should be set")
 	}
-	if time.Duration(cfg.Spindrift.PollInterval) != defaultPollInterval {
-		t.Errorf("spindrift pollInterval default: got %s", cfg.Spindrift.PollInterval)
+	if time.Duration(cfg.KthxEngine.PollInterval) != defaultPollInterval {
+		t.Errorf("kthxEngine pollInterval default: got %s", cfg.KthxEngine.PollInterval)
 	}
 }
 
-func TestLoadConfigOmittedSpindriftIsNil(t *testing.T) {
+func TestLoadConfigReadsTheLegacySpindriftKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
+		"classes": {"skiff-build": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 0}},
+		"spindrift": {"url": "https://engine.example", "tokenFile": "/run/secrets/engine", "classes": ["skiff-build"]}
+	}`)
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.KthxEngine == nil || cfg.KthxEngine.URL != "https://engine.example" {
+		t.Fatalf("the legacy key should populate KthxEngine, got %+v", cfg.KthxEngine)
+	}
+}
+
+func TestLoadConfigRejectsBothEngineKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	engine := `{"url": "https://engine.example", "tokenFile": "/x", "classes": ["skiff-build"]}`
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
+		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
+		"kthxEngine": `+engine+`,
+		"spindrift": `+engine+`
+	}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error when both kthxEngine and spindrift are set")
+	}
+}
+
+func TestLoadConfigOmittedKthxEngineIsNil(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
@@ -201,64 +236,64 @@ func TestLoadConfigOmittedSpindriftIsNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.Spindrift != nil {
-		t.Fatalf("spindrift should be nil when omitted, got %+v", cfg.Spindrift)
+	if cfg.KthxEngine != nil {
+		t.Fatalf("kthxEngine should be nil when omitted, got %+v", cfg.KthxEngine)
 	}
 }
 
-func TestLoadConfigRejectsSpindriftMissingURL(t *testing.T) {
+func TestLoadConfigRejectsKthxEngineMissingURL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
 		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
-		"spindrift": {"tokenFile": "/x", "classes": ["skiff-build"]}
+		"kthxEngine": {"tokenFile": "/x", "classes": ["skiff-build"]}
 	}`)
 	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("expected error for spindrift with no url")
+		t.Fatal("expected error for kthxEngine with no url")
 	}
 }
 
-func TestLoadConfigRejectsSpindriftMissingTokenFile(t *testing.T) {
+func TestLoadConfigRejectsKthxEngineMissingTokenFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
 		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
-		"spindrift": {"url": "https://spindrift.example", "classes": ["skiff-build"]}
+		"kthxEngine": {"url": "https://engine.example", "classes": ["skiff-build"]}
 	}`)
 	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("expected error for spindrift with no tokenFile")
+		t.Fatal("expected error for kthxEngine with no tokenFile")
 	}
 }
 
-func TestLoadConfigRejectsSpindriftWithNoClasses(t *testing.T) {
+func TestLoadConfigRejectsKthxEngineWithNoClasses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
 		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
-		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/x", "classes": []}
+		"kthxEngine": {"url": "https://engine.example", "tokenFile": "/x", "classes": []}
 	}`)
 	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("expected error for spindrift with no classes")
+		t.Fatal("expected error for kthxEngine with no classes")
 	}
 }
 
-func TestLoadConfigRejectsSpindriftClassNotDeclaredInClasses(t *testing.T) {
+func TestLoadConfigRejectsKthxEngineClassNotDeclaredInClasses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
 		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-nixos": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 1}},
-		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/x", "classes": ["skiff-build"]}
+		"kthxEngine": {"url": "https://engine.example", "tokenFile": "/x", "classes": ["skiff-build"]}
 	}`)
 	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("expected error for a spindrift class not declared in classes")
+		t.Fatal("expected error for a kthxEngine class not declared in classes")
 	}
 }
 

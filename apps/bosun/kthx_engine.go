@@ -22,9 +22,9 @@ var errDraining = errors.New("draining")
 // after its lease lapsed, so the guest's work is unwanted.
 var errClaimLost = errors.New("build request no longer claimed by this host")
 
-// spindriftClient is the build outbox API. bosun always polls; the server never
+// kthxEngineClient is the build outbox API. bosun always polls; the server never
 // dials in.
-type spindriftClient interface {
+type kthxEngineClient interface {
 	// ClaimBuild long-polls for a request in one of classes; nil, nil means none
 	// arrived in the poll window.
 	ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error)
@@ -62,22 +62,22 @@ const (
 	buildResultMaxLog = 1 << 20 // 1 MiB
 )
 
-// sdClient calls the internal bosun API over HTTP.
-type sdClient struct {
+// engineClient calls the internal bosun API over HTTP.
+type engineClient struct {
 	httpClient *http.Client
 	token      string
 	base       string
 }
 
-func newSDClient(url, token string) *sdClient {
-	return &sdClient{
+func newEngineClient(url, token string) *engineClient {
+	return &engineClient{
 		httpClient: &http.Client{},
 		token:      token,
 		base:       strings.TrimSuffix(url, "/"),
 	}
 }
 
-func (c *sdClient) ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error) {
+func (c *engineClient) ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error) {
 	ctx, cancel := context.WithTimeout(ctx, claimTimeout)
 	defer cancel()
 	var claim buildClaim
@@ -91,7 +91,7 @@ func (c *sdClient) ClaimBuild(ctx context.Context, classes []string) (*buildClai
 	return &claim, nil
 }
 
-func (c *sdClient) Heartbeat(ctx context.Context, id, claimant string) error {
+func (c *engineClient) Heartbeat(ctx context.Context, id, claimant string) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	status, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/heartbeat"+claimantQuery(claimant), nil, nil)
@@ -103,7 +103,7 @@ func (c *sdClient) Heartbeat(ctx context.Context, id, claimant string) error {
 	return err
 }
 
-func (c *sdClient) PostResult(ctx context.Context, id, claimant string, res buildResult) error {
+func (c *engineClient) PostResult(ctx context.Context, id, claimant string, res buildResult) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	_, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/result"+claimantQuery(claimant), res, nil)
@@ -120,7 +120,7 @@ func claimantQuery(claimant string) string {
 }
 
 // do returns the status even with no body, so ClaimBuild can tell 204 from 200.
-func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (status int, err error) {
+func (c *engineClient) do(ctx context.Context, method, url string, body, out any) (status int, err error) {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -146,7 +146,7 @@ func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (s
 
 	if resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return resp.StatusCode, fmt.Errorf("spindrift %s %s: %s: %s", method, url, resp.Status, bytes.TrimSpace(data))
+		return resp.StatusCode, fmt.Errorf("kthx engine %s %s: %s: %s", method, url, resp.Status, bytes.TrimSpace(data))
 	}
 	if out != nil && resp.StatusCode != http.StatusNoContent {
 		return resp.StatusCode, json.NewDecoder(resp.Body).Decode(out)
@@ -157,7 +157,7 @@ func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (s
 // buildSource claims build requests, runs each on a skiff and posts back what
 // the guest left. spawn must keep p.spawn's errDraining contract.
 type buildSource struct {
-	sd     spindriftClient
+	engine kthxEngineClient
 	spawn  func(ctx context.Context, claim *buildClaim) (*skiff, error)
 	logger *slog.Logger
 	stats  *metrics
@@ -169,12 +169,12 @@ type buildSource struct {
 // ponytail: one build per host; a second lane is another goroutine.
 func (b *buildSource) buildLoop(ctx context.Context, classes []string, pollInterval time.Duration) {
 	for ctx.Err() == nil {
-		claim, err := b.sd.ClaimBuild(ctx, classes)
+		claim, err := b.engine.ClaimBuild(ctx, classes)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			b.stats.spindriftError()
+			b.stats.kthxEngineError()
 			b.logger.Warn("claim build", "error", err)
 			time.Sleep(pollInterval)
 			continue
@@ -227,7 +227,7 @@ func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 			b.postBuildResult(ctx, claim, res, logger)
 			return
 		case <-heartbeat.C:
-			err := b.sd.Heartbeat(ctx, claim.ID, claim.Claimant)
+			err := b.engine.Heartbeat(ctx, claim.ID, claim.Claimant)
 			switch {
 			case err == nil:
 			// The server cancels a build by refusing its heartbeat. Kill the skiff
@@ -264,7 +264,7 @@ func (b *buildSource) postBuildResult(ctx context.Context, claim *buildClaim, re
 		if i > 0 {
 			time.Sleep(5 * time.Second)
 		}
-		if err = b.sd.PostResult(pctx, claim.ID, claim.Claimant, res); err == nil {
+		if err = b.engine.PostResult(pctx, claim.ID, claim.Claimant, res); err == nil {
 			logger.Info("build result posted", "status", res.Status)
 			return
 		}

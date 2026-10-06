@@ -78,14 +78,14 @@ func main() {
 
 	// Shutdown waits on this: buildLoop finishes a build in flight after ctx ends.
 	var buildDone chan struct{}
-	if cfg.Spindrift != nil {
-		sdTokenRaw, err := os.ReadFile(cfg.Spindrift.TokenFile)
+	if cfg.KthxEngine != nil {
+		engineTokenRaw, err := os.ReadFile(cfg.KthxEngine.TokenFile)
 		if err != nil {
-			logger.Error("read spindrift token file", "path", cfg.Spindrift.TokenFile, "error", err)
+			logger.Error("read kthx engine token file", "path", cfg.KthxEngine.TokenFile, "error", err)
 			os.Exit(1)
 		}
 		builds := &buildSource{
-			sd: newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw))),
+			engine: newEngineClient(cfg.KthxEngine.URL, strings.TrimSpace(string(engineTokenRaw))),
 			spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
 				return p.spawn(ctx, p.buildBerth(claim))
 			},
@@ -95,9 +95,9 @@ func main() {
 		buildDone = make(chan struct{})
 		go func() {
 			defer close(buildDone)
-			builds.buildLoop(ctx, cfg.Spindrift.Classes, time.Duration(cfg.Spindrift.PollInterval))
+			builds.buildLoop(ctx, cfg.KthxEngine.Classes, time.Duration(cfg.KthxEngine.PollInterval))
 		}()
-		logger.Info("spindrift build source enabled", "classes", cfg.Spindrift.Classes)
+		logger.Info("kthx engine build source enabled", "classes", cfg.KthxEngine.Classes)
 	}
 
 	p.pollLoop(ctx)

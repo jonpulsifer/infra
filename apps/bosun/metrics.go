@@ -19,7 +19,7 @@ type metrics struct {
 	ghErrors     int
 	buildClaims  int
 	buildResults map[string]int // "succeeded"|"failed" -> builds finished
-	sdErrors     int
+	engineErrors int
 }
 
 // Exit reasons. "completed" means the guest finished its job and powered off.
@@ -92,10 +92,10 @@ func (m *metrics) buildResult(status string) {
 	m.buildResults[strings.ToLower(status)]++
 }
 
-func (m *metrics) spindriftError() {
+func (m *metrics) kthxEngineError() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sdErrors++
+	m.engineErrors++
 }
 
 // render writes the Prometheus text format by hand. live counts idle and busy
@@ -143,19 +143,19 @@ func (m *metrics) render(live map[string]poolState, desired map[string]int) stri
 	b.WriteString("# TYPE bosun_github_errors_total counter\n")
 	b.WriteString(fmt.Sprintf("bosun_github_errors_total %d\n", m.ghErrors))
 
-	b.WriteString("# HELP bosun_build_claims_total Spindrift build requests claimed.\n")
+	b.WriteString("# HELP bosun_build_claims_total kthx engine build requests claimed.\n")
 	b.WriteString("# TYPE bosun_build_claims_total counter\n")
 	b.WriteString(fmt.Sprintf("bosun_build_claims_total %d\n", m.buildClaims))
 
-	b.WriteString("# HELP bosun_build_results_total Spindrift builds finished, by outcome.\n")
+	b.WriteString("# HELP bosun_build_results_total kthx engine builds finished, by outcome.\n")
 	b.WriteString("# TYPE bosun_build_results_total counter\n")
 	for _, status := range []string{"succeeded", "failed"} {
 		b.WriteString(fmt.Sprintf("bosun_build_results_total{status=%q} %d\n", status, m.buildResults[status]))
 	}
 
-	b.WriteString("# HELP bosun_spindrift_errors_total Spindrift API calls that failed.\n")
-	b.WriteString("# TYPE bosun_spindrift_errors_total counter\n")
-	b.WriteString(fmt.Sprintf("bosun_spindrift_errors_total %d\n", m.sdErrors))
+	b.WriteString("# HELP bosun_kthx_engine_errors_total kthx engine API calls that failed.\n")
+	b.WriteString("# TYPE bosun_kthx_engine_errors_total counter\n")
+	b.WriteString(fmt.Sprintf("bosun_kthx_engine_errors_total %d\n", m.engineErrors))
 	return b.String()
 }
 
