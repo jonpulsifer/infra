@@ -133,7 +133,7 @@ has no port to probe.
     - name: {{ .name }}
       {{- if .secretName }}
       # Straight at the Secret the engine's operator generated — never a Secret
-      # this chart materializes, so the credential never transits Spindrift and
+      # this chart materializes, so the credential never transits the engine and
       # a rotation lands on the next pod without a Deploy. The key is the
       # operator's, not the variable's, which is the one place this differs from
       # `secretEnv` above.

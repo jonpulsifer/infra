@@ -28,7 +28,7 @@ The three facts `reach` decides, resolved once. `private` is an A record at the
 gateway's own load-balancer address, unproxied: RFC1918, so the record type *is*
 the boundary and no policy has to be attached to it. `public` is a proxied CNAME
 at the Target's tunnel, whose ingress stays the single static wildcard rule
-Terraform owns — Spindrift never writes tunnel config (§9).
+Terraform owns — the kthx engine never writes tunnel config (§9).
 */}}
 {{- $recordType := ternary "A" "CNAME" $private }}
 {{- $target := ternary .Values.platform.dns.privateAddress .Values.platform.dns.tunnelHostname $private }}
