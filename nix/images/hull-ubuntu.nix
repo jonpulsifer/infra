@@ -212,7 +212,7 @@ let
       # the tool cache and bun's store. Nothing sets it, so `mktemp` and
       # node/bun's `os.tmpdir()` land on /tmp -- the tmpfs root overlay, which
       # is guest RAM. This repo's own suite has 26 `mkdtemp(tmpdir())` sites in
-      # apps/spindrift alone, several of them holding an extracted bundle at
+      # apps/kthx-engine alone, several of them holding an extracted bundle at
       # the same moment.
       #
       # It is wiped every boot, unlike the caches beside it: /tmp's contract is

@@ -13,6 +13,9 @@ spec:
     name: infra
   dependsOn:
     - name: storage
+    # Raw monitoring.coreos.com objects need their CRDs first, or the dry-run
+    # refuses the whole Kustomization, the HelmRelease that installs them too.
+    - name: monitoring-crds
   decryption:
     provider: sops
     secretRef:

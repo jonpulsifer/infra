@@ -363,7 +363,7 @@ export function readBrainConfig(env: Env): BrainConfig {
     databaseCaFile: text(env, 'MATE_DB_CA_FILE', '/var/run/mate/db-ca/ca.crt'),
     mcpServers: mcpServers(env),
     profileRoot: env.MATE_PROFILE_DIR?.trim() || null,
-    sessionRetentionDays: integer(env, 'MATE_SESSION_RETENTION_DAYS', 14, 0),
+    sessionRetentionDays: integer(env, 'MATE_SESSION_RETENTION_DAYS', 0, 0),
   };
 }
 

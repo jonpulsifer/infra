@@ -1,12 +1,17 @@
 # The identities every vessel repeats — the runtime service account, the
 # controller's project roles, the bucket-lister custom role — live in the
-# spindrift-vessel module (vessel.tf). What stays here is home-vessel-only:
+# kthx-engine-vessel module (vessel.tf). What stays here is home-vessel-only:
 # the controller service account itself, its federation bindings, and the
 # clusters' read path into this vessel's Secret Manager.
 
-resource "google_service_account" "spindrift_controller" {
+resource "google_service_account" "kthx_engine_controller" {
   account_id   = "spindrift-controller"
-  display_name = "Spindrift platform controller"
+  display_name = "kthx engine platform controller"
+}
+
+moved {
+  from = google_service_account.spindrift_controller
+  to   = google_service_account.kthx_engine_controller
 }
 
 # The offsite cluster's spindrift installation, namespace spindrift. The
@@ -17,10 +22,15 @@ locals {
   spindrift_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift:spindrift"
 }
 
-resource "google_service_account_iam_member" "spindrift_controller_workload_identity" {
-  service_account_id = google_service_account.spindrift_controller.name
+resource "google_service_account_iam_member" "kthx_engine_controller_workload_identity" {
+  service_account_id = google_service_account.kthx_engine_controller.name
   role               = "roles/iam.workloadIdentityUser"
   member             = local.spindrift_principal
+}
+
+moved {
+  from = google_service_account_iam_member.spindrift_controller_workload_identity
+  to   = google_service_account_iam_member.kthx_engine_controller_workload_identity
 }
 
 # Signing a V4 storage URL is a separate permission from impersonating.
@@ -31,10 +41,15 @@ resource "google_service_account_iam_member" "spindrift_controller_workload_iden
 # but not `iam.serviceAccounts.signBlob`, so impersonation succeeds while every
 # signature is refused. `roles/iam.serviceAccountTokenCreator` is the role that
 # carries both.
-resource "google_service_account_iam_member" "spindrift_controller_token_creator" {
-  service_account_id = google_service_account.spindrift_controller.name
+resource "google_service_account_iam_member" "kthx_engine_controller_token_creator" {
+  service_account_id = google_service_account.kthx_engine_controller.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = local.spindrift_principal
+}
+
+moved {
+  from = google_service_account_iam_member.spindrift_controller_token_creator
+  to   = google_service_account_iam_member.kthx_engine_controller_token_creator
 }
 
 # The roles the controller holds on this vessel. Declared in this file rather
@@ -81,12 +96,17 @@ data "google_compute_default_service_account" "default" {
 
 # Deploying a Cloud Run function is `functions.deploy` calling `actAs` on the
 # service account its build runs as, the same shape as the runtime `actAs`
-# grant in modules/spindrift-vessel/main.tf — a separate permission from
+# grant in modules/kthx-engine-vessel/main.tf — a separate permission from
 # creating the function itself.
-resource "google_service_account_iam_member" "spindrift_controller_acts_as_default" {
+resource "google_service_account_iam_member" "kthx_engine_controller_acts_as_default" {
   service_account_id = data.google_compute_default_service_account.default.name
   role               = "roles/iam.serviceAccountUser"
-  member             = google_service_account.spindrift_controller.member
+  member             = google_service_account.kthx_engine_controller.member
+}
+
+moved {
+  from = google_service_account_iam_member.spindrift_controller_acts_as_default
+  to   = google_service_account_iam_member.kthx_engine_controller_acts_as_default
 }
 
 # The org policy that strips predefined roles from the compute default

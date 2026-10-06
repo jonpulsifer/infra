@@ -26,7 +26,9 @@ type Config struct {
 	Classes      map[string]Class `json:"classes"`
 	Bin          BinPaths         `json:"bin"`
 	// nil disables the build source.
-	Spindrift *SpindriftConfig `json:"spindrift,omitempty"`
+	KthxEngine *KthxEngineConfig `json:"kthxEngine,omitempty"`
+	// LegacySpindrift is the legacy JSON key for KthxEngine that older modules still write.
+	LegacySpindrift *KthxEngineConfig `json:"spindrift,omitempty"`
 }
 
 // GitHubConfig is a GitHub App installation, which needs Administration: write
@@ -36,9 +38,9 @@ type GitHubConfig struct {
 	PrivateKeyFile string `json:"privateKeyFile"`
 }
 
-// SpindriftConfig long-polls a build outbox and runs each request on a skiff of
+// KthxEngineConfig long-polls a build outbox and runs each request on a skiff of
 // one of Classes.
-type SpindriftConfig struct {
+type KthxEngineConfig struct {
 	URL       string   `json:"url"`
 	TokenFile string   `json:"tokenFile"`
 	Classes   []string `json:"classes"`
@@ -183,24 +185,30 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.DrainTimeout = Duration(defaultDrainTimeout)
 	}
 
-	if cfg.Spindrift != nil {
-		sd := cfg.Spindrift
-		if sd.URL == "" {
-			return nil, fmt.Errorf("config: spindrift.url is required")
+	if cfg.LegacySpindrift != nil {
+		if cfg.KthxEngine != nil {
+			return nil, fmt.Errorf("config: kthxEngine and spindrift are the same setting; set only kthxEngine")
 		}
-		if sd.TokenFile == "" {
-			return nil, fmt.Errorf("config: spindrift.tokenFile is required")
+		cfg.KthxEngine, cfg.LegacySpindrift = cfg.LegacySpindrift, nil
+	}
+	if cfg.KthxEngine != nil {
+		engine := cfg.KthxEngine
+		if engine.URL == "" {
+			return nil, fmt.Errorf("config: kthxEngine.url is required")
 		}
-		if len(sd.Classes) == 0 {
-			return nil, fmt.Errorf("config: spindrift.classes is required")
+		if engine.TokenFile == "" {
+			return nil, fmt.Errorf("config: kthxEngine.tokenFile is required")
 		}
-		for _, name := range sd.Classes {
+		if len(engine.Classes) == 0 {
+			return nil, fmt.Errorf("config: kthxEngine.classes is required")
+		}
+		for _, name := range engine.Classes {
 			if _, ok := cfg.Classes[name]; !ok {
-				return nil, fmt.Errorf("config: spindrift.classes: class %q is not declared in classes", name)
+				return nil, fmt.Errorf("config: kthxEngine.classes: class %q is not declared in classes", name)
 			}
 		}
-		if sd.PollInterval <= 0 {
-			sd.PollInterval = Duration(defaultPollInterval)
+		if engine.PollInterval <= 0 {
+			engine.PollInterval = Duration(defaultPollInterval)
 		}
 	}
 

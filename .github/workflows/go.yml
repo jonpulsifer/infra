@@ -22,9 +22,9 @@ on:
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
+      - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
-      - 'apps/spindrift-verifier/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -36,9 +36,9 @@ on:
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
+      - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
-      - 'apps/spindrift-verifier/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -63,9 +63,9 @@ jobs:
           - apps/fml-attest
           - apps/fml-ceremony
           - apps/fml-pki
+          - apps/kthx-engine-verifier
           - apps/netbench
           - apps/smiirl
-          - apps/spindrift-verifier
     defaults:
       run:
         working-directory: ${{ matrix.module }}

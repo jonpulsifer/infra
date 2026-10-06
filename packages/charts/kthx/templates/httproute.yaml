@@ -11,8 +11,8 @@ metadata:
   annotations:
     # Keeps external-dns from overwriting Terraform's tunnel records with the gateway's
     # private address. Both prefixes: external-dns v0.22.0 moved the default one.
-    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
-    external-dns.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
 spec:
   # No `sectionName`: Cloudflare terminates TLS and the tunnel reaches the HTTP listener.
   parentRefs:

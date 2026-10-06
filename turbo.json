@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "agentGuidance": false,
   "globalEnv": ["NODE_ENV", "STANDALONE"],
   "globalDependencies": ["**/.env.*local", "biome.json"],
   "tasks": {
@@ -85,7 +86,7 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
-    "spindrift#test": {
+    "kthx-engine#test": {
       "dependsOn": ["build"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -104,7 +105,7 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
-    "spindrift#test:chart-pins": {
+    "kthx-engine#test:chart-pins": {
       "inputs": [
         "test/conformance/second-target-admission.test.ts",
         "$TURBO_ROOT$/packages/charts/spindrift/Chart.yaml",
@@ -120,7 +121,7 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/docs/**",
-        "$TURBO_ROOT$/apps/spindrift/src/web/client/diagrams/**"
+        "$TURBO_ROOT$/apps/kthx-engine/src/web/client/diagrams/**"
       ],
       "outputs": ["dist/**"]
     },

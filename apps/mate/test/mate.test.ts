@@ -15,7 +15,7 @@ import type { BrainConfig } from '../src/config.ts';
 import { PostgresCredentialStore } from '../src/credential-store.ts';
 import { CUSTODIAN_INTERVAL_MS } from '../src/custodian.ts';
 import type { KubeConfig } from '../src/kube.ts';
-import { Mate, type SlackSide } from '../src/mate.ts';
+import { Mate, RETENTION_SWEEP_MS, type SlackSide } from '../src/mate.ts';
 import { MCP_RETRY_MS } from '../src/mcp.ts';
 import { CHATGPT_PROVIDER } from '../src/model.ts';
 import { CHATGPT } from '../src/notices.ts';
@@ -371,6 +371,7 @@ describe('stopping', () => {
         'the custodian and the MCP bridge',
       );
       expect(clock.armed()).toContain(SPARE_SWEEP_MS);
+      expect(clock.armed()).toContain(RETENTION_SWEEP_MS);
 
       await one.mate.stop();
 
@@ -378,6 +379,22 @@ describe('stopping', () => {
     } finally {
       await mcp.stop();
     }
+  });
+
+  test('keeps every session when no retention is set', async () => {
+    const clock = new ShiftedClock(MORNING);
+    const one = await boot({
+      clock,
+      config: { brain: { sessionRetentionDays: 0 } },
+    });
+    await eventually(
+      () => clock.armed().includes(SPARE_SWEEP_MS),
+      'the spare sweep',
+    );
+
+    expect(clock.armed()).not.toContain(RETENTION_SWEEP_MS);
+
+    await one.mate.stop();
   });
 
   test('a sign-in waiting for its code hears that it no longer works before Discord closes', async () => {

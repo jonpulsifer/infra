@@ -65,8 +65,8 @@ Windows keeps its own clone, and no link crosses the WSL boundary. See
 - `pi/mate/` is the `mate` pi package. It holds Rowbutt's persona, a note on
   the workstation, the hipster theme, prompts and status line, and extensions
   that give pi the weather, kthx and `.mcp.json` MCP servers and this repo's
-  `.agents/skills` in other repos. `mise run --cd dotfiles pi:setup` installs
-  it from `~/.dotfiles/pi/mate`, fills missing keys of pi's `settings.json`
+  `.agents/skills` in other repos. `mise run --cd dotfiles pi:setup` declares
+  it in pi's `settings.json` as `../../.dotfiles/pi/mate`, fills missing keys
   from `pi/settings.seed.json`, and removes links into `.pi/agent` and copies
   of this repo's files from pi's `extensions`, `prompts` and `themes`. It runs
   on Linux and macOS only.

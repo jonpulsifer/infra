@@ -173,7 +173,7 @@ describe('the deploy label', () => {
 });
 
 describe('the value contract', () => {
-  // The number itself is checked in `apps/spindrift`'s suite.
+  // The number itself is checked in `apps/kthx-engine`'s suite.
   test('every rendered object carries the version it was rendered under', async () => {
     // Helm ignores unknown values, so each object records the contract it was rendered under.
     const chart = await chartMetadata();
@@ -709,7 +709,7 @@ describe('datastore delivery', () => {
   });
 
   test('a job gets its connections too', async () => {
-    // Both workloads build the container through `spindrift-app.podSpec`.
+    // Both workloads build the container through `kthx-app.podSpec`.
     const variables = env(
       one(
         await render({ ...ATTACHED, app: { ...ATTACHED.app, kind: 'job' } }),

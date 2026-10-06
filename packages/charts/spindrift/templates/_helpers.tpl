@@ -1,7 +1,7 @@
 {{/*
 The release's base name. Every object is derived from it.
 */}}
-{{- define "spindrift.fullname" -}}
+{{- define "kthx-engine.fullname" -}}
 {{- default .Release.Name .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -22,17 +22,17 @@ registry it is published to.
 `namespaceOverride` stays for a release that genuinely wants to write outside
 the namespace it was installed into.
 */}}
-{{- define "spindrift.namespace" -}}
+{{- define "kthx-engine.namespace" -}}
 {{- default .Release.Namespace .Values.namespaceOverride }}
 {{- end }}
 
-{{- define "spindrift.serviceAccountName" -}}
-{{- default (include "spindrift.fullname" .) .Values.serviceAccount.name }}
+{{- define "kthx-engine.serviceAccountName" -}}
+{{- default (include "kthx-engine.fullname" .) .Values.serviceAccount.name }}
 {{- end }}
 
-{{- define "spindrift.labels" -}}
-app.kubernetes.io/name: {{ include "spindrift.fullname" . }}
-app.kubernetes.io/part-of: {{ include "spindrift.fullname" . }}
+{{- define "kthx-engine.labels" -}}
+app.kubernetes.io/name: {{ include "kthx-engine.fullname" . }}
+app.kubernetes.io/part-of: {{ include "kthx-engine.fullname" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 {{- end }}
@@ -41,25 +41,25 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 Selector labels for one process. `app.kubernetes.io/component` is what
 separates the two Deployments and what the Service targets.
 */}}
-{{- define "spindrift.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "spindrift.fullname" . }}
+{{- define "kthx-engine.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "kthx-engine.fullname" . }}
 app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
-{{- define "spindrift.databaseName" -}}
-{{ include "spindrift.fullname" . }}-db
+{{- define "kthx-engine.databaseName" -}}
+{{ include "kthx-engine.fullname" . }}-db
 {{- end }}
 
 {{/*
 Refuses a recovery that archives into the prefix it recovers from: the plugin checks
 the archive is empty on the first WAL and the Cluster sticks at `Expected empty archive`.
 */}}
-{{- define "spindrift.backupPrefixes" -}}
+{{- define "kthx-engine.backupPrefixes" -}}
 {{- with .Values.backup.recoverFrom }}
 {{- if not $.Values.backup.endpointURL }}
 {{- fail "backup.recoverFrom needs backup.endpointURL: the recovery reads the garage ObjectStore" }}
 {{- end }}
-{{- if eq . (default (include "spindrift.databaseName" $) $.Values.backup.serverName) }}
+{{- if eq . (default (include "kthx-engine.databaseName" $) $.Values.backup.serverName) }}
 {{- fail (printf "backup.recoverFrom %q is the prefix this Cluster archives to: set backup.serverName to a new one" .) }}
 {{- end }}
 {{- end }}
@@ -70,9 +70,9 @@ The migration Job's name carries a digest of every input to its immutable pod
 template. New migrations arrive with a new image and become a new Job; an
 unrelated chart revision leaves the completed Job alone.
 */}}
-{{- define "spindrift.migrationName" -}}
+{{- define "kthx-engine.migrationName" -}}
 {{- $inputs := dict "image" .Values.image "sandbox" .Values.sandbox "envFromSecret" .Values.envFromSecret -}}
 {{- $digest := toJson $inputs | sha256sum | trunc 20 -}}
-{{ include "spindrift.fullname" . }}-migrate-{{ $digest }}
+{{ include "kthx-engine.fullname" . }}-migrate-{{ $digest }}
 {{- end }}
 

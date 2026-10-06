@@ -23,6 +23,10 @@ spec:
     remediation:
       retries: 5
   values:
+    # The monitoring-crds Kustomization owns the CRDs. The chart installs them
+    # from its crds/ directory, so disabling them here deletes none.
+    crds:
+      enabled: false
     defaultRules:
       # target-down.yaml declares it without the Windows desktops.
       disabled:

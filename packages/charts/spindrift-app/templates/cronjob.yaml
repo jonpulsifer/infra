@@ -6,12 +6,12 @@ and a CronJob keeps its run history across upgrades.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "spindrift-app.fullname" . }}
+  name: {{ include "kthx-app.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "spindrift-app.labels" . | nindent 4 }}
+    {{- include "kthx-app.labels" . | nindent 4 }}
   annotations:
-    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+    {{- include "kthx-app.contractAnnotations" . | nindent 4 }}
 spec:
   # The CronJob exists even unscheduled, so a manual run has something to trigger.
   suspend: {{ not .Values.app.schedule }}
@@ -23,19 +23,19 @@ spec:
   jobTemplate:
     metadata:
       labels:
-        {{- include "spindrift-app.labels" . | nindent 8 }}
+        {{- include "kthx-app.labels" . | nindent 8 }}
     spec:
       backoffLimit: 0
       template:
         metadata:
           labels:
-            {{- include "spindrift-app.podLabels" . | nindent 12 }}
+            {{- include "kthx-app.podLabels" . | nindent 12 }}
           annotations:
-            {{- include "spindrift-app.contractAnnotations" . | nindent 12 }}
+            {{- include "kthx-app.contractAnnotations" . | nindent 12 }}
             {{- with .Values.shared.podAnnotations }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
         spec:
           restartPolicy: Never
-          {{- include "spindrift-app.podSpec" . | nindent 10 }}
+          {{- include "kthx-app.podSpec" . | nindent 10 }}
 {{- end }}

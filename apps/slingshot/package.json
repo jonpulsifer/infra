@@ -12,7 +12,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@google-cloud/firestore": "9.2.0",
+    "@google-cloud/firestore": "9.3.0",
     "@hookform/resolvers": "5.9.1",
     "@radix-ui/react-accordion": "1.2.20",
     "@radix-ui/react-alert-dialog": "1.1.23",
@@ -48,7 +48,7 @@
     "cmdk": "1.1.1",
     "date-fns": "4.4.0",
     "embla-carousel-react": "8.6.0",
-    "motion": "13.4.5",
+    "motion": "13.4.6",
     "google-auth-library": "11.1.0",
     "input-otp": "1.5.0",
     "lucide-react": "1.48.0",

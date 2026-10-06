@@ -39,7 +39,7 @@ module "bluenose" {
   billing_account = data.google_billing_account.cloudlab.id
   labels = {
     environment = "production"
-    platform    = "spindrift"
+    platform    = "kthx-engine"
   }
 }
 

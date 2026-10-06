@@ -4,8 +4,8 @@ barman-cloud plugin into the site's Garage. Empty `backup.endpointURL` renders n
 */}}
 {{- if .Values.database.enabled }}
 {{- with .Values.backup.endpointURL }}
-{{- $db := include "spindrift.databaseName" $ }}
-{{- $namespace := (include "spindrift.namespace" $) }}
+{{- $db := include "kthx-engine.databaseName" $ }}
+{{- $namespace := (include "kthx-engine.namespace" $) }}
 {{- if $.Values.backup.externalSecret }}
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -13,7 +13,7 @@ metadata:
   name: garage-cnpg
   namespace: {{ $namespace }}
   labels:
-    {{- include "spindrift.labels" $ | nindent 4 }}
+    {{- include "kthx-engine.labels" $ | nindent 4 }}
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -40,7 +40,7 @@ metadata:
   name: garage
   namespace: {{ $namespace }}
   labels:
-    {{- include "spindrift.labels" $ | nindent 4 }}
+    {{- include "kthx-engine.labels" $ | nindent 4 }}
 spec:
   retentionPolicy: {{ $.Values.backup.retention | quote }}
   configuration:
@@ -61,7 +61,7 @@ metadata:
   name: {{ $db }}
   namespace: {{ $namespace }}
   labels:
-    {{- include "spindrift.labels" $ | nindent 4 }}
+    {{- include "kthx-engine.labels" $ | nindent 4 }}
 spec:
   schedule: {{ $.Values.backup.schedule | quote }}
   method: plugin

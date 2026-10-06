@@ -41,7 +41,7 @@ import { readerTalosconfig } from './talosconfig.ts';
 import { DRAIN_MS, Threads, type ThreadsDeps } from './threads.ts';
 
 const DAY_MS = 86_400_000;
-const RETENTION_SWEEP_MS = 3_600_000;
+export const RETENTION_SWEEP_MS = 3_600_000;
 // A real mint at boot and on a timer keeps `mate_github_app_ready` current
 // even when no turn has pushed.
 const PREFLIGHT_MS = 15 * 60_000;

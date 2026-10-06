@@ -10,10 +10,10 @@ here writes a DNS record or holds a Cloudflare credential.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: Gateway
 metadata:
-  name: {{ include "spindrift.fullname" . }}-gateway
-  namespace: {{ include "spindrift.namespace" . }}
+  name: {{ include "kthx-engine.fullname" . }}-gateway
+  namespace: {{ include "kthx-engine.namespace" . }}
   labels:
-    {{- include "spindrift.labels" . | nindent 4 }}
+    {{- include "kthx-engine.labels" . | nindent 4 }}
   annotations:
     cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
 spec:

@@ -34,7 +34,7 @@ cover what an agent needs beyond it. The `kubernetes-gitops` skill applies too.
 - A resource that differs in more than its substitutions goes in each
   cluster's directory.
 - folly has `nodes/` and its own storage overlay, and offsite has
-  `monitoring-crds/`. A change that renders on one cluster can fail on the
+  `garage/`. A change that renders on one cluster can fail on the
   other.
 - Render both clusters with `mise run k8s:render-apps`. For one directory,
   such as `apps` or `monitoring`, run `kubectl kustomize clusters/<site>/<dir>`

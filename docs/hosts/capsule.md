@@ -26,6 +26,8 @@ capsule is a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly
 
 Reach it at `capsule.lolwtf.ca` or [`capsule.<tailnet>`](index.md#reach-a-host).
 
+Rowbutt's sandboxes on offsite reach Lab Net hosts with capsule as their ssh jump host. offsite's Kubernetes ranges reach Lab Net only on capsule's port 22. See [Routing and firewall](../platform/network/routing-and-firewall.md).
+
 ## Quirks
 
 - `nix/hosts/capsule.nix` forces the file system labels `NIXOS_DNS` and `FW_DNS`, which the NVMe carries. If they change, the host does not find its root and firmware partitions at boot.

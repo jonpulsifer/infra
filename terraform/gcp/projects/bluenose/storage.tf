@@ -1,4 +1,4 @@
-resource "google_storage_bucket" "spindrift_source" {
+resource "google_storage_bucket" "kthx_engine_source" {
   name                        = "bluenose-spindrift-source"
   location                    = local.region
   force_destroy               = false
@@ -47,14 +47,24 @@ resource "google_storage_bucket" "spindrift_source" {
   depends_on = [module.vessel]
 }
 
-resource "google_storage_bucket_iam_member" "spindrift_source" {
-  bucket = google_storage_bucket.spindrift_source.name
+moved {
+  from = google_storage_bucket.spindrift_source
+  to   = google_storage_bucket.kthx_engine_source
+}
+
+resource "google_storage_bucket_iam_member" "kthx_engine_source" {
+  bucket = google_storage_bucket.kthx_engine_source.name
   role   = "roles/storage.admin"
-  member = google_service_account.spindrift_controller.member
+  member = google_service_account.kthx_engine_controller.member
+}
+
+moved {
+  from = google_storage_bucket_iam_member.spindrift_source
+  to   = google_storage_bucket_iam_member.kthx_engine_source
 }
 
 resource "google_storage_bucket_iam_member" "trusted_builder_source" {
-  bucket = google_storage_bucket.spindrift_source.name
+  bucket = google_storage_bucket.kthx_engine_source.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${data.google_project.trusted_builds.number}@cloudbuild.gserviceaccount.com"
 }

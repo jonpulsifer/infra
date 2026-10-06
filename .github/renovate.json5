@@ -612,7 +612,7 @@
       //     holds a tag the tree has not already named, so there is nothing to
       //     bump toward; a tag moved on its own is a red test, not an upgrade.
       //
-      // Scoped to `clusters/` on purpose, not to the owner. `apps/spindrift/`'s
+      // Scoped to `clusters/` on purpose, not to the owner. `apps/kthx-engine/`'s
       // Dockerfile pins `ghcr.io/jonpulsifer/spindrift-verifier` by digest to
       // build the verifier binary in, that image has no `deploy` entry, and
       // Renovate is the only thing that updates it — an owner-wide block would

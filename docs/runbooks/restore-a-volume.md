@@ -21,7 +21,7 @@ Use this runbook to restore a PersistentVolumeClaim from a Velero backup. Velero
 1. Find the newest completed backup of the schedule `daily`.
 
    ```bash
-   velero backup get --kubecontext <site>
+   velero backup get --selector velero.io/schedule-name=daily --kubecontext <site>
    ```
 
    Result: Backup names of the form `daily-<timestamp>`.
@@ -49,10 +49,10 @@ Use this runbook to restore a PersistentVolumeClaim from a Velero backup. Velero
 
    Result: `persistentvolumeclaim "<pvc>" deleted`.
 
-5. Restore the namespace objects of the app. `--selector` narrows the restore to labelled objects.
+5. Restore the pod, the claim and the volume. Do not use `--selector`. Include `persistentvolumes`, or the claim stays `Pending`.
 
    ```bash
-   velero restore create --from-backup <backup> --include-namespaces <namespace> --selector app.kubernetes.io/name=<app> --wait --kubecontext <site>
+   velero restore create --from-backup <backup> --include-namespaces <namespace> --include-resources pods,persistentvolumeclaims,persistentvolumes --wait --kubecontext <site>
    ```
 
    Result: `Restore completed with status: Completed`.
@@ -71,10 +71,16 @@ Use this runbook to restore a PersistentVolumeClaim from a Velero backup. Velero
    flux resume helmrelease <release> -n <namespace> --context <site>
    ```
 
-8. Make sure that the app pod is `Running` and the app has its files.
+8. Make sure that the restored pod is `Running` and has the files. Name the container, because the pod keeps the `restore-wait` init container.
 
    ```bash
-   kubectl get pods -n <namespace> --context <site>
+   kubectl exec <pod> -c <container> -n <namespace> --context <site> -- ls <mount-path>
+   ```
+
+9. Delete the restored pod. The Deployment pod must not share the claim with it.
+
+   ```bash
+   kubectl delete pod <pod> -n <namespace> --context <site>
    ```
 
 ## If something goes wrong
@@ -84,7 +90,29 @@ Use this runbook to restore a PersistentVolumeClaim from a Velero backup. Velero
 | `velero backup get` lists no backups. | The BackupStorageLocation is unavailable. | Run `velero backup-location get --kubecontext <site>`. Make sure that Garage answers. |
 | The backup has no `Pod Volume Backups`. | The pod has no annotation, or its PVC is bound to a hostPath volume. | Follow [Migrate a local-path volume](migrate-a-local-path-volume.md). Restore an older backup that has the volume. |
 | The restore is `PartiallyFailed`. | An object exists, or a plugin is missing. | Run `velero restore logs <restore> --kubecontext <site>`. Delete the object that exists, then restore again. |
+| The restore stays `InProgress`, and `velero restore delete` waits. | The restored pod does not run, so its PodVolumeRestore never ends. | Run `kubectl -n velero patch podvolumerestore <pvr> --type merge -p '{"spec":{"cancel":true}}'`. |
 | The restored pod is `Init` for a long time. | The init container restores the volume. | Wait. Read `kubectl logs <pod> -c restore-wait -n <namespace>`. |
+
+## Restore beside the live volume
+
+Use this procedure to test a backup while the app runs. It leaves the live volume as it is.
+
+> [!WARNING]
+> A resource modifier patch that fails does not block the object. Velero creates the object unmodified and reports only a namespace error at the end. Use `test` operations. Make sure that the pod spec is right after creation.
+
+1. Restore into a new namespace. Include the same three resources as step 5.
+
+   ```bash
+   velero restore create --from-backup <backup> --include-namespaces <namespace> --namespace-mappings <namespace>:drill-<namespace> --include-resources pods,persistentvolumeclaims,persistentvolumes --resource-modifier-configmap <modifiers> --wait --kubecontext <site>
+   ```
+
+2. Put a resource modifier ConfigMap in the `velero` namespace first. The rules drop scarce resources such as `gpu.intel.com/i915` from limits and requests. They drop hostPath mounts of live data. They set the container command to `sleep infinity`.
+
+3. Do not patch `/metadata/ownerReferences`. Velero removes it, and the patch fails.
+
+4. Make sure that the restored claim is `Bound` to a new volume. Compare the files with the live pod.
+
+5. Delete the namespace `drill-<namespace>`. If a restore stays `InProgress`, use the troubleshooting row above.
 
 ## Related
 

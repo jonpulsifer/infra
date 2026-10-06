@@ -49,7 +49,7 @@ spec:
         - name: mate
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/mate…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/mate:latest@sha256:9824fac7ccc4d860531ebe6974f1521ba144ce111f97d695bf21214ec32a6f80
+          image: ghcr.io/jonpulsifer/mate:latest@sha256:ab26dde15300530513d2c8e00c4bbfc22e185a43d877a6158eb29e08f14dbb2e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -162,7 +162,7 @@ spec:
             # Digest-pinned: the agent's tool calls run in this image with no
             # approval step. CD anchors on the image name beside the digest.
             - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:9e1fe3e9a80006de474805aefb5717c729d0aa464396f20111594c2b104c3133
+              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:71d6a8372c8aebd4533700936ad528d832ace4facec2f6186b228bd272388b73
             # The numeric App id, not the client id. mate mints a 1-hour token per
             # turn from the key; a sandbox never holds the key.
             - name: MATE_GITHUB_APP_ID
@@ -187,12 +187,6 @@ spec:
             # sudo. mate stamps it into the sandbox per turn and clears it after.
             - name: MATE_SSH_KEY_FILE
               value: /var/run/mate/ssh/private-key
-            # The host the sandbox's ssh jumps through to folly's Lab Net hosts.
-            # riptide, a folly node, until offsite has a route to Lab Net and
-            # folly's firewall admits the sandbox on capsule's port 22; mate's
-            # default is capsule, which stays NixOS when the nodes move to Talos.
-            - name: MATE_SANDBOX_LAB_JUMP
-              value: riptide.lolwtf.ca
             # An os:reader talosconfig with a context per cluster, stamped into
             # the sandbox per turn and cleared after. mate refuses a file with
             # any other role, and reads a missing one as none.

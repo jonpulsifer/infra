@@ -33,7 +33,7 @@ export const defaults = (): Options => ({
   // The kthx image build prunes to its own package, so its diagrams live there.
   assets: [
     join(ROOT, "docs", "assets"),
-    join(ROOT, "apps", "spindrift", "src", "web", "client", "diagrams"),
+    join(ROOT, "apps", "kthx-engine", "src", "web", "client", "diagrams"),
   ],
 });
 

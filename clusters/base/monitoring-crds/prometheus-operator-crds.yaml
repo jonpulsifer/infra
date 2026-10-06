@@ -13,8 +13,8 @@ spec:
   chart:
     spec:
       chart: prometheus-operator-crds
-      # Same operator (v0.94.0) as kube-prometheus-stack 91.x, whose operator on
-      # offsite reads these CRDs; bump the two together.
+      # Same operator (v0.94.1) as kube-prometheus-stack 91.x, whose operator on
+      # each cluster reads these CRDs; bump the two together.
       version: 32.0.1
       sourceRef:
         kind: HelmRepository

@@ -22,7 +22,7 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 	m.buildResult(buildSucceeded)
 	m.buildResult(buildFailed)
 	m.buildResult(buildFailed)
-	m.spindriftError()
+	m.kthxEngineError()
 
 	got := m.render(
 		map[string]poolState{"skiff-test": {idle: 1, busy: 2}},
@@ -43,7 +43,7 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 		`bosun_build_claims_total 2`,
 		`bosun_build_results_total{status="succeeded"} 1`,
 		`bosun_build_results_total{status="failed"} 2`,
-		`bosun_spindrift_errors_total 1`,
+		`bosun_kthx_engine_errors_total 1`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing series %q in:\n%s", want, got)
@@ -51,7 +51,7 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 	}
 
 	// The textfile collector rejects the whole file if a series lacks metadata.
-	for _, name := range []string{"bosun_skiffs", "bosun_skiffs_desired", "bosun_skiff_boots_total", "bosun_skiff_exits_total", "bosun_skiff_time_to_online_seconds", "bosun_github_errors_total", "bosun_build_claims_total", "bosun_build_results_total", "bosun_spindrift_errors_total"} {
+	for _, name := range []string{"bosun_skiffs", "bosun_skiffs_desired", "bosun_skiff_boots_total", "bosun_skiff_exits_total", "bosun_skiff_time_to_online_seconds", "bosun_github_errors_total", "bosun_build_claims_total", "bosun_build_results_total", "bosun_kthx_engine_errors_total"} {
 		if !strings.Contains(got, "# TYPE "+name+" ") {
 			t.Errorf("missing TYPE line for %s", name)
 		}

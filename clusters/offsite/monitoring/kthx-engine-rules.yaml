@@ -1,0 +1,46 @@
+---
+# reconciler_attempt_duration_seconds_count counts terminal attempts, so one
+# increase() window is the whole query. The second arm catches a series born at
+# 1 after a reconciler restart, which increase() reads as 0.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kthx-engine
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: spindrift
+    release: prom-stack
+spec:
+  groups:
+    - name: kthx-engine
+      rules:
+        # A terminal FAILED, not a retry. The Deploy row carries the reason.
+        - alert: KthxEngineDeployFailed
+          expr: |
+            increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"}[15m]) > 0
+            or (
+              reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"}
+              unless reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"} offset 15m
+            )
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "A kthx deploy attempt landed FAILED"
+            description: "kind=deploy outcome=FAILED in the last 15m. Check the kthx deploys ledger (`/deploys`) for the reason and the blame the kthx engine already diagnosed."
+
+        # The reconciler holding the claim died or hung mid-apply; another
+        # attempt still settles the row.
+        - alert: KthxEngineDeployLost
+          expr: |
+            increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"}[15m]) > 0
+            or (
+              reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"}
+              unless reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"} offset 15m
+            )
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "A kthx engine reconciler died or hung mid-deploy"
+            description: "kind=deploy outcome=LOST in the last 15m: an attempt's claim was reclaimed rather than settling the row. The deploy itself may still land via a later attempt — check the kthx deploys ledger (`/deploys`) and the reconciler pod's own restarts/logs."

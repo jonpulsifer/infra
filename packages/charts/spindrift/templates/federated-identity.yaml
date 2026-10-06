@@ -5,17 +5,17 @@ The process reads it through `GOOGLE_APPLICATION_CREDENTIALS`, which the
 deployment sets beside the mount.
 
 An ordinary ADC `external_account` document, so any client in the process finds
-the same credential rather than a Spindrift-shaped one only Spindrift reads.
+the same credential rather than a kthx-engine-shaped one only the engine reads.
 */}}
 {{- if .Values.serviceAccount.token.gcpAudience }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "spindrift.fullname" . }}-federated-identity
-  namespace: {{ include "spindrift.namespace" . }}
+  name: {{ include "kthx-engine.fullname" . }}-federated-identity
+  namespace: {{ include "kthx-engine.namespace" . }}
   labels:
-    {{- include "spindrift.labels" . | nindent 4 }}
+    {{- include "kthx-engine.labels" . | nindent 4 }}
 data:
   gcp-credentials.json: |-
     {

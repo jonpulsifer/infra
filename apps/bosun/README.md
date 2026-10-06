@@ -46,7 +46,7 @@ bosun -config config.json
   one, the guest root is a tmpfs overlay and `memory` is also the disk budget.
 - `bin.cloudHypervisor`, `bin.virtiofsd` and `bin.passt` override the binaries.
   Unset ones come from `PATH`.
-- With `spindrift` set, bosun also polls the kthx built-apps engine for build
+- With `kthxEngine` set, bosun also polls the kthx built-apps engine for build
   requests and runs each one on a skiff.
 
 On SIGTERM, bosun removes idle skiffs, gives busy skiffs `drainTimeout`

@@ -12,14 +12,14 @@ reconciler serves nothing, so it has no port and no probe.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "spindrift.fullname" $top }}-{{ $process.name }}
-  namespace: {{ include "spindrift.namespace" $top }}
+  name: {{ include "kthx-engine.fullname" $top }}-{{ $process.name }}
+  namespace: {{ include "kthx-engine.namespace" $top }}
   labels:
-    {{- include "spindrift.labels" $top | nindent 4 }}
+    {{- include "kthx-engine.labels" $top | nindent 4 }}
     app.kubernetes.io/component: {{ $process.name }}
   annotations:
     {{- if $top.Values.database.enabled }}
-    app.kubernetes.io/database: {{ include "spindrift.databaseName" $top }}
+    app.kubernetes.io/database: {{ include "kthx-engine.databaseName" $top }}
     {{- end }}
     # `NODE_EXTRA_CA_CERTS` is read once at start, so a changed bundle needs a restart, even one
     # this release does not own, such as `kube-root-ca.crt` after a cluster CA rotation.
@@ -40,17 +40,17 @@ spec:
       maxUnavailable: 1
   selector:
     matchLabels:
-      {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
+      {{- include "kthx-engine.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "spindrift.labels" $top | nindent 8 }}
+        {{- include "kthx-engine.labels" $top | nindent 8 }}
         app.kubernetes.io/component: {{ $process.name }}
     spec:
       {{- if $top.Values.sandbox }}
       runtimeClassName: gvisor
       {{- end }}
-      serviceAccountName: {{ include "spindrift.serviceAccountName" $top }}
+      serviceAccountName: {{ include "kthx-engine.serviceAccountName" $top }}
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -70,7 +70,7 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "spindrift.databaseName" $top }}-app
+                  name: {{ include "kthx-engine.databaseName" $top }}-app
                   key: uri
           volumeMounts:
             - name: tmp
@@ -107,9 +107,9 @@ spec:
             {{- if $process.serves }}
             # The machine routes also answer on this Service's in-cluster names.
             - name: SPINDRIFT_SERVICE_NAME
-              value: {{ include "spindrift.fullname" $top | quote }}
+              value: {{ include "kthx-engine.fullname" $top | quote }}
             - name: SPINDRIFT_SERVICE_NAMESPACE
-              value: {{ include "spindrift.namespace" $top | quote }}
+              value: {{ include "kthx-engine.namespace" $top | quote }}
             {{- end }}
             {{- if contains "@" $top.Values.image }}
             # The footer's version: `sha256:` and 12 hex characters, as `shortDigest` prints it. A
@@ -146,7 +146,7 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "spindrift.databaseName" $top }}-app
+                  name: {{ include "kthx-engine.databaseName" $top }}-app
                   key: uri
             {{- end }}
             {{- range $top.Values.env }}
@@ -210,7 +210,7 @@ spec:
                   expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
                   path: gcp-token
               - configMap:
-                  name: {{ include "spindrift.fullname" $top }}-federated-identity
+                  name: {{ include "kthx-engine.fullname" $top }}-federated-identity
                   items:
                     - key: gcp-credentials.json
                       path: gcp-credentials.json

@@ -1,6 +1,6 @@
 apiVersion: v2
 name: spindrift
-description: The Spindrift installer chart — the web and reconciler Deployments, their database, and the route the UI is served on
+description: The kthx engine installer chart — the web and reconciler Deployments, their database, and the route the UI is served on
 type: application
-version: 0.5.1
+version: 0.5.2
 appVersion: "latest"

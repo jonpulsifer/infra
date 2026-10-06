@@ -35,13 +35,13 @@ Flux deploys quick sites from `packages/charts/kthx/` in git. It deploys the eng
 
 | Alert | Meaning | Runbook |
 | --- | --- | --- |
-| `SpindriftDeployFailed` | A deploy ended FAILED. The console's Deploys page shows the reason. | |
-| `SpindriftDeployLost` | A reconciler stopped during a deploy. Read its pod's logs. | |
+| `KthxEngineDeployFailed` | A deploy ended FAILED. The console's Deploys page shows the reason. | |
+| `KthxEngineDeployLost` | A reconciler stopped during a deploy. Read its pod's logs. | |
 
 [Quick sites](kthx/sites.md#operate) lists its alerts. [Install kthx](../runbooks/install-kthx.md) installs the engine, and [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md) gives an agent the MCP endpoint. [Operate Postgres](../runbooks/operate-postgres.md) covers both databases.
 
 ## Reference
 
 - Quick sites: `apps/kthx/`, `packages/kthx/`, `packages/charts/kthx/` and `clusters/offsite/apps/kthx/`. Image `ghcr.io/jonpulsifer/kthx`.
-- Built apps: `apps/spindrift/`, `packages/charts/spindrift/`, `packages/charts/spindrift-app/`, `clusters/offsite/apps/spindrift/` and `clusters/base/platform/spindrift-target/`. Image `ghcr.io/jonpulsifer/spindrift`.
-- Cloud: `terraform/network/cloudflare/kthx.dev.tf`, `terraform/network/cloudflare/spindrift.tf` and `terraform/gcp/projects/bluenose/`
+- Built apps: `apps/kthx-engine/`, `packages/charts/spindrift/`, `packages/charts/spindrift-app/`, `clusters/offsite/apps/spindrift/` and `clusters/base/platform/spindrift-target/`. Image `ghcr.io/jonpulsifer/spindrift`.
+- Cloud: `terraform/network/cloudflare/kthx.dev.tf`, `terraform/network/cloudflare/kthx-engine.tf` and `terraform/gcp/projects/bluenose/`
