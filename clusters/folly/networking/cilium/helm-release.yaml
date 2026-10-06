@@ -26,8 +26,35 @@ spec:
     autoDirectNodeRoutes: true
     devices: eno+ enp+ tailscale0
     kubeProxyReplacement: true
-    k8sServiceHost: ${API_SERVER_IP}
-    k8sServicePort: ${API_SERVER_PORT}
+    # KubePrism, Talos's API server proxy on every node.
+    k8sServiceHost: localhost
+    k8sServicePort: 7445
+    # Talos mounts cgroup2 itself and does not let a pod load kernel modules.
+    cgroup:
+      autoMount:
+        enabled: false
+      hostRoot: /sys/fs/cgroup
+    securityContext:
+      capabilities:
+        # The chart's defaults without SYS_MODULE. Compare them with the
+        # chart's values.yaml at each Cilium bump.
+        ciliumAgent:
+          - CHOWN
+          - KILL
+          - NET_ADMIN
+          - NET_RAW
+          - IPC_LOCK
+          - SYS_ADMIN
+          - SYS_RESOURCE
+          - DAC_OVERRIDE
+          - FOWNER
+          - SETGID
+          - SETUID
+          - SYSLOG
+        cleanCiliumState:
+          - NET_ADMIN
+          - SYS_ADMIN
+          - SYS_RESOURCE
     routingMode: native
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableIPv4Masquerade: true
