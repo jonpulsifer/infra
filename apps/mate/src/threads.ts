@@ -14,7 +14,12 @@ import type { Clock, Handle } from './clock.ts';
 import type { Config } from './config.ts';
 import type { TeardownReason } from './lease.ts';
 import { type Log, plain } from './log.ts';
-import { type Instruments, lazyInstruments, type StoreOp } from './metrics.ts';
+import {
+  type Instruments,
+  inboundIgnored,
+  lazyInstruments,
+  type StoreOp,
+} from './metrics.ts';
 import {
   DAY_SPENT,
   GAVE_UP_WAITING,
@@ -579,16 +584,18 @@ export class Threads {
     return thread;
   }
 
-  /** Counted and logged without its words: a human's message mate stays silent on. */
   private ignored(message: Inbound, reason: InboundDropReason): void {
-    this.metrics.inboundDropped(message.surface, reason);
-    this.deps.log.info('an inbound message was ignored', {
-      surface: message.surface,
+    inboundIgnored(
+      this.metrics,
+      this.deps.log,
+      {
+        surface: message.surface,
+        channelId: message.channelId,
+        threadId: message.threadId,
+        messageId: message.id,
+      },
       reason,
-      channelId: message.channelId,
-      threadId: message.threadId,
-      messageId: message.id,
-    });
+    );
   }
 
   /** Why a message in a known thread runs nothing: its `+id` cannot run here. */

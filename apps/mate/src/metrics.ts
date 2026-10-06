@@ -15,6 +15,7 @@ import type {
   MintSample,
   TurnSandboxSource,
 } from './lease.ts';
+import type { Log } from './log.ts';
 import { LANES, type Lane, type Mode } from './profiles.ts';
 import type { Failure, Route, RouteReason } from './route.ts';
 import type { StopReason } from './sandbox.ts';
@@ -84,6 +85,25 @@ export interface Instruments extends HandsInstruments, McpInstruments {
   primaryFailed(reason: Failure): void;
   /** `null` reports nothing: no fallback, so nothing routes. */
   primaryUp(up: boolean | null): void;
+}
+
+/** Where an ignored message was, never what it said. */
+export interface IgnoredMessage {
+  readonly surface: SurfaceName;
+  readonly channelId: string | null;
+  readonly threadId: string | null;
+  readonly messageId: string | null;
+}
+
+/** An allowlisted human's message that ran nothing and said nothing: counted, and logged without its words. */
+export function inboundIgnored(
+  metrics: Pick<Instruments, 'inboundDropped'>,
+  log: Log,
+  message: IgnoredMessage,
+  reason: InboundDropReason,
+): void {
+  metrics.inboundDropped(message.surface, reason);
+  log.info('an inbound message was ignored', { ...message, reason });
 }
 
 let cached: { provider: MeterProvider; instruments: Instruments } | null = null;

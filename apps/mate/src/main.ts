@@ -9,9 +9,9 @@ import { Mate, type SlackSide } from './mate.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
 import { PROFILES, validateProfiles } from './profiles.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
-import { openSocket, slackEvent, slackSurface, slackWeb } from './slack.ts';
+import { openSocket, slackEvents, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
-import { openDatabase } from './store.ts';
+import { openDatabase, PostgresEventClaims } from './store.ts';
 import type { SurfaceListener } from './surface.ts';
 import {
   EXPORT_TIMEOUT_MS,
@@ -116,20 +116,30 @@ async function openSlack(slack: SlackConfig): Promise<SlackSide> {
   const listener: SurfaceListener = {
     async start(threads) {
       await threads.add(surface);
+      const events = slackEvents({
+        me: identity.userId,
+        allowedUserIds: slack.allowedUserIds,
+        threads,
+        metrics: lazyInstruments(),
+        log,
+      });
+      const claims = database.sql
+        ? new PostgresEventClaims(database.sql)
+        : null;
       socket = new SocketMode({
         open: () => openSocket(slack.appToken),
         connect: (url) => new WebSocket(url),
         clock: systemClock,
         log,
         since: Date.now(),
-        onEvent: (payload) =>
-          slackEvent(payload.event ?? {}, identity.userId, {
-            // The socket already acked the envelope, the only ack Slack
-            // waits for.
-            stopped: (stop) =>
-              void threads.onStop(stop.key, stop.userId, async () => {}),
-            message: (inbound) => void threads.onMessage(inbound),
-          }),
+        claim: claims
+          ? async (id, at) => {
+              if (!database.up()) throw new Error('the store is not up');
+              return claims.claim(id, at);
+            }
+          : undefined,
+        onEvent: events.onEvent,
+        onStale: events.onStale,
       });
       void socket.run();
     },

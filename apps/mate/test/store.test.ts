@@ -5,12 +5,15 @@ import { SQL } from 'bun';
 import { silentLog } from '../src/log.ts';
 import {
   composeUrl,
+  EVENT_CLAIM_KEEP_MS,
+  EVENT_PRUNE_MS,
   isStoreUnavailable,
   MemoryThreadStore,
   MIGRATIONS,
   migrateThreads,
   openDatabase,
   POOL_OPTIONS,
+  PostgresEventClaims,
   PostgresThreadStore,
   storeError,
 } from '../src/store.ts';
@@ -229,6 +232,23 @@ for (const [kind, storeOf] of stores) {
     });
   });
 }
+
+describe('a Slack event claim', () => {
+  test('is won once across processes, and forgotten a day later', async () => {
+    const clock = new FakeClock();
+    const one = new PostgresEventClaims(database().sql, clock);
+    const two = new PostgresEventClaims(database().sql, clock);
+    const id = `Ev${crypto.randomUUID()}`;
+    const at = clock.now();
+    const raced = await Promise.all([one.claim(id, at), two.claim(id, at)]);
+    expect(raced.sort()).toEqual([false, true]);
+    expect(await one.claim(id, at)).toBe(false);
+
+    await clock.advance(EVENT_CLAIM_KEEP_MS + EVENT_PRUNE_MS);
+    expect(await one.claim(`Ev${crypto.randomUUID()}`, clock.now())).toBe(true);
+    expect(await two.claim(id, at)).toBe(true);
+  });
+});
 
 describe('a row from before profiles', () => {
   test('reads, reopens and is swept as the default profile', async () => {

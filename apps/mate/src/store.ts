@@ -1,7 +1,7 @@
 /**
- * mate-db: pi's sessions, mate's `mate_threads` and `mate_credentials`, over
- * one pool. A store that cannot be reached leaves mate up with every open
- * refused, never in a crash loop.
+ * mate-db: pi's sessions, mate's `mate_threads`, `mate_credentials` and
+ * `mate_slack_events`, over one pool. A store that cannot be reached leaves
+ * mate up with every open refused, never in a crash loop.
  */
 
 import { migrate } from '@repo/pi-store-postgres';
@@ -204,6 +204,15 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
       turns INTEGER NOT NULL,
       PRIMARY KEY (profile, day)
     )`,
+  ],
+  [
+    5,
+    `CREATE TABLE mate_slack_events (
+      event_id TEXT COLLATE "C" PRIMARY KEY,
+      event_time BIGINT NOT NULL,
+      claimed_at BIGINT NOT NULL
+    );
+    CREATE INDEX mate_slack_events_claimed ON mate_slack_events (claimed_at)`,
   ],
 ];
 
@@ -493,6 +502,40 @@ export class MemoryThreadStore implements ThreadStore {
 
   async delete(key: string): Promise<void> {
     this.rows.delete(key);
+  }
+}
+
+/** Longer than the socket's replay window, so no event it answers was forgotten. */
+export const EVENT_CLAIM_KEEP_MS = 86_400_000;
+export const EVENT_PRUNE_MS = 3_600_000;
+
+/**
+ * The Slack events a process has handled, by event id. A claim is atomic
+ * across processes, so an event Slack redelivers after a restart, or to a
+ * second replica, is answered once.
+ */
+export class PostgresEventClaims {
+  private prunedAt: number | null = null;
+
+  constructor(
+    private readonly sql: SQL,
+    private readonly clock: Clock = systemClock,
+  ) {}
+
+  async claim(eventId: string, eventTime: number): Promise<boolean> {
+    const now = this.clock.now();
+    if (this.prunedAt === null || now - this.prunedAt >= EVENT_PRUNE_MS) {
+      this.prunedAt = now;
+      await this.sql`DELETE FROM mate_slack_events
+        WHERE claimed_at < ${now - EVENT_CLAIM_KEEP_MS}`;
+    }
+    const rows = await this.sql`
+      INSERT INTO mate_slack_events (event_id, event_time, claimed_at)
+      VALUES (${eventId}, ${eventTime}, ${now})
+      ON CONFLICT (event_id) DO NOTHING
+      RETURNING event_id
+    `;
+    return rows.length > 0;
   }
 }
 
