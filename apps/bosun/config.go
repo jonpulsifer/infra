@@ -27,7 +27,7 @@ type Config struct {
 	Bin          BinPaths         `json:"bin"`
 	// nil disables the build source.
 	KthxEngine *KthxEngineConfig `json:"kthxEngine,omitempty"`
-	// LegacySpindrift is the pre-rename spelling of KthxEngine.
+	// LegacySpindrift is the legacy JSON key for KthxEngine that older modules still write.
 	LegacySpindrift *KthxEngineConfig `json:"spindrift,omitempty"`
 }
 

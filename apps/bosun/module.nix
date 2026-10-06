@@ -73,8 +73,12 @@ let
         null
       else
         {
-          inherit (cfg.kthxEngine) url tokenFile classes;
-          pollInterval = cfg.kthxEngine.pollInterval;
+          inherit (cfg.kthxEngine)
+            url
+            tokenFile
+            classes
+            pollInterval
+            ;
         };
   };
 in
@@ -84,10 +88,7 @@ in
   disabledModules = [ "services/monitoring/bosun.nix" ];
 
   imports = [
-    (lib.mkRenamedOptionModule
-      [ "services" "bosun" "spindrift" ]
-      [ "services" "bosun" "kthxEngine" ]
-    )
+    (lib.mkRenamedOptionModule [ "services" "bosun" "spindrift" ] [ "services" "bosun" "kthxEngine" ])
   ];
 
   options.services.bosun = {
