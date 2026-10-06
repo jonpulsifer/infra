@@ -160,13 +160,13 @@
   "refresh": "30s",
   "schemaVersion": 37,
   "style": "dark",
-  "tags": ["spindrift", "platform"],
+  "tags": ["kthx-engine", "platform"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "kthx Engine",
-  "uid": "spindrift",
+  "uid": "kthx-engine",
   "version": 1,
   "weekStart": ""
 }
