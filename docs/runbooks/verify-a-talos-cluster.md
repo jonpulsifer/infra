@@ -1,12 +1,12 @@
 ---
 title: Verify a Talos cluster
-description: Check a cluster that runs Talos after a rebuild or an upgrade, from the nodes and Cilium to federation, OpenBao, the sandbox runtimes, the GPU, NFS and Falco.
+description: Check a cluster that runs Talos after a rebuild or an upgrade, from the nodes and Cilium to federation, backups, OpenBao, the sandbox runtimes, the GPU, NFS and Falco.
 ---
 
 Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md), and after a Talos or Kubernetes upgrade. Each section checks one layer, so a failure points at its layer. Run the sections in order.
 
 > [!WARNING]
-> This procedure changes live state by hand. It is an exception to the GitOps rule because the gVisor check starts a pod that no manifest declares. The last step of that check deletes it.
+> This procedure changes live state by hand. It is an exception to the GitOps rule because the backup checks and the gVisor check create objects that no manifest declares. Each check deletes its object, or lets it expire.
 
 ## Before you start
 
@@ -114,8 +114,50 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 
    Result: `Sealed false`.
 
+4. Make sure that a pod verifies the API server with its own CA, that the CA is the pin, and that it is the only client CA.
+
+   ```bash
+   kubectl --context <site> -n kata-demo exec deploy/kata-demo -c nginx -- curl -s -o /dev/null -w '%{http_code}\n' \
+     --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt https://kubernetes.default.svc/version
+   kubectl --context <site> -n kube-system get cm kube-root-ca.crt -o jsonpath='{.data.ca\.crt}' | diff - clusters/<site>/config/kubernetes-ca.pem
+   kubectl --context <site> -n kube-system get cm extension-apiserver-authentication -o jsonpath='{.data.client-ca-file}' | grep -c 'BEGIN CERT'
+   ```
+
+   Result: `401`, no `diff` output, and `1`.
+
+5. On folly, make sure that the kthx engine reaches the API server after its restart, and that Rowbutt can run `kubectl --context folly get ns` in a sandbox.
+
+   ```bash
+   kubectl --context offsite -n spindrift logs deploy/spindrift-reconciler --since 1h | grep -ci x509
+   ```
+
+   Result: `0`.
+
 > [!NOTE]
 > The API server allows TLS 1.3 only, and anonymous `/version` returns 401. No client is known that needs either.
+
+## Check the backups
+
+`<namespace>` holds a pod with a `backup.velero.io/backup-volumes` annotation, such as `jellyfin` on folly.
+
+1. Take the first etcd snapshot.
+
+   ```bash
+   kubectl --context <site> -n backups create job --from=cronjob/etcd-snapshot etcd-snapshot-first
+   kubectl --context <site> -n backups wait --for=condition=complete job/etcd-snapshot-first --timeout=10m
+   ```
+
+   Result: `job.batch/etcd-snapshot-first condition met`. The Job expires after seven days.
+
+2. Make sure that Velero backs up a pod volume from the kubelet root, then delete the backup.
+
+   ```bash
+   velero backup create verify-talos --include-namespaces <namespace> --wait --kubecontext <site>
+   velero backup describe verify-talos --details --kubecontext <site>
+   velero backup delete verify-talos --confirm --kubecontext <site>
+   ```
+
+   Result: A `Pod Volume Backups` list with the phase `Completed`.
 
 ## Check the workloads
 
@@ -184,7 +226,8 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 | --- | --- | --- |
 | `cilium-dbg bgp peers` shows no session. | The node lacks the `bgp-enabled` label, or the gateway has no neighbor for it. | Read the node's labels and `terraform/network/unifi/`. |
 | No `cilium` GatewayClass. | cilium-operator started before the CRDs. | Run `kubectl --context <site> -n kube-system rollout restart deploy/cilium-operator`. |
-| The federated plan shows `x509`. | The CA bundle lacks the cluster's new CA. | See [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md). |
+| The federated plan shows `x509`. | `clusters/<site>/config/kubernetes-ca.pem` holds the old CA, or the pull request predates it. | Pin the new CA, as [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md#pin-the-new-ca) describes, or rebase the pull request. |
+| The etcd snapshot Job fails in `snapshot`. | The Talos API refuses the role, or the Secret `etcd-snapshot-talos` is missing. | Read `kubectl -n backups get serviceaccounts.talos.dev etcd-snapshot-talos -o yaml` for its status. |
 | A sandbox pod fails only on Talos. | Workload isolation. | Read `talosctl -n <addr> logs sandboxd`. |
 | `bao status` shows `Sealed true`. | The KMS call failed. | Read the OpenBao pod's logs for the GCP error. |
 

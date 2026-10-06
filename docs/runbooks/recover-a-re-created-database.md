@@ -51,7 +51,7 @@ If the old `Cluster` still runs, stop the writers of the database first. The bac
 
 1. Set `backup.serverName: <new>` and `backup.recoverFrom: <old>` in the release's values. In a plain manifest, copy the `serverName`, `bootstrap.recovery` and `externalClusters` that `packages/charts/app/templates/database.yaml` renders.
 
-2. If the `Cluster` is `kthx-db`, set `serverName: <new>` in `clusters/offsite/apps/restore-drill/cluster.yaml`.
+2. If the `Cluster` is offsite's `kthx-db` or folly's `tronbyt`, set `serverName: <new>` in `clusters/<site>/apps/restore-drill/cluster.yaml`.
 
 3. Open a PR and merge it, as [Apply a Kubernetes change](apply-a-kubernetes-change.md) describes.
 
@@ -115,7 +115,7 @@ The plugin prunes only the prefix it archives under. Wait until `<new>` holds 30
 | Helm fails with `backup.recoverFrom ... is the prefix this Cluster archives to`. | `<new>` is empty or equals `<old>`. | Set `backup.serverName` to a prefix no `Cluster` has used. |
 | The pod logs print `Expected empty archive`. | `<new>` holds WAL. | Choose another `<new>`, then do step 4 of [Declare the new Cluster](#declare-the-new-cluster). |
 | The `Cluster` stays in `Setting up primary` with no such log line. | The recovery cannot read the `garage` ObjectStore, or `<old>` holds no backup. | Read the logs of the `<cluster>-1-full-recovery` pod. |
-| `restore-drill` fails after you remove the old prefix. | The drill still reads `<old>`. | Set `serverName: <new>` in `clusters/offsite/apps/restore-drill/cluster.yaml`. |
+| `restore-drill` fails after you remove the old prefix. | The drill still reads `<old>`. | Set `serverName: <new>` in `clusters/<site>/apps/restore-drill/cluster.yaml`. |
 
 ## Related
 

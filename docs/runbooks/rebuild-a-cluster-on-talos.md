@@ -3,7 +3,7 @@ title: Rebuild a cluster on Talos
 description: Replace a cluster's NixOS nodes with Talos Linux, bootstrap a fresh etcd, install Cilium and Flux, and restore the data that has a backup.
 ---
 
-Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd. The secrets bundle imports the service-account signing key, so the issuer, its JWKS, GCP workload identity and cross-cluster federation stay the same. The Kubernetes CA is new and self-signed. Node-local data comes back only from a CloudNativePG or Velero backup.
+Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd and a new, self-signed Kubernetes CA. The service-account signing key is imported, so the issuer, GCP workload identity and cross-cluster federation stay the same. Node-local data comes back only from a CloudNativePG or Velero backup.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because no controller runs until Flux does. The owner applies `clusters/<site>/talos/` and `clusters/<site>/bootstrap/` once, and Atlantis owns them from the next pull request.
@@ -13,8 +13,9 @@ Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd. 
 - Run `mise run devshell`, and sign in to `op`.
 - Set `SOPS_AGE_KEY_FILE` to the operator key, as [Manage SOPS secrets](manage-sops-secrets.md) describes.
 - You need write access to objects in the `homelab-ng` state bucket.
-- On folly, the `monitoring-crds` Flux Kustomization must exist. [Adopt the folly Prometheus Operator CRDs](adopt-the-folly-prometheus-operator-crds.md) adds it.
-- Open the cutover pull request: the Talos values in `clusters/<site>/networking/cilium/helm-release.yaml` and `clusters/<site>/config/cluster-settings.yaml`, and a new `serverName` for each CloudNativePG `Cluster`.
+- On folly, `main` must hold the `monitoring-crds` Flux Kustomization, as [Adopt the folly Prometheus Operator CRDs](adopt-the-folly-prometheus-operator-crds.md) describes.
+- `clusters/offsite/apps/atlantis/kubeconfig-hook.sh` and Rowbutt must read the CA only from `clusters/<site>/config/kubernetes-ca.pem`, not `terraform/pki/certs/`.
+- Open the cutover pull request as a draft: the Talos root, the Talos values in `clusters/<site>/networking/cilium/helm-release.yaml` and `clusters/<site>/config/cluster-settings.yaml`, and a new `serverName` for each CloudNativePG `Cluster`.
 
 `<site>` is `folly` or `offsite`, and `<checkout>` is a checkout of the cutover branch. `<cp>` is `API_SERVER_IP` in `clusters/<site>/config/cluster-topology.json`.
 
@@ -40,41 +41,9 @@ Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd. 
 
 ## Make the secrets bundle
 
-> [!WARNING]
-> The bundle holds every key of the cluster. Keep it on `/dev/shm`.
+The owner does this section, because it decrypts the signing key.
 
-1. Make the bundle with the cluster's signing key. `<control-plane>` is `optiplex` or `retrofit`.
-
-   ```bash
-   umask 077; cd "$(mktemp -d -p /dev/shm talos.XXXX)"
-   talosctl gen secrets --talos-version v1.14 -o secrets.yaml
-   KEY=$(sops -d --extract '["k8s-sa-signing-key"]' <checkout>/nix/secrets/<control-plane>.sops.yaml | base64 -w0) \
-     yq -i '.certs.k8sserviceaccount.key = strenv(KEY)' secrets.yaml
-   ```
-
-2. Store it as the Secure Note `talos-<site>-secrets`.
-
-   ```bash
-   op item template get "Secure Note" \
-     | jq --rawfile n secrets.yaml '.title="talos-<site>-secrets" | .fields |= map(if .id=="notesPlain" then .value=$n else . end)' \
-     | op item create --vault homelab --template - --format json | jq -r .id
-   ```
-
-   Result: The UUID of the item.
-
-3. In the cutover pull request, set `secrets_item_uuid` in `clusters/<site>/talos/talos.tf` to the UUID.
-
-> [!NOTE]
-> Atlantis and Rowbutt trust the API server through `<site>-ca-bundle.pem`, which `scripts/pki/post-rotate.sh` rewrites without the Talos CA.
-
-4. In the cutover pull request, add the new CA certificate to the bundle file.
-
-   ```bash
-   yq -r '.certs.k8s.crt' secrets.yaml | base64 -d >> <checkout>/terraform/pki/certs/<site>-ca-bundle.pem
-   ```
-
-5. Delete the directory.
-6. Issue the admin talosconfig, as [Issue a talosconfig](issue-a-talosconfig.md) describes.
+1. Make the bundle and pin its CA in the cutover pull request, as [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md) describes. It sets `secrets_item_uuid` and issues the admin talosconfig.
 
 ## Install the control plane
 
@@ -88,7 +57,7 @@ Use this runbook to move a cluster from NixOS to Talos Linux with a fresh etcd. 
    ```
 
 2. Boot the control plane into the Talos installer, as [Install Talos on a node](install-talos-on-a-node.md) describes.
-3. Merge the cutover pull request. The old control plane is gone, so nothing applies it to NixOS.
+3. Mark the cutover pull request ready, and merge it. No NixOS control plane is left to apply it.
 4. Apply the control plane, and create etcd.
 
    ```bash
@@ -164,7 +133,7 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
 
    Result: Each node is `Ready` within a few minutes.
 
-5. Apply the bootstrap root. It installs CoreDNS and Flux, and labels the nodes.
+5. Apply the bootstrap root. It installs CoreDNS and Flux. Talos labels the nodes, so `node-labels.tf` only forgets the old labels.
 
    ```bash
    tofu -chdir=clusters/<site>/bootstrap init
@@ -186,30 +155,38 @@ Cilium's values need the Prometheus Operator CRDs, and Flux needs pod networking
 2. Restore each volume from step 2 of the freeze, as [Restore a volume](restore-a-volume.md) describes.
 
 > [!NOTE]
-> Flux does not recreate kthx engine objects. The engine re-asserts `bootstrap.initdb` as the field manager `spindrift`, and no runbook covers the recovery of an engine Datastore.
+> Flux does not recreate kthx engine objects, and no runbook covers the recovery of an engine Datastore.
 
 3. On offsite, recover the `clankerbanker` Datastore in `spindrift-datastores` from its barman archive.
 
 ## Finish
 
-1. Do the checks in [Verify a Talos cluster](verify-a-talos-cluster.md).
-2. Comment `atlantis plan -d clusters/<site>/talos` on a pull request.
+1. Rebase each open pull request. Atlantis reads the CA pin from the pull request's checkout.
+2. Do the checks in [Verify a Talos cluster](verify-a-talos-cluster.md).
+3. Comment `atlantis plan -d clusters/<site>/talos` on a pull request.
 
    Result: `No changes`.
 
-3. Remove the cluster's nodes from `nix/hosts/default.nix` in a pull request.
+4. After the first Talos snapshot, delete the NixOS ones under the old control plane's hostname. Set the Garage remote as [Restore etcd on Talos](restore-etcd-on-talos.md#get-the-snapshot) does.
+
+   ```bash
+   rclone purge garage:etcd/<control-plane>/
+   ```
+
+5. In a pull request, remove the cluster's hosts from `nix/hosts/default.nix` and its CA files from `terraform/pki/certs/`. Keep `<site>-sa-signer.pem`, which the JWKS reads.
 
 ## If something goes wrong
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| The plan fails with `Create the talos-<site>-secrets Secure Note`. | `secrets_item_uuid` is the placeholder. | Do step 3 of the bundle procedure. |
+| The plan fails with `Create the talos-<site>-secrets Secure Note`. | `secrets_item_uuid` is the placeholder. | Make the bundle. |
 | The `cilium` HelmRelease shows `MissingRollbackTarget`. | The upgrade timed out before both operator replicas had a node. | Run `flux --context <site> reconcile hr cilium -n kube-system --reset --force`. |
-| The bootstrap root fails on `kubernetes_labels.nodes`. | A node has not registered. | Join the worker, then apply again. |
-| Atlantis or Rowbutt fails TLS to the API server. | The CA bundle lacks the new CA. | Do step 4 of the bundle procedure. |
+| The bootstrap root plans changes to `kubernetes_labels.nodes`. | `node-labels.tf` still declares the resource. | Replace it with a `removed` block, as `clusters/folly/bootstrap/node-labels.tf` does. |
+| Atlantis, Rowbutt or the kthx engine fails TLS to the API server. | `kubernetes-ca.pem` holds the old CA, or a pull request predates it. | Pin the new CA, as [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md#pin-the-new-ca) describes, or rebase the pull request. |
 
 ## Related
 
+- [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md)
 - [Install Talos on a node](install-talos-on-a-node.md)
 - [Verify a Talos cluster](verify-a-talos-cluster.md)
 - [Restore etcd on Talos](restore-etcd-on-talos.md)

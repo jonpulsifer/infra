@@ -13,7 +13,7 @@ tofu -chdir=clusters/folly/talos init -backend=false
 tofu -chdir=clusters/folly/talos validate
 ```
 
-A plan contacts no node. `tofu validate` cannot see a document that Talos rejects, such as a control-plane-only kind on a worker, so render a changed patch with `talosctl gen config --config-patch` and check it with `talosctl validate --mode metal`.
+A plan contacts no node. `tofu validate` cannot see a document that Talos rejects, such as a control-plane-only kind on a worker, so render a changed patch with `talosctl gen config` and check it with `talosctl validate --mode metal`. Pass the control plane's patches with `--config-patch-control-plane` and a worker's with `--config-patch-worker`: `--config-patch` patches both types, and a control-plane-only `$patch: delete` then fails on the worker.
 
 ## Deploy
 

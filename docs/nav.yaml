@@ -80,6 +80,7 @@ sections:
           - runbooks/apply-a-kubernetes-change.md
           - runbooks/get-cluster-admin-access.md
           - runbooks/rebuild-a-cluster-on-talos.md
+          - runbooks/make-a-talos-secrets-bundle.md
           - runbooks/verify-a-talos-cluster.md
           - runbooks/issue-a-talosconfig.md
           - runbooks/operate-postgres.md

@@ -18,7 +18,7 @@ Use this runbook when the etcd data of a control plane that runs Talos Linux is 
 ## Get the snapshot
 
 > [!NOTE]
-> No manifest in `clusters/` takes a scheduled Talos snapshot into Garage. Until one does, a snapshot is a file that `talosctl etcd snapshot` wrote by hand.
+> On folly, the `etcd-snapshot` CronJob in `clusters/folly/etcd-snapshot/` writes a snapshot under `etcd/<site>/` each night and keeps 14 days. A file under `etcd/<hostname>/` is from NixOS and does not restore on Talos.
 
 1. Put the Garage remote in the environment. Use the `etcd` key of the site.
 

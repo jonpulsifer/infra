@@ -19,7 +19,7 @@ folly holds Lab Net and Kubernetes in a custom `Lab` zone. offsite has no custom
 
 ## Rules
 
-- A new node needs its `bgp-enabled` label in `clusters/<site>/bootstrap/node-labels.tf` and a `neighbor <ip> peer-group HOMELAB` line in its site's FRR file, or it has no BGP session. The `<ip>` is the node's `NODE_ADDRESSES` value in its cluster's [topology file](../../reference/topology.md), copied by hand.
+- A new node needs its `bgp-enabled` label and a `neighbor <ip> peer-group HOMELAB` line in its site's FRR file, or it has no BGP session. Talos sets the label on folly's nodes, and `clusters/offsite/bootstrap/node-labels.tf` sets it on offsite's. The `<ip>` is the node's `NODE_ADDRESSES` value in its cluster's [topology file](../../reference/topology.md), copied by hand.
 - After a topology change, edit the literal addresses in both FRR files, or the gateways drop the new routes. Lab Net's prefix is `LAB_CIDR` in `clusters/folly/config/lab-topology.json`.
 - The only tunnel traffic folly admits to a Lab Net host is ssh from offsite's node subnet, VIP pool and pod pool to capsule's port 22 (policy `nest_k8s_to_capsule_ssh`), so offsite reaches other Lab Net hosts with capsule as an ssh jump host. offsite's Default network also routes to Lab Net, and folly's `Vpn` to `Lab` chain drops it.
 - In a folly policy that allows cross-site traffic, list the node subnet, VIP pool and pod pool as sources. Pod packets enter `Lab` on the node's interface, and the `Lab` to `Vpn` chain ends in a DROP.
