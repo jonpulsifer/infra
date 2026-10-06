@@ -20,7 +20,7 @@ For each class, Bosun keeps a set number of skiffs booted. Each skiff registers 
 
 A job runs as root in the guest, and the microVM is the isolation boundary. Bosun passes the JIT config to the guest on a virtiofs share, and deletes it when the runner comes online. The systemd unit denies private, link-local and tailnet addresses to every skiff.
 
-With `services.bosun.spindrift` set, Bosun also claims [kthx](kthx/built-apps.md) builds and boots a build hull for each claim.
+With `services.bosun.kthxEngine` set, Bosun also claims [kthx](kthx/built-apps.md) builds and boots a build hull for each claim.
 
 ## What is in the tree
 

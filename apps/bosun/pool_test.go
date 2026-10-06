@@ -761,11 +761,11 @@ func TestBuildSkiffExitPostsResultFromDiagFiles(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-1", Class: "skiff-test", Request: json.RawMessage(`{}`)}
-	sd := &fakeSpindrift{}
+	engine := &fakeKthxEngine{}
 
 	done := make(chan struct{})
 	go func() {
-		poolBuildSource(p, sd).runBuild(ctx, claim)
+		poolBuildSource(p, engine).runBuild(ctx, claim)
 		close(done)
 	}()
 
@@ -792,7 +792,7 @@ func TestBuildSkiffExitPostsResultFromDiagFiles(t *testing.T) {
 		t.Fatal("runBuild did not return after the build skiff halted")
 	}
 
-	results := sd.postedResults()
+	results := engine.postedResults()
 	if len(results) != 1 {
 		t.Fatalf("want 1 posted result, got %d", len(results))
 	}
@@ -805,11 +805,11 @@ func TestBuildSkiffExitWithNoResultFilesPostsFailed(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-2", Class: "skiff-test", Request: json.RawMessage(`{}`)}
-	sd := &fakeSpindrift{}
+	engine := &fakeKthxEngine{}
 
 	done := make(chan struct{})
 	go func() {
-		poolBuildSource(p, sd).runBuild(ctx, claim)
+		poolBuildSource(p, engine).runBuild(ctx, claim)
 		close(done)
 	}()
 
@@ -826,7 +826,7 @@ func TestBuildSkiffExitWithNoResultFilesPostsFailed(t *testing.T) {
 		t.Fatal("runBuild did not return after the build skiff halted")
 	}
 
-	results := sd.postedResults()
+	results := engine.postedResults()
 	if len(results) != 1 || results[0].res.Status != buildFailed {
 		t.Fatalf("want a single FAILED result, got %+v", results)
 	}
@@ -836,9 +836,9 @@ func TestBuildSkiffExitDoesNotRefillTheClass(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-3", Class: "skiff-test", Request: json.RawMessage(`{}`)}
-	sd := &fakeSpindrift{}
+	engine := &fakeKthxEngine{}
 
-	go poolBuildSource(p, sd).runBuild(ctx, claim)
+	go poolBuildSource(p, engine).runBuild(ctx, claim)
 	waitFor(t, "cloud-hypervisor launched for the build skiff", func() bool {
 		_, ok := fl.last("cloud-hypervisor")
 		return ok
@@ -1042,15 +1042,15 @@ func TestDrainRefusedClaimPostsNoResult(t *testing.T) {
 	p, _, _ := testPool(t)
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-6", Class: "skiff-test", Request: json.RawMessage(`{}`)}
-	sd := &fakeSpindrift{}
+	engine := &fakeKthxEngine{}
 
 	p.mu.Lock()
 	p.draining = true
 	p.mu.Unlock()
 
-	poolBuildSource(p, sd).runBuild(ctx, claim)
+	poolBuildSource(p, engine).runBuild(ctx, claim)
 
-	if results := sd.postedResults(); len(results) != 0 {
+	if results := engine.postedResults(); len(results) != 0 {
 		t.Fatalf("drain-refused claim posted a result: %+v", results)
 	}
 }
