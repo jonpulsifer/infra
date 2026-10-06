@@ -50,7 +50,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 | Repository | `main`, with `AGENTS.md` and the repository skills |
 | GitHub | Pushes branches, opens pull requests and merges the pull requests it opened once their required checks pass, as `clanky-bot[bot]`. The [daily custodian](#daily-custodian) assignment's own merge rule replaces that limit with pull requests it understands. The system prompt sets these limits; the token can merge any pull request. Its comments can plan and apply OpenTofu changes through Atlantis. |
 | offsite and folly clusters | `cluster-admin` on both, through the contexts `offsite` and `folly` |
-| Hosts | SSH as `rowbutt`, the host user for Rowbutt, which has passwordless sudo on every NixOS host. It reaches both sites' nodes, and folly's Lab Net hosts through riptide. weatherpi4 and oldboy have no route from the sandbox. |
+| Hosts | SSH as `rowbutt`, the host user for Rowbutt, which has passwordless sudo on every NixOS host. It reaches both sites' nodes, and folly's Lab Net hosts through capsule. weatherpi4 and oldboy have no route from the sandbox. |
 | Internet | Every host on ports 80 and 443 |
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx_*` tools that mate bridges from the kthx MCP server, when Secret `mate-kthx-agent` holds an agent token. |
 | Weather | Canadian weather and the family Tempest stations, through the `weather_*` tools that mate bridges from the [Weather API](weather.md) at `MATE_WEATHER_MCP_URL`. The server takes no token. |
