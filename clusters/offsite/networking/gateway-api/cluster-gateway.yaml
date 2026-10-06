@@ -22,12 +22,12 @@ spec:
                   - agents-sandbox
         kinds:
           - kind: HTTPRoute
-    # oauth2-proxy's host is in the App zone (SPINDRIFT_DOMAIN), and its route
+    # oauth2-proxy's host is in the App zone (KTHX_ENGINE_DOMAIN), and its route
     # lives in its own namespace, so this listener names both.
     - name: oauth2-tls
       protocol: HTTPS
       port: 443
-      hostname: &hostname "oauth2.${SPINDRIFT_DOMAIN}"
+      hostname: &hostname "oauth2.${KTHX_ENGINE_DOMAIN}"
       tls:
         certificateRefs:
           - kind: Secret

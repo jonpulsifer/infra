@@ -4,6 +4,7 @@
  */
 
 import { loadDeploymentFederation } from '@repo/archive/federation-credential';
+import { engineEnvVar, readEnv } from './env.ts';
 import {
   type AuthoredManifest,
   type InstallationManifest,
@@ -15,20 +16,23 @@ import { upgradeManifestDocument } from './manifest-upgrade.ts';
  * Set by the chart only when it renders a default-deny NetworkPolicy admitting
  * the configured trusted Gateway peers.
  */
-export const TRUSTED_GATEWAY_BOUNDARY_VAR =
-  'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY';
+export const TRUSTED_GATEWAY_BOUNDARY_VAR = engineEnvVar(
+  'KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY',
+);
 
 /** Set by the chart from the `hostname` that renders the Gateway. */
-export const HOSTNAME_VAR = 'SPINDRIFT_HOSTNAME';
+export const HOSTNAME_VAR = engineEnvVar('KTHX_ENGINE_HOSTNAME');
 
 /** The public name a tunnel forwards the machine routes on. */
-export const PUBLIC_HOSTNAME_VAR = 'SPINDRIFT_PUBLIC_HOSTNAME';
+export const PUBLIC_HOSTNAME_VAR = engineEnvVar('KTHX_ENGINE_PUBLIC_HOSTNAME');
 
 /** Comma-separated names served on the Apps gateway that no App may take. */
-export const RESERVED_HOSTNAMES_VAR = 'SPINDRIFT_RESERVED_HOSTNAMES';
+export const RESERVED_HOSTNAMES_VAR = engineEnvVar(
+  'KTHX_ENGINE_RESERVED_HOSTNAMES',
+);
 
 /** Also telemetry's `service.version`. Unset resolves to `null` here. */
-export const VERSION_VAR = 'SPINDRIFT_VERSION';
+export const VERSION_VAR = engineEnvVar('KTHX_ENGINE_VERSION');
 
 /**
  * The relying party of an in-cluster-only deployment, which serves no origin.
@@ -205,14 +209,17 @@ export async function resolveManifest(
   return {
     ...manifest,
     cloud: { federation: await loadDeploymentFederation(env) },
-    boundary: { trustedGateway: env[TRUSTED_GATEWAY_BOUNDARY_VAR] === 'true' },
+    boundary: {
+      trustedGateway: readEnv(env, TRUSTED_GATEWAY_BOUNDARY_VAR) === 'true',
+    },
     controlPlane: {
-      hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME,
-      publicHostname: env[PUBLIC_HOSTNAME_VAR]?.trim().toLowerCase() || null,
-      reservedHostnames: (env[RESERVED_HOSTNAMES_VAR] ?? '')
+      hostname: readEnv(env, HOSTNAME_VAR)?.trim() || UNSERVED_HOSTNAME,
+      publicHostname:
+        readEnv(env, PUBLIC_HOSTNAME_VAR)?.trim().toLowerCase() || null,
+      reservedHostnames: (readEnv(env, RESERVED_HOSTNAMES_VAR) ?? '')
         .split(',')
         .flatMap((host) => host.trim().toLowerCase() || []),
-      version: env[VERSION_VAR]?.trim() || null,
+      version: readEnv(env, VERSION_VAR)?.trim() || null,
     },
   };
 }

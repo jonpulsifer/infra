@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { canonicalGzip } from '@repo/archive/archive-format';
 import { workloadIdentityToken } from '@repo/archive/federation';
 import type { AdapterRegistry } from '../commands/types.ts';
+import { engineEnvVar, readEnv } from '../config/env.ts';
 import {
   type BuildRouteConfig,
   type StoreAdapter,
@@ -73,7 +74,9 @@ import { VercelSecretStore } from './store/vercel.ts';
 export const SERVICE_ACCOUNT_TOKEN_PATH =
   '/var/run/secrets/kubernetes.io/serviceaccount/token';
 /** Installer-declared path for the reconciler's audience-scoped token. */
-export const IDENTITY_TOKEN_PATH_VAR = 'SPINDRIFT_IDENTITY_TOKEN_PATH';
+export const IDENTITY_TOKEN_PATH_VAR = engineEnvVar(
+  'KTHX_ENGINE_IDENTITY_TOKEN_PATH',
+);
 
 export class AdapterUnavailableError extends Error {
   override readonly name = 'AdapterUnavailableError';
@@ -102,7 +105,7 @@ export function projectedServiceAccountToken(
 export function installationServiceAccountToken(
   env: Record<string, string | undefined> = Bun.env,
 ): TokenProvider {
-  const configured = env[IDENTITY_TOKEN_PATH_VAR]?.trim();
+  const configured = readEnv(env, IDENTITY_TOKEN_PATH_VAR)?.trim();
   return projectedServiceAccountToken(configured || SERVICE_ACCOUNT_TOKEN_PATH);
 }
 
@@ -121,7 +124,7 @@ export interface RegistryOptions {
   readonly storeToken?: () => string | Promise<string>;
   readonly vercelToken?: TokenProvider;
   readonly cloudflareToken?: TokenProvider;
-  /** Replaces the file at `SPINDRIFT_KTHX_TOKEN_PATH`. */
+  /** Replaces the file at {@link KTHX_TOKEN_PATH_VARIABLE}. */
   readonly kthxToken?: TokenProvider;
   /** One federated token for cloud runtimes and the cloud build service. */
   readonly cloudToken?: () => string | Promise<string>;
@@ -581,10 +584,12 @@ function cloudTokenFor(options: RegistryOptions): TokenProvider {
   });
 }
 
-export const KTHX_URL_VARIABLE = 'SPINDRIFT_KTHX_URL';
+export const KTHX_URL_VARIABLE = engineEnvVar('KTHX_ENGINE_KTHX_URL');
 /** Restated beside the URL: the deploy gate needs the zone without a call. */
-export const KTHX_ZONE_VARIABLE = 'SPINDRIFT_KTHX_ZONE';
-export const KTHX_TOKEN_PATH_VARIABLE = 'SPINDRIFT_KTHX_TOKEN_PATH';
+export const KTHX_ZONE_VARIABLE = engineEnvVar('KTHX_ENGINE_KTHX_ZONE');
+export const KTHX_TOKEN_PATH_VARIABLE = engineEnvVar(
+  'KTHX_ENGINE_KTHX_TOKEN_PATH',
+);
 
 const KTHX_VARIABLES = [
   KTHX_URL_VARIABLE,
@@ -601,7 +606,7 @@ let kthxGapLogged = false;
 function kthxFor(options: RegistryOptions): KthxClient | null {
   const env = options.env ?? Bun.env;
   const [url, zone, tokenPath] = KTHX_VARIABLES.map(
-    (variable) => env[variable]?.trim() || null,
+    (variable) => readEnv(env, variable)?.trim() || null,
   );
   if (url && zone && tokenPath) {
     return kthxClient({
@@ -611,7 +616,9 @@ function kthxFor(options: RegistryOptions): KthxClient | null {
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
   }
-  const missing = KTHX_VARIABLES.filter((variable) => !env[variable]?.trim());
+  const missing = KTHX_VARIABLES.filter(
+    (variable) => !readEnv(env, variable)?.trim(),
+  );
   if (missing.length < KTHX_VARIABLES.length && !kthxGapLogged) {
     kthxGapLogged = true;
     logWarn('kthx sites are off: a kthx variable is missing', {
@@ -622,11 +629,11 @@ function kthxFor(options: RegistryOptions): KthxClient | null {
 }
 
 /** The 1Password Connect bearer, read per call so a rotated Secret applies. */
-export const STORE_TOKEN_VARIABLE = 'SPINDRIFT_STORE_TOKEN';
+export const STORE_TOKEN_VARIABLE = engineEnvVar('KTHX_ENGINE_STORE_TOKEN');
 
 export function storeToken(env: Record<string, string | undefined> = Bun.env) {
   return (): string => {
-    const token = env[STORE_TOKEN_VARIABLE]?.trim();
+    const token = readEnv(env, STORE_TOKEN_VARIABLE)?.trim();
     if (!token) {
       throw new AdapterUnavailableError(
         `${STORE_TOKEN_VARIABLE} is not set: this installation cannot write to its secret store`,
@@ -640,26 +647,26 @@ export function storeToken(env: Record<string, string | undefined> = Bun.env) {
  * The Vercel bearer, read per call like {@link storeToken}. Vercel offers no
  * inbound federation, so this is a long-lived operator token.
  */
-export const VERCEL_TOKEN_VARIABLE = 'SPINDRIFT_VERCEL_TOKEN';
+export const VERCEL_TOKEN_VARIABLE = engineEnvVar('KTHX_ENGINE_VERCEL_TOKEN');
 
 /**
  * The team the Vercel config store writes in. Deploys use each Target's own
  * team, so a Target on another team deploys but holds no config. Unset, there
  * is no Vercel store.
  */
-export const VERCEL_TEAM_VARIABLE = 'SPINDRIFT_VERCEL_TEAM';
+export const VERCEL_TEAM_VARIABLE = engineEnvVar('KTHX_ENGINE_VERCEL_TEAM');
 
 export function vercelTeam(
   env: Record<string, string | undefined> = Bun.env,
 ): string | null {
-  return env[VERCEL_TEAM_VARIABLE]?.trim() || null;
+  return readEnv(env, VERCEL_TEAM_VARIABLE)?.trim() || null;
 }
 
 export function vercelToken(
   env: Record<string, string | undefined> = Bun.env,
 ): TokenProvider {
   return (): string => {
-    const token = env[VERCEL_TOKEN_VARIABLE]?.trim();
+    const token = readEnv(env, VERCEL_TOKEN_VARIABLE)?.trim();
     if (!token) {
       throw new AdapterUnavailableError(
         `${VERCEL_TOKEN_VARIABLE} is not set: this installation cannot reach a Vercel Target`,
@@ -675,13 +682,15 @@ export function vercelToken(
  * ponytail: one account per installation. Move it to a per-vessel sealed row
  * when a second account is needed.
  */
-export const CLOUDFLARE_TOKEN_VARIABLE = 'SPINDRIFT_CLOUDFLARE_TOKEN';
+export const CLOUDFLARE_TOKEN_VARIABLE = engineEnvVar(
+  'KTHX_ENGINE_CLOUDFLARE_TOKEN',
+);
 
 export function cloudflareToken(
   env: Record<string, string | undefined> = Bun.env,
 ): TokenProvider {
   return (): string => {
-    const token = env[CLOUDFLARE_TOKEN_VARIABLE]?.trim();
+    const token = readEnv(env, CLOUDFLARE_TOKEN_VARIABLE)?.trim();
     if (!token) {
       throw new AdapterUnavailableError(
         `${CLOUDFLARE_TOKEN_VARIABLE} is not set: this installation cannot reach a Cloudflare Target`,

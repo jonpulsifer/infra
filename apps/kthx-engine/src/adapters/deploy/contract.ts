@@ -10,6 +10,7 @@ import type {
   AdapterConnection,
   KubernetesDeliveryFlavour,
 } from '../../domain/target.ts';
+import type { ObjectKey } from '../object-keys.ts';
 
 export interface DeployTarget {
   /** The Vessel's name, for labels only. Adapters never dispatch on it. */
@@ -213,9 +214,13 @@ export type Restarted =
 
 /**
  * Stamped on the workload template with the request time. A template change is
- * what makes the platform roll, so each restart needs a new value.
+ * what makes the platform roll, so each restart needs a new value. Both twins
+ * take the same value in one write, so a restart rolls once.
  */
-export const RESTART_STAMP = 'spindrift.dev/restarted-at';
+export const RESTART_STAMP: ObjectKey = {
+  key: 'kthx.dev/restarted-at',
+  legacy: 'spindrift.dev/restarted-at',
+};
 
 export type JobRuns =
   | {

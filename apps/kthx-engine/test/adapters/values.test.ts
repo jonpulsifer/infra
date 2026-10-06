@@ -26,6 +26,9 @@ describe('the value contract has two halves and they must agree', () => {
       annotations?: Record<string, string>;
     };
 
+    expect(chart.annotations?.['kthx.dev/values-contract']).toBe(
+      VALUES_CONTRACT,
+    );
     expect(chart.annotations?.['spindrift.dev/values-contract']).toBe(
       VALUES_CONTRACT,
     );

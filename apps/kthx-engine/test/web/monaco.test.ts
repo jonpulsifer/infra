@@ -39,10 +39,23 @@ describe('the served Monaco tree', () => {
     expect(await response.text()).toContain('define');
   });
 
-  test('serves the stylesheet and worker the loader fetches next', () => {
+  test('serves the stylesheet and every worker a module asks the loader for', async () => {
     const css = routes[`${MONACO_BASE}/editor/editor.main.css`];
     expect(css!.headers.get('content-type')).toStartWith('text/css');
-    expect(routes[`${MONACO_BASE}/base/worker/workerMain.js`]).toBeDefined();
+
+    // Worker names are content-hashed, so read them from the `toUrl` calls.
+    const referenced: string[] = [];
+    for (const [path, response] of Object.entries(routes)) {
+      if (!path.endsWith('.js')) continue;
+      const text = await response.clone().text();
+      for (const [, ref] of text.matchAll(/toUrl\("(\.\.?\/[^"]+)"\)/g)) {
+        referenced.push(new URL(ref!, `http://console${path}`).pathname);
+      }
+    }
+    expect(referenced).toContainEqual(
+      expect.stringMatching(/\/assets\/ts\.worker-[\w-]+\.js$/),
+    );
+    for (const path of referenced) expect(routes[path]).toBeDefined();
   });
 
   test('has one route per file, all under its versioned base', async () => {

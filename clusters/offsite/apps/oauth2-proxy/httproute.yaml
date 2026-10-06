@@ -11,7 +11,7 @@ spec:
       namespace: default
       sectionName: oauth2-tls
   hostnames:
-    - "oauth2.${SPINDRIFT_DOMAIN}"
+    - "oauth2.${KTHX_ENGINE_DOMAIN}"
   rules:
     # The whole host: a sign-in's return target can resolve to an App path here,
     # and `/oauth2` alone would 404 it. The only upstream is `static://200`.

@@ -53,7 +53,7 @@ describe('the authenticated Gateway trust boundary', () => {
         ...configured,
         boundary: { trustedGateway: false },
       }),
-    ).toThrow('SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY');
+    ).toThrow('KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY');
     expect(() =>
       assertTrustedGatewayBoundary({
         ...configured,
@@ -66,7 +66,7 @@ describe('the authenticated Gateway trust boundary', () => {
     expect(
       (
         await resolveManifest(manifest, {
-          SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY: 'true',
+          KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY: 'true',
         })
       ).boundary,
     ).toEqual({ trustedGateway: true });
@@ -79,12 +79,16 @@ describe('the authenticated Gateway trust boundary', () => {
     const manifest = parseManifest(fixtureText, FIXTURE);
     // From the environment, so no manifest write can set it.
     expect(
-      (await resolveManifest(manifest, { SPINDRIFT_VERSION: ' 1.2.3 ' }))
+      (await resolveManifest(manifest, { KTHX_ENGINE_VERSION: ' 1.2.3 ' }))
         .controlPlane.version,
     ).toBe('1.2.3');
     expect(
       (await resolveManifest(manifest, {})).controlPlane.version,
     ).toBeNull();
+    expect(
+      (await resolveManifest(manifest, { SPINDRIFT_VERSION: '1.2.3' }))
+        .controlPlane.version,
+    ).toBe('1.2.3');
   });
 
   test('the public hostname is a deployment fact, lowercased, and unset is null', async () => {
@@ -92,7 +96,7 @@ describe('the authenticated Gateway trust boundary', () => {
     expect(
       (
         await resolveManifest(manifest, {
-          SPINDRIFT_PUBLIC_HOSTNAME: ' Spindrift-Control.Example.Test ',
+          KTHX_ENGINE_PUBLIC_HOSTNAME: ' Spindrift-Control.Example.Test ',
         })
       ).controlPlane.publicHostname,
     ).toBe('spindrift-control.example.test');
@@ -106,7 +110,7 @@ describe('the authenticated Gateway trust boundary', () => {
     expect(
       (
         await resolveManifest(manifest, {
-          SPINDRIFT_RESERVED_HOSTNAMES:
+          KTHX_ENGINE_RESERVED_HOSTNAMES:
             ' Kthx.Example.Test, ,other.example.test',
         })
       ).controlPlane.reservedHostnames,

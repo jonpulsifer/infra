@@ -5,8 +5,11 @@
 
 import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
 import { z } from 'zod';
+import { engineEnvVar, readEnv } from '../config/env.ts';
 
-export const CREDENTIAL_KEYRING_VAR = 'SPINDRIFT_CREDENTIAL_KEYRING';
+export const CREDENTIAL_KEYRING_VAR = engineEnvVar(
+  'KTHX_ENGINE_CREDENTIAL_KEYRING',
+);
 
 export type CredentialPurpose =
   | 'spindrift-github-app-key'
@@ -95,7 +98,7 @@ export class CredentialKeyring {
   static fromEnvironment(
     env: Record<string, string | undefined> = Bun.env,
   ): CredentialKeyring | null {
-    const raw = env[CREDENTIAL_KEYRING_VAR]?.trim();
+    const raw = readEnv(env, CREDENTIAL_KEYRING_VAR)?.trim();
     if (!raw) return null;
 
     let input: unknown;

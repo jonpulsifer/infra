@@ -57,5 +57,4 @@ The k6 operator on folly runs each new TestRun, a k6 test, in a runner Job. Each
 ## Related
 
 - [Install Windows monitoring](../runbooks/install-windows-monitoring.md)
-- [Adopt the folly Prometheus Operator CRDs](../runbooks/adopt-the-folly-prometheus-operator-crds.md)
 - [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)

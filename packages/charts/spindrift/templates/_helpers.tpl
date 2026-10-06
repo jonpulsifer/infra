@@ -76,3 +76,15 @@ unrelated chart revision leaves the completed Job alone.
 {{ include "kthx-engine.fullname" . }}-migrate-{{ $digest }}
 {{- end }}
 
+{{/*
+One engine variable as `KTHX_ENGINE_<name>`, mirrored under its old `SPINDRIFT_<name>` so
+an image that predates the new names reads the same value. The engine refuses the pair
+when the two differ.
+*/}}
+{{- define "kthx-engine.env" -}}
+- name: KTHX_ENGINE_{{ .name }}
+  value: {{ .value | quote }}
+- name: SPINDRIFT_{{ .name }}
+  value: {{ .value | quote }}
+{{- end }}
+

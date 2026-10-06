@@ -45,7 +45,7 @@ export const setRegistryCredential: Command<
   if (store === null) {
     return failed(
       'NOT_DEPLOYABLE',
-      'this installation has no credential keyring, so a registry token has nowhere durable to be kept. Set SPINDRIFT_CREDENTIAL_KEYRING in the installation Secret.',
+      'this installation has no credential keyring, so a registry token has nowhere durable to be kept. Set KTHX_ENGINE_CREDENTIAL_KEYRING in the installation Secret.',
     );
   }
 

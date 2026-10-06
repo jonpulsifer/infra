@@ -60,7 +60,7 @@ export const saveFunction: Command<
   if (sealer === null && existing?.env != null) {
     return failed(
       'NOT_DEPLOYABLE',
-      'set SPINDRIFT_CREDENTIAL_KEYRING before a Function with saved environment values can be changed',
+      'set KTHX_ENGINE_CREDENTIAL_KEYRING before a Function with saved environment values can be changed',
     );
   }
   const env = mergeEnv(
@@ -70,7 +70,7 @@ export const saveFunction: Command<
   if (Object.keys(env).length > 0 && sealer === null) {
     return failed(
       'NOT_DEPLOYABLE',
-      'set SPINDRIFT_CREDENTIAL_KEYRING before a Function can keep environment values',
+      'set KTHX_ENGINE_CREDENTIAL_KEYRING before a Function can keep environment values',
     );
   }
   const sealed =

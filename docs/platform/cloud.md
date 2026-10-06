@@ -27,7 +27,7 @@ The Cloudflare root declares the zones, the Cloudflare Tunnels that [Ingress and
 | Zone | What it is for |
 | --- | --- |
 | `lolwtf.ca` | Lab hosts, cluster services and API servers, the wiki, and the cluster OIDC documents |
-| `lolwtf.dev` | The default zone for App names (`SPINDRIFT_DOMAIN`) |
+| `lolwtf.dev` | The default zone for App names (`KTHX_ENGINE_DOMAIN`) |
 | `kthx.dev` | [kthx](../apps/kthx.md) at the apex, and its quick sites at `<name>.kthx.dev` |
 | `clankerbanker.ca` | [clankerbanker](../apps/clankerbanker.md) |
 | `embarrassing.ca` | App names |

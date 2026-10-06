@@ -125,7 +125,7 @@ function Enrol({ onSignedIn }: { onSignedIn: (p: Principal) => void }) {
             // The only box on this screen, so it takes focus.
             autoFocus
             value={token}
-            placeholder="from SPINDRIFT_ENROLMENT_TOKEN"
+            placeholder="from KTHX_ENGINE_ENROLMENT_TOKEN"
             onChange={(event) => setToken(event.currentTarget.value)}
           />
           <Problem>{error}</Problem>
@@ -186,9 +186,11 @@ function SignIn({
           >
             <p className="text-xs text-muted-foreground">
               Rotate{' '}
-              <code className="font-mono">SPINDRIFT_ENROLMENT_TOKEN</code> in
-              this installation&apos;s Secret first. Enrolling with the new
-              value replaces every passkey and ends every existing session.
+              <code className="font-mono">KTHX_ENGINE_ENROLMENT_TOKEN</code>, or{' '}
+              <code className="font-mono">SPINDRIFT_ENROLMENT_TOKEN</code>, its
+              old name, in this installation&apos;s Secret first. Enrolling with
+              the new value replaces every passkey and ends every existing
+              session.
             </p>
             <Field
               name="recovery-token"
@@ -196,7 +198,7 @@ function SignIn({
               type="password"
               autoComplete="off"
               value={token}
-              placeholder="the new SPINDRIFT_ENROLMENT_TOKEN"
+              placeholder="the new KTHX_ENGINE_ENROLMENT_TOKEN"
               onChange={(event) => setToken(event.currentTarget.value)}
             />
             <Button

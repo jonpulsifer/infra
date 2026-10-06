@@ -91,7 +91,6 @@ sections:
           - runbooks/restore-etcd-on-talos.md
           - runbooks/restore-from-the-gcs-copy.md
           - runbooks/migrate-a-local-path-volume.md
-          - runbooks/adopt-the-folly-prometheus-operator-crds.md
       - group: Cloud and network
         items:
           - runbooks/apply-an-opentofu-change.md
