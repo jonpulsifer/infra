@@ -29,7 +29,7 @@ Clients that route to a cluster's load-balancer range reach its addresses.
 
 Alertmanager routes every alert to Discord, and on offsite a firing `critical` alert to the owner's phone as well. [Alerting](observability/alerting.md) has the routes, the selector rules and who can post an alert.
 
-The in-cluster log streams carry `cluster` and a `job` of `kubernetes` or `systemd-journal`. The desktop streams carry `job="windows-eventlog"`, `host`, `channel` and `level`. Query logs in Grafana, or directly with the header `AccountID: 1`.
+The in-cluster log streams carry `cluster` and a `job` of `kubernetes` or `systemd-journal`. Vector also listens on each node's loopback for Talos service and kernel logs, the streams `job="talos"` (with `host` and `service`) and `job="talos-kernel"` (with `host`). No node runs Talos, so both are empty. The desktop streams carry `job="windows-eventlog"`, `host`, `channel` and `level`. Query logs in Grafana, or directly with the header `AccountID: 1`.
 
 ## Targets outside Kubernetes
 
