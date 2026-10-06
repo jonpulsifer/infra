@@ -19,11 +19,12 @@ spec:
       match:
         # Each entry under `any` is an alternative, so a pod labelled with
         # either key is verified. `spindrift.dev/deploy` is the legacy key.
+        # Both entries must list the same namespaces, or one key covers less.
+        # Per-App namespaces are named `app-<app>`.
         any:
           - resources:
               kinds:
                 - Pod
-              # Per-App namespaces are named `app-<app>`.
               namespaces:
                 - spindrift-apps
                 - "app-*"
