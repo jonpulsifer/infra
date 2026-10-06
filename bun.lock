@@ -270,7 +270,7 @@
       "version": "0.0.1",
       "devDependencies": {
         "@repo/typescript-config": "workspace:*",
-        "@types/k6": "2.2.1",
+        "@types/k6": "2.3.0",
         "typescript": "5.9.3",
       },
     },
@@ -1246,7 +1246,7 @@
 
     "@types/json-schema": ["@types/json-schema@7.0.15", "", {}, "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA=="],
 
-    "@types/k6": ["@types/k6@2.2.1", "", {}, "sha512-WgLxx6KgNSZq3KV3HnYYVvo5ZZSxyRz3q9B0byBAY8z6HuYWxcdOr69fRQuvadmUD2NkVVcbDMye8mF+2Wxx/A=="],
+    "@types/k6": ["@types/k6@2.3.0", "", {}, "sha512-kEiRQx9MRQZ0vAwWgZUyYvuEc1JC++OZbH9uHVLsSOIKFLwHz8UeIV1EuIlB4Fqn03A4ZM+E624zVsvQPAAp6Q=="],
 
     "@types/mdast": ["@types/mdast@4.0.4", "", { "dependencies": { "@types/unist": "*" } }, "sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA=="],
 
