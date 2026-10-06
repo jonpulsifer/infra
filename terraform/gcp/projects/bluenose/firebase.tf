@@ -3,7 +3,7 @@ module "firebase_project_policies" {
   project = local.project
 }
 
-resource "google_firebase_project" "spindrift" {
+resource "google_firebase_project" "kthx_engine" {
   provider = google-beta
   project  = local.project
 

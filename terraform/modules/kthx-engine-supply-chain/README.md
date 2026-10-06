@@ -1,4 +1,4 @@
-# spindrift-supply-chain
+# kthx-engine-supply-chain
 
 Module for the kthx supply chain in one artifacts project. See [kthx security](https://wiki.lolwtf.ca/apps/kthx/security/) on the wiki.
 
@@ -22,10 +22,10 @@ When you pass your own resources, you arrange these grants:
 ## Develop
 
 ```bash
-tofu -chdir=terraform/modules/spindrift-supply-chain init -backend=false
-tofu -chdir=terraform/modules/spindrift-supply-chain validate
-tofu -chdir=terraform/modules/spindrift-supply-chain/examples/auto init -backend=false
-tofu -chdir=terraform/modules/spindrift-supply-chain/examples/auto validate
+tofu -chdir=terraform/modules/kthx-engine-supply-chain init -backend=false
+tofu -chdir=terraform/modules/kthx-engine-supply-chain validate
+tofu -chdir=terraform/modules/kthx-engine-supply-chain/examples/auto init -backend=false
+tofu -chdir=terraform/modules/kthx-engine-supply-chain/examples/auto validate
 ```
 
 `mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/gcp/projects/trusted-builds` when this module changes.
@@ -93,7 +93,7 @@ No modules.
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_attestor"></a> [attestor](#output\_attestor) | Binary Authorization attestor id (projects/*/attestors/*) — what terraform/modules/spindrift-vessel's attestor variable takes |
+| <a name="output_attestor"></a> [attestor](#output\_attestor) | Binary Authorization attestor id (projects/*/attestors/*) — what terraform/modules/kthx-engine-vessel's attestor variable takes |
 | <a name="output_note"></a> [note](#output\_note) | Container-analysis note id (projects/*/notes/*). Null with a bring-your-own attestor. |
 | <a name="output_registry_namespace"></a> [registry\_namespace](#output\_registry\_namespace) | Artifact Registry namespace the kthx engine publishes to — supplyChain.registry material. A namespace, not a repository: core appends {app}/{component}. |
 | <a name="output_signer_key"></a> [signer\_key](#output\_signer\_key) | Signer crypto key resource id (projects/*/locations/*/keyRings/*/cryptoKeys/*) |

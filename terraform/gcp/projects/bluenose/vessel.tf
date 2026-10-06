@@ -1,23 +1,23 @@
-# The spindrift-vessel module applied to bluenose, the home vessel; iam.tf holds its extras.
+# The kthx-engine-vessel module applied to bluenose, the home vessel; iam.tf holds its extras.
 
 locals {
   controller_member = "serviceAccount:spindrift-controller@${local.project}.iam.gserviceaccount.com"
 }
 
 module "vessel" {
-  source = "../../../modules/spindrift-vessel"
+  source = "../../../modules/kthx-engine-vessel"
 
   project           = local.project
   controller_member = local.controller_member
   services          = local.vessel_services
   controller_roles  = local.spindrift_project_roles
 
-  # Created by trusted-builds' spindrift-supply-chain module; roots share no state.
+  # Created by trusted-builds' kthx-engine-supply-chain module; roots share no state.
   attestor = "projects/trusted-builds/attestors/provenance"
 
   # A grant to a missing service account fails with a 400 and is not retried. A vessel
   # project has iam.googleapis.com on before its first apply, so the account can come first.
-  depends_on = [google_service_account.spindrift_controller]
+  depends_on = [google_service_account.kthx_engine_controller]
 }
 
 module "network" {

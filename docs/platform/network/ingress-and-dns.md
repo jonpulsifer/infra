@@ -34,7 +34,7 @@ Chrony syncs from NTS servers and polls the other host.
 ## Rules
 
 - On offsite, an app that shares `cluster-gateway` adds a listener with its hostname and an `allowedRoutes` namespace, or its route does not attach.
-- Each zone that kthx creates App names in needs a `domainFilters` entry in the external-dns HelmRelease, a `dnsZones` entry in each `letsencrypt-production` issuer, a wildcard listener and certificate on each serving Apps Gateway, and, for `reach: public`, a `*.<zone>` rule in `terraform/network/cloudflare/spindrift.tf`. Without one, the App deploys but its name does not resolve or answer.
+- Each zone that kthx creates App names in needs a `domainFilters` entry in the external-dns HelmRelease, a `dnsZones` entry in each `letsencrypt-production` issuer, a wildcard listener and certificate on each serving Apps Gateway, and, for `reach: public`, a `*.<zone>` rule in `terraform/network/cloudflare/kthx-engine.tf`. Without one, the App deploys but its name does not resolve or answer.
 - Keep `--annotation-prefix` pinned in the external-dns HelmRelease, or external-dns ignores the proxy and controller annotations.
 
 ## Where it lives

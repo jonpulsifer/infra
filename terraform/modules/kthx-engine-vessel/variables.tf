@@ -26,5 +26,5 @@ variable "runtime_account_id" {
 
 variable "attestor" {
   type        = string
-  description = "The Binary Authorization attestor every container admission must carry, as projects/*/attestors/* — the spindrift-supply-chain module's attestor output"
+  description = "The Binary Authorization attestor every container admission must carry, as projects/*/attestors/* — the kthx-engine-supply-chain module's attestor output"
 }

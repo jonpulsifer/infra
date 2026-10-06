@@ -60,4 +60,4 @@ When the engine has the `SPINDRIFT_KTHX_*` variables, a name an App mints in the
 
 kthx writes config values to Secret Manager in bluenose, and each Target reads them from there ([Secrets](../../platform/secrets.md)).
 
-Function env values are write-only, but Cloud Run shows them to bluenose readers. Workers Functions need the Cloudflare token scopes in `terraform/network/cloudflare/spindrift.tf`.
+Function env values are write-only, but Cloud Run shows them to bluenose readers. Workers Functions need the Cloudflare token scopes in `terraform/network/cloudflare/kthx-engine.tf`.

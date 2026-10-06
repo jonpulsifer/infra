@@ -1,4 +1,4 @@
-# APIs enabled on this vessel, applied through the spindrift-vessel module.
+# APIs enabled on this vessel, applied through the kthx-engine-vessel module.
 # Declared in this file rather than beside the module call: Spindrift's
 # generated remediation stanzas append `google_project_service` resources to a
 # vessel root's services.tf and dedupe by grepping it for the quoted service

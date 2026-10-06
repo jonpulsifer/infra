@@ -52,7 +52,7 @@ resource "cloudflare_zone_setting" "kthx_dev" {
 }
 
 # The apex and wildcard records are kthx_apex and kthx_sites_wildcard in
-# spindrift.tf. www only redirects to the apex.
+# kthx-engine.tf. www only redirects to the apex.
 resource "cloudflare_dns_record" "www_kthx_dev" {
   zone_id = cloudflare_zone.kthx_dev.id
   comment = "terraform managed"
