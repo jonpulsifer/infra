@@ -25,7 +25,6 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Restore from the GCS copy](restore-from-the-gcs-copy.md): copy a Garage bucket back from the encrypted GCS copy
 - [Migrate a local-path volume](migrate-a-local-path-volume.md): move a hostPath volume to a `local` volume so that Velero can back it up
 - [Restore etcd](restore-etcd.md): restore the etcd of a control plane from a snapshot in Garage
-- [Adopt the folly Prometheus Operator CRDs](adopt-the-folly-prometheus-operator-crds.md): make sure that folly's `prometheus-operator-crds` HelmRelease adopted the CRDs that kube-prometheus-stack installed
 
 ## Cloud and network
 
