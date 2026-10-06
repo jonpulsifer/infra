@@ -698,7 +698,7 @@ describe('a verified webhook delivery', () => {
     const passes = await applyWebhookDelivery(loop, {
       kind: 'push',
       repository: fake.fullName,
-      ref: 'refs/heads/spindrift/configure',
+      ref: 'refs/heads/kthx/configure',
       defaultBranch: 'main',
       head: '2222222222222222222222222222222222222222',
     });

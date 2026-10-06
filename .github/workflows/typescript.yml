@@ -37,7 +37,7 @@ jobs:
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
           # The clusters/, mise.toml, AGENTS.md, persona, skills, .dockerignore,
-          # images/mate-sandbox, terraform/pki and spindrift-build.yml paths are
+          # images/mate-sandbox, terraform/pki and build workflow paths are
           # test inputs. Keep them in step with the kthx-engine, mate and
           # switchboard test inputs in turbo.json.
           files: |
@@ -84,6 +84,7 @@ jobs:
             biome.json
             .github/workflows/typescript.yml
             .github/workflows/spindrift-build.yml
+            .github/workflows/kthx.yml
       - id: classify
         env:
           ANY_CHANGED: ${{ steps.changed-paths.outputs.any_changed }}

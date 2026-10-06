@@ -1,7 +1,8 @@
-# The legacy build caller, which an engine older than kthx.yml dispatches and
-# whose run name it matches. kthx.yml is the caller every current engine runs.
+# The build caller for this repository, where uploaded archives build. A direct
+# dispatch of the reusable workflow would run the default branch; the local
+# `uses:` runs it at this file's own commit.
 name: kthx
-run-name: spindrift ${{ inputs.correlation }}
+run-name: kthx ${{ inputs.correlation }}
 
 on:
   workflow_dispatch:

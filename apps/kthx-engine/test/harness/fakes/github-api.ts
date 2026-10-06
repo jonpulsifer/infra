@@ -69,6 +69,13 @@ export interface FakeActionsOptions {
   listFailures?: number;
   /** Status reads that answer `500` before the endpoint serves. */
   statusFailures?: number;
+  /** The caller files the repository has; unset, every dispatch is accepted. */
+  callers?: readonly string[];
+}
+
+/** The run-name prefix each caller stamps; the legacy caller keeps its own. */
+function runNamePrefix(workflow: string): string {
+  return workflow === 'spindrift.yml' ? 'spindrift' : 'kthx';
 }
 
 interface FakeRun {
@@ -152,7 +159,8 @@ export class FakeGitHub {
   private tokenCounter = 0;
   private readonly now: () => Date;
   private readonly runs: FakeRun[] = [];
-  private readonly actions: Required<FakeActionsOptions>;
+  private readonly actions: Required<Omit<FakeActionsOptions, 'callers'>>;
+  private readonly callers: readonly string[] | null;
 
   constructor(options: FakeGitHubOptions = {}) {
     this.fullName = options.fullName ?? 'example/app';
@@ -169,6 +177,7 @@ export class FakeGitHub {
       listFailures: options.actions?.listFailures ?? 0,
       statusFailures: options.actions?.statusFailures ?? 0,
     };
+    this.callers = options.actions?.callers ?? null;
   }
 
   get baseUrl(): string {
@@ -387,9 +396,13 @@ export class FakeGitHub {
 
     const dispatch = rest.match(/^\/actions\/workflows\/([^/]+)\/dispatches$/);
     if (dispatch && method === 'POST') {
+      const workflow = decodeURIComponent(dispatch[1] ?? '');
+      if (this.callers !== null && !this.callers.includes(workflow)) {
+        return this.notFound();
+      }
       const inputs = (body.inputs ?? {}) as Record<string, string>;
       this.dispatches.push({
-        workflow: decodeURIComponent(dispatch[1] ?? ''),
+        workflow,
         branch: String(body.ref ?? ''),
         inputs,
       });
@@ -398,7 +411,7 @@ export class FakeGitHub {
       this.runs.push({
         id: this.runNumber,
         // What the caller workflow's `run-name` produces.
-        name: `spindrift ${inputs.correlation ?? ''}`,
+        name: `${runNamePrefix(workflow)} ${inputs.correlation ?? ''}`,
         reads: 0,
         log: this.actions.log(spec),
         cancelled: false,
@@ -623,15 +636,18 @@ export class FakeGitHub {
     }
 
     if (rest.startsWith('/pulls')) {
+      const state = url.searchParams.get('state');
       return this.json(
-        this.pulls.map((p) => ({
-          number: p.number,
-          title: p.title,
-          body: p.body,
-          head: { ref: p.head },
-          base: { ref: p.base },
-          state: p.state,
-        })),
+        this.pulls
+          .filter((p) => state === null || state === 'all' || p.state === state)
+          .map((p) => ({
+            number: p.number,
+            title: p.title,
+            body: p.body,
+            head: { ref: p.head },
+            base: { ref: p.base },
+            state: p.state,
+          })),
       );
     }
 

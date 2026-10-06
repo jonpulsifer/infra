@@ -143,6 +143,33 @@ export interface RepositoryWriter {
       readonly base: string;
     },
   ): Promise<number>;
+  /** The open pull request whose head is `branch`, or `null`. */
+  findOpenPullRequest?(
+    ref: RepositoryRef,
+    fullName: string,
+    branch: string,
+  ): Promise<number | null>;
+}
+
+/**
+ * The branch a pull request is written to: the legacy one while an open pull
+ * request stands on it, so a rerun rewrites that pull request instead of
+ * opening a second one beside it.
+ */
+export async function pullRequestBranch(
+  host: RepositoryWriter,
+  ref: RepositoryRef,
+  fullName: string,
+  branches: { readonly branch: string; readonly legacyBranch: string },
+): Promise<string> {
+  const standing = await host.findOpenPullRequest?.(
+    ref,
+    fullName,
+    branches.legacyBranch,
+  );
+  return standing === undefined || standing === null
+    ? branches.branch
+    : branches.legacyBranch;
 }
 
 export interface RepositoryHost extends RepositoryReader, RepositoryWriter {

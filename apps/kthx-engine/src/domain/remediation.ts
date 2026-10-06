@@ -183,7 +183,8 @@ function enablePlatformApi(
     };
   }
   const project = consumer ?? subject.project;
-  const label = identifier(`spindrift_${service.split('.')[0]}`);
+  const name = service.split('.')[0] ?? service;
+  const label = labelOf(name);
   return {
     kind: 'generated',
     summary:
@@ -196,7 +197,11 @@ function enablePlatformApi(
         : rootOf(owner, DESTINATION_FILE.PLATFORM_API),
     // The service string too: a root that enables APIs through one `for_each`
     // owns this service under a label nothing here can predict.
-    declares: [address('google_project_service', label), quote(service)],
+    declares: [
+      address('google_project_service', label),
+      legacyAddress('google_project_service', name),
+      quote(service),
+    ],
     terraform: `resource "google_project_service" "${label}" {
   project            = ${quote(project)}
   service            = ${quote(service)}
@@ -222,13 +227,18 @@ function grantFederatedAccess(subject: RemediationSubject): Remediation {
         'this installation federates without impersonating a service account, so the principal a grant must name is decided by the pool provider’s attribute mapping rather than by anything kthx holds',
     };
   }
-  const label = identifier(`spindrift_${role.slice(role.indexOf('/') + 1)}`);
+  const name = role.slice(role.indexOf('/') + 1);
+  const label = labelOf(name);
   return {
     kind: 'generated',
     summary: `Grant ${subject.principal} ${role} on ${subject.project}, which is the role that admits the call this probe was refused.`,
     destination: destinationOf(subject, DESTINATION_FILE.OIDC_FEDERATION),
     // The role string too, for a root that binds roles through one `for_each`.
-    declares: [address('google_project_iam_member', label), quote(role)],
+    declares: [
+      address('google_project_iam_member', label),
+      legacyAddress('google_project_iam_member', name),
+      quote(role),
+    ],
     terraform: `resource "google_project_iam_member" "${label}" {
   project = ${quote(subject.project)}
   role    = ${quote(role)}
@@ -258,10 +268,11 @@ function declareSourceBucket(subject: RemediationSubject): Remediation {
     summary: `Declare ${subject.sourceBucket} in ${subject.project}, at the location this boundary’s connected surface names.`,
     destination: destinationOf(subject, DESTINATION_FILE.SOURCE_BUCKET),
     declares: [
-      address('google_storage_bucket', 'spindrift_source'),
+      address('google_storage_bucket', labelOf('source')),
+      legacyAddress('google_storage_bucket', 'source'),
       quote(subject.sourceBucket),
     ],
-    terraform: `resource "google_storage_bucket" "spindrift_source" {
+    terraform: `resource "google_storage_bucket" "${labelOf('source')}" {
   project                     = ${quote(subject.project)}
   name                        = ${quote(subject.sourceBucket)}
   location                    = ${quote(subject.region)}
@@ -312,6 +323,20 @@ function rootOf(
 /** Only the characters HCL admits in a resource label. */
 function identifier(value: string): string {
   return value.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+const LABEL_PREFIX = 'kthx_engine';
+
+/** Read only: stanzas opened before the rename carry this prefix. */
+const LEGACY_LABEL_PREFIX = 'spindrift';
+
+function labelOf(name: string): string {
+  return identifier(`${LABEL_PREFIX}_${name}`);
+}
+
+/** A root that merged an earlier stanza declares the fact under this address. */
+function legacyAddress(type: string, name: string): string {
+  return address(type, identifier(`${LEGACY_LABEL_PREFIX}_${name}`));
 }
 
 /**
