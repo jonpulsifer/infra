@@ -58,17 +58,15 @@ export interface MonacoNamespace {
     defineTheme(name: string, data: EditorThemeData): void;
     setTheme(theme: string): void;
   };
-  readonly languages: {
-    readonly typescript: {
-      readonly javascriptDefaults: {
-        setCompilerOptions(options: Record<string, unknown>): void;
-        addExtraLib(content: string, filePath?: string): MonacoModel;
-        setDiagnosticsOptions(options: Record<string, unknown>): void;
-      };
-      readonly ScriptTarget: { readonly ESNext: number };
-      readonly ModuleKind: { readonly ESNext: number };
-      readonly ModuleResolutionKind: { readonly NodeJs: number };
+  readonly typescript: {
+    readonly javascriptDefaults: {
+      setCompilerOptions(options: Record<string, unknown>): void;
+      addExtraLib(content: string, filePath?: string): MonacoModel;
+      setDiagnosticsOptions(options: Record<string, unknown>): void;
     };
+    readonly ScriptTarget: { readonly ESNext: number };
+    readonly ModuleKind: { readonly ESNext: number };
+    readonly ModuleResolutionKind: { readonly NodeJs: number };
   };
   readonly KeyMod: { readonly CtrlCmd: number };
   readonly KeyCode: { readonly KeyS: number };
@@ -249,7 +247,7 @@ function installDefaultOptions(ns: MonacoNamespace): void {
 }
 
 function configure(ns: MonacoNamespace): void {
-  const ts = ns.languages.typescript;
+  const ts = ns.typescript;
   ts.javascriptDefaults.setCompilerOptions({
     allowJs: true,
     checkJs: true,
