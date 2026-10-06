@@ -12,3 +12,8 @@ resource "google_firebase_project" "kthx_engine" {
     module.firebase_project_policies,
   ]
 }
+
+moved {
+  from = google_firebase_project.spindrift
+  to   = google_firebase_project.kthx_engine
+}

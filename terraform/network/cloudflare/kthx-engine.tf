@@ -63,6 +63,11 @@ module "tunnel_kthx_engine" {
   }
 }
 
+moved {
+  from = module.tunnel_spindrift
+  to   = module.tunnel_kthx_engine
+}
+
 # A wildcard is safe here: nothing in this zone is hand-managed. Unserved names reach
 # the status route in clusters/offsite/apps/spindrift; exact records outrank this one.
 resource "cloudflare_dns_record" "kthx_engine_apps_wildcard" {
@@ -73,6 +78,11 @@ resource "cloudflare_dns_record" "kthx_engine_apps_wildcard" {
   type    = "CNAME"
   proxied = true
   ttl     = 1
+}
+
+moved {
+  from = cloudflare_dns_record.spindrift_apps_wildcard
+  to   = cloudflare_dns_record.kthx_engine_apps_wildcard
 }
 
 # Nothing in kthx.dev is hand-managed either: every name is a site.
@@ -116,6 +126,11 @@ resource "onepassword_item" "kthx_engine_cloudflared" {
     "kubernetes",
     "spindrift",
   ]
+}
+
+moved {
+  from = onepassword_item.spindrift_cloudflared
+  to   = onepassword_item.kthx_engine_cloudflared
 }
 
 # No Access application on this zone: `reach: private` records hold RFC1918

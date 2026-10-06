@@ -10,8 +10,18 @@ resource "google_secret_manager_secret" "kthx_engine_build_seal_key" {
   depends_on = [google_project_service.service["secretmanager.googleapis.com"]]
 }
 
+moved {
+  from = google_secret_manager_secret.spindrift_build_seal_key
+  to   = google_secret_manager_secret.kthx_engine_build_seal_key
+}
+
 resource "google_secret_manager_secret_iam_member" "kthx_engine_build_seal_key_accessor" {
   secret_id = google_secret_manager_secret.kthx_engine_build_seal_key.id
   role      = "roles/secretmanager.secretAccessor"
   member    = local.spindrift_build_workflow_principal
+}
+
+moved {
+  from = google_secret_manager_secret_iam_member.spindrift_build_seal_key_accessor
+  to   = google_secret_manager_secret_iam_member.kthx_engine_build_seal_key_accessor
 }

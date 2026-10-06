@@ -9,6 +9,11 @@ resource "google_service_account" "kthx_engine_controller" {
   display_name = "kthx engine platform controller"
 }
 
+moved {
+  from = google_service_account.spindrift_controller
+  to   = google_service_account.kthx_engine_controller
+}
+
 # The offsite cluster's spindrift installation, namespace spindrift. The
 # pool's subject is the cluster, the namespace and the service account, so
 # this principal names exactly that installation and nothing else federates
@@ -23,6 +28,11 @@ resource "google_service_account_iam_member" "kthx_engine_controller_workload_id
   member             = local.spindrift_principal
 }
 
+moved {
+  from = google_service_account_iam_member.spindrift_controller_workload_identity
+  to   = google_service_account_iam_member.kthx_engine_controller_workload_identity
+}
+
 # Signing a V4 storage URL is a separate permission from impersonating.
 # Spindrift mints one for every `gs://` source bundle it hands a hosted build
 # route, and signs it through IAM's `signBlob` as the federated principal —
@@ -35,6 +45,11 @@ resource "google_service_account_iam_member" "kthx_engine_controller_token_creat
   service_account_id = google_service_account.kthx_engine_controller.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = local.spindrift_principal
+}
+
+moved {
+  from = google_service_account_iam_member.spindrift_controller_token_creator
+  to   = google_service_account_iam_member.kthx_engine_controller_token_creator
 }
 
 # The roles the controller holds on this vessel. Declared in this file rather
@@ -87,6 +102,11 @@ resource "google_service_account_iam_member" "kthx_engine_controller_acts_as_def
   service_account_id = data.google_compute_default_service_account.default.name
   role               = "roles/iam.serviceAccountUser"
   member             = google_service_account.kthx_engine_controller.member
+}
+
+moved {
+  from = google_service_account_iam_member.spindrift_controller_acts_as_default
+  to   = google_service_account_iam_member.kthx_engine_controller_acts_as_default
 }
 
 # The org policy that strips predefined roles from the compute default

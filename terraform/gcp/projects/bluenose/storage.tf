@@ -47,10 +47,20 @@ resource "google_storage_bucket" "kthx_engine_source" {
   depends_on = [module.vessel]
 }
 
+moved {
+  from = google_storage_bucket.spindrift_source
+  to   = google_storage_bucket.kthx_engine_source
+}
+
 resource "google_storage_bucket_iam_member" "kthx_engine_source" {
   bucket = google_storage_bucket.kthx_engine_source.name
   role   = "roles/storage.admin"
   member = google_service_account.kthx_engine_controller.member
+}
+
+moved {
+  from = google_storage_bucket_iam_member.spindrift_source
+  to   = google_storage_bucket_iam_member.kthx_engine_source
 }
 
 resource "google_storage_bucket_iam_member" "trusted_builder_source" {
