@@ -30,7 +30,7 @@ sops = "latest"
 talosctl = "1.14.2"
 yq = "latest"
 # Atlantis applies with OpenTofu; run tofu locally to match.
-opentofu = "1.13.0"
+opentofu = "1.13.1"
 terraform = "latest"
 terraform-docs = "latest"
 velero = "latest"
