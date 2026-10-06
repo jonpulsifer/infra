@@ -5,12 +5,16 @@
  */
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import type { GeneratedRemediation } from '../../domain/remediation.ts';
-import type {
-  RepositoryRef,
-  RepositoryWriter,
+import {
+  pullRequestBranch,
+  type RepositoryRef,
+  type RepositoryWriter,
 } from '../../domain/repository.ts';
 
-export const REMEDIATION_BRANCH_PREFIX = 'spindrift/remediate';
+export const REMEDIATION_BRANCH_PREFIX = 'kthx/remediate';
+
+/** Read only: an open pull request under it is rewritten, never duplicated. */
+export const LEGACY_REMEDIATION_BRANCH_PREFIX = 'spindrift/remediate';
 
 /**
  * Names the surface, since one vessel can have the same unmet row on two
@@ -20,14 +24,17 @@ export function remediationBranch(
   vessel: string,
   adapter: TargetAdapter | null,
   prerequisite: string,
+  prefix: string = REMEDIATION_BRANCH_PREFIX,
 ): string {
   const row = prerequisite.toLowerCase().replace(/_/g, '-');
   const surface = adapter === null ? '' : `${adapter}-`;
-  return `${REMEDIATION_BRANCH_PREFIX}/${vessel}-${surface}${row}`;
+  return `${prefix}/${vessel}-${surface}${row}`;
 }
 
 export interface RemediationTransaction {
   readonly branch: string;
+  /** Written instead of `branch` while an open pull request stands on it. */
+  readonly legacyBranch: string;
   readonly title: string;
   readonly body: string;
   readonly commitMessage: string;
@@ -78,6 +85,12 @@ export function remediationTransaction(input: {
   const subject = subjectOf(input.vessel, input.adapter);
   return {
     branch: remediationBranch(input.vessel, input.adapter, input.prerequisite),
+    legacyBranch: remediationBranch(
+      input.vessel,
+      input.adapter,
+      input.prerequisite,
+      LEGACY_REMEDIATION_BRANCH_PREFIX,
+    ),
     title: `${subject}: clear ${input.prerequisite}`,
     body: pullRequestBody({
       subject,
@@ -176,18 +189,19 @@ export async function openRemediationPullRequest(
     tree,
     parent: base,
   });
-  await host.setBranch(ref, fullName, transaction.branch, commit);
+  const branch = await pullRequestBranch(host, ref, fullName, transaction);
+  await host.setBranch(ref, fullName, branch, commit);
 
   const number = await host.openPullRequest(ref, fullName, {
     title: transaction.title,
     body: transaction.body,
-    head: transaction.branch,
+    head: branch,
     base: defaultBranch,
   });
 
   return {
     number,
-    branch: transaction.branch,
+    branch,
     commit,
     path: transaction.path,
     createdFile: existing === null,

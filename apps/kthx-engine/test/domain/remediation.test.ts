@@ -260,27 +260,53 @@ describe('what a stanza says it already owns', () => {
     // The pull request path checks these against the destination file: the
     // address finds the same resource, the value finds it under a for_each.
     const api = generated(remediationFor({ name: 'PLATFORM_API' }, HOME));
-    expect(api.declares).toContain('"google_project_service" "spindrift_run"');
+    expect(api.declares).toContain(
+      '"google_project_service" "kthx_engine_run"',
+    );
     expect(api.declares).toContain('"run.googleapis.com"');
 
     const grant = generated(remediationFor({ name: 'OIDC_FEDERATION' }, HOME));
+    expect(grant.declares).toContain(
+      '"google_project_iam_member" "kthx_engine_run_admin"',
+    );
     expect(grant.declares).toContain('"roles/run.admin"');
+
+    const bucket = generated(remediationFor({ name: 'SOURCE_BUCKET' }, HOME));
+    expect(bucket.declares).toContain(
+      '"google_storage_bucket" "kthx_engine_source"',
+    );
+    expect(bucket.declares).toContain('"example-source-bucket"');
+  });
+
+  test('each one also names the address an earlier engine wrote for it', () => {
+    // A root that merged an older stanza owns the fact under the legacy label.
+    const api = generated(remediationFor({ name: 'PLATFORM_API' }, HOME));
+    expect(api.declares).toContain('"google_project_service" "spindrift_run"');
+
+    const grant = generated(remediationFor({ name: 'OIDC_FEDERATION' }, HOME));
+    expect(grant.declares).toContain(
+      '"google_project_iam_member" "spindrift_run_admin"',
+    );
 
     const bucket = generated(remediationFor({ name: 'SOURCE_BUCKET' }, HOME));
     expect(bucket.declares).toContain(
       '"google_storage_bucket" "spindrift_source"',
     );
-    expect(bucket.declares).toContain('"example-source-bucket"');
   });
 
-  test('every fact it names is one the stanza itself contains', () => {
+  test('every fact it names but the legacy address is one the stanza contains', () => {
     for (const name of [
       'PLATFORM_API',
       'OIDC_FEDERATION',
       'SOURCE_BUCKET',
     ] as const) {
       const change = generated(remediationFor({ name }, HOME));
-      for (const fact of change.declares) {
+      expect(change.terraform).not.toContain('"spindrift_');
+      const current = change.declares.filter(
+        (fact) => !fact.includes('"spindrift_'),
+      );
+      expect(current).toHaveLength(change.declares.length - 1);
+      for (const fact of current) {
         expect(change.terraform).toContain(fact);
       }
     }

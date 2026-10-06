@@ -292,7 +292,7 @@ describe('the hosted build route', () => {
 
     expect(result.status).toBe('SUCCEEDED');
     expect(host.dispatches).toHaveLength(1);
-    expect(host.dispatches[0]?.workflow).toBe('spindrift.yml');
+    expect(host.dispatches[0]?.workflow).toBe('kthx.yml');
     expect(host.dispatches[0]?.branch).toBe('main');
   });
 
@@ -306,9 +306,67 @@ describe('the hosted build route', () => {
 
     expect(result.status).toBe('SUCCEEDED');
     expect(host.dispatches).toHaveLength(1);
-    expect(host.dispatches[0]?.workflow).toBe('spindrift.yml');
+    expect(host.dispatches[0]?.workflow).toBe('kthx.yml');
     // The refused attempt explains why the run is not in the App's repository.
     expect(text(events)).toContain('someone/never-connected');
+  });
+
+  test('a repository with only the legacy caller builds there, and its run is found', async () => {
+    const { host, route } = hostedRoute({
+      fullName: 'someone/their-app',
+      actions: { callers: ['spindrift.yml'] },
+    });
+    const { events, result } = await run(
+      route.build(repoSource('someone/their-app'), spec),
+    );
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(host.dispatches.map((each) => each.workflow)).toEqual([
+      'spindrift.yml',
+    ]);
+    // The new caller was tried first and refused.
+    expect(text(events)).toContain('could not dispatch kthx.yml');
+    // The log names the run by the title the legacy caller stamps.
+    expect(text(events)).toContain('as “spindrift fixed-correlation”');
+  });
+
+  test('a dispatch refused for any reason but a missing file tries no legacy caller', async () => {
+    const { host, route } = hostedRoute({ actions: { dispatchFailures: 1 } });
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    // A 5xx may still have started the run, so a second dispatch could build twice.
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') {
+      expect(result.reason).toBe('TARGET_UNREACHABLE');
+    }
+    expect(text(events)).toContain('could not dispatch kthx.yml');
+    expect(text(events)).not.toContain('could not dispatch spindrift.yml');
+    expect(host.dispatches).toEqual([]);
+  });
+
+  test('a repository with both callers runs the new one alone', async () => {
+    const { host, route } = hostedRoute({
+      fullName: 'someone/their-app',
+      actions: { callers: ['kthx.yml', 'spindrift.yml'] },
+    });
+    const { result } = await run(
+      route.build(repoSource('someone/their-app'), spec),
+    );
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(host.dispatches.map((each) => each.workflow)).toEqual(['kthx.yml']);
+  });
+
+  test('a repository with neither caller is refused by name for both', async () => {
+    const { host, route } = hostedRoute({ actions: { callers: [] } });
+    const { result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') {
+      expect(result.reason).toBe('TARGET_UNREACHABLE');
+      expect(result.detail).toContain('kthx.yml or spindrift.yml');
+    }
+    expect(host.dispatches).toEqual([]);
   });
 
   test('an archive builds where the workflow lives, having no repository', async () => {
@@ -318,7 +376,7 @@ describe('the hosted build route', () => {
     expect(result.status).toBe('SUCCEEDED');
     // A dispatch names a branch, not a commit, so the pin lives in the caller
     // and the reusable workflow is never dispatched directly.
-    expect(host.dispatches[0]?.workflow).toBe('spindrift.yml');
+    expect(host.dispatches[0]?.workflow).toBe('kthx.yml');
   });
 
   test('the correlation is what finds the run, and travels outside the spec', async () => {
@@ -501,10 +559,13 @@ describe('the hosted build route', () => {
     // A connected repository gets this caller from the configuration PR; the
     // platform repository must commit its own.
     const caller = await Bun.file(
-      new URL('../../../../.github/workflows/spindrift.yml', import.meta.url),
+      new URL('../../../../.github/workflows/kthx.yml', import.meta.url),
     ).text();
     expect(caller).toContain('workflow_dispatch:');
     expect(caller).toContain('uses: ./.github/workflows/spindrift-build.yml');
+    // Assembled, because the linter flags `${` inside a plain string.
+    const expression = ['${', '{ inputs.correlation }', '}'].join('');
+    expect(caller).toContain(`run-name: ${RUN_NAME_PREFIX} ${expression}`);
   });
 
   test('the reusable workflow prints the marker core reads', async () => {
@@ -1294,7 +1355,7 @@ describe('the BuildKit program', () => {
     expect(program).toContain(DOCKERFILE_CONTEXT_PROBE);
     expect(program).toContain('sdc_context="$sdc_root"');
     expect(program).toContain(
-      '--local context="$(spindrift_dockerfile_context Dockerfile "$root" .)"',
+      '--local context="$(kthx_dockerfile_context Dockerfile "$root" .)"',
     );
     // The two arms pick different contexts, so neither may share one.
     expect(program).not.toContain('build "$@" \\\n  --local context=.');

@@ -105,7 +105,7 @@ export function quote(value: string): string {
  */
 export const DOCKERFILE_CONTEXT_PROBE = `# Which directory this Dockerfile builds from: prints its own directory when
 # a COPY/ADD source resolves beside it and not at the root, else the root.
-spindrift_dockerfile_context() {
+kthx_dockerfile_context() {
   sdc_file="$1"; sdc_root="$2"; sdc_scope="$3"
   sdc_context="$sdc_root"
   set -f
@@ -282,7 +282,7 @@ cd "$root"/${quote(input.subpath)}
 ${DOCKERFILE_CONTEXT_PROBE}
 if [ -f Dockerfile ]; then
   set -- --frontend dockerfile.v0 --local dockerfile=. \\
-    --local context="$(spindrift_dockerfile_context Dockerfile "$root" .)"
+    --local context="$(kthx_dockerfile_context Dockerfile "$root" .)"
 else
 ${zeroConfigArm(input)}
 fi

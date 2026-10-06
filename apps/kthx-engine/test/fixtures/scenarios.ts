@@ -1298,11 +1298,11 @@ export const VESSEL_LIST: readonly VesselListItem[] = [
             path: 'terraform/projects/cloud/storage.tf',
           },
           declares: [
-            '"google_storage_bucket" "spindrift_source"',
+            '"google_storage_bucket" "kthx_engine_source"',
             '"example-source-bucket"',
           ],
           terraform:
-            'resource "google_storage_bucket" "spindrift_source" {\n  name = "example-source-bucket"\n}\n',
+            'resource "google_storage_bucket" "kthx_engine_source" {\n  name = "example-source-bucket"\n}\n',
         },
       },
       { name: 'SECRET_STORE', met: true },

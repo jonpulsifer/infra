@@ -7,9 +7,11 @@
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type { RepositoryRef } from '../../domain/repository.ts';
 import {
-  CALLER_WORKFLOW_FILE,
-  RUN_NAME_PREFIX,
+  CALLER_WORKFLOW_FILES,
+  correlatedRunName,
+  isCorrelatedRunName,
 } from '../../integrations/github/config-pr.ts';
+import { GitHubAccessError } from '../../integrations/github/http.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -223,13 +225,13 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       source.origin.repository !== this.platformRepository
         ? [source.origin.repository, this.platformRepository]
         : [this.platformRepository];
-    // A caller workflow in either repository, with the same file name and inputs.
-    const workflow = CALLER_WORKFLOW_FILE;
+    // A caller workflow in either repository, with the same inputs. A repository
+    // configured before the rename has only the legacy caller file.
+    const workflows = CALLER_WORKFLOW_FILES.join(' or ');
 
     // The dispatch id where there is one, so the run name says which attempt it is.
     const correlation =
       dispatchId ?? (this.options.correlation ?? (() => crypto.randomUUID()))();
-    const runName = `${RUN_NAME_PREFIX} ${correlation}`;
 
     // Dispatch already refused a held secret without a seal key, so reaching the
     // throw below is a programming error.
@@ -276,41 +278,63 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     let repository: string | null = null;
     let ref: RepositoryRef | null = null;
     let branch = '';
+    let workflow = '';
     let detail = '';
-    for (const candidate of candidates) {
+    dispatch: for (const candidate of candidates) {
+      let candidateRef: RepositoryRef;
+      let candidateBranch: string;
       try {
-        const candidateRef = await host.installationFor(candidate);
-        const candidateBranch = (await host.repository(candidateRef, candidate))
+        candidateRef = await host.installationFor(candidate);
+        candidateBranch = (await host.repository(candidateRef, candidate))
           .defaultBranch;
-        await host.dispatchWorkflow(candidateRef, candidate, {
-          workflow,
-          branch: candidateBranch,
-          inputs: { spec: JSON.stringify(request), correlation },
-        });
-        repository = candidate;
-        ref = candidateRef;
-        branch = candidateBranch;
-        break;
       } catch (error) {
-        // Every failed attempt is logged, which explains a run in the platform
-        // repository.
         detail = error instanceof Error ? error.message : String(error);
         yield {
           type: 'log',
           at: now(),
-          line: `could not dispatch ${workflow} in ${candidate}: ${detail}`,
+          line: `could not dispatch ${workflows} in ${candidate}: ${detail}`,
         };
+        continue;
+      }
+      for (const file of CALLER_WORKFLOW_FILES) {
+        try {
+          await host.dispatchWorkflow(candidateRef, candidate, {
+            workflow: file,
+            branch: candidateBranch,
+            inputs: { spec: JSON.stringify(request), correlation },
+          });
+          repository = candidate;
+          ref = candidateRef;
+          branch = candidateBranch;
+          workflow = file;
+          break dispatch;
+        } catch (error) {
+          // Every failed attempt is logged, which explains a run in the
+          // platform repository.
+          detail = error instanceof Error ? error.message : String(error);
+          yield {
+            type: 'log',
+            at: now(),
+            line: `could not dispatch ${file} in ${candidate}: ${detail}`,
+          };
+          // Only a missing file moves on to the legacy caller. Any other
+          // refusal may have started the run, so this repository is done.
+          const missing =
+            error instanceof GitHubAccessError && error.status === 404;
+          if (!missing) continue dispatch;
+        }
       }
     }
     if (ref === null || repository === null) {
       return buildFailed(
         logs,
         'TARGET_UNREACHABLE',
-        `could not dispatch ${workflow} in ${candidates.join(' or ')}: ${detail}`,
-        { repositories: candidates, workflow },
+        `could not dispatch ${workflows} in ${candidates.join(' or ')}: ${detail}`,
+        { repositories: candidates, workflows: CALLER_WORKFLOW_FILES },
       );
     }
 
+    const runName = correlatedRunName(workflow, correlation);
     yield {
       type: 'log',
       at: now(),
@@ -348,7 +372,10 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
           workflow,
           branch,
         });
-        run = runs.find((candidate) => candidate.name === runName) ?? null;
+        run =
+          runs.find((candidate) =>
+            isCorrelatedRunName(candidate.name, correlation),
+          ) ?? null;
         lookupFailure = null;
       } catch (error) {
         lookupFailure = error instanceof Error ? error.message : String(error);
