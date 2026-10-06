@@ -35,7 +35,9 @@ Retention deletes the closed rows of profiles whose grants equal `operator`'s, a
 
 mate reads only the allowlist's messages. A mention in an allowed channel opens a thread. A reply in a thread with a row in `mate_threads` continues it, whether the row is open, closed for quiet or finished, and across restarts. It runs under the row's profile with its stored session, so a reply to the custodian's report runs as `custodian` in the automation lane.
 
-Slack retries an undelivered event for about six minutes. mate claims each event id in `mate_slack_events` before it answers, so a retry after a restart is answered once, and an event older than an hour is not. While the store is down, the cutoff is the process start.
+Slack retries an undelivered event for about six minutes. mate claims the event id of an allowlisted human's message or Stop in `mate_slack_events` before it answers, so a retry after a restart is answered once, and an event older than an hour is not. Other events skip the claim. While the store is down, or a claim takes more than three seconds, the cutoff is the process start.
+
+Discord does not replay a message sent while mate is disconnected from its gateway, so that message gets no answer, and `mate_inbound_dropped_total` does not count it.
 
 mate downloads no file on a message. The prompt ends with a line naming each file, with its type and size.
 
