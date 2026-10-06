@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "agentGuidance": false,
   "globalEnv": ["NODE_ENV", "STANDALONE"],
   "globalDependencies": ["**/.env.*local", "biome.json"],
   "tasks": {
