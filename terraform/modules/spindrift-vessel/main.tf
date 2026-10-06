@@ -15,7 +15,7 @@ resource "google_project_service" "service" {
 resource "google_service_account" "runtime" {
   project      = var.project
   account_id   = var.runtime_account_id
-  display_name = "Spindrift workload runtime"
+  display_name = "kthx engine workload runtime"
 
   depends_on = [google_project_service.service]
 }
@@ -41,7 +41,7 @@ resource "google_project_iam_member" "runtime_secret_reader" {
 resource "google_project_iam_custom_role" "bucket_lister" {
   project     = var.project
   role_id     = "spindriftBucketLister"
-  title       = "Spindrift bucket lister"
+  title       = "kthx engine bucket lister"
   description = "List the project's buckets, nothing else"
   permissions = ["storage.buckets.list"]
 }

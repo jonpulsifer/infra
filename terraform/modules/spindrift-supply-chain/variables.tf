@@ -10,7 +10,7 @@ variable "location" {
 
 variable "controller_member" {
   type        = string
-  description = "The IAM member the Spindrift controller acts as"
+  description = "The IAM member the kthx engine controller acts as"
 }
 
 variable "attester_principals" {
@@ -32,7 +32,7 @@ variable "verifier_agents" {
 
 variable "repository" {
   type        = string
-  description = "Artifact Registry repository id the reader/writer grants attach to. The module never creates it — the repository may be shared with non-Spindrift consumers, so it stays declared where it lives."
+  description = "Artifact Registry repository id the reader/writer grants attach to. The module never creates it — the repository may be shared with non-kthx-engine consumers, so it stays declared where it lives."
 }
 
 variable "registry_readers" {

@@ -34,6 +34,6 @@ output "note" {
 }
 
 output "registry_namespace" {
-  description = "Artifact Registry namespace Spindrift publishes to — supplyChain.registry material. A namespace, not a repository: core appends {app}/{component}."
+  description = "Artifact Registry namespace the kthx engine publishes to — supplyChain.registry material. A namespace, not a repository: core appends {app}/{component}."
   value       = "${var.location}-docker.pkg.dev/${var.project}/${var.repository}"
 }
