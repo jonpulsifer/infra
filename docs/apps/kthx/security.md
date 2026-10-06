@@ -60,6 +60,6 @@ Quick sites run as `kthx-server@bluenose`, which reaches only bucket `bluenose-k
 ## Supply chain
 
 - The engine verifies each Build's provenance, then signs the image digest with a KMS key in the trusted-builds GCP project.
-- Kyverno policy `spindrift-verify-images` on both clusters rejects an App pod without that signature.
+- Kyverno policy `spindrift-verify-images` on both clusters rejects an App pod without that signature. It matches pods labelled `spindrift.dev/deploy` or `kthx.dev/deploy`.
 - On Cloud Run, the Vessel's Binary Authorization policy admits only attested images.
 - `github-actions` builds reach GCP through the `homelab` workload identity pool as the workflow `spindrift-build.yml` on `main`.

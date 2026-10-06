@@ -17,6 +17,8 @@ spec:
   rules:
     - name: verify-trusted-build-signature
       match:
+        # Each entry under `any` is an alternative, so a pod labelled with
+        # either key is verified. `spindrift.dev/deploy` is the legacy key.
         any:
           - resources:
               kinds:
@@ -28,6 +30,16 @@ spec:
               selector:
                 matchExpressions:
                   - key: spindrift.dev/deploy
+                    operator: Exists
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - spindrift-apps
+                - "app-*"
+              selector:
+                matchExpressions:
+                  - key: kthx.dev/deploy
                     operator: Exists
       verifyImages:
         - imageReferences:
