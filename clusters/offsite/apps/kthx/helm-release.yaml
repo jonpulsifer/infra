@@ -18,7 +18,7 @@ spec:
         namespace: flux-system
   values:
     # CD rewrites this digest on each kthx build on main (`.github/containers.json`).
-    image: ghcr.io/jonpulsifer/kthx:latest@sha256:ac5a1511e27dbae32f85667b87eea3999c042c122ba0e9254a7a0e046ffbe99f
+    image: ghcr.io/jonpulsifer/kthx:latest@sha256:ddd9c48537ce2553778326abd0db76a72c8514f5506b117183dcb3c55a1abecb
     zone: kthx.dev
     # Claiming and site control answer on this host only. The tunnel does not
     # serve it: it is reachable from the lab, the offsite LAN and the tailnet.
