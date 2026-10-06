@@ -38,7 +38,7 @@ resource "google_binary_authorization_attestor" "provenance" {
     note_reference = google_container_analysis_note.provenance[0].id
 
     public_keys {
-      comment = "Spindrift signer key"
+      comment = "kthx engine signer key"
 
       # Admission matches the key version URI that sign-and-create stamps; unset, the API
       # invents an id and attested artifacts are denied. From .name, so id and PEM share a version.

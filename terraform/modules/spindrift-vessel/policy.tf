@@ -1,7 +1,7 @@
 # Cloud Run enforces the project's single Binary Authorization policy.
 resource "google_binary_authorization_policy" "vessel" {
   project     = var.project
-  description = "Require the trusted-builds provenance attestor for Spindrift runtimes"
+  description = "Require the trusted-builds provenance attestor for kthx engine runtimes"
 
   default_admission_rule {
     evaluation_mode         = "REQUIRE_ATTESTATION"

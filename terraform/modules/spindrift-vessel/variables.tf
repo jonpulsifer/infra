@@ -5,12 +5,12 @@ variable "project" {
 
 variable "controller_member" {
   type        = string
-  description = "The IAM member the Spindrift controller acts as in this vessel"
+  description = "The IAM member the kthx engine controller acts as in this vessel"
 }
 
 variable "services" {
   type        = list(string)
-  description = "APIs enabled on the vessel. Pass this list from the root's services.tf so Spindrift's generated remediation stanzas can see the quoted service strings where they look for them."
+  description = "APIs enabled on the vessel. Pass this list from the root's services.tf so the kthx engine's generated remediation stanzas can see the quoted service strings where they look for them."
 }
 
 variable "controller_roles" {
