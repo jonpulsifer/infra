@@ -2,7 +2,7 @@
 
 OpenTofu root for `trusted-builds`, the GCP project that builds, signs and stores kthx artifacts for every vessel. See [kthx security](https://wiki.lolwtf.ca/apps/kthx/security/) on the wiki.
 
-`supply-chain.tf` calls `terraform/modules/spindrift-supply-chain` for the KMS signing key, the Binary Authorization attestor and their grants. `locals.tf` declares who may sign, verify, read and write. The root also holds the Artifact Registry repository, the Developer Connect link to GitHub and the build seal key. A new Developer Connect connection needs the one-time step in [Authorize Developer Connect](https://wiki.lolwtf.ca/runbooks/authorize-developer-connect/).
+`supply-chain.tf` calls `terraform/modules/kthx-engine-supply-chain` for the KMS signing key, the Binary Authorization attestor and their grants. `locals.tf` declares who may sign, verify, read and write. The root also holds the Artifact Registry repository, the Developer Connect link to GitHub and the build seal key. A new Developer Connect connection needs the one-time step in [Authorize Developer Connect](https://wiki.lolwtf.ca/runbooks/authorize-developer-connect/).
 
 `supply-chain.tf` imports the live KMS key ring and key. Keep their names. GCP never deletes a ring or a key, so a new name is a new signing key whose public key the admission policy does not pin.
 
@@ -42,7 +42,7 @@ After an apply, copy the `supply_chain_manifest_block` output into the kthx inst
 
 | Name | Source | Version |
 | ---- | ------ | ------- |
-| <a name="module_supply_chain"></a> [supply\_chain](#module\_supply\_chain) | ../../../modules/spindrift-supply-chain | n/a |
+| <a name="module_supply_chain"></a> [supply\_chain](#module\_supply\_chain) | ../../../modules/kthx-engine-supply-chain | n/a |
 
 ## Resources
 

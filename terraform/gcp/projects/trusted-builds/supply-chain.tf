@@ -10,7 +10,7 @@ import {
 }
 
 module "supply_chain" {
-  source = "../../../modules/spindrift-supply-chain"
+  source = "../../../modules/kthx-engine-supply-chain"
 
   project    = local.project
   location   = local.region

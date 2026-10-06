@@ -1,17 +1,17 @@
-# spindrift-vessel
+# kthx-engine-vessel
 
 Module that makes one GCP project a kthx vessel, a boundary that kthx deploys into: its APIs, the runtime identity, the controller's grants, and the Binary Authorization admission policy. `terraform/gcp/projects/bluenose/vessel.tf` calls it. See [kthx built apps](https://wiki.lolwtf.ca/apps/kthx/built-apps/) on the wiki.
 
 - Declare `services` and `controller_roles` as locals in the calling root's `services.tf` and `iam.tf`. kthx proposes Terraform for unmet prerequisites into those files and reads them to skip what they already declare.
-- Pass `attestor` from the `spindrift-supply-chain` module's `attestor` output, or an existing `projects/*/attestors/*` ID.
+- Pass `attestor` from the `kthx-engine-supply-chain` module's `attestor` output, or an existing `projects/*/attestors/*` ID.
 
 The controller service account, federation bindings, source bucket and cluster Secret Manager readers stay in the home vessel's root.
 
 ## Develop
 
 ```bash
-tofu -chdir=terraform/modules/spindrift-vessel init -backend=false
-tofu -chdir=terraform/modules/spindrift-vessel validate
+tofu -chdir=terraform/modules/kthx-engine-vessel init -backend=false
+tofu -chdir=terraform/modules/kthx-engine-vessel validate
 ```
 
 `mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/gcp/projects/bluenose` when this module changes.
@@ -52,7 +52,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_attestor"></a> [attestor](#input\_attestor) | The Binary Authorization attestor every container admission must carry, as projects/*/attestors/* — the spindrift-supply-chain module's attestor output | `string` | n/a | yes |
+| <a name="input_attestor"></a> [attestor](#input\_attestor) | The Binary Authorization attestor every container admission must carry, as projects/*/attestors/* — the kthx-engine-supply-chain module's attestor output | `string` | n/a | yes |
 | <a name="input_controller_member"></a> [controller\_member](#input\_controller\_member) | The IAM member the kthx engine controller acts as in this vessel | `string` | n/a | yes |
 | <a name="input_controller_roles"></a> [controller\_roles](#input\_controller\_roles) | Project roles the controller holds here. Pass from the root's iam.tf, for the same remediation-visibility reason as services. | `list(string)` | n/a | yes |
 | <a name="input_project"></a> [project](#input\_project) | The project this vessel is, in the boundary's own terms | `string` | n/a | yes |
