@@ -24,7 +24,7 @@ provider "onepassword" {}
 variable "secrets_item_uuid" {
   type        = string
   description = "UUID of the 1Password Secure Note talos-folly-secrets, whose note is folly's Talos secrets bundle. Issue a talosconfig names the item."
-  default     = "PLACEHOLDER-create-talos-folly-secrets"
+  default     = "a3jq5rtwm4b22eeht7jg6idtli"
 
   validation {
     condition     = can(regex("^[a-z0-9]{26}$", var.secrets_item_uuid))
