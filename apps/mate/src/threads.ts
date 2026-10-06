@@ -52,6 +52,7 @@ import type { PromptResult } from './sandbox.ts';
 import {
   type AddOptions,
   type Inbound,
+  type InboundDropReason,
   type Mark,
   type MessageRef,
   type Outcome,
@@ -235,6 +236,10 @@ export class Threads {
   private readonly dayTurns: number[] = [];
   private readonly backlog: Inbound[] = [];
   private readonly inheritedTold = new Set<string>();
+  private readonly recalling = new Map<
+    string,
+    Promise<ThreadRow | undefined>
+  >();
   /**
    * Threads mate opened only to refuse a `+id`, with the refusal: never
    * adopted, and a message in one is refused again.
@@ -456,7 +461,10 @@ export class Threads {
       await this.refuse(surface, inside, prompt.message, refusal);
       return;
     }
-    const known = inside ? this.threads.get(threadKey(inside)) : undefined;
+    const known = inside
+      ? (this.threads.get(threadKey(inside)) ??
+        (await this.recall(surface, inside)))
+      : undefined;
     if (known) {
       const line = this.knownRefusal(known, tag?.id ?? null, stray);
       if (line) {
@@ -468,10 +476,12 @@ export class Threads {
       else this.accept(known, prompt);
       return;
     }
-    if (
-      !surface.allowedChannelIds.has(message.channelId) ||
-      !message.mentionsMe
-    ) {
+    if (!message.mentionsMe) {
+      this.ignored(message, 'no-mention');
+      return;
+    }
+    if (!surface.allowedChannelIds.has(message.channelId)) {
+      this.ignored(message, 'channel');
       return;
     }
     let profile = this.byDefault;
@@ -495,6 +505,7 @@ export class Threads {
         messageId: message.id,
         error: plain(error),
       });
+      this.ignored(message, 'thread-create');
       return;
     }
     if (line) {
@@ -525,6 +536,59 @@ export class Threads {
     if (!thread.row && thread.pending.length === 0) thread.profile = profile;
     if (command) this.command(command, thread, message.authorId);
     else this.accept(thread, prompt);
+  }
+
+  /**
+   * A thread mate has a row for and holds no Thread for: one closed or
+   * finished before a restart, or whose Discord thread was archived. It
+   * continues under its row's profile, as it would without the restart.
+   * Concurrent lookups of one thread share a read, so its messages keep
+   * their order.
+   */
+  private async recall(
+    surface: Surface,
+    inside: ThreadRef,
+  ): Promise<Thread | undefined> {
+    const key = threadKey(inside);
+    let lookup = this.recalling.get(key);
+    if (!lookup) {
+      lookup = this.deps.store
+        .get(key)
+        .finally(() => this.recalling.delete(key));
+      this.recalling.set(key, lookup);
+    }
+    let row: ThreadRow | undefined;
+    try {
+      row = await lookup;
+    } catch (error) {
+      this.metrics.storeFailed('rows');
+      this.deps.log.warn('a thread row could not be read', {
+        threadId: inside.id,
+        error: plain(error),
+      });
+      return undefined;
+    }
+    const held = this.threads.get(key);
+    if (held || !row) return held;
+    const profile = this.profiles.get(row.profile);
+    // An undeclared profile is refused at the open, as for a mention.
+    if (!profile) return this.ensure(surface, row.ref);
+    const thread = this.ensure(surface, row.ref, profile);
+    thread.row = row;
+    thread.turns = row.turns;
+    return thread;
+  }
+
+  /** Counted and logged without its words: a human's message mate stays silent on. */
+  private ignored(message: Inbound, reason: InboundDropReason): void {
+    this.metrics.inboundDropped(message.surface, reason);
+    this.deps.log.info('an inbound message was ignored', {
+      surface: message.surface,
+      reason,
+      channelId: message.channelId,
+      threadId: message.threadId,
+      messageId: message.id,
+    });
   }
 
   /** Why a message in a known thread runs nothing: its `+id` cannot run here. */

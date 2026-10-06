@@ -485,6 +485,48 @@ describe('trusted starts', () => {
     },
   );
 
+  test('a reply in a job thread that finished before a restart runs under its profile, with the report in its session', async () => {
+    const slack = slackSurface();
+    const before = build({
+      surfaces: [slack],
+      script: streaming('1 green, 2 broken'),
+    });
+    await before.threads.start({
+      ref: daily,
+      profile: 'custodian',
+      asker: OWNER,
+      text: 'check',
+    });
+    await clock.advance(5_000);
+    expect(await before.store.get(threadKey(daily))).toMatchObject({
+      state: 'closed',
+      profile: 'custodian',
+    });
+
+    const { threads, brain, store } = rebuild(before, { surfaces: [slack] });
+    await threads.rehydrate();
+    await settle();
+    expect(threads.stateOf(threadKey(daily))).toBeUndefined();
+    await threads.onMessage(slackIn('daily-root', 'fix 2'));
+    await clock.advance(5_000);
+    // A resumed session: the report is in it, so no transcript is replayed.
+    expect(brain.prompts).toEqual(['check', 'fix 2']);
+    expect(metrics.startedBy).toEqual([
+      { profile: 'custodian', mode: 'job' },
+      { profile: 'custodian', mode: 'job' },
+    ]);
+    expect(brain.released.map((r) => r.reason)).toEqual([
+      'finished',
+      'finished',
+    ]);
+    expect(await store.get(threadKey(daily))).toMatchObject({
+      profile: 'custodian',
+      state: 'closed',
+      turns: 2,
+    });
+    expect(metrics.inboundDrops).toEqual([]);
+  });
+
   test('a reply in a job thread whose closed row was swept runs as the default', async () => {
     const slack = slackSurface();
     const { threads, store, brain } = build({
@@ -1060,6 +1102,31 @@ describe('starting a thread', () => {
     await settle();
     expect(discord.threads).toHaveLength(0);
     expect(discord.messages).toHaveLength(0);
+  });
+
+  test("the allowlisted user's ignored messages are counted and logged without their words", async () => {
+    const { threads } = build();
+    await threads.onMessage(
+      mention('hi', { channelId: OTHER_CHANNEL, threadId: OTHER_CHANNEL }),
+    );
+    await threads.onMessage(mention('secret words', { mentionsMe: false }));
+    await threads.onMessage(mention('hi', { authorId: STRANGER }));
+    await threads.onMessage(mention('hi', { authorIsBot: true }));
+    discord.failCreateThread = new Error('missing access');
+    await threads.onMessage(mention('hi'));
+    await settle();
+    expect(metrics.inboundDrops).toEqual([
+      { surface: 'discord', reason: 'channel' },
+      { surface: 'discord', reason: 'no-mention' },
+      { surface: 'discord', reason: 'thread-create' },
+    ]);
+    const logged = log.of('an inbound message was ignored');
+    expect(logged.map((entry) => entry.fields?.reason)).toEqual([
+      'channel',
+      'no-mention',
+      'thread-create',
+    ]);
+    expect(JSON.stringify(logged)).not.toContain('secret');
   });
 
   test("the allowlisted user's reply in a mate thread is a turn", async () => {
@@ -1750,6 +1817,73 @@ describe('a mate restart', () => {
     expect(discord.historyCalls).toBe(0);
     expect(before.brain.prompts.at(-1)).toBe('still there?');
     expect(discord.contentsIn(threadId).at(-1)).toBe('back ');
+  });
+
+  test('a reply in a Discord thread archived for quiet before the restart continues its session, with no mention', async () => {
+    const before = build({ script: streaming('back') });
+    await before.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    await clock.advance(QUIET_MS);
+    expect(discord.archived).toContain(threadId);
+
+    const after = rebuild(before);
+    await after.threads.rehydrate();
+    await settle();
+    expect(after.threads.stateOf(key(threadId))).toBeUndefined();
+    await after.threads.onMessage(inThread(threadId, 'not you', STRANGER));
+    discord.historyCalls = 0;
+    await after.threads.onMessage(inThread(threadId, 'one more thing'));
+    await clock.advance(5_000);
+    expect(discord.historyCalls).toBe(0);
+    expect(before.brain.prompts).toEqual(['go', 'one more thing']);
+    expect(discord.contentsIn(threadId).at(-1)).toBe('back ');
+    expect((await before.store.get(key(threadId)))?.turns).toBe(2);
+    expect(metrics.inboundDrops).toEqual([]);
+  });
+
+  test('a Slack reply in a thread closed before the restart continues it', async () => {
+    const slack = slackSurface();
+    const before = build({ surfaces: [slack], script: streaming('back') });
+    await before.threads.onMessage(
+      slackIn(null, `<@${ME}> go`, { mentionsMe: true }),
+    );
+    await clock.advance(5_000);
+    const root = slack.opened[0]!.messageId;
+    await clock.advance(QUIET_MS);
+    expect(slack.linesIn(root).at(-1)).toBe(THREAD_CLOSED);
+
+    const after = rebuild(before, { surfaces: [slack] });
+    await after.threads.rehydrate();
+    await settle();
+    await after.threads.onMessage(slackIn(root, 'picking this back up'));
+    await clock.advance(5_000);
+    expect(before.brain.prompts).toEqual(['go', 'picking this back up']);
+    expect(slack.answerIn(root)).toBe('back ');
+    expect(metrics.inboundDrops).toEqual([]);
+  });
+
+  test('a reply whose row cannot be read falls back to the mention rule, and is counted when it has none', async () => {
+    const before = build({ script: streaming('back') });
+    await before.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    await clock.advance(QUIET_MS);
+
+    const store = before.store;
+    const get = store.get.bind(store);
+    store.get = async () => {
+      throw new Error('connection refused');
+    };
+    const after = rebuild(before);
+    await after.threads.onMessage(inThread(threadId, 'hello?'));
+    await clock.advance(5_000);
+    store.get = get;
+    expect(before.brain.prompts).toEqual(['go']);
+    expect(metrics.storeFailures).toContain('rows');
+    expect(metrics.inboundDrops).toEqual([
+      { surface: 'discord', reason: 'no-mention' },
+    ]);
   });
 
   test('a surface added without rehydrating leaves the stored threads alone, and still answers', async () => {

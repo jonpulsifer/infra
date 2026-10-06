@@ -46,6 +46,19 @@ export interface HistoryQuery {
   before?: string;
 }
 
+/**
+ * Why an allowlisted human's message ran nothing and said nothing: no mention
+ * outside a thread mate holds, a channel mate does not open threads in, a
+ * thread that could not be created, a Slack event older than the replay
+ * window, or a Slack message shape mate does not read.
+ */
+export type InboundDropReason =
+  | 'no-mention'
+  | 'channel'
+  | 'thread-create'
+  | 'stale'
+  | 'subtype';
+
 export type Outcome = 'done' | 'stopped' | 'failed';
 
 /** Slack's `task_card` statuses. */
