@@ -27,5 +27,4 @@ Reach it at `riptide.lolwtf.ca`.
 
 ## Quirks
 
-- The `prune-dri-by-path` unit removes dangling `/dev/dri/by-path` links before kubelet starts. Without it, each pod that claims the GPU fails with `CreateContainerError`.
 - `/mnt/disks` holds jellyfin's media and the `local-path` volumes on riptide.
