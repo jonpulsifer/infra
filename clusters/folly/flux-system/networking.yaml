@@ -13,6 +13,9 @@ spec:
     name: infra
   dependsOn:
     - name: config
+    # Cilium's values render ServiceMonitors, so its install fails without
+    # these CRDs.
+    - name: monitoring-crds
   decryption:
     provider: sops
     secretRef:
