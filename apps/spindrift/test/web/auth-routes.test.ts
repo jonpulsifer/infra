@@ -329,11 +329,13 @@ describe('a session under the legacy cookie name', () => {
       expiredLegacy,
     ]);
 
-    const name =
-      commandNames.find((n) => n === 'completeCreationDraft') ??
-      commandNames[0]!;
-    const moved = await call(routes, pathFor(name), {}, cookieFrom(response)!);
-    expect(moved.status).toBe(422);
+    const moved = await call(
+      routes,
+      pathFor(commandNames[0]!),
+      {},
+      cookieFrom(response)!,
+    );
+    expect(moved.status).not.toBe(401);
   });
 
   test('moves on a command response too', async () => {

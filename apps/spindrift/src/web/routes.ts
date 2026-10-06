@@ -83,21 +83,22 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
   };
 }
 
+type SessionRoute = (
+  request: Request,
+  ...rest: never[]
+) => Promise<Response | undefined> | Response | undefined;
+
 /**
  * Only the routes that read the session cookie. Static client routes cannot
  * set one, so the shell's first session read moves it.
  */
-function carryLegacySession<Routes extends Record<string, unknown>>(
+function carryLegacySession<Routes extends Record<string, SessionRoute>>(
   routes: Routes,
   deps: SessionStore,
 ): Routes {
-  const carried: Record<string, unknown> = {};
-  for (const [path, route] of Object.entries(routes)) {
-    const handler = route as (
-      request: Request,
-      ...rest: unknown[]
-    ) => Promise<Response | undefined> | Response | undefined;
-    carried[path] = async (request: Request, ...rest: unknown[]) => {
+  const carried: Record<string, SessionRoute> = {};
+  for (const [path, handler] of Object.entries(routes)) {
+    carried[path] = async (request: Request, ...rest: never[]) => {
       const response = await handler(request, ...rest);
       return response === undefined
         ? response
