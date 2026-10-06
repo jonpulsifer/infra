@@ -180,7 +180,7 @@ function SourceBucketList({
                 label="Bucket name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="spindrift-sources"
+                placeholder="kthx-sources"
                 hint="Checked before it is added — a bucket the controller cannot write to is a build that dies at staging."
               />
               <div className="flex flex-wrap gap-2">

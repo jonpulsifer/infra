@@ -209,7 +209,7 @@ func runVerifySignatureCommand(args []string) {
 	fs := flag.NewFlagSet("verify-signature", flag.ExitOnError)
 	artifactDigest := fs.String("artifact-digest", "", "The digest the bundle must cover")
 	bundlePath := fs.String("bundle-path", "", "Path to the signature bundle JSON file")
-	signerKey := fs.String("signer-key", "", "Path to the trusted Spindrift signer key (the same key Sign used)")
+	signerKey := fs.String("signer-key", "", "Path to the trusted kthx signer key (the same key Sign used)")
 	_ = fs.Parse(args)
 
 	if *artifactDigest == "" || *bundlePath == "" || *signerKey == "" {

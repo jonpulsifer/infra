@@ -1,7 +1,7 @@
 # The hosted build route's workflow. Generated callers in connected repositories run
 # it, ordinarily at main, with one opaque `spec`, so new parameters go in `spec`.
 # `workflow_dispatch` builds uploaded archives here. Its last line is the build report.
-name: spindrift-build
+name: kthx-build
 run-name: spindrift ${{ inputs.correlation }}
 
 on:
