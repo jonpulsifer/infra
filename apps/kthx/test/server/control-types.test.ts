@@ -10,10 +10,10 @@
  * router names a path no probe covers.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
-import { ask, withServer } from '../harness/server.ts';
+import { ask, type Harness, withServer } from '../harness/server.ts';
 
 const CONTROL = 'ops.kthx-control-types.test';
 const SERVER = join(import.meta.dir, '..', '..', 'server');
@@ -25,6 +25,8 @@ interface Probe {
   readonly method: string;
   readonly path: string;
   readonly kind: Kind;
+  /** Asserted when set: an owner route must reach its handler's answer. */
+  readonly status?: number;
   readonly token?: boolean;
   readonly body?: Uint8Array | string;
   readonly headers?: Record<string, string>;
@@ -91,14 +93,16 @@ function probes(name: string): Probe[] {
     json('GET', '/kthx/anything'),
     json('GET', `/api/sites/${name}-other`),
     json('GET', site),
+    json('GET', site, { token: true, status: 200 }),
     json('GET', `${site}/releases`),
-    json('POST', `${site}/releases`, { ...upload, body: SITE }),
+    json('POST', `${site}/releases`, { ...upload, body: SITE, status: 201 }),
     json('POST', `${site}/serve`, {
       token: true,
+      status: 200,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ release: 1 }),
+      body: JSON.stringify({ n: 1 }),
     }),
-    json('DELETE', `${site}/hold`, { token: true }),
+    json('DELETE', `${site}/hold`, { token: true, status: 200 }),
     json('GET', `${site}/nothing`),
     json('POST', '/cli/kthx.tgz'),
     page('GET', '/cli'),
@@ -106,25 +110,13 @@ function probes(name: string): Probe[] {
     page('GET', '/cli/nothing'),
     page('GET', '/cli/kthx.tgz/extra'),
     page('GET', '/cli/<script>alert(1)</script>'),
-    { method: 'DELETE', path: site, kind: 'empty', token: true },
+    { method: 'DELETE', path: site, kind: 'empty', token: true, status: 204 },
   ];
 }
 
-const kthx = withServer({ controlHost: CONTROL });
-const guarded = withServer({
-  controlHost: CONTROL,
-  engine: {
-    issuer: 'http://issuer.invalid',
-    audience: 'kthx',
-    subject: 'system:serviceaccount:spindrift:spindrift',
-  },
-});
-
 function mediaType(response: Response): string {
-  return (response.headers.get('content-type') ?? '')
-    .split(';')[0]
-    ?.trim()
-    .toLowerCase() as string;
+  const [type = ''] = (response.headers.get('content-type') ?? '').split(';');
+  return type.trim().toLowerCase();
 }
 
 const TYPES: Record<Kind, string> = {
@@ -135,7 +127,7 @@ const TYPES: Record<Kind, string> = {
 };
 
 async function answerTo(
-  harness: typeof kthx,
+  harness: () => Harness,
   probe: Probe,
   token: string,
 ): Promise<Response> {
@@ -163,17 +155,21 @@ async function expectNotHerePage(response: Response) {
 }
 
 describe('the control host under /api and /cli', () => {
+  const kthx = withServer({ controlHost: CONTROL });
+
   // The tarball only exists in a packed checkout; a stand-in keeps the probe
   // reachable and is removed again, and a real one is left alone.
-  let planted = false;
+  const TARBALL = join(DIST, 'kthx.tgz');
+  let planted: 'file' | 'dir' | null = null;
   beforeAll(() => {
-    if (Bun.file(join(DIST, 'kthx.tgz')).size > 0) return;
+    if (Bun.file(TARBALL).size > 0) return;
+    planted = existsSync(DIST) ? 'file' : 'dir';
     mkdirSync(DIST, { recursive: true });
-    writeFileSync(join(DIST, 'kthx.tgz'), tarGz([]));
-    planted = true;
+    writeFileSync(TARBALL, tarGz([]));
   });
   afterAll(() => {
-    if (planted) rmSync(DIST, { recursive: true, force: true });
+    if (planted === 'dir') rmSync(DIST, { recursive: true, force: true });
+    if (planted === 'file') rmSync(TARBALL, { force: true });
   });
 
   test('answers every route in one of the allowed types, and nothing else', async () => {
@@ -199,23 +195,14 @@ describe('the control host under /api and /cli', () => {
         'nosniff',
       ]);
       expect(response.status, where).toBeLessThan(500);
+      if (probe.status !== undefined) {
+        expect([where, response.status]).toEqual([where, probe.status]);
+      }
       if (probe.kind === 'page') {
         await expectNotHerePage(response);
       } else {
         await response.arrayBuffer();
       }
-    }
-  });
-
-  test('answers the engine routes with JSON when an engine is configured', async () => {
-    for (const probe of probes('unused').filter((p) =>
-      p.path.startsWith('/api/engine'),
-    )) {
-      const where = `${probe.method} ${probe.path}`;
-      const response = await answerTo(guarded, probe, '');
-      expect([where, response.status]).toEqual([where, 401]);
-      expect([where, mediaType(response)]).toEqual([where, TYPES.json]);
-      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     }
   });
 
@@ -286,5 +273,31 @@ describe('the control host under /api and /cli', () => {
         ),
     );
     expect(missed).toEqual([]);
+  });
+});
+
+describe('the control host with an engine configured', () => {
+  const guarded = withServer({
+    controlHost: CONTROL,
+    engine: {
+      issuer: 'http://issuer.invalid',
+      audience: 'kthx',
+      subject: 'system:serviceaccount:spindrift:spindrift',
+    },
+  });
+
+  test('answers the engine routes with JSON before authentication', async () => {
+    for (const probe of probes('unused').filter((p) =>
+      p.path.startsWith('/api/engine'),
+    )) {
+      const where = `${probe.method} ${probe.path}`;
+      const response = await answerTo(guarded, probe, '');
+      expect([where, response.status]).toEqual([where, 401]);
+      expect([where, mediaType(response)]).toEqual([where, TYPES.json]);
+      expect([where, response.headers.get('x-content-type-options')]).toEqual([
+        where,
+        'nosniff',
+      ]);
+    }
   });
 });
