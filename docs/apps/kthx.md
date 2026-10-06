@@ -35,8 +35,8 @@ Flux deploys quick sites from `packages/charts/kthx/` in git. It deploys the eng
 
 | Alert | Meaning | Runbook |
 | --- | --- | --- |
-| `SpindriftDeployFailed` | A deploy ended FAILED. The console's Deploys page shows the reason. | |
-| `SpindriftDeployLost` | A reconciler stopped during a deploy. Read its pod's logs. | |
+| `KthxEngineDeployFailed` | A deploy ended FAILED. The console's Deploys page shows the reason. | |
+| `KthxEngineDeployLost` | A reconciler stopped during a deploy. Read its pod's logs. | |
 
 [Quick sites](kthx/sites.md#operate) lists its alerts. [Install kthx](../runbooks/install-kthx.md) installs the engine, and [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md) gives an agent the MCP endpoint. [Operate Postgres](../runbooks/operate-postgres.md) covers both databases.
 
