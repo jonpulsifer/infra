@@ -1,0 +1,26 @@
+---
+# The monthly restore drill. It owns the `restore-drill` namespace and recovers
+# tronbyt's database from Garage into a throwaway CNPG Cluster there.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: restore-drill
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/folly/apps/restore-drill
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    # The ObjectStore and Cluster kinds the drill creates.
+    - name: barman-cloud
+    # Serves the ClusterSecretStore the ExternalSecret reads.
+    - name: onepassword-connect
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology

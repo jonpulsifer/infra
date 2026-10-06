@@ -120,12 +120,12 @@ Use this runbook to restore a Postgres database from the backups of the barman-c
 
 ## Run the restore drill
 
-The `restore-drill` CronJob recovers the kthx database from offsite's Garage into a throwaway cluster. It fails unless the `sites` table of the `kthx` database has rows.
+The `restore-drill` CronJob recovers a database from the site's Garage into a throwaway cluster. On offsite it recovers kthx and fails unless the `sites` table of the `kthx` database has rows. On folly it recovers tronbyt and fails unless the `tronbyt` database has tables in its `public` schema.
 
-1. Start a drill.
+1. Start a drill. `<site>` is `offsite` or `folly`.
 
    ```bash
-   kubectl create job restore-drill-now --from=cronjob/restore-drill -n restore-drill --context offsite
+   kubectl create job restore-drill-now --from=cronjob/restore-drill -n restore-drill --context <site>
    ```
 
    Result: `job.batch/restore-drill-now created`.
@@ -133,15 +133,15 @@ The `restore-drill` CronJob recovers the kthx database from offsite's Garage int
 2. Read the result.
 
    ```bash
-   kubectl logs job/restore-drill-now -c drill -n restore-drill --context offsite
+   kubectl logs job/restore-drill-now -c drill -n restore-drill --context <site>
    ```
 
-   Result: `recovered kthx-db: <n> rows in kthx.sites`.
+   Result: `recovered kthx-db: <n> rows in kthx.sites` on offsite, or `recovered tronbyt: <n> tables in the public schema` on folly.
 
 3. Delete the Job.
 
    ```bash
-   kubectl delete job restore-drill-now -n restore-drill --context offsite
+   kubectl delete job restore-drill-now -n restore-drill --context <site>
    ```
 
 ## If something goes wrong

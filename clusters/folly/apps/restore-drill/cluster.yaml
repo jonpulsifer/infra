@@ -1,0 +1,30 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tronbyt-drill
+  labels:
+    app.kubernetes.io/name: restore-drill
+    app.kubernetes.io/part-of: backups
+spec:
+  instances: 1
+  storage:
+    storageClass: local-path
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  bootstrap:
+    recovery:
+      source: tronbyt
+      database: tronbyt
+      owner: tronbyt
+  externalClusters:
+    - name: tronbyt
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: tronbyt
+          serverName: tronbyt

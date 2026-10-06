@@ -1,0 +1,23 @@
+---
+# tronbyt's barman store, read-only in practice: the drill only recovers from
+# it. It points at the path the ObjectStore in `tronbyt` writes.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: tronbyt
+  namespace: restore-drill
+  labels:
+    app.kubernetes.io/name: restore-drill
+    app.kubernetes.io/part-of: backups
+spec:
+  configuration:
+    destinationPath: s3://cnpg/tronbyt/
+    endpointURL: ${GARAGE_S3_ENDPOINT}
+    s3Credentials:
+      accessKeyId: {name: garage-cnpg, key: ACCESS_KEY_ID}
+      secretAccessKey: {name: garage-cnpg, key: ACCESS_SECRET_KEY}
+      region: {name: garage-cnpg, key: REGION}
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
