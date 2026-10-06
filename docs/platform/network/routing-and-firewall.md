@@ -9,7 +9,7 @@ Cilium on each node announces the cluster's pod and load-balancer addresses (VIP
 
 Pods get addresses from `CILIUM_POD_CIDR`, and LoadBalancer Services and Gateways get VIPs from `LB_RANGE`. Each node opens an eBGP session with the gateway at `ROUTER_IP`. The gateway's `HOMELAB-IN` prefix-list accepts only the node subnet, VIP pool and pod pool.
 
-The gateways exchange VIP pools and pod pools over iBGP through the tunnel. Site Magic also runs OSPF for the subnets in each console's Site Magic list, and the OSPF route wins for them. folly lists its node subnet and `future`, and offsite lists its node subnet and Default. Neither protocol carries folly's Management, Lab Net or iot networks.
+The gateways exchange VIP pools and pod pools over iBGP through the tunnel, and folly also sends Lab Net to offsite that way. Site Magic also runs OSPF for the subnets in each console's Site Magic list, and the OSPF route wins for them. folly lists its node subnet and `future`, and offsite lists its node subnet and Default. Neither protocol carries folly's Management or iot networks, and offsite sends traffic for an address it has no route to out its WAN.
 
 ## Firewall
 
@@ -20,7 +20,8 @@ folly holds Lab Net and Kubernetes in a custom `Lab` zone. offsite has no custom
 ## Rules
 
 - A new node needs its `bgp-enabled` label in `clusters/<site>/bootstrap/node-labels.tf` and a `neighbor <ip> peer-group HOMELAB` line in its site's FRR file, or it has no BGP session. The `<ip>` is the node's `NODE_ADDRESSES` value in its cluster's [topology file](../../reference/topology.md), copied by hand.
-- After a topology change, edit the literal addresses in both FRR files, or the gateways drop the new routes.
+- After a topology change, edit the literal addresses in both FRR files, or the gateways drop the new routes. Lab Net's prefix is `LAB_CIDR` in `clusters/folly/config/lab-topology.json`.
+- The only tunnel traffic folly admits to a Lab Net host is ssh from offsite's node subnet, VIP pool and pod pool to capsule's port 22 (policy `nest_k8s_to_capsule_ssh`), so offsite reaches other Lab Net hosts with capsule as an ssh jump host. offsite's Default network also routes to Lab Net, and folly's `Vpn` to `Lab` chain drops it.
 - In a folly policy that allows cross-site traffic, list the node subnet, VIP pool and pod pool as sources. Pod packets enter `Lab` on the node's interface, and the `Lab` to `Vpn` chain ends in a DROP.
 - Keep the policy `folly_lb_to_nest_lan`, or replies from folly VIPs to offsite's Default network drop. folly pods and nodes cannot open connections to that network.
 - Keep Management, `future` and offsite's Kubernetes network in `Internal`, where the policies expect them. If offsite's Kubernetes network moves to a custom zone, copy folly's cross-site policies to offsite.
@@ -29,6 +30,7 @@ folly holds Lab Net and Kubernetes in a custom `Lab` zone. offsite has no custom
 ## Where it lives
 
 - `clusters/<site>/config/cluster-topology.json`: `ROUTER_IP`, `BGP_CILIUM_ASN`, `BGP_GATEWAY_ASN`, `CILIUM_POD_CIDR` and `LB_RANGE`
+- `clusters/folly/config/lab-topology.json`: `LAB_CIDR` and `CAPSULE_IP`
 - `clusters/<site>/networking/cilium/`: the pod pool, VIP pool and BGP config
 - `terraform/network/unifi/folly/bgp-folly.conf` and `terraform/network/unifi/offsite/bgp.conf`: the FRR files
 - `terraform/network/unifi/folly/firewall.tf`: the `Lab` zone and cross-site policies
