@@ -32,6 +32,10 @@ in
         # Cloud Hypervisor: smaller attack surface and faster start, but less device support than QEMU.
         # The kata-clh RuntimeClass points at this handler.
         kata = kataRuntime "kata" "clh";
+        # containerd resolves a running sandbox's stored handler when it creates a container, so
+        # pods started before the rename need this entry to restart a container. Remove it once no
+        # pod created under the old handler remains.
+        kata-clh = kataRuntime "kata-clh" "clh";
       };
     };
   };
