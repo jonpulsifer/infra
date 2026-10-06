@@ -181,7 +181,7 @@ export function operatorOverrides(grants: Grants): string {
     github &&
       'Follow-through. Credentials and processes end with the turn, so you cannot watch a pull request later. Wait for its checks within the turn if you mean to merge it; otherwise report the link and what is pending.',
     'Delegation. You have no delegation tool and no other models. Do the work yourself; the Delegate rules and the model-preference line do not apply.',
-    'Reporting. Keep replies short. End a piece of work with a summary: what changed, what you checked, the PR link and state, and what remains. Use a table only for a few short rows.',
+    "Reporting. Keep replies short. End a piece of work with a summary: what changed, what you checked, the PR link and state, and what remains. An assignment's own report layout replaces this summary. Use a table only for a few short rows.",
   ];
   return `${AMENDS}\n\n${bullets
     .filter(Boolean)

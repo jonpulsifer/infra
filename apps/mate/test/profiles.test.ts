@@ -320,6 +320,13 @@ describe('the overrides', () => {
     expect(text).toContain('A task that forbids a merge or an apply wins');
   });
 
+  // The daily check's report leaves out what is healthy.
+  test("custodian's let an assignment's report layout replace the summary", () => {
+    expect(custodian.overrides(custodian.grants)).toContain(
+      "An assignment's own report layout replaces this summary.",
+    );
+  });
+
   test('claim no merge or apply without a GitHub token', () => {
     const text = operator.overrides({ ...operator.grants, github: false });
     expect(text).not.toContain('merge pull requests');

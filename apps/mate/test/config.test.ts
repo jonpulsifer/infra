@@ -149,7 +149,7 @@ describe('config from the environment', () => {
         databaseCaFile: '/var/run/mate/db-ca/ca.crt',
         mcpServers: [],
         profileRoot: null,
-        sessionRetentionDays: 14,
+        sessionRetentionDays: 0,
       },
       githubApp: null,
       sshKeyFile: null,
@@ -469,12 +469,8 @@ describe('config from the environment', () => {
     );
   });
 
-  test('sessions are kept 14 days, and 0 keeps them for good', () => {
-    expect(readBrainConfig({}).sessionRetentionDays).toBe(14);
-    expect(
-      readBrainConfig({ MATE_SESSION_RETENTION_DAYS: '0' })
-        .sessionRetentionDays,
-    ).toBe(0);
+  test('sessions are kept for good unless a retention is set', () => {
+    expect(readBrainConfig({}).sessionRetentionDays).toBe(0);
     expect(
       readBrainConfig({ MATE_SESSION_RETENTION_DAYS: '30' })
         .sessionRetentionDays,
