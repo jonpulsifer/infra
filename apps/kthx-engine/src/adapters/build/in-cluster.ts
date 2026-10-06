@@ -8,6 +8,7 @@ import {
   KubernetesApi,
   type KubernetesObject,
 } from '../deploy/kubernetes/api.ts';
+import { type ObjectKey, stamped } from '../object-keys.ts';
 import {
   buildKitProgramFor,
   buildSecretEnvOf,
@@ -54,7 +55,10 @@ export interface InClusterRouteOptions extends PollingOptions {
 export const JOB_TTL_SECONDS = 3600;
 
 /** The label a build Job carries so its pod can be found. */
-export const JOB_LABEL = 'spindrift.dev/build';
+export const JOB_LABEL: ObjectKey = {
+  key: 'kthx.dev/build',
+  legacy: 'spindrift.dev/build',
+};
 
 /** How a Job ended: a verdict, the cluster's deadline, or a delete. */
 type JobOutcome = 'succeeded' | 'failed' | 'deadline' | 'gone';
@@ -68,7 +72,7 @@ export class InClusterBuildRoute implements BuildAdapter {
   readonly name: string;
   readonly logFidelity: LogFidelity = 'LIVE_TEXT';
   readonly buildLevel: BuildLevel = 1;
-  readonly provenanceBuilderId = 'https://spindrift.dev/builders/in-cluster';
+  readonly provenanceBuilderId = 'https://kthx.dev/builders/in-cluster';
   /** Secrets ride the Job's container environment; see the ponytail on `job`. */
   readonly carriesHeldSecret = true;
   /** The service account reaches one vendor's registries through workload identity. */
@@ -233,7 +237,7 @@ export class InClusterBuildRoute implements BuildAdapter {
       metadata: {
         name,
         namespace: this.options.namespace,
-        labels: { [JOB_LABEL]: name },
+        labels: stamped(JOB_LABEL, name),
       },
       spec: {
         // Retries are core's call; a retried Job would push a second artifact.
@@ -244,7 +248,7 @@ export class InClusterBuildRoute implements BuildAdapter {
         ),
         ttlSecondsAfterFinished: JOB_TTL_SECONDS,
         template: {
-          metadata: { labels: { [JOB_LABEL]: name } },
+          metadata: { labels: stamped(JOB_LABEL, name) },
           spec: {
             restartPolicy: 'Never',
             serviceAccountName: this.options.serviceAccount,
@@ -325,14 +329,20 @@ export class InClusterBuildRoute implements BuildAdapter {
 
   /** The build pod's log, or `null` while there is no pod or no output yet. */
   private async readLog(name: string): Promise<string | null> {
-    const pods = await this.options.api.list(
-      {
-        apiVersion: 'v1',
-        plural: 'pods',
-        namespace: this.options.namespace,
-      },
-      { labelSelector: `${JOB_LABEL}=${name}` },
-    );
+    const podsLabelled = (label: string) =>
+      this.options.api.list(
+        {
+          apiVersion: 'v1',
+          plural: 'pods',
+          namespace: this.options.namespace,
+        },
+        { labelSelector: `${label}=${name}` },
+      );
+    const labelled = await podsLabelled(JOB_LABEL.key);
+    // A Job created before the new key carries only the legacy one.
+    const pods = labelled?.length
+      ? labelled
+      : await podsLabelled(JOB_LABEL.legacy);
     const pod = pods?.[0]?.metadata.name;
     if (pod === undefined) return null;
     return this.options.api.logs(this.options.namespace, pod, {
