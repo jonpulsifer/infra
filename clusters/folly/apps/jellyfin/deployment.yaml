@@ -50,6 +50,7 @@ spec:
               readOnly: false
             - name: media
               mountPath: /mnt/media
+              subPath: media
               readOnly: false
             - name: cache
               mountPath: /cache
@@ -63,10 +64,13 @@ spec:
         - name: jellyfin-config
           persistentVolumeClaim:
             claimName: jellyfin-config
+        # The node's data volume. The kubelet creates an empty media/ in it,
+        # and Directory refuses a missing root instead of creating one on
+        # EPHEMERAL.
         - name: media
           hostPath:
-            path: ${NODE_DATA_ROOT}/media
-            type: DirectoryOrCreate
+            path: ${NODE_DATA_ROOT}
+            type: Directory
       # No /dev/dri hostPath: the device plugin injects the render node, and
       # a dangling symlink in /dev/dri/by-path fails container creation.
       nodeSelector:

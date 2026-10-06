@@ -16,6 +16,8 @@ spec:
   dependsOn:
     # Serves the ClusterSecretStore the ExternalSecrets read.
     - name: onepassword-connect
+    # Holds KUBELET_ROOT, so the node agent never renders an old path.
+    - name: config
   postBuild:
     substituteFrom:
       - kind: ConfigMap
