@@ -15,7 +15,7 @@ WORKDIR /app
 COPY . .
 RUN cd apps/spindrift-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
 
-FROM cgr.dev/chainguard/node:latest@sha256:af9d762479c010649ab93b6ba2b0580522956d30c15043b61b00dea5743c9096 AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:1ae8ed719c65888716078a52ce2166767e091f0b1072a79f6b42becba6e1ad44 AS runner
 # ARGs are scoped to a stage; redeclare it so serve.ts can report SPINDRIFT_BUILD.
 ARG BUILD_COMMIT=unknown
 ENV NODE_ENV=production \
