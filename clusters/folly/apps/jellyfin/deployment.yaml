@@ -65,7 +65,7 @@ spec:
             claimName: jellyfin-config
         - name: media
           hostPath:
-            path: /mnt/disks/media
+            path: ${NODE_DATA_ROOT}/media
             type: DirectoryOrCreate
       # No /dev/dri hostPath: the device plugin injects the render node, and
       # a dangling symlink in /dev/dri/by-path fails container creation.
