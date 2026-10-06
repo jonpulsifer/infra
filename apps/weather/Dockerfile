@@ -12,7 +12,7 @@ RUN apk add --no-cache bash curl unzip \
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN bun x turbo@2.10.3 prune weather --docker
+RUN bun x turbo@2.11.5 prune weather --docker
 
 FROM base AS deps
 WORKDIR /app
