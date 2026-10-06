@@ -13,7 +13,7 @@ RUN apk add --no-cache bash curl unzip \
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN bun x turbo@2.10.3 prune kthx --docker
+RUN bun x turbo@2.11.5 prune kthx --docker
 
 # Runtime dependencies only, from the repo lockfile.
 FROM base AS deps

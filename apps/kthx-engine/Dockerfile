@@ -12,7 +12,7 @@ RUN apk add --no-cache bash curl unzip \
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN bun x turbo@2.10.3 prune kthx-engine --docker
+RUN bun x turbo@2.11.5 prune kthx-engine --docker
 
 # Everything, so the client can be compiled.
 FROM base AS builder
