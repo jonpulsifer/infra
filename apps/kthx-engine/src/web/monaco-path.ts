@@ -4,7 +4,7 @@
  */
 
 /** Pinned in package.json too; test/web/monaco.test.ts holds them equal. */
-export const MONACO_VERSION = '0.52.2';
+export const MONACO_VERSION = '0.57.0';
 
 /** The prefix sits outside the paths kthx owns on the shared host. */
 export const MONACO_BASE = `/vendor/monaco/${MONACO_VERSION}/vs`;

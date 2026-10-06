@@ -167,15 +167,16 @@ for cluster in "$@"; do
 done
 
 # NODE_EXTRA_CA_CERTS reads one file and needs a path to a self-signed root, so
-# this is offsite's CA plus folly's chain, which ends in the shared FML root.
+# this is offsite's chain, which ends in the FML root, plus folly's pin.
 spindrift_bundle="$repo_root/clusters/offsite/apps/spindrift/ca-bundle.yaml"
+folly_pin="$repo_root/clusters/folly/config/kubernetes-ca.pem"
 if [[ -s $spindrift_bundle ]] \
-  && [[ -s $certs_dir/offsite-ca.pem ]] \
-  && [[ -s $certs_dir/folly-ca-chain.pem ]]; then
+  && [[ -s $certs_dir/offsite-ca-chain.pem ]] \
+  && [[ -s $folly_pin ]]; then
   echo "==> regenerating ${spindrift_bundle#"$repo_root/"}" >&2
   {
     sed -n '1,/^  ca.crt: |$/p' "$spindrift_bundle"
-    cat "$certs_dir/offsite-ca.pem" "$certs_dir/folly-ca-chain.pem" | awk 'NF {print "    " $0}'
+    cat "$certs_dir/offsite-ca-chain.pem" "$folly_pin" | awk 'NF {print "    " $0}'
   } >"$spindrift_bundle.tmp"
   mv "$spindrift_bundle.tmp" "$spindrift_bundle"
 fi

@@ -12,6 +12,10 @@ import type {
 } from '../../src/commands/types.ts';
 import { targets, vessels } from '../../src/db/schema.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
+import {
+  LEGACY_REMEDIATION_BRANCH_PREFIX,
+  REMEDIATION_BRANCH_PREFIX,
+} from '../../src/integrations/github/remediation-pr.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeGitHub } from '../harness/fakes/github-api.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
@@ -177,6 +181,51 @@ describe('opening the change on a surface', () => {
     const contents = written['terraform/projects/cloud/services.tf']!;
     expect(contents).toContain(EXISTING.trim());
     expect(contents).toContain('"run.googleapis.com"');
+    expect(contents).toContain('"google_project_service" "kthx_engine_run"');
+    expect(result.value.branch).toBe(
+      `${REMEDIATION_BRANCH_PREFIX}/${manifest.installation.homeVessel}-cloudrun-platform-api`,
+    );
+  });
+
+  test('a pull request still open on the legacy branch is rewritten there', async () => {
+    await seedBoundary();
+    const fake = repository();
+    const legacy = `${LEGACY_REMEDIATION_BRANCH_PREFIX}/${manifest.installation.homeVessel}-cloudrun-platform-api`;
+    fake.commitFiles(legacy, { 'README.md': 'an older proposal' });
+    fake.pulls.push({
+      number: 7,
+      title: 'an older proposal',
+      body: 'an older proposal',
+      head: legacy,
+      base: fake.defaultBranch,
+      state: 'open',
+    });
+
+    const result = await openPrerequisiteRemediation(
+      {
+        vessel: manifest.installation.homeVessel,
+        adapter: 'cloudrun',
+        prerequisite: 'PLATFORM_API',
+      },
+      context(fake),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.branch).toBe(legacy);
+    expect(result.value.pullRequest).toBe(7);
+    expect(fake.pulls.filter((pull) => pull.state === 'open')).toHaveLength(1);
+    expect(
+      fake.filesAt(fake.head(legacy)!)['terraform/projects/cloud/services.tf'],
+    ).toContain('"run.googleapis.com"');
+    expect(
+      fake.head(
+        legacy.replace(
+          LEGACY_REMEDIATION_BRANCH_PREFIX,
+          REMEDIATION_BRANCH_PREFIX,
+        ),
+      ),
+    ).toBeUndefined();
   });
 
   test('the pull request stands on its own and claims nothing', async () => {
@@ -339,9 +388,35 @@ describe('a destination that already owns the change', () => {
     expect(fake.pulls).toHaveLength(0);
     // Refused before the branch is created.
     expect(
-      fake.head(`spindrift/remediate/${vessel.name}-source-bucket`),
+      fake.head(`${REMEDIATION_BRANCH_PREFIX}/${vessel.name}-source-bucket`),
     ).toBeUndefined();
   });
+
+  test.each(['kthx_engine_source', 'spindrift_source'])(
+    'a file declaring the resource as %s is refused, whatever it names',
+    async (label) => {
+      // The label an earlier engine wrote still owns the address.
+      const vessel = await seedBoundary();
+      const fake = repository({
+        'terraform/projects/cloud/storage.tf': `resource "google_storage_bucket" "${label}" {
+  name = "a-renamed-bucket"
+}
+`,
+      });
+
+      const result = await openPrerequisiteRemediation(
+        { vessel: vessel.name, prerequisite: 'SOURCE_BUCKET' },
+        context(fake),
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.failure.message).toContain(
+        `"google_storage_bucket" "${label}"`,
+      );
+      expect(fake.pulls).toHaveLength(0);
+    },
+  );
 
   test('a file owning the same fact under another label is refused too', async () => {
     // This parses, but two resources managing one API enablement drift apart.

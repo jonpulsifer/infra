@@ -55,7 +55,8 @@ port: 3000
 # Run every pod under gVisor. Only some nodes offer the runtime class.
 sandbox: false
 
-# Secret carrying `SPINDRIFT_ENROLMENT_TOKEN` and repository credentials.
+# Secret carrying `KTHX_ENGINE_ENROLMENT_TOKEN` and repository credentials. The engine also reads
+# each variable by its old `SPINDRIFT_*` name.
 envFromSecret: ""
 
 # Header authentication, safe only behind a Gateway that replaces identity headers. Enabling

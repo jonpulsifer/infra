@@ -6,25 +6,65 @@
 
 import { declarationPath } from '../../domain/detection/kthx-file.ts';
 import type { DetectionProposal } from '../../domain/detection/ladder.ts';
-import type {
-  RepositoryRef,
-  RepositoryWriter,
+import {
+  pullRequestBranch,
+  type RepositoryRef,
+  type RepositoryWriter,
 } from '../../domain/repository.ts';
 
-export const WORKFLOW_PATH = '.github/workflows/spindrift.yml';
+export const WORKFLOW_PATH = '.github/workflows/kthx.yml';
+
+/** Read only: the caller path configuration pull requests wrote before. */
+export const LEGACY_WORKFLOW_PATH = '.github/workflows/spindrift.yml';
+
+function fileName(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
+}
 
 /**
  * What a dispatch addresses. The same in every repository, including the
  * platform's own, which commits its caller by hand.
  */
-export const CALLER_WORKFLOW_FILE = WORKFLOW_PATH.slice(
-  WORKFLOW_PATH.lastIndexOf('/') + 1,
-);
+export const CALLER_WORKFLOW_FILE = fileName(WORKFLOW_PATH);
+
+/** Dispatched in order, so a repository with both callers runs the new one. */
+export const CALLER_WORKFLOW_FILES: readonly string[] = [
+  CALLER_WORKFLOW_FILE,
+  fileName(LEGACY_WORKFLOW_PATH),
+];
 
 /** The caller stamps it into the run name, and the build route matches on it. */
-export const RUN_NAME_PREFIX = 'spindrift';
+export const RUN_NAME_PREFIX = 'kthx';
 
-export const CONFIG_BRANCH = 'spindrift/configure';
+/** Read only: a legacy caller still stamps this one. */
+export const LEGACY_RUN_NAME_PREFIX = 'spindrift';
+
+/** The run name `workflow` stamps; the legacy caller keeps its own prefix. */
+export function correlatedRunName(
+  workflow: string,
+  correlation: string,
+): string {
+  const prefix =
+    workflow === fileName(LEGACY_WORKFLOW_PATH)
+      ? LEGACY_RUN_NAME_PREFIX
+      : RUN_NAME_PREFIX;
+  return `${prefix} ${correlation}`;
+}
+
+/** Whether a caller stamped this run name for this correlation. */
+export function isCorrelatedRunName(
+  name: string | null,
+  correlation: string,
+): boolean {
+  return [RUN_NAME_PREFIX, LEGACY_RUN_NAME_PREFIX].some(
+    (prefix) => name === `${prefix} ${correlation}`,
+  );
+}
+
+export const CONFIG_BRANCH = 'kthx/configure';
+
+/** Read only: an open pull request on it is rewritten, never duplicated. */
+export const LEGACY_CONFIG_BRANCH = 'spindrift/configure';
 
 export interface ConfigurationScope {
   /** Repo-relative directory; `.` is the root. */
@@ -42,6 +82,8 @@ export interface ConfigurationFile {
 
 export interface ConfigurationTransaction {
   readonly branch: string;
+  /** Written instead of `branch` while an open pull request stands on it. */
+  readonly legacyBranch: string;
   readonly title: string;
   readonly body: string;
   readonly commitMessage: string;
@@ -183,6 +225,7 @@ export function configurationTransaction(input: {
     input.scopes.length === 1 ? '1 scope' : `${input.scopes.length} scopes`;
   return {
     branch: CONFIG_BRANCH,
+    legacyBranch: LEGACY_CONFIG_BRANCH,
     title: `Connect this repository to kthx (${scopeCount})`,
     body: pullRequestBody(input.scopes),
     commitMessage: 'Add kthx configuration',
@@ -231,14 +274,15 @@ export async function openConfigurationPullRequest(
     tree,
     parent: base,
   });
-  await host.setBranch(ref, fullName, transaction.branch, commit);
+  const branch = await pullRequestBranch(host, ref, fullName, transaction);
+  await host.setBranch(ref, fullName, branch, commit);
 
   const number = await host.openPullRequest(ref, fullName, {
     title: transaction.title,
     body: transaction.body,
-    head: transaction.branch,
+    head: branch,
     base: defaultBranch,
   });
 
-  return { number, branch: transaction.branch, commit };
+  return { number, branch, commit };
 }

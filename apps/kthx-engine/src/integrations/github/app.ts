@@ -322,11 +322,12 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       }
       return pull.number;
     } catch (cause) {
+      // A failed lookup rethrows the refusal, which says more.
       const existing = await this.findOpenPullRequest(
         ref,
         fullName,
         input.head,
-      );
+      ).catch(() => null);
       if (existing === null) throw cause;
       await this.http(ref).send({
         method: 'PATCH',
@@ -339,7 +340,8 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
 
   /**
    * Filtered by `head` on GitHub's side, since an unfiltered page can miss the
-   * pull request.
+   * pull request. A failed lookup throws rather than reading as "none open",
+   * which would open a second pull request beside the one it missed.
    */
   async findOpenPullRequest(
     ref: InstallationRef,
@@ -347,21 +349,14 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
     headBranch: string,
   ): Promise<number | null> {
     const owner = fullName.slice(0, fullName.indexOf('/'));
-    try {
-      const pulls = await this.http(ref).json<
-        Array<{ number: number; head: { ref?: string } }>
-      >({
-        method: 'GET',
-        path: `/repos/${fullName}/pulls?state=open&per_page=${PAGE_SIZE}&head=${encodeURIComponent(`${owner}:${headBranch}`)}`,
-      });
-      if (Array.isArray(pulls)) {
-        const match = pulls.find((p) => p.head?.ref === headBranch);
-        if (match) return match.number;
-      }
-    } catch {
-      // null lets openPullRequest rethrow its own error.
-    }
-    return null;
+    const pulls = await this.http(ref).json<
+      Array<{ number: number; head: { ref?: string } }>
+    >({
+      method: 'GET',
+      path: `/repos/${fullName}/pulls?state=open&per_page=${PAGE_SIZE}&head=${encodeURIComponent(`${owner}:${headBranch}`)}`,
+    });
+    if (!Array.isArray(pulls)) return null;
+    return pulls.find((p) => p.head?.ref === headBranch)?.number ?? null;
   }
 
   /** A deleted pull request (`404`) reads as closed. */

@@ -226,7 +226,12 @@ describe('ui-driven installation configuration', () => {
     expect(deployments).toHaveLength(2);
     for (const deployment of deployments) {
       const pod = deployment.spec.template.spec;
-      for (const name of ['SPINDRIFT_MANIFEST_PATH', 'SPINDRIFT_MANIFEST']) {
+      for (const name of [
+        'KTHX_ENGINE_MANIFEST_PATH',
+        'KTHX_ENGINE_MANIFEST',
+        'SPINDRIFT_MANIFEST_PATH',
+        'SPINDRIFT_MANIFEST',
+      ]) {
         expect(
           pod.containers[0].env.some(
             (item: { name: string }) => item.name === name,
@@ -257,7 +262,7 @@ describe('authenticated Gateway trust', () => {
     expect(
       web.spec.template.spec.containers[0].env.some(
         (item: { name: string }) =>
-          item.name === 'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+          item.name === 'KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY',
       ),
     ).toBe(false);
   });
@@ -289,7 +294,7 @@ describe('authenticated Gateway trust', () => {
 
     const web = one(objects, 'Deployment', 'spindrift-web');
     expect(web.spec.template.spec.containers[0].env).toContainEqual({
-      name: 'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+      name: 'KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY',
       value: 'true',
     });
   });
@@ -363,7 +368,7 @@ describe('the relying party is the front door', () => {
     // The relying party and the HTTPRoute both come from `hostname`.
     expect(
       envOf(objects, 'spindrift-web').find(
-        (item) => item.name === 'SPINDRIFT_HOSTNAME',
+        (item) => item.name === 'KTHX_ENGINE_HOSTNAME',
       )?.value,
     ).toBe('spindrift.example.test');
     expect(
@@ -377,7 +382,7 @@ describe('the relying party is the front door', () => {
     expect(objects.some((object) => object.kind === 'HTTPRoute')).toBe(false);
     expect(
       envOf(objects, 'spindrift-web').some(
-        (item) => item.name === 'SPINDRIFT_HOSTNAME',
+        (item) => item.name === 'KTHX_ENGINE_HOSTNAME',
       ),
     ).toBe(false);
   });
@@ -393,16 +398,16 @@ describe('the machine routes answer on the Service', () => {
     const service = one(objects, 'Service', 'kthx');
     const web = envOf(objects, 'kthx-web');
     expect(web).toContainEqual({
-      name: 'SPINDRIFT_SERVICE_NAME',
+      name: 'KTHX_ENGINE_SERVICE_NAME',
       value: service.metadata.name,
     });
     expect(web).toContainEqual({
-      name: 'SPINDRIFT_SERVICE_NAMESPACE',
+      name: 'KTHX_ENGINE_SERVICE_NAMESPACE',
       value: service.metadata.namespace,
     });
     expect(
       envOf(objects, 'kthx-reconciler').some((item) =>
-        item.name.startsWith('SPINDRIFT_SERVICE_'),
+        item.name.startsWith('KTHX_ENGINE_SERVICE_'),
       ),
     ).toBe(false);
   });
@@ -514,7 +519,7 @@ describe('the kthx credential', () => {
         { audience: 'kthx', expirationSeconds: 3600, path: 'kthx-token' },
       ]);
       expect(envOf(objects, name)).toContainEqual({
-        name: 'SPINDRIFT_KTHX_TOKEN_PATH',
+        name: 'KTHX_ENGINE_KTHX_TOKEN_PATH',
         value: '/var/run/secrets/spindrift/kthx-token',
       });
     }
@@ -528,9 +533,73 @@ describe('the kthx credential', () => {
       ]);
       expect(
         envOf(objects, name).some(
-          (item) => item.name === 'SPINDRIFT_KTHX_TOKEN_PATH',
+          (item) => item.name === 'KTHX_ENGINE_KTHX_TOKEN_PATH',
         ),
       ).toBe(false);
     }
+  });
+});
+
+describe('engine variables carry the kthx-engine names', () => {
+  const engineVariables = (env: { name: string; value?: string }[]) =>
+    env.filter(
+      (item) =>
+        item.name.startsWith('KTHX_ENGINE_') ||
+        item.name.startsWith('SPINDRIFT_'),
+    );
+
+  test('every variable the chart sets is a KTHX_ENGINE_* name, mirrored under its old name', async () => {
+    const renders = [
+      await render(),
+      await render({
+        reconciler: { enabled: true },
+        hostname: 'kthx.example.test',
+        gatewayAuth: { enabled: true, from: [{ podSelector: {} }] },
+        serviceAccount: { token: { kthxAudience: 'kthx' } },
+        env: [
+          { name: 'KTHX_ENGINE_KTHX_ZONE', value: 'kthx.test' },
+          { name: 'OTEL_SERVICE_NAME', value: 'engine' },
+        ],
+      }),
+    ];
+    for (const objects of renders) {
+      for (const deployment of objects.filter(
+        (object) => object.kind === 'Deployment',
+      )) {
+        const env = engineVariables(envOf(objects, deployment.metadata.name));
+        const current = env.filter((item) =>
+          item.name.startsWith('KTHX_ENGINE_'),
+        );
+        expect(current.length).toBeGreaterThan(0);
+        expect(env).toHaveLength(current.length * 2);
+        for (const item of current) {
+          expect(env).toContainEqual({
+            name: item.name.replace(/^KTHX_ENGINE_/, 'SPINDRIFT_'),
+            value: item.value,
+          });
+        }
+      }
+    }
+
+    const web = envOf(renders[1] ?? [], 'spindrift-web');
+    for (const name of [
+      'KTHX_ENGINE_SERVICE_NAME',
+      'KTHX_ENGINE_SERVICE_NAMESPACE',
+      'KTHX_ENGINE_VERSION',
+      'KTHX_ENGINE_IDENTITY_TOKEN_PATH',
+      'KTHX_ENGINE_KTHX_TOKEN_PATH',
+      'KTHX_ENGINE_HOSTNAME',
+      'KTHX_ENGINE_TRUSTED_GATEWAY_BOUNDARY',
+    ]) {
+      expect(web.some((item) => item.name === name)).toBe(true);
+    }
+    expect(web).toContainEqual({
+      name: 'KTHX_ENGINE_KTHX_ZONE',
+      value: 'kthx.test',
+    });
+    expect(web).toContainEqual({ name: 'OTEL_SERVICE_NAME', value: 'engine' });
+    expect(
+      web.some((item) => item.name === 'SPINDRIFT_OTEL_SERVICE_NAME'),
+    ).toBe(false);
   });
 });

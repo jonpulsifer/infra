@@ -8,7 +8,7 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 ## Before you start
 
 - Get a passkey on the installation ([Install kthx](install-kthx.md)).
-- The console resolves to a private address, so your browser must reach the offsite network. The Cloudflare tunnel forwards `/mcp` from the internet. [kthx](../apps/kthx.md#use-it) lists both addresses, and `hostname` and `SPINDRIFT_PUBLIC_HOSTNAME` in `clusters/offsite/apps/spindrift/helm-release.yaml` declare them.
+- The console resolves to a private address, so your browser must reach the offsite network. The Cloudflare tunnel forwards `/mcp` from the internet. [kthx](../apps/kthx.md#use-it) lists both addresses, and `hostname` and `KTHX_ENGINE_PUBLIC_HOSTNAME` in `clusters/offsite/apps/spindrift/helm-release.yaml` declare them.
 - Get an MCP client that speaks streamable HTTP, such as Claude Code.
 
 ## Mint an agent token

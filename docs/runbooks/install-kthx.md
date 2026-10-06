@@ -9,7 +9,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 - Get Atlantis access ([Apply an OpenTofu change](apply-an-opentofu-change.md)), the operator age key ([Manage SOPS secrets](manage-sops-secrets.md)), and offsite access ([Get cluster admin access](get-cluster-admin-access.md)).
 - The console hostname, `<hostname>`, is kthx's `control.host` in `clusters/offsite/apps/kthx/helm-release.yaml`. The first passkey is registered to it, so browsers must reach it.
-- `<public-hostname>` is the `SPINDRIFT_PUBLIC_HOSTNAME` value in `helm-release.yaml`. The Cloudflare tunnel forwards the GitHub webhook and `/mcp` to it.
+- `<public-hostname>` is the `KTHX_ENGINE_PUBLIC_HOSTNAME` value in `helm-release.yaml`. The Cloudflare tunnel forwards the GitHub webhook and `/mcp` to it.
 - For another namespace, change `spindrift` in `namespace.yaml` and on each line that this command prints:
 
   ```bash
@@ -32,14 +32,14 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 ## Write the installation Secret
 
-`secret.sops.yaml` is the Secret `spindrift-env`.
+`secret.sops.yaml` is the Secret `spindrift-env`. The engine reads each key below, or the same key with `SPINDRIFT_` in place of `KTHX_ENGINE_`. The keys in `secret.sops.yaml` use the `SPINDRIFT_` names. Set each value under one name only: the engine refuses to start when both names are set and differ.
 
 | Key | Value |
 | --- | --- |
-| `SPINDRIFT_ENROLMENT_TOKEN` | Claims the installation |
-| `SPINDRIFT_CREDENTIAL_KEYRING` | Encrypts stored credentials |
-| `SPINDRIFT_GITHUB_APP_ID`, `SPINDRIFT_GITHUB_APP_PRIVATE_KEY`, `SPINDRIFT_GITHUB_WEBHOOK_SECRET` | Optional. Adopts a GitHub App |
-| `SPINDRIFT_VERCEL_TOKEN`, `SPINDRIFT_CLOUDFLARE_TOKEN` | Optional. Vercel and Cloudflare Pages tokens |
+| `KTHX_ENGINE_ENROLMENT_TOKEN` | Claims the installation |
+| `KTHX_ENGINE_CREDENTIAL_KEYRING` | Encrypts stored credentials |
+| `KTHX_ENGINE_GITHUB_APP_ID`, `KTHX_ENGINE_GITHUB_APP_PRIVATE_KEY`, `KTHX_ENGINE_GITHUB_WEBHOOK_SECRET` | Optional. Adopts a GitHub App |
+| `KTHX_ENGINE_VERCEL_TOKEN`, `KTHX_ENGINE_CLOUDFLARE_TOKEN` | Optional. Vercel and Cloudflare Pages tokens |
 
 > [!WARNING]
 > A copied enrolment token lets its holder claim the installation. Make a new token for each installation.
@@ -134,7 +134,7 @@ The roots `terraform/gcp/projects/bluenose/` and `terraform/gcp/projects/trusted
    Result: "Claim this installation", or "Sign in" if the database existed.
 
 2. If the page shows "Sign in", sign in with your passkey. Skip steps 3 to 8.
-3. Enter the value of `SPINDRIFT_ENROLMENT_TOKEN`.
+3. Enter the value of `KTHX_ENGINE_ENROLMENT_TOKEN`.
 4. Select "Enrol a passkey".
 5. Register the passkey when the browser asks.
 
@@ -154,7 +154,7 @@ The roots `terraform/gcp/projects/bluenose/` and `terraform/gcp/projects/trusted
 1. If Repositories shows "Create the App on GitHub", select it. Create the App on GitHub.
 2. If you adopt an App, select "Active" under Webhook in its GitHub settings.
 
-   Use `https://<public-hostname>/internal/github/webhook` and `SPINDRIFT_GITHUB_WEBHOOK_SECRET`.
+   Use `https://<public-hostname>/internal/github/webhook` and `KTHX_ENGINE_GITHUB_WEBHOOK_SECRET`.
 
 > [!CAUTION]
 > A private GitHub App installs only on its owner account. A public App cannot become private while another account has it installed.
@@ -168,7 +168,7 @@ The roots `terraform/gcp/projects/bluenose/` and `terraform/gcp/projects/trusted
 | --- | --- | --- |
 | A Target call fails with `unable to get issuer certificate`. | `ca-bundle.yaml` lacks part of that chain. | Run `nix develop -c bash scripts/pki/post-rotate.sh folly offsite`. Commit and merge the output ([PKI](../platform/pki.md)). |
 | A credential fails with "cannot be opened by this keyring". | The keyring lost its key. | Restore that key. |
-| You cannot sign in. | The passkey is lost. | Rotate `SPINDRIFT_ENROLMENT_TOKEN` and merge. Select "Recover with a rotated token". |
+| You cannot sign in. | The passkey is lost. | Rotate the enrolment token in `secret.sops.yaml` and merge. Select "Recover with a rotated token". |
 
 ## Related
 

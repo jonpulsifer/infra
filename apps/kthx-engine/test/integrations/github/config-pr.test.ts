@@ -11,8 +11,11 @@ import type { DetectionProposal } from '../../../src/domain/detection/ladder.ts'
 import { GitHubApp } from '../../../src/integrations/github/app.ts';
 import {
   buildWorkflowCaller,
+  CALLER_WORKFLOW_FILES,
   CONFIG_BRANCH,
   configurationTransaction,
+  isCorrelatedRunName,
+  LEGACY_CONFIG_BRANCH,
   openConfigurationPullRequest,
   RUN_NAME_PREFIX,
   serializeKthxFile,
@@ -120,6 +123,19 @@ describe('the CI caller', () => {
     // A called workflow can only narrow this token, so it grants GHCR push.
     expect(caller).toContain('packages: write');
     expect(caller).not.toMatch(/secrets\./);
+  });
+
+  test('is written as kthx.yml, and its runs are found under either prefix', () => {
+    expect(WORKFLOW_PATH).toBe('.github/workflows/kthx.yml');
+    expect(CALLER_WORKFLOW_FILES).toEqual(['kthx.yml', 'spindrift.yml']);
+    expect(isCorrelatedRunName('kthx dispatch-1', 'dispatch-1')).toBe(true);
+    // A repository still on the legacy caller stamps the legacy prefix.
+    expect(isCorrelatedRunName('spindrift dispatch-1', 'dispatch-1')).toBe(
+      true,
+    );
+    expect(isCorrelatedRunName('kthx dispatch-2', 'dispatch-1')).toBe(false);
+    expect(isCorrelatedRunName('dispatch-1', 'dispatch-1')).toBe(false);
+    expect(isCorrelatedRunName(null, 'dispatch-1')).toBe(false);
   });
 
   test('is checked as kthx while its runs keep the name the build route matches', () => {
@@ -331,7 +347,10 @@ describe('opening it against the repository API', () => {
     expect(fake.head(CONFIG_BRANCH)).toBe(second.opened.commit);
     // The second run patches the existing ref instead of creating it again.
     expect(
-      fake.requests.filter((request) => request.method === 'PATCH'),
+      fake.requests.filter(
+        (request) =>
+          request.method === 'PATCH' && request.path.includes('/git/refs/'),
+      ),
     ).toHaveLength(2);
     expect(
       fake.requests.filter(
@@ -339,6 +358,9 @@ describe('opening it against the repository API', () => {
           request.method === 'POST' && request.path.endsWith('/git/refs'),
       ),
     ).toHaveLength(1);
+    // GitHub refuses a second pull request for the branch, so the first is reused.
+    expect(second.opened.number).toBe(first.opened.number);
+    expect(fake.pulls).toHaveLength(1);
   });
 
   test('recovers existing open pull request number when POST /pulls fails', async () => {
@@ -362,6 +384,68 @@ describe('opening it against the repository API', () => {
 
     const second = await open(fake, failingFetch);
     expect(second.opened.number).toBe(first.opened.number);
+  });
+
+  test('a pull request still open on the legacy branch is rewritten there', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles(LEGACY_CONFIG_BRANCH, {
+      'README.md': 'an older proposal',
+    });
+    fake.pulls.push({
+      number: 7,
+      title: 'an older proposal',
+      body: 'an older proposal',
+      head: LEGACY_CONFIG_BRANCH,
+      base: 'main',
+      state: 'open',
+    });
+
+    const { opened, transaction } = await open(fake);
+
+    expect(opened.number).toBe(7);
+    expect(opened.branch).toBe(LEGACY_CONFIG_BRANCH);
+    expect(fake.head(LEGACY_CONFIG_BRANCH)).toBe(opened.commit);
+    expect(fake.head(CONFIG_BRANCH)).toBeUndefined();
+    expect(fake.pulls).toHaveLength(1);
+    expect(fake.pulls[0]?.title).toBe(transaction.title);
+  });
+
+  test('a closed pull request on the legacy branch leaves it alone', async () => {
+    const fake = new FakeGitHub();
+    const stale = fake.commitFiles(LEGACY_CONFIG_BRANCH, {
+      'README.md': 'an older proposal',
+    });
+    fake.pulls.push({
+      number: 7,
+      title: 'an older proposal',
+      body: 'an older proposal',
+      head: LEGACY_CONFIG_BRANCH,
+      base: 'main',
+      state: 'closed',
+    });
+
+    const { opened } = await open(fake);
+
+    expect(opened.branch).toBe(CONFIG_BRANCH);
+    expect(opened.number).not.toBe(7);
+    expect(fake.head(LEGACY_CONFIG_BRANCH)).toBe(stale);
+  });
+
+  test('a failed lookup of the legacy branch opens nothing', async () => {
+    const fake = new FakeGitHub();
+    // A legacy pull request may stand behind the failure, so guessing "none"
+    // would open a second one beside it.
+    const failingLookup = (async (request: Request) => {
+      const url = new URL(request.url);
+      if (request.method === 'GET' && url.pathname.endsWith('/pulls')) {
+        return new Response('{}', { status: 502 });
+      }
+      return fake.fetch(request);
+    }) as typeof fetch;
+
+    await expect(open(fake, failingLookup)).rejects.toThrow('502');
+    expect(fake.pulls).toHaveLength(0);
+    expect(fake.head(CONFIG_BRANCH)).toBeUndefined();
   });
 
   test('presents the installation authorization without exposing it to callers', async () => {

@@ -325,7 +325,7 @@ describe('the peers', () => {
       }),
     );
     if (!ca) return;
-    const bundle = join(r.workspace, 'terraform/pki/certs/folly-ca-bundle.pem');
+    const bundle = join(r.workspace, 'clusters/folly/config/kubernetes-ca.pem');
     mkdirSync(dirname(bundle), { recursive: true });
     writeFileSync(bundle, CA);
   }
@@ -363,7 +363,9 @@ describe('the peers', () => {
       'the checkout does not say where this cluster is',
     );
     expect(warned?.fields?.peer).toBe('folly');
-    expect(String(warned?.fields?.error)).toContain('folly-ca-bundle.pem');
+    expect(String(warned?.fields?.error)).toContain(
+      'folly/config/kubernetes-ca.pem',
+    );
   });
 
   test('parsePeer takes only an apiserver URL and a certificate', () => {

@@ -6,6 +6,7 @@ import type { SQL } from 'bun';
 import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import { systemClock } from '../commands/types.ts';
+import { assertEnvConsistent } from '../config/env.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import {
   currentStoredManifest,
@@ -35,9 +36,10 @@ import { initTelemetry } from '../telemetry/index.ts';
 export async function startReconciler(
   options: StartReconcilerOptions,
 ): Promise<void> {
+  const env = options.env ?? Bun.env;
+  assertEnvConsistent(env);
   initTelemetry('reconciler');
 
-  const env = options.env ?? Bun.env;
   const ownedClient = options.client === undefined;
   const client = options.client ?? createClient(env);
 

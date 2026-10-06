@@ -2,7 +2,7 @@
 # The control plane's own hostname is the passkey relying party and was a second
 # copy of the `hostname` the installer chart already renders the Gateway and the
 # HTTPRoute from; it is now resolved from the deployment
-# (`SPINDRIFT_HOSTNAME`), so no authored document carries it.
+# (`KTHX_ENGINE_HOSTNAME`), so no authored document carries it.
 #
 # **The newest file in this corpus, and the test asserts this build needs no
 # upgrade to read it.** That is the forcing function: change the manifest schema

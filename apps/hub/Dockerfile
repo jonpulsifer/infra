@@ -9,7 +9,7 @@ RUN apk add --no-cache bash curl libc6-compat \
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN bun x turbo@2.10.3 prune hub --docker
+RUN bun x turbo@2.11.5 prune hub --docker
 
 FROM base AS builder
 WORKDIR /app

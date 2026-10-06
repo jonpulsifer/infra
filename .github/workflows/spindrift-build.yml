@@ -2,7 +2,7 @@
 # it, ordinarily at main, with one opaque `spec`, so new parameters go in `spec`.
 # `workflow_dispatch` builds uploaded archives here. Its last line is the build report.
 name: kthx-build
-run-name: spindrift ${{ inputs.correlation }}
+run-name: kthx ${{ inputs.correlation }}
 
 on:
   workflow_call:
@@ -198,7 +198,7 @@ jobs:
           # copy and holds it identical to that one.
           # Which directory this Dockerfile builds from: prints its own directory when
           # a COPY/ADD source resolves beside it and not at the root, else the root.
-          spindrift_dockerfile_context() {
+          kthx_dockerfile_context() {
             sdc_file="$1"; sdc_root="$2"; sdc_scope="$3"
             sdc_context="$sdc_root"
             set -f
@@ -325,7 +325,7 @@ jobs:
           # would describe the wrong one.
           if [ -f "${scope}/Dockerfile" ]; then
             {
-              printf 'context=%s\n' "$(spindrift_dockerfile_context "${scope}/Dockerfile" "$ROOT" "$scope")"
+              printf 'context=%s\n' "$(kthx_dockerfile_context "${scope}/Dockerfile" "$ROOT" "$scope")"
               printf 'file=%s\n' "${scope}/Dockerfile"
               printf 'buildArgs=\n'
             } >> "$GITHUB_OUTPUT"
@@ -1087,7 +1087,7 @@ jobs:
                 predicateType: "https://slsa.dev/provenance/v1",
                 predicate: {
                   buildDefinition: {
-                    buildType: "https://spindrift.dev/buildtypes/github-actions/v1",
+                    buildType: "https://kthx.dev/buildtypes/github-actions/v1",
                     externalParameters: {
                       bundleDigest: $bundleDigest,
                       workflow: $workflow
