@@ -28,6 +28,17 @@ spec:
     - name: agent-sandbox-crds
   patches:
     - target:
+        kind: Namespace
+        name: agent-sandbox-system
+      patch: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: agent-sandbox-system
+          labels:
+            pod-security.kubernetes.io/enforce: baseline
+            pod-security.kubernetes.io/enforce-version: latest
+    - target:
         kind: Deployment
         name: agent-sandbox-controller
       patch: |
