@@ -14,13 +14,13 @@ assert_targets() {
   fi
 }
 
-assert_targets 'both topology ConfigMaps validate Nix' \
+assert_targets 'both topology ConfigMaps validate Nix and the folly Talos root' \
   $'clusters/folly/config/cluster-topology.json\nclusters/offsite/config/cluster-topology.json' \
-  'nix:flake-check'
+  $'nix:flake-check\nterraform:clusters/folly/talos'
 
 assert_targets 'every path routes when changed-files escapes the separators' \
   $'clusters/folly/config/cluster-topology.json\\\nterraform/network/unifi/offsite/k8s.tf\\\nterraform/network/tailscale/devices.tf' \
-  $'nix:flake-check\nterraform:terraform/network/tailscale\nterraform:terraform/network/unifi/offsite'
+  $'nix:flake-check\nterraform:clusters/folly/talos\nterraform:terraform/network/tailscale\nterraform:terraform/network/unifi/offsite'
 
 assert_targets 'the Nix workflow validates its routing target' \
   '.github/workflows/nix-ci.yaml' \
@@ -76,8 +76,8 @@ for root in clusters/folly/bootstrap clusters/offsite/bootstrap; do
 done
 
 # A Talos root under clusters/<site>/talos is a validation root, and its
-# site's topology ConfigMap validates it. No such root exists yet, so a
-# fixture tree with one for folly stands in for the repository.
+# site's topology ConfigMap validates it. A fixture tree with a root for folly
+# and none for offsite stands in for the repository.
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture"/clusters/{folly,offsite}/{bootstrap,config} \

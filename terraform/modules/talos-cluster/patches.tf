@@ -8,24 +8,13 @@ locals {
   # the same file). Never a literal.
   dns_zone = jsondecode(file("${path.module}/../../network/tailscale/fleet.tf.json")).locals.fleet.dns_zone
 
-  # Every node: no Flannel, no kube-proxy, no Talos CoreDNS (the bootstrap
-  # root's kube-dns Service at CLUSTER_DNS is the resolver), CIDRs and the
-  # kubelet resolver address from the topology ConfigMap.
+  # Every node: no Flannel, CIDRs and the kubelet resolver address from the
+  # topology ConfigMap.
   cluster_patch = join("\n---\n", [
     yamlencode({
       apiVersion = "v1alpha1"
       kind       = "KubeFlannelCNIConfig"
       "$patch"   = "delete"
-    }),
-    yamlencode({
-      apiVersion = "v1alpha1"
-      kind       = "KubeProxyConfig"
-      enabled    = false
-    }),
-    yamlencode({
-      apiVersion = "v1alpha1"
-      kind       = "KubeCoreDNSConfig"
-      enabled    = false
     }),
     yamlencode({
       apiVersion     = "v1alpha1"
@@ -43,32 +32,58 @@ locals {
       kind              = "SecurityProfileConfig"
       workloadIsolation = var.workload_isolation
     }),
+    # CoreDNS forwards to ROUTER_IP itself, so no pod resolves through the
+    # host DNS proxy, whose BPF-masquerade trap then never applies.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "ResolverConfig"
+      hostDNS = {
+        enabled              = true
+        forwardKubeDNSToHost = false
+      }
+    }),
   ])
 
-  # Control plane: serving-cert SANs as today (nix/services/k8s/default.nix
+  # Control plane: no kube-proxy and no Talos CoreDNS (the bootstrap root's
+  # kube-dns Service at CLUSTER_DNS is the resolver); Talos rejects both kinds
+  # on a worker. Serving-cert SANs as today (nix/services/k8s/default.nix
   # extraSANs minus the dead tailnet name). Issuer, federation and apiserver
   # extraArgs arrive through var.controlplane_patches.
-  controlplane_patch = yamlencode({
-    apiVersion = "v1alpha1"
-    kind       = "KubeAPIServerConfig"
-    certExtraSANs = distinct(concat(
-      [for name, n in local.controlplanes : name],
-      [for name, n in local.controlplanes : "${name}.${local.dns_zone}"],
-      [for name, n in local.controlplanes : "${name}.${local.topology.CLUSTER_NAME}.${local.dns_zone}"],
-      [local.topology.API_SERVER_HOSTNAME, local.topology.API_SERVER_IP],
-    ))
-    extraArgs = {
-      enable-aggregator-routing = "true"
-    }
-  })
+  controlplane_patch = join("\n---\n", [
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "KubeProxyConfig"
+      enabled    = false
+    }),
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "KubeCoreDNSConfig"
+      enabled    = false
+    }),
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "KubeAPIServerConfig"
+      certExtraSANs = distinct(concat(
+        [for name, n in local.controlplanes : name],
+        [for name, n in local.controlplanes : "${name}.${local.dns_zone}"],
+        [for name, n in local.controlplanes : "${name}.${local.topology.CLUSTER_NAME}.${local.dns_zone}"],
+        [local.topology.API_SERVER_HOSTNAME, local.topology.API_SERVER_IP],
+      ))
+      extraArgs = {
+        enable-aggregator-routing = "true"
+      }
+    }),
+  ])
 
   # Per node: hostname, install target and the labels the bootstrap root
   # applies today. The control plane drops its taint and LB-exclusion label
   # (one schedulable control plane per cluster).
   node_patch = { for name, n in var.nodes : name => join("\n---\n", concat([
+    # The generator emits auto: stable, and Talos rejects auto beside hostname.
     yamlencode({
       apiVersion = "v1alpha1"
       kind       = "HostnameConfig"
+      auto       = "off"
       hostname   = name
     }),
     yamlencode({
