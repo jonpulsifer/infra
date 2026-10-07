@@ -34,7 +34,7 @@ ARG CONFTEST_VERSION=0.71.0
 # renovate: datasource=github-releases depName=terrastruct/d2
 ARG D2_VERSION=0.9.0
 # renovate: datasource=github-releases depName=dandavison/delta
-ARG DELTA_VERSION=0.19.2
+ARG DELTA_VERSION=0.20.0
 # renovate: datasource=github-releases depName=eza-community/eza
 ARG EZA_VERSION=0.23.5
 # renovate: datasource=github-releases depName=fluxcd/flux2
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.1
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.2
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.10.1
+ARG MISE_VERSION=2026.10.2
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
