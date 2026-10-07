@@ -7,6 +7,10 @@ locals {
       "node-role.kubernetes.io/worker" = ""
       "bgp-enabled"                    = "true"
     },
+    "hotrod" = {
+      "node-role.kubernetes.io/worker" = ""
+      "bgp-enabled"                    = "true"
+    },
     "retrofit" = {
       "node-role.kubernetes.io/control-plane" = ""
       "bgp-enabled"                           = "true"
