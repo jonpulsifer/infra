@@ -15,7 +15,7 @@
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.5.15",
     "kthx": "workspace:*",
     "turbo": "2.11.5"
   },
