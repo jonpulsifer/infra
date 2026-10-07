@@ -3,15 +3,15 @@ title: Hosts
 description: Every host in the homelab, with its role, site, hardware, OS and status, and how to reach it.
 ---
 
-The hosts are the machines the homelab runs on: Kubernetes nodes, Raspberry Pis, Windows desktops and a cloud VM. They are at two sites, folly (home) and offsite (remote). See [Network](../platform/network.md). `nix/hosts/default.nix` declares every NixOS host and image.
+The hosts are the machines the homelab runs on: Kubernetes nodes, Raspberry Pis, Windows desktops and a cloud VM. They are at two sites, folly (home) and offsite (remote). See [Network](../platform/network.md). `nix/hosts/default.nix` declares every NixOS host and image. The folly nodes run Talos Linux, and `clusters/folly/talos/` declares them.
 
 NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade, and no Pi Zero runs its NixOS config. See [NixOS](../platform/nixos.md) and [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md).
 
 | Host | Role | Site | Hardware | OS | Status |
 | --- | --- | --- | --- | --- | --- |
-| [optiplex](optiplex.md) | folly control plane and cluster CA | folly | Dell OptiPlex 3050 micro | NixOS | live |
-| [riptide](riptide.md) | folly worker with a GPU | folly | HP EliteDesk 800 G5 Desktop Mini | NixOS | live |
-| [shale](shale.md) | folly worker | folly | HP EliteDesk 800 G2 DM | NixOS | live |
+| [optiplex](optiplex.md) | folly control plane | folly | Dell OptiPlex 3050 micro | Talos Linux | live |
+| [riptide](riptide.md) | folly worker with a GPU | folly | HP EliteDesk 800 G5 Desktop Mini | Talos Linux | live |
+| [shale](shale.md) | folly worker | folly | HP EliteDesk 800 G2 DM | Talos Linux | live |
 | [retrofit](retrofit.md) | offsite control plane and cluster CA | offsite | HP EliteDesk 800 G2 DM | NixOS | live |
 | [oldschool](oldschool.md) | offsite worker | offsite | HP EliteDesk 800 G3 DM | NixOS | live |
 | [spore](spore.md) | NFS, x86 netboot, forge's boot image, DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |

@@ -23,7 +23,7 @@ SOPS encrypts with age, a file-encryption tool. An age recipient is a public key
 - Every SOPS file lists the operator key, the owner's age key. Its private half is in `~/.config/age/keys.txt` and the 1Password item `sops homelab age key`.
 - Flux reads the operator key from the Secret `sops-age` in `flux-system`. Git does not declare that Secret.
 - A host recipient is the age key that `ssh-to-age` derives from the SSH host key. `nix/system/sops.nix` makes sops-nix decrypt with that key, so a host reads only the files encrypted to it.
-- `nix/secrets/bosun.sops.yaml` is shared by riptide and oldschool. No host configuration reads it.
+- `nix/secrets/bosun.sops.yaml` has oldschool as its host recipient. No host configuration reads it.
 - In `clusters/`, SOPS encrypts only `data` and `stringData`.
 
 ## Stores

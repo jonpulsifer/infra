@@ -1,6 +1,6 @@
 ---
 title: optiplex
-description: A Dell OptiPlex 3050 micro that is the folly cluster's only control-plane node and runs its cluster CA.
+description: A Dell OptiPlex 3050 micro that is the folly cluster's only control-plane node, on Talos Linux.
 specs:
   vendor: Dell
   model: OptiPlex 3050 (micro)
@@ -10,25 +10,25 @@ specs:
   ram: 16 GB DDR4 SODIMM
   gpu: Intel HD Graphics 630
   storage: 256 GB SK hynix SC311 SATA SSD
-  os: NixOS 26.05 (Yarara)
+  os: Talos Linux 1.14
   firmware: BIOS 1.27.0
   tpm: Intel PTT, not enabled in the BIOS
 ---
 
-optiplex is the only control-plane node of the folly [Kubernetes](../platform/kubernetes.md) cluster. `nix/hosts/optiplex.nix` configures it.
+optiplex is the only control-plane node of the folly [Kubernetes](../platform/kubernetes.md) cluster. It runs Talos Linux, and `clusters/folly/talos/` configures it.
 
 ## What it runs
 
 - etcd, the API server, the controller manager and the scheduler
-- cfssl with the folly cluster CA. The CA key and the token signer key come from `nix/secrets/optiplex.sops.yaml`. See [PKI](../platform/pki.md).
 - Pods, because the control plane has no taint
-- `etcd-backup`, a daily 02:30 etcd snapshot into folly's Garage store (`nix/services/etcd-backup.nix`)
+
+The cluster CA and the token signer key are in the secrets bundle, the 1Password item `talos-folly-secrets`. See [PKI](../platform/pki.md).
 
 ## Reach
 
-Reach it at `optiplex.lolwtf.ca`.
+Reach it at `optiplex.lolwtf.ca` with `talosctl --context folly`, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. It runs no SSH server.
 
 ## Quirks
 
-- One SATA SSD holds etcd, the Nix store, containerd and the `local-path` volumes. When the disk saturates, etcd slows and many folly controllers restart together. `EtcdRequestsSlow` in `clusters/base/monitoring/etcd-rules.yaml` fires first.
+- One SATA SSD holds the ETCD partition, the EPHEMERAL partition and the `data` volume at `/var/mnt/data`. When it saturates, etcd slows and `EtcdRequestsSlow` in `clusters/base/monitoring/etcd-rules.yaml` fires.
 - When optiplex reboots, the folly API stops.

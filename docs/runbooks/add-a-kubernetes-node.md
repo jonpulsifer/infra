@@ -1,9 +1,9 @@
 ---
 title: Add a Kubernetes node
-description: Declare a new x86_64 Kubernetes node and install it from the installer ISO.
+description: Declare a new x86_64 NixOS node for the offsite cluster and install it from the installer ISO.
 ---
 
-Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (remote-site) cluster.
+Use this runbook to add an x86_64 node to the `offsite` (remote-site) cluster. The `folly` nodes run Talos Linux, and each one is an entry in the node map of `clusters/folly/talos/`.
 
 ## Before you start
 
@@ -13,8 +13,23 @@ Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (re
 
 ## Declare the node
 
-1. Add an entry for the host to `nix/hosts/default.nix`. Set `tags` to `[ "folly" ]` or `[ "offsite" ]`.
-2. Copy `nix/hosts/shale.nix` to `nix/hosts/<host>.nix`.
+1. Add an entry for the host to `nix/hosts/default.nix`. Set `tags` to `[ "offsite" ]`.
+2. Create `nix/hosts/<host>.nix` with this content.
+
+   ```nix
+   { ... }:
+   {
+     imports = [
+       ../profiles/k8s-node.nix
+       ../system/tailscale-disable.nix
+     ];
+
+     services.k8s.clusterCa.enable = true;
+
+     homelab.disko.device = "/dev/sda";
+   }
+   ```
+
 3. In the new file, set `homelab.disko.device` to the disk of the host.
 
 > [!CAUTION]
@@ -37,9 +52,9 @@ Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (re
 
    Result: The command prints the store path of the closure.
 
-7. Add the host and a free address in `K8S_NODE_CIDR` to `NODE_ADDRESSES` in `clusters/<site>/config/cluster-topology.json`, and its MAC under `k8s` in `terraform/network/unifi/<site>/clients.yaml`.
+7. Add the host and a free address in `K8S_NODE_CIDR` to `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`, and its MAC under `k8s` in `terraform/network/unifi/offsite/clients.yaml`.
 8. Open a pull request.
-9. Apply the OpenTofu change to `terraform/network/unifi/<site>`, and for an `offsite` node to `terraform/network/cloudflare`, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes. The pull request changes no `.tf` file, so comment `atlantis plan -d <root>` for each root first.
+9. Apply the OpenTofu change to `terraform/network/unifi/offsite` and `terraform/network/cloudflare`, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes. The pull request changes no `.tf` file, so comment `atlantis plan -d <root>` for each root first.
 
 ## Install the node
 

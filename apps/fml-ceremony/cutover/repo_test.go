@@ -15,6 +15,9 @@ import (
 
 const repoRoot = "../../.."
 
+// folly's cluster CA is its Talos secrets bundle's own, outside the FML chain.
+var fmlCAClusters = []string{"offsite"}
+
 func certsDir() string { return filepath.Join(repoRoot, "terraform", "pki", "certs") }
 
 func readCerts(t *testing.T, path string) []*x509.Certificate {
@@ -45,7 +48,7 @@ func readCerts(t *testing.T, path string) []*x509.Certificate {
 // caFile also backs clientCaFile and kubeletClientCaFile, so an FML anchor in it
 // makes any certificate under the FML Root an authentication credential.
 func TestCABundleCarriesOnlyClusterCAs(t *testing.T) {
-	for _, cluster := range clusterName {
+	for _, cluster := range fmlCAClusters {
 		path := filepath.Join(certsDir(), cluster+"-ca-bundle.pem")
 		for i, c := range readCerts(t, path) {
 			if !strings.HasPrefix(c.Subject.CommonName, "FML K8s "+cluster) {
@@ -57,7 +60,7 @@ func TestCABundleCarriesOnlyClusterCAs(t *testing.T) {
 }
 
 func TestChainFileIsAWholePathToASelfSignedRoot(t *testing.T) {
-	for _, cluster := range clusterName {
+	for _, cluster := range fmlCAClusters {
 		path := filepath.Join(certsDir(), cluster+"-ca-chain.pem")
 		chain := readCerts(t, path)
 		if len(chain) != 3 {
@@ -79,7 +82,7 @@ func TestChainFileIsAWholePathToASelfSignedRoot(t *testing.T) {
 // If this stops holding, the cutover needs an overlap bundle and a maintenance
 // window. See TestRotatingTheClusterCAKeyReintroducesTheWindow.
 func TestIssuedCertsNameTheClusterCAByAnIdentifierTheRebirthDoesNotChange(t *testing.T) {
-	for _, cluster := range clusterName {
+	for _, cluster := range fmlCAClusters {
 		ca := readCerts(t, filepath.Join(certsDir(), cluster+"-ca.pem"))[0]
 		if len(ca.SubjectKeyId) == 0 {
 			t.Fatalf("%s-ca.pem carries no subjectKeyIdentifier, so nothing beneath it names an issuer", cluster)
@@ -117,6 +120,7 @@ func TestJWKSPublishesNoDuplicateKid(t *testing.T) {
 }
 
 // The model assumes the bundle backs caFile and the chain backs --root-ca-file.
+// offsite's NixOS control plane is the one host that still reads this module.
 func TestNixWiresTheBundleAndTheChainToDifferentOptions(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "nix", "services", "k8s", "default.nix"))
 	if err != nil {

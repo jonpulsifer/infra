@@ -31,4 +31,4 @@ With `services.bosun.kthxEngine` set, Bosun also claims [kthx](kthx/built-apps.m
 - `nix/secrets/bosun.sops.yaml`: Bosun's key on the GitHub App that Bosun shares with kthx.
 - `terraform/network/cloudflare/kthx-engine.tf`: routes the Bosun build queue, `/internal/bosun/` on `spindrift-control.lolwtf.dev`, to the kthx engine.
 - `clusters/base/monitoring/grafana-dashboards/bosun.json`: a dashboard on both clusters, with no data.
-- `nix/hosts/riptide.nix` and `nix/hosts/oldschool.nix` delete `bosun.prom` from the node-exporter textfile directory.
+- `nix/hosts/oldschool.nix` deletes `bosun.prom` from the node-exporter textfile directory.
