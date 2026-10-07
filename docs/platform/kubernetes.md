@@ -39,7 +39,7 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 ## Rules
 
 - Deploy a new containerd handler to every node from `main` before a workload names its RuntimeClass. The kubelet rejects a pod whose handler is missing.
-- Put a new CRD in its own Flux Kustomization, and add that to the `dependsOn` of each consumer. Flux dry-runs every object first, so one unknown kind stops the Flux Kustomization.
+- Put a new CRD in its own Flux Kustomization, and add that to the `dependsOn` of each consumer. Flux dry-runs every object first, so one unknown kind stops the Flux Kustomization. If a HelmRelease installs the CRD, health-check that HelmRelease, as `clusters/folly/flux-system/nodes.yaml` does.
 - Keep `helm.sh/resource-policy: keep` in the `prometheus-operator-crds` HelmRelease values. Without it, an uninstall deletes the Prometheus Operator CRDs and every object of those kinds.
 - A change to only `flux-values.yaml` in `clusters/<site>/bootstrap/` gets no autoplan. Plan and apply it as [OpenTofu and Atlantis](opentofu.md#rules) says.
 
@@ -48,6 +48,7 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 - `clusters/<site>/flux-system/` and `clusters/base/flux-system/`: the Flux Kustomizations
 - `clusters/<site>/bootstrap/` and `terraform/modules/flux-bootstrap/`: the bootstrap root, with its state in `gs://homelab-ng/clusters/<site>/bootstrap`
 - `clusters/base/platform/`, `clusters/*/storage/` and `clusters/folly/nodes/`: the shared controllers, storage and GPU plugin
+- `clusters/folly/node-features/`: the NodeFeatureRule that labels the GPU node
 - `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. `nix/services/k8s/` registers the handlers.
 - `clusters/<site>/config/`: the settings, secrets and topology that Flux substitutes. See [Topology](../reference/topology.md).
 

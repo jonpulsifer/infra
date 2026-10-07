@@ -7,7 +7,16 @@ metadata:
 spec:
   interval: 1h0m0s
   path: ./clusters/folly/nodes
-  prune: true
+  # Off for one release: a prune deletes intel-gpu-device before node-features
+  # adopts it, and NFD drops the GPU label until it returns.
+  prune: false
   sourceRef:
     kind: GitRepository
     name: infra
+  # The NodeFeatureRule CRD exists only after this HelmRelease is ready, and
+  # node-features needs it.
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: node-feature-discovery
+      namespace: nodes

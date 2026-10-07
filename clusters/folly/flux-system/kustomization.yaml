@@ -10,6 +10,7 @@ resources:
   - monitoring-crds.yaml
   - monitoring.yaml
   - networking.yaml
+  - node-features.yaml
   - nodes.yaml
   - oauth2-proxy.yaml
   - restore-drill.yaml
