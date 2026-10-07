@@ -214,9 +214,6 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 
    Result: One `Running` pod for each node.
 
-> [!NOTE]
-> `clusters/folly/apps/falco/helm-release.yaml` allows the NixOS `.runc-wrapped` binary, which a Talos node does not have. The rule matches nothing there.
-
 8. Make sure that the kthx engine's releases on the cluster are ready.
 
    ```bash
