@@ -8,11 +8,18 @@ spec:
   chart:
     spec:
       chart: falco
-      version: 9.0.0
+      version: 9.2.0
       sourceRef:
         kind: HelmRepository
         name: falco
   values:
+    # Talos 6.18 kernels expose the signal_deliver siginfo argument as a scalar,
+    # so the modern BPF probe before 0.45.1 fails the verifier. Drop the tag at
+    # a chart whose appVersion is 0.45.1 or later.
+    image:
+      registry: docker.io
+      repository: falcosecurity/falco
+      tag: 0.45.1-rc1
     driver:
       kind: modern-bpf
     collectors:
@@ -23,7 +30,7 @@ spec:
         # https://github.com/falcosecurity/falco/issues/3444
         # Add runc to known binaries
         - list: known_memfd_execution_binaries
-          items: [runc, .runc-wrapped]
+          items: [runc]
           override:
             items: append
 
