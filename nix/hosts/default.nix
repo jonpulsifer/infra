@@ -11,6 +11,9 @@
   retrofit = {
     tags = [ "offsite" ];
   };
+  hotrod = {
+    tags = [ "offsite" ];
+  };
 
   cloudpi4 = {
     system = "aarch64-linux";
