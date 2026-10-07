@@ -20,6 +20,8 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Get cluster admin access](get-cluster-admin-access.md): get `kubectl` access, use the break-glass certificate, and withdraw access
 - [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md): replace a cluster's NixOS nodes with Talos, bootstrap etcd, Cilium and Flux, and restore its backups
 - [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md): generate a cluster's Talos secrets with its imported signing key, and pin its new CA
+- [Install Cilium and Flux on Talos](install-cilium-and-flux-on-talos.md): write a new cluster's kubeconfig context, install Cilium with its BGP peering, and bootstrap Flux
+- [Move a cluster's data through a Talos rebuild](move-a-clusters-data-through-a-talos-rebuild.md): freeze the writers, take the last backups, and restore the databases, volumes and kthx Apps
 - [Verify a Talos cluster](verify-a-talos-cluster.md): check the nodes, network, identity and workloads of a cluster that runs Talos
 - [Issue a talosconfig](issue-a-talosconfig.md): mint the owner's and Rowbutt's Talos API credentials and store them in 1Password
 - [Operate Postgres](operate-postgres.md): connect to, inspect and restart the CloudNativePG databases

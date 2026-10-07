@@ -15,3 +15,5 @@ spec:
     name: infra
   dependsOn:
     - name: external-secrets-operator
+    # The RoleBinding's namespace, spindrift-datastores, comes from `apps`.
+    - name: apps

@@ -223,7 +223,7 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
    kubectl --context <site> -n spindrift-apps get hr
    ```
 
-   Result: Each row is `True`. After a rebuild, each release from the freeze in [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md#freeze-the-cluster) is there.
+   Result: Each row is `True`. After a rebuild, each release from the freeze in [Move a cluster's data through a Talos rebuild](move-a-clusters-data-through-a-talos-rebuild.md#freeze-the-cluster) is there.
 
 ## If something goes wrong
 
