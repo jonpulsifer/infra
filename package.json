@@ -17,7 +17,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "kthx": "workspace:*",
-    "turbo": "2.11.5"
+    "turbo": "2.11.6"
   },
   "engines": {
     "bun": ">=1.4.0",
