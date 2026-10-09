@@ -127,6 +127,26 @@ export class GithubApp {
     await response.text().catch(() => '');
   }
 
+  /**
+   * A GET under the App's repository, such as `/pulls/1`, for mate's own
+   * reads. A turn's end revokes the token it shares, so a 401 mints once more.
+   */
+  async read<T>(path: string): Promise<T> {
+    const { owner, repo } = this.options;
+    const what = `read ${path.split('?')[0]}`;
+    for (let attempt = 0; ; attempt += 1) {
+      const { token } = await this.token();
+      const response = await this.call(`/repos/${owner}/${repo}${path}`, token);
+      if (response.ok) return (await response.json()) as T;
+      if (response.status === 401 && attempt === 0) {
+        if (this.held?.token === token) this.held = null;
+        await response.text().catch(() => '');
+        continue;
+      }
+      throw await this.failure(response, what);
+    }
+  }
+
   // A real mint is the only proof the key still matches a live installation.
   // The caller logs and records the result.
   async preflight(): Promise<GithubAppStatus> {

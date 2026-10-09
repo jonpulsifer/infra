@@ -214,6 +214,21 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
     );
     CREATE INDEX mate_slack_events_claimed ON mate_slack_events (claimed_at)`,
   ],
+  // One pending wake a thread (wakes.ts); `pr` NULL is a timed wake.
+  [
+    6,
+    `CREATE TABLE mate_wakes (
+      key TEXT COLLATE "C" PRIMARY KEY,
+      surface TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      asker TEXT NOT NULL,
+      note TEXT NOT NULL,
+      due_at BIGINT NOT NULL,
+      pr INTEGER NULL,
+      created_at BIGINT NOT NULL
+    )`,
+  ],
 ];
 
 /** mate's own tables beside pi's; idempotent and safe to race. */

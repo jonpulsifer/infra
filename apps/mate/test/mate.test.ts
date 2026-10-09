@@ -366,9 +366,10 @@ describe('stopping', () => {
           },
         },
       });
+      // The custodian, the wakes and the MCP bridge each tick every minute.
       await eventually(
-        () => clock.armed().filter((ms) => ms === MCP_RETRY_MS).length === 2,
-        'the custodian and the MCP bridge',
+        () => clock.armed().filter((ms) => ms === MCP_RETRY_MS).length === 3,
+        'the custodian, the wakes and the MCP bridge',
       );
       expect(clock.armed()).toContain(SPARE_SWEEP_MS);
       expect(clock.armed()).toContain(RETENTION_SWEEP_MS);

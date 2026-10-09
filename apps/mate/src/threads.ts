@@ -25,6 +25,7 @@ import {
   GAVE_UP_WAITING,
   HARNESS_FAILED,
   NEVER_STARTED,
+  NOTHING_TO_STOP,
   PROFILE_GONE,
   PROFILE_PLACE,
   PROFILE_UNKNOWN,
@@ -73,6 +74,7 @@ import type {
   TurnMark,
 } from './thread-store.ts';
 import { assignmentPost, replayPreamble } from './transcript.ts';
+import type { Wakes } from './wakes.ts';
 
 export type { Inbound };
 
@@ -202,7 +204,12 @@ export interface ThreadsDeps {
   commands?: Commands;
   /** Tests add an automation profile; PROFILES otherwise. */
   profiles?: ReadonlyMap<string, Profile>;
+  /** A Stop cancels the thread's pending wake. */
+  wakes?: Pick<Wakes, 'cancel'> | null;
 }
+
+/** An owner message of exactly this, in a thread mate holds, is a Stop. */
+export const STOP_WORD = 'stop';
 
 export function stripMention(content: string, me: string): string {
   return content
@@ -477,6 +484,10 @@ export class Threads {
         await this.say(known.surface, known.ref, line);
         return;
       }
+      if (prompt.text.trim().toLowerCase() === STOP_WORD) {
+        await this.stop(known, true);
+        return;
+      }
       if (command) this.command(command, known, message.authorId);
       else this.accept(known, prompt);
       return;
@@ -674,16 +685,62 @@ export class Threads {
     userId: string,
     ack: () => Promise<void>,
   ): Promise<void> {
-    const { brain, log } = this.deps;
+    const { log } = this.deps;
     await ack().catch((error) =>
       log.warn('stop ack failed', { threadId: key, error: plain(error) }),
     );
     const thread = this.threads.get(key);
     if (!thread?.surface.allowedUserIds.has(userId)) return;
-    if (thread.state !== 'turn') return;
-    // A turn still building its prompt has nothing in the brain to cancel.
-    thread.stopRequested = true;
-    if (thread.session) await brain.cancel(thread.session);
+    await this.stop(thread, false);
+  }
+
+  /**
+   * Cancels the running turn, then the pending wake, so neither a slow store
+   * nor the dying turn's own `wake` call outlives the Stop. `say` answers a
+   * typed stop that found neither.
+   */
+  private async stop(thread: Thread, say: boolean): Promise<void> {
+    const running = thread.state === 'turn';
+    if (running) {
+      // A turn still building its prompt has nothing in the brain to cancel.
+      thread.stopRequested = true;
+      if (thread.session) await this.deps.brain.cancel(thread.session);
+    }
+    const cancelled = (await this.deps.wakes?.cancel(thread.ref)) ?? false;
+    if (say && !running && !cancelled) {
+      await this.say(thread.surface, thread.ref, NOTHING_TO_STOP);
+    }
+  }
+
+  /**
+   * A wake (wakes.ts): continues a thread mate has a row for under the row's
+   * profile, as `asker`'s reply would. `text` is posted first, so the thread
+   * shows why it moved, and replays as history. False when there is no row.
+   */
+  async wake({ ref, asker, text }: Omit<Start, 'profile'>): Promise<boolean> {
+    const surface = this.surfaces.get(ref.surface);
+    if (!surface?.allowedUserIds.has(asker)) return false;
+    if (this.draining || this.quiesced) {
+      throw new Error('mate is shutting down');
+    }
+    const thread =
+      this.threads.get(threadKey(ref)) ?? (await this.recall(surface, ref));
+    if (!thread?.row || thread.removed) return false;
+    await this.say(surface, ref, text);
+    this.accept(thread, {
+      text,
+      raw: text,
+      authorId: asker,
+      asked: null,
+      message: { channelId: ref.channelId, id: ref.id },
+    });
+    return true;
+  }
+
+  /** Posts a line in a thread on its surface. Never throws. */
+  async post(ref: ThreadRef, text: string): Promise<void> {
+    const surface = this.surfaces.get(ref.surface);
+    if (surface) await this.say(surface, ref, text);
   }
 
   async onThreadArchived(ref: ThreadRef): Promise<void> {
