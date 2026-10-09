@@ -334,6 +334,7 @@ export interface SandboxDeclaration {
   /** Applied to both the object and its pod template. */
   labels: Record<string, string>;
   config: SandboxConfig;
+  image: string;
   shutdownTime: string;
   /** Its grants decide what the pod's env holds. */
   profile: Profile;
@@ -419,6 +420,15 @@ function threadOf(labels: Record<string, string>): ThreadRef | null {
   return { surface, channelId, id };
 }
 
+/** The image a sandbox's harness runs, from its pod template. */
+function harnessImage(sandbox: Sandbox): string | undefined {
+  const template = sandbox.spec?.podTemplate as
+    | { spec?: { containers?: { name?: string; image?: string }[] } }
+    | undefined;
+  return template?.spec?.containers?.find((c) => c.name === HARNESS_CONTAINER)
+    ?.image;
+}
+
 function templateLabels(sandbox: Sandbox): Record<string, string> {
   const template = sandbox.spec?.podTemplate as
     | { metadata?: { labels?: Record<string, string> } }
@@ -437,7 +447,7 @@ function belongsTo(sandbox: Sandbox, thread: ThreadRef): boolean {
 }
 
 export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
-  const { name, namespace, labels, config, shutdownTime, profile } =
+  const { name, namespace, labels, config, image, shutdownTime, profile } =
     declaration;
   const { grants } = profile;
   return {
@@ -487,8 +497,8 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
           initContainers: [
             {
               name: CHECKOUT_CONTAINER,
-              image: config.image,
-              imagePullPolicy: pullPolicy(config.image),
+              image,
+              imagePullPolicy: pullPolicy(image),
               command: [
                 'git',
                 'clone',
@@ -511,8 +521,8 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
           containers: [
             {
               name: HARNESS_CONTAINER,
-              image: config.image,
-              imagePullPolicy: pullPolicy(config.image),
+              image,
+              imagePullPolicy: pullPolicy(image),
               env: [
                 ...(config.vault && grants.vault
                   ? connectEnv(config.vault)
@@ -667,8 +677,8 @@ export class KubeHands implements Hands {
   private readonly leaseDeps: LeaseDeps;
   private warming: Promise<void> | null = null;
   private again = false;
-  // Spares outlive a rollout, and nothing on one records the image or
-  // checkout it was built from, so the first pass discards them all.
+  // Spares outlive a rollout, and nothing on one records the checkout it was
+  // built from, so the first pass discards them all.
   private inheritedSpares = true;
   private inheritedSandboxes = false;
 
@@ -879,28 +889,29 @@ export class KubeHands implements Hands {
     // Pool off, the default: no apiserver calls at all.
     if (want === 0) return;
     if (this.inheritedSpares) await this.discardSpares();
+    const image = await this.deps.image();
     const ready: Sandbox[] = [];
-    // Unready spares that could not be condemned still take room on the node,
-    // so they count against the pool.
+    // Spares that could not be condemned still take room on the node, so they
+    // count against the pool.
     let stuck = 0;
     for (const spare of await this.spares()) {
-      if (isReady(spare)) {
+      const current = harnessImage(spare) === image;
+      if (isReady(spare) && current) {
         ready.push(spare);
         continue;
       }
-      // It was Ready once (`mintSpare` waits for that), so its pod was lost.
-      // Renewing it would keep an unusable spare in the pool indefinitely.
+      // Not ready, it was Ready once (`mintSpare` waits for that), so its pod
+      // was lost. Renewing either kind would keep it in the pool indefinitely.
+      const why = current ? 'stopped being ready' : 'runs an older image';
       const name = spare.metadata.name;
       try {
         await this.condemn(name, spare.metadata.resourceVersion);
-        log.info('condemned a spare that stopped being ready', {
-          sandbox: name,
-        });
+        log.info(`condemned a spare that ${why}`, { sandbox: name });
       } catch (error) {
         // 409: a thread claimed it or the controller reaped it since the list.
         if (error instanceof KubeError && error.status === 409) continue;
         stuck += 1;
-        log.warn('could not condemn a spare that stopped being ready', {
+        log.warn(`could not condemn a spare that ${why}`, {
           sandbox: name,
           error: plain(error),
         });
@@ -1417,7 +1428,7 @@ export class KubeHands implements Hands {
     return { sandbox: await this.waitUsable(name), source: 'fresh' };
   }
 
-  private create(
+  private async create(
     name: string,
     labels: Record<string, string>,
     profile: Profile,
@@ -1430,6 +1441,7 @@ export class KubeHands implements Hands {
         namespace: this.namespace,
         labels,
         config: this.deps.config,
+        image: await this.deps.image(),
         shutdownTime,
         profile,
       }),
@@ -1462,8 +1474,10 @@ export class KubeHands implements Hands {
     // its answer.
     if (config.spares === 0) return null;
     const labels = claimLabels(thread, profile);
+    // A spare on an older image is the sweep's to condemn.
+    const image = await this.deps.image();
     for (const spare of await this.spares()) {
-      if (!isReady(spare)) continue;
+      if (!isReady(spare) || harnessImage(spare) !== image) continue;
       const name = spare.metadata.name;
       onStep('adopting');
       try {

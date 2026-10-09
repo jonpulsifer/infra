@@ -22,7 +22,12 @@ import { discordListener, STOP_PREFIX } from '../src/discord.ts';
 import type { Log } from '../src/log.ts';
 import type { Database } from '../src/store.ts';
 import type { SurfaceListener } from '../src/surface.ts';
-import { GUILD, SANDBOX_CONFIG, tempDir } from './hands-support.ts';
+import {
+  GUILD,
+  SANDBOX_CONFIG,
+  SANDBOX_IMAGE,
+  tempDir,
+} from './hands-support.ts';
 import { type FakeDiscord, FakeGateway, settle } from './support.ts';
 
 export const ME = '900000000000000001';
@@ -84,6 +89,8 @@ export interface ConfigOverrides
 /** mate on pi's faux model, Discord alone, and every credential off. */
 export function mateConfig(overrides: ConfigOverrides = {}): Config {
   const { sandbox, brain, ...rest } = overrides;
+  const imageFile = join(tempDir('sandbox-image'), 'image');
+  writeFileSync(imageFile, SANDBOX_IMAGE);
   return {
     token: 'discord-token',
     guildId: GUILD,
@@ -96,7 +103,12 @@ export function mateConfig(overrides: ConfigOverrides = {}): Config {
     maxSandboxes: 4,
     port: 0,
     sessionFile: null,
-    sandbox: { ...SANDBOX_CONFIG, turnTimeoutMs: 60_000, ...sandbox },
+    sandbox: {
+      ...SANDBOX_CONFIG,
+      imageFile,
+      turnTimeoutMs: 60_000,
+      ...sandbox,
+    },
     brain: {
       model: 'faux/faux',
       thinking: 'off',

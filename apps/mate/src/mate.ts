@@ -28,6 +28,7 @@ import type { Instruments } from './metrics.ts';
 import { CHATGPT_PROVIDER, chatgptModel, createModelSetup } from './model.ts';
 import { brainProfiles, loadSystemPrompts } from './profile.ts';
 import { PROFILES } from './profiles.ts';
+import { fileImage } from './sandbox-image.ts';
 import { type HandsLayout, KubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
 import type { SlackApi } from './slack.ts';
 import { opensshKey } from './ssh-key.ts';
@@ -221,6 +222,7 @@ export class Mate {
       {
         kube,
         config: sandbox,
+        image: fileImage(sandbox.imageFile, log),
         guildId: config.guildId,
         maxSandboxes: config.maxSandboxes,
         log,

@@ -11,7 +11,7 @@ const minimal = {
   MATE_GUILD_ID: '1509024936717455381',
   MATE_ALLOWED_USER_IDS: '308072071949320204',
   MATE_ALLOWED_CHANNEL_IDS: '1509024937422356532, 1509024937422356533',
-  MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+  MATE_SANDBOX_IMAGE_FILE: '/var/run/mate/sandbox-image/image',
 };
 
 describe('config from the environment', () => {
@@ -112,14 +112,14 @@ describe('config from the environment', () => {
   });
 
   test('needs a harness image and takes the sandbox defaults', () => {
-    expect(() => readConfig({ ...minimal, MATE_SANDBOX_IMAGE: ' ' })).toThrow(
-      'MATE_SANDBOX_IMAGE is required',
-    );
+    expect(() =>
+      readConfig({ ...minimal, MATE_SANDBOX_IMAGE_FILE: ' ' }),
+    ).toThrow('MATE_SANDBOX_IMAGE_FILE is required');
     const { sandbox, brain, githubApp, sshKeyFile, talosconfigFile } =
       readConfig(minimal);
     expect({ sandbox, brain, githubApp, sshKeyFile, talosconfigFile }).toEqual({
       sandbox: {
-        image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+        imageFile: '/var/run/mate/sandbox-image/image',
         runtimeClass: 'kata-clh',
         namespace: null,
         checkoutRepo: 'https://github.com/jonpulsifer/infra',

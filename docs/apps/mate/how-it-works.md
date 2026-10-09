@@ -52,6 +52,8 @@ mate downloads no file on a message. The prompt ends with a line naming each fil
 
 If the sandbox dies mid-turn, the tool call fails, and the next call starts a new sandbox.
 
+A new sandbox runs the image named in ConfigMap `mate-sandbox-image`, which CD rewrites at each `mate-sandbox` build. mate reads the mounted file at each mint, so a new sandbox image restarts nothing: the next new sandbox runs it, the sweep replaces a spare on an older image, and a thread's existing sandbox keeps its image until it goes. If the file cannot be read, mate keeps the last image it read.
+
 ## Model routing
 
 A router in `apps/mate/src/route.ts` sends each model request to ChatGPT first. If ChatGPT fails before its first text, reasoning or tool call, the router sends the same request to the fallback in the same step, so pi records no failure. pi retries an error after content. Stop, the turn timeout and a context overflow never go to the fallback.
@@ -146,6 +148,8 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/hands-env.ts`: pi's execution environment over the `mate-hands` stream
 - `apps/mate/src/credentials.ts`: the credential files of a turn
 - `apps/mate/src/sandboxes.ts`: the Sandbox, its manifest and the spare pool
+- `apps/mate/src/sandbox-image.ts`: the reader of the sandbox image file
+- `clusters/offsite/apps/mate/sandbox-image.yaml`: the sandbox image
 - `apps/mate/src/store.ts`: the connection to `mate-db` and the `mate_threads` table
 - `apps/mate/src/credential-store.ts`: the `mate_credentials` table
 - `apps/mate/src/chatgpt.ts`: the ChatGPT sign-in, the `chatgpt` commands and the keeper that refreshes the token

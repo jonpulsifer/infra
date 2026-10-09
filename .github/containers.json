@@ -38,7 +38,7 @@
       "clusters/offsite/apps/mate/deployment.yaml"
     ],
     "mate-sandbox": [
-      "clusters/offsite/apps/mate/deployment.yaml"
+      "clusters/offsite/apps/mate/sandbox-image.yaml"
     ],
     "netbench": [
       "clusters/base/apps/iperf3/iperf3-daemonset.yaml",

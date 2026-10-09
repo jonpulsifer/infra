@@ -13,4 +13,5 @@ resources:
   - sandbox-reader-network-policy.yaml
   - database.yaml
   - database-backup.yaml
+  - sandbox-image.yaml
   - deployment.yaml

@@ -10,6 +10,7 @@ import type { KthxSites } from './kthx-sites.ts';
 import type { Kube } from './kube.ts';
 import type { Log } from './log.ts';
 import type { Lane, Profile } from './profiles.ts';
+import type { SandboxImage } from './sandbox-image.ts';
 import type { ThreadRef } from './surface.ts';
 
 export const WORKSPACE = '/workspace';
@@ -159,6 +160,7 @@ export interface TokenSource {
 export interface KubeHandsDeps {
   kube: Kube;
   config: SandboxConfig;
+  image: SandboxImage;
   guildId: string;
   /** MATE_MAX_SANDBOXES. */
   maxSandboxes: number;
