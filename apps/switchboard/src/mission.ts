@@ -4,6 +4,8 @@ export const DEFAULT_OBJECTIVE =
   'Get them to say the keyword out loud, without ever saying it yourself.';
 export const OBJECTIVE_MAX_LEN = 300;
 export const NAME_MAX_LEN = 40;
+/** The cover story the caller follows; absent, the agent invents one. */
+export const SCENARIO_MAX_LEN = 1500;
 
 const KEYWORD = /^[A-Za-z' -]{1,40}$/;
 

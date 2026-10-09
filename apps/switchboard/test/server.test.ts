@@ -506,6 +506,24 @@ describe('/mission', () => {
     const vars = JSON.parse(sent[0]?.body ?? '{}')
       .conversation_initiation_client_data.dynamic_variables;
     expect(vars).toMatchObject({ target_name: 'Sammy', objective: 'be nice' });
+    // No scenario given: the variable is absent, so the agent's own
+    // placeholder tells it to invent a cover story.
+    expect(vars).not.toHaveProperty('scenario');
+  });
+
+  test('a scenario is passed through, sanitized, when given', async () => {
+    const sent = mockMission('done');
+    const { app } = appWith();
+    await post(app, {
+      target: 'sam',
+      keyword: 'otter',
+      scenario: 'You are at the zoo.\x07 Ask what the river one is.',
+    });
+    const vars = JSON.parse(sent[0]?.body ?? '{}')
+      .conversation_initiation_client_data.dynamic_variables;
+    expect(vars.scenario).toBe(
+      'You are at the zoo. Ask what the river one is.',
+    );
   });
 
   test('wait answers 200 with the scored result', async () => {

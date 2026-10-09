@@ -36,18 +36,28 @@ curl -sS --max-time 15 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
 
 ## Mission
 
-When the owner asks to send Earl after someone with a word, send one request
-and wait for the score. `target` is a key of switchboard's allow-list:
-`parents`, `dad` or `owner`. `keyword` is the word the person has to say.
-`name` is what Earl calls them; leave it out to use the key. A mission call
-lasts up to five minutes and the score comes two minutes after at most, so
-the wait is long:
+When the owner asks to send the caller after someone with a word, write a
+cover story, send one request and wait for the score. `target` is a key of
+switchboard's allow-list: `parents`, `dad` or `owner`. `keyword` is the word
+the person has to say. `name` is what the caller calls them; leave it out to
+use the key. The caller speaks in the owner's voice and never introduces
+itself.
+
+`scenario` is the cover story, four to six sentences, and it is what makes the
+call sound like a call: a reason the owner would phone this person today, how
+to ease in (how they are, what they're up to), the story that has a gap only
+they can fill, which is the keyword, what to call the thing instead of its
+name, and what to ask after they say it so the call carries on a beat before
+the goodbye. Write it for the person named, not for the owner. Without one
+the caller invents a reason itself. A mission call lasts up to five minutes
+and the score comes two minutes after at most, so the wait is long:
 
 ```bash
 curl -sS --max-time 480 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/mission" \
   -H "Authorization: Bearer $SWITCHBOARD_MISSION_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"target":"dad","keyword":"blueberry","name":"<first name>","wait":true}'
+  -d '{"target":"dad","keyword":"turkey","name":"Dad","wait":true,
+       "scenario":"<the cover story, one paragraph>"}'
 ```
 
 - `200` with `result`: report it as a story: `won`, `secondsToWin`, `turn`,

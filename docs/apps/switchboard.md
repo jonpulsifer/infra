@@ -15,7 +15,7 @@ Switchboard is one image with two roles, which `SWITCHBOARD_ROLE` picks. The [bo
 | `POST /mission` | The same Service | mate's sandbox pods, with the mission token |
 | `GET /mission/:conversationId` | The same Service | The same callers, with the mission token |
 
-A mission sends `{target, keyword}` and optionally `name`, `objective` and `wait`. Earl, the `pbx-mission` agent, phones the target with a secret objective: get them to say the keyword. Without `wait` the answer is 202 with the conversation id, and the `GET` route returns `pending` or `done` with the scored result. With `wait: true` the answer holds until the call is scored.
+A mission sends `{target, keyword}` and optionally `name`, `objective`, `scenario` and `wait`. The `pbx-mission` agent phones the target in the owner's voice with a secret objective: get them to say the keyword. `scenario` is the cover story the call stands on, a few sentences at most; without one the agent invents a reason to call. Without `wait` the answer is 202 with the conversation id, and the `GET` route returns `pending` or `done` with the scored result. With `wait: true` the answer holds until the call is scored.
 
 ## Limits
 

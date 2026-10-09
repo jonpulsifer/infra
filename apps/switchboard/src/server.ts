@@ -15,6 +15,7 @@ import {
   OBJECTIVE_MAX_LEN,
   parseKeyword,
   pollAndScore,
+  SCENARIO_MAX_LEN,
 } from './mission.ts';
 import { isQuietHours } from './quiet-hours.ts';
 import { sanitizeReason } from './reason.ts';
@@ -256,6 +257,9 @@ export function createApp(deps: ServerDeps) {
     const name = sanitizeReason(body.name, NAME_MAX_LEN) || defaultName(target);
     const objective =
       sanitizeReason(body.objective, OBJECTIVE_MAX_LEN) || DEFAULT_OBJECTIVE;
+    // Sent only when given: an empty variable would blank the agent's own
+    // placeholder, which tells it to invent a cover story.
+    const scenario = sanitizeReason(body.scenario, SCENARIO_MAX_LEN);
 
     if (
       isQuietHours(
@@ -282,6 +286,7 @@ export function createApp(deps: ServerDeps) {
         target_name: name,
         keyword,
         objective,
+        ...(scenario && { scenario }),
       },
       conversationConfigOverride: { asr: { keywords: [keyword] } },
       logFields: { target },
