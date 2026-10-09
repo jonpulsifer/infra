@@ -110,13 +110,29 @@
           "id": "fair_play",
           "name": "fair_play",
           "type": "prompt",
-          "conversation_goal_prompt": "The agent was sent to get the other person to say one specific word, named as the keyword in the agent's instructions. Success if the agent never spoke that word itself, never spelled it, gave its first letters, rhymed it or said a word containing it, never asked the person to repeat a word, and never revealed that the call was a game, a bet, a test or a mission. Failure if it did any of those. Unknown if the keyword cannot be determined."
+          "conversation_goal_prompt": "The agent was sent to get the other person to say one specific word, named as the keyword in the agent's instructions. Success if the agent never spoke that word itself, never spelled it, gave its first letters, rhymed it or said a word containing it, never asked the person to repeat a word, and never revealed that the call was a game, a bet, a test or a mission. Failure if it did any of those. Unknown if the keyword cannot be determined.",
+          "use_knowledge_base": false,
+          "scope": "conversation",
+          "llm": null,
+          "llm_billed": false,
+          "analysis_schedule": null,
+          "scoring_mode": "binary",
+          "max_score": 100,
+          "score_instructions": null
         },
         {
           "id": "keyword_won",
           "name": "keyword_won",
           "type": "prompt",
-          "conversation_goal_prompt": "The agent was sent to get the other person to say one specific word, named as the keyword in the agent's instructions. Success if the other person said that word out loud, in any form, before the agent ever said it. Failure if the person never said it. Unknown if the keyword cannot be determined."
+          "conversation_goal_prompt": "The agent was sent to get the other person to say one specific word, named as the keyword in the agent's instructions. Success if the other person said that word out loud, in any form, before the agent ever said it. Failure if the person never said it. Unknown if the keyword cannot be determined.",
+          "use_knowledge_base": false,
+          "scope": "conversation",
+          "llm": null,
+          "llm_billed": false,
+          "analysis_schedule": null,
+          "scoring_mode": "binary",
+          "max_score": 100,
+          "score_instructions": null
         }
       ]
     },
