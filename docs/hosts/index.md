@@ -41,6 +41,17 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 
 The Kubernetes nodes run no Tailscale client. Off the LAN, the owner reaches them and Lab Net through each site's Connector. See [Remote access](../platform/network/remote-access.md).
 
+## Unmanaged devices at offsite
+
+No file in git declares these, and the UniFi console lists them as clients.
+
+| Device | Job | Limit |
+| --- | --- | --- |
+| JetKVM | Console video and keyboard for one offsite node, on the Default network. It answers over Site Magic. | It has no ATX power extension, so it cannot power-cycle the node. Which node it is cabled to is not recorded. |
+| TP-Link Kasa plugs (2× HS103, HS105, KP400) and a D-Link plug | Garden and decoration loads | None of them powers a node. |
+
+retrofit and oldschool power on after a power loss, from their BIOS setting. Nothing at offsite cuts a node's power remotely, so a node that hangs needs the JetKVM keyboard or someone at the site.
+
 ## Known divergence
 
 Each sheet states its host's divergence. These cover more than one host, or a host with no sheet:
