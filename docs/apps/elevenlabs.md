@@ -26,7 +26,7 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 
 ## How it works
 
-`desired/agents/` holds one agent per file, `pbx-troll` and `pbx-switchboard`. `desired/phone-number.json` names the agent that answers the number, its inbound trunk and its outbound trunk. Each run of `reconcile.sh` creates an agent no live one is named after, patches the declared fields that differ, and binds the number with one PATCH: the agent, the full inbound trunk with its digest credentials and, with the Secret in hand, the outbound trunk with its credentials. The API never returns a password, so every write run re-sends them. It logs field names, never values.
+`desired/agents/` holds one agent per file: `pbx-troll`, `pbx-switchboard` and `pbx-mission`, Earl with an objective for an outbound call, which no service places yet. `desired/phone-number.json` names the agent that answers the number, its inbound trunk and its outbound trunk. Each run of `reconcile.sh` creates an agent no live one is named after, patches the declared fields that differ, and binds the number with one PATCH: the agent, the full inbound trunk with its digest credentials and, with the Secret in hand, the outbound trunk with its credentials. The API never returns a password, so every write run re-sends them. It logs field names, never values.
 
 A failed request for one agent fails the Job and leaves that agent as it is; the other agents and the number are still reconciled. If ElevenLabs reports no inbound credentials after the bind, the run unbinds the number. Without the write key it only logs what it would create, patch or bind.
 
