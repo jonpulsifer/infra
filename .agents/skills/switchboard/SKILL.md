@@ -19,13 +19,14 @@ agent needs beyond it.
 When the owner asks to be called, send one request and read the status code:
 
 ```bash
-curl -sS --max-time 15 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
+curl -sS --max-time 100 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
   -H "Authorization: Bearer $SWITCHBOARD_RING_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"reason":"<one short line>"}'
 ```
 
-- `200`: the call is placed. Say so.
+- `200`: the call is placed. Say so. The answer comes only once the owner
+  picks up or the ring times out, so the wait can run over a minute.
 - `429`: refused. The body's `skipped` field says why, `daily-cap` or
   `cooldown`. Report the reason and do not retry.
 - `502`: the call was attempted once and failed. Report it and do not retry.
