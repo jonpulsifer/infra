@@ -2,7 +2,7 @@
 # The kthx server and the CLI tarball it serves. The server runs from source.
 # The chart runs it as uid 65532 on a read-only root; `/tmp` and the sites
 # volume are writable.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:0b91b1d8e5142eec0bebb10da7e1fb489e50c3c6cfc8b4c991fb331053809c76 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:50d16ee9c3ca08af8a037220d0ee5b3ec95a941e1b1e7bdfccb723020b9ccc67 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
