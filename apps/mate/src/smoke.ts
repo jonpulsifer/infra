@@ -379,7 +379,7 @@ try {
   if (!threads) throw new Error('mate did not start the smoke surface');
   jsonLog.info('smoke starting', {
     namespace,
-    image: config.sandbox.image,
+    imageFile: config.sandbox.imageFile,
     model: config.brain.model,
     thinking: config.brain.thinking,
     thread: id,

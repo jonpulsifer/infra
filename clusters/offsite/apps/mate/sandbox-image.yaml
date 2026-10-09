@@ -1,0 +1,15 @@
+---
+# The harness image every new sandbox runs. CD rewrites this digest; mate reads
+# the mounted file at each mint, so a new sandbox image restarts nothing.
+# Digest-pinned: the agent's tool calls run in this image with no approval
+# step. CD anchors on the image name beside the digest.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mate-sandbox-image
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate
+    app.kubernetes.io/part-of: mate
+data:
+  image: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:5328ccb40e1f1e7126534fb96a0240afae5a77036c4a09717803c2f4c5c5a988

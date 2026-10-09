@@ -84,8 +84,8 @@ export interface McpServerConfig {
 }
 
 export interface SandboxConfig {
-  /** The harness image every sandbox runs; CD rewrites its digest on mate's Deployment. */
-  readonly image: string;
+  /** Holds the harness image every new sandbox runs; CD rewrites its digest in the ConfigMap behind it. */
+  readonly imageFile: string;
   readonly runtimeClass: string;
   /** Where sandboxes are minted, or `null` for the namespace mate runs in. */
   readonly namespace: string | null;
@@ -454,7 +454,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     );
   }
   return {
-    image: required(env, 'MATE_SANDBOX_IMAGE'),
+    imageFile: required(env, 'MATE_SANDBOX_IMAGE_FILE'),
     runtimeClass: text(env, 'MATE_SANDBOX_RUNTIME_CLASS', 'kata-clh'),
     namespace: env.MATE_SANDBOX_NAMESPACE?.trim() || null,
     checkoutRepo: text(

@@ -33,6 +33,7 @@ import {
   type Rig,
   rig,
   SANDBOX_CONFIG,
+  SANDBOX_IMAGE,
   THREAD,
   until,
 } from './hands-support.ts';
@@ -154,6 +155,7 @@ async function plant(
         namespace: 'mate',
         labels,
         config: SANDBOX_CONFIG,
+        image: SANDBOX_IMAGE,
         shutdownTime: new Date(Date.now() + 3_600_000).toISOString(),
         profile: OPERATOR,
       }),
@@ -238,7 +240,7 @@ describe('the manifest', () => {
 
     const harness = pod.containers[0];
     expect(harness.name).toBe(HARNESS_CONTAINER);
-    expect(harness.image).toBe(SANDBOX_CONFIG.image);
+    expect(harness.image).toBe(SANDBOX_IMAGE);
     expect(harness.imagePullPolicy).toBe('IfNotPresent');
     expect(harness.securityContext.capabilities.drop).toEqual(['ALL']);
     expect(harness.resources).toEqual({
@@ -441,7 +443,7 @@ describe('the manifest', () => {
 
   test('pulls on every mint when the image is a bare tag', async () => {
     const r = rig({
-      config: { image: 'ghcr.io/jonpulsifer/mate-sandbox:latest' },
+      deps: { image: async () => 'ghcr.io/jonpulsifer/mate-sandbox:latest' },
     });
     await mint(r);
 
@@ -699,12 +701,35 @@ describe('the warm pool', () => {
     await r.hands.ensureSpares();
     const [inherited] = spareNames(r);
 
-    // Nothing on a spare records the image or ref it was built from.
+    // Nothing on a spare records the ref it was built from.
     r.hands = r.another();
     await r.hands.ensureSpares();
     await until(() => !r.fake.sandboxes.has(inherited ?? ''));
     expect(spareNames(r)).toHaveLength(1);
     expect(spareNames(r)[0]).not.toBe(inherited);
+  });
+
+  test('a new sandbox image reaches the next mint and replaces the spare', async () => {
+    let image = SANDBOX_IMAGE;
+    const r = rig({
+      config: { spares: 1 },
+      deps: { image: async () => image },
+    });
+    await r.hands.ensureSpares();
+    const [old] = spareNames(r);
+
+    image = SANDBOX_IMAGE.replace(/[0-9a-f]{64}$/, '2'.repeat(64));
+    expect(await mint(r)).toMatchObject({ sandbox: NAME, source: 'fresh' });
+    expect(podTemplate(r).containers[0].image).toBe(image);
+    expect(podTemplate(r).initContainers[0].image).toBe(image);
+
+    await r.hands.ensureSpares();
+    await until(() => !r.fake.sandboxes.has(old ?? ''));
+    expect(r.log.of('condemned a spare that runs an older image')).toHaveLength(
+      1,
+    );
+    const [fresh] = spareNames(r);
+    expect(podTemplate(r, fresh).containers[0].image).toBe(image);
   });
 
   test('will not hand out a spare whose pod has gone', async () => {
@@ -958,6 +983,7 @@ describe('profiles', () => {
       namespace: 'mate',
       labels: sandboxLabels(THREAD, GUILD, INVESTIGATOR),
       config: { ...SANDBOX_CONFIG, ...FULL, kubeReaderServiceAccount: null },
+      image: SANDBOX_IMAGE,
       shutdownTime: new Date().toISOString(),
       profile: INVESTIGATOR,
     }) as Json;

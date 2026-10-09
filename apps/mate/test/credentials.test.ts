@@ -34,6 +34,7 @@ import {
   type Rig,
   rig,
   SANDBOX_CONFIG,
+  SANDBOX_IMAGE,
   THREAD,
   until,
 } from './hands-support.ts';
@@ -746,6 +747,7 @@ describe('the kthx sites', () => {
           namespace: 'mate',
           labels,
           config: SANDBOX_CONFIG,
+          image: SANDBOX_IMAGE,
           shutdownTime: new Date(Date.now() + 3_600_000).toISOString(),
           profile: OPERATOR,
         }),
