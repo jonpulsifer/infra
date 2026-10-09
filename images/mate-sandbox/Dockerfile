@@ -29,7 +29,7 @@ ARG CILIUM_CLI_VERSION=0.20.1
 # renovate: datasource=custom.cnpg-operator depName=cloudnative-pg/cloudnative-pg
 ARG CNPG_VERSION=1.30.1
 # renovate: datasource=github-releases depName=open-policy-agent/conftest
-ARG CONFTEST_VERSION=0.71.0
+ARG CONFTEST_VERSION=0.71.1
 # Must equal d2 in the root mise.toml: `docs:diagrams` commits its output.
 # renovate: datasource=github-releases depName=terrastruct/d2
 ARG D2_VERSION=0.9.0
