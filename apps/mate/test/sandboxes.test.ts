@@ -317,6 +317,12 @@ describe('the manifest', () => {
       optional: true,
     });
     expect(env.SWITCHBOARD_RING_TOKEN.value).toBeUndefined();
+    expect(env.SWITCHBOARD_MISSION_TOKEN.valueFrom.secretKeyRef).toEqual({
+      name: 'mate-switchboard',
+      key: 'SWITCHBOARD_MISSION_TOKEN',
+      optional: true,
+    });
+    expect(env.SWITCHBOARD_MISSION_TOKEN.value).toBeUndefined();
   });
 
   test('points the harness at Connect and never at a service account', async () => {
@@ -928,6 +934,7 @@ describe('profiles', () => {
       'KTHX_ORIGIN',
       'SWITCHBOARD_URL',
       'SWITCHBOARD_RING_TOKEN',
+      'SWITCHBOARD_MISSION_TOKEN',
       'GIT_CONFIG_COUNT',
       'GIT_CONFIG_KEY_0',
       'GIT_CONFIG_VALUE_0',

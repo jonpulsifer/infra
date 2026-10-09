@@ -309,22 +309,21 @@ function kthxEnv(kthx: KthxConfig): Record<string, unknown>[] {
 }
 
 // A missing Secret would hold every sandbox in CreateContainerConfigError, so
-// the token is optional; without it a ring gets a 401, which the skill reports.
+// each token is optional; without one a ring or a mission gets a 401, which
+// the skill reports.
 function switchboardEnv(
   switchboard: SwitchboardConfig,
 ): Record<string, unknown>[] {
+  const token = (key: string) => ({
+    name: key,
+    valueFrom: {
+      secretKeyRef: { name: switchboard.secret, key, optional: true },
+    },
+  });
   return [
     { name: 'SWITCHBOARD_URL', value: switchboard.url },
-    {
-      name: 'SWITCHBOARD_RING_TOKEN',
-      valueFrom: {
-        secretKeyRef: {
-          name: switchboard.secret,
-          key: 'SWITCHBOARD_RING_TOKEN',
-          optional: true,
-        },
-      },
-    },
+    token('SWITCHBOARD_RING_TOKEN'),
+    token('SWITCHBOARD_MISSION_TOKEN'),
   ];
 }
 
