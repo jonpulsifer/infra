@@ -15,6 +15,7 @@ configMapGenerator:
   - name: elevenlabs-desired
     files:
       - desired/phone-number.json
+      - desired/outbound-number.json
   # Each file, by name: the reconciler owns every agent this ConfigMap holds.
   - name: elevenlabs-desired-agents
     files:
