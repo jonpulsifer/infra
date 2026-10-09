@@ -15,7 +15,7 @@ export async function resolveMission(
   log: Log,
   opts: Pick<ResolveAgentOptions, 'attempts' | 'delayMs' | 'sleep'> = {},
 ): Promise<MissionDeps | undefined> {
-  const targets = readTargets(config.targetsDir);
+  const targets = readTargets(config.targetsDir, log);
   if (!config.missionToken || targets.size === 0) return undefined;
   try {
     const agentId = await resolveAgentId(

@@ -36,7 +36,7 @@ Missions are on only when the Secret `switchboard-mission` holds a `token` and a
 
 ## The mission item
 
-The 1Password item `mission targets` in the `homelab` vault fills the Secret `switchboard-mission` through the ExternalSecret in `clusters/offsite/apps/elevenlabs/switchboard.yaml`. Each field label is a target key and its value that person's number as E.164. The field `token` is the mission bearer token. The Secret mounts at `SWITCHBOARD_TARGETS_DIR` (`/targets`); a malformed number exits the pod with status 64.
+The 1Password item `mission targets` in the `homelab` vault fills the Secret `switchboard-mission` through the ExternalSecret in `clusters/offsite/apps/elevenlabs/switchboard.yaml`. Each field label is a target key and its value that person's number as E.164. The field `token` is the mission bearer token. The Secret mounts at `SWITCHBOARD_TARGETS_DIR` (`/targets`); a field that holds no E.164 number, such as a Secure Note's empty `notesPlain`, is skipped with a `mission target skipped` log line that names the key.
 
 ## Unpark it
 

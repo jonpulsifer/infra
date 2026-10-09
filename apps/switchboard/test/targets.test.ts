@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConfigError } from '../src/config.ts';
+import type { Fields, Log } from '../src/log.ts';
 import { readTargets } from '../src/targets.ts';
 
 let dir: string;
@@ -31,16 +31,20 @@ describe('readTargets', () => {
     expect([...readTargets(dir).keys()]).toEqual(['sam']);
   });
 
-  test('a malformed number is a config error that never echoes it', () => {
+  test('a file without an E.164 number is skipped with a warning naming only the key', () => {
     writeFileSync(join(dir, 'sam'), '555-0123');
-    try {
-      readTargets(dir);
-      throw new Error('expected readTargets to throw');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ConfigError);
-      expect((error as Error).message).toContain('sam');
-      expect((error as Error).message).not.toContain('555-0123');
-    }
+    writeFileSync(join(dir, 'notesPlain'), '');
+    writeFileSync(join(dir, 'alex'), '+15555550124');
+    const lines: string[] = [];
+    const capture = (msg: string, fields?: Fields) =>
+      lines.push(JSON.stringify({ msg, ...fields }));
+    const log: Log = { info: capture, warn: capture, error: capture };
+    expect([...readTargets(dir, log)]).toEqual([['alex', '+15555550124']]);
+    expect(lines).toEqual([
+      JSON.stringify({ msg: 'mission target skipped', target: 'notesPlain' }),
+      JSON.stringify({ msg: 'mission target skipped', target: 'sam' }),
+    ]);
+    expect(lines.join('\n')).not.toContain('555-0123');
   });
 
   test('an empty or missing directory is an empty list', () => {
