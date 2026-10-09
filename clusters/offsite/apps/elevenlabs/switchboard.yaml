@@ -68,7 +68,8 @@ spec:
             # The outbound number: a SIP-trunk number at ElevenLabs whose
             # number string is the voip.ms sub-account 168847_elevenlabs, so
             # the INVITE's From user is that sub-account, which voip.ms
-            # requires. The DID number stays the inbound one.
+            # requires. desired/outbound-number.json declares it; the DID
+            # number stays the inbound one.
             - name: SWITCHBOARD_PHONE_NUMBER_ID
               value: phnum_4201m4h39fxnezvt2zq1e2htnm1y
             # The only number switchboard dials; no request can name another.

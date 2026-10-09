@@ -41,7 +41,7 @@ The 1Password item `mission targets` in the `homelab` vault fills the Secret `sw
 ## Unpark it
 
 1. In the voip.ms portal, confirm that the sub-account `168847_elevenlabs` allows encrypted SIP, has international and premium calling off, and has a caller ID with no e911 address. Git does not hold these settings, and they set what a call can reach and cost.
-2. Check that a reconcile run logs `and an outbound trunk`. The number dials out as `168847_elevenlabs`, whose password `clusters/offsite/apps/elevenlabs/external-secret.yaml` reads from the item `voip.ms sub accounts`.
+2. Check that a reconcile run logs `outbound trunk set with credentials` for the outbound number. The number dials out as `168847_elevenlabs`, whose password `clusters/offsite/apps/elevenlabs/external-secret.yaml` reads from the item `voip.ms sub accounts`.
 3. In the `homelab` vault, create `switchboard` (`to-number` as E.164, `ring-token`, `alert-token`).
 4. The pinned image must have `apps/switchboard/src/agent.ts`; an older build logs `SWITCHBOARD_AGENT_ID is required` and exits. `bash .github/scripts/cd-digest-update.sh revision jonpulsifer/switchboard <digest>` names a digest's commit.
 5. Set `replicas: 1` in `switchboard.yaml` and merge. voip.ms can hold a sub-account that starts dialling out from somewhere new as a fraud check: a bare 503 after 100 Trying.

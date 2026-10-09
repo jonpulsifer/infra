@@ -16,7 +16,7 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 ## Limits
 
 - The write key, item `elevenlabs pbx api key`, exists only in offsite's `elevenlabs` namespace.
-- The number gets an outbound trunk only once the Secret `elevenlabs-outbound-trunk` holds its username and password; until then each run logs that the trunk waits.
+- The outbound number gets its trunk only once the Secret `elevenlabs-outbound-trunk` holds its username and password; until then each run logs that the trunk waits.
 - With that Secret in hand, the number dials out as `168847_elevenlabs` for anyone who holds the write key, on the voip.ms balance folly's lines share. The sub-account's voip.ms settings, which git does not hold, set what such a call can reach and cost.
 - ElevenLabs holds that sub-account's password, and anyone who has it can register the sub-account and take the calls of any DID routed to it.
 - The offsite PBX registers `168847_elevenlabs` and takes every call voip.ms delivers to it. Another client registered with that password can take those calls instead.
@@ -26,7 +26,7 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 
 ## How it works
 
-`desired/agents/` holds one agent per file: `pbx-troll`, `pbx-switchboard` and `pbx-mission`, Earl with an objective for an outbound call, which no service places yet. `desired/phone-number.json` names the agent that answers the number, its inbound trunk and its outbound trunk. Each run of `reconcile.sh` creates an agent no live one is named after, patches the declared fields that differ, and binds the number with one PATCH: the agent, the full inbound trunk with its digest credentials and, with the Secret in hand, the outbound trunk with its credentials. The API never returns a password, so every write run re-sends them. It logs field names, never values.
+`desired/agents/` holds one agent per file: `pbx-troll`, `pbx-switchboard` and `pbx-mission`, Earl with an objective for an outbound call, which no service places yet. `desired/phone-number.json` names the agent that answers the DID number and declares its inbound trunk, and a trunk on that number that git does not declare is removed. `desired/outbound-number.json` declares the outbound number, `168847_elevenlabs`, and its trunk. Each run of `reconcile.sh` creates an agent no live one is named after, patches the declared fields that differ, binds the DID number with one PATCH of the agent and the full inbound trunk with its digest credentials, and, with the Secret in hand, patches the outbound number with its full trunk and credentials. The API never returns a password, so every write run re-sends them. It logs field names, never values.
 
 A failed request for one agent fails the Job and leaves that agent as it is; the other agents and the number are still reconciled. If ElevenLabs reports no inbound credentials after the bind, the run unbinds the number. Without the write key it only logs what it would create, patch or bind.
 

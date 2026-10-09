@@ -100,16 +100,22 @@ case "$method $path" in
     respond '{}' 200
     ;;
   "GET /v1/convai/phone-numbers/"*)
-    respond "$(cat "$STUB_DIR/number.json")" 200
+    nf=number.json
+    [[ ${path##*/} != phnum_4201m4h39fxnezvt2zq1e2htnm1y ]] || nf=outbound.json
+    respond "$(cat "$STUB_DIR/$nf")" 200
     ;;
   "PATCH /v1/convai/phone-numbers/"*)
+    nf=number.json
+    [[ ${path##*/} != phnum_4201m4h39fxnezvt2zq1e2htnm1y ]] || nf=outbound.json
     jq --argjson b "$body" "
       .assigned_agent = (if (\$b | has(\"agent_id\")) then (if \$b.agent_id == null then null else {agent_id: \$b.agent_id} end) else .assigned_agent end)
       | .inbound_trunk = (if \$b.inbound_trunk_config == null then .inbound_trunk
                           else (\$b.inbound_trunk_config | $trunk | .has_auth_credentials = (.has_auth_credentials and \$ENV.STUB_DROP_AUTH != \"1\")) end)
-      | .outbound_trunk = (if \$b.outbound_trunk_config == null then .outbound_trunk else (\$b.outbound_trunk_config | $trunk) end)
-    " "$STUB_DIR/number.json" >"$STUB_DIR/number.next.json"
-    mv "$STUB_DIR/number.next.json" "$STUB_DIR/number.json"
+      | .outbound_trunk = (if (\$b | has(\"outbound_trunk_config\")) | not then .outbound_trunk
+                           elif \$b.outbound_trunk_config == null then null
+                           else (\$b.outbound_trunk_config | $trunk) end)
+    " "$STUB_DIR/$nf" >"$STUB_DIR/next.json"
+    mv "$STUB_DIR/next.json" "$STUB_DIR/$nf"
     respond '{}' 200
     ;;
   *)
@@ -132,6 +138,12 @@ jq '. + {agent_id: "agent_troll1"}' "$desired/agents/pbx-troll.json" >"$pristine
 jq '{phone_number_id, assigned_agent: {agent_id: "agent_troll1"},
      inbound_trunk: (.inbound_trunk_config + {has_auth_credentials: true, username: "in-user"}),
      outbound_trunk: null}' "$desired/phone-number.json" >"$pristine/number.json"
+# The outbound number dials out only: its trunk matches git and holds the
+# sub-account login.
+out_id=$(jq -r .phone_number_id "$desired/outbound-number.json")
+jq '{phone_number_id, assigned_agent: null, inbound_trunk: null,
+     outbound_trunk: (.outbound_trunk_config + {has_auth_credentials: true, username: "out-user"})}' \
+  "$desired/outbound-number.json" >"$pristine/outbound.json"
 
 export STUB_DIR="$work/live" STUB_LOG="$work/requests.log"
 
@@ -158,7 +170,7 @@ assert_equal 'report mode exits 0 when nothing is wrong live' 0 "$status"
 assert_contains 'report mode says what it would create' "$out" 'agent pbx-switchboard: would create'
 assert_contains 'report mode reads the troll agent as in sync' "$out" 'agent pbx-troll (agent_troll1): in sync'
 assert_contains 'report mode names the keys the outbound trunk waits for' "$out" \
-  "number $number_id: the outbound trunk waits for OUTBOUND_TRUNK_USERNAME and OUTBOUND_TRUNK_PASSWORD (Secret elevenlabs-outbound-trunk)"
+  "number $out_id: the outbound trunk waits for OUTBOUND_TRUNK_USERNAME and OUTBOUND_TRUNK_PASSWORD (Secret elevenlabs-outbound-trunk)"
 assert_contains 'report mode does not bind without the inbound credentials' "$out" 'would not bind: the trunk credentials are missing'
 assert_lacks 'report mode sends no POST' "$requests" 'POST '
 assert_lacks 'report mode sends no PATCH' "$requests" 'PATCH '
@@ -173,7 +185,7 @@ patch=$(grep "PATCH /v1/convai/phone-numbers/$number_id" <<<"$requests")
 assert_contains 'the number PATCH carries the inbound password' "$patch" 'inbound_trunk_config.credentials.password'
 assert_lacks 'the number PATCH carries no outbound trunk without its item' "$patch" 'outbound_trunk_config'
 assert_equal 'the final line claims no outbound trunk when none was sent' \
-  "number $number_id: bound to pbx-troll with credentials" "$(tail -n1 <<<"$out")"
+  "number $number_id: bound to pbx-troll with credentials" "$(grep -F "number $number_id: bound" <<<"$out")"
 
 run_case "$desired" "${write_env[@]}" STUB_DROP_AUTH=1
 assert_equal 'a trunk that reads back without credentials fails the Job' 1 "$status"
@@ -197,26 +209,87 @@ assert_equal 'a write run without the inbound item sends one number PATCH, carry
   "$(grep "PATCH /v1/convai/phone-numbers/$number_id" <<<"$requests")"
 assert_equal 'the unbind leaves the number with no agent' null "$(jq -r .assigned_agent "$STUB_DIR/number.json")"
 
-run_case "$desired" "${write_env[@]}" OUTBOUND_TRUNK_USERNAME=out-user OUTBOUND_TRUNK_PASSWORD=out-pass
+out_env=(OUTBOUND_TRUNK_USERNAME=out-user OUTBOUND_TRUNK_PASSWORD=out-pass)
+
+run_case "$desired" ELEVENLABS_READ_KEY=read-key "${out_env[@]}"
+assert_equal 'report mode reads the outbound number as in sync' 0 "$status"
+assert_contains 'report mode says the outbound number is in sync' "$out" \
+  "number $out_id: in sync; a write run also re-sends the password, which the API never returns"
+assert_lacks 'report mode does not remove a trunk the number never had' "$out" 'would remove'
+assert_lacks 'report mode sends no PATCH with the outbound item' "$requests" 'PATCH '
+
+run_case "$desired" "${write_env[@]}" "${out_env[@]}"
 assert_equal 'a write run with the outbound item exits 0' 0 "$status"
 patch=$(grep "PATCH /v1/convai/phone-numbers/$number_id" <<<"$requests")
-assert_contains 'the number PATCH carries the outbound trunk and its password' "$patch" 'outbound_trunk_config.credentials.password'
-assert_contains 'the number PATCH carries the outbound address' "$patch" 'outbound_trunk_config.address'
-assert_contains 'the final line reports the outbound trunk' "$(tail -n1 <<<"$out")" \
-  "number $number_id: bound to pbx-troll with credentials and an outbound trunk (was: outbound_trunk_config."
+assert_lacks 'the DID number PATCH carries no outbound trunk' "$patch" 'outbound_trunk_config'
+patch=$(grep "PATCH /v1/convai/phone-numbers/$out_id" <<<"$requests")
+assert_contains 'the outbound number PATCH carries its password' "$patch" 'outbound_trunk_config.credentials.password'
+assert_contains 'the outbound number PATCH carries the address' "$patch" 'outbound_trunk_config.address'
+assert_lacks 'the outbound number PATCH binds no agent' "$patch" 'agent_id'
+assert_lacks 'the outbound number PATCH carries no inbound trunk' "$patch" 'inbound_trunk_config'
+assert_contains 'the outbound number PATCH uses the write key' "$patch" 'key=write-key'
+assert_equal 'a live outbound trunk in sync is set once' "number $out_id: outbound trunk set with credentials" \
+  "$(grep -F "number $out_id: outbound" <<<"$out")"
 assert_lacks 'no log line carries a password' "$out" 'out-pass'
 assert_lacks 'no request log line carries a password' "$requests" 'out-pass'
 
+cp "$pristine/outbound.json" "$work/outbound.base.json"
+jq '.outbound_trunk |= (.has_auth_credentials = false | .username = null)' "$work/outbound.base.json" >"$pristine/outbound.json"
+run_case "$desired" ELEVENLABS_READ_KEY=read-key "${out_env[@]}"
+assert_contains 'report mode names a trunk without credentials' "$out" \
+  "number $out_id: would patch outbound_trunk_config.credentials"
+run_case "$desired" "${write_env[@]}" "${out_env[@]}"
+assert_equal 'a write run sets the missing credentials' 0 "$status"
+assert_contains 'the log names the field, never the value' "$out" \
+  "number $out_id: outbound trunk set with credentials (was: outbound_trunk_config.credentials)"
+assert_lacks 'the credential log carries no password' "$out" 'out-pass'
+
+jq '.outbound_trunk.enabled_codecs = ["PCMU/8000"]' "$work/outbound.base.json" >"$pristine/outbound.json"
+run_case "$desired" ELEVENLABS_READ_KEY=read-key "${out_env[@]}"
+assert_contains 'a differing list is reported whole' "$out" "number $out_id: would patch outbound_trunk_config.enabled_codecs"
+cp "$work/outbound.base.json" "$pristine/outbound.json"
+
+withheaders="$work/withheaders"
+cp -r "$desired" "$withheaders"
+jq '.outbound_trunk_config.headers = {"X-Test": "git"}' "$desired/outbound-number.json" >"$withheaders/outbound-number.json"
+jq '.outbound_trunk.headers = {"X-Test": "live"}' "$work/outbound.base.json" >"$pristine/outbound.json"
+run_case "$withheaders" ELEVENLABS_READ_KEY=read-key "${out_env[@]}"
+assert_contains 'a differing object is reported whole' "$out" "number $out_id: would patch outbound_trunk_config.headers"
+assert_lacks 'a differing object logs no value' "$out" 'live'
+cp "$work/outbound.base.json" "$pristine/outbound.json"
+
+cp "$pristine/number.json" "$work/number.base.json"
 jq '.outbound_trunk = {address: "montreal10.voip.ms", transport: "tls", has_auth_credentials: true, username: "someone"}' \
-  "$pristine/number.json" >"$pristine/number.live-out.json"
-mv "$pristine/number.json" "$pristine/number.no-out.json"
-mv "$pristine/number.live-out.json" "$pristine/number.json"
+  "$work/number.base.json" >"$pristine/number.json"
+run_case "$desired" ELEVENLABS_READ_KEY=read-key
+assert_contains 'report mode says the DID number would lose its outbound trunk' "$out" \
+  "number $number_id: would remove its outbound trunk"
+assert_equal 'a trunk to remove does not fail report mode' 0 "$status"
 run_case "$desired" "${write_env[@]}"
-assert_equal 'a live outbound trunk without its item fails the Job' 1 "$status"
-assert_contains 'a live outbound trunk without its item is named' "$out" \
+assert_equal 'a write run removes the DID number outbound trunk' 0 "$status"
+patch=$(grep "PATCH /v1/convai/phone-numbers/$number_id" <<<"$requests")
+assert_contains 'the DID number PATCH carries a null outbound trunk' "$patch" 'outbound_trunk_config'
+assert_equal 'the DID number reads back with no outbound trunk' null "$(jq -c .outbound_trunk "$STUB_DIR/number.json")"
+assert_contains 'a write run says the outbound trunk was removed' "$out" "number $number_id: outbound trunk removed"
+assert_equal 'the DID number is still bound' "number $number_id: bound to pbx-troll with credentials" \
+  "$(grep -F "number $number_id: bound" <<<"$out")"
+
+declared="$work/declared"
+cp -r "$desired" "$declared"
+jq '.outbound_trunk_config = {address: "montreal10.voip.ms"}' "$desired/phone-number.json" >"$declared/phone-number.json"
+run_case "$declared" "${write_env[@]}"
+assert_equal 'a declared trunk with no Secret and a live trunk fails the Job' 1 "$status"
+assert_contains 'a declared trunk with no Secret and a live trunk is named' "$out" \
   "number $number_id: has an outbound trunk with no credentials in git; remove it in the ElevenLabs dashboard"
-assert_lacks 'the final line does not claim the trunk git could not send' "$(tail -n1 <<<"$out")" 'and an outbound trunk'
-mv "$pristine/number.no-out.json" "$pristine/number.json"
+cp "$work/number.base.json" "$pristine/number.json"
+
+noout="$work/noout"
+cp -r "$desired" "$noout"
+rm "$noout/outbound-number.json"
+run_case "$noout" "${write_env[@]}" "${out_env[@]}"
+assert_equal 'a run without outbound-number.json exits 0' 0 "$status"
+assert_lacks 'a run without outbound-number.json logs nothing about it' "$out" "$out_id"
+assert_lacks 'a run without outbound-number.json sends nothing for it' "$requests" "$out_id"
 
 run_case "$desired" "${write_env[@]}" STUB_CREATE_STATUS=422
 assert_equal 'a failed create fails the Job' 1 "$status"
@@ -226,7 +299,7 @@ assert_contains 'a failed create names the agent' "$out" 'agent pbx-switchboard:
 assert_contains 'the other agent is still reconciled after a failed create' "$out" 'agent pbx-troll (agent_troll1): in sync'
 assert_contains 'the number is still reconciled after a failed create' "$requests" "PATCH /v1/convai/phone-numbers/$number_id"
 assert_equal 'the number is still bound after a failed create' \
-  "number $number_id: bound to pbx-troll with credentials" "$(tail -n1 <<<"$out")"
+  "number $number_id: bound to pbx-troll with credentials" "$(grep -F "number $number_id: bound" <<<"$out")"
 
 jq '.agents += [{agent_id: "agent_troll2", name: "pbx-troll"}]' "$pristine/agents.json" >"$pristine/agents.two.json"
 mv "$pristine/agents.json" "$pristine/agents.one.json"
