@@ -36,7 +36,7 @@ spec:
         release: prom-stack
     image:
       repository: docker.io/timberio/vector
-      tag: 0.58.0-debian
+      tag: 0.59.0-debian
     # Talos sends its service and kernel logs to loopback, and a host process
     # cannot reach a pod address, so the agent shares the host network and
     # binds 127.0.0.1 only.
