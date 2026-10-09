@@ -48,7 +48,7 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 
    ```bash
    kubectl --context <site> -n spindrift-apps get hr
-   kubectl --context <site> -n spindrift-datastores get cluster
+   kubectl --context <site> -n spindrift-datastores get clusters.postgresql.cnpg.io,valkeyclusters.valkey.io
    ```
 
 ## Restore the data
@@ -59,7 +59,7 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 > [!NOTE]
 > Velero's namespace selection does not restore the `app-<name>` namespaces, and no runbook covers the recovery of an engine Datastore. The engine owns its namespaces and releases, so never create them by hand.
 
-3. Recreate each Datastore from step 5 of [Freeze the cluster](#freeze-the-cluster) in the kthx console. Then request a Deploy of each `LIVE` build there. The engine does not do either by itself. Then make sure that the engine created its release.
+3. Recreate each Datastore from step 5 of [Freeze the cluster](#freeze-the-cluster) in the kthx console: detach and destroy the stale one, create it again under the same name on the same Vessel, and attach it to its App. Then request a Deploy of each `LIVE` build there. The engine does not do either by itself. Then make sure that the engine created its release.
 
    ```bash
    kubectl --context <site> -n spindrift-apps get hr
