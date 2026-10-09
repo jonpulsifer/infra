@@ -38,10 +38,11 @@ function keywordPattern(keyword: string): RegExp {
     .split(/\s+/)
     .map((word) => word.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&'))
     .join('\\s+');
-  return new RegExp(
-    `(?<![\\p{L}\\p{N}])${body}(?:es|s)?(?![\\p{L}\\p{N}])`,
-    'iu',
-  );
+  // A plural counts: berry and berries, fox and foxes, otter and otters.
+  const plural = body.endsWith('y')
+    ? `${body.slice(0, -1)}(?:y|ies)`
+    : `${body}(?:es|s)?`;
+  return new RegExp(`(?<![\\p{L}\\p{N}])${plural}(?![\\p{L}\\p{N}])`, 'iu');
 }
 
 function text(value: unknown): string | undefined {

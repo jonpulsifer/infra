@@ -67,6 +67,18 @@ describe('scoreConversation', () => {
     expect(win('a firefox')).toBe(false);
   });
 
+  test('a word ending in y counts as its -ies plural', () => {
+    const win = (message: string) =>
+      scoreConversation(
+        convo([{ role: 'user', message, time_in_call_secs: 1 }]),
+        'blueberry',
+      ).won;
+    expect(win('Blueberries.')).toBe(true);
+    expect(win('a blueberry')).toBe(true);
+    expect(win('blueberrys')).toBe(false);
+    expect(win('blueberried')).toBe(false);
+  });
+
   test('a multi-word keyword matches across spacing', () => {
     expect(
       scoreConversation(
