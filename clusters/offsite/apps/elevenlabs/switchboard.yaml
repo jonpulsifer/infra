@@ -65,10 +65,12 @@ spec:
             # resolves its id from the agents list at boot.
             - name: SWITCHBOARD_AGENT_NAME
               value: pbx-switchboard
-            # desired/phone-number.json declares the number and its outbound
-            # trunk.
+            # The outbound number: a SIP-trunk number at ElevenLabs whose
+            # number string is the voip.ms sub-account 168847_elevenlabs, so
+            # the INVITE's From user is that sub-account, which voip.ms
+            # requires. The DID number stays the inbound one.
             - name: SWITCHBOARD_PHONE_NUMBER_ID
-              value: phnum_8101kst8hfnhex0ar1vfqvmffckk
+              value: phnum_4201m4h39fxnezvt2zq1e2htnm1y
             # The only number switchboard dials; no request can name another.
             - name: SWITCHBOARD_TO_NUMBER
               valueFrom:
