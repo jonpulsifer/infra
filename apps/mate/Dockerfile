@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # mate: one Bun process that runs its source as committed, with no build step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:0b91b1d8e5142eec0bebb10da7e1fb489e50c3c6cfc8b4c991fb331053809c76 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:50d16ee9c3ca08af8a037220d0ee5b3ec95a941e1b1e7bdfccb723020b9ccc67 AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.2
 ENV BUN_INSTALL=/usr/local \
