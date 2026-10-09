@@ -579,6 +579,31 @@ describe('/mission', () => {
     expect(all).not.toContain('I love otters');
   });
 
+  test('the log never carries the winning line, though the answer does', async () => {
+    globalThis.fetch = (async (url: string) =>
+      String(url).includes('/conversations/')
+        ? Response.json({
+            status: 'done',
+            transcript: [],
+            analysis: {
+              data_collection_results: {
+                winning_line: { value: 'a sentence from the callee' },
+              },
+            },
+          })
+        : ok()) as unknown as typeof fetch;
+    const { app, lines } = appWith();
+    const res = await post(app, {
+      target: 'sam',
+      keyword: 'otter',
+      wait: true,
+    });
+    expect(await res.json()).toMatchObject({
+      result: { winningLine: 'a sentence from the callee' },
+    });
+    expect(lines.join('\n')).not.toContain('a sentence from the callee');
+  });
+
   test('a failed call answers 502 and polls nothing', async () => {
     const calls = mockElevenLabs(failing);
     const { app } = appWith();

@@ -114,11 +114,14 @@ export function createApp(deps: ServerDeps) {
         sleep,
       });
       if (result) missions.set(conversationId, result);
+      // winningLine is the callee's own words: it stays in the stored result
+      // and the HTTP answers, never the pod log.
+      const { winningLine: _words, ...loggable } = result ?? {};
       log.info('mission result', {
         target,
         conversationId,
         scored: result !== null,
-        ...result,
+        ...loggable,
       });
       return result;
     } catch {
