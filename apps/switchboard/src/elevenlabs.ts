@@ -1,5 +1,9 @@
 const OUTBOUND_CALL_URL =
   'https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call';
+// The outbound-call endpoint answers once the callee picks up or the ring
+// times out, so a person who takes a while to reach the phone still counts
+// as a placed call. A read of a conversation is quick.
+const CALL_TIMEOUT_MS = 75_000;
 const TIMEOUT_MS = 10_000;
 
 export type OutboundCallFailure =
@@ -71,7 +75,7 @@ export async function placeOutboundCall(
           }),
         },
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
     });
   } catch (cause) {
     const timedOut = cause instanceof Error && cause.name === 'TimeoutError';
