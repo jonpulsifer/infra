@@ -162,10 +162,6 @@ spec:
             # sandbox-image.yaml, re-read at each mint.
             - name: MATE_SANDBOX_IMAGE_FILE
               value: /var/run/mate/sandbox-image/image
-            # Read only by a mate image that predates MATE_SANDBOX_IMAGE_FILE.
-            # CD no longer moves it; remove it once the pinned mate reads the file.
-            - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:02dae4971a99ea5e0633e9937766007b4c521c3bf535f01371243b15128478dd
             # The numeric App id, not the client id. mate mints a 1-hour token per
             # turn from the key; a sandbox never holds the key.
             - name: MATE_GITHUB_APP_ID
