@@ -41,7 +41,8 @@ describe('placeOutboundCall', () => {
     expect(JSON.parse(String(sent?.init.body))).toEqual({
       agent_id: 'agent_1',
       agent_phone_number_id: 'phnum_1',
-      to_number: '+19025551234',
+      // voip.ms routes digits and answers 404 to a leading plus.
+      to_number: '19025551234',
       conversation_initiation_client_data: {
         dynamic_variables: { reason: 'testing', source: 'ring' },
       },
@@ -119,7 +120,7 @@ describe('placeOutboundCall', () => {
     expect(sent).toEqual({
       agent_id: 'agent_1',
       agent_phone_number_id: 'phnum_1',
-      to_number: '+19025551234',
+      to_number: '19025551234',
       conversation_initiation_client_data: {
         dynamic_variables: { target_name: 'Sam', keyword: 'otter' },
         conversation_config_override: { asr: { keywords: ['otter'] } },

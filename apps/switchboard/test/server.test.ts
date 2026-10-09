@@ -126,7 +126,7 @@ describe('POST /ring', () => {
       number: '+17775551234',
     });
     const sent = JSON.parse(calls[0]?.body ?? '{}');
-    expect(sent.to_number).toBe('+19025551234');
+    expect(sent.to_number).toBe('19025551234');
   });
 
   test('a request with no body still rings, with an empty reason', async () => {
@@ -482,7 +482,7 @@ describe('/mission', () => {
     expect(await res.json()).toEqual({ ok: true, conversationId: 'conv_1' });
     const body = JSON.parse(sent[0]?.body ?? '{}');
     expect(body.agent_id).toBe('agent_mission');
-    expect(body.to_number).toBe('+15555550123');
+    expect(body.to_number).toBe('15555550123');
     expect(body.conversation_initiation_client_data).toEqual({
       dynamic_variables: {
         target_name: 'Sam',

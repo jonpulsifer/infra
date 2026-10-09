@@ -61,7 +61,9 @@ export async function placeOutboundCall(
       body: JSON.stringify({
         agent_id: opts.agentId,
         agent_phone_number_id: opts.agentPhoneNumberId,
-        to_number: opts.toNumber,
+        // The trunk is voip.ms, which routes 11 digits and answers 404 to a
+        // leading plus. The config and the allow-list stay E.164.
+        to_number: opts.toNumber.replace(/^\+/, ''),
         conversation_initiation_client_data: {
           dynamic_variables: opts.dynamicVariables,
           ...(opts.conversationConfigOverride && {
