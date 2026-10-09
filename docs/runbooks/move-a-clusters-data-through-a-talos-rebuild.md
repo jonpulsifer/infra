@@ -44,10 +44,11 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
    ```
 
 4. Take a last barman backup of each database, as [Recover a re-created database](recover-a-re-created-database.md#take-a-last-backup) describes.
-5. Record the kthx engine's releases on the cluster. Flux does not recreate them.
+5. Record the kthx engine's workloads on the cluster. Neither Velero nor Flux recreates them, and the engine, which runs on offsite, reports drift but never re-converges it. In the kthx console, list each Deploy that is `LIVE` and each Datastore whose Target is on the Vessel for `<site>`. Then record the releases.
 
    ```bash
    kubectl --context <site> -n spindrift-apps get hr
+   kubectl --context <site> -n spindrift-datastores get clusters.postgresql.cnpg.io,valkeyclusters.valkey.io
    ```
 
 ## Restore the data
@@ -56,9 +57,9 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 2. Restore each volume from the backup in step 2 of [Freeze the cluster](#freeze-the-cluster), as [Restore a volume](restore-a-volume.md) describes.
 
 > [!NOTE]
-> Flux does not recreate kthx engine objects, and no runbook covers the recovery of an engine Datastore. The engine owns its namespaces and releases, so never create them by hand.
+> Velero's namespace selection does not restore the `app-<name>` namespaces, and no runbook covers the recovery of an engine Datastore. The engine owns its namespaces and releases, so never create them by hand.
 
-3. Deploy each App from step 5 of [Freeze the cluster](#freeze-the-cluster) again, in the kthx console. Then make sure that the engine created its release.
+3. Recreate each Datastore from step 5 of [Freeze the cluster](#freeze-the-cluster) in the kthx console: detach and destroy the stale one, create it again under the same name on the same Vessel, and attach it to its App. Then request a Deploy of each `LIVE` build there. The engine does not do either by itself. Then make sure that the engine created its release.
 
    ```bash
    kubectl --context <site> -n spindrift-apps get hr

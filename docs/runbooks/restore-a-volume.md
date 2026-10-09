@@ -49,15 +49,17 @@ Use this runbook to restore a PersistentVolumeClaim from a Velero backup. Velero
 
    Result: `persistentvolumeclaim "<pvc>" deleted`.
 
-5. Restore the pod, the claim and the volume. Do not use `--selector`. Include `persistentvolumes`, or the claim stays `Pending`.
+5. Keep the scaled-down owner from adopting the restored pod. Velero strips the pod's `ownerReferences`, but the pod keeps its selector label, so the owner adopts and deletes it, the PodVolumeRestore hangs and the restore queue blocks. Put a resource modifier ConfigMap in the `velero` namespace. Its rule is a JSON patch on `pods` in `<namespace>` that tests the label, then removes it. The label is `pod-template-hash` for a Deployment, and `controller-revision-hash` and `statefulset.kubernetes.io/pod-name` for a StatefulSet. A `test` that fails leaves the pod unmodified, so make sure the label is gone after step 6.
+
+6. Restore the pod, the claim and the volume. Do not use `--selector`. Include `persistentvolumes`, or the claim stays `Pending`.
 
    ```bash
-   velero restore create --from-backup <backup> --include-namespaces <namespace> --include-resources pods,persistentvolumeclaims,persistentvolumes --wait --kubecontext <site>
+   velero restore create --from-backup <backup> --include-namespaces <namespace> --include-resources pods,persistentvolumeclaims,persistentvolumes --resource-modifier-configmap <modifiers> --wait --kubecontext <site>
    ```
 
    Result: `Restore completed with status: Completed`.
 
-6. Make sure that the restore filled the volume.
+7. Make sure that the restore filled the volume.
 
    ```bash
    velero restore describe <restore> --details --kubecontext <site>
@@ -65,22 +67,19 @@ Use this runbook to restore a PersistentVolumeClaim from a Velero backup. Velero
 
    Result: A `Pod Volume Restores` list with the phase `Completed`.
 
-7. Resume the release.
-
-   ```bash
-   flux resume helmrelease <release> -n <namespace> --context <site>
-   ```
-
-8. Make sure that the restored pod is `Running` and has the files. Name the container, because the pod keeps the `restore-wait` init container.
-
-   ```bash
-   kubectl exec <pod> -c <container> -n <namespace> --context <site> -- ls <mount-path>
-   ```
-
-9. Delete the restored pod. The Deployment pod must not share the claim with it.
+8. Delete the restored bare pod, so that the owner does not share the claim with it. Then resume the release.
 
    ```bash
    kubectl delete pod <pod> -n <namespace> --context <site>
+   flux resume helmrelease <release> -n <namespace> --context <site>
+   ```
+
+   `flux resume` does not restore the replicas. Reconcile the release so that the manifest's replicas apply, or scale the owner back up.
+
+9. Make sure that the app's pod is `Running` and has the files.
+
+   ```bash
+   kubectl exec <pod> -n <namespace> --context <site> -- ls <mount-path>
    ```
 
 ## If something goes wrong
@@ -100,7 +99,7 @@ Use this procedure to test a backup while the app runs. It leaves the live volum
 > [!WARNING]
 > A resource modifier patch that fails does not block the object. Velero creates the object unmodified and reports only a namespace error at the end. Use `test` operations. Make sure that the pod spec is right after creation.
 
-1. Restore into a new namespace. Include the same three resources as step 5.
+1. Restore into a new namespace. Include the same three resources as step 6.
 
    ```bash
    velero restore create --from-backup <backup> --include-namespaces <namespace> --namespace-mappings <namespace>:drill-<namespace> --include-resources pods,persistentvolumeclaims,persistentvolumes --resource-modifier-configmap <modifiers> --wait --kubecontext <site>
