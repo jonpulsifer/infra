@@ -29,3 +29,4 @@ Reach it at `oldschool.lolwtf.ca`. See [Reach a host](index.md#reach-a-host).
 ## Quirks
 
 - The root partition is 200 GB, not the fleet's 100 GB default.
+- A JetKVM gives its console video and keyboard. The kernel lists it as the USB device `JetKVM USB Emulation Device`. See [Unmanaged devices at offsite](index.md#unmanaged-devices-at-offsite).

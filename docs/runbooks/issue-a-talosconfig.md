@@ -3,7 +3,7 @@ title: Issue a talosconfig
 description: Mint the owner's os:admin talosconfig for a Talos cluster and Rowbutt's os:reader one, and store each in 1Password.
 ---
 
-Use this runbook when a cluster moves to Talos, and before a talosconfig certificate expires. A talosconfig is the client certificate and endpoints that `talosctl` uses to reach the Talos API. Its certificate lasts one year. Today no cluster runs Talos, so no item below exists yet.
+Use this runbook when a cluster moves to Talos, and before a talosconfig certificate expires. A talosconfig is the client certificate and endpoints that `talosctl` uses to reach the Talos API. Its certificate lasts one year. Today only folly runs Talos, so each item below holds folly alone.
 
 | 1Password item | Type and file name | Holds |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Use this runbook when a cluster moves to Talos, and before a talosconfig certifi
 
 ## Before you start
 
-- You need `talosctl`, `jq` and `op`, signed in to the `homelab` vault.
+- You need `talosctl`, `jq`, `yq` and `op`, signed in to the `homelab` vault.
 - The item `talos-<site>-secrets` exists.
 
 ## Issue the admin talosconfig
@@ -56,11 +56,12 @@ Use this runbook when a cluster moves to Talos, and before a talosconfig certifi
 ## Issue the Rowbutt talosconfig
 
 1. Go to a new directory under `/dev/shm`.
-2. For each cluster that runs Talos, mint an `os:reader` file with your admin context, and merge it into `reader`.
+2. For each cluster that runs Talos, mint an `os:reader` file with your admin context, and merge it into `reader`. `config new` names its context `reader@<site>`, so rename it to `<site>` before the merge.
 
    ```bash
    ip=$(jq -r .data.API_SERVER_IP <checkout>/clusters/<site>/config/cluster-topology.json)
    talosctl --context <site> config new --roles os:reader --crt-ttl 8760h reader-<site>
+   yq -i '.context = "<site>" | .contexts = {"<site>": .contexts["reader@<site>"]}' reader-<site>
    talosctl --talosconfig reader config merge reader-<site>
    talosctl --talosconfig reader --context <site> config endpoint "$ip"
    ```

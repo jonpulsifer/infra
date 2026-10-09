@@ -47,10 +47,10 @@ No file in git declares these, and the UniFi console lists them as clients.
 
 | Device | Job | Limit |
 | --- | --- | --- |
-| JetKVM | Console video and keyboard for one offsite node, on the Default network. It answers over Site Magic. | It has no ATX power extension, so it cannot power-cycle the node. Which node it is cabled to is not recorded. |
+| JetKVM | Console video and keyboard for [oldschool](oldschool.md), on the Default network. It answers over Site Magic. | It has no ATX power extension, so it cannot power-cycle oldschool. retrofit has no console. |
 | TP-Link Kasa plugs (2× HS103, HS105, KP400) and a D-Link plug | Garden and decoration loads | None of them powers a node. |
 
-retrofit and oldschool power on after a power loss, from their BIOS setting. Nothing at offsite cuts a node's power remotely, so a node that hangs needs the JetKVM keyboard or someone at the site.
+retrofit and oldschool power on after a power loss, from their BIOS setting. Nothing at offsite cuts a node's power remotely, so a hung oldschool needs the JetKVM keyboard or someone at the site, and a hung retrofit needs someone at the site.
 
 ## Known divergence
 
