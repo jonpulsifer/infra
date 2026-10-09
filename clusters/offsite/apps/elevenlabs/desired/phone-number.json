@@ -10,7 +10,7 @@
   "outbound_trunk_config": {
     "address": "montreal10.voip.ms",
     "transport": "udp",
-    "media_encryption": "required",
+    "media_encryption": "disabled",
     "enabled_codecs": [
       "G722/8000",
       "PCMU/8000"
