@@ -16,6 +16,12 @@ export interface Config {
   readonly ringDailyCap: number;
   readonly alertDailyCap: number;
   readonly cooldownMs: number;
+  /** From SWITCHBOARD_MISSION_TOKEN: absent means missions are off. */
+  readonly missionToken?: string;
+  readonly missionAgentName: string;
+  /** One file per mission target: the name is the key, the content E.164. */
+  readonly targetsDir: string;
+  readonly missionDailyCap: number;
   readonly quietStart: string;
   readonly quietEnd: string;
   readonly quietTz: string;
@@ -51,7 +57,7 @@ function integer(env: Env, key: string, fallback: number, min: number): number {
 
 // A leading +, then 8-15 digits total: loose E.164, tight enough to catch a
 // local-format or punctuated number pasted in by mistake.
-const E164 = /^\+[1-9]\d{7,14}$/;
+export const E164 = /^\+[1-9]\d{7,14}$/;
 
 function readToNumber(env: Env): string {
   const value = required(env, 'SWITCHBOARD_TO_NUMBER');
@@ -95,6 +101,11 @@ export function readConfig(env: Env): Config {
     ringDailyCap: integer(env, 'SWITCHBOARD_RING_DAILY_CAP', 3, 1),
     alertDailyCap: integer(env, 'SWITCHBOARD_ALERT_DAILY_CAP', 3, 1),
     cooldownMs: integer(env, 'SWITCHBOARD_COOLDOWN_MINUTES', 10, 0) * 60_000,
+    missionToken: optional(env, 'SWITCHBOARD_MISSION_TOKEN'),
+    missionAgentName:
+      optional(env, 'SWITCHBOARD_MISSION_AGENT_NAME') ?? 'pbx-mission',
+    targetsDir: optional(env, 'SWITCHBOARD_TARGETS_DIR') ?? '/targets',
+    missionDailyCap: integer(env, 'SWITCHBOARD_MISSION_DAILY_CAP', 5, 1),
     quietStart: clockTime(env, 'SWITCHBOARD_QUIET_START', '23:00'),
     quietEnd: clockTime(env, 'SWITCHBOARD_QUIET_END', '08:00'),
     quietTz: timezone(env, 'SWITCHBOARD_QUIET_TZ', 'America/Halifax'),

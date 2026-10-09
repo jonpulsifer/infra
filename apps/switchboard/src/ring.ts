@@ -1,7 +1,8 @@
 import { resolveAgentId } from './agent.ts';
 import { readConfig } from './config.ts';
 import type { Log } from './log.ts';
-import { createApp } from './server.ts';
+import { createApp, type MissionDeps } from './server.ts';
+import { readTargets } from './targets.ts';
 
 /**
  * The ringer: settles the agent id, then serves /ring and /alertmanager. A
@@ -15,7 +16,24 @@ export async function startRing(
   // Settled before the port opens, so a pod that cannot name its agent never
   // reports ready.
   const agentId = await resolveAgentId(config, { log });
-  const app = createApp({ config: { ...config, agentId }, log });
+  // Missions are on only with a token and at least one target; otherwise the
+  // route answers 503 and the mission agent is never looked up.
+  const targets = readTargets(config.targetsDir);
+  let mission: MissionDeps | undefined;
+  if (config.missionToken && targets.size > 0) {
+    mission = {
+      agentId: await resolveAgentId(
+        {
+          elevenlabsApiKey: config.elevenlabsApiKey,
+          agentName: config.missionAgentName,
+        },
+        { log },
+      ),
+      targets,
+    };
+    log.info('missions on', { targets: targets.size });
+  }
+  const app = createApp({ config: { ...config, agentId }, log, mission });
   Bun.serve({
     port: config.port,
     hostname: '0.0.0.0',
