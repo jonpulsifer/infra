@@ -11,7 +11,7 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
 | The number's inbound trunk | `agent-did` in the item `elevenlabs troll trunk` | The offsite PBX, for every call on `168847_elevenlabs`, and the folly PBX, for the calls its own dialplan sends there; both with that item's digest credentials |
-| The number's outbound trunk | voip.ms over TLS, as the sub-account `168847_elevenlabs` | Anyone holding the `elevenlabs pbx api key`, which Switchboard uses through the outbound-call API |
+| The number's outbound trunk | voip.ms over UDP with SRTP, as the sub-account `168847_elevenlabs`. voip.ms's TLS port negotiates only RSA key exchange, which ElevenLabs' SIP stack refuses, so the trunk cannot use TLS. | Anyone holding the `elevenlabs pbx api key`, which Switchboard uses through the outbound-call API |
 
 ## Limits
 
