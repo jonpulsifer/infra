@@ -694,17 +694,22 @@ export class Threads {
     await this.stop(thread, false);
   }
 
-  /** Cancels the pending wake and the running turn; `say` answers a typed stop that found neither. */
+  /**
+   * Cancels the running turn, then the pending wake, so neither a slow store
+   * nor the dying turn's own `wake` call outlives the Stop. `say` answers a
+   * typed stop that found neither.
+   */
   private async stop(thread: Thread, say: boolean): Promise<void> {
-    const cancelled = (await this.deps.wakes?.cancel(thread.ref)) ?? false;
-    if (thread.state !== 'turn') {
-      if (say && !cancelled)
-        await this.say(thread.surface, thread.ref, NOTHING_TO_STOP);
-      return;
+    const running = thread.state === 'turn';
+    if (running) {
+      // A turn still building its prompt has nothing in the brain to cancel.
+      thread.stopRequested = true;
+      if (thread.session) await this.deps.brain.cancel(thread.session);
     }
-    // A turn still building its prompt has nothing in the brain to cancel.
-    thread.stopRequested = true;
-    if (thread.session) await this.deps.brain.cancel(thread.session);
+    const cancelled = (await this.deps.wakes?.cancel(thread.ref)) ?? false;
+    if (say && !running && !cancelled) {
+      await this.say(thread.surface, thread.ref, NOTHING_TO_STOP);
+    }
   }
 
   /**

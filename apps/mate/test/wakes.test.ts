@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { validateToolArguments } from '@earendil-works/pi-ai';
 import { type ThreadRef, threadKey } from '../src/surface.ts';
 import {
   GithubPullRequests,
@@ -287,7 +288,71 @@ describe('firing wakes', () => {
   });
 });
 
+describe('firing faults', () => {
+  test('a thread that refuses the wake while mate drains gets it back', async () => {
+    const { wakes, store, target, clock, log } = rig();
+    target.wake = async () => {
+      throw new Error('mate is shutting down');
+    };
+    await wakes.schedule({
+      ref: THREAD,
+      asker: OWNER,
+      minutes: 5,
+      note: 'n',
+      pr: null,
+    });
+    await clock.advance(5 * 60_000);
+    await wakes.tick();
+    expect((await store!.list()).map((w) => w.note)).toEqual(['n']);
+    expect(
+      log.of('a wake could not continue its thread; keeping it'),
+    ).toHaveLength(1);
+    wakes.stop();
+  });
+
+  test('one wake that cannot be claimed leaves the rest of the tick to fire', async () => {
+    const store = new MemoryWakes();
+    const { wakes, target, clock } = rig({ store });
+    await wakes.schedule({
+      ref: THREAD,
+      asker: OWNER,
+      minutes: 5,
+      note: 'a',
+      pr: null,
+    });
+    await wakes.schedule({
+      ref: OTHER,
+      asker: OWNER,
+      minutes: 6,
+      note: 'b',
+      pr: null,
+    });
+    const take = store.take.bind(store);
+    store.take = async (key, createdAt) => {
+      if (key === threadKey(THREAD)) throw new Error('connection reset');
+      return take(key, createdAt);
+    };
+    await clock.advance(6 * 60_000);
+    await wakes.tick();
+    expect(target.woken.map((w) => w.text)).toEqual(['⏰ wake: b']);
+    wakes.stop();
+  });
+});
+
 describe('the wake tool', () => {
+  test('a cancel with no other field passes the schema', () => {
+    const tool = wakeTool(THREAD, () => OWNER, rig().wakes);
+    const call = (args: Record<string, boolean | number | string>) =>
+      validateToolArguments(tool, {
+        type: 'toolCall',
+        id: 'c1',
+        name: tool.name,
+        arguments: args,
+      });
+    expect(() => call({ cancel: true })).not.toThrow();
+    expect(() => call({ minutes: 3, note: 'n' })).toThrow();
+  });
+
   test('sets a wake as the running turn’s asker, cancels, and refuses between turns', async () => {
     const { wakes, store } = rig();
     let asker: string | null = OWNER;

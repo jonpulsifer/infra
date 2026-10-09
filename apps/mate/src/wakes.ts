@@ -316,7 +316,13 @@ export class Wakes {
       const wakes = (await this.deps.store?.list()) ?? [];
       for (const wake of wakes) {
         if (this.stopped) break;
-        await this.consider(wake);
+        // One wake's fault leaves the rest of the tick to run.
+        await this.consider(wake).catch((error: unknown) =>
+          this.deps.log.warn('a wake could not be fired; retrying', {
+            threadId: wake.ref.id,
+            error: plain(error),
+          }),
+        );
       }
     } catch (error) {
       this.deps.log.warn('wakes could not be read; retrying', {
@@ -372,15 +378,18 @@ export class Wakes {
     if (!store || !target) return;
     // The claim first: a wake replaced since the list is the new one's to fire.
     if (!(await store.take(wake.key, wake.createdAt))) return;
-    const woke = await target
-      .wake({ ref: wake.ref, asker: wake.asker, text })
-      .catch((error: unknown) => {
-        log.warn('a wake could not continue its thread', {
-          threadId: wake.ref.id,
-          error: plain(error),
-        });
-        return false;
+    let woke: boolean;
+    try {
+      woke = await target.wake({ ref: wake.ref, asker: wake.asker, text });
+    } catch (error) {
+      // A draining mate refuses it; put it back for the next process.
+      log.warn('a wake could not continue its thread; keeping it', {
+        threadId: wake.ref.id,
+        error: plain(error),
       });
+      await store.put(wake);
+      return;
+    }
     log.info(woke ? 'a wake fired' : 'a wake found no thread to continue', {
       threadId: wake.ref.id,
       pr: wake.pr,
@@ -397,17 +406,21 @@ function scheduledLine(wake: Wake): string {
 }
 
 const WAKE_PARAMETERS = Type.Object({
-  minutes: Type.Integer({
-    minimum: MIN_WAKE_MINUTES,
-    maximum: MAX_WAKE_MINUTES,
-    description: `Minutes from now, ${MIN_WAKE_MINUTES} to ${MAX_WAKE_MINUTES}. With pr, the deadline.`,
-  }),
-  note: Type.String({
-    minLength: 1,
-    maxLength: NOTE_LIMIT,
-    description:
-      'What to do when woken. The woken turn starts with it, so name the work, the branch or PR, and what to check.',
-  }),
+  // Optional so `{ cancel: true }` alone validates; `schedule` requires both.
+  minutes: Type.Optional(
+    Type.Integer({
+      minimum: MIN_WAKE_MINUTES,
+      maximum: MAX_WAKE_MINUTES,
+      description: `Minutes from now, ${MIN_WAKE_MINUTES} to ${MAX_WAKE_MINUTES}. With pr, the deadline. Required unless cancel.`,
+    }),
+  ),
+  note: Type.Optional(
+    Type.String({
+      maxLength: NOTE_LIMIT,
+      description:
+        'What to do when woken. The woken turn starts with it, so name the work, the branch or PR, and what to check. Required unless cancel.',
+    }),
+  ),
   pr: Type.Optional(
     Type.Integer({
       minimum: 1,
@@ -455,8 +468,8 @@ export function wakeTool(
         const wake = await wakes.schedule({
           ref,
           asker: who,
-          minutes: args.minutes,
-          note: args.note,
+          minutes: args.minutes ?? 0,
+          note: args.note ?? '',
           pr: args.pr ?? null,
         });
         const at = new Date(wake.dueAt).toISOString();

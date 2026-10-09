@@ -161,6 +161,8 @@ interface Turn {
   /** pi's events route here from just before the prompt is submitted. */
   live: boolean;
   cancelRequested: boolean;
+  /** The owner stopped it; it sets no wake from here on. */
+  stopped: boolean;
   timedOut: boolean;
   /** SIGTERM closed the harness under this turn. */
   abandoned: boolean;
@@ -449,6 +451,7 @@ export class PiBrain implements Brain {
     const tb = this.threads.get(session.key);
     const turn = tb?.turn;
     if (!tb || !turn) return;
+    turn.stopped = true;
     if (turn.submission !== null) this.stop(tb, turn);
     else turn.cancelRequested = true;
   }
@@ -612,6 +615,7 @@ export class PiBrain implements Brain {
       poisoned,
       poison,
       cancelRequested: false,
+      stopped: false,
       timedOut: false,
       abandoned: false,
       cutOff,
@@ -1110,13 +1114,7 @@ export class PiBrain implements Brain {
     const key = threadKey(ref);
     const wake =
       wakes && lists(profile.profile, WAKE_TOOL)
-        ? [
-            wakeTool(
-              ref,
-              () => this.threads.get(key)?.turn?.asker ?? null,
-              wakes,
-            ),
-          ]
+        ? [wakeTool(ref, () => this.asker(key), wakes)]
         : [];
     return defineExtension({
       name: EXTENSION,
@@ -1125,6 +1123,12 @@ export class PiBrain implements Brain {
         section('mate', () => profile.prompts[ref.surface], { tag: false }),
       ],
     });
+  }
+
+  /** Whose turn is running in the thread; `null` between turns and once stopped. */
+  private asker(key: string): string | null {
+    const turn = this.threads.get(key)?.turn;
+    return turn && !turn.stopped ? turn.asker : null;
   }
 
   /**
