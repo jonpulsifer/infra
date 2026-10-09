@@ -39,7 +39,11 @@ function refused(profiles: ReadonlyMap<string, Profile>, id: string): void {
 const reader = (grants: Partial<Grants>, mcp: string[] = []): Profile => ({
   ...investigator,
   grants: { ...investigator.grants, ...grants },
-  tools: { base: investigator.tools.base, mcp: ['weather_*', ...mcp] },
+  tools: {
+    base: investigator.tools.base,
+    mcp: ['weather_*', ...mcp],
+    wake: false,
+  },
 });
 
 describe('validateProfiles', () => {
@@ -80,7 +84,10 @@ describe('validateProfiles', () => {
     [['read', 'read']],
   ])('refuses the base tools %p', (base) => {
     refused(
-      declared({ ...investigator, tools: { base, mcp: ['weather_*'] } }),
+      declared({
+        ...investigator,
+        tools: { base, mcp: ['weather_*'], wake: false },
+      }),
       'investigator',
     );
   });
@@ -91,7 +98,7 @@ describe('validateProfiles', () => {
       refused(
         declared({
           ...operator,
-          tools: { base: operator.tools.base, mcp: [pattern] },
+          tools: { base: operator.tools.base, mcp: [pattern], wake: true },
         }),
         'operator',
       );
@@ -201,6 +208,12 @@ describe('the declared profiles', () => {
     expect(lists(investigator, 'weather_forecast')).toBe(true);
     expect(lists(investigator, 'bash')).toBe(true);
     expect(lists(operator, 'kthx_deleteApp')).toBe(true);
+  });
+
+  test('operator and custodian list wake, and investigator does not', () => {
+    expect(lists(operator, 'wake')).toBe(true);
+    expect(lists(custodian, 'wake')).toBe(true);
+    expect(lists(investigator, 'wake')).toBe(false);
   });
 
   test('retention sweeps only the profiles with the default grants', () => {

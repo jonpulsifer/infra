@@ -17,7 +17,7 @@ Mention Rowbutt in one of these channels to open a thread, and reply in it with 
 
 Start the opening message with `+investigator` after the mention to open a read-only thread. A thread keeps the profile it opened with, and mate refuses a `+name` that is unknown, cannot open from chat, disagrees with the thread's, or is not the first word.
 
-To stop a turn, use Discord's Stop button or Slack's stop control.
+To stop a turn, use Discord's Stop button or Slack's stop control, or reply `stop`. Each also cancels the thread's pending [wake](#wakes).
 
 `chatgpt login`, `chatgpt status`, `chatgpt logout`, `chatgpt pause [minutes]` and `chatgpt resume` manage Rowbutt's ChatGPT sign-in and whether ChatGPT answers. While `MATE_MODEL` is a ChatGPT model, they never reach the agent; otherwise the model answers them as prompts. [Sign Rowbutt in to ChatGPT](../runbooks/sign-rowbutt-in-to-chatgpt.md) and [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) have the steps.
 
@@ -40,6 +40,10 @@ A profile sets what a thread may do. `apps/mate/src/profiles.ts` declares them, 
 mate starts a daily homelab check at 18:00 `America/Halifax` in Slack `#chatops`, configured by `MATE_CUSTODIAN_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. It checks the clusters, Flux, alerts, backups, hosts and PR status. The report opens with a numbered list of what needs the owner, each with the reason, its evidence and a proposed action. It then lists what Rowbutt fixed, with PR links, and any check it could not run. A day with nothing for the owner and nothing fixed is one line. The assignment can fix clear problems through branches and PRs and merge understood PRs once required checks pass and reviews do not block. It does not bypass protections, make live infrastructure changes by hand or apply Atlantis plans without the owner's approval. It runs under the `custodian` profile in job mode, with operator's access and 10 turns a UTC day of its own.
 
 mate records the day and Slack root in `mate-db` and posts the assignment into the thread. The thread's row is the attempt, so a refused or failed check is said once in its thread, and a reply runs it again. A reply to the report, such as `fix 2`, runs a `custodian` turn with the report in its session. Each reply is its own job turn: it counts toward the 10 a day and runs in a new sandbox that mate releases when it ends, so work left uncommitted does not reach the next reply. mate releases the sandbox when the report is done. A restart resumes an interrupted turn. If mate stops after Slack accepts the root but before its timestamp reaches the database, a retry can post a second root. `apps/mate/src/custodian.ts` owns this schedule; unset `MATE_CUSTODIAN_CHANNEL` to stop new reports.
+
+## Wakes
+
+Under `operator` and `custodian`, the agent's `wake` tool continues the thread later in a new turn. A wake fires after 5 to 1,440 minutes. A wake for a pull request fires once the PR is merged or closed, or every GitHub Actions run on its head has finished, or at the deadline. mate polls GitHub each minute with the App's token and spends no model turn while it waits. It reads Actions runs only, not Atlantis's status, and a head with no run 15 minutes after the wake was set counts as finished. A thread holds one wake, and a new one replaces it. mate posts `⏰` lines when a wake is set, when it fires and when it is cancelled. The woken turn runs as a reply from whoever set the wake, so it counts toward the same limits. Replies leave the wake pending. `apps/mate/src/wakes.ts` owns this, with the rows in `mate_wakes`.
 
 ## What the agent can do
 
@@ -64,7 +68,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 - At most two interactive turns run at once, and other threads wait in a queue. Automation and job profiles run one turn at a time and have their own daily caps in `mate-db`.
 - At most two threads hold a sandbox at once. A turn that needs one takes the sandbox of a thread idle for 5 minutes, which deletes that thread's uncommitted work, or waits. An automation turn never takes an interactive thread's sandbox, but it can take a free one, so while the custodian runs the owner's threads share one fewer.
 - An investigator reads logs with `kubectl logs`; VictoriaLogs is not reachable from a read-only sandbox.
-- Credentials and background processes last only for the turn.
+- Credentials and background processes last only for the turn. A [wake](#wakes) is the way back to a thread later.
 - After 30 quiet minutes, mate deletes the sandbox with any uncommitted work and archives the Discord thread. mate keeps the conversation, so a reply continues it in a new sandbox, across restarts too.
 - Slack retries a message for about six minutes, so one sent while mate is down for longer gets no answer.
 - Discord does not replay a message sent while mate is disconnected, so it gets no answer and nothing counts it.

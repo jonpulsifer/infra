@@ -34,6 +34,8 @@ export const RECORD_GONE =
 export const PROFILE_PLACE = '🚫 put the profile first:';
 /** A job row restored with no turn run and none marked. */
 export const UNRUN = '⚠️ this assignment never started — reply here to run it';
+/** A typed `stop` with no turn running and no wake pending. */
+export const NOTHING_TO_STOP = '✋ nothing to stop here';
 
 // The `sandbox` card's titles, drawn inside a turn.
 export const WAITING = '⏳ waiting for a free sandbox';
@@ -107,6 +109,7 @@ const PREFIXES: readonly string[] = [
   RECORD_GONE,
   PROFILE_PLACE,
   UNRUN,
+  NOTHING_TO_STOP,
   WAITING,
   // Spread, so a new mint step is filtered too.
   ...Object.values(MINT_STEPS),
