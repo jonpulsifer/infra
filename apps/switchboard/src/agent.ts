@@ -101,6 +101,8 @@ export async function findAgentId(opts: FindAgentOptions): Promise<string> {
 
 export interface ResolveAgentOptions {
   readonly log: Log;
+  /** Named in the ConfigError message; defaults to SWITCHBOARD_AGENT_NAME. */
+  readonly envName?: string;
   readonly attempts?: number;
   readonly delayMs?: number;
   /** Overridable for tests; defaults to a real wait. */
@@ -137,7 +139,7 @@ export async function resolveAgentId(
       if (!(error instanceof AgentLookupError)) throw error;
       if (!error.transient || attempt >= attempts) {
         throw new ConfigError(
-          `SWITCHBOARD_AGENT_NAME could not be resolved: ${error.reason}`,
+          `${opts.envName ?? 'SWITCHBOARD_AGENT_NAME'} could not be resolved: ${error.reason}`,
         );
       }
       opts.log.warn('agent lookup failed', {

@@ -19,6 +19,10 @@ const baseConfig: ResolvedConfig = {
   ringDailyCap: 2,
   alertDailyCap: 2,
   cooldownMs: 10 * 60_000,
+  missionToken: 'mission-secret',
+  missionAgentName: 'pbx-mission',
+  targetsDir: '/targets',
+  missionDailyCap: 2,
   quietStart: '23:00',
   quietEnd: '08:00',
   quietTz: 'UTC',
@@ -362,5 +366,249 @@ describe('POST /alertmanager', () => {
       body: 'not json',
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('/mission', () => {
+  const targets = new Map([['sam', '+15555550123']]);
+  const mission = { agentId: 'agent_mission', targets };
+  const auth = { authorization: 'Bearer mission-secret' };
+
+  const post = (app: ReturnType<typeof createApp>, body: unknown) =>
+    app.request('/mission', {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  // Answers the outbound call, then the conversation polls with `statuses`.
+  function mockMission(...statuses: string[]) {
+    const sent: { url: string; body: string }[] = [];
+    let polls = 0;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      sent.push({ url: String(url), body: String(init.body) });
+      if (String(url).includes('/conversations/')) {
+        const status = statuses[Math.min(polls++, statuses.length - 1)];
+        return Response.json({
+          status,
+          transcript: [
+            { role: 'agent', message: 'Hello', time_in_call_secs: 1 },
+            { role: 'user', message: 'I love otters', time_in_call_secs: 7 },
+          ],
+          metadata: { call_duration_secs: 30 },
+        });
+      }
+      return ok();
+    }) as unknown as typeof fetch;
+    return sent;
+  }
+
+  function appWith(overrides: Partial<Parameters<typeof createApp>[0]> = {}) {
+    const { log, lines } = fakeLog();
+    const c = clock(DAYTIME);
+    const app = createApp({
+      config: baseConfig,
+      log,
+      mission,
+      now: c.fn,
+      sleep: async () => {},
+      ...overrides,
+    });
+    return { app, lines, clock: c };
+  }
+
+  test('503 when the token or the allow-list is absent', async () => {
+    const noMission = appWith({ mission: undefined }).app;
+    const noToken = appWith({
+      config: { ...baseConfig, missionToken: undefined },
+    }).app;
+    for (const app of [noMission, noToken]) {
+      const res = await post(app, { target: 'sam', keyword: 'otter' });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: 'missions off' });
+    }
+  });
+
+  test('401 on a bad token, 400 on a bad keyword, 404 on an unknown target', async () => {
+    const calls = mockMission('done');
+    const { app } = appWith();
+    const bad = await app.request('/mission', {
+      method: 'POST',
+      headers: { authorization: 'Bearer nope' },
+      body: '{}',
+    });
+    expect(bad.status).toBe(401);
+    expect((await post(app, { target: 'sam', keyword: 'ot7er' })).status).toBe(
+      400,
+    );
+    expect((await post(app, { target: 'sam' })).status).toBe(400);
+    const unknown = await post(app, { target: 'nobody', keyword: 'otter' });
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({ error: 'unknown target' });
+    expect(calls).toHaveLength(0);
+  });
+
+  test('429 in quiet hours, spending nothing', async () => {
+    const calls = mockMission('done');
+    const { app, clock: c } = appWith();
+    c.set(new Date('2026-01-01T03:00:00Z').getTime());
+    const res = await post(app, { target: 'sam', keyword: 'otter' });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ ok: false, skipped: 'quiet-hours' });
+    expect(calls).toHaveLength(0);
+  });
+
+  test('429 on the cooldown and then the daily cap', async () => {
+    mockMission('in-progress');
+    const { app, clock: c } = appWith();
+    const go = () => post(app, { target: 'sam', keyword: 'otter' });
+    expect((await go()).status).toBe(202);
+    const cooling = await go();
+    expect(cooling.status).toBe(429);
+    expect(await cooling.json()).toEqual({ ok: false, skipped: 'cooldown' });
+    c.set(DAYTIME + 11 * 60_000);
+    expect((await go()).status).toBe(202);
+    c.set(DAYTIME + 22 * 60_000);
+    const capped = await go();
+    expect(capped.status).toBe(429);
+    expect(await capped.json()).toEqual({ ok: false, skipped: 'daily-cap' });
+  });
+
+  test('202 without wait; the call carries the variables and the override', async () => {
+    const sent = mockMission('done');
+    const { app } = appWith();
+    const res = await post(app, { target: 'sam', keyword: 'otter' });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ ok: true, conversationId: 'conv_1' });
+    const body = JSON.parse(sent[0]?.body ?? '{}');
+    expect(body.agent_id).toBe('agent_mission');
+    expect(body.to_number).toBe('+15555550123');
+    expect(body.conversation_initiation_client_data).toEqual({
+      dynamic_variables: {
+        target_name: 'Sam',
+        keyword: 'otter',
+        objective:
+          'Get them to say the keyword out loud, without ever saying it yourself.',
+      },
+      conversation_config_override: { asr: { keywords: ['otter'] } },
+    });
+  });
+
+  test('name and objective come from the request, sanitized', async () => {
+    const sent = mockMission('done');
+    const { app } = appWith();
+    await post(app, {
+      target: 'sam',
+      keyword: 'otter',
+      name: 'Sammy\n',
+      objective: 'be \x00nice',
+    });
+    const vars = JSON.parse(sent[0]?.body ?? '{}')
+      .conversation_initiation_client_data.dynamic_variables;
+    expect(vars).toMatchObject({ target_name: 'Sammy', objective: 'be nice' });
+  });
+
+  test('wait answers 200 with the scored result', async () => {
+    mockMission('in-progress', 'done');
+    const { app } = appWith();
+    const res = await post(app, {
+      target: 'sam',
+      keyword: 'otter',
+      wait: true,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      conversationId: 'conv_1',
+      result: { won: true, turn: 1, secondsToWin: 7, durationSecs: 30 },
+    });
+  });
+
+  test('wait answers pending when the poll limit runs out', async () => {
+    mockMission('in-progress');
+    const { app } = appWith();
+    const res = await post(app, {
+      target: 'sam',
+      keyword: 'otter',
+      wait: true,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      conversationId: 'conv_1',
+      status: 'pending',
+    });
+  });
+
+  test('GET answers pending, then done, and 404 for an unknown id', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { app } = appWith();
+    globalThis.fetch = (async (url: string) => {
+      if (String(url).includes('/conversations/')) {
+        await gate;
+        return Response.json({ status: 'done', transcript: [] });
+      }
+      return ok();
+    }) as unknown as typeof fetch;
+    await post(app, { target: 'sam', keyword: 'otter' });
+    const get = (id: string, headers: Record<string, string> = auth) =>
+      app.request(`/mission/${id}`, { headers });
+    expect(await (await get('conv_1')).json()).toEqual({ status: 'pending' });
+    release();
+    await Bun.sleep(10);
+    expect(await (await get('conv_1')).json()).toMatchObject({
+      status: 'done',
+      result: { won: false },
+    });
+    expect((await get('conv_nope')).status).toBe(404);
+    expect((await get('conv_1', {})).status).toBe(401);
+  });
+
+  test('logs one mission result line with the target and never the number or transcript', async () => {
+    mockMission('done');
+    const { app, lines } = appWith();
+    await post(app, { target: 'sam', keyword: 'otter', wait: true });
+    const results = lines.filter((l) => l.includes('"mission result"'));
+    expect(results).toHaveLength(1);
+    expect(results[0]).toContain('"target":"sam"');
+    const all = lines.join('\n');
+    expect(all).not.toContain('5555550123');
+    expect(all).not.toContain('I love otters');
+  });
+
+  test('the log never carries the winning line, though the answer does', async () => {
+    globalThis.fetch = (async (url: string) =>
+      String(url).includes('/conversations/')
+        ? Response.json({
+            status: 'done',
+            transcript: [],
+            analysis: {
+              data_collection_results: {
+                winning_line: { value: 'a sentence from the callee' },
+              },
+            },
+          })
+        : ok()) as unknown as typeof fetch;
+    const { app, lines } = appWith();
+    const res = await post(app, {
+      target: 'sam',
+      keyword: 'otter',
+      wait: true,
+    });
+    expect(await res.json()).toMatchObject({
+      result: { winningLine: 'a sentence from the callee' },
+    });
+    expect(lines.join('\n')).not.toContain('a sentence from the callee');
+  });
+
+  test('a failed call answers 502 and polls nothing', async () => {
+    const calls = mockElevenLabs(failing);
+    const { app } = appWith();
+    const res = await post(app, { target: 'sam', keyword: 'otter' });
+    expect(res.status).toBe(502);
+    expect(calls).toHaveLength(1);
   });
 });

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { OutboundCallError, placeOutboundCall } from '../src/elevenlabs.ts';
+import {
+  fetchConversation,
+  OutboundCallError,
+  placeOutboundCall,
+} from '../src/elevenlabs.ts';
 
 const original = globalThis.fetch;
 afterEach(() => {
@@ -11,8 +15,7 @@ const opts = {
   agentId: 'agent_1',
   agentPhoneNumberId: 'phnum_1',
   toNumber: '+19025551234',
-  reason: 'testing',
-  source: 'ring',
+  dynamicVariables: { reason: 'testing', source: 'ring' },
 };
 
 describe('placeOutboundCall', () => {
@@ -100,5 +103,52 @@ describe('placeOutboundCall', () => {
     }) as unknown as typeof fetch;
     await placeOutboundCall(opts);
     expect(signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test('sends the variables and the override verbatim', async () => {
+    let sent: unknown;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body));
+      return Response.json({ success: true, conversation_id: 'c' });
+    }) as unknown as typeof fetch;
+    await placeOutboundCall({
+      ...opts,
+      dynamicVariables: { target_name: 'Sam', keyword: 'otter' },
+      conversationConfigOverride: { asr: { keywords: ['otter'] } },
+    });
+    expect(sent).toEqual({
+      agent_id: 'agent_1',
+      agent_phone_number_id: 'phnum_1',
+      to_number: '+19025551234',
+      conversation_initiation_client_data: {
+        dynamic_variables: { target_name: 'Sam', keyword: 'otter' },
+        conversation_config_override: { asr: { keywords: ['otter'] } },
+      },
+    });
+  });
+});
+
+describe('fetchConversation', () => {
+  test('reads the conversation with the api key', async () => {
+    let seen: { url: string; headers: Record<string, string> } | undefined;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      seen = { url: String(url), headers: init.headers as never };
+      return Response.json({ status: 'done' });
+    }) as unknown as typeof fetch;
+    expect(await fetchConversation('k', 'conv_1')).toEqual({ status: 'done' });
+    expect(seen?.url).toBe(
+      'https://api.elevenlabs.io/v1/convai/conversations/conv_1',
+    );
+    expect(seen?.headers['xi-api-key']).toBe('k');
+  });
+
+  test('a failure is null, not a throw', async () => {
+    globalThis.fetch = (async () =>
+      new Response('no', { status: 500 })) as unknown as typeof fetch;
+    expect(await fetchConversation('k', 'c')).toBeNull();
+    globalThis.fetch = (async () => {
+      throw new Error('down');
+    }) as unknown as typeof fetch;
+    expect(await fetchConversation('k', 'c')).toBeNull();
   });
 });

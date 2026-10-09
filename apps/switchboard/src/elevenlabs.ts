@@ -25,8 +25,9 @@ export interface PlaceCallOptions {
   readonly agentId: string;
   readonly agentPhoneNumberId: string;
   readonly toNumber: string;
-  readonly reason: string;
-  readonly source: string;
+  readonly dynamicVariables: Record<string, string>;
+  /** Sent as conversation_config_override when set. */
+  readonly conversationConfigOverride?: Record<string, unknown>;
 }
 
 export interface OutboundCallResult {
@@ -62,7 +63,10 @@ export async function placeOutboundCall(
         agent_phone_number_id: opts.agentPhoneNumberId,
         to_number: opts.toNumber,
         conversation_initiation_client_data: {
-          dynamic_variables: { reason: opts.reason, source: opts.source },
+          dynamic_variables: opts.dynamicVariables,
+          ...(opts.conversationConfigOverride && {
+            conversation_config_override: opts.conversationConfigOverride,
+          }),
         },
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -79,4 +83,48 @@ export async function placeOutboundCall(
     throw new OutboundCallError('bad-response');
   }
   return { conversationId: body.conversation_id, sipCallId: body.sip_call_id };
+}
+
+const CONVERSATION_URL = 'https://api.elevenlabs.io/v1/convai/conversations';
+
+export interface ConversationTurn {
+  readonly role?: string;
+  readonly message?: string | null;
+  readonly time_in_call_secs?: number;
+}
+
+export interface Conversation {
+  readonly status?: string;
+  readonly transcript?: readonly ConversationTurn[];
+  readonly metadata?: { readonly call_duration_secs?: number };
+  readonly analysis?: {
+    readonly evaluation_criteria_results?: Record<
+      string,
+      { readonly result?: string } | undefined
+    >;
+    readonly data_collection_results?: Record<
+      string,
+      { readonly value?: unknown } | undefined
+    >;
+  };
+}
+
+/** One bounded read of a conversation; any failure is null, never a throw. */
+export async function fetchConversation(
+  apiKey: string,
+  conversationId: string,
+): Promise<Conversation | null> {
+  try {
+    const res = await fetch(
+      `${CONVERSATION_URL}/${encodeURIComponent(conversationId)}`,
+      {
+        headers: { 'xi-api-key': apiKey },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as Conversation;
+  } catch {
+    return null;
+  }
 }
