@@ -162,7 +162,7 @@ export interface Surface {
   archive?(thread: ThreadRef): Promise<void>;
   /** Clears a working sign that outlives the process, like Slack's session. */
   settle?(thread: ThreadRef): Promise<void>;
-  /** Discord reacts on the message; Slack's agent session already shows it. */
+  /** Reacts on the message: 👀 when taken, then ✅, ⚠️ or ⏹️ when the turn ends. */
   mark?(message: MessageRef, mark: Mark): Promise<void>;
   /**
    * A message only `userId` can see, never in the thread: a Discord DM, or a

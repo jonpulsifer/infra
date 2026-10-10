@@ -242,6 +242,8 @@ export type SlackCall =
   | { call: 'edit'; ts: string; text: string; blocks?: SlackBlock[] }
   | { call: 'read'; threadTs: string; ts: string }
   | { call: 'remove'; ts: string }
+  | { call: 'react'; channel: string; ts: string; name: string }
+  | { call: 'unreact'; channel: string; ts: string; name: string }
   | { call: 'start'; ts: string; args: StreamStart }
   | { call: 'append'; ts: string; chunks: StreamChunk[] }
   | { call: 'stop'; ts: string; chunks: StreamChunk[] }
@@ -264,6 +266,9 @@ export class FakeSlack implements SlackApi {
   failStart: Error | null = null;
   failEdit: Error | null = null;
   failRead: Error | null = null;
+  failReact: Error | null = null;
+  failUnreact: Error | null = null;
+  private readonly reactions = new Set<string>();
   private serial = 0;
 
   async post(channel: string, threadTs: string, text: string): Promise<string> {
@@ -294,6 +299,26 @@ export class FakeSlack implements SlackApi {
 
   async remove(_channel: string, ts: string): Promise<void> {
     this.calls.push({ call: 'remove', ts });
+  }
+
+  async react(channel: string, ts: string, name: string): Promise<void> {
+    if (this.failReact) throw this.failReact;
+    this.calls.push({ call: 'react', channel, ts, name });
+    this.reactions.add(`${channel}/${ts}/${name}`);
+  }
+
+  async unreact(channel: string, ts: string, name: string): Promise<void> {
+    if (this.failUnreact) throw this.failUnreact;
+    this.calls.push({ call: 'unreact', channel, ts, name });
+    this.reactions.delete(`${channel}/${ts}/${name}`);
+  }
+
+  /** mate's own reactions on one message, in the order they were added. */
+  reactionsOn(channel: string, ts: string): string[] {
+    const prefix = `${channel}/${ts}/`;
+    return [...this.reactions]
+      .filter((r) => r.startsWith(prefix))
+      .map((r) => r.slice(prefix.length));
   }
 
   async startStream(args: StreamStart): Promise<string> {
@@ -360,6 +385,8 @@ export class FakeSlack implements SlackApi {
         c.call === 'whisper' ||
         c.call === 'edit' ||
         c.call === 'remove' ||
+        c.call === 'react' ||
+        c.call === 'unreact' ||
         c.call === 'read'
       )
         return [];
