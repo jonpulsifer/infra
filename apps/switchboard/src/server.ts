@@ -4,18 +4,28 @@ import { criticalFiringAlerts, resolvedFingerprints } from './alertmanager.ts';
 import { bearerMatches } from './auth.ts';
 import type { ResolvedConfig } from './config.ts';
 import { FingerprintDedupe } from './dedupe.ts';
-import { OutboundCallError, placeOutboundCall } from './elevenlabs.ts';
+import {
+  OutboundCallError,
+  placeOutboundCall,
+  simulateConversation,
+} from './elevenlabs.ts';
 import { Limiter } from './limiter.ts';
 import type { Log } from './log.ts';
 import {
+  CALLEE_FIRST_MESSAGE,
+  CALLEE_MAX_LEN,
   DEFAULT_OBJECTIVE,
+  defaultCallee,
   defaultName,
   MissionStore,
   NAME_MAX_LEN,
   OBJECTIVE_MAX_LEN,
   parseKeyword,
   pollAndScore,
+  REHEARSAL_TURNS,
+  REHEARSAL_TURNS_MAX,
   SCENARIO_MAX_LEN,
+  scoreConversation,
 } from './mission.ts';
 import { isQuietHours } from './quiet-hours.ts';
 import { sanitizeReason } from './reason.ts';
@@ -115,9 +125,13 @@ export function createApp(deps: ServerDeps) {
         sleep,
       });
       if (result) missions.set(conversationId, result);
-      // winningLine is the callee's own words: it stays in the stored result
-      // and the HTTP answers, never the pod log.
-      const { winningLine: _words, ...loggable } = result ?? {};
+      // The callee's own words stay in the stored result and the HTTP
+      // answers, never the pod log.
+      const {
+        winningLine: _words,
+        transcript: _transcript,
+        ...loggable
+      } = result ?? {};
       log.info('mission result', {
         target,
         conversationId,
@@ -305,6 +319,70 @@ export function createApp(deps: ServerDeps) {
           conversationId: outcome.conversationId,
           status: 'pending',
         });
+  });
+
+  // A rehearsal plays the agent against a simulated callee in text and scores
+  // the transcript the same way. Nothing is dialled, so neither the limiter
+  // nor quiet hours apply, and a target is optional: it only names the callee.
+  app.post('/mission/rehearse', async (c) => {
+    const gate = missionGate(c.req.header('authorization'));
+    if (gate.status === 503) return c.json({ error: 'missions off' }, 503);
+    if (gate.status === 401) return c.json({ error: 'unauthorized' }, 401);
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await c.req.json()) as Record<string, unknown>;
+    } catch {
+      return c.json({ error: 'invalid json' }, 400);
+    }
+    if (!body || typeof body !== 'object') {
+      return c.json({ error: 'invalid json' }, 400);
+    }
+    const keyword = parseKeyword(body.keyword);
+    if (!keyword) return c.json({ error: 'invalid keyword' }, 400);
+    const target = typeof body.target === 'string' ? body.target : '';
+    if (target && !gate.mission.targets.has(target)) {
+      return c.json({ error: 'unknown target' }, 404);
+    }
+    const name =
+      sanitizeReason(body.name, NAME_MAX_LEN) ||
+      (target ? defaultName(target) : 'there');
+    const objective =
+      sanitizeReason(body.objective, OBJECTIVE_MAX_LEN) || DEFAULT_OBJECTIVE;
+    const scenario = sanitizeReason(body.scenario, SCENARIO_MAX_LEN);
+    const callee =
+      sanitizeReason(body.callee, CALLEE_MAX_LEN) || defaultCallee(name);
+    const turns =
+      typeof body.turns === 'number' && Number.isInteger(body.turns)
+        ? Math.min(Math.max(body.turns, 2), REHEARSAL_TURNS_MAX)
+        : REHEARSAL_TURNS;
+
+    const conversation = await simulateConversation({
+      apiKey: config.elevenlabsApiKey,
+      agentId: gate.mission.agentId,
+      dynamicVariables: {
+        target_name: name,
+        keyword,
+        objective,
+        ...(scenario && { scenario }),
+      },
+      calleePrompt: callee,
+      calleeFirstMessage: CALLEE_FIRST_MESSAGE,
+      turns,
+    });
+    if (!conversation) {
+      log.error('rehearsal failed', { target });
+      return c.json({ ok: false, error: 'rehearsal failed' }, 502);
+    }
+    const result = scoreConversation(conversation, keyword);
+    log.info('rehearsal result', {
+      target,
+      won: result.won,
+      turn: result.turn,
+      agentSaidFirst: result.agentSaidFirst,
+      turns: result.transcript.length,
+    });
+    return c.json({ ok: true, rehearsal: true, result });
   });
 
   app.get('/mission/:conversationId', (c) => {

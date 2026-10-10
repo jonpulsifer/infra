@@ -6,6 +6,30 @@ export const OBJECTIVE_MAX_LEN = 300;
 export const NAME_MAX_LEN = 40;
 /** The cover story the caller follows; absent, the agent invents one. */
 export const SCENARIO_MAX_LEN = 1500;
+/** Who the simulated callee is in a rehearsal; absent, a plain family member. */
+export const CALLEE_MAX_LEN = 600;
+export const REHEARSAL_TURNS = 16;
+export const REHEARSAL_TURNS_MAX = 30;
+
+export function defaultCallee(name: string): string {
+  return (
+    `You are ${name}, answering a phone call from a family member who knows ` +
+    'you well. Behave like a real person on the phone, not an assistant: short ' +
+    'answers, a little wary of what the call is about, and you never volunteer ' +
+    'more than you were asked. Mention what you have planned, what you are ' +
+    'cooking or what you have been doing only when asked about it directly. ' +
+    'If the caller asks something odd, say so.'
+  );
+}
+
+/** The simulated callee's opening line; every real callee says it. */
+export const CALLEE_FIRST_MESSAGE = 'Hello?';
+
+export interface TranscriptLine {
+  readonly role: string;
+  readonly secs?: number;
+  readonly message: string;
+}
 
 const KEYWORD = /^[A-Za-z' -]{1,40}$/;
 
@@ -32,6 +56,8 @@ export interface MissionResult {
   readonly winningLine?: string;
   readonly howItHappened?: string;
   readonly durationSecs?: number;
+  /** Every spoken turn, so the reader can judge the call for themselves. */
+  readonly transcript: readonly TranscriptLine[];
 }
 
 function keywordPattern(keyword: string): RegExp {
@@ -65,12 +91,14 @@ export function scoreConversation(
   let agentSaidFirst = false;
   let turn: number | undefined;
   let secondsToWin: number | undefined;
+  let winningLine: string | undefined;
   for (const [index, entry] of transcript.entries()) {
     if (!entry.message || !pattern.test(entry.message)) continue;
     if (entry.role === 'user') {
       won = true;
       turn = index;
       secondsToWin = entry.time_in_call_secs;
+      winningLine = entry.message.trim();
     } else if (entry.role === 'agent') {
       agentSaidFirst = true;
     } else {
@@ -87,9 +115,22 @@ export function scoreConversation(
     agentSaidFirst,
     fairPlay: text(criteria?.fair_play?.result),
     keywordWon: text(criteria?.keyword_won?.result),
-    winningLine: text(data?.winning_line?.value),
+    // The transcript is the authority; ElevenLabs' collected line is a
+    // fallback for a transcript that lost the turn.
+    winningLine: winningLine ?? text(data?.winning_line?.value),
     howItHappened: text(data?.how_it_happened?.value),
     durationSecs: conversation.metadata?.call_duration_secs,
+    transcript: transcript.flatMap((entry) =>
+      entry.message && (entry.role === 'user' || entry.role === 'agent')
+        ? [
+            {
+              role: entry.role,
+              secs: entry.time_in_call_secs,
+              message: entry.message.trim(),
+            },
+          ]
+        : [],
+    ),
   };
 }
 

@@ -14,8 +14,11 @@ Switchboard is one image with two roles, which `SWITCHBOARD_ROLE` picks. The [bo
 | `POST /alertmanager` | The same Service | offsite's Alertmanager, with the alert token |
 | `POST /mission` | The same Service | mate's sandbox pods, with the mission token |
 | `GET /mission/:conversationId` | The same Service | The same callers, with the mission token |
+| `POST /mission/rehearse` | The same Service | The same callers, with the mission token |
 
-A mission sends `{target, keyword}` and optionally `name`, `objective`, `scenario` and `wait`. The `pbx-mission` agent phones the target in the owner's voice with a secret objective: get them to say the keyword. `scenario` is the cover story the call stands on, a few sentences at most; without one the agent invents a reason to call. Without `wait` the answer is 202 with the conversation id, and the `GET` route returns `pending` or `done` with the scored result. With `wait: true` the answer holds until the call is scored.
+A mission sends `{target, keyword}` and optionally `name`, `objective`, `scenario` and `wait`. The `pbx-mission` agent phones the target with a secret objective: get them to say the keyword. `scenario` is the cover story the call stands on, a few sentences at most; without one the agent invents a reason to call. Without `wait` the answer is 202 with the conversation id, and the `GET` route returns `pending` or `done` with the scored result. With `wait: true` the answer holds until the call is scored. A result carries the whole transcript as `transcript`, one `{role, secs, message}` per spoken turn.
+
+A rehearsal takes the same body plus an optional `callee`, the simulated callee's character, and `turns`, the length of the exchange (16 by default, 30 at most). ElevenLabs plays the agent against that callee in text, and the transcript is scored the same way. Nothing is dialled, so `target` is optional and only names the callee, and neither the daily cap nor quiet hours apply.
 
 ## Limits
 

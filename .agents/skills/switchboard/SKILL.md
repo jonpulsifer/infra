@@ -50,7 +50,27 @@ to ease in (how they are, what they're up to), the story that has a gap only
 they can fill, which is the keyword, what to call the thing instead of its
 name, and what to ask after they say it so the call carries on a beat before
 the goodbye. Write it for the person named, not for the owner. Without one
-the caller invents a reason itself. A mission call lasts up to five minutes
+the caller invents a reason itself.
+
+Rehearse before you dial. A rehearsal plays the caller against a simulated
+callee in text, costs no phone call and no goodwill, and answers in under a
+minute. Send the same body to `/mission/rehearse`, with `callee` describing
+who answers (their mood, how much they volunteer, what they know) and `turns`
+if sixteen is not enough. Read the transcript: did the reason for the call
+hold up, did the gap open naturally, did the caller talk too much or ask the
+same thing twice. Fix the cover story and rehearse again until it wins
+without feeling like a quiz, then dial. Two or three rehearsals are normal.
+
+```bash
+curl -sS --max-time 120 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/mission/rehearse" \
+  -H "Authorization: Bearer $SWITCHBOARD_MISSION_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"keyword":"turkey","name":"Dad","turns":16,
+       "callee":"<who answers, two sentences>",
+       "scenario":"<the cover story, one paragraph>"}'
+```
+
+A mission call lasts up to five minutes
 and the score comes two minutes after at most, so the wait is long:
 
 ```bash
@@ -61,9 +81,12 @@ curl -sS --max-time 480 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/mission"
        "scenario":"<the cover story, one paragraph>"}'
 ```
 
-- `200` with `result`: report it as a story: `won`, `secondsToWin`, `turn`,
-  `agentSaidFirst` (Earl cheated), `fairPlay` and `keywordWon` (ElevenLabs'
-  judges), `howItHappened` and `winningLine`.
+- `200` with `result`: report it as a story. `won`, `secondsToWin` and
+  `winningLine` come from the transcript; `agentSaidFirst` means the caller
+  said the word first. Read `transcript` yourself and judge fair play: the
+  caller must never have said, spelled, rhymed or hinted the word's letters,
+  and the call should read as a call, not a quiz. Quote the two or three
+  best lines; never paste the whole transcript into a channel.
 - `200` with `status: pending`: the call ran long. Poll
   `GET "$SWITCHBOARD_URL/mission/<conversationId>"` with the same bearer every
   30 seconds, up to five times, for `status: done`.

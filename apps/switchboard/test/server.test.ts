@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ResolvedConfig } from '../src/config.ts';
 import type { Fields, Log } from '../src/log.ts';
+import {
+  DEFAULT_OBJECTIVE,
+  REHEARSAL_TURNS,
+  REHEARSAL_TURNS_MAX,
+} from '../src/mission.ts';
 import { createApp } from '../src/server.ts';
 
 const original = globalThis.fetch;
@@ -628,5 +633,140 @@ describe('/mission', () => {
     const res = await post(app, { target: 'sam', keyword: 'otter' });
     expect(res.status).toBe(502);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('/mission/rehearse', () => {
+  const targets = new Map([['sam', '+15555550123']]);
+  const mission = { agentId: 'agent_mission', targets };
+  const auth = { authorization: 'Bearer mission-secret' };
+
+  const rehearse = (app: ReturnType<typeof createApp>, body: unknown) =>
+    app.request('/mission/rehearse', {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  function mockSimulation(status = 200) {
+    const sent: { url: string; body: string }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      sent.push({ url: String(url), body: String(init.body) });
+      if (status !== 200) return new Response('nope', { status });
+      return Response.json({
+        simulated_conversation: [
+          { role: 'agent', message: 'Hi, is this Sam?', time_in_call_secs: 0 },
+          { role: 'user', message: 'Speaking.', time_in_call_secs: 2 },
+          { role: 'user', message: 'We do otters here', time_in_call_secs: 9 },
+        ],
+      });
+    }) as unknown as typeof fetch;
+    return sent;
+  }
+
+  function appWith() {
+    const { log, lines } = fakeLog();
+    const app = createApp({
+      config: baseConfig,
+      log,
+      mission,
+      now: clock(DAYTIME).fn,
+      sleep: async () => {},
+    });
+    return { app, lines };
+  }
+
+  test('simulates with the mission variables and scores the transcript', async () => {
+    const sent = mockSimulation();
+    const { app, lines } = appWith();
+    const res = await rehearse(app, {
+      target: 'sam',
+      keyword: 'otter',
+      scenario: 'a cover story',
+      callee: 'a wary callee',
+      turns: 6,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      rehearsal: true,
+      result: {
+        won: true,
+        turn: 2,
+        secondsToWin: 9,
+        winningLine: 'We do otters here',
+        transcript: [
+          { role: 'agent', secs: 0, message: 'Hi, is this Sam?' },
+          { role: 'user', secs: 2, message: 'Speaking.' },
+          { role: 'user', secs: 9, message: 'We do otters here' },
+        ],
+      },
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.url).toContain(
+      '/agents/agent_mission/simulate-conversation',
+    );
+    const body = JSON.parse(sent[0]?.body ?? '{}');
+    expect(body.new_turns_limit).toBe(6);
+    expect(body.simulation_specification.dynamic_variables).toEqual({
+      target_name: 'Sam',
+      keyword: 'otter',
+      objective: DEFAULT_OBJECTIVE,
+      scenario: 'a cover story',
+    });
+    expect(
+      body.simulation_specification.simulated_user_config.prompt.prompt,
+    ).toBe('a wary callee');
+    const all = lines.join('\n');
+    expect(all).toContain('"rehearsal result"');
+    expect(all).not.toContain('We do otters here');
+    expect(all).not.toContain('5555550123');
+  });
+
+  test('needs no target, dials nothing and ignores the daily cap', async () => {
+    const sent = mockSimulation();
+    const { app } = appWith();
+    for (let i = 0; i < 4; i++) {
+      const res = await rehearse(app, { keyword: 'otter', name: 'Pat' });
+      expect(res.status).toBe(200);
+    }
+    expect(sent).toHaveLength(4);
+    for (const call of sent) {
+      expect(call.url).not.toContain('outbound-call');
+      expect(
+        JSON.parse(call.body).simulation_specification.dynamic_variables
+          .target_name,
+      ).toBe('Pat');
+    }
+  });
+
+  test('clamps turns and refuses a bad keyword or unknown target', async () => {
+    const sent = mockSimulation();
+    const { app } = appWith();
+    expect((await rehearse(app, { keyword: 'ot7er' })).status).toBe(400);
+    expect(
+      (await rehearse(app, { keyword: 'otter', target: 'nobody' })).status,
+    ).toBe(404);
+    expect(sent).toHaveLength(0);
+    await rehearse(app, { keyword: 'otter', turns: 900 });
+    expect(JSON.parse(sent[0]?.body ?? '{}').new_turns_limit).toBe(
+      REHEARSAL_TURNS_MAX,
+    );
+    await rehearse(app, { keyword: 'otter', turns: 'lots' });
+    expect(JSON.parse(sent[1]?.body ?? '{}').new_turns_limit).toBe(
+      REHEARSAL_TURNS,
+    );
+  });
+
+  test('a failed simulation answers 502, and no bearer 401', async () => {
+    mockSimulation(500);
+    const { app } = appWith();
+    expect((await rehearse(app, { keyword: 'otter' })).status).toBe(502);
+    const res = await app.request('/mission/rehearse', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ keyword: 'otter' }),
+    });
+    expect(res.status).toBe(401);
   });
 });
