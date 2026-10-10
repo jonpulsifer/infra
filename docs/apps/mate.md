@@ -15,6 +15,8 @@ Rowbutt is a chat bot, code name mate, that gives the owner a coding and operati
 
 Mention Rowbutt in one of these channels to open a thread, and reply in it with no mention. Rowbutt ignores messages from every other user.
 
+Rowbutt reacts 👀 on a message it has taken, and swaps the reaction for ✅, ⚠️ or ⏹️ when the turn ends, on both surfaces. On Slack the reaction needs the app's `reactions:write` scope.
+
 Start the opening message with `+investigator` after the mention to open a read-only thread. A thread keeps the profile it opened with, and mate refuses a `+name` that is unknown, cannot open from chat, disagrees with the thread's, or is not the first word.
 
 To stop a turn, use Discord's Stop button or Slack's stop control, or reply `stop`. Each also cancels the thread's pending [wake](#wakes).
