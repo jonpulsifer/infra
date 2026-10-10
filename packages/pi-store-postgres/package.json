@@ -14,11 +14,11 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.0.0",
-    "@earendil-works/pi-durable": "1.0.0"
+    "@earendil-works/chord": "1.0.1",
+    "@earendil-works/pi-durable": "1.0.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-ai": "1.0.1",
     "@repo/typescript-config": "workspace:*",
     "@types/bun": "1.4.2",
     "typescript": "5.9.3"
