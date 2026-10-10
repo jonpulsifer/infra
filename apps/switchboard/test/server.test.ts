@@ -32,6 +32,12 @@ const baseConfig: ResolvedConfig = {
   quietEnd: '08:00',
   quietTz: 'UTC',
   port: 8080,
+  personaToken: 'persona-secret',
+  personaAgentNames: ['pbx-troll', 'pbx-mission'],
+  personaDir: 'clusters/offsite/apps/elevenlabs/desired/agents',
+  githubOwner: 'jonpulsifer',
+  githubRepo: 'infra',
+  githubBase: 'main',
 };
 
 function fakeLog(): { log: Log; lines: string[] } {
@@ -768,5 +774,379 @@ describe('/mission/rehearse', () => {
       body: JSON.stringify({ keyword: 'otter' }),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('/persona', () => {
+  type Loose = Record<string, Record<string, unknown>>;
+  const json = (res: Response) => res.json() as Promise<Loose>;
+  const liveAgent = {
+    agent_id: 'agent_troll',
+    conversation_config: {
+      agent: {
+        first_message: 'Yeah. Who is this?',
+        prompt: { prompt: 'You are Jonathan.', llm: 'gemini-3.5-flash-lite' },
+      },
+      tts: { voice_id: 'B3MaEpg3jVTwjxbDmLJE', stability: 0.5 },
+    },
+  };
+  const fileInGit = {
+    name: 'pbx-troll',
+    conversation_config: {
+      agent: {
+        first_message: 'Yeah. Who is this?',
+        prompt: { prompt: 'You are Jonathan.', llm: 'gemini-3.5-flash-lite' },
+      },
+      tts: { voice_id: 'B3MaEpg3jVTwjxbDmLJE', stability: 0.5 },
+    },
+    platform_settings: { data_collection: {} },
+  };
+
+  function fakeGithub(content = `${JSON.stringify(fileInGit, null, 2)}\n`) {
+    const opened: unknown[] = [];
+    return {
+      opened,
+      github: {
+        readFile: async () => ({ content, sha: 'blob1' }),
+        openSnapshot: async (snapshot: unknown) => {
+          opened.push(snapshot);
+          return {
+            url: 'https://github.com/o/r/pull/9',
+            number: 9,
+            autoMerge: true,
+          };
+        },
+      },
+    };
+  }
+
+  /** ElevenLabs: a GET answers the agent, a PATCH applies the body to it. */
+  function mockAgent(start: Record<string, unknown>) {
+    let agent = structuredClone(start);
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ method, url: String(url), body });
+      if (method === 'PATCH') {
+        const patch = body.conversation_config ?? {};
+        const config = agent.conversation_config as Record<
+          string,
+          Record<string, unknown>
+        >;
+        for (const [section, leaves] of Object.entries(patch)) {
+          const current = config[section] ?? {};
+          for (const [key, value] of Object.entries(
+            leaves as Record<string, unknown>,
+          )) {
+            current[key] =
+              key === 'prompt' && typeof value === 'object'
+                ? { ...(current.prompt as object), ...(value as object) }
+                : value;
+          }
+          config[section] = current;
+        }
+        return Response.json({});
+      }
+      if (String(url).includes('/simulate-conversation')) {
+        return Response.json({
+          simulated_conversation: [
+            { role: 'agent', message: 'Yeah. Who is this?' },
+            { role: 'user', message: 'Hi! Brittany here!' },
+            { role: 'agent', message: '[annoyed] What do you want.' },
+          ],
+        });
+      }
+      return Response.json(agent);
+    }) as unknown as typeof fetch;
+    return {
+      calls,
+      current: () => agent,
+      reset: () => (agent = structuredClone(start)),
+    };
+  }
+
+  const persona = (github?: ReturnType<typeof fakeGithub>['github']) => ({
+    agents: new Map([['pbx-troll', 'agent_troll']]),
+    github,
+    dir: 'clusters/offsite/apps/elevenlabs/desired/agents',
+    base: 'main',
+  });
+  const auth = {
+    authorization: 'Bearer persona-secret',
+    'content-type': 'application/json',
+  };
+
+  test('answers 503 without the deps or the token, 401 with the wrong bearer', async () => {
+    const { log } = fakeLog();
+    const off = createApp({ config: baseConfig, log });
+    expect((await off.request('/persona', { headers: auth })).status).toBe(503);
+    const noToken = createApp({
+      config: { ...baseConfig, personaToken: undefined },
+      log,
+      persona: persona(),
+    });
+    expect((await noToken.request('/persona', { headers: auth })).status).toBe(
+      503,
+    );
+    const on = createApp({ config: baseConfig, log, persona: persona() });
+    expect((await on.request('/persona')).status).toBe(401);
+    expect(
+      (
+        await on.request('/persona/pbx-troll', {
+          method: 'PATCH',
+          headers: { authorization: 'Bearer nope' },
+          body: '{}',
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  test('lists the agents and reads a persona', async () => {
+    mockAgent(liveAgent);
+    const { log } = fakeLog();
+    const app = createApp({
+      config: baseConfig,
+      log,
+      persona: persona(fakeGithub().github),
+    });
+    const list = await app.request('/persona', { headers: auth });
+    expect(await list.json()).toEqual({
+      agents: [{ name: 'pbx-troll', agentId: 'agent_troll' }],
+      snapshot: true,
+    });
+    const read = await app.request('/persona/pbx-troll', { headers: auth });
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual({
+      name: 'pbx-troll',
+      persona: {
+        first_message: 'Yeah. Who is this?',
+        prompt: 'You are Jonathan.',
+        tts: { voice_id: 'B3MaEpg3jVTwjxbDmLJE', stability: 0.5 },
+      },
+    });
+    expect(
+      (await app.request('/persona/pbx-nobody', { headers: auth })).status,
+    ).toBe(404);
+  });
+
+  test('a patch writes only persona leaves live, then snapshots the file', async () => {
+    const live = mockAgent(liveAgent);
+    const gh = fakeGithub();
+    const { log, lines } = fakeLog();
+    const app = createApp({
+      config: baseConfig,
+      log,
+      persona: persona(gh.github),
+      now: () => new Date('2026-10-10T21:04:05Z').getTime(),
+    });
+    const res = await app.request('/persona/pbx-troll', {
+      method: 'PATCH',
+      headers: auth,
+      body: JSON.stringify({
+        prompt: 'You are Jonathan, and grumpy.',
+        tts: { stability: 0.6 },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const answer = await json(res);
+    expect(answer.persona).toEqual({
+      first_message: 'Yeah. Who is this?',
+      prompt: 'You are Jonathan, and grumpy.',
+      tts: { voice_id: 'B3MaEpg3jVTwjxbDmLJE', stability: 0.6 },
+    });
+    expect(answer.snapshot).toEqual({
+      status: 'opened',
+      url: 'https://github.com/o/r/pull/9',
+      autoMerge: true,
+    });
+
+    const patch = live.calls.find((c) => c.method === 'PATCH');
+    expect(patch?.body).toEqual({
+      conversation_config: {
+        agent: { prompt: { prompt: 'You are Jonathan, and grumpy.' } },
+        tts: { stability: 0.6 },
+      },
+    });
+    expect(gh.opened).toHaveLength(1);
+    const snapshot = gh.opened[0] as {
+      path: string;
+      branch: string;
+      content: string;
+      base: string;
+    };
+    expect(snapshot.path).toBe(
+      'clusters/offsite/apps/elevenlabs/desired/agents/pbx-troll.json',
+    );
+    expect(snapshot.branch).toBe('persona/pbx-troll-20261010210405');
+    expect(snapshot.base).toBe('main');
+    const written = JSON.parse(snapshot.content);
+    expect(written.conversation_config.agent.prompt).toEqual({
+      prompt: 'You are Jonathan, and grumpy.',
+      llm: 'gemini-3.5-flash-lite',
+    });
+    expect(written.conversation_config.tts.stability).toBe(0.6);
+    expect(written.platform_settings).toEqual({ data_collection: {} });
+    expect(snapshot.content.endsWith('\n')).toBe(true);
+    const logged = lines.find((l) => l.includes('persona patched'));
+    expect(logged).toContain('"leaves":["prompt","tts.stability"]');
+    expect(logged).not.toContain('grumpy');
+  });
+
+  test('a patch with a key outside the persona is refused before any write', async () => {
+    const live = mockAgent(liveAgent);
+    const { log } = fakeLog();
+    const app = createApp({ config: baseConfig, log, persona: persona() });
+    const res = await app.request('/persona/pbx-troll', {
+      method: 'PATCH',
+      headers: auth,
+      body: JSON.stringify({
+        prompt: 'x',
+        platform_settings: { call_limits: { daily_limit: 999 } },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: 'unknown key platform_settings',
+    });
+    expect(live.calls).toHaveLength(0);
+  });
+
+  test('without the github app the edit stands and the snapshot is skipped', async () => {
+    mockAgent(liveAgent);
+    const { log } = fakeLog();
+    const app = createApp({ config: baseConfig, log, persona: persona() });
+    const res = await app.request('/persona/pbx-troll', {
+      method: 'PATCH',
+      headers: auth,
+      body: JSON.stringify({ first_message: 'What.' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await json(res)).snapshot).toEqual({
+      status: 'skipped',
+      reason: 'no github app',
+    });
+  });
+
+  test('a snapshot of a live persona that matches git opens nothing', async () => {
+    mockAgent(liveAgent);
+    const gh = fakeGithub();
+    const { log } = fakeLog();
+    const app = createApp({
+      config: baseConfig,
+      log,
+      persona: persona(gh.github),
+    });
+    const res = await app.request('/persona/pbx-troll/snapshot', {
+      method: 'POST',
+      headers: auth,
+    });
+    expect(res.status).toBe(200);
+    expect((await json(res)).snapshot).toEqual({ status: 'unchanged' });
+    expect(gh.opened).toHaveLength(0);
+  });
+
+  test('a snapshot after a dashboard edit opens the pull request', async () => {
+    mockAgent({
+      ...liveAgent,
+      conversation_config: {
+        ...liveAgent.conversation_config,
+        agent: {
+          ...liveAgent.conversation_config.agent,
+          first_message: 'Edited in the dashboard.',
+        },
+      },
+    });
+    const gh = fakeGithub();
+    const { log } = fakeLog();
+    const app = createApp({
+      config: baseConfig,
+      log,
+      persona: persona(gh.github),
+    });
+    const res = await app.request('/persona/pbx-troll/snapshot', {
+      method: 'POST',
+      headers: auth,
+    });
+    expect((await json(res)).snapshot?.status).toBe('opened');
+    const written = JSON.parse((gh.opened[0] as { content: string }).content);
+    expect(written.conversation_config.agent.first_message).toBe(
+      'Edited in the dashboard.',
+    );
+  });
+
+  test('a failed github call leaves the live edit and reports the failure', async () => {
+    mockAgent(liveAgent);
+    const { log, lines } = fakeLog();
+    const app = createApp({
+      config: baseConfig,
+      log,
+      persona: persona({
+        readFile: async () => {
+          throw new Error('read: HTTP 500');
+        },
+        openSnapshot: async () => {
+          throw new Error('never');
+        },
+      }),
+    });
+    const res = await app.request('/persona/pbx-troll', {
+      method: 'PATCH',
+      headers: auth,
+      body: JSON.stringify({ first_message: 'What.' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await json(res)).snapshot).toEqual({
+      status: 'failed',
+      reason: 'read: HTTP 500',
+    });
+    expect(lines.some((l) => l.includes('persona snapshot failed'))).toBe(true);
+  });
+
+  test('a rehearsal answers the transcript and the tags the agent used', async () => {
+    const live = mockAgent(liveAgent);
+    const { log } = fakeLog();
+    const app = createApp({ config: baseConfig, log, persona: persona() });
+    const res = await app.request('/persona/pbx-troll/rehearse', {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        caller: 'A bubbly telemarketer.',
+        first_message: 'Hi there!',
+        turns: 6,
+        dynamic_variables: { sip_pbx_mode: 'troll' },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      name: 'pbx-troll',
+      transcript: [
+        { role: 'agent', message: 'Yeah. Who is this?' },
+        { role: 'user', message: 'Hi! Brittany here!' },
+        { role: 'agent', message: '[annoyed] What do you want.' },
+      ],
+      tags: ['annoyed'],
+    });
+    const sent = live.calls.find((c) =>
+      c.url.includes('/simulate-conversation'),
+    )?.body;
+    expect(sent).toEqual({
+      simulation_specification: {
+        simulated_user_config: {
+          first_message: 'Hi there!',
+          language: 'en',
+          prompt: { prompt: 'A bubbly telemarketer.' },
+        },
+        dynamic_variables: { sip_pbx_mode: 'troll' },
+      },
+      new_turns_limit: 6,
+    });
+    const noCaller = await app.request('/persona/pbx-troll/rehearse', {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ turns: 4 }),
+    });
+    expect(noCaller.status).toBe(400);
   });
 });

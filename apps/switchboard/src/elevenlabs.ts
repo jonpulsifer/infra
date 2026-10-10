@@ -135,6 +135,54 @@ export async function fetchConversation(
   }
 }
 
+const AGENTS_URL = 'https://api.elevenlabs.io/v1/convai/agents';
+
+/** One bounded read of an agent, whole; any failure is null, never a throw. */
+export async function fetchAgent(
+  apiKey: string,
+  agentId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${AGENTS_URL}/${encodeURIComponent(agentId)}`, {
+      headers: { 'xi-api-key': apiKey },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as unknown;
+    return body && typeof body === 'object'
+      ? (body as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One bounded PATCH of an agent, never retried. The API merges objects, so
+ * the body carries only the leaves to change. False on any failure.
+ */
+export async function patchAgent(
+  apiKey: string,
+  agentId: string,
+  body: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${AGENTS_URL}/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: {
+        'xi-api-key': apiKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    await res.text().catch(() => '');
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 const SIMULATE_TIMEOUT_MS = 240_000;
 
 export interface SimulateOptions {

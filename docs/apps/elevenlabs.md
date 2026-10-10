@@ -30,6 +30,8 @@ ElevenLabs hosts the lab's voice agents and the SIP trunk that joins them to voi
 
 An agent's persona is edited live, not through git: the first message, the closing message, the prompt text and the `tts` block (voice, model, stability, similarity, speed, expressive mode and suggested tags). `reconcile.sh` names those leaves in `persona`, sends none of them in a PATCH, and logs `persona differs from the file` when the live value is not the file's. The file seeds a new agent with them and otherwise holds the last snapshot of what is live. Everything else in the file, the tools, the LLM, the limits, the judges and the number bindings, is git's as before.
 
+An agent's persona is edited live, not through git: the first message, the closing message, the prompt text and the `tts` block (voice, model, stability, similarity, speed, expressive mode and suggested tags). `reconcile.sh` names those leaves in `persona`, sends none of them in a PATCH, and logs `persona differs from the file` when the live value is not the file's. The file seeds a new agent with them and otherwise holds the last snapshot of what is live: [Switchboard](switchboard.md)'s persona routes write the leaves to the agent and open a pull request that puts the live values into the file. Everything else in the file, the tools, the LLM, the limits, the judges and the number bindings, is git's as before.
+
 A failed request for one agent fails the Job and leaves that agent as it is; the other agents and the number are still reconciled. If ElevenLabs reports no inbound credentials after the bind, the run unbinds the number. Without the write key it only logs what it would create, patch or bind.
 
 ## Operate

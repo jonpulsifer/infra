@@ -30,7 +30,7 @@ spec:
       annotations:
         # The tokens and the key are env vars, so Reloader rolls the pod when
         # either Secret rotates.
-        secret.reloader.stakater.com/reload: switchboard-config,switchboard-mission,elevenlabs-write-key
+        secret.reloader.stakater.com/reload: switchboard-config,switchboard-mission,switchboard-persona,switchboard-github-app,elevenlabs-write-key
     spec:
       automountServiceAccountToken: false
       # toFQDNs only matches names Cilium's DNS proxy saw resolved through the
@@ -99,6 +99,20 @@ spec:
                   optional: true
             - name: SWITCHBOARD_TARGETS_DIR
               value: /targets
+            # The persona routes are on only with this token, from the item
+            # `switchboard personas`. Each edit is snapshotted into git through
+            # the GitHub App mate pushes as (the same key, Secret
+            # switchboard-github-app); without the key an edit is live only.
+            - name: SWITCHBOARD_PERSONA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: switchboard-persona
+                  key: token
+                  optional: true
+            - name: SWITCHBOARD_GITHUB_APP_ID
+              value: "5027196"
+            - name: SWITCHBOARD_GITHUB_APP_KEY_FILE
+              value: /var/run/switchboard/github-app/private-key
             # The caps (3 a day per caller class, 5 for missions, a 10 minute
             # cooldown) and the quiet hours (23:00-08:00 America/Halifax) are
             # the image's defaults.
@@ -114,6 +128,9 @@ spec:
               mountPath: /tmp
             - name: targets
               mountPath: /targets
+              readOnly: true
+            - name: github-app
+              mountPath: /var/run/switchboard/github-app
               readOnly: true
           # The port opens only once the agent id is resolved, so a pod that
           # cannot name its agent never reports ready.
@@ -145,6 +162,12 @@ spec:
           secret:
             secretName: switchboard-mission
             optional: true
+        # Optional too: the file is absent until the Secret syncs, and the pod
+        # then logs `personas on` with snapshot false.
+        - name: github-app
+          secret:
+            secretName: switchboard-github-app
+            optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -162,8 +185,9 @@ spec:
       protocol: TCP
 ---
 # Only mate's sandboxes and Alertmanager reach switchboard, and switchboard
-# reaches only the ElevenLabs API. Every other pod on the cluster would
-# otherwise be able to spend the daily caps.
+# reaches only the ElevenLabs API and, for the persona snapshots, GitHub's.
+# Every other pod on the cluster would otherwise be able to spend the daily
+# caps.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -210,8 +234,10 @@ spec:
           rules:
             dns:
               - matchName: api.elevenlabs.io
+              - matchName: api.github.com
     - toFQDNs:
         - matchName: api.elevenlabs.io
+        - matchName: api.github.com
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}
@@ -260,3 +286,44 @@ spec:
   dataFrom:
     - extract:
         key: mission targets
+---
+# The persona bearer token, from the item `switchboard personas` in the vault
+# `homelab`. Until the item exists the Secret is absent and the persona routes
+# answer 503.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: switchboard-persona
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: switchboard-persona
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef: {key: switchboard personas, property: token}
+---
+# The GitHub App's private key, the same item mate's `mate-github-app` reads:
+# a persona snapshot is a pull request from the App. The PEM is stored as
+# `base64 -w0` in a concealed field, so it decodes here.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: switchboard-github-app
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: switchboard-github-app
+    creationPolicy: Owner
+  data:
+    - secretKey: private-key
+      remoteRef:
+        key: c6cjx25kepz7yojdt3h7mcp6ka
+        property: pem (base64)
+        decodingStrategy: Base64

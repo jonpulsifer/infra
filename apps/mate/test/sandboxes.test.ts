@@ -935,6 +935,7 @@ describe('profiles', () => {
       'SWITCHBOARD_URL',
       'SWITCHBOARD_RING_TOKEN',
       'SWITCHBOARD_MISSION_TOKEN',
+      'SWITCHBOARD_PERSONA_TOKEN',
       'GIT_CONFIG_COUNT',
       'GIT_CONFIG_KEY_0',
       'GIT_CONFIG_VALUE_0',
