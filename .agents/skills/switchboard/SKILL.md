@@ -39,9 +39,9 @@ curl -sS --max-time 100 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
 
 When the owner asks to send the caller after someone with a word, write a
 cover story, send one request and wait for the score. `target` is a key of
-switchboard's allow-list: `parents`, `dad` or `owner`. `keyword` is the word
-the person has to say. `name` is what the caller calls them; leave it out to
-use the key. The caller speaks in the owner's voice and never introduces
+switchboard's allow-list: `parents`, `dad`, `nate` or `owner`. `keyword` is
+the word the person has to say. `name` is what the caller calls them; leave
+it out to use the key. The caller speaks in the owner's voice and never introduces
 itself.
 
 `scenario` is the cover story, four to six sentences, and it is what makes the
