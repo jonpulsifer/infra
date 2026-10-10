@@ -60,7 +60,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 | Internet | Every host on ports 80 and 443 |
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx_*` tools that mate bridges from the kthx MCP server, when Secret `mate-kthx-agent` holds an agent token. |
 | Weather | Canadian weather and the family Tempest stations, through the `weather_*` tools that mate bridges from the [Weather API](weather.md) at `MATE_WEATHER_MCP_URL`. The server takes no token. |
-| Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason, and sends Jess, the mission caller, after an allow-listed family member with a word to get out of them; Switchboard fixes the numbers and caps the calls. |
+| Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason, and sends the mission caller, in the owner's voice, after an allow-listed family member with a word to get out of them; Switchboard fixes the numbers and caps the calls. |
 
 [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox. It guards against accidents only: as `cluster-admin` and root on the hosts, the agent can read mate's Secrets or remove the fence.
 

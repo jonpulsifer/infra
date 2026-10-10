@@ -1,7 +1,7 @@
 ---
 name: switchboard
 description: >-
-  Ring the owner's phone through switchboard, or send Jess, the mission caller, to
+  Ring the owner's phone through switchboard, or send the mission caller, in the owner's voice, to
   phone a family member and get them to say a word. Use when the owner asks to
   be called, rung or phoned, says "call me", or asks for a mission, a prank
   call, or to make someone say a word.
@@ -40,36 +40,31 @@ curl -sS --max-time 100 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/ring" \
 When the owner asks to send the caller after someone with a word, write a
 cover story, rehearse it, send one request and wait for the score. `target`
 is a key of switchboard's allow-list: `parents`, `dad`, `nate` or `owner`.
-`keyword` is the word the person has to say. `name` is the first name the
-person goes by, and a mission needs one: the caller is a stranger and opens
-with "is this <name>?", so a key such as `dad` makes no greeting.
+`keyword` is the word the person has to say. `name` is what the caller calls
+them ("Dad", "Nate"); leave it out to use the key.
 
-The caller is Jess, a woman in her late twenties with no connection to the
-family unless the cover story gives her one. She says who she is and why
-she's calling within her first two turns, and if nobody tells her otherwise
-she works with Jonathan and he passed the number on. She admits to being an
-AI when sincerely asked, never claims to be from a real business, and never
-asks for personal details.
+The caller speaks in the owner's voice and is Jonathan: it never introduces
+itself, opens with how they are and what they're at, and gets to the reason
+for the call after a real exchange or two. It admits to being an AI when
+sincerely asked and never asks for personal details.
 
 `scenario` is the cover story, four to six sentences, and it is what makes the
-call sound like a call. It says who Jess is to this person and why she has
-their number, the thing she needs from them, how the gap opens (the keyword
-is the natural answer), what to call the thing instead of its name, and what
-to ask after they say it so the call carries on before the goodbye. Write it
-for the person named, with facts that are true of them. Recipes that work:
+call sound like a call. It says why Jonathan would phone this person today,
+the thing he needs from them, how the gap opens (the keyword is the natural
+answer), what to call the thing instead of its name, and what to ask after
+they say it so the call carries on before the goodbye. Write it for the
+person named, with facts that are true of the family. Recipes that work:
 
-- Advice. Jonathan said they're the one who knows about the thing, and Jess
-  is in over her head with it (hosting for the first time, fixing something,
-  planting something). People give advice freely, and the keyword is the
-  answer. Best by far for parents and grandparents.
-- The errand. Jess is doing Jonathan a favour, his phone is dead, and she's
-  standing in the store with his half-legible note: what did he mean by "the
-  big one"?
-- The confirmation. Jess runs a made-up small place (a farm stand, a bakery)
-  and is confirming what they ordered for a day; coffee went over the sheet.
-  Never a real business.
+- Advice. Jonathan is in over his head with something (cooking the big
+  dinner, fixing the car, planting the garden) and this is the person who
+  knows. People give advice freely, and the keyword is the answer. Best by
+  far for parents.
+- The errand. Jonathan is at the store with a half-legible list someone sent
+  him: what did they mean by "the big one", and what size?
+- The plan. Something's being organised for the weekend and he needs one
+  detail from them to do his part.
 
-Without a scenario the caller invents an advice call itself.
+Without a scenario the caller invents a reason itself.
 
 Rehearse before you dial. A rehearsal plays the caller against a simulated
 callee in text, costs no phone call and no goodwill, and answers in under a
