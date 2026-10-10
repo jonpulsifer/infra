@@ -22,8 +22,6 @@ export interface Config {
   /** Sandboxes leased at once; a turn's first tool call waits for one. */
   readonly maxSandboxes: number;
   readonly port: number;
-  /** Where gateway session info is persisted for a resume, or `null` for memory only. */
-  readonly sessionFile: string | null;
   readonly sandbox: SandboxConfig;
   readonly brain: BrainConfig;
   // Outside `sandbox`: `sandboxManifest` turns a `SandboxConfig` into a pod
@@ -515,7 +513,6 @@ export function readConfig(env: Env): Config {
     maxConcurrent: integer(env, 'MATE_MAX_CONCURRENT', 3),
     maxSandboxes: integer(env, 'MATE_MAX_SANDBOXES', 2),
     port: integer(env, 'MATE_PORT', 8080),
-    sessionFile: env.MATE_SESSION_FILE?.trim() || null,
     sandbox,
     brain: readBrainConfig(env),
     githubApp: githubApp(env, sandbox.checkoutRepo),

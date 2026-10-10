@@ -229,6 +229,15 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
       created_at BIGINT NOT NULL
     )`,
   ],
+  // The Discord gateway session a replaced pod resumes (session.ts).
+  [
+    7,
+    `CREATE TABLE mate_gateway_session (
+      shard_id INTEGER PRIMARY KEY,
+      info JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    )`,
+  ],
 ];
 
 /** mate's own tables beside pi's; idempotent and safe to race. */

@@ -293,12 +293,12 @@ function gate() {
 }
 
 describe('stopping', () => {
-  test('stops Slack, the custodian and the spare sweep first, lets Discord deliver through the drain, then closes Discord, Slack and the database in turn', async () => {
+  test('stops Slack, Discord, the custodian and the spare sweep first, then closes Discord, Slack and the database in turn after the drain', async () => {
     const clock = new ShiftedClock(MORNING);
     let asked = false;
     const one = await boot({
       slack: 'open',
-      drainMs: 10_000,
+      drainMs: 300,
       clock,
       config: {
         custodianChannel: SLACK_CHANNEL,
@@ -328,16 +328,19 @@ describe('stopping', () => {
 
     const stopping = one.mate.stop();
     await settle();
-    expect(one.events).toEqual(['slack.start', 'slack.stop']);
+    expect(one.events).toEqual(['slack.start', 'slack.stop', 'discord.stop']);
     // Nothing starts a turn while the drain waits.
     expect(clock.armed()).not.toContain(CUSTODIAN_INTERVAL_MS);
     expect(clock.armed()).not.toContain(SPARE_SWEEP_MS);
 
-    // The drain waits for the turn, and Discord still delivers its Stop.
+    // The gateway has left, so a Stop pressed during the drain is not
+    // delivered; the drain's own deadline abandons the turn.
     one.discord.stop(key);
     await stopping;
-    expect(one.api.reactionsOn(CHANNEL, message)).toContain('⏹️');
-    expect(one.metrics.turns).toEqual(['cancelled']);
+    expect(one.api.reactionsOn(CHANNEL, message)).not.toContain('⏹️');
+    // Abandoned, not cancelled: the turn stays open for the next process.
+    expect(one.metrics.turns).toEqual([]);
+    await one.db.sql?.unsafe('TRUNCATE mate_threads, pi_sessions CASCADE');
     expect(one.events).toEqual([
       'slack.start',
       'slack.stop',

@@ -383,6 +383,9 @@ export class Mate {
     // First: envelopes are acked on receipt, so one taken during the drain is
     // lost for good.
     slack?.listener.stop();
+    // The gateway closes keeping its session, so what arrives during the drain
+    // is replayed to the next process; posting is REST and still works.
+    surfaces.discord.stop();
     custodian?.stop();
     wakes.stop();
     for (const cancel of running.timers) cancel();
@@ -396,7 +399,6 @@ export class Mate {
     // While the surfaces can still post: a sign-in waiting for its code tells
     // its thread that the code no longer works.
     await chatgpt?.account.stop();
-    surfaces.discord.stop();
     try {
       await surfaces.discord.close();
     } catch (error) {

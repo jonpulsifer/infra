@@ -102,7 +102,6 @@ export function mateConfig(overrides: ConfigOverrides = {}): Config {
     maxConcurrent: 3,
     maxSandboxes: 4,
     port: 0,
-    sessionFile: null,
     sandbox: {
       ...SANDBOX_CONFIG,
       imageFile,

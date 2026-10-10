@@ -523,6 +523,11 @@ export class FakeGateway implements DiscordGateway {
       if (this.gateBudget) await this.gateBudget;
     },
   };
+  readonly leaves: { reason: string }[] = [];
+  leave = async (reason: string) => {
+    this.leaves.push({ reason });
+    this.destroys += 1;
+  };
   readonly manager = {
     connect: async () => {
       this.connects += 1;
