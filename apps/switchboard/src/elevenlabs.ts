@@ -134,3 +134,59 @@ export async function fetchConversation(
     return null;
   }
 }
+
+const SIMULATE_TIMEOUT_MS = 240_000;
+
+export interface SimulateOptions {
+  readonly apiKey: string;
+  readonly agentId: string;
+  readonly dynamicVariables: Record<string, string>;
+  /** The system prompt of the simulated callee. */
+  readonly calleePrompt: string;
+  readonly calleeFirstMessage: string;
+  readonly turns: number;
+}
+
+interface SimulateResponse {
+  simulated_conversation?: readonly ConversationTurn[];
+}
+
+/**
+ * A text-only rehearsal: ElevenLabs plays the agent against a simulated
+ * callee for `turns` turns and returns the transcript shaped like a finished
+ * conversation. Null on any failure; nothing is dialled.
+ */
+export async function simulateConversation(
+  opts: SimulateOptions,
+): Promise<Conversation | null> {
+  try {
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/convai/agents/${encodeURIComponent(opts.agentId)}/simulate-conversation`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': opts.apiKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          simulation_specification: {
+            simulated_user_config: {
+              first_message: opts.calleeFirstMessage,
+              language: 'en',
+              prompt: { prompt: opts.calleePrompt },
+            },
+            dynamic_variables: opts.dynamicVariables,
+          },
+          new_turns_limit: opts.turns,
+        }),
+        signal: AbortSignal.timeout(SIMULATE_TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as SimulateResponse;
+    if (!Array.isArray(body.simulated_conversation)) return null;
+    return { status: 'done', transcript: body.simulated_conversation };
+  } catch {
+    return null;
+  }
+}

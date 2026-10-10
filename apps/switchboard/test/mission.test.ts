@@ -211,3 +211,36 @@ describe('MissionStore', () => {
     expect(store.get(`c${MAX_RESULTS + 2}`)).toBe('pending');
   });
 });
+
+describe('scoreConversation transcript', () => {
+  test('carries every spoken turn and the winning line from the transcript', () => {
+    const result = scoreConversation(
+      convo([
+        { role: 'agent', message: ' Hello ', time_in_call_secs: 0 },
+        { role: 'tool', message: 'end_call' },
+        { role: 'user', message: null },
+        { role: 'user', message: 'Otters, I think.', time_in_call_secs: 5 },
+      ]),
+      'otter',
+    );
+    expect(result.transcript).toEqual([
+      { role: 'agent', secs: 0, message: 'Hello' },
+      { role: 'user', secs: 5, message: 'Otters, I think.' },
+    ]);
+    expect(result.winningLine).toBe('Otters, I think.');
+  });
+
+  test('falls back to the collected line when the transcript has no win', () => {
+    const result = scoreConversation(
+      convo([], {
+        analysis: {
+          data_collection_results: { winning_line: { value: 'kept' } },
+        },
+      }),
+      'otter',
+    );
+    expect(result.won).toBe(false);
+    expect(result.winningLine).toBe('kept');
+    expect(result.transcript).toEqual([]);
+  });
+});
