@@ -54,18 +54,50 @@ call() {
   printf '%s\n' "$out"
 }
 
-# The dotted paths of every declared leaf whose live value differs. An array
-# or an empty object is one leaf, compared whole.
+# The persona leaves: the character, which is edited live (in the ElevenLabs
+# dashboard or through Switchboard) and snapshotted back into git. The file
+# seeds a created agent with them; a difference in them is logged and left.
+persona='[
+  ["conversation_config", "agent", "first_message"],
+  ["conversation_config", "agent", "max_conversation_duration_message"],
+  ["conversation_config", "agent", "prompt", "prompt"],
+  ["conversation_config", "tts", "voice_id"],
+  ["conversation_config", "tts", "model_id"],
+  ["conversation_config", "tts", "stability"],
+  ["conversation_config", "tts", "similarity_boost"],
+  ["conversation_config", "tts", "speed"],
+  ["conversation_config", "tts", "expressive_mode"],
+  ["conversation_config", "tts", "suggested_audio_tags"]
+]'
+
+# drift WANT LIVE WHICH prints the dotted paths of every declared leaf whose
+# live value differs: the managed leaves, or the persona ones. An array or an
+# empty object is one leaf, compared whole.
 drift() {
-  jq -rn --argjson want "$1" --argjson live "$2" '
+  jq -rn --argjson want "$1" --argjson live "$2" --arg which "$3" --argjson persona "$persona" '
     def leaves($p):
       if type == "object" and length > 0
       then . as $o | keys_unsorted[] as $k | ($o[$k] | leaves($p + [$k]))
       else $p end;
     [$want | leaves([])]
+    | map(select((. | IN($persona[])) == ($which == "persona")))
     | map(select(. as $p | ($want | getpath($p)) != (try ($live | getpath($p)) catch {})))
     | map(map(tostring) | join("."))
     | join(", ")'
+}
+
+# The PATCH body: the file without its persona leaves. An object the deletion
+# emptied goes too, since the API would take `{}` as a reset; one the file
+# declares empty stays, since that is what it means.
+managed() {
+  jq -c --argjson persona "$persona" '
+    . as $want
+    | def strip($orig):
+        if type == "object"
+        then with_entries(. as $e | .value = ($e.value | strip($orig[$e.key] // {})))
+             | with_entries(select(.value != {} or $orig[.key] == {}))
+        else . end;
+    delpaths($persona) | strip($want)' <<<"$1"
 }
 
 # Pages through every agent: the list's search is fuzzy, and an agent it
@@ -106,7 +138,7 @@ give_up() {
 
 # reconcile_agent NAME WANT creates or patches one agent and records it.
 reconcile_agent() {
-  local name=$1 want=$2 agent_id live fields left created status
+  local name=$1 want=$2 agent_id live fields persona_fields left created status
   agent_ready[$name]=no
   agent_ids[$name]=""
   agent_id=$(find_agent "$name") || {
@@ -138,7 +170,9 @@ reconcile_agent() {
       give_up "agent $name ($agent_id): not read"
       return
     }
-    fields=$(drift "$want" "$live")
+    fields=$(drift "$want" "$live" managed)
+    persona_fields=$(drift "$want" "$live" persona)
+    [[ -z $persona_fields ]] || log "agent $name ($agent_id): persona differs from the file: $persona_fields"
     if [[ -z $fields ]]; then
       log "agent $name ($agent_id): in sync"
       agent_ready[$name]=yes
@@ -148,7 +182,7 @@ reconcile_agent() {
       log "agent $name ($agent_id): would patch $fields"
       return
     fi
-    call PATCH "/v1/convai/agents/$agent_id" "$write_key" <<<"$want" >/dev/null || {
+    managed "$want" | call PATCH "/v1/convai/agents/$agent_id" "$write_key" >/dev/null || {
       give_up "agent $name ($agent_id): not patched"
       return
     }
@@ -160,7 +194,7 @@ reconcile_agent() {
     give_up "agent $name ($agent_id): not re-read"
     return
   }
-  left=$(drift "$want" "$live")
+  left=$(drift "$want" "$live" managed)
   if [[ -n $left ]]; then
     give_up "agent $name ($agent_id): still differs after a write: $left"
     return

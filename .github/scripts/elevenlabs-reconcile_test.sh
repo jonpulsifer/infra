@@ -322,4 +322,31 @@ assert_equal 'a number bound to an undeclared agent fails before any write' 1 "$
 assert_contains 'a number bound to an undeclared agent is refused' "$out" 'binds an agent that'
 assert_lacks 'a number bound to an undeclared agent sends no PATCH' "$requests" 'PATCH '
 
+# The persona leaves are edited live: a prompt or a voice that differs from
+# the file is reported and left, and never in a PATCH.
+cp "$pristine/agent-agent_troll1.json" "$work/troll.base.json"
+jq '.conversation_config.agent.prompt.prompt = "edited in the dashboard" | .conversation_config.tts.stability = 0.9' \
+  "$work/troll.base.json" >"$pristine/agent-agent_troll1.json"
+run_case "$desired" ELEVENLABS_READ_KEY=read-key
+assert_contains 'report mode names the persona leaves that differ' "$out" \
+  'agent pbx-troll (agent_troll1): persona differs from the file: conversation_config.agent.prompt.prompt, conversation_config.tts.stability'
+assert_contains 'a persona edit alone leaves the agent in sync' "$out" 'agent pbx-troll (agent_troll1): in sync'
+run_case "$desired" "${write_env[@]}"
+assert_equal 'a persona edit alone exits 0' 0 "$status"
+assert_lacks 'a persona edit alone sends no agent PATCH' "$requests" 'PATCH /v1/convai/agents/'
+assert_equal 'a persona edit alone survives the run' 'edited in the dashboard' \
+  "$(jq -r .conversation_config.agent.prompt.prompt "$STUB_DIR/agent-agent_troll1.json")"
+jq '.conversation_config.agent.prompt.temperature = 0.1 | .platform_settings.call_limits.daily_limit = 3' \
+  "$pristine/agent-agent_troll1.json" >"$pristine/next.json"
+mv "$pristine/next.json" "$pristine/agent-agent_troll1.json"
+run_case "$desired" "${write_env[@]}"
+assert_equal 'a managed edit beside a persona edit exits 0' 0 "$status"
+assert_contains 'a managed edit beside a persona edit is patched' "$out" \
+  'agent pbx-troll (agent_troll1): patched conversation_config.agent.prompt.temperature, platform_settings.call_limits.daily_limit'
+patch=$(grep "PATCH /v1/convai/agents/agent_troll1" <<<"$requests")
+assert_contains 'the agent PATCH carries the managed leaves' "$patch" 'conversation_config.agent.prompt.temperature'
+assert_lacks 'the agent PATCH carries no prompt text' "$patch" 'conversation_config.agent.prompt.prompt'
+assert_lacks 'the agent PATCH carries no tts leaf' "$patch" 'conversation_config.tts'
+cp "$work/troll.base.json" "$pristine/agent-agent_troll1.json"
+
 echo "elevenlabs-reconcile_test: ok"
