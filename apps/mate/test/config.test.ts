@@ -23,7 +23,6 @@ describe('config from the environment', () => {
     expect(config.maxConcurrent).toBe(3);
     expect(config.maxSandboxes).toBe(2);
     expect(config.port).toBe(8080);
-    expect(config.sessionFile).toBeNull();
     expect([...config.allowedChannelIds]).toEqual([
       '1509024937422356532',
       '1509024937422356533',

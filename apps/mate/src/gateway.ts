@@ -1,6 +1,7 @@
 import { Client } from '@discordjs/core';
 import { REST } from '@discordjs/rest';
 import {
+  CloseCodes,
   CompressionMethod,
   WebSocketManager,
   WebSocketShardEvents,
@@ -47,6 +48,8 @@ export interface Gateway {
   manager: WebSocketManager;
   rest: REST;
   budget: IdentifyBudget;
+  /** Closes the socket keeping the stored session, so the next process resumes it. */
+  leave(reason: string): Promise<void>;
 }
 
 export function createGateway(deps: GatewayDeps): Gateway {
@@ -81,6 +84,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
     health.connected = true;
     log.info('gateway resumed');
   });
+  let leaving = false;
   manager.on(WebSocketShardEvents.Closed, (code) => {
     health.connected = false;
     const fatal = FATAL_CLOSE_CODES.has(code);
@@ -93,6 +97,10 @@ export function createGateway(deps: GatewayDeps): Gateway {
       deps.exit(EXIT_FATAL_CLOSE);
       return;
     }
+    if (leaving && code === CloseCodes.Resuming) {
+      log.info('gateway closed; session kept for the next process', { code });
+      return;
+    }
     log.warn('gateway closed', { code });
   });
   manager.on(WebSocketShardEvents.Error, (error) => {
@@ -103,5 +111,11 @@ export function createGateway(deps: GatewayDeps): Gateway {
   });
 
   const client = new Client({ rest, gateway: manager });
-  return { client, manager, rest, budget };
+  async function leave(reason: string): Promise<void> {
+    leaving = true;
+    deps.store.seal();
+    await manager.destroy({ code: CloseCodes.Resuming, reason });
+    await deps.store.flush();
+  }
+  return { client, manager, rest, budget, leave };
 }

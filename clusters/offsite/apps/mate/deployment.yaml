@@ -218,10 +218,6 @@ spec:
             # number and the caps are switchboard's; the sandbox holds neither.
             - name: MATE_SWITCHBOARD_URL
               value: http://switchboard.elevenlabs.svc.cluster.local:8080
-            # On the emptyDir, so a container restart resumes the gateway session
-            # instead of spending an identify from the daily budget.
-            - name: MATE_SESSION_FILE
-              value: /tmp/session.json
             # readOnlyRootFilesystem: /tmp (below) is the only writable path.
             - name: TMPDIR
               value: /tmp

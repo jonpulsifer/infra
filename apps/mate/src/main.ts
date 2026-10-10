@@ -8,7 +8,7 @@ import { jsonLog as log, plain } from './log.ts';
 import { Mate, type SlackSide } from './mate.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
 import { PROFILES, validateProfiles } from './profiles.ts';
-import { fileSessionStore, memorySessionStore } from './session.ts';
+import { memorySessionStore, postgresSessionStore } from './session.ts';
 import { openSocket, slackEvents, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
 import { openDatabase, PostgresEventClaims } from './store.ts';
@@ -74,10 +74,13 @@ const server = Bun.serve({
   port: config.port,
   fetch: (request) => health.fetch(request),
 });
-const store = config.sessionFile
-  ? fileSessionStore(config.sessionFile, log)
+const database = await openDatabase(config.brain, log, {
+  metrics: lazyInstruments(),
+});
+const store = database.sql
+  ? postgresSessionStore(database, log)
   : memorySessionStore();
-const { client, manager, budget } = createGateway({
+const { client, manager, budget, leave } = createGateway({
   token: config.token,
   store,
   log,
@@ -163,12 +166,9 @@ async function shutdown(signal: string): Promise<void> {
 }
 
 const kube = await discoverKube();
-const database = await openDatabase(config.brain, log, {
-  metrics: lazyInstruments(),
-});
 const { slack } = config;
 const discord = discordListener({
-  gateway: { client, manager, budget },
+  gateway: { client, manager, budget, leave },
   api: discordOver(client.api),
   commands: client.api.applicationCommands,
   guildId: config.guildId,
