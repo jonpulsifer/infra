@@ -1,10 +1,12 @@
 ---
 name: switchboard
 description: >-
-  Ring the owner's phone through switchboard, or send the mission caller, in the owner's voice, to
-  phone a family member and get them to say a word. Use when the owner asks to
-  be called, rung or phoned, says "call me", or asks for a mission, a prank
-  call, or to make someone say a word.
+  Ring the owner's phone through switchboard, send the mission caller, in the
+  owner's voice, to phone a family member and get them to say a word, or edit
+  the character of a phone agent (Earl the troll, the mission caller). Use when
+  the owner asks to be called, rung or phoned, says "call me", asks for a
+  mission, a prank call, or to make someone say a word, or asks to change how
+  an agent sounds, talks or behaves on the phone.
 metadata:
   wiki: https://wiki.lolwtf.ca/apps/switchboard/
 ---
@@ -110,6 +112,48 @@ curl -sS --max-time 480 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/mission"
 - `400`: the keyword is not 1-40 letters, spaces, hyphens or apostrophes.
 - `503`: missions are off on the server. Say so.
 - `502`, `401` and `000`: as for a ring, with the mission token.
+
+## Persona
+
+When the owner asks to change how a phone agent sounds, talks or behaves
+("make Earl grumpier", "less chuckling", "give the mission caller a shorter
+opener"), edit its persona live and let the snapshot put it in git. The
+agents are `pbx-troll` (Earl, who answers screened callers), `pbx-mission`
+(the mission caller) and `pbx-switchboard` (the ringer). The owner's own
+voice is on the first two, so the register is flat and a bit put out, never
+chirpy: no `laughs`, `excited` or `surprised` tags unless asked.
+
+1. Read the persona: `GET "$SWITCHBOARD_URL/persona/<name>"` with the
+   persona bearer. It answers `first_message`,
+   `max_conversation_duration_message`, `prompt` and `tts`.
+2. Edit the prompt as text, the smallest change that does what was asked,
+   and send only the leaves you changed. The prompt goes back whole.
+3. Rehearse: `POST /persona/<name>/rehearse` with `caller` (who phones, two
+   sentences, in the mood that tests the change), `turns` and, for Earl,
+   `dynamic_variables: {"sip_pbx_mode": "troll"}`. Read the transcript and
+   the `tags` list. Edit again if it is not right.
+4. Report the pull request the answer's `snapshot` names, with two or three
+   lines from the rehearsal; never paste the whole prompt or transcript.
+
+```bash
+curl -sS --max-time 60 -w '\n%{http_code}\n' -X PATCH "$SWITCHBOARD_URL/persona/pbx-troll" \
+  -H "Authorization: Bearer $SWITCHBOARD_PERSONA_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"tts":{"stability":0.5},"prompt":"<the whole prompt>"}'
+```
+
+- `200`: written. `persona` is what is live now; `snapshot.status` is
+  `opened` (say the URL), `unchanged`, `skipped` (no App key on the pod; the
+  edit is live and git has not got it, say so) or `failed` (the same, with
+  the step that failed).
+- `400`: a key outside the persona, or a leaf of the wrong shape; the body
+  names it. Nothing was written.
+- `404`: no such agent. Name the three.
+- `503`: the persona routes are off. `401` and `000`: as for a ring, with the
+  persona token.
+
+An edit made in the ElevenLabs dashboard is put in git the same way with
+`POST /persona/<name>/snapshot`.
 
 ## Notes
 

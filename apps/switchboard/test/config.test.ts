@@ -135,3 +135,34 @@ describe('config from the environment', () => {
     ).toThrow('SWITCHBOARD_MISSION_DAILY_CAP');
   });
 });
+
+describe('persona config', () => {
+  test('defaults the agents, the directory and the repository', () => {
+    const config = readConfig(minimal);
+    expect(config.personaToken).toBeUndefined();
+    expect(config.personaAgentNames).toEqual([
+      'pbx-troll',
+      'pbx-switchboard',
+      'pbx-mission',
+    ]);
+    expect(config.personaDir).toBe(
+      'clusters/offsite/apps/elevenlabs/desired/agents',
+    );
+    expect(config.githubOwner).toBe('jonpulsifer');
+    expect(config.githubRepo).toBe('infra');
+    expect(config.githubBase).toBe('main');
+  });
+
+  test('reads a custom agent list and refuses a bad name or repository', () => {
+    expect(
+      readConfig({ ...minimal, SWITCHBOARD_PERSONA_AGENTS: 'a, b,a' })
+        .personaAgentNames,
+    ).toEqual(['a', 'b']);
+    expect(() =>
+      readConfig({ ...minimal, SWITCHBOARD_PERSONA_AGENTS: 'Bad Name' }),
+    ).toThrow('bad agent name');
+    expect(() =>
+      readConfig({ ...minimal, SWITCHBOARD_GITHUB_REPO: 'infra' }),
+    ).toThrow('owner/repo');
+  });
+});

@@ -324,6 +324,7 @@ function switchboardEnv(
     { name: 'SWITCHBOARD_URL', value: switchboard.url },
     token('SWITCHBOARD_RING_TOKEN'),
     token('SWITCHBOARD_MISSION_TOKEN'),
+    token('SWITCHBOARD_PERSONA_TOKEN'),
   ];
 }
 
