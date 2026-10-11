@@ -49,3 +49,5 @@ spec:
             name: alertmanager-discord
             key: webhook-url
           sendResolved: true
+          title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ with .CommonLabels.cluster }} · {{ . }}{{ end }}{{ if gt (len .Alerts) 1 }} ({{ len .Alerts }}){{ end }}'
+          message: '{{ range .Alerts }}• {{ if .Annotations.message }}{{ .Annotations.message }}{{ else if .Annotations.summary }}{{ .Annotations.summary }}{{ else }}{{ .Labels.alertname }}{{ end }}{{ "\n" }}{{ end }}'
