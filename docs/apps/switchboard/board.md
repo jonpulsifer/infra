@@ -16,7 +16,7 @@ The Switchboard board is a web page of the office phone as the folly [PBX](../pb
 
 The page shows:
 
-- Each call in progress: the caller, or the number the handset dialled; the line and trunk; the IVR stage, such as `press-5 prompt`, `with Earl` or `held: Robo-Lenny`; the verdict and `pbx-event` kinds; and the elapsed time.
+- Each call in progress: the caller, or the number the handset dialled; the line and trunk; the IVR stage, such as `press-5 prompt`, `with Jonathan` or `held: Robo-Lenny`; the verdict and `pbx-event` kinds; and the elapsed time.
 - Each line: handset and trunk registration, whether it screens, and whether a call is up.
 - The last 25 calls to end, and the state of the ARI connection.
 
@@ -26,7 +26,7 @@ The page shows:
 - The board samples the PBX once a second, so a call that ends within a second, such as one the screening cap refuses, can miss the page. The PBX log still has it.
 - The recent calls carry no hangup cause, and the pod holds them, so a restart empties the list.
 - A context the board has no name for reads as `in <context>`.
-- A caller handed to offsite leaves folly while `PBX_TROLL_EXTENSION` is set, so the board lists the call as ended at `handing off to offsite`, and the caller's time with Earl is in offsite's PBX log.
+- A caller handed to offsite leaves folly while `PBX_TROLL_EXTENSION` is set, so the board lists the call as ended at `handing off to offsite`, and the caller's time with Jonathan is in offsite's PBX log.
 
 ## How it works
 

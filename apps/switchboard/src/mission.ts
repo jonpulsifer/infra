@@ -79,7 +79,7 @@ function text(value: unknown): string | undefined {
 
 /**
  * Scores a finished conversation. The first turn to contain the keyword
- * decides it: a user turn wins, an agent turn means Earl said it first.
+ * decides it: a user turn wins, an agent turn means Jonathan said it first.
  */
 export function scoreConversation(
   conversation: Conversation,

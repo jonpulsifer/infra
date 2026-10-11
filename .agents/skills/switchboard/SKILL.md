@@ -3,7 +3,7 @@ name: switchboard
 description: >-
   Ring the owner's phone through switchboard, send the mission caller, in the
   owner's voice, to phone a family member and get them to say a word, or edit
-  the character of a phone agent (Earl the troll, the mission caller). Use when
+  the character of a phone agent (Jonathan the troll, the mission caller). Use when
   the owner asks to be called, rung or phoned, says "call me", asks for a
   mission, a prank call, or to make someone say a word, or asks to change how
   an agent sounds, talks or behaves on the phone.
@@ -116,11 +116,11 @@ curl -sS --max-time 480 -w '\n%{http_code}\n' -X POST "$SWITCHBOARD_URL/mission"
 ## Persona
 
 When the owner asks to change how a phone agent sounds, talks or behaves
-("make Earl grumpier", "less chuckling", "give the mission caller a shorter
+("make Jonathan grumpier", "less chuckling", "give the mission caller a shorter
 opener"), edit its persona live and let the snapshot put it in git. The
-agents are `pbx-troll` (Earl, who answers screened callers), `pbx-mission`
+agents are `pbx-troll` (Jonathan, who answers screened callers), `pbx-mission`
 (the mission caller) and `pbx-switchboard` (the ringer). The owner's own
-voice is on the first two, so the register is flat and a bit put out, never
+voice is on the first two. Jonathan is easygoing and conversational, not
 chirpy: no `laughs`, `excited` or `surprised` tags unless asked.
 
 1. Read the persona: `GET "$SWITCHBOARD_URL/persona/<name>"` with the
@@ -129,7 +129,7 @@ chirpy: no `laughs`, `excited` or `surprised` tags unless asked.
 2. Edit the prompt as text, the smallest change that does what was asked,
    and send only the leaves you changed. The prompt goes back whole.
 3. Rehearse: `POST /persona/<name>/rehearse` with `caller` (who phones, two
-   sentences, in the mood that tests the change), `turns` and, for Earl,
+   sentences, in the mood that tests the change), `turns` and, for Jonathan,
    `dynamic_variables: {"sip_pbx_mode": "troll"}`. Read the transcript and
    the `tags` list. Edit again if it is not right.
 4. Report the pull request the answer's `snapshot` names, with two or three
