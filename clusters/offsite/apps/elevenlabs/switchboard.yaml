@@ -88,7 +88,7 @@ spec:
                 secretKeyRef:
                   name: switchboard-config
                   key: SWITCHBOARD_ALERT_TOKEN
-            # The mission route (Earl, the pbx-mission agent) is on only when
+            # The mission route (Jonathan, the pbx-mission agent) is on only when
             # the item `mission targets` has a token and a target; the pod then
             # resolves the agent's id at boot like the ringer's.
             - name: SWITCHBOARD_MISSION_TOKEN

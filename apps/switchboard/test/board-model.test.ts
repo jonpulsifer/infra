@@ -264,7 +264,7 @@ describe('the board model', () => {
     // Another call's leg to the desk is not this Dial's.
     pbx.put('16.3', 'PJSIP/line1-00000052', { app: 'AppDial' });
     expect(pbx.poll(0).calls.map((c) => [c.id, c.stage.label])).toEqual([
-      ['16.1', 'with Earl'],
+      ['16.1', 'with Jonathan'],
     ]);
   });
 
@@ -289,7 +289,7 @@ describe('the board model', () => {
     ]);
   });
 
-  test('the troll line reads as Earl, and a context it does not know by name', () => {
+  test('the troll line reads as Jonathan, and a context it does not know by name', () => {
     const pbx = new FakePbx();
     pbx.put('8.1', 'PJSIP/vms-1994-0000000d', line4('agent', 's', 'Dial'));
     pbx.put(
@@ -298,12 +298,12 @@ describe('the board model', () => {
       line4('party-line', 's', 'Playback', '', '', { created: 1 }),
     );
     expect(pbx.poll(1).calls.map((c) => c.stage)).toEqual([
-      { key: 'agent', label: 'with Earl' },
+      { key: 'agent', label: 'with Jonathan' },
       { key: 'other', label: 'in party-line' },
     ]);
   });
 
-  test('a screened caller talks with Earl through the hangup handler and into recent', () => {
+  test('a screened caller talks with Jonathan through the hangup handler and into recent', () => {
     const pbx = new FakePbx();
     const trunk = 'PJSIP/vms-1994-00000040';
     const agent = 'PJSIP/elevenlabs-00000041';
@@ -323,13 +323,13 @@ describe('the board model', () => {
     });
     let view = pbx.poll(14);
     expect(view.calls).toHaveLength(1);
-    expect(view.calls[0]?.stage.label).toBe('with Earl');
+    expect(view.calls[0]?.stage.label).toBe('with Jonathan');
     pbx.put('14.2', agent, { state: 'Up', app: 'AppDial', created: 14 });
     view = pbx.bridge('b3', '14.2', '14.1').poll(16);
     expect(view.calls[0]).toMatchObject({
       verdict: 'screened',
       trail: ['inbound', 'screened', 'troll'],
-      stage: { key: 'agent', label: 'with Earl' },
+      stage: { key: 'agent', label: 'with Jonathan' },
     });
     // agent.conf's hangup handler logs the call without moving it.
     pbx.hangup('14.2');
@@ -338,16 +338,16 @@ describe('the board model', () => {
       trunk,
       line4('agent-held', 's', 'Log', '', 'inbound screened troll held'),
     );
-    expect(stage(pbx, 76)).toBe('with Earl');
+    expect(stage(pbx, 76)).toBe('with Jonathan');
     view = pbx.hangup('14.1').poll(77);
     expect(view.recent[0]).toMatchObject({
-      lastStage: 'talked with Earl',
+      lastStage: 'talked with Jonathan',
       trail: ['inbound', 'screened', 'troll', 'held'],
       talkedSeconds: 60,
     });
   });
 
-  test('a caller Earl does not take falls back to the sinks', () => {
+  test('a caller Jonathan does not take falls back to the sinks', () => {
     const pbx = new FakePbx();
     pbx.put(
       '15.1',

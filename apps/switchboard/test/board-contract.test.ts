@@ -73,8 +73,8 @@ describe.skipIf(!present)('the board and the folly dialplan', () => {
     ['inbound', 'spam', 'queue', 'held: Endless Queue'],
     ['inbound', 'spam', 'lenny', 'held: Robo-Lenny'],
     ['inbound', 'spam', 'full', 'refused (full)'],
-    ['inbound', 'agent', 's', 'with Earl'],
-    ['inbound', 'agent', 'dial', 'with Earl'],
+    ['inbound', 'agent', 's', 'with Jonathan'],
+    ['inbound', 'agent', 'dial', 'with Jonathan'],
   ];
   for (const [direction, context, exten, label] of places) {
     test(`${context},${exten} is in the dialplan and reads as ${label}`, () => {
