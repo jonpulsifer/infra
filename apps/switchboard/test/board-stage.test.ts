@@ -112,7 +112,12 @@ describe('the IVR stage of a call', () => {
       'refused',
       'refused (busy)',
     ],
-    ['the troll agent', input('inbound', 'agent', 's'), 'agent', 'with Jonathan'],
+    [
+      'the troll agent',
+      input('inbound', 'agent', 's'),
+      'agent',
+      'with Jonathan',
+    ],
     [
       'handing off to offsite',
       input('inbound', 'agent', 'dial', {
