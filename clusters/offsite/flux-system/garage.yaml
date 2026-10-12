@@ -16,6 +16,12 @@ spec:
   dependsOn:
     # Serves the ClusterSecretStore the ExternalSecret reads.
     - name: onepassword-connect
+    # Holds NODE_DATA_ROOT, the hostPath of the data volume.
+    - name: config
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-settings
   healthChecks:
     - apiVersion: apps/v1
       kind: StatefulSet

@@ -3,7 +3,7 @@ title: Issue a talosconfig
 description: Mint the owner's os:admin talosconfig for a Talos cluster and Rowbutt's os:reader one, and store each in 1Password.
 ---
 
-Use this runbook when a cluster moves to Talos, and before a talosconfig certificate expires. A talosconfig is the client certificate and endpoints that `talosctl` uses to reach the Talos API. Its certificate lasts one year. Today only folly runs Talos, so each item below holds folly alone.
+Use this runbook when a cluster moves to Talos, and before a talosconfig certificate expires. A talosconfig is the client certificate and endpoints that `talosctl` uses to reach the Talos API. Its certificate lasts one year.
 
 | 1Password item | Type and file name | Holds |
 | --- | --- | --- |

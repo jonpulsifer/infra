@@ -3,7 +3,7 @@ title: Kubernetes
 description: The folly and offsite Kubernetes clusters, how Flux applies clusters/ from git, and the sandbox runtimes and storage the clusters offer.
 ---
 
-The lab runs two Kubernetes clusters on NixOS hosts: `folly` at home and `offsite` at the remote site. Flux, the GitOps controller in each cluster, applies `clusters/` from `main`. [Workloads](workloads.md) lists what runs where.
+The lab runs two Kubernetes clusters on Talos Linux nodes: `folly` at home and `offsite` at the remote site. `clusters/<site>/talos/` declares each cluster's nodes. Flux, the GitOps controller in each cluster, applies `clusters/` from `main`. [Workloads](workloads.md) lists what runs where.
 
 ## Parts
 
@@ -11,7 +11,7 @@ The lab runs two Kubernetes clusters on NixOS hosts: `folly` at home and `offsit
 | --- | --- | --- |
 | Control plane | Runs the API server, etcd and pods | [optiplex](../hosts/optiplex.md) on folly, [retrofit](../hosts/retrofit.md) on offsite |
 | Workers | Run pods | [riptide](../hosts/riptide.md) and [shale](../hosts/shale.md) on folly, [oldschool](../hosts/oldschool.md) on offsite |
-| Bootstrap root | The OpenTofu root module that installs CoreDNS, `flux-operator` and the `FluxInstance`, the object that `flux-operator` installs Flux from. On offsite it also labels the nodes | Atlantis |
+| Bootstrap root | The OpenTofu root module that installs CoreDNS, `flux-operator` and the `FluxInstance`, the object that `flux-operator` installs Flux from | Atlantis |
 | Flux | Applies `clusters/` from the `infra` GitRepository | The `flux-system` namespace |
 | Shared controllers | CloudNativePG, External Secrets, Kyverno and others | Both clusters |
 | Storage | `local-path` volumes, and NFS volumes from [spore](../hosts/spore.md) | Both clusters, NFS on folly |
@@ -49,7 +49,7 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 - `clusters/<site>/bootstrap/` and `terraform/modules/flux-bootstrap/`: the bootstrap root, with its state in `gs://homelab-ng/clusters/<site>/bootstrap`
 - `clusters/base/platform/`, `clusters/*/storage/` and `clusters/folly/nodes/`: the shared controllers, storage and GPU plugin
 - `clusters/folly/node-features/`: the NodeFeatureRule that labels the GPU node
-- `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. `nix/services/k8s/` registers the handlers.
+- `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. The `kata-containers` and `gvisor` extensions in `clusters/<site>/talos/talos.tf` provide the handlers.
 - `clusters/<site>/config/`: the settings, secrets and topology that Flux substitutes. See [Topology](../reference/topology.md).
 
 ## Related
@@ -58,4 +58,4 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 - [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)
 - [Get cluster admin access](../runbooks/get-cluster-admin-access.md)
 - [Operate Postgres](../runbooks/operate-postgres.md)
-- [Add a Kubernetes node](../runbooks/add-a-kubernetes-node.md)
+- [Install Talos on a node](../runbooks/install-talos-on-a-node.md)

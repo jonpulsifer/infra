@@ -36,4 +36,4 @@ tests:
               job: node-exporter
             exp_annotations:
               message: "shale has no data volume at /var/mnt/data"
-              description: "The node's `data` user volume is not mounted, so new local-path claims and jellyfin's media land on EPHEMERAL. `talosctl -n shale get volumestatus u-data` and `talosctl -n shale get mountstatus` show why."
+              description: "The node's `data` user volume is not mounted, so new local-path claims and the hostPath trees under it land on EPHEMERAL. `talosctl -n shale get volumestatus u-data` and `talosctl -n shale get mountstatus` show why."
