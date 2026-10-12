@@ -9,11 +9,10 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| Garage | Stores the buckets `velero`, `cnpg` and `etcd` | A NixOS service on [spore](../hosts/spore.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md) for offsite |
+| Garage | Stores the buckets `velero`, `cnpg` and `etcd` | A NixOS service on [spore](../hosts/spore.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
 | Velero | Backs up objects, and the volumes of pods with the annotation `backup.velero.io/backup-volumes` | The `velero` namespace |
 | barman-cloud plugin | Archives each database's base backups and WAL, through an `ObjectStore` named `garage` | The `cloudnative-pg` namespace |
-| `etcd-snapshot` | Snapshots folly's etcd through the Talos API into `etcd/folly/` | The `backups` namespace on folly |
-| `etcd-backup` | Snapshots offsite's etcd into `etcd/<hostname>/` | [retrofit](../hosts/retrofit.md) |
+| `etcd-snapshot` | Snapshots the cluster's etcd through the Talos API into `etcd/<site>/` | The `backups` namespace on each site |
 | `backup-push` | Syncs each bucket to GCS through an rclone crypt remote | The `backups` namespace |
 | `restore-drill` | Recovers the kthx database on offsite, and the tronbyt database on folly, into a throwaway cluster | The `restore-drill` namespace on each site |
 
@@ -51,15 +50,15 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 
 ## Where it lives
 
-- `nix/services/garage.nix`, `nix/services/etcd-backup.nix`: Garage on spore, and offsite's etcd snapshots
-- `clusters/folly/etcd-snapshot/`: folly's etcd snapshots
+- `nix/services/garage.nix`: Garage on spore
+- `clusters/<site>/etcd-snapshot/`: the etcd snapshots
 - `clusters/offsite/garage/`: offsite's Garage
 - `clusters/base/platform/velero/`, `barman-cloud/`, `backups/`: Velero, the plugin and `backup-push`
 - `clusters/base/platform/spindrift-target/backup/`: the store the kthx Datastores archive to
 - `clusters/offsite/apps/restore-drill/`, `clusters/folly/apps/restore-drill/`: the restore drill
 - `clusters/<site>/config/cluster-settings.yaml`: `GARAGE_S3_ENDPOINT`, `BACKUP_PUSH_SCHEDULE`
 - `terraform/gcp/projects/homelab-ng/backups.tf`: the buckets
-- `clusters/base/monitoring/backup-rules.yaml`, `clusters/folly/monitoring/etcd-snapshot-rules.yaml`: the alerts
+- `clusters/base/monitoring/backup-rules.yaml`, `clusters/base/monitoring/etcd-snapshot-rules.yaml`: the alerts
 
 ## Related
 

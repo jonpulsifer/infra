@@ -37,13 +37,18 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 
    Result: A `Pod Volume Backups` list with each volume that you restore, in the phase `Completed`.
 
-3. Stop the writers of each database. On folly, that is the `tronbyt` Deployment.
+3. Stop the writers of each database. On folly, that is the `tronbyt` Deployment. On offsite, they are `kthx`, `mate`, `spindrift-web`, `spindrift-reconciler`, `prowler-api`, `prowler-worker`, `prowler-beat` and `clankerbanker-web`.
 
    ```bash
    kubectl --context folly -n tronbyt scale deploy/tronbyt --replicas 0
    ```
 
-4. Take a last barman backup of each database, as [Recover a re-created database](recover-a-re-created-database.md#take-a-last-backup) describes.
+4. Take a last barman backup of each database, as [Recover a re-created database](recover-a-re-created-database.md#take-a-last-backup) describes. On offsite, `mate-db` has no archive: run its `mate-db-backup` CronJob once instead, and make sure that the dump reached `gs://homelab-ng-mate/backups/pg/`.
+
+   ```bash
+   kubectl --context offsite -n mate create job --from=cronjob/mate-db-backup mate-db-backup-pre-talos
+   kubectl --context offsite -n mate wait --for=condition=complete job/mate-db-backup-pre-talos --timeout=10m
+   ```
 5. Record the kthx engine's workloads on the cluster. Neither Velero nor Flux recreates them, and the engine, which runs on offsite, reports drift but never re-converges it. In the kthx console, list each Deploy that is `LIVE` and each Datastore whose Target is on the Vessel for `<site>`. Then record the releases.
 
    ```bash
@@ -53,7 +58,7 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 
 ## Restore the data
 
-1. Make sure that each database recovers, as [Check the recovery](recover-a-re-created-database.md#check-the-recovery) describes, including its base backup under the new prefix. Flux creates each `Cluster` with the recovery that the cutover pull request declares. On folly, that is `tronbyt` in `clusters/folly/apps/tronbyt/04-database.yaml`.
+1. Make sure that each database recovers, as [Check the recovery](recover-a-re-created-database.md#check-the-recovery) describes, including its base backup under the new prefix. Flux creates each `Cluster` with the recovery that the cutover pull request declares. On folly, that is `tronbyt` in `clusters/folly/apps/tronbyt/04-database.yaml`. On offsite, they are the `backup.recoverFrom` values of the `kthx`, `prowler` and `spindrift` releases in `clusters/offsite/apps/`. `mate-db` starts empty: restore the dump from step 4 of [Freeze the cluster](#freeze-the-cluster) with [Restore a database](restore-a-database.md), then sign in to ChatGPT again, because the dump leaves out `mate_credentials`.
 2. Restore each volume from the backup in step 2 of [Freeze the cluster](#freeze-the-cluster), as [Restore a volume](restore-a-volume.md) describes.
 
 > [!NOTE]
