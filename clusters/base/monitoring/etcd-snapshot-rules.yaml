@@ -1,5 +1,5 @@
 ---
-# The deadman for clusters/folly/etcd-snapshot. BackupJobStale and
+# The deadman for clusters/<site>/etcd-snapshot. BackupJobStale and
 # BackupJobFailed watch the CronJob once it reports; this fires when it does not.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule

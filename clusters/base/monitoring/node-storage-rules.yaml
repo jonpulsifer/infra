@@ -23,4 +23,4 @@ spec:
             severity: critical
           annotations:
             message: "{{ $labels.instance }} has no data volume at /var/mnt/data"
-            description: "The node's `data` user volume is not mounted, so new local-path claims and jellyfin's media land on EPHEMERAL. `talosctl -n {{ $labels.instance }} get volumestatus u-data` and `talosctl -n {{ $labels.instance }} get mountstatus` show why."
+            description: "The node's `data` user volume is not mounted, so new local-path claims and the hostPath trees under it land on EPHEMERAL. `talosctl -n {{ $labels.instance }} get volumestatus u-data` and `talosctl -n {{ $labels.instance }} get mountstatus` show why."

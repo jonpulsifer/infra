@@ -12,3 +12,8 @@ data:
   # backups. Its push to GCS runs nightly.
   GARAGE_S3_ENDPOINT: http://oldschool.lolwtf.ca:3900
   BACKUP_PUSH_SCHEDULE: "0 5 * * *"
+
+  # offsite's nodes run Talos: the kubelet's own root, and the `data` user
+  # volume that clusters/offsite/talos/patches.tf mounts on every node.
+  KUBELET_ROOT: /var/lib/kubelet
+  NODE_DATA_ROOT: /var/mnt/data

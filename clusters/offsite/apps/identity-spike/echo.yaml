@@ -27,7 +27,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: echo
-          image: ghcr.io/jonpulsifer/kthx:latest@sha256:2209687886f57f5775d37d761f5c6b24664220b4df440bb780c01ce05cb45eb5
+          image: ghcr.io/jonpulsifer/kthx:latest@sha256:1171b7bd5b0aa126f98f883e5e0663f633cc72f243b2490cf1e9ea8f7aba41ba
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/bun", "-e"]
           args:
