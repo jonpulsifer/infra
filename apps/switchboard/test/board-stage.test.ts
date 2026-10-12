@@ -112,7 +112,12 @@ describe('the IVR stage of a call', () => {
       'refused',
       'refused (busy)',
     ],
-    ['the troll agent', input('inbound', 'agent', 's'), 'agent', 'with Earl'],
+    [
+      'the troll agent',
+      input('inbound', 'agent', 's'),
+      'agent',
+      'with Jonathan',
+    ],
     [
       'handing off to offsite',
       input('inbound', 'agent', 'dial', {
@@ -126,13 +131,13 @@ describe('the IVR stage of a call', () => {
       'dialling the troll agent',
       input('inbound', 'from-voipms', 's', { dialling: 'elevenlabs' }),
       'agent',
-      'with Earl',
+      'with Jonathan',
     ],
     [
       'talking to the troll agent',
       input('handset', 'agent', 's', { bridgedTo: 'elevenlabs' }),
       'agent',
-      'with Earl',
+      'with Jonathan',
     ],
     ['a toy', input('handset', 'toybox', 'clock'), 'toy', 'toy: clock'],
     [

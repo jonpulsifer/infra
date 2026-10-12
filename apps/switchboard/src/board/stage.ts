@@ -41,10 +41,10 @@ const LINE = /^line\d+$/;
 /** The PJSIP endpoint of the ElevenLabs trunk in pjsip.conf. */
 export const AGENT_ENDPOINT = 'elevenlabs';
 /** The troll agent's name on the phone. */
-export const AGENT_NAME = 'Earl';
+export const AGENT_NAME = 'Jonathan';
 // The ElevenLabs troll line's contexts, from agent.conf.
 const AGENT_CONTEXTS = new Set(['agent', 'from-elevenlabs']);
-/** The app agent.conf hands a screened caller to offsite's Earl with. */
+/** The app agent.conf uses to hand a screened caller to Jonathan offsite. */
 export const TRANSFER_APP = 'Transfer';
 const SINKS: Record<string, string> = {
   queue: 'Endless Queue',

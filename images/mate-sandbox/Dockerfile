@@ -29,12 +29,12 @@ ARG CILIUM_CLI_VERSION=0.20.1
 # renovate: datasource=custom.cnpg-operator depName=cloudnative-pg/cloudnative-pg
 ARG CNPG_VERSION=1.30.1
 # renovate: datasource=github-releases depName=open-policy-agent/conftest
-ARG CONFTEST_VERSION=0.71.0
+ARG CONFTEST_VERSION=0.71.1
 # Must equal d2 in the root mise.toml: `docs:diagrams` commits its output.
 # renovate: datasource=github-releases depName=terrastruct/d2
 ARG D2_VERSION=0.9.0
 # renovate: datasource=github-releases depName=dandavison/delta
-ARG DELTA_VERSION=0.19.2
+ARG DELTA_VERSION=0.20.1
 # renovate: datasource=github-releases depName=eza-community/eza
 ARG EZA_VERSION=0.23.5
 # renovate: datasource=github-releases depName=fluxcd/flux2
@@ -46,7 +46,7 @@ ARG GH_VERSION=2.102.0
 # renovate: datasource=github-releases depName=helm/helm
 ARG HELM_VERSION=4.3.0
 # renovate: datasource=github-releases depName=cilium/hubble
-ARG HUBBLE_VERSION=1.19.4
+ARG HUBBLE_VERSION=1.20.2
 # renovate: datasource=github-releases depName=jqlang/jq extractVersion=^jq-(?<version>.*)$
 ARG JQ_VERSION=1.8.2
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.1
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.2
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.10.1
+ARG MISE_VERSION=2026.10.4
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
@@ -188,7 +188,7 @@ COPY images/mate-sandbox/gh /usr/local/bin/gh
 # The CLI comes from the image that serves it, so the sandbox runs the build
 # the apex serves. It is a Bun bundle: `kthx` on PATH is the shim copied in
 # below, and `kthx upgrade` would install a second copy the shim never runs.
-COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:511bad906c429f90c02b9170cacefe74b91a1f2fb5811e605c4be5ddeb1416cd /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
+COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:449db3e1517c056a9641900d0bba78337c79ba9b30b407e65fa31607a8625cd6 /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
 RUN set -eux; \
     mkdir -m 0755 -p /usr/local/lib/kthx; \
     tar -xzf /tmp/kthx.tgz --no-same-owner -C /usr/local/lib/kthx --strip-components=1 \

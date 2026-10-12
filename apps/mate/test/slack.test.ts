@@ -1168,6 +1168,38 @@ describe('the surface', () => {
       clock,
     });
 
+  describe('marking a message', () => {
+    const ref = { channelId: CHANNEL, id: TS };
+
+    test('seen adds eyes', async () => {
+      await surface().mark?.(ref, 'seen');
+      expect(api.reactionsOn(CHANNEL, TS)).toEqual(['eyes']);
+    });
+
+    test.each([
+      ['done', 'white_check_mark'],
+      ['failed', 'warning'],
+      ['stopped', 'black_square_for_stop'],
+    ] as const)('%s swaps eyes for %s', async (mark, name) => {
+      await surface().mark?.(ref, 'seen');
+      await surface().mark?.(ref, mark);
+      expect(api.reactionsOn(CHANNEL, TS)).toEqual([name]);
+    });
+
+    test('a failed unreact still adds the mark and rejects once', async () => {
+      api.failUnreact = new Error('boom');
+      await expect(surface().mark?.(ref, 'done')).rejects.toThrow('boom');
+      expect(api.reactionsOn(CHANNEL, TS)).toEqual(['white_check_mark']);
+    });
+
+    test('a failed react still removes eyes and rejects once', async () => {
+      await surface().mark?.(ref, 'seen');
+      api.failReact = new Error('bang');
+      await expect(surface().mark?.(ref, 'done')).rejects.toThrow('bang');
+      expect(api.reactionsOn(CHANNEL, TS)).toEqual([]);
+    });
+  });
+
   test('a whisper is a message only the user sees, in the channel and not the thread', async () => {
     await surface().whisper?.(THREAD, OWNER, 'enter <this> & that');
     expect(api.calls).toEqual([
@@ -1553,6 +1585,37 @@ describe('a Web API call', () => {
       return Response.json({ ok: true, ts: TS });
     }) as unknown as typeof fetch;
     expect(await web().postRoot(CHANNEL, 'daily check')).toBe(TS);
+  });
+
+  test('a reaction already added or already gone is not an error', async () => {
+    const methods: string[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      const method = url.split('/').pop() as string;
+      methods.push(method);
+      expect(JSON.parse(init.body as string)).toEqual({
+        channel: CHANNEL,
+        timestamp: TS,
+        name: 'eyes',
+      });
+      return Response.json({
+        ok: false,
+        error: method === 'reactions.add' ? 'already_reacted' : 'no_reaction',
+      });
+    }) as unknown as typeof fetch;
+    await web().react(CHANNEL, TS, 'eyes');
+    await web().unreact(CHANNEL, TS, 'eyes');
+    expect(methods).toEqual(['reactions.add', 'reactions.remove']);
+  });
+
+  test('any other reaction refusal is the error', async () => {
+    globalThis.fetch = (async () =>
+      Response.json({
+        ok: false,
+        error: 'missing_scope',
+      })) as unknown as typeof fetch;
+    await expect(web().react(CHANNEL, TS, 'eyes')).rejects.toThrow(
+      'reactions.add: missing_scope',
+    );
   });
 
   test('a transport failure names the method and the status', async () => {

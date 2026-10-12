@@ -384,6 +384,18 @@ describe('the gateway listener', () => {
     expect(gateway.destroys).toBe(1);
   });
 
+  test('stop leaves the gateway at once with a reason, and close waits for that leave', async () => {
+    const { gateway, listener, ready } = await listening();
+    await ready();
+    expect(gateway.leaves).toEqual([]);
+    listener.stop();
+    expect(gateway.leaves).toHaveLength(1);
+    expect(gateway.leaves[0]?.reason).toBeTruthy();
+    await listener.close();
+    expect(gateway.leaves).toHaveLength(1);
+    expect(gateway.destroys).toBe(1);
+  });
+
   test('adds the Discord surface on Ready, as the bot, and clears global commands', async () => {
     const { inbox, overwrites, log, ready } = await listening({
       commands: ['help'],

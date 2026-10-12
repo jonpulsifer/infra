@@ -41,11 +41,15 @@ spec:
               value: "1000"
             - name: PGID
               value: "1000"
+            # The server logs DB_DSN at startup, so the password stays out of
+            # it; pgx reads PGPASSWORD.
             - name: DB_DSN
+              value: host=tronbyt-rw.tronbyt.svc.cluster.local user=tronbyt dbname=tronbyt port=5432 sslmode=require TimeZone=UTC
+            - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
                   name: tronbyt-db
-                  key: DB_DSN
+                  key: password
           volumeMounts:
             - name: tronbyt-data
               mountPath: /app/data

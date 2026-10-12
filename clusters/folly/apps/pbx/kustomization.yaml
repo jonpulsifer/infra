@@ -55,7 +55,11 @@ configMapGenerator:
       # internal extension in the voip.ms portal and puts the number here,
       # only while the offsite PBX is registered: a caller voip.ms takes has
       # no fallback here. Empty skips the transfer, and folly keeps every call.
-      - PBX_TROLL_EXTENSION=113
+      # Empty today: voip.ms accepts a REFER to extension 113 and reports the
+      # call to it ringing and answered within the same second, but no INVITE
+      # reaches the offsite registration, so a transferred caller is lost.
+      # Set it again once an internal call to the extension reaches offsite.
+      - PBX_TROLL_EXTENSION=
 
   # render.sh renders every *.conf here into /etc/asterisk, where
   # extensions.conf includes the rest by name.

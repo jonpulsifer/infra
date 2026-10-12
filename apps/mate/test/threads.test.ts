@@ -13,6 +13,7 @@ import {
   HARNESS_FAILED,
   LIMIT_FALLBACK,
   NEVER_STARTED,
+  NOTHING_TO_STOP,
   PRIMARY_REFUSING,
   PROFILE_GONE,
   PROFILE_PLACE,
@@ -184,6 +185,17 @@ interface BuildOptions {
   surfaces?: Surface[];
   commands?: Commands;
   profiles?: ReadonlyMap<string, Profile>;
+  wakes?: RecordingWakes;
+}
+
+/** Answers each cancel with `pending`, and records the thread. */
+class RecordingWakes {
+  readonly cancelled: ThreadRef[] = [];
+  pending = true;
+  async cancel(ref: ThreadRef): Promise<boolean> {
+    this.cancelled.push(ref);
+    return this.pending;
+  }
 }
 
 function build(opts: BuildOptions = {}) {
@@ -211,6 +223,7 @@ function build(opts: BuildOptions = {}) {
     metrics,
     commands: opts.commands,
     profiles: opts.profiles,
+    wakes: opts.wakes,
   });
   return { threads, brain, store };
 }
@@ -1350,6 +1363,46 @@ describe('stopping a turn', () => {
     expect(reply.hasStop).toBe(false);
   });
 
+  test('a Stop click also cancels the pending wake', async () => {
+    const wakes = new RecordingWakes();
+    const { threads } = build({ script: streaming('one two three'), wakes });
+    await threads.onMessage(mention('go'));
+    await clock.advance(250);
+    const threadId = discord.threads[0]!.id;
+    await threads.onStop(key(threadId), OWNER, async () => {});
+    expect(wakes.cancelled).toEqual([ref(threadId)]);
+  });
+
+  test('a typed stop cancels the wake and the running turn, and runs nothing', async () => {
+    const wakes = new RecordingWakes();
+    const { threads, brain } = build({
+      script: streaming('one two three four five'),
+      wakes,
+    });
+    await threads.onMessage(mention('go'));
+    await clock.advance(250);
+    const threadId = discord.threads[0]!.id;
+    await threads.onMessage(inThread(threadId, ' Stop '));
+    await clock.advance(2_000);
+    expect(wakes.cancelled).toEqual([ref(threadId)]);
+    expect(brain.prompts).toEqual(['go']);
+    expect(threads.stateOf(key(threadId))).toBe('idle');
+    expect(discord.inThread(threadId)[0]!.content).not.toContain('five');
+  });
+
+  test('a typed stop with nothing to stop says so', async () => {
+    const wakes = new RecordingWakes();
+    wakes.pending = false;
+    const { threads, brain } = build({ script: streaming('ok'), wakes });
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    await threads.onMessage(inThread(threadId, 'stop'));
+    await clock.advance(1_000);
+    expect(brain.prompts).toEqual(['go']);
+    expect(discord.contentsIn(threadId).at(-1)).toBe(NOTHING_TO_STOP);
+  });
+
   test("anyone else's Stop click is acked and ignored", async () => {
     const { threads } = build({ script: streaming('one two') });
     await threads.onMessage(mention('go'));
@@ -1840,6 +1893,37 @@ describe('a mate restart', () => {
     expect(discord.contentsIn(threadId).at(-1)).toBe('back ');
     expect((await before.store.get(key(threadId)))?.turns).toBe(2);
     expect(metrics.inboundDrops).toEqual([]);
+  });
+
+  test('a wake continues a thread closed before the restart, posting its line first', async () => {
+    const before = build({ script: streaming('back') });
+    await before.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    await clock.advance(QUIET_MS);
+
+    const after = rebuild(before);
+    await after.threads.rehydrate();
+    await settle();
+    const text = '⏰ wake: check the rollout';
+    expect(
+      await after.threads.wake({ ref: ref(threadId), asker: STRANGER, text }),
+    ).toBe(false);
+    expect(
+      await after.threads.wake({
+        ref: ref('no-such-thread'),
+        asker: OWNER,
+        text,
+      }),
+    ).toBe(false);
+    expect(
+      await after.threads.wake({ ref: ref(threadId), asker: OWNER, text }),
+    ).toBe(true);
+    await clock.advance(5_000);
+    expect(before.brain.prompts).toEqual(['go', text]);
+    const lines = discord.contentsIn(threadId);
+    expect(lines.indexOf(text)).toBeLessThan(lines.lastIndexOf('back '));
+    expect((await before.store.get(key(threadId)))?.turns).toBe(2);
   });
 
   test('a Slack reply in a thread closed before the restart continues it', async () => {

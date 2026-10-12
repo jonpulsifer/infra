@@ -1,6 +1,6 @@
 ---
 # The `nfs` StorageClass: one subdirectory per PVC under spore's
-# /nfs/data/k8s-provisioned, apart from the static spore PV's /nfs/data/k8s.
+# /nfs/data/k8s-provisioned.
 # nix/services/nfs-server.nix owns the mount and export.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease

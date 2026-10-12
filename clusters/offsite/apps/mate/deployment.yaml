@@ -49,7 +49,7 @@ spec:
         - name: mate
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/mate…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/mate:latest@sha256:b6a7f4b41704cc8075fe108564215cb83dd215d1da7093cb39020ec83a792a5c
+          image: ghcr.io/jonpulsifer/mate:latest@sha256:971a829b016b4cd112edb7ea4d7cf4e43d9ded948ad0715750d7347d2f201dfc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -159,10 +159,9 @@ spec:
                   optional: true
             - name: MATE_DB_CA_FILE
               value: /var/run/mate/db-ca/ca.crt
-            # Digest-pinned: the agent's tool calls run in this image with no
-            # approval step. CD anchors on the image name beside the digest.
-            - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:d1b895260af4d02de3db4e0b70598c8d31a6ae09d5fe62a762ef5757cf1d66d0
+            # sandbox-image.yaml, re-read at each mint.
+            - name: MATE_SANDBOX_IMAGE_FILE
+              value: /var/run/mate/sandbox-image/image
             # The numeric App id, not the client id. mate mints a 1-hour token per
             # turn from the key; a sandbox never holds the key.
             - name: MATE_GITHUB_APP_ID
@@ -219,10 +218,6 @@ spec:
             # number and the caps are switchboard's; the sandbox holds neither.
             - name: MATE_SWITCHBOARD_URL
               value: http://switchboard.elevenlabs.svc.cluster.local:8080
-            # On the emptyDir, so a container restart resumes the gateway session
-            # instead of spending an identify from the daily budget.
-            - name: MATE_SESSION_FILE
-              value: /tmp/session.json
             # readOnlyRootFilesystem: /tmp (below) is the only writable path.
             - name: TMPDIR
               value: /tmp
@@ -245,6 +240,10 @@ spec:
               readOnly: true
             - name: db-ca
               mountPath: /var/run/mate/db-ca
+              readOnly: true
+            # No subPath: the kubelet swaps a whole-volume mount in place.
+            - name: sandbox-image
+              mountPath: /var/run/mate/sandbox-image
               readOnly: true
           # No liveness probe: /healthz is 503 while the identify-budget guard
           # sleeps, and a restart would burn the budget it protects.
@@ -311,3 +310,8 @@ spec:
               - key: ca.crt
                 path: ca.crt
             optional: true
+        # Not in Reloader's list: a new image reaches the next mint without a
+        # restart.
+        - name: sandbox-image
+          configMap:
+            name: mate-sandbox-image

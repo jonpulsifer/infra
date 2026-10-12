@@ -51,6 +51,7 @@ import type { PromptSink, Update } from '../src/sandbox.ts';
 import { POOL_OPTIONS, PostgresThreadStore } from '../src/store.ts';
 import { type ThreadRef, threadKey } from '../src/surface.ts';
 import type { ThreadRow } from '../src/thread-store.ts';
+import { type Wake, Wakes } from '../src/wakes.ts';
 import { withDatabase } from './db.ts';
 import { LocalHands, type LocalHandsOptions } from './local-hands.ts';
 import { stallingProxy } from './stall-proxy.ts';
@@ -1520,6 +1521,46 @@ describe('profiles', () => {
     const { session } = await opened(built);
     await built.brain.prompt(session, 'go', new Recorder(), ASKER);
     expect(asked[0]?.tools).toEqual([...BASE, 'kthx_x', 'weather_y'].sort());
+  });
+
+  test('an operator lists wake, and its call keeps a wake for the asker; an investigator lists none', async () => {
+    const model = faux();
+    const kept: Wake[] = [];
+    const wakes = new Wakes({
+      store: {
+        put: async (wake) => void kept.push(wake),
+        list: async () => kept,
+        take: async () => false,
+        cancel: async () => false,
+      },
+      pulls: null,
+      log: new RecordingLog(),
+    });
+    model.script(
+      tool('wake', { minutes: 30, note: 'check the deploy' }),
+      fauxAssistantMessage('back in 30'),
+    );
+    const built = build(model, { wakes });
+    const { session, ref } = await opened(built);
+    const sink = new Recorder();
+    await built.brain.prompt(session, 'deploy then check', sink, ASKER);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({
+      ref,
+      asker: ASKER.asker,
+      note: 'check the deploy',
+      pr: null,
+    });
+
+    const asked = seen(model);
+    const investigating = await opened(built, thread(), 'investigator');
+    await built.brain.prompt(
+      investigating.session,
+      'look',
+      new Recorder(),
+      ASKER,
+    );
+    expect(asked[0]?.tools).toEqual(BASE);
   });
 
   test("each profile's prompt for the surface reaches pi, and the hands are made under the profile", async () => {

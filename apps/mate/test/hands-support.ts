@@ -296,9 +296,11 @@ export const THIRD_THREAD: ThreadRef = {
 export const GUILD = '1509024936717455381';
 
 /** A sandbox config with every credential off; tests turn on what they check. */
+export const SANDBOX_IMAGE =
+  'ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac';
+
 export const SANDBOX_CONFIG: SandboxConfig = {
-  image:
-    'ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac',
+  imageFile: '/var/run/mate/sandbox-image/image',
   runtimeClass: 'kata-clh',
   namespace: 'mate',
   checkoutRepo: 'https://github.com/jonpulsifer/infra',
@@ -417,6 +419,7 @@ export function rig(
       {
         kube,
         config: { ...SANDBOX_CONFIG, ...opts.config },
+        image: async () => SANDBOX_IMAGE,
         guildId: GUILD,
         maxSandboxes: 4,
         log,

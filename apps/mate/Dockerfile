@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # mate: one Bun process that runs its source as committed, with no build step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:617061855f341917060d95d164930fd949ed19e66fdc2918eabd2eefe2b29ae6 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:df7376d245b4a242d38e9289d265e6124a21217dea665001a0058960367fae46 AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.2
 ENV BUN_INSTALL=/usr/local \
@@ -14,7 +14,7 @@ FROM base AS pruner
 # At least 2.11.2: 2.10.3's prune drops a nested lockfile entry that pi-ai's
 # dependencies need, and the frozen install then refuses it.
 # renovate: datasource=npm depName=turbo
-ARG TURBO_VERSION=2.11.5
+ARG TURBO_VERSION=2.11.7
 WORKDIR /app
 COPY . .
 RUN bun x "turbo@${TURBO_VERSION}" prune mate --docker
@@ -25,7 +25,7 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
-FROM cgr.dev/chainguard/node:latest@sha256:4dcf9bbb401b4ba7e1fb65dcc5dbd42d71bac515ed6a4662126424017d51df8e AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:51042bb0c3f282bc5694e8c9b3a06847ef847d566115f91dee6ad2cd88a7d26e AS runner
 ENV NODE_ENV=production \
   MATE_PORT=8080
 WORKDIR /app

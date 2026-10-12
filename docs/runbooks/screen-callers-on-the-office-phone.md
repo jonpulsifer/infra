@@ -17,13 +17,13 @@ trunks and a failed call.
 - `config/inbound.conf` rings a contact, an unscreened line, and a screened
   line within an hour of a 911 from the handset. It answers anyone else and
   plays the press-5 prompt twice. A 5 rings the handset as `[5] <number>`. Any
-  other answer goes to `config/agent.conf`, which dials Earl, the troll agent
+  other answer goes to `config/agent.conf`, which dials Jonathan, the troll agent
   on [ElevenLabs](../apps/elevenlabs.md), for up to ten minutes.
-- Before it dials Earl, `config/agent.conf` transfers the caller with a SIP
+- Before it dials Jonathan, `config/agent.conf` transfers the caller with a SIP
   REFER to the voip.ms internal extension in `PBX_TROLL_EXTENSION`, which
   belongs to the `168847_elevenlabs` sub-account that the offsite PBX
   registers. voip.ms moves the call and folly drops out of it. Folly dials
-  Earl itself only when voip.ms refuses the transfer, and the sinks below
+  Jonathan itself only when voip.ms refuses the transfer, and the sinks below
   hold whoever he does not take. A transfer voip.ms challenges for
   credentials, or does not finish in 45 seconds, goes to the sinks instead,
   since voip.ms may still move that caller. `PBX_TROLL_EXTENSION` is empty
@@ -31,9 +31,9 @@ trunks and a failed call.
   ([Turn on the offsite hand-off](#turn-on-the-offsite-hand-off)), and while
   it is empty folly keeps every call.
 - A call that rings the handset buffers the caller's audio with an adaptive
-  jitterbuffer before the handset hears it. The prompt and Earl's calls do
+  jitterbuffer before the handset hears it. The prompt and Jonathan's calls do
   not.
-- Folly's daily count covers both sites: it counts each call Earl answers on
+- Folly's daily count covers both sites: it counts each call Jonathan answers on
   folly and each call that ends on folly during or after its transfer, and
   at twenty folly neither transfers nor dials. Folly's two-call cap covers
   only the calls folly keeps; offsite and ElevenLabs cap the ones it hands
@@ -48,12 +48,12 @@ trunks and a failed call.
   `provision/cathy.xml`.
 - Each step logs one line, `pbx-event kind=<kind> line=<line> caller=<digits>`,
   from `config/events.conf`. `kind=troll` is a hand-off,
-  `kind=held sink=troll` a call Earl answered, and `why=` on `kind=troll-miss`
+  `kind=held sink=troll` a call Jonathan answered, and `why=` on `kind=troll-miss`
   says why he did not take one. The PBX dashboard counts `kind=screened`, and
   so does the [Smiirl counter](operate-the-smiirl-counter.md).
 - `kind=troll site=offsite` is a transfer attempt, and
   `kind=troll-miss site=offsite why=<status>` one that did not happen, which
-  folly's own `kind=troll` follows when folly dials Earl itself:
+  folly's own `kind=troll` follows when folly dials Jonathan itself:
   `why=FAILURE-<code>` names the SIP code voip.ms answered with,
   `why=FAILURE-500` is also a REFER voip.ms never answered,
   `why=FAILURE-1` a REFER that Asterisk could not send or whose subscription
@@ -71,7 +71,7 @@ trunks and a failed call.
 
 > [!NOTE]
 > A caller voip.ms takes leaves folly for good: if the offsite PBX does not
-> answer the extension, folly cannot fall back to its own Earl or the sinks.
+> answer the extension, folly cannot fall back to its own Jonathan or the sinks.
 > Set the extension only while `pjsip show registrations` on offsite lists
 > the one registration `clusters/offsite/apps/pbx/config/pjsip.conf` declares
 > as `Registered`. Each row names the registration and its auth, never the
@@ -90,7 +90,7 @@ trunks and a failed call.
 
 3. Call line 4 from a number that is not a contact, and press nothing.
 
-   Result: Earl answers. The folly log has `pbx-event kind=troll` with
+   Result: Jonathan answers. The folly log has `pbx-event kind=troll` with
    `site=offsite` and no `kind=troll-miss` with `site=offsite`, and
    `core show channels` on folly shows no active call.
 
@@ -168,7 +168,7 @@ Dial a code from any line. `config/handset-codes.conf` sends each one to
 | `*26` | The number of callers the sinks have held since the pod started |
 | `*27` | Robo-Lenny |
 | `*28` | The Endless Queue |
-| `*29` | Earl, the troll agent, in `desk` mode; an error tone if he does not answer |
+| `*29` | Jonathan, the troll agent, in `desk` mode; an error tone if he does not answer |
 
 ## Render the prompts
 
@@ -197,13 +197,13 @@ Place these calls after the pod rolls and the phone has fetched its profile
 
 3. Call line 4 from that number again and press nothing.
 
-   Result: Earl answers. With `PBX_TROLL_EXTENSION` set, offsite carries the
+   Result: Jonathan answers. With `PBX_TROLL_EXTENSION` set, offsite carries the
    call and `*25` on the handset has nothing to play; with it empty, `*25`
    plays the call.
 
 4. Dial `*29`.
 
-   Result: Earl answers and plays up the demo.
+   Result: Jonathan answers and plays up the demo.
 
 5. Dial `*20` from each line.
 
@@ -218,15 +218,16 @@ Place these calls after the pod rolls and the phone has fetched its profile
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| A caller on line 4 hears "press five", talks to Earl, or is held in the queue or with Lenny | Line 4 screens every caller who is not a contact. | Add them as a contact, or tell them to press 5. |
+| A caller on line 4 hears "press five", talks to Jonathan, or is held in the queue or with Lenny | Line 4 screens every caller who is not a contact. | Add them as a contact, or tell them to press 5. |
 | Screened callers are held, never trolled, and the log has `why=off` | The pod started without the `pbx-elevenlabs` Secret, which it reads only at start. | Make sure `kubectl --context folly -n pbx get externalsecret pbx-elevenlabs` shows `SecretSynced`, then restart the pod when no call is up. |
-| The log has `why=daily` | The PBX's own cap: twenty calls today, counting each call Earl answers on folly and each call folly hands to offsite. | Wait for the next day. |
+| The log has `why=daily` | The PBX's own cap: twenty calls today, counting each call Jonathan answers on folly and each call folly hands to offsite. | Wait for the next day. |
 | The log has `why=CONGESTION`, `CHANUNAVAIL`, `BUSY` or `NOANSWER` | ElevenLabs refused the call, was unreachable, or did not answer in 60 seconds. How it treats a call over its own limits is unverified; with call queueing on, it plays hold audio. | Read the agent's SIP ([Diagnose a failed call](operate-the-office-phone.md#diagnose-a-failed-call)). |
 | A caller on line 4 gets a busy signal | Two callers are in the screen. | Wait, or raise the cap in `config/inbound.conf`. |
-| The log has `kind=troll-miss site=offsite why=FAILURE-<code>`, then Earl answers from folly | voip.ms answered the REFER, or a NOTIFY about the call to the extension, with that SIP code, and folly kept the call. | Read the REFER and its NOTIFYs ([Diagnose a failed call](operate-the-office-phone.md#diagnose-a-failed-call)). Check `PBX_TROLL_EXTENSION` against the portal and that the offsite PBX is registered. |
-| The log has `why=FAILURE-401` or `FAILURE-407` with `site=offsite`, and the caller is held in a sink | voip.ms challenged the REFER. Asterisk sends it again with `vms-1994`'s credentials after `Transfer()` has given up, so folly holds the caller in a sink rather than dial Earl, and voip.ms may still move them. | Read the second REFER's answer. When voip.ms takes it, the transfer works after a challenge. |
+| The log has `kind=troll-miss site=offsite why=FAILURE-<code>`, then Jonathan answers from folly | voip.ms answered the REFER, or a NOTIFY about the call to the extension, with that SIP code, and folly kept the call. | Read the REFER and its NOTIFYs ([Diagnose a failed call](operate-the-office-phone.md#diagnose-a-failed-call)). Check `PBX_TROLL_EXTENSION` against the portal and that the offsite PBX is registered. |
+| The log has `why=FAILURE-401` or `FAILURE-407` with `site=offsite`, and the caller is held in a sink | voip.ms challenged the REFER. Asterisk sends it again with `vms-1994`'s credentials after `Transfer()` has given up, so folly holds the caller in a sink rather than dial Jonathan, and voip.ms may still move them. | Read the second REFER's answer. When voip.ms takes it, the transfer works after a challenge. |
 | Screened callers never reach offsite, and the log has no `site=offsite` | `PBX_TROLL_EXTENSION` is empty. | [Turn on the offsite hand-off](#turn-on-the-offsite-hand-off). |
-| A screened caller hears silence after the prompt, then Earl or a sink | voip.ms accepted the REFER, and `Transfer()` plays nothing while it waits for the NOTIFY that reports the call to the extension up, for up to 45 seconds. | Read the NOTIFYs. A silence ending in `why=FAILURE-<code>` is a call to the extension that failed, and one ending in `why=timeout` gets no final NOTIFY. |
+| The log has `kind=troll site=offsite` and nothing after it, the caller is dropped, and offsite logs no `kind=inbound` | voip.ms accepted the REFER and reported the call to the extension ringing and answered within the same second, so folly hung up, but no `INVITE` reached the offsite registration. This is what the extension does today. | Empty `PBX_TROLL_EXTENSION`, so folly dials Jonathan itself. Check the sub-account's internal extension in the portal, then place an internal call from the handset to it and watch for `kind=inbound` on offsite before setting it again. |
+| A screened caller hears silence after the prompt, then Jonathan or a sink | voip.ms accepted the REFER, and `Transfer()` plays nothing while it waits for the NOTIFY that reports the call to the extension up, for up to 45 seconds. | Read the NOTIFYs. A silence ending in `why=FAILURE-<code>` is a call to the extension that failed, and one ending in `why=timeout` gets no final NOTIFY. |
 | `pbx-contacts` shows `SecretSyncedError` | The `pbx contacts` item is missing, has a repeated label, or shares its title with another item. No alert covers it. | Fix the item. The ExternalSecret retries within the hour. |
 | A new contact still hears the screen | Asterisk read the contacts file at its last dialplan load, or the value is not ten digits and the template skipped it. | Run `dialplan reload` after the Secret has caught up. If `dialplan show globals` has no line for it, fix the value. |
 | A removed contact still skips the screen | A reload keeps the global, or the item was deleted and its Secret kept. | Restart the pod. If the item is gone, recreate it without the field first. |

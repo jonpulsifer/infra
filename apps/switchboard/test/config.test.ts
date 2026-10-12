@@ -106,4 +106,63 @@ describe('config from the environment', () => {
     expect(config.quietTz).toBe('UTC');
     expect(config.port).toBe(9090);
   });
+
+  test('missions default to off, with a pbx-mission agent and a 5 a day cap', () => {
+    const config = readConfig(minimal);
+    expect(config.missionToken).toBeUndefined();
+    expect(config.missionAgentName).toBe('pbx-mission');
+    expect(config.targetsDir).toBe('/targets');
+    expect(config.missionDailyCap).toBe(5);
+  });
+
+  test('takes the mission overrides', () => {
+    const config = readConfig({
+      ...minimal,
+      SWITCHBOARD_MISSION_TOKEN: 'mission-token',
+      SWITCHBOARD_MISSION_AGENT_NAME: 'pbx-other',
+      SWITCHBOARD_TARGETS_DIR: '/mnt/targets',
+      SWITCHBOARD_MISSION_DAILY_CAP: '2',
+    });
+    expect(config.missionToken).toBe('mission-token');
+    expect(config.missionAgentName).toBe('pbx-other');
+    expect(config.targetsDir).toBe('/mnt/targets');
+    expect(config.missionDailyCap).toBe(2);
+  });
+
+  test('refuses a mission cap below 1', () => {
+    expect(() =>
+      readConfig({ ...minimal, SWITCHBOARD_MISSION_DAILY_CAP: '0' }),
+    ).toThrow('SWITCHBOARD_MISSION_DAILY_CAP');
+  });
+});
+
+describe('persona config', () => {
+  test('defaults the agents, the directory and the repository', () => {
+    const config = readConfig(minimal);
+    expect(config.personaToken).toBeUndefined();
+    expect(config.personaAgentNames).toEqual([
+      'pbx-troll',
+      'pbx-switchboard',
+      'pbx-mission',
+    ]);
+    expect(config.personaDir).toBe(
+      'clusters/offsite/apps/elevenlabs/desired/agents',
+    );
+    expect(config.githubOwner).toBe('jonpulsifer');
+    expect(config.githubRepo).toBe('infra');
+    expect(config.githubBase).toBe('main');
+  });
+
+  test('reads a custom agent list and refuses a bad name or repository', () => {
+    expect(
+      readConfig({ ...minimal, SWITCHBOARD_PERSONA_AGENTS: 'a, b,a' })
+        .personaAgentNames,
+    ).toEqual(['a', 'b']);
+    expect(() =>
+      readConfig({ ...minimal, SWITCHBOARD_PERSONA_AGENTS: 'Bad Name' }),
+    ).toThrow('bad agent name');
+    expect(() =>
+      readConfig({ ...minimal, SWITCHBOARD_GITHUB_REPO: 'infra' }),
+    ).toThrow('owner/repo');
+  });
 });

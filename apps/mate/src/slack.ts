@@ -14,6 +14,7 @@ import {
   type Inbound,
   type InboundDropReason,
   type Inbox,
+  type Mark,
   type Notice,
   type Outcome,
   type Surface,
@@ -46,6 +47,13 @@ export const DETAILS_MAX = 600;
 const MORE_ROOM = 16;
 /** The plan's running title changes at most this often. */
 export const TITLE_CADENCE_MS = 3_000;
+
+const REACTION: Record<Mark, string> = {
+  seen: 'eyes',
+  done: 'white_check_mark',
+  failed: 'warning',
+  stopped: 'black_square_for_stop',
+};
 
 export class SlackError extends Error {
   constructor(
@@ -283,6 +291,10 @@ export interface SlackApi {
     blocks?: SlackBlock[],
   ): Promise<void>;
   remove(channel: string, ts: string): Promise<void>;
+  /** `reactions.add`; a reaction already there is not an error. */
+  react(channel: string, ts: string, name: string): Promise<void>;
+  /** `reactions.remove`; a reaction already gone is not an error. */
+  unreact(channel: string, ts: string, name: string): Promise<void>;
   startStream(args: StreamStart): Promise<string>;
   appendStream(
     channel: string,
@@ -413,6 +425,16 @@ export function slackWeb(
     },
     async remove(channel, ts) {
       await call('chat.delete', { channel, ts });
+    },
+    async react(channel, ts, name) {
+      await call('reactions.add', { channel, timestamp: ts, name }).catch(
+        tolerate('already_reacted'),
+      );
+    },
+    async unreact(channel, ts, name) {
+      await call('reactions.remove', { channel, timestamp: ts, name }).catch(
+        tolerate('no_reaction'),
+      );
     },
     async startStream(args) {
       const started = await call('chat.startStream', {
@@ -1149,6 +1171,13 @@ export interface SlackSurfaceDeps {
   streamCap?: number;
 }
 
+function tolerate(code: string): (error: unknown) => void {
+  return (error) => {
+    if (error instanceof SlackError && error.code === code) return;
+    throw error;
+  };
+}
+
 export function slackSurface(deps: SlackSurfaceDeps): Surface {
   async function author(message: SlackMessage): Promise<string> {
     if (message.bot_id) return message.username ?? 'bot';
@@ -1179,6 +1208,19 @@ export function slackSurface(deps: SlackSurfaceDeps): Surface {
     },
     notice(thread) {
       return new SlackNotice(deps.api, thread);
+    },
+    // Both reaction calls are tried; either failing throws once.
+    async mark(message, mark) {
+      if (mark === 'seen') {
+        await deps.api.react(message.channelId, message.id, REACTION.seen);
+        return;
+      }
+      const results = await Promise.allSettled([
+        deps.api.unreact(message.channelId, message.id, REACTION.seen),
+        deps.api.react(message.channelId, message.id, REACTION[mark]),
+      ]);
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed) throw new Error(plain(failed.reason));
     },
     async history(thread, query) {
       const all = await deps.api.replies(thread.channelId, thread.id);

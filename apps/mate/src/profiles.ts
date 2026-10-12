@@ -7,6 +7,7 @@
  */
 import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import { ConfigError } from './config.ts';
+import { WAKE_TOOL } from './wakes.ts';
 
 /** `interactive`: a human's thread. `automation`: a trusted trigger's, quiet-timed. `job`: a trusted trigger's, released when its turn ends. */
 export type Mode = 'interactive' | 'automation' | 'job';
@@ -112,6 +113,8 @@ export interface Profile {
   readonly tools: {
     readonly base: readonly BaseTool[];
     readonly mcp: readonly string[];
+    /** mate's own `wake` tool (wakes.ts), which continues the thread later. */
+    readonly wake: boolean;
   };
   readonly grants: Grants;
   readonly sandbox: {
@@ -179,7 +182,7 @@ export function operatorOverrides(grants: Grants): string {
       'Secrets. `op` reaches 1Password through Connect in this sandbox. Never print secret values or the token files.',
     'Tools. Tools are baked into the image and mise runs tasks offline. A missing tool is a change to the repo, not an install.',
     github &&
-      'Follow-through. Credentials and processes end with the turn, so you cannot watch a pull request later. Wait for its checks within the turn if you mean to merge it; otherwise report the link and what is pending.',
+      "Follow-through. Credentials and processes end with the turn. To come back to a pull request, call `wake` with its number and a note of what to do, then end the turn: mate continues the thread once the PR's GitHub Actions runs finish, or at the deadline. Use `wake` with only minutes for any other later check. Otherwise report the link and what is pending.",
     'Delegation. You have no delegation tool and no other models. Do the work yourself; the Delegate rules and the model-preference line do not apply.',
     "Reporting. Keep replies short. End a piece of work with a summary: what changed, what you checked, the PR link and state, and what remains. An assignment's own report layout replaces this summary. Use a table only for a few short rows.",
   ];
@@ -222,7 +225,7 @@ const operator: Profile = {
   ownerSections: null,
   overrides: operatorOverrides,
   model: null,
-  tools: { base: BASE_TOOLS, mcp: ['kthx_*', 'weather_*'] },
+  tools: { base: BASE_TOOLS, mcp: ['kthx_*', 'weather_*'], wake: true },
   grants: FULL,
   sandbox: { network: 'mate-sandbox', spares: true },
   budget: { turnMinutes: null, turnsPerThread: null, turnsPerDay: null },
@@ -245,7 +248,7 @@ const investigator: Profile = {
   ownerSections: ['Protect', 'Communicate'],
   overrides: investigatorOverrides,
   model: null,
-  tools: { base: BASE_TOOLS, mcp: ['weather_*'] },
+  tools: { base: BASE_TOOLS, mcp: ['weather_*'], wake: false },
   grants: READER,
   sandbox: { network: 'mate-sandbox-reader', spares: false },
   budget: { turnMinutes: 20, turnsPerThread: 10, turnsPerDay: null },
@@ -261,6 +264,7 @@ export function laneOf(profile: Profile): Lane {
 
 /** Whether `profile` lists the base or bridged tool `name`. */
 export function lists(profile: Profile, name: string): boolean {
+  if (name === WAKE_TOOL) return profile.tools.wake;
   if ((BASE_TOOLS as readonly string[]).includes(name)) {
     return (profile.tools.base as readonly string[]).includes(name);
   }

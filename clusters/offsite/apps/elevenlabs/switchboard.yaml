@@ -30,7 +30,7 @@ spec:
       annotations:
         # The tokens and the key are env vars, so Reloader rolls the pod when
         # either Secret rotates.
-        secret.reloader.stakater.com/reload: switchboard-config,elevenlabs-write-key
+        secret.reloader.stakater.com/reload: switchboard-config,switchboard-mission,switchboard-persona,switchboard-github-app,elevenlabs-write-key
     spec:
       automountServiceAccountToken: false
       # toFQDNs only matches names Cilium's DNS proxy saw resolved through the
@@ -48,7 +48,7 @@ spec:
         - name: switchboard
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # full `ghcr.io/…/switchboard…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:f40ac58cba4657c2d117063c766bc27141e6cf1b7425b50dc502af4c3d292e47
+          image: ghcr.io/jonpulsifer/switchboard:latest@sha256:c177dcc69d49905f5475304487b216ce549c899dc86ec65671daa138b8c5cf0f
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -65,10 +65,13 @@ spec:
             # resolves its id from the agents list at boot.
             - name: SWITCHBOARD_AGENT_NAME
               value: pbx-switchboard
-            # desired/phone-number.json declares the number and its outbound
-            # trunk.
+            # The outbound number: a SIP-trunk number at ElevenLabs whose
+            # number string is the voip.ms sub-account 168847_elevenlabs, so
+            # the INVITE's From user is that sub-account, which voip.ms
+            # requires. desired/outbound-number.json declares it; the DID
+            # number stays the inbound one.
             - name: SWITCHBOARD_PHONE_NUMBER_ID
-              value: phnum_8101kst8hfnhex0ar1vfqvmffckk
+              value: phnum_4201m4h39fxnezvt2zq1e2htnm1y
             # The only number switchboard dials; no request can name another.
             - name: SWITCHBOARD_TO_NUMBER
               valueFrom:
@@ -85,8 +88,34 @@ spec:
                 secretKeyRef:
                   name: switchboard-config
                   key: SWITCHBOARD_ALERT_TOKEN
-            # The caps (3 a day per caller class, a 10 minute cooldown) and the
-            # quiet hours (23:00-08:00 America/Halifax) are the image's defaults.
+            # The mission route (Jonathan, the pbx-mission agent) is on only when
+            # the item `mission targets` has a token and a target; the pod then
+            # resolves the agent's id at boot like the ringer's.
+            - name: SWITCHBOARD_MISSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: switchboard-mission
+                  key: token
+                  optional: true
+            - name: SWITCHBOARD_TARGETS_DIR
+              value: /targets
+            # The persona routes are on only with this token, from the item
+            # `switchboard personas`. Each edit is snapshotted into git through
+            # the GitHub App mate pushes as (the same key, Secret
+            # switchboard-github-app); without the key an edit is live only.
+            - name: SWITCHBOARD_PERSONA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: switchboard-persona
+                  key: token
+                  optional: true
+            - name: SWITCHBOARD_GITHUB_APP_ID
+              value: "5027196"
+            - name: SWITCHBOARD_GITHUB_APP_KEY_FILE
+              value: /var/run/switchboard/github-app/private-key
+            # The caps (3 a day per caller class, 5 for missions, a 10 minute
+            # cooldown) and the quiet hours (23:00-08:00 America/Halifax) are
+            # the image's defaults.
             - name: SWITCHBOARD_PORT
               value: "8080"
             # readOnlyRootFilesystem: /tmp (below) is the only writable path.
@@ -97,6 +126,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: targets
+              mountPath: /targets
+              readOnly: true
+            - name: github-app
+              mountPath: /var/run/switchboard/github-app
+              readOnly: true
           # The port opens only once the agent id is resolved, so a pod that
           # cannot name its agent never reports ready.
           readinessProbe:
@@ -121,6 +156,18 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 16Mi
+        # One file per mission target, so a missing Secret leaves the dir
+        # absent and missions off, not the pod unready.
+        - name: targets
+          secret:
+            secretName: switchboard-mission
+            optional: true
+        # Optional too: the file is absent until the Secret syncs, and the pod
+        # then logs `personas on` with snapshot false.
+        - name: github-app
+          secret:
+            secretName: switchboard-github-app
+            optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -138,8 +185,9 @@ spec:
       protocol: TCP
 ---
 # Only mate's sandboxes and Alertmanager reach switchboard, and switchboard
-# reaches only the ElevenLabs API. Every other pod on the cluster would
-# otherwise be able to spend the daily caps.
+# reaches only the ElevenLabs API and, for the persona snapshots, GitHub's.
+# Every other pod on the cluster would otherwise be able to spend the daily
+# caps.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -186,8 +234,10 @@ spec:
           rules:
             dns:
               - matchName: api.elevenlabs.io
+              - matchName: api.github.com
     - toFQDNs:
         - matchName: api.elevenlabs.io
+        - matchName: api.github.com
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}
@@ -214,3 +264,66 @@ spec:
       remoteRef: {key: switchboard, property: ring-token}
     - secretKey: SWITCHBOARD_ALERT_TOKEN
       remoteRef: {key: switchboard, property: alert-token}
+---
+# The mission allow-list and its bearer token, from the 1Password item
+# `mission targets` in the vault `homelab`. Each field label is a target key
+# and its value that person's number as E.164; the field `token` is the
+# mission bearer token and no target. Every field becomes a file in the
+# Secret, mounted at /targets. Until the item exists this ExternalSecret
+# errors, the mount stays empty and POST /mission answers 503.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: switchboard-mission
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: switchboard-mission
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: mission targets
+---
+# The persona bearer token, from the item `switchboard personas` in the vault
+# `homelab`. Until the item exists the Secret is absent and the persona routes
+# answer 503.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: switchboard-persona
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: switchboard-persona
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef: {key: switchboard personas, property: token}
+---
+# The GitHub App's private key, the same item mate's `mate-github-app` reads:
+# a persona snapshot is a pull request from the App. The PEM is stored as
+# `base64 -w0` in a concealed field, so it decodes here.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: switchboard-github-app
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: switchboard-github-app
+    creationPolicy: Owner
+  data:
+    - secretKey: private-key
+      remoteRef:
+        key: c6cjx25kepz7yojdt3h7mcp6ka
+        property: pem (base64)
+        decodingStrategy: Base64

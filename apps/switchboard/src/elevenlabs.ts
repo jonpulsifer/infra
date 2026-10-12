@@ -1,5 +1,9 @@
 const OUTBOUND_CALL_URL =
   'https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call';
+// The outbound-call endpoint answers once the callee picks up or the ring
+// times out, so a person who takes a while to reach the phone still counts
+// as a placed call. A read of a conversation is quick.
+const CALL_TIMEOUT_MS = 75_000;
 const TIMEOUT_MS = 10_000;
 
 export type OutboundCallFailure =
@@ -25,8 +29,9 @@ export interface PlaceCallOptions {
   readonly agentId: string;
   readonly agentPhoneNumberId: string;
   readonly toNumber: string;
-  readonly reason: string;
-  readonly source: string;
+  readonly dynamicVariables: Record<string, string>;
+  /** Sent as conversation_config_override when set. */
+  readonly conversationConfigOverride?: Record<string, unknown>;
 }
 
 export interface OutboundCallResult {
@@ -60,12 +65,17 @@ export async function placeOutboundCall(
       body: JSON.stringify({
         agent_id: opts.agentId,
         agent_phone_number_id: opts.agentPhoneNumberId,
-        to_number: opts.toNumber,
+        // The trunk is voip.ms, which routes 11 digits and answers 404 to a
+        // leading plus. The config and the allow-list stay E.164.
+        to_number: opts.toNumber.replace(/^\+/, ''),
         conversation_initiation_client_data: {
-          dynamic_variables: { reason: opts.reason, source: opts.source },
+          dynamic_variables: opts.dynamicVariables,
+          ...(opts.conversationConfigOverride && {
+            conversation_config_override: opts.conversationConfigOverride,
+          }),
         },
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
     });
   } catch (cause) {
     const timedOut = cause instanceof Error && cause.name === 'TimeoutError';
@@ -79,4 +89,152 @@ export async function placeOutboundCall(
     throw new OutboundCallError('bad-response');
   }
   return { conversationId: body.conversation_id, sipCallId: body.sip_call_id };
+}
+
+const CONVERSATION_URL = 'https://api.elevenlabs.io/v1/convai/conversations';
+
+export interface ConversationTurn {
+  readonly role?: string;
+  readonly message?: string | null;
+  readonly time_in_call_secs?: number;
+}
+
+export interface Conversation {
+  readonly status?: string;
+  readonly transcript?: readonly ConversationTurn[];
+  readonly metadata?: { readonly call_duration_secs?: number };
+  readonly analysis?: {
+    readonly evaluation_criteria_results?: Record<
+      string,
+      { readonly result?: string } | undefined
+    >;
+    readonly data_collection_results?: Record<
+      string,
+      { readonly value?: unknown } | undefined
+    >;
+  };
+}
+
+/** One bounded read of a conversation; any failure is null, never a throw. */
+export async function fetchConversation(
+  apiKey: string,
+  conversationId: string,
+): Promise<Conversation | null> {
+  try {
+    const res = await fetch(
+      `${CONVERSATION_URL}/${encodeURIComponent(conversationId)}`,
+      {
+        headers: { 'xi-api-key': apiKey },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as Conversation;
+  } catch {
+    return null;
+  }
+}
+
+const AGENTS_URL = 'https://api.elevenlabs.io/v1/convai/agents';
+
+/** One bounded read of an agent, whole; any failure is null, never a throw. */
+export async function fetchAgent(
+  apiKey: string,
+  agentId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${AGENTS_URL}/${encodeURIComponent(agentId)}`, {
+      headers: { 'xi-api-key': apiKey },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as unknown;
+    return body && typeof body === 'object'
+      ? (body as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One bounded PATCH of an agent, never retried. The API merges objects, so
+ * the body carries only the leaves to change. False on any failure.
+ */
+export async function patchAgent(
+  apiKey: string,
+  agentId: string,
+  body: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${AGENTS_URL}/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: {
+        'xi-api-key': apiKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    await res.text().catch(() => '');
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+const SIMULATE_TIMEOUT_MS = 240_000;
+
+export interface SimulateOptions {
+  readonly apiKey: string;
+  readonly agentId: string;
+  readonly dynamicVariables: Record<string, string>;
+  /** The system prompt of the simulated callee. */
+  readonly calleePrompt: string;
+  readonly calleeFirstMessage: string;
+  readonly turns: number;
+}
+
+interface SimulateResponse {
+  simulated_conversation?: readonly ConversationTurn[];
+}
+
+/**
+ * A text-only rehearsal: ElevenLabs plays the agent against a simulated
+ * callee for `turns` turns and returns the transcript shaped like a finished
+ * conversation. Null on any failure; nothing is dialled.
+ */
+export async function simulateConversation(
+  opts: SimulateOptions,
+): Promise<Conversation | null> {
+  try {
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/convai/agents/${encodeURIComponent(opts.agentId)}/simulate-conversation`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': opts.apiKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          simulation_specification: {
+            simulated_user_config: {
+              first_message: opts.calleeFirstMessage,
+              language: 'en',
+              prompt: { prompt: opts.calleePrompt },
+            },
+            dynamic_variables: opts.dynamicVariables,
+          },
+          new_turns_limit: opts.turns,
+        }),
+        signal: AbortSignal.timeout(SIMULATE_TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as SimulateResponse;
+    if (!Array.isArray(body.simulated_conversation)) return null;
+    return { status: 'done', transcript: body.simulated_conversation };
+  } catch {
+    return null;
+  }
 }

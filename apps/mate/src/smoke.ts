@@ -125,7 +125,6 @@ function smokeConfig(env: Record<string, string | undefined>): Config {
     maxConcurrent: 1,
     maxSandboxes: 1,
     port: 0,
-    sessionFile: null,
     // A fresh sandbox every run, and no kthx sites ledger, whose Secret is the
     // running mate's.
     sandbox: { ...sandbox, spares: 0, kthx: { ...sandbox.kthx, origin: null } },
@@ -379,7 +378,7 @@ try {
   if (!threads) throw new Error('mate did not start the smoke surface');
   jsonLog.info('smoke starting', {
     namespace,
-    image: config.sandbox.image,
+    imageFile: config.sandbox.imageFile,
     model: config.brain.model,
     thinking: config.brain.thinking,
     thread: id,

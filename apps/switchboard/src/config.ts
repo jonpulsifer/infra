@@ -16,10 +16,28 @@ export interface Config {
   readonly ringDailyCap: number;
   readonly alertDailyCap: number;
   readonly cooldownMs: number;
+  /** From SWITCHBOARD_MISSION_TOKEN: absent means missions are off. */
+  readonly missionToken?: string;
+  readonly missionAgentName: string;
+  /** One file per mission target: the name is the key, the content E.164. */
+  readonly targetsDir: string;
+  readonly missionDailyCap: number;
   readonly quietStart: string;
   readonly quietEnd: string;
   readonly quietTz: string;
   readonly port: number;
+  /** From SWITCHBOARD_PERSONA_TOKEN: absent means the persona routes are off. */
+  readonly personaToken?: string;
+  /** The agents whose persona the routes edit, by name. */
+  readonly personaAgentNames: readonly string[];
+  /** Where the desired agent files live in the repo, for the snapshot. */
+  readonly personaDir: string;
+  /** Without an App id and key file, a persona edit is live only, no snapshot. */
+  readonly githubAppId?: string;
+  readonly githubAppKeyFile?: string;
+  readonly githubOwner: string;
+  readonly githubRepo: string;
+  readonly githubBase: string;
 }
 
 /** A Config once boot has settled the agent id. */
@@ -51,7 +69,7 @@ function integer(env: Env, key: string, fallback: number, min: number): number {
 
 // A leading +, then 8-15 digits total: loose E.164, tight enough to catch a
 // local-format or punctuated number pasted in by mistake.
-const E164 = /^\+[1-9]\d{7,14}$/;
+export const E164 = /^\+[1-9]\d{7,14}$/;
 
 function readToNumber(env: Env): string {
   const value = required(env, 'SWITCHBOARD_TO_NUMBER');
@@ -95,9 +113,51 @@ export function readConfig(env: Env): Config {
     ringDailyCap: integer(env, 'SWITCHBOARD_RING_DAILY_CAP', 3, 1),
     alertDailyCap: integer(env, 'SWITCHBOARD_ALERT_DAILY_CAP', 3, 1),
     cooldownMs: integer(env, 'SWITCHBOARD_COOLDOWN_MINUTES', 10, 0) * 60_000,
+    missionToken: optional(env, 'SWITCHBOARD_MISSION_TOKEN'),
+    missionAgentName:
+      optional(env, 'SWITCHBOARD_MISSION_AGENT_NAME') ?? 'pbx-mission',
+    targetsDir: optional(env, 'SWITCHBOARD_TARGETS_DIR') ?? '/targets',
+    missionDailyCap: integer(env, 'SWITCHBOARD_MISSION_DAILY_CAP', 5, 1),
     quietStart: clockTime(env, 'SWITCHBOARD_QUIET_START', '23:00'),
     quietEnd: clockTime(env, 'SWITCHBOARD_QUIET_END', '08:00'),
     quietTz: timezone(env, 'SWITCHBOARD_QUIET_TZ', 'America/Halifax'),
     port: integer(env, 'SWITCHBOARD_PORT', 8080, 1),
+    personaToken: optional(env, 'SWITCHBOARD_PERSONA_TOKEN'),
+    personaAgentNames: names(
+      env,
+      'SWITCHBOARD_PERSONA_AGENTS',
+      'pbx-troll,pbx-switchboard,pbx-mission',
+    ),
+    personaDir:
+      optional(env, 'SWITCHBOARD_PERSONA_DIR') ??
+      'clusters/offsite/apps/elevenlabs/desired/agents',
+    githubAppId: optional(env, 'SWITCHBOARD_GITHUB_APP_ID'),
+    githubAppKeyFile: optional(env, 'SWITCHBOARD_GITHUB_APP_KEY_FILE'),
+    ...repository(env, 'SWITCHBOARD_GITHUB_REPO', 'jonpulsifer/infra'),
+    githubBase: optional(env, 'SWITCHBOARD_GITHUB_BASE') ?? 'main',
   };
+}
+
+const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+function names(env: Env, key: string, fallback: string): string[] {
+  const list = (env[key]?.trim() || fallback)
+    .split(',')
+    .map((n) => n.trim())
+    .filter(Boolean);
+  for (const name of list) {
+    if (!AGENT_NAME.test(name)) {
+      throw new ConfigError(`${key} holds a bad agent name: ${name}`);
+    }
+  }
+  return [...new Set(list)];
+}
+
+const REPOSITORY = /^([A-Za-z0-9][A-Za-z0-9-]*)\/([A-Za-z0-9._-]+)$/;
+
+function repository(env: Env, key: string, fallback: string) {
+  const value = env[key]?.trim() || fallback;
+  const match = REPOSITORY.exec(value);
+  if (!match) throw new ConfigError(`${key} must be owner/repo, got ${value}`);
+  return { githubOwner: match[1] as string, githubRepo: match[2] as string };
 }

@@ -28,6 +28,7 @@ import type { Instruments } from './metrics.ts';
 import { CHATGPT_PROVIDER, chatgptModel, createModelSetup } from './model.ts';
 import { brainProfiles, loadSystemPrompts } from './profile.ts';
 import { PROFILES } from './profiles.ts';
+import { fileImage } from './sandbox-image.ts';
 import { type HandsLayout, KubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
 import type { SlackApi } from './slack.ts';
 import { opensshKey } from './ssh-key.ts';
@@ -39,6 +40,7 @@ import {
 import type { SurfaceListener } from './surface.ts';
 import { readerTalosconfig } from './talosconfig.ts';
 import { DRAIN_MS, Threads, type ThreadsDeps } from './threads.ts';
+import { GithubPullRequests, PostgresWakeStore, Wakes } from './wakes.ts';
 
 const DAY_MS = 86_400_000;
 export const RETENTION_SWEEP_MS = 3_600_000;
@@ -108,6 +110,7 @@ interface Running {
   githubApp: GithubApp | null;
   slack: SlackSide | null;
   custodian: Custodian | null;
+  wakes: Wakes;
   timers: (() => void)[];
 }
 
@@ -221,6 +224,7 @@ export class Mate {
       {
         kube,
         config: sandbox,
+        image: fileImage(sandbox.imageFile, log),
         guildId: config.guildId,
         maxSandboxes: config.maxSandboxes,
         log,
@@ -249,6 +253,12 @@ export class Mate {
           open: () => Promise.reject(new Error('mate has no database')),
           delete: async () => {},
         };
+    const wakes = new Wakes({
+      store: db.sql ? new PostgresWakeStore(db.sql) : null,
+      pulls: githubApp ? new GithubPullRequests(githubApp, clock) : null,
+      log,
+      clock,
+    });
     const brain = new PiBrain({
       db,
       store: threadStore,
@@ -257,6 +267,7 @@ export class Mate {
       setup,
       profiles,
       mcp,
+      wakes,
       log,
       clock,
       metrics,
@@ -284,8 +295,11 @@ export class Mate {
       config,
       metrics,
       commands: chatgpt?.account,
+      wakes,
       ...tuning?.threads,
     });
+    wakes.bind(threads);
+    void db.ready.then(() => wakes.start());
     chatgpt?.keeper.start(db.ready);
     const custodian =
       config.custodianChannel && slack && db.sql
@@ -314,6 +328,7 @@ export class Mate {
       githubApp,
       slack,
       custodian,
+      wakes,
       timers: [],
     };
   }
@@ -364,11 +379,15 @@ export class Mate {
     const running = await this.starting?.catch(() => null);
     if (!running) return;
     const { log, database, surfaces, tuning } = this.edges;
-    const { threads, hands, chatgpt, slack, custodian, mcp } = running;
+    const { threads, hands, chatgpt, slack, custodian, wakes, mcp } = running;
     // First: envelopes are acked on receipt, so one taken during the drain is
     // lost for good.
     slack?.listener.stop();
+    // The gateway closes keeping its session, so what arrives during the drain
+    // is replayed to the next process; posting is REST and still works.
+    surfaces.discord.stop();
     custodian?.stop();
+    wakes.stop();
     for (const cancel of running.timers) cancel();
     // While both surfaces can still post: running turns finish or stay open for
     // the next process to resume, and queued prompts are told they never started.
@@ -380,7 +399,6 @@ export class Mate {
     // While the surfaces can still post: a sign-in waiting for its code tells
     // its thread that the code no longer works.
     await chatgpt?.account.stop();
-    surfaces.discord.stop();
     try {
       await surfaces.discord.close();
     } catch (error) {

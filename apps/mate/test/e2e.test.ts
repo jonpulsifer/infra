@@ -790,7 +790,9 @@ describe('profiles', () => {
       // The operator turn stamped the preflight's token, then revoked it.
       expect(github.minted).toBe(1);
       expect(github.revoked).toEqual(['ghs-token-1']);
-      expect(heard[1]).toEqual([...BASE, 'kthx_deploy', 'weather_now'].sort());
+      expect(heard[1]).toEqual(
+        [...BASE, 'kthx_deploy', 'wake', 'weather_now'].sort(),
+      );
     },
     SLOW,
   );

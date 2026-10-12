@@ -533,6 +533,7 @@ export interface DiscordGateway {
   client: Pick<Client, 'on' | 'once'>;
   manager: Pick<WebSocketManager, 'connect' | 'destroy'>;
   budget: Pick<IdentifyBudget, 'waitForBudget'>;
+  leave(reason: string): Promise<void>;
 }
 
 export interface DiscordListenerOptions {
@@ -553,6 +554,7 @@ export function discordListener(
   const { gateway, api, guildId, log } = options;
   const { client } = gateway;
   let delivering = false;
+  let leaving: Promise<void> | null = null;
   let me = '';
 
   function listen(threads: Inbox): void {
@@ -675,9 +677,12 @@ export function discordListener(
     },
     stop() {
       delivering = false;
+      leaving ??= gateway.leave('mate is shutting down');
+      leaving.catch(() => {});
     },
     async close() {
-      await gateway.manager.destroy();
+      leaving ??= gateway.leave('mate is shutting down');
+      await leaving;
     },
   };
 }

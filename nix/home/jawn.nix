@@ -25,7 +25,7 @@ in
   programs.btop.enable = true;
 
   programs.eza.enable = true;
-  programs.eza.icons = true;
+  programs.eza.icons = "auto";
   programs.eza.git = true;
 
   programs.fzf = {
@@ -88,7 +88,7 @@ in
 
   programs.zsh = {
     enable = true;
-    dotDir = ".config/zsh";
+    dotDir = "${config.xdg.configHome}/zsh";
     enableCompletion = true;
     autosuggestion.enable = true;
     syntaxHighlighting.enable = true;

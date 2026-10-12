@@ -74,6 +74,7 @@ import { type Database, isStoreUnavailable, storeError } from './store.ts';
 import { type ThreadRef, threadKey } from './surface.ts';
 import type { ThreadRow, ThreadRowPatch, ThreadStore } from './thread-store.ts';
 import { TurnTranslator } from './turn.ts';
+import { WAKE_TOOL, type Wakes, wakeTool } from './wakes.ts';
 
 /** The model waits seconds before its first event on every step. */
 export const PROVIDER_TIMEOUT_MS = 240_000;
@@ -138,6 +139,8 @@ export interface PiBrainDeps {
   /** By profile id; a row naming an absent one opens nothing. */
   profiles: ReadonlyMap<string, BrainProfile>;
   mcp: McpBridge | null;
+  /** Backs each listing profile's `wake` tool; `null` lists no `wake`. */
+  wakes?: Wakes | null;
   log: Log;
   clock?: Clock;
   metrics?: Instruments;
@@ -148,6 +151,8 @@ export interface PiBrainDeps {
 
 interface Turn {
   readonly translator: TurnTranslator;
+  /** Whose message the turn answers. */
+  readonly asker: string;
   /** Aborted when the turn ends: it bounds a wait for a sandbox slot. */
   readonly leaseStop: AbortController;
   lease: TurnLease | null;
@@ -156,6 +161,8 @@ interface Turn {
   /** pi's events route here from just before the prompt is submitted. */
   live: boolean;
   cancelRequested: boolean;
+  /** The owner stopped it; it sets no wake from here on. */
+  stopped: boolean;
   timedOut: boolean;
   /** SIGTERM closed the harness under this turn. */
   abandoned: boolean;
@@ -379,11 +386,11 @@ export class PiBrain implements Brain {
     session: BrainSession,
     text: string,
     sink: PromptSink,
-    _turn: TurnContext,
+    context: TurnContext,
   ): Promise<PromptResult> {
     const tb = this.opened(session);
     if (tb.turn) return errorResult('a turn is already running here');
-    return this.run(tb, sink, async (turn) => {
+    return this.run(tb, sink, context, async (turn) => {
       const refused = await this.ready(tb);
       if (refused) return refused;
       if (turn.abandoned) throw new ClosedUnderTurn();
@@ -404,11 +411,11 @@ export class PiBrain implements Brain {
   async resume(
     session: BrainSession,
     sink: PromptSink,
-    _turn: TurnContext,
+    context: TurnContext,
   ): Promise<PromptResult> {
     const tb = this.opened(session);
     if (tb.turn) return errorResult('a turn is already running here');
-    return this.run(tb, sink, async (turn) => {
+    return this.run(tb, sink, context, async (turn) => {
       if (this.deps.mcp) {
         await this.deps.mcp.ready(this.timeouts.mcpBootWait);
       }
@@ -444,6 +451,7 @@ export class PiBrain implements Brain {
     const tb = this.threads.get(session.key);
     const turn = tb?.turn;
     if (!tb || !turn) return;
+    turn.stopped = true;
     if (turn.submission !== null) this.stop(tb, turn);
     else turn.cancelRequested = true;
   }
@@ -549,9 +557,10 @@ export class PiBrain implements Brain {
   private async run(
     tb: ThreadBrain,
     sink: PromptSink,
+    context: TurnContext,
     body: (turn: Turn) => Promise<PromptResult>,
   ): Promise<PromptResult> {
-    const turn = this.startTurn(tb, sink);
+    const turn = this.startTurn(tb, sink, context.asker);
     let result: PromptResult | null = null;
     try {
       result = await body(turn);
@@ -576,7 +585,7 @@ export class PiBrain implements Brain {
     }
   }
 
-  private startTurn(tb: ThreadBrain, sink: PromptSink): Turn {
+  private startTurn(tb: ThreadBrain, sink: PromptSink, asker: string): Turn {
     let resolve = () => {};
     const done = new Promise<void>((settle) => {
       resolve = settle;
@@ -592,6 +601,7 @@ export class PiBrain implements Brain {
     // Nothing races it until the run is driven.
     poisoned.catch(() => {});
     const turn: Turn = {
+      asker,
       translator: new TurnTranslator(
         sink,
         this.clock,
@@ -605,6 +615,7 @@ export class PiBrain implements Brain {
       poisoned,
       poison,
       cancelRequested: false,
+      stopped: false,
       timedOut: false,
       abandoned: false,
       cutOff,
@@ -1099,13 +1110,25 @@ export class PiBrain implements Brain {
 
   /** The profile's prompt for the thread's surface, and the tools it lists. */
   private extension(profile: BrainProfile, ref: ThreadRef): Extension {
+    const { wakes } = this.deps;
+    const key = threadKey(ref);
+    const wake =
+      wakes && lists(profile.profile, WAKE_TOOL)
+        ? [wakeTool(ref, () => this.asker(key), wakes)]
+        : [];
     return defineExtension({
       name: EXTENSION,
-      tools: this.listedTools(profile.profile),
+      tools: [...this.listedTools(profile.profile), ...wake],
       sections: [
         section('mate', () => profile.prompts[ref.surface], { tag: false }),
       ],
     });
+  }
+
+  /** Whose turn is running in the thread; `null` between turns and once stopped. */
+  private asker(key: string): string | null {
+    const turn = this.threads.get(key)?.turn;
+    return turn && !turn.stopped ? turn.asker : null;
   }
 
   /**

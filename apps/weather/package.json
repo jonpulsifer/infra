@@ -11,8 +11,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.31.0",
-    "hono": "4.13.12",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "hono": "4.13.13",
     "zod": "4.6.5"
   },
   "devDependencies": {
