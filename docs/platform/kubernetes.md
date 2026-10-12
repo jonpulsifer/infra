@@ -49,7 +49,7 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 - `clusters/<site>/bootstrap/` and `terraform/modules/flux-bootstrap/`: the bootstrap root, with its state in `gs://homelab-ng/clusters/<site>/bootstrap`
 - `clusters/base/platform/`, `clusters/*/storage/` and `clusters/folly/nodes/`: the shared controllers, storage and GPU plugin
 - `clusters/folly/node-features/`: the NodeFeatureRule that labels the GPU node
-- `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. `nix/services/k8s/` registers the handlers.
+- `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. The `kata-containers` and `gvisor` extensions in `clusters/<site>/talos/talos.tf` provide the handlers.
 - `clusters/<site>/config/`: the settings, secrets and topology that Flux substitutes. See [Topology](../reference/topology.md).
 
 ## Related
@@ -58,4 +58,4 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 - [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)
 - [Get cluster admin access](../runbooks/get-cluster-admin-access.md)
 - [Operate Postgres](../runbooks/operate-postgres.md)
-- [Add a Kubernetes node](../runbooks/add-a-kubernetes-node.md)
+- [Install Talos on a node](../runbooks/install-talos-on-a-node.md)
