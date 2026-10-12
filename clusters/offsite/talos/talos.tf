@@ -39,11 +39,11 @@ locals {
   node_addresses = jsondecode(module.topology.data.NODE_ADDRESSES)
 
   # install is a CEL disk selector. ephemeral caps EPHEMERAL so that the
-  # data user volume takes the rest of the one disk. hotrod joins in a later
-  # pull request, once the gateway peers with it.
+  # data user volume takes the rest of the one disk.
   nodes = {
     retrofit  = { role = "controlplane", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "100GiB" }
     oldschool = { role = "worker", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "100GiB" }
+    hotrod    = { role = "worker", install = "disk.dev_path == \"/dev/nvme0n1\"", ephemeral = "64GiB" }
   }
 }
 
