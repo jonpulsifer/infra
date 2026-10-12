@@ -14,7 +14,7 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 | [shale](shale.md) | folly worker | folly | HP EliteDesk 800 G2 DM | Talos Linux | live |
 | [retrofit](retrofit.md) | offsite control plane | offsite | HP EliteDesk 800 G2 DM | Talos Linux | live |
 | [oldschool](oldschool.md) | offsite worker | offsite | HP EliteDesk 800 G3 DM | Talos Linux | live |
-| [hotrod](hotrod.md) | offsite worker | offsite | HP mini, Intel Core i5-10500T | Talos Linux | not installed |
+| [hotrod](hotrod.md) | offsite worker | offsite | HP mini, Intel Core i5-10500T | Talos Linux | live |
 | [spore](spore.md) | NFS, x86 netboot, forge's boot image, DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [capsule](capsule.md) | DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [forge](forge.md) | arm64 build host | folly | Raspberry Pi 5, NVMe | NixOS | live |

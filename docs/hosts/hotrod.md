@@ -1,6 +1,6 @@
 ---
 title: hotrod
-description: An HP mini PC that is declared as an offsite worker node, on Talos Linux, and joins when the offsite root names it.
+description: An HP mini PC that is the offsite cluster's second worker node, on Talos Linux.
 specs:
   vendor: HP
   cpu: "Intel Core i5-10500T"
@@ -10,12 +10,16 @@ specs:
   firmware: UEFI
 ---
 
-hotrod is a worker node for the offsite [Kubernetes](../platform/kubernetes.md) cluster. It will run Talos Linux.
+hotrod is a worker node of the offsite [Kubernetes](../platform/kubernetes.md) cluster. It runs Talos Linux, and `clusters/offsite/talos/` configures it.
 
 ## What it runs
 
-`NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json` declares hotrod, and `clusters/offsite/talos/talos.tf` does not name it yet. It joins the cluster when that root names it. Until then it runs no workload.
+- Pods. `/var/mnt/data`, its `data` volume, holds the `local-path` volumes that land on hotrod.
 
 ## Reach
 
-Its name is `hotrod.lolwtf.ca`. Once it runs Talos, reach it with `talosctl --context offsite --nodes hotrod.lolwtf.ca`. It will run no SSH server. [Install Talos on a node](../runbooks/install-talos-on-a-node.md) has the steps.
+Reach it at `hotrod.lolwtf.ca` with `talosctl --context offsite`, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. It runs no SSH server.
+
+## Quirks
+
+- The NVMe holds the EPHEMERAL partition and the `data` volume; there is no second disk.
