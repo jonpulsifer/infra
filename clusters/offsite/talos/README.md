@@ -1,6 +1,6 @@
 # offsite talos
 
-The OpenTofu root for the Talos Linux machine configuration of the offsite cluster: retrofit as the control plane and oldschool as a worker. It calls `terraform/modules/talos-cluster`. [Rebuild a cluster on Talos](https://wiki.lolwtf.ca/runbooks/rebuild-a-cluster-on-talos/) is the procedure that first applies it.
+The OpenTofu root for the Talos Linux machine configuration of the offsite cluster: retrofit as the control plane, oldschool and hotrod as workers. It calls `terraform/modules/talos-cluster`. [Rebuild a cluster on Talos](https://wiki.lolwtf.ca/runbooks/rebuild-a-cluster-on-talos/) is the procedure that first applies it.
 
 `talos.tf` holds the version pins, the schematic's extension list and the node map. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`. `patches.tf` holds offsite's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/offsite/talos`.
 
@@ -17,7 +17,7 @@ A plan contacts no node. `tofu validate` cannot see a document that Talos reject
 
 ## Deploy
 
-The owner applies this root by hand once, when offsite is rebuilt. Atlantis applies it from the next pull request. Atlantis runs on this cluster, so an apply that changes `talos_version` or `extensions` reboots every node, the control plane first, and the apply dies with Atlantis's node. Rerun it when Atlantis is back.
+The owner applies this root by hand once, when offsite is rebuilt, and once for each node that joins later: a node in maintenance mode has no route back to pod addresses, so Atlantis's pod on this cluster cannot reach its port 50000 (`dial tcp <node>:50000: i/o timeout`). Atlantis applies every other change, from the pull request. Atlantis runs on this cluster, so an apply that changes `talos_version` or `extensions` reboots every node, the control plane first, and the apply dies with Atlantis's node. Rerun it when Atlantis is back.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
