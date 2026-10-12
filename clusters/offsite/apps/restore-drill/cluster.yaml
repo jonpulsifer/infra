@@ -27,4 +27,5 @@ spec:
         name: barman-cloud.cloudnative-pg.io
         parameters:
           barmanObjectName: kthx
-          serverName: kthx-db
+          # backup.serverName in clusters/offsite/apps/kthx/helm-release.yaml.
+          serverName: kthx-db-2

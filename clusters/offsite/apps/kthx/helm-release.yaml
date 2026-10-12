@@ -61,6 +61,11 @@ spec:
     backup:
       endpointURL: ${GARAGE_S3_ENDPOINT}
       item: garage-${CLUSTER_NAME}
+      # One prefix per generation of the Cluster. Recovery reads the previous
+      # one, kthx-db; recover-a-re-created-database removes recoverFrom once
+      # kthx-db-2 holds a base backup. The restore drill reads serverName.
+      serverName: kthx-db-2
+      recoverFrom: kthx-db
     podAnnotations:
       backup.velero.io/backup-volumes: sites
     # The pool principal holds only workloadIdentityUser on this account, so
