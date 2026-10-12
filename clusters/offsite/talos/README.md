@@ -17,7 +17,7 @@ A plan contacts no node. `tofu validate` cannot see a document that Talos reject
 
 ## Deploy
 
-The owner applies this root by hand once, when offsite is rebuilt. Atlantis applies it from the next pull request. Atlantis runs on this cluster, so an apply that changes `talos_version` or `extensions` reboots every node, the control plane first, and the apply dies with Atlantis's node. Rerun it when Atlantis is back.
+The owner applies this root by hand once, when offsite is rebuilt, and once for each node that joins later: a node in maintenance mode has no route back to pod addresses, so Atlantis's pod on this cluster cannot reach its port 50000 (`dial tcp <node>:50000: i/o timeout`). Atlantis applies every other change, from the pull request. Atlantis runs on this cluster, so an apply that changes `talos_version` or `extensions` reboots every node, the control plane first, and the apply dies with Atlantis's node. Rerun it when Atlantis is back.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
