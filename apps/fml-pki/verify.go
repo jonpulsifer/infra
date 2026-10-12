@@ -149,11 +149,16 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 		}
 	}
 	sort.Strings(clusterCAs)
-	if len(clusterCAs) == 0 {
-		return fmt.Errorf("no cluster CA certificates in %s", certsDir)
-	}
 
 	var problems []string
+	if len(clusterCAs) == 0 {
+		// Talos clusters carry their own CA outside the FML chain; the anchors still link.
+		fmt.Fprintln(out, "==> fml")
+		problems = append(problems, checkChain("fml", []named{
+			{intermediate, "fml-intermediate.pem"},
+			{root, "fml-root.pem"},
+		})...)
+	}
 	for _, path := range clusterCAs {
 		base := filepath.Base(path)
 		cluster := strings.TrimSuffix(base, "-ca.pem")

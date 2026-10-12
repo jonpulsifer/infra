@@ -11,7 +11,7 @@ This root needs OpenTofu, because only the OpenTofu registry publishes the `open
 
 ## Rules
 
-- Never put the chain file in `caFile`. That option also backs `clientCaFile`, so the API server would accept any certificate issued under the FML root. `nix/services/k8s/default.nix` wires both files.
+- Never trust the FML root as a Kubernetes client CA. The API server would accept any certificate issued under it. Talos clusters use their own CA.
 - `max_path_length = 0` on the cluster CAs has no effect, and the issued certificates carry no path length constraint.
 - `prevent_destroy` guards each CA key's 1Password escrow item. Before you rotate a CA, move the old item to a versioned resource and title.
 
@@ -30,7 +30,7 @@ mise run pki:verify
 
 Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/pki`.
 
-After an apply that issues a CA or a signer, run `scripts/pki/post-rotate.sh <cluster>` and commit what it writes. It updates `certs/`, the encrypted keys in `nix/secrets/`, `oidc/<cluster>/` and `clusters/offsite/apps/spindrift/ca-bundle.yaml`. `.github/workflows/oidc.yml` publishes the OIDC documents on merge.
+After an apply that issues a signer, run `scripts/pki/post-rotate.sh offsite` and commit what it writes. It updates the signer certificates in `certs/` and `oidc/<cluster>/`. Both clusters run the self-signed Kubernetes CA from their Talos secrets bundle, so no cluster CA file is committed. `.github/workflows/oidc.yml` publishes the OIDC documents on merge.
 
 <!-- BEGIN_TF_DOCS -->
 <!-- END_TF_DOCS -->

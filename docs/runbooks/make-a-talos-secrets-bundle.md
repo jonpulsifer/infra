@@ -51,7 +51,7 @@ Atlantis, Rowbutt and the kthx engine trust the cluster's API server through `cl
    yq -r '.certs.k8s.crt' secrets.yaml | base64 -d > <checkout>/clusters/<site>/config/kubernetes-ca.pem
    ```
 
-2. In the cutover pull request, write the kthx engine's CA bundle: offsite's CA, then folly's. `<offsite-ca>` is `terraform/pki/certs/offsite-ca-chain.pem` while offsite runs NixOS, and `clusters/offsite/config/kubernetes-ca.pem` after.
+2. In the cutover pull request, write the kthx engine's CA bundle: offsite's CA, then folly's. `<offsite-ca>` is `clusters/offsite/config/kubernetes-ca.pem`.
 
    ```bash
    cd <checkout>; f=clusters/offsite/apps/spindrift/ca-bundle.yaml

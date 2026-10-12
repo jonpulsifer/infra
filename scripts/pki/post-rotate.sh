@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Writes the committed certificates, SOPS-encrypted keys and OIDC documents for
-# each named cluster from terraform/pki state, after Atlantis issues or rotates
-# its CA or SA token signer. Rotation steps: terraform/pki/README.md.
+# Writes the committed signer certificate and OIDC documents for each named
+# cluster from terraform/pki state, after Atlantis issues or rotates its SA token
+# signer. Rotation steps: terraform/pki/README.md.
 
 set -euo pipefail
 
@@ -16,7 +16,7 @@ fi
 
 # Check every tool first: a failure halfway leaves certs/ half-updated.
 missing=()
-for tool in tofu sops jq go; do
+for tool in tofu jq go; do
   command -v "$tool" >/dev/null || missing+=("$tool")
 done
 if ((${#missing[@]})); then
@@ -26,11 +26,9 @@ if ((${#missing[@]})); then
   exit 1
 fi
 
-# folly runs Talos: its cluster CA is its secrets bundle's own, and the bundle
-# carries its signer key, so this script writes neither.
-declare -A control_plane=(
-  [offsite]="retrofit"
-)
+# Both clusters run Talos: each cluster CA is its secrets bundle's own, and the
+# bundle carries the signer key, so this script writes neither.
+clusters=(offsite)
 
 echo "==> reading terraform/pki outputs" >&2
 outputs="$(tofu -chdir="$pki_dir" output -json)"
@@ -38,17 +36,6 @@ outputs="$(tofu -chdir="$pki_dir" output -json)"
 mkdir -p "$certs_dir"
 jq -er '.fml_root_cert.value' <<<"$outputs" >"$certs_dir/fml-root.pem"
 jq -er '.fml_intermediate_cert.value' <<<"$outputs" >"$certs_dir/fml-intermediate.pem"
-
-# Private keys go to sops and fml-pki on stdin; plaintext never touches disk.
-sops_set_key() {
-  secret_file=$1
-  secret_name=$2
-  output_name=$3
-  cluster=$4
-
-  jq -ce ".${output_name}.value.\"$cluster\"" <<<"$outputs" \
-    | sops set --value-stdin "$secret_file" "[\"$secret_name\"]"
-}
 
 fml_pki() {
   go -C "$repo_root/apps/fml-pki" run . "$@"
@@ -60,58 +47,14 @@ cert_key_id() {
   fml_pki spki -
 }
 
-verify_key_pair() {
-  cert_output=$1
-  key_output=$2
-  cluster=$3
-
-  cert_spki="$(jq -er ".${cert_output}.value.\"$cluster\"" <<<"$outputs" | fml_pki spki -)"
-  key_spki="$(jq -er ".${key_output}.value.\"$cluster\"" <<<"$outputs" | fml_pki spki -)"
-  if [[ $cert_spki != "$key_spki" ]]; then
-    echo "error: $cluster $cert_output does not match $key_output" >&2
-    return 1
-  fi
-}
-
 for cluster in "$@"; do
-  if [[ ! -v control_plane[$cluster] ]]; then
+  if [[ " ${clusters[*]} " != *" $cluster "* ]]; then
     echo "error: unknown cluster: $cluster" >&2
     exit 2
   fi
-  host="${control_plane[$cluster]}"
   issuer="$(jq -er ".issuers.value.\"$cluster\"" <<<"$outputs")"
-  ca_pem="$certs_dir/$cluster-ca.pem"
-  ca_prev_pem="$certs_dir/$cluster-ca-prev.pem"
-  ca_bundle_pem="$certs_dir/$cluster-ca-bundle.pem"
-  ca_chain_pem="$certs_dir/$cluster-ca-chain.pem"
   signer_pem="$certs_dir/$cluster-sa-signer.pem"
   prev_pem="$certs_dir/$cluster-sa-signer-prev.pem"
-
-  verify_key_pair cluster_ca_certs cluster_ca_private_keys "$cluster"
-  verify_key_pair sa_signer_certs sa_signer_private_keys "$cluster"
-
-  # ca-bundle.pem trusts the previous CA too, so old leaves verify until reissued.
-  new_ca="$(jq -er ".cluster_ca_certs.value.\"$cluster\"" <<<"$outputs")"
-  new_ca_key_id="$(printf '%s\n' "$new_ca" | cert_key_id)"
-  current_ca_key_id="$([[ -s $ca_pem ]] && cert_key_id <"$ca_pem" || true)"
-  if [[ -n $current_ca_key_id ]] && [[ $new_ca_key_id != "$current_ca_key_id" ]]; then
-    echo "==> $cluster: previous CA kept for overlap ($ca_prev_pem)" >&2
-    cp "$ca_pem" "$ca_prev_pem"
-  fi
-  printf '%s\n' "$new_ca" >"$ca_pem"
-  if [[ -s $ca_prev_pem ]] && [[ $(cert_key_id <"$ca_prev_pem") == "$new_ca_key_id" ]]; then
-    echo "==> $cluster: removing duplicate previous CA artifact" >&2
-    rm "$ca_prev_pem"
-  fi
-  cp "$ca_pem" "$ca_bundle_pem"
-  if [[ -s $ca_prev_pem ]]; then
-    printf '\n' >>"$ca_bundle_pem"
-    cat "$ca_prev_pem" >>"$ca_bundle_pem"
-  fi
-
-  # Pods get this as ca.crt; OpenSSL clients need a path to the self-signed root.
-  # Keep the anchors out of ca-bundle.pem: it is also the API server's client CA.
-  cat "$ca_pem" "$certs_dir/fml-intermediate.pem" "$certs_dir/fml-root.pem" >"$ca_chain_pem"
 
   # The replaced signer stays in the JWKS so the tokens it signed still verify.
   new_signer="$(jq -er ".sa_signer_certs.value.\"$cluster\"" <<<"$outputs")"
@@ -132,26 +75,6 @@ for cluster in "$@"; do
     rm "$prev_pem"
   fi
 
-  echo "==> $cluster: sops-encrypting cluster CA and signer keys for $host" >&2
-  secret_file="$repo_root/nix/secrets/$host.sops.yaml"
-  if [[ -s $secret_file ]]; then
-    sops_set_key "$secret_file" "k8s-cluster-ca-key" cluster_ca_private_keys "$cluster"
-    sops_set_key "$secret_file" "k8s-sa-signing-key" sa_signer_private_keys "$cluster"
-  else
-    # Reading stdin, sops needs --filename-override (3.9+) to match a creation rule.
-    encrypted="$(
-      jq -n \
-        --argjson cluster_ca_key "$(jq -c ".cluster_ca_private_keys.value.\"$cluster\"" <<<"$outputs")" \
-        --argjson signer_key "$(jq -c ".sa_signer_private_keys.value.\"$cluster\"" <<<"$outputs")" \
-        '{
-          "k8s-cluster-ca-key": $cluster_ca_key,
-          "k8s-sa-signing-key": $signer_key
-        }' \
-        | sops encrypt --filename-override "$secret_file" --input-type json --output-type yaml /dev/stdin
-    )"
-    printf '%s\n' "$encrypted" >"$secret_file"
-  fi
-
   echo "==> $cluster: regenerating OIDC documents" >&2
   jwks_args=("$signer_pem")
   [[ -s $prev_pem ]] && jwks_args+=("$prev_pem")
@@ -161,38 +84,17 @@ for cluster in "$@"; do
     "${jwks_args[@]}"
 
   echo "==> $cluster: certificate inventory" >&2
-  for cert in "$ca_pem" "$ca_prev_pem" "$signer_pem" "$prev_pem"; do
+  for cert in "$signer_pem" "$prev_pem"; do
     [[ -s $cert ]] || continue
     fml_pki inspect "$cert" | sed "s|^|    |" >&2
   done
 done
 
-# NODE_EXTRA_CA_CERTS reads one file and needs a path to a self-signed root, so
-# this is offsite's chain, which ends in the FML root, plus folly's pin.
-spindrift_bundle="$repo_root/clusters/offsite/apps/spindrift/ca-bundle.yaml"
-folly_pin="$repo_root/clusters/folly/config/kubernetes-ca.pem"
-if [[ -s $spindrift_bundle ]] \
-  && [[ -s $certs_dir/offsite-ca-chain.pem ]] \
-  && [[ -s $folly_pin ]]; then
-  echo "==> regenerating ${spindrift_bundle#"$repo_root/"}" >&2
-  {
-    sed -n '1,/^  ca.crt: |$/p' "$spindrift_bundle"
-    cat "$certs_dir/offsite-ca-chain.pem" "$folly_pin" | awk 'NF {print "    " $0}'
-  } >"$spindrift_bundle.tmp"
-  mv "$spindrift_bundle.tmp" "$spindrift_bundle"
-fi
-
 cat >&2 <<'EOF'
 
 Done. Next steps:
-  1. git add terraform/pki/certs terraform/pki/oidc nix/secrets \
-       clusters/offsite/apps/spindrift/ca-bundle.yaml && commit + PR
+  1. git add terraform/pki/certs terraform/pki/oidc && commit + PR
      (the next atlantis apply uploads the refreshed OIDC documents)
-  2. deploy the control planes only after the matching NixOS configuration
-     consumes the refreshed keys, then restart cfssl and kube-controller-manager
-     on each of them: sops-nix compares decrypted plaintext to decide restarts,
-     so neither bounces when a certificate changes but its key does not
-  3. a *-prev.pem appears only when a key actually changed. Once every TLS leaf
-     uses the new CA, remove *-ca-prev.pem and rerun this script; after old
-     tokens age out, do the same for *-sa-signer-prev.pem
+  2. a *-prev.pem appears only when a key actually changed. After old tokens age
+     out, remove *-sa-signer-prev.pem and rerun this script
 EOF
