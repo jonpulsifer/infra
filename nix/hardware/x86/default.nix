@@ -40,7 +40,7 @@
     ];
   };
 
-  # fileSystems come from disko on k8s nodes and from the installer modules on the ISO and netboot images.
+  # fileSystems come from the installer modules on the ISO and netboot images.
 
   swapDevices = [ ];
 }

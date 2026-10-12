@@ -1,57 +1,18 @@
 {
   config,
   lib,
-  pkgs,
-  inputs,
   modulesPath,
   ...
 }:
-let
-  disko = inputs.disko.packages.${pkgs.stdenv.hostPlatform.system}.disko;
-
-  # The motd's host list: every Kubernetes node, by its cluster tag.
-  installableHosts = lib.attrNames (
-    lib.filterAttrs (
-      _: entry:
-      lib.any (
-        tag:
-        lib.elem tag [
-          "folly"
-          "offsite"
-        ]
-      ) (entry.tags or [ ])
-    ) (import ../hosts)
-  );
-
-  homelab-install = pkgs.writeShellApplication {
-    name = "homelab-install";
-    runtimeInputs = [
-      disko
-      pkgs.nixos-install-tools
-      pkgs.util-linux
-    ];
-    text = builtins.readFile ./homelab-install.sh;
-  };
-in
 {
   imports = [
     (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix")
     ../hardware/x86
   ];
 
-  environment.systemPackages = [
-    disko
-    homelab-install
-  ];
-
-  environment.etc."README".source = ./INSTALL.md;
-
   users.motd = ''
 
     === jonpulsifer/infra live installer ===
-    Install a host:   sudo homelab-install <host>
-    Full guide:       less /etc/README
-    Hosts:            ${lib.concatStringsSep " " installableHosts}
   '';
 
   users.users = {
