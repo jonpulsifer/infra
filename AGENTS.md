@@ -39,8 +39,9 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
 - A NixOS host configuration deployed from a branch reverts at the host's next
   auto-upgrade, which rebuilds from `main` every day. Merge the change promptly.
   The Pi 4 hosts have no auto-upgrade and change only when deployed. No Pi Zero
-  runs its NixOS config. The folly nodes run Talos Linux, have no auto-upgrade,
-  and change only through an Atlantis apply of `clusters/folly/talos/`.
+  runs its NixOS config. The Kubernetes nodes of both clusters run Talos Linux,
+  have no auto-upgrade, and change only through an Atlantis apply of
+  `clusters/<site>/talos/`.
 
 ## How changes ship
 
@@ -74,7 +75,7 @@ one exists.
 
 | Path | What is there |
 | --- | --- |
-| `nix/` | NixOS configuration for every NixOS host, and the image builds. Hosts are declared in `nix/hosts/default.nix`. |
+| `nix/` | NixOS configuration for every NixOS host (no Kubernetes node), and the image builds. Hosts are declared in `nix/hosts/default.nix`. |
 | `clusters/` | Kubernetes manifests for `folly` and `offsite`. `clusters/base/` is shared by both. |
 | `terraform/` | OpenTofu root modules, with the network under `network/` and reusable modules under `modules/`. Each `clusters/<site>/bootstrap/` and `clusters/<site>/talos/` is a root too. |
 | `apps/` | First-party services and tools. |

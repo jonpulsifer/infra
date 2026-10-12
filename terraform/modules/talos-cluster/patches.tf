@@ -46,8 +46,8 @@ locals {
 
   # Control plane: no kube-proxy and no Talos CoreDNS (the bootstrap root's
   # kube-dns Service at CLUSTER_DNS is the resolver); Talos rejects both kinds
-  # on a worker. Serving-cert SANs as today (nix/services/k8s/default.nix
-  # extraSANs minus the dead tailnet name). Issuer, federation and apiserver
+  # on a worker. Serving-cert SANs are the node and API
+  # server names. Issuer, federation and apiserver
   # extraArgs arrive through var.controlplane_patches.
   controlplane_patch = join("\n---\n", [
     yamlencode({

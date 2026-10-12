@@ -1,6 +1,6 @@
 ---
 title: retrofit
-description: An HP EliteDesk 800 G2 mini PC that is the offsite cluster's only control-plane node and runs its cluster CA.
+description: An HP EliteDesk 800 G2 mini PC that is the offsite cluster's only control-plane node, on Talos Linux.
 specs:
   vendor: HP
   model: EliteDesk 800 G2 DM 65W
@@ -10,23 +10,23 @@ specs:
   ram: 16 GB DDR4 SODIMM
   gpu: Intel HD Graphics 530
   storage: 512 GB Timetec SD08 SATA SSD
-  os: NixOS 26.05 (Yarara)
+  os: Talos Linux 1.14
   firmware: N21 Ver. 02.21
   tpm: TPM 1.2, too old for systemd-cryptenroll
 ---
 
-retrofit is the only control-plane node of the offsite [Kubernetes](../platform/kubernetes.md) cluster. `nix/hosts/retrofit.nix` configures it.
+retrofit is the only control-plane node of the offsite [Kubernetes](../platform/kubernetes.md) cluster. It runs Talos Linux, and `clusters/offsite/talos/` configures it.
 
 ## What it runs
 
 - etcd, the API server, the controller manager and the scheduler
-- cfssl with the offsite cluster CA. The CA key and the token signer key come from `nix/secrets/retrofit.sops.yaml`. See [PKI](../platform/pki.md).
 - Pods, because the control plane has no taint
-- `etcd-backup`, a daily 02:30 etcd snapshot into offsite's Garage store (`nix/services/etcd-backup.nix`)
+
+The cluster CA and the token signer key are in the secrets bundle, the 1Password item `talos-offsite-secrets`. See [PKI](../platform/pki.md).
 
 ## Reach
 
-Reach it at `offsite.lolwtf.ca`, the offsite API server name, or at `retrofit.lolwtf.ca`. See [Reach a host](index.md#reach-a-host).
+Reach it at `retrofit.lolwtf.ca` with `talosctl --context offsite`, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. The API server answers at `offsite.lolwtf.ca`. It runs no SSH server.
 
 ## Quirks
 

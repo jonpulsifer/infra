@@ -3,13 +3,12 @@ title: PKI
 description: The FML certificate chain, the Kubernetes cluster CAs and token signers, the cluster OIDC issuers and workload identity federation.
 ---
 
-The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the private certificate chain of the lab. It signs a Kubernetes CA and a ServiceAccount token signer for each cluster. The signers make each cluster an OIDC issuer, which publishes the keys that other systems use to check its ServiceAccount tokens. With the issuers, workloads get GCP credentials and reach the other cluster with no stored key.
+The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the private certificate chain of the lab. It signs a ServiceAccount token signer for each cluster. The signers make each cluster an OIDC issuer, which publishes the keys that other systems use to check its ServiceAccount tokens. With the issuers, workloads get GCP credentials and reach the other cluster with no stored key.
 
 ## Parts
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| cfssl | Issues node certificates and the break-glass `system:masters` certificate | Each control plane |
 | API server | Signs ServiceAccount tokens as the issuer `https://oidc.lolwtf.ca/<cluster>` | Each control plane |
 | OIDC documents | Publish the public keys of each signer | Cloudflare Pages, from `terraform/pki/oidc/<cluster>/` |
 | `fml-pool` | Exchanges a ServiceAccount token for a GCP credential | GCP |
@@ -20,12 +19,12 @@ The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the pri
 | --- | --- | --- |
 | FML Root CA | Itself | Offline. 1Password holds the certificate only. |
 | FML Intermediate CA | FML Root CA | 1Password |
-| FML K8s `<cluster>` CA | FML Intermediate CA | SOPS file of the control plane, and an escrow item in 1Password |
-| `<cluster>` ServiceAccount token signer | FML K8s `<cluster>` CA | SOPS file of the control plane |
+| Kubernetes CA of `<cluster>` | Itself | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
+| `<cluster>` ServiceAccount token signer | FML K8s `<cluster>` CA | The Talos secrets bundle, imported from the signer key |
 
-`terraform/pki` issues the cluster CAs and signers, and its state holds every private key it generates or reads. The root and intermediate do not expire. Cluster CAs last two years, and signers one year. The intermediate allows one CA below it, so a CA that a cluster CA signs fails validation.
+`terraform/pki` issues the signers, and its state holds every private key it generates or reads. The root and intermediate do not expire. Signers last one year. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
 
-Nodes trust `terraform/pki/certs/<cluster>-ca-bundle.pem`. Pods get `<cluster>-ca-chain.pem` as `ca.crt`. `apps/fml-pki` checks the chain with `mise run pki:verify` and writes the OIDC documents. The other `apps/fml-*` directories hold an offline root ceremony. No real ceremony transcript is committed.
+Both clusters run the self-signed Kubernetes CA from their secrets bundle, so nodes and pods trust that CA and no cluster CA file is committed under `terraform/pki/certs/`. `apps/fml-pki` checks the chain with `mise run pki:verify` and writes the OIDC documents. The other `apps/fml-*` directories hold an offline root ceremony. No real ceremony transcript is committed.
 
 ## Workload identity
 
@@ -44,15 +43,15 @@ Each API server also accepts tokens from the other cluster, for the ServiceAccou
 
 ## Rules
 
-- Keep `<cluster>-ca-chain.pem` out of `services.kubernetes.caFile`. That option also sets the client CA, so the API server would accept every client certificate under the FML Root.
-- After Atlantis applies a new CA or signer, follow the rotation steps in `terraform/pki/README.md`. After a same-key reissue, cfssl and kube-controller-manager keep the old certificate until they restart.
+- Never trust the FML Root as a client CA of a cluster, or its API server would accept every client certificate under the FML Root.
+- After Atlantis applies a new signer, follow the rotation steps in `terraform/pki/README.md`.
 - For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
 - On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one.
 
 ## Where it lives
 
 - `terraform/pki/`: the certificates, the OIDC documents and the rotation procedure in `README.md`
-- `nix/services/k8s/default.nix`: the issuer, cfssl and the rule for tokens from the other cluster
+- `clusters/<site>/talos/patches.tf`: the issuer and the rule for tokens from the other cluster
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: `fml-pool`
 
 ## Related

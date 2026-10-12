@@ -6,7 +6,7 @@ metadata:
 handler: runsc
 ---
 # podFixed charges each microVM's guest kernel and VMM, which run outside the
-# pod cgroup. nix/services/k8s/kata.nix registers the kata handler, Cloud
+# pod cgroup. The siderolabs/kata-containers extension in clusters/<site>/talos/talos.tf registers the kata handler, Cloud
 # Hypervisor, on every node.
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass

@@ -18,7 +18,7 @@ spec:
         app.kubernetes.io/name: kata-demo
         app.kubernetes.io/part-of: kata-demo
     spec:
-      # Every k8s node registers this handler (nix/services/k8s/kata.nix), so
+      # Every k8s node registers this handler (the siderolabs/kata-containers extension in clusters/<site>/talos/talos.tf), so
       # the pod needs no scheduling constraint.
       runtimeClassName: kata-clh
       automountServiceAccountToken: false

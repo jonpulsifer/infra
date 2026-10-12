@@ -10,8 +10,8 @@ metadata:
 
 # NixOS deploy
 
-The procedure is `docs/runbooks/deploy-a-nixos-host.md`. To add an x86
-Kubernetes node, follow `docs/runbooks/add-a-kubernetes-node.md`. The platform
+The procedure is `docs/runbooks/deploy-a-nixos-host.md`. To add a
+Kubernetes node, follow `docs/runbooks/install-talos-on-a-node.md`. The platform
 page is `docs/platform/nixos.md`, and each host has a sheet under
 `docs/hosts/`. These notes cover what an agent needs beyond them.
 

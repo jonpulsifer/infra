@@ -3,7 +3,7 @@ title: Hosts
 description: Every host in the homelab, with its role, site, hardware, OS and status, and how to reach it.
 ---
 
-The hosts are the machines the homelab runs on: Kubernetes nodes, Raspberry Pis, Windows desktops and a cloud VM. They are at two sites, folly (home) and offsite (remote). See [Network](../platform/network.md). `nix/hosts/default.nix` declares every NixOS host and image. The folly nodes run Talos Linux, and `clusters/folly/talos/` declares them.
+The hosts are the machines the homelab runs on: Kubernetes nodes, Raspberry Pis, Windows desktops and a cloud VM. They are at two sites, folly (home) and offsite (remote). See [Network](../platform/network.md). `nix/hosts/default.nix` declares every NixOS host and image. The Kubernetes nodes run Talos Linux, and `clusters/<site>/talos/` declares them.
 
 NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade, and no Pi Zero runs its NixOS config. See [NixOS](../platform/nixos.md) and [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md).
 
@@ -12,9 +12,9 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 | [optiplex](optiplex.md) | folly control plane | folly | Dell OptiPlex 3050 micro | Talos Linux | live |
 | [riptide](riptide.md) | folly worker with a GPU | folly | HP EliteDesk 800 G5 Desktop Mini | Talos Linux | live |
 | [shale](shale.md) | folly worker | folly | HP EliteDesk 800 G2 DM | Talos Linux | live |
-| [retrofit](retrofit.md) | offsite control plane and cluster CA | offsite | HP EliteDesk 800 G2 DM | NixOS | live |
-| [oldschool](oldschool.md) | offsite worker | offsite | HP EliteDesk 800 G3 DM | NixOS | live |
-| hotrod | offsite worker | offsite | unknown | NixOS | not installed |
+| [retrofit](retrofit.md) | offsite control plane | offsite | HP EliteDesk 800 G2 DM | Talos Linux | live |
+| [oldschool](oldschool.md) | offsite worker | offsite | HP EliteDesk 800 G3 DM | Talos Linux | live |
+| [hotrod](hotrod.md) | offsite worker | offsite | HP mini, Intel Core i5-10500T | Talos Linux | not installed |
 | [spore](spore.md) | NFS, x86 netboot, forge's boot image, DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [capsule](capsule.md) | DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [forge](forge.md) | arm64 build host | folly | Raspberry Pi 5, NVMe | NixOS | live |
@@ -59,4 +59,4 @@ Each sheet states its host's divergence. These cover more than one host, or a ho
 - eviropico runs Pimoroni's MicroPython firmware, and no file in git holds its code.
 - capsule and forge are on the tailnet, and `devices.tf` lists neither. forge enrols through the OAuth client in `terraform/network/tailscale/oauth_clients.tf`.
 - `devices.tf` lists nuc, with `tag:folly`, and desktop-g7i75ls, with `tag:offsite`. No sheet or NixOS configuration covers either.
-- The five Kubernetes nodes run no Tailscale client, and `devices.tf` does not list them. Their tailnet entries stay in the admin console, and `dotfiles/.ssh/config` sends `ssh retrofit` and `ssh oldschool` to those names, which do not answer.
+- The Kubernetes nodes run no Tailscale client, and `devices.tf` does not list them. Their tailnet entries stay in the admin console.
