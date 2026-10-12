@@ -21,11 +21,8 @@ spec:
     backup:
       endpointURL: ${GARAGE_S3_ENDPOINT}
       item: garage-${CLUSTER_NAME}
-      # One prefix per generation of the Cluster. Recovery reads the previous
-      # one; recover-a-re-created-database removes recoverFrom once
-      # prowler-db-2 holds a base backup.
+      # One prefix per generation of the Cluster; the one before it was prowler-db.
       serverName: prowler-db-2
-      recoverFrom: prowler-db
     gcp:
       # The pool trusts this cluster's SA-token issuer, so the projected token
       # needs no credential. Roles: terraform/gcp/projects/homelab-ng/prowler.tf.
