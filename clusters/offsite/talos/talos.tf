@@ -24,7 +24,7 @@ provider "onepassword" {}
 variable "secrets_item_uuid" {
   type        = string
   description = "UUID of the 1Password Secure Note talos-offsite-secrets, whose note is offsite's Talos secrets bundle. Issue a talosconfig names the item."
-  default     = "PLACEHOLDER-create-talos-offsite-secrets"
+  default     = "kbtd3p7uw2rjbiiuflxdxr6njm"
 
   validation {
     condition     = can(regex("^[a-z0-9]{26}$", var.secrets_item_uuid))
