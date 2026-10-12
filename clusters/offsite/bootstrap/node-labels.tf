@@ -1,26 +1,10 @@
-locals {
-  common_labels = {
-    terraform-managed = "true"
-  }
-  offsite_nodes = {
-    "oldschool" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-enabled"                    = "true"
-    },
-    "retrofit" = {
-      "node-role.kubernetes.io/control-plane" = ""
-      "bgp-enabled"                           = "true"
-    }
-  }
-}
+# Talos sets bgp-enabled through KubeNodeConfig in
+# terraform/modules/talos-cluster. This root forgets kubernetes_labels.nodes
+# from its state and leaves the labels on the nodes.
+removed {
+  from = kubernetes_labels.nodes
 
-resource "kubernetes_labels" "nodes" {
-  for_each = local.offsite_nodes
-
-  api_version = "v1"
-  kind        = "Node"
-  metadata {
-    name = each.key
+  lifecycle {
+    destroy = false
   }
-  labels = each.value
 }

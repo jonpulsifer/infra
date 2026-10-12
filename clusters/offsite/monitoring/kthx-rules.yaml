@@ -53,19 +53,20 @@ spec:
             message: "kthx site databases are past 80% of the kthx-db volume"
             description: "Site databases sum to more than 80% of what the kthx-db claim asks for. Each site is capped at 256 MiB, so this is site count, not one runaway: expand the claim (allowed live) or delete dead sites."
 
-        # The sites volume sees all of /mnt/disks, shared with other claims, and
-        # the server evicts only past 80% used. hostPath has no volume stats.
+        # The sites volume sees all of the node's data volume, shared with other
+        # claims, and the server evicts only past 80% used. hostPath has no
+        # volume stats.
         - alert: KthxSitesDiskFilling
           expr: |
-            node_filesystem_avail_bytes{instance="oldschool",mountpoint="/mnt/disks"}
+            node_filesystem_avail_bytes{instance="oldschool",mountpoint="/var/mnt/data"}
             /
-            node_filesystem_size_bytes{instance="oldschool",mountpoint="/mnt/disks"}
+            node_filesystem_size_bytes{instance="oldschool",mountpoint="/var/mnt/data"}
             < 0.25
           for: 30m
           labels:
             severity: warning
           annotations:
-            message: "oldschool /mnt/disks is under 25% free"
+            message: "oldschool /var/mnt/data is under 25% free"
             description: "Every local-path volume on oldschool lives here, and the one that grows from anonymous public uploads is the kthx sites volume. Measure that directory first, then the other claims on this disk. At 20% free the server starts evicting release directories that are neither serving nor previous; at 5% NodeFilesystemAlmostOutOfSpace fires and every workload on the node is already in trouble."
 
         # Keyed on the last success: failed Jobs outlive a fix, and a CronJob that

@@ -31,20 +31,26 @@ spec:
       enabled: false
     defaultRules:
       rules:
-        etcd: false
-        kubeControllerManager: false
+        etcd: true
+        kubeControllerManager: true
         kubeProxy: false
-        kubeSchedulerAlerting: false
+        kubeSchedulerAlerting: true
     # cAdvisor rides the kubelet scrape: every container_* series and the
     # KubeletDown rule need it.
     kubelet:
       enabled: true
+    # Static pods on the control plane's host network, which
+    # clusters/offsite/talos/patches.tf binds to the node address. etcd serves
+    # plain-HTTP metrics on 2381; the chart's ports and schemes match.
     kubeControllerManager:
-      enabled: false
+      enabled: true
+      endpoints: ["${API_SERVER_IP}"]
     kubeEtcd:
-      enabled: false
+      enabled: true
+      endpoints: ["${API_SERVER_IP}"]
     kubeScheduler:
-      enabled: false
+      enabled: true
+      endpoints: ["${API_SERVER_IP}"]
     cleanPrometheusOperatorObjectNames: true
     prometheus:
       ingress:
@@ -196,12 +202,10 @@ spec:
             resources: [gateways, httproutes]
             verbs: [list, watch]
     prometheus-node-exporter:
-      # Host services drop .prom files in the textfile directory. extraArgs
-      # replaces the chart defaults, so keep its two filesystem excludes.
+      # extraArgs replaces the chart defaults, so keep its two filesystem excludes.
       extraArgs:
         - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
         - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$
-        - --collector.textfile.directory=/host/root/var/lib/prometheus-node-exporter-text-files
       prometheus:
         monitor:
           relabelings:

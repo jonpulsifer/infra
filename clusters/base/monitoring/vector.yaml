@@ -52,8 +52,7 @@ spec:
         kubernetes_logs:
           type: kubernetes_logs
         # The Talos machine config's machine.logging.destinations and
-        # KmsgLogConfig name these two ports. NixOS nodes send nothing here;
-        # offsite's kustomization.yaml adds their journal while they remain.
+        # KmsgLogConfig in clusters/<site>/talos/patches.tf name these two ports.
         talos_service:
           type: socket
           mode: tcp

@@ -13,11 +13,13 @@ resources:
   - alertmanager-discord.yaml
   - coredns-rules.yaml
   - etcd-rules.yaml
+  - etcd-snapshot-rules.yaml
   - flux-monitoring.yaml
   - flux-rules.yaml
   - gateway-api-generation.yaml
   - mate-sandbox-reader.yaml
   - node-saturation-rules.yaml
+  - node-storage-rules.yaml
   - backup-rules.yaml
   - grafana-dashboards
   - helm-repository-grafana.yaml

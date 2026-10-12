@@ -1,6 +1,8 @@
 ---
 # Offsite's Garage. It runs on oldschool's host network so the S3 port answers
-# at oldschool.lolwtf.ca, and keeps its metadata and data on that node's disk.
+# at oldschool.lolwtf.ca, and keeps its metadata and data under that node's
+# NODE_DATA_ROOT, the `data` volume. A rebuild of the node empties it; Restore
+# from the GCS copy refills it.
 # Updates stop the pod before they start its replacement, so the two never
 # fight for the host's ports.
 apiVersion: apps/v1
@@ -103,5 +105,5 @@ spec:
           emptyDir: {}
         - name: data
           hostPath:
-            path: /mnt/disks/garage
+            path: ${NODE_DATA_ROOT}/garage
             type: DirectoryOrCreate

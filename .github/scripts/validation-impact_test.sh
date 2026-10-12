@@ -14,9 +14,9 @@ assert_targets() {
   fi
 }
 
-assert_targets 'both topology ConfigMaps validate Nix and the folly Talos root' \
+assert_targets 'both topology ConfigMaps validate Nix and each Talos root' \
   $'clusters/folly/config/cluster-topology.json\nclusters/offsite/config/cluster-topology.json' \
-  $'nix:flake-check\nterraform:clusters/folly/talos'
+  $'nix:flake-check\nterraform:clusters/folly/talos\nterraform:clusters/offsite/talos'
 
 assert_targets 'every path routes when changed-files escapes the separators' \
   $'clusters/folly/config/cluster-topology.json\\\nterraform/network/unifi/offsite/k8s.tf\\\nterraform/network/tailscale/devices.tf' \
