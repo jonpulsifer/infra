@@ -1,0 +1,85 @@
+---
+# Opens a Rowbutt thread for a firing warning or critical alert group
+# (docs/apps/mate.md#alert-responder). The Discord config in base/monitoring
+# stays the record of every alert, and alertmanager-switchboard.yaml rings for
+# a critical one; this one asks mate to look.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-mate
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: alertmanager-mate
+    creationPolicy: Owner
+    # The same cleaning as mate's copy, so both sides hold one value.
+    template:
+      engineVersion: v2
+      data:
+        token: '{{ regexReplaceAll "[^A-Za-z0-9_-]" .token "" }}'
+  data:
+    # The item mate's own mate-alertmanager ExternalSecret reads, so the
+    # webhook and its receiver hold one value. Until the item exists this
+    # Secret is missing, so kube-prometheus.yaml leaves this config out of the
+    # selector: a selected config with a missing Secret is rejected, receiver
+    # and route together, and PrometheusOperatorRejectedResources fires.
+    - secretKey: token
+      remoteRef: {key: mate alertmanager token, property: credential}
+---
+# The operator makes each selected AlertmanagerConfig a sub-route with
+# `continue: true`, so an alert reaches Discord and this receiver.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: mate
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: mate
+spec:
+  route:
+    # Matches every namespace only while alertmanagerConfigMatcherStrategy is None.
+    receiver: mate
+    matchers:
+      # Info alerts are inhibited unless a warning fires beside them, and
+      # mate's turns are the cost; a thread per warning is the floor.
+      - name: severity
+        value: critical|warning
+        matchType: "=~"
+      # Watchdog always fires, and InfoInhibitor is a synthetic inhibitor.
+      - name: alertname
+        value: Watchdog|InfoInhibitor
+        matchType: "!~"
+    # The same grouping as Discord's, so a thread is one Discord title.
+    groupBy: [cluster, namespace, alertname]
+    # A minute gathers a burst into one thread.
+    groupWait: 1m
+    # Alertmanager retries a failed post for about this long before it counts
+    # the notification failed, which AlertmanagerClusterFailedToSendAlerts,
+    # critical on this chart, fires on. A CD roll of mate takes a minute or
+    # two, and mate answers 503 while it drains, starts, or has no token yet,
+    # so a roll costs nothing; a mate down for longer pages, as MateDown does.
+    groupInterval: 5m
+    # A repeat opens nothing: mate knows the group's alerts by fingerprint and
+    # only an alert that joins the group wakes its thread.
+    repeatInterval: 12h
+  receivers:
+    - name: mate
+      webhookConfigs:
+        - url: http://mate.mate.svc.cluster.local:8080/alertmanager
+          # The thread notes the resolution, and a group that fires again
+          # after it resolved gets a new thread.
+          sendResolved: true
+          # The prompt describes a dozen; a storm of one alert name is one
+          # thread either way. An incident with many names opens a thread for
+          # each, and the responder profile's daily cap bounds the spend.
+          maxAlerts: 20
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: alertmanager-mate
+                key: token

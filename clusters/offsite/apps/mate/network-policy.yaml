@@ -1,6 +1,7 @@
 ---
 # Egress for the bot pod; sandbox-network-policy.yaml covers sandboxes. Cilium
-# admits the node, where the readiness probe comes from; nothing else reaches mate.
+# admits the node, where the readiness probe comes from, and Alertmanager's
+# pods, which post to /alertmanager; nothing else reaches mate.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -17,6 +18,17 @@ spec:
     # deployment.yaml's readinessProbe.
     - fromEntities:
         - host
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Alertmanager's notifications (clusters/offsite/monitoring/
+    # alertmanager-mate.yaml), by the label the operator sets on its pods.
+    # The bearer in the request is what mate checks; this is who may try.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: alertmanager
       toPorts:
         - ports:
             - port: "8080"

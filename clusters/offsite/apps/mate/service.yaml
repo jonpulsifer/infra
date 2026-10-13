@@ -1,0 +1,20 @@
+---
+# Where Alertmanager posts its notifications (clusters/offsite/monitoring/
+# alertmanager-mate.yaml): mate's one port, which also answers the readiness
+# probe. network-policy.yaml admits Alertmanager's pods and the node alone.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mate
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate
+    app.kubernetes.io/part-of: mate
+spec:
+  selector:
+    app.kubernetes.io/name: mate
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

@@ -9,7 +9,9 @@ Alertmanager in each cluster's [monitoring stack](../observability.md) routes ev
 
 The `discord` AlertmanagerConfig sends alerts to a Discord webhook from 1Password, except `Watchdog` and `InfoInhibitor`. Each alert carries its `cluster` label, repeats every 12 hours, and reports when it resolves. The `inhibit_rules` in `kube-prometheus.yaml` send an info alert only while a warning or critical alert fires in its namespace.
 
-On offsite, the `switchboard` AlertmanagerConfig posts a firing `critical` alert to Switchboard and repeats it every 15 minutes, so a notification skipped for quiet hours or the cap is retried soon after. It is parked: offsite's `alertmanagerConfigSelector` names `discord` alone. A switchboard restart forgets what it rang, so a pod roll during an incident rings once more per firing critical alert.
+On offsite, the `switchboard` AlertmanagerConfig posts a firing `critical` alert to Switchboard and repeats it every 15 minutes, so a notification skipped for quiet hours or the cap is retried soon after. A switchboard restart forgets what it rang, so a pod roll during an incident rings once more per firing critical alert.
+
+Also on offsite, the `mate` AlertmanagerConfig posts a firing `warning` or `critical` alert group to Rowbutt's [alert responder](../../apps/mate.md#alert-responder), grouped as Discord groups it, with the resolution, and repeats every 12 hours, which opens nothing. Both are parked: offsite's `alertmanagerConfigSelector` names `discord` alone.
 
 ## Who can post an alert
 
@@ -19,10 +21,12 @@ Alertmanager's API has no authentication. On offsite, its network policy admits 
 
 - Keep `alertmanagerConfigSelector` and `alertmanagerConfigMatcherStrategy` in each `kube-prometheus.yaml`, or no alert reaches Discord.
 - Add `switchboard` to offsite's `alertmanagerConfigSelector` only once the switchboard Deployment has a Ready pod, in its own merge, and drop it before parking the Deployment. Selected with no pod, every webhook fails and `AlertmanagerClusterFailedToSendAlerts`, a critical alert, rings the owner when the pod comes up.
+- Add `mate` to the selector the same way, once a mate pod from an image with `apps/mate/src/responder.ts` is Ready and Secret `alertmanager-mate` exists, and drop it before unsetting `MATE_RESPONDER_CHANNEL`. mate refuses a post it cannot act on with a 4xx, which counts as a failed notification too.
 
 ## Where it lives
 
 - `clusters/base/monitoring/alertmanager-discord.yaml`: the Discord route
 - `clusters/<site>/monitoring/kube-prometheus.yaml`: the selector and the inhibit rules
 - `clusters/offsite/monitoring/alertmanager-switchboard.yaml`: the switchboard receiver
+- `clusters/offsite/monitoring/alertmanager-mate.yaml`: the Rowbutt receiver
 - `clusters/offsite/monitoring/alertmanager-network-policy.yaml`: who reaches Alertmanager on offsite

@@ -11,6 +11,7 @@ resources:
   - mate-sandbox-reader.yaml
   - pbx-rules.yaml
   - alertmanager-switchboard.yaml
+  - alertmanager-mate.yaml
   - alertmanager-network-policy.yaml
   - ../../base/monitoring
 patches:
