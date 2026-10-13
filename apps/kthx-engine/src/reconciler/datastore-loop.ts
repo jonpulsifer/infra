@@ -48,6 +48,7 @@ export async function runDatastorePass(
       ref: datastores.ref,
       phase: datastores.phase,
       connectionRef: datastores.connectionRef,
+      serverName: datastores.serverName,
       permittedNamespace: datastores.permittedNamespace,
       permittedAt: datastores.permittedAt,
       appName: apps.name,
@@ -118,7 +119,7 @@ export async function runDatastorePass(
       // older than its store archives nowhere until it is attached.
       if (adapter.protect !== undefined) {
         try {
-          await adapter.protect(target, row.ref);
+          await adapter.protect(target, row.ref, row.serverName);
         } catch (error) {
           logWarn('a Datastore backup was refused', {
             'spindrift.datastore.id': row.id,

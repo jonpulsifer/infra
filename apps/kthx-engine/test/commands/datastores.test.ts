@@ -107,13 +107,21 @@ describe('createDatastore', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(backend.provisioned).toEqual([
-      { name: 'orders', engine: 'postgres', storageGiB: 10 },
-    ]);
     const [row] = await database()
       .db.select()
       .from(datastores)
       .where(eq(datastores.name, 'orders'));
+    // One prefix for this generation: the name and the row id's first eight.
+    expect(row?.serverName).toBe(`orders-${row!.id.slice(0, 8)}`);
+    expect(row?.serverName).toMatch(/^orders-[0-9a-f]{8}$/);
+    expect(backend.provisioned).toEqual([
+      {
+        name: 'orders',
+        engine: 'postgres',
+        storageGiB: 10,
+        serverName: row?.serverName,
+      },
+    ]);
     expect(row?.ref).toBe('postgres/fixture/orders');
     expect(row?.provenance).toBe('managed');
     // PENDING until the loop learns the object came up.

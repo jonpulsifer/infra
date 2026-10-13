@@ -3,6 +3,7 @@
  * surface there that can host it. Attaching it to an App is `attachDatastore`'s
  * job.
  */
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DatastoreEngine } from '../../adapters/datastore/contract.ts';
@@ -93,21 +94,23 @@ export const createDatastore: Command<
   // Inserted first: the far-side object is named after the Datastore, so only
   // the unique key on (vessel_id, name) can refuse a duplicate.
   const now = context.clock.now();
-  let inserted: readonly { id: string }[];
+  // Each generation of a name archives under its own prefix: the id is new
+  // every time, so a re-created Datastore never meets the old WAL.
+  const id = randomUUID();
+  const serverName = `${input.name}-${id.slice(0, 8)}`;
   try {
-    inserted = await context.db
-      .insert(datastores)
-      .values({
-        name: input.name,
-        engine: input.engine,
-        provenance: 'managed',
-        vesselId: vessel.id,
-        phase: 'PENDING',
-        ref: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: datastores.id });
+    await context.db.insert(datastores).values({
+      id,
+      serverName,
+      name: input.name,
+      engine: input.engine,
+      provenance: 'managed',
+      vesselId: vessel.id,
+      phase: 'PENDING',
+      ref: null,
+      createdAt: now,
+      updatedAt: now,
+    });
   } catch {
     // The unique key is the only constraint this insert can violate.
     return failed(
@@ -115,20 +118,13 @@ export const createDatastore: Command<
       `${datastoreVesselLabel(vessel)} already has a Datastore called '${input.name}'`,
     );
   }
-  const id = inserted[0]?.id;
-  if (id === undefined) {
-    return failed(
-      'NOT_DEPLOYABLE',
-      'the Datastore record could not be written',
-    );
-  }
-
   let ref: string;
   try {
     ref = await adapter.provision(deployTargetOf(target, vessel), {
       name: input.name,
       engine: input.engine,
       storageGiB: input.storageGiB,
+      serverName,
     });
   } catch (cause) {
     await context.db.delete(datastores).where(eq(datastores.id, id));

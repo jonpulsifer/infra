@@ -462,6 +462,8 @@ describe('the backup', () => {
     // Once on attach, once past the reassert window: a store the installation
     // adds later reaches a Datastore provisioned before it, within the hour.
     expect(backend.protects).toEqual([row.ref!, row.ref!]);
+    // A row older than the column has no prefix, and keeps the default.
+    expect(backend.protectedServerNames).toEqual([null, null]);
     expect(backend.permits).toHaveLength(2);
   });
 

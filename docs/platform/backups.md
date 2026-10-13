@@ -46,7 +46,7 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 - Keep `backup-crypt` in 1Password. Without it the GCS copy cannot be read.
 - Label each backup CronJob `lolwtf.ca/backup: "true"`. `BackupJobStale` and `BackupJobFailed` watch only those.
 - Give a new database an `ObjectStore` and a `ScheduledBackup`. It has no backup without them.
-- Give a re-created `Cluster` a new `backup.serverName`. The plugin refuses a prefix that holds WAL; [Recover a re-created database](../runbooks/recover-a-re-created-database.md) has the steps.
+- Give a re-created `Cluster` a new `backup.serverName`. The kthx engine does this for a Datastore: each generation archives under its own prefix, `<name>-<8 hex characters of the row id>`. The plugin refuses a prefix that holds WAL; [Recover a re-created database](../runbooks/recover-a-re-created-database.md) has the steps.
 
 ## Where it lives
 
