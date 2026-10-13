@@ -127,6 +127,7 @@ export function mateConfig(overrides: ConfigOverrides = {}): Config {
     slack: null,
     custodianChannel: null,
     responderChannel: null,
+    dreamsChannel: null,
     alertmanagerTokenFile: '/var/run/mate/alertmanager/token',
     ...rest,
   };

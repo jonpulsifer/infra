@@ -40,6 +40,8 @@ export interface Config {
   readonly custodianChannel: string | null;
   /** Where the alert responder opens a thread per alert group; disabled without a channel. */
   readonly responderChannel: string | null;
+  /** Where the nightly 03:00 America/Halifax dream opens its thread; disabled without a channel. */
+  readonly dreamsChannel: string | null;
   /** The file holding the bearer Alertmanager's webhook carries to `/alertmanager`, read at each request. */
   readonly alertmanagerTokenFile: string;
 }
@@ -539,6 +541,7 @@ export function readConfig(env: Env): Config {
   refuseRenamed(env);
   const custodianChannel = slackChannel(env, 'MATE_CUSTODIAN_CHANNEL');
   const responderChannel = slackChannel(env, 'MATE_RESPONDER_CHANNEL');
+  const dreamsChannel = slackChannel(env, 'MATE_DREAMS_CHANNEL');
   const sandbox = readSandboxConfig(env);
   return {
     token: required(env, 'DISCORD_TOKEN'),
@@ -559,6 +562,7 @@ export function readConfig(env: Env): Config {
     slack: slack(env),
     custodianChannel,
     responderChannel,
+    dreamsChannel,
     alertmanagerTokenFile: text(
       env,
       'MATE_ALERTMANAGER_TOKEN_FILE',

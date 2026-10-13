@@ -105,6 +105,11 @@ spec:
             # retries.
             - name: MATE_ALERTMANAGER_TOKEN_FILE
               value: /var/run/mate/alertmanager/token
+            # 03:00 America/Halifax: the nightly dream reads the day's threads
+            # and opens a pull request with what Rowbutt learned, here,
+            # #chatops. Unset to dream no more.
+            - name: MATE_DREAMS_CHANNEL
+              value: C062BS4GADR
             # shutdownTime is never more than two hours out, so mate refuses a turn cap
             # of 120 minutes or more, and 55 or more while the GitHub App is set.
             - name: MATE_TURN_MINUTES

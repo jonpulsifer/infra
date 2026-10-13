@@ -18,6 +18,7 @@ import type { Clock, Handle } from './clock.ts';
 import type { Config, GithubAppConfig } from './config.ts';
 import { PostgresCredentialStore } from './credential-store.ts';
 import { Custodian, PostgresCustodianLedger } from './custodian.ts';
+import { DREAMER_PROFILE, Dreams, PostgresDreamsLedger } from './dreams.ts';
 import { GithubApp } from './github-app.ts';
 import type { Routes } from './http.ts';
 import { KthxSites } from './kthx-sites.ts';
@@ -28,7 +29,8 @@ import { combineMcp, createMcpBridge } from './mcp.ts';
 import type { Instruments } from './metrics.ts';
 import { CHATGPT_PROVIDER, chatgptModel, createModelSetup } from './model.ts';
 import { brainProfiles, loadSystemPrompts } from './profile.ts';
-import { PROFILES } from './profiles.ts';
+import { DEFAULT_PROFILE, PROFILES } from './profiles.ts';
+import { PostgresRecallSource } from './recall.ts';
 import {
   fileToken,
   PostgresResponderLedger,
@@ -120,6 +122,7 @@ interface Running {
   slack: SlackSide | null;
   custodian: Custodian | null;
   responder: Responder | null;
+  dreams: Dreams | null;
   wakes: Wakes;
   timers: (() => void)[];
 }
@@ -269,6 +272,13 @@ export class Mate {
       log,
       clock,
     });
+    // The dream's own threads are left out of a listing: nothing dreams of dreams.
+    const recall = db.sql
+      ? new PostgresRecallSource(db.sql, {
+          defaultProfile: DEFAULT_PROFILE,
+          exclude: [DREAMER_PROFILE],
+        })
+      : null;
     const brain = new PiBrain({
       db,
       store: threadStore,
@@ -278,6 +288,7 @@ export class Mate {
       profiles,
       mcp,
       wakes,
+      recall,
       log,
       clock,
       metrics,
@@ -355,6 +366,21 @@ export class Mate {
         ),
       );
     }
+    const dreams =
+      config.dreamsChannel && slack && db.sql
+        ? new Dreams({
+            ledger: new PostgresDreamsLedger(db.sql),
+            slack: slack.api,
+            threads,
+            channel: config.dreamsChannel,
+            owner: slackOwner,
+            log,
+            clock,
+          })
+        : null;
+    if (dreams) void db.ready.then(() => dreams.start());
+    else if (config.dreamsChannel)
+      log.warn('dreams disabled: Slack or database unavailable');
     // Before the gateway: a revoked or rate-limited Discord token, or a wait on
     // the identify budget, must not hold Slack back.
     if (slack) await slack.listener.start(threads);
@@ -368,6 +394,7 @@ export class Mate {
       slack,
       custodian,
       responder,
+      dreams,
       wakes,
       timers: [],
     };
@@ -419,8 +446,17 @@ export class Mate {
     const running = await this.starting?.catch(() => null);
     if (!running) return;
     const { log, database, surfaces, tuning } = this.edges;
-    const { threads, hands, chatgpt, slack, custodian, responder, wakes, mcp } =
-      running;
+    const {
+      threads,
+      hands,
+      chatgpt,
+      slack,
+      custodian,
+      responder,
+      dreams,
+      wakes,
+      mcp,
+    } = running;
     // First: envelopes are acked on receipt, so one taken during the drain is
     // lost for good.
     slack?.listener.stop();
@@ -428,6 +464,7 @@ export class Mate {
     // is replayed to the next process; posting is REST and still works.
     surfaces.discord.stop();
     custodian?.stop();
+    dreams?.stop();
     // Alertmanager retries the 503 against the next pod.
     responder?.stop();
     wakes.stop();

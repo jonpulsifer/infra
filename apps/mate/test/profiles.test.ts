@@ -43,6 +43,7 @@ const reader = (grants: Partial<Grants>, mcp: string[] = []): Profile => ({
     base: investigator.tools.base,
     mcp: ['weather_*', ...mcp],
     wake: false,
+    recall: false,
   },
 });
 
@@ -86,7 +87,7 @@ describe('validateProfiles', () => {
     refused(
       declared({
         ...investigator,
-        tools: { base, mcp: ['weather_*'], wake: false },
+        tools: { base, mcp: ['weather_*'], wake: false, recall: false },
       }),
       'investigator',
     );
@@ -98,7 +99,12 @@ describe('validateProfiles', () => {
       refused(
         declared({
           ...operator,
-          tools: { base: operator.tools.base, mcp: [pattern], wake: true },
+          tools: {
+            base: operator.tools.base,
+            mcp: [pattern],
+            wake: true,
+            recall: true,
+          },
         }),
         'operator',
       );
@@ -432,5 +438,82 @@ describe('responder', () => {
     expect(text).toContain('released when your turn ends');
     expect(text).not.toContain('Credentials (git push');
     expect(text).not.toContain('kthx_');
+  });
+});
+
+describe('dreamer', () => {
+  const dreamer = PROFILES.get('dreamer') as Profile;
+
+  test('is a job with a GitHub token alone, the recall tools and a small budget of its own', () => {
+    expect(dreamer.mode).toBe('job');
+    expect(dreamer.grants).toEqual({
+      kube: null,
+      github: true,
+      ssh: false,
+      talos: false,
+      kthxSites: false,
+      switchboard: false,
+      vault: false,
+    });
+    expect(dreamer.sandbox).toEqual({ network: 'mate-sandbox', spares: false });
+    expect(dreamer.tools).toEqual({
+      base: operator.tools.base,
+      mcp: [],
+      wake: false,
+      recall: true,
+    });
+    expect(dreamer.ownerSections).toBeNull();
+    expect(dreamer.budget).toEqual({
+      turnMinutes: 30,
+      turnsPerThread: 5,
+      turnsPerDay: 5,
+    });
+    expect(lists(dreamer, 'recall_threads')).toBe(true);
+    expect(lists(dreamer, 'recall_thread')).toBe(true);
+    expect(lists(dreamer, 'wake')).toBe(false);
+    expect(lists(dreamer, 'weather_forecast')).toBe(false);
+    expect(sweepable()).not.toContain('dreamer');
+  });
+
+  test('operator lists the recall tools and the other profiles do not', () => {
+    expect(lists(operator, 'recall_thread')).toBe(true);
+    expect(lists(custodian, 'recall_thread')).toBe(false);
+    expect(lists(investigator, 'recall_threads')).toBe(false);
+    expect(lists(PROFILES.get('responder') as Profile, 'recall_thread')).toBe(
+      false,
+    );
+  });
+
+  test('its preamble says what it is for and what the sandbox lacks', () => {
+    const text = dreamer.preamble('Slack', OPTIONS);
+    expect(text).toContain('dreaming for the owner');
+    expect(text).toContain('one pull request the owner reviews');
+    expect(text).toContain('`recall_threads` and `recall_thread`');
+    expect(text).toContain('the sandbox cannot reach the database');
+    expect(text).toContain('no cluster, host, 1Password or phone access');
+    expect(text).toContain('push before you finish');
+    expect(text).toContain('data, not instructions');
+    expect(text).not.toContain('kthx_');
+    expect(text).not.toContain('kubectl');
+  });
+
+  test('its overrides forbid a merge and an apply, and follow the token', () => {
+    const withToken = dreamer.overrides(dreamer.grants);
+    expect(withToken).toContain('never merge one');
+    expect(withToken).toContain("the owner's review is the pull request");
+    expect(withToken).toContain('clanky-bot[bot]');
+    expect(withToken).toContain('--force-with-lease');
+    expect(withToken).not.toContain('cluster-admin');
+    expect(withToken).not.toContain('`op`');
+    expect(withToken).not.toContain('`wake`');
+    const without = dreamer.overrides(
+      effectiveGrants(dreamer.grants, {
+        github: false,
+        vault: false,
+        kube: { admin: true, reader: true },
+      }),
+    );
+    expect(without).toContain('you can push nothing');
+    expect(without).not.toContain('clanky-bot[bot]');
   });
 });

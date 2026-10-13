@@ -33,6 +33,7 @@ A profile sets what a thread may do. `apps/mate/src/profiles.ts` declares them, 
 | `custodian` | job | The daily check | `mate-sandbox-admin` | As `operator` | 10 turns a UTC day of its own |
 | `investigator` | interactive | A mention starting `+investigator` | `mate-sandbox-reader`, read-only on both clusters | GET on Prometheus and Alertmanager, and the `weather_*` tools | 20-minute turns, 10 a thread, and the shared interactive day |
 | `responder` | job | An Alertmanager notification | As `investigator` | As `investigator` | 20-minute turns, 10 a thread, 30 a UTC day of its own |
+| `dreamer` | job | The nightly dream | None | GitHub, to open one pull request, and the `recall_*` tools | 30-minute turns, 5 a thread, 5 a UTC day of its own |
 
 - Interactive: the owner's threads, which share the turn slots and the daily count.
 - Automation: a trusted trigger's thread, which runs one turn at a time and closes after 30 quiet minutes.
@@ -49,6 +50,14 @@ mate records the day and Slack root in `mate-db` and posts the assignment into t
 offsite's Alertmanager posts each firing `warning` or `critical` alert group to mate, and mate opens a thread for it in Slack `#chatops`, configured by `MATE_RESPONDER_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. The root names the alert, the cluster, the count and the severity, with the first alert's message under it. The thread's assignment lists every firing alert with its labels and annotations, and asks for a read-only investigation: whether each alert still fires, what changed and why, the evidence, and the change the agent would make, naming the runbook or the file that owns the fix. It runs under the `responder` profile in job mode, with `investigator`'s access and 30 turns a UTC day of its own. The groups are Discord's, so an incident with several alert names opens a thread for each, one turn at a time in the automation lane, and the daily cap bounds what an incident spends; a group past the cap gets a line saying so, and Discord has the alert.
 
 A group is one thread while it fires. An alert that joins the group wakes the thread with its details, a repeat notification opens nothing, an alert that leaves and rejoins an open group wakes nothing, and the resolution is one `✅ resolved` line. A group that fires again after it resolved gets a new thread. A reply in the thread runs a `responder` turn in a new sandbox, read-only like the first; the owner makes changes in a thread of their own. `apps/mate/src/responder.ts` owns this, with the rows in `mate_alert_groups`. [Alerting](../platform/observability/alerting.md) has the route, which `clusters/offsite/monitoring/alertmanager-mate.yaml` declares and the selector in `kube-prometheus.yaml` turns on.
+
+## Memory and dreams
+
+Rowbutt remembers in `dotfiles/pi/mate/memory.md`: one fact a line about the lab and how the owner works, dated, under the headings the file sets. Every profile reads it into its system prompt after the repository's `AGENTS.md`, and the owner's local pi reads it through the `mate` pi package, so it holds facts and never a capability, a credential or a private detail. The file is kept under 120 lines.
+
+Each night at 03:00 `America/Halifax` mate opens a dream thread in Slack `#chatops`, configured by `MATE_DREAMS_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`, under the `dreamer` profile in job mode. The assignment reads the threads active since the previous dream, or the last 24 hours the first time and at most 7 days after a gap, with the `recall_threads` and `recall_thread` tools, and distils three kinds of lesson: a fact for the memory, a skill in `.agents/skills/` or `dotfiles/skills/` that misled a turn, and a page in `docs/` that disagrees with what a thread saw. It opens one pull request from branch `dreams/<day>` with every edit and never merges it. The owner's review is the control: the memory reaches the system prompt of every profile, the cluster-admin ones included, and a transcript the dreamer reads is untrusted text with a push token in reach, so read a dream's diff before merging it. The repository is public, so the assignment keeps out anything that names a person other than the owner, a credential or the content of a private conversation, and reports what it kept private in the thread instead. A night with nothing worth keeping opens no pull request and reports one line. The dreamer's sandbox has a GitHub token and no cluster, host, 1Password or phone access. A reply in the thread runs another `dreamer` turn, so the owner can ask it to look again or at something else, and a dream whose turn failed runs again over the same window from a reply; the next night starts where this one's window ended. `apps/mate/src/dreams.ts` owns the schedule, with the rows in `mate_dreams`; unset `MATE_DREAMS_CHANNEL` to stop dreaming.
+
+Under `operator` and `dreamer`, the `recall_threads` tool lists mate's threads whose last message falls in a window of at most 30 days, newest first, with each thread's key, profile, turns and opening ask, and `recall_thread` reads one as a transcript: the owner's messages, Rowbutt's replies, its tool calls and their results, each with anything shaped like a secret redacted and then clipped, in pages of 24,000 characters. The tools read `mate-db` from mate itself; no sandbox reaches the database. A dream thread never appears in a listing. `apps/mate/src/recall.ts` owns them.
 
 ## Wakes
 
@@ -68,6 +77,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx_*` tools that mate bridges from the kthx MCP server, when Secret `mate-kthx-agent` holds an agent token. |
 | Weather | Canadian weather and the family Tempest stations, through the `weather_*` tools that mate bridges from the [Weather API](weather.md) at `MATE_WEATHER_MCP_URL`. The server takes no token. |
 | Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason, and sends the mission caller, in the owner's voice, after an allow-listed family member with a word to get out of them; Switchboard fixes the numbers and caps the calls. |
+| Memory | `dotfiles/pi/mate/memory.md` in the system prompt, and the `recall_threads` and `recall_thread` tools over mate's own threads in `mate-db` ([Memory and dreams](#memory-and-dreams)) |
 
 [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox. It guards against accidents only: as `cluster-admin` and root on the hosts, the agent can read mate's Secrets or remove the fence.
 
@@ -107,6 +117,7 @@ To take mate off Discord and Slack, set `replicas` to `0` in `clusters/offsite/a
 ## Reference
 
 - Source: `apps/mate/`, `images/mate-sandbox/`, `packages/mate-hands/` and `packages/pi-store-postgres/`
+- Memory: `dotfiles/pi/mate/memory.md`, beside the persona
 - Manifests: `clusters/offsite/apps/mate/`, and the alert route in `clusters/offsite/monitoring/alertmanager-mate.yaml`
 - Items in the `homelab` vault: `mate alertmanager token`, the bearer Alertmanager's posts carry
 - Images: `ghcr.io/jonpulsifer/mate`, `ghcr.io/jonpulsifer/mate-sandbox`

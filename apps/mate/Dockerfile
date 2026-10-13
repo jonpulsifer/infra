@@ -39,6 +39,7 @@ COPY --from=pruner --chmod=755 /app/out/full/packages/pi-store-postgres/src ./pa
 # the overrides, AGENTS.md plus an index of these skills. turbo prune leaves
 # them out, so they come from the raw context.
 COPY --from=pruner --chmod=755 /app/dotfiles/pi/mate/persona.md /app/dotfiles/pi/mate/persona.md
+COPY --from=pruner --chmod=755 /app/dotfiles/pi/mate/memory.md /app/dotfiles/pi/mate/memory.md
 COPY --from=pruner --chmod=755 /app/dotfiles/.agents/AGENTS.md /app/dotfiles/.agents/AGENTS.md
 COPY --from=pruner --chmod=755 /app/AGENTS.md /app/AGENTS.md
 COPY --from=pruner --chmod=755 /app/dotfiles/skills /app/dotfiles/skills
@@ -51,6 +52,7 @@ RUN test -f /app/apps/mate/src/main.ts \
   && test -f /app/apps/mate/node_modules/@repo/pi-store-postgres/src/index.ts \
   && test -f /app/AGENTS.md \
   && test -s /app/dotfiles/pi/mate/persona.md \
+  && test -s /app/dotfiles/pi/mate/memory.md \
   && test -s /app/dotfiles/.agents/AGENTS.md \
   && ls /app/dotfiles/skills/*/SKILL.md >/dev/null \
   && ls /app/.agents/skills/*/SKILL.md >/dev/null

@@ -1,7 +1,8 @@
 /**
  * Each profile's system prompt: the shared persona, its preamble, the owner's
- * global AGENTS.md, its overrides of those rules, the repo's AGENTS.md and an
- * index of its skills, read from mate's own copy of the repo once per process.
+ * global AGENTS.md, its overrides of those rules, the repo's AGENTS.md, what
+ * Rowbutt remembers and an index of its skills, read from mate's own copy of
+ * the repo once per process.
  * The skills' locations point into the sandbox's checkout, where the model
  * reads them with its tools. `brainProfiles` resolves each profile's prompt,
  * model and turn timeout at boot.
@@ -36,6 +37,9 @@ export const SKILL_DIRS = ['dotfiles/skills', '.agents/skills'] as const;
 export const AGENTS_FILE = 'AGENTS.md';
 /** Shared with the owner's local pi package, so it holds no capability claims. */
 export const PERSONA_FILE = 'dotfiles/pi/mate/persona.md';
+/** What Rowbutt has learned; the nightly dream edits it through a pull request, and the local pi reads it too. */
+export const MEMORY_FILE = 'dotfiles/pi/mate/memory.md';
+export const MEMORY_HEADING = `# What you remember (${MEMORY_FILE})`;
 export const OWNER_AGENTS_FILE = 'dotfiles/.agents/AGENTS.md';
 /** Only when the persona file is missing or empty, so the model keeps an identity. */
 export const FALLBACK_PERSONA =
@@ -52,10 +56,11 @@ export async function loadSystemPrompts(
   profiles: Iterable<Profile>,
 ): Promise<ProfilePrompts> {
   const root = resolve(options.root);
-  const [persona, owner, agents, skills] = await Promise.all([
+  const [persona, owner, agents, memory, skills] = await Promise.all([
     readProfileFile(root, PERSONA_FILE, options.log),
     readProfileFile(root, OWNER_AGENTS_FILE, options.log),
     readProfileFile(root, AGENTS_FILE, options.log),
+    readProfileFile(root, MEMORY_FILE, options.log),
     skillsIndex(root, options),
   ]);
   const prompts = (profile: Profile): SystemPrompts => {
@@ -68,6 +73,7 @@ export async function loadSystemPrompts(
           `# Owner's standing instructions (global AGENTS.md)\n\n${rules}`,
         `# Overrides for this deployment\n\n${profile.overrides(effectiveGrants(profile.grants, options.configured))}`,
         agents && `# Repository instructions (AGENTS.md)\n\n${agents}`,
+        memory && `${MEMORY_HEADING}\n\n${memory}`,
         skills,
       ]
         .filter(Boolean)
