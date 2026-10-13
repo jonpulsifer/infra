@@ -14,6 +14,8 @@ fzf = "latest"
 gcloud = "latest"
 "github:tronbyt/pixlet" = "v0.54.0"
 go = "latest"
+# The Starlink dish speaks gRPC; net-health.sh reads its event log with it.
+grpcurl = "latest"
 helm = "latest"
 jq = "latest"
 k9s = "latest"
