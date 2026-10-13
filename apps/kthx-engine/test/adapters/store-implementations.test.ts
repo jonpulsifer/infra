@@ -237,7 +237,7 @@ describe('Secret Manager', () => {
 
     const reference = await store.put(long, key, 'one');
     expect(reference.key).toBe(id);
-    expect(api.annotationsOf(id)).toMatchObject({ 'spindrift-key': key });
+    expect(api.annotationsOf(id)).toMatchObject({ 'kthx-engine-key': key });
     expect((await store.describe(reference))?.key).toBe(key);
   });
 
@@ -262,20 +262,34 @@ describe('Secret Manager', () => {
     // The id is only a legible name; `describe` reads the variable back from
     // the annotations.
     expect(api.annotationsOf(reference.key)).toEqual({
+      'kthx-engine-app': 'invoices',
+      'kthx-engine-component': 'web',
+      'kthx-engine-target': 'metal',
+      'kthx-engine-key': 'DATABASE_URL',
+    });
+  });
+
+  test('accepts a secret stamped with the previous annotation keys', async () => {
+    const { api, store } = secretManager();
+    api.seedSecret(secretIdFor(scope, 'DATABASE_URL'), {
       'spindrift-app': 'invoices',
       'spindrift-component': 'web',
       'spindrift-target': 'metal',
       'spindrift-key': 'DATABASE_URL',
     });
+
+    const reference = await store.put(scope, 'DATABASE_URL', 'one');
+
+    expect((await store.describe(reference))?.key).toBe('DATABASE_URL');
   });
 
   test('refuses a secret whose annotations name another scope', async () => {
     const { api, store } = secretManager();
     api.seedSecret(secretIdFor(scope, 'DATABASE_URL'), {
-      'spindrift-app': 'invoices',
-      'spindrift-component': 'worker',
-      'spindrift-target': 'metal',
-      'spindrift-key': 'DATABASE_URL',
+      'kthx-engine-app': 'invoices',
+      'kthx-engine-component': 'worker',
+      'kthx-engine-target': 'metal',
+      'kthx-engine-key': 'DATABASE_URL',
     });
 
     // Sanitizing is lossy, so two scopes can share an id. Writing anyway would

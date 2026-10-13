@@ -39,7 +39,12 @@ interface ConnectItem extends ConnectItemOverview {
  * Connect adds its category's default fields to a created item, one of them
  * `CONCEALED`. Those belong to no section, so this section marks our field.
  */
-const SECTION = 'spindrift';
+const SECTION = 'kthx-engine';
+const PREVIOUS_SECTION = 'spindrift';
+
+function inSection(id: string | undefined): boolean {
+  return id === SECTION || id === PREVIOUS_SECTION;
+}
 
 function itemTitle(scope: ConfigScope, key: string): string {
   return [scope.app, scope.component, scope.target, key].join('/');
@@ -51,7 +56,7 @@ function itemTitle(scope: ConfigScope, key: string): string {
  */
 function keyOf(item: ConnectItem): string | null {
   for (const field of item.fields ?? []) {
-    if (field.section?.id !== SECTION) continue;
+    if (!inSection(field.section?.id)) continue;
     if (field.type !== 'CONCEALED') continue;
     if (field.label === undefined || field.label === '') continue;
     return field.label;
@@ -84,7 +89,7 @@ export class OnePasswordStore implements SecretStore {
         vault: { id: this.vault },
         title,
         category: 'API_CREDENTIAL',
-        sections: [{ id: SECTION, label: 'kthx' }],
+        sections: [{ id: SECTION, label: 'kthx engine' }],
         fields: [
           { type: 'CONCEALED', label: key, value, section: { id: SECTION } },
         ],
@@ -125,7 +130,7 @@ export class OnePasswordStore implements SecretStore {
     if (item === null || item.title !== reference.key) return null;
 
     for (const field of item.fields ?? []) {
-      if (field.section?.id !== SECTION) continue;
+      if (!inSection(field.section?.id)) continue;
       if (field.type !== 'CONCEALED') continue;
       return field.value ?? null;
     }

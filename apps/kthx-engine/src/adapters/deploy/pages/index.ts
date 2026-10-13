@@ -112,8 +112,10 @@ const PRODUCTION_BRANCH = 'production';
 const PROJECT_NAME_LIMIT = 58;
 
 /** Where the digest and the deploy travel, since a deployment carries no labels. */
-const DIGEST_MARKER = 'spindrift-digest=';
-const DEPLOY_MARKER = 'spindrift-deploy=';
+const DIGEST_MARKER = 'kthx-engine-digest=';
+const DEPLOY_MARKER = 'kthx-engine-deploy=';
+const PREVIOUS_DIGEST_MARKER = 'spindrift-digest=';
+const PREVIOUS_DEPLOY_MARKER = 'spindrift-deploy=';
 
 const NOTHING_RUNS = 'Static files are served by the Target.';
 
@@ -400,6 +402,7 @@ export class PagesDeployAdapter implements DeployAdapter {
       artifactDigest: markerIn(
         latest.deployment_trigger?.metadata?.commit_message,
         DIGEST_MARKER,
+        PREVIOUS_DIGEST_MARKER,
       ),
       ...(phase === 'FAILED'
         ? {
@@ -568,6 +571,7 @@ export class PagesDeployAdapter implements DeployAdapter {
           markerIn(
             deployment.deployment_trigger?.metadata?.commit_message,
             DEPLOY_MARKER,
+            PREVIOUS_DEPLOY_MARKER,
           ) === deploy,
       ) ?? null
     );
@@ -817,11 +821,16 @@ function phaseOf(deployment: PagesDeployment): DeployPhase {
 }
 
 /** One marker's value out of the commit message, or `''` where there is none. */
-function markerIn(message: string | undefined, marker: string): string {
-  const found = (message ?? '')
-    .split(/\s+/)
-    .find((word) => word.startsWith(marker));
-  return found === undefined ? '' : found.slice(marker.length);
+function markerIn(
+  message: string | undefined,
+  ...markers: readonly string[]
+): string {
+  const words = (message ?? '').split(/\s+/);
+  for (const marker of markers) {
+    const found = words.find((word) => word.startsWith(marker));
+    if (found !== undefined) return found.slice(marker.length);
+  }
+  return '';
 }
 
 export type { CloudFailure };

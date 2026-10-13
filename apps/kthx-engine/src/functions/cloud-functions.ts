@@ -117,7 +117,7 @@ export class CloudRunFunctions implements FunctionDeployer {
           ? {}
           : { serviceAccountEmail: this.options.runtimeServiceAccount }),
       },
-      labels: { 'spindrift-function': name },
+      labels: { 'kthx-engine-function': name },
     };
 
     // Create and update are separate verbs; a create on an existing function is

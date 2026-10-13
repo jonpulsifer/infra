@@ -183,7 +183,7 @@ describe('the release is five steps, in the product’s order', () => {
     await drain(adapter.apply(TARGET, desired()));
     await drain(adapter.apply(TARGET, desired({ deploy: 'deploy-2' })));
 
-    expect(api.serving('shop-site')?.labels['spindrift-deploy']).toBe(
+    expect(api.serving('shop-site')?.labels['kthx-engine-deploy']).toBe(
       'deploy-2',
     );
     expect(
@@ -205,7 +205,7 @@ describe('the release is five steps, in the product’s order', () => {
     expect(
       api.pathsOf('POST').filter((path) => path.endsWith('/sites')),
     ).toHaveLength(1);
-    expect(api.serving('shop-site')?.labels['spindrift-deploy']).toBe(
+    expect(api.serving('shop-site')?.labels['kthx-engine-deploy']).toBe(
       'deploy-2',
     );
   });

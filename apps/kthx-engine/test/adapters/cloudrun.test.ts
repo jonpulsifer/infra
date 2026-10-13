@@ -741,17 +741,17 @@ describe('§3: a job is a Job with no cadence of its own', () => {
       ),
     ).toEqual({
       labels: {
-        'spindrift-managed': 'true',
-        'spindrift-app': 'shop',
-        'spindrift-component': 'nightly',
+        'kthx-engine-managed': 'true',
+        'kthx-engine-app': 'shop',
+        'kthx-engine-component': 'nightly',
       },
       binaryAuthorization: { useDefault: true },
       template: {
         labels: {
-          'spindrift-managed': 'true',
-          'spindrift-app': 'shop',
-          'spindrift-component': 'nightly',
-          'spindrift-deploy': 'deploy-1',
+          'kthx-engine-managed': 'true',
+          'kthx-engine-app': 'shop',
+          'kthx-engine-component': 'nightly',
+          'kthx-engine-deploy': 'deploy-1',
         },
         // `Job.template` is an ExecutionTemplate whose own `template` is the
         // TaskTemplate; a Service nests once.

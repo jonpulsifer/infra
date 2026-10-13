@@ -200,7 +200,10 @@ async function runVercelCli(
  * symlink here as `{ path, target }` from the deployment root, and
  * {@link extractTree} restores them.
  */
-const LINKS_MANIFEST = '.vercel/output/__spindrift/func-links.json';
+const LINKS_MANIFESTS = [
+  '.vercel/output/__kthx-engine/func-links.json',
+  '.vercel/output/__spindrift/func-links.json',
+];
 
 /**
  * Writes the artifact's files relative to `dir` and restores the build's
@@ -216,14 +219,19 @@ async function extractTree(
     await writeFile(path, file.bytes);
   }
 
-  const manifest = join(dir, LINKS_MANIFEST);
-  let links: readonly { path: string; target: string }[];
-  try {
-    links = JSON.parse(await readFile(manifest, 'utf8'));
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw cause;
+  let manifest: string | undefined;
+  let links: readonly { path: string; target: string }[] = [];
+  for (const candidate of LINKS_MANIFESTS) {
+    const path = join(dir, candidate);
+    try {
+      links = JSON.parse(await readFile(path, 'utf8'));
+      manifest = path;
+      break;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+    }
   }
+  if (manifest === undefined) return;
   await rm(dirname(manifest), { recursive: true });
   // Checked with `realpath` once the link exists, since a target can walk
   // through an earlier link. Earlier links passed too, so `mkdir` cannot escape.
@@ -254,8 +262,10 @@ export const DEFAULT_ENDPOINT = 'https://api.vercel.com';
  * The `meta` keys every deployment is stamped with. One made elsewhere has
  * none, so it reports an empty digest and shows as drift.
  */
-const DIGEST_META = 'spindriftDigest';
-const DEPLOY_META = 'spindriftDeploy';
+const DIGEST_META = 'kthxEngineDigest';
+const DEPLOY_META = 'kthxEngineDeploy';
+const PREVIOUS_DIGEST_META = 'spindriftDigest';
+const PREVIOUS_DEPLOY_META = 'spindriftDeploy';
 
 const NOTHING_RUNS = 'Static files are served by the Target.';
 
@@ -557,7 +567,8 @@ export class VercelDeployAdapter implements DeployAdapter {
     return {
       ref,
       phase: phaseOf(latest.readyState).phase,
-      artifactDigest: latest.meta?.[DIGEST_META] ?? '',
+      artifactDigest:
+        latest.meta?.[DIGEST_META] ?? latest.meta?.[PREVIOUS_DIGEST_META] ?? '',
     };
   }
 
@@ -687,19 +698,23 @@ export class VercelDeployAdapter implements DeployAdapter {
     project: string,
     deploy: string,
   ): Promise<{ uid?: string; readyState?: string } | null> {
-    const listed = await http.json<DeploymentList>({
-      method: 'GET',
-      path: '/v7/deployments',
-      query: {
-        projectId: project,
-        target: 'production',
-        [`meta-${DEPLOY_META}`]: deploy,
-        limit: '1',
-        teamId: connection.team,
-      },
-    });
-    if (!listed.ok) return null;
-    return listed.value?.deployments?.[0] ?? null;
+    for (const key of [DEPLOY_META, PREVIOUS_DEPLOY_META]) {
+      const listed = await http.json<DeploymentList>({
+        method: 'GET',
+        path: '/v7/deployments',
+        query: {
+          projectId: project,
+          target: 'production',
+          [`meta-${key}`]: deploy,
+          limit: '1',
+          teamId: connection.team,
+        },
+      });
+      if (!listed.ok) return null;
+      const found = listed.value?.deployments?.[0];
+      if (found !== undefined) return found;
+    }
+    return null;
   }
 
   /**

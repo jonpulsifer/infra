@@ -68,7 +68,7 @@ export function cloudRunService(
       ? { binaryAuthorization: { useDefault: true } }
       : {}),
     template: {
-      labels: { ...labels, 'spindrift-deploy': desired.deploy },
+      labels: { ...labels, 'kthx-engine-deploy': desired.deploy },
       ...(context.serviceAccount === null
         ? {}
         : { serviceAccount: context.serviceAccount }),
@@ -85,9 +85,9 @@ export function cloudRunService(
 
 export function workloadLabels(desired: DesiredState): Record<string, string> {
   return {
-    'spindrift-managed': 'true',
-    'spindrift-app': desired.app,
-    'spindrift-component': desired.component,
+    'kthx-engine-managed': 'true',
+    'kthx-engine-app': desired.app,
+    'kthx-engine-component': desired.component,
   };
 }
 
