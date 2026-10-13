@@ -26,8 +26,10 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels:
-              app.kubernetes.io/part-of: spindrift
+            matchExpressions:
+              - key: app.kubernetes.io/part-of
+                operator: In
+                values: [spindrift, kthx]
         kinds:
           - kind: HTTPRoute
     # A wildcard binds one label, so App names are flat: `plainboi-web`, not
@@ -44,8 +46,10 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels:
-              app.kubernetes.io/part-of: spindrift
+            matchExpressions:
+              - key: app.kubernetes.io/part-of
+                operator: In
+                values: [spindrift, kthx]
         kinds:
           - kind: HTTPRoute
     # The App chart's DNSEndpoint decides per record whether a name reaches this
@@ -62,8 +66,10 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels:
-              app.kubernetes.io/part-of: spindrift
+            matchExpressions:
+              - key: app.kubernetes.io/part-of
+                operator: In
+                values: [spindrift, kthx]
         kinds:
           - kind: HTTPRoute
     # Public-only: names arrive through the tunnel, never as RFC1918 records.
@@ -79,8 +85,10 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels:
-              app.kubernetes.io/part-of: spindrift
+            matchExpressions:
+              - key: app.kubernetes.io/part-of
+                operator: In
+                values: [spindrift, kthx]
         kinds:
           - kind: HTTPRoute
     # Public-only. The apex App rides `http-gateway`: a wildcard never matches
@@ -97,7 +105,9 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels:
-              app.kubernetes.io/part-of: spindrift
+            matchExpressions:
+              - key: app.kubernetes.io/part-of
+                operator: In
+                values: [spindrift, kthx]
         kinds:
           - kind: HTTPRoute

@@ -157,6 +157,9 @@ const VALUES_CONTRACT_KEY: ObjectKey = {
   legacy: 'spindrift.dev/values-contract',
 };
 
+/** The values the engine's own namespaces carry as app.kubernetes.io/managed-by. */
+const ENGINE_MANAGERS = ['spindrift', 'kthx-engine'];
+
 /** A pod adds six characters to its Job's name and must fit a DNS label (63). */
 const RUN_NAME_LIMIT = 57;
 
@@ -354,9 +357,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // Gone, or never created because the write path refused the name.
     if (namespace === null) return;
     const labels = (namespace.metadata?.labels ?? {}) as Record<string, string>;
-    if (labels['app.kubernetes.io/managed-by'] !== 'spindrift') {
+    if (
+      !ENGINE_MANAGERS.includes(labels['app.kubernetes.io/managed-by'] ?? '')
+    ) {
       throw new Error(
-        `namespace ${name} carries no app.kubernetes.io/managed-by=spindrift, so it is not the engine's to delete`,
+        `namespace ${name} carries no ${ENGINE_MANAGERS.map((m) => `app.kubernetes.io/managed-by=${m}`).join(' or ')}, so it is not the engine's to delete`,
       );
     }
     await api.delete({ apiVersion: 'v1', plural: 'namespaces', name });
