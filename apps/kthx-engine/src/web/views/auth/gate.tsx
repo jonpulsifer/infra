@@ -187,9 +187,9 @@ function SignIn({
             <p className="text-xs text-muted-foreground">
               Rotate{' '}
               <code className="font-mono">KTHX_ENGINE_ENROLMENT_TOKEN</code>, or{' '}
-              <code className="font-mono">SPINDRIFT_ENROLMENT_TOKEN</code>, its
-              old name, in this installation&apos;s Secret first. Enrolling with
-              the new value replaces every passkey and ends every existing
+              <code className="font-mono">KTHX_ENGINE_ENROLMENT_TOKEN</code>,
+              its old name, in this installation&apos;s Secret first. Enrolling
+              with the new value replaces every passkey and ends every existing
               session.
             </p>
             <Field

@@ -6,7 +6,8 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 export type Theme = 'system' | 'light' | 'dark';
 
-const KEY = 'spindrift.theme';
+const KEY = 'kthx-engine.theme';
+const OLD_KEY = 'spindrift.theme';
 
 const listeners = new Set<() => void>();
 
@@ -15,7 +16,14 @@ function isTheme(value: string | null): value is Theme {
 }
 
 function read(): Theme {
-  const stored = localStorage.getItem(KEY);
+  let stored = localStorage.getItem(KEY);
+  if (stored === null) {
+    stored = localStorage.getItem(OLD_KEY);
+    if (isTheme(stored)) {
+      localStorage.setItem(KEY, stored);
+      localStorage.removeItem(OLD_KEY);
+    }
+  }
   return isTheme(stored) ? stored : 'dark';
 }
 
@@ -49,6 +57,7 @@ export function useTheme(): [Theme, (theme: Theme) => void] {
 
   const set = useCallback((next: Theme) => {
     localStorage.setItem(KEY, next);
+    localStorage.removeItem(OLD_KEY);
     applyTheme(next);
     for (const listener of listeners) listener();
   }, []);

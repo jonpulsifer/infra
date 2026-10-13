@@ -547,8 +547,9 @@ async function dispatchAdopted(
     );
   } catch (cause) {
     logWarn('an adopted commit could not be dispatched during App creation', {
-      'spindrift.repository': pass.fullName,
-      'spindrift.error': cause instanceof Error ? cause.message : String(cause),
+      'kthx.engine.repository': pass.fullName,
+      'kthx.engine.error':
+        cause instanceof Error ? cause.message : String(cause),
     });
   }
 }

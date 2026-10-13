@@ -207,9 +207,9 @@ export async function reconcileRepository(
       // Another row already holds the new name (`full_name` is unique). Keep
       // working under the stored name; merging the rows is an operator's call.
       logWarn('repository renamed; not followed', {
-        'spindrift.repository': stored.fullName,
-        'spindrift.repository.renamed': fullName,
-        'spindrift.error':
+        'kthx.engine.repository': stored.fullName,
+        'kthx.engine.repository.renamed': fullName,
+        'kthx.engine.error':
           cause instanceof Error ? cause.message : String(cause),
       });
     }
@@ -427,8 +427,8 @@ async function followRename(
     })
     .where(eq(apps.repositoryId, stored.id));
   logInfo('repository renamed; following it', {
-    'spindrift.repository': fullName,
-    'spindrift.repository.previous': stored.fullName,
+    'kthx.engine.repository': fullName,
+    'kthx.engine.repository.previous': stored.fullName,
   });
   return { ...stored, fullName };
 }
