@@ -285,13 +285,14 @@ describe('loadSystemPrompts', () => {
     expect(all.investigator?.slack).toContain(
       `${OWNER_HEADING}\n\n# Owner\n\n## Protect\n\n- Guard.\n\n${OVERRIDES_HEADING}`,
     );
-    expect(log.of('owner instructions section missing')).toEqual([
-      {
+    // Both read-only profiles read the same sections.
+    expect(log.of('owner instructions section missing')).toEqual(
+      ['investigator', 'responder'].map((profile) => ({
         level: 'warn',
         msg: 'owner instructions section missing',
-        fields: { profile: 'investigator', section: 'Communicate' },
-      },
-    ]);
+        fields: { profile, section: 'Communicate' },
+      })),
+    );
   });
 
   test('a skills directory with no skills is logged, and the other still indexes', async () => {
@@ -343,6 +344,7 @@ describe('each profile', () => {
       'custodian',
       'investigator',
       'operator',
+      'responder',
     ]);
     for (const prompts of Object.values(all)) {
       expect(Object.keys(prompts).sort()).toEqual(['discord', 'slack']);

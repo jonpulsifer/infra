@@ -456,3 +456,44 @@ describe('a store that cannot be reached', () => {
     expect(isStoreUnavailable(error)).toBe(true);
   });
 });
+
+describe('the responder ledger', () => {
+  const key = (n: number) =>
+    `{}/{severity=~"critical|warning"}:{alertname="A${n}"}`;
+
+  test('claims a group once, keeps its root, and starts over after it resolves', async () => {
+    const { PostgresResponderLedger } = await import('../src/responder.ts');
+    const ledger = new PostgresResponderLedger(database().sql);
+    const first = await ledger.claim(key(1), 'C1', ['b', 'a'], 1_000);
+    expect(first).toEqual({
+      groupKey: key(1),
+      channel: 'C1',
+      threadTs: null,
+      fingerprints: ['a', 'b'],
+      resolvedAt: null,
+    });
+    await ledger.saved(key(1), 'p-1');
+    // A second save never moves the root.
+    await ledger.saved(key(1), 'p-2');
+    const open = await ledger.claim(key(1), 'C1', ['c'], 2_000);
+    expect(open).toMatchObject({ threadTs: 'p-1', fingerprints: ['a', 'b'] });
+    await ledger.fingerprints(key(1), ['a', 'b', 'c']);
+    expect((await ledger.current(key(1)))?.fingerprints).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    await ledger.resolve(key(1), 3_000);
+    await ledger.resolve(key(1), 4_000);
+    expect((await ledger.current(key(1)))?.resolvedAt).toBe(3_000);
+    const again = await ledger.claim(key(1), 'C2', ['d'], 5_000);
+    expect(again).toEqual({
+      groupKey: key(1),
+      channel: 'C2',
+      threadTs: null,
+      fingerprints: ['d'],
+      resolvedAt: null,
+    });
+    expect(await ledger.current(key(2))).toBeNull();
+  });
+});

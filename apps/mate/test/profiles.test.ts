@@ -393,3 +393,44 @@ describe('the overrides', () => {
     expect(text).not.toContain('cluster-admin');
   });
 });
+
+describe('responder', () => {
+  const responder = PROFILES.get('responder') as Profile;
+
+  test('is investigator on a trusted trigger, released when its turn ends', () => {
+    expect(responder.mode).toBe('job');
+    expect(responder.grants).toEqual(investigator.grants);
+    expect(responder.sandbox).toEqual(investigator.sandbox);
+    expect(responder.tools).toEqual(investigator.tools);
+    expect(responder.ownerSections).toEqual(investigator.ownerSections);
+    expect(responder.overrides(responder.grants)).toBe(
+      investigator.overrides(investigator.grants),
+    );
+    expect(responder.budget).toEqual({
+      turnMinutes: 20,
+      turnsPerThread: 10,
+      turnsPerDay: 30,
+    });
+    expect(lists(responder, 'wake')).toBe(false);
+    expect(sweepable()).not.toContain('responder');
+  });
+
+  test('its preamble keeps every read-only line and asks for the alert first', () => {
+    const text = responder.preamble('Slack', OPTIONS);
+    const reader = investigatorPreamble('Slack', OPTIONS);
+    for (const line of reader.split('\n').filter((l) => l.startsWith('- '))) {
+      if (line.startsWith('- Report') || line.startsWith('- The sandbox and'))
+        continue;
+      expect(text).toContain(line);
+    }
+    expect(text).toContain('responding to an alert');
+    expect(text).toContain('Alertmanager opened');
+    expect(text).toContain('check whether it still fires before anything else');
+    expect(text).toContain(
+      'whether it still fires, and the change you would make',
+    );
+    expect(text).toContain('released when your turn ends');
+    expect(text).not.toContain('Credentials (git push');
+    expect(text).not.toContain('kthx_');
+  });
+});

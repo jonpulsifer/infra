@@ -140,6 +140,8 @@ function smokeConfig(env: Record<string, string | undefined>): Config {
     talosconfigFile: null,
     slack: null,
     custodianChannel: null,
+    responderChannel: null,
+    alertmanagerTokenFile: '/var/run/mate/alertmanager/token',
   };
 }
 

@@ -238,6 +238,20 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
       updated_at TIMESTAMPTZ NOT NULL
     )`,
   ],
+  // One row per Alertmanager group the responder has seen (responder.ts);
+  // `thread_ts` NULL is a claim whose root Slack has not accepted, and
+  // `fingerprints` is a JSON array of the firing alerts the thread knows.
+  [
+    8,
+    `CREATE TABLE mate_alert_groups (
+      group_key TEXT COLLATE "C" PRIMARY KEY,
+      channel TEXT NOT NULL,
+      thread_ts TEXT NULL,
+      fingerprints TEXT NOT NULL DEFAULT '[]',
+      opened_at BIGINT NOT NULL,
+      resolved_at BIGINT NULL
+    )`,
+  ],
 ];
 
 /** mate's own tables beside pi's; idempotent and safe to race. */

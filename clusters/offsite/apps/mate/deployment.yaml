@@ -93,6 +93,18 @@ spec:
             # 18:00 America/Halifax; uses the existing mate-db and Slack identity.
             - name: MATE_CUSTODIAN_CHANNEL
               value: C062BS4GADR
+            # Alertmanager posts each firing warning or critical alert group to
+            # /alertmanager on this pod (clusters/offsite/monitoring/
+            # alertmanager-mate.yaml), and mate opens a read-only thread for it
+            # here, #chatops. Unset to open none.
+            - name: MATE_RESPONDER_CHANNEL
+              value: C062BS4GADR
+            # The bearer those posts carry (external-secret.yaml), read at each
+            # request so the Secret's arrival or rotation needs no restart.
+            # While the file is missing mate answers 503, which Alertmanager
+            # retries.
+            - name: MATE_ALERTMANAGER_TOKEN_FILE
+              value: /var/run/mate/alertmanager/token
             # shutdownTime is never more than two hours out, so mate refuses a turn cap
             # of 120 minutes or more, and 55 or more while the GitHub App is set.
             - name: MATE_TURN_MINUTES
@@ -245,6 +257,9 @@ spec:
             - name: sandbox-image
               mountPath: /var/run/mate/sandbox-image
               readOnly: true
+            - name: alertmanager
+              mountPath: /var/run/mate/alertmanager
+              readOnly: true
           # No liveness probe: /healthz is 503 while the identify-budget guard
           # sleeps, and a restart would burn the budget it protects.
           readinessProbe:
@@ -315,3 +330,10 @@ spec:
         - name: sandbox-image
           configMap:
             name: mate-sandbox-image
+        # Not in Reloader's list either: mate reads the token at each request.
+        # `optional`: until the item exists the mount is empty and the alert
+        # responder answers 503.
+        - name: alertmanager
+          secret:
+            secretName: mate-alertmanager
+            optional: true

@@ -38,6 +38,10 @@ export interface Config {
   readonly slack: SlackConfig | null;
   /** A daily 18:00 America/Halifax report, disabled without a channel. */
   readonly custodianChannel: string | null;
+  /** Where the alert responder opens a thread per alert group; disabled without a channel. */
+  readonly responderChannel: string | null;
+  /** The file holding the bearer Alertmanager's webhook carries to `/alertmanager`, read at each request. */
+  readonly alertmanagerTokenFile: string;
 }
 
 export interface SlackConfig {
@@ -489,18 +493,22 @@ function slack(env: Env): SlackConfig | null {
   };
 }
 
+/** An allowed Slack channel a trusted trigger posts in, or `null` when unset. */
+function slackChannel(env: Env, key: string): string | null {
+  const channel = env[key]?.trim() || null;
+  if (
+    channel &&
+    (!SLACK_ID.test(channel) || !slack(env)?.allowedChannelIds.has(channel))
+  ) {
+    throw new ConfigError(`${key} must be an allowed Slack channel`);
+  }
+  return channel;
+}
+
 export function readConfig(env: Env): Config {
   refuseRenamed(env);
-  const custodianChannel = env.MATE_CUSTODIAN_CHANNEL?.trim() || null;
-  if (
-    custodianChannel &&
-    (!SLACK_ID.test(custodianChannel) ||
-      !slack(env)?.allowedChannelIds.has(custodianChannel))
-  ) {
-    throw new ConfigError(
-      'MATE_CUSTODIAN_CHANNEL must be an allowed Slack channel',
-    );
-  }
+  const custodianChannel = slackChannel(env, 'MATE_CUSTODIAN_CHANNEL');
+  const responderChannel = slackChannel(env, 'MATE_RESPONDER_CHANNEL');
   const sandbox = readSandboxConfig(env);
   return {
     token: required(env, 'DISCORD_TOKEN'),
@@ -520,5 +528,11 @@ export function readConfig(env: Env): Config {
     talosconfigFile: env.MATE_TALOSCONFIG_FILE?.trim() || null,
     slack: slack(env),
     custodianChannel,
+    responderChannel,
+    alertmanagerTokenFile: text(
+      env,
+      'MATE_ALERTMANAGER_TOKEN_FILE',
+      '/var/run/mate/alertmanager/token',
+    ),
   };
 }

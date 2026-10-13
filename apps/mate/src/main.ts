@@ -3,11 +3,13 @@ import { ConfigError, readConfig, type SlackConfig } from './config.ts';
 import { discordListener, discordOver } from './discord.ts';
 import { createGateway } from './gateway.ts';
 import { Health } from './health.ts';
+import { Routes } from './http.ts';
 import { discoverKube } from './kube.ts';
 import { jsonLog as log, plain } from './log.ts';
 import { Mate, type SlackSide } from './mate.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
 import { PROFILES, validateProfiles } from './profiles.ts';
+import { RESPONDER_PATH } from './responder.ts';
 import { memorySessionStore, postgresSessionStore } from './session.ts';
 import { openSocket, slackEvents, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
@@ -70,9 +72,17 @@ if (
 }
 
 const health = new Health();
+const routes = new Routes();
+routes.set('/healthz', (request) => health.fetch(request));
+// Until mate's core is built: Alertmanager retries a 503 and counts a 404 as failed.
+if (config.responderChannel) {
+  routes.set(RESPONDER_PATH, () => new Response('starting', { status: 503 }));
+}
 const server = Bun.serve({
   port: config.port,
-  fetch: (request) => health.fetch(request),
+  // An Alertmanager notification is kilobytes; nothing else posts here.
+  maxRequestBodySize: 1_048_576,
+  fetch: (request) => routes.fetch(request),
 });
 const database = await openDatabase(config.brain, log, {
   metrics: lazyInstruments(),
@@ -197,6 +207,7 @@ const mate = new Mate({
     },
     slack: slack ? () => openSlack(slack) : null,
   },
+  routes,
 });
 
 try {

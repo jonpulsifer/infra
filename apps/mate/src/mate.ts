@@ -19,6 +19,7 @@ import type { Config, GithubAppConfig } from './config.ts';
 import { PostgresCredentialStore } from './credential-store.ts';
 import { Custodian, PostgresCustodianLedger } from './custodian.ts';
 import { GithubApp } from './github-app.ts';
+import type { Routes } from './http.ts';
 import { KthxSites } from './kthx-sites.ts';
 import { Kube, type KubeConfig } from './kube.ts';
 import { type KubeHandsDeps, WORKSPACE } from './lease.ts';
@@ -28,6 +29,12 @@ import type { Instruments } from './metrics.ts';
 import { CHATGPT_PROVIDER, chatgptModel, createModelSetup } from './model.ts';
 import { brainProfiles, loadSystemPrompts } from './profile.ts';
 import { PROFILES } from './profiles.ts';
+import {
+  fileToken,
+  PostgresResponderLedger,
+  RESPONDER_PATH,
+  Responder,
+} from './responder.ts';
 import { fileImage } from './sandbox-image.ts';
 import { type HandsLayout, KubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
 import type { SlackApi } from './slack.ts';
@@ -91,6 +98,8 @@ export interface MateEdges {
   readonly surfaces: MateSurfaces;
   /** What MATE_MODEL and the fallback may name; OpenCode Go's and ChatGPT's when absent. */
   readonly providers?: readonly Provider[];
+  /** The process's HTTP routes, where the alert responder answers Alertmanager; absent, it answers nothing. */
+  readonly routes?: Routes;
   readonly tuning?: MateTuning;
 }
 
@@ -110,6 +119,7 @@ interface Running {
   githubApp: GithubApp | null;
   slack: SlackSide | null;
   custodian: Custodian | null;
+  responder: Responder | null;
   wakes: Wakes;
   timers: (() => void)[];
 }
@@ -301,6 +311,7 @@ export class Mate {
     wakes.bind(threads);
     void db.ready.then(() => wakes.start());
     chatgpt?.keeper.start(db.ready);
+    const slackOwner = [...(config.slack?.allowedUserIds ?? [])][0] ?? '';
     const custodian =
       config.custodianChannel && slack && db.sql
         ? new Custodian({
@@ -308,7 +319,7 @@ export class Mate {
             slack: slack.api,
             threads,
             channel: config.custodianChannel,
-            owner: [...(config.slack?.allowedUserIds ?? [])][0] ?? '',
+            owner: slackOwner,
             log,
             clock,
           })
@@ -316,6 +327,34 @@ export class Mate {
     if (custodian) void db.ready.then(() => custodian.start());
     else if (config.custodianChannel)
       log.warn('custodian disabled: Slack or database unavailable');
+    const { responderChannel, alertmanagerTokenFile } = config;
+    const responder =
+      responderChannel && slack && db.sql
+        ? new Responder({
+            ledger: new PostgresResponderLedger(db.sql),
+            slack: slack.api,
+            threads,
+            channel: responderChannel,
+            owner: slackOwner,
+            token: fileToken(alertmanagerTokenFile, log),
+            log,
+            clock,
+          })
+        : null;
+    if (responder) {
+      this.edges.routes?.set(RESPONDER_PATH, (request) =>
+        responder.fetch(request),
+      );
+    } else if (responderChannel) {
+      // Still a route: Alertmanager retries a 503 and counts a 404 as failed.
+      log.warn('alert responder disabled: Slack or database unavailable');
+      this.edges.routes?.set(RESPONDER_PATH, () =>
+        Response.json(
+          { error: 'alert responder unavailable' },
+          { status: 503 },
+        ),
+      );
+    }
     // Before the gateway: a revoked or rate-limited Discord token, or a wait on
     // the identify budget, must not hold Slack back.
     if (slack) await slack.listener.start(threads);
@@ -328,6 +367,7 @@ export class Mate {
       githubApp,
       slack,
       custodian,
+      responder,
       wakes,
       timers: [],
     };
@@ -379,7 +419,8 @@ export class Mate {
     const running = await this.starting?.catch(() => null);
     if (!running) return;
     const { log, database, surfaces, tuning } = this.edges;
-    const { threads, hands, chatgpt, slack, custodian, wakes, mcp } = running;
+    const { threads, hands, chatgpt, slack, custodian, responder, wakes, mcp } =
+      running;
     // First: envelopes are acked on receipt, so one taken during the drain is
     // lost for good.
     slack?.listener.stop();
@@ -387,6 +428,8 @@ export class Mate {
     // is replayed to the next process; posting is REST and still works.
     surfaces.discord.stop();
     custodian?.stop();
+    // Alertmanager retries the 503 against the next pod.
+    responder?.stop();
     wakes.stop();
     for (const cancel of running.timers) cancel();
     // While both surfaces can still post: running turns finish or stay open for

@@ -488,3 +488,33 @@ describe('config from the environment', () => {
     ).toMatchObject({ profileRoot: '/app', modelKeyFile: '/run/key' });
   });
 });
+
+describe('the alert responder', () => {
+  const slack = {
+    ...minimal,
+    MATE_SLACK_BOT_TOKEN: 'xoxb',
+    MATE_SLACK_APP_TOKEN: 'xapp',
+    MATE_SLACK_TEAM_ID: 'TAR78LS82',
+    MATE_SLACK_ALLOWED_USER_IDS: 'UAR78LSKC',
+    MATE_SLACK_ALLOWED_CHANNEL_IDS: 'C062BS4GADR',
+  };
+
+  test('is opt-in to an allowed Slack channel, with the webhook bearer in a file', () => {
+    const off = readConfig(minimal);
+    expect(off.responderChannel).toBeNull();
+    expect(off.alertmanagerTokenFile).toBe('/var/run/mate/alertmanager/token');
+    const on = readConfig({
+      ...slack,
+      MATE_RESPONDER_CHANNEL: 'C062BS4GADR',
+      MATE_ALERTMANAGER_TOKEN_FILE: ' /run/token ',
+    });
+    expect(on.responderChannel).toBe('C062BS4GADR');
+    expect(on.alertmanagerTokenFile).toBe('/run/token');
+    expect(() =>
+      readConfig({ ...slack, MATE_RESPONDER_CHANNEL: 'COTHER' }),
+    ).toThrow('MATE_RESPONDER_CHANNEL must be an allowed Slack channel');
+    expect(() =>
+      readConfig({ ...minimal, MATE_RESPONDER_CHANNEL: 'C062BS4GADR' }),
+    ).toThrow('allowed Slack channel');
+  });
+});
