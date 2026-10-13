@@ -12,9 +12,9 @@
     "mate",
     "mate-sandbox",
     "smiirl",
-    "spindrift",
-    "spindrift-demo",
-    "spindrift-verifier",
+    "kthx-engine",
+    "kthx-engine-demo",
+    "kthx-engine-verifier",
     "switchboard",
     "weather"
   ],
@@ -50,7 +50,7 @@
     "smiirl": [
       "clusters/folly/apps/smiirl/02-deployment.yaml"
     ],
-    "spindrift": [
+    "kthx-engine": [
       "clusters/offsite/apps/spindrift/helm-release.yaml"
     ],
     "switchboard": [
