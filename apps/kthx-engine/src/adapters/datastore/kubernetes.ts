@@ -136,6 +136,7 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
             request.name,
             size,
             await storeIn(api, namespace),
+            request.serverName ?? null,
           )
         : valkeyObject(namespace, request.name, size);
     // Server-side apply keeps this idempotent without a read-first check that
@@ -248,7 +249,11 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
    * and when the namespace offers no store or more than one: the engine does
    * not guess where a database's history goes.
    */
-  async protect(target: DeployTarget, ref: DatastoreRef): Promise<boolean> {
+  async protect(
+    target: DeployTarget,
+    ref: DatastoreRef,
+    serverName: string | null = null,
+  ): Promise<boolean> {
     const connection = connectionOf(target);
     const parsed = parseRef(ref);
     if (connection === null || parsed === null) return false;
@@ -275,7 +280,7 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     if (typeof size !== 'string') return false;
 
     await api.apply(
-      postgresObject(parsed.namespace, parsed.name, size, store),
+      postgresObject(parsed.namespace, parsed.name, size, store, serverName),
       ENGINE_KINDS.postgres.plural,
     );
     const archiving = (spec?.plugins ?? []).some(
@@ -453,13 +458,16 @@ function metadataOf(
 /**
  * No `storageClass`: the cluster default decides, and naming one would put an
  * installation fact in the software. `store` names the namespace's
- * ObjectStore, or `null` for a Cluster that archives nowhere.
+ * ObjectStore, or `null` for a Cluster that archives nowhere. `serverName` is
+ * the archive prefix of this generation of the Datastore; `null` leaves the
+ * plugin's default, the Cluster name.
  */
 function postgresObject(
   namespace: string,
   name: string,
   size: string,
   store: string | null,
+  serverName: string | null,
 ): KubernetesObject {
   const kind = ENGINE_KINDS.postgres;
   return {
@@ -476,7 +484,10 @@ function postgresObject(
               {
                 name: BARMAN_PLUGIN,
                 isWALArchiver: true,
-                parameters: { barmanObjectName: store },
+                parameters: {
+                  barmanObjectName: store,
+                  ...(serverName === null ? {} : { serverName }),
+                },
               },
             ],
           }),

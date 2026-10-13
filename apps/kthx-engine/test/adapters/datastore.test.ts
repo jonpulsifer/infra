@@ -134,6 +134,52 @@ describe('provision', () => {
     ).not.toHaveProperty('plugins');
   });
 
+  test('renders the generation prefix as the plugin serverName', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+
+    await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 4,
+      serverName: 'orders-1a2b3c4d',
+    });
+
+    expect(
+      fake.get('clusters/spindrift-datastores/orders')?.spec,
+    ).toMatchObject({
+      plugins: [
+        {
+          name: 'barman-cloud.cloudnative-pg.io',
+          isWALArchiver: true,
+          parameters: {
+            barmanObjectName: 'vault',
+            serverName: 'orders-1a2b3c4d',
+          },
+        },
+      ],
+    });
+  });
+
+  test('without a prefix the plugin parameters are the store alone', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+
+    await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 4,
+      serverName: null,
+    });
+
+    const spec = fake.get('clusters/spindrift-datastores/orders')?.spec as {
+      plugins: { parameters: unknown }[];
+    };
+    expect(spec.plugins[0]?.parameters).toEqual({ barmanObjectName: 'vault' });
+  });
+
   test('with several stores in the namespace it archives to none of them', async () => {
     const { fake, adapter, target } = adapterOn({
       objects: {
@@ -602,6 +648,28 @@ describe('destroy', () => {
  * under that store by the datastore loop.
  */
 describe('protect', () => {
+  test('keeps the generation prefix on the re-applied Cluster', async () => {
+    const { fake, adapter, target } = adapterOn({
+      objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },
+    });
+    const ref = await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 4,
+      serverName: 'orders-1a2b3c4d',
+    });
+
+    await adapter.protect(target, ref, 'orders-1a2b3c4d');
+
+    const spec = fake.get('clusters/spindrift-datastores/orders')?.spec as {
+      plugins: { parameters: unknown }[];
+    };
+    expect(spec.plugins[0]?.parameters).toEqual({
+      barmanObjectName: 'vault',
+      serverName: 'orders-1a2b3c4d',
+    });
+  });
+
   test('schedules a daily base backup for a Ready Cluster that archives', async () => {
     const { fake, adapter, target } = adapterOn({
       objects: { 'objectstores/spindrift-datastores/vault': aStore('vault') },

@@ -20,6 +20,8 @@ export interface DatastoreRequest {
   readonly name: string;
   readonly engine: DatastoreEngine;
   readonly storageGiB: number;
+  /** The archive prefix of this generation; absent keeps the default. */
+  readonly serverName?: string | null;
 }
 
 /**
@@ -79,7 +81,11 @@ export interface DatastoreAdapter {
    * the same schedule as `permit`, so idempotent; `false` means the Target
    * provides none for this Datastore and nothing was written.
    */
-  protect?(target: DeployTarget, ref: DatastoreRef): Promise<boolean>;
+  protect?(
+    target: DeployTarget,
+    ref: DatastoreRef,
+    serverName?: string | null,
+  ): Promise<boolean>;
 
   /**
    * The backend's own object, verbatim, for a person diagnosing it. Absent, or

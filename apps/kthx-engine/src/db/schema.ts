@@ -601,6 +601,13 @@ export const datastores = pgTable(
     /** A secret reference, never the credential. */
     connectionRef: text('connection_ref'),
     /**
+     * The archive prefix of this generation of a managed Postgres Datastore,
+     * so a Datastore created again under one name never archives into the
+     * history of the one it replaced. Null for a row older than the column,
+     * which keeps the plugin's default prefix, the Cluster name.
+     */
+    serverName: text('server_name'),
+    /**
      * The namespace last admitted, re-asserted when it differs from the App's.
      * Text, not a foreign key an App delete would null.
      */

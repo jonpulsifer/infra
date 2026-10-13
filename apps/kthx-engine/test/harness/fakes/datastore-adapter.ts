@@ -34,6 +34,7 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
   readonly observed: DatastoreRef[] = [];
   readonly permits: { ref: DatastoreRef; namespaces: readonly string[] }[] = [];
   readonly protects: DatastoreRef[] = [];
+  readonly protectedServerNames: (string | null)[] = [];
 
   /** Each ref's states, oldest first; the last one repeats. */
   private readonly states = new Map<DatastoreRef, DatastoreState[]>();
@@ -101,8 +102,13 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
     return !this.options.permitNoops;
   }
 
-  async protect(_target: DeployTarget, ref: DatastoreRef): Promise<boolean> {
+  async protect(
+    _target: DeployTarget,
+    ref: DatastoreRef,
+    serverName: string | null = null,
+  ): Promise<boolean> {
     this.protects.push(ref);
+    this.protectedServerNames.push(serverName);
     if (this.options.protectThrows !== undefined) {
       throw new Error(this.options.protectThrows);
     }
