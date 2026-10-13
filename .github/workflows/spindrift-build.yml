@@ -1,6 +1,7 @@
 # The hosted build route's workflow. Generated callers in connected repositories run
 # it, ordinarily at main, with one opaque `spec`, so new parameters go in `spec`.
-# `workflow_dispatch` builds uploaded archives here. Its last line is the build report.
+# `workflow_dispatch` builds uploaded archives here. Its last two lines carry the
+# build report, once under each marker the engine reads.
 name: kthx-build
 run-name: kthx ${{ inputs.correlation }}
 
@@ -14,6 +15,9 @@ on:
     secrets:
       # Optional: without it, "Resolve the seal key" reads the same key from
       # Secret Manager. Only this repository's own caller can pass it.
+      KTHX_ENGINE_BUILD_SEAL_KEY:
+        required: false
+      # The same key under its old name, read when the new one is unset.
       SPINDRIFT_BUILD_SEAL_KEY:
         required: false
   workflow_dispatch:
@@ -489,16 +493,16 @@ jobs:
           steps.request.outputs.sealedRegistryAuth != '' ||
           steps.request.outputs.sealedBuildSecrets != ''
         env:
-          SEAL_KEY: ${{ secrets.SPINDRIFT_BUILD_SEAL_KEY }}
+          SEAL_KEY: ${{ secrets.KTHX_ENGINE_BUILD_SEAL_KEY || secrets.SPINDRIFT_BUILD_SEAL_KEY }}
         run: |
           set -euo pipefail
-          file="${RUNNER_TEMP}/spindrift-seal-key.pem"
+          file="${RUNNER_TEMP}/kthx-engine-seal-key.pem"
           if [ -n "${SEAL_KEY:-}" ]; then
             printf '%s' "$SEAL_KEY" > "$file"
           elif ! gcloud secrets versions access latest \
               --secret=projects/trusted-builds/secrets/spindrift-build-seal-key \
               > "$file"; then
-            echo "::error::this build carries a sealed value, and neither this repository's SPINDRIFT_BUILD_SEAL_KEY secret nor projects/trusted-builds/secrets/spindrift-build-seal-key answered — set the repository secret, or check that this run's identity is federated for the seal key's Secret Manager IAM binding." >&2
+            echo "::error::this build carries a sealed value, and neither this repository's KTHX_ENGINE_BUILD_SEAL_KEY secret nor projects/trusted-builds/secrets/spindrift-build-seal-key answered — set the repository secret, or check that this run's identity is federated for the seal key's Secret Manager IAM binding." >&2
             exit 1
           fi
           chmod 600 "$file"
@@ -1099,4 +1103,6 @@ jobs:
                   }
                 }
               }}')"
-          echo "spindrift-result $(printf '%s' "$report" | base64 | tr -d '\n')"
+          encoded="$(printf '%s' "$report" | base64 | tr -d '\n')"
+          echo "spindrift-result $encoded"
+          echo "kthx-engine-result $encoded"

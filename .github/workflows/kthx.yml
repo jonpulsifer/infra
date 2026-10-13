@@ -25,7 +25,7 @@ jobs:
   build:
     uses: ./.github/workflows/spindrift-build.yml
     # workflow_call passes only the secrets it is given, including the optional
-    # SPINDRIFT_BUILD_SEAL_KEY. `inherit` is safe: the callee is in this repo.
+    # KTHX_ENGINE_BUILD_SEAL_KEY. `inherit` is safe: the callee is in this repo.
     secrets: inherit
     with:
       spec: ${{ inputs.spec }}
