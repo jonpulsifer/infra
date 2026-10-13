@@ -11,7 +11,7 @@ The `discord` AlertmanagerConfig sends alerts to a Discord webhook from 1Passwor
 
 On offsite, the `switchboard` AlertmanagerConfig posts a firing `critical` alert to Switchboard and repeats it every 15 minutes, so a notification skipped for quiet hours or the cap is retried soon after. A switchboard restart forgets what it rang, so a pod roll during an incident rings once more per firing critical alert.
 
-Also on offsite, the `mate` AlertmanagerConfig posts a firing `warning` or `critical` alert group to Rowbutt's [alert responder](../../apps/mate.md#alert-responder), grouped as Discord groups it, with the resolution, and repeats every 12 hours, which opens nothing. Both are parked: offsite's `alertmanagerConfigSelector` names `discord` alone.
+Also on offsite, the `mate` AlertmanagerConfig posts a firing `warning` or `critical` alert group to Rowbutt's [alert responder](../../apps/mate.md#alert-responder), grouped as Discord groups it, with the resolution, and repeats every 12 hours, which opens nothing. offsite's `alertmanagerConfigSelector` names all three.
 
 ## Who can post an alert
 
