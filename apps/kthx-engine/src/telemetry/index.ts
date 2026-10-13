@@ -31,7 +31,7 @@ import { VERSION_VAR } from '../config/manifest.ts';
 const OTLP_ENDPOINT =
   process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
   'http://opentelemetry-collector.monitoring.svc.cluster.local:4318';
-const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || 'spindrift';
+const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || 'kthx-engine';
 const SERVICE_VERSION = readEnv(process.env, VERSION_VAR) || '1.0.0';
 
 let sdkInstance: NodeSDK | null = null;
@@ -100,7 +100,7 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
   return sdkInstance;
 }
 
-export const tracer: Tracer = trace.getTracer('spindrift');
+export const tracer: Tracer = trace.getTracer('kthx-engine');
 
 /**
  * The metrics API has no proxy provider, so an instrument minted before the SDK
@@ -113,7 +113,7 @@ function lazily<T>(mint: (meter: Meter) => T): () => T {
     const provider = metrics.getMeterProvider();
     if (provider !== mintedFrom) {
       mintedFrom = provider;
-      instrument = mint(provider.getMeter('spindrift'));
+      instrument = mint(provider.getMeter('kthx-engine'));
     }
     return instrument;
   };
@@ -227,7 +227,7 @@ export const reconcilerDriftedDeploys: Gauge = gauge(
   },
 );
 
-const logger = logs.getLogger('spindrift');
+const logger = logs.getLogger('kthx-engine');
 
 /**
  * The OTLP copy is best-effort: `console` already has the line. A failure goes

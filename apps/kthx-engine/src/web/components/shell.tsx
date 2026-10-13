@@ -177,7 +177,8 @@ export const PHONE_NAV: readonly RailDestination[] = [
 const RAIL_APPS_CAP = 8;
 
 // A per-browser preference, stored beside the theme key.
-const RAIL_KEY = 'spindrift.rail';
+const RAIL_KEY = 'kthx-engine.rail';
+const OLD_RAIL_KEY = 'spindrift.rail';
 
 /**
  * Guarded for static test renders, which have no `localStorage`. An unreadable
@@ -186,7 +187,15 @@ const RAIL_KEY = 'spindrift.rail';
 function railCollapsed(): boolean {
   if (typeof localStorage === 'undefined') return false;
   try {
-    return localStorage.getItem(RAIL_KEY) === 'collapsed';
+    let stored = localStorage.getItem(RAIL_KEY);
+    if (stored === null) {
+      stored = localStorage.getItem(OLD_RAIL_KEY);
+      if (stored !== null) {
+        localStorage.setItem(RAIL_KEY, stored);
+        localStorage.removeItem(OLD_RAIL_KEY);
+      }
+    }
+    return stored === 'collapsed';
   } catch {
     return false;
   }
@@ -195,6 +204,7 @@ function railCollapsed(): boolean {
 function rememberRail(collapsed: boolean): void {
   try {
     localStorage.setItem(RAIL_KEY, collapsed ? 'collapsed' : 'expanded');
+    localStorage.removeItem(OLD_RAIL_KEY);
   } catch {
     // A blocked or full store only loses the preference for this visit.
   }

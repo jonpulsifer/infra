@@ -22,7 +22,14 @@
     -->
     <script>
       try {
-        const choice = localStorage.getItem("spindrift.theme");
+        let choice = localStorage.getItem("kthx-engine.theme");
+        if (choice === null) {
+          choice = localStorage.getItem("spindrift.theme");
+          if (choice !== null) {
+            localStorage.setItem("kthx-engine.theme", choice);
+            localStorage.removeItem("spindrift.theme");
+          }
+        }
         if (choice !== "system") {
           document.documentElement.setAttribute(
             "data-theme",

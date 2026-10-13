@@ -135,12 +135,14 @@ function stepInHash(): number {
 }
 
 /** Session storage, so an unsaved document never outlives its tab. */
-const HELD = 'spindrift.setup';
+const HELD = 'kthx-engine.setup';
+const OLD_HELD = 'spindrift.setup';
 
 /** Any failure to read the held document starts fresh. */
 function restored(): unknown {
   try {
-    const held = sessionStorage.getItem(HELD);
+    const held =
+      sessionStorage.getItem(HELD) ?? sessionStorage.getItem(OLD_HELD);
     const document: unknown = held === null ? null : JSON.parse(held);
     return typeof document === 'object' && document !== null
       ? document
@@ -153,6 +155,7 @@ function restored(): unknown {
 function remember(document: unknown): void {
   try {
     sessionStorage.setItem(HELD, JSON.stringify(document));
+    sessionStorage.removeItem(OLD_HELD);
   } catch {
     // Without storage, a reload loses the answers; nothing else breaks.
   }

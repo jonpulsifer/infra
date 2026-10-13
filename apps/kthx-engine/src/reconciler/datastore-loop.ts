@@ -122,9 +122,9 @@ export async function runDatastorePass(
           await adapter.protect(target, row.ref, row.serverName);
         } catch (error) {
           logWarn('a Datastore backup was refused', {
-            'spindrift.datastore.id': row.id,
-            'spindrift.target': label,
-            'spindrift.error':
+            'kthx.engine.datastore.id': row.id,
+            'kthx.engine.target': label,
+            'kthx.engine.error':
               error instanceof Error ? error.message : String(error),
           });
         }
@@ -141,10 +141,10 @@ export async function runDatastorePass(
           // Not a `continue`: the poll below still runs, and the unrecorded
           // write is retried next pass.
           logWarn('a Datastore network exception was refused', {
-            'spindrift.datastore.id': row.id,
-            'spindrift.datastore.namespace': desired ?? '(none)',
-            'spindrift.target': label,
-            'spindrift.error':
+            'kthx.engine.datastore.id': row.id,
+            'kthx.engine.datastore.namespace': desired ?? '(none)',
+            'kthx.engine.target': label,
+            'kthx.engine.error':
               error instanceof Error ? error.message : String(error),
           });
         }

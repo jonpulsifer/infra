@@ -85,11 +85,11 @@ export async function dispatchAutoDeploys(
       // deploy it would refuse.
       if (app.lockReason !== null) {
         logWarn('a push was adopted and its App is locked', {
-          'spindrift.app.id': scope.appId,
-          'spindrift.app.name': app.name,
-          'spindrift.repository': pass.fullName,
-          'spindrift.commit': pass.commit,
-          'spindrift.lock.reason': app.lockReason,
+          'kthx.engine.app.id': scope.appId,
+          'kthx.engine.app.name': app.name,
+          'kthx.engine.repository': pass.fullName,
+          'kthx.engine.commit': pass.commit,
+          'kthx.engine.lock.reason': app.lockReason,
         });
         continue;
       }
@@ -107,11 +107,11 @@ export async function dispatchAutoDeploys(
         // Logged: both callers discard the return value, and a refused push
         // has no Build row to carry the reason.
         logWarn('a push was adopted and its deploy was refused', {
-          'spindrift.app.id': scope.appId,
-          'spindrift.repository': pass.fullName,
-          'spindrift.commit': pass.commit,
-          'spindrift.refusal.code': result.failure.code,
-          'spindrift.refusal.message': result.failure.message,
+          'kthx.engine.app.id': scope.appId,
+          'kthx.engine.repository': pass.fullName,
+          'kthx.engine.commit': pass.commit,
+          'kthx.engine.refusal.code': result.failure.code,
+          'kthx.engine.refusal.message': result.failure.message,
         });
       }
       attempts.push({ appId: scope.appId, commit: pass.commit, result });
