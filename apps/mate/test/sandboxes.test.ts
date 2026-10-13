@@ -256,6 +256,39 @@ describe('the manifest', () => {
 
   // mise has no wildcard for disable_tools, so the image lists every repo tool.
   // An unlisted tool makes mise resolve it on every `mise run`, which fails offline.
+  test('selects the sandbox node and tolerates its taint when a label is named', async () => {
+    const r = rig({
+      config: {
+        ...FULL,
+        nodeLabel: { key: 'lolwtf.ca/sandbox', value: 'true' },
+      },
+    });
+    await mint(r);
+    const pod = podTemplate(r);
+    expect(
+      pod.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution
+        .nodeSelectorTerms,
+    ).toEqual([
+      {
+        matchExpressions: [
+          {
+            key: 'node-role.kubernetes.io/control-plane',
+            operator: 'DoesNotExist',
+          },
+          { key: 'lolwtf.ca/sandbox', operator: 'In', values: ['true'] },
+        ],
+      },
+    ]);
+    expect(pod.tolerations).toEqual([
+      {
+        key: 'lolwtf.ca/sandbox',
+        operator: 'Equal',
+        value: 'true',
+        effect: 'NoSchedule',
+      },
+    ]);
+  });
+
   test('disables every tool the repo declares in the sandbox image', async () => {
     const toml = async <T>(path: string) =>
       Bun.TOML.parse(

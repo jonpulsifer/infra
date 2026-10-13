@@ -463,8 +463,9 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
         metadata: { labels },
         spec: {
           runtimeClassName: config.runtimeClass,
-          // No node is tainted, so this term alone keeps agent commands off
-          // a control-plane node.
+          // Off the control plane, and on the labelled node when one is named.
+          // That node's taint keeps every other pod away, and the toleration
+          // admits the sandbox.
           affinity: {
             nodeAffinity: {
               requiredDuringSchedulingIgnoredDuringExecution: {
@@ -475,12 +476,33 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                         key: 'node-role.kubernetes.io/control-plane',
                         operator: 'DoesNotExist',
                       },
+                      ...(config.nodeLabel === null
+                        ? []
+                        : [
+                            {
+                              key: config.nodeLabel.key,
+                              operator: 'In',
+                              values: [config.nodeLabel.value],
+                            },
+                          ]),
                     ],
                   },
                 ],
               },
             },
           },
+          ...(config.nodeLabel === null
+            ? {}
+            : {
+                tolerations: [
+                  {
+                    key: config.nodeLabel.key,
+                    operator: 'Equal',
+                    value: config.nodeLabel.value,
+                    effect: 'NoSchedule',
+                  },
+                ],
+              }),
           restartPolicy: 'Always',
           automountServiceAccountToken: false,
           // The agent runs arbitrary commands and gets no Service addresses.

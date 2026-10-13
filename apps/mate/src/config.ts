@@ -85,10 +85,22 @@ export interface McpServerConfig {
   readonly token: string | null;
 }
 
+/** A node label, `key=value` in the environment. */
+export interface NodeLabel {
+  readonly key: string;
+  readonly value: string;
+}
+
 export interface SandboxConfig {
   /** Holds the harness image every new sandbox runs; CD rewrites its digest in the ConfigMap behind it. */
   readonly imageFile: string;
   readonly runtimeClass: string;
+  /**
+   * The label of the node sandboxes run on, whose `NoSchedule` taint of the
+   * same key and value they tolerate. `null`, the default, lets them run on
+   * any node but the control plane.
+   */
+  readonly nodeLabel: NodeLabel | null;
   /** Where sandboxes are minted, or `null` for the namespace mate runs in. */
   readonly namespace: string | null;
   readonly checkoutRepo: string;
@@ -219,6 +231,23 @@ function hostName(env: Env, key: string, fallback: string): string {
     throw new ConfigError(`${key} is not a host name: ${value}`);
   }
   return value;
+}
+
+/** A Kubernetes label key, with its optional prefix, and a non-empty value. */
+const LABEL_KEY =
+  /^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
+const LABEL_VALUE = /^[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
+
+function nodeLabel(env: Env, key: string): NodeLabel | null {
+  const raw = env[key]?.trim();
+  if (!raw) return null;
+  const at = raw.indexOf('=');
+  const labelKey = at === -1 ? raw : raw.slice(0, at);
+  const value = at === -1 ? '' : raw.slice(at + 1);
+  if (!LABEL_KEY.test(labelKey) || !LABEL_VALUE.test(value)) {
+    throw new ConfigError(`${key} is not a key=value node label: ${raw}`);
+  }
+  return { key: labelKey, value };
 }
 
 function clusterName(env: Env, key: string, fallback: string): string {
@@ -458,6 +487,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
   return {
     imageFile: required(env, 'MATE_SANDBOX_IMAGE_FILE'),
     runtimeClass: text(env, 'MATE_SANDBOX_RUNTIME_CLASS', 'kata-clh'),
+    nodeLabel: nodeLabel(env, 'MATE_SANDBOX_NODE_LABEL'),
     namespace: env.MATE_SANDBOX_NAMESPACE?.trim() || null,
     checkoutRepo: text(
       env,
