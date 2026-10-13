@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '..');
-const FILES = ['persona.md', 'workstation.md'];
+const FILES = ['persona.md', 'memory.md', 'workstation.md'];
 
 function read(file: string): string {
   try {

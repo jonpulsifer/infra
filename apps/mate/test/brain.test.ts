@@ -46,6 +46,7 @@ import { systemClock } from '../src/clock.ts';
 import { silentLog } from '../src/log.ts';
 import { LIMIT_FALLBACK } from '../src/notices.ts';
 import { PROFILES, type Profile } from '../src/profiles.ts';
+import type { RecallSource } from '../src/recall.ts';
 import { CHATGPT_PROVIDER, routeModels } from '../src/route.ts';
 import type { PromptSink, Update } from '../src/sandbox.ts';
 import { POOL_OPTIONS, PostgresThreadStore } from '../src/store.ts';
@@ -152,6 +153,7 @@ function thread(): ThreadRef {
 
 const OPERATOR = PROFILES.get('operator') as Profile;
 const INVESTIGATOR = PROFILES.get('investigator') as Profile;
+const DREAMER = PROFILES.get('dreamer') as Profile;
 /** Operator's powers, with a turn cut at 300ms. */
 const SHORT: Profile = { ...OPERATOR, id: 'short' };
 const PROMPTS: Record<string, SystemPrompts> = {
@@ -160,6 +162,7 @@ const PROMPTS: Record<string, SystemPrompts> = {
     discord: 'You look on Discord.',
     slack: 'You look on Slack.',
   },
+  dreamer: { discord: 'You dream on Discord.', slack: 'You dream on Slack.' },
   short: { discord: 'You hurry on Discord.', slack: 'You hurry on Slack.' },
 };
 
@@ -186,6 +189,7 @@ function profilesFor(setup: ModelSetup): ReadonlyMap<string, BrainProfile> {
   return new Map([
     brainProfile(setup, OPERATOR, 60_000),
     brainProfile(setup, INVESTIGATOR, 1_200_000),
+    brainProfile(setup, DREAMER, 1_800_000),
     brainProfile(setup, SHORT, 300),
   ]);
 }
@@ -1561,6 +1565,52 @@ describe('profiles', () => {
       ASKER,
     );
     expect(asked[0]?.tools).toEqual(BASE);
+  });
+
+  test('an operator lists the recall tools when mate has a source, and a call reads a thread through it; a dreamer lists them and nothing bridged', async () => {
+    const model = faux();
+    const read: string[] = [];
+    const recall: RecallSource = {
+      threads: async () => [],
+      messages: async (key) => {
+        read.push(key);
+        return [{ role: 'user', content: 'earlier ask', timestamp: 1 }];
+      },
+    };
+    const first: ReturnType<typeof heard>[] = [];
+    model.script(
+      (context) => {
+        first.push(heard(context.messages));
+        return tool('recall_thread', { key: 'slack:C1:p-1' });
+      },
+      (context) =>
+        fauxAssistantMessage(
+          toolText(context.messages, 'call-recall_thread') || 'no result',
+        ),
+    );
+    const mcp = new FakeBridge([kthxTool('kthx_x'), kthxTool('weather_y')]);
+    const built = build(model, { recall, mcp });
+    const { session } = await opened(built);
+    const sink = new Recorder();
+    await built.brain.prompt(session, 'what did we say?', sink, ASKER);
+    expect(first[0]?.tools).toEqual(
+      [
+        ...BASE,
+        'kthx_x',
+        'weather_y',
+        'recall_thread',
+        'recall_threads',
+      ].sort(),
+    );
+    expect(read).toEqual(['slack:C1:p-1']);
+    expect(sink.text).toContain('owner: earlier ask');
+
+    const asked = seen(model);
+    const dreaming = await opened(built, thread(), 'dreamer');
+    await built.brain.prompt(dreaming.session, 'dream', new Recorder(), ASKER);
+    expect(asked[0]?.tools).toEqual(
+      [...BASE, 'recall_thread', 'recall_threads'].sort(),
+    );
   });
 
   test("each profile's prompt for the surface reaches pi, and the hands are made under the profile", async () => {

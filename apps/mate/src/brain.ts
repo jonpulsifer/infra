@@ -67,6 +67,11 @@ import {
   type ProviderErrorKind,
 } from './metrics.ts';
 import { lists, type Profile, sweepable } from './profiles.ts';
+import {
+  RECALL_THREAD_TOOL,
+  type RecallSource,
+  recallTools,
+} from './recall.ts';
 import { redact } from './redact.ts';
 import { fallbackError, type RouteEvent } from './route.ts';
 import type { PromptResult, PromptSink } from './sandbox.ts';
@@ -141,6 +146,8 @@ export interface PiBrainDeps {
   mcp: McpBridge | null;
   /** Backs each listing profile's `wake` tool; `null` lists no `wake`. */
   wakes?: Wakes | null;
+  /** Backs each listing profile's `recall_*` tools; `null` lists none. */
+  recall?: RecallSource | null;
   log: Log;
   clock?: Clock;
   metrics?: Instruments;
@@ -1110,15 +1117,19 @@ export class PiBrain implements Brain {
 
   /** The profile's prompt for the thread's surface, and the tools it lists. */
   private extension(profile: BrainProfile, ref: ThreadRef): Extension {
-    const { wakes } = this.deps;
+    const { wakes, recall } = this.deps;
     const key = threadKey(ref);
     const wake =
       wakes && lists(profile.profile, WAKE_TOOL)
         ? [wakeTool(ref, () => this.asker(key), wakes)]
         : [];
+    const recalls =
+      recall && lists(profile.profile, RECALL_THREAD_TOOL)
+        ? recallTools(recall, () => this.clock.now())
+        : [];
     return defineExtension({
       name: EXTENSION,
-      tools: [...this.listedTools(profile.profile), ...wake],
+      tools: [...this.listedTools(profile.profile), ...wake, ...recalls],
       sections: [
         section('mate', () => profile.prompts[ref.surface], { tag: false }),
       ],

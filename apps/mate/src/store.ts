@@ -252,6 +252,19 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
       resolved_at BIGINT NULL
     )`,
   ],
+  // One row per nightly dream (dreams.ts): `thread_ts` NULL is a claim whose
+  // root Slack has not accepted, and [since, until) is the window of threads
+  // it read, which starts where the previous dream's ended.
+  [
+    9,
+    `CREATE TABLE mate_dreams (
+      day TEXT COLLATE "C" PRIMARY KEY,
+      thread_ts TEXT NULL,
+      since BIGINT NOT NULL,
+      until BIGINT NOT NULL,
+      created_at BIGINT NOT NULL
+    )`,
+  ],
 ];
 
 /** mate's own tables beside pi's; idempotent and safe to race. */

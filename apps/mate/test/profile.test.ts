@@ -11,11 +11,14 @@ import {
   brainProfiles,
   FALLBACK_PERSONA,
   loadSystemPrompts,
+  MEMORY_FILE,
+  MEMORY_HEADING,
   OWNER_AGENTS_FILE,
   PERSONA_FILE,
   SKILL_DIRS,
 } from '../src/profile.ts';
 import {
+  dreamerPreamble,
   investigatorPreamble,
   operatorPreamble,
   PROFILES,
@@ -46,6 +49,7 @@ const PROFILE_INPUTS = [
   PERSONA_FILE,
   OWNER_AGENTS_FILE,
   AGENTS_FILE,
+  MEMORY_FILE,
   ...SKILL_DIRS,
 ];
 const OWNER_HEADING = "# Owner's standing instructions (global AGENTS.md)";
@@ -56,13 +60,14 @@ async function repoText(file: string): Promise<string> {
   return (await Bun.file(join(REPO, file)).text()).trim();
 }
 
-/** The persona, the owner's file and AGENTS.md, but `without`. */
+/** The persona, the owner's file, AGENTS.md and the memory, but `without`. */
 function writeProfileFiles(root: string, without?: string): void {
   const files: Record<string, string> = {
     [PERSONA_FILE]: 'You are Testbutt.\n',
     [OWNER_AGENTS_FILE]:
       '# Owner\n\nPriority.\n\n## Protect\n\n- Guard.\n\n## Communicate\n\n- Talk.\n',
     [AGENTS_FILE]: 'Rules.\n',
+    [MEMORY_FILE]: '# Memory\n\n- 2026-10-13: The lab has two clusters.\n',
   };
   for (const [file, text] of Object.entries(files)) {
     if (file === without) continue;
@@ -131,6 +136,13 @@ describe('the profile mate bakes into its image', () => {
 
   test('has the persona the local pi package shares', async () => {
     expect(await repoText(PERSONA_FILE)).toStartWith('You are Rowbutt');
+  });
+
+  // The dream edits it, so an empty file would silence a whole section.
+  test('has the memory the dream keeps and the local pi package shares', async () => {
+    const memory = await repoText(MEMORY_FILE);
+    expect(memory).toStartWith('# Memory');
+    expect(memory.split('\n').length).toBeLessThanOrEqual(120);
   });
 
   // The investigator reads only these sections of the owner's file.
@@ -274,6 +286,28 @@ describe('loadSystemPrompts', () => {
     ]);
   });
 
+  test('the memory follows AGENTS.md under its own heading, and a missing one drops the heading', async () => {
+    const { all } = await load(rootWithout('nothing'));
+    for (const prompts of Object.values(all)) {
+      for (const [, prompt] of each(prompts)) {
+        expect(prompt).toContain(
+          `${REPO_HEADING}\n\nRules.\n\n${MEMORY_HEADING}\n\n# Memory\n\n- 2026-10-13: The lab has two clusters.`,
+        );
+      }
+    }
+    const root = rootWithout(MEMORY_FILE);
+    const { all: without, log } = await load(root);
+    for (const prompts of Object.values(without)) {
+      for (const [, prompt] of each(prompts)) {
+        expect(prompt).not.toContain(MEMORY_HEADING);
+        expect(prompt).toContain(`${REPO_HEADING}\n\nRules.`);
+      }
+    }
+    expect(log.of('profile file missing').map((e) => e.fields?.path)).toEqual([
+      `${root}/${MEMORY_FILE}`,
+    ]);
+  });
+
   test("an owner's file without a section the investigator reads is logged", async () => {
     const root = rootWithout(OWNER_AGENTS_FILE);
     mkdirSync(dirname(join(root, OWNER_AGENTS_FILE)), { recursive: true });
@@ -342,6 +376,7 @@ describe('each profile', () => {
     const { all } = await load(REPO);
     expect(Object.keys(all).sort()).toEqual([
       'custodian',
+      'dreamer',
       'investigator',
       'operator',
       'responder',
@@ -371,12 +406,13 @@ describe('each profile', () => {
     expect(all.custodian).toEqual(all.operator as SystemPrompts);
   });
 
-  test('orders the persona, preamble, owner rules, overrides, AGENTS.md and skills', async () => {
+  test('orders the persona, preamble, owner rules, overrides, AGENTS.md, memory and skills', async () => {
     const persona = await repoText(PERSONA_FILE);
     const { all } = await load(REPO);
     for (const [id, preamble] of [
       ['operator', operatorPreamble],
       ['investigator', investigatorPreamble],
+      ['dreamer', dreamerPreamble],
     ] as const) {
       const prompt = all[id]?.discord ?? '';
       const at = [
@@ -385,6 +421,7 @@ describe('each profile', () => {
         OWNER_HEADING,
         OVERRIDES_HEADING,
         REPO_HEADING,
+        MEMORY_HEADING,
         '<available_skills>',
       ].map((part) => prompt.indexOf(part));
       expect(at[0]).toBe(0);

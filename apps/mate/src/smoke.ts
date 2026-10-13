@@ -141,6 +141,7 @@ function smokeConfig(env: Record<string, string | undefined>): Config {
     slack: null,
     custodianChannel: null,
     responderChannel: null,
+    dreamsChannel: null,
     alertmanagerTokenFile: '/var/run/mate/alertmanager/token',
   };
 }

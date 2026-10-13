@@ -497,3 +497,35 @@ describe('the responder ledger', () => {
     expect(await ledger.current(key(2))).toBeNull();
   });
 });
+
+describe('the dreams ledger', () => {
+  test('claims a day once with a window that starts where the previous ended, and keeps its first root', async () => {
+    const { FIRST_WINDOW_MS, PostgresDreamsLedger, WINDOW_MAX_MS } =
+      await import('../src/dreams.ts');
+    const ledger = new PostgresDreamsLedger(database().sql);
+    const day = 10_000_000_000;
+    const first = await ledger.claim('2026-07-03', day);
+    expect(first).toEqual({
+      day: '2026-07-03',
+      threadTs: null,
+      since: day - FIRST_WINDOW_MS,
+      until: day,
+    });
+    // A retry on the same day reads the same window, whatever the clock says.
+    expect(await ledger.claim('2026-07-03', day + 60_000)).toEqual(first);
+    await ledger.saved('2026-07-03', 'p-1');
+    await ledger.saved('2026-07-03', 'p-2');
+    expect((await ledger.claim('2026-07-03', day)).threadTs).toBe('p-1');
+    const next = await ledger.claim('2026-07-04', day + 86_400_000);
+    expect(next).toMatchObject({ since: day, until: day + 86_400_000 });
+    // After a long gap the window is capped, so one dream never reads weeks.
+    const late = await ledger.claim('2026-08-01', day + 30 * 86_400_000);
+    expect(late.since).toBe(day + 30 * 86_400_000 - WINDOW_MAX_MS);
+    // A clock that stepped back still gives a window of at least a millisecond.
+    const back = await ledger.claim('2026-08-02', late.until - 5_000);
+    expect(back).toMatchObject({
+      since: late.until - 5_001,
+      until: late.until - 5_000,
+    });
+  });
+});

@@ -533,4 +533,18 @@ describe('the alert responder', () => {
       readConfig({ ...minimal, MATE_RESPONDER_CHANNEL: 'C062BS4GADR' }),
     ).toThrow('allowed Slack channel');
   });
+
+  test('the dream is opt-in to an allowed Slack channel too', () => {
+    expect(readConfig(minimal).dreamsChannel).toBeNull();
+    expect(
+      readConfig({ ...slack, MATE_DREAMS_CHANNEL: 'C062BS4GADR' })
+        .dreamsChannel,
+    ).toBe('C062BS4GADR');
+    expect(() =>
+      readConfig({ ...slack, MATE_DREAMS_CHANNEL: 'COTHER' }),
+    ).toThrow('MATE_DREAMS_CHANNEL must be an allowed Slack channel');
+    expect(() =>
+      readConfig({ ...minimal, MATE_DREAMS_CHANNEL: 'C062BS4GADR' }),
+    ).toThrow('allowed Slack channel');
+  });
 });
