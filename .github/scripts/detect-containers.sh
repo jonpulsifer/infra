@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Writes the build matrix of the containers.json "build" images whose watched paths
 # changed or that BUILD_IMAGES names; an unclassified Dockerfile image fails.
-# `--watches` prints `<image><TAB><path>` for every build image instead.
+# `--watches` prints `<image><TAB><path>` for every build image instead. An
+# entry's "aliases" are further names the same build is pushed under.
 
 set -euo pipefail
 
@@ -91,6 +92,7 @@ for dockerfile in "${dockerfiles[@]}"; do
     # A string, so the workflow tests every matrix field with `!= ''`. When set,
     # the workflow mounts GCP credentials as the `gcp_credentials` build secret.
     gcp_credentials=$(jq -r 'if ."gcp-credentials" then "true" else "" end' <<<"$entry")
+    aliases=$(jq -r '(.aliases // []) | join(" ")' <<<"$entry")
     deploy_manifests=$(jq -c --arg img "$image" '.deploy[$img] // []' "$manifest")
 
     should_build="$rebuild_all"
@@ -117,9 +119,9 @@ for dockerfile in "${dockerfiles[@]}"; do
       includes=$(jq -cn --argjson a "$includes" \
         --arg img "$image" --arg ctx "$context" --arg f "$file" --arg ba "$build_args" \
         --arg p "$platforms" --arg ncf "$no_cache_filters" --arg gcp "$gcp_credentials" \
-        --argjson m "$deploy_manifests" \
+        --arg al "$aliases" --argjson m "$deploy_manifests" \
         '$a + [{"image":$img,"context":$ctx,"file":$f,"build-args":$ba,"platforms":$p,
-                "no-cache-filters":$ncf,"gcp-credentials":$gcp,"manifests":$m}]')
+                "no-cache-filters":$ncf,"gcp-credentials":$gcp,"aliases":$al,"manifests":$m}]')
     fi
   done
 done

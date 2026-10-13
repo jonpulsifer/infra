@@ -155,11 +155,28 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Name the image
+        # The build is pushed under its name and each alias; the digest is the
+        # same under every name. Scans and delivery use the first name.
+        id: names
+        env:
+          OWNER: ${{ github.repository_owner }}
+          IMAGE: ${{ matrix.image }}
+          ALIASES: ${{ matrix.aliases }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'images<<EOF'
+            for name in "$IMAGE" $ALIASES; do
+              echo "ghcr.io/$OWNER/$name"
+            done
+            echo 'EOF'
+          } >>"$GITHUB_OUTPUT"
       - name: Generate Docker Meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          images: ${{ steps.names.outputs.images }}
           flavor: |
             latest=true
           tags: |

@@ -1,6 +1,7 @@
 [
   {
     "image": "spindrift-demo",
+    "aliases": ["kthx-engine-demo"],
     "context": ".",
     "file": "apps/kthx-engine-demo/Dockerfile",
     "platforms": "linux/amd64",
