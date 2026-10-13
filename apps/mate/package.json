@@ -8,7 +8,8 @@
     "lint:fix": "biome check . --write",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "smoke": "bun run src/smoke.ts"
+    "smoke": "bun run src/smoke.ts",
+    "evals": "bun run src/evals-cli.ts"
   },
   "dependencies": {
     "@discordjs/core": "2.6.0",

@@ -50,6 +50,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Rotate the Rowbutt Slack token](rotate-the-rowbutt-slack-token.md): replace Rowbutt's Slack App-Level Token, and revoke tokens that other clients hold
 - [Sign Rowbutt in to ChatGPT](sign-rowbutt-in-to-chatgpt.md): sign mate in to the owner's ChatGPT subscription from chat, and sign it out
 - [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md): check which model answers Rowbutt, keep turns off ChatGPT, and drill the fallback
+- [Evaluate the Rowbutt models](evaluate-the-rowbutt-models.md): read what the recorded turns say about each model, and replay the recorded tool decisions against a candidate
 - [Operate the Smiirl counter](operate-the-smiirl-counter.md): check, calibrate and repair the Smiirl counter
 - [Operate the Flame Boss exporter](operate-the-flame-boss-exporter.md): check a cook, act on its alerts, and replace the Flame Boss token
 - [Repair a kiosk](repair-a-kiosk.md): restart or start a Weather Hub kiosk

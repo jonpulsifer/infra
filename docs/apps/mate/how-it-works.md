@@ -174,6 +174,7 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/dreams.ts`: the nightly dream, its assignment and the `mate_dreams` table
 - `apps/mate/src/recall.ts`: the `recall_threads` and `recall_thread` tools over `mate_threads` and `pi_entries`
 - `dotfiles/pi/mate/memory.md`: what Rowbutt remembers, read into every system prompt
+- `apps/mate/src/evals.ts` and `apps/mate/src/evals-cli.ts`: `bun run evals`, the ledger of recorded steps by model and the decision replay over `mate_threads` and `pi_entries`
 - `apps/mate/src/store.ts`: the connection to `mate-db` and the `mate_threads` table
 - `apps/mate/src/credential-store.ts`: the `mate_credentials` table
 - `apps/mate/src/wakes.ts`: the `wake` tool, the `mate_wakes` table and the minute tick that fires wakes
