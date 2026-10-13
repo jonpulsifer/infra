@@ -32,7 +32,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 ## Write the installation Secret
 
-`secret.sops.yaml` is the Secret `spindrift-env`. The engine reads each key below, or the same key with `SPINDRIFT_` in place of `KTHX_ENGINE_`. The keys in `secret.sops.yaml` use the `KTHX_ENGINE_` names. Set each value under one name only: the engine refuses to start when both names are set and differ.
+`secret.sops.yaml` is the Secret `spindrift-env`. The engine reads each key below under its `KTHX_ENGINE_` name only, and `secret.sops.yaml` keys each value that way.
 
 | Key | Value |
 | --- | --- |

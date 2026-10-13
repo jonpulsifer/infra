@@ -88,8 +88,8 @@ async function stagerAgainst(fake: FakeGitHub): Promise<{
     manifest,
     db: database().db,
     env: {
-      SPINDRIFT_GITHUB_APP_ID: '4576122',
-      SPINDRIFT_GITHUB_APP_PRIVATE_KEY: pem,
+      KTHX_ENGINE_GITHUB_APP_ID: '4576122',
+      KTHX_ENGINE_GITHUB_APP_PRIVATE_KEY: pem,
     },
     fetch: fake.fetch,
   });

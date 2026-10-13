@@ -26,7 +26,7 @@ const DECLARED = `${HOST}/artifacts`;
 function keyring(): CredentialKeyring {
   const key = Buffer.from(new Uint8Array(32).fill(7)).toString('base64url');
   const parsed = CredentialKeyring.fromEnvironment({
-    SPINDRIFT_CREDENTIAL_KEYRING: JSON.stringify({
+    KTHX_ENGINE_CREDENTIAL_KEYRING: JSON.stringify({
       active: 'k1',
       keys: { k1: key },
     }),

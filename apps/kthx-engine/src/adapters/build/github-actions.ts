@@ -7,11 +7,10 @@
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type { RepositoryRef } from '../../domain/repository.ts';
 import {
-  CALLER_WORKFLOW_FILES,
+  CALLER_WORKFLOW_FILE,
   correlatedRunName,
   isCorrelatedRunName,
 } from '../../integrations/github/config-pr.ts';
-import { GitHubAccessError } from '../../integrations/github/http.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -225,9 +224,6 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       source.origin.repository !== this.platformRepository
         ? [source.origin.repository, this.platformRepository]
         : [this.platformRepository];
-    // A caller workflow in either repository, with the same inputs. A repository
-    // configured before the rename has only the legacy caller file.
-    const workflows = CALLER_WORKFLOW_FILES.join(' or ');
 
     // The dispatch id where there is one, so the run name says which attempt it is.
     const correlation =
@@ -280,7 +276,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     let branch = '';
     let workflow = '';
     let detail = '';
-    dispatch: for (const candidate of candidates) {
+    for (const candidate of candidates) {
       let candidateRef: RepositoryRef;
       let candidateBranch: string;
       try {
@@ -292,49 +288,40 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
         yield {
           type: 'log',
           at: now(),
-          line: `could not dispatch ${workflows} in ${candidate}: ${detail}`,
+          line: `could not dispatch ${CALLER_WORKFLOW_FILE} in ${candidate}: ${detail}`,
         };
         continue;
       }
-      for (const file of CALLER_WORKFLOW_FILES) {
-        try {
-          await host.dispatchWorkflow(candidateRef, candidate, {
-            workflow: file,
-            branch: candidateBranch,
-            inputs: { spec: JSON.stringify(request), correlation },
-          });
-          repository = candidate;
-          ref = candidateRef;
-          branch = candidateBranch;
-          workflow = file;
-          break dispatch;
-        } catch (error) {
-          // Every failed attempt is logged, which explains a run in the
-          // platform repository.
-          detail = error instanceof Error ? error.message : String(error);
-          yield {
-            type: 'log',
-            at: now(),
-            line: `could not dispatch ${file} in ${candidate}: ${detail}`,
-          };
-          // Only a missing file moves on to the legacy caller. Any other
-          // refusal may have started the run, so this repository is done.
-          const missing =
-            error instanceof GitHubAccessError && error.status === 404;
-          if (!missing) continue dispatch;
-        }
+      try {
+        await host.dispatchWorkflow(candidateRef, candidate, {
+          workflow: CALLER_WORKFLOW_FILE,
+          branch: candidateBranch,
+          inputs: { spec: JSON.stringify(request), correlation },
+        });
+        repository = candidate;
+        ref = candidateRef;
+        branch = candidateBranch;
+        workflow = CALLER_WORKFLOW_FILE;
+        break;
+      } catch (error) {
+        detail = error instanceof Error ? error.message : String(error);
+        yield {
+          type: 'log',
+          at: now(),
+          line: `could not dispatch ${CALLER_WORKFLOW_FILE} in ${candidate}: ${detail}`,
+        };
       }
     }
     if (ref === null || repository === null) {
       return buildFailed(
         logs,
         'TARGET_UNREACHABLE',
-        `could not dispatch ${workflows} in ${candidates.join(' or ')}: ${detail}`,
-        { repositories: candidates, workflows: CALLER_WORKFLOW_FILES },
+        `could not dispatch ${CALLER_WORKFLOW_FILE} in ${candidates.join(' or ')}: ${detail}`,
+        { repositories: candidates, workflows: [CALLER_WORKFLOW_FILE] },
       );
     }
 
-    const runName = correlatedRunName(workflow, correlation);
+    const runName = correlatedRunName(correlation);
     yield {
       type: 'log',
       at: now(),

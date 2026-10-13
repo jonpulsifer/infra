@@ -85,10 +85,6 @@ describe('the authenticated Gateway trust boundary', () => {
     expect(
       (await resolveManifest(manifest, {})).controlPlane.version,
     ).toBeNull();
-    expect(
-      (await resolveManifest(manifest, { SPINDRIFT_VERSION: '1.2.3' }))
-        .controlPlane.version,
-    ).toBe('1.2.3');
   });
 
   test('the public hostname is a deployment fact, lowercased, and unset is null', async () => {

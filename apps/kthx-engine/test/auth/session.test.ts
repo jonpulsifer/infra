@@ -13,7 +13,6 @@ import {
   clearedSessionCookies,
   closeSession,
   completeSignIn,
-  LEGACY_SESSION_COOKIE,
   resolveSession,
   SESSION_COOKIE,
   SESSION_LIFETIME_MS,
@@ -149,43 +148,22 @@ describe('the cookie it travels in', () => {
     );
   });
 
-  test('and clearing it expires both names rather than blanking them', () => {
+  test('clearing expires the cookie rather than blanking it', () => {
     // A browser keeps a blank cookie and forgets only an expired one.
     expect(clearedSessionCookies()).toEqual([
       '__Host-kthx_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
-      'spindrift_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
     ]);
   });
 });
 
-describe('the legacy cookie name', () => {
-  const legacy = (token: string) =>
-    new Request(RELYING_PARTY.origin, {
-      headers: { cookie: `${LEGACY_SESSION_COOKIE}=${token}` },
+describe('the former cookie name', () => {
+  test('opens nothing', async () => {
+    const clock = movableClock();
+    const { deps, token } = await enrolled(clock);
+    const former = new Request(RELYING_PARTY.origin, {
+      headers: { cookie: `spindrift_session=${token}` },
     });
-
-  test('still opens the session it was issued for', async () => {
-    const clock = movableClock();
-    const { deps, token } = await enrolled(clock);
-    expect(await resolveSession(legacy(token), deps)).not.toBeNull();
-  });
-
-  test('loses to the new name when a request carries both', async () => {
-    const clock = movableClock();
-    const { deps, token } = await enrolled(clock);
-    const both = new Request(RELYING_PARTY.origin, {
-      headers: {
-        cookie: `${LEGACY_SESSION_COOKIE}=${token}; ${SESSION_COOKIE}=not-a-session`,
-      },
-    });
-    expect(await resolveSession(both, deps)).toBeNull();
-  });
-
-  test('is revoked by signing out, as the new name is', async () => {
-    const clock = movableClock();
-    const { deps, token } = await enrolled(clock);
-    await closeSession(legacy(token), deps);
-    expect(await resolveSession(legacy(token), deps)).toBeNull();
+    expect(await resolveSession(former, deps)).toBeNull();
   });
 });
 

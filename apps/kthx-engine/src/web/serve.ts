@@ -7,7 +7,7 @@ import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
 import { resolveAgentToken } from '../auth/session.ts';
 import { type Principal, systemClock } from '../commands/types.ts';
-import { assertEnvConsistent, engineEnvVar, readEnv } from '../config/env.ts';
+import { engineEnvVar, readEnv } from '../config/env.ts';
 import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
 import {
   currentStoredManifest,
@@ -107,7 +107,6 @@ export async function start(
   client: Record<string, ClientRoute>,
   { development }: { development: boolean },
 ): Promise<void> {
-  assertEnvConsistent(Bun.env);
   initTelemetry('web');
 
   const db = createDb();

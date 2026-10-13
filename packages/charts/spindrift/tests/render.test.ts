@@ -229,8 +229,6 @@ describe('ui-driven installation configuration', () => {
       for (const name of [
         'KTHX_ENGINE_MANIFEST_PATH',
         'KTHX_ENGINE_MANIFEST',
-        'SPINDRIFT_MANIFEST_PATH',
-        'SPINDRIFT_MANIFEST',
       ]) {
         expect(
           pod.containers[0].env.some(
@@ -548,7 +546,7 @@ describe('engine variables carry the kthx-engine names', () => {
         item.name.startsWith('SPINDRIFT_'),
     );
 
-  test('every variable the chart sets is a KTHX_ENGINE_* name, mirrored under its old name', async () => {
+  test('every variable the chart sets is a KTHX_ENGINE_* name, and none is mirrored', async () => {
     const renders = [
       await render(),
       await render({
@@ -567,17 +565,10 @@ describe('engine variables carry the kthx-engine names', () => {
         (object) => object.kind === 'Deployment',
       )) {
         const env = engineVariables(envOf(objects, deployment.metadata.name));
-        const current = env.filter((item) =>
-          item.name.startsWith('KTHX_ENGINE_'),
+        expect(env.length).toBeGreaterThan(0);
+        expect(env.every((item) => item.name.startsWith('KTHX_ENGINE_'))).toBe(
+          true,
         );
-        expect(current.length).toBeGreaterThan(0);
-        expect(env).toHaveLength(current.length * 2);
-        for (const item of current) {
-          expect(env).toContainEqual({
-            name: item.name.replace(/^KTHX_ENGINE_/, 'SPINDRIFT_'),
-            value: item.value,
-          });
-        }
       }
     }
 

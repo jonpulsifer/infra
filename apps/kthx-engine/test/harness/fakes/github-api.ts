@@ -75,11 +75,6 @@ export interface FakeActionsOptions {
   dispatchFailures?: number;
 }
 
-/** The run-name prefix each caller stamps; the legacy caller keeps its own. */
-function runNamePrefix(workflow: string): string {
-  return workflow === 'spindrift.yml' ? 'spindrift' : 'kthx';
-}
-
 interface FakeRun {
   id: number;
   name: string;
@@ -419,7 +414,7 @@ export class FakeGitHub {
       this.runs.push({
         id: this.runNumber,
         // What the caller workflow's `run-name` produces.
-        name: `${runNamePrefix(workflow)} ${inputs.correlation ?? ''}`,
+        name: `kthx ${inputs.correlation ?? ''}`,
         reads: 0,
         log: this.actions.log(spec),
         cancelled: false,
