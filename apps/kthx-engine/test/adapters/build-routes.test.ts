@@ -1135,12 +1135,12 @@ describe('the in-cluster build route', () => {
         },
       ],
     };
-    const podSpecOf = (cluster: FakeKubernetes): Record<string, unknown> =>
-      (
-        cluster.get('jobs/builds/spindrift-build-fixed') as {
-          spec: { template: { spec: Record<string, unknown> } };
-        }
-      ).spec.template.spec;
+    const podSpecOf = (cluster: FakeKubernetes): Record<string, unknown> => {
+      const job = cluster.get('jobs/builds/spindrift-build-fixed');
+      if (job === undefined) throw new Error('the build Job was not created');
+      return (job.spec as { template: { spec: Record<string, unknown> } })
+        .template.spec;
+    };
 
     const pinned = clusterRoute({}, {}, JOB_LABEL.key, placement);
     await run(pinned.route.build(archiveSource(), spec));
