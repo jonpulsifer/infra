@@ -1013,7 +1013,7 @@ describe('the cloud build route', () => {
 function clusterRoute(
   options: FakeKubernetesOptions = {},
   pacing: { timeoutMs?: number } = {},
-  podLabel: string = JOB_LABEL.key,
+  podLabel: string = JOB_LABEL,
   placement: Pick<InClusterRouteOptions, 'nodeSelector' | 'tolerations'> = {},
 ): {
   cluster: FakeKubernetes;
@@ -1098,7 +1098,7 @@ describe('the in-cluster build route', () => {
     expect(jobSpec.template.spec.serviceAccountName).toBe('builder');
   });
 
-  test('the Job and its pod carry the build label and its legacy twin', async () => {
+  test('the Job and its pod carry the build label', async () => {
     const { cluster, route } = clusterRoute();
     await run(route.build(archiveSource(), spec));
 
@@ -1106,19 +1106,9 @@ describe('the in-cluster build route', () => {
     const template = job?.spec as
       | { template: { metadata: { labels?: Record<string, string> } } }
       | undefined;
-    const both = {
-      [JOB_LABEL.key]: 'spindrift-build-fixed',
-      [JOB_LABEL.legacy]: 'spindrift-build-fixed',
-    };
-    expect(job?.metadata.labels).toEqual(both);
-    expect(template?.template.metadata.labels).toEqual(both);
-  });
-
-  test('finds the pod of a Job labelled only with the legacy key', async () => {
-    // A Job created before the new key carries only the legacy one.
-    const { route } = clusterRoute({}, {}, JOB_LABEL.legacy);
-    const { result } = await run(route.build(archiveSource(), spec));
-    expect(result.status).toBe('SUCCEEDED');
+    const labels = { [JOB_LABEL]: 'spindrift-build-fixed' };
+    expect(job?.metadata.labels).toEqual(labels);
+    expect(template?.template.metadata.labels).toEqual(labels);
   });
 
   test('the Job carries the node selector and tolerations it is configured with', async () => {
@@ -1142,7 +1132,7 @@ describe('the in-cluster build route', () => {
         .template.spec;
     };
 
-    const pinned = clusterRoute({}, {}, JOB_LABEL.key, placement);
+    const pinned = clusterRoute({}, {}, JOB_LABEL, placement);
     await run(pinned.route.build(archiveSource(), spec));
     const pod = podSpecOf(pinned.cluster);
     expect(pod.nodeSelector).toEqual(placement.nodeSelector);

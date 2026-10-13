@@ -1615,9 +1615,7 @@ describe('restart', () => {
         containers: { image: string }[];
       };
     };
-    const stamp = service.template.annotations?.[RESTART_STAMP.key];
-    expect(stamp).toBeDefined();
-    expect(service.template.annotations?.[RESTART_STAMP.legacy]).toBe(stamp);
+    expect(service.template.annotations?.[RESTART_STAMP]).toBeDefined();
     expect(service.template.containers[0]?.image).toBe(
       'registry.example.test/shop@sha256:abc',
     );

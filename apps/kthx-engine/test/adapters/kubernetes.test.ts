@@ -130,7 +130,7 @@ function podRenderedUnder(
       labels: POD_LABELS,
       creationTimestamp: overrides.createdAt ?? '2026-01-01T00:00:00Z',
       annotations: overrides.annotations ?? {
-        'spindrift.dev/values-contract': contract,
+        'kthx.dev/values-contract': contract,
       },
     },
     ...(overrides.phase === undefined
@@ -1251,7 +1251,7 @@ describe('the checklist', () => {
     expect(nothing?.detail).toBeUndefined();
   });
 
-  test('the contract is read from the new key first, then from the legacy one', async () => {
+  test('the contract is read from the pod annotation', async () => {
     const renderedNew = adapterFor({
       lists: {
         pods: [
@@ -1267,10 +1267,7 @@ describe('the checklist', () => {
       lists: {
         pods: [
           podRenderedUnder(VALUES_CONTRACT, {
-            annotations: {
-              'kthx.dev/values-contract': '2',
-              'spindrift.dev/values-contract': VALUES_CONTRACT,
-            },
+            annotations: { 'kthx.dev/values-contract': '2' },
           }),
         ],
       },
@@ -1433,7 +1430,7 @@ describe('discovery reports observations, never judgements', () => {
 });
 
 describe('runtime log tail', () => {
-  test('tags a line with the Deploy from the new label, or the legacy one', async () => {
+  test('tags a line with the Deploy from its label', async () => {
     const pod = (name: string, labels: Record<string, string>): FakeObject => ({
       apiVersion: 'v1',
       kind: 'Pod',
@@ -1449,13 +1446,7 @@ describe('runtime log tail', () => {
     });
     const cluster = new FakeKubernetes({
       lists: {
-        pods: [
-          pod('blog-web-both', {
-            'kthx.dev/deploy': '42',
-            'spindrift.dev/deploy': '41',
-          }),
-          pod('blog-web-legacy', { 'spindrift.dev/deploy': '40' }),
-        ],
+        pods: [pod('blog-web-new', { 'kthx.dev/deploy': '42' })],
       },
       logs: () => '2026-07-29T12:00:00Z hello\n',
     });
@@ -1474,7 +1465,7 @@ describe('runtime log tail', () => {
       Object.fromEntries(
         tail.entries.map((entry) => [entry.replica, entry.deployId]),
       ),
-    ).toEqual({ 'blog-web-both': '42', 'blog-web-legacy': '40' });
+    ).toEqual({ 'blog-web-new': '42' });
   });
 
   test('replays after an opaque cursor without duplicate lines across adapter restart', async () => {
@@ -1487,7 +1478,7 @@ describe('runtime log tail', () => {
         labels: {
           'app.kubernetes.io/name': 'web',
           'app.kubernetes.io/part-of': 'blog',
-          'spindrift.dev/deploy': '41',
+          'kthx.dev/deploy': '41',
         },
       },
     };
@@ -2038,7 +2029,6 @@ describe('a job is run, and its runs are read', () => {
     expect(created?.metadata.annotations).toEqual({
       'cronjob.kubernetes.io/instantiate': 'manual',
       'kthx.dev/run-with': 'SNAPSHOT, SINCE',
-      'spindrift.dev/run-with': 'SNAPSHOT, SINCE',
     });
     // The next scheduled fire must not inherit this run's parameters.
     expect(far.get('cronjobs/apps/blog-nightly')?.spec).toEqual(spec);
@@ -2191,50 +2181,47 @@ describe('a job is run, and its runs are read', () => {
     );
   });
 
-  test.each(['kthx.dev/run-with', 'spindrift.dev/run-with'])(
-    'reads the names a run was started with back into its line from %s, never the values',
-    async (runWith) => {
-      const far = cluster({
-        'jobs/apps/blog-nightly-9': {
-          ...ranJob('blog-nightly-9', {
-            startTime: '2026-08-03T00:00:00Z',
-            conditions: [
-              {
-                type: 'Complete',
-                status: 'True',
-                reason: 'CompletionsReached',
-                message: 'all tasks completed',
-              },
-            ],
-          }),
-          metadata: {
-            name: 'blog-nightly-9',
-            namespace: 'apps',
-            labels: JOB_LABELS,
-            annotations: { [runWith]: 'SNAPSHOT, SINCE' },
-          },
-          spec: {
-            template: {
-              spec: {
-                containers: [
-                  { env: [{ name: 'SNAPSHOT', value: 'nightly-2026-08-03' }] },
-                ],
-              },
+  test('reads the names a run was started with back into its line, never the values', async () => {
+    const far = cluster({
+      'jobs/apps/blog-nightly-9': {
+        ...ranJob('blog-nightly-9', {
+          startTime: '2026-08-03T00:00:00Z',
+          conditions: [
+            {
+              type: 'Complete',
+              status: 'True',
+              reason: 'CompletionsReached',
+              message: 'all tasks completed',
+            },
+          ],
+        }),
+        metadata: {
+          name: 'blog-nightly-9',
+          namespace: 'apps',
+          labels: JOB_LABELS,
+          annotations: { 'kthx.dev/run-with': 'SNAPSHOT, SINCE' },
+        },
+        spec: {
+          template: {
+            spec: {
+              containers: [
+                { env: [{ name: 'SNAPSHOT', value: 'nightly-2026-08-03' }] },
+              ],
             },
           },
         },
-      });
+      },
+    });
 
-      const runs = await adapterFor(far).executions(target(), REF);
+    const runs = await adapterFor(far).executions(target(), REF);
 
-      expect(runs.kind).toBe('executions');
-      if (runs.kind !== 'executions') return;
-      expect(runs.executions[0]?.detail).toBe(
-        'ran with SNAPSHOT, SINCE · all tasks completed',
-      );
-      expect(JSON.stringify(runs)).not.toContain('nightly-2026-08-03');
-    },
-  );
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(runs.executions[0]?.detail).toBe(
+      'ran with SNAPSHOT, SINCE · all tasks completed',
+    );
+    expect(JSON.stringify(runs)).not.toContain('nightly-2026-08-03');
+  });
 
   test("reads one run's logs rather than the Component's whole output", async () => {
     const far = new FakeKubernetes({
@@ -2332,7 +2319,7 @@ describe('restart', () => {
     const values = renderedValues(far) as RenderedValues & {
       shared: { podAnnotations?: Record<string, string> };
     };
-    return values.shared.podAnnotations?.[RESTART_STAMP.key];
+    return values.shared.podAnnotations?.[RESTART_STAMP];
   }
 
   test('stamps the pod template through the shared values, keeping the operator’s annotation and the digest', async () => {
@@ -2341,16 +2328,15 @@ describe('restart', () => {
 
     expect(restarted.kind).toBe('restarted');
     if (restarted.kind !== 'restarted') return;
-    expect(restarted.detail).toContain(`${RESTART_STAMP.key}=${STAMPED}`);
+    expect(restarted.detail).toContain(`${RESTART_STAMP}=${STAMPED}`);
 
     const values = renderedValues(far) as RenderedValues & {
       shared: { podAnnotations?: Record<string, string> };
     };
-    // The stamp and its legacy twin added to the operator's map, never the map replaced.
+    // The stamp added to the operator's map, never the map replaced.
     expect(values.shared.podAnnotations).toEqual({
       'example.com/owner': 'ops',
-      [RESTART_STAMP.key]: STAMPED,
-      [RESTART_STAMP.legacy]: STAMPED,
+      [RESTART_STAMP]: STAMPED,
     });
     expect(values.shared.resources).toEqual({ requests: { cpu: '250m' } });
     // The same digest, so `observe` reads no drift.
@@ -2493,8 +2479,7 @@ describe('restart', () => {
       };
     };
     expect(spec.source.helm.valuesObject.shared.podAnnotations).toEqual({
-      [RESTART_STAMP.key]: STAMPED,
-      [RESTART_STAMP.legacy]: STAMPED,
+      [RESTART_STAMP]: STAMPED,
     });
     expect(spec.source.repoURL).toBe('https://git.example.test/infra');
     expect(spec.source.path).toBe(CHART);

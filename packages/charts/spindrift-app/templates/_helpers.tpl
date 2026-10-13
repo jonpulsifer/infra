@@ -30,8 +30,8 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 {{- end }}
 
 {{/*
-Pod template labels: the common set plus the deploy label and its legacy
-`spindrift.dev` twin, the only labels that move per deploy.
+Pod template labels: the common set plus the deploy label, the only label
+that moves per deploy.
 
 Neither delivery flavour's applied-object enumeration covers pods, so this
 label is how a pod is traced back to the Deploy that placed it.
@@ -40,7 +40,6 @@ label is how a pod is traced back to the Deploy that placed it.
 {{ include "kthx-app.labels" . }}
 {{- with .Values.app.deployId }}
 kthx.dev/deploy: {{ . | quote }}
-spindrift.dev/deploy: {{ . | quote }}
 {{- end }}
 {{- with .Values.shared.podLabels }}
 {{ toYaml . }}
@@ -54,7 +53,6 @@ holding the chart that did it.
 */}}
 {{- define "kthx-app.contractAnnotations" -}}
 kthx.dev/values-contract: {{ index .Chart.Annotations "kthx.dev/values-contract" | quote }}
-spindrift.dev/values-contract: {{ index .Chart.Annotations "spindrift.dev/values-contract" | quote }}
 {{- end }}
 
 {{/*

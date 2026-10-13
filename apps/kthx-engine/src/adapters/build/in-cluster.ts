@@ -9,7 +9,6 @@ import {
   KubernetesApi,
   type KubernetesObject,
 } from '../deploy/kubernetes/api.ts';
-import { type ObjectKey, stamped } from '../object-keys.ts';
 import {
   buildKitProgramFor,
   buildSecretEnvOf,
@@ -60,10 +59,7 @@ export interface InClusterRouteOptions extends PollingOptions {
 export const JOB_TTL_SECONDS = 3600;
 
 /** The label a build Job carries so its pod can be found. */
-export const JOB_LABEL: ObjectKey = {
-  key: 'kthx.dev/build',
-  legacy: 'spindrift.dev/build',
-};
+export const JOB_LABEL = 'kthx.dev/build';
 
 /** How a Job ended: a verdict, the cluster's deadline, or a delete. */
 type JobOutcome = 'succeeded' | 'failed' | 'deadline' | 'gone';
@@ -242,7 +238,7 @@ export class InClusterBuildRoute implements BuildAdapter {
       metadata: {
         name,
         namespace: this.options.namespace,
-        labels: stamped(JOB_LABEL, name),
+        labels: { [JOB_LABEL]: name },
       },
       spec: {
         // Retries are core's call; a retried Job would push a second artifact.
@@ -253,7 +249,7 @@ export class InClusterBuildRoute implements BuildAdapter {
         ),
         ttlSecondsAfterFinished: JOB_TTL_SECONDS,
         template: {
-          metadata: { labels: stamped(JOB_LABEL, name) },
+          metadata: { labels: { [JOB_LABEL]: name } },
           spec: {
             restartPolicy: 'Never',
             serviceAccountName: this.options.serviceAccount,
@@ -349,11 +345,7 @@ export class InClusterBuildRoute implements BuildAdapter {
         },
         { labelSelector: `${label}=${name}` },
       );
-    const labelled = await podsLabelled(JOB_LABEL.key);
-    // A Job created before the new key carries only the legacy one.
-    const pods = labelled?.length
-      ? labelled
-      : await podsLabelled(JOB_LABEL.legacy);
+    const pods = await podsLabelled(JOB_LABEL);
     const pod = pods?.[0]?.metadata.name;
     if (pod === undefined) return null;
     return this.options.api.logs(this.options.namespace, pod, {
