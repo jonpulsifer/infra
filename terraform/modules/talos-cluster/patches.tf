@@ -75,9 +75,17 @@ locals {
     }),
   ])
 
-  # Per node: hostname, install target and the labels the bootstrap root
-  # applies today. The control plane drops its taint and LB-exclusion label
-  # (one schedulable control plane per cluster).
+  # The control plane drops its taint (one schedulable control plane per
+  # cluster); a node's own taints are added. One map per node keeps the
+  # conditional below to a single shape, which OpenTofu's type unification
+  # of a conditional requires.
+  node_taints = { for name, n in var.nodes : name => merge(
+    n.role == "controlplane" ? { "node-role.kubernetes.io/control-plane" = { "$patch" = "delete" } } : {},
+    n.taints,
+  ) }
+
+  # Per node: hostname, install target, and its labels and taints. The
+  # control plane drops its LB-exclusion label too.
   node_patch = { for name, n in var.nodes : name => join("\n---\n", concat([
     # The generator emits auto: stable, and Talos rejects auto beside hostname.
     yamlencode({
@@ -102,11 +110,10 @@ locals {
         labels = merge(
           { "bgp-enabled" = "true" },
           n.role == "controlplane" ? { "node.kubernetes.io/exclude-from-external-load-balancers" = { "$patch" = "delete" } } : {},
+          n.labels,
         )
       },
-      n.role == "controlplane" ? {
-        taints = { "node-role.kubernetes.io/control-plane" = { "$patch" = "delete" } }
-      } : {},
+      length(local.node_taints[name]) > 0 ? { taints = local.node_taints[name] } : {},
     )),
   ])) }
 }

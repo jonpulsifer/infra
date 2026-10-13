@@ -3,6 +3,7 @@
  * cluster this process reaches. It is SLSA L1, so a Target requiring L2 refuses it.
  */
 
+import type { Toleration } from '../../config/build-route-schemas.ts';
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import {
   KubernetesApi,
@@ -48,6 +49,10 @@ export interface InClusterRouteOptions extends PollingOptions {
    * process holds no registry credential.
    */
   readonly serviceAccount: string;
+  /** Labels the build node must carry; absent lets the scheduler choose. */
+  readonly nodeSelector?: Readonly<Record<string, string>>;
+  /** Taints the Job tolerates; absent keeps it off every tainted node. */
+  readonly tolerations?: readonly Toleration[];
   readonly id?: () => string;
 }
 
@@ -252,6 +257,12 @@ export class InClusterBuildRoute implements BuildAdapter {
           spec: {
             restartPolicy: 'Never',
             serviceAccountName: this.options.serviceAccount,
+            ...(this.options.nodeSelector === undefined
+              ? {}
+              : { nodeSelector: this.options.nodeSelector }),
+            ...(this.options.tolerations === undefined
+              ? {}
+              : { tolerations: this.options.tolerations }),
             // The strictest context BuildKit runs under, admissible at Pod Security
             // `baseline`, so `image` must be a rootless BuildKit.
             // ponytail: `RuntimeDefault` seccomp, since `baseline` forbids `Unconfined`.
@@ -371,6 +382,12 @@ export const inClusterDescriptor = {
       namespace: config.namespace,
       image: config.image,
       serviceAccount: config.serviceAccount,
+      ...(config.nodeSelector === undefined
+        ? {}
+        : { nodeSelector: config.nodeSelector }),
+      ...(config.tolerations === undefined
+        ? {}
+        : { tolerations: config.tolerations }),
       zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
     });
   },

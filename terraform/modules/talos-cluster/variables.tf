@@ -63,6 +63,8 @@ variable "nodes" {
     install     = string # CEL disk selector, e.g. disk.dev_path == "/dev/sda"
     reboot_mode = optional(string, "DEFAULT")
     patches     = optional(list(string), [])
+    labels      = optional(map(string), {})
+    taints      = optional(map(string), {}) # key => "value:Effect"
   }))
 
   validation {

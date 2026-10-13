@@ -36,6 +36,8 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 
 [Rowbutt](../apps/mate.md) sandboxes run on `kata-clh`. The `packages/charts/app/` chart runs pods on `gvisor` unless its `sandbox` value is false.
 
+On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/talos/talos.tf` gives it the `lolwtf.ca/sandbox` label and a `NoSchedule` taint of the same key, so only a pod that selects the label and tolerates the taint lands there: the Rowbutt sandboxes, the GitHub Actions runners and the kthx engine's in-cluster build Jobs. A DaemonSet that should run on every node tolerates the taint in its chart values. folly has no sandbox node.
+
 ## Rules
 
 - Deploy a new containerd handler to every node from `main` before a workload names its RuntimeClass. The kubelet rejects a pod whose handler is missing.
@@ -50,6 +52,7 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 - `clusters/base/platform/`, `clusters/*/storage/` and `clusters/folly/nodes/`: the shared controllers, storage and GPU plugin
 - `clusters/folly/node-features/`: the NodeFeatureRule that labels the GPU node
 - `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. The `kata-containers` and `gvisor` extensions in `clusters/<site>/talos/talos.tf` provide the handlers.
+- `clusters/<site>/talos/talos.tf`: each node's labels and taints, through `terraform/modules/talos-cluster`
 - `clusters/<site>/config/`: the settings, secrets and topology that Flux substitutes. See [Topology](../reference/topology.md).
 
 ## Related

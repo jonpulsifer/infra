@@ -120,6 +120,7 @@ describe('config from the environment', () => {
       sandbox: {
         imageFile: '/var/run/mate/sandbox-image/image',
         runtimeClass: 'kata-clh',
+        nodeLabel: null,
         namespace: null,
         checkoutRepo: 'https://github.com/jonpulsifer/infra',
         checkoutRef: 'main',
@@ -205,6 +206,21 @@ describe('config from the environment', () => {
       expect(() =>
         readSandboxConfig({ ...minimal, MATE_SANDBOX_LAB_JUMP: bad }),
       ).toThrow('MATE_SANDBOX_LAB_JUMP is not a host name');
+    }
+  });
+
+  test('sandboxes take a node label as key=value, and refuse any other shape', () => {
+    expect(readSandboxConfig(minimal).nodeLabel).toBeNull();
+    expect(
+      readSandboxConfig({
+        ...minimal,
+        MATE_SANDBOX_NODE_LABEL: ' lolwtf.ca/sandbox=true ',
+      }).nodeLabel,
+    ).toEqual({ key: 'lolwtf.ca/sandbox', value: 'true' });
+    for (const bad of ['sandbox', 'sandbox=', '=true', 'a b=c', 'k=v=w']) {
+      expect(() =>
+        readSandboxConfig({ ...minimal, MATE_SANDBOX_NODE_LABEL: bad }),
+      ).toThrow('MATE_SANDBOX_NODE_LABEL is not a key=value node label');
     }
   });
 

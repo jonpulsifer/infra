@@ -121,13 +121,17 @@ spec:
             # sandbox until its first tool call.
             - name: MATE_MAX_CONCURRENT
               value: "2"
-            # Sandboxes leased at once. Sandboxes do not schedule on the control
-            # plane, and offsite has one other node. A turn that finds them all
-            # held takes one idle for five minutes, or waits.
+            # Sandboxes run on hotrod, the sandbox node: they select this label
+            # and tolerate the taint of the same key and value that keeps every
+            # other pod off it (clusters/offsite/talos/talos.tf).
+            - name: MATE_SANDBOX_NODE_LABEL
+              value: lolwtf.ca/sandbox=true
+            # Sandboxes leased at once. A turn that finds them all held takes
+            # one idle for five minutes, or waits.
             - name: MATE_MAX_SANDBOXES
               value: "2"
             # A warm spare skips the cold mint. Sandboxes are the largest driver
-            # of oldschool's CPU requests, so check KubeCPUOvercommit headroom
+            # of hotrod's CPU requests, so check KubeCPUOvercommit headroom
             # before raising MATE_MAX_SANDBOXES or spares.
             - name: MATE_SPARES
               value: "1"

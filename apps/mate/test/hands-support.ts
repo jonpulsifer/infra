@@ -302,6 +302,7 @@ export const SANDBOX_IMAGE =
 export const SANDBOX_CONFIG: SandboxConfig = {
   imageFile: '/var/run/mate/sandbox-image/image',
   runtimeClass: 'kata-clh',
+  nodeLabel: null,
   namespace: 'mate',
   checkoutRepo: 'https://github.com/jonpulsifer/infra',
   checkoutRef: 'main',

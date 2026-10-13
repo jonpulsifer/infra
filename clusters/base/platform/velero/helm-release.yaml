@@ -68,6 +68,11 @@ spec:
       resources:
         requests: {cpu: 50m, memory: 256Mi}
         limits: {memory: 2Gi}
+      # offsite's sandbox node admits only the pods that tolerate its taint.
+      tolerations:
+        - key: lolwtf.ca/sandbox
+          operator: Exists
+          effect: NoSchedule
     metrics:
       serviceMonitor:
         enabled: true

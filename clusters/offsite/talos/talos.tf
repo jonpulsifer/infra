@@ -40,10 +40,20 @@ locals {
 
   # install is a CEL disk selector. ephemeral caps EPHEMERAL so that the
   # data user volume takes the rest of the one disk.
+  #
+  # hotrod is the sandbox node: Rowbutt's sandboxes, the ARC runners and the
+  # kthx engine's in-cluster build Jobs select its label and tolerate its
+  # taint, and the taint keeps every other pod off it.
   nodes = {
     retrofit  = { role = "controlplane", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "100GiB" }
     oldschool = { role = "worker", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "100GiB" }
-    hotrod    = { role = "worker", install = "disk.dev_path == \"/dev/nvme0n1\"", ephemeral = "64GiB" }
+    hotrod = {
+      role      = "worker"
+      install   = "disk.dev_path == \"/dev/nvme0n1\""
+      ephemeral = "64GiB"
+      labels    = { "lolwtf.ca/sandbox" = "true" }
+      taints    = { "lolwtf.ca/sandbox" = "true:NoSchedule" }
+    }
   }
 }
 
@@ -76,6 +86,8 @@ module "talos" {
     address = local.node_addresses[name]
     install = n.install
     patches = [local.ephemeral_patch[name]]
+    labels  = try(n.labels, {})
+    taints  = try(n.taints, {})
   } }
 
   cluster_patches      = local.cluster_patches
