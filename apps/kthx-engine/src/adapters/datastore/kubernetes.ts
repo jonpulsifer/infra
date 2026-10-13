@@ -336,8 +336,8 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
           name: policyName(parsed.name),
           namespace: parsed.namespace,
           labels: {
-            'app.kubernetes.io/managed-by': 'spindrift',
-            'app.kubernetes.io/part-of': 'spindrift',
+            'app.kubernetes.io/managed-by': 'kthx-engine',
+            'app.kubernetes.io/part-of': 'kthx',
           },
         },
         spec: {
@@ -449,7 +449,7 @@ function metadataOf(
     name,
     namespace,
     labels: {
-      'app.kubernetes.io/managed-by': 'spindrift',
+      'app.kubernetes.io/managed-by': 'kthx-engine',
       'app.kubernetes.io/name': name,
     },
   };

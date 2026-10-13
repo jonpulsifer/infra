@@ -1270,7 +1270,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const name = releaseName(desired);
     const values = chartValues(desired, connection, image);
     const labels = {
-      'app.kubernetes.io/managed-by': 'spindrift',
+      'app.kubernetes.io/managed-by': 'kthx-engine',
       'app.kubernetes.io/part-of': desired.app,
       'app.kubernetes.io/name': desired.component,
     };
@@ -1291,7 +1291,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         // lets `sweepApp` tell it from one an operator declared.
         namespaceMetadata: {
           ...admission,
-          'app.kubernetes.io/managed-by': 'spindrift',
+          'app.kubernetes.io/managed-by': 'kthx-engine',
         },
       });
     }
@@ -1355,8 +1355,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           name,
           labels: {
             ...admission,
-            'app.kubernetes.io/managed-by': 'spindrift',
-            'app.kubernetes.io/part-of': 'spindrift',
+            'app.kubernetes.io/managed-by': 'kthx-engine',
+            'app.kubernetes.io/part-of': 'kthx',
           },
         },
       },

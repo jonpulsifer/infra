@@ -7,7 +7,7 @@ metadata:
   name: spindrift-build
   labels:
     kustomize.toolkit.fluxcd.io/prune: enabled
-    app.kubernetes.io/part-of: spindrift
+    app.kubernetes.io/part-of: kthx
     # The level the Job's rendered security context targets (in-cluster.ts).
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/enforce-version: latest
@@ -24,7 +24,7 @@ metadata:
   name: spindrift-build
   namespace: spindrift-build
   labels:
-    app.kubernetes.io/part-of: spindrift
+    app.kubernetes.io/part-of: kthx
 ---
 # `delete` is for the route's cancel, and for a Job past the build budget that
 # the cluster did not end; a finished Job is reaped by its

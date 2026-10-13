@@ -45,7 +45,7 @@ describe('publish', () => {
     expect(object?.apiVersion).toBe('externaldns.k8s.io/v1alpha1');
     expect(object?.kind).toBe('DNSEndpoint');
     expect(object?.metadata.labels).toEqual({
-      'app.kubernetes.io/managed-by': 'spindrift',
+      'app.kubernetes.io/managed-by': 'kthx-engine',
       'app.kubernetes.io/name': 'shop-web',
     });
     expect(object?.spec).toEqual({
