@@ -29,7 +29,7 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 
 ## Secrets
 
-`clusters/offsite/apps/spindrift/secret.sops.yaml` holds the engine's secrets. Its keys carry the old `SPINDRIFT_` prefix, which the engine reads when the `KTHX_ENGINE_` name is unset.
+`clusters/offsite/apps/spindrift/secret.sops.yaml` holds the engine's secrets under their `KTHX_ENGINE_` names. The engine still reads each one under its old `SPINDRIFT_` name when the new one is unset.
 
 | Secret | Also in | If missing |
 | --- | --- | --- |
