@@ -28,7 +28,6 @@ import {
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import { ENGINE_KINDS as DATASTORE_ENGINE_KINDS } from '../../datastore/kubernetes.ts';
-import { type ObjectKey, readKey, stamped } from '../../object-keys.ts';
 import type {
   ClusterProbe,
   DeployAdapter,
@@ -140,22 +139,13 @@ const JOB_NAME_LABEL = 'batch.kubernetes.io/job-name';
 const MANUAL_RUN = 'cronjob.kubernetes.io/instantiate';
 
 /** Parameter names only, never values: the timeline shows this. */
-const RUN_WITH: ObjectKey = {
-  key: 'kthx.dev/run-with',
-  legacy: 'spindrift.dev/run-with',
-};
+const RUN_WITH = 'kthx.dev/run-with';
 
 /** The chart puts the Deploy's id on each pod template. */
-const DEPLOY_LABEL: ObjectKey = {
-  key: 'kthx.dev/deploy',
-  legacy: 'spindrift.dev/deploy',
-};
+const DEPLOY_LABEL = 'kthx.dev/deploy';
 
 /** The chart stamps the value contract it rendered under on every object. */
-const VALUES_CONTRACT_KEY: ObjectKey = {
-  key: 'kthx.dev/values-contract',
-  legacy: 'spindrift.dev/values-contract',
-};
+const VALUES_CONTRACT_KEY = 'kthx.dev/values-contract';
 
 /** A pod adds six characters to its Job's name and must fit a DNS label (63). */
 const RUN_NAME_LIMIT = 57;
@@ -515,7 +505,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           [MANUAL_RUN]: 'manual',
           ...(parameters.length === 0
             ? {}
-            : stamped(RUN_WITH, parameters.map(([key]) => key).join(', '))),
+            : { [RUN_WITH]: parameters.map(([key]) => key).join(', ') }),
         },
         // The controller warns UnexpectedJob until the run ends. No
         // `blockOwnerDeletion`: it needs finalizer rights on the CronJob.
@@ -602,14 +592,14 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         ...values,
         shared: {
           ...shared,
-          podAnnotations: { ...podAnnotations, ...stamped(RESTART_STAMP, at) },
+          podAnnotations: { ...podAnnotations, [RESTART_STAMP]: at },
         },
       }),
       pluralOf(parsed.flavour),
     );
     return {
       kind: 'restarted',
-      detail: `${resourceLabel(object)} stamped ${RESTART_STAMP.key}=${at}; the controller is replacing the pods`,
+      detail: `${resourceLabel(object)} stamped ${RESTART_STAMP}=${at}; the controller is replacing the pods`,
     };
   }
 
@@ -1055,7 +1045,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // a rolling update's old pods never read as skew.
     const newest = new Map<string, { contract: string; at: string }>();
     for (const pod of pods) {
-      const contract = readKey(pod.metadata.annotations, VALUES_CONTRACT_KEY);
+      const contract = pod.metadata.annotations?.[VALUES_CONTRACT_KEY];
       if (contract === undefined) continue;
       const phase = (pod.status as { phase?: string } | undefined)?.phase;
       if (phase === 'Succeeded' || phase === 'Failed') continue;
@@ -1442,7 +1432,7 @@ function jobExecution(job: KubernetesObject): JobExecution {
       (condition.type === 'Complete' || condition.type === 'Failed'),
   );
   const at = status?.startTime ?? job.metadata.creationTimestamp;
-  const ranWith = readKey(job.metadata.annotations, RUN_WITH);
+  const ranWith = job.metadata.annotations?.[RUN_WITH];
   const ended = terminal?.message ?? terminal?.reason;
   const detail = [
     ...(ranWith === undefined ? [] : [`ran with ${ranWith}`]),
@@ -1512,7 +1502,7 @@ function encodeRuntimeCursor(cursor: Record<string, RuntimePosition>): string {
 }
 
 function deployIdOf(pod: KubernetesObject): { deployId?: string } {
-  const deployId = readKey(pod.metadata.labels, DEPLOY_LABEL);
+  const deployId = pod.metadata.labels?.[DEPLOY_LABEL];
   return deployId ? { deployId } : {};
 }
 

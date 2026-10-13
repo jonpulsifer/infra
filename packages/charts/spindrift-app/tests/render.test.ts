@@ -121,18 +121,14 @@ describe('the three exclusions', () => {
   });
 });
 
-// The new key first, then its legacy twin.
-const DEPLOY_KEYS = ['kthx.dev/deploy', 'spindrift.dev/deploy'];
-const CONTRACT_KEYS = [
-  'kthx.dev/values-contract',
-  'spindrift.dev/values-contract',
-];
+const DEPLOY_KEY = 'kthx.dev/deploy';
+const CONTRACT_KEY = 'kthx.dev/values-contract';
 
 describe('the deploy label', () => {
-  test('it and its legacy twin are on the pod template', async () => {
+  test('it is on the pod template', async () => {
     const labels = one(await render(), 'Deployment').spec.template.metadata
       .labels;
-    for (const key of DEPLOY_KEYS) expect(labels[key]).toBe('deploy-1');
+    expect(labels[DEPLOY_KEY]).toBe('deploy-1');
   });
 
   test('it is never in a selector', async () => {
@@ -142,21 +138,19 @@ describe('the deploy label', () => {
     const service = one(objects, 'Service');
     const policy = one(objects, 'NetworkPolicy');
 
-    for (const key of DEPLOY_KEYS) {
-      expect(Object.keys(deployment.spec.selector.matchLabels)).not.toContain(
-        key,
-      );
-      expect(Object.keys(service.spec.selector)).not.toContain(key);
-      expect(Object.keys(policy.spec.podSelector.matchLabels)).not.toContain(
-        key,
-      );
-    }
+    expect(Object.keys(deployment.spec.selector.matchLabels)).not.toContain(
+      DEPLOY_KEY,
+    );
+    expect(Object.keys(service.spec.selector)).not.toContain(DEPLOY_KEY);
+    expect(Object.keys(policy.spec.podSelector.matchLabels)).not.toContain(
+      DEPLOY_KEY,
+    );
   });
 
   test('a job carries it on the pod template too', async () => {
     const cronJob = one(await render({ app: { kind: 'job' } }), 'CronJob');
     const labels = cronJob.spec.jobTemplate.spec.template.metadata.labels;
-    for (const key of DEPLOY_KEYS) expect(labels[key]).toBe('deploy-1');
+    expect(labels[DEPLOY_KEY]).toBe('deploy-1');
   });
 
   test('two deploys of the same Component keep one selector', async () => {
@@ -180,16 +174,11 @@ describe('the value contract', () => {
   test('every rendered object carries the version it was rendered under', async () => {
     // Helm ignores unknown values, so each object records the contract it was rendered under.
     const chart = await chartMetadata();
-    const declared = chart.annotations?.[CONTRACT_KEYS[0] as string];
+    const declared = chart.annotations?.[CONTRACT_KEY];
     expect(declared).toBeDefined();
-    for (const key of CONTRACT_KEYS) {
-      expect(chart.annotations?.[key]).toBe(declared);
-    }
     for (const values of [{}, { app: { kind: 'job' } }]) {
       for (const object of await render(values)) {
-        for (const key of CONTRACT_KEYS) {
-          expect(object.metadata.annotations?.[key]).toBe(declared);
-        }
+        expect(object.metadata.annotations?.[CONTRACT_KEY]).toBe(declared);
       }
     }
   });
@@ -737,7 +726,6 @@ describe('shared pod annotations reach the pod template', () => {
   // A restart changes `shared.podAnnotations`, which rolls the pods and nothing else.
   const STAMP = {
     'kthx.dev/restarted-at': '2026-08-23T12:00:00.000Z',
-    'spindrift.dev/restarted-at': '2026-08-23T12:00:00.000Z',
   };
 
   test('on a Deployment, beside the contract annotation', async () => {
@@ -747,7 +735,7 @@ describe('shared pod annotations reach the pod template', () => {
     );
     const annotations = deployment.spec.template.metadata.annotations;
     expect(annotations).toMatchObject(STAMP);
-    for (const key of CONTRACT_KEYS) expect(annotations[key]).toBeDefined();
+    expect(annotations[CONTRACT_KEY]).toBeDefined();
     // On the Deployment's own metadata it would roll nothing.
     for (const key of Object.keys(STAMP)) {
       expect(deployment.metadata.annotations).not.toHaveProperty([key]);
