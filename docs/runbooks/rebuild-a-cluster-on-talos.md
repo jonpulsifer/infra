@@ -109,6 +109,20 @@ The owner does this section, because it decrypts the signing key.
 
 5. In a pull request, remove the cluster's hosts from `nix/hosts/default.nix` and its CA files from `terraform/pki/certs/`. Keep `<site>-sa-signer.pem`, which the JWKS reads.
 
+## Add a node later
+
+A node that joins after the rebuild takes the same path: a pull request that names it in `clusters/<site>/talos/talos.tf` and, on offsite, as a neighbor in `terraform/network/unifi/offsite/bgp.conf`.
+
+1. Comment `atlantis apply -d terraform/network/unifi/offsite` on the pull request, so that the gateway routes the pod range the node gets.
+2. Boot the node into the Talos installer, as [Install Talos on a node](install-talos-on-a-node.md) describes.
+3. Apply the Talos root from your machine. Atlantis runs in the cluster, and a node in maintenance mode has no route back to pod addresses, so Atlantis's apply fails with `dial tcp <node>:50000: i/o timeout`.
+
+   ```bash
+   tofu -chdir=clusters/<site>/talos apply -lock-timeout=10m
+   ```
+
+4. Comment `atlantis plan` on the pull request. Expect `No changes` for the Talos root, then `atlantis apply` merges it.
+
 ## If something goes wrong
 
 | Symptom | Cause | Action |

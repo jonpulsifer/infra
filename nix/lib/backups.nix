@@ -1,5 +1,6 @@
-# Backup facts shared by the Garage hosts and the host backup jobs. Each site backs up into a
-# Garage S3 store on one of its own hosts; the clusters copy it to GCS.
+# Backup facts shared by the Garage host and the host backup jobs. folly backs up into a Garage
+# S3 store on spore; offsite's Garage runs in its cluster (clusters/offsite/garage/). The
+# clusters copy each store to GCS.
 { pkgs }:
 let
   fleet = import ./fleet.nix;
@@ -10,7 +11,6 @@ rec {
 
   garageHosts = {
     folly = "spore";
-    offsite = "oldschool";
   };
 
   s3Endpoint = site: "http://${garageHosts.${site}}.${fleet.dnsZone}:${toString s3Port}";

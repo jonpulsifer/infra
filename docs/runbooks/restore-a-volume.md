@@ -67,14 +67,13 @@ Use this runbook to restore a PersistentVolumeClaim from a Velero backup. Velero
 
    Result: A `Pod Volume Restores` list with the phase `Completed`.
 
-8. Delete the restored bare pod, so that the owner does not share the claim with it. Then resume the release.
+8. Delete every bare pod in the namespace, so that no owner shares a claim with one. The restore recreates each pod in the backup that has no live namesake, not only the one with the annotation. Then resume the release and scale the owner back up: `flux resume` and a reconcile leave the replicas at zero.
 
    ```bash
-   kubectl delete pod <pod> -n <namespace> --context <site>
+   kubectl get pods -n <namespace> --context <site> -o json | jq -r '.items[] | select(.metadata.ownerReferences == null) | .metadata.name' | xargs -r kubectl delete pod -n <namespace> --context <site>
    flux resume helmrelease <release> -n <namespace> --context <site>
+   kubectl scale deployment <app> -n <namespace> --replicas 1 --context <site>
    ```
-
-   `flux resume` does not restore the replicas. Reconcile the release so that the manifest's replicas apply, or scale the owner back up.
 
 9. Make sure that the app's pod is `Running` and has the files.
 

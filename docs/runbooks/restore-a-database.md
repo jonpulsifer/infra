@@ -158,4 +158,4 @@ The `restore-drill` CronJob recovers a database from the site's Garage into a th
 - [Recover a re-created database](recover-a-re-created-database.md)
 - [Operate Postgres](operate-postgres.md)
 - [Restore a volume](restore-a-volume.md)
-- [Restore etcd](restore-etcd.md)
+- [Restore etcd on Talos](restore-etcd-on-talos.md)

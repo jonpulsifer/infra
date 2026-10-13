@@ -79,6 +79,10 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The backup has no `Pod Volume Backups` entry for a volume. | The pod did not run during the backup, or it has no backup annotation. | Start the pod, then take the backup again. See [Restore a volume](restore-a-volume.md#if-something-goes-wrong). |
+| The backup stays `InProgress` with a `Pod Volume Backup` in `New`, and `velero backup delete` reports `backup is still in progress`. | The pod sits on a node whose node agent is gone, and Velero processes a delete request against a running backup once, with that error. | Restart the `velero` Deployment, which fails the backup, force-delete the dead pod, run `velero backup delete` again, then take the backup again. |
+| `kubectl cnpg backup` fails with `no backup section`. | The command used the default method. | Add `--method plugin --plugin-name barman-cloud.cloudnative-pg.io`. |
+| `DROP DATABASE` fails with `other sessions using the database`. | The writer's connections outlive its pod. | Run `select pg_terminate_backend(pid) from pg_stat_activity where datname = '<database>'` first, or `DROP DATABASE <database> WITH (FORCE)`. |
+| `kubectl cp` into a CloudNativePG pod fails. | The image has no `tar`. | Load a dump over stdin: `gunzip -c <dump> \| kubectl exec -i <pod> -c postgres -- psql -v ON_ERROR_STOP=1 -1 -d <database>`. |
 | A `Cluster` stays in `Setting up primary`. | The recovery cannot read its archive. | Do the checks in [Recover a re-created database](recover-a-re-created-database.md#if-something-goes-wrong). |
 
 ## Related
