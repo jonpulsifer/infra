@@ -8,7 +8,7 @@ metadata:
   name: garage
   labels:
     app.kubernetes.io/managed-by: flux
-    app.kubernetes.io/part-of: spindrift
+    app.kubernetes.io/part-of: kthx
 spec:
   retentionPolicy: 30d
   configuration:
@@ -32,7 +32,7 @@ metadata:
   name: datastores
   labels:
     app.kubernetes.io/managed-by: flux
-    app.kubernetes.io/part-of: spindrift
+    app.kubernetes.io/part-of: kthx
     release: prom-stack
 spec:
   selector:

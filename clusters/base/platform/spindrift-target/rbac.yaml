@@ -62,7 +62,7 @@ rules:
       - patch
       - watch
   # RBAC cannot scope these verbs to runtime App names, so `sweepApp` deletes
-  # only namespaces labelled `app.kubernetes.io/managed-by: spindrift`.
+  # only namespaces whose `app.kubernetes.io/managed-by` label is `kthx-engine` or `spindrift`.
   - apiGroups:
       - ""
     resources:

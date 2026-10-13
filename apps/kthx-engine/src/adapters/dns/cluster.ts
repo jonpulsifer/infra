@@ -49,7 +49,7 @@ export class ClusterDnsPublisher implements DnsPublisher {
         name,
         namespace: this.options.namespace,
         labels: {
-          'app.kubernetes.io/managed-by': 'spindrift',
+          'app.kubernetes.io/managed-by': 'kthx-engine',
           // ponytail: the whole handle; splitting App and Component is
           // ambiguous when either has a hyphen. Pass them to `publish`
           // separately to filter by one.
