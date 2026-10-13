@@ -16,7 +16,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
   git grep -n -e 'spindrift:spindrift' -e 'namespace: spindrift$' -e 'spindrift\.spindrift\.svc'
   ```
 
-  Then deploy the Kubernetes control-plane nodes, [optiplex](../hosts/optiplex.md) and [retrofit](../hosts/retrofit.md) ([Deploy a NixOS host](deploy-a-nixos-host.md)).
+  Then change the `spindrift` subject in the `KubeAuthenticationConfig` of `clusters/folly/talos/patches.tf` and `clusters/offsite/talos/patches.tf`, which Atlantis applies.
 
 ## Declare the installation
 

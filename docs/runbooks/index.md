@@ -29,7 +29,6 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Restore a volume](restore-a-volume.md): restore the files of a volume from a Velero backup
 - [Restore from the GCS copy](restore-from-the-gcs-copy.md): copy a Garage bucket back from the encrypted GCS copy
 - [Migrate a local-path volume](migrate-a-local-path-volume.md): move a hostPath volume to a `local` volume so that Velero can back it up
-- [Restore etcd](restore-etcd.md): restore the etcd of a control plane from a snapshot in Garage
 
 ## Cloud and network
 

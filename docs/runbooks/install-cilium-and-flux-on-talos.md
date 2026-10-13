@@ -146,6 +146,8 @@ Cilium's values need the Prometheus Operator CRDs, and its chart renders the `ci
 | CoreDNS logs `i/o timeout` to `ROUTER_IP`, or the FluxInstance shows `server misbehaving`. | Cilium's BGP session is not established, so the gateway's replies to pods have no route. | Do steps 6 and 7 of [Install Cilium](#install-cilium). |
 | A Flux Kustomization fails with `secret "sops-age" not found`. | The Secret was not created. | Do step 1 of [Install Flux](#install-flux). |
 | The `cilium` HelmRelease shows `MissingRollbackTarget`. | The upgrade timed out before both operator replicas had a node. | Run `flux --context <site> reconcile hr cilium -n kube-system --reset --force`. |
+| `barman-cloud` reports `'flux-system/cert-manager' not found`, and `monitoring`, `gcp-secret-manager` or `networking` report a `dry-run failed` on an External Secrets kind or webhook. | The `networking` Kustomization creates the `cert-manager` Kustomization, and it ran before the external-secrets webhook had endpoints. | Once `external-secrets-webhook` runs, reconcile `onepassword-connect`, `gcp-secret-manager`, `networking` and `monitoring`. The rest of the chain drains by itself. |
+| A HelmRelease whose chart renders a CloudNativePG `Cluster` shows `Helm install failed` with `timeout waiting for`, and its pods run. | The install waited while the `Cluster` recovered its archive. | Run `flux --context <site> reconcile hr <name> -n <namespace> --force`. |
 | The bootstrap root plans changes to `kubernetes_labels.nodes`. | `node-labels.tf` still declares the resource. | Replace it with a `removed` block, as `clusters/folly/bootstrap/node-labels.tf` does. |
 
 ## Related

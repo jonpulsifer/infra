@@ -3,7 +3,7 @@ title: Restore etcd on Talos
 description: Restore the etcd of a Talos control plane from a snapshot, when the etcd data is lost or corrupt.
 ---
 
-Use this runbook when the etcd data of a control plane that runs Talos Linux is lost or corrupt. etcd is the database of the Kubernetes API server, and each cluster has one member, on its control plane. The control plane keeps etcd on its own `ETCD` partition, so the restore wipes only that partition. The image cache in `EPHEMERAL` and the `data` user volume stay. The restore returns every Kubernetes object to its state at the snapshot time, and Flux then applies `main` again. [Restore etcd](restore-etcd.md) covers a NixOS control plane.
+Use this runbook when the etcd data of a control plane that runs Talos Linux is lost or corrupt. etcd is the database of the Kubernetes API server, and each cluster has one member, on its control plane. The control plane keeps etcd on its own `ETCD` partition, so the restore wipes only that partition. The image cache in `EPHEMERAL` and the `data` user volume stay. The restore returns every Kubernetes object to its state at the snapshot time, and Flux then applies `main` again.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because git does not hold the etcd data.
@@ -18,7 +18,7 @@ Use this runbook when the etcd data of a control plane that runs Talos Linux is 
 ## Get the snapshot
 
 > [!NOTE]
-> On folly, the `etcd-snapshot` CronJob in `clusters/folly/etcd-snapshot/` writes a snapshot under `etcd/<site>/` each night and keeps 14 days. A file under `etcd/<hostname>/` is from NixOS and does not restore on Talos.
+> The `etcd-snapshot` CronJob in `clusters/<site>/etcd-snapshot/` writes a snapshot under `etcd/<site>/` each night and keeps 14 days. A file under `etcd/<hostname>/` is from NixOS and does not restore on Talos.
 
 1. Put the Garage remote in the environment. Use the `etcd` key of the site.
 
@@ -111,6 +111,5 @@ Use this runbook when the etcd data of a control plane that runs Talos Linux is 
 
 ## Related
 
-- [Restore etcd](restore-etcd.md)
 - [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md)
 - [Backups](../platform/backups.md)

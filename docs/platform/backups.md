@@ -65,7 +65,6 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 - [Restore a database](../runbooks/restore-a-database.md)
 - [Recover a re-created database](../runbooks/recover-a-re-created-database.md)
 - [Restore a volume](../runbooks/restore-a-volume.md)
-- [Restore etcd](../runbooks/restore-etcd.md)
 - [Restore etcd on Talos](../runbooks/restore-etcd-on-talos.md)
 - [Restore from the GCS copy](../runbooks/restore-from-the-gcs-copy.md)
 - [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md)
