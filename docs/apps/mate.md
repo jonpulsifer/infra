@@ -97,6 +97,10 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 
 mate is one Bun process, and its ingress admits only the node it runs on and Alertmanager. It runs the agent loop on pi, a TypeScript agent library, against the model in `MATE_MODEL` on the owner's ChatGPT subscription. When ChatGPT cannot answer, the OpenCode Go model in `MATE_FALLBACK_MODEL` answers, and mate holds its key. It keeps each thread's session in the Postgres database `mate-db`, the [session store](mate/how-it-works.md#session-store), with a nightly dump. The first tool call of a turn leases the thread's `Sandbox`, which the agent-sandbox controller runs on [hotrod](../hosts/hotrod.md), the sandbox node, and writes the short-lived GitHub and cluster tokens and the `rowbutt` SSH key that its profile grants into it. A turn that only talks creates no sandbox. If mate restarts mid-turn, it resumes the turn in a new message. [How Rowbutt works](mate/how-it-works.md) has the details.
 
+## Evals
+
+Each recorded step in the session store names the model that answered it, so `bun run evals` in `apps/mate` reads what the turns show about each model: steps, tool calls, failed tools, errors, the median time to a step and the cost. With `--model` it replays the recorded tool decisions against a candidate model, with the recorded context in front of it, and scores whether the candidate picked the same tool and the same action; it measures agreement with the recorded model one step at a time, not correctness. It reads `mate-db` alone and never Rowbutt's ChatGPT sign-in. [Evaluate the Rowbutt models](../runbooks/evaluate-the-rowbutt-models.md) has the steps, and `apps/mate/src/evals.ts` owns the scoring.
+
 ## Operate
 
 | Alert | Meaning | Runbook |

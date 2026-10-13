@@ -109,6 +109,7 @@ sections:
           - runbooks/rotate-the-rowbutt-slack-token.md
           - runbooks/sign-rowbutt-in-to-chatgpt.md
           - runbooks/operate-the-rowbutt-model-fallback.md
+          - runbooks/evaluate-the-rowbutt-models.md
           - runbooks/operate-the-smiirl-counter.md
           - runbooks/operate-the-flame-boss-exporter.md
           - runbooks/repair-a-kiosk.md
