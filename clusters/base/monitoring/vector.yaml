@@ -30,6 +30,10 @@ spec:
         operator: Equal
         effect: NoSchedule
         value: "true"
+      # offsite's sandbox node admits only the pods that tolerate its taint.
+      - key: lolwtf.ca/sandbox
+        operator: Exists
+        effect: NoSchedule
     podMonitor:
       enabled: true
       additionalLabels:

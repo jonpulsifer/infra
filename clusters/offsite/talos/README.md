@@ -2,7 +2,7 @@
 
 The OpenTofu root for the Talos Linux machine configuration of the offsite cluster: retrofit as the control plane, oldschool and hotrod as workers. It calls `terraform/modules/talos-cluster`. [Rebuild a cluster on Talos](https://wiki.lolwtf.ca/runbooks/rebuild-a-cluster-on-talos/) is the procedure that first applies it.
 
-`talos.tf` holds the version pins, the schematic's extension list and the node map. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`. `patches.tf` holds offsite's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/offsite/talos`.
+`talos.tf` holds the version pins, the schematic's extension list and the node map, with hotrod's sandbox label and taint. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`. `patches.tf` holds offsite's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/offsite/talos`.
 
 The secrets bundle is the 1Password Secure Note `talos-offsite-secrets`, which [Issue a talosconfig](https://wiki.lolwtf.ca/runbooks/issue-a-talosconfig/) names. `secrets_item_uuid` holds its UUID, and a plan fails until the variable holds a real one.
 
@@ -47,7 +47,7 @@ No resources.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_secrets_item_uuid"></a> [secrets\_item\_uuid](#input\_secrets\_item\_uuid) | UUID of the 1Password Secure Note talos-offsite-secrets, whose note is offsite's Talos secrets bundle. Issue a talosconfig names the item. | `string` | `"PLACEHOLDER-create-talos-offsite-secrets"` | no |
+| <a name="input_secrets_item_uuid"></a> [secrets\_item\_uuid](#input\_secrets\_item\_uuid) | UUID of the 1Password Secure Note talos-offsite-secrets, whose note is offsite's Talos secrets bundle. Issue a talosconfig names the item. | `string` | `"kbtd3p7uw2rjbiiuflxdxr6njm"` | no |
 
 ## Outputs
 

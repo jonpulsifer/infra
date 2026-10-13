@@ -13,3 +13,15 @@ patches:
       - op: add
         path: /spec/values/maxRunners
         value: 20
+      # Jobs run on hotrod, the sandbox node (clusters/offsite/talos/talos.tf).
+      - op: add
+        path: /spec/values/template/spec/nodeSelector
+        value:
+          lolwtf.ca/sandbox: "true"
+      - op: add
+        path: /spec/values/template/spec/tolerations
+        value:
+          - key: lolwtf.ca/sandbox
+            operator: Equal
+            value: "true"
+            effect: NoSchedule

@@ -75,9 +75,9 @@ locals {
     }),
   ])
 
-  # Per node: hostname, install target and the labels the bootstrap root
-  # applies today. The control plane drops its taint and LB-exclusion label
-  # (one schedulable control plane per cluster).
+  # Per node: hostname, install target, and its labels and taints. The
+  # control plane drops its taint and LB-exclusion label (one schedulable
+  # control plane per cluster).
   node_patch = { for name, n in var.nodes : name => join("\n---\n", concat([
     # The generator emits auto: stable, and Talos rejects auto beside hostname.
     yamlencode({
@@ -102,11 +102,12 @@ locals {
         labels = merge(
           { "bgp-enabled" = "true" },
           n.role == "controlplane" ? { "node.kubernetes.io/exclude-from-external-load-balancers" = { "$patch" = "delete" } } : {},
+          n.labels,
         )
       },
       n.role == "controlplane" ? {
-        taints = { "node-role.kubernetes.io/control-plane" = { "$patch" = "delete" } }
-      } : {},
+        taints = merge({ "node-role.kubernetes.io/control-plane" = { "$patch" = "delete" } }, n.taints)
+      } : length(n.taints) > 0 ? { taints = n.taints } : {},
     )),
   ])) }
 }
