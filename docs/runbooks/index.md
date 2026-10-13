@@ -7,8 +7,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 ## Hosts
 
-- [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host's configuration, restore its previous generation, or rename a node's partitions
-- [Add a Kubernetes node](add-a-kubernetes-node.md): declare a new x86_64 node and install it
+- [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host's configuration or restore its previous generation
 - [Install Talos on a node](install-talos-on-a-node.md): boot a NixOS node into the Talos installer with kexec, and check its volumes
 - [Change the forge EEPROM](change-the-forge-eeprom.md): change forge's boot settings and keep its HTTP boot fallback
 - [Install a Windows desktop](install-a-windows-desktop.md): install and update the owner's Windows configuration

@@ -10,9 +10,10 @@ asserts this document still lists them in this order, so the runbook cannot
 drift away from the thing that was checked. Run the model with
 `mise run pki:cutover`.
 
-folly runs Talos, and its cluster CA is the one in its secrets bundle, outside
-the FML chain. `post-rotate.sh` refuses `folly`. Steps 5 and 15 to 19, and
-folly's half of `model.go`, are stale until the model drops folly.
+Both clusters run Talos, and each cluster CA is the one in its secrets bundle,
+outside the FML chain. `post-rotate.sh` refuses `folly` and writes no cluster CA
+for `offsite`. Steps 5, 6 and 9 to 19, and `model.go`,
+describe the NixOS control planes and are stale until the model drops them.
 
 ## What makes this safe
 

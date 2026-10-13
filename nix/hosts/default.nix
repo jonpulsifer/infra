@@ -1,20 +1,9 @@
 # The fleet registry. flake.nix derives every output from it through ../lib/registry.nix.
-# Optional fields: system (build platform, default x86_64-linux); tags (Tailscale tags; "folly" or
-# "offsite" sets a k8s node's cluster); kind (host, image or package, default host); baseline
-# (overrides kind's default); module (default ./<name>.nix, callPackage'd for a package); artifact
+# Optional fields: system (build platform, default x86_64-linux); tags (Tailscale tags); kind (host, image or
+# package, default host); baseline (overrides kind's default); module (default ./<name>.nix, callPackage'd for a package); artifact
 # (the config.system.build attribute published as a package, unused for a package); packageSystem
 # (the packages.<system> the result publishes under, default x86_64-linux).
 {
-  oldschool = {
-    tags = [ "offsite" ];
-  };
-  retrofit = {
-    tags = [ "offsite" ];
-  };
-  hotrod = {
-    tags = [ "offsite" ];
-  };
-
   cloudpi4 = {
     system = "aarch64-linux";
     artifact = "sdImage";

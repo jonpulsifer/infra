@@ -1,6 +1,7 @@
 ---
 # The one file NODE_EXTRA_CA_CERTS names, so every CA a Target presents is in
-# this key. Written by scripts/pki/post-rotate.sh; do not hand-edit.
+# this key. Written by the Talos secrets bundle runbook
+# (docs/runbooks/make-a-talos-secrets-bundle.md); do not hand-edit.
 apiVersion: v1
 kind: ConfigMap
 metadata:

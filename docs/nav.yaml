@@ -48,7 +48,7 @@ sections:
     index: hosts/index.md
     items:
       - group: Kubernetes nodes
-        items: [hosts/optiplex.md, hosts/riptide.md, hosts/shale.md, hosts/retrofit.md, hosts/oldschool.md]
+        items: [hosts/optiplex.md, hosts/riptide.md, hosts/shale.md, hosts/retrofit.md, hosts/oldschool.md, hosts/hotrod.md]
       - group: Raspberry Pis
         items:
           - hosts/spore.md
@@ -70,7 +70,6 @@ sections:
       - group: Hosts
         items:
           - runbooks/deploy-a-nixos-host.md
-          - runbooks/add-a-kubernetes-node.md
           - runbooks/install-talos-on-a-node.md
           - runbooks/change-the-forge-eeprom.md
           - runbooks/install-a-windows-desktop.md

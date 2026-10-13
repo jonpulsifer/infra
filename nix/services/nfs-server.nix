@@ -7,7 +7,7 @@
   ...
 }:
 let
-  networks = import ./k8s/networks.nix { inherit lib; };
+  networks = import ../lib/networks.nix;
   folly = networks.folly;
   lab = import ../lib/lab.nix;
 in

@@ -1,99 +1,20 @@
 package cutover
 
 import (
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// These tests pin the model to the committed files and NixOS wiring. They skip
+// These tests pin the model to the committed files. They skip
 // what `mise run pki:verify` checks, which runs as its own job in go.yml.
 
 const repoRoot = "../../.."
 
-// folly's cluster CA is its Talos secrets bundle's own, outside the FML chain.
-var fmlCAClusters = []string{"offsite"}
-
-func certsDir() string { return filepath.Join(repoRoot, "terraform", "pki", "certs") }
-
-func readCerts(t *testing.T, path string) []*x509.Certificate {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []*x509.Certificate
-	for {
-		var blk *pem.Block
-		blk, raw = pem.Decode(raw)
-		if blk == nil {
-			break
-		}
-		c, err := x509.ParseCertificate(blk.Bytes)
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		out = append(out, c)
-	}
-	if len(out) == 0 {
-		t.Fatalf("%s: no certificates", path)
-	}
-	return out
-}
-
-// caFile also backs clientCaFile and kubeletClientCaFile, so an FML anchor in it
-// makes any certificate under the FML Root an authentication credential.
-func TestCABundleCarriesOnlyClusterCAs(t *testing.T) {
-	for _, cluster := range fmlCAClusters {
-		path := filepath.Join(certsDir(), cluster+"-ca-bundle.pem")
-		for i, c := range readCerts(t, path) {
-			if !strings.HasPrefix(c.Subject.CommonName, "FML K8s "+cluster) {
-				t.Errorf("%s[%d] is %q — caFile backs clientCaFile and kubeletClientCaFile, so only this cluster's CA may appear there",
-					filepath.Base(path), i, c.Subject.CommonName)
-			}
-		}
-	}
-}
-
-func TestChainFileIsAWholePathToASelfSignedRoot(t *testing.T) {
-	for _, cluster := range fmlCAClusters {
-		path := filepath.Join(certsDir(), cluster+"-ca-chain.pem")
-		chain := readCerts(t, path)
-		if len(chain) != 3 {
-			t.Fatalf("%s holds %d certificates, want cluster CA + Intermediate + Root", filepath.Base(path), len(chain))
-		}
-		for i := range len(chain) - 1 {
-			if err := chain[i].CheckSignatureFrom(chain[i+1]); err != nil {
-				t.Errorf("%s[%d] %q is not signed by [%d] %q: %v",
-					filepath.Base(path), i, chain[i].Subject.CommonName, i+1, chain[i+1].Subject.CommonName, err)
-			}
-		}
-		root := chain[2]
-		if err := root.CheckSignatureFrom(root); err != nil {
-			t.Errorf("%s does not terminate in a self-signed root: %v", filepath.Base(path), err)
-		}
-	}
-}
-
-// If this stops holding, the cutover needs an overlap bundle and a maintenance
-// window. See TestRotatingTheClusterCAKeyReintroducesTheWindow.
-func TestIssuedCertsNameTheClusterCAByAnIdentifierTheRebirthDoesNotChange(t *testing.T) {
-	for _, cluster := range fmlCAClusters {
-		ca := readCerts(t, filepath.Join(certsDir(), cluster+"-ca.pem"))[0]
-		if len(ca.SubjectKeyId) == 0 {
-			t.Fatalf("%s-ca.pem carries no subjectKeyIdentifier, so nothing beneath it names an issuer", cluster)
-		}
-		signer := readCerts(t, filepath.Join(certsDir(), cluster+"-sa-signer.pem"))[0]
-		if string(signer.AuthorityKeyId) != string(ca.SubjectKeyId) {
-			t.Errorf("%s-sa-signer.pem names issuer %x, but %s-ca.pem is %x",
-				cluster, signer.AuthorityKeyId, cluster, ca.SubjectKeyId)
-		}
-	}
-}
+// Both clusters run Talos, so their cluster CAs are their secrets bundles' own, outside the FML
+// chain, and no cluster-CA file is committed under terraform/pki/certs.
 
 // A duplicate kid resolves a token against whichever entry the apiserver reads first.
 func TestJWKSPublishesNoDuplicateKid(t *testing.T) {
@@ -116,30 +37,6 @@ func TestJWKSPublishesNoDuplicateKid(t *testing.T) {
 			}
 			seen[k.Kid] = true
 		}
-	}
-}
-
-// The model assumes the bundle backs caFile and the chain backs --root-ca-file.
-// offsite's NixOS control plane is the one host that still reads this module.
-func TestNixWiresTheBundleAndTheChainToDifferentOptions(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "nix", "services", "k8s", "default.nix"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	nix := string(raw)
-	for _, want := range []string{
-		`fmlClusterCaBundle = ../../../terraform/pki/certs/${cfg.network}-ca-bundle.pem;`,
-		`fmlClusterCaChain = ../../../terraform/pki/certs/${cfg.network}-ca-chain.pem;`,
-		`"L+ /var/lib/kubernetes/secrets/ca.pem - - - - ${fmlClusterCaBundle}"`,
-		`caFile = "/var/lib/kubernetes/secrets/ca.pem";`,
-		`rootCaFile = lib.mkIf cfg.clusterCa.enable (lib.mkForce fmlClusterCaChain);`,
-	} {
-		if !strings.Contains(nix, want) {
-			t.Errorf("nix/services/k8s/default.nix no longer contains %q; the model's wiring assumption is stale", want)
-		}
-	}
-	if strings.Contains(nix, "caFile = ") && strings.Contains(nix, "caFile = fmlClusterCaChain") {
-		t.Error("the chain reached caFile, which also backs clientCaFile and kubeletClientCaFile")
 	}
 }
 

@@ -23,7 +23,7 @@ Each file is a Kubernetes ConfigMap in the `flux-system` namespace, written as J
 | Reader | How it reads the files | Where |
 | --- | --- | --- |
 | Flux | The `config` Flux Kustomization applies each file as a ConfigMap. Other Flux Kustomizations replace `${KEY}` in their manifests with values from it, through `postBuild.substituteFrom`. | `clusters/<site>/config/kustomization.yaml` and `clusters/<site>/flux-system/` |
-| Nix | `builtins.fromJSON` at evaluation | `nix/services/k8s/networks.nix` for the clusters, and `nix/lib/lab.nix` for the lab |
+| Nix | `builtins.fromJSON` at evaluation | `nix/lib/networks.nix` for folly, and `nix/lib/lab.nix` for the lab |
 | OpenTofu | The `cluster-topology` module returns the `data` of one file, selected by its `site` and `config_map` inputs | `terraform/modules/cluster-topology/` |
 | `update-kubeconfigs` | `jq` reads each `API_SERVER_IP` from the repo checkout that the script is linked from. With no checkout, it fetches the file from `main` on GitHub. | `dotfiles/.local/bin/update-kubeconfigs` |
 

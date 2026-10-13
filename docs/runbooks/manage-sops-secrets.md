@@ -218,5 +218,5 @@ harmonia, the Nix binary cache server on a build host, signs the store paths it 
 ## Related
 
 - [Secrets](../platform/secrets.md)
-- [Add a Kubernetes node](add-a-kubernetes-node.md)
+- [Install Talos on a node](install-talos-on-a-node.md)
 - [PKI](../platform/pki.md)
