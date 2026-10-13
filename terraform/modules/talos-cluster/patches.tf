@@ -78,7 +78,10 @@ locals {
   # The control plane drops its taint (one schedulable control plane per
   # cluster); a node's own taints are added. One map per node keeps the
   # conditional below to a single shape, which OpenTofu's type unification
-  # of a conditional requires.
+  # of a conditional requires. Talos passes a taint to the kubelet, which
+  # applies it when it registers the Node, and NodeRestriction refuses the
+  # kubelet's later change: a taint declared for a registered node is applied
+  # once by hand with kubectl taint.
   node_taints = { for name, n in var.nodes : name => merge(
     n.role == "controlplane" ? { "node-role.kubernetes.io/control-plane" = { "$patch" = "delete" } } : {},
     n.taints,
@@ -102,6 +105,12 @@ locals {
         diskSelector = { match = n.install }
         wipe         = true
       }
+    }),
+    # The Talos API certificate names the hostname and addresses by itself;
+    # the public name is what talosctl --nodes is given. machine.certSANs has
+    # no 1.14 document, so it stays a v1alpha1 fragment.
+    yamlencode({
+      machine = { certSANs = ["${name}.${local.dns_zone}"] }
     }),
     yamlencode(merge(
       {

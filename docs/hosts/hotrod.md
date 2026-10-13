@@ -31,7 +31,7 @@ Its `lolwtf.ca/sandbox` taint, declared with its label of the same name in `clus
 
 ## Reach
 
-Reach it with `talosctl --context offsite --nodes <address>`, where the address is its `NODE_ADDRESSES` value in `clusters/offsite/config/cluster-topology.json`. Its Talos certificate names `hotrod` only, so `hotrod.lolwtf.ca` fails the certificate check. It runs no SSH server.
+Reach it at `hotrod.lolwtf.ca` with `talosctl --context offsite --nodes hotrod.lolwtf.ca`. It runs no SSH server.
 
 ## Quirks
 
