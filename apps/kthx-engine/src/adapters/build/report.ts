@@ -10,7 +10,14 @@ import { digestSchema as digest } from '../../domain/digest.ts';
  * Plain text: a CI's workflow-command syntax may be consumed by the runner's
  * own log processor.
  */
-export const BUILD_REPORT_MARKER = 'spindrift-result';
+export const BUILD_REPORT_MARKER = 'kthx-engine-result';
+
+/** The marker the workflow and the hull builder image still print. */
+export const LEGACY_BUILD_REPORT_MARKER = 'spindrift-result';
+
+const REPORT_PREFIXES = [BUILD_REPORT_MARKER, LEGACY_BUILD_REPORT_MARKER].map(
+  (marker) => `${marker} `,
+);
 
 /**
  * {@link parseBuildReport} does not check `bundleDigest`; `buildSucceeded`
@@ -48,10 +55,10 @@ export function encodeBuildReport(report: BuildReport): string {
  * one, and the last describes what was pushed. Malformed marker lines are skipped.
  */
 export function parseBuildReport(log: string): BuildReport | null {
-  const prefix = `${BUILD_REPORT_MARKER} `;
   for (const line of log.split('\n').reverse()) {
+    const prefix = REPORT_PREFIXES.find((p) => line.includes(p));
+    if (prefix === undefined) continue;
     const at = line.indexOf(prefix);
-    if (at === -1) continue;
     const payload = line.slice(at + prefix.length).trim();
     if (payload === '') continue;
 

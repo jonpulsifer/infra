@@ -4,7 +4,7 @@
  */
 import type { RegistryAuth } from '../../storage/registry-credentials.ts';
 import type { BuildSecretValue, BuildSource, BuildSpec } from './contract.ts';
-import { BUILD_REPORT_MARKER } from './report.ts';
+import { LEGACY_BUILD_REPORT_MARKER } from './report.ts';
 
 /**
  * The variable the program reads a Docker config from. The program text is
@@ -310,6 +310,6 @@ done
 ref=${quote(input.destinations[0] ?? '')}@"$digest"
 report=$(printf '{"bundleDigest":"%s","digest":"%s","refs":[%s],"baseDigest":null,"buildkitProvenanceRef":"%s","sbomRef":"%s"}' \\
   ${quote(input.bundleDigest)} "$digest" "$refs" "$ref" "$ref")
-echo "${BUILD_REPORT_MARKER} $(printf '%s' "$report" | base64 | tr -d '\\n')"
+echo "${LEGACY_BUILD_REPORT_MARKER} $(printf '%s' "$report" | base64 | tr -d '\\n')"
 `;
 }

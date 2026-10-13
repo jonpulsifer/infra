@@ -30,8 +30,8 @@ import {
   JOB_LABEL,
 } from '../../src/adapters/build/in-cluster.ts';
 import {
-  BUILD_REPORT_MARKER,
   encodeBuildReport,
+  LEGACY_BUILD_REPORT_MARKER,
 } from '../../src/adapters/build/report.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { buildRouteProfiles } from '../../src/adapters/registry.ts';
@@ -577,7 +577,7 @@ describe('the hosted build route', () => {
         import.meta.url,
       ),
     ).text();
-    expect(workflow).toContain(BUILD_REPORT_MARKER);
+    expect(workflow).toContain(LEGACY_BUILD_REPORT_MARKER);
   });
 
   test('the caller in somebody’s repository accepts what this route sends', async () => {

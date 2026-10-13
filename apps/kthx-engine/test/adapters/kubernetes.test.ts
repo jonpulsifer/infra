@@ -522,6 +522,17 @@ describe('sweeping the App away', () => {
     await adapter.sweepApp(target(), 'never-deployed');
   });
 
+  test.each(['spindrift', 'kthx-engine'])(
+    'it deletes a namespace labelled managed-by %s',
+    async (manager) => {
+      const { adapter, cluster } = adapterFor({
+        namespaceLabels: { 'app.kubernetes.io/managed-by': manager },
+      });
+      await adapter.sweepApp(target(), 'blog');
+      expect(cluster.get('namespaces//app-blog')).toBeUndefined();
+    },
+  );
+
   test('it refuses a namespace it did not make', async () => {
     // The fake answers every namespace read with the operator's declared one,
     // which has no `managed-by` label.
