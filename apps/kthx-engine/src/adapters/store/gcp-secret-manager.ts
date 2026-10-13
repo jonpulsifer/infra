@@ -50,11 +50,28 @@ interface AccessVersionResponse {
  * two scopes that sanitize to one {@link secretId}.
  */
 const ANNOTATION = {
+  app: 'kthx-engine-app',
+  component: 'kthx-engine-component',
+  target: 'kthx-engine-target',
+  key: 'kthx-engine-key',
+} as const;
+
+const PREVIOUS_ANNOTATION = {
   app: 'spindrift-app',
   component: 'spindrift-component',
   target: 'spindrift-target',
   key: 'spindrift-key',
 } as const;
+
+function annotationOf(
+  annotations: Record<string, string> | undefined,
+  field: keyof typeof ANNOTATION,
+): string | undefined {
+  return (
+    annotations?.[ANNOTATION[field]] ??
+    annotations?.[PREVIOUS_ANNOTATION[field]]
+  );
+}
 
 /** The ceiling `projects.secrets.create` puts on a secret id. */
 const MAX_ID_LENGTH = 255;
@@ -156,7 +173,7 @@ export class SecretManagerStore implements SecretStore {
       method: 'GET',
       path: this.secretPath(reference.key),
     });
-    const key = secret?.annotations?.[ANNOTATION.key];
+    const key = annotationOf(secret?.annotations, 'key');
     if (key === undefined) return null;
 
     return { reference, key, createdAt: new Date(version.createTime) };
@@ -247,10 +264,10 @@ function assertScopeMatches(
 ): void {
   const annotations = secret.annotations ?? {};
   const owner = {
-    app: annotations[ANNOTATION.app],
-    component: annotations[ANNOTATION.component],
-    target: annotations[ANNOTATION.target],
-    key: annotations[ANNOTATION.key],
+    app: annotationOf(annotations, 'app'),
+    component: annotationOf(annotations, 'component'),
+    target: annotationOf(annotations, 'target'),
+    key: annotationOf(annotations, 'key'),
   };
   const matches =
     owner.app === scope.app &&

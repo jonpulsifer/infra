@@ -93,6 +93,7 @@ const OUTPUT_TREE = tarball([
  */
 function linkedTree(
   links: readonly { path: string; target: string }[],
+  manifestDir = '__spindrift',
 ): Uint8Array<ArrayBuffer> {
   return tarball([
     { name: '.vercel/output/config.json', bytes: bytes('{"version":3}') },
@@ -101,7 +102,7 @@ function linkedTree(
       bytes: bytes('{"runtime":"nodejs20.x"}'),
     },
     {
-      name: '.vercel/output/__spindrift/func-links.json',
+      name: `.vercel/output/${manifestDir}/func-links.json`,
       bytes: bytes(JSON.stringify(links)),
     },
   ]);
@@ -198,7 +199,7 @@ describe('§4: build stays separate from deploy', () => {
     const observed = await adapter.observe(TARGET, verdict.ref);
     expect(observed?.artifactDigest).toBe('sha256:observed');
     expect(observed?.phase).toBe('LIVE');
-    expect(api.serving(PROJECT)?.meta.spindriftDeploy).toBe('deploy-1');
+    expect(api.serving(PROJECT)?.meta.kthxEngineDeploy).toBe('deploy-1');
   });
 });
 
@@ -275,7 +276,7 @@ describe('the platform’s own build output deploys prebuilt', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.project).toBe(PROJECT);
     expect(calls[0]?.team).toBe(CONNECTION.team);
-    expect(calls[0]?.meta.spindriftDeploy).toBe('deploy-1');
+    expect(calls[0]?.meta.kthxEngineDeploy).toBe('deploy-1');
     expect(trees[0]).toContain('.vercel/output/config.json');
     expect(trees[0]).toContain('node_modules/@scope/dep/index.js');
   });
@@ -302,6 +303,24 @@ describe('the platform’s own build output deploys prebuilt', () => {
     });
     expect(trees[0]).not.toContain(
       '.vercel/output/__spindrift/func-links.json',
+    );
+  });
+
+  test('a manifest under the engine directory restores its links too', async () => {
+    const { adapter, trees, links } = cliAdapter(
+      linkedTree(
+        [{ path: '.vercel/output/functions/home.func', target: 'index.func' }],
+        '__kthx-engine',
+      ),
+    );
+    const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(links[0]).toEqual({
+      '.vercel/output/functions/home.func': 'index.func',
+    });
+    expect(trees[0]).not.toContain(
+      '.vercel/output/__kthx-engine/func-links.json',
     );
   });
 

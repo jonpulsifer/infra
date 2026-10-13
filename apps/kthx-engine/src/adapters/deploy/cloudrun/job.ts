@@ -28,7 +28,7 @@ export function cloudRunJob(
       ? { binaryAuthorization: { useDefault: true } }
       : {}),
     template: {
-      labels: { ...labels, 'spindrift-deploy': desired.deploy },
+      labels: { ...labels, 'kthx-engine-deploy': desired.deploy },
       // A Job nests twice where a Service nests once: the containers live in
       // the inner `TaskTemplate`.
       template: {

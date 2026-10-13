@@ -123,7 +123,7 @@ describe('CloudRunFunctions.deploy', () => {
     expect(created.serviceConfig.serviceAccountEmail).toBe(
       'runner@example-vessel.test',
     );
-    expect(created.labels).toEqual({ 'spindrift-function': 'hello' });
+    expect(created.labels).toEqual({ 'kthx-engine-function': 'hello' });
     // Always present: an absent field under this update mask would leave a
     // removed variable on the Service.
     expect(created.serviceConfig.environmentVariables).toEqual({});

@@ -75,8 +75,9 @@ export const DEFAULT_ENDPOINT = 'https://firebasehosting.googleapis.com';
 const API_VERSION = '/v1beta1';
 
 /** The label a version carries so `observe` can report what is serving. */
-const DIGEST_LABEL = 'spindrift-digest';
-const DEPLOY_LABEL = 'spindrift-deploy';
+const DIGEST_LABEL = 'kthx-engine-digest';
+const DEPLOY_LABEL = 'kthx-engine-deploy';
+const PREVIOUS_DIGEST_LABEL = 'spindrift-digest';
 
 /** The product caps a site id well below a DNS label. */
 const SITE_ID_LIMIT = 30;
@@ -262,7 +263,10 @@ export class StaticDeployAdapter implements DeployAdapter {
     return {
       ref,
       phase: 'LIVE',
-      artifactDigest: latest.version?.labels?.[DIGEST_LABEL] ?? '',
+      artifactDigest:
+        latest.version?.labels?.[DIGEST_LABEL] ??
+        latest.version?.labels?.[PREVIOUS_DIGEST_LABEL] ??
+        '',
     };
   }
 
