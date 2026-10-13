@@ -17,7 +17,7 @@ EOF
 }
 
 # Anchored on ghcr.io, the only registry the workflow pushes to, and ended by
-# `:` or `@` so that `spindrift` never matches `spindrift-demo`.
+# `:` or `@` so that `kthx-engine` never matches `kthx-engine-demo`.
 image_ref() {
   printf '%s' "ghcr\.io/[^[:space:]\"']*/$1(:[^@[:space:]]+)?"
 }
