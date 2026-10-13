@@ -47,7 +47,7 @@ A Build uses the first route, in Settings rank order, whose SLSA (Supply-chain L
 | --- | --- | --- |
 | `github-actions` | 2 | `.github/workflows/spindrift-build.yml` |
 | `cloud-build` | 3 | Cloud Build |
-| `in-cluster` | 1 | A Job in `spindrift-build` on offsite |
+| `in-cluster` | 1 | A Job in `spindrift-build` on offsite. The route's `nodeSelector` and `tolerations` put it on [hotrod](../../hosts/hotrod.md), the sandbox node. |
 | `bosun` | 2 | [Bosun](../bosun.md), which is parked |
 
 ## Addresses and config

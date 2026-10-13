@@ -22,6 +22,18 @@ export const cloudBuildConfigSchema = z
   })
   .strict();
 
+/** A toleration in the Kubernetes shape, of a taint on a node kept for builds. */
+const tolerationSchema = z
+  .object({
+    key: nonEmptyString.optional(),
+    operator: z.enum(['Equal', 'Exists']).optional(),
+    value: z.string().optional(),
+    effect: z.enum(['NoSchedule', 'PreferNoSchedule', 'NoExecute']).optional(),
+  })
+  .strict();
+
+export type Toleration = z.infer<typeof tolerationSchema>;
+
 export const inClusterConfigSchema = z
   .object({
     name: nonEmptyString,
@@ -30,6 +42,10 @@ export const inClusterConfigSchema = z
     namespace: nonEmptyString,
     image: nonEmptyString,
     serviceAccount: nonEmptyString,
+    /** Labels the build node must carry; absent lets the scheduler choose. */
+    nodeSelector: z.record(nonEmptyString, z.string()).optional(),
+    /** Taints the Job tolerates; absent keeps it off every tainted node. */
+    tolerations: z.array(tolerationSchema).optional(),
   })
   .strict();
 

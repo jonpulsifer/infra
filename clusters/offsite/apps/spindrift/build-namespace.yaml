@@ -26,8 +26,10 @@ metadata:
   labels:
     app.kubernetes.io/part-of: spindrift
 ---
-# No `delete`: a finished Job is reaped by its ttlSecondsAfterFinished. The
-# route lists pods by label because it does not know the pod name.
+# `delete` is for the route's cancel, and for a Job past the build budget that
+# the cluster did not end; a finished Job is reaped by its
+# ttlSecondsAfterFinished. The route lists pods by label because it does not
+# know the pod name.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -40,6 +42,7 @@ rules:
       - jobs
     verbs:
       - create
+      - delete
       - get
   - apiGroups:
       - ""

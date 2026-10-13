@@ -26,6 +26,7 @@ import {
 } from '../../src/adapters/build/github-actions.ts';
 import {
   InClusterBuildRoute,
+  type InClusterRouteOptions,
   JOB_LABEL,
 } from '../../src/adapters/build/in-cluster.ts';
 import {
@@ -1013,6 +1014,7 @@ function clusterRoute(
   options: FakeKubernetesOptions = {},
   pacing: { timeoutMs?: number } = {},
   podLabel: string = JOB_LABEL.key,
+  placement: Pick<InClusterRouteOptions, 'nodeSelector' | 'tolerations'> = {},
 ): {
   cluster: FakeKubernetes;
   route: InClusterBuildRoute;
@@ -1063,6 +1065,7 @@ function clusterRoute(
       ...PACING,
       ...pacing,
       ...fakeClock(),
+      ...placement,
     }),
   };
 }
@@ -1116,6 +1119,40 @@ describe('the in-cluster build route', () => {
     const { route } = clusterRoute({}, {}, JOB_LABEL.legacy);
     const { result } = await run(route.build(archiveSource(), spec));
     expect(result.status).toBe('SUCCEEDED');
+  });
+
+  test('the Job carries the node selector and tolerations it is configured with', async () => {
+    // A node kept for builds carries a taint; an unconfigured route names
+    // neither, so the Job lands wherever the scheduler puts it.
+    const placement = {
+      nodeSelector: { 'example.test/builds': 'true' },
+      tolerations: [
+        {
+          key: 'example.test/builds',
+          operator: 'Equal' as const,
+          value: 'true',
+          effect: 'NoSchedule' as const,
+        },
+      ],
+    };
+    const podSpecOf = (cluster: FakeKubernetes): Record<string, unknown> =>
+      (
+        cluster.get('jobs/builds/spindrift-build-fixed') as {
+          spec: { template: { spec: Record<string, unknown> } };
+        }
+      ).spec.template.spec;
+
+    const pinned = clusterRoute({}, {}, JOB_LABEL.key, placement);
+    await run(pinned.route.build(archiveSource(), spec));
+    const pod = podSpecOf(pinned.cluster);
+    expect(pod.nodeSelector).toEqual(placement.nodeSelector);
+    expect(pod.tolerations).toEqual(placement.tolerations);
+
+    const free = clusterRoute();
+    await run(free.route.build(archiveSource(), spec));
+    const anywhere = podSpecOf(free.cluster);
+    expect(anywhere).not.toHaveProperty('nodeSelector');
+    expect(anywhere).not.toHaveProperty('tolerations');
   });
 
   test('the Job is admissible at Pod Security baseline', async () => {
