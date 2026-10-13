@@ -1,0 +1,26 @@
+{
+  "name": "mate-voice",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "smoke": "bun run src/smoke.ts"
+  },
+  "dependencies": {
+    "@discordjs/voice": "0.19.2",
+    "@noble/ciphers": "1.3.0",
+    "@snazzah/davey": "0.1.12",
+    "discord-api-types": "0.38.56",
+    "opusscript": "0.1.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "1.4.2",
+    "typescript": "5.9.3"
+  }
+}

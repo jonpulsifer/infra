@@ -46,6 +46,7 @@ jobs:
             apps/kthx/**
             apps/kthx-engine/**
             apps/mate/**
+            apps/mate-voice/**
             apps/slingshot/**
             apps/switchboard/**
             apps/weather/**
