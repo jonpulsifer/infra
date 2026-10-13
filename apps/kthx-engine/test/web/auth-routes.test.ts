@@ -9,14 +9,11 @@ import {
 import { authPathFor } from '../../src/auth/routes.ts';
 import {
   clearedSessionCookies,
-  LEGACY_SESSION_COOKIE,
   SESSION_COOKIE,
-  sessionCookie,
 } from '../../src/auth/session.ts';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { CommandContext } from '../../src/commands/types.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
-import { MCP_PATH } from '../../src/web/mcp-route.ts';
 import { webRoutes } from '../../src/web/routes.ts';
 import { createAuthenticator } from '../harness/authenticator.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -298,107 +295,28 @@ describe('signing out over the route table', () => {
   });
 });
 
-describe('a session under the legacy cookie name', () => {
-  async function legacySession(routes: Routes) {
+describe('a session under the former cookie name', () => {
+  test('opens nothing and is left alone', async () => {
+    const { routes } = serve();
     const cookie = cookieFrom(await enrolOverHttp(routes));
     const token = cookie!.slice(`${SESSION_COOKIE}=`.length);
-    return { token, legacy: `${LEGACY_SESSION_COOKIE}=${token}` };
-  }
+    const former = `spindrift_session=${token}`;
 
-  function readSession(routes: Routes, cookie: string): Promise<Response> {
     const path = authPathFor('session');
-    return handlerFor(
-      routes,
-      path,
-    )(new Request(`${RELYING_PARTY.origin}${path}`, { headers: { cookie } }));
-  }
-
-  const expiredLegacy = `${LEGACY_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
-
-  test('signs in, and moves to the new name on that response', async () => {
-    const { routes } = serve();
-    const { token, legacy } = await legacySession(routes);
-
-    const response = await readSession(routes, legacy);
-    const body = (await response.json()) as {
-      value: { principal: { displayName: string } | null };
-    };
-    expect(body.value.principal?.displayName).toBe('Operator');
-    expect(response.headers.getSetCookie()).toEqual([
-      sessionCookie(token),
-      expiredLegacy,
-    ]);
-
-    const moved = await call(
-      routes,
-      pathFor(commandNames[0]!),
-      {},
-      cookieFrom(response)!,
-    );
-    expect(moved.status).not.toBe(401);
-  });
-
-  test('moves on a command response too', async () => {
-    const { routes } = serve();
-    const { token, legacy } = await legacySession(routes);
-
-    const response = await call(routes, pathFor(commandNames[0]!), {}, legacy);
-    expect(response.status).not.toBe(401);
-    expect(response.headers.getSetCookie()).toEqual([
-      sessionCookie(token),
-      expiredLegacy,
-    ]);
-  });
-
-  test('that opens nothing is only expired', async () => {
-    const { routes } = serve();
-    await enrolOverHttp(routes);
-
-    const response = await readSession(
-      routes,
-      `${LEGACY_SESSION_COOKIE}=a-token-nobody-issued`,
-    );
-    expect(response.headers.getSetCookie()).toEqual([expiredLegacy]);
-  });
-
-  test('beside the new name is only expired', async () => {
-    const { routes } = serve();
-    const { token, legacy } = await legacySession(routes);
-
-    const response = await readSession(
-      routes,
-      `${legacy}; ${SESSION_COOKIE}=${token}`,
-    );
-    expect(response.headers.getSetCookie()).toEqual([expiredLegacy]);
-  });
-
-  test('signs out without being moved', async () => {
-    const { routes } = serve();
-    const { legacy } = await legacySession(routes);
-
-    const out = await call(routes, authPathFor('signout'), {}, legacy);
-    expect(out.headers.getSetCookie()).toEqual([...clearedSessionCookies()]);
-
-    const after = await call(routes, pathFor(commandNames[0]!), {}, legacy);
-    expect(after.status).toBe(401);
-  });
-
-  test('is neither read nor moved by /mcp', async () => {
-    const { routes } = serve();
-    const { legacy } = await legacySession(routes);
-
     const response = await handlerFor(
       routes,
-      MCP_PATH,
+      path,
     )(
-      new Request(`${RELYING_PARTY.origin}${MCP_PATH}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: legacy },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      new Request(`${RELYING_PARTY.origin}${path}`, {
+        headers: { cookie: former },
       }),
     );
-    expect(response.status).toBe(401);
+    const body = (await response.json()) as { value: { principal: unknown } };
+    expect(body.value.principal).toBeNull();
     expect(response.headers.getSetCookie()).toEqual([]);
+
+    const command = await call(routes, pathFor(commandNames[0]!), {}, former);
+    expect(command.status).toBe(401);
   });
 });
 

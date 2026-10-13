@@ -14,9 +14,6 @@ import {
 
 export const WORKFLOW_PATH = '.github/workflows/kthx.yml';
 
-/** Read only: the caller path configuration pull requests wrote before. */
-export const LEGACY_WORKFLOW_PATH = '.github/workflows/spindrift.yml';
-
 function fileName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
@@ -27,28 +24,15 @@ function fileName(path: string): string {
  */
 export const CALLER_WORKFLOW_FILE = fileName(WORKFLOW_PATH);
 
-/** Dispatched in order, so a repository with both callers runs the new one. */
-export const CALLER_WORKFLOW_FILES: readonly string[] = [
-  CALLER_WORKFLOW_FILE,
-  fileName(LEGACY_WORKFLOW_PATH),
-];
-
 /** The caller stamps it into the run name, and the build route matches on it. */
 export const RUN_NAME_PREFIX = 'kthx';
 
 /** Read only: a legacy caller still stamps this one. */
 export const LEGACY_RUN_NAME_PREFIX = 'spindrift';
 
-/** The run name `workflow` stamps; the legacy caller keeps its own prefix. */
-export function correlatedRunName(
-  workflow: string,
-  correlation: string,
-): string {
-  const prefix =
-    workflow === fileName(LEGACY_WORKFLOW_PATH)
-      ? LEGACY_RUN_NAME_PREFIX
-      : RUN_NAME_PREFIX;
-  return `${prefix} ${correlation}`;
+/** The run name the caller stamps for this correlation. */
+export function correlatedRunName(correlation: string): string {
+  return `${RUN_NAME_PREFIX} ${correlation}`;
 }
 
 /** Whether a caller stamped this run name for this correlation. */

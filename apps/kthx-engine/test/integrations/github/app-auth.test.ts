@@ -507,8 +507,8 @@ describe('an adopted App, from the installation Secret', () => {
       clock: { now },
       keyring: options?.keyring === undefined ? null : options.keyring,
       env: {
-        SPINDRIFT_GITHUB_APP_ID: '4576122',
-        SPINDRIFT_GITHUB_APP_PRIVATE_KEY: pem,
+        KTHX_ENGINE_GITHUB_APP_ID: '4576122',
+        KTHX_ENGINE_GITHUB_APP_PRIVATE_KEY: pem,
       },
       apiBaseUrl: fake.baseUrl,
       webBaseUrl: 'https://git.example.test',
@@ -591,7 +591,7 @@ describe('an adopted App, from the installation Secret', () => {
       db: database().db,
       clock: { now },
       keyring: null,
-      env: { SPINDRIFT_GITHUB_APP_ID: '4576122' },
+      env: { KTHX_ENGINE_GITHUB_APP_ID: '4576122' },
       apiBaseUrl: 'https://api.git.example.test',
       webBaseUrl: 'https://git.example.test',
       controlPlaneHostname: 'spindrift.example.test',
@@ -610,7 +610,7 @@ describe('the webhook secret, per delivery', () => {
 
     await expect(
       githubAppWebhookSecret(database().db, keyring, {
-        SPINDRIFT_GITHUB_WEBHOOK_SECRET: 'pasted-secret',
+        KTHX_ENGINE_GITHUB_WEBHOOK_SECRET: 'pasted-secret',
       }),
     ).resolves.toBe('pasted-secret');
     await expect(

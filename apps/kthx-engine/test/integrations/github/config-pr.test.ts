@@ -11,7 +11,7 @@ import type { DetectionProposal } from '../../../src/domain/detection/ladder.ts'
 import { GitHubApp } from '../../../src/integrations/github/app.ts';
 import {
   buildWorkflowCaller,
-  CALLER_WORKFLOW_FILES,
+  CALLER_WORKFLOW_FILE,
   CONFIG_BRANCH,
   configurationTransaction,
   isCorrelatedRunName,
@@ -127,7 +127,7 @@ describe('the CI caller', () => {
 
   test('is written as kthx.yml, and its runs are found under either prefix', () => {
     expect(WORKFLOW_PATH).toBe('.github/workflows/kthx.yml');
-    expect(CALLER_WORKFLOW_FILES).toEqual(['kthx.yml', 'spindrift.yml']);
+    expect(CALLER_WORKFLOW_FILE).toBe('kthx.yml');
     expect(isCorrelatedRunName('kthx dispatch-1', 'dispatch-1')).toBe(true);
     // A repository still on the legacy caller stamps the legacy prefix.
     expect(isCorrelatedRunName('spindrift dispatch-1', 'dispatch-1')).toBe(

@@ -2,7 +2,7 @@
  * Browser sessions, agent tokens and passkey sign-in. A token is 32 random
  * bytes; its row holds only the SHA-256.
  */
-import { and, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, desc, eq, gt } from 'drizzle-orm';
 import type { Clock, Principal, PrincipalKind } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { credentials, sessions, users } from '../db/schema.ts';
@@ -25,10 +25,6 @@ import {
  * names a `Domain`, lacks `Secure` or is scoped below `/`.
  */
 export const SESSION_COOKIE = '__Host-kthx_session';
-
-// Transitional: still read so a deploy signs nobody out, and moved to
-// `SESSION_COOKIE` on the response. Drop it a release after this name ships.
-export const LEGACY_SESSION_COOKIE = 'spindrift_session';
 
 /** Enforced by the row's expiry at every read, not the cookie's `Max-Age`. */
 export const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -93,9 +89,7 @@ export function sessionCookie(token: string): string {
 
 /** A blank cookie is still sent; only `Max-Age=0` makes the browser drop it. */
 export function clearedSessionCookies(): readonly string[] {
-  return [SESSION_COOKIE, LEGACY_SESSION_COOKIE].map((name) =>
-    cookieHeader(name, '', 0),
-  );
+  return [cookieHeader(SESSION_COOKIE, '', 0)];
 }
 
 function cookieOf(request: Request, name: string): string | null {
@@ -112,44 +106,7 @@ function cookieOf(request: Request, name: string): string | null {
 }
 
 export function sessionTokenOf(request: Request): string | null {
-  return (
-    cookieOf(request, SESSION_COOKIE) ??
-    cookieOf(request, LEGACY_SESSION_COOKIE)
-  );
-}
-
-const setsCookie = (response: Response, name: string): boolean =>
-  response.headers.getSetCookie().some((value) => value.startsWith(`${name}=`));
-
-/**
- * Expires a legacy cookie on the response, and first copies it to the new
- * name when it still opens a session and the response sets none of its own.
- * Read after the handler, so a sign-out is never undone.
- */
-export async function migrateLegacySession(
-  request: Request,
-  response: Response,
-  deps: SessionStore,
-): Promise<Response> {
-  const legacy = cookieOf(request, LEGACY_SESSION_COOKIE);
-  if (legacy === null || setsCookie(response, LEGACY_SESSION_COOKIE)) {
-    return response;
-  }
-
-  const headers = new Headers(response.headers);
-  if (
-    cookieOf(request, SESSION_COOKIE) === null &&
-    !setsCookie(response, SESSION_COOKIE) &&
-    (await resolveToken(deps, legacy, 'browser')) !== null
-  ) {
-    headers.append('set-cookie', sessionCookie(legacy));
-  }
-  headers.append('set-cookie', cookieHeader(LEGACY_SESSION_COOKIE, '', 0));
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return cookieOf(request, SESSION_COOKIE);
 }
 
 /** The only place the plaintext token exists; the database holds its hash. */
@@ -382,13 +339,11 @@ export async function closeSession(
   request: Request,
   deps: AuthDeps,
 ): Promise<void> {
-  const tokens = [SESSION_COOKIE, LEGACY_SESSION_COOKIE]
-    .map((name) => cookieOf(request, name))
-    .filter((token) => token !== null);
-  if (tokens.length === 0) return;
+  const token = cookieOf(request, SESSION_COOKIE);
+  if (token === null) return;
   await deps.db.delete(sessions).where(
     and(
-      inArray(sessions.tokenHash, await Promise.all(tokens.map(hashToken))),
+      eq(sessions.tokenHash, await hashToken(token)),
       // Signing out never revokes an agent token.
       eq(sessions.kind, 'browser'),
     ),
