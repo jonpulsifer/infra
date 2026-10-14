@@ -40,7 +40,7 @@ ARG EZA_VERSION=0.23.5
 # renovate: datasource=github-releases depName=fluxcd/flux2
 ARG FLUX_VERSION=2.9.6
 # renovate: datasource=github-releases depName=junegunn/fzf
-ARG FZF_VERSION=0.74.4
+ARG FZF_VERSION=0.74.5
 # renovate: datasource=github-releases depName=cli/cli
 ARG GH_VERSION=2.102.0
 # renovate: datasource=github-releases depName=helm/helm
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.1
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.3
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.10.7
+ARG MISE_VERSION=2026.10.8
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
