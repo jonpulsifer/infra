@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { FromMate } from '@repo/mate-voice-protocol';
 import type { ServerWebSocket } from 'bun';
 import { MateLink } from '../src/link.ts';
 import { silentLog } from '../src/log.ts';
-import type { FromMate } from '../src/protocol.ts';
 import { CHANNEL, GUILD, OWNER } from './fakes.ts';
 
 function mate() {

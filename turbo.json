@@ -41,6 +41,7 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/mate-hands/**",
+        "$TURBO_ROOT$/packages/mate-voice-protocol/**",
         "$TURBO_ROOT$/packages/pi-store-postgres/**",
         "$TURBO_ROOT$/AGENTS.md",
         "$TURBO_ROOT$/dotfiles/pi/mate/persona.md",

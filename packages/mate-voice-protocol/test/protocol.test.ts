@@ -4,7 +4,7 @@ import {
   decodeFromMate,
   encode,
   PROTOCOL_VERSION,
-} from '../src/protocol.ts';
+} from '../src/index.ts';
 
 const GUILD = '444444444444444444';
 const CHANNEL = '333333333333333333';

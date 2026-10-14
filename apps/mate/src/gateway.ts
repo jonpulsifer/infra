@@ -16,7 +16,9 @@ import type { SessionStore } from './session.ts';
 export const INTENTS =
   GatewayIntentBits.Guilds |
   GatewayIntentBits.GuildMessages |
-  GatewayIntentBits.MessageContent;
+  GatewayIntentBits.MessageContent |
+  // Who is in which voice channel, for the voice bridge.
+  GatewayIntentBits.GuildVoiceStates;
 
 /** Configuration errors that reconnecting cannot fix, so the process exits. */
 export const FATAL_CLOSE_CODES: ReadonlySet<number> = new Set([

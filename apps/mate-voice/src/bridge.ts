@@ -3,13 +3,14 @@
  * mate's messages, with the link's loss bounded by a timer after which the
  * call ends on its own. `main.ts` wires it to the process.
  */
+
+import { type FromMate, PROTOCOL_VERSION } from '@repo/mate-voice-protocol';
 import { relayAdapter } from './adapter.ts';
 import { Call, type Connect } from './call.ts';
 import type { Config } from './config.ts';
 import type { MateLink } from './link.ts';
 import type { Log } from './log.ts';
 import type { Playback } from './playback.ts';
-import { type FromMate, PROTOCOL_VERSION } from './protocol.ts';
 
 export const VERSION = '0.1.0';
 

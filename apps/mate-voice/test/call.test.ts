@@ -4,11 +4,11 @@ import {
   VoiceConnectionDisconnectReason,
   VoiceConnectionStatus,
 } from '@discordjs/voice';
+import type { CallState, StallReason } from '@repo/mate-voice-protocol';
 import { relayAdapter } from '../src/adapter.ts';
 import { Call } from '../src/call.ts';
 import { silentLog } from '../src/log.ts';
 import { Playback } from '../src/playback.ts';
-import type { CallState, StallReason } from '../src/protocol.ts';
 import { CHANNEL, FakePlayer, fakeConnect, GUILD, OWNER } from './fakes.ts';
 
 function setup(overrides: { rejoinCap?: number; joinTimeoutMs?: number } = {}) {

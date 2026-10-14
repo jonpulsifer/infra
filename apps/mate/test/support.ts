@@ -465,6 +465,12 @@ export class FakeDiscord implements Discord {
     this.acks.push(interactionId);
   }
 
+  /** Ephemeral slash-command answers, by interaction. */
+  readonly whispers: { interactionId: string; line: string }[] = [];
+  async whisperBack(interactionId: string, _token: string, line: string) {
+    this.whispers.push({ interactionId, line });
+  }
+
   async react(channelId: string, messageId: string, emoji: string) {
     if (this.failReactions) throw this.failReactions;
     this.reactions.add(`${channelId}/${messageId}/${emoji}`);
