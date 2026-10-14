@@ -37,4 +37,4 @@ Reach it at `hotrod.lolwtf.ca` with `talosctl --context offsite --nodes hotrod.l
 
 - The NVMe holds the EPHEMERAL partition and the `data` volume; there is no second disk.
 - Memory runs single-channel: the second SODIMM slot is empty.
-- A pod that holds a `local-path` volume on hotrod and does not tolerate the taint cannot be rescheduled: the volume pins it here and the taint refuses it. The `clankerbanker` Datastore in `spindrift-datastores` is such a pod, from before the taint. Its volume moves only through the kthx engine, which owns that namespace.
+- A pod that holds a `local-path` volume on hotrod and does not tolerate the taint cannot be rescheduled: the volume pins it here and the taint refuses it. No such pod remains, and the taint keeps a new one away.
