@@ -12,7 +12,7 @@ spec:
     kind: GitRepository
     name: infra
   dependsOn:
-    # packages/charts/spindrift renders a CNPG Cluster. helm-controller, not the
+    # packages/charts/kthx-engine renders a CNPG Cluster. helm-controller, not the
     # dry-run, meets a missing CRD, and the install fails past its retries.
     - name: cloudnative-pg
     # The barman-cloud plugin's ObjectStore kind, for the same reason.

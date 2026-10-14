@@ -66,10 +66,7 @@ export async function render(
   overrides: Values = {},
 ): Promise<RenderedObject[]> {
   const values = merge(BASELINE, overrides);
-  const file = join(
-    tmpdir(),
-    `spindrift-app-values-${crypto.randomUUID()}.json`,
-  );
+  const file = join(tmpdir(), `kthx-app-values-${crypto.randomUUID()}.json`);
   await Bun.write(file, JSON.stringify(values));
 
   try {

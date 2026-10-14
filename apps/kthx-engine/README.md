@@ -72,9 +72,9 @@ The tests enforce these rules:
 
 `.github/workflows/containers.yml` publishes `ghcr.io/jonpulsifer/spindrift`.
 `.github/workflows/spindrift-charts.yml` publishes the chart in
-`packages/charts/spindrift/` to an OCI registry. Flux applies
+`packages/charts/kthx-engine/` to an OCI registry. Flux applies
 `clusters/offsite/apps/spindrift/`, whose HelmRelease installs that chart. The
 chart runs the migrations as a Job. The engine deploys each app on a Kubernetes
-Target with the chart in `packages/charts/spindrift-app/`. The installation
+Target with the chart in `packages/charts/kthx-app/`. The installation
 manifest is a row in the database, and no file in git holds it. See
 [Install kthx](https://wiki.lolwtf.ca/runbooks/install-kthx/).

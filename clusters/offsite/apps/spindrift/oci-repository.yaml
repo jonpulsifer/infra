@@ -1,5 +1,5 @@
 ---
-# .github/workflows/spindrift-charts.yml pushes packages/charts/spindrift here
+# .github/workflows/spindrift-charts.yml pushes packages/charts/kthx-engine here
 # on each merge that touches it, tagged with its Chart.yaml version.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -12,5 +12,5 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    tag: 0.5.4
-  url: oci://ghcr.io/jonpulsifer/charts/spindrift
+    tag: 0.6.0
+  url: oci://ghcr.io/jonpulsifer/charts/kthx-engine

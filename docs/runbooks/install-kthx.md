@@ -20,7 +20,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 ## Declare the installation
 
-`clusters/offsite/apps/spindrift/` is the installation, and `packages/charts/spindrift/values.yaml` describes its values. A Target is where kthx deploys built apps.
+`clusters/offsite/apps/spindrift/` is the installation, and `packages/charts/kthx-engine/values.yaml` describes its values. A Target is where kthx deploys built apps.
 
 1. In `helm-release.yaml`, set `hostname` to `<hostname>` and `ingress.enabled` to `false`.
 
