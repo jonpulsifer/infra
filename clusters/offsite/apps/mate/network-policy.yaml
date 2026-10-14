@@ -1,7 +1,9 @@
 ---
-# Egress for the bot pod; sandbox-network-policy.yaml covers sandboxes. Cilium
-# admits the node, where the readiness probe comes from, and Alertmanager's
-# pods, which post to /alertmanager; nothing else reaches mate.
+# Egress for the bot pod; sandbox-network-policy.yaml covers sandboxes and
+# voice-network-policy.yaml the voice bridge. Cilium admits the node, where
+# the readiness probe comes from, Alertmanager's pods, which post to
+# /alertmanager, and the voice bridge, which dials /voice; nothing else
+# reaches mate.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -29,6 +31,15 @@ spec:
         - matchLabels:
             io.kubernetes.pod.namespace: monitoring
             app.kubernetes.io/name: alertmanager
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # The voice bridge (voice-deployment.yaml), which dials /voice on the same
+    # port. mate keeps one bridge link and replaces it with the next.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: mate-voice
       toPorts:
         - ports:
             - port: "8080"
