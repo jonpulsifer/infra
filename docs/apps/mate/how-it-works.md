@@ -69,7 +69,7 @@ mate downloads no file on a message. The prompt ends with a line naming each fil
 
 `/join`, `/leave`, and a mention that says only `join` or `leave`, are the voice commands. mate registers the two slash commands on its guild at every READY, and the guild's Discord settings decide who sees them. Every path checks `MATE_ALLOWED_USER_IDS`: another user is refused. mate joins only the voice channel the owner is in, and only when `MATE_ALLOWED_CHANNEL_IDS` lists it, so a voice channel goes on that list. A slash command is answered where only its user sees it; a mention is answered in its channel, and that channel gets the call's status lines. mate holds one call. It leaves when the owner leaves the channel, when the channel has nobody else in it, when asked, and when the bridge stalls. If the bridge's link drops mid-call mate sends the leave itself, and if mate restarts the bridge keeps the call until the next mate adopts it or thirty seconds pass.
 
-`mate-voice` has no Deployment yet, so the commands answer that the bridge is not connected. The bridge's own page lands with its Deployment.
+While no `mate-voice` pod is linked, the commands answer that the bridge is not connected.
 
 ## A turn
 
