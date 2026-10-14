@@ -1,0 +1,18 @@
+[
+  {
+    "_comment": "The context is the repo root because the Dockerfile prunes the workspace; the watch list is what turbo prune pulls in.",
+    "image": "mate-voice",
+    "context": ".",
+    "file": "apps/mate-voice/Dockerfile",
+    "platforms": "linux/amd64",
+    "no-cache-filters": "runner",
+    "watch": [
+      "apps/mate-voice",
+      "packages/typescript-config",
+      ".dockerignore",
+      "package.json",
+      "bun.lock",
+      "turbo.json"
+    ]
+  }
+]
