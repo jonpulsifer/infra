@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Internet report</title>
+<meta name="description" content="What the house network saw on a bad-internet day: the Wi-Fi hop, the gateway's WAN monitor and the Starlink dish's own event log.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s1-wash: rgba(42,120,214,0.10); --dim: #c3c2b7;
+  --good: #006300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s1-wash: rgba(57,135,229,0.12); --dim: #4a4a47;
+    --good: #0ca30c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s1-wash: rgba(57,135,229,0.12); --dim: #4a4a47;
+  --good: #0ca30c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+header h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 4px; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--ink-2); }
+.hero { margin: 28px 0 8px; padding: 24px; background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; display: grid; grid-template-columns: auto 1fr; gap: 8px 28px; align-items: center; }
+.hero .num { font-size: 56px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
+.hero .num small { display: block; font-size: 0.85rem; font-weight: 400; color: var(--ink-2); margin-top: 6px; letter-spacing: 0; }
+.hero h2 { margin: 0 0 6px; font-size: 1.35rem; line-height: 1.25; }
+.hero p { margin: 0; color: var(--ink-2); }
+@media (max-width: 560px) { .hero { grid-template-columns: 1fr; } }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0 32px; }
+.tile { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 14px 16px; }
+.tile .label { color: var(--ink-2); font-size: 0.85rem; }
+.tile .value { font-size: 1.7rem; font-weight: 600; line-height: 1.15; margin-top: 2px; }
+.tile .note { color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+section { margin: 36px 0; }
+section > h2 { font-size: 1.25rem; margin: 0 0 4px; }
+section > p.lead { margin: 0 0 14px; color: var(--ink-2); }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; position: relative; }
+.card h3 { margin: 0; font-size: 1rem; }
+.card .sub { margin: 2px 0 10px; color: var(--ink-2); font-size: 0.85rem; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg.chart text { font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); font-variant-numeric: tabular-nums; }
+svg.chart .grid line { stroke: var(--grid); stroke-width: 1; }
+svg.chart .axis { stroke: var(--axis); stroke-width: 1; }
+svg.chart .lbl { fill: var(--ink-2); }
+svg.chart .lbl.strong { fill: var(--ink); font-weight: 600; }
+svg.chart .crosshair { stroke: var(--axis); stroke-width: 1; pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.85rem; color: var(--ink-2); margin: 8px 0 2px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; }
+.legend i.rect { width: 12px; height: 12px; border-radius: 3px; }
+.tip { position: absolute; z-index: 2; pointer-events: none; background: var(--surface); border: 1px solid var(--ring); box-shadow: 0 4px 16px rgba(0,0,0,0.12); border-radius: 8px; padding: 8px 10px; font-size: 0.85rem; min-width: 140px; display: none; }
+.tip .t { color: var(--muted); margin-bottom: 4px; }
+.tip .row { display: flex; align-items: center; gap: 8px; }
+.tip .row i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; }
+.tip .row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tip .row span { color: var(--ink-2); }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+th { color: var(--ink-2); font-weight: 500; font-size: 0.8rem; }
+td.num, th.num { text-align: right; }
+details summary { cursor: pointer; color: var(--ink-2); }
+.prose p { margin: 0 0 12px; }
+.prose ul { margin: 0 0 12px; padding-left: 22px; }
+.prose li { margin-bottom: 6px; }
+footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+.ok { color: var(--good); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) { .tip { transition: opacity .08s; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title">Internet report</h1>
+    <p id="subtitle"></p>
+  </header>
+
+  <div class="hero">
+    <div class="num"><span id="heroNum">–</span><small id="heroNote"></small></div>
+    <div>
+      <h2 id="heroHead">Reading the day…</h2>
+      <p id="heroText"></p>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <h2>Starlink</h2>
+    <p class="lead">The satellite dish keeps its own log of every moment it lost the network. Both charts come straight from it.</p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Outage events per day</h3>
+        <div class="sub">Count of drops the dish logged, last five days</div>
+        <div id="daysChart"></div>
+      </div>
+      <div class="card">
+        <h3>Seconds without network per day</h3>
+        <div class="sub">Total length of the dish's drops</div>
+        <div id="secsChart"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>When the dish dropped today</h3>
+      <div class="sub">Each column is one event, its height the seconds it lasted. Packet-loss runs are the ones a video call feels.</div>
+      <div id="timelineChart"></div>
+      <div class="legend"><span><i class="rect" style="background:var(--s1)"></i>Packet-loss run</span><span><i class="rect" style="background:var(--dim)"></i>Sub-second blip</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Your Wi-Fi hop</h2>
+    <p class="lead" id="wifiLead"></p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Signal strength</h3>
+        <div class="sub">dBm as the access point hears your laptop. Anything above −70 is comfortable.</div>
+        <div id="signalChart"></div>
+      </div>
+      <div class="card">
+        <h3>Wi-Fi satisfaction</h3>
+        <div class="sub">The access point's 0–100 score for the link, every five minutes</div>
+        <div id="satChart"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Upload traffic</h2>
+    <p class="lead">Upload is what a video call needs most, and what Starlink has least of. Your laptop's line sits on top of the whole house's line all day: your calls were the house's internet use.</p>
+    <div class="card">
+      <h3>Megabits per second sent out, five-minute averages</h3>
+      <div class="sub">Laptop upload measured at the access point, house upload measured at the gateway</div>
+      <div id="uploadChart"></div>
+      <div class="legend"><span><i style="background:var(--s1)"></i><span id="legClient">Laptop</span></span><span><i style="background:var(--s2)"></i>Whole house</span></div>
+    </div>
+  </section>
+
+  <section class="prose">
+    <h2>What this means</h2>
+    <div id="meaning"></div>
+  </section>
+
+  <section>
+    <h2>The dish's log for today</h2>
+    <details>
+      <summary id="eventsSummary">Show every event</summary>
+      <div class="card" style="margin-top:10px; overflow:auto">
+        <table id="eventsTable"><thead><tr><th>Time</th><th class="num">Lasted</th><th>What the dish logged</th></tr></thead><tbody></tbody></table>
+      </div>
+    </details>
+  </section>
+
+  <section class="prose">
+    <h2>How this was checked</h2>
+    <div id="method"></div>
+  </section>
+
+  <footer id="foot"></footer>
+</main>
+<script src="data.js"></script>
+<script>
+(function () {
+  const D = window.NETDATA;
+  if (!D) return;
+  const el = (id) => document.getElementById(id);
+  const text = (id, s) => { el(id).textContent = s; };
+  const mins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  const fmtT = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  const prettyDay = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' });
+  const shortDay = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', day: 'numeric' });
+  const firstName = (D.client.name || 'The laptop').replace(/[-_]?(MBP|MacBook.*|Laptop|s)$/i, '').replace(/s$/, '') || 'The laptop';
+
+  // ---------- derived numbers ----------
+  const today = D.dishDays.find(d => d.d === D.day) || { n: 0, s: 0, loss: 0 };
+  const priors = D.dishDays.filter(d => d.d !== D.day);
+  const priorMax = priors.length ? Math.max(...priors.map(d => d.n)) : 0;
+  const priorMin = priors.length ? Math.min(...priors.map(d => d.n)) : 0;
+  const lossRuns = D.dishEvents.filter(e => /PACKET_LOSS/.test(e.reason));
+  const longest = D.dishEvents.reduce((a, e) => Math.max(a, e.dur), 0);
+  const work = D.wifi.filter(b => mins(b.t) >= 9 * 60 && mins(b.t) < 17 * 60 && (b.up + b.down) > 0.05);
+  const avg = (xs, k) => xs.length ? xs.reduce((a, b) => a + b[k], 0) / xs.length : 0;
+  const avgSig = avg(work, 'sig'), avgSat = avg(work, 'sat'), avgRetry = avg(work, 'retry');
+  const minSat = work.length ? Math.min(...work.map(b => b.sat)) : 0;
+  const clientUpMB = D.wifi.reduce((a, b) => a + b.up * 300 / 8, 0);
+  const houseUpMB = D.wan.reduce((a, b) => a + b.up * 300 / 8, 0);
+  const share = houseUpMB ? Math.round(100 * clientUpMB / houseUpMB) : 0;
+  const bad = today.n > Math.max(2 * priorMax, 10) || lossRuns.length >= 3;
+
+  // ---------- header, hero, tiles ----------
+  text('title', `${firstName}'s internet, ${prettyDay(D.day)}`);
+  text('subtitle', `What the house network saw. Read at ${D.generated}; times are ${D.tz.replace('America/', '')} local.`);
+  text('heroNum', String(today.n));
+  text('heroNote', priors.length ? `Starlink drops today, vs ${priorMin}–${priorMax} on each of the ${priors.length} days before` : 'Starlink drops today');
+  if (bad) {
+    text('heroHead', 'Your Wi-Fi was fine. Starlink had a rough day.');
+    text('heroText', `The dish logged ${lossRuns.length} packet-loss runs of up to ${longest.toFixed(0)} seconds, ${today.s.toFixed(0)} seconds of lost network in all. Your laptop's Wi-Fi link held at ${avgSig.toFixed(0)} dBm with a ${avgSat.toFixed(0)}/100 score through the work day.`);
+  } else {
+    text('heroHead', 'Nothing stood out today.');
+    text('heroText', `Starlink logged ${today.n} drops, ${today.s.toFixed(0)} seconds in all, which is a normal day. The Wi-Fi link held at ${avgSig.toFixed(0)} dBm with a ${avgSat.toFixed(0)}/100 score.`);
+  }
+  const tiles = [
+    ['Longest Starlink drop', `${longest.toFixed(longest < 10 ? 1 : 0)} s`, 'a video call freezes past ~2 s'],
+    ['Packet-loss runs', String(lossRuns.length), 'runs of 5 s or more'],
+    ['Network lost today', `${Math.round(today.s)} s`, 'sum of every drop'],
+    ['Wi-Fi signal', `${avgSig.toFixed(0)} dBm`, 'work-hours average; −70 is the comfort line'],
+    ['Wi-Fi score', `${avgSat.toFixed(0)}/100`, `never below ${minSat} in work hours`],
+    ['Your share of upload', `${share}%`, 'of everything the house sent out'],
+  ];
+  el('tiles').replaceChildren(...tiles.map(([l, v, n]) => {
+    const d = document.createElement('div'); d.className = 'tile';
+    const a = document.createElement('div'); a.className = 'label'; a.textContent = l;
+    const b = document.createElement('div'); b.className = 'value'; b.textContent = v;
+    const c = document.createElement('div'); c.className = 'note'; c.textContent = n;
+    d.append(a, b, c); return d;
+  }));
+  text('wifiLead', `${firstName}'s laptop was on Wi-Fi all day, on the access point called ${D.client.ap || '?'}${D.client.radio === '6e' ? ' over 6 GHz' : ''}. Both lines stay flat and healthy, so the problem was not between the laptop and the house.`);
+  text('legClient', `${firstName}'s laptop`);
+
+  // ---------- svg helpers ----------
+  const NS = 'http://www.w3.org/2000/svg';
+  const mk = (n, attrs, parent) => { const e = document.createElementNS(NS, n); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const niceTicks = (lo, hi, n) => { const span = hi - lo, raw = span / n, p = Math.pow(10, Math.floor(Math.log10(raw))), s = [1, 2, 5, 10].map(x => x * p).find(x => x >= raw); const out = []; for (let v = Math.ceil(lo / s) * s; v <= hi + 1e-9; v += s) out.push(+v.toFixed(6)); return out; };
+  function tooltip(card) { let t = card.querySelector('.tip'); if (!t) { t = document.createElement('div'); t.className = 'tip'; card.appendChild(t); } return t; }
+  function showTip(tip, card, x, y, title, rows) {
+    tip.replaceChildren();
+    const h = document.createElement('div'); h.className = 't'; h.textContent = title; tip.appendChild(h);
+    for (const r of rows) {
+      const d = document.createElement('div'); d.className = 'row';
+      const i = document.createElement('i'); i.style.background = r.color;
+      const b = document.createElement('b'); b.textContent = r.value;
+      const s = document.createElement('span'); s.textContent = r.label;
+      d.append(i, b, s); tip.appendChild(d);
+    }
+    tip.style.display = 'block';
+    const rect = card.getBoundingClientRect(), tw = tip.offsetWidth;
+    let left = x - rect.left + 14; if (left + tw > rect.width - 8) left = x - rect.left - tw - 14;
+    tip.style.left = Math.max(8, left) + 'px'; tip.style.top = Math.max(8, y - rect.top - 10) + 'px';
+  }
+
+  // Time-of-day line chart. series: [{name, color, points: [{t:'HH:MM', v}]}]
+  function lineChart(id, series, opts) {
+    const host = el(id), card = host.closest('.card'), tip = tooltip(card);
+    const W = 600, H = opts.h || 220, m = { l: 40, r: 14, t: 10, b: 26 };
+    const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': opts.label || '' }, host);
+    const x0 = 0, x1 = 24 * 60;
+    const allV = series.flatMap(s => s.points.map(p => p.v));
+    const lo = opts.lo ?? Math.min(...allV), hi = opts.hi ?? Math.max(...allV);
+    const X = (mn) => m.l + (mn - x0) / (x1 - x0) * (W - m.l - m.r);
+    const Y = (v) => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+    const g = mk('g', { class: 'grid' }, svg);
+    for (const v of (opts.ticks || niceTicks(lo, hi, 4))) { mk('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }, g); const t = mk('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end' }, svg); t.textContent = opts.fmt ? opts.fmt(v) : v; }
+    for (let h = 0; h <= 24; h += 3) { const t = mk('text', { x: X(h * 60), y: H - 8, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle' }, svg); t.textContent = h === 24 ? '24:00' : String(h).padStart(2, '0') + ':00'; }
+    mk('line', { class: 'axis', x1: m.l, x2: W - m.r, y1: Y(lo), y2: Y(lo) }, svg);
+    if (opts.ref != null) { mk('line', { x1: m.l, x2: W - m.r, y1: Y(opts.ref), y2: Y(opts.ref), stroke: 'var(--axis)', 'stroke-width': 1, 'stroke-dasharray': '0' }, svg); const t = mk('text', { x: W - m.r, y: Y(opts.ref) - 4, 'text-anchor': 'end', class: 'lbl' }, svg); t.textContent = opts.refLabel; }
+    for (const s of series) {
+      const pts = s.points.filter(p => p.v != null);
+      if (!pts.length) continue;
+      const d = pts.map((p, i) => (i ? 'L' : 'M') + X(mins(p.t)).toFixed(1) + ' ' + Y(p.v).toFixed(1)).join(' ');
+      if (s.area) mk('path', { d: d + ` L${X(mins(pts[pts.length - 1].t)).toFixed(1)} ${Y(lo)} L${X(mins(pts[0].t)).toFixed(1)} ${Y(lo)} Z`, fill: s.color, opacity: 0.10 }, svg);
+      mk('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+      const last = pts[pts.length - 1];
+      mk('circle', { cx: X(mins(last.t)), cy: Y(last.v), r: 4, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 }, svg);
+      if (series.length > 1) { const t = mk('text', { x: X(mins(last.t)) + 7, y: Y(last.v) + 4, class: 'lbl' }, svg); t.textContent = s.name; }
+    }
+    const cross = mk('line', { class: 'crosshair', y1: m.t, y2: H - m.b, x1: 0, x2: 0, style: 'display:none' }, svg);
+    const dots = series.map(s => mk('circle', { r: 5, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2, style: 'display:none' }, svg));
+    const hit = mk('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' }, svg);
+    const times = series[0].points.map(p => mins(p.t));
+    function move(ev) {
+      const r = svg.getBoundingClientRect(); const mn = x0 + (ev.clientX - r.left) / r.width * W; const mm = (mn - m.l) / (W - m.l - m.r) * (x1 - x0);
+      let bi = 0, bd = 1e9; times.forEach((t, i) => { const d = Math.abs(t - mm); if (d < bd) { bd = d; bi = i; } });
+      if (bd > 20) { leave(); return; }
+      const tm = times[bi]; cross.setAttribute('x1', X(tm)); cross.setAttribute('x2', X(tm)); cross.style.display = '';
+      const rows = [];
+      series.forEach((s, si) => { const p = s.points[bi]; if (!p || p.v == null) { dots[si].style.display = 'none'; return; } dots[si].setAttribute('cx', X(tm)); dots[si].setAttribute('cy', Y(p.v)); dots[si].style.display = ''; rows.push({ color: s.color, value: opts.fmt ? opts.fmt(p.v) : p.v, label: s.name }); });
+      showTip(tip, card, ev.clientX, ev.clientY, fmtT(tm), rows);
+    }
+    function leave() { cross.style.display = 'none'; dots.forEach(d => d.style.display = 'none'); tip.style.display = 'none'; }
+    hit.addEventListener('pointermove', move); hit.addEventListener('pointerleave', leave);
+  }
+
+  // Columns on a categorical axis. items: [{label, v, color, strong}]
+  function columnChart(id, items, opts) {
+    const host = el(id), card = host.closest('.card'), tip = tooltip(card);
+    const W = 600, H = opts.h || 200, m = { l: 36, r: 10, t: 22, b: 26 };
+    const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': opts.label || '' }, host);
+    const hi = Math.max(1, ...items.map(i => i.v)) * 1.1, lo = 0;
+    const Y = (v) => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+    const band = (W - m.l - m.r) / items.length, bw = Math.min(24, band * 0.6);
+    const g = mk('g', { class: 'grid' }, svg);
+    for (const v of niceTicks(lo, hi, 3)) { mk('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }, g); const t = mk('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end' }, svg); t.textContent = v; }
+    mk('line', { class: 'axis', x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0) }, svg);
+    items.forEach((it, i) => {
+      const cx = m.l + band * (i + 0.5), top = Y(it.v), h = Math.max(0, Y(0) - top), r = Math.min(4, h);
+      const d = `M${cx - bw / 2} ${Y(0)} V${top + r} a${r} ${r} 0 0 1 ${r} -${r} H${cx + bw / 2 - r} a${r} ${r} 0 0 1 ${r} ${r} V${Y(0)} Z`;
+      const p = mk('path', { d, fill: it.color }, svg);
+      const t = mk('text', { x: cx, y: H - 8, 'text-anchor': 'middle', class: it.strong ? 'lbl strong' : '' }, svg); t.textContent = it.label;
+      if (it.strong || opts.labelAll) { const v = mk('text', { x: cx, y: top - 6, 'text-anchor': 'middle', class: 'lbl strong' }, svg); v.textContent = opts.fmt ? opts.fmt(it.v) : it.v; }
+      const hit = mk('rect', { x: cx - band / 2, y: m.t, width: band, height: H - m.t - m.b, fill: 'transparent' }, svg);
+      hit.addEventListener('pointermove', (ev) => { p.setAttribute('opacity', '0.8'); showTip(tip, card, ev.clientX, ev.clientY, it.title || it.label, [{ color: it.color, value: opts.fmt ? opts.fmt(it.v) : it.v, label: opts.unit || '' }]); });
+      hit.addEventListener('pointerleave', () => { p.removeAttribute('opacity'); tip.style.display = 'none'; });
+    });
+  }
+
+  // Events across the day: x = time, height = seconds.
+  function timeline(id, events) {
+    const host = el(id), card = host.closest('.card'), tip = tooltip(card);
+    const W = 600, H = 220, m = { l: 36, r: 14, t: 14, b: 26 };
+    const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': 'Starlink events through the day' }, host);
+    const hi = Math.max(5, ...events.map(e => e.dur)) * 1.1;
+    const X = (mn) => m.l + mn / 1440 * (W - m.l - m.r), Y = (v) => m.t + (hi - v) / hi * (H - m.t - m.b);
+    mk('rect', { x: X(9 * 60), y: m.t, width: X(17 * 60) - X(9 * 60), height: H - m.t - m.b, fill: 'var(--grid)', opacity: 0.45 }, svg);
+    const wl = mk('text', { x: X(13 * 60), y: m.t + 12, 'text-anchor': 'middle' }, svg); wl.textContent = 'work hours';
+    const g = mk('g', { class: 'grid' }, svg);
+    for (const v of niceTicks(0, hi, 3)) { mk('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }, g); const t = mk('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end' }, svg); t.textContent = v + ' s'; }
+    for (let h = 0; h <= 24; h += 3) { const t = mk('text', { x: X(h * 60), y: H - 8, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle' }, svg); t.textContent = h === 24 ? '24:00' : String(h).padStart(2, '0') + ':00'; }
+    mk('line', { class: 'axis', x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0) }, svg);
+    const sorted = [...events].sort((a, b) => a.dur - b.dur);
+    for (const e of sorted) {
+      const loss = /PACKET_LOSS/.test(e.reason), cx = X(mins(e.t)), top = Y(Math.max(e.dur, 0.6)), h = Y(0) - top, r = Math.min(3, h / 2), w = 6;
+      const d = `M${cx - w / 2} ${Y(0)} V${top + r} a${r} ${r} 0 0 1 ${r} -${r} H${cx + w / 2 - r} a${r} ${r} 0 0 1 ${r} ${r} V${Y(0)} Z`;
+      const p = mk('path', { d, fill: loss ? 'var(--s1)' : 'var(--dim)' }, svg);
+      const hit = mk('rect', { x: cx - 8, y: Math.min(top, Y(0) - 24), width: 16, height: Math.max(24, h), fill: 'transparent' }, svg);
+      const nice = e.reason.replace('OUTAGE_', '').replace(/_/g, ' ').toLowerCase();
+      hit.addEventListener('pointermove', (ev) => { p.setAttribute('opacity', '0.75'); showTip(tip, card, ev.clientX, ev.clientY, e.t, [{ color: loss ? 'var(--s1)' : 'var(--dim)', value: e.dur + ' s', label: nice }]); });
+      hit.addEventListener('pointerleave', () => { p.removeAttribute('opacity'); tip.style.display = 'none'; });
+    }
+    const longestE = events.reduce((a, e) => (e.dur > (a ? a.dur : -1) ? e : a), null);
+    if (longestE) { const t = mk('text', { x: Math.min(X(mins(longestE.t)) + 8, W - 80), y: Y(longestE.dur) + 4, class: 'lbl strong' }, svg); t.textContent = `${longestE.dur} s at ${longestE.t}`; }
+  }
+
+  // ---------- render ----------
+  const dayItems = D.dishDays.slice(-5);
+  columnChart('daysChart', dayItems.map(d => ({ label: shortDay(d.d), title: prettyDay(d.d), v: d.n, color: d.d === D.day ? 'var(--s1)' : 'var(--dim)', strong: d.d === D.day })), { unit: 'drops', label: 'Starlink outage events per day' });
+  columnChart('secsChart', dayItems.map(d => ({ label: shortDay(d.d), title: prettyDay(d.d), v: Math.round(d.s), color: d.d === D.day ? 'var(--s1)' : 'var(--dim)', strong: d.d === D.day })), { unit: 'seconds', fmt: v => v + ' s', label: 'Seconds without network per day' });
+  timeline('timelineChart', D.dishEvents);
+  lineChart('signalChart', [{ name: 'Signal', color: 'var(--s1)', points: D.wifi.map(b => ({ t: b.t, v: b.sig })) }], { lo: -95, hi: -45, ticks: [-90, -80, -70, -60, -50], fmt: v => v + ' dBm', ref: -70, refLabel: 'comfort line', label: 'Wi-Fi signal through the day' });
+  lineChart('satChart', [{ name: 'Satisfaction', color: 'var(--s1)', points: D.wifi.map(b => ({ t: b.t, v: b.sat })), area: true }], { lo: 0, hi: 100, ticks: [0, 25, 50, 75, 100], fmt: v => v + '/100', label: 'Wi-Fi satisfaction through the day' });
+  const upHi = Math.max(1, ...D.wan.map(b => b.up), ...D.wifi.map(b => b.up));
+  lineChart('uploadChart', [
+    { name: `${firstName}'s laptop`, color: 'var(--s1)', points: D.wifi.map(b => ({ t: b.t, v: b.up })) },
+    { name: 'Whole house', color: 'var(--s2)', points: D.wan.map(b => ({ t: b.t, v: b.up })) },
+  ], { lo: 0, hi: Math.ceil(upHi * 1.15), fmt: v => (+v).toFixed(1) + ' Mbps', h: 240, label: 'Upload traffic, laptop against the whole house' });
+
+  // ---------- prose ----------
+  const P = (s) => { const p = document.createElement('p'); p.textContent = s; return p; };
+  const L = (items) => { const u = document.createElement('ul'); for (const s of items) { const li = document.createElement('li'); li.textContent = s; u.appendChild(li); } return u; };
+  const meaning = el('meaning');
+  if (bad) {
+    const lossTimes = lossRuns.map(e => e.t).join(', ');
+    meaning.append(
+      P(`Starlink, the satellite link the whole house uses, dropped packets in bursts through the day. The dish logged ${lossRuns.length} runs of heavy downlink packet loss between ${lossRuns[0]?.t || '?'} and ${lossRuns[lossRuns.length - 1]?.t || '?'} (${lossTimes}), the longest ${longest.toFixed(0)} seconds. A video call freezes or drops when the link is gone for more than a couple of seconds, so each of those would have felt like "the internet is bad."`),
+      P(`None of it was on your side of the house. Your laptop's Wi-Fi link held a strong signal and a near-perfect score every five minutes of the work day, and it only reconnected once, at ${D.clientEvents.find(e => /DISCONNECTED/.test(e.key))?.t || 'the end of the day'}, when the signal fell to ${D.clientEvents.find(e => /DISCONNECTED/.test(e.key))?.signal || '?'} dBm as the laptop moved away from its access point.`),
+      L([
+        'Plugging in with a cable would not have helped. The weak link was between the dish and the satellites, not between you and the router.',
+        'The dish reports no obstruction, so it was not a tree or snow in the way. Loss like this comes from the Starlink side: congestion on the satellite or ground station, or weather along the path.',
+        'If a call matters, a phone hotspot is the only independent path out of the house. Otherwise there is nothing to change; days like this pass.',
+      ])
+    );
+  } else {
+    meaning.append(P('Neither the satellite link nor the Wi-Fi hop logged anything unusual today. If the internet felt slow, the cause was most likely at the far end: the service you were using, or its path across the public internet.'));
+  }
+  const method = el('method');
+  method.append(
+    P('Three records were read, none of them from the laptop itself:'),
+    L([
+      `The Wi-Fi access point's five-minute statistics for the laptop: signal strength, link score, retries and traffic. The laptop appears as ${D.client.name} (${D.client.mac}).`,
+      `The gateway's own internet monitor, which pings and resolves names every few seconds and logs each failure. Today it logged ${D.wanMonitor.filter(m => /is down/.test(m.msg)).length} failure${D.wanMonitor.filter(m => /is down/.test(m.msg)).length === 1 ? '' : 's'} and reports ${(D.health.availability || 0).toFixed(2)}% availability over the last 24 hours.`,
+      'The Starlink dish\'s event log, read directly from the dish. It records every drop with its cause and length, which is where the outage counts and the timeline come from.',
+    ])
+  );
+  const tb = el('eventsTable').querySelector('tbody');
+  for (const e of D.dishEvents) {
+    const tr = document.createElement('tr');
+    for (const [v, cls] of [[e.t, ''], [e.dur + ' s', 'num'], [e.reason.replace('OUTAGE_', '').replace(/_/g, ' ').toLowerCase() + (e.sev === 'CAUTION' ? ' (caution)' : ''), '']]) { const td = document.createElement('td'); td.textContent = v; if (cls) td.className = cls; tr.appendChild(td); }
+    tb.appendChild(tr);
+  }
+  text('eventsSummary', `Show all ${D.dishEvents.length} events`);
+  text('foot', `Built from the house network's own records at ${D.generated}. Times are ${D.tz.replace('America/', '')} local. Nothing here identifies what you were doing online, only how well the links carried it.`);
+})();
+</script>
+</body>
+</html>
