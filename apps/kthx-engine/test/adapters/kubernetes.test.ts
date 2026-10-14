@@ -1153,6 +1153,47 @@ describe('the checklist', () => {
     expect(chartSource?.detail).toContain(OCI_CHART);
   });
 
+  const OLD_CHART = 'oci://ghcr.io/jonpulsifer/charts/spindrift-app';
+  const NEW_CHART = 'oci://ghcr.io/jonpulsifer/charts/kthx-app';
+
+  async function chartSourceFor(declared: string, served: string) {
+    const { adapter } = adapterFor(
+      {
+        objects: {
+          'ocirepositories/delivery/charts': {
+            apiVersion: 'source.toolkit.fluxcd.io/v1',
+            kind: 'OCIRepository',
+            metadata: { name: 'charts', namespace: 'delivery' },
+            spec: { url: served },
+          },
+        },
+      },
+      declared,
+    );
+    const { prerequisites } = await adapter.inspect(target());
+    return prerequisites.find((item) => item.name === 'CHART_SOURCE');
+  }
+
+  test('a declared old chart name accepts the renamed artifact', async () => {
+    expect((await chartSourceFor(OLD_CHART, NEW_CHART))?.met).toBe(true);
+  });
+
+  test('a declared new chart name accepts the old artifact', async () => {
+    expect((await chartSourceFor(NEW_CHART, OLD_CHART))?.met).toBe(true);
+  });
+
+  test('an unrelated artifact is refused with both URLs named', async () => {
+    const unmet = await chartSourceFor(
+      OLD_CHART,
+      'oci://ghcr.io/jonpulsifer/charts/somebody-else',
+    );
+    expect(unmet?.met).toBe(false);
+    expect(unmet?.detail).toContain(OLD_CHART);
+    expect(unmet?.detail).toContain(
+      'oci://ghcr.io/jonpulsifer/charts/somebody-else',
+    );
+  });
+
   test('a cluster running neither operator cannot deliver anything', async () => {
     const { adapter } = adapterFor({ servedKinds: {} });
     const { prerequisites } = await adapter.inspect(target());
