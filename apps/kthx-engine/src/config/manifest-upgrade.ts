@@ -18,14 +18,16 @@ function asDocument(value: unknown): Document | null {
  * what arrived. Steps run innermost first, and the order matters.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return renameAppChart(
-    dropControlPlane(
-      dropDeviceFlowIdentity(
-        listDnsZones(
-          movePinnedBuildWorkflowToMain(
-            scrubPlaceholderBuildWorkflow(
-              nameInstallationVessels(
-                dropTargetNames(addDeclaredVessels(document)),
+  return renameBuildWorkflow(
+    renameAppChart(
+      dropControlPlane(
+        dropDeviceFlowIdentity(
+          listDnsZones(
+            movePinnedBuildWorkflowToMain(
+              scrubPlaceholderBuildWorkflow(
+                nameInstallationVessels(
+                  dropTargetNames(addDeclaredVessels(document)),
+                ),
               ),
             ),
           ),
@@ -33,6 +35,34 @@ export function upgradeManifestDocument(document: unknown): unknown {
       ),
     ),
   );
+}
+
+const BUILD_WORKFLOW_FILES = {
+  old: '/.github/workflows/spindrift-build.yml@',
+  current: '/.github/workflows/kthx-engine-build.yml@',
+};
+
+/**
+ * Points a stored `github.buildWorkflow` at the reusable workflow's current
+ * file, keeping the repository and the ref. Any other workflow is an operator's.
+ */
+function renameBuildWorkflow(document: unknown): unknown {
+  const manifest = asDocument(document);
+  const github = asDocument(manifest?.github);
+  const workflow = github?.buildWorkflow;
+  if (manifest === null || github === null || typeof workflow !== 'string') {
+    return document;
+  }
+  const at = workflow.indexOf(BUILD_WORKFLOW_FILES.old);
+  if (at <= 0) return document;
+  const ref = workflow.slice(at + BUILD_WORKFLOW_FILES.old.length);
+  return {
+    ...manifest,
+    github: {
+      ...github,
+      buildWorkflow: `${workflow.slice(0, at)}${BUILD_WORKFLOW_FILES.current}${ref}`,
+    },
+  };
 }
 
 const APP_CHART_NAMES = { old: 'spindrift-app', current: 'kthx-app' };

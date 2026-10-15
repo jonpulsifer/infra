@@ -10,11 +10,13 @@ locals {
   cloud_build_worker_member = "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
 
   # Named by the reusable workflow, so every connected repository's caller of it matches.
-  spindrift_build_workflow_principal = "principalSet://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/homelab/attribute.workflow/jonpulsifer/infra/.github/workflows/spindrift-build.yml@refs/heads/main"
+  spindrift_build_workflow_principal   = "principalSet://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/homelab/attribute.workflow/jonpulsifer/infra/.github/workflows/spindrift-build.yml@refs/heads/main"
+  kthx_engine_build_workflow_principal = "principalSet://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/homelab/attribute.workflow/jonpulsifer/infra/.github/workflows/kthx-engine-build.yml@refs/heads/main"
 
   # One signer per build route. The Cloud Build worker attests as a step of the build it pushes.
   attester_principals = [
     local.spindrift_build_workflow_principal,
+    local.kthx_engine_build_workflow_principal,
     # Remove once a build on main has signed under the workflow principal.
     "principalSet://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/homelab/attribute.repository_owner/jonpulsifer",
     local.spindrift_controller_member,

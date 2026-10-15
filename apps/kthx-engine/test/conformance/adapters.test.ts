@@ -268,7 +268,7 @@ buildAdapterSuite('github-actions', () => {
       appAuthorization: () => 'Bearer test-app-jwt',
       fetch: host.fetch,
     }),
-    buildWorkflow: `${host.fullName}/.github/workflows/spindrift-build.yml@${'f'.repeat(40)}`,
+    buildWorkflow: `${host.fullName}/.github/workflows/kthx-engine-build.yml@${'f'.repeat(40)}`,
     zeroConfigFrontend: 'registry.example.test/zero-config:pinned',
     signer: '',
     attestor: '',

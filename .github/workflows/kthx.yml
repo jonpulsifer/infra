@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   build:
-    uses: ./.github/workflows/spindrift-build.yml
+    uses: ./.github/workflows/kthx-engine-build.yml
     # workflow_call passes only the secrets it is given, including the optional
     # KTHX_ENGINE_BUILD_SEAL_KEY. `inherit` is safe: the callee is in this repo.
     secrets: inherit

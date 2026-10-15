@@ -222,8 +222,8 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('is a no-op on a document that already declares them', () => {
-    // `12` needs no upgrade.
-    const current = snapshot('12-kthx-app-chart.yaml');
+    // `13` needs no upgrade.
+    const current = snapshot('13-kthx-engine-build-workflow.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });
@@ -381,3 +381,32 @@ function snapshotWith(patch: Record<string, unknown>): Record<string, unknown> {
   if (newest === undefined) throw new Error('the corpus is empty');
   return { ...snapshot(newest), ...patch };
 }
+
+describe('the reusable build workflow file', () => {
+  const upgradeWorkflow = (buildWorkflow: string) =>
+    (
+      upgradeManifestDocument({ github: { buildWorkflow } }) as {
+        github: { buildWorkflow: string };
+      }
+    ).github.buildWorkflow;
+
+  test('keeps its repository and ref under the new file name', () => {
+    expect(
+      upgradeWorkflow(
+        'jonpulsifer/infra/.github/workflows/spindrift-build.yml@main',
+      ),
+    ).toBe('jonpulsifer/infra/.github/workflows/kthx-engine-build.yml@main');
+    expect(
+      upgradeWorkflow(
+        'acme/platform/.github/workflows/spindrift-build.yml@refs/heads/release',
+      ),
+    ).toBe(
+      'acme/platform/.github/workflows/kthx-engine-build.yml@refs/heads/release',
+    );
+  });
+
+  test('leaves an unrelated workflow untouched', () => {
+    const other = 'acme/platform/.github/workflows/build.yml@main';
+    expect(upgradeWorkflow(other)).toBe(other);
+  });
+});

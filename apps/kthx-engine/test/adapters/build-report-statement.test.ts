@@ -18,7 +18,7 @@ import { parseBuildReport } from '../../src/adapters/build/report.ts';
 
 const WORKFLOW = join(
   import.meta.dir,
-  '../../../../.github/workflows/spindrift-build.yml',
+  '../../../../.github/workflows/kthx-engine-build.yml',
 );
 const REPORT_STEP = 'Report what was built';
 
@@ -87,7 +87,7 @@ async function runReportStep(docker: string = UNREACHABLE) {
         GITHUB_REPOSITORY: 'jonpulsifer/infra',
         GITHUB_RUN_ID: '12345',
         GITHUB_WORKFLOW_REF:
-          'jonpulsifer/infra/.github/workflows/spindrift-build.yml@refs/heads/main',
+          'jonpulsifer/infra/.github/workflows/kthx-engine-build.yml@refs/heads/main',
       },
     });
     const [stdout, stderr, exitCode] = await Promise.all([
@@ -164,7 +164,7 @@ describe('the hosted route reports a statement admission can read', () => {
       name: 'hosted',
       host: {} as never,
       buildWorkflow:
-        'jonpulsifer/infra/.github/workflows/spindrift-build.yml@abc',
+        'jonpulsifer/infra/.github/workflows/kthx-engine-build.yml@abc',
       zeroConfigFrontend: 'ghcr.io/railwayapp/railpack-frontend:v0.35.0',
       signer: '',
       attestor: '',

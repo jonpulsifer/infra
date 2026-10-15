@@ -63,7 +63,7 @@ import {
 } from '../harness/fakes/kubernetes-api.ts';
 
 const PLATFORM_REPO = 'example/platform';
-const WORKFLOW_REF = `${PLATFORM_REPO}/.github/workflows/spindrift-build.yml@${'f'.repeat(40)}`;
+const WORKFLOW_REF = `${PLATFORM_REPO}/.github/workflows/kthx-engine-build.yml@${'f'.repeat(40)}`;
 const FRONTEND = 'registry.example.test/zero-config:pinned';
 const SIGNER =
   'gcpkms://projects/example/locations/global/keyRings/keys/cryptoKeys/signer';
@@ -196,7 +196,7 @@ function hostedRoute(
 async function workflowDecryptScript(): Promise<string> {
   const text = await Bun.file(
     new URL(
-      '../../../../.github/workflows/spindrift-build.yml',
+      '../../../../.github/workflows/kthx-engine-build.yml',
       import.meta.url,
     ),
   ).text();
@@ -217,7 +217,7 @@ async function workflowDecryptScript(): Promise<string> {
     scriptStart === -1 ? -1 : (step?.run?.indexOf(marker, scriptStart) ?? -1);
   if (step?.run === undefined || scriptStart === -1 || cut === -1) {
     throw new Error(
-      'could not find the sealed-credential decrypt algorithm in spindrift-build.yml',
+      'could not find the sealed-credential decrypt algorithm in kthx-engine-build.yml',
     );
   }
   return `${step.run.slice(scriptStart, cut + marker.length)}\nconsole.log(JSON.stringify(auth));\n`;
@@ -546,7 +546,7 @@ describe('the hosted build route', () => {
       new URL('../../../../.github/workflows/kthx.yml', import.meta.url),
     ).text();
     expect(caller).toContain('workflow_dispatch:');
-    expect(caller).toContain('uses: ./.github/workflows/spindrift-build.yml');
+    expect(caller).toContain('uses: ./.github/workflows/kthx-engine-build.yml');
     // Assembled, because the linter flags `${` inside a plain string.
     const expression = ['${', '{ inputs.correlation }', '}'].join('');
     expect(caller).toContain(`run-name: ${RUN_NAME_PREFIX} ${expression}`);
@@ -556,7 +556,7 @@ describe('the hosted build route', () => {
     // YAML cannot import the constant.
     const workflow = await Bun.file(
       new URL(
-        '../../../../.github/workflows/spindrift-build.yml',
+        '../../../../.github/workflows/kthx-engine-build.yml',
         import.meta.url,
       ),
     ).text();

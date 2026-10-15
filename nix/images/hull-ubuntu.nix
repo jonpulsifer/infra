@@ -323,7 +323,7 @@ let
   buildRun = pkgs.writeScript "skiff-build" ''
     #!/bin/bash
     # Stage 2, line 2 for the build variant: fetch the bundle §5 staged, run it
-    # through the same frontend ladder spindrift-build.yml runs on GitHub's own
+    # through the same frontend ladder kthx-engine-build.yml runs on GitHub's own
     # runners, and push. Everything printed here — including the marker line
     # core reads — is captured to $diag/result/build.log as well as the serial
     # console, and $diag/result/status is the one file that always lands: this
@@ -410,7 +410,7 @@ let
     tar -xzf "$bundle_file" -C "$bundle_root"
 
     # §5's unwrap: a bundle whose root is exactly one directory has that
-    # directory as its real root — the same rule spindrift-build.yml applies.
+    # directory as its real root — the same rule kthx-engine-build.yml applies.
     root="$bundle_root"
     shopt -s dotglob nullglob
     entries=("$root"/*)
@@ -443,7 +443,7 @@ let
     echo "skiff-mark frontend-select $(cut -d' ' -f1 /proc/uptime)"
     frontend_build_arg=""
     if [ "$artifact_type" = "files" ]; then
-      # A `files` artifact is not built at all — see spindrift-build.yml's
+      # A `files` artifact is not built at all — see kthx-engine-build.yml's
       # "Choose the frontend" step for why `FROM scratch` + `COPY . /` is
       # what makes the scope itself the pushed layer.
       dockerfile="$build_root/Dockerfile.files"
@@ -453,7 +453,7 @@ let
     elif [ -f "$scope/Dockerfile" ]; then
       # ponytail: skips the workflow's COPY/ADD context-sniffing probe and
       # always builds from the bundle root; upgrade to the probe in
-      # spindrift-build.yml's "Choose the frontend" step if a scoped
+      # kthx-engine-build.yml's "Choose the frontend" step if a scoped
       # Dockerfile that expects its own directory as context shows up here.
       context="$root"
       file="$scope/Dockerfile"
@@ -514,7 +514,7 @@ let
 
     digest=$(jq -r '."containerimage.digest"' "$metadata_file")
 
-    # Best effort, and null when it is not there — mirrors spindrift-build.yml's
+    # Best effort, and null when it is not there — mirrors kthx-engine-build.yml's
     # "Report what was built" base-digest extraction exactly.
     base="$(docker buildx imagetools inspect "''${destination}@''${digest}" --format '{{ json .Provenance }}' 2>/dev/null \
       | jq -r '[.. | .uri? // empty | select(startswith("pkg:docker"))][0] // empty' \

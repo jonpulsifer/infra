@@ -10,7 +10,7 @@ import { join } from 'node:path';
 
 const WORKFLOW = join(
   import.meta.dir,
-  '../../../../.github/workflows/spindrift-build.yml',
+  '../../../../.github/workflows/kthx-engine-build.yml',
 );
 const GUARD_STEP = 'Make the plan check its own start command';
 const FRONTEND_STEP = 'Choose the frontend';

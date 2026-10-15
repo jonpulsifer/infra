@@ -33,7 +33,7 @@ import { aDesiredDocument } from '../harness/release.ts';
 const database = withIsolatedDatabase();
 
 const BUILD_WORKFLOW =
-  'example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809';
+  'example/platform/.github/workflows/kthx-engine-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809';
 
 const NOW = new Date('2026-07-28T12:00:00.000Z');
 const clock = { now: () => NOW };

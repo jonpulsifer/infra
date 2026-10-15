@@ -18,7 +18,7 @@ import {
 import { blameFor } from '../../src/adapters/deploy/contract.ts';
 
 const WORKFLOW =
-  'jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6';
+  'jonpulsifer/infra/.github/workflows/kthx-engine-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6';
 
 const source: BuildSource = {
   bundleDigest: 'sha256:bundle',
