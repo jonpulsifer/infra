@@ -13,6 +13,40 @@ describe('config', () => {
     expect(config.orphanMs).toBe(30_000);
   });
 
+  test('ElevenLabs is off until both the engine id and the key file are set', () => {
+    const base = { MATE_VOICE_MATE_URL: 'ws://mate:8080/voice' };
+    expect(readConfig(base).elevenlabs).toBeNull();
+    expect(() =>
+      readConfig({ ...base, MATE_VOICE_ELEVENLABS_ENGINE_ID: 'seng_1' }),
+    ).toThrow('go together');
+    expect(() =>
+      readConfig({
+        ...base,
+        MATE_VOICE_ELEVENLABS_ENGINE_ID: 'agent_1',
+        MATE_VOICE_ELEVENLABS_KEY_FILE: '/k',
+      }),
+    ).toThrow('seng_');
+    expect(
+      readConfig({
+        ...base,
+        MATE_VOICE_ELEVENLABS_ENGINE_ID: 'seng_1',
+        MATE_VOICE_ELEVENLABS_KEY_FILE: '/k',
+      }).elevenlabs,
+    ).toEqual({
+      api: 'https://api.elevenlabs.io',
+      engineId: 'seng_1',
+      keyFile: '/k',
+    });
+    expect(() =>
+      readConfig({
+        ...base,
+        MATE_VOICE_ELEVENLABS_ENGINE_ID: 'seng_1',
+        MATE_VOICE_ELEVENLABS_KEY_FILE: '/k',
+        MATE_VOICE_ELEVENLABS_API: 'http://plain',
+      }),
+    ).toThrow('https');
+  });
+
   test('refuses a cap that is not a count', () => {
     expect(() =>
       readConfig({

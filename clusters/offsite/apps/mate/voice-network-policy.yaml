@@ -53,6 +53,14 @@ spec:
     # dialled 2083, a Cloudflare HTTPS port, not 443. So no port rule.
     - toFQDNs:
         - matchPattern: "*.discord.media"
+    # ElevenLabs: the signed URL for a conversation, then the conversation
+    # WebSocket that carries the owner's voice up and the engine's back.
+    - toFQDNs:
+        - matchName: api.elevenlabs.io
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
     # The voice media itself is UDP to the address and port the voice server
     # names in its Ready, which no FQDN rule can match. The internet, less the
     # private and the carrier-grade ranges, on the two ranges Discord's voice

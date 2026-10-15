@@ -1,8 +1,11 @@
+import OpusScript from 'opusscript';
 import { Bridge } from './bridge.ts';
 import { ConfigError, readConfig } from './config.ts';
+import { EngineConversation, fetchSignedUrl } from './engine.ts';
 import { Health } from './health.ts';
 import { MateLink } from './link.ts';
 import { jsonLog as log, plain } from './log.ts';
+import { CHANNELS, SAMPLE_RATE } from './playback.ts';
 
 const EXIT_CONFIG = 64;
 
@@ -38,7 +41,34 @@ const link = new MateLink({
     bridge.onLinkClose();
   },
 });
-bridge = new Bridge({ config, link, log });
+const elevenlabs = config.elevenlabs;
+bridge = new Bridge({
+  config,
+  link,
+  log,
+  engine: elevenlabs
+    ? ({ playback, onEnd }) =>
+        new EngineConversation({
+          signedUrl: (signal) =>
+            fetchSignedUrl(
+              {
+                api: elevenlabs.api,
+                engineId: elevenlabs.engineId,
+                readKey: async () =>
+                  (await Bun.file(elevenlabs.keyFile).text()).trim(),
+              },
+              signal,
+            ),
+          connect: (url) => new WebSocket(url),
+          decoder: () =>
+            new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO),
+          playback,
+          log,
+          connectTimeoutMs: config.connectTimeoutMs,
+          onEnd,
+        })
+    : undefined,
+});
 
 const server = Bun.serve({
   port: config.port,

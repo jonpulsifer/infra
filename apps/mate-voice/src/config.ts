@@ -15,6 +15,16 @@ export interface Config {
   readonly resubscribeCap: number;
   /** How long a call outlives the link to mate before the bridge leaves. */
   readonly orphanMs: number;
+  /** ElevenLabs Speech Engine; `null` leaves the call silent. */
+  readonly elevenlabs: ElevenLabsConfig | null;
+}
+
+export interface ElevenLabsConfig {
+  readonly api: string;
+  /** `seng_…`, the engine the reconciler created. */
+  readonly engineId: string;
+  /** Read on every conversation, so a rotated key needs no restart. */
+  readonly keyFile: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -64,5 +74,34 @@ export function readConfig(env: Env): Config {
     rejoinCap: integer(env, 'MATE_VOICE_REJOIN_CAP', 3, 0),
     resubscribeCap: integer(env, 'MATE_VOICE_RESUBSCRIBE_CAP', 5, 0),
     orphanMs: integer(env, 'MATE_VOICE_ORPHAN_MS', 30_000, 1_000),
+    elevenlabs: elevenlabs(env),
   };
+}
+
+function elevenlabs(env: Env): ElevenLabsConfig | null {
+  const engineId = env.MATE_VOICE_ELEVENLABS_ENGINE_ID?.trim() ?? '';
+  const keyFile = env.MATE_VOICE_ELEVENLABS_KEY_FILE?.trim() ?? '';
+  if (!engineId && !keyFile) return null;
+  if (!engineId || !keyFile) {
+    throw new ConfigError(
+      'MATE_VOICE_ELEVENLABS_ENGINE_ID and MATE_VOICE_ELEVENLABS_KEY_FILE go together',
+    );
+  }
+  if (!engineId.startsWith('seng_')) {
+    throw new ConfigError(
+      `MATE_VOICE_ELEVENLABS_ENGINE_ID must be a speech engine id (seng_…), got ${engineId}`,
+    );
+  }
+  const api =
+    env.MATE_VOICE_ELEVENLABS_API?.trim() || 'https://api.elevenlabs.io';
+  let url: URL | null = null;
+  try {
+    url = new URL(api);
+  } catch {}
+  if (url?.protocol !== 'https:') {
+    throw new ConfigError(
+      `MATE_VOICE_ELEVENLABS_API must be an https URL, got ${api}`,
+    );
+  }
+  return { api, engineId, keyFile };
 }
