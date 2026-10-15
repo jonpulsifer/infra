@@ -108,6 +108,12 @@ export function mateConfig(overrides: ConfigOverrides = {}): Config {
       turnTimeoutMs: 60_000,
       ...sandbox,
     },
+    voice: {
+      model: 'faux/faux',
+      thinking: 'off',
+      timeoutMs: 20_000,
+      speechEngineKeySha256: null,
+    },
     brain: {
       model: 'faux/faux',
       thinking: 'off',

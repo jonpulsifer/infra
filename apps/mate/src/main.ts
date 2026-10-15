@@ -13,6 +13,13 @@ import { RESPONDER_PATH } from './responder.ts';
 import { memorySessionStore, postgresSessionStore } from './session.ts';
 import { openSocket, slackEvents, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
+import {
+  refuseSpeechEngine,
+  SPEECH_ENGINE_PATH,
+  SpeechEngine,
+  type SpeechEngineSocketData,
+  speechEngineHandlers,
+} from './speech-engine.ts';
 import { openDatabase, PostgresEventClaims } from './store.ts';
 import type { SurfaceListener } from './surface.ts';
 import {
@@ -199,19 +206,54 @@ const voice = new Voice({
       .then(() => {}),
   voiceChannelOf: (userId) => discordApi.voiceChannelOf(config.guildId, userId),
 });
-const server = Bun.serve<VoiceSocketData>({
+const speechEngine = new SpeechEngine({ log });
+type SocketData =
+  | ({ kind: 'voice' } & VoiceSocketData)
+  | ({ kind: 'engine' } & SpeechEngineSocketData);
+const voiceSocket = voiceHandlers(voice);
+const engineSocket = speechEngineHandlers(speechEngine);
+const server = Bun.serve<SocketData>({
   port: config.port,
   // An Alertmanager notification is kilobytes; nothing else posts here.
   maxRequestBodySize: 1_048_576,
   fetch: (request, server) => {
-    if (new URL(request.url).pathname === VOICE_PATH) {
-      return server.upgrade(request, { data: { link: null } })
+    const path = new URL(request.url).pathname;
+    if (path === VOICE_PATH) {
+      return server.upgrade(request, { data: { kind: 'voice', link: null } })
+        ? undefined
+        : new Response('upgrade required', { status: 426 });
+    }
+    if (path === SPEECH_ENGINE_PATH) {
+      const why = refuseSpeechEngine(
+        request.headers,
+        config.voice.speechEngineKeySha256,
+        Date.now(),
+      );
+      if (why) {
+        log.warn('speech engine: refused', { why });
+        return new Response('unauthorized', { status: 401 });
+      }
+      return server.upgrade(request, { data: { kind: 'engine', engine: null } })
         ? undefined
         : new Response('upgrade required', { status: 426 });
     }
     return routes.fetch(request);
   },
-  websocket: voiceHandlers(voice),
+  websocket: {
+    open(ws) {
+      if (ws.data.kind === 'engine') engineSocket.open?.(ws as never);
+      else voiceSocket.open?.(ws as never);
+    },
+    message(ws, data) {
+      if (ws.data.kind === 'engine') engineSocket.message(ws as never, data);
+      else voiceSocket.message(ws as never, data);
+    },
+    close(ws, code, reason) {
+      if (ws.data.kind === 'engine')
+        engineSocket.close?.(ws as never, code, reason);
+      else voiceSocket.close?.(ws as never, code, reason);
+    },
+  },
 });
 const discord = discordListener({
   gateway: { client, manager, budget, leave },
@@ -245,6 +287,7 @@ const mate = new Mate({
     slack: slack ? () => openSlack(slack) : null,
   },
   routes,
+  speechEngine,
 });
 
 try {
