@@ -12,9 +12,7 @@ metadata:
     app.kubernetes.io/name: mate-voice
     app.kubernetes.io/part-of: mate
 spec:
-  # Zero until the live voice probe passes: the first join is a hand-run
-  # test against a test Discord application, not Rowbutt.
-  replicas: 0
+  replicas: 1
   # Two bridges would both dial mate, and mate keeps only the last.
   strategy:
     type: Recreate
