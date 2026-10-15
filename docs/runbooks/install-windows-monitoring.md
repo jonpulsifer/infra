@@ -70,41 +70,26 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 
 ## Install Lookout
 
-Lookout replaces step 4 of [Install or update the agents](#install-or-update-the-agents) on a desktop that runs it. The package must be signed, and no certificate exists yet, so this procedure makes one.
+Lookout replaces step 4 of [Install or update the agents](#install-or-update-the-agents) on a desktop that runs it.
 
-1. On the desktop, in PowerShell 7 as administrator, make the certificate once. Its subject is the Publisher in `apps/lookout/packaging/AppxManifest.xml`.
-
-   ```powershell
-   $cert = New-SelfSignedCertificate -Type Custom -Subject 'CN=lolwtf.ca' -FriendlyName 'Lookout' -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
-   Export-Certificate -Cert $cert -FilePath lookout.cer
-   Import-Certificate -FilePath lookout.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
-   ```
-
-   Result: The last command prints the certificate's thumbprint under `Cert:\LocalMachine\TrustedPeople`.
-
-2. Export the PFX for CI, and put it in 1Password. Add it, base64-encoded, as the repository secret `LOOKOUT_SIGNING_PFX`, and its password as `LOOKOUT_SIGNING_PASSWORD`.
+1. Download `Lookout.msi` from the latest `lookout-v<version>` release of the repository, or from the `lookout-msi` artifact of a `lookout` workflow run.
+2. On the desktop, run the installer. Approve the administrator prompt. If SmartScreen stops it, choose **More info**, then **Run anyway**.
 
    ```powershell
-   Export-PfxCertificate -Cert $cert -FilePath lookout.pfx -Password (Read-Host -AsSecureString 'PFX password')
-   [Convert]::ToBase64String([IO.File]::ReadAllBytes('lookout.pfx')) | Set-Clipboard
+   msiexec /i .\Lookout.msi
    ```
 
-   Result: The base64 text is on the clipboard.
-
-3. Download `Lookout.msix` from the `lookout-msix` artifact of the latest `lookout` workflow run on `main`.
-4. Install it. Approve the administrator prompt, which the packaged service needs.
-
-   ```powershell
-   Add-AppxPackage -Path .\Lookout.msix
-   ```
-
-   Result: The `Lookout` service is running, and the tray icon appears.
+   Result: `Lookout` is listed in Settings under Apps, and the service runs.
 
    ```powershell
    Get-Service Lookout
    ```
 
-5. Do [Check a desktop](#check-a-desktop). The agent's own metrics are there too.
+3. Open **Lookout** from the Start menu once. It starts by itself at the next logon.
+
+   Result: The tray icon appears, and turns green once the three agents are installed.
+
+4. Do [Check a desktop](#check-a-desktop). The agent's own metrics are there too.
 
    ```bash
    ssh spore.lolwtf.ca "curl -s http://<ip>:9182/metrics" | grep '^lookout_'
@@ -198,7 +183,7 @@ Memory Integrity and the vulnerable driver blocklist are Windows security settin
 | Step 4 of [Check a desktop](#check-a-desktop) prints `0`. | The `OhmGraphite` service stopped, or it does not run as LocalSystem. | As administrator, run `sc.exe config OhmGraphite obj= LocalSystem`. Run `Restart-Service OhmGraphite`. |
 | GPU temperature is present, and GPU load is missing. | The `gpu` collector is off. | Run the installer again. |
 | Step 6 of [Check a desktop](#check-a-desktop) shows no lines. | The `Vector` task stopped, or `vector.yaml` has another endpoint. | Run the installer again. |
-| `Add-AppxPackage` stops with `0x800B0100` or names the publisher. | The desktop does not trust the signing certificate, or the package is unsigned. | Do step 1 of [Install Lookout](#install-lookout). Make sure the CI run had the signing secrets. |
+| The installer stops with `A newer Lookout is installed.` | The MSI is older than the installed one. | Uninstall Lookout from Settings, then do [Install Lookout](#install-lookout) again. |
 | `LookoutStale`, `LookoutComponentDrifted` or `LookoutComponentUnhealthy` fires. | The Lookout service is stopped, paused, or an agent fails to install. | On the desktop, open the Application event log and filter on source `Lookout`. Choose **Sync now** in the tray. |
 
 ## Related

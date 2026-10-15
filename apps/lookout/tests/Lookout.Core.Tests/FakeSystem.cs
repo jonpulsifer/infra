@@ -17,6 +17,7 @@ public sealed class FakeSystem : ISystem
     public HashSet<string> FirewallRules { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> Tasks { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> Commands { get; } = new();
+    public List<string> Detached { get; } = new();
     public List<string> Extracted { get; } = new();
     /// <summary>A test hook. Returning null falls through to the built-in behaviour.</summary>
     public Func<string, string, ProcessResult?>? OnRun { get; set; }
@@ -29,6 +30,12 @@ public sealed class FakeSystem : ISystem
     public void WriteText(string path, string content) => Files[path] = content;
     public void CreateDirectory(string path) => Directories.Add(path);
     public void DeleteFile(string path) => Files.Remove(path);
+    public void MoveFile(string source, string destination)
+    {
+        Files[destination] = Files[source];
+        Files.Remove(source);
+    }
+    public void StartDetached(string file, string arguments) => Detached.Add($"{file} {arguments}");
     public string TempFile(string extension) => $@"C:\Temp\lookout-{++tempCounter}{extension}";
     public void ExtractZip(string zipPath, string destination) => Extracted.Add($"{zipPath} -> {destination}");
     public string? FileProductVersion(string path) => Versions.GetValueOrDefault(path);

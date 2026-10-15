@@ -4,18 +4,28 @@ using Windows.UI.Notifications;
 
 namespace Lookout.Tray;
 
-/// <summary>Windows notifications. They need package identity, so an unpackaged run shows nothing.</summary>
-public sealed class Toasts
+/// <summary>
+/// Windows notifications. An unpackaged app sends them under the
+/// AppUserModelID that the installer puts on the Start menu shortcut. When
+/// that fails, the tray icon's balloon tip is the notification instead.
+/// </summary>
+public sealed class Toasts(Action<string, string> fallback)
 {
+    public const string AppUserModelId = "lolwtf.Lookout";
+
     private ToastNotifier? notifier;
     private bool unavailable;
 
     public void Show(string title, string body)
     {
-        if (unavailable) return;
+        if (unavailable)
+        {
+            fallback(title, body);
+            return;
+        }
         try
         {
-            notifier ??= ToastNotificationManager.CreateToastNotifier();
+            notifier ??= ToastNotificationManager.CreateToastNotifier(AppUserModelId);
             var xml = new XmlDocument();
             xml.LoadXml($"""
                 <toast>
@@ -32,6 +42,7 @@ public sealed class Toasts
         catch (Exception)
         {
             unavailable = true;
+            fallback(title, body);
         }
     }
 }

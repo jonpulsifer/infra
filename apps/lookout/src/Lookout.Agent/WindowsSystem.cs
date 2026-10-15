@@ -21,6 +21,7 @@ public sealed class WindowsSystem : ISystem, IDisposable
     public string? ReadText(string path) => File.Exists(path) ? File.ReadAllText(path) : null;
     public void CreateDirectory(string path) => Directory.CreateDirectory(path);
     public void DeleteFile(string path) => File.Delete(path);
+    public void MoveFile(string source, string destination) => File.Move(source, destination, overwrite: true);
     public string TempFile(string extension) => Path.Combine(Path.GetTempPath(), $"lookout-{Guid.NewGuid():N}{extension}");
     public void ExtractZip(string zipPath, string destination) => ZipFile.ExtractToDirectory(zipPath, destination, overwriteFiles: true);
 
@@ -104,6 +105,12 @@ public sealed class WindowsSystem : ISystem, IDisposable
         var stderr = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct);
         return new ProcessResult(process.ExitCode, await stdout, await stderr);
+    }
+
+    public void StartDetached(string file, string arguments)
+    {
+        using var process = Process.Start(new ProcessStartInfo(file, arguments) { UseShellExecute = false, CreateNoWindow = true })
+            ?? throw new InvalidOperationException($"could not start {file}");
     }
 
     public Task<string> DownloadTextAsync(Uri url, CancellationToken ct) => http.GetStringAsync(url, ct);

@@ -11,6 +11,24 @@ public class PolicyTests
         Assert.StartsWith("{", policy.Vector.ProductCode);
     }
 
+    [Fact]
+    public void TheAgentEntryIsOptionalAndThreePart()
+    {
+        Assert.Null(Policy.Parse(Fixtures.PolicyJson).Agent);
+        var with = Fixtures.PolicyJson.TrimEnd().TrimEnd('}') + """
+            ,
+              "agent": {
+                "version": "0.2.0",
+                "url": "https://github.com/jonpulsifer/infra/releases/download/lookout-v0.2.0/Lookout.msi",
+                "sha256": "0AADCE6AFB20182B678BFCA9E8F2E8464EF48C469B28B4CF02E99D82158F5D40"
+              }
+            }
+            """;
+        Assert.Equal("0.2.0", Policy.Parse(with).Agent!.Version);
+        var error = Assert.Throws<PolicyException>(() => Policy.Parse(with.Replace("\"0.2.0\"", "\"0.2\"")));
+        Assert.Contains("major.minor.patch", error.Message);
+    }
+
     [Theory]
     [InlineData("\"schema\": 1", "\"schema\": 2", "schema 2")]
     [InlineData("\"intervalMinutes\": 360", "\"intervalMinutes\": 1", "at least 5")]

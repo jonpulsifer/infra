@@ -1,9 +1,13 @@
 name: lookout
 
 # The Windows monitoring agent. The only .NET project in the repo, and the only
-# one that needs a Windows runner: the package tooling (makeappx, signtool)
-# ships with the Windows SDK. Core's tests also run on Linux through
-# `mise run lookout:test`.
+# one that needs a Windows runner: WiX builds the MSI only there. Core's tests
+# also run on Linux through `mise run lookout:test`.
+#
+# The MSI is unsigned on purpose: msiexec installs it, SmartScreen asks once,
+# and nothing has to trust a certificate. A push to main publishes it as the
+# GitHub release lookout-v<version> when that release does not exist yet, and
+# the policy names the release's URL and SHA256 for the agent's self-update.
 
 on:
   pull_request:
@@ -30,36 +34,59 @@ env:
 jobs:
   package:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.0.x'
 
       - name: Test
         run: dotnet test apps/lookout/tests/Lookout.Core.Tests --configuration Release
 
-      # Unsigned when the secrets are absent, which is every fork and every
-      # Dependabot PR; the artifact is then a build check, not an installer.
+      # WiX 6 is MIT. WiX 7 asks for a maintenance-fee EULA; stay on 6.
+      - name: Install WiX
+        run: dotnet tool install --global wix --version 6.0.2
+
       - name: Package
         shell: pwsh
-        env:
-          LOOKOUT_SIGNING_PFX: ${{ secrets.LOOKOUT_SIGNING_PFX }}
-          LOOKOUT_SIGNING_PASSWORD: ${{ secrets.LOOKOUT_SIGNING_PASSWORD }}
-        run: |
-          $arguments = @{}
-          if ($env:LOOKOUT_SIGNING_PFX) {
-            $pfx = Join-Path $env:RUNNER_TEMP 'lookout.pfx'
-            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:LOOKOUT_SIGNING_PFX))
-            $arguments.CertificatePath = $pfx
-            $arguments.CertificatePassword = ConvertTo-SecureString -String $env:LOOKOUT_SIGNING_PASSWORD -AsPlainText -Force
-          }
-          ./apps/lookout/packaging/Build-Package.ps1 @arguments
-          if ($env:LOOKOUT_SIGNING_PFX) { Remove-Item -LiteralPath $pfx -Force }
+        run: ./apps/lookout/packaging/Build-Package.ps1
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - id: version
+        shell: pwsh
+        run: |
+          $props = [xml](Get-Content -LiteralPath apps/lookout/Directory.Build.props -Raw)
+          "version=$($props.Project.PropertyGroup.Version)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: lookout-msix
-          path: apps/lookout/out/Lookout.msix
+          name: lookout-msi
+          path: apps/lookout/out/Lookout.msi
           if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: lookout-v${{ needs.package.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: lookout-msi
+
+      # A version that is already released stays as it was: the policy pins its SHA256.
+      - name: Release
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$TAG exists; not replacing it"
+            exit 0
+          fi
+          sha=$(sha256sum Lookout.msi | cut -d' ' -f1)
+          gh release create "$TAG" Lookout.msi --repo "$GITHUB_REPOSITORY" --title "Lookout $TAG" \
+            --notes "Lookout.msi SHA256: ${sha}"$'\n\n'"Put the version, the asset URL and this hash in the \`agent\` entry of apps/lookout/policy/policy.json to roll it out."

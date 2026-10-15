@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  One MSI with both programs. The agent is a Windows service as LocalSystem,
+  the tray starts at logon through the Run key, and the Start menu shortcut
+  carries the AppUserModelID that lets an unpackaged app show notifications.
+  The UpgradeCode never changes: it is what lets each version replace the
+  last, including when the agent upgrades itself.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Lookout"
+    Manufacturer="lolwtf.ca"
+    Version="$(var.Version)"
+    UpgradeCode="7B7F1C4E-3D3B-4F0E-9B2A-5C1E6A1D2F31"
+    Scope="perMachine"
+    Compressed="yes"
+    InstallerVersion="500">
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer Lookout is installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="LookoutIcon" SourceFile="lookout.ico" />
+    <Property Id="ARPPRODUCTICON" Value="LookoutIcon" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Lookout">
+        <Directory Id="AgentFolder" Name="Agent" />
+        <Directory Id="TrayFolder" Name="Tray" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="Agent" />
+      <ComponentGroupRef Id="Tray" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="Agent" Directory="AgentFolder">
+      <Component Id="AgentService">
+        <File Id="AgentExe" Source="$(var.AgentDir)/Lookout.Agent.exe" KeyPath="yes" />
+        <ServiceInstall
+          Id="LookoutService"
+          Name="Lookout"
+          DisplayName="Lookout"
+          Description="Keeps the lab's monitoring agents installed and current on this desktop."
+          Start="auto"
+          Type="ownProcess"
+          ErrorControl="normal"
+          Account="LocalSystem"
+          Vital="yes" />
+        <ServiceControl Id="LookoutServiceControl" Name="Lookout" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      </Component>
+      <Files Include="$(var.AgentDir)/**">
+        <Exclude Files="$(var.AgentDir)/Lookout.Agent.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Tray" Directory="TrayFolder">
+      <Component Id="TrayApp">
+        <File Id="TrayExe" Source="$(var.TrayDir)/Lookout.Tray.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Lookout" Icon="LookoutIcon" Advertise="no">
+            <ShortcutProperty Key="System.AppUserModel.ID" Value="lolwtf.Lookout" />
+          </Shortcut>
+        </File>
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\Microsoft\Windows\CurrentVersion\Run"
+          Name="Lookout"
+          Value="&quot;[TrayFolder]Lookout.Tray.exe&quot;"
+          Type="string" />
+      </Component>
+      <Files Include="$(var.TrayDir)/**">
+        <Exclude Files="$(var.TrayDir)/Lookout.Tray.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

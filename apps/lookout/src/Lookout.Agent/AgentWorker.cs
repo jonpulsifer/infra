@@ -63,6 +63,21 @@ public sealed class AgentWorker(ISystem system, AgentSettings settings, AgentSta
         Publish(report);
         log.LogInformation("sync done: {Summary}", report.Summary);
 
+        if (!paused)
+        {
+            try
+            {
+                if (await new AgentUpdater(system, AgentSettings.Version).UpdateAsync(bundle.Policy, ct) is { } upgrade)
+                {
+                    log.LogInformation("{Upgrade}; the installer restarts this service", upgrade);
+                }
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                log.LogError(e, "agent upgrade failed");
+            }
+        }
+
         return result.Ok ? TimeSpan.FromMinutes(bundle.Policy.IntervalMinutes) : RetryInterval;
     }
 
