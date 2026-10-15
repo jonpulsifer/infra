@@ -11,5 +11,3 @@ build:
   file: Dockerfile
 watchPaths:
   - apps/kthx-engine-demo
-  - package.json
-  - bun.lock

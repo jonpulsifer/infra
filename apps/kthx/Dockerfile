@@ -3,7 +3,8 @@
 # The chart runs it as uid 65532 on a read-only root; `/tmp` and the sites
 # volume are writable.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:e7076475a5978df4626e4fcf99b368c4a8c2741b39249105f42a8fb4579bcb65 AS base
-ARG BUN_VERSION=1.4.0
+# renovate: datasource=npm depName=bun
+ARG BUN_VERSION=1.4.2
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 USER root
@@ -11,9 +12,11 @@ RUN apk add --no-cache bash curl unzip \
   && curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
 
 FROM base AS pruner
+# renovate: datasource=npm depName=turbo
+ARG TURBO_VERSION=2.11.7
 WORKDIR /app
 COPY . .
-RUN bun x turbo@2.11.5 prune kthx --docker
+RUN bun x "turbo@${TURBO_VERSION}" prune kthx --docker
 
 # Runtime dependencies only, from the repo lockfile.
 FROM base AS deps

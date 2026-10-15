@@ -208,6 +208,16 @@ assert_equal 'the delivery branch sits directly on current main' \
 assert_equal 'the delivery branch changes exactly the deploy target' \
   "$manifest" "$(git -C "$remote" diff --name-only "main..$branch")"
 
+# The merge commit skips the push workflows. The branch commit must not, or
+# the pull request's required checks never report.
+grep -qxF "pr merge $branch --repo $repository --auto --squash --body [skip ci]" "$GH_LOG" \
+  || fail "the digest pull request merges without [skip ci]: $(grep 'pr merge' "$GH_LOG")"
+while IFS= read -r call; do
+  [[ "$call" == *'--body "[skip ci]"'* ]] || fail "a merge form in the step lacks [skip ci]: $call"
+done < <(grep -oE 'gh pr merge [^|]*' "$step")
+[[ "$(git -C "$remote" log -1 --format=%B "$branch")" != *'skip ci'* ]] \
+  || fail 'the delivery branch commit skips CI, so its pull request never reports its checks'
+
 unknown=$(digest 9)
 git -C "$remote" update-ref -d "refs/heads/$branch"
 queue="$work/queue"

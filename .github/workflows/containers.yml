@@ -1,11 +1,17 @@
 name: containers
 on:
+  # No image watches a path under clusters/, so a change there, such as a
+  # digest pull request and its merge, has nothing to build.
   push:
     branches:
       - main
+    paths-ignore:
+      - "clusters/**"
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "clusters/**"
   # A push builds only what it changed, so a build that never finishes is never
   # retried. The schedule rebuilds each image pinned behind main.
   schedule:
@@ -34,6 +40,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       has_changes: ${{ steps.set-matrix.outputs.has_changes }}
+      guard: ${{ steps.guard.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -88,15 +95,40 @@ jobs:
           fi
           echo "images=$images" >>"$GITHUB_OUTPUT"
 
+      # detect-containers.sh compares this workflow's build job on a push to
+      # main with yq.
+      - if: github.event_name == 'push'
+        uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
+        with:
+          install_args: yq
+
       - id: set-matrix
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
           BUILD_IMAGES: ${{ steps.stale.outputs.images }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash .github/scripts/detect-containers.sh
 
-  # The workflow has no `paths:` filter, so these suites gate every pull request,
-  # including one that only edits the delivery step they read from this file.
+      # cd-guard's suites read only these files: this workflow, whose delivery
+      # step cd-digest-step_test.sh runs, the scripts under test and the
+      # allowlist. A dispatch runs them on demand.
+      - id: guard
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          inputs='^\.github/(workflows/containers\.yml|containers\.json|scripts/(cd-|detect-containers))'
+          run=false
+          if [ "$EVENT_NAME" = workflow_dispatch ] || grep -Eq "$inputs" <<<"$CHANGED_FILES"; then
+            run=true
+          fi
+          echo "run=$run" >>"$GITHUB_OUTPUT"
+
   cd-guard:
+    needs: detect
+    if: needs.detect.outputs.guard == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -108,6 +140,7 @@ jobs:
       - run: bash .github/scripts/cd-digest-update_test.sh
       - run: bash .github/scripts/cd-digest-step_test.sh
       - run: bash .github/scripts/cd-stale-images_test.sh
+      - run: bash .github/scripts/detect-containers_test.sh
 
   build:
     needs: detect
@@ -157,7 +190,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Name the image
         # The build is pushed under its name and each alias; the digest is the
-        # same under every name. Scans and delivery use the first name.
+        # same under every name. Delivery uses the first name.
         id: names
         env:
           OWNER: ${{ github.repository_owner }}
@@ -206,17 +239,6 @@ jobs:
           secret-files: ${{ matrix.gcp-credentials != '' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
           sbom: true
           provenance: true
-      - name: Scan ${{ matrix.image }} image with Trivy
-        if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}
-          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
-          hide-progress: false
-          ignore-unfixed: true
-          exit-code: 0
-          severity: CRITICAL,HIGH
       # A pull request opened with GITHUB_TOKEN gets no checks, so --auto never
       # merges it. Gated on a variable because step conditions cannot read secrets.
       - name: Mint a continuous-delivery App token
@@ -391,9 +413,8 @@ jobs:
           git remote set-url origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Stage only the manifests this step edited. A blanket `git add .`
-          # also sweeps up whatever the build and scan steps left behind — the
-          # Trivy action's multi-gigabyte vulnerability DB under .cache/ is
-          # what wedged this step shut.
+          # also sweeps up whatever earlier steps left behind, such as a
+          # scanner's multi-gigabyte vulnerability DB under .cache/.
           git add -- "${targets[@]}"
           git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
 
@@ -435,4 +456,8 @@ jobs:
               --title "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
           fi
 
-          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash || gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --merge
+          # `[skip ci]` goes on the merge commit only. The branch commit keeps
+          # none, so the pull request's own checks still run and gate it, and
+          # the merge, which differs only in a digest they checked, runs none.
+          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash --body "[skip ci]" \
+            || gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --merge --body "[skip ci]"

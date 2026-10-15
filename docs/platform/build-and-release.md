@@ -11,6 +11,7 @@ First-party code lives in `apps/` (services), `packages/` (shared code and chart
 | --- | --- | --- |
 | Bun workspace | Runs `lint`, `typecheck`, `build` and `test` in each workspace through Turborepo | `package.json`, `turbo.json` |
 | Image list | Lists each Dockerfile's image under `build` or `ignore`, and under `deploy` the manifests that pin it | `.github/containers.json` |
+| Build entry | An image's watch paths, context, aliases and build options | `<dir>/build.json` |
 | Image build | Builds each `build` image and pushes `ghcr.io/jonpulsifer/<image>` from `main` | `.github/workflows/containers.yml` |
 | Charts | Helm charts that Flux installs | `packages/charts/` |
 | Renovate | The dependency-update bot. Its `packageRules` set which updates merge unreviewed and how long each waits. | `.github/renovate.json5` |
@@ -18,9 +19,11 @@ First-party code lives in `apps/` (services), `packages/` (shared code and chart
 
 ## Continuous delivery
 
-On a push to `main`, `containers.yml` builds each image whose watch paths changed. For an image with `deploy` targets, it cuts `cd/update-<image>-digest` from `main` and rewrites the digest in each target. It opens a PR that merges when its checks pass.
+On a push to `main`, `containers.yml` builds each image whose watch paths changed. For an image with `deploy` targets, it cuts `cd/update-<image>-digest` from `main` and rewrites the digest in each target. It opens a PR that merges when its checks pass. The digest PR's merge commit carries `[skip ci]`, so no workflow runs for it on `main`. The PR's own checks gate it.
 
 It writes no digest older than the one on `main` or in the open PR. A daily run rebuilds each image whose pin is behind `main`.
+
+A pull request that changes `containers.yml`, `detect-containers.sh` or `.github/containers.json` builds every image without pushing. On `main`, a change to how the build job builds an image rebuilds every image. A change to `.github/containers.json` builds each image whose `build` entry or `deploy` targets changed. On `main`, a change to `detect-containers.sh` alone builds nothing. `workflow_dispatch` with `images` republishes named images. A change only under `clusters/` runs no `containers.yml`.
 
 `.github/workflows/spindrift-charts.yml` publishes `packages/charts/spindrift/` and `packages/charts/spindrift-app/` to GHCR, and their OCIRepository objects pin a version tag. Flux loads the other charts in `packages/charts/` from the `infra` GitRepository with `reconcileStrategy: Revision`, so it re-renders them on each commit to `main`. Under `clusters/`, Renovate skips first-party images and charts.
 
