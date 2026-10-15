@@ -1,6 +1,6 @@
 ---
 title: Lookout
-description: A Windows app, installed as an MSIX, whose service keeps the monitoring agents on a Windows desktop at the versions git declares and reports its own health to folly. No desktop runs it yet.
+description: A Windows app, installed from an MSI, whose service keeps the monitoring agents on a Windows desktop at the versions git declares and reports its own health to folly. No desktop runs it yet.
 status: unverified
 ---
 
@@ -31,15 +31,17 @@ Each pass observes the three agents, converges the ones that drifted, then obser
 
 The service writes `lookout.prom` into `windows_exporter`'s `textfile_inputs` directory, so folly scrapes the agent's own state with the host's metrics, and logs to the Application event log under source `Lookout`, which Vector ships to VictoriaLogs. The tray and the service talk over the named pipe `lookout`.
 
-The package holds two programs. The tray is the app, and starts at logon through the package's startup task. The service is a packaged Windows service running as LocalSystem, which the manifest declares with the `packagedServices` and `localSystemServices` capabilities.
+The MSI, built by WiX from `apps/lookout/packaging/Lookout.wxs`, holds two programs. The tray is the app in Settings and the Start menu, and starts at logon through the `Run` key the installer writes. The service runs as LocalSystem. The Start menu shortcut carries the AppUserModelID `lolwtf.Lookout`, which is what lets the tray show notifications without package identity; when that fails, the tray icon's balloon tip is the notification.
+
+The agent updates itself. When the policy's `agent` entry names a version other than the running one, the service downloads that MSI, checks its SHA256 and starts msiexec without waiting. The installer stops the service, replaces the files and starts it again.
 
 ## Limits
 
-- Only a signed package installs. `apps/lookout/packaging/Build-Package.ps1` signs when it is given the certificate, and the CI workflow signs when the `LOOKOUT_SIGNING_PFX` and `LOOKOUT_SIGNING_PASSWORD` secrets exist. No secret exists, so the CI artifact is unsigned.
-- The certificate's subject must be `CN=lolwtf.ca`, the Publisher in `apps/lookout/packaging/AppxManifest.xml`, and each desktop must trust it once.
-- No `.appinstaller` is hosted, so the package does not update itself.
+- The MSI is unsigned, so SmartScreen asks once on a downloaded copy. Choose **More info**, then **Run anyway**.
+- No release exists until the first push to `main` after this page, and the policy has no `agent` entry until the owner adds one, so no desktop upgrades itself yet.
+- Clicking a notification opens nothing. An unpackaged app needs a COM activator for that, and the tray has none.
 - Memory Integrity still blocks the sensor driver. See [Check Memory Integrity](../runbooks/install-windows-monitoring.md#check-memory-integrity).
-- Nothing has run on a desktop. The first install must confirm that Windows registers the service from a sideloaded package, that the tray reaches the pipe, that toasts appear, and that `windows_exporter` reads the textfile.
+- Nothing has run on a desktop. The first install must confirm that the tray reaches the pipe, that notifications appear, and that `windows_exporter` reads the textfile.
 
 ## Operate
 
@@ -53,9 +55,12 @@ folly alerts in `clusters/folly/monitoring/windows-exporters.yaml`:
 
 To change an agent version, edit `policy.json` and merge. Every desktop converges on its next pass. To test a policy before merging, put its raw URL in `policyUrl` in `C:\ProgramData\Lookout\settings.json` and restart the `Lookout` service.
 
+To roll out a new Lookout, raise `Version` in `apps/lookout/Directory.Build.props` and merge. The `lookout` workflow publishes the GitHub release `lookout-v<version>` with the MSI and its SHA256 in the notes. Then put that version, the asset URL and the hash in the `agent` entry of `policy.json` and merge again.
+
 ## Reference
 
 - Source: `apps/lookout/`
 - Policy: `apps/lookout/policy/policy.json`
-- Tests and build: `mise run lookout:test`; the package builds in `.github/workflows/lookout.yml`
+- Tests and build: `mise run lookout:test`; the MSI builds and releases in `.github/workflows/lookout.yml`
+- Releases: `lookout-v<version>` on the repository's releases page
 - Grafana: the Windows Desktops dashboard, `clusters/folly/monitoring/grafana-dashboards/windows.json`

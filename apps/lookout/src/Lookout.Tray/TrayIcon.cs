@@ -11,7 +11,7 @@ namespace Lookout.Tray;
 /// current and answering, amber is drift or a failed sync, red is an agent
 /// down, grey is no Lookout service to ask.
 /// </summary>
-public sealed class TrayIcon(PipeClient client, Toasts toasts) : IDisposable
+public sealed class TrayIcon(PipeClient client) : IDisposable
 {
     private const string GrafanaBase = "https://grafana.lolwtf.ca/d/windows-desktops";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
@@ -22,6 +22,7 @@ public sealed class TrayIcon(PipeClient client, Toasts toasts) : IDisposable
     private readonly ToolStripMenuItem summary = new("Starting") { Enabled = false };
     private readonly ToolStripMenuItem detail = new() { Enabled = false, Visible = false };
     private readonly ToolStripMenuItem pause = new("Pause for 1 hour");
+    private Toasts? toasts;
     private StatusReport? latest;
     private Overall? shown;
     private bool announced;
@@ -29,6 +30,7 @@ public sealed class TrayIcon(PipeClient client, Toasts toasts) : IDisposable
 
     public void Start()
     {
+        toasts = new Toasts((title, body) => icon.ShowBalloonTip(10_000, title, body, ToolTipIcon.None));
         var menu = new ContextMenuStrip();
         menu.Items.Add(summary);
         menu.Items.Add(detail);
@@ -87,7 +89,7 @@ public sealed class TrayIcon(PipeClient client, Toasts toasts) : IDisposable
             Overall.Down => ("Monitoring agent down", latest?.Summary ?? ""),
             _ => ("Lookout", ""),
         };
-        toasts.Show(title, body);
+        toasts?.Show(title, body);
     }
 
     private void Render()

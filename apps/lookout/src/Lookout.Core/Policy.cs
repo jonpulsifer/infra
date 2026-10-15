@@ -13,7 +13,8 @@ public sealed record Policy(
     int IntervalMinutes,
     ExporterPolicy WindowsExporter,
     OhmGraphitePolicy OhmGraphite,
-    VectorPolicy Vector)
+    VectorPolicy Vector,
+    AgentPolicy? Agent = null)
 {
     public const int CurrentSchema = 1;
 
@@ -32,6 +33,7 @@ public sealed record Policy(
         policy.WindowsExporter.Validate("windowsExporter");
         policy.OhmGraphite.Validate("ohmGraphite");
         policy.Vector.Validate("vector");
+        policy.Agent?.Validate("agent");
         return policy;
     }
 }
@@ -87,6 +89,18 @@ public sealed record VectorPolicy(string Version, string Url, string Sha256, str
         base.Validate(name);
         if (!Uri.TryCreate(ConfigUrl, UriKind.Absolute, out _)) throw new PolicyException($"{name}.configUrl is not a URL");
         if (!Guid.IsMatch(ProductCode)) throw new PolicyException($"{name}.productCode must be a braced GUID");
+    }
+}
+
+/// <summary>The Lookout MSI itself. When present and newer than the running agent, the agent installs it.</summary>
+public sealed record AgentPolicy(string Version, string Url, string Sha256) : ComponentPolicy(Version, Url, Sha256)
+{
+    private static readonly Regex ThreePart = new("^\\d+\\.\\d+\\.\\d+$");
+
+    public override void Validate(string name)
+    {
+        base.Validate(name);
+        if (!ThreePart.IsMatch(Version)) throw new PolicyException($"{name}.version must be major.minor.patch");
     }
 }
 

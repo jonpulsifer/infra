@@ -15,6 +15,7 @@ public interface ISystem
     void WriteText(string path, string content);
     void CreateDirectory(string path);
     void DeleteFile(string path);
+    void MoveFile(string source, string destination);
     string TempFile(string extension);
     void ExtractZip(string zipPath, string destination);
 
@@ -28,6 +29,9 @@ public interface ISystem
 
     /// <summary>Runs a program with a raw command line and waits for it.</summary>
     Task<ProcessResult> RunAsync(string file, string arguments, CancellationToken ct);
+
+    /// <summary>Starts a program and does not wait: the agent's own upgrade stops the agent.</summary>
+    void StartDetached(string file, string arguments);
 
     Task<string> DownloadTextAsync(Uri url, CancellationToken ct);
 
@@ -70,4 +74,5 @@ public static class Paths
     public static string VectorConfigCache(ISystem s) => Path.Combine(StateDir(s), "vector.yaml");
     public static string Status(ISystem s) => Path.Combine(StateDir(s), "status.json");
     public static string Settings(ISystem s) => Path.Combine(StateDir(s), "settings.json");
+    public static string UpdateMsi(ISystem s) => Path.Combine(StateDir(s), "update.msi");
 }
