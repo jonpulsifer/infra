@@ -22,7 +22,7 @@ This page defines the lab's own terms, and the tool terms that have a lab-specif
 | Build route | Where a kthx Build runs, chosen by its SLSA level | [Built apps](../apps/kthx/built-apps.md#builds) |
 | Built app | An App that kthx builds from a repository or archive, signs and deploys | [Built apps](../apps/kthx/built-apps.md) |
 | cathy | The office phone, a Cisco SPA504G | [PBX](../apps/pbx.md) |
-| CD digest PR | The pull request that pins a newly built image digest in its manifests | [Build and release](../platform/build-and-release.md#continuous-delivery) |
+| CD digest PR | The pull request on `cd/update-digests` that pins the newly built image digests in their manifests | [Build and release](../platform/build-and-release.md#continuous-delivery) |
 | Class | In Bosun, what a `runs-on:` label resolves to | [Bosun](../apps/bosun.md#terms) |
 | Cluster CA | The FML certificate authority of one Kubernetes cluster | [PKI](../platform/pki.md#chain) |
 | `cluster-gateway` | The shared Gateway that apps on a cluster attach routes to | [Ingress and DNS](../platform/network/ingress-and-dns.md#private-names) |

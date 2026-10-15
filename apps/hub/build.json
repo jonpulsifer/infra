@@ -1,6 +1,7 @@
 [
   {
     "image": "hub",
+    "workspace": "hub",
     "context": ".",
     "file": "apps/hub/Dockerfile",
     "platforms": "linux/amd64",

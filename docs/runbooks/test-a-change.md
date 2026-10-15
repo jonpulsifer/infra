@@ -33,7 +33,7 @@ Use this runbook before you open a pull request. It gives the local command for 
 | A shell script in `scripts/`, `.github/scripts/` or `dotfiles/` | `mise run check` | `shell.yml` |
 | `dotfiles/` | `mise -C dotfiles run dotfiles:check` | `dotfiles.yml` |
 | `.github/scripts/validation-impact.sh` | `mise run validation-impact:test` | `terraform.yml` |
-| `.github/scripts/cd-*.sh`, `.github/scripts/detect-containers.sh`, `.github/containers.json` or `.github/workflows/containers.yml` | `mise run cd-digest:test` | `containers.yml` |
+| `.github/scripts/cd-*.sh`, `.github/scripts/detect-containers.sh`, `.github/scripts/image-affected.sh`, `.github/containers.json` or `.github/workflows/containers.yml` | `mise run cd-digest:test` | `containers.yml` |
 
 1. List the files that the branch changes.
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests cd-stale-images.sh against a real commit graph on disk. The registry
-# read and the watch map are stubs set through the script's override variables.
+# read, the watch map and image-affected.sh are stubs set through the script's
+# override variables.
 
 set -euo pipefail
 
@@ -43,6 +44,8 @@ commit() {
 
 first=$(commit apps/foo/main.ts 'foo one')
 bar_only=$(commit apps/bar/main.ts 'bar one')
+ws_source=$(commit apps/ws/main.ts 'ws one')
+ws_lock=$(commit bun.lock 'a lockfile bump')
 latest_foo=$(commit apps/foo/other.ts 'foo two')
 untouched=$(commit docs/notes.md 'docs only')
 
@@ -81,18 +84,20 @@ assert_equal 'a pin on a commit this checkout does not have is unknown' \
   "$("$script" verdict 0000000000000000000000000000000000000000 "$latest_foo" 2>/dev/null)"
 
 fixtures="$work/fixtures"
-mkdir -p "$fixtures"/{pins,queued,revision}
+mkdir -p "$fixtures"/{pins,queued,revision,fingerprint}
 export FIXTURES="$fixtures"
 
-# Answers `pins`, `pins-at` and `revision` from fixture files, with the real
-# script's argument positions.
+# Answers `pins`, `queued`, `revision` and `fingerprint` from fixture files,
+# with the real script's argument positions. The last two take a digest or a
+# tag, and a missing file is a tag the registry does not have.
 cat >"$work/cd-digest-update.sh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$1" in
   pins) cat "$FIXTURES/pins/$2" 2>/dev/null || true ;;
-  pins-at) cat "$FIXTURES/queued/$3" 2>/dev/null || true ;;
+  queued) cat "$FIXTURES/queued/${2#refs/cd/queued/}/$3" 2>/dev/null || true ;;
   revision) cat "$FIXTURES/revision/$3" 2>/dev/null || true ;;
+  fingerprint) cat "$FIXTURES/fingerprint/$3" 2>/dev/null || true ;;
   *) exit 64 ;;
 esac
 STUB
@@ -101,19 +106,33 @@ chmod +x "$work/cd-digest-update.sh"
 cat >"$work/detect-containers.sh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-[ "${1:-}" = "--watches" ] || exit 64
-cat "$FIXTURES/watches"
+case "${1:-}" in
+  --watches) cat "$FIXTURES/watches" ;;
+  --workspaces) cat "$FIXTURES/workspaces" ;;
+  *) exit 64 ;;
+esac
 STUB
 chmod +x "$work/detect-containers.sh"
 
-printf 'foo\tapps/foo\nbar\tapps/bar\n' >"$fixtures/watches"
+# Logs its arguments and exits with the code in the `affected` fixture: 0 for
+# affected, 1 for not affected, anything else for a failure.
+cat >"$work/image-affected.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$FIXTURES/affected-calls"
+exit "$(cat "$FIXTURES/affected")"
+STUB
+chmod +x "$work/image-affected.sh"
+
+printf 'foo\tapps/foo\nbar\tapps/bar\nws\tapps/ws\nws\tbun.lock\n' >"$fixtures/watches"
+printf 'ws\tws\n' >"$fixtures/workspaces"
 
 cat >"$work/containers.json" <<'JSON'
 {
-  "build": ["foo", "bar", "orphan"],
+  "build": ["foo", "bar", "ws", "orphan"],
   "deploy": {
     "foo": ["deploy/foo.yaml", "deploy/foo-other.yaml"],
-    "bar": ["deploy/bar.yaml"]
+    "bar": ["deploy/bar.yaml"],
+    "ws": ["deploy/ws.yaml"]
   },
   "ignore": []
 }
@@ -121,6 +140,7 @@ JSON
 
 export CD_DIGEST_UPDATE="$work/cd-digest-update.sh"
 export DETECT_CONTAINERS="$work/detect-containers.sh"
+export IMAGE_AFFECTED="$work/image-affected.sh"
 export CONTAINERS_MANIFEST="$work/containers.json"
 export REGISTRY_OWNER=tester
 
@@ -130,12 +150,18 @@ foo_old='sha256:1111111111111111111111111111111111111111111111111111111111111111
 foo_new='sha256:2222222222222222222222222222222222222222222222222222222222222222'
 bar_new='sha256:4444444444444444444444444444444444444444444444444444444444444444'
 unlabelled='sha256:3333333333333333333333333333333333333333333333333333333333333333'
+ws_old='sha256:5555555555555555555555555555555555555555555555555555555555555555'
+ws_src='sha256:6666666666666666666666666666666666666666666666666666666666666666'
 
 reset_fixtures() {
-  rm -f "$fixtures"/pins/* "$fixtures"/queued/* "$fixtures"/revision/*
+  rm -rf "$fixtures"/queued/*
+  mkdir -p "$fixtures/queued/update-digests"
+  rm -f "$fixtures"/pins/* "$fixtures"/revision/* "$fixtures"/fingerprint/* "$fixtures"/affected*
   printf '%s\n' "$first" >"$fixtures/revision/$foo_old"
   printf '%s\n' "$latest_foo" >"$fixtures/revision/$foo_new"
   printf '%s\n' "$bar_only" >"$fixtures/revision/$bar_new"
+  printf '%s\n' "$bar_only" >"$fixtures/revision/$ws_old"
+  printf '%s\n' "$ws_source" >"$fixtures/revision/$ws_src"
   : >"$fixtures/revision/$unlabelled"
 }
 
@@ -159,8 +185,15 @@ assert_equal 'a main pin behind names the image although another main pin is cur
 
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
-printf '%s\n' "$foo_new" >"$fixtures/queued/foo"
+printf '%s\n' "$foo_new" >"$fixtures/queued/update-digests/foo"
 assert_equal 'a newer digest queued but not merged counts as current' \
+  '' "$("$script" stale foo 2>/dev/null)"
+
+reset_fixtures
+mkdir -p "$fixtures/queued/update-foo-digest"
+printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
+printf '%s\n' "$foo_new" >"$fixtures/queued/update-foo-digest/foo"
+assert_equal 'a newer digest queued on the per-image branch still counts as current' \
   '' "$("$script" stale foo 2>/dev/null)"
 
 reset_fixtures
@@ -177,6 +210,116 @@ reset_fixtures
 printf '%s\n%s\n' "$foo_old" "$unlabelled" >"$fixtures/pins/foo"
 assert_equal 'a single unreadable candidate withdraws the whole verdict' \
   '' "$("$script" stale foo 2>/dev/null)"
+
+# ws names its workspace, so image-affected.sh decides a pin that ancestry
+# calls stale. Its newest input commit is $ws_lock.
+reset_fixtures
+printf '%s\n' "$ws_src" >"$fixtures/pins/ws"
+echo 1 >"$fixtures/affected"
+assert_equal 'a lockfile commit that leaves the workspace unaffected keeps the pin current' \
+  '' "$("$script" stale ws 2>/dev/null)"
+assert_equal 'the workspace check spans the pin to the newest input commit' \
+  "$ws_source $ws_lock ws apps/ws bun.lock" "$(cat "$fixtures/affected-calls")"
+
+reset_fixtures
+printf '%s\n' "$ws_src" >"$fixtures/pins/ws"
+echo 0 >"$fixtures/affected"
+assert_equal 'a lockfile commit that affects the workspace makes the pin stale' \
+  ws "$("$script" stale ws 2>/dev/null)"
+
+reset_fixtures
+printf '%s\n' "$ws_old" >"$fixtures/pins/ws"
+echo 0 >"$fixtures/affected"
+assert_equal 'a source change since the pin makes it stale' \
+  ws "$("$script" stale ws 2>/dev/null)"
+assert_equal 'the workspace check starts at the pinned commit' \
+  "$bar_only $ws_lock ws apps/ws bun.lock" "$(cat "$fixtures/affected-calls")"
+
+reset_fixtures
+printf '%s\n' "$ws_src" >"$fixtures/pins/ws"
+echo 2 >"$fixtures/affected"
+assert_equal 'a workspace check that fails counts the pin as stale' \
+  ws "$("$script" stale ws 2>/dev/null)"
+
+reset_fixtures
+printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
+printf '%s\n' "$bar_new" >"$fixtures/pins/bar"
+echo 1 >"$fixtures/affected"
+assert_equal 'an image with no workspace is decided by ancestry alone' \
+  foo "$("$script" stale foo bar 2>/dev/null)"
+assert_equal 'an image with no workspace is never asked about one' \
+  '' "$(cat "$fixtures/affected-calls" 2>/dev/null || true)"
+
+# foo is pinned behind $latest_foo, and the build tagged with that commit is
+# compared by content. `same` and `other` stand for two fingerprints.
+foo_mid='sha256:7777777777777777777777777777777777777777777777777777777777777777'
+foo_queued='sha256:8888888888888888888888888888888888888888888888888888888888888888'
+content() { printf '%s\n' "$2" >"$fixtures/fingerprint/$1"; }
+
+reset_fixtures
+printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
+content "$foo_old" same
+content "$latest_foo" same
+assert_equal 'a pin with the content of the newest build is current' \
+  '' "$("$script" stale foo 2>/dev/null)"
+grep -qx 'foo is pinned at content identical to the newest build.' <<<"$("$script" stale foo 2>&1 >/dev/null)" \
+  || fail 'a content match passed in silence'
+
+content "$latest_foo" other
+assert_equal 'a pin whose content differs from the newest build is stale' \
+  foo "$("$script" stale foo 2>/dev/null)"
+
+rm "$fixtures/fingerprint/$latest_foo"
+assert_equal 'a newest commit with no pushed build is stale, so it is retried' \
+  foo "$("$script" stale foo 2>/dev/null)"
+
+content "$latest_foo" same
+rm "$fixtures/fingerprint/$foo_old"
+assert_equal 'a pin whose fingerprint cannot be read is stale' \
+  foo "$("$script" stale foo 2>/dev/null)"
+
+reset_fixtures
+printf '%s\n%s\n' "$foo_old" "$foo_mid" >"$fixtures/pins/foo"
+printf '%s\n' "$first" >"$fixtures/revision/$foo_mid"
+content "$foo_old" same
+content "$foo_mid" other
+content "$latest_foo" same
+assert_equal 'one main pin with other content names the image' \
+  foo "$("$script" stale foo 2>/dev/null)"
+
+# A delivery branch can outlive a pull request closed unmerged, so main and the
+# branch both have to match.
+reset_fixtures
+printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
+printf '%s\n' "$foo_queued" >"$fixtures/queued/update-digests/foo"
+printf '%s\n' "$first" >"$fixtures/revision/$foo_queued"
+content "$foo_old" same
+content "$foo_queued" other
+content "$latest_foo" same
+assert_equal 'a queued build with other content is stale although main matches' \
+  foo "$("$script" stale foo 2>/dev/null)"
+
+content "$foo_old" other
+content "$foo_queued" same
+assert_equal 'a queued build with the newest content is stale while main differs' \
+  foo "$("$script" stale foo 2>/dev/null)"
+
+content "$foo_old" same
+assert_equal 'main and a queued build with the newest content are current' \
+  '' "$("$script" stale foo 2>/dev/null)"
+
+# A scheduled rebuild is tagged with main's head, not with $latest_foo.
+reset_fixtures
+printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
+content "$foo_old" same
+content latest same
+printf '%s\n' "$untouched" >"$fixtures/revision/latest"
+assert_equal 'a latest build that contains the newest commit stands in for its missing tag' \
+  '' "$("$script" stale foo 2>/dev/null)"
+
+printf '%s\n' "$first" >"$fixtures/revision/latest"
+assert_equal 'a latest build older than the newest commit does not count' \
+  foo "$("$script" stale foo 2>/dev/null)"
 
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/orphan"

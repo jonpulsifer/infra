@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tests cd-digest-update.sh without the network. cd-digest-step_test.sh covers
-# the workflow step and the registry read.
+# Tests cd-digest-update.sh without the network: a curl stub answers the
+# registry reads. cd-digest-step_test.sh covers the workflow step.
 
 set -euo pipefail
 
@@ -218,6 +218,127 @@ assert_equal 'pins-at is silent about a file that ref does not carry' \
 
 assert_equal 'pins-at leaves nothing behind in the working tree' \
   '' "$(git -C "$queued" status --porcelain)"
+
+# The batched branch carries every manifest, and only the images it changed
+# are waiting on it.
+other_manifest=clusters/app/weather.yaml
+printf 'image: ghcr.io/jonpulsifer/weather:latest@%s\n' "$one" >"$queued/$other_manifest"
+git -C "$queued" add -A
+git -C "$queued" commit -q -m 'pin weather'
+git -C "$queued" checkout -q -b cd/update-digests
+printf 'image: ghcr.io/jonpulsifer/mate:latest@%s\n' "$new" >"$queued/$queued_manifest"
+git -C "$queued" commit -q -am 'queue mate'
+git -C "$queued" checkout -q main
+printf 'image: ghcr.io/jonpulsifer/weather:latest@%s\n' "$two" >"$queued/$other_manifest"
+git -C "$queued" commit -q -am 'main moves weather on after the branch was cut'
+
+queued_at() { (cd "$queued" && "$script" queued "$@"); }
+
+assert_equal 'queued reads a digest the branch changed' \
+  "$new" "$(queued_at cd/update-digests mate "$queued_manifest")"
+
+assert_equal 'queued is silent about an image the branch left as main had it' \
+  '' "$(queued_at cd/update-digests weather "$other_manifest")"
+
+assert_equal 'queued is silent about a branch that does not exist' \
+  '' "$(queued_at refs/cd/queued/nothing-here mate "$queued_manifest")"
+
+# The registry is a directory of canned answers behind a curl stub, which logs
+# each URL so the test can name every call `fingerprint` makes.
+registry="$work/registry"
+mkdir -p "$registry/manifests" "$registry/blobs" "$work/bin"
+cat >"$work/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+url="${!#}"
+printf '%s\n' "$url" >>"$REGISTRY/calls"
+case "$url" in
+  https://ghcr.io/token\?*)
+    [ ! -e "$REGISTRY/no-token" ] || exit 22
+    printf '{"token":"stub"}'
+    ;;
+  https://ghcr.io/v2/jonpulsifer/app/manifests/*) cat "$REGISTRY/manifests/${url##*/}" 2>/dev/null || exit 22 ;;
+  https://ghcr.io/v2/jonpulsifer/app/blobs/*) cat "$REGISTRY/blobs/${url##*/}" 2>/dev/null || exit 22 ;;
+  *) exit 22 ;;
+esac
+STUB
+chmod +x "$work/bin/curl"
+export REGISTRY="$registry"
+export PATH="$work/bin:$PATH"
+
+# Publishes <ref> as buildx pushes it: an index of one image per platform beside
+# an attestation manifest. Each platform is `os/arch=config-json`, in order.
+publish() {
+  local ref="$1" entry platform config children='[]'
+  shift
+  for entry in "$@"; do
+    platform="${entry%%=*}"
+    config="${entry#*=}"
+    printf '%s' "$config" >"$registry/blobs/$ref.${platform//\//-}.config"
+    printf '{"config":{"digest":"%s"}}' "$ref.${platform//\//-}.config" >"$registry/manifests/$ref.${platform//\//-}"
+    children=$(jq -c --arg d "$ref.${platform//\//-}" --arg os "${platform%/*}" --arg arch "${platform#*/}" \
+      '. + [{digest: $d, platform: {os: $os, architecture: $arch}}]' <<<"$children")
+  done
+  jq -c --arg att "$ref.att" '{manifests: (. + [{digest: $att, platform: {os: "unknown", architecture: "unknown"}}])}' \
+    <<<"$children" >"$registry/manifests/$ref"
+}
+
+image_config() {
+  local revision="$1" created="$2" env="$3" layers="$4"
+  jq -cn --arg r "$revision" --arg c "$created" --arg e "$env" --arg l "$layers" \
+    '{architecture: "amd64", created: $c, history: [{created: $c}],
+      config: {Cmd: ["bun", "start"], Env: [$e], Labels: {"org.opencontainers.image.revision": $r, "org.opencontainers.image.created": $c}},
+      rootfs: {type: "layers", diff_ids: ($l | split(" "))}}'
+}
+
+fingerprint() { "$script" fingerprint jonpulsifer/app "$1"; }
+
+base=$(image_config aaa 2026-10-01T00:00:00Z PATH=/usr/bin 'sha256:l1 sha256:l2')
+publish built-once "linux/amd64=$base"
+publish built-again "linux/amd64=$(image_config bbb 2026-10-02T00:00:00Z PATH=/usr/bin 'sha256:l1 sha256:l2')"
+publish new-layer "linux/amd64=$(image_config aaa 2026-10-01T00:00:00Z PATH=/usr/bin 'sha256:l1 sha256:l3')"
+publish new-env "linux/amd64=$(image_config aaa 2026-10-01T00:00:00Z PATH=/bin 'sha256:l1 sha256:l2')"
+publish arm-first "linux/arm64=$(image_config aaa 2026-10-01T00:00:00Z PATH=/usr/bin 'sha256:a1')" "linux/amd64=$base"
+publish arm-only "linux/arm64=$base"
+publish no-layers "linux/amd64=$(image_config aaa 2026-10-01T00:00:00Z PATH=/usr/bin '' | jq -c '.rootfs.diff_ids = []')"
+publish 0123456789abcdef0123456789abcdef01234567 "linux/amd64=$base"
+
+once=$(fingerprint built-once)
+[[ "$once" =~ ^[0-9a-f]{64}$ ]] || fail "fingerprint printed '$once', not one sha256"
+
+: >"$registry/calls"
+fingerprint built-once >/dev/null
+assert_equal 'fingerprint reads the index, the amd64 manifest and its config, and never a layer' \
+  "https://ghcr.io/token?scope=repository:jonpulsifer/app:pull&service=ghcr.io
+https://ghcr.io/v2/jonpulsifer/app/manifests/built-once
+https://ghcr.io/v2/jonpulsifer/app/manifests/built-once.linux-amd64
+https://ghcr.io/v2/jonpulsifer/app/blobs/built-once.linux-amd64.config" \
+  "$(cat "$registry/calls")"
+
+assert_equal 'fingerprint ignores the labels and creation times every build changes' \
+  "$once" "$(fingerprint built-again)"
+
+[ "$(fingerprint new-layer)" != "$once" ] \
+  || fail 'fingerprint missed a changed layer'
+[ "$(fingerprint new-env)" != "$once" ] \
+  || fail 'fingerprint missed a changed runtime config'
+
+assert_equal 'fingerprint reads the amd64 image although another platform comes first' \
+  "$once" "$(fingerprint arm-first)"
+
+assert_equal 'fingerprint reads a commit tag as it reads a digest' \
+  "$once" "$(fingerprint 0123456789abcdef0123456789abcdef01234567)"
+
+assert_equal 'revision still reads the first platform image after the shared fetch' \
+  aaa "$("$script" revision jonpulsifer/app arm-first)"
+
+# Every failure is silent and exits 0, so the caller opens the pull request.
+# The last case is a registry that issues no token.
+for ref in arm-only no-layers absent built-once; do
+  [ "$ref" != built-once ] || touch "$registry/no-token"
+  out=$(fingerprint "$ref") || fail "fingerprint of $ref failed instead of printing nothing"
+  assert_equal "fingerprint prints nothing for $ref" '' "$out"
+done
+rm "$registry/no-token"
 
 if (cd "$repo" && "$script" decide >/dev/null 2>&1); then
   fail 'decide accepted a call with no commit to judge'

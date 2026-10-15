@@ -1,11 +1,11 @@
 [
   {
-    "_comment": "The context is the repo root because the Dockerfile prunes the workspace; the watch list is what turbo prune pulls in, the agent profile the runner copies from the raw context, and the root .dockerignore that lets the profile in.",
+    "_comment": "The context is the repo root because the Dockerfile prunes the workspace. The other watches are what turbo prune pulls in, the agent profile the runner copies from the raw context, and the root .dockerignore that lets the profile in; the root package.json, bun.lock and turbo.json rebuild the image only when turbo ls --affected names its workspace.",
     "image": "mate",
+    "workspace": "mate",
     "context": ".",
     "file": "apps/mate/Dockerfile",
     "platforms": "linux/amd64",
-    "no-cache-filters": "runner",
     "watch": [
       "apps/mate",
       "packages/mate-hands",

@@ -6,7 +6,6 @@
       "name": "infra",
       "devDependencies": {
         "@biomejs/biome": "2.5.15",
-        "kthx": "workspace:*",
         "turbo": "2.11.7",
       },
     },

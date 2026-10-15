@@ -20,7 +20,10 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
-RUN bun run build --filter=hub
+# The build ID hashes the pruned inputs, not the clock, so a rebuild of unchanged sources reloads no kiosk.
+# Bun's filter runs hub's script without turbo, whose strict env mode would drop GIT_SHA.
+RUN GIT_SHA="$(find . -name node_modules -prune -o -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)" \
+  bun run --filter=hub build
 
 FROM base AS runner
 ENV NODE_ENV=production

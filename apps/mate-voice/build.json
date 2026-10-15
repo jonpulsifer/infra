@@ -1,11 +1,11 @@
 [
   {
-    "_comment": "The context is the repo root because the Dockerfile prunes the workspace; the watch list is what turbo prune pulls in.",
+    "_comment": "The context is the repo root because the Dockerfile prunes the workspace. The other watches are what turbo prune pulls in and the root .dockerignore; the root package.json, bun.lock and turbo.json rebuild the image only when turbo ls --affected names its workspace.",
     "image": "mate-voice",
+    "workspace": "mate-voice",
     "context": ".",
     "file": "apps/mate-voice/Dockerfile",
     "platforms": "linux/amd64",
-    "no-cache-filters": "runner",
     "watch": [
       "apps/mate-voice",
       "packages/mate-voice-protocol",

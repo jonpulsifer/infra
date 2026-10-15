@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The file-level half of selective CD: the digest a manifest pins for an image,
-# and whether this run is newer than the run that wrote it. `decide` prints its
-# verdict on stdout and its reasons on stderr.
+# whether this run is newer than the run that wrote it, and what its image
+# holds. `decide` prints its verdict on stdout and its reasons on stderr.
 
 set -euo pipefail
 
@@ -9,8 +9,10 @@ usage() {
   cat >&2 <<'EOF'
 usage: cd-digest-update.sh pins <image> <manifest>...
        cd-digest-update.sh pins-at <ref> <image> <manifest>...
+       cd-digest-update.sh queued <ref> <image> <manifest>...
        cd-digest-update.sh rewrite <image> <digest> <manifest>...
        cd-digest-update.sh revision <repository> <digest>
+       cd-digest-update.sh fingerprint <repository> <digest-or-tag>
        cd-digest-update.sh decide <built-commit> [pinned-commit]...
 EOF
   exit 64
@@ -48,8 +50,8 @@ pins() {
   done | sort -u
 }
 
-# `pins` for another ref's copy of the manifests, such as an unmerged
-# cd/update-<image>-digest branch. A missing ref or file prints nothing.
+# `pins` for another ref's copy of the manifests. A missing ref or file prints
+# nothing.
 pins_at() {
   local ref="$1" image="$2" tmp manifest status=0
   shift 2
@@ -63,6 +65,23 @@ pins_at() {
   (cd "$tmp" && pins "$image" "$@") || status=$?
   rm -rf "$tmp"
   return "$status"
+}
+
+# `pins-at` for an unmerged delivery branch such as cd/update-digests, printed
+# only when the branch changed them since it left HEAD. The branch carries
+# every image, and a pin it leaves alone is the one main had when it was cut,
+# which waits on nothing. Without a merge base every pin at the ref counts.
+queued() {
+  local ref="$1" image="$2" at base
+  shift 2
+
+  git rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || return 0
+  at=$(pins_at "$ref" "$image" "$@")
+  if base=$(git merge-base "$ref" HEAD 2>/dev/null) \
+    && [ "$at" = "$(pins_at "$base" "$image" "$@")" ]; then
+    return 0
+  fi
+  [ -z "$at" ] || printf '%s\n' "$at"
 }
 
 # A target that is missing or pins no digest fails: a silent no-op would look
@@ -109,10 +128,12 @@ rewrite() {
   done
 }
 
-# Prints the commit a published digest was built from, or nothing. It reads the
-# org.opencontainers.image.revision label that docker/metadata-action stamps.
-revision() {
-  local repository="$1" digest="$2" accept token doc platform config blob
+# Prints the image config blob that a digest or tag names, or nothing on any
+# failure. After the token it makes three GETs, for the index, one platform
+# manifest and the config, and never fetches a layer. With a platform such as
+# linux/amd64, only that child of an index counts.
+config_blob() {
+  local repository="$1" reference="$2" platform="${3:-}" accept token doc child config
 
   accept='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
 
@@ -122,22 +143,47 @@ revision() {
   [ -n "$token" ] || return 0
 
   doc=$(curl -fsS --retry 3 --retry-connrefused -H "Authorization: Bearer $token" -H "Accept: $accept" \
-    "https://ghcr.io/v2/${repository}/manifests/${digest}") || return 0
+    "https://ghcr.io/v2/${repository}/manifests/${reference}") || return 0
 
   # With provenance and SBOM on, the push is an index that also holds
   # unknown/unknown attestation manifests. Only a platform image has labels.
-  platform=$(jq -r '[.manifests[]? | select(.platform.os != "unknown" and .platform.architecture != "unknown")][0].digest // empty' <<<"$doc")
-  if [ -n "$platform" ]; then
+  child=$(jq -r --arg p "$platform" '[.manifests[]?
+    | select(.platform.os != "unknown" and .platform.architecture != "unknown")
+    | select($p == "" or "\(.platform.os)/\(.platform.architecture)" == $p)][0].digest // empty' <<<"$doc") || return 0
+  if [ -n "$child" ]; then
     doc=$(curl -fsS --retry 3 --retry-connrefused -H "Authorization: Bearer $token" -H "Accept: $accept" \
-      "https://ghcr.io/v2/${repository}/manifests/${platform}") || return 0
+      "https://ghcr.io/v2/${repository}/manifests/${child}") || return 0
   fi
 
-  config=$(jq -r '.config.digest // empty' <<<"$doc")
+  # An index with no child for the platform has no config here, so it ends.
+  config=$(jq -r '.config.digest // empty' <<<"$doc") || return 0
   [ -n "$config" ] || return 0
 
-  blob=$(curl -fsSL --retry 3 --retry-connrefused -H "Authorization: Bearer $token" \
-    "https://ghcr.io/v2/${repository}/blobs/${config}") || return 0
-  jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"$blob"
+  curl -fsSL --retry 3 --retry-connrefused -H "Authorization: Bearer $token" \
+    "https://ghcr.io/v2/${repository}/blobs/${config}" || return 0
+}
+
+# Prints the commit a published digest was built from, or nothing. It reads the
+# org.opencontainers.image.revision label that docker/metadata-action stamps.
+revision() {
+  local blob
+  blob=$(config_blob "$1" "$2")
+  [ -n "$blob" ] || return 0
+  jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"$blob" || return 0
+}
+
+# Prints a hash of the linux/amd64 image's layer diff_ids and runtime config, or
+# nothing. Labels are left out because every build stamps a new revision and
+# creation time there, so two builds of the same files and config hash the
+# same. An empty answer means "cannot tell", and callers count it as different.
+fingerprint() {
+  local blob content sum
+  blob=$(config_blob "$1" "$2" linux/amd64)
+  [ -n "$blob" ] || return 0
+  content=$(jq -cS 'select((.rootfs.diff_ids | length) > 0) | {d: .rootfs.diff_ids, c: (.config | del(.Labels))}' <<<"$blob") || return 0
+  [ -n "$content" ] || return 0
+  sum=$(sha256sum <<<"$content") || return 0
+  printf '%s\n' "${sum%% *}"
 }
 
 # Prints `skip` when a pinned commit descends from <built-commit>, else `write`.
@@ -190,6 +236,11 @@ case "${1:-}" in
     shift
     pins_at "$@"
     ;;
+  queued)
+    [ "$#" -ge 4 ] || usage
+    shift
+    queued "$@"
+    ;;
   rewrite)
     [ "$#" -ge 4 ] || usage
     shift
@@ -199,6 +250,11 @@ case "${1:-}" in
     [ "$#" -eq 3 ] || usage
     shift
     revision "$@"
+    ;;
+  fingerprint)
+    [ "$#" -eq 3 ] || usage
+    shift
+    fingerprint "$@"
     ;;
   decide)
     [ "$#" -ge 2 ] || usage
