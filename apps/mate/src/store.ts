@@ -265,6 +265,10 @@ export const MIGRATIONS: readonly (readonly [number, string])[] = [
       created_at BIGINT NOT NULL
     )`,
   ],
+  // The intents the stored session identified with (session.ts). A resume
+  // keeps the old session's intents, so one identified with other intents
+  // is dropped and the pod identifies fresh.
+  [10, 'ALTER TABLE mate_gateway_session ADD COLUMN intents INTEGER'],
 ];
 
 /** mate's own tables beside pi's; idempotent and safe to race. */

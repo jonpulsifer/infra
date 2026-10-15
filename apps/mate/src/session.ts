@@ -23,19 +23,28 @@ export interface PostgresSessionOptions {
   /** How long `retrieve` waits for the migrations before identifying fresh. */
   readyWaitMs?: number;
   debounceMs?: number;
+  /**
+   * The intents this process identifies with. A resume keeps the intents of
+   * the session it resumes and delivers no READY, so a stored session that
+   * identified with other intents is dropped and the process identifies
+   * fresh.
+   */
+  intents?: number;
 }
 
 type SessionDatabase = Pick<Database, 'sql' | 'up' | 'ready'>;
 
 // `mate_gateway_session` outlives the pod, so a replaced mate resumes the
-// previous one's session and Discord replays what arrived in between. Writes
-// are debounced: the sequence changes on every dispatch.
+// previous one's session and Discord replays what arrived in between, unless
+// the intents changed. Writes are debounced: the sequence changes on every
+// dispatch.
 export function postgresSessionStore(
   database: SessionDatabase,
   log: Log,
   options: PostgresSessionOptions = {},
 ): SessionStore {
   const debounceMs = options.debounceMs ?? WRITE_DEBOUNCE_MS;
+  const intents = options.intents ?? null;
   let pending: { shardId: number; info: SessionInfo } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let sealed = false;
@@ -59,10 +68,10 @@ export function postgresSessionStore(
     const { sql } = database;
     if (!write || !sql) return;
     try {
-      await sql`INSERT INTO mate_gateway_session (shard_id, info, updated_at)
-        VALUES (${write.shardId}, ${JSON.stringify(write.info)}::jsonb, now())
+      await sql`INSERT INTO mate_gateway_session (shard_id, info, intents, updated_at)
+        VALUES (${write.shardId}, ${JSON.stringify(write.info)}::jsonb, ${intents}, now())
         ON CONFLICT (shard_id) DO UPDATE SET info = EXCLUDED.info,
-          updated_at = EXCLUDED.updated_at`;
+          intents = EXCLUDED.intents, updated_at = EXCLUDED.updated_at`;
     } catch (error) {
       failed('write', error);
     }
@@ -87,11 +96,24 @@ export function postgresSessionStore(
       return null;
     }
     try {
-      const rows = (await sql`SELECT info FROM mate_gateway_session
-      WHERE shard_id = ${shardId}`) as { info: SessionInfo | string }[];
+      const rows = (await sql`SELECT info, intents FROM mate_gateway_session
+      WHERE shard_id = ${shardId}`) as {
+        info: SessionInfo | string;
+        intents: number | null;
+      }[];
       const info = rows[0]?.info;
       if (!info) {
         log.info('no stored gateway session; identifying fresh');
+        return null;
+      }
+      if ((rows[0]?.intents ?? null) !== intents) {
+        log.info(
+          'stored gateway session has other intents; identifying fresh',
+          {
+            stored: rows[0]?.intents,
+            intents,
+          },
+        );
         return null;
       }
       return typeof info === 'string'
