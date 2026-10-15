@@ -59,9 +59,9 @@ spec:
             # in clusters/offsite/apps/elevenlabs; the key file is the read
             # key, mounted below. Both unset leaves a call silent.
             - name: MATE_VOICE_ELEVENLABS_ENGINE_ID
-              value: ""
+              value: seng_4601m50hqphcemyas1y5kpqwjv7j
             - name: MATE_VOICE_ELEVENLABS_KEY_FILE
-              value: ""
+              value: /var/run/mate-voice/elevenlabs/key
             # readOnlyRootFilesystem: /tmp (below) is the only writable path.
             - name: TMPDIR
               value: /tmp
