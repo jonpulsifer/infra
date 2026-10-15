@@ -33,6 +33,7 @@ error_summary='
     [.detail.status, .detail.message]
     | map(select(. != null) | tostring | gsub("\\+?[0-9][0-9 ()-]{5,}[0-9]"; "<digits>") | .[:200])
     | join(": ")
+  elif (.detail | type) == "string" then (.detail | .[:200])
   else "" end'
 
 # call METHOD PATH KEY prints the response body. Every method but GET sends
