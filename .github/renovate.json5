@@ -371,8 +371,9 @@
       // rebuild a week. matchCurrentVersion matches the automerge rule above:
       // Renovate automerges a group only when every update in it may
       // automerge, so one 0.x bump would turn the group into a review. Majors
-      // and 0.x updates stay their own PRs. The pi and x402 groups below come
-      // later and win. Vulnerability alerts bypass the schedule.
+      // and 0.x updates stay their own PRs. The pi and x402 groups below keep
+      // their own pull requests but inherit this window, so they open weekly
+      // too. Vulnerability alerts bypass the schedule.
       description: 'npm stable non-major: one weekly pull request',
       matchDatasources: ['npm'],
       matchCurrentVersion: '!/^0/',
@@ -418,6 +419,10 @@
       matchFileNames: ['images/mate-sandbox/Dockerfile'],
       groupName: 'mate sandbox toolset',
       groupSlug: 'mate-sandbox-toolset',
+      // The bun pin is an npm dependency, and a group takes its schedule from
+      // whichever member Renovate lists first. Without this the toolset would
+      // wait for the npm window in some weeks and open at once in others.
+      schedule: ['at any time'],
     },
     {
       // The sandbox's kthx CLI is a digest pin on the first-party kthx image,
