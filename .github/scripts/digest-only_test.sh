@@ -52,6 +52,9 @@ values:
   engine:
     image: ghcr.io/jonpulsifer/kthx-engine:latest@$old
 YAML
+cat >deploy/other.yaml <<YAML
+image: ghcr.io/jonpulsifer/mate:latest@$old
+YAML
 echo notes >docs/notes.md
 git add -A
 git commit -qm base
@@ -83,8 +86,11 @@ expect 'a digest-only change to a release skips' 0 "$head" deploy/release.yaml
 head=$(change sed -i -e "s/$old/$new/" -e 's/value: info/value: debug/' deploy/mate.yaml)
 expect 'a digest change beside another line runs' 1 "$head" deploy/mate.yaml
 
+head=$(change sed -i "s/$old/$new/" deploy/other.yaml)
+expect 'a digest-only change to a file that is not a deploy target runs' 1 "$head" deploy/other.yaml
+
 head=$(change sed -i 's/notes/more notes/' docs/notes.md)
-expect 'a file that is not a deploy target runs' 1 "$head" docs/notes.md
+expect 'a docs change runs' 1 "$head" docs/notes.md
 
 head=$(change sed -i '/image: /d' deploy/mate.yaml)
 expect 'a deleted pin line runs' 1 "$head" deploy/mate.yaml
