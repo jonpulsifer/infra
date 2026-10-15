@@ -133,13 +133,13 @@ export class FakePlayer extends EventEmitter {
 }
 
 export function capturingLog(): Log & {
-  lines: { level: string; msg: string }[];
+  lines: { level: string; msg: string; [field: string]: unknown }[];
 } {
-  const lines: { level: string; msg: string }[] = [];
+  const lines: { level: string; msg: string; [field: string]: unknown }[] = [];
   return {
     lines,
-    info: (msg) => lines.push({ level: 'info', msg }),
-    warn: (msg) => lines.push({ level: 'warn', msg }),
-    error: (msg) => lines.push({ level: 'error', msg }),
+    info: (msg, fields) => lines.push({ ...fields, level: 'info', msg }),
+    warn: (msg, fields) => lines.push({ ...fields, level: 'warn', msg }),
+    error: (msg, fields) => lines.push({ ...fields, level: 'error', msg }),
   };
 }

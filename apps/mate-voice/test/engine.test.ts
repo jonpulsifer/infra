@@ -159,6 +159,11 @@ describe('the ElevenLabs conversation', () => {
     other.sockets[0]?.open();
     other.sockets[0]?.close(4300, 'queue');
     expect(other.ends).toEqual(['closed_4300']);
+    expect(
+      other.log.lines.find(
+        (l) => l.msg === 'speech engine: conversation closed',
+      ),
+    ).toMatchObject({ code: 4300, reason: 'queue' });
   });
 
   test('a signed url that fails, or a dial that never opens, ends the conversation', async () => {
