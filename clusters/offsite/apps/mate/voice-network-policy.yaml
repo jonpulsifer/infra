@@ -49,13 +49,10 @@ spec:
             - port: "8080"
               protocol: TCP
     # The voice WebSocket: Discord names a `*.discord.media` host in the
-    # VOICE_SERVER_UPDATE, on any port.
+    # VOICE_SERVER_UPDATE, on a port of its choosing; the first live join
+    # dialled 2083, a Cloudflare HTTPS port, not 443. So no port rule.
     - toFQDNs:
         - matchPattern: "*.discord.media"
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
     # The voice media itself is UDP to the address and port the voice server
     # names in its Ready, which no FQDN rule can match. The internet, less the
     # private and the carrier-grade ranges, on the two ranges Discord's voice
