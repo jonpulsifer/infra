@@ -135,7 +135,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Reads the pins the way CD writes them, which also covers a chart that
       # splits `repository:` from `tag:`. A stable category per image keeps
-      # each day's upload replacing the last instead of piling up alerts.
+      # each day's upload replacing the last instead of piling up alerts. An
+      # image pinned at two digests gets a second, numbered category for as
+      # long as that lasts; its alerts, like those of an image dropped from
+      # `deploy`, stay open until that code-scanning category is deleted by
+      # hand.
       - name: Read the digests main pins
         id: pins
         run: |
