@@ -471,6 +471,25 @@ describe('the gateway listener', () => {
     });
   });
 
+  test('adds the surface after a resume too, asking the API who the bot is', async () => {
+    const { inbox, discord, guildCommands, log, gateway, ready } =
+      await listening();
+    discord.identity = { userId: BOT, username: 'mate', applicationId: APP };
+    gateway.dispatch(GatewayDispatchEvents.Resumed, {} as never);
+    await settle();
+    expect(inbox.surfaceNames).toEqual(['discord']);
+    expect(inbox.surfaces[0]?.me).toBe(BOT);
+    expect(guildCommands).toEqual([['join', 'leave']]);
+    expect(log.of('ready')[0]?.fields).toMatchObject({
+      how: 'resumed',
+      userId: BOT,
+      applicationId: APP,
+    });
+    await ready();
+    expect(inbox.surfaceNames).toEqual(['discord']);
+    expect(log.of('ready')).toHaveLength(1);
+  });
+
   test('keeps the surface when the command cleanup fails', async () => {
     const { inbox, log, ready } = await listening({
       failCommands: new Error('429'),
