@@ -50,7 +50,7 @@ spec:
     # `/mcp` on. Every other route answers on `hostname` alone.
     env:
       - name: KTHX_ENGINE_PUBLIC_HOSTNAME
-        value: spindrift-control.${KTHX_ENGINE_DOMAIN}
+        value: kthx-engine.${KTHX_ENGINE_DOMAIN}
       # kthx quick sites' `control.host`, which the console shares, and their
       # zone's apex are served on the Apps Gateway, so no App may take either.
       # This zone's `spindrift` label is held too: a reservation, not an
@@ -58,7 +58,7 @@ spec:
       # checked against every declared zone, so once kthx.dev is one, no App
       # in any zone may set its vanity to `@`.
       - name: KTHX_ENGINE_RESERVED_HOSTNAMES
-        value: spindrift.${SECRET_DOMAIN},kthx.${SECRET_DOMAIN},kthx.dev
+        value: spindrift.${SECRET_DOMAIN},kthx.${SECRET_DOMAIN},kthx.dev,spindrift-control.${KTHX_ENGINE_DOMAIN}
       # The engine reads quick sites from kthx's control host, and reserves a
       # name in kthx before it mints one under the quick-site zone. The zone is
       # restated so the deploy gate needs no call to learn it.

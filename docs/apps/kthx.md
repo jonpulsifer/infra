@@ -21,7 +21,7 @@ kthx is the lab's hosting product. The owner and agents use it to put apps on th
 | Landing page, site directory, SDK, agent reference and CLI | `https://kthx.dev` | Anyone |
 | Console, and the CLI's claims, uploads and deletes | `https://kthx.lolwtf.ca` | The lab, the offsite LAN and the tailnet owner. The console needs a passkey. |
 | Quick-site builder and tailnet-login claims | [`https://kthx.<tailnet>`](../hosts/index.md#reach-a-host) | Every tailnet member |
-| MCP endpoint for built apps | `https://spindrift-control.lolwtf.dev/mcp` | The internet, with an agent token |
+| MCP endpoint for built apps | `https://kthx-engine.lolwtf.dev/mcp` | The internet, with an agent token |
 
 ## How it works
 
