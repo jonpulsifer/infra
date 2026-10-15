@@ -23,7 +23,7 @@ On a push to `main`, `containers.yml` builds each image whose watch paths change
 
 It writes no digest older than the one on `main` or in the open PR. A daily run rebuilds each image whose pin is behind `main`.
 
-A pull request that changes `containers.yml`, `detect-containers.sh` or `.github/containers.json` builds every image without pushing. On `main`, a change to how the build job builds an image rebuilds every image. A change to `.github/containers.json` builds each image whose `build` entry or `deploy` targets changed. `workflow_dispatch` with `images` republishes named images. A change only under `clusters/` runs no `containers.yml`.
+A pull request that changes `containers.yml`, `detect-containers.sh` or `.github/containers.json` builds every image without pushing. On `main`, a change to how the build job builds an image rebuilds every image. A change to `.github/containers.json` builds each image whose `build` entry or `deploy` targets changed. On `main`, a change to `detect-containers.sh` alone builds nothing. `workflow_dispatch` with `images` republishes named images. A change only under `clusters/` runs no `containers.yml`.
 
 `.github/workflows/spindrift-charts.yml` publishes `packages/charts/spindrift/` and `packages/charts/spindrift-app/` to GHCR, and their OCIRepository objects pin a version tag. Flux loads the other charts in `packages/charts/` from the `infra` GitRepository with `reconcileStrategy: Revision`, so it re-renders them on each commit to `main`. Under `clusters/`, Renovate skips first-party images and charts.
 
