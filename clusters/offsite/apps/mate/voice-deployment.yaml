@@ -54,6 +54,14 @@ spec:
             # it leaves on its own.
             - name: MATE_VOICE_ORPHAN_MS
               value: "30000"
+            # ElevenLabs Speech Engine hears and speaks for mate. The engine id
+            # is the one the reconciler created from desired/speech-engines/
+            # in clusters/offsite/apps/elevenlabs; the key file is the read
+            # key, mounted below. Both unset leaves a call silent.
+            - name: MATE_VOICE_ELEVENLABS_ENGINE_ID
+              value: ""
+            - name: MATE_VOICE_ELEVENLABS_KEY_FILE
+              value: ""
             # readOnlyRootFilesystem: /tmp (below) is the only writable path.
             - name: TMPDIR
               value: /tmp
@@ -62,6 +70,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: elevenlabs
+              mountPath: /var/run/mate-voice/elevenlabs
+              readOnly: true
           # 503 until the link to mate is up, so a bridge that cannot reach
           # mate is never Ready.
           readinessProbe:
@@ -88,3 +99,9 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        # Until the 1Password item is readable the Secret is missing, and the
+        # pod still starts; the key file is then absent and the engine off.
+        - name: elevenlabs
+          secret:
+            secretName: mate-voice-elevenlabs
+            optional: true

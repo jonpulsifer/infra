@@ -3,6 +3,7 @@ import { type AudioPlayer, VoiceConnectionStatus } from '@discordjs/voice';
 import { type FromBridge, PROTOCOL_VERSION } from '@repo/mate-voice-protocol';
 import { Bridge, VERSION } from '../src/bridge.ts';
 import type { Config } from '../src/config.ts';
+import type { EngineConversation } from '../src/engine.ts';
 import { Playback } from '../src/playback.ts';
 import {
   CHANNEL,
@@ -22,6 +23,7 @@ const config: Config = {
   rejoinCap: 1,
   resubscribeCap: 1,
   orphanMs: 30,
+  elevenlabs: null,
 };
 
 function setup() {
@@ -127,6 +129,47 @@ describe('bridge', () => {
     await Bun.sleep(60);
     expect(connections[0]?.destroyed).toEqual([true]);
     expect(bridge.inCall).toBe(false);
+  });
+
+  test('opens the ElevenLabs conversation once ready, feeds it the owner, and ends it with the call', async () => {
+    const heard: number[] = [];
+    const made: { playback: Playback; onEnd(reason: string): void }[] = [];
+    let stopped = 0;
+    const { connect, connections } = fakeConnect();
+    const player = new FakePlayer();
+    const bridge = new Bridge({
+      config,
+      link: { send: () => true },
+      log: capturingLog(),
+      connect,
+      playback: () => new Playback(player as unknown as AudioPlayer),
+      joinTone: null,
+      engine: (call) => {
+        made.push(call);
+        return {
+          start: async () => {},
+          hear: (opus: Buffer) => {
+            heard.push(opus.length);
+          },
+          stop: () => {
+            stopped += 1;
+            call.onEnd('stopped');
+          },
+        } as unknown as EngineConversation;
+      },
+    });
+    void bridge.onMessage(join);
+    const connection = connections[0];
+    if (!connection) throw new Error('no connection');
+    expect(made).toHaveLength(0);
+    connection.go(VoiceConnectionStatus.Ready);
+    await Bun.sleep(1);
+    expect(made).toHaveLength(1);
+    connection.streams[0]?.write(Buffer.alloc(3));
+    await Bun.sleep(1);
+    expect(heard).toEqual([3]);
+    await bridge.onMessage({ type: 'leave' });
+    expect(stopped).toBe(1);
   });
 
   test('stop ends the call without a stall', async () => {

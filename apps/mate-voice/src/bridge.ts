@@ -8,6 +8,7 @@ import { type FromMate, PROTOCOL_VERSION } from '@repo/mate-voice-protocol';
 import { relayAdapter } from './adapter.ts';
 import { Call, type Connect } from './call.ts';
 import type { Config } from './config.ts';
+import type { EngineConversation } from './engine.ts';
 import type { MateLink } from './link.ts';
 import type { Log } from './log.ts';
 import type { Playback } from './playback.ts';
@@ -21,10 +22,16 @@ export interface BridgeDeps {
   connect?: Connect;
   playback?: () => Playback;
   joinTone?: Buffer | null;
+  /** The ElevenLabs conversation for one call; absent, the call is silent. */
+  engine?: (call: {
+    playback: Playback;
+    onEnd(reason: string): void;
+  }) => EngineConversation;
 }
 
 export class Bridge {
   private call: Call | null = null;
+  private engine: EngineConversation | null = null;
   private orphan: ReturnType<typeof setTimeout> | null = null;
   /** Speech characters mate has sent that nothing voices yet. */
   unvoicedChars = 0;
@@ -96,7 +103,25 @@ export class Bridge {
   stop(): void {
     if (this.orphan) clearTimeout(this.orphan);
     this.orphan = null;
+    this.engine?.stop();
+    this.engine = null;
     this.call?.leave();
+  }
+
+  /** Opens the ElevenLabs conversation once the voice connection is ready. */
+  private converse(call: Call): void {
+    const make = this.deps.engine;
+    if (!make) return;
+    const engine = make({
+      playback: call.playback,
+      onEnd: (reason) => {
+        if (this.engine !== engine) return;
+        this.engine = null;
+        this.deps.log.info('speech engine: conversation over', { reason });
+      },
+    });
+    this.engine = engine;
+    void engine.start();
   }
 
   private async join(
@@ -122,14 +147,18 @@ export class Bridge {
       resubscribeCap: config.resubscribeCap,
       onState: (state) => {
         link.send({ type: 'state', call: state });
+        if (state.status === 'ready' && this.call === call && !this.engine) {
+          this.converse(call);
+        }
         if (state.status === 'destroyed' && this.call === call) {
           this.call = null;
+          this.engine?.stop();
+          this.engine = null;
           link.send({ type: 'state', call: null });
         }
       },
       onStall: (reason, code) => link.send({ type: 'stall', reason, code }),
-      // Decoding and speech-to-text land with the speech half.
-      onFrame: () => {},
+      onFrame: (opus) => this.engine?.hear(opus),
       connect: this.deps.connect,
       playback: this.deps.playback?.(),
       joinTone: this.deps.joinTone,
