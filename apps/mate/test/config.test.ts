@@ -41,6 +41,31 @@ describe('config from the environment', () => {
     ).toThrow('non-snowflake');
   });
 
+  test('the voice lane has its own model, thinking off, and takes the engine key as a hex hash', () => {
+    const voice = readConfig(minimal).voice;
+    expect(voice).toEqual({
+      model: 'opencode-go/qwen3.8-flash',
+      thinking: 'off',
+      timeoutMs: 20_000,
+      speechEngineKeySha256: null,
+    });
+    expect(
+      readConfig({
+        ...minimal,
+        MATE_VOICE_MODEL: 'faux/fast',
+        MATE_VOICE_THINKING: 'low',
+        MATE_SPEECH_ENGINE_KEY_SHA256: `${'AB'.repeat(32)} `,
+      }).voice,
+    ).toMatchObject({
+      model: 'faux/fast',
+      thinking: 'low',
+      speechEngineKeySha256: 'ab'.repeat(32),
+    });
+    expect(() =>
+      readConfig({ ...minimal, MATE_SPEECH_ENGINE_KEY_SHA256: 'not-hex' }),
+    ).toThrow('MATE_SPEECH_ENGINE_KEY_SHA256');
+  });
+
   test('refuses a non-positive number', () => {
     expect(() => readConfig({ ...minimal, MATE_QUIET_MINUTES: '0' })).toThrow(
       'MATE_QUIET_MINUTES',

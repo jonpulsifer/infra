@@ -24,6 +24,7 @@ export interface Config {
   readonly port: number;
   readonly sandbox: SandboxConfig;
   readonly brain: BrainConfig;
+  readonly voice: VoiceConfig;
   // Outside `sandbox`: `sandboxManifest` turns a `SandboxConfig` into a pod
   // spec, so no secret may be reachable from it.
   readonly githubApp: GithubAppConfig | null;
@@ -52,6 +53,17 @@ export interface SlackConfig {
   readonly teamId: string;
   readonly allowedUserIds: ReadonlySet<string>;
   readonly allowedChannelIds: ReadonlySet<string>;
+}
+
+/** The voice lane ElevenLabs Speech Engine dials, and the key that admits it. */
+export interface VoiceConfig {
+  /** `provider/model` that answers a spoken turn; a second provider is fine. */
+  readonly model: string;
+  readonly thinking: ThinkingLevel;
+  /** The whole spoken reply, first token included. */
+  readonly timeoutMs: number;
+  /** Hex SHA-256 of the API key that owns the engine; `null` refuses every connection. */
+  readonly speechEngineKeySha256: string | null;
 }
 
 /** The agent loop in mate's own process: its model, its store and its kthx tools. */
@@ -537,6 +549,24 @@ function slackChannel(env: Env, key: string): string | null {
   return channel;
 }
 
+export function readVoiceConfig(env: Env): VoiceConfig {
+  const hash = env.MATE_SPEECH_ENGINE_KEY_SHA256?.trim().toLowerCase() || null;
+  if (hash !== null && !/^[0-9a-f]{64}$/.test(hash)) {
+    throw new ConfigError(
+      'MATE_SPEECH_ENGINE_KEY_SHA256 must be the hex SHA-256 of the API key, 64 hex digits',
+    );
+  }
+  return {
+    model: modelSpec(env, 'MATE_VOICE_MODEL', 'opencode-go/qwen3.8-flash'),
+    thinking: thinking(
+      'MATE_VOICE_THINKING',
+      text(env, 'MATE_VOICE_THINKING', 'off'),
+    ),
+    timeoutMs: integer(env, 'MATE_VOICE_TIMEOUT_MS', 20_000, 1_000),
+    speechEngineKeySha256: hash,
+  };
+}
+
 export function readConfig(env: Env): Config {
   refuseRenamed(env);
   const custodianChannel = slackChannel(env, 'MATE_CUSTODIAN_CHANNEL');
@@ -556,6 +586,7 @@ export function readConfig(env: Env): Config {
     port: integer(env, 'MATE_PORT', 8080),
     sandbox,
     brain: readBrainConfig(env),
+    voice: readVoiceConfig(env),
     githubApp: githubApp(env, sandbox.checkoutRepo),
     sshKeyFile: env.MATE_SSH_KEY_FILE?.trim() || null,
     talosconfigFile: env.MATE_TALOSCONFIG_FILE?.trim() || null,

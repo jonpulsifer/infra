@@ -16,6 +16,7 @@ import type { McpBridge, ModelSetup } from './brain-inputs.ts';
 import { ChatgptAccount, ChatgptKeeper } from './chatgpt.ts';
 import type { Clock, Handle } from './clock.ts';
 import type { Config, GithubAppConfig } from './config.ts';
+import { ConfigError } from './config.ts';
 import { PostgresCredentialStore } from './credential-store.ts';
 import { Custodian, PostgresCustodianLedger } from './custodian.ts';
 import { DREAMER_PROFILE, Dreams, PostgresDreamsLedger } from './dreams.ts';
@@ -27,7 +28,12 @@ import { type KubeHandsDeps, WORKSPACE } from './lease.ts';
 import { type Log, plain } from './log.ts';
 import { combineMcp, createMcpBridge } from './mcp.ts';
 import type { Instruments } from './metrics.ts';
-import { CHATGPT_PROVIDER, chatgptModel, createModelSetup } from './model.ts';
+import {
+  CHATGPT_PROVIDER,
+  chatgptModel,
+  createModelSetup,
+  profileModel,
+} from './model.ts';
 import { brainProfiles, loadSystemPrompts } from './profile.ts';
 import { DEFAULT_PROFILE, PROFILES } from './profiles.ts';
 import { PostgresRecallSource } from './recall.ts';
@@ -40,6 +46,7 @@ import {
 import { fileImage } from './sandbox-image.ts';
 import { type HandsLayout, KubeHands, SPARE_SWEEP_MS } from './sandboxes.ts';
 import type { SlackApi } from './slack.ts';
+import type { VoiceLane } from './speech-engine.ts';
 import { opensshKey } from './ssh-key.ts';
 import {
   type Database,
@@ -49,6 +56,7 @@ import {
 import type { SurfaceListener } from './surface.ts';
 import { readerTalosconfig } from './talosconfig.ts';
 import { DRAIN_MS, Threads, type ThreadsDeps } from './threads.ts';
+import { modelVoiceLane } from './voice-lane.ts';
 import { GithubPullRequests, PostgresWakeStore, Wakes } from './wakes.ts';
 
 const DAY_MS = 86_400_000;
@@ -102,6 +110,8 @@ export interface MateEdges {
   readonly providers?: readonly Provider[];
   /** The process's HTTP routes, where the alert responder answers Alertmanager; absent, it answers nothing. */
   readonly routes?: Routes;
+  /** Given the voice lane once the models are built; absent, the engine apologises. */
+  readonly speechEngine?: { setLane(lane: VoiceLane | null): void };
   readonly tuning?: MateTuning;
 }
 
@@ -213,6 +223,29 @@ export class Mate {
       clock,
       metrics,
     });
+    // Voice never keeps text mate from booting: a model pi's catalog lacks
+    // leaves the lane off, and the engine apologises to the caller.
+    try {
+      const voice = profileModel(
+        setup,
+        'MATE_VOICE_MODEL',
+        config.voice.model,
+        config.voice.thinking,
+      );
+      this.edges.speechEngine?.setLane(
+        modelVoiceLane({
+          models: setup.models,
+          model: voice.model,
+          thinking: voice.thinking,
+          timeoutMs: config.voice.timeoutMs,
+          log,
+        }),
+      );
+    } catch (error) {
+      if (!(error instanceof ConfigError)) throw error;
+      log.error('the voice lane is off', { error: plain(error) });
+      this.edges.speechEngine?.setLane(null);
+    }
     const prompts = await loadSystemPrompts(
       {
         root: brainConfig.profileRoot ?? REPO_ROOT,

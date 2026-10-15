@@ -19,6 +19,7 @@ import {
   ConfigError,
   readBrainConfig,
   readSandboxConfig,
+  readVoiceConfig,
 } from './config.ts';
 import { discoverKube, Kube, type KubeList } from './kube.ts';
 import { type HandsConnectSample, SANDBOX_CARD_ID } from './lease.ts';
@@ -129,6 +130,7 @@ function smokeConfig(env: Record<string, string | undefined>): Config {
     // running mate's.
     sandbox: { ...sandbox, spares: 0, kthx: { ...sandbox.kthx, origin: null } },
     // The retention sweep is the running mate's to run.
+    voice: readVoiceConfig(env),
     brain: {
       ...brain,
       ...answering,

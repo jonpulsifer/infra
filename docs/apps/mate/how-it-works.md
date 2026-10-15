@@ -72,6 +72,8 @@ mate downloads no file on a message. The prompt ends with a line naming each fil
 
 While no `mate-voice` pod is linked, the commands answer that the bridge is not connected.
 
+ElevenLabs Speech Engine hears and speaks for mate. It dials mate's `/speech-engine` path over the offsite tunnel, on the same port as everything else, with a JWT signed by the SHA-256 of the API key that owns the engine; mate holds that hash alone, from Secret `mate-speech-engine` as `MATE_SPEECH_ENGINE_KEY_SHA256`, and refuses every connection while it is unset. Each spoken turn arrives as the whole transcript so far. `speech-engine.ts` streams the voice lane's reply back in chunks tagged with the turn's id, and a newer turn aborts the reply under way. The voice lane in `voice-lane.ts` is one model call per turn on `MATE_VOICE_MODEL` at `MATE_VOICE_THINKING`, with a spoken-style prompt and no tools, bounded by `MATE_VOICE_TIMEOUT_MS`. A model pi's catalog lacks leaves the lane off and mate booting; the engine then apologises. The engine itself is declared beside the agents that [ElevenLabs](../elevenlabs.md) reconciles.
+
 ## A turn
 
 1. The model streams its answer. A turn that calls no tool ends here, and no sandbox exists for it.
