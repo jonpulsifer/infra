@@ -1,5 +1,6 @@
 # Loaded by .github/workflows/trivy.yml through TRIVY_IGNOREFILE. Paths are
-# relative to scan-ref, a changed directory, so each entry has two globs.
+# relative to scan-ref: the repository root on a scheduled or dispatched run, a
+# changed directory on a pull request. So each entry has two globs.
 misconfigurations:
   - id: AVD-KSV-0024
     paths: ["**/pbx.yaml", "pbx.yaml"]

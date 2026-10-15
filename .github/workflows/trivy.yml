@@ -1,29 +1,21 @@
 name: "Trivy"
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '**/*.tf'
-      - 'clusters/**'
-      - '**/go.mod'
-      - '**/go.sum'
-      - '**/package.json'
-      - 'bun.lock'
-      - '**/Dockerfile'
+  # A digest PR touches neither path, so it starts no scan.
   pull_request:
     paths:
       - '**/*.tf'
-      - 'clusters/**'
-      - '**/go.mod'
-      - '**/go.sum'
-      - '**/package.json'
-      - 'bun.lock'
       - '**/Dockerfile'
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   changed-config:
     name: Changed Config Dirs
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       directories: ${{ steps.changed.outputs.all_changed_files }}
@@ -39,7 +31,7 @@ jobs:
         with:
           files: |
             **/*.tf
-            clusters/**
+            **/Dockerfile
           dir_names: true
           dir_names_exclude_current_dir: true
           matrix: true
@@ -48,9 +40,6 @@ jobs:
     needs: [changed-config]
     runs-on: ubuntu-latest
     if: needs.changed-config.outputs.any_changed == 'true'
-    permissions:
-      contents: read
-      security-events: write
     strategy:
       fail-fast: false
       matrix:
@@ -68,7 +57,6 @@ jobs:
           trivy-config: ${{ github.workspace }}/.github/trivy.yaml
           hide-progress: false
           ignore-unfixed: true
-          limit-severities-for-sarif: true
           output: trivy-config.txt
           exit-code: 0
           severity: CRITICAL,HIGH
@@ -84,71 +72,143 @@ jobs:
               cat trivy-config.txt
               echo '```'
               echo "</details>"
-            } >> $GITHUB_STEP_SUMMARY
+            } >> "$GITHUB_STEP_SUMMARY"
             cat trivy-config.txt
           fi
 
-  changed-fs:
-    name: Changed Filesystem Dirs
+  scan-repo:
+    name: Scan the repository
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    outputs:
-      directories: ${{ steps.changed.outputs.all_changed_files }}
-      any_changed: ${{ steps.changed.outputs.any_changed }}
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Run Trivy config scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IGNOREFILE: ${{ github.workspace }}/.github/trivyignore.yaml
         with:
-          fetch-depth: 2
-      - name: Directories with Dep Changes
-        id: changed
-        uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
+          scan-type: config
+          scan-ref: .
+          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
+          ignore-unfixed: true
+          format: sarif
+          limit-severities-for-sarif: true
+          output: trivy-config.sarif
+          exit-code: 0
+          severity: CRITICAL,HIGH
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          files: |
-            **/go.mod
-            **/go.sum
-            **/package.json
-            bun.lock
-          dir_names: true
-          dir_names_exclude_current_dir: true
-          matrix: true
+          scan-type: filesystem
+          scan-ref: .
+          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
+          skip-setup-trivy: true
+          ignore-unfixed: true
+          format: sarif
+          limit-severities-for-sarif: true
+          output: trivy-fs.sarif
+          exit-code: 0
+          severity: CRITICAL,HIGH
+      - name: Upload config results
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+      - name: Upload filesystem results
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
 
-  scan-fs:
-    needs: [changed-fs]
+  deployed-images:
+    name: Deployed image digests
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    if: needs.changed-fs.outputs.any_changed == 'true'
+    outputs:
+      images: ${{ steps.pins.outputs.images }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Reads the pins the way CD writes them, which also covers a chart that
+      # splits `repository:` from `tag:`. A stable category per image keeps
+      # each day's upload replacing the last instead of piling up alerts.
+      - name: Read the digests main pins
+        id: pins
+        run: |
+          images=$(
+            jq -r '.deploy | keys[]' .github/containers.json | while read -r image; do
+              mapfile -t targets < <(jq -r --arg i "$image" '.deploy[$i][]' .github/containers.json)
+              bash .github/scripts/cd-digest-update.sh pins "$image" "${targets[@]}" \
+                | jq -R --arg i "$image" '{image: $i, digest: .}'
+            done | jq -sc 'group_by(.image) | map(to_entries
+              | map(.value + {category: ("image-" + .value.image + (if .key > 0 then "-\(.key)" else "" end))}))
+              | add // []'
+          )
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          jq . <<<"$images"
+
+  scan-images:
+    name: Scan ${{ matrix.image }}
+    needs: [deployed-images]
+    if: needs.deployed-images.outputs.images != '[]'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
     strategy:
       fail-fast: false
       matrix:
-        dir: ${{ fromJSON(needs.changed-fs.outputs.directories) }}
+        include: ${{ fromJSON(needs.deployed-images.outputs.images) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Run Trivy filesystem scan
+      - name: Run Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          scan-type: filesystem
-          scan-ref: ${{ matrix.dir }}
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}@${{ matrix.digest }}
           trivy-config: ${{ github.workspace }}/.github/trivy.yaml
-          hide-progress: false
           ignore-unfixed: true
-          output: trivy-fs.txt
+          output: trivy-image.txt
           exit-code: 0
           severity: CRITICAL,HIGH
-      - name: Output Trivy filesystem results
+      - name: Write SARIF from the same database
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}@${{ matrix.digest }}
+          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
+          skip-setup-trivy: true
+          ignore-unfixed: true
+          format: sarif
+          limit-severities-for-sarif: true
+          output: trivy-image.sarif
+          exit-code: 0
+          severity: CRITICAL,HIGH
+      - name: Output Trivy image results
         if: always()
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ matrix.digest }}
         run: |
-          if [[ -s trivy-fs.txt ]]; then
+          if [[ -s trivy-image.txt ]]; then
             {
-              echo "### Filesystem Scan"
+              echo "### ${IMAGE}@${DIGEST}"
               echo "<details><summary>Click to expand</summary>"
               echo ""
               echo '```'
-              cat trivy-fs.txt
+              cat trivy-image.txt
               echo '```'
               echo "</details>"
-            } >> $GITHUB_STEP_SUMMARY
-            cat trivy-fs.txt
+            } >> "$GITHUB_STEP_SUMMARY"
+            cat trivy-image.txt
           fi
+      - name: Upload image results
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: trivy-image.sarif
+          category: ${{ matrix.category }}
