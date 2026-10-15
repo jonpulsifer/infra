@@ -16,5 +16,5 @@ variable "subnet_cidr" {
 variable "name" {
   type        = string
   description = "Name shared by the network and subnetwork"
-  default     = "spindrift-vessel"
+  default     = "kthx-engine-vessel"
 }

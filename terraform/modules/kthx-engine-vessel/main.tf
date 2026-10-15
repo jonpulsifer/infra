@@ -40,7 +40,7 @@ resource "google_project_iam_member" "runtime_secret_reader" {
 # and every predefined role with it also grants object reads.
 resource "google_project_iam_custom_role" "bucket_lister" {
   project     = var.project
-  role_id     = "spindriftBucketLister"
+  role_id     = "kthxEngineBucketLister"
   title       = "kthx engine bucket lister"
   description = "List the project's buckets, nothing else"
   permissions = ["storage.buckets.list"]

@@ -5,6 +5,7 @@ data "google_project" "bluenose" {
 locals {
   spindrift_vessel_project                    = "bluenose"
   spindrift_controller_member                 = "serviceAccount:spindrift-controller@${local.spindrift_vessel_project}.iam.gserviceaccount.com"
+  kthx_engine_controller_member               = "serviceAccount:kthx-engine-controller@${local.spindrift_vessel_project}.iam.gserviceaccount.com"
   bluenose_binary_authorization_service_agent = "serviceAccount:service-${data.google_project.bluenose.number}@gcp-sa-binaryauthorization.iam.gserviceaccount.com"
 
   cloud_build_worker_member = "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
@@ -20,6 +21,7 @@ locals {
     # Remove once a build on main has signed under the workflow principal.
     "principalSet://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/homelab/attribute.repository_owner/jonpulsifer",
     local.spindrift_controller_member,
+    local.kthx_engine_controller_member,
     local.cloud_build_worker_member,
   ]
 

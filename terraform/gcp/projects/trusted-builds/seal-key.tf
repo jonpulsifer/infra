@@ -31,3 +31,21 @@ resource "google_secret_manager_secret_iam_member" "kthx_engine_build_seal_key_a
   role      = "roles/secretmanager.secretAccessor"
   member    = local.kthx_engine_build_workflow_principal
 }
+
+resource "google_secret_manager_secret" "kthx_engine_build_seal_key_named" {
+  secret_id = "kthx-engine-build-seal-key"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.service["secretmanager.googleapis.com"]]
+}
+
+# Both build workflow names read the seal key until the old one is retired.
+resource "google_secret_manager_secret_iam_member" "kthx_engine_build_seal_key_named_accessor" {
+  for_each  = toset([local.spindrift_build_workflow_principal, local.kthx_engine_build_workflow_principal])
+  secret_id = google_secret_manager_secret.kthx_engine_build_seal_key_named.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = each.value
+}

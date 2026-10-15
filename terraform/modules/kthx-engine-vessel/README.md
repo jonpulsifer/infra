@@ -56,12 +56,13 @@ No modules.
 | <a name="input_controller_member"></a> [controller\_member](#input\_controller\_member) | The IAM member the kthx engine controller acts as in this vessel | `string` | n/a | yes |
 | <a name="input_controller_roles"></a> [controller\_roles](#input\_controller\_roles) | Project roles the controller holds here. Pass from the root's iam.tf, for the same remediation-visibility reason as services. | `list(string)` | n/a | yes |
 | <a name="input_project"></a> [project](#input\_project) | The project this vessel is, in the boundary's own terms | `string` | n/a | yes |
-| <a name="input_runtime_account_id"></a> [runtime\_account\_id](#input\_runtime\_account\_id) | Account id of the runtime service account revisions and jobs run as | `string` | `"spindrift-runtime"` | no |
+| <a name="input_runtime_account_id"></a> [runtime\_account\_id](#input\_runtime\_account\_id) | Account id of the runtime service account revisions and jobs run as | `string` | `"kthx-engine-runtime"` | no |
 | <a name="input_services"></a> [services](#input\_services) | APIs enabled on the vessel. Pass this list from the root's services.tf so the kthx engine's generated remediation stanzas can see the quoted service strings where they look for them. | `list(string)` | n/a | yes |
 
 ## Outputs
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_bucket_lister_role_id"></a> [bucket\_lister\_role\_id](#output\_bucket\_lister\_role\_id) | Id of the custom role that lists the project's buckets |
 | <a name="output_runtime_service_account"></a> [runtime\_service\_account](#output\_runtime\_service\_account) | The runtime service account revisions and jobs run as |
 <!-- END_TF_DOCS -->

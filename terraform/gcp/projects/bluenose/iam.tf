@@ -19,13 +19,24 @@ moved {
 # this principal names exactly that installation and nothing else federates
 # through it.
 locals {
-  spindrift_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift:spindrift"
+  spindrift_principal   = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift:spindrift"
+  kthx_engine_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:kthx-engine:kthx-engine"
+  engine_principals = {
+    spindrift   = local.spindrift_principal
+    kthx-engine = local.kthx_engine_principal
+  }
 }
 
 resource "google_service_account_iam_member" "kthx_engine_controller_workload_identity" {
   service_account_id = google_service_account.kthx_engine_controller.name
   role               = "roles/iam.workloadIdentityUser"
   member             = local.spindrift_principal
+}
+
+resource "google_service_account_iam_member" "kthx_engine_controller_workload_identity_engine" {
+  service_account_id = google_service_account.kthx_engine_controller.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = local.kthx_engine_principal
 }
 
 moved {
@@ -47,9 +58,59 @@ resource "google_service_account_iam_member" "kthx_engine_controller_token_creat
   member             = local.spindrift_principal
 }
 
+resource "google_service_account_iam_member" "kthx_engine_controller_token_creator_engine" {
+  service_account_id = google_service_account.kthx_engine_controller.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = local.kthx_engine_principal
+}
+
 moved {
   from = google_service_account_iam_member.spindrift_controller_token_creator
   to   = google_service_account_iam_member.kthx_engine_controller_token_creator
+}
+
+# The controller account named for the engine, beside the one above. Both
+# federated subjects reach it, so the engine's Kubernetes identity and the
+# account it impersonates switch independently.
+resource "google_service_account" "kthx_engine_controller_named" {
+  account_id   = "kthx-engine-controller"
+  display_name = "kthx engine platform controller"
+}
+
+resource "google_service_account_iam_member" "kthx_engine_controller_named_workload_identity" {
+  for_each = local.engine_principals
+
+  service_account_id = google_service_account.kthx_engine_controller_named.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = each.value
+}
+
+resource "google_service_account_iam_member" "kthx_engine_controller_named_token_creator" {
+  for_each = local.engine_principals
+
+  service_account_id = google_service_account.kthx_engine_controller_named.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = each.value
+}
+
+resource "google_service_account_iam_member" "kthx_engine_controller_named_acts_as_runtime" {
+  service_account_id = module.vessel.runtime_service_account.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = google_service_account.kthx_engine_controller_named.member
+}
+
+resource "google_project_iam_member" "kthx_engine_controller_named_bucket_lister" {
+  project = local.project
+  role    = module.vessel.bucket_lister_role_id
+  member  = google_service_account.kthx_engine_controller_named.member
+}
+
+resource "google_project_iam_member" "kthx_engine_controller_named" {
+  for_each = toset(local.spindrift_project_roles)
+
+  project = local.project
+  role    = each.key
+  member  = google_service_account.kthx_engine_controller_named.member
 }
 
 # The roles the controller holds on this vessel. Declared in this file rather
@@ -102,6 +163,12 @@ resource "google_service_account_iam_member" "kthx_engine_controller_acts_as_def
   service_account_id = data.google_compute_default_service_account.default.name
   role               = "roles/iam.serviceAccountUser"
   member             = google_service_account.kthx_engine_controller.member
+}
+
+resource "google_service_account_iam_member" "kthx_engine_controller_named_acts_as_default" {
+  service_account_id = data.google_compute_default_service_account.default.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = google_service_account.kthx_engine_controller_named.member
 }
 
 moved {

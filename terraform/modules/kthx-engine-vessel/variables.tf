@@ -21,7 +21,7 @@ variable "controller_roles" {
 variable "runtime_account_id" {
   type        = string
   description = "Account id of the runtime service account revisions and jobs run as"
-  default     = "spindrift-runtime"
+  default     = "kthx-engine-runtime"
 }
 
 variable "attestor" {

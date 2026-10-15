@@ -26,7 +26,22 @@ module "supply_chain" {
 
   registry_readers = [
     local.spindrift_controller_member,
+    local.kthx_engine_controller_member,
     local.bluenose_binary_authorization_service_agent,
     "serviceAccount:service-${data.google_project.bluenose.number}@serverless-robot-prod.iam.gserviceaccount.com",
   ]
+}
+
+# The module grants these project roles to one controller member; the named
+# controller account holds the same set.
+resource "google_project_iam_member" "kthx_engine_controller_named" {
+  for_each = toset([
+    "roles/cloudbuild.builds.editor",
+    "roles/logging.viewer",
+    "roles/cloudkms.viewer",
+  ])
+
+  project = local.project
+  role    = each.key
+  member  = local.kthx_engine_controller_member
 }
