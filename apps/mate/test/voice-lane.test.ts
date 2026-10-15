@@ -92,11 +92,16 @@ describe('the model voice lane', () => {
           { role: 'user', content: 'all good?' },
         ],
         signal,
+        'conv_1',
       ),
     );
     expect(words).toEqual(['all ', 'good']);
     const call = calls[0];
-    expect(call?.options).toMatchObject({ signal, timeoutMs: 1234 });
+    expect(call?.options).toMatchObject({
+      signal,
+      timeoutMs: 1234,
+      sessionId: 'conv_1',
+    });
     expect(call?.options && 'reasoning' in call.options).toBe(false);
     const messages = call?.context.messages ?? [];
     expect(messages[0]).toMatchObject({
@@ -128,6 +133,7 @@ describe('the model voice lane', () => {
         lane.reply(
           [{ role: 'user', content: 'x' }],
           new AbortController().signal,
+          'conv_2',
         ),
       ),
     ).rejects.toThrow('boom');

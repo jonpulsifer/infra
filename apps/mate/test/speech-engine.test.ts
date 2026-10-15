@@ -111,9 +111,11 @@ class FakeSocket {
 /** A lane that speaks its script one word at a time, waiting on a gate between words. */
 function scriptedLane(words: string[], gate?: () => Promise<void>) {
   const heard: Turn[][] = [];
+  const conversations: string[] = [];
   const lane: VoiceLane = {
-    async *reply(turns, signal) {
+    async *reply(turns, signal, conversationId) {
       heard.push([...turns]);
+      conversations.push(conversationId);
       for (const word of words) {
         if (gate) await gate();
         if (signal.aborted) return;
@@ -121,7 +123,7 @@ function scriptedLane(words: string[], gate?: () => Promise<void>) {
       }
     },
   };
-  return { lane, heard };
+  return { lane, heard, conversations };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
@@ -139,7 +141,7 @@ const transcript = (eventId: number, ...lines: string[]) =>
 describe('the Speech Engine link', () => {
   test('answers a ping, and streams a reply with the turn id then an empty final', async () => {
     const log = new RecordingLog();
-    const { lane, heard } = scriptedLane(['hi ', 'there']);
+    const { lane, heard, conversations } = scriptedLane(['hi ', 'there']);
     const engine = new SpeechEngine({ log, lane });
     const socket = new FakeSocket();
     engine.attach(socket);
@@ -162,6 +164,7 @@ describe('the Speech Engine link', () => {
       { type: 'agent_response', content: '', is_final: true, event_id: 1 },
     ]);
     expect(heard[0]?.map((t) => t.role)).toEqual(['user', 'agent', 'user']);
+    expect(conversations).toEqual(['c']);
     expect(log.of('speech engine: replied')[0]?.fields).toMatchObject({
       chars: 8,
       turns: 3,

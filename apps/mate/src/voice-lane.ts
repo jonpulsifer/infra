@@ -68,7 +68,7 @@ function messages(turns: readonly Turn[], model: Model<Api>): Message[] {
 export function modelVoiceLane(options: ModelVoiceLaneOptions): VoiceLane {
   const { models, model, thinking, timeoutMs, log } = options;
   return {
-    async *reply(turns, signal) {
+    async *reply(turns, signal, conversationId) {
       const context: Context = {
         systemPrompt: VOICE_PROMPT,
         messages: messages(turns, model),
@@ -78,6 +78,7 @@ export function modelVoiceLane(options: ModelVoiceLaneOptions): VoiceLane {
       const stream = models.streamSimple(model, normalizeContext(context), {
         signal,
         timeoutMs,
+        sessionId: conversationId,
         ...(thinking === 'off' ? {} : { reasoning: thinking }),
       });
       for await (const event of stream) {
