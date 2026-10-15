@@ -1,7 +1,8 @@
 {
   "name": "mate",
   "speech_engine": {
-    "ws_url": "wss://voice.lolwtf.ca/speech-engine"
+    "ws_url": "wss://voice.lolwtf.ca/speech-engine",
+    "request_headers": {}
   },
   "language": "en",
   "cascade_timeout_seconds": 10,
@@ -19,15 +20,7 @@
     "retranscribe_on_turn_timeout": false
   },
   "conversation": {
-    "max_duration_seconds": 2400,
-    "client_events": [
-      "audio",
-      "interruption",
-      "ping",
-      "user_transcript",
-      "agent_response",
-      "agent_response_correction"
-    ]
+    "max_duration_seconds": 2400
   },
   "privacy": {
     "record_voice": false
