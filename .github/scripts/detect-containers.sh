@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Writes the build matrix of the containers.json "build" images whose watched paths
 # changed or that BUILD_IMAGES names; an unclassified Dockerfile image fails.
-# `--watches` prints `<image><TAB><path>` for every build image instead. An
+# EVENT_NAME and BASE_SHA decide what a change to the workflow, this script or
+# the allowlist builds. `--watches` prints `<image><TAB><path>` for every build image instead. An
 # entry's "aliases" are further names the same build is pushed under.
 
 set -euo pipefail
@@ -17,20 +18,72 @@ case "${1:-}" in
 esac
 
 manifest=".github/containers.json"
+workflow=".github/workflows/containers.yml"
 
 mapfile -t changed_files <<<"${CHANGED_FILES:-}"
 read -r -a forced_images <<<"${BUILD_IMAGES:-}"
 # tj-actions' safe_output leaves a trailing backslash on every path but the
-# last, which breaks the exact-match grep below.
+# last, which breaks the exact matches below.
 changed_files=("${changed_files[@]%\\}")
 
-# A change to the workflow, this script, or the allowlist rebuilds every image.
+changed() {
+  local f
+  for f in "${changed_files[@]}"; do
+    [[ "$f" == "$1" ]] && return 0
+  done
+  return 1
+}
+
+# The checkout is shallow, so the base is fetched on demand. A push that
+# creates a branch names an all-zero base.
+base_ready() {
+  [[ -n "${BASE_SHA:-}" && ! "$BASE_SHA" =~ ^0+$ ]] || return 1
+  git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null \
+    || git fetch -q --depth=1 origin "$BASE_SHA" 2>/dev/null
+}
+
+# What the build job does to an image: that job and the permissions and env it
+# inherits, less the delivery steps and any scan of the pushed image. Triggers,
+# detect and cd-guard build nothing.
+build_shape() {
+  yq -o=json '{"env": .env, "permissions": .permissions, "build": (.jobs.build
+    | del(.steps[] | select((.name // "") | test("^(Mint a continuous-delivery App token|Update manifest digest|Scan )"))))}'
+}
+
+# A side that cannot be read counts as a change, so a missing base file or a
+# missing yq rebuilds every image instead of none.
+shape_changed() {
+  local before after
+  before=$(git show "$BASE_SHA:$workflow" | build_shape) || return 0
+  after=$(build_shape <"$workflow") || return 0
+  [[ "$before" != "$after" ]]
+}
+
+# A pull request builds every image, without pushing, when the workflow, this
+# script or the allowlist changes. On main, only a change to how the build job
+# builds republishes every image, and an allowlist change builds each image
+# whose `build` entry or `deploy` targets changed. Without a readable base,
+# main rebuilds every image too.
 rebuild_all=false
-if printf '%s\n' "${changed_files[@]}" | grep -qxF \
-  -e '.github/workflows/containers.yml' \
-  -e '.github/scripts/detect-containers.sh' \
-  -e "$manifest"; then
-  rebuild_all=true
+if changed "$workflow" || changed .github/scripts/detect-containers.sh || changed "$manifest"; then
+  if [[ "${EVENT_NAME:-pull_request}" == pull_request ]] || ! base_ready; then
+    rebuild_all=true
+  else
+    if changed "$workflow" && shape_changed; then
+      rebuild_all=true
+    fi
+    if changed "$manifest"; then
+      if retargeted=$(git show "$BASE_SHA:$manifest" | jq -r --slurpfile h "$manifest" '. as $b
+        | [$h[0].build[] as $i
+          | select(($b.build | any(. == $i) | not) or $b.deploy[$i] != $h[0].deploy[$i]) | $i]
+        | join(" ")'); then
+        read -r -a more <<<"$retargeted"
+        forced_images+=(${more[@]+"${more[@]}"})
+      else
+        rebuild_all=true
+      fi
+    fi
+  fi
 fi
 
 # Every image must be in "build" or "ignore", so a new app is never published

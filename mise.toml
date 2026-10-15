@@ -68,11 +68,12 @@ description = "Test validation-impact routing"
 run = "bash .github/scripts/validation-impact_test.sh"
 
 [tasks."cd-digest:test"]
-description = "Test the continuous-delivery digest rewrite, its never-go-backwards guard, and the staleness read that reruns a dropped build"
+description = "Test the continuous-delivery digest rewrite, its never-go-backwards guard, the staleness read that reruns a dropped build, and the build matrix"
 run = [
   "bash .github/scripts/cd-digest-update_test.sh",
   "bash .github/scripts/cd-digest-step_test.sh",
   "bash .github/scripts/cd-stale-images_test.sh",
+  "bash .github/scripts/detect-containers_test.sh",
 ]
 
 [tasks.alerts]
