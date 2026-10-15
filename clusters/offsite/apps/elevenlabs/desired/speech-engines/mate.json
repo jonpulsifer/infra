@@ -10,7 +10,7 @@
     "user_input_audio_format": "pcm_48000"
   },
   "tts": {
-    "model_id": "eleven_flash_v2_5",
+    "model_id": "eleven_flash_v2",
     "voice_id": "cjVigY5qzO86Huf0OWal",
     "agent_output_audio_format": "pcm_24000"
   },
