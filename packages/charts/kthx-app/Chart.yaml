@@ -1,8 +1,8 @@
 apiVersion: v2
-name: spindrift-app
+name: kthx-app
 description: The one chart every Component the kthx engine deploys to a Kubernetes Target renders through
 type: application
-version: 0.5.3
+version: 0.6.0
 appVersion: "1"
 annotations:
   # Read when a Target is pinned. Helm ignores unknown values silently, so a contract

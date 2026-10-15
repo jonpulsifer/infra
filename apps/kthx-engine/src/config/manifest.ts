@@ -105,7 +105,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     buckets: ['bluenose-spindrift-source'],
   },
   charts: {
-    app: 'packages/charts/spindrift-app',
+    app: 'packages/charts/kthx-app',
   },
   supplyChain: {
     registry: ['ghcr.io/spindrift'],

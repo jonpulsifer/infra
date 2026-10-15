@@ -1,6 +1,6 @@
 name: kthx-charts
 
-# Pushes packages/charts/spindrift and spindrift-app to GHCR at their Chart.yaml
+# Pushes packages/charts/kthx-engine and kthx-app to GHCR at their Chart.yaml
 # versions; apps/kthx-engine/test/conformance/ checks that each consumer's OCIRepository
 # pins that tag. A new GHCR package starts private; make it public once, or pulls get a 401.
 on:
@@ -8,15 +8,15 @@ on:
     branches:
       - main
     paths:
-      - 'packages/charts/spindrift/**'
-      - 'packages/charts/spindrift-app/**'
+      - 'packages/charts/kthx-engine/**'
+      - 'packages/charts/kthx-app/**'
       - '.github/workflows/spindrift-charts.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'packages/charts/spindrift/**'
-      - 'packages/charts/spindrift-app/**'
+      - 'packages/charts/kthx-engine/**'
+      - 'packages/charts/kthx-app/**'
       - '.github/workflows/spindrift-charts.yml'
 
 # In-progress push runs are never cancelled: a cancelled push leaves its chart
@@ -42,14 +42,14 @@ jobs:
       - name: Lint charts
         run: |
           set -euo pipefail
-          helm lint packages/charts/spindrift
-          helm lint packages/charts/spindrift-app
+          helm lint packages/charts/kthx-engine
+          helm lint packages/charts/kthx-app
       - name: Package charts
         run: |
           set -euo pipefail
           mkdir -p dist
-          helm package packages/charts/spindrift -d dist
-          helm package packages/charts/spindrift-app -d dist
+          helm package packages/charts/kthx-engine -d dist
+          helm package packages/charts/kthx-app -d dist
       - name: Login to GitHub Container Registry
         # Pull requests lint and package without pushing.
         if: github.event_name != 'pull_request'
@@ -57,11 +57,11 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
       - name: Push charts
-        # Named one by one: a `dist/spindrift-*.tgz` glob also matches spindrift-app.
+        # Named one by one: a `dist/kthx-*.tgz` glob also matches both charts.
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
-          for chart in spindrift spindrift-app; do
+          for chart in kthx-engine kthx-app; do
             version="$(grep '^version:' "packages/charts/${chart}/Chart.yaml" | awk '{print $2}')"
             helm push "dist/${chart}-${version}.tgz" oci://ghcr.io/jonpulsifer/charts
           done

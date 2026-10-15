@@ -6,10 +6,7 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const CHART = join(
-  import.meta.dir,
-  '../../../../packages/charts/spindrift-app',
-);
+const CHART = join(import.meta.dir, '../../../../packages/charts/kthx-app');
 
 export interface RenderedObject {
   apiVersion: string;

@@ -17,7 +17,7 @@ import { DEFAULT_PLATFORM } from '../../src/domain/placement.ts';
 
 const CHART_YAML = join(
   import.meta.dir,
-  '../../../../packages/charts/spindrift-app/Chart.yaml',
+  '../../../../packages/charts/kthx-app/Chart.yaml',
 );
 
 describe('the value contract has two halves and they must agree', () => {

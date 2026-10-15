@@ -296,7 +296,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       spec: {
         chart: {
           spec: {
-            chart: 'packages/charts/spindrift',
+            chart: 'packages/charts/kthx-engine',
             sourceRef: {
               kind: 'GitRepository',
               name: 'infra',
@@ -310,9 +310,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
   });
 
   test('the App-chart check catches a repository-local chart path', () => {
-    expect(isExtractableAppChartRef('packages/charts/spindrift-app')).toBe(
-      false,
-    );
+    expect(isExtractableAppChartRef('packages/charts/kthx-app')).toBe(false);
   });
 
   test('an oci:// App chart is rendered as an extractable source, not a path', () => {
@@ -320,7 +318,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       name: 'blog-web',
       namespace: 'spindrift-apps',
       targetNamespace: 'spindrift-apps',
-      chart: 'oci://ghcr.io/jonpulsifer/charts/spindrift-app',
+      chart: 'oci://ghcr.io/jonpulsifer/charts/kthx-app',
       sourceRef: { name: 'spindrift-app', namespace: 'spindrift-apps' },
       labels: {},
       values: {},
@@ -332,7 +330,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       name: 'blog-web',
       namespace: 'spindrift-apps',
       targetNamespace: 'spindrift-apps',
-      chart: 'packages/charts/spindrift-app',
+      chart: 'packages/charts/kthx-app',
       sourceRef: { name: 'infra', namespace: 'flux-system' },
       labels: {},
       values: {},
@@ -346,9 +344,9 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     // A version ahead of its tag ships nothing, and a tag ahead of the push
     // cannot pull. turbo.json's `kthx-engine#test:chart-pins` inputs list these.
     const consumers: [string, string][] = [
-      ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
+      ['kthx-engine', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
       [
-        'spindrift-app',
+        'kthx-app',
         'clusters/base/platform/spindrift-target/oci-repository.yaml',
       ],
     ];

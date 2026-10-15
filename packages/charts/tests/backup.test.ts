@@ -39,7 +39,7 @@ const CASES: Case[] = [
     },
   },
   {
-    chart: 'spindrift',
+    chart: 'kthx-engine',
     namespace: 'spindrift',
     database: 'spindrift-db',
     values: {
