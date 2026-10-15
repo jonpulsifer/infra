@@ -49,6 +49,13 @@ run = "claude --permission-mode auto"
 description = "Enter the Nix dev shell"
 run = "nix develop"
 
+[tasks.kthx]
+description = "Run the kthx CLI from this checkout"
+# The root package does not depend on the CLI's workspace, so turbo leaves it
+# out of every other image's pruned workspace.
+dir = "{{cwd}}"
+run = "bun {{config_root}}/apps/kthx/cli/main.ts"
+
 [tasks.fmt]
 description = "Format Nix + Terraform"
 run = [
