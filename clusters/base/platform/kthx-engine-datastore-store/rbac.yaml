@@ -1,0 +1,38 @@
+---
+# Secret names come from Datastore names chosen at runtime, so the namespace
+# bounds this grant, not `resourceNames`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kthx-engine-datastore-store
+  namespace: spindrift-datastores
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # Store validation asks what it may do; without this the store reports invalid.
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - selfsubjectrulesreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kthx-engine-datastore-store
+  namespace: spindrift-datastores
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kthx-engine-datastore-store
+subjects:
+  - kind: ServiceAccount
+    name: kthx-engine-datastore-store
+    namespace: external-secrets

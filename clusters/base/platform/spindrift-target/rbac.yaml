@@ -4,7 +4,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: spindrift-target-discovery
+  name: kthx-engine-target-discovery
 rules:
   # `list` lets the connect screen offer any namespace, not only spindrift-apps.
   - apiGroups:
@@ -48,7 +48,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: spindrift-target-delivery
+  name: kthx-engine-target-delivery
 rules:
   - apiGroups:
       - helm.toolkit.fluxcd.io
@@ -106,7 +106,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: spindrift-target-chart-artifact
+  name: kthx-engine-target-chart-artifact
   namespace: spindrift-apps
 rules:
   - apiGroups:
@@ -123,7 +123,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: spindrift-target-dns
+  name: kthx-engine-target-dns
   namespace: spindrift-apps
 rules:
   - apiGroups:
@@ -141,7 +141,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: spindrift-target-datastores
+  name: kthx-engine-target-datastores
   namespace: spindrift-datastores
 rules:
   - apiGroups:
@@ -204,7 +204,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: spindrift-target-datastores-legacy
+  name: kthx-engine-target-datastores-legacy
   namespace: spindrift-apps
 rules:
   - apiGroups:
@@ -232,7 +232,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: spindrift-target-chart-source
+  name: kthx-engine-target-chart-source
   namespace: flux-system
 rules:
   - apiGroups:
