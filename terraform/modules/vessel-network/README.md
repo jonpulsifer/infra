@@ -44,7 +44,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_name"></a> [name](#input\_name) | Name shared by the network and subnetwork | `string` | `"spindrift-vessel"` | no |
+| <a name="input_name"></a> [name](#input\_name) | Name shared by the network and subnetwork | `string` | `"kthx-engine-vessel"` | no |
 | <a name="input_project"></a> [project](#input\_project) | The vessel project the network lives in | `string` | n/a | yes |
 | <a name="input_region"></a> [region](#input\_region) | The region the subnetwork is created in | `string` | n/a | yes |
 | <a name="input_subnet_cidr"></a> [subnet\_cidr](#input\_subnet\_cidr) | CIDR of the vessel subnet. Read from the vessel's topology SSOT, never typed inline. | `string` | n/a | yes |

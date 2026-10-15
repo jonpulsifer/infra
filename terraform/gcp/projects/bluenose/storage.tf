@@ -69,6 +69,81 @@ resource "google_storage_bucket_iam_member" "trusted_builder_source" {
   member = "serviceAccount:${data.google_project.trusted_builds.number}@cloudbuild.gserviceaccount.com"
 }
 
+resource "google_storage_bucket_iam_member" "kthx_engine_source_controller_named" {
+  bucket = google_storage_bucket.kthx_engine_source.name
+  role   = "roles/storage.admin"
+  member = google_service_account.kthx_engine_controller_named.member
+}
+
+resource "google_storage_bucket" "kthx_engine_source_named" {
+  name                        = "bluenose-kthx-engine-source"
+  location                    = local.region
+  force_destroy               = false
+  uniform_bucket_level_access = true
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      age                = 30
+      num_newer_versions = 10
+      with_state         = "ARCHIVED"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  # Bundles under ephemeral/ never reach 10 newer versions, so only these two rules expire them.
+  # Re-staging a commit overwrites its bundle, which resets its age.
+  lifecycle_rule {
+    condition {
+      age            = 30
+      matches_prefix = ["ephemeral/"]
+      with_state     = "LIVE"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  # With versioning on, a delete or overwrite only archives the live object.
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 7
+      matches_prefix             = ["ephemeral/"]
+      with_state                 = "ARCHIVED"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  depends_on = [module.vessel]
+}
+
+
+resource "google_storage_bucket_iam_member" "kthx_engine_source_named" {
+  bucket = google_storage_bucket.kthx_engine_source_named.name
+  role   = "roles/storage.admin"
+  member = google_service_account.kthx_engine_controller.member
+}
+
+resource "google_storage_bucket_iam_member" "kthx_engine_source_named_controller_named" {
+  bucket = google_storage_bucket.kthx_engine_source_named.name
+  role   = "roles/storage.admin"
+  member = google_service_account.kthx_engine_controller_named.member
+}
+
+
+resource "google_storage_bucket_iam_member" "trusted_builder_source_named" {
+  bucket = google_storage_bucket.kthx_engine_source_named.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${data.google_project.trusted_builds.number}@cloudbuild.gserviceaccount.com"
+}
+
 # The kthx depot: release archives under releases/, site files under files/<site>/,
 # and database dumps under backups/pg/.
 resource "google_storage_bucket" "kthx" {
