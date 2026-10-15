@@ -24,6 +24,14 @@ It writes no digest older than the one on `main` or in the open PR. A daily run 
 
 `.github/workflows/spindrift-charts.yml` publishes `packages/charts/spindrift/` and `packages/charts/spindrift-app/` to GHCR, and their OCIRepository objects pin a version tag. Flux loads the other charts in `packages/charts/` from the `infra` GitRepository with `reconcileStrategy: Revision`, so it re-renders them on each commit to `main`. Under `clusters/`, Renovate skips first-party images and charts.
 
+## Renovate
+
+Renovate merges stable npm minor and patch updates as one weekly PR, so the Bun images rebuild once a week for them. Majors and 0.x updates arrive as their own PRs.
+
+Chainguard node base digests (`:latest` and `:latest-dev`) move together in one PR each Monday and Thursday, so a base-image fix reaches the images within about four days. The kthx CLI pin in `images/mate-sandbox/Dockerfile` and the verifier pin in `apps/kthx-engine/Dockerfile` move weekly, and the owner reviews each.
+
+Renovate rebases a PR only when it conflicts with `main`. Terraform and Talos PRs rebase whenever they fall behind, because Atlantis applies the PR's own plan.
+
 ## CI checks
 
 A path that no workflow lists runs no checks, and its PR still passes. `.github/scripts/validation-impact.sh` routes paths to [OpenTofu roots](opentofu.md) and `nix flake check`.
