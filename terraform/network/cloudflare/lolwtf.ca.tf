@@ -35,6 +35,14 @@ module "tunnel_offsite" {
         hostname = "tf.${cloudflare_zone.lolwtf_ca.name}"
         service  = "http://atlantis.atlantis"
       },
+      # ElevenLabs Speech Engine dials mate's brain here over a WebSocket;
+      # mate verifies its JWT. The zone's one custom firewall ruleset is not
+      # this root's, so no edge allow-list yet.
+      {
+        hostname = "voice.${cloudflare_zone.lolwtf_ca.name}"
+        path     = "^/speech-engine$"
+        service  = "http://mate.mate:8080"
+      },
       {
         service = "http_status:418"
       }
