@@ -1,0 +1,22 @@
+---
+# Lets the `kthx-control` HTTPRoute in `kthx` send the console's paths to the
+# engine's Service, and the Apps Gateway's status route reach the same Service.
+# Scoped to one Service: a namespace-wide grant would let any route reach
+# anything the control plane runs.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: kthx-control-console
+  namespace: kthx-engine
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: kthx
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: spindrift-apps
+  to:
+    - group: ""
+      kind: Service
+      name: kthx-engine

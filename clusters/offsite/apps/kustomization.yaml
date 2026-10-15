@@ -15,6 +15,7 @@ resources:
   - pbx
   - prowler
   - spindrift
+  - kthx-engine
   - weather
   - ../../base/platform/kthx-engine-target
   - ../../base/apps/reloader

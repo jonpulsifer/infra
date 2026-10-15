@@ -70,3 +70,6 @@ subjects:
   - kind: ServiceAccount
     name: spindrift
     namespace: spindrift
+  - kind: ServiceAccount
+    name: kthx-engine
+    namespace: kthx-engine
