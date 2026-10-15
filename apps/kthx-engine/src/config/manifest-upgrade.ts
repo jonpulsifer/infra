@@ -18,19 +18,46 @@ function asDocument(value: unknown): Document | null {
  * what arrived. Steps run innermost first, and the order matters.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return dropControlPlane(
-    dropDeviceFlowIdentity(
-      listDnsZones(
-        movePinnedBuildWorkflowToMain(
-          scrubPlaceholderBuildWorkflow(
-            nameInstallationVessels(
-              dropTargetNames(addDeclaredVessels(document)),
+  return renameAppChart(
+    dropControlPlane(
+      dropDeviceFlowIdentity(
+        listDnsZones(
+          movePinnedBuildWorkflowToMain(
+            scrubPlaceholderBuildWorkflow(
+              nameInstallationVessels(
+                dropTargetNames(addDeclaredVessels(document)),
+              ),
             ),
           ),
         ),
       ),
     ),
   );
+}
+
+const APP_CHART_NAMES = { old: 'spindrift-app', current: 'kthx-app' };
+
+/**
+ * Renames the App chart in `charts.app`, whichever registry or repository
+ * path carries it. The chart publishes under its new name from 0.6.0, and the
+ * old name keeps only the versions already pushed.
+ */
+function renameAppChart(document: unknown): unknown {
+  const manifest = asDocument(document);
+  const charts = asDocument(manifest?.charts);
+  const app = charts?.app;
+  if (manifest === null || charts === null || typeof app !== 'string') {
+    return document;
+  }
+  const suffix = `/${APP_CHART_NAMES.old}`;
+  if (!app.endsWith(suffix)) return document;
+  return {
+    ...manifest,
+    charts: {
+      ...charts,
+      app: `${app.slice(0, -suffix.length)}/${APP_CHART_NAMES.current}`,
+    },
+  };
 }
 
 /**
