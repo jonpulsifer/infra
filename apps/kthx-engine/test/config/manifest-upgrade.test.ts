@@ -222,8 +222,8 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('is a no-op on a document that already declares them', () => {
-    // `11` needs no upgrade.
-    const current = snapshot('11-deployment-serves-the-control-plane.yaml');
+    // `12` needs no upgrade.
+    const current = snapshot('12-kthx-app-chart.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });
@@ -351,3 +351,33 @@ describe('the zones a reach-keyed document is upgraded into', () => {
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });
+
+describe('the App chart rename', () => {
+  test('moves charts.app to the new name under any registry or path', () => {
+    for (const [from, to] of [
+      [
+        'oci://registry.example.test/charts/spindrift-app',
+        'oci://registry.example.test/charts/kthx-app',
+      ],
+      ['example/spindrift-app', 'example/kthx-app'],
+    ] as const) {
+      const upgraded = upgradeManifestDocument(
+        snapshotWith({ charts: { app: from } }),
+      ) as { charts: { app: string } };
+      expect(upgraded.charts.app).toBe(to);
+    }
+  });
+
+  test('leaves any other chart alone', () => {
+    const document = snapshotWith({
+      charts: { app: 'oci://registry.example.test/charts/somebody-else' },
+    });
+    expect(upgradeManifestDocument(document)).toEqual(document);
+  });
+});
+
+function snapshotWith(patch: Record<string, unknown>): Record<string, unknown> {
+  const newest = SNAPSHOTS.at(-1);
+  if (newest === undefined) throw new Error('the corpus is empty');
+  return { ...snapshot(newest), ...patch };
+}
