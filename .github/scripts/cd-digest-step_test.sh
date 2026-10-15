@@ -61,8 +61,10 @@ esac
 exit 0
 STUB
 
-# The fixture maps a digest to its build commit. An unknown digest fails as an
-# HTTP error, which is how an unreadable pin looks.
+# The fixture maps a digest to its build commit and to the layer its image
+# holds, which defaults to one of its own. An unknown digest fails as an HTTP
+# error, which is how an unreadable pin looks, and a layer named `unreadable`
+# fails the config read the same way.
 cat >"$stubs/curl" <<'STUB'
 #!/usr/bin/env bash
 url="${!#}"
@@ -73,9 +75,11 @@ case "$url" in
     ;;
   *"/blobs/"*)
     d=$(digest_for "$url"); d="${d%.config}"
-    commit=$(awk -v d="$d" '$1 == d { print $2 }' "$REGISTRY_FIXTURE")
+    read -r commit layer < <(awk -v d="$d" '$1 == d { print $2, $3 }' "$REGISTRY_FIXTURE")
     [ -n "$commit" ] || exit 22
-    printf '{"config":{"Labels":{"org.opencontainers.image.revision":"%s"}}}' "$commit"
+    [ "$layer" != unreadable ] || exit 22
+    printf '{"rootfs":{"type":"layers","diff_ids":["%s"]},"config":{"Cmd":["bun","start"],"Labels":{"org.opencontainers.image.revision":"%s"}}}' \
+      "${layer:-$d}" "$commit"
     ;;
   *"/manifests/"*.amd64)
     d=$(digest_for "$url")
@@ -96,7 +100,7 @@ export PATH="$stubs:$PATH"
 
 export REGISTRY_FIXTURE="$work/registry"
 : >"$REGISTRY_FIXTURE"
-publish() { printf '%s %s\n' "$1" "$2" >>"$REGISTRY_FIXTURE"; }
+publish() { printf '%s %s %s\n' "$1" "$2" "${3:-}" >>"$REGISTRY_FIXTURE"; }
 
 manifest=clusters/offsite/apps/mate/deployment.yaml
 remote="$work/remote.git"
@@ -233,6 +237,43 @@ assert_equal 'a queued digest with no readable provenance does not block deliver
   "$d1" "$(queued_digest)"
 grep -q '::warning::Cannot tell which commit' "$work/log.unknown" \
   || fail 'the unreadable pin was passed over without a warning'
+
+# Each of these digests is a later build of c2 whose image holds the layer of
+# the digest it is named after, so only its labels differ from that build.
+like_d0=$(digest a)
+like_d2=$(digest b)
+unreadable=$(digest c)
+publish "$like_d0" "$c2" "$d0"
+publish "$like_d2" "$c2" "$d2"
+publish "$unreadable" "$c2" unreadable
+
+git -C "$remote" update-ref -d "refs/heads/$branch"
+: >"$GH_LOG"
+run_step "$c2" "$like_d0" >"$work/log.same" 2>&1 || fail "the run failed: $(cat "$work/log.same")"
+assert_equal 'a build with the files and config main already pins opens nothing' \
+  '' "$(queued_digest)"
+assert_equal 'a build with the files and config main already pins calls no gh' \
+  '' "$(cat "$GH_LOG")"
+grep -qF "::notice::mate build $c2 has the same filesystem and config as the pin; no pull request" "$work/log.same" \
+  || fail "the content skip did not say so: $(cat "$work/log.same")"
+
+run_step "$c2" "$d2" >"$work/log.differs" 2>&1 || fail "the run failed: $(cat "$work/log.differs")"
+assert_equal 'a build whose content differs from the pin is delivered' "$d2" "$(queued_digest)"
+
+run_step "$c2" "$like_d2" >"$work/log.queued-same" 2>&1 || fail "the run failed: $(cat "$work/log.queued-same")"
+assert_equal 'a build matching the queued build leaves the queue alone although main differs' \
+  "$d2" "$(queued_digest)"
+grep -qF '::notice::mate build' "$work/log.queued-same" \
+  || fail 'the skip against the queued build did not say so'
+
+run_step "$c2" "$like_d0" >"$work/log.queued-differs" 2>&1 || fail "the run failed: $(cat "$work/log.queued-differs")"
+assert_equal 'a build matching main but not the queued build replaces the queued one' \
+  "$like_d0" "$(queued_digest)"
+
+git -C "$remote" update-ref -d "refs/heads/$branch"
+run_step "$c2" "$unreadable" >"$work/log.unreadable" 2>&1 || fail "the run failed: $(cat "$work/log.unreadable")"
+assert_equal 'a build whose fingerprint cannot be read is delivered as before' \
+  "$unreadable" "$(queued_digest)"
 
 # The step edits main's copy of the manifest, so its targets come from main's
 # deploy map and not from the built commit's.

@@ -4,7 +4,7 @@
 # daily, and a wrong `stale` would rebuild and roll the image every day. For an
 # image that names its turbo workspace, image-affected.sh, the test the push
 # build used, has the last word, so a lockfile commit the push skipped is not
-# rebuilt here.
+# rebuilt here. A pin whose content matches the newest build is current too.
 
 set -euo pipefail
 
@@ -107,6 +107,33 @@ survey() {
   done | sort -u
 }
 
+# Succeeds when the newest build holds the same files and runtime config as
+# every reference pin. The delivery step opens no pull request for such a
+# build, so its pin keeps an older commit, and without this check the image
+# would be rebuilt every day. The build tags each push with its commit; a
+# scheduled rebuild is tagged with main's head instead, so `latest` counts when
+# it was built from a commit that contains the newest one. Neither tag means
+# the build never pushed, and the image stays stale so that it is retried.
+same_content() {
+  local repository="$1" newest_commit="$2" pins="$3" newest built digest
+
+  newest=$("$cd_digest" fingerprint "$repository" "$newest_commit" || true)
+  if [ -z "$newest" ]; then
+    built=$("$cd_digest" revision "$repository" latest || true)
+    if [ -n "$built" ] && git merge-base --is-ancestor "$newest_commit" "$built" 2>/dev/null; then
+      newest=$("$cd_digest" fingerprint "$repository" latest || true)
+    fi
+  fi
+  if [ -z "$newest" ] || [ -z "$pins" ]; then
+    return 1
+  fi
+
+  while IFS= read -r digest; do
+    [ -n "$digest" ] || continue
+    [ "$("$cd_digest" fingerprint "$repository" "$digest" || true)" = "$newest" ] || return 1
+  done <<<"$pins"
+}
+
 stale() {
   local images=("$@") image targets watches workspace newest_commit owner
   local main_pins queued_pins main_said queued_said
@@ -160,6 +187,11 @@ stale() {
       continue
     fi
     if grep -qx stale <<<"$main_said"; then
+      # The same reference the delivery step compares with: what merges next.
+      if same_content "$owner/$image" "$newest_commit" "${queued_pins:-$main_pins}"; then
+        echo "$image is pinned at content identical to the newest build." >&2
+        continue
+      fi
       echo "$image is pinned behind $newest_commit, the newest commit touching its inputs." >&2
       printf '%s\n' "$image"
       continue
