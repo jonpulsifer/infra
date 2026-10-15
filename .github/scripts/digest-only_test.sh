@@ -26,10 +26,11 @@ git config user.email tester@example.invalid
 
 cat >.github/containers.json <<'JSON'
 {
-  "build": ["mate", "kthx-engine"],
+  "build": ["mate", "kthx-engine", "atlantis"],
   "deploy": {
     "mate": ["deploy/mate.yaml"],
-    "kthx-engine": ["deploy/release.yaml"]
+    "kthx-engine": ["deploy/release.yaml"],
+    "atlantis": ["deploy/chart.yaml"]
   },
   "ignore": []
 }
@@ -51,6 +52,12 @@ cat >deploy/release.yaml <<YAML
 values:
   engine:
     image: ghcr.io/jonpulsifer/kthx-engine:latest@$old
+YAML
+cat >deploy/chart.yaml <<YAML
+values:
+  image:
+    repository: ghcr.io/jonpulsifer/atlantis
+    tag: latest@$old
 YAML
 cat >deploy/other.yaml <<YAML
 image: ghcr.io/jonpulsifer/mate:latest@$old
@@ -82,6 +89,9 @@ expect 'a digest-only change to a deploy target skips' 0 "$head" deploy/mate.yam
 
 head=$(change sed -i "s/$old/$new/" deploy/release.yaml)
 expect 'a digest-only change to a release skips' 0 "$head" deploy/release.yaml
+
+head=$(change sed -i "s/$old/$new/" deploy/chart.yaml)
+expect 'a digest-only change on a tag: line skips' 0 "$head" deploy/chart.yaml
 
 head=$(change sed -i -e "s/$old/$new/" -e 's/value: info/value: debug/' deploy/mate.yaml)
 expect 'a digest change beside another line runs' 1 "$head" deploy/mate.yaml

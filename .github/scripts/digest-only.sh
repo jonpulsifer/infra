@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Exits 0 when every file is a CD deploy target in .github/containers.json that
-# differs only at its first-party image digest line and still pins one.
+# differs only at its first-party image digest line and still pins one. A chart
+# that splits the image into `repository:` and `tag:` pins the digest on the
+# `tag:` line, so that form counts too.
 # usage: digest-only.sh <base> <head> <file>...
 
 set -euo pipefail
 
 base=$1 head=$2
 shift 2
-re='^[[:space:]]*image: ghcr\.io/jonpulsifer/[a-z0-9-]+:latest@sha256:[[:xdigit:]]{64}$'
+re='^[[:space:]]*(image: ghcr\.io/jonpulsifer/[a-z0-9-]+:|tag: )latest@sha256:[[:xdigit:]]{64}$'
 
 declare -A targets=()
 while IFS= read -r target; do
