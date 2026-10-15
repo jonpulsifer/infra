@@ -62,10 +62,12 @@ function base64UrlDecode(input: string): Buffer {
  * that digest as hex and never the key. Returns null when valid, else why.
  */
 export function verifySpeechEngineToken(
-  token: string,
+  value: string,
   keySha256Hex: string,
   nowMs: number,
 ): string | null {
+  // ElevenLabs sends the header as `Bearer <jwt>`.
+  const token = value.trim().replace(/^bearer\s+/i, '');
   const parts = token.split('.');
   if (parts.length !== 3) return 'malformed token';
   const [headerB64, payloadB64, signatureB64] = parts as [

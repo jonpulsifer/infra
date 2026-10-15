@@ -82,6 +82,16 @@ describe('the Speech Engine token', () => {
     expect(refuseSpeechEngine(new Headers(), KEY_HEX, NOW)).toBe('no token');
     expect(refuseSpeechEngine(headers, KEY_HEX, NOW)).toBeNull();
   });
+
+  test('the Bearer prefix ElevenLabs sends is stripped', () => {
+    const headers = new Headers({
+      [AUTHORIZATION_HEADER]: `Bearer ${token(CLAIMS)}`,
+    });
+    expect(refuseSpeechEngine(headers, KEY_HEX, NOW)).toBeNull();
+    expect(
+      verifySpeechEngineToken(`bearer ${token(CLAIMS, 'other')}`, KEY_HEX, NOW),
+    ).toBe('bad signature');
+  });
 });
 
 class FakeSocket {
