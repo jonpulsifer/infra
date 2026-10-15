@@ -63,6 +63,14 @@ mate downloads no file on a message. The prompt ends with a line naming each fil
 
 `mate_inbound_dropped_total` counts an allowlisted message that runs nothing and says nothing, by `surface` and `reason`: `no-mention`, `channel`, `thread-create`, `stale` or `subtype`. The log line `an inbound message was ignored` carries its ids, never its text.
 
+## Voice
+
+`apps/mate-voice/` is the bridge that holds Rowbutt's Discord voice connection, and `packages/mate-voice-protocol/` is the JSON protocol the two speak. mate stays the only gateway session: the bridge dials mate's `/voice` WebSocket on its port, asks mate to send each voice state update on the gateway, and mate relays the bot's own `VOICE_STATE_UPDATE` and the `VOICE_SERVER_UPDATE` back. Both sides heartbeat every five seconds, and three missed beats end the link. A second bridge that dials in replaces the first.
+
+`/join`, `/leave`, and a mention that says only `join` or `leave`, are the voice commands. mate registers the two slash commands on its guild at every READY, and the guild's Discord settings decide who sees them. Every path checks `MATE_ALLOWED_USER_IDS`: another user is refused. mate joins only the voice channel the owner is in, and only when `MATE_ALLOWED_CHANNEL_IDS` lists it, so a voice channel goes on that list. A slash command is answered where only its user sees it; a mention is answered in its channel, and that channel gets the call's status lines. mate holds one call. It leaves when the owner leaves the channel, when the channel has nobody else in it, when asked, and when the bridge stalls. If the bridge's link drops mid-call mate sends the leave itself, and if mate restarts the bridge keeps the call until the next mate adopts it or thirty seconds pass.
+
+While no `mate-voice` pod is linked, the commands answer that the bridge is not connected.
+
 ## A turn
 
 1. The model streams its answer. A turn that calls no tool ends here, and no sandbox exists for it.

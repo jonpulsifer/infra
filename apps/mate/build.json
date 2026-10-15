@@ -10,6 +10,7 @@
       "apps/mate",
       "packages/mate-hands",
       "packages/pi-store-postgres",
+      "packages/mate-voice-protocol",
       "packages/typescript-config",
       "AGENTS.md",
       "dotfiles/pi/mate/persona.md",

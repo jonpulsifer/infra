@@ -34,6 +34,7 @@ COPY --from=pruner --chmod=755 /app/out/full/apps/mate/src ./apps/mate/src
 # `deps` has only the workspace manifests and symlinks, so each package's
 # source comes from `pruner`.
 COPY --from=pruner --chmod=755 /app/out/full/packages/mate-hands/src ./packages/mate-hands/src
+COPY --from=pruner --chmod=755 /app/out/full/packages/mate-voice-protocol/src ./packages/mate-voice-protocol/src
 COPY --from=pruner --chmod=755 /app/out/full/packages/pi-store-postgres/src ./packages/pi-store-postgres/src
 # The agent's profile: the system prompt is the persona, the owner's AGENTS.md,
 # the overrides, AGENTS.md plus an index of these skills. turbo prune leaves
@@ -49,6 +50,7 @@ RUN test -f /app/apps/mate/src/main.ts \
   && test -d /app/apps/mate/node_modules/@discordjs/ws \
   && test -d /app/apps/mate/node_modules/@earendil-works/pi-durable \
   && test -f /app/apps/mate/node_modules/@repo/mate-hands/src/protocol.ts \
+  && test -f /app/apps/mate/node_modules/@repo/mate-voice-protocol/src/index.ts \
   && test -f /app/apps/mate/node_modules/@repo/pi-store-postgres/src/index.ts \
   && test -f /app/AGENTS.md \
   && test -s /app/dotfiles/pi/mate/persona.md \

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { type AudioPlayer, VoiceConnectionStatus } from '@discordjs/voice';
+import { type FromBridge, PROTOCOL_VERSION } from '@repo/mate-voice-protocol';
 import { Bridge, VERSION } from '../src/bridge.ts';
 import type { Config } from '../src/config.ts';
 import { Playback } from '../src/playback.ts';
-import { type FromBridge, PROTOCOL_VERSION } from '../src/protocol.ts';
 import {
   CHANNEL,
   capturingLog,

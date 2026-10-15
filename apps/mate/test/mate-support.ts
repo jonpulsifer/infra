@@ -187,6 +187,7 @@ export class DiscordDriver {
       commands: {
         getGlobalCommands: async () => [] as never,
         bulkOverwriteGlobalCommands: async () => [] as never,
+        bulkOverwriteGuildCommands: async () => [] as never,
       },
       guildId: GUILD,
       allowedUserIds: new Set([OWNER]),

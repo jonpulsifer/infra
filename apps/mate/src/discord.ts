@@ -17,7 +17,12 @@ import {
   SeparatorSpacingSize,
 } from 'discord-api-types/v10';
 import { type Clock, duration } from './clock.ts';
-import { clearGlobalCommands, type GlobalCommands } from './commands.ts';
+import {
+  clearGlobalCommands,
+  type GlobalCommands,
+  type GuildCommands,
+  registerGuildCommands,
+} from './commands.ts';
 import type { IdentifyBudget } from './guard.ts';
 import { SANDBOX_CARD_ID } from './lease.ts';
 import { type Log, plain } from './log.ts';
@@ -39,6 +44,7 @@ import {
   type ToolState,
   withAttachments,
 } from './surface.ts';
+import { refusalLine, type Voice, voiceCommand } from './voice.ts';
 
 export type StopRow = APIActionRowComponent<APIButtonComponentWithCustomId>;
 
@@ -68,6 +74,12 @@ export interface Discord {
   joinThread(threadId: string): Promise<void>;
   showTyping(channelId: string): Promise<void>;
   ackUpdate(interactionId: string, token: string): Promise<void>;
+  /** Answers a slash command with a line only its user sees. */
+  whisperBack(
+    interactionId: string,
+    token: string,
+    line: string,
+  ): Promise<void>;
   react(channelId: string, messageId: string, emoji: string): Promise<void>;
   unreact(channelId: string, messageId: string, emoji: string): Promise<void>;
 }
@@ -219,6 +231,12 @@ export function discordOver(api: API): Discord {
     },
     async ackUpdate(interactionId, token) {
       await api.interactions.deferMessageUpdate(interactionId, token);
+    },
+    async whisperBack(interactionId, token, line) {
+      await api.interactions.reply(interactionId, token, {
+        content: line,
+        flags: MessageFlags.Ephemeral,
+      });
     },
     async react(channelId, messageId, emoji) {
       await api.channels.addMessageReaction(channelId, messageId, emoji);
@@ -539,23 +557,47 @@ export interface DiscordGateway {
 export interface DiscordListenerOptions {
   gateway: DiscordGateway;
   api: Discord;
-  commands: GlobalCommands;
+  commands: GlobalCommands & GuildCommands;
   guildId: string;
   allowedUserIds: ReadonlySet<string>;
   allowedChannelIds: ReadonlySet<string>;
   clock: Clock;
   log: Log;
+  /** The voice bridge's side; without it the voice commands answer that there is none. */
+  voice?: Voice;
 }
 
 /** The gateway: the surface joins the threads on Ready, then its events follow. */
 export function discordListener(
   options: DiscordListenerOptions,
 ): SurfaceListener {
-  const { gateway, api, guildId, log } = options;
+  const { gateway, api, guildId, log, voice } = options;
   const { client } = gateway;
   let delivering = false;
   let leaving: Promise<void> | null = null;
   let me = '';
+
+  async function onVoiceCommand(
+    command: 'join' | 'leave',
+    userId: string,
+    channelId: string,
+    answer: (line: string) => Promise<void>,
+  ): Promise<void> {
+    if (!voice) {
+      await answer(refusalLine('bridge_not_ready'));
+      return;
+    }
+    const result =
+      command === 'join'
+        ? await voice.join(userId, channelId)
+        : await voice.leave(userId);
+    if (result.ok) {
+      await answer(command === 'join' ? 'on my way' : 'leaving');
+      return;
+    }
+    log.info('voice command refused', { command, reason: result.reason });
+    await answer(refusalLine(result.reason));
+  }
 
   function listen(threads: Inbox): void {
     client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
@@ -581,6 +623,25 @@ export function discordListener(
       } catch (error) {
         log.warn('global command cleanup failed', { error: plain(error) });
       }
+      try {
+        await registerGuildCommands(
+          options.commands,
+          data.application.id,
+          guildId,
+          log,
+        );
+      } catch (error) {
+        log.warn('guild command registration failed', {
+          error: plain(error),
+        });
+      }
+    });
+
+    // Every READY, not only the first: a fresh identify drops the bot's voice
+    // state, and the voice side rejoins a held call.
+    client.on(GatewayDispatchEvents.Ready, ({ data }) => {
+      if (!delivering || !voice) return;
+      void voice.onReady(data.user.id);
     });
 
     client.on(GatewayDispatchEvents.GuildCreate, ({ data }) => {
@@ -602,6 +663,7 @@ export function discordListener(
           threads.adopt(discordThread(thread.id, thread.parent_id));
         }
       }
+      voice?.onGuildCreate(data.voice_states);
       log.info('guild ready', {
         guildId: data.id,
         activeThreads: data.threads.length,
@@ -637,8 +699,34 @@ export function discordListener(
       );
     });
 
+    client.on(GatewayDispatchEvents.VoiceStateUpdate, ({ data }) => {
+      if (!delivering) return;
+      void voice?.onVoiceStateUpdate(data);
+    });
+
+    client.on(GatewayDispatchEvents.VoiceServerUpdate, ({ data }) => {
+      if (!delivering) return;
+      voice?.onVoiceServerUpdate(data);
+    });
+
     client.on(GatewayDispatchEvents.MessageCreate, ({ data }) => {
       if (!delivering) return;
+      if (data.guild_id === guildId && !data.author.bot) {
+        const mentioned = data.mentions.some((user) => user.id === me);
+        const command = mentioned ? voiceCommand(data.content, me) : null;
+        if (command) {
+          void onVoiceCommand(
+            command,
+            data.author.id,
+            data.channel_id,
+            (line) =>
+              api
+                .createMessage(data.channel_id, { content: subtext(line) })
+                .then(() => {}),
+          );
+          return;
+        }
+      }
       const inbound = discordInbound(
         {
           id: data.id,
@@ -657,6 +745,15 @@ export function discordListener(
 
     client.on(GatewayDispatchEvents.InteractionCreate, ({ data }) => {
       if (!delivering) return;
+      if (data.type === InteractionType.ApplicationCommand) {
+        const name = data.data.name;
+        if (name !== 'join' && name !== 'leave') return;
+        const userId = data.member?.user.id ?? data.user?.id ?? '';
+        void onVoiceCommand(name, userId, data.channel.id, (line) =>
+          api.whisperBack(data.id, data.token, line),
+        );
+        return;
+      }
       if (data.type !== InteractionType.MessageComponent) return;
       if (data.data.component_type !== ComponentType.Button) return;
       const customId = data.data.custom_id;
@@ -677,6 +774,7 @@ export function discordListener(
     },
     stop() {
       delivering = false;
+      void voice?.stop();
       leaving ??= gateway.leave('mate is shutting down');
       leaving.catch(() => {});
     },

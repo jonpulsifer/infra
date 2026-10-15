@@ -3,13 +3,14 @@
  * dialling with backoff, and treats a quiet link as a lost one. Bun's
  * WebSocket has no connect timeout, so every dial is bounded by a timer.
  */
-import type { Log } from './log.ts';
+
 import {
   decodeFromMate,
   encode,
   type FromBridge,
   type FromMate,
-} from './protocol.ts';
+} from '@repo/mate-voice-protocol';
+import type { Log } from './log.ts';
 
 export interface LinkOptions {
   url: string;

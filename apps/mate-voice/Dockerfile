@@ -31,6 +31,9 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=deps --chmod=755 /app ./
 COPY --from=pruner --chmod=755 /app/out/full/apps/mate-voice/src ./apps/mate-voice/src
+# `deps` has only the workspace manifests and symlinks, so the package's
+# source comes from `pruner`.
+COPY --from=pruner --chmod=755 /app/out/full/packages/mate-voice-protocol/src ./packages/mate-voice-protocol/src
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app/apps/mate-voice
 # The davey binary is native and opusscript is WASM: both must load in this
@@ -39,6 +42,7 @@ WORKDIR /app/apps/mate-voice
 RUN test -f src/main.ts \
   && test -d node_modules/@discordjs/voice \
   && test -d node_modules/@snazzah/davey \
+  && test -f node_modules/@repo/mate-voice-protocol/src/index.ts \
   && /usr/local/bin/bun run src/smoke.ts
 USER 65532:65532
 EXPOSE 8080

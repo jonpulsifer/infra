@@ -66,6 +66,7 @@ jobs:
             packages/archive/**
             packages/kthx/**
             packages/mate-hands/**
+            packages/mate-voice-protocol/**
             packages/pi-store-postgres/**
             packages/typescript-config/**
             dotfiles/skills/**

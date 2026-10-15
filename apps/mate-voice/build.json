@@ -8,6 +8,7 @@
     "no-cache-filters": "runner",
     "watch": [
       "apps/mate-voice",
+      "packages/mate-voice-protocol",
       "packages/typescript-config",
       ".dockerignore",
       "package.json",

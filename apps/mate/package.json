@@ -25,6 +25,7 @@
     "@opentelemetry/sdk-metrics": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.30.0",
     "@repo/mate-hands": "workspace:*",
+    "@repo/mate-voice-protocol": "workspace:*",
     "@repo/pi-store-postgres": "workspace:*",
     "discord-api-types": "0.38.56",
     "zod": "4.6.5"

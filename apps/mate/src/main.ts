@@ -1,6 +1,6 @@
 import { systemClock } from './clock.ts';
 import { ConfigError, readConfig, type SlackConfig } from './config.ts';
-import { discordListener, discordOver } from './discord.ts';
+import { discordListener, discordOver, subtext } from './discord.ts';
 import { createGateway } from './gateway.ts';
 import { Health } from './health.ts';
 import { Routes } from './http.ts';
@@ -20,6 +20,12 @@ import {
   startTelemetry,
   stopTelemetry,
 } from './telemetry.ts';
+import {
+  VOICE_PATH,
+  Voice,
+  type VoiceSocketData,
+  voiceHandlers,
+} from './voice.ts';
 
 const EXIT_CONFIG = 64;
 // Must exceed EXPORT_TIMEOUT_MS, or a slow collector loses the last export,
@@ -78,12 +84,6 @@ routes.set('/healthz', (request) => health.fetch(request));
 if (config.responderChannel) {
   routes.set(RESPONDER_PATH, () => new Response('starting', { status: 503 }));
 }
-const server = Bun.serve({
-  port: config.port,
-  // An Alertmanager notification is kilobytes; nothing else posts here.
-  maxRequestBodySize: 1_048_576,
-  fetch: (request) => routes.fetch(request),
-});
 const database = await openDatabase(config.brain, log, {
   metrics: lazyInstruments(),
 });
@@ -177,10 +177,46 @@ async function shutdown(signal: string): Promise<void> {
 
 const kube = await discoverKube();
 const { slack } = config;
+const discordApi = discordOver(client.api);
+const voice = new Voice({
+  guildId: config.guildId,
+  allowedUserIds: config.allowedUserIds,
+  allowedChannelIds: config.allowedChannelIds,
+  gateway: {
+    send: async (payload) => {
+      const shards = await manager.getShardCount();
+      await manager.send(
+        Number((BigInt(config.guildId) >> 22n) % BigInt(shards)),
+        payload,
+      );
+    },
+  },
+  clock: systemClock,
+  log,
+  post: (channelId, line) =>
+    discordApi
+      .createMessage(channelId, { content: subtext(line) })
+      .then(() => {}),
+});
+const server = Bun.serve<VoiceSocketData>({
+  port: config.port,
+  // An Alertmanager notification is kilobytes; nothing else posts here.
+  maxRequestBodySize: 1_048_576,
+  fetch: (request, server) => {
+    if (new URL(request.url).pathname === VOICE_PATH) {
+      return server.upgrade(request, { data: { link: null } })
+        ? undefined
+        : new Response('upgrade required', { status: 426 });
+    }
+    return routes.fetch(request);
+  },
+  websocket: voiceHandlers(voice),
+});
 const discord = discordListener({
   gateway: { client, manager, budget, leave },
-  api: discordOver(client.api),
+  api: discordApi,
   commands: client.api.applicationCommands,
+  voice,
   guildId: config.guildId,
   allowedUserIds: config.allowedUserIds,
   allowedChannelIds: config.allowedChannelIds,

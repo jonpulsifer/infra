@@ -12,11 +12,15 @@ import {
   type VoiceConnectionState,
   VoiceConnectionStatus,
 } from '@discordjs/voice';
+import type {
+  CallState,
+  CallStatus,
+  StallReason,
+} from '@repo/mate-voice-protocol';
 import type { RelayAdapter } from './adapter.ts';
 import { Ears, type Receiver } from './ears.ts';
 import type { Log } from './log.ts';
 import { Playback, tone } from './playback.ts';
-import type { CallState, CallStatus, StallReason } from './protocol.ts';
 
 /** Close codes after which the library would rejoin forever, or must not. */
 export const FINAL_CLOSE_CODES: ReadonlySet<number> = new Set([

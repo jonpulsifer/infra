@@ -31,6 +31,7 @@ import type {
   ThreadRef,
 } from '../src/surface.ts';
 import { threadKey } from '../src/surface.ts';
+import { Voice } from '../src/voice.ts';
 import {
   FakeClock,
   FakeDiscord,
@@ -289,6 +290,34 @@ class RecordingInbox implements Inbox {
 
 const BOT = '1509024936717455000';
 const APP = '1509024936717455001';
+const VOICE_CHANNEL = '1509024937422356999';
+
+/** A bridge on the other end of the voice link, already through its hello. */
+async function bridged(voice: Voice) {
+  const frames: string[] = [];
+  const socket = {
+    send: (text: string) => {
+      frames.push(text);
+    },
+    close: () => {},
+  };
+  voice.attach(socket);
+  await voice.receive(
+    socket,
+    JSON.stringify({ type: 'ready', protocol: 1, version: 'test' }),
+  );
+  const sent = () => frames.map((frame) => JSON.parse(frame).type as string);
+  return { socket, frames, sent };
+}
+
+const slash = (name: string, userId = OWNER) => ({
+  id: 'i-2',
+  token: 'tok',
+  type: InteractionType.ApplicationCommand,
+  data: { name },
+  channel: { id: CHANNEL },
+  member: { user: { id: userId } },
+});
 
 async function listening(
   options: { commands?: string[]; failCommands?: Error } = {},
@@ -298,6 +327,19 @@ async function listening(
   const inbox = new RecordingInbox();
   const log = new RecordingLog();
   const overwrites: unknown[] = [];
+  const guildCommands: string[][] = [];
+  const clock = new FakeClock();
+  const voice = new Voice({
+    guildId: GUILD,
+    allowedUserIds: new Set([OWNER]),
+    allowedChannelIds: new Set([CHANNEL, VOICE_CHANNEL]),
+    gateway: { send: async () => {} },
+    clock,
+    log,
+    post: async (channelId, line) => {
+      await discord.createMessage(channelId, { content: line });
+    },
+  });
   const listener = discordListener({
     gateway,
     api: discord,
@@ -313,12 +355,17 @@ async function listening(
         overwrites.push(body);
         return [] as never;
       },
+      bulkOverwriteGuildCommands: async (_id, _guild, body) => {
+        guildCommands.push(body.map((command) => command.name));
+        return [] as never;
+      },
     },
     guildId: GUILD,
     allowedUserIds: new Set([OWNER]),
     allowedChannelIds: new Set([CHANNEL]),
-    clock: new FakeClock(),
+    clock,
     log,
+    voice,
   });
   await listener.start(inbox);
   const ready = async () => {
@@ -329,7 +376,17 @@ async function listening(
     });
     await settle();
   };
-  return { gateway, discord, inbox, log, overwrites, listener, ready };
+  return {
+    gateway,
+    discord,
+    inbox,
+    log,
+    overwrites,
+    guildCommands,
+    listener,
+    ready,
+    voice,
+  };
 }
 
 const gatewayMessage = (overrides: Record<string, unknown> = {}) => ({
@@ -367,6 +424,7 @@ describe('the gateway listener', () => {
       commands: {
         getGlobalCommands: async () => [] as never,
         bulkOverwriteGlobalCommands: async () => [] as never,
+        bulkOverwriteGuildCommands: async () => [] as never,
       },
       guildId: GUILD,
       allowedUserIds: new Set([OWNER]),
@@ -626,3 +684,89 @@ function textLength(
     return sum;
   }, 0);
 }
+
+describe('the voice commands', () => {
+  test('are registered as guild commands at every READY', async () => {
+    const { guildCommands, ready } = await listening();
+    await ready();
+    expect(guildCommands).toEqual([['join', 'leave']]);
+  });
+
+  test('/join refuses a non-owner, and the owner outside a voice channel', async () => {
+    const { gateway, discord, voice, ready } = await listening();
+    await ready();
+    await bridged(voice);
+    gateway.dispatch(
+      GatewayDispatchEvents.InteractionCreate,
+      slash('join', 'stranger'),
+    );
+    gateway.dispatch(GatewayDispatchEvents.InteractionCreate, slash('join'));
+    await settle();
+    expect(discord.whispers.map((w) => w.line)).toEqual([
+      'voice is for the owner',
+      'join a voice channel first',
+    ]);
+  });
+
+  test('/join sends the bridge after the owner, and /leave ends the call', async () => {
+    const { gateway, discord, voice, ready } = await listening();
+    await ready();
+    const bridge = await bridged(voice);
+    gateway.dispatch(GatewayDispatchEvents.VoiceStateUpdate, {
+      guild_id: GUILD,
+      user_id: OWNER,
+      channel_id: VOICE_CHANNEL,
+    });
+    gateway.dispatch(GatewayDispatchEvents.InteractionCreate, slash('join'));
+    await settle();
+    expect(discord.whispers.map((w) => w.line)).toEqual(['on my way']);
+    expect(bridge.sent()).toEqual(['hello', 'join']);
+    expect(voice.current?.channelId).toBe(VOICE_CHANNEL);
+    gateway.dispatch(GatewayDispatchEvents.InteractionCreate, slash('leave'));
+    await settle();
+    expect(bridge.sent()).toEqual(['hello', 'join', 'leave']);
+  });
+
+  test('a mention saying only join is a command, not a prompt', async () => {
+    const { gateway, discord, inbox, voice, ready } = await listening();
+    await ready();
+    await bridged(voice);
+    gateway.dispatch(
+      GatewayDispatchEvents.MessageCreate,
+      gatewayMessage({
+        content: `<@${BOT}> join`,
+        mentions: [{ id: BOT }],
+        channel_id: CHANNEL,
+      }),
+    );
+    await settle();
+    expect(inbox.messages).toHaveLength(0);
+    expect(discord.messages.map((m) => spoken(m.body))).toEqual([
+      'join a voice channel first',
+    ]);
+  });
+
+  test("relays the bot's own voice state and the voice server to the bridge", async () => {
+    const { gateway, voice, ready } = await listening();
+    await ready();
+    const bridge = await bridged(voice);
+    gateway.dispatch(GatewayDispatchEvents.VoiceStateUpdate, {
+      guild_id: GUILD,
+      user_id: OWNER,
+      channel_id: VOICE_CHANNEL,
+    });
+    gateway.dispatch(GatewayDispatchEvents.VoiceStateUpdate, {
+      guild_id: GUILD,
+      user_id: BOT,
+      channel_id: VOICE_CHANNEL,
+      session_id: 's',
+    });
+    gateway.dispatch(GatewayDispatchEvents.VoiceServerUpdate, {
+      guild_id: GUILD,
+      token: 't',
+      endpoint: 'x.discord.media:443',
+    });
+    await settle();
+    expect(bridge.sent()).toEqual(['hello', 'voice_state', 'voice_server']);
+  });
+});
