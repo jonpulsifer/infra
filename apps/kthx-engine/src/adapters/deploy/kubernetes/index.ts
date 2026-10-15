@@ -92,6 +92,23 @@ export interface KubernetesAdapterOptions {
   readonly now?: () => number;
 }
 
+const CHART_ALIASES: readonly (readonly [string, string])[] = [
+  [
+    'oci://ghcr.io/jonpulsifer/charts/spindrift-app',
+    'oci://ghcr.io/jonpulsifer/charts/kthx-app',
+  ],
+];
+
+function servesChart(declared: string, served: string | undefined): boolean {
+  return (
+    served === declared ||
+    CHART_ALIASES.some(
+      ([a, b]) =>
+        (declared === a && served === b) || (declared === b && served === a),
+    )
+  );
+}
+
 const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const RUNTIME_LOG_LIMIT_BYTES = 256 * 1024;
@@ -1111,7 +1128,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // `chartRef` names only the object, so a mismatched `url` would deploy a
     // different chart under this installation's declaration.
     const url = (source.spec as { url?: string } | undefined)?.url;
-    if (kind === OCI_REPOSITORY && url !== this.options.chart) {
+    if (kind === OCI_REPOSITORY && !servesChart(this.options.chart, url)) {
       return [
         false,
         `${kind.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} serves ${url ?? 'no artifact'}, not the ${this.options.chart} this installation declares`,
