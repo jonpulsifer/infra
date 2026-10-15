@@ -4,3 +4,5 @@ scan:
     - "**/tests"
     - "**/test"
     - "**/fixtures"
+    # trivy-action keeps its vulnerability database here, inside the checkout.
+    - ".cache"
