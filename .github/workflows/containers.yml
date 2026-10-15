@@ -649,6 +649,12 @@ jobs:
           # carried every image, rewrites the same line as this one, so
           # whichever merges second conflicts. The guard read that branch, so
           # an image written here is newer and its old pull request is closed.
+          # Nothing here reaches a rerun of a run from before this job: a rerun
+          # runs its own commit's workflow, whose guard never reads
+          # cd/update-digests, so it can open a per-image pull request that
+          # rolls main back past a digest waiting here and leaves this one
+          # conflicting until the next force push. Republish with
+          # workflow_dispatch and `images` instead of rerunning those runs.
           # Drop this with that read once no cd/update-<image>-digest branch
           # exists.
           for image in "${written_images[@]}"; do
