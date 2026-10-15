@@ -29,11 +29,13 @@
     'prEditedNotification',
     'prIgnoreNotification',
   ],
-  // 'auto' rebases automerging PRs (most of this repo) whenever they fall
-  // behind main — Atlantis plans stay fresh and GitHub native auto-merge can
-  // satisfy require-up-to-date rules — while manual-review PRs only rebase on
-  // conflict. Terraform PRs are forced to behind-base-branch below.
-  rebaseWhen: 'auto',
+  // Rebase a PR only when it conflicts with main. main requires no branch to
+  // be up to date, and main moves dozens of times a day, so rebasing on every
+  // move reruns each PR's checks and, for a bun.lock PR, rebuilds every Bun
+  // image on the PR. The trade-off is that an automerged PR can merge on
+  // checks run against an older main. Terraform and Talos PRs are forced to
+  // behind-base-branch below, because Atlantis applies the PR's own plan.
+  rebaseWhen: 'conflicted',
   // Use GitHub's native auto-merge so PRs merge as soon as required checks
   // pass, instead of waiting for the next Renovate run.
   platformAutomerge: true,
@@ -357,6 +359,22 @@
       matchUpdateTypes: ['minor', 'patch'],
       automerge: true,
     },
+    {
+      // Every npm bump changes bun.lock, which every Bun image watches, so
+      // each one rebuilds and redeploys all of them. One weekly group is one
+      // rebuild a week. matchCurrentVersion matches the automerge rule above:
+      // Renovate automerges a group only when every update in it may
+      // automerge, so one 0.x bump would turn the group into a review. Majors
+      // and 0.x updates stay their own PRs. The pi and x402 groups below come
+      // later and win. Vulnerability alerts bypass the schedule.
+      description: 'npm stable non-major: one weekly pull request',
+      matchDatasources: ['npm'],
+      matchCurrentVersion: '!/^0/',
+      matchUpdateTypes: ['minor', 'patch'],
+      groupName: 'npm non-major',
+      groupSlug: 'npm-non-major',
+      schedule: ['before 6am on monday'],
+    },
     // ============================================================
     // Grouping
     // ============================================================
@@ -401,11 +419,31 @@
       // build would reopen that PR and, since a first-party digest is never
       // automerged, hold two dozen tool bumps behind a digest review. Its own
       // group keeps the digest reviewed on its own and the toolset moving.
+      //
+      // kthx builds several times a day, mostly for lockfile and base-image
+      // bumps that leave the CLI unchanged. A weekly schedule, with
+      // updateNotScheduled off so the open branch does not follow each build,
+      // makes it one review a week. The sandbox CLI may lag the apex by up to
+      // a week.
       description: 'mate sandbox kthx cli: the first-party digest is its own pull request',
       matchFileNames: ['images/mate-sandbox/Dockerfile'],
       matchPackageNames: ['ghcr.io/jonpulsifer/kthx'],
       groupName: 'mate sandbox kthx cli',
       groupSlug: 'mate-sandbox-kthx-cli',
+      schedule: ['before 6am on monday'],
+      updateNotScheduled: false,
+    },
+    {
+      // The engine builds its verifier stage from a digest pin on the
+      // first-party verifier image, and Renovate is the only thing that moves
+      // it. Every verifier build has a new digest, even with no source change,
+      // and each pin PR is a review and an engine rebuild. Weekly, as for the
+      // sandbox's kthx CLI above.
+      description: 'kthx-engine verifier: the first-party digest moves weekly',
+      matchFileNames: ['apps/kthx-engine/Dockerfile'],
+      matchPackageNames: ['ghcr.io/jonpulsifer/kthx-engine-verifier'],
+      schedule: ['before 6am on monday'],
+      updateNotScheduled: false,
     },
     {
       // Two of the sandbox's tools have to be the versions the repo already
@@ -504,6 +542,23 @@
       description: 'Auto-merge all digest pins',
       matchUpdateTypes: ['digest', 'pinDigest'],
       automerge: true,
+    },
+    {
+      // Chainguard republishes node almost daily, and each image built on it
+      // pins :latest-dev in its build stages and :latest in its runner, so
+      // each tag's PR rebuilds and redeploys every one of them. One group
+      // keeps both stages on the same publish, and twice a week bounds how
+      // long a base-image fix waits: no advisory feed covers Docker digests,
+      // so vulnerability alerts do not bypass this schedule. 'node' stays
+      // out, or the node:24-alpine pins would join. Automerge comes from the
+      // rule above.
+      description: 'Chainguard node: both tags in one pull request, twice a week',
+      matchDatasources: ['docker'],
+      matchPackageNames: ['cgr.dev/chainguard/node'],
+      matchUpdateTypes: ['digest', 'pinDigest'],
+      groupName: 'chainguard node',
+      groupSlug: 'chainguard-node',
+      schedule: ['before 6am on monday', 'before 6am on thursday'],
     },
     {
       // A first-party :latest digest can be built from main immediately before
