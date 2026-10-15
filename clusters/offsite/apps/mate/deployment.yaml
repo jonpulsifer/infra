@@ -49,7 +49,7 @@ spec:
         - name: mate
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/mate…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/mate:latest@sha256:3bd6683dff85263bd968355f846577200bdab3617ebe6d291f95eb4d83b29b2d
+          image: ghcr.io/jonpulsifer/mate:latest@sha256:125ec72787d18c07ddc705c23bbab385eba25523db9524454cd1966d7a2c7c1b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
