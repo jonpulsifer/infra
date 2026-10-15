@@ -1,0 +1,74 @@
+---
+# Egress for the voice bridge (voice-deployment.yaml): Discord's voice
+# servers and mate, nothing else. It holds no credential and has no API
+# server egress. Cilium admits the node, where the readiness probe comes
+# from; network-policy.yaml admits the bridge to mate.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate-voice
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-voice
+    app.kubernetes.io/part-of: mate
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mate-voice
+  ingress:
+    # voice-deployment.yaml's readinessProbe.
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
+    # rule; without it every connection below fails closed.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # mate's /voice WebSocket, by the labels its Service selects. Cilium
+    # resolves the ClusterIP to a backend before the verdict.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: mate
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # The voice WebSocket: Discord names a `*.discord.media` host in the
+    # VOICE_SERVER_UPDATE, on any port.
+    - toFQDNs:
+        - matchPattern: "*.discord.media"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # The voice media itself is UDP to the address and port the voice server
+    # names in its Ready, which no FQDN rule can match. The internet, less the
+    # private and the carrier-grade ranges, on the ports Discord documents for
+    # voice. The live probe measures the range this rule really needs.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+            - 100.64.0.0/10
+      toPorts:
+        - ports:
+            - port: "50000"
+              endPort: 65535
+              protocol: UDP

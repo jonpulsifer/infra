@@ -9,6 +9,7 @@ resources:
   - external-secret.yaml
   - kthx-sites-secret.yaml
   - network-policy.yaml
+  - voice-network-policy.yaml
   - sandbox-network-policy.yaml
   - sandbox-reader-network-policy.yaml
   - database.yaml
@@ -16,3 +17,4 @@ resources:
   - sandbox-image.yaml
   - service.yaml
   - deployment.yaml
+  - voice-deployment.yaml

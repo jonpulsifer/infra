@@ -41,6 +41,9 @@
     "mate-sandbox": [
       "clusters/offsite/apps/mate/sandbox-image.yaml"
     ],
+    "mate-voice": [
+      "clusters/offsite/apps/mate/voice-deployment.yaml"
+    ],
     "netbench": [
       "clusters/base/apps/iperf3/iperf3-daemonset.yaml",
       "clusters/folly/apps/netbench/03-deployment.yaml"
