@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # Static site demo: builds dist/ with build-time git facts, then serves it with bun.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:e7076475a5978df4626e4fcf99b368c4a8c2741b39249105f42a8fb4579bcb65 AS base
-ARG BUN_VERSION=1.4.0
+# renovate: datasource=npm depName=bun
+ARG BUN_VERSION=1.4.2
 ENV BUN_INSTALL=/usr/local
 USER root
 RUN apk add --no-cache bash curl \
