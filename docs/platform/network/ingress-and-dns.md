@@ -18,7 +18,7 @@ Hosts resolve as `<host>.lolwtf.ca`. The Kubernetes nodes come from `NODE_ADDRES
 | Cloudflare Tunnel | Runs on | Serves |
 | --- | --- | --- |
 | folly | folly | Nothing (HTTP 418) |
-| offsite | offsite | `tf.lolwtf.ca` for Atlantis, and `voice.lolwtf.ca` on `/speech-engine` for ElevenLabs Speech Engine to reach mate, admitted at the edge from ElevenLabs' egress addresses alone |
+| offsite | offsite | `tf.lolwtf.ca` for Atlantis, and `voice.lolwtf.ca` on `/speech-engine` for ElevenLabs Speech Engine to reach mate, which verifies each connection's JWT |
 | kthx Apps | offsite | Public [kthx](../../apps/kthx.md) App names, quick sites at `<name>.kthx.dev`, the kthx GitHub webhook, and the [Bosun](../../apps/bosun.md) build queue at `/internal/bosun/` |
 
 Each cluster that serves kthx Apps has an Apps Gateway with its own VIP. An App with `reach: private` gets an A record at that VIP, and `reach: public` gets a proxied CNAME to the kthx Apps tunnel.
