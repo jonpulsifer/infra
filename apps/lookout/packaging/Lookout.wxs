@@ -19,7 +19,7 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer Lookout is installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Icon Id="LookoutIcon" SourceFile="lookout.ico" />
+    <Icon Id="LookoutIcon" SourceFile="$(sys.SOURCEFILEDIR)lookout.ico" />
     <Property Id="ARPPRODUCTICON" Value="LookoutIcon" />
     <Property Id="ARPNOMODIFY" Value="1" />
 
