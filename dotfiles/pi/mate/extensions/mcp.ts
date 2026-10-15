@@ -32,7 +32,7 @@ export default function (pi: ExtensionAPI) {
   }
   // `&&` fails the header when op fails, where a bare $(...) sends `Bearer `.
   pi.registerMcpServer('kthx', {
-    url: 'https://spindrift-control.lolwtf.dev/mcp',
+    url: 'https://kthx-engine.lolwtf.dev/mcp',
     headers: {
       Authorization: `!t=$(op read '${KTHX_TOKEN}') && printf 'Bearer %s' "$t"`,
     },

@@ -3,7 +3,7 @@ title: Connect an agent to kthx
 description: Mint an agent token in the kthx console and connect an MCP client, Rowbutt or the owner's workstation to the kthx engine, which serves each console command as a tool.
 ---
 
-Use this runbook to give an MCP client the commands of the kthx built-apps console. The kthx engine on offsite serves each command in `apps/kthx-engine/src/commands/registry.ts` as a Model Context Protocol (MCP) tool at `https://spindrift-control.lolwtf.dev/mcp`. The endpoint accepts only an agent token, which you mint in the console at `https://kthx.lolwtf.ca`. A token lasts 90 days. The console shows it once, because kthx stores only its SHA-256 hash.
+Use this runbook to give an MCP client the commands of the kthx built-apps console. The kthx engine on offsite serves each command in `apps/kthx-engine/src/commands/registry.ts` as a Model Context Protocol (MCP) tool at `https://kthx-engine.lolwtf.dev/mcp`. The endpoint accepts only an agent token, which you mint in the console at `https://kthx.lolwtf.ca`. A token lasts 90 days. The console shows it once, because kthx stores only its SHA-256 hash.
 
 ## Before you start
 
@@ -41,10 +41,10 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 2. If the client is Claude Code, add the server.
 
    ```bash
-   claude mcp add --transport http kthx https://spindrift-control.lolwtf.dev/mcp --header "Authorization: Bearer $TOKEN"
+   claude mcp add --transport http kthx https://kthx-engine.lolwtf.dev/mcp --header "Authorization: Bearer $TOKEN"
    ```
 
-   Result: The command prints `Added HTTP MCP server kthx with URL: https://spindrift-control.lolwtf.dev/mcp to local config`.
+   Result: The command prints `Added HTTP MCP server kthx with URL: https://kthx-engine.lolwtf.dev/mcp to local config`.
 
 3. If the client reads a JSON file, add the server to it.
 
@@ -53,7 +53,7 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
      "mcpServers": {
        "kthx": {
          "type": "http",
-         "url": "https://spindrift-control.lolwtf.dev/mcp",
+         "url": "https://kthx-engine.lolwtf.dev/mcp",
          "headers": { "Authorization": "Bearer <token>" }
        }
      }
@@ -63,7 +63,7 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 4. Make sure the endpoint lists its tools.
 
    ```bash
-   curl -s https://spindrift-control.lolwtf.dev/mcp \
+   curl -s https://kthx-engine.lolwtf.dev/mcp \
      -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '.result.tools | length'
    ```
@@ -157,7 +157,7 @@ If `op` fails, pi reports that `kthx` failed and starts without it. pi reads the
 | --- | --- | --- |
 | HTTP 401 with "this surface needs an agent token". | The token is missing, expired, revoked, or a browser cookie. | Mint a new agent token. |
 | HTTP 405 with "POST JSON-RPC here". | The request is not a POST. | Use POST. The endpoint does not stream Server-Sent Events (SSE). |
-| HTTP 404 on `/mcp`. | The host is not a kthx engine host. | Use `https://spindrift-control.lolwtf.dev/mcp`. |
+| HTTP 404 on `/mcp`. | The host is not a kthx engine host. | Use `https://kthx-engine.lolwtf.dev/mcp`. |
 | A tool result has `isError` set to `true`. | kthx refused the command. The text has a code, such as `NOT_DEPLOYABLE` or `INVALID_INPUT`, and the sentence the console shows. | Correct the input as the sentence tells you. Call the tool again. |
 | A tool result has the code `FORBIDDEN`. | An agent token called `mintAgentToken`. | Mint tokens in the console. |
 

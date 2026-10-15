@@ -4,9 +4,22 @@ module "tunnel_kthx_engine" {
   source     = "./modules/tunnel"
   account_id = local.fml_account_id
   zone_id    = cloudflare_zone.lolwtf_dev.id
-  name       = "spindrift"
+  name       = "kthx-engine"
   config = {
     ingress = [
+      {
+        # Only the bosun outbox, bearer-authed by SPINDRIFT_BOSUN_SECRET. Other paths reach the
+        # control plane through the wildcard, and it serves only its machine routes on this host.
+        hostname = "kthx-engine.${cloudflare_zone.lolwtf_dev.name}"
+        path     = "^/internal/bosun/"
+        service  = "http://spindrift.spindrift.svc.cluster.local:3000"
+      },
+      {
+        # The GitHub App webhook, HMAC-authenticated by the App's webhook secret.
+        hostname = "kthx-engine.${cloudflare_zone.lolwtf_dev.name}"
+        path     = "^/internal/github/webhook$"
+        service  = "http://spindrift.spindrift.svc.cluster.local:3000"
+      },
       {
         # Only the bosun outbox, bearer-authed by SPINDRIFT_BOSUN_SECRET. Other paths reach the
         # control plane through the wildcard, and it serves only its machine routes on this host.
@@ -111,7 +124,7 @@ resource "cloudflare_dns_record" "kthx_apex" {
 # value enters git.
 resource "onepassword_item" "kthx_engine_cloudflared" {
   vault    = local.vault_id
-  title    = "spindrift cloudflared"
+  title    = "kthx engine cloudflared"
   category = "password"
 
   password_wo = module.tunnel_kthx_engine.cloudflare_tunnel_token
@@ -124,7 +137,7 @@ resource "onepassword_item" "kthx_engine_cloudflared" {
   tags = [
     "cloudflare",
     "kubernetes",
-    "spindrift",
+    "kthx-engine",
   ]
 }
 
