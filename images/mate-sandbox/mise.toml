@@ -19,6 +19,7 @@ disable_tools = [
   "conftest",
   "d2",
   "delta",
+  "dotnet",
   "eza",
   "flux2",
   "fzf",
