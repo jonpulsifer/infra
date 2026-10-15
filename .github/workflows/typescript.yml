@@ -97,11 +97,9 @@ jobs:
         run: |
           has_changes="$ANY_CHANGED"
 
-          # Every release continuous delivery stamps this image's digest into,
-          # from `.github/containers.json`.
-          releases=(
-            clusters/offsite/apps/spindrift/helm-release.yaml
-          )
+          # Every file continuous delivery stamps an image digest into, read
+          # from the deploy map in `.github/containers.json`.
+          mapfile -t releases < <(jq -r '.deploy[][]' .github/containers.json | sort -u)
 
           # Continuous delivery only rewrites the image digest. The rest of each
           # release is a conformance-test input and remains significant, so this
@@ -114,7 +112,7 @@ jobs:
               [[ "$changed" == "$release" ]] && known=true && break
             done
             if ! "$known" || ! git diff --quiet \
-              --ignore-matching-lines='^[[:space:]]*image: ghcr\.io/jonpulsifer/spindrift:latest@sha256:[[:xdigit:]]{64}$' \
+              --ignore-matching-lines='^[[:space:]]*(image: ghcr\.io/jonpulsifer/[a-z0-9-]+:|tag: )latest@sha256:[[:xdigit:]]{64}$' \
               "$BASE_SHA" "$HEAD_SHA" -- "$changed"; then
               only_digests=false
               break
