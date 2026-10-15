@@ -12,7 +12,7 @@ import { diskTree } from '../../src/domain/detection/tree.ts';
 
 const WORKFLOW = join(
   import.meta.dir,
-  '../../../../.github/workflows/spindrift-build.yml',
+  '../../../../.github/workflows/kthx-engine-build.yml',
 );
 const FRONTEND_STEP = 'Choose the frontend';
 const SUBPATH = 'apps/ddns';

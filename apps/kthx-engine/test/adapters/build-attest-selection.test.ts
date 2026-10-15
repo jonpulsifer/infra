@@ -15,7 +15,7 @@ import {
 
 const WORKFLOW = join(
   import.meta.dir,
-  '../../../../.github/workflows/spindrift-build.yml',
+  '../../../../.github/workflows/kthx-engine-build.yml',
 );
 const ATTEST_STEP = 'Attest the artifact';
 

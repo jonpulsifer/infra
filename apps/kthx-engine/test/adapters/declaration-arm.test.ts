@@ -17,7 +17,7 @@ import { parseKthxFile } from '../../src/domain/detection/kthx-file.ts';
 
 const WORKFLOW = join(
   import.meta.dir,
-  '../../../../.github/workflows/spindrift-build.yml',
+  '../../../../.github/workflows/kthx-engine-build.yml',
 );
 const FRONTEND_STEP = 'Choose the frontend';
 const SUBPATH = 'apps/view-counter';

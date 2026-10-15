@@ -14,7 +14,7 @@ import {
 } from '../../src/adapters/build/github-actions.ts';
 
 const WORKFLOW =
-  'acme/platform/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6';
+  'acme/platform/.github/workflows/kthx-engine-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6';
 
 const RUN_URL = 'https://vcs.example/acme/widgets/actions/runs/9';
 

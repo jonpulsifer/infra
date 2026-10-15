@@ -99,7 +99,7 @@
         "$TURBO_ROOT$/clusters/offsite/apps/spindrift/helm-release.yaml",
         "$TURBO_ROOT$/clusters/base/networking/external-dns/helm-release.yaml",
         "$TURBO_ROOT$/clusters/*/networking/external-dns/kustomization.yaml",
-        "$TURBO_ROOT$/.github/workflows/spindrift-build.yml",
+        "$TURBO_ROOT$/.github/workflows/kthx-engine-build.yml",
         "$TURBO_ROOT$/.github/workflows/kthx.yml",
         "$TURBO_ROOT$/apps/kthx/cli/main.ts",
         "$TURBO_ROOT$/apps/kthx/server/mcp.ts",

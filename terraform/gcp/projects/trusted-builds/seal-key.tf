@@ -25,3 +25,9 @@ moved {
   from = google_secret_manager_secret_iam_member.spindrift_build_seal_key_accessor
   to   = google_secret_manager_secret_iam_member.kthx_engine_build_seal_key_accessor
 }
+
+resource "google_secret_manager_secret_iam_member" "kthx_engine_build_seal_key_accessor_renamed_workflow" {
+  secret_id = google_secret_manager_secret.kthx_engine_build_seal_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.kthx_engine_build_workflow_principal
+}
