@@ -39,6 +39,10 @@ velero = "latest"
 vim = "latest"
 d2 = "0.9.0"
 
+[tasks."claude:auto"]
+description = "Start Claude in auto mode for this repository"
+run = "claude --permission-mode auto"
+
 [tasks.devshell]
 description = "Enter the Nix dev shell"
 run = "nix develop"
