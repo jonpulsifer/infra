@@ -19,7 +19,7 @@ First-party code lives in `apps/` (services), `packages/` (shared code and chart
 
 ## Continuous delivery
 
-On a push to `main`, `containers.yml` builds each image whose watch paths changed. For an image with `deploy` targets, it cuts `cd/update-<image>-digest` from `main` and rewrites the digest in each target. It opens a PR that merges when its checks pass. The digest PR's merge commit carries `[skip ci]`, so no workflow runs for it on `main`. The PR's own checks gate it.
+On a push to `main`, `containers.yml` builds each image whose watch paths changed. For an image with `deploy` targets, it cuts `cd/update-<image>-digest` from `main` and rewrites the digest in each target. It opens a PR that merges when its checks pass. The digest PR's merge commit carries `[skip ci]`, so no workflow runs for it on `main`. The PR's own checks gate it, and the TypeScript workflow skips its test job when a PR changes nothing but a digest in one of those targets.
 
 It writes no digest older than the one on `main` or in the open PR. A daily run rebuilds each image whose pin is behind `main`.
 
