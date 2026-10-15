@@ -92,19 +92,28 @@ export interface KubernetesAdapterOptions {
   readonly now?: () => number;
 }
 
-const CHART_ALIASES: readonly (readonly [string, string])[] = [
-  [
-    'oci://ghcr.io/jonpulsifer/charts/spindrift-app',
-    'oci://ghcr.io/jonpulsifer/charts/kthx-app',
-  ],
+// The App chart's old and new names. One registry path publishes both while
+// installations move their declaration, so either name serves the other.
+const CHART_NAME_ALIASES: readonly (readonly [string, string])[] = [
+  ['spindrift-app', 'kthx-app'],
 ];
 
+function splitChartUrl(url: string): readonly [string, string] {
+  const at = url.lastIndexOf('/');
+  return [url.slice(0, at), url.slice(at + 1)];
+}
+
 function servesChart(declared: string, served: string | undefined): boolean {
+  if (served === undefined) return false;
+  if (served === declared) return true;
+  const [declaredPath, declaredName] = splitChartUrl(declared);
+  const [servedPath, servedName] = splitChartUrl(served);
   return (
-    served === declared ||
-    CHART_ALIASES.some(
+    declaredPath === servedPath &&
+    CHART_NAME_ALIASES.some(
       ([a, b]) =>
-        (declared === a && served === b) || (declared === b && served === a),
+        (declaredName === a && servedName === b) ||
+        (declaredName === b && servedName === a),
     )
   );
 }
