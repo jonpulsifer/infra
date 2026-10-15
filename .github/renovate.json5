@@ -151,15 +151,21 @@
     // Keep major+minor together so we don't get PR-per-update-type
     // ============================================================
     {
+      // Atlantis applies the PR's plan: keep every Terraform PR rebased on main
+      // so the plan that gets applied always matches the merge result. The
+      // terraform manager also reads the container images the modules pin,
+      // such as CoreDNS in flux-bootstrap, so this covers more than providers.
+      description: 'Terraform: every update rebases when it falls behind main',
+      matchManagers: ['terraform'],
+      rebaseWhen: 'behind-base-branch',
+    },
+    {
       description: 'Terraform: all providers use update-lockfile, automerge',
       matchManagers:   ['terraform'],
       matchDatasources: ['terraform-provider'],
       rangeStrategy:      'update-lockfile',
       separateMajorMinor: false,
       automerge:          true,
-      // Atlantis applies the PR's plan: keep every provider PR rebased on main
-      // so the plan that gets applied always matches the merge result.
-      rebaseWhen: 'behind-base-branch',
     },
     // Provider groups match on depName (the required_providers key, e.g.
     // "google"). packageName is the full registry source ("hashicorp/google"),
