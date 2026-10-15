@@ -1,0 +1,16 @@
+---
+# .github/workflows/spindrift-charts.yml pushes packages/charts/kthx-engine here
+# on each merge that touches it, tagged with its Chart.yaml version.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: kthx-engine
+  namespace: kthx-engine
+spec:
+  interval: 15m
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    tag: 0.6.0
+  url: oci://ghcr.io/jonpulsifer/charts/kthx-engine

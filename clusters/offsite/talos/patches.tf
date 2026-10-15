@@ -85,10 +85,11 @@ locals {
                 "system:serviceaccount:atlantis:atlantis",
                 "system:serviceaccount:mate:mate-sandbox-admin",
                 "system:serviceaccount:mate:mate-sandbox-reader",
-                "system:serviceaccount:spindrift:spindrift"
+                "system:serviceaccount:spindrift:spindrift",
+                "system:serviceaccount:kthx-engine:kthx-engine"
               ]
             CEL
-            message    = "only the Atlantis, Rowbutt sandbox (admin and reader) and Spindrift service accounts may authenticate across clusters"
+            message    = "only the Atlantis, Rowbutt sandbox (admin and reader) and kthx engine service accounts may authenticate across clusters"
           }]
           claimMappings = { username = { expression = "\"federated:\" + claims.sub" } }
         }]

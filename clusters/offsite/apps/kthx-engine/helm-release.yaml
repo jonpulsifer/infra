@@ -1,0 +1,141 @@
+---
+# The kthx engine is a **platform workload, never one of its own Apps**: Flux owns
+# this namespace exactly as it owns Atlantis's and hub's, which is what resolves
+# a deploy layer that would otherwise have to deploy itself.
+#
+# Both charts are independently pinned, extractable OCI artifacts rather than
+# repository-local paths. `.github/workflows/spindrift-charts.yml` packages and
+# pushes each on every merge that touches it; `oci-repository.yaml` beside this
+# file is the installer's consumer, and
+# `clusters/base/platform/kthx-engine-target/oci-repository.yaml` is the App
+# chart's, one per Target cluster. The deploy adapter renders each Component's
+# `HelmRelease` with a `chartRef` at the Target's own copy.
+#
+# **This release declares no installation manifest, and there is no key here
+# that could.** What this installation is — its vessels, its Targets, its zones,
+# its build routes — is configured in the product and stored in the row this
+# release's own database holds. The copy that used to sit here seeded an empty
+# row and was ignored ever after, so it drifted from what was running with
+# nothing but a pod-log warning to say so. Settings writes the document down on
+# request and onboarding reads one back, which is the same recovery derived from
+# what the installation actually has.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kthx-engine
+  namespace: kthx-engine
+  labels:
+    # clusters/offsite/apps/kustomization.yaml patches `chart.spec.interval`
+    # onto every HelmRelease that is *not* labeled this way — that field only
+    # exists on a GitRepository/HelmRepository-sourced chart, and a chartRef
+    # release like this one has no `chart.spec` for the patch to land on.
+    source.toolkit.fluxcd.io/kind: OCIRepository
+spec:
+  # Suspended until the cut-over: two reconcilers must never run against one
+  # installation. The window resumes this release once the old one is stopped
+  # and its database has taken a final backup.
+  suspend: true
+  interval: 5m
+  chartRef:
+    kind: OCIRepository
+    name: kthx-engine
+  values:
+    # Renovate pins the digest on this line and Flux rolls it out. The image's
+    # manifest schema and the chart must agree on which keys a declaration may
+    # carry — the manifest below has to satisfy both.
+    image: ghcr.io/jonpulsifer/kthx-engine:latest@sha256:5ffbc34b5e5ff50c5f1e60a62cc996d4993ee03be1c0149d704c741a1dbaf89b
+    # Substituted by the apps Kustomization from the cluster-secrets Secret, so
+    # the zone is read rather than restated. This is kthx's `control.host`: the
+    # `kthx-control` route in `kthx` sends every path but `/api` and `/cli` to
+    # this Service, publishes the record and serves the Apps Gateway's wildcard
+    # certificate, so this release renders no edge of its own.
+    hostname: kthx.${SECRET_DOMAIN}
+    # The public name the tunnel forwards the webhook, the bosun outbox, and
+    # `/mcp` on. Every other route answers on `hostname` alone.
+    env:
+      - name: KTHX_ENGINE_PUBLIC_HOSTNAME
+        value: kthx-engine.${KTHX_ENGINE_DOMAIN}
+      # kthx quick sites' `control.host`, which the console shares, and their
+      # zone's apex are served on the Apps Gateway, so no App may take either.
+      # This zone's `spindrift` label is held too: a reservation, not an
+      # alias, so no App answers on a name a browser knows. A reserved name is
+      # checked against every declared zone, so once kthx.dev is one, no App
+      # in any zone may set its vanity to `@`.
+      - name: KTHX_ENGINE_RESERVED_HOSTNAMES
+        value: spindrift.${SECRET_DOMAIN},kthx.${SECRET_DOMAIN},kthx.dev,spindrift-control.${KTHX_ENGINE_DOMAIN}
+      # The engine reads quick sites from kthx's control host, and reserves a
+      # name in kthx before it mints one under the quick-site zone. The zone is
+      # restated so the deploy gate needs no call to learn it.
+      - name: KTHX_ENGINE_KTHX_URL
+        value: https://kthx.${SECRET_DOMAIN}
+      - name: KTHX_ENGINE_KTHX_ZONE
+        value: kthx.dev
+    # The Secret carries only the one-time enrolment token and optional
+    # integration credentials.
+    envFromSecret: kthx-engine-env
+    # The whole of the federation. These two values render the pod's
+    # `external_account` credential and the process reads its federation out of
+    # that file, so this is the only place the facts are stated.
+    #
+    # The pool principal holds `roles/iam.workloadIdentityUser` and
+    # `roles/iam.serviceAccountTokenCreator` on this one service account and
+    # nothing else; every project role, the source bucket, and the signer hang
+    # off the account. Impersonating it is the only thing the federated identity
+    # can do, so the url is not optional here.
+    # Declared in terraform/gcp/projects/bluenose/iam.tf.
+    serviceAccount:
+      token:
+        gcpAudience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+        gcpImpersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/kthx-engine-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
+        # This installation holds a Target on folly, which is reached across the
+        # network rather than in-cluster, so the trust store needs folly's chain
+        # as well as this cluster's own root. `kube-root-ca.crt` carries only the
+        # latter. See ca-bundle.yaml.
+        caConfigMap: kthx-engine-ca-bundle
+        # kthx accepts this audience from this ServiceAccount, checked against
+        # offsite's public OIDC issuer (clusters/offsite/apps/kthx/helm-release.yaml).
+        kthxAudience: kthx
+    # kthx's control route is the edge, so the chart's own Gateway and route
+    # would be a second, plaintext door to the console.
+    ingress:
+      enabled: false
+    # The control plane's own database, including the installation manifest
+    # singleton. Both processes wait for the image's committed migration journal
+    # before becoming Ready.
+    database:
+      enabled: true
+      size: 2Gi
+      # The database keeps its name inside Postgres; the Cluster and the archive
+      # prefix carry the engine's.
+      name: spindrift
+      migration:
+        enabled: true
+    backup:
+      endpointURL: ${GARAGE_S3_ENDPOINT}
+      item: garage-${CLUSTER_NAME}
+      # Bootstraps from the previous Cluster's archive, then archives into its
+      # own prefix. One prefix per generation of the Cluster.
+      recoverFrom: spindrift-db-2
+      serverName: kthx-engine-db
+    reconciler:
+      enabled: true
+      # The deploy loop shells out to `vercel deploy --prebuilt` for a Vercel
+      # Target — a Node CLI that, alongside the prebuilt artifact it uploads
+      # (~100MB for a Next.js app), needs far more than the chart's default.
+      # 512Mi OOM-killed the reconciler mid-deploy, which abandoned the attempt
+      # in APPLYING; the CLI is the memory floor here, so the limit follows it.
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 100m
+        limits:
+          memory: 2Gi
+          cpu: 1000m
+    web:
+      resources:
+        requests:
+          memory: 256Mi
+          cpu: 100m
+        limits:
+          memory: 768Mi
+          cpu: 1000m
