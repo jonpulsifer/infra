@@ -25,6 +25,7 @@ disable_tools = [
   "gcloud",
   "github:tronbyt/pixlet",
   "go",
+  "grpcurl",
   "helm",
   "jq",
   "k9s",
