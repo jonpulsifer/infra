@@ -35,11 +35,50 @@ module "tunnel_offsite" {
         hostname = "tf.${cloudflare_zone.lolwtf_ca.name}"
         service  = "http://atlantis.atlantis"
       },
+      # ElevenLabs Speech Engine dials mate's brain here over a WebSocket;
+      # mate verifies its JWT, and the ruleset below admits ElevenLabs alone.
+      {
+        hostname = "voice.${cloudflare_zone.lolwtf_ca.name}"
+        path     = "^/speech-engine$"
+        service  = "http://mate.mate:8080"
+      },
       {
         service = "http_status:418"
       }
     ]
   }
+}
+
+# The static egress addresses ElevenLabs publishes for Speech Engine, webhooks
+# and MCP (https://elevenlabs.io/docs/eleven-api/resources/ip-allowlisting).
+# cloudflared is the only origin client, so the allow-list lives at the edge.
+locals {
+  elevenlabs_egress_ips = [
+    "34.67.146.145",
+    "34.59.11.47",
+    "35.204.38.71",
+    "34.147.113.54",
+    "35.185.187.110",
+    "35.247.157.189",
+  ]
+}
+
+resource "cloudflare_ruleset" "lolwtf_ca_voice_allowlist" {
+  zone_id     = cloudflare_zone.lolwtf_ca.id
+  name        = "voice.lolwtf.ca: ElevenLabs only"
+  description = "Blocks every request to voice.lolwtf.ca that is not from an ElevenLabs egress address."
+  kind        = "zone"
+  phase       = "http_request_firewall_custom"
+
+  rules = [
+    {
+      ref         = "voice_elevenlabs_only"
+      description = "Block voice.lolwtf.ca unless the client is ElevenLabs"
+      expression  = "(http.host eq \"voice.${cloudflare_zone.lolwtf_ca.name}\" and not ip.src in {${join(" ", local.elevenlabs_egress_ips)}})"
+      action      = "block"
+      enabled     = true
+    }
+  ]
 }
 
 resource "cloudflare_dns_record" "folly_lolwtf_ca" {
