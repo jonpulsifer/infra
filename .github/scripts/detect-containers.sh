@@ -47,11 +47,11 @@ base_ready() {
 }
 
 # What the build job does to an image: that job and the permissions and env it
-# inherits, less the delivery steps and any scan of the pushed image. Triggers,
-# detect and cd-guard build nothing.
+# inherits, less the steps that record a build for delivery and any scan of the
+# pushed image. Triggers, detect, cd-guard and deliver build nothing.
 build_shape() {
   yq -o=json '{"env": .env, "permissions": .permissions, "build": (.jobs.build
-    | del(.steps[] | select((.name // "") | test("^(Mint a continuous-delivery App token|Update manifest digest|Scan )"))))}'
+    | del(.steps[] | select((.name // "") | test("^(Record the build|Scan )"))))}'
 }
 
 # A side that cannot be read counts as a change, so a missing base file or a

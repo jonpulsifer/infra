@@ -122,10 +122,15 @@ detect() {
 }
 
 from_base
-edit_workflow '(.jobs.build.steps[] | select(.name == "Mint a continuous-delivery App token") | .with."app-id") = "another-app"'
+edit_workflow '(.jobs.build.steps[] | select(.name == "Record the build as an artifact") | .with."retention-days") = 2'
 assert_equal 'a pull request that changes the workflow builds every image' \
   'bar foo ws' "$(detect pull_request "$base")"
-assert_equal 'a push that changes only the token step builds nothing' \
+assert_equal 'a push that changes only how a build is recorded builds nothing' \
+  '' "$(detect push "$base")"
+
+from_base
+edit_workflow '(.jobs.deliver.steps[] | select(.name == "Mint a continuous-delivery App token") | .with."app-id") = "another-app"'
+assert_equal 'a push that changes only the deliver job builds nothing' \
   '' "$(detect push "$base")"
 
 from_base

@@ -9,6 +9,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: cd-digest-update.sh pins <image> <manifest>...
        cd-digest-update.sh pins-at <ref> <image> <manifest>...
+       cd-digest-update.sh queued <ref> <image> <manifest>...
        cd-digest-update.sh rewrite <image> <digest> <manifest>...
        cd-digest-update.sh revision <repository> <digest>
        cd-digest-update.sh fingerprint <repository> <digest-or-tag>
@@ -49,8 +50,8 @@ pins() {
   done | sort -u
 }
 
-# `pins` for another ref's copy of the manifests, such as an unmerged
-# cd/update-<image>-digest branch. A missing ref or file prints nothing.
+# `pins` for another ref's copy of the manifests. A missing ref or file prints
+# nothing.
 pins_at() {
   local ref="$1" image="$2" tmp manifest status=0
   shift 2
@@ -64,6 +65,23 @@ pins_at() {
   (cd "$tmp" && pins "$image" "$@") || status=$?
   rm -rf "$tmp"
   return "$status"
+}
+
+# `pins-at` for an unmerged delivery branch such as cd/update-digests, printed
+# only when the branch changed them since it left HEAD. The branch carries
+# every image, and a pin it leaves alone is the one main had when it was cut,
+# which waits on nothing. Without a merge base every pin at the ref counts.
+queued() {
+  local ref="$1" image="$2" at base
+  shift 2
+
+  git rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || return 0
+  at=$(pins_at "$ref" "$image" "$@")
+  if base=$(git merge-base "$ref" HEAD 2>/dev/null) \
+    && [ "$at" = "$(pins_at "$base" "$image" "$@")" ]; then
+    return 0
+  fi
+  [ -z "$at" ] || printf '%s\n' "$at"
 }
 
 # A target that is missing or pins no digest fails: a silent no-op would look
@@ -217,6 +235,11 @@ case "${1:-}" in
     [ "$#" -ge 4 ] || usage
     shift
     pins_at "$@"
+    ;;
+  queued)
+    [ "$#" -ge 4 ] || usage
+    shift
+    queued "$@"
     ;;
   rewrite)
     [ "$#" -ge 4 ] || usage

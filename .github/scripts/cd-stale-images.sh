@@ -16,7 +16,7 @@ detect="${DETECT_CONTAINERS:-$here/detect-containers.sh}"
 image_affected="${IMAGE_AFFECTED:-$here/image-affected.sh}"
 manifest="${CONTAINERS_MANIFEST:-.github/containers.json}"
 
-# Ref prefix of the delivery branches that hold a queued, unmerged digest.
+# Ref prefix of the delivery branch that holds the queued, unmerged digests.
 queued_prefix="${QUEUED_REF_PREFIX:-refs/cd/queued}"
 
 usage() {
@@ -136,7 +136,7 @@ same_content() {
 
 stale() {
   local images=("$@") image targets watches workspace newest_commit owner
-  local main_pins queued_pins main_said queued_said
+  local main_pins queued_pins legacy_pins main_said queued_said
 
   # The registry looks a digest up per repository, so `revision` needs the owner.
   owner="${REGISTRY_OWNER:-${GITHUB_REPOSITORY_OWNER:-}}"
@@ -169,7 +169,11 @@ stale() {
     # A current queued build covers every target. Main pins are per target, so
     # one stale pin names the image even when a sibling pin is current.
     main_pins=$("$cd_digest" pins "$image" "${targets[@]}")
-    queued_pins=$("$cd_digest" pins-at "$queued_prefix/update-${image}-digest" "$image" "${targets[@]}")
+    queued_pins=$("$cd_digest" queued "$queued_prefix/update-digests" "$image" "${targets[@]}")
+    # The branch each image had before one branch carried them all. Drop this
+    # read once no cd/update-<image>-digest branch exists.
+    legacy_pins=$("$cd_digest" queued "$queued_prefix/update-${image}-digest" "$image" "${targets[@]}")
+    queued_pins=$(printf '%s\n%s\n' "$queued_pins" "$legacy_pins" | sed '/^$/d' | sort -u)
     if [ -z "$main_pins$queued_pins" ]; then
       echo "::warning::$image is a deploy target but its manifests pin no digest, so it can never roll." >&2
       continue

@@ -219,6 +219,30 @@ assert_equal 'pins-at is silent about a file that ref does not carry' \
 assert_equal 'pins-at leaves nothing behind in the working tree' \
   '' "$(git -C "$queued" status --porcelain)"
 
+# The batched branch carries every manifest, and only the images it changed
+# are waiting on it.
+other_manifest=clusters/app/weather.yaml
+printf 'image: ghcr.io/jonpulsifer/weather:latest@%s\n' "$one" >"$queued/$other_manifest"
+git -C "$queued" add -A
+git -C "$queued" commit -q -m 'pin weather'
+git -C "$queued" checkout -q -b cd/update-digests
+printf 'image: ghcr.io/jonpulsifer/mate:latest@%s\n' "$new" >"$queued/$queued_manifest"
+git -C "$queued" commit -q -am 'queue mate'
+git -C "$queued" checkout -q main
+printf 'image: ghcr.io/jonpulsifer/weather:latest@%s\n' "$two" >"$queued/$other_manifest"
+git -C "$queued" commit -q -am 'main moves weather on after the branch was cut'
+
+queued_at() { (cd "$queued" && "$script" queued "$@"); }
+
+assert_equal 'queued reads a digest the branch changed' \
+  "$new" "$(queued_at cd/update-digests mate "$queued_manifest")"
+
+assert_equal 'queued is silent about an image the branch left as main had it' \
+  '' "$(queued_at cd/update-digests weather "$other_manifest")"
+
+assert_equal 'queued is silent about a branch that does not exist' \
+  '' "$(queued_at refs/cd/queued/nothing-here mate "$queued_manifest")"
+
 # The registry is a directory of canned answers behind a curl stub, which logs
 # each URL so the test can name every call `fingerprint` makes.
 registry="$work/registry"

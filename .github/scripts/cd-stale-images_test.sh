@@ -87,7 +87,7 @@ fixtures="$work/fixtures"
 mkdir -p "$fixtures"/{pins,queued,revision,fingerprint}
 export FIXTURES="$fixtures"
 
-# Answers `pins`, `pins-at`, `revision` and `fingerprint` from fixture files,
+# Answers `pins`, `queued`, `revision` and `fingerprint` from fixture files,
 # with the real script's argument positions. The last two take a digest or a
 # tag, and a missing file is a tag the registry does not have.
 cat >"$work/cd-digest-update.sh" <<'STUB'
@@ -95,7 +95,7 @@ cat >"$work/cd-digest-update.sh" <<'STUB'
 set -euo pipefail
 case "$1" in
   pins) cat "$FIXTURES/pins/$2" 2>/dev/null || true ;;
-  pins-at) cat "$FIXTURES/queued/$3" 2>/dev/null || true ;;
+  queued) cat "$FIXTURES/queued/${2#refs/cd/queued/}/$3" 2>/dev/null || true ;;
   revision) cat "$FIXTURES/revision/$3" 2>/dev/null || true ;;
   fingerprint) cat "$FIXTURES/fingerprint/$3" 2>/dev/null || true ;;
   *) exit 64 ;;
@@ -154,7 +154,9 @@ ws_old='sha256:5555555555555555555555555555555555555555555555555555555555555555'
 ws_src='sha256:6666666666666666666666666666666666666666666666666666666666666666'
 
 reset_fixtures() {
-  rm -f "$fixtures"/pins/* "$fixtures"/queued/* "$fixtures"/revision/* "$fixtures"/fingerprint/* "$fixtures"/affected*
+  rm -rf "$fixtures"/queued/*
+  mkdir -p "$fixtures/queued/update-digests"
+  rm -f "$fixtures"/pins/* "$fixtures"/revision/* "$fixtures"/fingerprint/* "$fixtures"/affected*
   printf '%s\n' "$first" >"$fixtures/revision/$foo_old"
   printf '%s\n' "$latest_foo" >"$fixtures/revision/$foo_new"
   printf '%s\n' "$bar_only" >"$fixtures/revision/$bar_new"
@@ -183,8 +185,15 @@ assert_equal 'a main pin behind names the image although another main pin is cur
 
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
-printf '%s\n' "$foo_new" >"$fixtures/queued/foo"
+printf '%s\n' "$foo_new" >"$fixtures/queued/update-digests/foo"
 assert_equal 'a newer digest queued but not merged counts as current' \
+  '' "$("$script" stale foo 2>/dev/null)"
+
+reset_fixtures
+mkdir -p "$fixtures/queued/update-foo-digest"
+printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
+printf '%s\n' "$foo_new" >"$fixtures/queued/update-foo-digest/foo"
+assert_equal 'a newer digest queued on the per-image branch still counts as current' \
   '' "$("$script" stale foo 2>/dev/null)"
 
 reset_fixtures
@@ -282,7 +291,7 @@ assert_equal 'one main pin with other content names the image' \
 # branch both have to match.
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
-printf '%s\n' "$foo_queued" >"$fixtures/queued/foo"
+printf '%s\n' "$foo_queued" >"$fixtures/queued/update-digests/foo"
 printf '%s\n' "$first" >"$fixtures/revision/$foo_queued"
 content "$foo_old" same
 content "$foo_queued" other

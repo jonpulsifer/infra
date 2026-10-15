@@ -120,8 +120,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash .github/scripts/detect-containers.sh
 
-      # cd-guard's suites read only these files: this workflow, whose delivery
-      # step cd-digest-step_test.sh runs, the scripts under test and the
+      # cd-guard's suites read only these files: this workflow, whose record and
+      # delivery steps cd-digest-step_test.sh runs, the scripts under test and the
       # allowlist. A dispatch runs them on demand.
       - id: guard
         env:
@@ -159,11 +159,11 @@ jobs:
     # Hosted: an image build outgrows the lab runners' disk, and hosted runners
     # are free for a public repository.
     runs-on: ubuntu-latest
+    # Delivery is the deliver job's, so a build writes nothing to the repository.
     permissions:
-      contents: write
+      contents: read
       id-token: write
       packages: write
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
@@ -171,11 +171,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Git sends a persisted GITHUB_TOKEN header ahead of any credential in
-          # the remote URL, so the delivery step would push as
-          # github-actions[bot] however it sets the URL. That identity's push to
-          # an open pull request holds every check at action_required, and
-          # --auto never merges it.
           persist-credentials: false
       # Per-image needs come from each app's build.json through the matrix.
       - name: Authenticate build to Google Cloud
@@ -250,27 +245,79 @@ jobs:
           secret-files: ${{ matrix.gcp-credentials != '' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
           sbom: true
           provenance: true
-      # A pull request opened with GITHUB_TOKEN gets no checks, so --auto never
-      # merges it. Gated on a variable because step conditions cannot read secrets.
-      - name: Mint a continuous-delivery App token
-        id: cd-app-token
-        if: >-
-          (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-          && vars.CD_APP_ID != ''
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ vars.CD_APP_ID }}
-          private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
-      - name: Update manifest digest for selective continuous delivery
+      # Delivery runs once per run, in the deliver job, so each leg hands it a
+      # record of what it pushed instead of opening its own pull request.
+      - name: Record the build for delivery
         if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           IMAGE_NAME: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
           MANIFESTS: ${{ toJson(matrix.manifests) }}
+          BUILT_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DIGEST" ]; then
+            echo "::error::The build of $IMAGE_NAME pushed no digest, so there is nothing to deliver."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/cd"
+          jq -n --arg image "$IMAGE_NAME" --arg digest "$DIGEST" \
+            --arg built_commit "$BUILT_COMMIT" --argjson manifests "$MANIFESTS" \
+            '{image: $image, digest: $digest, built_commit: $built_commit, manifests: $manifests}' \
+            >"$RUNNER_TEMP/cd/$IMAGE_NAME.json"
+      - name: Record the build as an artifact
+        if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cd-${{ matrix.image }}
+          path: ${{ runner.temp }}/cd/${{ matrix.image }}.json
+          if-no-files-found: error
+          # A rerun of this leg uploads the same name again.
+          overwrite: true
+          retention-days: 1
+
+  deliver:
+    needs: build
+    # A leg that failed recorded nothing, so the legs that pushed still deliver.
+    # A cancelled or skipped build has nothing to hand on.
+    if: >-
+      always() && (needs.build.result == 'success' || needs.build.result == 'failure')
+      && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Git sends a persisted GITHUB_TOKEN header ahead of any credential in
+          # the remote URL, so the delivery step would push as
+          # github-actions[bot] however it sets the URL. That identity's push to
+          # an open pull request holds every check at action_required, and
+          # --auto never merges it.
+          persist-credentials: false
+      - name: Download the build records
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: cd-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/cd
+      # A pull request opened with GITHUB_TOKEN gets no checks, so --auto never
+      # merges it. Gated on a variable because step conditions cannot read secrets.
+      - name: Mint a continuous-delivery App token
+        id: cd-app-token
+        if: vars.CD_APP_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.CD_APP_ID }}
+          private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
+      - name: Update manifest digests for selective continuous delivery
+        env:
           GH_TOKEN: ${{ steps.cd-app-token.outputs.token || secrets.GITHUB_TOKEN }}
           CD_ACTOR: ${{ steps.cd-app-token.outputs.app-slug }}
-          BUILT_COMMIT: ${{ github.sha }}
-          REGISTRY_REPOSITORY: ${{ github.repository_owner }}/${{ matrix.image }}
+          REGISTRY_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
 
@@ -284,6 +331,15 @@ jobs:
           cd_digest="$RUNNER_TEMP/cd-digest-update.sh"
           cp .github/scripts/cd-digest-update.sh "$cd_digest"
 
+          # One record per image this run pushed, written by the build job's
+          # "Record the build for delivery" step. A leg that failed left none.
+          shopt -s nullglob
+          records=("$RUNNER_TEMP"/cd/*.json)
+          if [ "${#records[@]}" -eq 0 ]; then
+            echo "No build in this run pushed an image, so there is nothing to deliver."
+            exit 0
+          fi
+
           # **Everything below happens on current main, not on the commit this
           # run built.** A branch cut from the build's own checkout is a diff
           # against a main that has since moved on: the moment anything else
@@ -293,8 +349,8 @@ jobs:
           # request, so the digest sits there forever while every step of this
           # job reports green; four `cd/*` pull requests were stuck
           # CONFLICTING at once when this was written. Re-deriving the rewrite
-          # from main's copy of the file makes the pull request a one-line
-          # change against the branch it targets, which cannot conflict.
+          # from main's copy of each file makes the pull request a change of
+          # digest lines against the branch it targets, which cannot conflict.
           #
           # The full history comes with it because the guard below has an
           # ancestry question to answer, and `actions/checkout` leaves a
@@ -307,129 +363,224 @@ jobs:
           # Pinned now, because the second fetch below moves FETCH_HEAD.
           main_head=$(git rev-parse FETCH_HEAD)
 
-          # One branch per image, not per commit. The branch is a queue with a
-          # single slot: the newest build for an image force-pushes over the
-          # one waiting, and there is never more than one open pull request
-          # asking to roll it. A per-commit branch would instead leave every
-          # superseded build open as its own mergeable pull request, each one
-          # carrying an older digest — the regression the guard below exists to
-          # prevent, reintroduced as a matter of routine.
-          BRANCH_NAME="cd/update-${IMAGE_NAME}-digest"
-          QUEUED_REF="refs/cd/queued/update-${IMAGE_NAME}-digest"
+          # One branch for every image, not one per image or per commit. The
+          # branch is a queue with a single slot: each run cuts it fresh from
+          # main, writes every digest it built, carries over the digests already
+          # waiting there, and force-pushes, so there is never more than one
+          # open pull request asking to roll anything. A branch per commit
+          # would instead leave every superseded build open as its own
+          # mergeable pull request, each one carrying an older digest — the
+          # regression the guard below exists to prevent, reintroduced as a
+          # matter of routine.
+          BRANCH_NAME=cd/update-digests
+          QUEUED_REF=refs/cd/queued/update-digests
 
           # What is already sitting in that slot is an input to the guard
           # below, so it has to be fetched, and a failure to fetch it has to be
           # loud. A wildcard refspec gives both: matching no branch at all is a
           # success, so "nothing queued" stays silent, while a network or auth
           # failure exits non-zero and stops the step instead of reading as an
-          # empty queue. Naming the branch exactly would fail on the first push
-          # for every new image.
+          # empty queue. Naming the branch exactly would fail on the first push.
           git fetch --no-tags origin "+refs/heads/cd/*:refs/cd/queued/*"
 
           git checkout -B "$BRANCH_NAME" "$main_head"
 
-          # Deploy targets come from main's map for the same reason the
-          # manifests do. A target renamed or dropped on main since this commit
-          # was built is not a broken deploy map; it is a deploy map this run
-          # is behind, and reading the built commit's list here names a file
-          # main no longer has and fails the job — permanently, since every
-          # rerun reads the same stale list. `rewrite` keeps its `::error::`
-          # for a target main's own map names and main's own tree does not
-          # have, which really is broken.
-          mapfile -t targets < <(jq -r --arg img "$IMAGE_NAME" '.deploy[$img][]? // empty' .github/containers.json)
-          if [ "${#targets[@]}" -eq 0 ]; then
-            if [ "$(jq 'length' <<<"$MANIFESTS")" -gt 0 ]; then
-              echo "::notice::$IMAGE_NAME had deploy targets when $BUILT_COMMIT was built and main's .github/containers.json lists none, so this run has nothing to roll."
-            else
-              echo "$IMAGE_NAME has no deploy targets in .github/containers.json"
-            fi
-            exit 0
-          fi
+          # An **open** one, not any one. `gh pr view <branch>` answers with the
+          # most recent pull request for that head whatever its state, so once
+          # the first digest bump merged it went on finding it, skipped the
+          # create, and no-opped the auto-merge — leaving the branch force-pushed
+          # with a correct digest and no pull request to carry it. Continuous
+          # delivery stopped silently, with every step green.
+          open_pr() {
+            gh pr list --repo "$GITHUB_REPOSITORY" \
+              --head "$1" --state open --json number --jq '.[0].number'
+          }
 
-          # Never roll backwards. Re-running an old workflow run is a real
-          # recovery — a run cancelled before its jobs start builds nothing,
-          # and because the matrix is per-commit changed-files no later commit
-          # ever builds that image, so the only way to get it built is to run
-          # that run again. But an old run checks out an old commit and would
-          # happily stamp its older digest over a newer one.
-          #
-          # A newer build can already be recorded in two places, and both
-          # count. What the manifests pin on main is the build that got there
-          # and merged; what `cd/update-<image>-digest` carries is the build
-          # that got there and is still waiting on its pull request. Reading
-          # only main loses the second one outright, and that is the case this
-          # guard exists for: a rerun is the thing an operator does once a
-          # digest looks stale, which is to say after newer commits have
-          # landed, so the newer digest it would overwrite is usually still
-          # open rather than merged. Simulated against a local remote, reading
-          # only main let a rerun of an older commit force-push its digest over
-          # an unmerged newer one, and the open pull request then merged the
-          # older digest.
-          #
-          # `org.opencontainers.image.revision` on each of those digests says
-          # which commit its build came from. If this run's commit is an
-          # ancestor of one of them, this run is the older and has nothing to
-          # contribute — which is not a failure, so say it plainly and leave.
-          #
-          # Through a file rather than a process substitution: a substitution
-          # hides the exit status of everything inside it, and a guard that
-          # quietly reads fewer candidates than exist is a guard that fails
-          # open.
-          main_pins="$RUNNER_TEMP/$IMAGE_NAME-main-digests"
-          queued_pins="$RUNNER_TEMP/$IMAGE_NAME-queued-digests"
-          "$cd_digest" pins "$IMAGE_NAME" "${targets[@]}" >"$main_pins"
-          "$cd_digest" pins-at "$QUEUED_REF" "$IMAGE_NAME" "${targets[@]}" >"$queued_pins"
-          candidates="$RUNNER_TEMP/$IMAGE_NAME-candidate-digests"
-          sort -u "$main_pins" "$queued_pins" >"$candidates"
-          mapfile -t pinned_digests <"$candidates"
+          written=()
+          written_images=()
+          failed_images=()
 
-          pinned_commits=()
-          for pinned_digest in "${pinned_digests[@]}"; do
-            pinned_commit=$("$cd_digest" revision "$REGISTRY_REPOSITORY" "$pinned_digest")
-            if [ -n "$pinned_commit" ]; then
-              echo "$IMAGE_NAME is pinned or queued at $pinned_digest, built from $pinned_commit"
-              pinned_commits+=("$pinned_commit")
-            else
-              echo "::warning::Cannot tell which commit $IMAGE_NAME@$pinned_digest was built from; this run cannot be checked against it."
+          # Stages one image's digest on the branch, or says why not. Every way
+          # out is a return, never an exit: one image with nothing to roll must
+          # not stop the images after it.
+          deliver() {
+            local IMAGE_NAME="$1" DIGEST="$2" BUILT_COMMIT="$3" MANIFESTS="$4"
+            local REGISTRY_REPOSITORY="$REGISTRY_OWNER/$1"
+            local -a targets pinned_digests pinned_commits
+            local main_pins queued_pins candidates pinned_digest pinned_commit
+            local verdict new_fingerprint same target
+
+            # Deploy targets come from main's map for the same reason the
+            # manifests do. A target renamed or dropped on main since this
+            # commit was built is not a broken deploy map; it is a deploy map
+            # this run is behind, and reading the built commit's list here
+            # names a file main no longer has and fails the job — permanently,
+            # since every rerun reads the same stale list. `rewrite` keeps its
+            # `::error::` for a target main's own map names and main's own tree
+            # does not have, which really is broken.
+            mapfile -t targets < <(jq -r --arg img "$IMAGE_NAME" '.deploy[$img][]? // empty' .github/containers.json)
+            if [ "${#targets[@]}" -eq 0 ]; then
+              if [ "$(jq 'length' <<<"$MANIFESTS")" -gt 0 ]; then
+                echo "::notice::$IMAGE_NAME had deploy targets when $BUILT_COMMIT was built and main's .github/containers.json lists none, so this run has nothing to roll."
+              else
+                echo "$IMAGE_NAME has no deploy targets in .github/containers.json"
+              fi
+              return 0
             fi
+
+            # Never roll backwards. Re-running an old workflow run is a real
+            # recovery — a run cancelled before its jobs start builds nothing,
+            # and because the matrix is per-commit changed-files no later
+            # commit ever builds that image, so the only way to get it built is
+            # to run that run again. But an old run checks out an old commit and
+            # would happily stamp its older digest over a newer one.
+            #
+            # A newer build can already be recorded in two places, and both
+            # count. What the manifests pin on main is the build that got there
+            # and merged; what `cd/update-digests` changed is the build that got
+            # there and is still waiting on its pull request. Reading only main
+            # loses the second one outright, and that is the case this guard
+            # exists for: a rerun is the thing an operator does once a digest
+            # looks stale, which is to say after newer commits have landed, so
+            # the newer digest it would overwrite is usually still open rather
+            # than merged. Simulated against a local remote, reading only main
+            # let a rerun of an older commit force-push its digest over an
+            # unmerged newer one, and the open pull request then merged the
+            # older digest.
+            #
+            # `org.opencontainers.image.revision` on each of those digests says
+            # which commit its build came from. If this run's commit is an
+            # ancestor of one of them, this run is the older and has nothing to
+            # contribute for this image — which is not a failure, so say it
+            # plainly and move on to the next one.
+            #
+            # Through a file rather than a process substitution: a substitution
+            # hides the exit status of everything inside it, and a guard that
+            # quietly reads fewer candidates than exist is a guard that fails
+            # open.
+            main_pins="$RUNNER_TEMP/$IMAGE_NAME-main-digests"
+            queued_pins="$RUNNER_TEMP/$IMAGE_NAME-queued-digests"
+            "$cd_digest" pins "$IMAGE_NAME" "${targets[@]}" >"$main_pins"
+            "$cd_digest" queued "$QUEUED_REF" "$IMAGE_NAME" "${targets[@]}" >"$queued_pins"
+            # The branch each image had before one branch carried them all.
+            # Drop this read once no cd/update-<image>-digest branch exists.
+            "$cd_digest" queued "refs/cd/queued/update-${IMAGE_NAME}-digest" "$IMAGE_NAME" "${targets[@]}" >>"$queued_pins"
+            candidates="$RUNNER_TEMP/$IMAGE_NAME-candidate-digests"
+            sort -u "$main_pins" "$queued_pins" >"$candidates"
+            mapfile -t pinned_digests <"$candidates"
+
+            pinned_commits=()
+            for pinned_digest in "${pinned_digests[@]}"; do
+              pinned_commit=$("$cd_digest" revision "$REGISTRY_REPOSITORY" "$pinned_digest")
+              if [ -n "$pinned_commit" ]; then
+                echo "$IMAGE_NAME is pinned or queued at $pinned_digest, built from $pinned_commit"
+                pinned_commits+=("$pinned_commit")
+              else
+                echo "::warning::Cannot tell which commit $IMAGE_NAME@$pinned_digest was built from; this run cannot be checked against it."
+              fi
+            done
+            # A carried-over digest whose own commit cannot be read has nothing
+            # to compare, and anything unproven writes.
+            verdict="write"
+            if [ -n "$BUILT_COMMIT" ]; then
+              verdict=$("$cd_digest" decide "$BUILT_COMMIT" "${pinned_commits[@]}")
+            fi
+            if [ "$verdict" = "skip" ]; then
+              # Named loosely on purpose: the verdict covers every target at
+              # once, and the reason lines `decide` printed just above name the
+              # build and the commit that settled it.
+              echo "::notice::$IMAGE_NAME is already pinned or queued at a build that contains $BUILT_COMMIT, so this run leaves every manifest alone."
+              return 0
+            fi
+
+            # Every build has a new digest, because its labels and provenance
+            # carry the commit and the time, so a build of unchanged inputs
+            # would still roll every pod onto the files it already runs. The
+            # fingerprint hashes the layers and the runtime config without the
+            # labels. It skips only when every pin on main and on the delivery
+            # branch matches: a revert built while a newer digest is queued has
+            # to replace it even when it matches main, and a branch whose pull
+            # request was closed unmerged outlives it, so matching that branch
+            # alone says nothing about what runs. A fingerprint that cannot be
+            # read leaves the verdict at write, so a registry failure delivers
+            # as before.
+            new_fingerprint=$("$cd_digest" fingerprint "$REGISTRY_REPOSITORY" "$DIGEST")
+            same=false
+            if [ -n "$new_fingerprint" ] && [ -s "$candidates" ]; then
+              same=true
+              while IFS= read -r pinned_digest; do
+                [ "$("$cd_digest" fingerprint "$REGISTRY_REPOSITORY" "$pinned_digest")" = "$new_fingerprint" ] || same=false
+              done <"$candidates"
+            fi
+            if [ "$same" = true ]; then
+              echo "::notice::$IMAGE_NAME build $BUILT_COMMIT has the same filesystem and config as the pin; no pull request"
+              return 0
+            fi
+
+            # A broken target fails this image and not the run: the others
+            # still roll, and the step fails at the end. The checkout restores
+            # from the index, so it keeps what an earlier image staged in a
+            # manifest the two share. One file at a time, because a missing
+            # target fails a checkout that names it beside the others.
+            if ! "$cd_digest" rewrite "$IMAGE_NAME" "$DIGEST" "${targets[@]}"; then
+              for target in "${targets[@]}"; do
+                git checkout -q -- "$target" 2>/dev/null || true
+              done
+              failed_images+=("$IMAGE_NAME")
+              return 0
+            fi
+
+            if git diff --quiet -- "${targets[@]}"; then
+              echo "$IMAGE_NAME manifests already pin $DIGEST"
+              return 0
+            fi
+
+            # Stage only the manifests this step edited. A blanket `git add .`
+            # also sweeps up whatever earlier steps left behind, such as a
+            # scanner's multi-gigabyte vulnerability DB under .cache/.
+            git add -- "${targets[@]}"
+            written+=("$IMAGE_NAME@$DIGEST")
+            written_images+=("$IMAGE_NAME")
+          }
+
+          for record in "${records[@]}"; do
+            deliver "$(jq -r .image "$record")" "$(jq -r .digest "$record")" \
+              "$(jq -r .built_commit "$record")" "$(jq -c .manifests "$record")"
           done
-          if [ "$("$cd_digest" decide "$BUILT_COMMIT" "${pinned_commits[@]}")" = "skip" ]; then
-            # Named loosely on purpose: the verdict covers every target at
-            # once, and the reason lines `decide` printed just above name the
-            # build and the commit that settled it.
-            echo "::notice::$IMAGE_NAME is already pinned or queued at a build that contains $BUILT_COMMIT, so this run leaves every manifest alone."
+
+          if [ "${#written[@]}" -eq 0 ]; then
+            echo "No image built in this run has a digest to roll, so $BRANCH_NAME is left as it is."
+            if [ "${#failed_images[@]}" -gt 0 ]; then
+              echo "::error::Not delivered, because main's deploy map or manifests are broken for them: ${failed_images[*]}"
+              exit 1
+            fi
             exit 0
           fi
 
-          # Every build has a new digest, because its labels and provenance
-          # carry the commit and the time, so a build of unchanged inputs would
-          # still roll every pod onto the files it already runs. The fingerprint
-          # hashes the layers and the runtime config without the labels. It
-          # skips only when every pin on main and on the delivery branch
-          # matches: a revert built while a newer digest is queued has to
-          # replace it even when it matches main, and a branch whose pull
-          # request was closed unmerged outlives it, so matching that branch
-          # alone says nothing about what runs. A fingerprint that cannot be
-          # read leaves the verdict at write, so a registry failure delivers as
-          # before.
-          new_fingerprint=$("$cd_digest" fingerprint "$REGISTRY_REPOSITORY" "$DIGEST")
-          same=false
-          if [ -n "$new_fingerprint" ] && [ -s "$candidates" ]; then
-            same=true
-            while IFS= read -r pinned_digest; do
-              [ "$("$cd_digest" fingerprint "$REGISTRY_REPOSITORY" "$pinned_digest")" = "$new_fingerprint" ] || same=false
-            done <"$candidates"
-          fi
-          if [ "$same" = true ]; then
-            echo "::notice::$IMAGE_NAME build $BUILT_COMMIT has the same filesystem and config as the pin; no pull request"
-            exit 0
-          fi
-
-          "$cd_digest" rewrite "$IMAGE_NAME" "$DIGEST" "${targets[@]}"
-
-          if git diff --quiet -- "${targets[@]}"; then
-            echo "$IMAGE_NAME manifests already pin $DIGEST"
-            exit 0
+          # The branch was cut fresh from main, so a digest waiting on it for an
+          # image this run did not write is lost to the force push unless it is
+          # written again. `queued` reads only what the branch changed, since a
+          # pin it left alone is main's from when it was cut, and each one goes
+          # through the same guard as a build, so a pin main has since moved
+          # past is left out. Only while the branch's pull request is open: one
+          # closed unmerged was turned down, and carrying its digests into a
+          # new one would undo that.
+          waiting_pr=$(open_pr "$BRANCH_NAME")
+          if [ -n "$waiting_pr" ]; then
+            mapfile -t deployed < <(jq -r '.deploy | keys[]' .github/containers.json)
+            handled=$(printf '%s\n' "${written_images[@]}" "${failed_images[@]}")
+            for image in "${deployed[@]}"; do
+              ! grep -qxF "$image" <<<"$handled" || continue
+              mapfile -t targets < <(jq -r --arg img "$image" '.deploy[$img][]' .github/containers.json)
+              queued=$("$cd_digest" queued "$QUEUED_REF" "$image" "${targets[@]}")
+              [ -n "$queued" ] || continue
+              if [ "$(grep -c . <<<"$queued")" -ne 1 ]; then
+                echo "::warning::$BRANCH_NAME pins $image at more than one digest, so none is carried over: $(paste -sd' ' <<<"$queued")"
+                continue
+              fi
+              echo "Carrying $image@$queued over from #$waiting_pr."
+              deliver "$image" "$queued" "$("$cd_digest" revision "$REGISTRY_OWNER/$image" "$queued")" "[]"
+            done
           fi
 
           # Commit as whoever is actually pushing, so the author matches the
@@ -448,11 +599,7 @@ jobs:
           # checks.
           git remote set-url origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          # Stage only the manifests this step edited. A blanket `git add .`
-          # also sweeps up whatever earlier steps left behind, such as a
-          # scanner's multi-gigabyte vulnerability DB under .cache/.
-          git add -- "${targets[@]}"
-          git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
+          git commit -m "fix(cd): update image digests" -m "$(printf '%s\n' "${written[@]}")"
 
           if ! git push origin "$BRANCH_NAME" --force; then
             # The branch now always carries exactly one manifest-only commit on
@@ -469,31 +616,51 @@ jobs:
             }
           fi
 
-          # An **open** one, not any one. `gh pr view <branch>` answers with the
-          # most recent pull request for that head whatever its state, so once
-          # the first digest bump merged this went on finding it, skipped the
-          # create, and no-opped the auto-merge — leaving the branch force-pushed
-          # with a correct digest and no pull request to carry it. Continuous
-          # delivery stopped silently, with every step green.
-          pr_number=$(gh pr list --repo "$GITHUB_REPOSITORY" \
-                        --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')
+          # The title names every image, so the squash commit on main says
+          # what rolled.
+          names=$(printf '%s, ' "${written_images[@]}")
+          title="fix(cd): update image digests (${names%, })"
+          body=$(printf 'Automated image digest update for continuous delivery.\n\n' && printf -- '- %s\n' "${written[@]}")
+          # Asked again, because the recovery above deletes the branch, and
+          # GitHub closes its pull request with it.
+          pr_number=$(open_pr "$BRANCH_NAME")
           if [ -z "$pr_number" ]; then
             gh pr create \
               --repo "$GITHUB_REPOSITORY" \
-              --title "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}" \
-              --body "Automated image digest update for continuous delivery of ${IMAGE_NAME}." \
+              --title "$title" \
+              --body "$body" \
               --head "$BRANCH_NAME" \
               --base main
+            pr_number=$(open_pr "$BRANCH_NAME")
           else
             # The single slot was already taken. The force push above replaced
             # what the branch carries, so retitle too, or the open pull request
-            # goes on advertising a digest it no longer holds.
-            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" \
-              --title "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
+            # goes on advertising digests it no longer holds.
+            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
           fi
 
           # `[skip ci]` goes on the merge commit only. The branch commit keeps
           # none, so the pull request's own checks still run and gate it, and
-          # the merge, which differs only in a digest they checked, runs none.
+          # the merge, which differs only in digests they checked, runs none.
           gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash --body "[skip ci]" \
             || gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --merge --body "[skip ci]"
+
+          # A pull request on an image's own branch, from before one branch
+          # carried every image, rewrites the same line as this one, so
+          # whichever merges second conflicts. The guard read that branch, so
+          # an image written here is newer and its old pull request is closed.
+          # Drop this with that read once no cd/update-<image>-digest branch
+          # exists.
+          for image in "${written_images[@]}"; do
+            git rev-parse -q --verify "refs/cd/queued/update-${image}-digest" >/dev/null || continue
+            superseded=$(open_pr "cd/update-${image}-digest")
+            [ -n "$superseded" ] || continue
+            gh pr close "$superseded" --repo "$GITHUB_REPOSITORY" --delete-branch \
+              --comment "Superseded by #${pr_number}, which carries every image digest." \
+              || echo "::warning::Cannot close #$superseded, which $BRANCH_NAME supersedes for $image."
+          done
+
+          if [ "${#failed_images[@]}" -gt 0 ]; then
+            echo "::error::Not delivered, because main's deploy map or manifests are broken for them: ${failed_images[*]}"
+            exit 1
+          fi
