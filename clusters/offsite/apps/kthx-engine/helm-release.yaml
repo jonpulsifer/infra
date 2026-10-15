@@ -31,10 +31,6 @@ metadata:
     # release like this one has no `chart.spec` for the patch to land on.
     source.toolkit.fluxcd.io/kind: OCIRepository
 spec:
-  # Suspended until the cut-over: two reconcilers must never run against one
-  # installation. The window resumes this release once the old one is stopped
-  # and its database has taken a final backup.
-  suspend: true
   interval: 5m
   chartRef:
     kind: OCIRepository

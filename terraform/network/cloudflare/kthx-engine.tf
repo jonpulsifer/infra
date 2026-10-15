@@ -25,13 +25,13 @@ module "tunnel_kthx_engine" {
         # control plane through the wildcard, and it serves only its machine routes on this host.
         hostname = "spindrift-control.${cloudflare_zone.lolwtf_dev.name}"
         path     = "^/internal/bosun/"
-        service  = "http://spindrift.spindrift.svc.cluster.local:3000"
+        service  = "http://kthx-engine.kthx-engine.svc.cluster.local:3000"
       },
       {
         # The GitHub App webhook, HMAC-authenticated by the App's webhook secret.
         hostname = "spindrift-control.${cloudflare_zone.lolwtf_dev.name}"
         path     = "^/internal/github/webhook$"
-        service  = "http://spindrift.spindrift.svc.cluster.local:3000"
+        service  = "http://kthx-engine.kthx-engine.svc.cluster.local:3000"
       },
       {
         hostname = "*.${cloudflare_zone.lolwtf_dev.name}"

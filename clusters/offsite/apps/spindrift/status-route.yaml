@@ -21,8 +21,8 @@ spec:
     - "*.${KTHX_ENGINE_DOMAIN}"
   rules:
     - backendRefs:
-        - name: spindrift
-          namespace: spindrift
+        - name: kthx-engine
+          namespace: kthx-engine
           port: 3000
 ---
 # Scoped to one Service: a namespace-wide grant would let any App route in
