@@ -88,6 +88,8 @@ jobs:
             .github/workflows/typescript.yml
             .github/workflows/spindrift-build.yml
             .github/workflows/kthx.yml
+      - name: Test the digest-only skip
+        run: bash .github/scripts/digest-only_test.sh
       - id: classify
         env:
           ANY_CHANGED: ${{ steps.changed-paths.outputs.any_changed }}
@@ -97,28 +99,14 @@ jobs:
         run: |
           has_changes="$ANY_CHANGED"
 
-          # Every file continuous delivery stamps an image digest into, read
-          # from the deploy map in `.github/containers.json`.
-          mapfile -t releases < <(jq -r '.deploy[][]' .github/containers.json | sort -u)
-
-          # Continuous delivery only rewrites the image digest. The rest of each
-          # release is a conformance-test input and remains significant, so this
-          # skips only when every changed file is one of those releases and
-          # every one of them differs at nothing but that line.
-          only_digests=true
-          for changed in $ALL_CHANGED_FILES; do
-            known=false
-            for release in "${releases[@]}"; do
-              [[ "$changed" == "$release" ]] && known=true && break
-            done
-            if ! "$known" || ! git diff --quiet \
-              --ignore-matching-lines='^[[:space:]]*(image: ghcr\.io/jonpulsifer/[a-z0-9-]+:|tag: )latest@sha256:[[:xdigit:]]{64}$' \
-              "$BASE_SHA" "$HEAD_SHA" -- "$changed"; then
-              only_digests=false
-              break
-            fi
-          done
-          if [[ -n "$ALL_CHANGED_FILES" ]] && "$only_digests"; then
+          # Continuous delivery only rewrites the image digest in the `deploy`
+          # targets of `.github/containers.json`. The rest of each target is a
+          # conformance-test input and remains significant, so this skips only
+          # when every changed file is a target that differs at nothing but
+          # that line.
+          read -ra changed <<<"$ALL_CHANGED_FILES"
+          if ((${#changed[@]})) &&
+            bash .github/scripts/digest-only.sh "$BASE_SHA" "$HEAD_SHA" "${changed[@]}"; then
             has_changes=false
           fi
 
@@ -126,7 +114,9 @@ jobs:
 
   validate:
     needs: detect
-    if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+    # A skipped validate satisfies the required check, so a detect that fails
+    # before it classifies runs validate rather than skipping it.
+    if: ${{ !cancelled() && (needs.detect.outputs.has_changes != 'false' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -137,6 +127,13 @@ jobs:
       TURBO_TELEMETRY_DISABLED: 1
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/spindrift
     steps:
+      # detect is not a required check, so a broken digest-only test would
+      # otherwise merge green and then run a full validate on every digest PR.
+      - name: Fail when detect failed
+        if: needs.detect.result == 'failure'
+        run: |
+          echo "::error::detect failed, so the digest-only skip cannot be trusted; see its log."
+          exit 1
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Turbo remote cache
@@ -180,7 +177,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.4.2
+          bun-version-file: package.json
       - name: Cache Bun store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

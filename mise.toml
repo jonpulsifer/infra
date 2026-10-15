@@ -89,6 +89,7 @@ run = [
   "bash .github/scripts/cd-digest-step_test.sh",
   "bash .github/scripts/cd-stale-images_test.sh",
   "bash .github/scripts/detect-containers_test.sh",
+  "bash .github/scripts/digest-only_test.sh",
 ]
 
 [tasks.alerts]
