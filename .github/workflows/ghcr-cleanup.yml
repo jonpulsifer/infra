@@ -62,13 +62,14 @@ jobs:
           set -euo pipefail
           # A day past the window, so a build that ages into it during the
           # cleanup is not counted. The excluded `latest` can be one more.
+          # `updated_at`, the clock the action ages and sorts versions by.
           cutoff=$(date -u -d "$((RETAIN_DAYS + 1)) days ago" +%FT%TZ)
           limit=$((RETAIN_TAGGED + 1))
           failed=0
           for pkg in $(jq -r '.build[]' .github/containers.json); do
             if ! old=$(gh api --paginate \
               "/users/$OWNER/packages/container/$pkg/versions?per_page=100" \
-              --jq ".[] | select((.metadata.container.tags | length) > 0 and .created_at < \"$cutoff\") | .id" \
+              --jq ".[] | select((.metadata.container.tags | length) > 0 and .updated_at < \"$cutoff\") | .id" \
               | wc -l); then
               echo "::error::$pkg: cannot list versions; grant this repository Admin in the package's Manage Actions access"
               failed=1
