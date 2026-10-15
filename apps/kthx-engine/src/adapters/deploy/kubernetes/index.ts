@@ -148,7 +148,7 @@ const DEPLOY_LABEL = 'kthx.dev/deploy';
 const VALUES_CONTRACT_KEY = 'kthx.dev/values-contract';
 
 /** The values the engine's own namespaces carry as app.kubernetes.io/managed-by. */
-const ENGINE_MANAGERS = ['spindrift', 'kthx-engine'];
+const ENGINE_MANAGERS = ['kthx-engine'];
 
 /** A pod adds six characters to its Job's name and must fit a DNS label (63). */
 const RUN_NAME_LIMIT = 57;

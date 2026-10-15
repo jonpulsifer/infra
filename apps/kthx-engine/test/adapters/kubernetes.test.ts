@@ -522,16 +522,22 @@ describe('sweeping the App away', () => {
     await adapter.sweepApp(target(), 'never-deployed');
   });
 
-  test.each(['spindrift', 'kthx-engine'])(
-    'it deletes a namespace labelled managed-by %s',
-    async (manager) => {
-      const { adapter, cluster } = adapterFor({
-        namespaceLabels: { 'app.kubernetes.io/managed-by': manager },
-      });
-      await adapter.sweepApp(target(), 'blog');
-      expect(cluster.get('namespaces//app-blog')).toBeUndefined();
-    },
-  );
+  test('it deletes a namespace labelled managed-by kthx-engine', async () => {
+    const { adapter, cluster } = adapterFor({
+      namespaceLabels: { 'app.kubernetes.io/managed-by': 'kthx-engine' },
+    });
+    await adapter.sweepApp(target(), 'blog');
+    expect(cluster.get('namespaces//app-blog')).toBeUndefined();
+  });
+
+  test('a namespace still labelled with the old manager is not its to delete', async () => {
+    const { adapter } = adapterFor({
+      namespaceLabels: { 'app.kubernetes.io/managed-by': 'spindrift' },
+    });
+    await expect(adapter.sweepApp(target(), 'blog')).rejects.toThrow(
+      /managed-by=kthx-engine/,
+    );
+  });
 
   test('it refuses a namespace it did not make', async () => {
     // The fake answers every namespace read with the operator's declared one,
@@ -539,7 +545,7 @@ describe('sweeping the App away', () => {
     const { adapter, cluster } = adapterFor();
 
     await expect(adapter.sweepApp(target(), 'blog')).rejects.toThrow(
-      /app.kubernetes.io\/managed-by=spindrift/,
+      /app.kubernetes.io\/managed-by=kthx-engine/,
     );
     expect(cluster.get('namespaces//app-blog')).toBeUndefined();
   });
