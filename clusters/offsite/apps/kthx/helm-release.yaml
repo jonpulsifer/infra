@@ -27,10 +27,10 @@ spec:
       listener: spindrift-apps-tls-secret-domain
       # kthx keeps `/api` and `/cli` on this host; the engine's console takes
       # every other path. The engine's `hostname` is this host, and
-      # clusters/offsite/apps/spindrift/kthx-route-grant.yaml admits the route.
+      # clusters/offsite/apps/kthx-engine/kthx-route-grant.yaml admits the route.
       console:
-        name: spindrift
-        namespace: spindrift
+        name: kthx-engine
+        namespace: kthx-engine
         port: 3000
     # Output `kthx_bucket` of terraform/gcp/projects/bluenose. kthx has only
     # objectAdmin on it, without `storage.buckets.get`, so nothing may preflight it.
@@ -54,7 +54,7 @@ spec:
     engine:
       issuer: https://oidc.lolwtf.ca/offsite
       audience: kthx
-      subject: system:serviceaccount:spindrift:spindrift
+      subject: system:serviceaccount:kthx-engine:kthx-engine
     # Both volumes are `local-path` on this node. retrofit already holds the
     # control plane and every other CNPG volume.
     node: oldschool
