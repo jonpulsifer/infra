@@ -137,7 +137,7 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 | Pod | Egress |
 | --- | --- |
 | mate | DNS, Discord, Slack, `api.github.com`, `opencode.ai`, `auth.openai.com` and `chatgpt.com` on 443, the API server, the OTLP collector, the `mate-db` instance on 5432, the kthx engine's web pods on 3000, the weather MCP server's pods on 8080 |
-| mate-voice | DNS, mate on 8080, `*.discord.media` on 443, and UDP 50000 to 65535 to the internet less the private and carrier-grade ranges |
+| mate-voice | DNS, mate on 8080, `*.discord.media` on 443, and UDP 19294 to 19344 and 50000 to 65535 to the internet less the private and carrier-grade ranges |
 | Sandbox | DNS; the internet on 80 and 443; every in-cluster pod but the `mate` namespace and Alertmanager; the API server; offsite's nodes on 22; `CILIUM_NATIVE_ROUTING_CIDR`, which holds folly's hosts and API server, on 22 and 6443. `kthx.lolwtf.ca` on 443 and the kthx engine in `spindrift` pass under these rules: the control host is on the Gateway and the engine is an in-cluster pod. |
 | Read-only sandbox | DNS for `cluster.local`, folly's API server name and `github.com`; this cluster's API server, and folly's by name, on 6443; `github.com` on 443 only while `lolwtf.ca/checkout=open`, which mate closes before the agent's first command |
 

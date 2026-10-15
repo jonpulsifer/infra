@@ -58,8 +58,9 @@ spec:
               protocol: TCP
     # The voice media itself is UDP to the address and port the voice server
     # names in its Ready, which no FQDN rule can match. The internet, less the
-    # private and the carrier-grade ranges, on the ports Discord documents for
-    # voice. The live probe measures the range this rule really needs.
+    # private and the carrier-grade ranges, on the two ranges Discord's voice
+    # servers answer from: the first join landed on a Cloudflare-fronted
+    # server at 19301, the lower range, which Discord does not document.
     - toCIDRSet:
         - cidr: 0.0.0.0/0
           except:
@@ -69,6 +70,9 @@ spec:
             - 100.64.0.0/10
       toPorts:
         - ports:
+            - port: "19294"
+              endPort: 19344
+              protocol: UDP
             - port: "50000"
               endPort: 65535
               protocol: UDP
