@@ -1,6 +1,5 @@
 [
   {
-    "image": "kthx-engine-verifier",
-    "aliases": ["spindrift-verifier"]
+    "image": "kthx-engine-verifier"
   }
 ]

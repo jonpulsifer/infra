@@ -70,7 +70,7 @@ The tests enforce these rules:
 
 ## Deploy
 
-`.github/workflows/containers.yml` publishes `ghcr.io/jonpulsifer/spindrift`.
+`.github/workflows/containers.yml` publishes `ghcr.io/jonpulsifer/kthx-engine`.
 `.github/workflows/spindrift-charts.yml` publishes the chart in
 `packages/charts/kthx-engine/` to an OCI registry. Flux applies
 `clusters/offsite/apps/spindrift/`, whose HelmRelease installs that chart. The

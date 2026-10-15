@@ -200,7 +200,7 @@ describe('migration Job identity', () => {
   test('changes when an immutable execution input changes', async () => {
     const first = one(await render({ database }), 'Job');
     const changed = one(
-      await render({ database, image: 'ghcr.io/jonpulsifer/spindrift:next' }),
+      await render({ database, image: 'ghcr.io/jonpulsifer/kthx-engine:next' }),
       'Job',
     );
 
