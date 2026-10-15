@@ -127,6 +127,13 @@ jobs:
       TURBO_TELEMETRY_DISABLED: 1
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/spindrift
     steps:
+      # detect is not a required check, so a broken digest-only test would
+      # otherwise merge green and then run a full validate on every digest PR.
+      - name: Fail when detect failed
+        if: needs.detect.result == 'failure'
+        run: |
+          echo "::error::detect failed, so the digest-only skip cannot be trusted; see its log."
+          exit 1
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Turbo remote cache
