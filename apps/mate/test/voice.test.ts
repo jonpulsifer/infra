@@ -35,7 +35,12 @@ class FakeSocket implements LinkSocket {
   }
 }
 
-function harness(overrides: { allowedChannels?: string[] } = {}) {
+function harness(
+  overrides: {
+    allowedChannels?: string[];
+    voiceChannelOf?: (userId: string) => Promise<string | null>;
+  } = {},
+) {
   const clock = new FakeClock();
   const log = new RecordingLog();
   const sends: GatewaySendPayload[] = [];
@@ -54,6 +59,7 @@ function harness(overrides: { allowedChannels?: string[] } = {}) {
     post: async (channelId, line) => {
       posts.push({ channelId, line });
     },
+    voiceChannelOf: overrides.voiceChannelOf,
   });
   const link = async () => {
     const socket = new FakeSocket();
@@ -167,6 +173,47 @@ describe('joining', () => {
       ok: false,
       reason: 'channel_not_allowed',
     });
+  });
+
+  test('asks the API where the owner is when the gateway has not said', async () => {
+    const asked: string[] = [];
+    const { voice, link } = harness({
+      voiceChannelOf: async (userId) => {
+        asked.push(userId);
+        return asked.length === 1 ? VOICE : null;
+      },
+    });
+    const socket = await link();
+    expect(await voice.join(OWNER, TEXT)).toEqual({ ok: true });
+    expect(socket.frames.at(-1)).toMatchObject({
+      type: 'join',
+      channelId: VOICE,
+    });
+    expect(asked).toEqual([OWNER]);
+    await voice.leave(OWNER);
+    // Known now: the gateway's word stands and the API is not asked again.
+    await voice.onVoiceStateUpdate({
+      guild_id: GUILD,
+      user_id: OWNER,
+      channel_id: null,
+    } as never);
+    expect(await voice.join(OWNER, TEXT)).toEqual({
+      ok: false,
+      reason: 'not_in_voice',
+    });
+    expect(asked).toEqual([OWNER]);
+  });
+
+  test('relays its own voice state after a resume, once told who it is', async () => {
+    const { voice, link } = harness();
+    const socket = await link();
+    voice.onResumed(BOT);
+    await voice.onVoiceStateUpdate({
+      guild_id: GUILD,
+      user_id: BOT,
+      channel_id: VOICE,
+    } as never);
+    expect(socket.types()).toEqual(['hello', 'voice_state']);
   });
 
   test("asks the bridge for the owner's channel and relays its gateway sends", async () => {

@@ -197,6 +197,7 @@ const voice = new Voice({
     discordApi
       .createMessage(channelId, { content: subtext(line) })
       .then(() => {}),
+  voiceChannelOf: (userId) => discordApi.voiceChannelOf(config.guildId, userId),
 });
 const server = Bun.serve<VoiceSocketData>({
   port: config.port,

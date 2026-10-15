@@ -476,6 +476,16 @@ export class FakeDiscord implements Discord {
     this.reactions.add(`${channelId}/${messageId}/${emoji}`);
   }
 
+  /** What `whoAmI` answers, for a resumed session. */
+  identity = { userId: 'bot', username: 'mate', applicationId: 'app' };
+  /** What `voiceChannelOf` answers, by user. */
+  readonly voiceStates = new Map<string, string | null>();
+  async whoAmI() {
+    return this.identity;
+  }
+  async voiceChannelOf(_guildId: string, userId: string) {
+    return this.voiceStates.get(userId) ?? null;
+  }
   async unreact(channelId: string, messageId: string, emoji: string) {
     this.reactions.delete(`${channelId}/${messageId}/${emoji}`);
   }

@@ -76,6 +76,11 @@ export interface VoiceOptions {
   log: Log;
   /** A status line for the humans in the text channel the call came from. */
   post(channelId: string, line: string): Promise<void>;
+  /**
+   * Where a member is, asked of the API when the gateway has not said: a
+   * resumed session replays no GUILD_CREATE, so the map starts cold.
+   */
+  voiceChannelOf?(userId: string): Promise<string | null>;
   heartbeatMs?: number;
 }
 
@@ -127,6 +132,11 @@ export class Voice {
     await this.sendVoiceState(call.guildId, call.channelId);
   }
 
+  /** The bot user, learnt from the API when the session resumed without a READY. */
+  onResumed(me: string): void {
+    this.me = me;
+  }
+
   /** The guild's voice states as GUILD_CREATE lists them. */
   onGuildCreate(states: readonly APIBaseVoiceState[] | undefined): void {
     this.channels.clear();
@@ -168,7 +178,17 @@ export class Voice {
     if (!allowedUserIds.has(userId))
       return { ok: false, reason: 'not_allowed' };
     if (!this.ready) return { ok: false, reason: 'bridge_not_ready' };
-    const channelId = this.channels.get(userId) ?? null;
+    let channelId = this.channels.get(userId) ?? null;
+    if (!this.channels.has(userId) && this.options.voiceChannelOf) {
+      try {
+        channelId = await this.options.voiceChannelOf(userId);
+        this.channels.set(userId, channelId);
+      } catch (error) {
+        log.warn('voice: the API would not say where the owner is', {
+          error: plain(error),
+        });
+      }
+    }
     if (!channelId) return { ok: false, reason: 'not_in_voice' };
     if (!allowedChannelIds.has(channelId))
       return { ok: false, reason: 'channel_not_allowed' };

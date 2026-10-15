@@ -82,6 +82,16 @@ export interface Discord {
   ): Promise<void>;
   react(channelId: string, messageId: string, emoji: string): Promise<void>;
   unreact(channelId: string, messageId: string, emoji: string): Promise<void>;
+  /** The bot and its application, for a session that resumed without a READY. */
+  whoAmI(): Promise<Identity>;
+  /** The voice channel a member is in, or null, when the gateway has not said. */
+  voiceChannelOf(guildId: string, userId: string): Promise<string | null>;
+}
+
+export interface Identity {
+  userId: string;
+  username: string;
+  applicationId: string;
 }
 
 export const STOP_PREFIX = 'stop:';
@@ -243,6 +253,26 @@ export function discordOver(api: API): Discord {
     },
     async unreact(channelId, messageId, emoji) {
       await api.channels.deleteOwnMessageReaction(channelId, messageId, emoji);
+    },
+    async whoAmI() {
+      const [user, application] = await Promise.all([
+        api.users.getCurrent(),
+        api.applications.getCurrent(),
+      ]);
+      return {
+        userId: user.id,
+        username: user.username,
+        applicationId: application.id,
+      };
+    },
+    async voiceChannelOf(guildId, userId) {
+      try {
+        const state = await api.voice.getUserVoiceState(guildId, userId);
+        return state.channel_id ?? null;
+      } catch (error) {
+        if ((error as { status?: number }).status === 404) return null;
+        throw error;
+      }
     },
   };
 }
@@ -600,9 +630,17 @@ export function discordListener(
   }
 
   function listen(threads: Inbox): void {
-    client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
-      if (!delivering) return;
-      me = data.user.id;
+    let arrived = false;
+    // The surface joins once, on the first READY or, for a resumed session
+    // that gets none, once the API has said who the bot is.
+    async function arrive(
+      who: Identity,
+      how: 'ready' | 'resumed',
+      guilds?: number,
+    ): Promise<void> {
+      if (!delivering || arrived) return;
+      arrived = true;
+      me = who.userId;
       await threads.add(
         discordSurface(api, {
           me,
@@ -612,21 +650,22 @@ export function discordListener(
         }),
       );
       log.info('ready', {
-        user: data.user.username,
+        how,
+        user: who.username,
         userId: me,
-        applicationId: data.application.id,
-        guilds: data.guilds.length,
+        applicationId: who.applicationId,
+        guilds,
         surfaces: threads.surfaceNames,
       });
       try {
-        await clearGlobalCommands(options.commands, data.application.id, log);
+        await clearGlobalCommands(options.commands, who.applicationId, log);
       } catch (error) {
         log.warn('global command cleanup failed', { error: plain(error) });
       }
       try {
         await registerGuildCommands(
           options.commands,
-          data.application.id,
+          who.applicationId,
           guildId,
           log,
         );
@@ -635,6 +674,35 @@ export function discordListener(
           error: plain(error),
         });
       }
+    }
+
+    client.on(GatewayDispatchEvents.Ready, ({ data }) => {
+      void arrive(
+        {
+          userId: data.user.id,
+          username: data.user.username,
+          applicationId: data.application.id,
+        },
+        'ready',
+        data.guilds.length,
+      );
+    });
+
+    // A resumed session replays dispatches, never a READY, so the bot's
+    // identity comes from the API.
+    client.on(GatewayDispatchEvents.Resumed, async () => {
+      if (!delivering || arrived) return;
+      let who: Identity;
+      try {
+        who = await api.whoAmI();
+      } catch (error) {
+        log.error('resumed, but the API would not say who the bot is', {
+          error: plain(error),
+        });
+        return;
+      }
+      voice?.onResumed(who.userId);
+      await arrive(who, 'resumed');
     });
 
     // Every READY, not only the first: a fresh identify drops the bot's voice
