@@ -1,20 +1,23 @@
 # Loaded by .github/workflows/trivy.yml through TRIVY_IGNOREFILE. Paths are
-# relative to scan-ref: the repository root on a scheduled or dispatched run, a
-# changed directory on a pull request. So each entry has two globs.
+# relative to scan-ref, and only the scheduled or dispatched scan of the
+# repository root matches these globs. A pull request scans each changed
+# directory, so a waived Dockerfile at the top of that directory is just
+# `Dockerfile` there and its finding shows in that run's summary. A bare
+# `Dockerfile` glob would waive the check for every Dockerfile.
 misconfigurations:
   - id: AVD-KSV-0024
-    paths: ["**/pbx.yaml", "pbx.yaml"]
+    paths: ["**/pbx.yaml"]
     statement: "Asterisk SIP needs host ports to receive VoIP traffic on the node."
   - id: AVD-KSV-0014
-    paths: ["**/pbx.yaml", "pbx.yaml"]
+    paths: ["**/pbx.yaml"]
     statement: "Asterisk writes runtime state/spool/logs; read-only rootfs is impractical."
   - id: AVD-KSV-0118
-    paths: ["**/pbx.yaml", "pbx.yaml"]
+    paths: ["**/pbx.yaml"]
     statement: "Asterisk telephony container runs as root by design."
   # One file only, so other hostNetwork DaemonSets still fail.
   - id: AVD-KSV-0009
-    paths: ["**/iperf3/iperf3-daemonset.yaml", "iperf3-daemonset.yaml"]
+    paths: ["**/iperf3/iperf3-daemonset.yaml"]
     statement: "netbench iperf3 server needs hostNetwork to benchmark per-node VLAN paths."
   - id: DS-0002
-    paths: ["**/ergodox/Dockerfile", "ergodox/Dockerfile"]
+    paths: ["**/ergodox/Dockerfile"]
     statement: "Local QMK firmware build container, not a deployed service; root is fine."
