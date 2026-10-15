@@ -100,7 +100,7 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
 ]);
 
 /** The product's own name and prefixes, the same in every installation. */
-const PRODUCT_NAMESPACE = /^(kthx-engine|spindrift)(-|$)/;
+const PRODUCT_NAMESPACE = /^(kthx-engine|kthx-app|spindrift)(-|$)/;
 
 /** An abbreviated commit or digest prefix, which has the project-id shape. */
 const OBJECT_ID = /^[0-9a-f]{6,40}$/;

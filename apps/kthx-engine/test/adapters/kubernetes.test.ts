@@ -1153,8 +1153,8 @@ describe('the checklist', () => {
     expect(chartSource?.detail).toContain(OCI_CHART);
   });
 
-  const OLD_CHART = 'oci://ghcr.io/jonpulsifer/charts/spindrift-app';
-  const NEW_CHART = 'oci://ghcr.io/jonpulsifer/charts/kthx-app';
+  const OLD_CHART = 'oci://registry.example.test/charts/spindrift-app';
+  const NEW_CHART = 'oci://registry.example.test/charts/kthx-app';
 
   async function chartSourceFor(declared: string, served: string) {
     const { adapter } = adapterFor(
@@ -1185,13 +1185,21 @@ describe('the checklist', () => {
   test('an unrelated artifact is refused with both URLs named', async () => {
     const unmet = await chartSourceFor(
       OLD_CHART,
-      'oci://ghcr.io/jonpulsifer/charts/somebody-else',
+      'oci://registry.example.test/charts/somebody-else',
     );
     expect(unmet?.met).toBe(false);
     expect(unmet?.detail).toContain(OLD_CHART);
     expect(unmet?.detail).toContain(
-      'oci://ghcr.io/jonpulsifer/charts/somebody-else',
+      'oci://registry.example.test/charts/somebody-else',
     );
+  });
+
+  test('the renamed chart from another registry path is refused', async () => {
+    const unmet = await chartSourceFor(
+      OLD_CHART,
+      'oci://elsewhere.example.test/charts/kthx-app',
+    );
+    expect(unmet?.met).toBe(false);
   });
 
   test('a cluster running neither operator cannot deliver anything', async () => {
