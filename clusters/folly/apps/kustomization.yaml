@@ -16,7 +16,7 @@ resources:
   - netbench
   - pbx
   - smiirl
-  - spindrift-target
+  - kthx-engine-target
   - ../../base/apps/reloader
   # - satisfactory
   - tronbyt

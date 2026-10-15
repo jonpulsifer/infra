@@ -7,7 +7,7 @@
 # repository-local paths. `.github/workflows/spindrift-charts.yml` packages and
 # pushes each on every merge that touches it; `oci-repository.yaml` beside this
 # file is the installer's consumer, and
-# `clusters/base/platform/spindrift-target/oci-repository.yaml` is the App
+# `clusters/base/platform/kthx-engine-target/oci-repository.yaml` is the App
 # chart's, one per Target cluster. The deploy adapter renders each Component's
 # `HelmRelease` with a `chartRef` at the Target's own copy.
 #

@@ -16,7 +16,7 @@ resources:
   - prowler
   - spindrift
   - weather
-  - ../../base/platform/spindrift-target
+  - ../../base/platform/kthx-engine-target
   - ../../base/apps/reloader
 patches:
   - target:

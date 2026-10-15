@@ -821,7 +821,7 @@ describe('protect', () => {
 
 /**
  * The ingress exception around one Datastore. The default-deny floor under it
- * is in `clusters/base/platform/spindrift-target/networkpolicy.yaml`.
+ * is in `clusters/base/platform/kthx-engine-target/networkpolicy.yaml`.
  */
 describe('permit', () => {
   test('admits the App namespace and selects the datastore by its operator label', async () => {
