@@ -2,7 +2,9 @@
 # Writes the build matrix of the containers.json "build" images whose watched paths
 # changed or that BUILD_IMAGES names; an unclassified Dockerfile image fails.
 # EVENT_NAME and BASE_SHA decide what a change to the workflow, this script or
-# the allowlist builds. `--watches` prints `<image><TAB><path>` for every build image instead. An
+# the allowlist builds, and what a root lockfile change builds. `--watches`
+# prints `<image><TAB><path>` for every build image instead, and `--workspaces`
+# `<image><TAB><workspace>` for each one that names its turbo workspace. An
 # entry's "aliases" are further names the same build is pushed under.
 
 set -euo pipefail
@@ -10,13 +12,15 @@ set -euo pipefail
 mode=matrix
 case "${1:-}" in
   --watches) mode=watches ;;
+  --workspaces) mode=workspaces ;;
   "") ;;
   *)
-    echo "usage: $0 [--watches]" >&2
+    echo "usage: $0 [--watches | --workspaces]" >&2
     exit 64
     ;;
 esac
 
+here="$(cd "$(dirname "$0")" && pwd)"
 manifest=".github/containers.json"
 workflow=".github/workflows/containers.yml"
 
@@ -65,7 +69,8 @@ shape_changed() {
 # whose `build` entry or `deploy` targets changed. Without a readable base,
 # main rebuilds every image too.
 rebuild_all=false
-if changed "$workflow" || changed .github/scripts/detect-containers.sh || changed "$manifest"; then
+if changed "$workflow" || changed .github/scripts/detect-containers.sh \
+  || changed .github/scripts/image-affected.sh || changed "$manifest"; then
   if [[ "${EVENT_NAME:-pull_request}" == pull_request ]] || ! base_ready; then
     rebuild_all=true
   else
@@ -96,6 +101,12 @@ done \
   < <(jq -r '.build[]' "$manifest")
 while IFS= read -r img; do is_classified[$img]=1; done \
   < <(jq -r '.ignore[]' "$manifest")
+
+# The workspace files every pruned image shares. For an entry that names its
+# workspace they are only a trigger for image-affected.sh.
+root_file() {
+  [[ "$1" == package.json || "$1" == bun.lock || "$1" == turbo.json ]]
+}
 
 path_changed() {
   local watch="$1" f
@@ -129,7 +140,12 @@ for dockerfile in "${dockerfiles[@]}"; do
     [[ -n "${is_build[$image]:-}" ]] || continue
 
     mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<<"$entry")
+    workspace=$(jq -r '.workspace // ""' <<<"$entry")
 
+    if [[ "$mode" == workspaces ]]; then
+      [[ -z "$workspace" ]] || printf '%s\t%s\n' "$image" "$workspace"
+      continue
+    fi
     if [[ "$mode" == watches ]]; then
       for watch in "${watches[@]}"; do
         printf '%s\t%s\n' "$image" "$watch"
@@ -160,12 +176,25 @@ for dockerfile in "${dockerfiles[@]}"; do
       done
     fi
     if [[ "$should_build" != "true" ]]; then
+      root_only=false
       for watch in "${watches[@]}"; do
-        if path_changed "$watch"; then
-          should_build=true
-          break
+        path_changed "$watch" || continue
+        if [[ -n "$workspace" ]] && root_file "$watch"; then
+          root_only=true
+          continue
         fi
+        should_build=true
+        break
       done
+      # image-affected.sh exits 1 only when it is sure, and counts a base it
+      # cannot read as a change.
+      if [[ "$should_build" != "true" && "$root_only" == "true" ]]; then
+        base_ready || true
+        rc=0
+        bash "$here/image-affected.sh" "${BASE_SHA:-}" "$(git rev-parse HEAD)" \
+          "$workspace" "${watches[@]}" </dev/null || rc=$?
+        [[ "$rc" -eq 1 ]] || should_build=true
+      fi
     fi
 
     if [[ "$should_build" == "true" ]]; then
@@ -179,7 +208,7 @@ for dockerfile in "${dockerfiles[@]}"; do
   done
 done
 
-if [[ "$mode" == watches ]]; then
+if [[ "$mode" != matrix ]]; then
   exit 0
 fi
 

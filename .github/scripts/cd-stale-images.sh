@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Prints the images whose pinned build is older than the newest commit touching
 # their inputs. An unreadable pin is `unknown` and never rebuilds: this runs
-# daily, and a wrong `stale` would rebuild and roll the image every day.
+# daily, and a wrong `stale` would rebuild and roll the image every day. For an
+# image that names its turbo workspace, image-affected.sh, the test the push
+# build used, has the last word, so a lockfile commit the push skipped is not
+# rebuilt here.
 
 set -euo pipefail
 
@@ -10,6 +13,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # Overridable so the tests can stub the registry read.
 cd_digest="${CD_DIGEST_UPDATE:-$here/cd-digest-update.sh}"
 detect="${DETECT_CONTAINERS:-$here/detect-containers.sh}"
+image_affected="${IMAGE_AFFECTED:-$here/image-affected.sh}"
 manifest="${CONTAINERS_MANIFEST:-.github/containers.json}"
 
 # Ref prefix of the delivery branches that hold a queued, unmerged digest.
@@ -76,19 +80,35 @@ watches_for() {
   awk -F'\t' -v img="$image" '$1 == img { print $2 }' <<<"$watch_map"
 }
 
-# Prints the distinct verdicts for a list of digests, one per line.
+workspace_map=""
+workspace_for() {
+  local image="$1"
+  [ -n "$workspace_map" ] || workspace_map=$("$detect" --workspaces)
+  awk -F'\t' -v img="$image" '$1 == img { print $2 }' <<<"$workspace_map"
+}
+
+# Prints the distinct verdicts for a list of digests, one per line. A stale pin
+# of a workspace image is current when image-affected.sh is sure that nothing
+# the image is built from changed since; it exits 1 only then.
 survey() {
-  local repository="$1" newest_commit="$2" digest commit
+  local repository="$1" newest_commit="$2" workspace="$3" digest commit said rc
+  shift 3
   while IFS= read -r digest; do
     [ -n "$digest" ] || continue
     # A failed read is `unknown` for this image and must not stop the pass.
     commit=$("$cd_digest" revision "$repository" "$digest" || true)
-    verdict "$commit" "$newest_commit"
+    said=$(verdict "$commit" "$newest_commit")
+    if [ "$said" = stale ] && [ -n "$workspace" ]; then
+      rc=0
+      "$image_affected" "$commit" "$newest_commit" "$workspace" "$@" </dev/null || rc=$?
+      [ "$rc" -ne 1 ] || said=current
+    fi
+    echo "$said"
   done | sort -u
 }
 
 stale() {
-  local images=("$@") image targets watches newest_commit owner
+  local images=("$@") image targets watches workspace newest_commit owner
   local main_pins queued_pins main_said queued_said
 
   # The registry looks a digest up per repository, so `revision` needs the owner.
@@ -117,6 +137,7 @@ stale() {
     fi
 
     newest_commit=$(newest "${watches[@]}")
+    workspace=$(workspace_for "$image")
 
     # A current queued build covers every target. Main pins are per target, so
     # one stale pin names the image even when a sibling pin is current.
@@ -127,8 +148,8 @@ stale() {
       continue
     fi
 
-    main_said=$(survey "$owner/$image" "$newest_commit" <<<"$main_pins")
-    queued_said=$(survey "$owner/$image" "$newest_commit" <<<"$queued_pins")
+    main_said=$(survey "$owner/$image" "$newest_commit" "$workspace" "${watches[@]}" <<<"$main_pins")
+    queued_said=$(survey "$owner/$image" "$newest_commit" "$workspace" "${watches[@]}" <<<"$queued_pins")
 
     if grep -qx current <<<"$queued_said"; then
       echo "$image has a build of the newest commit touching it queued on its delivery branch." >&2
@@ -143,7 +164,7 @@ stale() {
       printf '%s\n' "$image"
       continue
     fi
-    echo "$image is pinned at a build of the newest commit touching it." >&2
+    echo "$image is pinned at a build current with the newest commit touching it." >&2
   done
 }
 

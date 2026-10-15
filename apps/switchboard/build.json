@@ -1,7 +1,8 @@
 [
   {
-    "_comment": "The context is the repo root because the Dockerfile prunes the workspace; the watch list is what turbo prune actually pulls in.",
+    "_comment": "The context is the repo root because the Dockerfile prunes the workspace. The other watches are what turbo prune pulls in; the root package.json, bun.lock and turbo.json rebuild the image only when turbo ls --affected names its workspace.",
     "image": "switchboard",
+    "workspace": "switchboard",
     "context": ".",
     "file": "apps/switchboard/Dockerfile",
     "platforms": "linux/amd64",
