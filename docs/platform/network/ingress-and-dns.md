@@ -40,7 +40,7 @@ Chrony syncs from NTS servers and polls the other host.
 ## Where it lives
 
 - `clusters/base/networking/` and `clusters/<site>/networking/`: `cluster-gateway`, issuers, external-dns and cloudflared
-- `clusters/offsite/apps/spindrift/gateway.yaml` and `clusters/folly/apps/kthx-engine-target/gateway.yaml`: the Apps Gateways
+- `clusters/offsite/apps/kthx-engine/gateway.yaml` and `clusters/folly/apps/kthx-engine-target/gateway.yaml`: the Apps Gateways
 - `clusters/base/cluster-settings.yaml`: `KTHX_ENGINE_DOMAIN`, the default zone for App names
 - `terraform/network/cloudflare/`: the zones, tunnels and tunnel ingress rules
 - `nix/services/coredns-sinkhole.nix` and `nix/services/ntp-server.nix`: the lab resolvers

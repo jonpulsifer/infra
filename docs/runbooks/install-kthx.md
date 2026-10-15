@@ -20,7 +20,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 ## Declare the installation
 
-`clusters/offsite/apps/spindrift/` is the installation, and `packages/charts/kthx-engine/values.yaml` describes its values. A Target is where kthx deploys built apps.
+`clusters/offsite/apps/kthx-engine/` is the installation, and `packages/charts/kthx-engine/values.yaml` describes its values. A Target is where kthx deploys built apps.
 
 1. In `helm-release.yaml`, set `hostname` to `<hostname>` and `ingress.enabled` to `false`.
 
@@ -32,7 +32,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 ## Write the installation Secret
 
-`secret.sops.yaml` is the Secret `spindrift-env`. The engine reads each key below under its `KTHX_ENGINE_` name only, and `secret.sops.yaml` keys each value that way.
+`secret.sops.yaml` is the Secret `kthx-engine-env`. The engine reads each key below under its `KTHX_ENGINE_` name only, and `secret.sops.yaml` keys each value that way.
 
 | Key | Value |
 | --- | --- |
@@ -79,7 +79,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 4. Open the Secret in your editor.
 
    ```bash
-   SOPS_AGE_KEY_FILE=~/.config/age/keys.txt sops clusters/offsite/apps/spindrift/secret.sops.yaml
+   SOPS_AGE_KEY_FILE=~/.config/age/keys.txt sops clusters/offsite/apps/kthx-engine/secret.sops.yaml
    ```
 
 5. Set each key under `stringData`. Save the file and close the editor.
@@ -97,7 +97,7 @@ The roots `terraform/gcp/projects/bluenose/` and `terraform/gcp/projects/trusted
    Result: Atlantis comments the plan.
 
 > [!CAUTION]
-> On a new installation, the first trusted-builds apply fails with HTTP 400, because bluenose has no `spindrift-controller` service account yet.
+> On a new installation, the first trusted-builds apply fails with HTTP 400, because bluenose has no `kthx-engine-controller` service account yet.
 
 2. Comment `atlantis apply -d terraform/gcp/projects/trusted-builds`.
 
@@ -105,7 +105,7 @@ The roots `terraform/gcp/projects/bluenose/` and `terraform/gcp/projects/trusted
 
 3. Do steps 1 and 2 for `terraform/gcp/projects/bluenose`.
 
-   Result: The apply creates `spindrift-controller`.
+   Result: The apply creates `kthx-engine-controller`.
 
 4. Do steps 1 and 2 for `terraform/gcp/projects/trusted-builds` again.
 

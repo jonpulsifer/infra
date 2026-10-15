@@ -85,7 +85,6 @@ locals {
                 "system:serviceaccount:atlantis:atlantis",
                 "system:serviceaccount:mate:mate-sandbox-admin",
                 "system:serviceaccount:mate:mate-sandbox-reader",
-                "system:serviceaccount:spindrift:spindrift",
                 "system:serviceaccount:kthx-engine:kthx-engine"
               ]
             CEL
