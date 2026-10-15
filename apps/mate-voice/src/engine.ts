@@ -124,6 +124,7 @@ export class EngineConversation {
       this.socket = null;
       log.info('speech engine: conversation closed', {
         code: event.code,
+        reason: event.reason.slice(0, 120) || null,
         ...this.counts,
       });
       this.end(`closed_${event.code}`);

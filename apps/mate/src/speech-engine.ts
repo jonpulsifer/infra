@@ -213,12 +213,15 @@ export class SpeechEngine {
     }
   }
 
-  detach(socket: EngineSocket): void {
+  /** `code` and `reason` are the peer's close frame, when the socket had one. */
+  detach(socket: EngineSocket, code?: number, reason?: string): void {
     const session = this.sessions.get(socket);
     if (!session) return;
     this.sessions.delete(socket);
     session.current?.abort.abort();
     this.options.log.info('speech engine: disconnected', {
+      code: code ?? null,
+      reason: reason?.slice(0, 120) || null,
       replies: session.replies,
       interrupted: session.interrupted,
       failed: session.failed,
@@ -321,10 +324,10 @@ export function speechEngineHandlers(
       if (!socket || typeof data !== 'string') return;
       engine.receive(socket, data);
     },
-    close(ws) {
+    close(ws, code, reason) {
       const socket = ws.data.engine;
       ws.data.engine = null;
-      if (socket) engine.detach(socket);
+      if (socket) engine.detach(socket, code, reason);
     },
   };
 }

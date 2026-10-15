@@ -169,8 +169,10 @@ describe('the Speech Engine link', () => {
       chars: 8,
       turns: 3,
     });
-    engine.detach(socket);
+    engine.detach(socket, 1002, 'speech_engine_error: x');
     expect(log.of('speech engine: disconnected')[0]?.fields).toMatchObject({
+      code: 1002,
+      reason: 'speech_engine_error: x',
       replies: 1,
       interrupted: 0,
       failed: 0,
