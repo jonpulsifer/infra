@@ -92,32 +92,6 @@ export interface KubernetesAdapterOptions {
   readonly now?: () => number;
 }
 
-// The App chart's old and new names. One registry path publishes both while
-// installations move their declaration, so either name serves the other.
-const CHART_NAME_ALIASES: readonly (readonly [string, string])[] = [
-  ['spindrift-app', 'kthx-app'],
-];
-
-function splitChartUrl(url: string): readonly [string, string] {
-  const at = url.lastIndexOf('/');
-  return [url.slice(0, at), url.slice(at + 1)];
-}
-
-function servesChart(declared: string, served: string | undefined): boolean {
-  if (served === undefined) return false;
-  if (served === declared) return true;
-  const [declaredPath, declaredName] = splitChartUrl(declared);
-  const [servedPath, servedName] = splitChartUrl(served);
-  return (
-    declaredPath === servedPath &&
-    CHART_NAME_ALIASES.some(
-      ([a, b]) =>
-        (declaredName === a && servedName === b) ||
-        (declaredName === b && servedName === a),
-    )
-  );
-}
-
 const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const RUNTIME_LOG_LIMIT_BYTES = 256 * 1024;
@@ -1137,7 +1111,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // `chartRef` names only the object, so a mismatched `url` would deploy a
     // different chart under this installation's declaration.
     const url = (source.spec as { url?: string } | undefined)?.url;
-    if (kind === OCI_REPOSITORY && !servesChart(this.options.chart, url)) {
+    if (kind === OCI_REPOSITORY && url !== this.options.chart) {
       return [
         false,
         `${kind.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} serves ${url ?? 'no artifact'}, not the ${this.options.chart} this installation declares`,
