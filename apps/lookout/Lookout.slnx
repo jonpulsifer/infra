@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lookout.Core/Lookout.Core.csproj" />
+    <Project Path="src/Lookout.Agent/Lookout.Agent.csproj" />
+    <Project Path="src/Lookout.Tray/Lookout.Tray.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lookout.Core.Tests/Lookout.Core.Tests.csproj" />
+  </Folder>
+</Solution>

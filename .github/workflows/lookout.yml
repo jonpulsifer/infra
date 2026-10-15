@@ -1,0 +1,65 @@
+name: lookout
+
+# The Windows monitoring agent. The only .NET project in the repo, and the only
+# one that needs a Windows runner: the package tooling (makeappx, signtool)
+# ships with the Windows SDK. Core's tests also run on Linux through
+# `mise run lookout:test`.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/lookout/**'
+      - '.github/workflows/lookout.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/lookout/**'
+      - '.github/workflows/lookout.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lookout-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Test
+        run: dotnet test apps/lookout/tests/Lookout.Core.Tests --configuration Release
+
+      # Unsigned when the secrets are absent, which is every fork and every
+      # Dependabot PR; the artifact is then a build check, not an installer.
+      - name: Package
+        shell: pwsh
+        env:
+          LOOKOUT_SIGNING_PFX: ${{ secrets.LOOKOUT_SIGNING_PFX }}
+          LOOKOUT_SIGNING_PASSWORD: ${{ secrets.LOOKOUT_SIGNING_PASSWORD }}
+        run: |
+          $arguments = @{}
+          if ($env:LOOKOUT_SIGNING_PFX) {
+            $pfx = Join-Path $env:RUNNER_TEMP 'lookout.pfx'
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:LOOKOUT_SIGNING_PFX))
+            $arguments.CertificatePath = $pfx
+            $arguments.CertificatePassword = ConvertTo-SecureString -String $env:LOOKOUT_SIGNING_PASSWORD -AsPlainText -Force
+          }
+          ./apps/lookout/packaging/Build-Package.ps1 @arguments
+          if ($env:LOOKOUT_SIGNING_PFX) { Remove-Item -LiteralPath $pfx -Force }
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: lookout-msix
+          path: apps/lookout/out/Lookout.msix
+          if-no-files-found: error
