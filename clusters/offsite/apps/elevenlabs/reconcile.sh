@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Makes every ElevenLabs agent under desired/agents/ and the phone number in
+# Makes every ElevenLabs agent under desired/agents/, every Speech Engine
+# under desired/speech-engines/, and the phone number in
 # desired/phone-number.json and desired/outbound-number.json match git. With no write key it only reports
 # drift. It logs field names, never values: the requests carry an API key and
 # the trunk passwords, so never add `set -x` or print a request or response
@@ -9,6 +10,7 @@ set -euo pipefail
 api=${ELEVENLABS_API:-https://api.elevenlabs.io}
 desired=${DESIRED_DIR:-/desired}
 agents_dir=${AGENTS_DIR:-$desired/agents}
+engines_dir=${SPEECH_ENGINES_DIR:-$desired/speech-engines}
 write_key=${ELEVENLABS_WRITE_KEY:-}
 read_key=${ELEVENLABS_READ_KEY:-$write_key}
 failed=0
@@ -203,6 +205,78 @@ reconcile_agent() {
   agent_ready[$name]=yes
 }
 
+# A Speech Engine is mate's voice: ElevenLabs hears and speaks, and dials
+# mate's brain at the file's ws_url. Every leaf is managed; nothing is
+# edited live. The list's search is fuzzy, so the name is matched exactly.
+find_engine() {
+  local page cursor="" ids="[]"
+  for _ in {1..20}; do
+    page=$(call GET "/v1/speech-engine?page_size=100${cursor:+&cursor=$cursor}" "$read_key") || return 1
+    ids=$(jq -c --arg n "$1" --argjson ids "$ids" '$ids + [.speech_engines[] | select(.name == $n) | .speech_engine_id]' <<<"$page")
+    [[ $(jq -r .has_more <<<"$page") == true ]] || break
+    cursor=$(jq -r '.next_cursor | @uri' <<<"$page")
+  done
+  [[ $(jq length <<<"$ids") -le 1 ]] || return 2
+  jq -r '.[]' <<<"$ids"
+}
+
+# reconcile_engine NAME WANT creates or patches one Speech Engine. A created
+# engine's id is logged: the bridge's Deployment pins it by hand.
+reconcile_engine() {
+  local name=$1 want=$2 engine_id live fields left created status
+  engine_id=$(find_engine "$name") || {
+    status=$?
+    [[ $status == 2 ]] || die "could not list speech engines"
+    give_up "speech engine $name: more than one live engine has this name"
+    return
+  }
+  if [[ -z $engine_id ]]; then
+    if [[ $mode == report ]]; then
+      log "speech engine $name: would create"
+      return
+    fi
+    created=$(call POST /v1/speech-engine "$write_key" <<<"$want") || {
+      give_up "speech engine $name: not created"
+      return
+    }
+    engine_id=$(jq -r '.speech_engine_id // empty' <<<"$created")
+    if [[ -z $engine_id ]]; then
+      give_up "speech engine $name: the create response named no engine"
+      return
+    fi
+    log "speech engine $name: created $engine_id; pin it in the bridge's MATE_VOICE_ELEVENLABS_ENGINE_ID"
+    fields=created
+  else
+    live=$(call GET "/v1/speech-engine/$engine_id" "$read_key") || {
+      give_up "speech engine $name ($engine_id): not read"
+      return
+    }
+    fields=$(drift "$want" "$live" managed)
+    if [[ -z $fields ]]; then
+      log "speech engine $name ($engine_id): in sync"
+      return
+    fi
+    if [[ $mode == report ]]; then
+      log "speech engine $name ($engine_id): would patch $fields"
+      return
+    fi
+    managed "$want" | call PATCH "/v1/speech-engine/$engine_id" "$write_key" >/dev/null || {
+      give_up "speech engine $name ($engine_id): not patched"
+      return
+    }
+  fi
+  live=$(call GET "/v1/speech-engine/$engine_id" "$read_key") || {
+    give_up "speech engine $name ($engine_id): not re-read"
+    return
+  }
+  left=$(drift "$want" "$live" managed)
+  if [[ -n $left ]]; then
+    give_up "speech engine $name ($engine_id): still differs after a write: $left"
+    return
+  fi
+  [[ $fields == created ]] || log "speech engine $name ($engine_id): patched $fields"
+}
+
 agent_files=("$agents_dir"/*.json)
 [[ -e ${agent_files[0]} ]] || die "$agents_dir declares no agent"
 for file in "${agent_files[@]}"; do
@@ -391,4 +465,15 @@ reconcile_outbound_number() {
 
 reconcile_number
 reconcile_outbound_number
+
+declare -A engine_names=()
+for file in "$engines_dir"/*.json; do
+  [[ -e $file ]] || break
+  want_engine=$(jq -c . "$file")
+  name=$(jq -r '.name // empty' <<<"$want_engine")
+  [[ -n $name ]] || die "$(basename "$file") names no speech engine"
+  [[ ! -v engine_names[$name] ]] || die "two files under $engines_dir name the speech engine $name"
+  engine_names[$name]=1
+  reconcile_engine "$name" "$want_engine"
+done
 exit "$failed"

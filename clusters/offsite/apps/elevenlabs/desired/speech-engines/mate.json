@@ -1,0 +1,40 @@
+{
+  "name": "mate",
+  "speech_engine": {
+    "ws_url": "wss://voice.lolwtf.ca/speech-engine"
+  },
+  "language": "en",
+  "cascade_timeout_seconds": 10,
+  "asr": {
+    "user_input_audio_format": "pcm_48000"
+  },
+  "tts": {
+    "model_id": "eleven_flash_v2_5",
+    "voice_id": "cjVigY5qzO86Huf0OWal",
+    "agent_output_audio_format": "pcm_24000"
+  },
+  "turn": {
+    "turn_timeout": 30,
+    "turn_eagerness": "normal",
+    "retranscribe_on_turn_timeout": false
+  },
+  "conversation": {
+    "max_duration_seconds": 2400,
+    "client_events": [
+      "audio",
+      "interruption",
+      "ping",
+      "user_transcript",
+      "agent_response",
+      "agent_response_correction"
+    ]
+  },
+  "privacy": {
+    "record_voice": false
+  },
+  "call_limits": {
+    "agent_concurrency_limit": 1,
+    "daily_limit": 50,
+    "bursting_enabled": false
+  }
+}

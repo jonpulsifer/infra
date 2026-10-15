@@ -118,6 +118,27 @@ case "$method $path" in
     mv "$STUB_DIR/next.json" "$STUB_DIR/$nf"
     respond '{}' 200
     ;;
+  "GET /v1/speech-engine")
+    respond "$(cat "$STUB_DIR/engines.json")" 200
+    ;;
+  "GET /v1/speech-engine/"*)
+    file="$STUB_DIR/engine-${path##*/}.json"
+    if [[ -f $file ]]; then
+      respond "$(cat "$file")" 200
+    else
+      respond '{"detail":{"status":"not_found","message":"no such engine"}}' 404
+    fi
+    ;;
+  "POST /v1/speech-engine")
+    jq --arg id seng_new '. + {speech_engine_id: $id}' <<<"$body" >"$STUB_DIR/engine-seng_new.json"
+    jq '.speech_engines += [{speech_engine_id: "seng_new", name: "mate"}]' "$STUB_DIR/engines.json" >"$STUB_DIR/next.json"
+    mv "$STUB_DIR/next.json" "$STUB_DIR/engines.json"
+    respond '{"speech_engine_id":"seng_new"}' 201
+    ;;
+  "PATCH /v1/speech-engine/"*)
+    jq --arg id "${path##*/}" '. + {speech_engine_id: $id}' <<<"$body" >"$STUB_DIR/engine-${path##*/}.json"
+    respond '{}' 200
+    ;;
   *)
     respond '{"detail":{"status":"not_found","message":"no such route"}}' 404
     ;;
@@ -140,6 +161,8 @@ jq '{phone_number_id, assigned_agent: {agent_id: "agent_troll1"},
      outbound_trunk: null}' "$desired/phone-number.json" >"$pristine/number.json"
 # The outbound number dials out only: its trunk matches git and holds the
 # sub-account login.
+# No Speech Engine exists live until a write run creates mate's.
+jq -n '{speech_engines: [], has_more: false}' >"$pristine/engines.json"
 out_id=$(jq -r .phone_number_id "$desired/outbound-number.json")
 jq '{phone_number_id, assigned_agent: null, inbound_trunk: null,
      outbound_trunk: (.outbound_trunk_config + {has_auth_credentials: true, username: "out-user"})}' \
@@ -172,12 +195,33 @@ assert_contains 'report mode reads the troll agent as in sync' "$out" 'agent pbx
 assert_contains 'report mode names the keys the outbound trunk waits for' "$out" \
   "number $out_id: the outbound trunk waits for OUTBOUND_TRUNK_USERNAME and OUTBOUND_TRUNK_PASSWORD (Secret elevenlabs-outbound-trunk)"
 assert_contains 'report mode does not bind without the inbound credentials' "$out" 'would not bind: the trunk credentials are missing'
+assert_contains 'report mode says it would create the speech engine' "$out" 'speech engine mate: would create'
 assert_lacks 'report mode sends no POST' "$requests" 'POST '
 assert_lacks 'report mode sends no PATCH' "$requests" 'PATCH '
 
 run_case "$desired" "${write_env[@]}"
 assert_equal 'a write run without the outbound item exits 0' 0 "$status"
 assert_contains 'a write run creates the missing agent' "$out" 'agent pbx-switchboard: created agent_new'
+assert_contains 'a write run creates the speech engine and says where its id goes' "$out" \
+  "speech engine mate: created seng_new; pin it in the bridge's MATE_VOICE_ELEVENLABS_ENGINE_ID"
+assert_contains 'the engine is created with the write key' "$requests" 'POST /v1/speech-engine key=write-key'
+assert_contains 'the engine body carries the ws_url and the formats' "$requests" 'speech_engine.ws_url'
+assert_contains 'the engine body carries the formats' "$requests" 'asr.user_input_audio_format'
+
+# With the engine live and matching git, a write run patches nothing; a drifted
+# leaf is patched.
+engine_live="$pristine/engine-seng_live.json"
+jq '. + {speech_engine_id: "seng_live"}' "$desired/speech-engines/mate.json" >"$engine_live"
+jq -n '{speech_engines: [{speech_engine_id: "seng_live", name: "mate"}], has_more: false}' >"$pristine/engines.json"
+run_case "$desired" "${write_env[@]}"
+assert_contains 'a live engine that matches git is in sync' "$out" 'speech engine mate (seng_live): in sync'
+assert_lacks 'an engine in sync is not patched' "$requests" 'PATCH /v1/speech-engine/'
+jq '.turn.turn_timeout = 7' "$engine_live" >"$pristine/next.json" && mv "$pristine/next.json" "$engine_live"
+run_case "$desired" "${write_env[@]}"
+assert_contains 'a drifted engine leaf is patched' "$out" 'speech engine mate (seng_live): patched turn.turn_timeout'
+assert_contains 'the engine patch uses the write key' "$requests" 'PATCH /v1/speech-engine/seng_live key=write-key'
+jq -n '{speech_engines: [], has_more: false}' >"$pristine/engines.json"
+rm -f "$engine_live"
 assert_contains 'a write run creates with the write key' "$requests" 'POST /v1/convai/agents/create key=write-key'
 assert_contains 'a write run re-sends the inbound credentials' "$requests" \
   "PATCH /v1/convai/phone-numbers/$number_id key=write-key"

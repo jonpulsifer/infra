@@ -42,6 +42,7 @@ spec:
               # desired/ instead of under it, and AGENTS_DIR names that path.
               env:
                 - {name: AGENTS_DIR, value: /desired-agents}
+                - {name: SPEECH_ENGINES_DIR, value: /desired-speech-engines}
               envFrom:
                 - secretRef: {name: elevenlabs-read-key, optional: true}
                 - secretRef: {name: elevenlabs-write-key, optional: true}
@@ -59,6 +60,7 @@ spec:
                 - {name: scripts, mountPath: /scripts, readOnly: true}
                 - {name: desired, mountPath: /desired, readOnly: true}
                 - {name: agents, mountPath: /desired-agents, readOnly: true}
+                - {name: speech-engines, mountPath: /desired-speech-engines, readOnly: true}
                 - {name: tmp, mountPath: /tmp}
           volumes:
             - name: scripts
@@ -70,6 +72,9 @@ spec:
             - name: agents
               configMap:
                 name: elevenlabs-desired-agents
+            - name: speech-engines
+              configMap:
+                name: elevenlabs-desired-speech-engines
             # bash writes a large here-string to a temporary file.
             - name: tmp
               emptyDir:

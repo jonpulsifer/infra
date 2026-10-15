@@ -143,7 +143,7 @@ mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx
 
 `sandbox-network-policy.yaml` declares the sandbox policy and `mate-sandbox-baseline`, which selects every pod with `lolwtf.ca/hands` and allows DNS for `cluster.local` alone. A sandbox whose own policy is missing gets that egress and no more. `sandbox-reader-network-policy.yaml` declares the read-only policy and the checkout window. Before the agent's first command, mate sets the pod's `lolwtf.ca/checkout` to `closed` and waits for its CiliumEndpoint to carry the new label.
 
-The microVM isolates the kernel. mate's ingress admits only the node it runs on, for the readiness probe, and Alertmanager's pods in `monitoring`, for the alert responder. The sandbox's policy keeps it away from `mate` and from Alertmanager, whose API takes an alert from anyone, but as `cluster-admin` and root on the nodes it can reach both on purpose.
+The microVM isolates the kernel. mate's ingress admits the node it runs on, for the readiness probe, Alertmanager's pods in `monitoring`, for the alert responder, the bridge's pods, for the voice link, and cloudflared's pods in `cloudflare`, through which ElevenLabs Speech Engine reaches `/speech-engine`; the edge admits ElevenLabs' addresses alone and mate verifies the JWT. The sandbox's policy keeps it away from `mate` and from Alertmanager, whose API takes an alert from anyone, but as `cluster-admin` and root on the nodes it can reach both on purpose.
 
 No policy selects the `mate-db` instance or the `mate-db-backup` Job's pod. The CloudNativePG controller, Prometheus and the kubelet reach the instance, and that Job reaches Google Cloud. A sandbox reaches neither, because its egress leaves out every pod in `mate`.
 

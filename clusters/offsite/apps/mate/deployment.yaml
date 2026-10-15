@@ -67,6 +67,14 @@ spec:
               value: "1509024936717455381"
             - name: MATE_ALLOWED_USER_IDS
               value: "308072071949320204"
+            # ElevenLabs Speech Engine's JWT key (the hash alone); mate refuses
+            # the /speech-engine upgrade while it is unset.
+            - name: MATE_SPEECH_ENGINE_KEY_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: mate-speech-engine
+                  key: MATE_SPEECH_ENGINE_KEY_SHA256
+                  optional: true
             - name: MATE_ALLOWED_CHANNEL_IDS
               value: "1509024937422356532,1509024937422356533"
             # Slack needs both tokens; one alone stops mate from booting. `optional`
