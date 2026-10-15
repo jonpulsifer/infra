@@ -88,6 +88,8 @@ jobs:
             .github/workflows/typescript.yml
             .github/workflows/spindrift-build.yml
             .github/workflows/kthx.yml
+      - name: Test the digest-only skip
+        run: bash .github/scripts/digest-only_test.sh
       - id: classify
         env:
           ANY_CHANGED: ${{ steps.changed-paths.outputs.any_changed }}
@@ -97,28 +99,14 @@ jobs:
         run: |
           has_changes="$ANY_CHANGED"
 
-          # Every file continuous delivery stamps an image digest into, read
-          # from the deploy map in `.github/containers.json`.
-          mapfile -t releases < <(jq -r '.deploy[][]' .github/containers.json | sort -u)
-
-          # Continuous delivery only rewrites the image digest. The rest of each
-          # release is a conformance-test input and remains significant, so this
-          # skips only when every changed file is one of those releases and
-          # every one of them differs at nothing but that line.
-          only_digests=true
-          for changed in $ALL_CHANGED_FILES; do
-            known=false
-            for release in "${releases[@]}"; do
-              [[ "$changed" == "$release" ]] && known=true && break
-            done
-            if ! "$known" || ! git diff --quiet \
-              --ignore-matching-lines='^[[:space:]]*(image: ghcr\.io/jonpulsifer/[a-z0-9-]+:|tag: )latest@sha256:[[:xdigit:]]{64}$' \
-              "$BASE_SHA" "$HEAD_SHA" -- "$changed"; then
-              only_digests=false
-              break
-            fi
-          done
-          if [[ -n "$ALL_CHANGED_FILES" ]] && "$only_digests"; then
+          # Continuous delivery only rewrites the image digest in the `deploy`
+          # targets of `.github/containers.json`. The rest of each target is a
+          # conformance-test input and remains significant, so this skips only
+          # when every changed file is a target that differs at nothing but
+          # that line.
+          read -ra changed <<<"$ALL_CHANGED_FILES"
+          if ((${#changed[@]})) &&
+            bash .github/scripts/digest-only.sh "$BASE_SHA" "$HEAD_SHA" "${changed[@]}"; then
             has_changes=false
           fi
 
@@ -126,7 +114,9 @@ jobs:
 
   validate:
     needs: detect
-    if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+    # A skipped validate satisfies the required check, so a detect that fails
+    # before it classifies runs validate rather than skipping it.
+    if: ${{ !cancelled() && (needs.detect.outputs.has_changes != 'false' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     permissions:
       contents: read

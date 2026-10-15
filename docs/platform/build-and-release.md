@@ -42,7 +42,7 @@ A path that no workflow lists runs no checks, and its PR still passes. `.github/
 | Workflow | Checks |
 | --- | --- |
 | `nix-ci.yaml` | `nix flake check` on PRs, and host and image builds on `main` |
-| `typescript.yml` | The Bun workspace, when a path on its list changes |
+| `typescript.yml` | The Bun workspace, when a path on its list changes. A change that only moves a first-party image digest in a `deploy` target of `.github/containers.json` skips it. |
 | `kustomize.yml` | Renders each Flux Kustomization path, and templates in-repo charts with their HelmRelease values. It skips charts from a HelmRepository or OCIRepository. |
 | `go.yml`, `rust.yml` | The Go and Rust modules on their lists |
 
