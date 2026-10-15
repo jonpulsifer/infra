@@ -160,6 +160,39 @@ spec:
             message: "{{ $labels.instance }}: windows_exporter collector {{ $labels.collector }} is failing"
             description: "Usually a missing or corrupted performance counter. `lodctr /R` from an elevated prompt rebuilds the counter registry."
 
+    - name: lookout
+      # The Lookout agent (apps/lookout) keeps the three agents current and
+      # reports through windows_exporter's textfile collector, so these series
+      # exist only on a desktop that runs it and is on.
+      rules:
+        - alert: LookoutStale
+          expr: time() - lookout_last_sync_timestamp_seconds > 2 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }}: Lookout has not synced for {{ $value | humanizeDuration }}"
+            description: "The Lookout service stopped, or every pass fails before it finishes. The Application log on the desktop, source Lookout, says which."
+
+        - alert: LookoutComponentDrifted
+          expr: lookout_component_current == 0
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }}: {{ $labels.component }} does not match the policy"
+            description: "Lookout could not converge it in 6 hours, or convergence is paused from the tray. The Application log on the desktop has the installer error."
+
+        # Vector has no port, so this is the only rule that sees it stop.
+        - alert: LookoutComponentUnhealthy
+          expr: lookout_component_healthy == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }}: {{ $labels.component }} is not running"
+            description: "Sync now from the Lookout tray restarts it. If it stops again, the Application log on the desktop has the reason."
+
     - name: windows-sensors
       # OhmGraphite names series ohm_<hardwaretype>_<unit>; the GPU types are
       # gpunvidia, gpuamd and gpuintel.

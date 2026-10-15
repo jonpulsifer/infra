@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "intervalMinutes": 360,
+  "windowsExporter": {
+    "version": "0.31.8",
+    "url": "https://github.com/prometheus-community/windows_exporter/releases/download/v0.31.8/windows_exporter-0.31.8-amd64.msi",
+    "sha256": "0AADCE6AFB20182B678BFCA9E8F2E8464EF48C469B28B4CF02E99D82158F5D40",
+    "collectors": "[defaults],gpu,cpu_info,diskdrive,textfile",
+    "port": 9182
+  },
+  "ohmGraphite": {
+    "version": "0.38.0",
+    "url": "https://github.com/nickbabcock/OhmGraphite/releases/download/v0.38.0/OhmGraphite-0.38.0.zip",
+    "sha256": "35DC1FEA76F3F2F766EA0D416A1AC01CE61E3E6C239E13AAD97B29D7EC9DE418",
+    "configUrl": "https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/monitoring/OhmGraphite.exe.config",
+    "port": 4445
+  },
+  "vector": {
+    "version": "0.58.0",
+    "url": "https://packages.timber.io/vector/0.58.0/vector-x64.msi",
+    "sha256": "53B783BF5F39ED317CD9D19DA0D654DE8A963C5971852B0E87BED1B931AF9B29",
+    "configUrl": "https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/monitoring/vector.yaml",
+    "productCode": "{7FAD6F97-D84E-42CC-A600-5F4EC3460FF5}"
+  }
+}

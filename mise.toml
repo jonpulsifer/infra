@@ -38,6 +38,8 @@ terraform-docs = "latest"
 velero = "latest"
 vim = "latest"
 d2 = "0.9.0"
+# The Lookout agent, apps/lookout. The SDK needs invariant globalization here: no ICU on NixOS.
+dotnet = "10"
 
 [tasks."claude:auto"]
 description = "Start Claude in auto mode for this repository"
@@ -61,6 +63,15 @@ run = "nix develop -c nix fmt"
 [tasks."tf:fmt"]
 description = "Format Terraform files"
 run = "tofu fmt -recursive"
+
+[tasks."lookout:test"]
+description = "Build the Lookout solution and run its Core tests (apps/lookout)"
+dir = "apps/lookout"
+env = { DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1", DOTNET_CLI_TELEMETRY_OPTOUT = "1", DOTNET_NOLOGO = "1" }
+run = [
+  "dotnet build",
+  "dotnet test tests/Lookout.Core.Tests",
+]
 
 [tasks."rust:test"]
 description = "Differential tests for the FML derivation spec (apps/fml-derive-rs)"

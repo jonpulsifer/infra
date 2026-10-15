@@ -19,6 +19,7 @@ sections:
       - apps/hub.md
       - apps/weather.md
       - apps/wiki.md
+      - apps/lookout.md
       - group: Internal tools
         items: [apps/netbench.md]
       - group: Parked

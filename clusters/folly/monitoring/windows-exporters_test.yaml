@@ -222,3 +222,60 @@ tests:
       - eval_time: 70m
         alertname: WindowsAgentDown
         exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      # tallboy last synced at the epoch, so time() runs away from it.
+      - series: 'lookout_last_sync_timestamp_seconds{instance="tallboy",job="windows-exporter"}'
+        values: 0x3000
+      # atomic syncs every hour.
+      - series: 'lookout_last_sync_timestamp_seconds{instance="atomic",job="windows-exporter"}'
+        values: 0+3600x3000
+      # Vector drifted on tallboy and stopped on atomic.
+      - series: 'lookout_component_current{instance="tallboy",component="vector",job="windows-exporter"}'
+        values: 0x3000
+      - series: 'lookout_component_healthy{instance="tallboy",component="vector",job="windows-exporter"}'
+        values: 1x3000
+      - series: 'lookout_component_current{instance="atomic",component="vector",job="windows-exporter"}'
+        values: 1x3000
+      - series: 'lookout_component_healthy{instance="atomic",component="vector",job="windows-exporter"}'
+        values: 0x3000
+    alert_rule_test:
+      - eval_time: 48h
+        alertname: LookoutStale
+        exp_alerts: []
+      - eval_time: 50h
+        alertname: LookoutStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+              job: windows-exporter
+            exp_annotations:
+              message: "tallboy: Lookout has not synced for 2d 2h 0m 0s"
+              description: "The Lookout service stopped, or every pass fails before it finishes. The Application log on the desktop, source Lookout, says which."
+      - eval_time: 5h
+        alertname: LookoutComponentDrifted
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: LookoutComponentDrifted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+              component: vector
+              job: windows-exporter
+            exp_annotations:
+              message: "tallboy: vector does not match the policy"
+              description: "Lookout could not converge it in 6 hours, or convergence is paused from the tray. The Application log on the desktop has the installer error."
+      - eval_time: 31m
+        alertname: LookoutComponentUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: atomic
+              component: vector
+              job: windows-exporter
+            exp_annotations:
+              message: "atomic: vector is not running"
+              description: "Sync now from the Lookout tray restarts it. If it stops again, the Application log on the desktop has the reason."
