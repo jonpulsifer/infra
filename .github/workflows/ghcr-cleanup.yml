@@ -1,7 +1,11 @@
 name: ghcr-cleanup
 
 # GHCR never expires a version, and each build pushes several. CD pins each
-# image's newest build, so the newest tagged versions hold every live pin.
+# image's newest build, and reverting a fix(cd) merge pins an older one, so
+# every build younger than the retention window survives; past it, only the
+# newest few do. GHCR answers 404 to a delete on a package GITHUB_TOKEN
+# cannot administer, and the action counts that as already deleted, so the
+# last step fails the run on any package the cleanup left over the limit.
 on:
   schedule:
     # Sunday, away from weekday CD merges.
@@ -16,6 +20,10 @@ on:
 permissions:
   contents: read
   packages: write
+
+env:
+  RETAIN_DAYS: 30
+  RETAIN_TAGGED: 10
 
 jobs:
   cleanup:
@@ -32,8 +40,11 @@ jobs:
         with:
           packages: ${{ steps.packages.outputs.list }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          # Ten builds of headroom over the one digest each manifest pins.
-          keep-n-tagged: 10
+          # Every rule below applies only to versions older than this, so a
+          # pin reverted within the window still resolves.
+          older-than: ${{ env.RETAIN_DAYS }} days
+          # Ten builds of headroom past the window.
+          keep-n-tagged: ${{ env.RETAIN_TAGGED }}
           # `latest` always tags the newest build, which is never deleted.
           exclude-tags: latest
           # Platform children and attestations are untagged; the action keeps
@@ -42,3 +53,31 @@ jobs:
           delete-ghost-images: true
           delete-partial-images: true
           dry-run: ${{ inputs.dry-run || false }}
+      - name: Check every package was trimmed
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          # A day past the window, so a build that ages into it during the
+          # cleanup is not counted. The excluded `latest` can be one more.
+          # `updated_at`, the clock the action ages and sorts versions by.
+          cutoff=$(date -u -d "$((RETAIN_DAYS + 1)) days ago" +%FT%TZ)
+          limit=$((RETAIN_TAGGED + 1))
+          failed=0
+          for pkg in $(jq -r '.build[]' .github/containers.json); do
+            if ! old=$(gh api --paginate \
+              "/users/$OWNER/packages/container/$pkg/versions?per_page=100" \
+              --jq ".[] | select((.metadata.container.tags | length) > 0 and .updated_at < \"$cutoff\") | .id" \
+              | wc -l); then
+              echo "::error::$pkg: cannot list versions; grant this repository Admin in the package's Manage Actions access"
+              failed=1
+            elif ((old > limit)); then
+              echo "::error::$pkg: $old tagged versions older than $((RETAIN_DAYS + 1)) days, limit $limit; grant this repository Admin in the package's Manage Actions access"
+              failed=1
+            else
+              echo "$pkg: $old tagged versions older than $((RETAIN_DAYS + 1)) days"
+            fi
+          done
+          exit "$failed"
