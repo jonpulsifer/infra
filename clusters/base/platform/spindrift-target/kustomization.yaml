@@ -6,4 +6,5 @@ resources:
   - backup
   - networkpolicy.yaml
   - oci-repository.yaml
+  - kthx-app-oci-repository.yaml
   - rbac.yaml

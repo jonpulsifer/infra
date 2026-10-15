@@ -1,0 +1,16 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kthx-engine-policy
+  namespace: flux-system
+spec:
+  interval: 1h
+  path: ./clusters/base/platform/kthx-engine-policy
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    - name: kyverno
+  wait: true

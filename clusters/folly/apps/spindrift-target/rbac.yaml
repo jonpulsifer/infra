@@ -2,11 +2,11 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: spindrift-target-discovery
+  name: kthx-engine-target-discovery
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: spindrift-target-discovery
+  name: kthx-engine-target-discovery
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
@@ -15,11 +15,11 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: spindrift-target-delivery
+  name: kthx-engine-target-delivery
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: spindrift-target-delivery
+  name: kthx-engine-target-delivery
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
@@ -28,12 +28,12 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: spindrift-target-chart-artifact
+  name: kthx-engine-target-chart-artifact
   namespace: spindrift-apps
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: spindrift-target-chart-artifact
+  name: kthx-engine-target-chart-artifact
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
@@ -42,12 +42,12 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: spindrift-target-datastores
+  name: kthx-engine-target-datastores
   namespace: spindrift-datastores
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: spindrift-target-datastores
+  name: kthx-engine-target-datastores
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
@@ -56,12 +56,12 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: spindrift-target-datastores-legacy
+  name: kthx-engine-target-datastores-legacy
   namespace: spindrift-apps
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: spindrift-target-datastores-legacy
+  name: kthx-engine-target-datastores-legacy
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
@@ -72,7 +72,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: spindrift-target-delivery-argo
+  name: kthx-engine-target-delivery-argo
   namespace: argo
 rules:
   - apiGroups:
@@ -88,12 +88,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: spindrift-target-delivery-argo
+  name: kthx-engine-target-delivery-argo
   namespace: argo
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: spindrift-target-delivery-argo
+  name: kthx-engine-target-delivery-argo
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
@@ -102,12 +102,12 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: spindrift-target-chart-source
+  name: kthx-engine-target-chart-source
   namespace: flux-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: spindrift-target-chart-source
+  name: kthx-engine-target-chart-source
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User

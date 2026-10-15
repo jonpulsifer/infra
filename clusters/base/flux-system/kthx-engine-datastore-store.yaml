@@ -1,0 +1,19 @@
+---
+# Its own Kustomization: a ClusterSecretStore cannot dry-run in the apply that
+# installs its CRD.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kthx-engine-datastore-store
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/base/platform/kthx-engine-datastore-store
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    - name: external-secrets-operator
+    # The RoleBinding's namespace, spindrift-datastores, comes from `apps`.
+    - name: apps
