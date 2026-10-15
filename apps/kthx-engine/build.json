@@ -2,7 +2,6 @@
   {
     "image": "kthx-engine",
     "workspace": "kthx-engine",
-    "aliases": ["spindrift"],
     "context": ".",
     "file": "apps/kthx-engine/Dockerfile",
     "platforms": "linux/amd64",
