@@ -6,7 +6,6 @@
     "context": ".",
     "file": "apps/kthx/Dockerfile",
     "platforms": "linux/amd64",
-    "no-cache-filters": "runner",
     "watch": [
       "apps/kthx",
       "packages/archive",

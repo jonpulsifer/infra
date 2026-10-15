@@ -6,7 +6,6 @@
     "context": ".",
     "file": "apps/mate/Dockerfile",
     "platforms": "linux/amd64",
-    "no-cache-filters": "runner",
     "watch": [
       "apps/mate",
       "packages/mate-hands",

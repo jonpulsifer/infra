@@ -6,7 +6,6 @@
     "context": ".",
     "file": "apps/mate-voice/Dockerfile",
     "platforms": "linux/amd64",
-    "no-cache-filters": "runner",
     "watch": [
       "apps/mate-voice",
       "packages/mate-voice-protocol",

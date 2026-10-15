@@ -6,7 +6,6 @@
     "context": ".",
     "file": "apps/switchboard/Dockerfile",
     "platforms": "linux/amd64",
-    "no-cache-filters": "runner",
     "watch": [
       "apps/switchboard",
       "packages/typescript-config",

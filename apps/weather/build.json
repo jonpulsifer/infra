@@ -6,7 +6,6 @@
     "context": ".",
     "file": "apps/weather/Dockerfile",
     "platforms": "linux/amd64",
-    "no-cache-filters": "runner",
     "watch": [
       "apps/weather",
       "packages/typescript-config",
