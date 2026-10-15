@@ -108,7 +108,7 @@ survey() {
 }
 
 # Succeeds when the newest build holds the same files and runtime config as
-# every reference pin. The delivery step opens no pull request for such a
+# every pin it is given. The delivery step opens no pull request for such a
 # build, so its pin keeps an older commit, and without this check the image
 # would be rebuilt every day. The build tags each push with its commit; a
 # scheduled rebuild is tagged with main's head instead, so `latest` counts when
@@ -187,8 +187,8 @@ stale() {
       continue
     fi
     if grep -qx stale <<<"$main_said"; then
-      # The same reference the delivery step compares with: what merges next.
-      if same_content "$owner/$image" "$newest_commit" "${queued_pins:-$main_pins}"; then
+      # The same pins the delivery step compares with: main's and the branch's.
+      if same_content "$owner/$image" "$newest_commit" "$(printf '%s\n%s' "$main_pins" "$queued_pins")"; then
         echo "$image is pinned at content identical to the newest build." >&2
         continue
       fi

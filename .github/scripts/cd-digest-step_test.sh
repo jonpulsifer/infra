@@ -260,15 +260,28 @@ grep -qF "::notice::mate build $c2 has the same filesystem and config as the pin
 run_step "$c2" "$d2" >"$work/log.differs" 2>&1 || fail "the run failed: $(cat "$work/log.differs")"
 assert_equal 'a build whose content differs from the pin is delivered' "$d2" "$(queued_digest)"
 
+# A pull request closed unmerged leaves its branch behind, so matching the
+# branch alone proves nothing about what main runs.
 run_step "$c2" "$like_d2" >"$work/log.queued-same" 2>&1 || fail "the run failed: $(cat "$work/log.queued-same")"
-assert_equal 'a build matching the queued build leaves the queue alone although main differs' \
-  "$d2" "$(queued_digest)"
-grep -qF '::notice::mate build' "$work/log.queued-same" \
-  || fail 'the skip against the queued build did not say so'
+assert_equal 'a build matching only the queued build is delivered, since main differs' \
+  "$like_d2" "$(queued_digest)"
+if grep -qF '::notice::mate build' "$work/log.queued-same"; then
+  fail 'a build matching only the queued build was skipped'
+fi
 
 run_step "$c2" "$like_d0" >"$work/log.queued-differs" 2>&1 || fail "the run failed: $(cat "$work/log.queued-differs")"
 assert_equal 'a build matching main but not the queued build replaces the queued one' \
   "$like_d0" "$(queued_digest)"
+
+# The queue now holds main's content under another digest, so a third build of
+# it matches every pin on main and on the branch.
+again_d0=$(digest d)
+publish "$again_d0" "$c2" "$d0"
+run_step "$c2" "$again_d0" >"$work/log.queued-both" 2>&1 || fail "the run failed: $(cat "$work/log.queued-both")"
+assert_equal 'a build matching main and the queued build leaves the queue alone' \
+  "$like_d0" "$(queued_digest)"
+grep -qF "::notice::mate build $c2 has the same filesystem and config as the pin; no pull request" "$work/log.queued-both" \
+  || fail "the skip against main and the queued build did not say so: $(cat "$work/log.queued-both")"
 
 git -C "$remote" update-ref -d "refs/heads/$branch"
 run_step "$c2" "$unreadable" >"$work/log.unreadable" 2>&1 || fail "the run failed: $(cat "$work/log.unreadable")"

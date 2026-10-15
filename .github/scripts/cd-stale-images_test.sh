@@ -278,7 +278,8 @@ content "$latest_foo" same
 assert_equal 'one main pin with other content names the image' \
   foo "$("$script" stale foo 2>/dev/null)"
 
-# A queued build is what merges next, so it is the content that counts.
+# A delivery branch can outlive a pull request closed unmerged, so main and the
+# branch both have to match.
 reset_fixtures
 printf '%s\n' "$foo_old" >"$fixtures/pins/foo"
 printf '%s\n' "$foo_queued" >"$fixtures/queued/foo"
@@ -291,7 +292,11 @@ assert_equal 'a queued build with other content is stale although main matches' 
 
 content "$foo_old" other
 content "$foo_queued" same
-assert_equal 'a queued build with the newest content is current although main differs' \
+assert_equal 'a queued build with the newest content is stale while main differs' \
+  foo "$("$script" stale foo 2>/dev/null)"
+
+content "$foo_old" same
+assert_equal 'main and a queued build with the newest content are current' \
   '' "$("$script" stale foo 2>/dev/null)"
 
 # A scheduled rebuild is tagged with main's head, not with $latest_foo.

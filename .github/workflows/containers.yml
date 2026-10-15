@@ -404,24 +404,21 @@ jobs:
           # Every build has a new digest, because its labels and provenance
           # carry the commit and the time, so a build of unchanged inputs would
           # still roll every pod onto the files it already runs. The fingerprint
-          # hashes the layers and the runtime config without the labels. The
-          # reference is what merges next: the queued build when one waits,
-          # because a revert built while a newer digest is queued has to replace
-          # it even when it matches main. A fingerprint that cannot be read
-          # leaves the verdict at write, so a registry failure delivers as
+          # hashes the layers and the runtime config without the labels. It
+          # skips only when every pin on main and on the delivery branch
+          # matches: a revert built while a newer digest is queued has to
+          # replace it even when it matches main, and a branch whose pull
+          # request was closed unmerged outlives it, so matching that branch
+          # alone says nothing about what runs. A fingerprint that cannot be
+          # read leaves the verdict at write, so a registry failure delivers as
           # before.
-          if git rev-parse --verify --quiet "$QUEUED_REF" >/dev/null; then
-            reference="$queued_pins"
-          else
-            reference="$main_pins"
-          fi
           new_fingerprint=$("$cd_digest" fingerprint "$REGISTRY_REPOSITORY" "$DIGEST")
           same=false
-          if [ -n "$new_fingerprint" ] && [ -s "$reference" ]; then
+          if [ -n "$new_fingerprint" ] && [ -s "$candidates" ]; then
             same=true
             while IFS= read -r pinned_digest; do
               [ "$("$cd_digest" fingerprint "$REGISTRY_REPOSITORY" "$pinned_digest")" = "$new_fingerprint" ] || same=false
-            done <"$reference"
+            done <"$candidates"
           fi
           if [ "$same" = true ]; then
             echo "::notice::$IMAGE_NAME build $BUILT_COMMIT has the same filesystem and config as the pin; no pull request"
