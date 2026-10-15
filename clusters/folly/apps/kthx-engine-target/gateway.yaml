@@ -26,10 +26,8 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: app.kubernetes.io/part-of
-                operator: In
-                values: [spindrift, kthx]
+            matchLabels:
+              app.kubernetes.io/part-of: kthx
         kinds:
           - kind: HTTPRoute
     # One wildcard for every App: no release could own a per-App listener or
@@ -46,10 +44,8 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: app.kubernetes.io/part-of
-                operator: In
-                values: [spindrift, kthx]
+            matchLabels:
+              app.kubernetes.io/part-of: kthx
         kinds:
           - kind: HTTPRoute
     # cluster-gateway holds the same wildcard on its own address; each App's
@@ -66,9 +62,7 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: app.kubernetes.io/part-of
-                operator: In
-                values: [spindrift, kthx]
+            matchLabels:
+              app.kubernetes.io/part-of: kthx
         kinds:
           - kind: HTTPRoute
