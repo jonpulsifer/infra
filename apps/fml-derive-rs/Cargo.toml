@@ -13,7 +13,7 @@ path = "src/main.rs"
 # std has no crypto. Exact pins keep the differential check's primitives fixed.
 [dependencies]
 hkdf = "=0.13.0"
-sha2 = "=0.11.0"
+sha2 = "=0.11.1"
 ed25519-dalek = "=3.0.0"
 x25519-dalek = "=3.0.0"
 
