@@ -1,7 +1,7 @@
 import { systemClock } from './clock.ts';
 import { ConfigError, readConfig, type SlackConfig } from './config.ts';
 import { discordListener, discordOver, subtext } from './discord.ts';
-import { createGateway } from './gateway.ts';
+import { createGateway, INTENTS } from './gateway.ts';
 import { Health } from './health.ts';
 import { Routes } from './http.ts';
 import { discoverKube } from './kube.ts';
@@ -88,7 +88,7 @@ const database = await openDatabase(config.brain, log, {
   metrics: lazyInstruments(),
 });
 const store = database.sql
-  ? postgresSessionStore(database, log)
+  ? postgresSessionStore(database, log, { intents: INTENTS })
   : memorySessionStore();
 const { client, manager, budget, leave } = createGateway({
   token: config.token,

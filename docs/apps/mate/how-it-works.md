@@ -58,7 +58,7 @@ mate reads only the allowlist's messages. A mention in an allowed channel opens 
 
 Slack retries an undelivered event for about six minutes. mate claims the event id of an allowlisted human's message or Stop in `mate_slack_events` before it answers, so a retry after a restart is answered once, and an event older than an hour is not. Other events skip the claim. While the store is down, or a claim takes more than three seconds, the cutoff is the process start.
 
-mate keeps its gateway session in `mate_gateway_session` and closes the gateway keeping it, so a restarted mate resumes and Discord replays what arrived in between. A session that Discord does not hold (an outage past the time Discord keeps one, or a store that is down) identifies fresh, so a message sent in that gap gets no answer and `mate_inbound_dropped_total` does not count it.
+mate keeps its gateway session in `mate_gateway_session` and closes the gateway keeping it, so a restarted mate resumes and Discord replays what arrived in between. A session that Discord does not hold (an outage past the time Discord keeps one, or a store that is down), or one that identified with other intents than the build runs with, identifies fresh, so a message sent in that gap gets no answer and `mate_inbound_dropped_total` does not count it.
 
 mate downloads no file on a message. The prompt ends with a line naming each file, with its type and size.
 

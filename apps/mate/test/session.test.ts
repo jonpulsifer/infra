@@ -47,6 +47,20 @@ describe('the Postgres gateway session store', () => {
     expect((await open().retrieve(0))?.sequence).toBe(11);
   });
 
+  test('identifies fresh when the stored session has other intents, and resumes when they match', async () => {
+    const withIntents = (intents: number) =>
+      postgresSessionStore(
+        { sql: db().sql, up: () => true, ready: Promise.resolve() },
+        new RecordingLog(),
+        { debounceMs: 20, intents },
+      );
+    await withIntents(1).update(0, info);
+    await sleep(150);
+    expect(await withIntents(1).retrieve(0)).toEqual(info);
+    expect(await withIntents(3).retrieve(0)).toBeNull();
+    expect(await open().retrieve(0)).toBeNull();
+  });
+
   test('deletes the row on update(null)', async () => {
     const store = open();
     await store.update(0, info);
