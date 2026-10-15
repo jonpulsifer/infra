@@ -1,5 +1,5 @@
 {
-  "_comment": "Allowlist for the containers workflow. Every image produced by a Dockerfile under apps/ or images/ must appear in exactly one of these lists. detect-containers.sh fails CI if a Dockerfile is left unclassified, so a new app can't be silently published or silently dropped. 'build' = published to GHCR; 'ignore' = has a Dockerfile but is intentionally not published here.",
+  "_comment": "Allowlist for the containers workflow. Every image produced by a Dockerfile under apps/ or images/ must appear in exactly one of these lists. detect-containers.sh fails CI if a Dockerfile is left unclassified, so a new app can't be silently published or silently dropped. 'build' = published to GHCR; 'ignore' = has a Dockerfile but is intentionally not published here, such as an app the kthx engine builds from its own kthx.yaml.",
   "build": [
     "ddnsd",
     "flameboss",
@@ -14,7 +14,6 @@
     "mate-voice",
     "smiirl",
     "kthx-engine",
-    "kthx-engine-demo",
     "kthx-engine-verifier",
     "switchboard",
     "weather"
@@ -68,6 +67,7 @@
   "ignore": [
     "bashcurljq",
     "clankerbanker",
+    "kthx-engine-demo",
     "slingshot"
   ]
 }
