@@ -12,8 +12,6 @@ resources:
   - onepassword-connect.yaml
   - sandbox.yaml
   - kthx-engine-datastore-store.yaml
-  - spindrift-datastore-store.yaml
   - kthx-engine-policy.yaml
-  - spindrift-policy.yaml
   - valkey-operator.yaml
   - velero.yaml

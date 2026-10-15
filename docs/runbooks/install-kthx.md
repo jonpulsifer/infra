@@ -28,7 +28,7 @@ Use this runbook to install the kthx engine on the offsite cluster, or to rebuil
 
 2. Make sure each Kubernetes Target cluster declares an Apps Gateway and binds the Target ClusterRoles.
 
-   offsite declares both in `gateway.yaml` and `target-rbac.yaml`, and folly in `clusters/folly/apps/spindrift-target/`.
+   offsite declares both in `gateway.yaml` and `target-rbac.yaml`, and folly in `clusters/folly/apps/kthx-engine-target/`.
 
 ## Write the installation Secret
 

@@ -347,7 +347,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       ['kthx-engine', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
       [
         'kthx-app',
-        'clusters/base/platform/spindrift-target/oci-repository.yaml',
+        'clusters/base/platform/kthx-engine-target/oci-repository.yaml',
       ],
     ];
     for (const [chart, consumer] of consumers) {

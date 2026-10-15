@@ -91,7 +91,7 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 
 Each database except `mate-db` has a barman `ObjectStore` named `garage` in its namespace, a `ScheduledBackup`, and WAL archiving through the barman-cloud plugin. The store is the `cnpg` bucket of the site's Garage, under `<namespace>/`. A chart's `backup` value sets the endpoint and the 1Password item. [Backups](../platform/backups.md) describes the schedule, the copy to GCS and the retention. To restore a database, use [Restore a database](restore-a-database.md).
 
-A Postgres Datastore in `spindrift-datastores` archives to that namespace's `garage` store, which `clusters/base/platform/spindrift-target/backup/` declares. The kthx engine owns each Datastore's `Cluster` and `ScheduledBackup`. It turns the plugin on when it provisions a Datastore, and on an older one at the hourly check of an attached Datastore. The first check after the `Cluster` is ready with the plugin adds the `ScheduledBackup`. A Datastore attached to no App is not checked.
+A Postgres Datastore in `spindrift-datastores` archives to that namespace's `garage` store, which `clusters/base/platform/kthx-engine-target/backup/` declares. The kthx engine owns each Datastore's `Cluster` and `ScheduledBackup`. It turns the plugin on when it provisions a Datastore, and on an older one at the hourly check of an attached Datastore. The first check after the `Cluster` is ready with the plugin adds the `ScheduledBackup`. A Datastore attached to no App is not checked.
 
 | Database | Extra backup |
 | --- | --- |
