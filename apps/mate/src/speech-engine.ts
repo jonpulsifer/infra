@@ -37,9 +37,17 @@ const Upstream = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string().optional() }),
 ]);
 
-/** Streams the spoken reply to a transcript whose last turn is the owner's. */
+/**
+ * Streams the spoken reply to a transcript whose last turn is the owner's.
+ * `conversationId` names the call on each model request, as a thread's pi
+ * session id does: OpenCode Go refuses a request that names no session.
+ */
 export interface VoiceLane {
-  reply(turns: readonly Turn[], signal: AbortSignal): AsyncIterable<string>;
+  reply(
+    turns: readonly Turn[],
+    signal: AbortSignal,
+    conversationId: string,
+  ): AsyncIterable<string>;
 }
 
 export interface EngineSocket {
@@ -265,7 +273,12 @@ export class SpeechEngine {
     }
     let chars = 0;
     try {
-      for await (const delta of lane.reply(turns, run.abort.signal)) {
+      const conversationId = session.conversationId ?? 'voice';
+      for await (const delta of lane.reply(
+        turns,
+        run.abort.signal,
+        conversationId,
+      )) {
         if (!live()) return;
         chars += delta.length;
         say(delta, false);
