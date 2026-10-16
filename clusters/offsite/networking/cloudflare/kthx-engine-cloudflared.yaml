@@ -2,21 +2,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: spindrift-cloudflared
+  name: kthx-engine-cloudflared
   namespace: cloudflare
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: spindrift-cloudflared
-      app.kubernetes.io/part-of: spindrift
+      app.kubernetes.io/name: kthx-engine-cloudflared
+      app.kubernetes.io/part-of: kthx
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: spindrift-cloudflared
-        app.kubernetes.io/part-of: spindrift
+        app.kubernetes.io/name: kthx-engine-cloudflared
+        app.kubernetes.io/part-of: kthx
       annotations:
-        secret.reloader.stakater.com/reload: spindrift-cloudflared
+        secret.reloader.stakater.com/reload: kthx-engine-cloudflared
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -76,6 +76,6 @@ spec:
       volumes:
         - name: tunnel-token
           secret:
-            secretName: spindrift-cloudflared
+            secretName: kthx-engine-cloudflared
         - name: tmp
           emptyDir: {}

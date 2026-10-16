@@ -66,7 +66,7 @@ type JobOutcome = 'succeeded' | 'failed' | 'deadline' | 'gone';
 
 /** One name from one token, so `build` and `cancel` cannot disagree on it. */
 function jobNameFor(id: string): string {
-  return `spindrift-build-${id}`;
+  return `kthx-build-${id}`;
 }
 
 export class InClusterBuildRoute implements BuildAdapter {
