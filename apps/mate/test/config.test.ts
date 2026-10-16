@@ -44,7 +44,7 @@ describe('config from the environment', () => {
   test('the voice lane has its own model, thinking off, and takes the engine key as a hex hash', () => {
     const voice = readConfig(minimal).voice;
     expect(voice).toEqual({
-      model: 'opencode-go/qwen3.8-flash',
+      model: 'opencode-go/gpt-6-luna',
       thinking: 'off',
       timeoutMs: 20_000,
       fillerMs: 1_200,

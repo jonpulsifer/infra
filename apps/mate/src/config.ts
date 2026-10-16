@@ -559,7 +559,7 @@ export function readVoiceConfig(env: Env): VoiceConfig {
     );
   }
   return {
-    model: modelSpec(env, 'MATE_VOICE_MODEL', 'opencode-go/qwen3.8-flash'),
+    model: modelSpec(env, 'MATE_VOICE_MODEL', 'opencode-go/gpt-6-luna'),
     thinking: thinking(
       'MATE_VOICE_THINKING',
       text(env, 'MATE_VOICE_THINKING', 'off'),
