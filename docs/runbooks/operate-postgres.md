@@ -97,7 +97,7 @@ A Postgres Datastore in `kthx-datastores` archives to that namespace's `garage` 
 | --- | --- |
 | kthx (`kthx-db`) | The CronJob `kthx-db-backup` writes a `pg_dumpall` to `gs://bluenose-kthx/backups/pg/` each night. The bucket deletes a dump after 30 days. |
 | mate (`mate-db`) | Its only backup. The CronJob `mate-db-backup` writes a `pg_dump` to `gs://homelab-ng-mate/backups/pg/` each night, without the ChatGPT sign-in. The bucket deletes a dump after 30 days. |
-| The built-apps database (`spindrift-db`) | None. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
+| The engine database (`kthx-engine-db`) | None. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
 | Prowler (`prowler-db`), tronbyt (`tronbyt`, on folly), the Datastores | None. |
 
 > [!WARNING]
@@ -123,7 +123,7 @@ A Postgres Datastore in `kthx-datastores` archives to that namespace's `garage` 
 | `unknown command "cnpg" for "kubectl"` | The plugin is not installed. | Run `mise install github:cloudnative-pg/cloudnative-pg`. |
 | `cnpg status` shows no primary. | The `Cluster` is in bootstrap or in a restart. | If no primary shows after 5 minutes, read `kubectl cnpg logs cluster`. |
 | `BackupJobStale` or `BackupJobFailed` fires. | The `backup-push` CronJob has not succeeded in its window. | Read the logs of each container of the last Job of the CronJob in the alert. |
-| `CNPGBackupStale` fires. | A database has no backup newer than 36 hours. | Run `kubectl get scheduledbackup,backup -n <namespace>`, then read `kubectl cnpg status`. |
+| `CNPGBackupStale` fires. | A database has no backup newer than 36 hours. An immediate backup can run before a recovering Cluster has a pod. | Run `kubectl get scheduledbackup,backup -n <namespace>`, then read `kubectl cnpg status`. If the Cluster is ready without a completed base backup, run `kubectl cnpg backup` as in [Recover a re-created database](recover-a-re-created-database.md#take-a-last-backup). |
 | `KthxBackupFailing` fires. | No kthx dump has succeeded for 36 hours. | Read the logs of the last `kthx-db-backup` Job. |
 | `MateDatabaseBackupFailing` fires. | No mate dump has succeeded for 36 hours. | Read the logs of the last `mate-db-backup` Job. A 403 from `upload` is the grant in `terraform/gcp/projects/homelab-ng/mate.tf`. |
 

@@ -3,7 +3,7 @@ title: Recover a re-created database
 description: Bring a Postgres database back from its barman backups when its CloudNativePG Cluster is created again under the same name, such as after a Kubernetes cluster rebuild.
 ---
 
-Use this runbook when a CloudNativePG `Cluster` is created again under its old name, after a Kubernetes cluster rebuild or a lost volume. The barman-cloud plugin archives each `Cluster` under `s3://cnpg/<namespace>/<serverName>/`, and `serverName` defaults to the `Cluster` name. A new `Cluster` refuses to archive into a prefix that holds WAL, so it recovers from the old prefix and archives under a new one. The charts in `packages/charts/` render both from `backup.recoverFrom` and `backup.serverName`. [Restore a database](restore-a-database.md) covers a restore into a `Cluster` that still runs.
+Use this runbook when a CloudNativePG `Cluster` is created again under its old name, after a Kubernetes cluster rebuild or a lost volume. The barman-cloud plugin archives each `Cluster` under `s3://cnpg/<namespace>/<serverName>/`, and `serverName` defaults to the `Cluster` name. A new `Cluster` refuses to archive into a prefix that holds WAL, so it recovers from the old prefix and archives under a new one. The charts in `packages/charts/` render both from `backup.recoverFrom` and `backup.serverName`. For recovery from another namespace, `packages/charts/kthx-engine/templates/backup.yaml` renders a separate source store from `backup.recoverFromPath`. [Restore a database](restore-a-database.md) covers a restore into a `Cluster` that still runs.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because git holds no data, only the declaration of the database.
@@ -49,13 +49,20 @@ If the old `Cluster` still runs, stop the writers of the database first. The bac
 > [!CAUTION]
 > Merge after the old `Cluster` stops and before Flux creates the new one. A running `Cluster` takes `<new>` and fills it with WAL, and the new `Cluster` then stays in `Setting up primary`.
 
-1. Set `backup.serverName: <new>` and `backup.recoverFrom: <old>` in the release's values. In a plain manifest, copy the `serverName`, `bootstrap.recovery` and `externalClusters` that `packages/charts/app/templates/database.yaml` renders.
+1. Set `backup.serverName: <new>` and `backup.recoverFrom: <old>` in the release's values.
 
-2. If the `Cluster` is offsite's `kthx-db` or folly's `tronbyt`, set `serverName: <new>` in `clusters/<site>/apps/restore-drill/cluster.yaml`.
+2. If the source is in another namespace, set `backup.recoverFromPath` to `s3://cnpg/<source-namespace>/`.
 
-3. Open a PR and merge it, as [Apply a Kubernetes change](apply-a-kubernetes-change.md) describes.
+3. For a plain manifest, copy the `serverName`, `bootstrap.recovery` and `externalClusters` from `packages/charts/app/templates/database.yaml`.
 
-4. If the `Cluster` already exists and stays in `Setting up primary`, delete it. CloudNativePG deletes its claim. Then apply the release again, or reconcile the Kustomization of a plain manifest.
+4. If the `Cluster` is offsite's `kthx-db` or folly's `tronbyt`, set `serverName: <new>` in `clusters/<site>/apps/restore-drill/cluster.yaml`.
+
+5. Open a PR and merge it, as [Apply a Kubernetes change](apply-a-kubernetes-change.md) describes.
+
+> [!WARNING]
+> Deleting a `Cluster` deletes its data claim. Make sure that the source archive holds the completed backup before you delete it.
+
+6. If the new `Cluster` cannot recover, delete it after the source path is correct. Then reconcile the release or the plain manifest's Kustomization.
 
    ```bash
    kubectl delete cluster.postgresql.cnpg.io/<cluster> -n <namespace> --context <site>
@@ -113,7 +120,8 @@ The plugin prunes only the prefix it archives under. Wait until `<new>` holds 30
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | Helm fails with `backup.recoverFrom ... is the prefix this Cluster archives to`. | `<new>` is empty or equals `<old>`. | Set `backup.serverName` to a prefix no `Cluster` has used. |
-| The pod logs print `Expected empty archive`. | `<new>` holds WAL. | Choose another `<new>`, then do step 4 of [Declare the new Cluster](#declare-the-new-cluster). |
+| The pod logs print `Expected empty archive`. | `<new>` holds WAL. | Choose another `<new>`, then do step 6 of [Declare the new Cluster](#declare-the-new-cluster). |
+| The recovery log says `no target backup found`. | The source store path or `<old>` has no completed backup. | Compare `backup.recoverFromPath` with the source archive namespace, then read the `<cluster>-1-full-recovery` pod logs. |
 | The `Cluster` stays in `Setting up primary` with no such log line. | The recovery cannot read the `garage` ObjectStore, or `<old>` holds no backup. | Read the logs of the `<cluster>-1-full-recovery` pod. |
 | `restore-drill` fails after you remove the old prefix. | The drill still reads `<old>`. | Set `serverName: <new>` in `clusters/<site>/apps/restore-drill/cluster.yaml`. |
 

@@ -48,7 +48,7 @@ The engine's read of quick sites includes each owner login. That login is no sec
 
 ## Federation
 
-The engine runs as ServiceAccount `spindrift/spindrift` on offsite, with no GCP or cluster key.
+The engine runs as ServiceAccount `kthx-engine/kthx-engine` on offsite, with no GCP or cluster key.
 
 - GCP: The `offsite` provider of the `fml-pool` workload identity pool lets it impersonate `kthx-engine-controller@bluenose` (`terraform/gcp/projects/bluenose/iam.tf`).
 - folly: The API server accepts its token as user `federated:system:serviceaccount:kthx-engine:kthx-engine` (`clusters/folly/talos/patches.tf`).
@@ -60,6 +60,7 @@ Quick sites run as `kthx-server@bluenose`, which reaches only bucket `bluenose-k
 ## Supply chain
 
 - The engine verifies each Build's provenance, then signs the image digest with a KMS key in the trusted-builds GCP project.
-- Kyverno policy `kthx-engine-verify-images` on both clusters rejects an App pod without that signature. It matches pods labelled `kthx.dev/deploy`.
+- Kyverno policy `kthx-engine-verify-images` rejects an App pod without that signature. It matches pods labelled `kthx.dev/deploy` on both clusters (`clusters/base/platform/kthx-engine-policy/verify-images.yaml`).
+- Kyverno reads the image signature from GHCR. A private package without registry access prevents pod admission.
 - On Cloud Run, the Vessel's Binary Authorization policy admits only attested images.
 - `github-actions` builds reach GCP through the `homelab` workload identity pool as the workflow `kthx-engine-build.yml` on `main`.
