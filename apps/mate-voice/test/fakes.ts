@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type {
   AudioPlayerStatus,
+  AudioResource,
   DiscordGatewayAdapterImplementerMethods,
   DiscordGatewayAdapterLibraryMethods,
   VoiceConnectionState,
@@ -109,15 +110,17 @@ export function fakeConnect(): {
   return { connect, connections };
 }
 
-/** A player that plays nothing: the test drives its state. */
+/** A player that plays nothing: the test drives its state and reads what it was given. */
 export class FakePlayer extends EventEmitter {
   state: { status: AudioPlayerStatus } = {
     status: 'idle' as AudioPlayerStatus,
   };
   played = 0;
   stops: boolean[] = [];
-  play(): void {
+  readonly resources: AudioResource[] = [];
+  play(resource?: AudioResource): void {
     this.played++;
+    if (resource) this.resources.push(resource);
     this.go('playing' as AudioPlayerStatus);
   }
   stop(force?: boolean): boolean {
@@ -130,6 +133,17 @@ export class FakePlayer extends EventEmitter {
     this.state = { status };
     this.emit('stateChange', old, this.state);
   }
+}
+
+/** Reads every Opus frame a resource has ready, one a step as the player would, and counts them. */
+export async function readyFrames(
+  resource: AudioResource | undefined,
+): Promise<number> {
+  if (!resource) throw new Error('no resource');
+  await Bun.sleep(1);
+  let count = 0;
+  while (resource.read()) count++;
+  return count;
 }
 
 export function capturingLog(): Log & {

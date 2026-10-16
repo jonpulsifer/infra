@@ -178,7 +178,9 @@ export class ScribeEars {
   }
 
   stop(): void {
+    if (this.stopping || this.ended) return;
     this.stopping = true;
+    this.options.log.info('scribe: stopped', { ...this.counts });
     this.end('stopped');
   }
 

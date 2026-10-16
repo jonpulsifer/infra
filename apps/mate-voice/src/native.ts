@@ -44,6 +44,7 @@ export class NativeSpeech {
   private spoken: { words: Set<string>; at: number }[] = [];
   /** The utterance in progress already caused a barge-in. */
   private bargedIn = false;
+  private stopped = false;
   readonly counts: NativeCounts = { bargeIns: 0, echoes: 0 };
 
   constructor(private readonly options: NativeSpeechOptions) {
@@ -51,7 +52,9 @@ export class NativeSpeech {
     this.ears = options.ears({
       onPartial: (text) => this.heard(text, false),
       onCommitted: (text) => this.heard(text, true),
-      onEnd: (reason) => options.onDeaf(reason),
+      onEnd: (reason) => {
+        if (!this.stopped) options.onDeaf(reason);
+      },
     });
   }
 
@@ -78,8 +81,11 @@ export class NativeSpeech {
   }
 
   stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
     this.ears.stop();
     this.mouth.stop();
+    this.options.log.info('speech: stopped', { ...this.counts });
   }
 
   get speaking(): boolean {

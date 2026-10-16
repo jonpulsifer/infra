@@ -224,9 +224,22 @@ describe('the Scribe ears', () => {
       type: 'insufficient_audio_activity',
     });
     h.ears.stop();
+    h.ears.stop();
     expect(h.sockets[0]?.closed?.code).toBe(1000);
     expect(h.sockets).toHaveLength(1);
     expect(h.ends).toEqual(['stopped']);
+    expect(h.log.lines.filter((l) => l.msg === 'scribe: stopped')).toEqual([
+      {
+        level: 'info',
+        msg: 'scribe: stopped',
+        heardFrames: 0,
+        sentChunks: 0,
+        silentChunks: 0,
+        partials: 0,
+        commits: 0,
+        redials: 0,
+      },
+    ]);
   });
 
   test('ends when the key cannot be read', async () => {
