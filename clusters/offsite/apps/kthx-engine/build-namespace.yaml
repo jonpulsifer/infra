@@ -4,24 +4,6 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: spindrift-build
-  labels:
-    kustomize.toolkit.fluxcd.io/prune: enabled
-    app.kubernetes.io/part-of: kthx
-    # The level the Job's rendered security context targets (in-cluster.ts).
-    pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: restricted
-    pod-security.kubernetes.io/warn-version: latest
----
----
-# In-cluster build Jobs. Not `kthx-apps`: a Job carries its registry
-# credential and build secrets as env, readable by anyone with `get jobs`.
-apiVersion: v1
-kind: Namespace
-metadata:
   name: kthx-build
   labels:
     kustomize.toolkit.fluxcd.io/prune: enabled
@@ -33,16 +15,6 @@ metadata:
     pod-security.kubernetes.io/audit-version: latest
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/warn-version: latest
----
-# The Job pushes to Artifact Registry as this account through workload
-# identity. A GHCR push still needs a stored registry credential.
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: spindrift-build
-  namespace: spindrift-build
-  labels:
-    app.kubernetes.io/part-of: kthx
 ---
 # The Job pushes to Artifact Registry as this account through workload
 # identity. A GHCR push still needs a stored registry credential.
@@ -53,37 +25,6 @@ metadata:
   namespace: kthx-build
   labels:
     app.kubernetes.io/part-of: kthx
----
-# `delete` is for the route's cancel, and for a Job past the build budget that
-# the cluster did not end; a finished Job is reaped by its
-# ttlSecondsAfterFinished. The route lists pods by label because it does not
-# know the pod name.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: spindrift-build
-  namespace: spindrift-build
-rules:
-  - apiGroups:
-      - batch
-    resources:
-      - jobs
-    verbs:
-      - create
-      - delete
-      - get
-  - apiGroups:
-      - ""
-    resources:
-      - pods
-    verbs:
-      - list
-  - apiGroups:
-      - ""
-    resources:
-      - pods/log
-    verbs:
-      - get
 ---
 # `delete` is for the route's cancel, and for a Job past the build budget that
 # the cluster did not end; a finished Job is reaped by its
@@ -115,21 +56,6 @@ rules:
       - pods/log
     verbs:
       - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: spindrift-build
-  namespace: spindrift-build
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: spindrift-build
-subjects:
-  - kind: ServiceAccount
-    name: kthx-engine
-    namespace: kthx-engine
-
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
