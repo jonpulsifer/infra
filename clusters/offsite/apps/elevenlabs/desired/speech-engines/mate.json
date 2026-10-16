@@ -11,7 +11,7 @@
   },
   "tts": {
     "model_id": "eleven_flash_v2",
-    "voice_id": "cjVigY5qzO86Huf0OWal",
+    "voice_id": "B3MaEpg3jVTwjxbDmLJE",
     "agent_output_audio_format": "pcm_24000"
   },
   "turn": {
