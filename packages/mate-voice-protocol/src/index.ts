@@ -9,6 +9,9 @@
  * the bot's own `VOICE_STATE_UPDATE` and the `VOICE_SERVER_UPDATE` back as
  * `voice_state` and `voice_server`.
  *
+ * `speaking` says who in the channel is transmitting, so mate knows who is
+ * talking without hearing anyone but the owner.
+ *
  * `speak`, `announce`, `transcript` and `barge_in` are the speech half, for
  * the bridge that hears and speaks itself: the owner's words go up as
  * `transcript`, mate's reply comes back as `speak` deltas and an empty final,
@@ -91,6 +94,12 @@ export const FromBridge = z.discriminatedUnion('type', [
     final: z.boolean(),
   }),
   z.object({ type: z.literal('barge_in'), heardChars: z.number().int() }),
+  /** Who is transmitting in the channel, from Discord's speaking map; no audio of theirs is heard. */
+  z.object({
+    type: z.literal('speaking'),
+    userId: snowflake,
+    speaking: z.boolean(),
+  }),
   z.object({
     type: z.literal('stall'),
     reason: StallReason,

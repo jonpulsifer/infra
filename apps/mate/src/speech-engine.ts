@@ -69,6 +69,8 @@ export interface EngineCall {
   readonly news: string[];
   /** Each committed line of the call, for the call's thread. */
   transcript?(role: 'user' | 'agent', text: string): void;
+  /** A line about the channel, before the owner's latest words; null for nothing to say. */
+  context?(): string | null;
 }
 
 export interface SpeechEngineOptions {
@@ -305,20 +307,19 @@ export class SpeechEngine {
       const tools = (call?.tools ?? []).filter(
         (tool) => alone || !tool.sideEffect,
       );
-      // News of finished work goes in just before the owner's latest words.
+      // News of finished work, and a word on the channel, go in just before
+      // the owner's latest words.
       const news = call?.news.splice(0) ?? [];
+      const note = call?.context?.() ?? null;
+      const inserted: Turn[] = [
+        ...(note ? [{ role: 'user' as const, content: note }] : []),
+        ...news.map(
+          (line): Turn => ({ role: 'user', content: `[task result] ${line}` }),
+        ),
+      ];
       const context: Turn[] =
-        news.length > 0 && last
-          ? [
-              ...turns.slice(0, -1),
-              ...news.map(
-                (line): Turn => ({
-                  role: 'user',
-                  content: `[task result] ${line}`,
-                }),
-              ),
-              last,
-            ]
+        inserted.length > 0 && last
+          ? [...turns.slice(0, -1), ...inserted, last]
           : turns;
       for await (const delta of lane.reply(
         context,

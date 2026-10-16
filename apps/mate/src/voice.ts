@@ -73,7 +73,6 @@ export type JoinRefusal =
   | 'not_allowed'
   | 'bridge_not_ready'
   | 'not_in_voice'
-  | 'channel_not_allowed'
   | 'already_there';
 
 export type JoinResult = { ok: true } | { ok: false; reason: JoinRefusal };
@@ -84,6 +83,7 @@ export type LeaveResult =
 export interface VoiceOptions {
   guildId: string;
   allowedUserIds: ReadonlySet<string>;
+  /** The text channels a call's words and work may go to; voice channels are not gated. */
   allowedChannelIds: ReadonlySet<string>;
   gateway: VoiceGateway;
   clock: Clock;
@@ -103,8 +103,20 @@ export interface VoiceOptions {
     messageId: string,
     name: string,
   ): Promise<string>;
+  /** A guild member's names and roles, for who is in the channel. */
+  member?(userId: string): Promise<Member>;
   heartbeatMs?: number;
 }
+
+export interface Member {
+  /** The display name in the guild. */
+  name: string;
+  username: string;
+  roles: readonly string[];
+}
+
+/** How long after their last packet someone still counts as talking. */
+export const SPOKE_RECENTLY_MS = 15_000;
 
 /** What the Speech Engine path gets of a call, per reply. */
 export interface EngineCallContext {
@@ -116,6 +128,8 @@ export interface EngineCallContext {
   /** Results of work started from the call, told on the next turn. */
   readonly news: string[];
   transcript(role: 'user' | 'agent', text: string): void;
+  /** A line about the channel, before the owner's latest words; null for nothing to say. */
+  context(): string | null;
 }
 
 /** mate's threads, for work started from a call; given once they are built. */
@@ -133,7 +147,6 @@ const REFUSALS: Record<JoinRefusal | 'no_call', string> = {
   not_allowed: 'voice is for the owner',
   bridge_not_ready: 'the voice bridge is not connected',
   not_in_voice: 'join a voice channel first',
-  channel_not_allowed: 'that voice channel is not one I may join',
   already_there: "I'm already in your channel",
   no_call: "I'm not in a call",
 };
@@ -162,6 +175,10 @@ export class Voice {
   private engineContext: EngineCallContext | null = null;
   /** The call's thread being opened, so two first lines open one thread. */
   private opening: Promise<string | null> | null = null;
+  /** Who transmitted when, from the bridge; the owner included. */
+  private readonly spoke = new Map<string, { at: number; now: boolean }>();
+  private readonly members = new Map<string, Member | null>();
+  private readonly fetching = new Set<string>();
   private readonly announced = new Set<StartedTask>();
 
   constructor(private readonly options: VoiceOptions) {
@@ -226,6 +243,7 @@ export class Voice {
         heard,
         news: [],
         transcript: (role, text) => this.note(call, role, text),
+        context: () => this.channelNote(call),
       };
     }
     return this.engineContext;
@@ -290,7 +308,7 @@ export class Voice {
     userId: string,
     originChannelId: string | null,
   ): Promise<JoinResult> {
-    const { allowedUserIds, allowedChannelIds, guildId, log } = this.options;
+    const { allowedUserIds, guildId, log } = this.options;
     if (!allowedUserIds.has(userId))
       return { ok: false, reason: 'not_allowed' };
     if (!this.ready) return { ok: false, reason: 'bridge_not_ready' };
@@ -305,9 +323,8 @@ export class Voice {
         });
       }
     }
+    // Any voice channel the owner is in: the owner is the gate, not the room.
     if (!channelId) return { ok: false, reason: 'not_in_voice' };
-    if (!allowedChannelIds.has(channelId))
-      return { ok: false, reason: 'channel_not_allowed' };
     if (this.call?.channelId === channelId && this.call.status !== 'destroyed')
       return { ok: false, reason: 'already_there' };
     this.call = {
@@ -432,6 +449,13 @@ export class Voice {
       case 'barge_in':
         this.talk?.bargeIn(message.heardChars);
         return;
+      case 'speaking':
+        this.spoke.set(message.userId, {
+          at: this.options.clock.now(),
+          now: message.speaking,
+        });
+        if (message.speaking) this.learn(message.userId);
+        return;
       case 'heartbeat':
         return;
     }
@@ -454,6 +478,7 @@ export class Voice {
       alone: () => this.others(call.channelId) === 1,
       tools: this.toolsFor(call, () => talk.lastHeard),
       transcript: (role, text) => this.note(call, role, text),
+      context: () => this.channelNote(call),
     });
     return talk;
   }
@@ -493,9 +518,97 @@ export class Voice {
         threadState: (key) => work.threads.stateOf(key),
         recall: work.recall,
         now: () => this.options.clock.now(),
+        people: () => this.people(call),
       },
       context,
     );
+  }
+
+  /** Everyone in the call's channel but mate, the owner first. */
+  private inChannel(call: Call): string[] {
+    const ids: string[] = [];
+    for (const [userId, channelId] of this.channels) {
+      if (channelId === call.channelId && userId !== this.me) ids.push(userId);
+    }
+    return ids.sort((a, b) =>
+      a === call.ownerId ? -1 : b === call.ownerId ? 1 : a.localeCompare(b),
+    );
+  }
+
+  private learn(userId: string): void {
+    const { member } = this.options;
+    if (!member || this.members.has(userId) || this.fetching.has(userId))
+      return;
+    this.fetching.add(userId);
+    void member(userId)
+      .then((found) => this.members.set(userId, found))
+      .catch((error) => {
+        this.members.set(userId, null);
+        this.options.log.warn('voice: a member could not be read', {
+          error: plain(error),
+        });
+      })
+      .finally(() => this.fetching.delete(userId));
+  }
+
+  private nameOf(userId: string, call: Call): string {
+    if (userId === call.ownerId) return 'the owner';
+    return this.members.get(userId)?.name ?? `someone (${userId.slice(-4)})`;
+  }
+
+  private talking(userId: string): 'talking' | 'spoke just now' | null {
+    const seen = this.spoke.get(userId);
+    if (!seen) return null;
+    if (seen.now) return 'talking';
+    return this.options.clock.now() - seen.at < SPOKE_RECENTLY_MS
+      ? 'spoke just now'
+      : null;
+  }
+
+  /**
+   * A line for the lane when the owner is not alone: who else is here and
+   * who is talking, by name. Nothing when it is just the owner.
+   */
+  private channelNote(call: Call): string | null {
+    const others = this.inChannel(call).filter((id) => id !== call.ownerId);
+    if (others.length === 0) return null;
+    for (const id of others) this.learn(id);
+    const parts = others.map((id) => {
+      const state = this.talking(id);
+      const name = this.nameOf(id, call);
+      return state ? `${name} (${state})` : name;
+    });
+    return `[channel] With the owner in the channel: ${parts.join(', ')}. Only the owner is heard.`;
+  }
+
+  /** The channel_members tool's answer. */
+  private async people(call: Call): Promise<string> {
+    const ids = this.inChannel(call);
+    const { member } = this.options;
+    const lines = await Promise.all(
+      ids.map(async (id) => {
+        let found = this.members.get(id) ?? null;
+        if (found === null && !this.members.has(id) && member) {
+          try {
+            found = await member(id);
+          } catch {
+            found = null;
+          }
+          this.members.set(id, found);
+        }
+        const who =
+          id === call.ownerId
+            ? `the owner${found ? ` (${found.name})` : ''}`
+            : (found?.name ?? `someone (${id.slice(-4)})`);
+        const bits = [
+          found ? `@${found.username}` : null,
+          found && found.roles.length > 0 ? found.roles.join(', ') : null,
+          this.talking(id),
+        ].filter(Boolean);
+        return `- ${who}${bits.length > 0 ? `: ${bits.join('; ')}` : ''}`;
+      }),
+    );
+    return lines.length > 0 ? lines.join('\n') : 'Nobody is in the channel.';
   }
 
   /**
@@ -566,6 +679,7 @@ export class Voice {
   private endTalk(): void {
     this.engineContext = null;
     this.announced.clear();
+    this.spoke.clear();
     const talk = this.talk;
     if (!talk) return;
     this.talk = null;

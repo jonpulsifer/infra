@@ -33,6 +33,7 @@ function harness(
       threadState: (key) => states.get(key),
       recall: options.recall ?? null,
       now: () => 1_000,
+      people: async () => '- the owner',
     },
     context,
   );
@@ -121,6 +122,7 @@ describe('the voice tools', () => {
         threadState: () => undefined,
         recall: null,
         now: () => 0,
+        people: async () => '- the owner',
       },
       context,
     );
@@ -166,6 +168,7 @@ describe('the voice tools', () => {
     expect(h.tools.map((t) => t.name)).toEqual([
       START_TASK_TOOL,
       TASK_STATUS_TOOL,
+      'channel_members',
       'recall_threads',
       'recall_thread',
     ]);

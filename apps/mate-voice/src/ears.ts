@@ -17,6 +17,10 @@ export interface Receiver {
     userId: string,
     options?: { end: { behavior: EndBehaviorType.Manual } },
   ): Readable;
+  /** Who is transmitting, by user id: metadata the library keeps for every speaker. */
+  speaking?: {
+    on(event: 'start' | 'end', listener: (userId: string) => void): unknown;
+  };
 }
 
 export interface EarsOptions {
