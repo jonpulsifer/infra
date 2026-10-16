@@ -21,7 +21,7 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 | `clusters/folly/apps/tronbyt/04-database.yaml` | Git |
 | `clusters/offsite/apps/mate/database.yaml` | Git |
 | `packages/charts/*/templates/database.yaml`, in each chart that has one | Git, in the chart values of the HelmRelease |
-| The `spindrift-datastores` namespace | kthx. Each is the database that kthx makes for a [built app](../apps/kthx/built-apps.md). |
+| The `kthx-datastores` namespace | kthx. Each is the database that kthx makes for a [built app](../apps/kthx/built-apps.md). |
 
 `clusters/base/platform/cloudnative-pg/` installs the controller on both clusters.
 
@@ -91,7 +91,7 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 
 Each database except `mate-db` has a barman `ObjectStore` named `garage` in its namespace, a `ScheduledBackup`, and WAL archiving through the barman-cloud plugin. The store is the `cnpg` bucket of the site's Garage, under `<namespace>/`. A chart's `backup` value sets the endpoint and the 1Password item. [Backups](../platform/backups.md) describes the schedule, the copy to GCS and the retention. To restore a database, use [Restore a database](restore-a-database.md).
 
-A Postgres Datastore in `spindrift-datastores` archives to that namespace's `garage` store, which `clusters/base/platform/kthx-engine-target/backup/` declares. The kthx engine owns each Datastore's `Cluster` and `ScheduledBackup`. It turns the plugin on when it provisions a Datastore, and on an older one at the hourly check of an attached Datastore. The first check after the `Cluster` is ready with the plugin adds the `ScheduledBackup`. A Datastore attached to no App is not checked.
+A Postgres Datastore in `kthx-datastores` archives to that namespace's `garage` store, which `clusters/base/platform/kthx-engine-target/backup/` declares. The kthx engine owns each Datastore's `Cluster` and `ScheduledBackup`. It turns the plugin on when it provisions a Datastore, and on an older one at the hourly check of an attached Datastore. The first check after the `Cluster` is ready with the plugin adds the `ScheduledBackup`. A Datastore attached to no App is not checked.
 
 | Database | Extra backup |
 | --- | --- |

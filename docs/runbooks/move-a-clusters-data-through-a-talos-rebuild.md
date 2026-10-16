@@ -53,7 +53,7 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 
    ```bash
    kubectl --context <site> -n kthx-apps get hr
-   kubectl --context <site> -n spindrift-datastores get clusters.postgresql.cnpg.io,valkeyclusters.valkey.io
+   kubectl --context <site> -n kthx-datastores get clusters.postgresql.cnpg.io,valkeyclusters.valkey.io
    ```
 
 ## Restore the data
@@ -72,7 +72,7 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 
    Result: Each release from the freeze is `True`.
 
-4. On offsite, recover the `clankerbanker` Datastore in `spindrift-datastores` from its barman archive.
+4. On offsite, recover the `clankerbanker` Datastore in `kthx-datastores` from its barman archive.
 
 ## If something goes wrong
 
