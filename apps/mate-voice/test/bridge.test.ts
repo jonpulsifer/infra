@@ -4,8 +4,10 @@ import { type FromBridge, PROTOCOL_VERSION } from '@repo/mate-voice-protocol';
 import { Bridge, type BridgeDeps, VERSION } from '../src/bridge.ts';
 import type { Config } from '../src/config.ts';
 import type { EngineConversation } from '../src/engine.ts';
-import type { NativeSpeech } from '../src/native.ts';
+import type { Mouth } from '../src/mouth.ts';
+import { NativeSpeech } from '../src/native.ts';
 import { Playback } from '../src/playback.ts';
+import type { ScribeEars } from '../src/scribe.ts';
 import {
   CHANNEL,
   capturingLog,
@@ -241,6 +243,60 @@ describe('bridge', () => {
     ]);
     await bridge.onMessage({ type: 'leave' });
     expect(stopped).toBe(1);
+  });
+
+  test('a normal leave stops native speech without calling the call deaf; ears that end on their own do', async () => {
+    const log = capturingLog();
+    const { connect, connections } = fakeConnect();
+    const player = new FakePlayer();
+    const ends: ((reason: string) => void)[] = [];
+    const bridge = new Bridge({
+      config,
+      link: { send: () => true },
+      log,
+      connect,
+      playback: () => new Playback(player as unknown as AudioPlayer),
+      joinTone: null,
+      speech: (call) =>
+        new NativeSpeech({
+          ears: (handlers) => {
+            ends.push(handlers.onEnd);
+            return {
+              start: async () => {},
+              hear: () => {},
+              stop: () => handlers.onEnd('stopped'),
+            } as unknown as ScribeEars;
+          },
+          mouth: { stop: () => {} } as unknown as Mouth,
+          log,
+          onTranscript: call.onTranscript,
+          onBargeIn: call.onBargeIn,
+          onDeaf: call.onDeaf,
+        }),
+    });
+    const deaf = () =>
+      log.lines.filter((l) => l.msg === 'speech: the call went deaf');
+    void bridge.onMessage(join);
+    connections[0]?.go(VoiceConnectionStatus.Ready);
+    await Bun.sleep(1);
+    await bridge.onMessage({ type: 'leave' });
+    expect(deaf()).toEqual([]);
+    expect(log.lines.filter((l) => l.msg === 'speech: stopped')).toHaveLength(
+      1,
+    );
+    void bridge.onMessage(join);
+    connections[1]?.go(VoiceConnectionStatus.Ready);
+    await Bun.sleep(1);
+    ends[1]?.('redial_cap');
+    expect(deaf()).toEqual([
+      {
+        level: 'warn',
+        msg: 'speech: the call went deaf',
+        reason: 'redial_cap',
+      },
+    ]);
+    bridge.stop();
+    expect(deaf()).toHaveLength(1);
   });
 
   test('stop ends the call without a stall', async () => {

@@ -39,19 +39,22 @@ function harness() {
   const transcripts: [string, boolean][] = [];
   const bargeIns: number[] = [];
   const deaf: string[] = [];
+  const log = capturingLog();
   const speech = new NativeSpeech({
     ears: (h) => {
       handlers = h;
       return {
         start: async () => {},
         hear: () => {},
+        // Scribe's ears end, and say so, on a stop too.
         stop: () => {
           earsStopped += 1;
+          handlers?.onEnd('stopped');
         },
       } as unknown as ScribeEars;
     },
     mouth: mouth as unknown as Mouth,
-    log: capturingLog(),
+    log,
     now: () => now,
     onTranscript: (text, final) => transcripts.push([text, final]),
     onBargeIn: (heardChars) => bargeIns.push(heardChars),
@@ -69,6 +72,7 @@ function harness() {
     transcripts,
     bargeIns,
     deaf,
+    log,
     setSpeaking: (value: boolean) => {
       speaking = value;
     },
@@ -141,5 +145,20 @@ describe('native speech', () => {
     expect(h.deaf).toEqual(['redial_cap']);
     h.speech.stop();
     expect(h.stops()).toMatchObject({ earsStopped: 1, mouthStopped: 1 });
+    expect(h.deaf).toEqual(['redial_cap']);
+  });
+
+  test('a clean stop is not deafness, and logs the counts once', () => {
+    const h = harness();
+    h.speech.say('The build passed.', true);
+    h.setSpeaking(true);
+    h.ears().onCommitted('stop');
+    h.speech.stop();
+    h.speech.stop();
+    expect(h.deaf).toEqual([]);
+    expect(h.stops()).toMatchObject({ earsStopped: 1, mouthStopped: 1 });
+    expect(h.log.lines).toEqual([
+      { level: 'info', msg: 'speech: stopped', bargeIns: 1, echoes: 0 },
+    ]);
   });
 });

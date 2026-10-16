@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { AudioPlayer } from '@discordjs/voice';
 import type { EngineSocket } from '../src/engine.ts';
 import { Mouth, TTS_OUTPUT_RATE, ttsUrl } from '../src/mouth.ts';
-import { Playback } from '../src/playback.ts';
-import { capturingLog, FakePlayer } from './fakes.ts';
+import { FRAME_BYTES, Playback, TAIL_FRAMES } from '../src/playback.ts';
+import { capturingLog, FakePlayer, readyFrames } from './fakes.ts';
 
 class FakeWebSocket {
   readyState = 0;
@@ -45,7 +45,14 @@ class FakeWebSocket {
 function harness() {
   const sockets: FakeWebSocket[] = [];
   const player = new FakePlayer();
-  const playback = new Playback(player as unknown as AudioPlayer);
+  const playbackTimers: (() => void)[] = [];
+  const playback = new Playback(player as unknown as AudioPlayer, {
+    setTimer: ((fn: () => void) => {
+      playbackTimers.push(fn);
+      return playbackTimers.length as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout,
+    clearTimer: (() => {}) as typeof clearTimeout,
+  });
   const log = capturingLog();
   const timers: (() => void)[] = [];
   const mouth = new Mouth({
@@ -73,7 +80,8 @@ function harness() {
   return { mouth, sockets, player, playback, log, timers };
 }
 
-const audio = (contextId: string, samples = 240) => ({
+/** 200 ms of 24 kHz mono by default: more than the jitter buffer holds. */
+const audio = (contextId: string, samples = 4_800) => ({
   audio: Buffer.alloc(samples * 2, 1).toString('base64'),
   contextId,
 });
@@ -126,13 +134,42 @@ describe('the mouth', () => {
     expect(h.sockets).toHaveLength(1);
   });
 
-  test('plays audio as it arrives, upsampled to 48 kHz stereo', async () => {
+  test("plays an utterance's chunks as one stream, upsampled to 48 kHz stereo", async () => {
     const h = harness();
-    await h.mouth.say('Hi.', true);
-    h.sockets[0]?.receive(audio('u1', 240));
+    await h.mouth.say('Hi there.', true);
+    h.sockets[0]?.receive(audio('u1'));
     expect(h.player.played).toBe(1);
-    expect(h.mouth.counts.audioChunks).toBe(1);
+    for (let i = 0; i < 9; i++) {
+      await Bun.sleep(0);
+      h.sockets[0]?.receive(audio('u1', 240));
+    }
     h.sockets[0]?.receive({ isFinal: true, contextId: 'u1' });
+    expect(h.player.played).toBe(1);
+    expect(h.mouth.counts.audioChunks).toBe(10);
+    // Each 24 kHz mono sample is two 48 kHz stereo frames of four bytes.
+    const bytes = (4_800 + 9 * 240) * 8;
+    expect(await readyFrames(h.player.resources[0])).toBe(
+      Math.ceil(bytes / FRAME_BYTES) + TAIL_FRAMES,
+    );
+    expect(h.mouth.speaking).toBe(true);
+    h.player.go('idle' as never);
+    expect(h.mouth.speaking).toBe(false);
+  });
+
+  test('plays utterances in turn, an announcement included', async () => {
+    const h = harness();
+    await h.mouth.say('First.', true);
+    await h.mouth.announce('Second.');
+    h.sockets[0]?.receive(audio('u2'));
+    h.sockets[0]?.receive(audio('u1'));
+    expect(h.player.played).toBe(1);
+    h.sockets[0]?.receive({ isFinal: true, contextId: 'u2' });
+    h.sockets[0]?.receive({ isFinal: true, contextId: 'u1' });
+    h.player.go('idle' as never);
+    expect(h.player.played).toBe(2);
+    expect(await readyFrames(h.player.resources[0])).toBe(
+      (4_800 * 8) / FRAME_BYTES + TAIL_FRAMES,
+    );
   });
 
   test('a hush closes the context, stops the player and drops the audio still arriving', async () => {
@@ -151,10 +188,36 @@ describe('the mouth', () => {
     h.sockets[0]?.receive(audio('u1'));
     expect(h.player.played).toBe(1);
     expect(h.mouth.counts).toMatchObject({ hushes: 1, droppedChunks: 1 });
+    expect(h.mouth.speaking).toBe(false);
     h.sockets[0]?.receive({ isFinal: true, contextId: 'u1' });
     await h.mouth.say('Next.', true);
     h.sockets[0]?.receive(audio('u2'));
     expect(h.player.played).toBe(2);
+  });
+
+  test('a hush also drops the late audio of an utterance already said', async () => {
+    const h = harness();
+    await h.mouth.say('Done talking.', true);
+    h.sockets[0]?.receive(audio('u1'));
+    expect(h.mouth.speaking).toBe(true);
+    h.mouth.hush();
+    expect(h.player.stops).toEqual([true]);
+    h.sockets[0]?.receive(audio('u1'));
+    expect(h.player.played).toBe(1);
+    expect(h.mouth.counts).toMatchObject({ hushes: 1, droppedChunks: 1 });
+  });
+
+  test('a socket that drops mid-utterance ends the stream with what came', async () => {
+    const h = harness();
+    await h.mouth.say('Cut ', false);
+    h.sockets[0]?.receive(audio('u1'));
+    h.sockets[0]?.drop();
+    expect(await readyFrames(h.player.resources[0])).toBe(
+      (4_800 * 8) / FRAME_BYTES + TAIL_FRAMES,
+    );
+    h.player.go('idle' as never);
+    expect(h.player.played).toBe(1);
+    expect(h.mouth.speaking).toBe(false);
   });
 
   test('redials on the next word after the socket drops, and counts a lost utterance', async () => {
@@ -181,8 +244,24 @@ describe('the mouth', () => {
     h.timers.at(-1)?.();
     expect(h.sockets[0]?.sent.at(-1)).toEqual({ context_id: 'keep', text: '' });
     h.mouth.stop();
+    h.mouth.stop();
     expect(h.sockets[0]?.sent.at(-1)).toEqual({ close_socket: true });
     expect(h.sockets[0]?.closed?.code).toBe(1000);
+    expect(h.log.lines.filter((l) => l.msg.startsWith('tts: s'))).toEqual([
+      { level: 'info', msg: 'tts: socket open', dials: 1 },
+      {
+        level: 'info',
+        msg: 'tts: stopped',
+        utterances: 1,
+        chars: 4,
+        audioChunks: 0,
+        droppedChunks: 0,
+        hushes: 0,
+        dials: 1,
+        failures: 0,
+        underruns: 0,
+      },
+    ]);
     await h.mouth.say('Nothing.', true);
     expect(h.sockets).toHaveLength(1);
   });

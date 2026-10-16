@@ -2,15 +2,16 @@
  * mate's voice, from ElevenLabs text-to-speech over one multi-context
  * WebSocket per call. Each utterance is a context: mate's text deltas go up
  * as they arrive, the audio comes back as 24 kHz mono and plays through the
- * call's player. A barge-in closes the context that is speaking and drops
- * the audio still on the way, so the next utterance starts clean. The socket
- * opens on the first word and is kept alive between turns; a socket that
- * drops is reopened on the next word. Logs carry counts, never words.
+ * call's player as one stream per utterance. A barge-in closes the context
+ * that is speaking and drops the audio still on the way, so the next
+ * utterance starts clean. The socket opens on the first word and is kept
+ * alive between turns; a socket that drops is reopened on the next word.
+ * Logs carry counts, never words.
  */
 import { upsampleToStereo48k } from './audio.ts';
 import type { EngineSocket } from './engine.ts';
 import type { Log } from './log.ts';
-import type { Playback } from './playback.ts';
+import type { Playback, PlaybackStream } from './playback.ts';
 
 export const TTS_OUTPUT_RATE = 24_000;
 /** The longest the server keeps an idle socket; keepalives beat it. */
@@ -83,6 +84,8 @@ export class Mouth {
   private current: Utterance | null = null;
   /** Contexts closed early whose audio is still arriving. */
   private readonly hushed = new Set<string>();
+  /** Contexts whose audio is not all in, each with its stream, queued in the order they began. */
+  private readonly voicing = new Map<string, PlaybackStream>();
   private sequence = 0;
   private keepalive: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -145,23 +148,28 @@ export class Mouth {
   hush(): void {
     const utterance = this.current;
     this.options.playback.stop();
-    if (!utterance) return;
+    if (this.voicing.size === 0) return;
     this.counts.hushes += 1;
+    for (const id of this.voicing.keys()) this.hushed.add(id);
+    this.voicing.clear();
     this.current = null;
-    this.hushed.add(utterance.id);
-    this.closeContext(utterance.id);
+    if (utterance) this.closeContext(utterance.id);
   }
 
   stop(): void {
+    if (this.stopped) return;
     this.stopped = true;
     this.clearKeepalive();
     const socket = this.socket;
     this.socket = null;
     this.current = null;
+    for (const stream of this.voicing.values()) stream.abort();
+    this.voicing.clear();
     if (socket && socket.readyState === OPEN) {
       socket.send(JSON.stringify({ close_socket: true }));
       socket.close(1000, 'stopped');
     }
+    this.options.log.info('tts: stopped', this.logCounts());
   }
 
   private begin(): Utterance {
@@ -174,6 +182,7 @@ export class Mouth {
     };
     this.current = utterance;
     this.counts.utterances += 1;
+    this.voicing.set(utterance.id, this.options.playback.openStream());
     this.initContext(utterance.id);
     return utterance;
   }
@@ -293,10 +302,13 @@ export class Mouth {
           this.counts.failures += 1;
           this.current = null;
         }
+        for (const stream of this.voicing.values()) stream.end();
+        this.voicing.clear();
+        this.hushed.clear();
         log.info('tts: socket closed', {
           code: event.code,
           reason: event.reason.slice(0, 120) || null,
-          ...this.counts,
+          ...this.logCounts(),
         });
         resolve(false);
       };
@@ -317,12 +329,18 @@ export class Mouth {
       return;
     }
     if (message.audio) {
-      if (message.contextId && this.hushed.has(message.contextId)) {
+      const id = message.contextId ?? '';
+      if (this.hushed.has(id) || !this.voicing.has(id)) {
         this.counts.droppedChunks += 1;
         return;
       }
       this.counts.audioChunks += 1;
-      this.options.playback.play(
+      let stream = this.voicing.get(id);
+      if (!stream?.open) {
+        stream = this.options.playback.openStream();
+        this.voicing.set(id, stream);
+      }
+      stream.write(
         upsampleToStereo48k(
           Buffer.from(message.audio, 'base64'),
           TTS_OUTPUT_RATE,
@@ -332,6 +350,8 @@ export class Mouth {
     }
     if (message.isFinal && message.contextId) {
       this.hushed.delete(message.contextId);
+      this.voicing.get(message.contextId)?.end();
+      this.voicing.delete(message.contextId);
       return;
     }
     if (message.error || message.message) {
@@ -340,6 +360,10 @@ export class Mouth {
         error: (message.error ?? message.message ?? '').slice(0, 120),
       });
     }
+  }
+
+  private logCounts(): Record<string, number> {
+    return { ...this.counts, underruns: this.options.playback.underruns };
   }
 
   private startKeepalive(): void {
