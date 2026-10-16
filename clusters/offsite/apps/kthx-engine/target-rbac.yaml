@@ -9,9 +9,6 @@ roleRef:
   name: kthx-engine-target-discovery
 subjects:
   - kind: ServiceAccount
-    name: spindrift
-    namespace: spindrift
-  - kind: ServiceAccount
     name: kthx-engine
     namespace: kthx-engine
 ---
@@ -25,9 +22,6 @@ roleRef:
   name: kthx-engine-target-delivery
 subjects:
   - kind: ServiceAccount
-    name: spindrift
-    namespace: spindrift
-  - kind: ServiceAccount
     name: kthx-engine
     namespace: kthx-engine
 ---
@@ -42,9 +36,6 @@ roleRef:
   name: kthx-engine-target-chart-artifact
 subjects:
   - kind: ServiceAccount
-    name: spindrift
-    namespace: spindrift
-  - kind: ServiceAccount
     name: kthx-engine
     namespace: kthx-engine
 ---
@@ -58,9 +49,6 @@ roleRef:
   kind: Role
   name: kthx-engine-target-dns
 subjects:
-  - kind: ServiceAccount
-    name: spindrift
-    namespace: spindrift
   - kind: ServiceAccount
     name: kthx-engine
     namespace: kthx-engine
@@ -76,9 +64,6 @@ roleRef:
   name: kthx-engine-target-datastores
 subjects:
   - kind: ServiceAccount
-    name: spindrift
-    namespace: spindrift
-  - kind: ServiceAccount
     name: kthx-engine
     namespace: kthx-engine
 ---
@@ -93,9 +78,6 @@ roleRef:
   name: kthx-engine-target-datastores-legacy
 subjects:
   - kind: ServiceAccount
-    name: spindrift
-    namespace: spindrift
-  - kind: ServiceAccount
     name: kthx-engine
     namespace: kthx-engine
 ---
@@ -109,9 +91,6 @@ roleRef:
   kind: Role
   name: kthx-engine-target-chart-source
 subjects:
-  - kind: ServiceAccount
-    name: spindrift
-    namespace: spindrift
   - kind: ServiceAccount
     name: kthx-engine
     namespace: kthx-engine

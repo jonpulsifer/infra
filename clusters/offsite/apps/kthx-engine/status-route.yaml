@@ -24,20 +24,3 @@ spec:
         - name: kthx-engine
           namespace: kthx-engine
           port: 3000
----
-# Scoped to one Service: a namespace-wide grant would let any App route in
-# `spindrift-apps` reach anything the control plane runs.
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: spindrift-apps-status-page
-  namespace: spindrift
-spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: spindrift-apps
-  to:
-    - group: ""
-      kind: Service
-      name: spindrift

@@ -275,14 +275,17 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     // The real cluster manifests, because a fixture can disagree with them.
     const helmRelease = Bun.YAML.parse(
       await Bun.file(
-        join(REPO_ROOT, 'clusters/offsite/apps/spindrift/helm-release.yaml'),
+        join(REPO_ROOT, 'clusters/offsite/apps/kthx-engine/helm-release.yaml'),
       ).text(),
     ) as Parameters<typeof isExtractableChartSource>[0];
     expect(isExtractableChartSource(helmRelease)).toBe(true);
 
     const ociRepository = Bun.YAML.parse(
       await Bun.file(
-        join(REPO_ROOT, 'clusters/offsite/apps/spindrift/oci-repository.yaml'),
+        join(
+          REPO_ROOT,
+          'clusters/offsite/apps/kthx-engine/oci-repository.yaml',
+        ),
       ).text(),
     ) as { spec?: { url?: string; ref?: { tag?: string; digest?: string } } };
     expect(ociRepository.spec?.url).toMatch(/^oci:\/\//);
@@ -344,7 +347,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     // A version ahead of its tag ships nothing, and a tag ahead of the push
     // cannot pull. turbo.json's `kthx-engine#test:chart-pins` inputs list these.
     const consumers: [string, string][] = [
-      ['kthx-engine', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
+      ['kthx-engine', 'clusters/offsite/apps/kthx-engine/oci-repository.yaml'],
       [
         'kthx-app',
         'clusters/base/platform/kthx-engine-target/oci-repository.yaml',

@@ -54,7 +54,7 @@ Atlantis, Rowbutt and the kthx engine trust the cluster's API server through `cl
 2. In the cutover pull request, write the kthx engine's CA bundle: offsite's pin, then folly's.
 
    ```bash
-   cd <checkout>; f=clusters/offsite/apps/spindrift/ca-bundle.yaml
+   cd <checkout>; f=clusters/offsite/apps/kthx-engine/ca-bundle.yaml
    { sed -n '1,/^  ca.crt: |$/p' "$f"; cat clusters/offsite/config/kubernetes-ca.pem clusters/folly/config/kubernetes-ca.pem | awk 'NF {print "    " $0}'; } > "$f.tmp"
    mv "$f.tmp" "$f"; cd -
    ```

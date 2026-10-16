@@ -47,4 +47,4 @@ No alerts watch clankerbanker. `GET /healthz` returns `ok`.
 - Source: `apps/clankerbanker/`
 - Zone: `terraform/network/cloudflare/clankerbanker.ca.tf`
 - Tunnel rules: `terraform/network/cloudflare/kthx-engine.tf`
-- Gateway listener: `clusters/offsite/apps/spindrift/gateway.yaml`
+- Gateway listener: `clusters/offsite/apps/kthx-engine/gateway.yaml`
