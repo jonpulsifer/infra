@@ -17,7 +17,7 @@ const MODEL = {
   contextWindow: 100_000,
 } as unknown as Model<Api>;
 
-function fakeModels(play: 'words' | 'error') {
+function fakeModels(play: 'words' | 'error' | 'tool') {
   const calls: { context: TranscriptContext; options?: SimpleStreamOptions }[] =
     [];
   const models = {
@@ -38,6 +38,28 @@ function fakeModels(play: 'words' | 'error') {
         timestamp: 1,
       } as unknown as AssistantMessage;
       queueMicrotask(() => {
+        if (play === 'tool' && calls.length === 1) {
+          const call = {
+            type: 'toolCall' as const,
+            id: 'c1',
+            name: 'task_status',
+            arguments: {},
+          };
+          out.push({
+            type: 'text_delta',
+            contentIndex: 0,
+            delta: 'Let me look. ',
+            partial,
+          });
+          out.push({
+            type: 'toolcall_end',
+            contentIndex: 1,
+            toolCall: call,
+            partial,
+          });
+          out.end({ ...partial, content: [call], stopReason: 'toolUse' });
+          return;
+        }
         if (play === 'error') {
           out.push({
             type: 'error',
@@ -138,5 +160,51 @@ describe('the model voice lane', () => {
       ),
     ).rejects.toThrow('boom');
     expect(calls[0]?.options).toMatchObject({ reasoning: 'low' });
+  });
+
+  test('runs a tool round in mate and speaks what the model says before and after', async () => {
+    const { models, calls } = fakeModels('tool');
+    const ran: unknown[] = [];
+    const lane = modelVoiceLane({
+      models,
+      model: MODEL,
+      thinking: 'off',
+      timeoutMs: 5_000,
+      log: new RecordingLog(),
+    });
+    const words = await collect(
+      lane.reply(
+        [{ role: 'user', content: 'how is the task' }],
+        new AbortController().signal,
+        'conv_3',
+        [
+          {
+            name: 'task_status',
+            description: 'status',
+            parameters: { type: 'object', properties: {} } as never,
+            sideEffect: false,
+            execute: async (args) => {
+              ran.push(args);
+              return 'still running';
+            },
+          },
+        ],
+      ),
+    );
+    expect(words).toEqual(['Let me look. ', 'all ', 'good']);
+    expect(ran).toEqual([{}]);
+    expect(calls).toHaveLength(2);
+    const system = calls[0]?.context.messages[0] as
+      | { toolsAdded?: { name: string }[] }
+      | undefined;
+    expect(system?.toolsAdded?.map((t) => t.name)).toEqual(['task_status']);
+    const second = calls[1]?.context.messages ?? [];
+    expect(second.at(-2)?.role).toBe('assistant');
+    expect(second.at(-1)).toMatchObject({
+      role: 'toolResult',
+      toolCallId: 'c1',
+      toolName: 'task_status',
+      isError: false,
+    });
   });
 });

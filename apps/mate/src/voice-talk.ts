@@ -7,6 +7,7 @@
  */
 import { type Log, plain } from './log.ts';
 import { SORRY, type Turn, type VoiceLane } from './speech-engine.ts';
+import type { VoiceTool } from './voice-tools.ts';
 
 /** Turns kept as the lane's context; older ones fall off. */
 export const TURN_CAP = 40;
@@ -18,6 +19,11 @@ export interface TalkOptions {
   log: Log;
   /** A `speak` frame for the bridge: a delta, then an empty final. */
   speak(text: string, final: boolean): void;
+  /** A whole line for the bridge to voice outside a reply. */
+  announce?(text: string): void;
+  /** The call's tools; `sideEffect` ones are withheld while the owner is not alone. */
+  tools?: readonly VoiceTool[];
+  alone?(): boolean;
 }
 
 interface Run {
@@ -39,6 +45,8 @@ export class Talk {
   private readonly turns: Turn[] = [];
   private current: Run | null = null;
   private stopped = false;
+  /** The owner's last committed words, for the confirmation gate. */
+  lastHeard = '';
   readonly counts: TalkCounts = {
     turns: 0,
     replies: 0,
@@ -57,6 +65,7 @@ export class Talk {
     if (!final) return;
     const words = text.trim();
     if (!words) return;
+    this.lastHeard = words;
     this.cut('interrupted');
     this.push({ role: 'user', content: words });
     this.counts.turns += 1;
@@ -76,6 +85,50 @@ export class Talk {
     this.cut('stopped');
   }
 
+  /**
+   * Work started from the call settled: the lane sums its result up in a
+   * sentence, voiced as an announcement. Nothing plays while a reply is under
+   * way; the next reply carries the news instead.
+   */
+  async announce(task: string, result: string | null): Promise<void> {
+    const { lane, log } = this.options;
+    if (this.stopped || !this.options.announce) return;
+    const news = result
+      ? `The task "${task}" finished. Its last message was: ${result.slice(0, 1_500)}`
+      : `The task "${task}" finished; its thread has the details.`;
+    this.push({ role: 'user', content: `[task result] ${news}` });
+    if (this.current || !lane) return;
+    const run: Run = { abort: new AbortController(), said: '' };
+    this.current = run;
+    try {
+      for await (const delta of lane.reply(
+        [
+          ...this.turns,
+          {
+            role: 'user',
+            content:
+              'Tell me the result in one short spoken sentence, as an aside.',
+          },
+        ],
+        run.abort.signal,
+        this.options.callId,
+      )) {
+        if (this.current !== run) return;
+        run.said += delta;
+      }
+      if (this.current !== run) return;
+      this.current = null;
+      if (run.said.trim()) {
+        this.options.announce(run.said.trim());
+        this.push({ role: 'agent', content: run.said.trim() });
+        log.info('voice talk: announced', { chars: run.said.length });
+      }
+    } catch (error) {
+      if (this.current === run) this.current = null;
+      log.warn('voice talk: the announcement failed', { error: plain(error) });
+    }
+  }
+
   private async reply(run: Run): Promise<void> {
     const { lane, log, speak } = this.options;
     const live = () => this.current === run && !run.abort.signal.aborted;
@@ -86,10 +139,15 @@ export class Talk {
       return;
     }
     try {
+      const alone = this.options.alone?.() ?? false;
+      const tools = (this.options.tools ?? []).filter(
+        (tool) => alone || !tool.sideEffect,
+      );
       for await (const delta of lane.reply(
         this.turns,
         run.abort.signal,
         this.options.callId,
+        tools,
       )) {
         if (!live()) return;
         run.said += delta;
