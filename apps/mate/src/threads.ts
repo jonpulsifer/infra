@@ -206,6 +206,8 @@ export interface ThreadsDeps {
   profiles?: ReadonlyMap<string, Profile>;
   /** A Stop cancels the thread's pending wake. */
   wakes?: Pick<Wakes, 'cancel'> | null;
+  /** A turn ended, for whoever waits on the thread; never awaited. */
+  onSettled?(ref: ThreadRef): void;
 }
 
 /** An owner message of exactly this, in a thread mate holds, is a Stop. */
@@ -1369,6 +1371,11 @@ export class Threads {
     await this.patch(thread, { turn: null });
     this.to(thread, 'idle');
     this.pumpWaiting();
+    try {
+      this.deps.onSettled?.(thread.ref);
+    } catch (error) {
+      this.deps.log.warn('a settle listener failed', { error: plain(error) });
+    }
     await this.pump(thread);
   }
 

@@ -53,9 +53,10 @@ import {
   MemoryThreadStore,
   PostgresThreadStore,
 } from './store.ts';
-import type { SurfaceListener } from './surface.ts';
+import type { SurfaceListener, ThreadRef } from './surface.ts';
 import { readerTalosconfig } from './talosconfig.ts';
 import { DRAIN_MS, Threads, type ThreadsDeps } from './threads.ts';
+import type { VoiceWorkDeps } from './voice.ts';
 import { modelVoiceLane } from './voice-lane.ts';
 import { GithubPullRequests, PostgresWakeStore, Wakes } from './wakes.ts';
 
@@ -112,8 +113,12 @@ export interface MateEdges {
   readonly routes?: Routes;
   /** Given the voice lane once the models are built; absent, the engine apologises. */
   readonly speechEngine?: { setLane(lane: VoiceLane | null): void };
-  /** The bridge's conversation gets the same lane. */
-  readonly voice?: { setLane(lane: VoiceLane | null): void };
+  /** Given the same lane, and the threads, for calls where the bridge hears and speaks itself. */
+  readonly voice?: {
+    setLane(lane: VoiceLane | null): void;
+    setWork(work: VoiceWorkDeps | null): void;
+    onThreadSettled(ref: ThreadRef): void;
+  };
   readonly tuning?: MateTuning;
 }
 
@@ -353,9 +358,11 @@ export class Mate {
       metrics,
       commands: chatgpt?.account,
       wakes,
+      onSettled: (ref) => this.edges.voice?.onThreadSettled(ref),
       ...tuning?.threads,
     });
     wakes.bind(threads);
+    this.edges.voice?.setWork({ threads, recall });
     void db.ready.then(() => wakes.start());
     chatgpt?.keeper.start(db.ready);
     const slackOwner = [...(config.slack?.allowedUserIds ?? [])][0] ?? '';

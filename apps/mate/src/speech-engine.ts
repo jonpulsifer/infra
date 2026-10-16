@@ -9,6 +9,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { type Log, plain } from './log.ts';
+import type { VoiceTool } from './voice-tools.ts';
 
 export const SPEECH_ENGINE_PATH = '/speech-engine';
 export const AUTHORIZATION_HEADER = 'x-elevenlabs-speech-engine-authorization';
@@ -47,6 +48,7 @@ export interface VoiceLane {
     turns: readonly Turn[],
     signal: AbortSignal,
     conversationId: string,
+    tools?: readonly VoiceTool[],
   ): AsyncIterable<string>;
 }
 

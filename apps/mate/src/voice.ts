@@ -24,8 +24,18 @@ import type {
 } from 'discord-api-types/v10';
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';
+import type { RecallSource } from './recall.ts';
 import type { VoiceLane } from './speech-engine.ts';
+import type { Inbound, ThreadRef } from './surface.ts';
+import type { ThreadState } from './threads.ts';
 import { Talk } from './voice-talk.ts';
+import {
+  lastSaid,
+  type StartedTask,
+  type VoiceTool,
+  type VoiceToolContext,
+  voiceTools,
+} from './voice-tools.ts';
 
 export const VOICE_PATH = '/voice';
 /** The bridge beats at the same cadence; three missed beats end the link. */
@@ -83,7 +93,18 @@ export interface VoiceOptions {
    * resumed session replays no GUILD_CREATE, so the map starts cold.
    */
   voiceChannelOf?(userId: string): Promise<string | null>;
+  /** Posts a message in a text channel and resolves to its id; the root of a task's thread. */
+  rootMessage?(channelId: string, content: string): Promise<string>;
   heartbeatMs?: number;
+}
+
+/** mate's threads, for work started from a call; given once they are built. */
+export interface VoiceWorkDeps {
+  threads: {
+    onMessage(message: Inbound): Promise<void>;
+    stateOf(key: string): ThreadState | undefined;
+  };
+  recall: RecallSource | null;
 }
 
 const REFUSALS: Record<JoinRefusal | 'no_call', string> = {
@@ -113,6 +134,9 @@ export class Voice {
   private lane: VoiceLane | null = null;
   /** The conversation of the current call, once the bridge hears. */
   private talk: Talk | null = null;
+  private work: VoiceWorkDeps | null = null;
+  /** Work started from the current call, by thread key. */
+  private started: StartedTask[] = [];
 
   constructor(private readonly options: VoiceOptions) {
     this.heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
@@ -120,6 +144,22 @@ export class Voice {
 
   setLane(lane: VoiceLane | null): void {
     this.lane = lane;
+  }
+
+  setWork(work: VoiceWorkDeps | null): void {
+    this.work = work;
+  }
+
+  /** A thread's turn ended; work started from the call is announced. */
+  onThreadSettled(ref: ThreadRef): void {
+    if (ref.surface !== 'discord') return;
+    const task = this.started.find((one) => one.key === ref.id);
+    const talk = this.talk;
+    if (!task || !talk) return;
+    const recall = this.work?.recall ?? null;
+    void (recall ? lastSaid(recall, task.key) : Promise.resolve(null))
+      .catch(() => null)
+      .then((result) => talk.announce(task.task, result));
   }
 
   get ready(): boolean {
@@ -328,14 +368,60 @@ export class Voice {
   }
 
   private startTalk(call: Call): Talk {
-    return new Talk({
-      callId: `voice:${call.channelId}:${this.options.clock.now()}`,
+    const { clock, log } = this.options;
+    this.started = [];
+    let talk: Talk;
+    talk = new Talk({
+      callId: `voice:${call.channelId}:${clock.now()}`,
       lane: this.lane,
-      log: this.options.log,
+      log,
       speak: (text, final) => {
         this.send({ type: 'speak', text, final });
       },
+      announce: (text) => {
+        this.send({ type: 'announce', text });
+      },
+      alone: () => this.others(call.channelId) === 1,
+      tools: this.toolsFor(call, () => talk.lastHeard),
     });
+    return talk;
+  }
+
+  private toolsFor(call: Call, lastHeard: () => string): VoiceTool[] {
+    const work = this.work;
+    const { rootMessage } = this.options;
+    if (!work) return [];
+    const context: VoiceToolContext = {
+      alone: () => this.others(call.channelId) === 1,
+      lastHeard,
+      started: this.started,
+    };
+    return voiceTools(
+      {
+        startTask: async (task) => {
+          if (!call.originChannelId || !rootMessage) {
+            throw new Error('the call has no text channel');
+          }
+          const id = await rootMessage(call.originChannelId, `voice: ${task}`);
+          // A thread off a message takes the message's id, so this is its key.
+          await work.threads.onMessage({
+            surface: 'discord',
+            id,
+            channelId: call.originChannelId,
+            threadId: null,
+            authorId: call.ownerId,
+            authorIsBot: false,
+            content: task,
+            mentionsMe: true,
+          });
+          return id;
+        },
+        threadState: (key) => work.threads.stateOf(key),
+        recall: work.recall,
+        now: () => this.options.clock.now(),
+      },
+      context,
+    );
   }
 
   private endTalk(): void {

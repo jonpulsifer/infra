@@ -205,6 +205,8 @@ const voice = new Voice({
       .createMessage(channelId, { content: subtext(line) })
       .then(() => {}),
   voiceChannelOf: (userId) => discordApi.voiceChannelOf(config.guildId, userId),
+  rootMessage: (channelId, content) =>
+    discordApi.createMessage(channelId, { content }),
 });
 const speechEngine = new SpeechEngine({ log });
 type SocketData =

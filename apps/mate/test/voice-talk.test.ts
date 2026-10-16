@@ -7,10 +7,12 @@ import { RecordingLog } from './support.ts';
 function scriptedLane(words: string[], gate?: () => Promise<void>) {
   const heard: Turn[][] = [];
   const calls: string[] = [];
+  const toolNames: string[][] = [];
   const lane: VoiceLane = {
-    async *reply(turns, signal, callId) {
+    async *reply(turns, signal, callId, tools = []) {
       heard.push([...turns]);
       calls.push(callId);
+      toolNames.push(tools.map((t) => t.name));
       for (const word of words) {
         if (gate) await gate();
         if (signal.aborted) return;
@@ -18,19 +20,31 @@ function scriptedLane(words: string[], gate?: () => Promise<void>) {
       }
     },
   };
-  return { lane, heard, calls };
+  return { lane, heard, calls, toolNames };
 }
 
 function harness(lane: VoiceLane | null) {
   const spoken: [string, boolean][] = [];
+  const announced: string[] = [];
   const log = new RecordingLog();
   const talk = new Talk({
     callId: 'voice:c:1',
     lane,
     log,
     speak: (text, final) => spoken.push([text, final]),
+    announce: (text) => announced.push(text),
+    alone: () => true,
+    tools: [
+      {
+        name: 'start_task',
+        description: '',
+        parameters: {} as never,
+        sideEffect: true,
+        execute: async () => 'ok',
+      },
+    ],
   });
-  return { talk, spoken, log };
+  return { talk, spoken, announced, log };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
@@ -160,5 +174,19 @@ describe('a spoken conversation', () => {
     h.talk.heard('after', true);
     await settle();
     expect(h.spoken.length).toBe(before);
+  });
+
+  test("hands the call's tools to the lane, and announces a settled task as an aside", async () => {
+    const { lane, heard, toolNames } = scriptedLane(['done, ', 'fence up']);
+    const h = harness(lane);
+    h.talk.heard('go', true);
+    await settle();
+    expect(toolNames[0]).toEqual(['start_task']);
+    await h.talk.announce('fix the fence', 'The fence is up and tested.');
+    expect(h.announced).toEqual(['done, fence up']);
+    expect(heard[1]?.at(-1)?.content).toContain('one short spoken sentence');
+    expect(heard[1]?.at(-2)?.content).toContain('[task result]');
+    expect(h.spoken.filter(([, final]) => !final)).toHaveLength(2);
+    expect(h.log.of('voice talk: announced')).toHaveLength(1);
   });
 });
