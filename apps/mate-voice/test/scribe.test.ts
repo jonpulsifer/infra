@@ -60,6 +60,8 @@ const decoder = (): Decoder & { deleted: boolean } => ({
 function harness(redialCap = 2) {
   const sockets: FakeWebSocket[] = [];
   const waits: number[] = [];
+  let now = 10_000;
+  const ticks: (() => void)[] = [];
   const log = capturingLog();
   const partials: string[] = [];
   const commits: string[] = [];
@@ -78,6 +80,14 @@ function harness(redialCap = 2) {
     connectTimeoutMs: 50,
     redialCap,
     redialMs: 10,
+    now: () => now,
+    setTicker: ((fn: () => void) => {
+      ticks.push(fn);
+      return ticks.length as unknown as ReturnType<typeof setInterval>;
+    }) as typeof setInterval,
+    clearTicker: (() => {
+      ticks.length = 0;
+    }) as typeof clearInterval,
     setTimer: ((fn: () => void, ms: number) => {
       waits.push(ms);
       fn();
@@ -87,7 +97,20 @@ function harness(redialCap = 2) {
     onCommitted: (text) => commits.push(text),
     onEnd: (reason) => ends.push(reason),
   });
-  return { ears, sockets, log, partials, commits, ends, dec, waits };
+  return {
+    ears,
+    sockets,
+    log,
+    partials,
+    commits,
+    ends,
+    dec,
+    waits,
+    ticks,
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
 }
 
 describe('the Scribe ears', () => {
@@ -102,6 +125,7 @@ describe('the Scribe ears', () => {
     expect(url.searchParams.get('model_id')).toBe('scribe_v2_realtime');
     expect(url.searchParams.get('audio_format')).toBe('pcm_48000');
     expect(url.searchParams.get('commit_strategy')).toBe('vad');
+    expect(url.searchParams.get('vad_silence_threshold_secs')).toBe('0.8');
     expect(scribeUrl('http://local:1')).toStartWith('ws://local:1/');
   });
 
@@ -133,6 +157,41 @@ describe('the Scribe ears', () => {
       partials: 1,
       commits: 1,
     });
+  });
+
+  test('fills the quiet with silent chunks, so the VAD can close an utterance', async () => {
+    const h = harness();
+    await h.ears.start();
+    const socket = h.sockets[0];
+    socket?.open();
+    expect(h.ticks).toHaveLength(1);
+    // Nothing sent yet and no time passed: no filler.
+    h.ticks[0]?.();
+    expect(socket?.sent).toHaveLength(0);
+    h.advance(FRAMES_PER_CHUNK * 20);
+    h.ticks[0]?.();
+    const silent = socket?.sent[0];
+    expect(silent).toMatchObject({ message_type: 'input_audio_chunk' });
+    const pcm = Buffer.from(silent?.audio_base_64 as string, 'base64');
+    expect(pcm.length).toBe(FRAMES_PER_CHUNK * 960 * 2);
+    expect(pcm.every((byte) => byte === 0)).toBe(true);
+    // Speech within the span holds the filler back.
+    h.advance(50);
+    for (let i = 0; i < FRAMES_PER_CHUNK; i++) h.ears.hear(Buffer.from([10]));
+    h.advance(60);
+    h.ticks[0]?.();
+    expect(socket?.sent).toHaveLength(2);
+    // A short tail of speech is flushed by the ticker rather than held.
+    h.ears.hear(Buffer.from([10]));
+    h.advance(100);
+    h.ticks[0]?.();
+    expect(socket?.sent).toHaveLength(3);
+    expect(
+      Buffer.from(socket?.sent[2]?.audio_base_64 as string, 'base64').length,
+    ).toBe(960 * 2);
+    expect(h.ears.counts).toMatchObject({ sentChunks: 2, silentChunks: 1 });
+    h.ears.stop();
+    expect(h.ticks).toHaveLength(0);
   });
 
   test('redials a dropped session up to the cap, then ends deaf', async () => {
