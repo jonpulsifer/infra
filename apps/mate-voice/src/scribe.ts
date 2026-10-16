@@ -15,6 +15,8 @@ export const SCRIBE_MODEL = 'scribe_v2_realtime';
 export const SCRIBE_SAMPLE_RATE = 48_000;
 /** Discord frames per chunk: five 20 ms frames, 100 ms. */
 export const FRAMES_PER_CHUNK = 5;
+/** The first redial's wait; a refused key would otherwise burn the cap in a second. */
+export const REDIAL_MS = 1_000;
 
 export interface ScribeOptions {
   /** `https://api.elevenlabs.io`; the socket URL is derived. */
@@ -26,6 +28,9 @@ export interface ScribeOptions {
   connectTimeoutMs: number;
   /** Redials in one call before the ears give up. */
   redialCap: number;
+  /** The wait before the first redial; each later one waits a step longer. */
+  redialMs?: number;
+  setTimer?: typeof setTimeout;
   /** An interim transcript of the utterance in progress; it may change. */
   onPartial(text: string): void;
   /** The utterance Scribe's VAD closed. */
@@ -134,7 +139,10 @@ export class ScribeEars {
         return;
       }
       this.counts.redials += 1;
-      void this.start();
+      const wait = (this.options.redialMs ?? REDIAL_MS) * this.counts.redials;
+      (this.options.setTimer ?? setTimeout)(() => {
+        if (!this.ended) void this.start();
+      }, wait);
     };
   }
 
