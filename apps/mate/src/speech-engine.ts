@@ -57,9 +57,19 @@ export interface EngineSocket {
   close(code: number, reason: string): void;
 }
 
+/** The call behind a conversation, for tools; absent, a reply has none. */
+export interface EngineCall {
+  readonly tools: readonly VoiceTool[];
+  alone(): boolean;
+  readonly heard: { value: string };
+  /** Results to tell; taken on the next turn. */
+  readonly news: string[];
+}
+
 export interface SpeechEngineOptions {
   log: Log;
   lane?: VoiceLane | null;
+  call?: () => EngineCall | null;
 }
 
 function base64UrlDecode(input: string): Buffer {
@@ -279,10 +289,33 @@ export class SpeechEngine {
     let chars = 0;
     try {
       const conversationId = session.conversationId ?? 'voice';
+      const call = this.options.call?.() ?? null;
+      const last = turns.at(-1);
+      if (call && last?.role === 'user') call.heard.value = last.content;
+      const alone = call?.alone() ?? false;
+      const tools = (call?.tools ?? []).filter(
+        (tool) => alone || !tool.sideEffect,
+      );
+      // News of finished work goes in just before the owner's latest words.
+      const news = call?.news.splice(0) ?? [];
+      const context: Turn[] =
+        news.length > 0 && last
+          ? [
+              ...turns.slice(0, -1),
+              ...news.map(
+                (line): Turn => ({
+                  role: 'user',
+                  content: `[task result] ${line}`,
+                }),
+              ),
+              last,
+            ]
+          : turns;
       for await (const delta of lane.reply(
-        turns,
+        context,
         run.abort.signal,
         conversationId,
+        tools,
       )) {
         if (!live()) return;
         chars += delta.length;

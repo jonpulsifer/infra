@@ -98,6 +98,17 @@ export interface VoiceOptions {
   heartbeatMs?: number;
 }
 
+/** What the Speech Engine path gets of a call, per reply. */
+export interface EngineCallContext {
+  readonly call: Call;
+  readonly tools: VoiceTool[];
+  alone(): boolean;
+  /** The owner's last words, set before each reply. */
+  readonly heard: { value: string };
+  /** Results of work started from the call, told on the next turn. */
+  readonly news: string[];
+}
+
 /** mate's threads, for work started from a call; given once they are built. */
 export interface VoiceWorkDeps {
   threads: {
@@ -137,6 +148,7 @@ export class Voice {
   private work: VoiceWorkDeps | null = null;
   /** Work started from the current call, by thread key. */
   private started: StartedTask[] = [];
+  private engineContext: EngineCallContext | null = null;
 
   constructor(private readonly options: VoiceOptions) {
     this.heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
@@ -150,16 +162,54 @@ export class Voice {
     this.work = work;
   }
 
-  /** A thread's turn ended; work started from the call is announced. */
+  /**
+   * A thread's turn ended; work started from the call is announced: by the
+   * talk when the bridge speaks itself, else as news the Speech Engine's
+   * next turn carries.
+   */
   onThreadSettled(ref: ThreadRef): void {
     if (ref.surface !== 'discord') return;
     const task = this.started.find((one) => one.key === ref.id);
-    const talk = this.talk;
-    if (!task || !talk) return;
+    if (!task) return;
     const recall = this.work?.recall ?? null;
     void (recall ? lastSaid(recall, task.key) : Promise.resolve(null))
       .catch(() => null)
-      .then((result) => talk.announce(task.task, result));
+      .then((result) => {
+        const talk = this.talk;
+        if (talk) return talk.announce(task.task, result);
+        if (this.engineContext) {
+          this.engineContext.news.push(
+            result
+              ? `The task "${task.task}" finished. Its last message was: ${result.slice(0, 1_500)}`
+              : `The task "${task.task}" finished; its thread has the details.`,
+          );
+        }
+      });
+  }
+
+  /**
+   * The call's tools and gates for the Speech Engine path, where the
+   * transcript comes whole from ElevenLabs: `heard` is set to the owner's
+   * last words before each reply, and `news` holds results to tell.
+   */
+  engineCall(): EngineCallContext | null {
+    const call = this.call;
+    if (!call || call.status === 'destroyed') {
+      this.engineContext = null;
+      return null;
+    }
+    if (this.engineContext?.call !== call) {
+      const heard = { value: '' };
+      this.started = [];
+      this.engineContext = {
+        call,
+        tools: this.toolsFor(call, () => heard.value),
+        alone: () => this.others(call.channelId) === 1,
+        heard,
+        news: [],
+      };
+    }
+    return this.engineContext;
   }
 
   get ready(): boolean {
@@ -425,6 +475,7 @@ export class Voice {
   }
 
   private endTalk(): void {
+    this.engineContext = null;
     const talk = this.talk;
     if (!talk) return;
     this.talk = null;

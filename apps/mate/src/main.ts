@@ -208,7 +208,10 @@ const voice = new Voice({
   rootMessage: (channelId, content) =>
     discordApi.createMessage(channelId, { content }),
 });
-const speechEngine = new SpeechEngine({ log });
+const speechEngine = new SpeechEngine({
+  log,
+  call: () => voice.engineCall(),
+});
 type SocketData =
   | ({ kind: 'voice' } & VoiceSocketData)
   | ({ kind: 'engine' } & SpeechEngineSocketData);
