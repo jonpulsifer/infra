@@ -67,6 +67,8 @@ export interface EngineCall {
   readonly heard: { value: string };
   /** Results to tell; taken on the next turn. */
   readonly news: string[];
+  /** Each committed line of the call, for the call's thread. */
+  transcript?(role: 'user' | 'agent', text: string): void;
 }
 
 export interface SpeechEngineOptions {
@@ -294,7 +296,11 @@ export class SpeechEngine {
       const conversationId = session.conversationId ?? 'voice';
       const call = this.options.call?.() ?? null;
       const last = turns.at(-1);
-      if (call && last?.role === 'user') call.heard.value = last.content;
+      if (call && last?.role === 'user') {
+        call.heard.value = last.content;
+        call.transcript?.('user', last.content);
+      }
+      let said = '';
       const alone = call?.alone() ?? false;
       const tools = (call?.tools ?? []).filter(
         (tool) => alone || !tool.sideEffect,
@@ -322,11 +328,13 @@ export class SpeechEngine {
       )) {
         if (!live()) return;
         chars += delta.length;
+        said += delta;
         say(delta, false);
       }
       if (!live()) return;
       say('', true);
       session.replies += 1;
+      if (said.trim()) call?.transcript?.('agent', said.trim());
       log.info('speech engine: replied', { chars, turns: turns.length });
     } catch (error) {
       if (!live()) return;

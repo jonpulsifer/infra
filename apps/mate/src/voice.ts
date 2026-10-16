@@ -64,6 +64,8 @@ export interface Call {
   ownerId: string;
   /** The text channel the join came from, where status lines go. */
   originChannelId: string | null;
+  /** The call's thread in that channel, opened at the first spoken turn. */
+  threadId: string | null;
   status: BridgeCallState['status'];
 }
 
@@ -93,8 +95,14 @@ export interface VoiceOptions {
    * resumed session replays no GUILD_CREATE, so the map starts cold.
    */
   voiceChannelOf?(userId: string): Promise<string | null>;
-  /** Posts a message in a text channel and resolves to its id; the root of a task's thread. */
+  /** Posts a message in a text channel or thread and resolves to its id. */
   rootMessage?(channelId: string, content: string): Promise<string>;
+  /** Opens a thread off a message and resolves to the thread's id. */
+  openThread?(
+    channelId: string,
+    messageId: string,
+    name: string,
+  ): Promise<string>;
   heartbeatMs?: number;
 }
 
@@ -107,6 +115,7 @@ export interface EngineCallContext {
   readonly heard: { value: string };
   /** Results of work started from the call, told on the next turn. */
   readonly news: string[];
+  transcript(role: 'user' | 'agent', text: string): void;
 }
 
 /** mate's threads, for work started from a call; given once they are built. */
@@ -114,6 +123,8 @@ export interface VoiceWorkDeps {
   threads: {
     onMessage(message: Inbound): Promise<void>;
     stateOf(key: string): ThreadState | undefined;
+    /** Registers the call's thread, so a message in it needs no mention. */
+    adopt(ref: ThreadRef): void;
   };
   recall: RecallSource | null;
 }
@@ -149,6 +160,9 @@ export class Voice {
   /** Work started from the current call, by thread key. */
   private started: StartedTask[] = [];
   private engineContext: EngineCallContext | null = null;
+  /** The call's thread being opened, so two first lines open one thread. */
+  private opening: Promise<string | null> | null = null;
+  private readonly announced = new Set<StartedTask>();
 
   constructor(private readonly options: VoiceOptions) {
     this.heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
@@ -169,8 +183,12 @@ export class Voice {
    */
   onThreadSettled(ref: ThreadRef): void {
     if (ref.surface !== 'discord') return;
-    const task = this.started.find((one) => one.key === ref.id);
+    // Tasks run in the call's thread one after another; each settle tells the next.
+    const task = this.started.find(
+      (one) => one.key === ref.id && !this.announced.has(one),
+    );
     if (!task) return;
+    this.announced.add(task);
     const recall = this.work?.recall ?? null;
     void (recall ? lastSaid(recall, task.key) : Promise.resolve(null))
       .catch(() => null)
@@ -207,6 +225,7 @@ export class Voice {
         alone: () => this.others(call.channelId) === 1,
         heard,
         news: [],
+        transcript: (role, text) => this.note(call, role, text),
       };
     }
     return this.engineContext;
@@ -296,6 +315,7 @@ export class Voice {
       channelId,
       ownerId: userId,
       originChannelId,
+      threadId: null,
       status: 'joining',
     };
     this.send({ type: 'join', guildId, channelId, ownerId: userId });
@@ -433,6 +453,7 @@ export class Voice {
       },
       alone: () => this.others(call.channelId) === 1,
       tools: this.toolsFor(call, () => talk.lastHeard),
+      transcript: (role, text) => this.note(call, role, text),
     });
     return talk;
   }
@@ -449,22 +470,23 @@ export class Voice {
     return voiceTools(
       {
         startTask: async (task) => {
-          if (!call.originChannelId || !rootMessage) {
+          const threadId = await this.callThread(call);
+          if (!threadId || !call.originChannelId || !rootMessage) {
             throw new Error('the call has no text channel');
           }
-          const id = await rootMessage(call.originChannelId, `voice: ${task}`);
-          // A thread off a message takes the message's id, so this is its key.
+          const id = await rootMessage(threadId, `voice: ${task}`);
+          // The thread is adopted, so the owner's message in it runs a turn.
           await work.threads.onMessage({
             surface: 'discord',
             id,
             channelId: call.originChannelId,
-            threadId: null,
+            threadId,
             authorId: call.ownerId,
             authorIsBot: false,
             content: task,
-            mentionsMe: true,
+            mentionsMe: false,
           });
-          return id;
+          return threadId;
         },
         threadState: (key) => work.threads.stateOf(key),
         recall: work.recall,
@@ -474,8 +496,64 @@ export class Voice {
     );
   }
 
+  /**
+   * The call's thread in the text channel the join came from, opened once
+   * at the first spoken line and registered with the threads, so work from
+   * the call runs in it and the words of the call are kept there.
+   */
+  private callThread(call: Call): Promise<string | null> {
+    if (call.threadId) return Promise.resolve(call.threadId);
+    if (this.opening) return this.opening;
+    const { rootMessage, openThread, clock, log } = this.options;
+    const work = this.work;
+    if (!call.originChannelId || !rootMessage || !openThread || !work) {
+      return Promise.resolve(null);
+    }
+    const channelId = call.originChannelId;
+    this.opening = (async () => {
+      try {
+        const when = new Date(clock.now())
+          .toISOString()
+          .slice(0, 16)
+          .replace('T', ' ');
+        const root = await rootMessage(channelId, `voice call · ${when} UTC`);
+        const threadId = await openThread(channelId, root, `voice ${when}`);
+        work.threads.adopt({ surface: 'discord', channelId, id: threadId });
+        if (this.call === call) call.threadId = threadId;
+        log.info('voice: call thread open', { threadId });
+        return threadId;
+      } catch (error) {
+        log.warn('voice: the call thread could not be opened', {
+          error: plain(error),
+        });
+        return null;
+      } finally {
+        this.opening = null;
+      }
+    })();
+    return this.opening;
+  }
+
+  /** A line of the call, in its thread. Never throws. */
+  private note(call: Call, role: 'user' | 'agent', text: string): void {
+    const { rootMessage } = this.options;
+    if (!rootMessage) return;
+    void this.callThread(call)
+      .then((threadId) => {
+        if (!threadId) return;
+        const who = role === 'user' ? 'you' : 'mate';
+        return rootMessage(threadId, `${who}: ${text.slice(0, 1_800)}`);
+      })
+      .catch((error) =>
+        this.options.log.warn('voice: transcript post failed', {
+          error: plain(error),
+        }),
+      );
+  }
+
   private endTalk(): void {
     this.engineContext = null;
+    this.announced.clear();
     const talk = this.talk;
     if (!talk) return;
     this.talk = null;
@@ -515,6 +593,7 @@ export class Voice {
         channelId: state.channelId,
         ownerId: state.ownerId,
         originChannelId: call?.originChannelId ?? null,
+        threadId: call?.threadId ?? null,
         status: state.status,
       };
       return;

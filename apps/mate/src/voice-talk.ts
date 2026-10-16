@@ -21,6 +21,8 @@ export interface TalkOptions {
   speak(text: string, final: boolean): void;
   /** A whole line for the bridge to voice outside a reply. */
   announce?(text: string): void;
+  /** Each committed line of the call, for the call's thread. */
+  transcript?(role: 'user' | 'agent', text: string): void;
   /** The call's tools; `sideEffect` ones are withheld while the owner is not alone. */
   tools?: readonly VoiceTool[];
   alone?(): boolean;
@@ -68,6 +70,7 @@ export class Talk {
     this.lastHeard = words;
     this.cut('interrupted');
     this.push({ role: 'user', content: words });
+    this.options.transcript?.('user', words);
     this.counts.turns += 1;
     const run: Run = { abort: new AbortController(), said: '' };
     this.current = run;
@@ -96,7 +99,7 @@ export class Talk {
     const news = result
       ? `The task "${task}" finished. Its last message was: ${result.slice(0, 1_500)}`
       : `The task "${task}" finished; its thread has the details.`;
-    this.push({ role: 'user', content: `[task result] ${news}` });
+    this.turns.push({ role: 'user', content: `[task result] ${news}` });
     if (this.current || !lane) return;
     const run: Run = { abort: new AbortController(), said: '' };
     this.current = run;
@@ -203,6 +206,8 @@ export class Talk {
   }
 
   private push(turn: Turn): void {
+    if (turn.role === 'agent' && turn.content.trim())
+      this.options.transcript?.('agent', turn.content.trim());
     this.turns.push(turn);
     if (this.turns.length > TURN_CAP)
       this.turns.splice(0, this.turns.length - TURN_CAP);

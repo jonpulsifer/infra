@@ -81,6 +81,22 @@ describe('the voice tools', () => {
     );
   });
 
+  test('a read-only task starts at once, with no read-back', async () => {
+    const h = harness();
+    const start = h.tool(START_TASK_TOOL);
+    expect(
+      await start.execute({
+        task: 'see whether the backups ran',
+        readOnly: true,
+      }),
+    ).toContain('Started');
+    expect(h.started).toEqual(['see whether the backups ran']);
+    // A task that changes something still waits for the yes.
+    expect(
+      await start.execute({ task: 'rotate the key', readOnly: false }),
+    ).toContain('Not started yet');
+  });
+
   test('start_task refuses when the owner is not alone, and forgets the pending task', async () => {
     const h = harness({ alone: false });
     const start = h.tool(START_TASK_TOOL);

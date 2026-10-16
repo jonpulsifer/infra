@@ -357,6 +357,7 @@ describe('a held call', () => {
       channelId: VOICE,
       ownerId: OWNER,
       originChannelId: null,
+      threadId: null,
       status: 'ready',
     });
     await voice.onReady(BOT);
@@ -414,6 +415,101 @@ describe('a mention', () => {
       replies: 1,
       bargeIns: 1,
     });
+  });
+
+  test('opens one thread for the call at its first line, keeps the words there, and runs work in it', async () => {
+    const posts: [string, string][] = [];
+    const threadsOpened: [string, string, string][] = [];
+    const adopted: string[] = [];
+    const inbound: {
+      threadId: string | null;
+      content: string;
+      mentionsMe: boolean;
+    }[] = [];
+    const { voice, link, from, state, log } = harness();
+    let n = 0;
+    (
+      voice as unknown as { options: Record<string, unknown> }
+    ).options.rootMessage = async (channelId: string, content: string) => {
+      posts.push([channelId, content]);
+      n += 1;
+      return `m${n}`;
+    };
+    (
+      voice as unknown as { options: Record<string, unknown> }
+    ).options.openThread = async (
+      channelId: string,
+      messageId: string,
+      name: string,
+    ) => {
+      threadsOpened.push([channelId, messageId, name]);
+      return 't1';
+    };
+    voice.setWork({
+      threads: {
+        onMessage: async (message) => {
+          inbound.push({
+            threadId: message.threadId,
+            content: message.content,
+            mentionsMe: message.mentionsMe,
+          });
+        },
+        stateOf: () => 'turn',
+        adopt: (ref) => adopted.push(ref.id),
+      },
+      recall: null,
+    });
+    voice.setLane({
+      async *reply(turns, _signal, _id, tools = []) {
+        const start = tools.find((t) => t.name === 'start_task');
+        if (turns.at(-1)?.content === 'look up the backups' && start) {
+          await start.execute({ task: 'look up the backups', readOnly: true });
+          yield 'on it';
+          return;
+        }
+        yield 'hi';
+      },
+    });
+    const socket = await link();
+    voice.onGuildCreate([{ user_id: OWNER, channel_id: VOICE } as never]);
+    await voice.join(OWNER, TEXT);
+    await from(socket, state('ready'));
+    await from(socket, {
+      type: 'transcript',
+      speakerId: OWNER,
+      text: 'hello',
+      final: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(threadsOpened).toEqual([
+      [TEXT, 'm1', expect.stringContaining('voice ')],
+    ]);
+    expect(adopted).toEqual(['t1']);
+    expect(voice.current?.threadId).toBe('t1');
+    expect(posts.slice(1)).toEqual([
+      ['t1', 'you: hello'],
+      ['t1', 'mate: hi'],
+    ]);
+    await from(socket, {
+      type: 'transcript',
+      speakerId: OWNER,
+      text: 'look up the backups',
+      final: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(threadsOpened).toHaveLength(1);
+    expect(
+      posts.some(
+        ([id, text]) => id === 't1' && text === 'voice: look up the backups',
+      ),
+    ).toBe(true);
+    expect(inbound).toEqual([
+      { threadId: 't1', content: 'look up the backups', mentionsMe: false },
+    ]);
+    voice.onThreadSettled({ surface: 'discord', channelId: TEXT, id: 't1' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(socket.frames.filter((f) => f.type === 'announce')).toHaveLength(1);
+    expect(log.of('voice: call thread open')).toHaveLength(1);
   });
 
   test('is a voice command only when it says just join or leave', () => {
