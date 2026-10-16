@@ -17,6 +17,9 @@ spec:
         name: infra
         namespace: flux-system
   values:
+    gateway:
+      name: kthx-apps
+      namespace: kthx-apps
     # CD rewrites this digest on each kthx build on main (`.github/containers.json`).
     image: ghcr.io/jonpulsifer/kthx:latest@sha256:81abc40c07e260ddca883617594f2e2edf70f0ff0c6992e0795ea2f60284cd86
     zone: kthx.dev
@@ -24,7 +27,7 @@ spec:
     # serve it: it is reachable from the lab, the offsite LAN and the tailnet.
     control:
       host: kthx.${SECRET_DOMAIN}
-      listener: spindrift-apps-tls-secret-domain
+      listener: kthx-apps-tls-secret-domain
       # kthx keeps `/api` and `/cli` on this host; the engine's console takes
       # every other path. The engine's `hostname` is this host, and
       # clusters/offsite/apps/kthx-engine/kthx-route-grant.yaml admits the route.

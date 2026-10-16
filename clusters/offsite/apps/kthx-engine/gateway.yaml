@@ -4,8 +4,8 @@
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: Gateway
 metadata:
-  name: spindrift-apps
-  namespace: spindrift-apps
+  name: kthx-apps
+  namespace: kthx-apps
   annotations:
     cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
 spec:
@@ -32,7 +32,7 @@ spec:
           - kind: HTTPRoute
     # A wildcard binds one label, so App names are flat: `plainboi-web`, not
     # `web.plainboi`. cert-manager issues it from the annotation above.
-    - name: spindrift-apps-tls
+    - name: kthx-apps-tls
       protocol: HTTPS
       port: 443
       hostname: "*.${KTHX_ENGINE_DOMAIN}"
@@ -50,7 +50,7 @@ spec:
           - kind: HTTPRoute
     # The App chart's DNSEndpoint decides per record whether a name reaches this
     # listener or `cluster-gateway`'s own wildcard.
-    - name: spindrift-apps-tls-secret-domain
+    - name: kthx-apps-tls-secret-domain
       protocol: HTTPS
       port: 443
       hostname: "*.${SECRET_DOMAIN}"
@@ -67,7 +67,7 @@ spec:
         kinds:
           - kind: HTTPRoute
     # Public-only: names arrive through the tunnel, never as RFC1918 records.
-    - name: spindrift-apps-tls-wishin
+    - name: kthx-apps-tls-wishin
       protocol: HTTPS
       port: 443
       hostname: "*.wishin.app"
@@ -85,7 +85,7 @@ spec:
           - kind: HTTPRoute
     # Public-only. The apex App rides `http-gateway`: a wildcard never matches
     # the apex, and the edge terminates its TLS.
-    - name: spindrift-apps-tls-clankerbanker
+    - name: kthx-apps-tls-clankerbanker
       protocol: HTTPS
       port: 443
       hostname: "*.clankerbanker.ca"

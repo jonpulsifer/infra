@@ -5,7 +5,7 @@ metadata:
   name: kthx
   labels:
     kustomize.toolkit.fluxcd.io/prune: enabled
-    # Lets this namespace's HTTPRoute attach to the `spindrift-apps` Gateway,
+    # Lets this namespace's HTTPRoute attach to the `kthx-apps` Gateway,
     # whose listeners admit routes by this namespace label.
     app.kubernetes.io/part-of: kthx
     # A public anonymous-write process that needs no capability, host mount or root.

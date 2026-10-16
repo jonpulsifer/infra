@@ -4,8 +4,8 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: spindrift-status
-  namespace: spindrift-apps
+  name: kthx-apps-status
+  namespace: kthx-apps
   annotations:
     # Holds external-dns off these wildcards, which Terraform owns. Both
     # spellings: external-dns v0.22.0 changed the prefix with no fallback.
@@ -14,7 +14,7 @@ metadata:
 spec:
   # No sectionName: names arrive over TLS from the lab and over HTTP from the tunnel.
   parentRefs:
-    - name: spindrift-apps
+    - name: kthx-apps
   # The dedicated App zone only. Elsewhere this wildcard would answer for names
   # Terraform or kthx owns, and Cilium splits two routes on one wildcard 50/50.
   hostnames:
