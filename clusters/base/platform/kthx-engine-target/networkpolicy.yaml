@@ -15,6 +15,20 @@ spec:
   policyTypes:
     - Ingress
 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: kthx-datastores
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: kthx
+spec:
+  # Its own object, so editing the allow list below cannot remove the deny.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
 # Platform callers on any port. Never admit this namespace's own pods here: the
 # reconciler scopes pod-to-pod rules per Datastore, or one Datastore reaches another.
 apiVersion: networking.k8s.io/v1
@@ -22,6 +36,38 @@ kind: NetworkPolicy
 metadata:
   name: allow-platform
   namespace: spindrift-datastores
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: kthx
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudnative-pg
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: valkey-operator-system
+    # CloudNativePG's exporter. Enabling the Valkey exporter needs its port here.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9187
+          protocol: TCP
+
+---
+# Platform callers on any port. Never admit this namespace's own pods here: the
+# reconciler scopes pod-to-pod rules per Datastore, or one Datastore reaches another.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform
+  namespace: kthx-datastores
   labels:
     app.kubernetes.io/managed-by: flux
     app.kubernetes.io/part-of: kthx
