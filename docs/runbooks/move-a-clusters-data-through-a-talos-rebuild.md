@@ -52,7 +52,7 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 5. Record the kthx engine's workloads on the cluster. Neither Velero nor Flux recreates them, and the engine, which runs on offsite, reports drift but never re-converges it. In the kthx console, list each Deploy that is `LIVE` and each Datastore whose Target is on the Vessel for `<site>`. Then record the releases.
 
    ```bash
-   kubectl --context <site> -n spindrift-apps get hr
+   kubectl --context <site> -n kthx-apps get hr
    kubectl --context <site> -n spindrift-datastores get clusters.postgresql.cnpg.io,valkeyclusters.valkey.io
    ```
 
@@ -67,7 +67,7 @@ Use this runbook during [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.
 3. Recreate each Datastore from step 5 of [Freeze the cluster](#freeze-the-cluster) in the kthx console: detach and destroy the stale one, create it again under the same name on the same Vessel, and attach it to its App. Then request a Deploy of each `LIVE` build there. The engine does not do either by itself. Then make sure that the engine created its release.
 
    ```bash
-   kubectl --context <site> -n spindrift-apps get hr
+   kubectl --context <site> -n kthx-apps get hr
    ```
 
    Result: Each release from the freeze is `True`.

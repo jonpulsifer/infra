@@ -117,8 +117,8 @@ backup:
   recoverFrom: ""
 
 gateway:
-  name: spindrift-apps
-  namespace: spindrift-apps
+  name: kthx-apps
+  namespace: kthx-apps
 
 # The private host for claiming and site control. Empty keeps them on the public apex.
 # Set, the apex answers `403 PRIVATE` under `/api/sites` except the directory.

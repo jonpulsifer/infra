@@ -33,7 +33,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(kube_pod_status_ready{condition=\"true\", namespace=~\"kthx-engine|spindrift-apps\"})",
+          "expr": "sum(kube_pod_status_ready{condition=\"true\", namespace=~\"kthx-engine|kthx-apps\"})",
           "refId": "A",
           "instant": true
         }
@@ -71,7 +71,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"kthx-engine|spindrift-apps\"}[1h]))",
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"kthx-engine|kthx-apps\"}[1h]))",
           "refId": "A",
           "instant": true
         }
@@ -110,7 +110,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "kube_pod_status_phase{namespace=~\"kthx-engine|spindrift-apps\"}",
+          "expr": "kube_pod_status_phase{namespace=~\"kthx-engine|kthx-apps\"}",
           "legendFormat": "{{pod}} {{phase}} ({{cluster}})",
           "refId": "A"
         }
@@ -144,7 +144,7 @@
       "targets": [
         {
           "datasource": { "type": "victoriametrics-logs-datasource", "uid": "victorialogs" },
-          "expr": "{namespace=~\"kthx-engine|spindrift-apps\"}",
+          "expr": "{namespace=~\"kthx-engine|kthx-apps\"}",
           "refId": "A"
         }
       ],

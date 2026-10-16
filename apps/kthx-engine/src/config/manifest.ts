@@ -155,12 +155,12 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       vessel: 'primary',
       adapter: 'kubernetes',
       connection: {
-        namespace: 'spindrift-apps',
+        namespace: 'kthx-apps',
         appNamespace: 'app-{app}',
         datastoreNamespace: 'spindrift-datastores',
         delivery: {
           flavour: 'flux-helmrelease',
-          namespace: 'spindrift-apps',
+          namespace: 'kthx-apps',
           sourceRef: { name: 'infra', namespace: 'flux-system' },
         },
       },

@@ -40,7 +40,7 @@ Every site answers these paths, and the SDK at `/api/sdk.js` wraps them as `wind
 
 ## How it works
 
-Cloudflare sends `kthx.dev` and `*.kthx.dev` through the kthx Apps tunnel to the `spindrift-apps` Gateway ([kthx](../kthx.md#how-it-works)). The kthx server picks the site from the `Host` header. The `kthx` namespace's `app.kubernetes.io/part-of: spindrift` label lets its routes attach to that Gateway. Keep it.
+Cloudflare sends `kthx.dev` and `*.kthx.dev` through the kthx Apps tunnel to the `kthx-apps` Gateway ([kthx](../kthx.md#how-it-works)). The kthx server picks the site from the `Host` header. The `kthx` namespace's `app.kubernetes.io/part-of: spindrift` label lets its routes attach to that Gateway. Keep it.
 
 On `kthx.lolwtf.ca`, the HTTPRoute `kthx-control` sends `/api` and `/cli` to kthx and every other path to the engine's console, so the CLI and the console share that host. `control.console` in `clusters/offsite/apps/kthx/helm-release.yaml` declares the split.
 

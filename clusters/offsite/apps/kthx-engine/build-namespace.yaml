@@ -1,5 +1,5 @@
 ---
-# In-cluster build Jobs. Not `spindrift-apps`: a Job carries its registry
+# In-cluster build Jobs. Not `kthx-apps`: a Job carries its registry
 # credential and build secrets as env, readable by anyone with `get jobs`.
 apiVersion: v1
 kind: Namespace

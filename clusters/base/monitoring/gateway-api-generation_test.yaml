@@ -15,9 +15,9 @@ tests:
       - series: 'kube_customresource_httproute_observed_generation{customresource_group="gateway.networking.k8s.io",customresource_kind="HTTPRoute",customresource_version="v1",namespace="default",name="sonarr",controller="io.cilium/gateway-controller",job="kube-state-metrics",instance="10.42.0.32:8080"}'
         values: 1x20
       # Lagging: generation 2 was never observed.
-      - series: 'kube_customresource_httproute_generation{customresource_group="gateway.networking.k8s.io",customresource_kind="HTTPRoute",customresource_version="v1",namespace="spindrift-apps",name="spindrift-status",job="kube-state-metrics",instance="10.42.0.32:8080"}'
+      - series: 'kube_customresource_httproute_generation{customresource_group="gateway.networking.k8s.io",customresource_kind="HTTPRoute",customresource_version="v1",namespace="kthx-apps",name="kthx-apps-status",job="kube-state-metrics",instance="10.42.0.32:8080"}'
         values: 2x20
-      - series: 'kube_customresource_httproute_observed_generation{customresource_group="gateway.networking.k8s.io",customresource_kind="HTTPRoute",customresource_version="v1",namespace="spindrift-apps",name="spindrift-status",controller="io.cilium/gateway-controller",job="kube-state-metrics",instance="10.42.0.32:8080"}'
+      - series: 'kube_customresource_httproute_observed_generation{customresource_group="gateway.networking.k8s.io",customresource_kind="HTTPRoute",customresource_version="v1",namespace="kthx-apps",name="kthx-apps-status",controller="io.cilium/gateway-controller",job="kube-state-metrics",instance="10.42.0.32:8080"}'
         values: 1x20
       # Never given status, so no observed series.
       - series: 'kube_customresource_httproute_generation{customresource_group="gateway.networking.k8s.io",customresource_kind="HTTPRoute",customresource_version="v1",namespace="hub",name="hub-http-route",job="kube-state-metrics",instance="10.42.0.32:8080"}'
@@ -72,11 +72,11 @@ tests:
               customresource_version: v1
               job: kube-state-metrics
               instance: 10.42.0.32:8080
-              namespace: spindrift-apps
-              name: spindrift-status
+              namespace: kthx-apps
+              name: kthx-apps-status
             exp_annotations:
-              message: HTTPRoute spindrift-apps/spindrift-status has not been reconciled by its controller
-              description: "The route's spec has moved past what any controller wrote back into its status, so Envoy still serves the previous hostnames and backends while the object reports Accepted. Compare `kubectl get httproute -n spindrift-apps spindrift-status -o jsonpath='{.metadata.generation} {.status.parents[*].conditions[*].observedGeneration}'`, then check whether the leader cilium-operator (lease kube-system/cilium-operator-resource-lock) logged `initGatewayAPIController` without an error."
+              message: HTTPRoute kthx-apps/kthx-apps-status has not been reconciled by its controller
+              description: "The route's spec has moved past what any controller wrote back into its status, so Envoy still serves the previous hostnames and backends while the object reports Accepted. Compare `kubectl get httproute -n kthx-apps kthx-apps-status -o jsonpath='{.metadata.generation} {.status.parents[*].conditions[*].observedGeneration}'`, then check whether the leader cilium-operator (lease kube-system/cilium-operator-resource-lock) logged `initGatewayAPIController` without an error."
       - eval_time: 11m
         alertname: GatewayNotReconciled
         exp_alerts:

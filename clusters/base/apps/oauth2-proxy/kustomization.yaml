@@ -6,5 +6,5 @@ resources:
   - helm-repository.yaml
   - external-secret.yaml
   - helm-release.yaml
-  - spindrift-reference-grant.yaml
+  - kthx-apps-reference-grant.yaml
 namespace: oauth2-proxy

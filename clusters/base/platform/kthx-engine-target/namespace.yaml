@@ -1,18 +1,5 @@
 # Each per-App namespace copies its `pod-security.kubernetes.io/*` labels from
-# `spindrift-apps`, so an edit here reaches every App.
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: spindrift-apps
-  labels:
-    app.kubernetes.io/managed-by: flux
-    app.kubernetes.io/part-of: kthx
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/warn: restricted
-# Datastores outlive their Apps, so they live in a namespace named for none.
-# Keep `restricted`: the adapter renders Datastore pods to pass it.
+# `kthx-apps`, so an edit here reaches every App.
 ---
 apiVersion: v1
 kind: Namespace
