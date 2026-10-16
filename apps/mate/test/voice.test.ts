@@ -377,6 +377,45 @@ describe('a held call', () => {
 });
 
 describe('a mention', () => {
+  test("answers the owner's committed words through the lane as speak frames, and ends the talk with the call", async () => {
+    const { voice, link, from, state, log } = harness();
+    voice.setLane({
+      async *reply(turns, _signal, callId) {
+        expect(callId).toStartWith(`voice:${VOICE}:`);
+        yield `heard ${turns.length}`;
+      },
+    });
+    const socket = await link();
+    voice.onGuildCreate([{ user_id: OWNER, channel_id: VOICE } as never]);
+    await voice.join(OWNER, TEXT);
+    await from(socket, state('ready'));
+    await from(socket, {
+      type: 'transcript',
+      speakerId: FRIEND,
+      text: 'not me',
+      final: true,
+    });
+    await from(socket, {
+      type: 'transcript',
+      speakerId: OWNER,
+      text: 'hello',
+      final: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(socket.frames.filter((f) => f.type === 'speak')).toEqual([
+      { type: 'speak', text: 'heard 1', final: false },
+      { type: 'speak', text: '', final: true },
+    ]);
+    await from(socket, { type: 'barge_in', heardChars: 3 });
+    await from(socket, state('destroyed'));
+    await from(socket, { type: 'state', call: null });
+    expect(log.of('voice: conversation over')[0]?.fields).toMatchObject({
+      turns: 1,
+      replies: 1,
+      bargeIns: 1,
+    });
+  });
+
   test('is a voice command only when it says just join or leave', () => {
     expect(voiceCommand(`<@${BOT}> join`, BOT)).toBe('join');
     expect(voiceCommand(`<@!${BOT}>  Leave `, BOT)).toBe('leave');

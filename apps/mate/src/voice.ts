@@ -24,6 +24,8 @@ import type {
 } from 'discord-api-types/v10';
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';
+import type { VoiceLane } from './speech-engine.ts';
+import { Talk } from './voice-talk.ts';
 
 export const VOICE_PATH = '/voice';
 /** The bridge beats at the same cadence; three missed beats end the link. */
@@ -107,12 +109,17 @@ export class Voice {
   private beat: Handle | null = null;
   private lastHeard = 0;
   private readonly heartbeatMs: number;
-  /** Counts only; the words never reach a log. */
-  private transcriptChars = 0;
-  private bargeIns = 0;
+  /** The brain's voice lane, known once mate has built its models. */
+  private lane: VoiceLane | null = null;
+  /** The conversation of the current call, once the bridge hears. */
+  private talk: Talk | null = null;
 
   constructor(private readonly options: VoiceOptions) {
     this.heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
+  }
+
+  setLane(lane: VoiceLane | null): void {
+    this.lane = lane;
   }
 
   get ready(): boolean {
@@ -249,6 +256,7 @@ export class Voice {
     this.stopBeat();
     const call = this.call;
     this.options.log.warn('voice: bridge link lost', { inCall: call !== null });
+    this.endTalk();
     if (!call) return;
     // The bridge cannot ask for the leave any more, so mate sends it itself.
     this.call = null;
@@ -258,6 +266,7 @@ export class Voice {
 
   /** mate is restarting: the bridge keeps the call for the next process. */
   async stop(): Promise<void> {
+    this.endTalk();
     const call = this.call;
     if (call) await this.tell(call, 'restarting; back in a moment');
     const socket = this.socket;
@@ -302,15 +311,39 @@ export class Voice {
         if (call) await this.tell(call, `voice stalled: ${message.reason}`);
         return;
       }
-      case 'transcript':
-        this.transcriptChars += message.text.length;
+      case 'transcript': {
+        const call = this.call;
+        // The bridge's ears are on the owner alone; anyone else is dropped here too.
+        if (!call || message.speakerId !== call.ownerId) return;
+        this.talk ??= this.startTalk(call);
+        this.talk.heard(message.text, message.final);
         return;
+      }
       case 'barge_in':
-        this.bargeIns += 1;
+        this.talk?.bargeIn(message.heardChars);
         return;
       case 'heartbeat':
         return;
     }
+  }
+
+  private startTalk(call: Call): Talk {
+    return new Talk({
+      callId: `voice:${call.channelId}:${this.options.clock.now()}`,
+      lane: this.lane,
+      log: this.options.log,
+      speak: (text, final) => {
+        this.send({ type: 'speak', text, final });
+      },
+    });
+  }
+
+  private endTalk(): void {
+    const talk = this.talk;
+    if (!talk) return;
+    this.talk = null;
+    talk.stop();
+    this.options.log.info('voice: conversation over', { ...talk.counts });
   }
 
   private async onState(state: BridgeCallState | null): Promise<void> {
@@ -318,6 +351,7 @@ export class Voice {
     if (state === null) {
       const ended = this.call;
       this.call = null;
+      this.endTalk();
       if (ended) {
         log.info('voice: call over');
         await this.tell(ended, 'left the voice channel');
@@ -334,6 +368,7 @@ export class Voice {
       return;
     if (!call || call.channelId !== state.channelId) {
       // The bridge held a call across a mate restart.
+      this.endTalk();
       log.info('voice: adopting the call the bridge holds', {
         channelId: state.channelId,
         status: state.status,
@@ -349,6 +384,7 @@ export class Voice {
     }
     const was = call.status;
     call.status = state.status;
+    if (state.status === 'destroyed') this.endTalk();
     if (was !== state.status) {
       log.info('voice: call state', {
         status: state.status,
