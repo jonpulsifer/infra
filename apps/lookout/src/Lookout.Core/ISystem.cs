@@ -39,6 +39,45 @@ public interface ISystem
     Task<string> DownloadFileAsync(Uri url, string sha256, string extension, CancellationToken ct);
 
     Task<bool> HttpOkAsync(Uri url, CancellationToken ct);
+
+    Task DelayAsync(TimeSpan delay, CancellationToken ct);
+}
+
+/// <summary>Version strings as installers report them.</summary>
+public static class Versions
+{
+    /// <summary>
+    /// True when the installed version is the declared one. A product's
+    /// ProductVersion may carry build metadata after a plus, such as
+    /// 0.38.0+fb18a89, which the policy never declares.
+    /// </summary>
+    public static bool Matches(string? installed, string declared)
+        => installed is not null && Core(installed) == declared;
+
+    private static string Core(string version)
+    {
+        var plus = version.IndexOf('+');
+        return plus < 0 ? version : version[..plus];
+    }
+}
+
+/// <summary>A port that a freshly started service takes a moment to open.</summary>
+public static class Readiness
+{
+    public static readonly TimeSpan Wait = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Step = TimeSpan.FromSeconds(2);
+
+    /// <summary>Polls the URL until it answers or the wait runs out. Returns whether it answered.</summary>
+    public static async Task<bool> WaitForHttpAsync(ISystem system, Uri url, CancellationToken ct)
+    {
+        var deadline = system.Now + Wait;
+        while (true)
+        {
+            if (await system.HttpOkAsync(url, ct)) return true;
+            if (system.Now >= deadline) return false;
+            await system.DelayAsync(Step, ct);
+        }
+    }
 }
 
 public sealed record ProcessResult(int ExitCode, string Stdout, string Stderr);

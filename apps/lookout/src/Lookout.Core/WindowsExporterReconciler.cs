@@ -3,7 +3,9 @@ namespace Lookout;
 /// <summary>
 /// windows_exporter from its MSI. The MSI writes --collectors.enabled onto the
 /// service command line, and a flag beats config.yaml, so a wrong collector
-/// list means a reinstall, never a config edit.
+/// list means a reinstall, never a config edit. Windows Installer treats /i of
+/// an installed version as a reconfiguration, which this MSI fails with 1603,
+/// so the installed product is removed first.
 /// </summary>
 public sealed class WindowsExporterReconciler(ISystem system) : IComponentReconciler
 {
@@ -15,7 +17,7 @@ public sealed class WindowsExporterReconciler(ISystem system) : IComponentReconc
         var problems = new List<string>();
 
         var installedVersion = system.FileProductVersion(Paths.ExporterExe(system));
-        var installed = installedVersion == policy.Version;
+        var installed = Versions.Matches(installedVersion, policy.Version);
         if (!installed)
         {
             problems.Add(installedVersion is null ? "not installed" : $"version {installedVersion}, want {policy.Version}");
@@ -49,12 +51,24 @@ public sealed class WindowsExporterReconciler(ISystem system) : IComponentReconc
     public async Task<ConvergeResult> ConvergeAsync(PolicyBundle bundle, ComponentState observed, CancellationToken ct)
     {
         var policy = bundle.Policy.WindowsExporter;
+        var actions = new List<string>();
+        var reboot = false;
         var msi = await system.DownloadFileAsync(new Uri(policy.Url), policy.Sha256, ".msi", ct);
         try
         {
-            var exit = await Msi.InstallAsync(system, msi,
-                $"ADDLOCAL=FirewallException ENABLED_COLLECTORS=\"{policy.Collectors}\"", ct);
-            return new ConvergeResult([$"installed {policy.Version} with collectors {policy.Collectors}"], exit == Msi.RebootRequired);
+            if (observed.Installed)
+            {
+                reboot |= await Msi.UninstallAsync(system, $"\"{msi}\"", ct) == Msi.RebootRequired;
+                actions.Add($"removed {observed.InstalledVersion}");
+            }
+            reboot |= await Msi.InstallAsync(system, msi,
+                $"ADDLOCAL=FirewallException ENABLED_COLLECTORS=\"{policy.Collectors}\"", ct) == Msi.RebootRequired;
+            actions.Add($"installed {policy.Version} with collectors {policy.Collectors}");
+            if (!await Readiness.WaitForHttpAsync(system, new Uri($"http://127.0.0.1:{policy.Port}/metrics"), ct))
+            {
+                actions.Add($"port {policy.Port} did not answer within {Readiness.Wait.TotalSeconds:0}s");
+            }
+            return new ConvergeResult(actions, reboot);
         }
         finally
         {
@@ -78,12 +92,13 @@ public static class Msi
         return result.ExitCode;
     }
 
-    public static async Task<int> UninstallAsync(ISystem system, string productCode, CancellationToken ct)
+    /// <summary>Removes a product by its ProductCode, or by the path of the MSI that installed it.</summary>
+    public static async Task<int> UninstallAsync(ISystem system, string product, CancellationToken ct)
     {
-        var result = await system.RunAsync("msiexec.exe", $"/x {productCode} /qn /norestart", ct);
+        var result = await system.RunAsync("msiexec.exe", $"/x {product} /qn /norestart", ct);
         if (result.ExitCode is not (0 or UnknownProduct or RebootRequired))
         {
-            throw new InvalidOperationException($"msiexec exited {result.ExitCode} removing {productCode}");
+            throw new InvalidOperationException($"msiexec exited {result.ExitCode} removing {product}");
         }
         return result.ExitCode;
     }
