@@ -30,7 +30,7 @@ export interface VoiceTool<TParameters extends TSchema = TSchema> {
 
 /** A task started from this call. */
 export interface StartedTask {
-  /** The thread key, which is the root message's id on Discord. */
+  /** The thread key: the call's thread, which every task of the call runs in. */
   readonly key: string;
   readonly task: string;
   readonly startedAt: number;
@@ -38,7 +38,7 @@ export interface StartedTask {
 
 /** What the tools need of the call and of mate. */
 export interface VoiceWork {
-  /** Posts the task in the call's text channel and runs it there; resolves to the thread key. */
+  /** Posts the task in the call's thread and runs it there; resolves to the thread key. */
   startTask(task: string): Promise<string>;
   threadState(key: string): ThreadState | undefined;
   recall: RecallSource | null;
@@ -58,6 +58,12 @@ const START_PARAMETERS = Type.Object({
     description:
       'The work, in the words the owner used, as the opening message of a text thread.',
   }),
+  readOnly: Type.Optional(
+    Type.Boolean({
+      description:
+        'True when the task only looks things up and reports, changing nothing; it then starts at once, with no read-back.',
+    }),
+  ),
 });
 
 const STATUS_PARAMETERS = Type.Object({});
@@ -85,17 +91,21 @@ export function voiceTools(
   const start: VoiceTool<typeof START_PARAMETERS> = {
     name: START_TASK_TOOL,
     description:
-      'Start work in a text thread, where mate has its tools. The first call only records the task: read it back to the owner in one sentence and ask for a yes. Call it again after the owner says yes, and the work starts. The result is announced on the call when the work settles.',
+      "Start work in the call's text thread, where mate has its tools. A read-only task (readOnly true: look something up, check, report) starts at once. Anything that changes something is read back first: the first call only records the task, you read it back to the owner in one sentence and ask for a yes, and the work starts on a second call after the owner says yes. The result is announced on the call when the work settles.",
     parameters: START_PARAMETERS,
     sideEffect: true,
-    execute: async ({ task }) => {
+    execute: async ({ task, readOnly }) => {
       const words = task.trim();
       if (!words) return 'No task was given.';
       if (!context.alone()) {
         pending = null;
         return 'Someone else is in the channel, so no work starts from the call. The owner can type it in a thread.';
       }
-      if (pending === null || !YES.test(context.lastHeard().trim())) {
+      if (readOnly) pending = words;
+      if (
+        pending === null ||
+        (!readOnly && !YES.test(context.lastHeard().trim()))
+      ) {
         pending = words;
         return `Not started yet. Read the task back to the owner in one sentence and ask whether to go ahead: "${clip(words)}". Call start_task again once they say yes.`;
       }
@@ -108,7 +118,7 @@ export function voiceTools(
         return `The thread could not be started: ${(error as Error).message}. Tell the owner to type it instead.`;
       }
       context.started.push({ key, task: confirmed, startedAt: work.now() });
-      return 'Started in a text thread. Tell the owner in a few words that it is under way and that you will say when it is done.';
+      return "Started in the call's thread. Tell the owner in a few words that it is under way and that you will say when it is done.";
     },
   };
   const status: VoiceTool<typeof STATUS_PARAMETERS> = {

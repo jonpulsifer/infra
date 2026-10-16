@@ -207,6 +207,8 @@ const voice = new Voice({
   voiceChannelOf: (userId) => discordApi.voiceChannelOf(config.guildId, userId),
   rootMessage: (channelId, content) =>
     discordApi.createMessage(channelId, { content }),
+  openThread: (channelId, messageId, name) =>
+    discordApi.createThread(channelId, messageId, name),
 });
 const speechEngine = new SpeechEngine({
   log,
