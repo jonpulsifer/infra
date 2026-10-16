@@ -34,7 +34,7 @@ Both clusters have three ESO ClusterSecretStores.
 | --- | --- | --- |
 | `onepassword-connect` | The `homelab` vault, through 1Password Connect | A Connect token from a SOPS file |
 | `gcp-secret-manager` | kthx App config in Secret Manager in `bluenose` | [Workload identity](pki.md#workload-identity) |
-| `kthx-datastores` | The credentials of kthx Datastores | A ServiceAccount that reads Secrets in `spindrift-datastores` |
+| `kthx-datastores` | The credentials of kthx Datastores | A ServiceAccount that reads Secrets in `kthx-datastores` |
 
 ## OpenBao
 

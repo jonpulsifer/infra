@@ -43,20 +43,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: kthx-engine-target-datastores
-  namespace: spindrift-datastores
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: kthx-engine-target-datastores
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: User
-    name: federated:system:serviceaccount:kthx-engine:kthx-engine
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kthx-engine-target-datastores
   namespace: kthx-datastores
 roleRef:
   apiGroup: rbac.authorization.k8s.io

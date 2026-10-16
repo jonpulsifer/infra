@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - backup
-  - backup-kthx-datastores
   - networkpolicy.yaml
   - oci-repository.yaml
   - rbac.yaml

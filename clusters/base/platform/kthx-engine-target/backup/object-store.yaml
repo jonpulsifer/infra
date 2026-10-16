@@ -12,7 +12,7 @@ metadata:
 spec:
   retentionPolicy: 30d
   configuration:
-    destinationPath: s3://cnpg/spindrift-datastores/
+    destinationPath: s3://cnpg/kthx-datastores/
     endpointURL: ${GARAGE_S3_ENDPOINT}
     s3Credentials:
       accessKeyId: {name: garage-cnpg, key: ACCESS_KEY_ID}
