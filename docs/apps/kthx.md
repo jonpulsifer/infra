@@ -27,7 +27,7 @@ kthx is the lab's hosting product. The owner and agents use it to put apps on th
 
 One Bun process in the `kthx` namespace serves quick sites. The kthx engine in the `spindrift` namespace builds and deploys built apps. The engine is a `web` process for the console, API and MCP, a `reconciler` that builds and deploys, and their CloudNativePG database.
 
-Quick sites and the engine share the Cloudflare tunnel named `spindrift`, called the kthx Apps tunnel, and the `spindrift-apps` Gateway on offsite. They also share the archive reader in `packages/archive/` and the bluenose GCP project, and each has its own database and bucket.
+Quick sites and the engine share the Cloudflare tunnel named `kthx-engine`, called the kthx Apps tunnel, and the `kthx-apps` Gateway on offsite. They also share the archive reader in `packages/archive/` and the bluenose GCP project, and each has its own database and bucket.
 
 Flux deploys quick sites from `packages/charts/kthx/` in git. It deploys the engine, and the engine its Apps, from the OCI charts that `.github/workflows/spindrift-charts.yml` publishes. [Build and release](../platform/build-and-release.md#rules) has the rule for a chart change.
 

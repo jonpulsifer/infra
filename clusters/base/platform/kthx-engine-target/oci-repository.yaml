@@ -7,7 +7,7 @@ kind: OCIRepository
 metadata:
   name: kthx-app
   # Beside the HelmReleases that reference it.
-  namespace: spindrift-apps
+  namespace: kthx-apps
 spec:
   interval: 15m
   layerSelector:

@@ -217,7 +217,7 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 8. Make sure that the kthx engine's releases on the cluster are ready.
 
    ```bash
-   kubectl --context <site> -n spindrift-apps get hr
+   kubectl --context <site> -n kthx-apps get hr
    ```
 
    Result: Each row is `True`. After a rebuild, each release from the freeze in [Move a cluster's data through a Talos rebuild](move-a-clusters-data-through-a-talos-rebuild.md#freeze-the-cluster) is there.

@@ -2,13 +2,13 @@
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
 metadata:
-  name: spindrift-apps-external-auth
+  name: kthx-apps-external-auth
   namespace: oauth2-proxy
 spec:
   from:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      namespace: spindrift-apps
+      namespace: kthx-apps
   to:
     # The ExternalAuth filter targets `-authz`. `oauth2-proxy` stays for stored
     # Targets whose `platform.externalAuth` still names the port-80 Service.

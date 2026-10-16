@@ -6,7 +6,7 @@ kind: ClusterRole
 metadata:
   name: kthx-engine-target-discovery
 rules:
-  # `list` lets the connect screen offer any namespace, not only spindrift-apps.
+  # `list` lets the connect screen offer any namespace, not only kthx-apps.
   - apiGroups:
       - ""
     resources:
@@ -107,22 +107,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: kthx-engine-target-chart-artifact
-  namespace: spindrift-apps
-rules:
-  - apiGroups:
-      - source.toolkit.fluxcd.io
-    resources:
-      - ocirepositories
-    resourceNames:
-      - spindrift-app
-    verbs:
-      - get
----
-# `CHART_SOURCE` for the OCI form, scoped to its one object.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kthx-engine-target-chart-artifact
   namespace: kthx-apps
 rules:
   - apiGroups:
@@ -133,24 +117,6 @@ rules:
       - spindrift-app
     verbs:
       - get
----
-# DNSEndpoints for vanity names of Targets with no cluster, such as Vercel.
-# Bound only where an installation runs, so other Targets carry no binding.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kthx-engine-target-dns
-  namespace: spindrift-apps
-rules:
-  - apiGroups:
-      - externaldns.k8s.io
-    resources:
-      - dnsendpoints
-    verbs:
-      - create
-      - delete
-      - get
-      - patch
 ---
 # DNSEndpoints for vanity names of Targets with no cluster, such as Vercel.
 # Bound only where an installation runs, so other Targets carry no binding.
@@ -232,64 +198,6 @@ rules:
       - delete
       - get
       - patch
----
-# Reads and deletes Datastores whose stored ref still names `spindrift-apps`.
-# Delete this Role and its bindings once no ref names it.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kthx-engine-target-datastores-legacy
-  namespace: spindrift-apps
-rules:
-  - apiGroups:
-      - postgresql.cnpg.io
-    resources:
-      - clusters
-    verbs:
-      - delete
-      - get
-  - apiGroups:
-      - valkey.io
-    resources:
-      - valkeyclusters
-    verbs:
-      - delete
-      - get
-  - apiGroups:
-      - ""
-    resources:
-      - services
-    verbs:
-      - get
----
-# Reads and deletes Datastores whose stored ref still names `spindrift-apps`.
-# Delete this Role and its bindings once no ref names it.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kthx-engine-target-datastores-legacy
-  namespace: kthx-apps
-rules:
-  - apiGroups:
-      - postgresql.cnpg.io
-    resources:
-      - clusters
-    verbs:
-      - delete
-      - get
-  - apiGroups:
-      - valkey.io
-    resources:
-      - valkeyclusters
-    verbs:
-      - delete
-      - get
-  - apiGroups:
-      - ""
-    resources:
-      - services
-    verbs:
-      - get
 ---
 # `CHART_SOURCE` for the repository form, when `charts.app` names a path.
 apiVersion: rbac.authorization.k8s.io/v1

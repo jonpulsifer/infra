@@ -29,39 +29,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: kthx-engine-target-chart-artifact
-  namespace: spindrift-apps
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: kthx-engine-target-chart-artifact
-subjects:
-  - kind: ServiceAccount
-    name: kthx-engine
-    namespace: kthx-engine
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kthx-engine-target-chart-artifact
   namespace: kthx-apps
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: kthx-engine-target-chart-artifact
-subjects:
-  - kind: ServiceAccount
-    name: kthx-engine
-    namespace: kthx-engine
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kthx-engine-target-dns
-  namespace: spindrift-apps
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: kthx-engine-target-dns
 subjects:
   - kind: ServiceAccount
     name: kthx-engine
@@ -90,34 +62,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: kthx-engine-target-datastores
-subjects:
-  - kind: ServiceAccount
-    name: kthx-engine
-    namespace: kthx-engine
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kthx-engine-target-datastores-legacy
-  namespace: spindrift-apps
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: kthx-engine-target-datastores-legacy
-subjects:
-  - kind: ServiceAccount
-    name: kthx-engine
-    namespace: kthx-engine
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kthx-engine-target-datastores-legacy
-  namespace: kthx-apps
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: kthx-engine-target-datastores-legacy
 subjects:
   - kind: ServiceAccount
     name: kthx-engine
