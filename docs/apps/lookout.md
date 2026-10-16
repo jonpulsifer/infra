@@ -38,7 +38,6 @@ The agent updates itself. When the policy's `agent` entry names a version other 
 ## Limits
 
 - The MSI is unsigned, so SmartScreen asks once on a downloaded copy. Choose **More info**, then **Run anyway**.
-- No release exists until the first push to `main` after this page, and the policy has no `agent` entry until the owner adds one, so no desktop upgrades itself yet.
 - Clicking a notification opens nothing. An unpackaged app needs a COM activator for that, and the tray has none.
 - Memory Integrity still blocks the sensor driver. See [Check Memory Integrity](../runbooks/install-windows-monitoring.md#check-memory-integrity).
 - The tray reaches the pipe on tallboy. Whether notifications appear, and whether `windows_exporter` reads the textfile, is unconfirmed.
