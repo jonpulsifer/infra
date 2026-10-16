@@ -1014,7 +1014,7 @@ function clusterRoute(
             name: 'build-pod',
             namespace: 'builds',
             // The route finds its pod by this label; the fake filters on it.
-            labels: { [podLabel]: 'spindrift-build-fixed' },
+            labels: { [podLabel]: 'kthx-build-fixed' },
           },
         },
       ],
@@ -1068,7 +1068,7 @@ describe('the in-cluster build route', () => {
     const { cluster, route } = clusterRoute();
     await run(route.build(archiveSource(), spec));
 
-    const job = cluster.get('jobs/builds/spindrift-build-fixed');
+    const job = cluster.get('jobs/builds/kthx-build-fixed');
     const jobSpec = job?.spec as {
       backoffLimit: number;
       ttlSecondsAfterFinished: number;
@@ -1085,11 +1085,11 @@ describe('the in-cluster build route', () => {
     const { cluster, route } = clusterRoute();
     await run(route.build(archiveSource(), spec));
 
-    const job = cluster.get('jobs/builds/spindrift-build-fixed');
+    const job = cluster.get('jobs/builds/kthx-build-fixed');
     const template = job?.spec as
       | { template: { metadata: { labels?: Record<string, string> } } }
       | undefined;
-    const labels = { [JOB_LABEL]: 'spindrift-build-fixed' };
+    const labels = { [JOB_LABEL]: 'kthx-build-fixed' };
     expect(job?.metadata.labels).toEqual(labels);
     expect(template?.template.metadata.labels).toEqual(labels);
   });
@@ -1109,7 +1109,7 @@ describe('the in-cluster build route', () => {
       ],
     };
     const podSpecOf = (cluster: FakeKubernetes): Record<string, unknown> => {
-      const job = cluster.get('jobs/builds/spindrift-build-fixed');
+      const job = cluster.get('jobs/builds/kthx-build-fixed');
       if (job === undefined) throw new Error('the build Job was not created');
       return (job.spec as { template: { spec: Record<string, unknown> } })
         .template.spec;
@@ -1133,7 +1133,7 @@ describe('the in-cluster build route', () => {
     const { cluster, route } = clusterRoute();
     await run(route.build(archiveSource(), spec));
 
-    const job = cluster.get('jobs/builds/spindrift-build-fixed');
+    const job = cluster.get('jobs/builds/kthx-build-fixed');
     const pod = (
       job?.spec as {
         template: {
@@ -1195,7 +1195,7 @@ describe('the in-cluster build route', () => {
     const { cluster, route } = clusterRoute({}, { timeoutMs: 90_000 });
     await run(route.build(archiveSource(), spec));
 
-    const jobSpec = cluster.get('jobs/builds/spindrift-build-fixed')?.spec as {
+    const jobSpec = cluster.get('jobs/builds/kthx-build-fixed')?.spec as {
       activeDeadlineSeconds: number;
     };
     // The cluster ends a runaway build even if this process is gone.
@@ -1229,7 +1229,7 @@ describe('the in-cluster build route', () => {
     expect(text(events)).toContain('deleting it');
     // Background propagation, or the API orphans the pod and it keeps going.
     expect(jobDeletes(cluster)).toEqual([
-      '/apis/batch/v1/namespaces/builds/jobs/spindrift-build-fixed?propagationPolicy=Background',
+      '/apis/batch/v1/namespaces/builds/jobs/kthx-build-fixed?propagationPolicy=Background',
     ]);
   });
 
@@ -1237,7 +1237,7 @@ describe('the in-cluster build route', () => {
     let cluster: FakeKubernetes | null = null;
     const built = clusterRoute({
       status: (reads) => {
-        if (reads === 2) cluster?.remove('jobs/builds/spindrift-build-fixed');
+        if (reads === 2) cluster?.remove('jobs/builds/kthx-build-fixed');
         return {};
       },
     });
@@ -1254,15 +1254,13 @@ describe('the in-cluster build route', () => {
   test('names the Job by the dispatch id, which is what cancel deletes by', async () => {
     const { cluster, route } = clusterRoute();
     await run(route.build(archiveSource(), spec, 'dispatch-1'));
-    expect(cluster.get('jobs/builds/spindrift-build-dispatch-1')).toBeDefined();
+    expect(cluster.get('jobs/builds/kthx-build-dispatch-1')).toBeDefined();
 
     await route.cancel({ dispatchId: 'dispatch-1', runUrl: null });
     expect(jobDeletes(cluster)).toEqual([
-      '/apis/batch/v1/namespaces/builds/jobs/spindrift-build-dispatch-1?propagationPolicy=Background',
+      '/apis/batch/v1/namespaces/builds/jobs/kthx-build-dispatch-1?propagationPolicy=Background',
     ]);
-    expect(
-      cluster.get('jobs/builds/spindrift-build-dispatch-1'),
-    ).toBeUndefined();
+    expect(cluster.get('jobs/builds/kthx-build-dispatch-1')).toBeUndefined();
   });
 
   test('cancelling a Job that is already gone is not an error', async () => {

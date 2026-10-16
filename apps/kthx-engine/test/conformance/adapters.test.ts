@@ -309,7 +309,7 @@ buildAdapterSuite('in-cluster', () => {
             name: 'build-pod',
             namespace: 'builds',
             // The fake cluster filters pods on this label.
-            labels: { [JOB_LABEL]: 'spindrift-build-conformance' },
+            labels: { [JOB_LABEL]: 'kthx-build-conformance' },
           },
         },
       ],
