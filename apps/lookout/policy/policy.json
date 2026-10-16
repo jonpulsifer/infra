@@ -23,8 +23,8 @@
     "productCode": "{7FAD6F97-D84E-42CC-A600-5F4EC3460FF5}"
   },
   "agent": {
-    "version": "0.1.1",
-    "url": "https://github.com/jonpulsifer/infra/releases/download/lookout-v0.1.1/Lookout.msi",
-    "sha256": "A030F4B56A150648E0D07BCD2ADBE11C9D9A5E3A3C6609CD7DEAB9DE94950969"
+    "version": "0.1.2",
+    "url": "https://github.com/jonpulsifer/infra/releases/download/lookout-v0.1.2/Lookout.msi",
+    "sha256": "A93B143D21C51F76450BDAA5E8432578F65981DD2E8A55AB1D4E781B478BC942"
   }
 }
