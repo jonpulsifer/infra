@@ -41,6 +41,20 @@ public class WindowsExporterTests
     }
 
     [Fact]
+    public async Task AVPrefixOnTheProductVersionIsNotDrift()
+    {
+        var system = new FakeSystem();
+        var bundle = Fixtures.Bundle();
+        system.InstallEverything(bundle);
+        system.Versions[Paths.ExporterExe(system)] = "v0.31.8";
+
+        var state = await new WindowsExporterReconciler(system).ObserveAsync(bundle, CancellationToken.None);
+
+        Assert.True(state.Current);
+        Assert.Empty(state.Problems);
+    }
+
+    [Fact]
     public async Task TheInstalledVersionIsRemovedBeforeItIsReinstalledWithOtherCollectors()
     {
         var system = new FakeSystem();
