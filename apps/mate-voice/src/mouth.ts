@@ -54,13 +54,44 @@ interface Utterance {
   id: string;
   /** Characters sent to the server so far. */
   sent: number;
-  /** Text held back until a word boundary. */
+  /** Text held back until a clause ends. */
   held: string;
   final: boolean;
 }
 
 const OPEN = 1;
 const CONNECTING = 0;
+
+/** Held text past this length goes up at its last space, clause or not. */
+export const CLAUSE_MAX_CHARS = 120;
+/** A comma, colon or semicolon ends a piece once this much is held. */
+export const CLAUSE_MIN_CHARS = 40;
+const SENTENCE_END = /[.!?…][)"']*\s/g;
+const CLAUSE_END = /[,;:][)"']*\s/g;
+
+/**
+ * Where the held text can go up without cutting a thought: after the last
+ * sentence end; after the last comma once enough is held; at the last space
+ * once too much is held; else nowhere yet.
+ */
+export function clauseEnd(text: string): number {
+  let last = 0;
+  for (const match of text.matchAll(SENTENCE_END))
+    last = match.index + match[0].length;
+  if (last > 0) return last;
+  if (text.length >= CLAUSE_MIN_CHARS) {
+    for (const match of text.matchAll(CLAUSE_END)) {
+      const end = match.index + match[0].length;
+      if (end >= CLAUSE_MIN_CHARS) last = end;
+    }
+    if (last > 0) return last;
+  }
+  if (text.length >= CLAUSE_MAX_CHARS) {
+    const space = text.lastIndexOf(' ');
+    if (space > 0) return space + 1;
+  }
+  return 0;
+}
 
 /** The socket URL for one call. */
 export function ttsUrl(api: string, voiceId: string, modelId: string): string {
@@ -128,15 +159,24 @@ export class Mouth {
     }
     const utterance = this.current ?? this.begin();
     utterance.held += text;
-    const boundary = final
-      ? utterance.held.length
-      : utterance.held.lastIndexOf(' ') + 1;
-    if (boundary > 0) {
-      const chunk = utterance.held.slice(0, boundary);
-      utterance.held = utterance.held.slice(boundary);
-      this.sendText(utterance, final ? `${chunk} ` : chunk);
+    if (final) {
+      const rest = utterance.held.trim();
+      utterance.held = '';
+      if (rest) this.sendText(utterance, `${rest} `);
+      this.finish(utterance);
+      return;
     }
-    if (final) this.finish(utterance);
+    // The server voices each piece as it comes, so a piece is a clause or a
+    // sentence, never a word: that is where the intonation lives.
+    for (
+      let cut = clauseEnd(utterance.held);
+      cut > 0;
+      cut = clauseEnd(utterance.held)
+    ) {
+      const chunk = utterance.held.slice(0, cut).trim();
+      utterance.held = utterance.held.slice(cut);
+      if (chunk) this.sendText(utterance, `${chunk} `);
+    }
   }
 
   /** A whole line of mate's, outside a reply. */

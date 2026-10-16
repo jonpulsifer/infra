@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { AudioPlayer } from '@discordjs/voice';
 import type { EngineSocket } from '../src/engine.ts';
-import { Mouth, TTS_OUTPUT_RATE, ttsUrl } from '../src/mouth.ts';
+import {
+  CLAUSE_MAX_CHARS,
+  clauseEnd,
+  Mouth,
+  TTS_OUTPUT_RATE,
+  ttsUrl,
+} from '../src/mouth.ts';
 import { FRAME_BYTES, Playback, TAIL_FRAMES } from '../src/playback.ts';
 import { capturingLog, FakePlayer, readyFrames } from './fakes.ts';
 
@@ -109,21 +115,21 @@ describe('the mouth', () => {
     });
   });
 
-  test('speaks an utterance as one context: init, words at boundaries, flush and close at the end', async () => {
+  test('speaks an utterance as one context: init, whole clauses, flush and close at the end', async () => {
     const h = harness();
     await h.mouth.say('Hello th', false);
     await h.mouth.say('ere, ow', false);
-    await h.mouth.say('ner.', true);
+    await h.mouth.say('ner. The fence', false);
+    await h.mouth.say(' is up.', true);
     const socket = h.sockets[0];
     expect(socket?.of('u1')).toEqual([
       { context_id: 'u1', text: ' ', voice_settings: { stability: 0.5 } },
-      { context_id: 'u1', text: 'Hello ' },
-      { context_id: 'u1', text: 'there, ' },
-      { context_id: 'u1', text: 'owner. ' },
+      { context_id: 'u1', text: 'Hello there, owner. ' },
+      { context_id: 'u1', text: 'The fence is up. ' },
       { context_id: 'u1', text: '', flush: true },
       { context_id: 'u1', close_context: true },
     ]);
-    expect(h.mouth.counts).toMatchObject({ utterances: 1, chars: 20 });
+    expect(h.mouth.counts).toMatchObject({ utterances: 1, chars: 37 });
     await h.mouth.say('Again.', true);
     expect(socket?.of('u2').map((m) => m.text ?? m.close_context)).toEqual([
       ' ',
@@ -174,11 +180,11 @@ describe('the mouth', () => {
 
   test('a hush closes the context, stops the player and drops the audio still arriving', async () => {
     const h = harness();
-    await h.mouth.say('A long sentence ', false);
+    await h.mouth.say('A long sentence. ', false);
     h.sockets[0]?.receive(audio('u1'));
     expect(h.player.played).toBe(1);
     expect(h.mouth.speaking).toBe(true);
-    expect(h.mouth.heardChars).toBe(16);
+    expect(h.mouth.heardChars).toBe(17);
     h.mouth.hush();
     expect(h.sockets[0]?.of('u1').at(-1)).toEqual({
       context_id: 'u1',
@@ -284,5 +290,17 @@ describe('the mouth', () => {
     ]);
     await h.mouth.say('Nothing.', true);
     expect(h.sockets).toHaveLength(1);
+  });
+
+  test('a piece ends at a sentence, at a comma once enough is held, or at a space once too much is', () => {
+    expect(clauseEnd('Hello there')).toBe(0);
+    expect(clauseEnd('Hello there. And')).toBe('Hello there. '.length);
+    expect(clauseEnd('Is it up? Yes, it')).toBe('Is it up? '.length);
+    expect(clauseEnd('one, two, three, four')).toBe(0);
+    const long =
+      'the first clause of a long sentence runs on, and then the rest';
+    expect(clauseEnd(long)).toBe(long.indexOf(', ') + 2);
+    const run = 'a '.repeat(CLAUSE_MAX_CHARS / 2 + 2);
+    expect(clauseEnd(run)).toBe(run.lastIndexOf(' ') + 1);
   });
 });

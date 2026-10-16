@@ -476,10 +476,12 @@ export class Voice {
           }
           const id = await rootMessage(threadId, `voice: ${task}`);
           // The thread is adopted, so the owner's message in it runs a turn.
+          // A message in a thread is addressed by the thread, as Discord
+          // delivers it, so the marks on it land.
           await work.threads.onMessage({
             surface: 'discord',
             id,
-            channelId: call.originChannelId,
+            channelId: threadId,
             threadId,
             authorId: call.ownerId,
             authorIsBot: false,
