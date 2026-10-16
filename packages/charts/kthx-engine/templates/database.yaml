@@ -47,7 +47,7 @@ spec:
       plugin:
         name: barman-cloud.cloudnative-pg.io
         parameters:
-          barmanObjectName: garage
+          barmanObjectName: {{ ternary "garage-origin" "garage" (not (empty .Values.backup.recoverFromPath)) }}
           serverName: {{ .Values.backup.recoverFrom | quote }}
   {{- else }}
     initdb:

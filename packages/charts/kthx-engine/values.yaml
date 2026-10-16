@@ -100,6 +100,9 @@ backup:
   # A prefix of the same store to recover from in place of `initdb`: the serverName the
   # Cluster had before it was re-created. Read at creation only; drop it once recovered.
   recoverFrom: ""
+  # The archive path that prefix lives under when it is another namespace's store, such as
+  # s3://cnpg/<namespace>/. Empty recovers from this Cluster's own store.
+  recoverFromPath: ""
 
 ingress:
   enabled: true

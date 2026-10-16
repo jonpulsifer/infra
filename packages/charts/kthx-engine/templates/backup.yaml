@@ -54,6 +54,29 @@ spec:
       compression: gzip
     data:
       compression: gzip
+{{- if and $.Values.backup.recoverFrom $.Values.backup.recoverFromPath }}
+---
+# The store the recovery reads: another namespace's archive, the same Garage keys.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: garage-origin
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kthx-engine.labels" $ | nindent 4 }}
+spec:
+  configuration:
+    destinationPath: {{ $.Values.backup.recoverFromPath | quote }}
+    endpointURL: {{ . | quote }}
+    s3Credentials:
+      accessKeyId: {name: garage-cnpg, key: ACCESS_KEY_ID}
+      secretAccessKey: {name: garage-cnpg, key: ACCESS_SECRET_KEY}
+      region: {name: garage-cnpg, key: REGION}
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+{{- end }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
