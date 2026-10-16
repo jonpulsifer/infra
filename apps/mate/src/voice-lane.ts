@@ -3,7 +3,10 @@
  * transcript as the whole context. The model may call the call's tools; each
  * round of calls runs in mate's own process and the answers go back for the
  * next round, a few rounds at most, all within one time budget. Text the
- * model says before a tool call is spoken while the tool runs.
+ * model says before a tool call is spoken while the tool runs. A turn that
+ * stays silent too long opens with a filler, and a tool round the model
+ * starts without a word opens with an acknowledgement, so the caller hears
+ * that mate heard.
  */
 import {
   type Api,
@@ -24,10 +27,17 @@ import type { VoiceTool } from './voice-tools.ts';
 
 export const VOICE_PROMPT = `You are mate, speaking aloud in a Discord voice call with the owner of this homelab. Your words are read out by a text-to-speech voice in the owner's own voice.
 Answer in one or two short sentences of plain spoken English. No lists, no headings, no markdown, no code, no URLs, no ids read aloud.
-You have a few tools. Say a few words before calling one, and keep the answer short after it. Work that takes longer than a moment goes to a text thread through start_task: the first call records the task, you read it back and ask for a yes, and after the owner says yes you call start_task again. When the owner is not alone in the channel, start_task refuses; say so and move on.`;
+You have a few tools. Say a few words before calling one, and keep the answer short after it. When the owner asks for work, call start_task right away rather than describing what you would do or asking first. Work that takes longer than a moment goes to a text thread through start_task: the first call records the task, you read it back and ask for a yes, and after the owner says yes you call start_task again. When the owner is not alone in the channel, start_task refuses; say so and move on.`;
 
 /** Rounds of tool calls in one spoken turn. */
 export const TOOL_ROUNDS = 3;
+
+/** Said when the model is slow to start; flat, never eager. */
+export const FILLERS = ['Hmm.', 'Let me think.', 'One sec.', 'Right.'];
+/** Said when a tool round starts before the model has said a word. */
+export const TOOL_ACK = 'On it.';
+export const FILLER_MS = 1_200;
+const LATE = Symbol('late');
 
 export interface ModelVoiceLaneOptions {
   models: Pick<Models, 'streamSimple'>;
@@ -35,6 +45,8 @@ export interface ModelVoiceLaneOptions {
   thinking: ThinkingLevel;
   /** The whole reply, first token included, tool rounds included. */
   timeoutMs: number;
+  /** Silence before the first word that earns a filler; 0 for none. */
+  fillerMs?: number;
   log: Log;
 }
 
@@ -73,6 +85,22 @@ function messages(turns: readonly Turn[], model: Model<Api>): Message[] {
   });
 }
 
+/** `next`'s value, or `LATE` once `ms` pass first. */
+async function within<T>(
+  next: Promise<T>,
+  ms: number,
+): Promise<T | typeof LATE> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<typeof LATE>((resolve) => {
+    timer = setTimeout(() => resolve(LATE), ms);
+  });
+  try {
+    return await Promise.race([next, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function run(
   tools: readonly VoiceTool[],
   call: ToolCall,
@@ -105,12 +133,18 @@ async function run(
 
 export function modelVoiceLane(options: ModelVoiceLaneOptions): VoiceLane {
   const { models, model, thinking, timeoutMs, log } = options;
+  const fillerMs = options.fillerMs ?? FILLER_MS;
   return {
-    async *reply(turns, signal, conversationId, tools = []) {
+    async *reply(turns, signal, conversationId, tools = [], say = {}) {
       const history: Message[] = messages(turns, model);
       const started = Date.now();
       let first: number | null = null;
       let calls = 0;
+      const fillers = say.fillers ?? true;
+      // Anything said yet: the model's words, a filler or the acknowledgement.
+      let heard = false;
+      let filler = false;
+      let ack = false;
       for (let round = 0; round <= TOOL_ROUNDS; round++) {
         const context: Context = {
           systemPrompt: VOICE_PROMPT,
@@ -134,12 +168,38 @@ export function modelVoiceLane(options: ModelVoiceLaneOptions): VoiceLane {
           ...(thinking === 'off' ? {} : { reasoning: thinking }),
         });
         const pending: ToolCall[] = [];
-        for await (const event of stream) {
+        const events = stream[Symbol.asyncIterator]();
+        let next = events.next();
+        for (;;) {
+          const step =
+            heard || !fillers || fillerMs <= 0
+              ? await next
+              : await within(next, fillerMs - (Date.now() - started));
+          if (step === LATE) {
+            heard = true;
+            filler = true;
+            if (!signal.aborted) {
+              yield `${FILLERS[Math.floor(Math.random() * FILLERS.length)]} `;
+            }
+            continue;
+          }
+          if (step.done) break;
+          next = events.next();
+          const event = step.value;
           if (event.type === 'text_delta') {
             first ??= Date.now() - started;
+            heard = true;
             yield event.delta;
-          } else if (event.type === 'toolcall_end') {
-            pending.push(event.toolCall);
+          } else if (
+            event.type === 'toolcall_start' ||
+            event.type === 'toolcall_end'
+          ) {
+            if (fillers && first === null && !ack) {
+              heard = true;
+              ack = true;
+              yield `${TOOL_ACK} `;
+            }
+            if (event.type === 'toolcall_end') pending.push(event.toolCall);
           } else if (event.type === 'error') {
             throw new Error(event.error.errorMessage ?? event.reason);
           }
@@ -153,7 +213,12 @@ export function modelVoiceLane(options: ModelVoiceLaneOptions): VoiceLane {
           history.push(await run(tools, call, log));
         }
       }
-      log.info('voice lane: answered', { firstTokenMs: first, tools: calls });
+      log.info('voice lane: answered', {
+        firstTokenMs: first,
+        tools: calls,
+        filler,
+        ack,
+      });
     },
   };
 }

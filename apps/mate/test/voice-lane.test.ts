@@ -7,7 +7,12 @@ import {
   type SimpleStreamOptions,
   type TranscriptContext,
 } from '@earendil-works/pi-ai';
-import { modelVoiceLane, VOICE_PROMPT } from '../src/voice-lane.ts';
+import {
+  FILLERS,
+  modelVoiceLane,
+  TOOL_ACK,
+  VOICE_PROMPT,
+} from '../src/voice-lane.ts';
 import { RecordingLog } from './support.ts';
 
 const MODEL = {
@@ -17,7 +22,10 @@ const MODEL = {
   contextWindow: 100_000,
 } as unknown as Model<Api>;
 
-function fakeModels(play: 'words' | 'error' | 'tool') {
+function fakeModels(
+  play: 'words' | 'error' | 'tool' | 'silent-tool',
+  delayMs = 0,
+) {
   const calls: { context: TranscriptContext; options?: SimpleStreamOptions }[] =
     [];
   const models = {
@@ -37,8 +45,28 @@ function fakeModels(play: 'words' | 'error' | 'tool') {
         stopReason: 'stop',
         timestamp: 1,
       } as unknown as AssistantMessage;
-      queueMicrotask(() => {
-        if (play === 'tool' && calls.length === 1) {
+      const round = calls.length;
+      const begin = (fn: () => void) =>
+        delayMs > 0 ? setTimeout(fn, delayMs) : queueMicrotask(fn);
+      begin(() => {
+        if (play === 'silent-tool' && round <= 2) {
+          const call = {
+            type: 'toolCall' as const,
+            id: `c${round}`,
+            name: 'task_status',
+            arguments: {},
+          };
+          out.push({ type: 'toolcall_start', contentIndex: 0, partial });
+          out.push({
+            type: 'toolcall_end',
+            contentIndex: 0,
+            toolCall: call,
+            partial,
+          });
+          out.end({ ...partial, content: [call], stopReason: 'toolUse' });
+          return;
+        }
+        if (play === 'tool' && round === 1) {
           const call = {
             type: 'toolCall' as const,
             id: 'c1',
@@ -88,6 +116,14 @@ function fakeModels(play: 'words' | 'error' | 'tool') {
   };
   return { models, calls };
 }
+
+const STATUS = {
+  name: 'task_status',
+  description: 'status',
+  parameters: { type: 'object', properties: {} } as never,
+  sideEffect: false,
+  execute: async () => 'still running',
+};
 
 const collect = async (it: AsyncIterable<string>) => {
   const out: string[] = [];
@@ -206,5 +242,121 @@ describe('the model voice lane', () => {
       toolName: 'task_status',
       isError: false,
     });
+  });
+
+  test('opens a slow turn with one flat filler before the first word', async () => {
+    const { models } = fakeModels('words', 60);
+    const lane = modelVoiceLane({
+      models,
+      model: MODEL,
+      thinking: 'off',
+      timeoutMs: 5_000,
+      fillerMs: 10,
+      log: new RecordingLog(),
+    });
+    const words = await collect(
+      lane.reply(
+        [{ role: 'user', content: 'all good?' }],
+        new AbortController().signal,
+        'conv_4',
+      ),
+    );
+    expect(words).toHaveLength(3);
+    expect(FILLERS).toContain(words[0]?.trimEnd() ?? '');
+    expect(words[0]?.endsWith(' ')).toBe(true);
+    expect(words.slice(1)).toEqual(['all ', 'good']);
+  });
+
+  test('says no filler when the model is quick, when fillerMs is 0, or when the caller asks for none', async () => {
+    const quick = modelVoiceLane({
+      models: fakeModels('words').models,
+      model: MODEL,
+      thinking: 'off',
+      timeoutMs: 5_000,
+      fillerMs: 40,
+      log: new RecordingLog(),
+    });
+    const off = modelVoiceLane({
+      models: fakeModels('words', 40).models,
+      model: MODEL,
+      thinking: 'off',
+      timeoutMs: 5_000,
+      fillerMs: 0,
+      log: new RecordingLog(),
+    });
+    const asked = modelVoiceLane({
+      models: fakeModels('silent-tool', 40).models,
+      model: MODEL,
+      thinking: 'off',
+      timeoutMs: 5_000,
+      fillerMs: 10,
+      log: new RecordingLog(),
+    });
+    const turns = [{ role: 'user' as const, content: 'all good?' }];
+    const signal = new AbortController().signal;
+    expect(await collect(quick.reply(turns, signal, 'conv_5'))).toEqual([
+      'all ',
+      'good',
+    ]);
+    expect(await collect(off.reply(turns, signal, 'conv_5'))).toEqual([
+      'all ',
+      'good',
+    ]);
+    expect(
+      await collect(
+        asked.reply(turns, signal, 'conv_5', [STATUS], { fillers: false }),
+      ),
+    ).toEqual(['all ', 'good']);
+  });
+
+  test('acknowledges once when the model starts tool rounds without a word', async () => {
+    const { models, calls } = fakeModels('silent-tool');
+    const log = new RecordingLog();
+    const lane = modelVoiceLane({
+      models,
+      model: MODEL,
+      thinking: 'off',
+      timeoutMs: 5_000,
+      fillerMs: 0,
+      log,
+    });
+    const words = await collect(
+      lane.reply(
+        [{ role: 'user', content: 'check the backups' }],
+        new AbortController().signal,
+        'conv_6',
+        [STATUS],
+      ),
+    );
+    expect(words).toEqual([`${TOOL_ACK} `, 'all ', 'good']);
+    expect(calls).toHaveLength(3);
+    expect(log.of('voice lane: answered')[0]?.fields).toMatchObject({
+      tools: 2,
+      filler: false,
+      ack: true,
+    });
+  });
+
+  test('a slow silent tool round gets the filler and then the acknowledgement', async () => {
+    const { models } = fakeModels('silent-tool', 40);
+    const lane = modelVoiceLane({
+      models,
+      model: MODEL,
+      thinking: 'off',
+      timeoutMs: 5_000,
+      fillerMs: 10,
+      log: new RecordingLog(),
+    });
+    const words = await collect(
+      lane.reply(
+        [{ role: 'user', content: 'check the backups' }],
+        new AbortController().signal,
+        'conv_7',
+        [STATUS],
+      ),
+    );
+    expect(words).toHaveLength(4);
+    expect(FILLERS).toContain(words[0]?.trimEnd() ?? '');
+    expect(words.slice(1)).toEqual([`${TOOL_ACK} `, 'all ', 'good']);
   });
 });

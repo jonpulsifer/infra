@@ -112,6 +112,8 @@ export class Talk {
         ],
         run.abort.signal,
         this.options.callId,
+        [],
+        { fillers: false },
       )) {
         if (this.current !== run) return;
         run.said += delta;
