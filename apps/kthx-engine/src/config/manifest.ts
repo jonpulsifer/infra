@@ -157,7 +157,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       connection: {
         namespace: 'kthx-apps',
         appNamespace: 'app-{app}',
-        datastoreNamespace: 'spindrift-datastores',
+        datastoreNamespace: 'kthx-datastores',
         delivery: {
           flavour: 'flux-helmrelease',
           namespace: 'kthx-apps',

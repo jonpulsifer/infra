@@ -190,7 +190,7 @@ export type CloudflarePagesAdapterConnection = Extract<
  */
 const DEFAULT_APP_NAMESPACE = 'app-{app}';
 
-const DEFAULT_DATASTORE_NAMESPACE = 'spindrift-datastores';
+const DEFAULT_DATASTORE_NAMESPACE = 'kthx-datastores';
 
 /**
  * Per App, so the chart's same-namespace `podSelector: {}` allow covers only that
