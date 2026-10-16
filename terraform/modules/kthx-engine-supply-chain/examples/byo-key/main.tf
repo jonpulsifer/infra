@@ -7,10 +7,10 @@ module "supply_chain" {
   project           = "artifacts-project"
   location          = "northamerica-northeast1"
   repository        = "i"
-  controller_member = "serviceAccount:spindrift-controller@home-vessel.iam.gserviceaccount.com"
+  controller_member = "serviceAccount:kthx-engine-controller@home-vessel.iam.gserviceaccount.com"
 
   attester_principals = [
-    "serviceAccount:spindrift-controller@home-vessel.iam.gserviceaccount.com",
+    "serviceAccount:kthx-engine-controller@home-vessel.iam.gserviceaccount.com",
   ]
 
   signer_key = "projects/keys-project/locations/northamerica-northeast1/keyRings/keys/cryptoKeys/signer"

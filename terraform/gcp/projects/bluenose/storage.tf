@@ -52,17 +52,6 @@ moved {
   to   = google_storage_bucket.kthx_engine_source
 }
 
-resource "google_storage_bucket_iam_member" "kthx_engine_source" {
-  bucket = google_storage_bucket.kthx_engine_source.name
-  role   = "roles/storage.admin"
-  member = google_service_account.kthx_engine_controller.member
-}
-
-moved {
-  from = google_storage_bucket_iam_member.spindrift_source
-  to   = google_storage_bucket_iam_member.kthx_engine_source
-}
-
 resource "google_storage_bucket_iam_member" "trusted_builder_source" {
   bucket = google_storage_bucket.kthx_engine_source.name
   role   = "roles/storage.objectViewer"
@@ -124,12 +113,6 @@ resource "google_storage_bucket" "kthx_engine_source_named" {
   depends_on = [module.vessel]
 }
 
-
-resource "google_storage_bucket_iam_member" "kthx_engine_source_named" {
-  bucket = google_storage_bucket.kthx_engine_source_named.name
-  role   = "roles/storage.admin"
-  member = google_service_account.kthx_engine_controller.member
-}
 
 resource "google_storage_bucket_iam_member" "kthx_engine_source_named_controller_named" {
   bucket = google_storage_bucket.kthx_engine_source_named.name

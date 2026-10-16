@@ -1,7 +1,7 @@
 # The kthx-engine-vessel module applied to bluenose, the home vessel; iam.tf holds its extras.
 
 locals {
-  controller_member = "serviceAccount:spindrift-controller@${local.project}.iam.gserviceaccount.com"
+  controller_member = google_service_account.kthx_engine_controller_named.member
 }
 
 module "vessel" {
@@ -17,7 +17,7 @@ module "vessel" {
 
   # A grant to a missing service account fails with a 400 and is not retried. A vessel
   # project has iam.googleapis.com on before its first apply, so the account can come first.
-  depends_on = [google_service_account.kthx_engine_controller]
+  depends_on = [google_service_account.kthx_engine_controller_named]
 }
 
 module "network" {
