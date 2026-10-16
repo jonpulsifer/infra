@@ -248,10 +248,12 @@ export class Playback {
       }, JITTER_MS);
       return;
     }
+    // A stream that hears nothing for this long is over, whether or not
+    // anything waits behind it; otherwise the player would never be idle.
     stream.timer = setTimer(() => {
       stream.timer = null;
       stream.stalled = true;
-      if (this.queue.length > 0) this.giveWay(stream);
+      this.giveWay(stream);
     }, STALL_MS);
   }
 

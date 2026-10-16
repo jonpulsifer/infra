@@ -150,6 +150,16 @@ describe('playback', () => {
     expect(player.played).toBe(3);
   });
 
+  test('a stream that never hears audio gives way on its own, so the player is idle again', () => {
+    const { player, playback, fire } = harness();
+    const stream = playback.openStream();
+    expect(playback.idle).toBe(false);
+    fire(STALL_MS);
+    expect(stream.open).toBe(false);
+    expect(playback.idle).toBe(true);
+    expect(player.played).toBe(0);
+  });
+
   test('stop and abort drop open streams and what they hold', () => {
     const { player, playback } = harness();
     const playing = playback.openStream();

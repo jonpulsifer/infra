@@ -147,13 +147,13 @@ export class Mouth {
   /** The owner spoke over mate: stop the utterance and drop its audio. */
   hush(): void {
     const utterance = this.current;
+    this.current = null;
     this.options.playback.stop();
+    if (utterance) this.closeContext(utterance.id);
     if (this.voicing.size === 0) return;
     this.counts.hushes += 1;
     for (const id of this.voicing.keys()) this.hushed.add(id);
     this.voicing.clear();
-    this.current = null;
-    if (utterance) this.closeContext(utterance.id);
   }
 
   stop(): void {
@@ -260,9 +260,14 @@ export class Mouth {
       return false;
     }
     this.counts.dials += 1;
+    // A superseded socket's close is ignored below, so its utterances end here.
+    if (this.current) this.counts.failures += 1;
+    this.current = null;
+    for (const stream of this.voicing.values()) stream.end();
+    this.voicing.clear();
+    this.hushed.clear();
     this.socket = socket;
     this.contexts = new Set();
-    this.current = null;
     return new Promise<boolean>((resolve) => {
       const setTimer = this.options.setTimer ?? setTimeout;
       const timer = setTimer(() => {
@@ -329,7 +334,8 @@ export class Mouth {
       return;
     }
     if (message.audio) {
-      const id = message.contextId ?? '';
+      // The schema allows a frame without a context id; it belongs to the utterance under way.
+      const id = message.contextId ?? this.current?.id ?? '';
       if (this.hushed.has(id) || !this.voicing.has(id)) {
         this.counts.droppedChunks += 1;
         return;

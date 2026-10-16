@@ -236,6 +236,26 @@ describe('the mouth', () => {
     expect(h.mouth.counts.dials).toBe(2);
   });
 
+  test('a redial while the old socket is still closing ends its utterances, so the next one plays', async () => {
+    const h = harness();
+    await h.mouth.say('Hello ', false);
+    h.sockets[0]?.receive(audio('u1'));
+    expect(h.player.played).toBe(1);
+    // The server sent a close frame; onclose has not fired yet.
+    const old = h.sockets[0];
+    if (!old) throw new Error('no socket');
+    old.readyState = 2;
+    await h.mouth.say('world.', true);
+    expect(h.sockets).toHaveLength(2);
+    expect(h.mouth.counts.failures).toBe(1);
+    old.onclose?.({ code: 1006, reason: '' } as CloseEvent);
+    h.sockets[1]?.receive(audio('u2'));
+    h.player.go('idle' as never);
+    expect(h.player.played).toBe(2);
+    expect(h.mouth.speaking).toBe(true);
+    h.sockets[1]?.receive({ isFinal: true, contextId: 'u2' });
+  });
+
   test('keeps the socket alive between turns and stops cleanly', async () => {
     const h = harness();
     await h.mouth.say('Hi.', true);
