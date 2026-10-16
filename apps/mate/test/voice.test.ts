@@ -149,7 +149,7 @@ describe('the voice link', () => {
 });
 
 describe('joining', () => {
-  test('refuses in order: stranger, no bridge, not in voice, channel not allowed', async () => {
+  test('refuses in order: stranger, no bridge, not in voice; then joins any voice channel the owner is in', async () => {
     const { voice, link } = harness({ allowedChannels: [TEXT] });
     expect(await voice.join(FRIEND, TEXT)).toEqual({
       ok: false,
@@ -169,10 +169,8 @@ describe('joining', () => {
       user_id: OWNER,
       channel_id: VOICE,
     } as never);
-    expect(await voice.join(OWNER, TEXT)).toEqual({
-      ok: false,
-      reason: 'channel_not_allowed',
-    });
+    expect(await voice.join(OWNER, TEXT)).toEqual({ ok: true });
+    expect(voice.current?.channelId).toBe(VOICE);
   });
 
   test('asks the API where the owner is when the gateway has not said', async () => {
@@ -558,6 +556,68 @@ describe('a mention', () => {
       [TEXT, 'mate: hi'],
     ]);
     expect(log.of('voice: the call keeps to its channel')).toHaveLength(1);
+  });
+
+  test('knows who is in the channel and who is talking, by name, without hearing them', async () => {
+    const asked: string[] = [];
+    const { voice, link, from, state, clock } = harness();
+    (voice as unknown as { options: Record<string, unknown> }).options.member =
+      async (userId: string) => {
+        asked.push(userId);
+        return { name: 'Pat', username: 'pat', roles: ['Crew'] };
+      };
+    let peopleTool:
+      | { execute(args: Record<string, never>): Promise<string> }
+      | undefined;
+    const notes: string[] = [];
+    voice.setWork({
+      threads: {
+        onMessage: async () => {},
+        stateOf: () => undefined,
+        adopt: () => {},
+      },
+      recall: null,
+    });
+    voice.setLane({
+      async *reply(turns, _signal, _id, tools = []) {
+        peopleTool = tools.find((t) => t.name === 'channel_members');
+        const note = turns.find((t) => t.content.startsWith('[channel]'));
+        if (note) notes.push(note.content);
+        yield 'hi';
+      },
+    });
+    const socket = await link();
+    voice.onGuildCreate([
+      { user_id: OWNER, channel_id: VOICE },
+      { user_id: FRIEND, channel_id: VOICE },
+    ] as never);
+    await voice.join(OWNER, TEXT);
+    await from(socket, state('ready'));
+    await from(socket, { type: 'speaking', userId: FRIEND, speaking: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await from(socket, {
+      type: 'transcript',
+      speakerId: OWNER,
+      text: 'who is here',
+      final: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(asked).toEqual([FRIEND]);
+    expect(notes).toEqual([
+      '[channel] With the owner in the channel: Pat (talking). Only the owner is heard.',
+    ]);
+    if (!peopleTool) throw new Error('no channel_members tool');
+    await from(socket, { type: 'speaking', userId: FRIEND, speaking: false });
+    expect(await peopleTool.execute({})).toBe(
+      [
+        '- the owner (Pat): @pat; Crew',
+        '- Pat: @pat; Crew; spoke just now',
+      ].join('\n'),
+    );
+    await clock.advance(20_000);
+    expect(await peopleTool.execute({})).toBe(
+      ['- the owner (Pat): @pat; Crew', '- Pat: @pat; Crew'].join('\n'),
+    );
   });
 
   test('is a voice command only when it says just join or leave', () => {

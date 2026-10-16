@@ -23,6 +23,8 @@ export interface TalkOptions {
   announce?(text: string): void;
   /** Each committed line of the call, for the call's thread. */
   transcript?(role: 'user' | 'agent', text: string): void;
+  /** A line about the channel for the lane, before the owner's latest words; null for nothing to say. */
+  context?(): string | null;
   /** The call's tools; `sideEffect` ones are withheld while the owner is not alone. */
   tools?: readonly VoiceTool[];
   alone?(): boolean;
@@ -148,8 +150,14 @@ export class Talk {
       const tools = (this.options.tools ?? []).filter(
         (tool) => alone || !tool.sideEffect,
       );
+      const note = this.options.context?.() ?? null;
+      const last = this.turns.at(-1);
+      const turns: Turn[] =
+        note && last
+          ? [...this.turns.slice(0, -1), { role: 'user', content: note }, last]
+          : this.turns;
       for await (const delta of lane.reply(
-        this.turns,
+        turns,
         run.abort.signal,
         this.options.callId,
         tools,

@@ -209,7 +209,30 @@ const voice = new Voice({
     discordApi.createMessage(channelId, { content }),
   openThread: (channelId, messageId, name) =>
     discordApi.createThread(channelId, messageId, name),
+  member: async (userId) => {
+    const found = await client.api.guilds.getMember(config.guildId, userId);
+    const roles = await guildRoles();
+    return {
+      name: found.nick ?? found.user.global_name ?? found.user.username,
+      username: found.user.username,
+      roles: found.roles
+        .map((id) => roles.get(id))
+        .filter((name): name is string => Boolean(name)),
+    };
+  },
 });
+// Role names, read once; a role renamed mid-process keeps its old name here.
+let rolesOnce: Promise<Map<string, string>> | null = null;
+function guildRoles(): Promise<Map<string, string>> {
+  rolesOnce ??= client.api.guilds
+    .getRoles(config.guildId)
+    .then((list) => new Map(list.map((role) => [role.id, role.name])))
+    .catch(() => {
+      rolesOnce = null;
+      return new Map<string, string>();
+    });
+  return rolesOnce;
+}
 const speechEngine = new SpeechEngine({
   log,
   call: () => voice.engineCall(),

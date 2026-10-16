@@ -58,6 +58,8 @@ export interface CallOptions {
   onState(state: CallState): void;
   onStall(reason: StallReason, code?: number): void;
   onFrame(opus: Buffer): void;
+  /** Someone in the channel started or stopped transmitting. */
+  onSpeaking?(userId: string, speaking: boolean): void;
   connect?: Connect;
   playback?: Playback;
   /** Played once the connection is first ready; off in tests. */
@@ -114,6 +116,15 @@ export class Call {
     connection.on('error', (error: Error) => {
       log.warn('voice connection error', { error: error.message });
     });
+    const { onSpeaking } = this.options;
+    if (onSpeaking) {
+      connection.receiver.speaking?.on('start', (userId) =>
+        onSpeaking(userId, true),
+      );
+      connection.receiver.speaking?.on('end', (userId) =>
+        onSpeaking(userId, false),
+      );
+    }
     connection.on('stateChange', (oldState, newState) =>
       this.onStateChange(oldState, newState),
     );

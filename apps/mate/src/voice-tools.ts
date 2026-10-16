@@ -14,6 +14,7 @@ import type { ThreadState } from './threads.ts';
 
 export const START_TASK_TOOL = 'start_task';
 export const TASK_STATUS_TOOL = 'task_status';
+export const CHANNEL_MEMBERS_TOOL = 'channel_members';
 /** The owner's words that confirm a read-back. */
 const YES =
   /^(yes|yeah|yep|yup|do it|go ahead|go for it|sure|confirm|confirmed|please do|ok|okay)\b/i;
@@ -43,6 +44,8 @@ export interface VoiceWork {
   threadState(key: string): ThreadState | undefined;
   recall: RecallSource | null;
   now(): number;
+  /** Who is in the call's channel, one line each, with who is talking. */
+  people(): Promise<string>;
 }
 
 export interface VoiceToolContext {
@@ -135,7 +138,19 @@ export function voiceTools(
         .join('\n');
     },
   };
-  const tools: VoiceTool[] = [start as VoiceTool, status as VoiceTool];
+  const members: VoiceTool<typeof STATUS_PARAMETERS> = {
+    name: CHANNEL_MEMBERS_TOOL,
+    description:
+      'Who is in the voice channel with you: display name, username, roles, and who is talking or spoke last. Only the owner is heard; the rest are names.',
+    parameters: STATUS_PARAMETERS,
+    sideEffect: false,
+    execute: () => work.people(),
+  };
+  const tools: VoiceTool[] = [
+    start as VoiceTool,
+    status as VoiceTool,
+    members as VoiceTool,
+  ];
   if (work.recall) {
     for (const tool of recallTools(work.recall, work.now)) {
       tools.push(fromRegistration(tool));

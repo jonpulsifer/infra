@@ -28,6 +28,7 @@ export class FakeConnection extends EventEmitter implements Connection {
   readonly dispatches: string[] = [];
   readonly streams: PassThrough[] = [];
   readonly asked: string[] = [];
+  readonly speaking = new EventEmitter();
   readonly receiver = {
     subscribe: (userId: string) => {
       this.asked.push(userId);
@@ -35,6 +36,7 @@ export class FakeConnection extends EventEmitter implements Connection {
       this.streams.push(stream);
       return stream;
     },
+    speaking: this.speaking,
   };
 
   constructor(

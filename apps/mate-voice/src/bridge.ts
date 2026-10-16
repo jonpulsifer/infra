@@ -204,6 +204,8 @@ export class Bridge {
         }
       },
       onStall: (reason, code) => link.send({ type: 'stall', reason, code }),
+      onSpeaking: (userId, speaking) =>
+        link.send({ type: 'speaking', userId, speaking }),
       onFrame: (opus) => (this.speech ?? this.engine)?.hear(opus),
       connect: this.deps.connect,
       playback: this.deps.playback?.(),

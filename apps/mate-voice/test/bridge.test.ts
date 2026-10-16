@@ -299,6 +299,20 @@ describe('bridge', () => {
     expect(deaf()).toHaveLength(1);
   });
 
+  test('relays who is transmitting as speaking frames', async () => {
+    const { bridge, sent, connections } = setup();
+    void bridge.onMessage(join);
+    const connection = connections[0];
+    if (!connection) throw new Error('no connection');
+    connection.go(VoiceConnectionStatus.Ready);
+    connection.speaking.emit('start', '555555555555555555');
+    connection.speaking.emit('end', '555555555555555555');
+    expect(sent.filter((m) => m.type === 'speaking')).toEqual([
+      { type: 'speaking', userId: '555555555555555555', speaking: true },
+      { type: 'speaking', userId: '555555555555555555', speaking: false },
+    ]);
+  });
+
   test('stop ends the call without a stall', async () => {
     const { bridge, sent, connections } = setup();
     void bridge.onMessage(join);
