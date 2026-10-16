@@ -10,8 +10,9 @@ Lookout is the lab's monitoring agent for a Windows desktop such as [tallboy](..
 
 | Surface | What it does |
 | --- | --- |
-| Tray icon | Green when every agent is current and answering, amber on drift, a failed sync or a pending reboot, red when an agent is down, grey when the service does not answer |
-| Tray menu | Sync now, pause convergence for an hour, open this desktop's Grafana board, the Event Viewer or `status.json` |
+| Tray icon | A ring in the taskbar's colour with a badge: green when every agent is current and answering, amber on drift, a failed sync or a pending reboot, red when an agent is down, grey when the service does not answer |
+| Flyout, on a left click | A card per agent with its version, state and problems, the time of the last sync, Sync now, pause convergence for an hour, and links to this desktop's Grafana board, the Event Viewer and `status.json` |
+| Menu, on a right click | The summary, Open, Sync now, pause and Exit |
 | Notifications | One toast each time the state changes |
 | `C:\ProgramData\Lookout\status.json` | The last report, for a script |
 
@@ -29,7 +30,7 @@ Each pass observes the three agents, converges the ones that drifted, waits for 
 | OhmGraphite | Another version, a different config, or no firewall rule | Unpack the zip, rewrite the config, register and restart the service, open the port |
 | Vector | Another version, a different config, or no scheduled task | Remove the old product, install the MSI, write the config, register and start the SYSTEM task at boot |
 
-The service writes `lookout.prom` into `windows_exporter`'s `textfile_inputs` directory, so folly scrapes the agent's own state with the host's metrics, and logs to the Application event log under source `Lookout`, which Vector ships to VictoriaLogs. The tray and the service talk over the named pipe `lookout`.
+The service writes `lookout.prom` into `windows_exporter`'s `textfile_inputs` directory, so folly scrapes the agent's own state with the host's metrics, and logs to the Application event log under source `Lookout`, which Vector ships to VictoriaLogs. The tray and the service talk over the named pipe `lookout`. The tray is WPF in the Fluent theme, so it follows the light or dark setting and the accent colour; the flyout asks the Desktop Window Manager for an acrylic backdrop and rounded corners, which Windows 10 ignores.
 
 The MSI, built by WiX from `apps/lookout/packaging/Lookout.wxs`, holds two programs. The tray is the app in Settings and the Start menu, and starts at logon through the `Run` key the installer writes. The service runs as LocalSystem. The Start menu shortcut carries the AppUserModelID `lolwtf.Lookout`, which is what lets the tray show notifications without package identity; when that fails, the tray icon's balloon tip is the notification.
 

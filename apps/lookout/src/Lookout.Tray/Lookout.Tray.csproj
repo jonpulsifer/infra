@@ -8,6 +8,8 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <ApplicationIcon />
+    <!-- WPF0001: the Fluent theme (ThemeMode) is marked experimental. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Lookout.Core/Lookout.Core.csproj" />
