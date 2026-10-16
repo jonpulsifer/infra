@@ -48,16 +48,18 @@ public static class Versions
 {
     /// <summary>
     /// True when the installed version is the declared one. A product's
-    /// ProductVersion may carry build metadata after a plus, such as
-    /// 0.38.0+fb18a89, which the policy never declares.
+    /// ProductVersion may carry a v prefix, as windows_exporter's v0.31.8
+    /// does, or build metadata after a plus, as OhmGraphite's 0.38.0+fb18a89
+    /// does. The policy declares neither.
     /// </summary>
     public static bool Matches(string? installed, string declared)
         => installed is not null && Core(installed) == declared;
 
     private static string Core(string version)
     {
-        var plus = version.IndexOf('+');
-        return plus < 0 ? version : version[..plus];
+        var core = version.StartsWith('v') || version.StartsWith('V') ? version[1..] : version;
+        var plus = core.IndexOf('+');
+        return plus < 0 ? core : core[..plus];
     }
 }
 

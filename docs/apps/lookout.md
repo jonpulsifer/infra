@@ -21,7 +21,7 @@ The service converges on a schedule from the policy, and at once on **Sync now**
 
 The policy is git. `apps/lookout/policy/policy.json` names each agent's version, download URL, SHA256 and, for OhmGraphite and Vector, the URL of its config file in `dotfiles/windows/monitoring/`. The service fetches the policy from `main` on every pass and keeps the last copy in `C:\ProgramData\Lookout\`, so a desktop that is offline converges to the policy it last saw.
 
-Each pass observes the three agents, converges the ones that drifted, waits for a restarted agent's port to answer, then observes again. A version is compared without its build metadata, so OhmGraphite's `0.38.0+<commit>` matches a declared `0.38.0`.
+Each pass observes the three agents, converges the ones that drifted, waits for a restarted agent's port to answer, then observes again. A version is compared without a `v` prefix or build metadata, so windows_exporter's `v0.31.8` and OhmGraphite's `0.38.0+<commit>` match the declared `0.31.8` and `0.38.0`.
 
 | Agent | Drift means | Convergence |
 | --- | --- | --- |
