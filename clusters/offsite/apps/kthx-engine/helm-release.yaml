@@ -109,11 +109,7 @@ spec:
     backup:
       endpointURL: ${GARAGE_S3_ENDPOINT}
       item: garage-${CLUSTER_NAME}
-      # Bootstraps from the previous Cluster's archive, then archives into its
-      # own prefix. One prefix per generation of the Cluster.
-      recoverFrom: spindrift-db-2
-      # That prefix lives under the old namespace's archive path.
-      recoverFromPath: s3://cnpg/spindrift/
+      # One prefix per generation of the Cluster.
       serverName: kthx-engine-db
     reconciler:
       enabled: true
