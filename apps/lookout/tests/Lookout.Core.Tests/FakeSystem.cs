@@ -147,5 +147,16 @@ public static class Fixtures
 {
     public static string PolicyJson => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "policy.json"));
 
+    /// <summary>The committed policy with no agent entry, as a desktop sees it between rollouts.</summary>
+    public static string PolicyJsonWithoutAgent
+    {
+        get
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(PolicyJson)!.AsObject();
+            node.Remove("agent");
+            return node.ToJsonString(Json.Options);
+        }
+    }
+
     public static PolicyBundle Bundle() => new(Policy.Parse(PolicyJson), "<ohm config/>", "sinks: {}\n", "test");
 }

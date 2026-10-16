@@ -14,8 +14,9 @@ public class PolicyTests
     [Fact]
     public void TheAgentEntryIsOptionalAndThreePart()
     {
-        Assert.Null(Policy.Parse(Fixtures.PolicyJson).Agent);
-        var with = Fixtures.PolicyJson.TrimEnd().TrimEnd('}') + """
+        var without = Fixtures.PolicyJsonWithoutAgent;
+        Assert.Null(Policy.Parse(without).Agent);
+        var with = without.TrimEnd().TrimEnd('}') + """
             ,
               "agent": {
                 "version": "0.2.0",

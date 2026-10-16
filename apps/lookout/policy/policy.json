@@ -21,5 +21,10 @@
     "sha256": "53B783BF5F39ED317CD9D19DA0D654DE8A963C5971852B0E87BED1B931AF9B29",
     "configUrl": "https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/monitoring/vector.yaml",
     "productCode": "{7FAD6F97-D84E-42CC-A600-5F4EC3460FF5}"
+  },
+  "agent": {
+    "version": "0.1.1",
+    "url": "https://github.com/jonpulsifer/infra/releases/download/lookout-v0.1.1/Lookout.msi",
+    "sha256": "A030F4B56A150648E0D07BCD2ADBE11C9D9A5E3A3C6609CD7DEAB9DE94950969"
   }
 }
