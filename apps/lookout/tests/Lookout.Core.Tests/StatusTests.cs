@@ -52,6 +52,12 @@ public class StatusTests
         Assert.Contains("lookout_component_healthy{component=\"vector\"} 0\n", text);
         Assert.Contains("lookout_paused 0\n", text);
         Assert.DoesNotContain("\r", text);
+        // The text parser rejects a second HELP or TYPE line for a metric name.
+        foreach (var family in text.Split('\n').Where(l => l.StartsWith("# TYPE ")).GroupBy(l => l))
+        {
+            Assert.Single(family);
+        }
+        Assert.Contains("# TYPE lookout_component_current gauge\nlookout_component_current{component=\"windows_exporter\"} 1\nlookout_component_current{component=\"vector\"} 0\n", text);
     }
 
     [Fact]

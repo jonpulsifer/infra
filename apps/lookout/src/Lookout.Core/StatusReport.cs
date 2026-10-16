@@ -62,27 +62,29 @@ public static class Textfile
     public static string Render(StatusReport status)
     {
         var sb = new StringBuilder();
-        void Gauge(string name, string help, string labels, double value)
+        void Family(string name, string help, params (string Labels, double Value)[] samples)
         {
+            // One HELP and TYPE per metric name: the text parser rejects a second pair.
             sb.Append("# HELP ").Append(name).Append(' ').Append(help).Append('\n');
             sb.Append("# TYPE ").Append(name).Append(" gauge\n");
-            sb.Append(name).Append(labels).Append(' ').Append(value.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+            foreach (var (labels, value) in samples)
+            {
+                sb.Append(name).Append(labels).Append(' ').Append(value.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+            }
         }
+        static string ComponentLabels(ComponentState c) => $"{{component=\"{c.Component}\"}}";
 
-        Gauge("lookout_info", "The Lookout agent build.", $"{{version=\"{status.AgentVersion}\"}}", 1);
-        Gauge("lookout_last_sync_timestamp_seconds", "When the agent last finished a sync.", "",
-            status.LastSyncAt?.ToUnixTimeSeconds() ?? 0);
-        Gauge("lookout_last_sync_success", "1 when the last sync converged every component without error.", "", status.LastSyncOk ? 1 : 0);
-        Gauge("lookout_policy_fetch_success", "1 when the last policy fetch from git succeeded.", "", status.PolicyFetchOk ? 1 : 0);
-        Gauge("lookout_paused", "1 while the owner has paused convergence.", "", status.Paused ? 1 : 0);
-        Gauge("lookout_reboot_pending", "1 when an installer asked for a reboot.", "", status.RebootPending ? 1 : 0);
-
-        foreach (var c in status.Components)
-        {
-            var labels = $"{{component=\"{c.Component}\"}}";
-            Gauge("lookout_component_current", "1 when the component runs the declared version and configuration.", labels, c.Current ? 1 : 0);
-            Gauge("lookout_component_healthy", "1 when the component runs and answers.", labels, c.Healthy ? 1 : 0);
-        }
+        Family("lookout_info", "The Lookout agent build.", ($"{{version=\"{status.AgentVersion}\"}}", 1));
+        Family("lookout_last_sync_timestamp_seconds", "When the agent last finished a sync.",
+            ("", status.LastSyncAt?.ToUnixTimeSeconds() ?? 0));
+        Family("lookout_last_sync_success", "1 when the last sync converged every component without error.", ("", status.LastSyncOk ? 1 : 0));
+        Family("lookout_policy_fetch_success", "1 when the last policy fetch from git succeeded.", ("", status.PolicyFetchOk ? 1 : 0));
+        Family("lookout_paused", "1 while the owner has paused convergence.", ("", status.Paused ? 1 : 0));
+        Family("lookout_reboot_pending", "1 when an installer asked for a reboot.", ("", status.RebootPending ? 1 : 0));
+        Family("lookout_component_current", "1 when the component runs the declared version and configuration.",
+            status.Components.Select(c => (ComponentLabels(c), c.Current ? 1.0 : 0)).ToArray());
+        Family("lookout_component_healthy", "1 when the component runs and answers.",
+            status.Components.Select(c => (ComponentLabels(c), c.Healthy ? 1.0 : 0)).ToArray());
         return sb.ToString();
     }
 }
