@@ -8,7 +8,6 @@ locals {
     "5461940",  # jonpulsifer
     "63516210", # homelab-ng
   ]
-  spindrift_build_workflow_ref   = "jonpulsifer/infra/.github/workflows/spindrift-build.yml@refs/heads/main"
   kthx_engine_build_workflow_ref = "jonpulsifer/infra/.github/workflows/kthx-engine-build.yml@refs/heads/main"
 
   # A repository ID survives a rename.
@@ -47,7 +46,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
-  attribute_condition = "assertion.repository_owner_id in ${jsonencode(local.github_actions_allowed_owner_ids)} && (assertion.repository_id in ${jsonencode(local.github_actions_allowed_repository_ids)} || assertion.job_workflow_ref in ${jsonencode([local.spindrift_build_workflow_ref, local.kthx_engine_build_workflow_ref])})"
+  attribute_condition = "assertion.repository_owner_id in ${jsonencode(local.github_actions_allowed_owner_ids)} && (assertion.repository_id in ${jsonencode(local.github_actions_allowed_repository_ids)} || assertion.job_workflow_ref == ${jsonencode(local.kthx_engine_build_workflow_ref)})"
   depends_on          = [time_sleep.workload_identity_org_policy_propagation]
 }
 

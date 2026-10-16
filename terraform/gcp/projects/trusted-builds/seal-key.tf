@@ -18,7 +18,7 @@ moved {
 resource "google_secret_manager_secret_iam_member" "kthx_engine_build_seal_key_accessor" {
   secret_id = google_secret_manager_secret.kthx_engine_build_seal_key.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = local.spindrift_build_workflow_principal
+  member    = local.kthx_engine_build_workflow_principal
 }
 
 moved {
@@ -42,10 +42,8 @@ resource "google_secret_manager_secret" "kthx_engine_build_seal_key_named" {
   depends_on = [google_project_service.service["secretmanager.googleapis.com"]]
 }
 
-# Both build workflow names read the seal key until the old one is retired.
 resource "google_secret_manager_secret_iam_member" "kthx_engine_build_seal_key_named_accessor" {
-  for_each  = toset([local.spindrift_build_workflow_principal, local.kthx_engine_build_workflow_principal])
   secret_id = google_secret_manager_secret.kthx_engine_build_seal_key_named.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = each.value
+  member    = local.kthx_engine_build_workflow_principal
 }

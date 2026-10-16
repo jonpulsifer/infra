@@ -4,74 +4,23 @@
 # the controller service account itself, its federation bindings, and the
 # clusters' read path into this vessel's Secret Manager.
 
-resource "google_service_account" "kthx_engine_controller" {
-  account_id   = "spindrift-controller"
-  display_name = "kthx engine platform controller"
-}
-
-moved {
-  from = google_service_account.spindrift_controller
-  to   = google_service_account.kthx_engine_controller
-}
-
-# The offsite cluster's spindrift installation, namespace spindrift. The
-# pool's subject is the cluster, the namespace and the service account, so
-# this principal names exactly that installation and nothing else federates
-# through it.
+# The engine's federated identity: the kthx-engine service account in the
+# kthx-engine namespace on offsite. The pool's subject is the cluster, the
+# namespace and the service account, so this principal names exactly that
+# installation and nothing else federates through it.
 locals {
-  spindrift_principal   = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift:spindrift"
   kthx_engine_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:kthx-engine:kthx-engine"
   engine_principals = {
-    spindrift   = local.spindrift_principal
     kthx-engine = local.kthx_engine_principal
   }
 }
 
-resource "google_service_account_iam_member" "kthx_engine_controller_workload_identity" {
-  service_account_id = google_service_account.kthx_engine_controller.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = local.spindrift_principal
-}
-
-resource "google_service_account_iam_member" "kthx_engine_controller_workload_identity_engine" {
-  service_account_id = google_service_account.kthx_engine_controller.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = local.kthx_engine_principal
-}
-
-moved {
-  from = google_service_account_iam_member.spindrift_controller_workload_identity
-  to   = google_service_account_iam_member.kthx_engine_controller_workload_identity
-}
-
-# Signing a V4 storage URL is a separate permission from impersonating.
-# Spindrift mints one for every `gs://` source bundle it hands a hosted build
-# route, and signs it through IAM's `signBlob` as the federated principal —
-# before impersonation — so the string-to-sign never needs a private key.
-# `roles/iam.workloadIdentityUser` carries `iam.serviceAccounts.getAccessToken`
-# but not `iam.serviceAccounts.signBlob`, so impersonation succeeds while every
-# signature is refused. `roles/iam.serviceAccountTokenCreator` is the role that
-# carries both.
-resource "google_service_account_iam_member" "kthx_engine_controller_token_creator" {
-  service_account_id = google_service_account.kthx_engine_controller.name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = local.spindrift_principal
-}
-
-resource "google_service_account_iam_member" "kthx_engine_controller_token_creator_engine" {
-  service_account_id = google_service_account.kthx_engine_controller.name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = local.kthx_engine_principal
-}
-
-moved {
-  from = google_service_account_iam_member.spindrift_controller_token_creator
-  to   = google_service_account_iam_member.kthx_engine_controller_token_creator
-}
-
-# The controller account named for the engine, beside the one above. Both
-# federated subjects reach it, so the engine's Kubernetes identity and the
-# account it impersonates switch independently.
+# The controller account. Signing a V4 storage URL is a separate permission
+# from impersonating: the engine mints one for every gs:// source bundle it
+# hands a hosted build route and signs it through IAM signBlob as the federated
+# principal, before impersonation, so the string-to-sign never needs a private
+# key. roles/iam.workloadIdentityUser carries getAccessToken but not signBlob,
+# so the token creator role below is what lets the signature through.
 resource "google_service_account" "kthx_engine_controller_named" {
   account_id   = "kthx-engine-controller"
   display_name = "kthx engine platform controller"
@@ -93,24 +42,28 @@ resource "google_service_account_iam_member" "kthx_engine_controller_named_token
   member             = each.value
 }
 
-resource "google_service_account_iam_member" "kthx_engine_controller_named_acts_as_runtime" {
-  service_account_id = module.vessel.runtime_service_account.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = google_service_account.kthx_engine_controller_named.member
+# The vessel module grants these roles, the bucket-lister role and acts-as on
+# the runtime account to the controller. State forgets the explicit grants that
+# duplicated them without revoking anything.
+removed {
+  from = google_service_account_iam_member.kthx_engine_controller_named_acts_as_runtime
+  lifecycle {
+    destroy = false
+  }
 }
 
-resource "google_project_iam_member" "kthx_engine_controller_named_bucket_lister" {
-  project = local.project
-  role    = module.vessel.bucket_lister_role_id
-  member  = google_service_account.kthx_engine_controller_named.member
+removed {
+  from = google_project_iam_member.kthx_engine_controller_named_bucket_lister
+  lifecycle {
+    destroy = false
+  }
 }
 
-resource "google_project_iam_member" "kthx_engine_controller_named" {
-  for_each = toset(local.spindrift_project_roles)
-
-  project = local.project
-  role    = each.key
-  member  = google_service_account.kthx_engine_controller_named.member
+removed {
+  from = google_project_iam_member.kthx_engine_controller_named
+  lifecycle {
+    destroy = false
+  }
 }
 
 # The roles the controller holds on this vessel. Declared in this file rather
@@ -159,21 +112,10 @@ data "google_compute_default_service_account" "default" {
 # service account its build runs as, the same shape as the runtime `actAs`
 # grant in modules/kthx-engine-vessel/main.tf — a separate permission from
 # creating the function itself.
-resource "google_service_account_iam_member" "kthx_engine_controller_acts_as_default" {
-  service_account_id = data.google_compute_default_service_account.default.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = google_service_account.kthx_engine_controller.member
-}
-
 resource "google_service_account_iam_member" "kthx_engine_controller_named_acts_as_default" {
   service_account_id = data.google_compute_default_service_account.default.name
   role               = "roles/iam.serviceAccountUser"
   member             = google_service_account.kthx_engine_controller_named.member
-}
-
-moved {
-  from = google_service_account_iam_member.spindrift_controller_acts_as_default
-  to   = google_service_account_iam_member.kthx_engine_controller_acts_as_default
 }
 
 # The org policy that strips predefined roles from the compute default

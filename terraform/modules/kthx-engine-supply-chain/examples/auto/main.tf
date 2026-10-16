@@ -7,11 +7,11 @@ module "supply_chain" {
   project           = "artifacts-project"
   location          = "northamerica-northeast1"
   repository        = "i"
-  controller_member = "serviceAccount:spindrift-controller@home-vessel.iam.gserviceaccount.com"
+  controller_member = "serviceAccount:kthx-engine-controller@home-vessel.iam.gserviceaccount.com"
 
   attester_principals = [
     "principalSet://iam.googleapis.com/projects/000000000000/locations/global/workloadIdentityPools/pool/attribute.repository_owner/owner",
-    "serviceAccount:spindrift-controller@home-vessel.iam.gserviceaccount.com",
+    "serviceAccount:kthx-engine-controller@home-vessel.iam.gserviceaccount.com",
     "serviceAccount:000000000000@cloudbuild.gserviceaccount.com",
   ]
 
@@ -21,7 +21,7 @@ module "supply_chain" {
   verifier_agents = ["serviceAccount:service-000000000000@gcp-sa-binaryauthorization.iam.gserviceaccount.com"]
 
   registry_readers = [
-    "serviceAccount:spindrift-controller@home-vessel.iam.gserviceaccount.com",
+    "serviceAccount:kthx-engine-controller@home-vessel.iam.gserviceaccount.com",
     "serviceAccount:service-000000000000@gcp-sa-binaryauthorization.iam.gserviceaccount.com",
     "serviceAccount:service-000000000000@serverless-robot-prod.iam.gserviceaccount.com",
   ]
