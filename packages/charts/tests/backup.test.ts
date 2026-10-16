@@ -278,3 +278,50 @@ describe.each(CASES)('the $chart database backup', (c) => {
     ).rejects.toThrow('backup.endpointURL');
   });
 });
+
+describe('the kthx engine recovers from another namespace', () => {
+  const values = {
+    image: 'registry.example.test/kthx-engine@sha256:feed',
+    database: { enabled: true },
+    backup: {
+      endpointURL: 'http://garage.example.test',
+      item: 'garage-example',
+      recoverFrom: 'spindrift-db-2',
+      recoverFromPath: 's3://cnpg/spindrift/',
+      serverName: 'kthx-engine-db',
+    },
+  };
+
+  test('reads the old archive through its own object store', async () => {
+    const objects = await render('kthx-engine', 'kthx-engine', values);
+    const origin = objects.find(
+      (o) => o.kind === 'ObjectStore' && o.metadata.name === 'garage-origin',
+    ) as Rendered;
+    expect(origin.spec.configuration.destinationPath).toBe(
+      's3://cnpg/spindrift/',
+    );
+    const cluster = objects.find(
+      (o) => o.kind === 'Cluster' && o.metadata.name === 'kthx-engine-db',
+    ) as Rendered;
+    expect(cluster.spec.externalClusters[0].plugin.parameters).toEqual({
+      barmanObjectName: 'garage-origin',
+      serverName: 'spindrift-db-2',
+    });
+    expect(cluster.spec.plugins[0].parameters).toEqual({
+      barmanObjectName: 'garage',
+      serverName: 'kthx-engine-db',
+    });
+  });
+
+  test('renders no second store without a path', async () => {
+    const objects = await render('kthx-engine', 'kthx-engine', {
+      ...values,
+      backup: { ...values.backup, recoverFromPath: '' },
+    });
+    expect(
+      objects.some(
+        (o) => o.kind === 'ObjectStore' && o.metadata.name === 'garage-origin',
+      ),
+    ).toBe(false);
+  });
+});
