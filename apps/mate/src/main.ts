@@ -288,6 +288,7 @@ const mate = new Mate({
   },
   routes,
   speechEngine,
+  voice,
 });
 
 try {

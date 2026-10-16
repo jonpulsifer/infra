@@ -9,9 +9,11 @@
  * the bot's own `VOICE_STATE_UPDATE` and the `VOICE_SERVER_UPDATE` back as
  * `voice_state` and `voice_server`.
  *
- * `speak`, `announce`, `transcript` and `barge_in` are the speech half. They
- * are part of the schema so the two sides never drift, but the bridge only
- * counts them until speech lands.
+ * `speak`, `announce`, `transcript` and `barge_in` are the speech half, for
+ * the bridge that hears and speaks itself: the owner's words go up as
+ * `transcript`, mate's reply comes back as `speak` deltas and an empty final,
+ * `announce` is a line outside a reply, and `barge_in` says how much of a
+ * reply the owner heard before speaking over it.
  */
 import { z } from 'zod';
 

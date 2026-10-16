@@ -112,6 +112,8 @@ export interface MateEdges {
   readonly routes?: Routes;
   /** Given the voice lane once the models are built; absent, the engine apologises. */
   readonly speechEngine?: { setLane(lane: VoiceLane | null): void };
+  /** The bridge's conversation gets the same lane. */
+  readonly voice?: { setLane(lane: VoiceLane | null): void };
   readonly tuning?: MateTuning;
 }
 
@@ -232,19 +234,20 @@ export class Mate {
         config.voice.model,
         config.voice.thinking,
       );
-      this.edges.speechEngine?.setLane(
-        modelVoiceLane({
-          models: setup.models,
-          model: voice.model,
-          thinking: voice.thinking,
-          timeoutMs: config.voice.timeoutMs,
-          log,
-        }),
-      );
+      const lane = modelVoiceLane({
+        models: setup.models,
+        model: voice.model,
+        thinking: voice.thinking,
+        timeoutMs: config.voice.timeoutMs,
+        log,
+      });
+      this.edges.speechEngine?.setLane(lane);
+      this.edges.voice?.setLane(lane);
     } catch (error) {
       if (!(error instanceof ConfigError)) throw error;
       log.error('the voice lane is off', { error: plain(error) });
       this.edges.speechEngine?.setLane(null);
+      this.edges.voice?.setLane(null);
     }
     const prompts = await loadSystemPrompts(
       {

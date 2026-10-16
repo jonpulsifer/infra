@@ -11,6 +11,7 @@ import type { Config } from './config.ts';
 import type { EngineConversation } from './engine.ts';
 import type { MateLink } from './link.ts';
 import type { Log } from './log.ts';
+import type { NativeSpeech } from './native.ts';
 import type { Playback } from './playback.ts';
 
 export const VERSION = '0.1.0';
@@ -22,16 +23,25 @@ export interface BridgeDeps {
   connect?: Connect;
   playback?: () => Playback;
   joinTone?: Buffer | null;
-  /** The ElevenLabs conversation for one call; absent, the call is silent. */
+  /** The ElevenLabs Speech Engine conversation for one call. */
   engine?: (call: {
     playback: Playback;
     onEnd(reason: string): void;
   }) => EngineConversation;
+  /** The bridge's own hearing and speaking for one call. Absent both, the call is silent. */
+  speech?: (call: {
+    playback: Playback;
+    ownerId: string;
+    onTranscript(text: string, final: boolean): void;
+    onBargeIn(heardChars: number): void;
+    onDeaf(reason: string): void;
+  }) => NativeSpeech;
 }
 
 export class Bridge {
   private call: Call | null = null;
   private engine: EngineConversation | null = null;
+  private speech: NativeSpeech | null = null;
   private orphan: ReturnType<typeof setTimeout> | null = null;
   /** Speech characters mate has sent that nothing voices yet. */
   unvoicedChars = 0;
@@ -86,11 +96,16 @@ export class Bridge {
         this.call?.adapter.onVoiceServerUpdate(message.data);
         return;
       case 'speak':
+        if (this.speech) this.speech.say(message.text, message.final);
+        else this.unvoicedChars += message.text.length;
+        return;
       case 'announce':
-        this.unvoicedChars += message.text.length;
+        if (this.speech) this.speech.announce(message.text);
+        else this.unvoicedChars += message.text.length;
         return;
       case 'stop_playback':
-        this.call?.playback.stop();
+        if (this.speech) this.speech.hush();
+        else this.call?.playback.stop();
         return;
       case 'leave':
         this.call?.leave();
@@ -105,11 +120,35 @@ export class Bridge {
     this.orphan = null;
     this.engine?.stop();
     this.engine = null;
+    this.speech?.stop();
+    this.speech = null;
     this.call?.leave();
   }
 
-  /** Opens the ElevenLabs conversation once the voice connection is ready. */
+  /** Starts hearing and speaking once the voice connection is ready. */
   private converse(call: Call): void {
+    const { link, log } = this.deps;
+    if (this.deps.speech) {
+      const speech = this.deps.speech({
+        playback: call.playback,
+        ownerId: call.state().ownerId,
+        onTranscript: (text, final) =>
+          link.send({
+            type: 'transcript',
+            speakerId: call.state().ownerId,
+            text,
+            final,
+          }),
+        onBargeIn: (heardChars) => link.send({ type: 'barge_in', heardChars }),
+        onDeaf: (reason) => {
+          if (this.speech !== speech) return;
+          log.warn('speech: the call went deaf', { reason });
+        },
+      });
+      this.speech = speech;
+      void speech.start();
+      return;
+    }
     const make = this.deps.engine;
     if (!make) return;
     const engine = make({
@@ -147,18 +186,25 @@ export class Bridge {
       resubscribeCap: config.resubscribeCap,
       onState: (state) => {
         link.send({ type: 'state', call: state });
-        if (state.status === 'ready' && this.call === call && !this.engine) {
+        if (
+          state.status === 'ready' &&
+          this.call === call &&
+          !this.engine &&
+          !this.speech
+        ) {
           this.converse(call);
         }
         if (state.status === 'destroyed' && this.call === call) {
           this.call = null;
           this.engine?.stop();
           this.engine = null;
+          this.speech?.stop();
+          this.speech = null;
           link.send({ type: 'state', call: null });
         }
       },
       onStall: (reason, code) => link.send({ type: 'stall', reason, code }),
-      onFrame: (opus) => this.engine?.hear(opus),
+      onFrame: (opus) => (this.speech ?? this.engine)?.hear(opus),
       connect: this.deps.connect,
       playback: this.deps.playback?.(),
       joinTone: this.deps.joinTone,

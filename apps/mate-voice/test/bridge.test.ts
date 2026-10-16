@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { type AudioPlayer, VoiceConnectionStatus } from '@discordjs/voice';
 import { type FromBridge, PROTOCOL_VERSION } from '@repo/mate-voice-protocol';
-import { Bridge, VERSION } from '../src/bridge.ts';
+import { Bridge, type BridgeDeps, VERSION } from '../src/bridge.ts';
 import type { Config } from '../src/config.ts';
 import type { EngineConversation } from '../src/engine.ts';
+import type { NativeSpeech } from '../src/native.ts';
 import { Playback } from '../src/playback.ts';
 import {
   CHANNEL,
@@ -23,7 +24,7 @@ const config: Config = {
   rejoinCap: 1,
   resubscribeCap: 1,
   orphanMs: 30,
-  elevenlabs: null,
+  speech: null,
 };
 
 function setup() {
@@ -168,6 +169,76 @@ describe('bridge', () => {
     connection.streams[0]?.write(Buffer.alloc(3));
     await Bun.sleep(1);
     expect(heard).toEqual([3]);
+    await bridge.onMessage({ type: 'leave' });
+    expect(stopped).toBe(1);
+  });
+
+  test('with native speech, voices mate and relays the owner and barge-ins over the link', async () => {
+    const said: [string, boolean][] = [];
+    const announced: string[] = [];
+    let hushes = 0;
+    let stopped = 0;
+    const sent: FromBridge[] = [];
+    type SpeechCall = Parameters<NonNullable<BridgeDeps['speech']>>[0];
+    let handlers: SpeechCall | null = null;
+    const { connect, connections } = fakeConnect();
+    const player = new FakePlayer();
+    const bridge = new Bridge({
+      config,
+      link: {
+        send: (message) => {
+          sent.push(message);
+          return true;
+        },
+      },
+      log: capturingLog(),
+      connect,
+      playback: () => new Playback(player as unknown as AudioPlayer),
+      joinTone: null,
+      speech: (call) => {
+        handlers = call;
+        return {
+          start: async () => {},
+          hear: () => {},
+          say: (text: string, final: boolean) => {
+            said.push([text, final]);
+          },
+          announce: (text: string) => {
+            announced.push(text);
+          },
+          hush: () => {
+            hushes += 1;
+          },
+          stop: () => {
+            stopped += 1;
+          },
+        } as unknown as NativeSpeech;
+      },
+    });
+    void bridge.onMessage(join);
+    connections[0]?.go(VoiceConnectionStatus.Ready);
+    await Bun.sleep(1);
+    const started = handlers as SpeechCall | null;
+    if (!started) throw new Error('speech not started');
+    await bridge.onMessage({ type: 'speak', text: 'hello ', final: false });
+    await bridge.onMessage({ type: 'speak', text: '', final: true });
+    await bridge.onMessage({ type: 'announce', text: 'done' });
+    await bridge.onMessage({ type: 'stop_playback' });
+    expect(said).toEqual([
+      ['hello ', false],
+      ['', true],
+    ]);
+    expect(announced).toEqual(['done']);
+    expect(hushes).toBe(1);
+    expect(bridge.unvoicedChars).toBe(0);
+    started.onTranscript('hi there', true);
+    started.onBargeIn(12);
+    expect(sent.filter((m) => m.type === 'transcript')).toEqual([
+      { type: 'transcript', speakerId: OWNER, text: 'hi there', final: true },
+    ]);
+    expect(sent.filter((m) => m.type === 'barge_in')).toEqual([
+      { type: 'barge_in', heardChars: 12 },
+    ]);
     await bridge.onMessage({ type: 'leave' });
     expect(stopped).toBe(1);
   });

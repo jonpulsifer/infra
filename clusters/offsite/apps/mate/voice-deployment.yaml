@@ -54,12 +54,16 @@ spec:
             # it leaves on its own.
             - name: MATE_VOICE_ORPHAN_MS
               value: "30000"
-            # ElevenLabs Speech Engine hears and speaks for mate. The engine id
-            # is the one the reconciler created from desired/speech-engines/
-            # in clusters/offsite/apps/elevenlabs; the key file is the read
-            # key, mounted below. Both unset leaves a call silent.
-            - name: MATE_VOICE_ELEVENLABS_ENGINE_ID
-              value: seng_4601m50hqphcemyas1y5kpqwjv7j
+            # The bridge hears and speaks itself: Scribe for the owner's words
+            # and text-to-speech in this voice, the owner's clone that the
+            # mission caller uses, with the key mounted below. The other mode,
+            # MATE_VOICE_ELEVENLABS_ENGINE_ID with the engine the reconciler
+            # created from desired/speech-engines/ in
+            # clusters/offsite/apps/elevenlabs, hands both to ElevenLabs Speech
+            # Engine, which refuses a cloned voice. Neither set leaves a call
+            # silent.
+            - name: MATE_VOICE_ELEVENLABS_VOICE_ID
+              value: B3MaEpg3jVTwjxbDmLJE
             - name: MATE_VOICE_ELEVENLABS_KEY_FILE
               value: /var/run/mate-voice/elevenlabs/key
             # readOnlyRootFilesystem: /tmp (below) is the only writable path.

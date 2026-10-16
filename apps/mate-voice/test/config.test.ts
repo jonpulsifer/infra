@@ -13,12 +13,15 @@ describe('config', () => {
     expect(config.orphanMs).toBe(30_000);
   });
 
-  test('ElevenLabs is off until both the engine id and the key file are set', () => {
+  test('speech is off until a key file and a voice or an engine are set', () => {
     const base = { MATE_VOICE_MATE_URL: 'ws://mate:8080/voice' };
-    expect(readConfig(base).elevenlabs).toBeNull();
+    expect(readConfig(base).speech).toBeNull();
     expect(() =>
       readConfig({ ...base, MATE_VOICE_ELEVENLABS_ENGINE_ID: 'seng_1' }),
-    ).toThrow('go together');
+    ).toThrow('KEY_FILE goes with');
+    expect(() =>
+      readConfig({ ...base, MATE_VOICE_ELEVENLABS_KEY_FILE: '/k' }),
+    ).toThrow('KEY_FILE goes with');
     expect(() =>
       readConfig({
         ...base,
@@ -31,12 +34,42 @@ describe('config', () => {
         ...base,
         MATE_VOICE_ELEVENLABS_ENGINE_ID: 'seng_1',
         MATE_VOICE_ELEVENLABS_KEY_FILE: '/k',
-      }).elevenlabs,
+      }).speech,
     ).toEqual({
+      mode: 'engine',
       api: 'https://api.elevenlabs.io',
       engineId: 'seng_1',
       keyFile: '/k',
     });
+    expect(
+      readConfig({
+        ...base,
+        MATE_VOICE_ELEVENLABS_VOICE_ID: 'B3MaEpg3jVTwjxbDmLJE',
+        MATE_VOICE_ELEVENLABS_KEY_FILE: '/k',
+      }).speech,
+    ).toEqual({
+      mode: 'native',
+      api: 'https://api.elevenlabs.io',
+      keyFile: '/k',
+      voiceId: 'B3MaEpg3jVTwjxbDmLJE',
+      ttsModel: 'eleven_flash_v2_5',
+      scribeRedialCap: 5,
+    });
+    expect(() =>
+      readConfig({
+        ...base,
+        MATE_VOICE_ELEVENLABS_VOICE_ID: 'not a voice id',
+        MATE_VOICE_ELEVENLABS_KEY_FILE: '/k',
+      }),
+    ).toThrow('voice id');
+    expect(() =>
+      readConfig({
+        ...base,
+        MATE_VOICE_ELEVENLABS_VOICE_ID: 'B3MaEpg3jVTwjxbDmLJE',
+        MATE_VOICE_ELEVENLABS_ENGINE_ID: 'seng_1',
+        MATE_VOICE_ELEVENLABS_KEY_FILE: '/k',
+      }),
+    ).toThrow('exclude each other');
     expect(() =>
       readConfig({
         ...base,
