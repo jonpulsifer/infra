@@ -1,10 +1,10 @@
 ---
 title: Lookout
-description: A Windows app, installed from an MSI, whose service keeps the monitoring agents on a Windows desktop at the versions git declares and reports its own health to folly. No desktop runs it yet.
-status: unverified
+description: A Windows app, installed from an MSI, whose service keeps the monitoring agents on a Windows desktop at the versions git declares and reports its own health to folly. tallboy runs it.
+status: live
 ---
 
-Lookout is the lab's monitoring agent for a Windows desktop such as [tallboy](../hosts/tallboy.md). Its service installs `windows_exporter`, OhmGraphite and Vector, the three agents [Install Windows monitoring](../runbooks/install-windows-monitoring.md) describes, and keeps them at the versions and configuration that `apps/lookout/policy/policy.json` declares. A tray icon shows the state. No desktop runs it: the first install on tallboy decides the open questions under [Limits](#limits).
+Lookout is the lab's monitoring agent for a Windows desktop such as [tallboy](../hosts/tallboy.md). Its service installs `windows_exporter`, OhmGraphite and Vector, the three agents [Install Windows monitoring](../runbooks/install-windows-monitoring.md) describes, and keeps them at the versions and configuration that `apps/lookout/policy/policy.json` declares. A tray icon shows the state. [tallboy](../hosts/tallboy.md) runs it, on top of the agents the runbook's script installed.
 
 ## Use it
 
@@ -21,11 +21,11 @@ The service converges on a schedule from the policy, and at once on **Sync now**
 
 The policy is git. `apps/lookout/policy/policy.json` names each agent's version, download URL, SHA256 and, for OhmGraphite and Vector, the URL of its config file in `dotfiles/windows/monitoring/`. The service fetches the policy from `main` on every pass and keeps the last copy in `C:\ProgramData\Lookout\`, so a desktop that is offline converges to the policy it last saw.
 
-Each pass observes the three agents, converges the ones that drifted, then observes again:
+Each pass observes the three agents, converges the ones that drifted, waits for a restarted agent's port to answer, then observes again. A version is compared without its build metadata, so OhmGraphite's `0.38.0+<commit>` matches a declared `0.38.0`.
 
 | Agent | Drift means | Convergence |
 | --- | --- | --- |
-| `windows_exporter` | Another version, or other collectors on the service command line | Reinstall the MSI with the declared collectors; a flag on the command line beats `config.yaml` |
+| `windows_exporter` | Another version, or other collectors on the service command line | Remove the installed product, then install the MSI with the declared collectors; a flag on the command line beats `config.yaml`, and Windows Installer refuses to reconfigure an installed version |
 | OhmGraphite | Another version, a different config, or no firewall rule | Unpack the zip, rewrite the config, register and restart the service, open the port |
 | Vector | Another version, a different config, or no scheduled task | Remove the old product, install the MSI, write the config, register and start the SYSTEM task at boot |
 
@@ -41,7 +41,7 @@ The agent updates itself. When the policy's `agent` entry names a version other 
 - No release exists until the first push to `main` after this page, and the policy has no `agent` entry until the owner adds one, so no desktop upgrades itself yet.
 - Clicking a notification opens nothing. An unpackaged app needs a COM activator for that, and the tray has none.
 - Memory Integrity still blocks the sensor driver. See [Check Memory Integrity](../runbooks/install-windows-monitoring.md#check-memory-integrity).
-- Nothing has run on a desktop. The first install must confirm that the tray reaches the pipe, that notifications appear, and that `windows_exporter` reads the textfile.
+- The tray reaches the pipe on tallboy. Whether notifications appear, and whether `windows_exporter` reads the textfile, is unconfirmed.
 
 ## Operate
 

@@ -3,7 +3,7 @@ title: Install Windows monitoring
 description: Add a Windows desktop to folly's Prometheus, install or update its monitoring agents, and find why it stopped reporting.
 ---
 
-Use this runbook to make a Windows desktop report to folly's Prometheus and VictoriaLogs, to update its agents, or to find why it stopped reporting. `dotfiles/windows/Install-Monitoring.ps1` installs three agents from downloads pinned by SHA256. [Lookout](../apps/lookout.md) is the app that will keep them installed; no desktop runs it yet, and [Install Lookout](#install-lookout) is its first-install procedure.
+Use this runbook to make a Windows desktop report to folly's Prometheus and VictoriaLogs, to update its agents, or to find why it stopped reporting. `dotfiles/windows/Install-Monitoring.ps1` installs three agents from downloads pinned by SHA256. [Lookout](../apps/lookout.md) is the app that keeps them installed on a desktop that runs it, such as tallboy; [Install Lookout](#install-lookout) adds it to a desktop.
 
 ## Before you start
 

@@ -150,6 +150,8 @@ public sealed class WindowsSystem : ISystem, IDisposable
         }
     }
 
+    public Task DelayAsync(TimeSpan delay, CancellationToken ct) => Task.Delay(delay, ct);
+
     public void Dispose()
     {
         http.Dispose();

@@ -16,8 +16,9 @@ public sealed class OhmGraphiteReconciler(ISystem system) : IComponentReconciler
 
         var installedVersion = system.FileProductVersion(Paths.OhmExe(system));
         var service = system.QueryService(Paths.OhmService);
-        var installed = installedVersion == policy.Version && service is not null;
-        if (installedVersion != policy.Version)
+        var versionCurrent = Versions.Matches(installedVersion, policy.Version);
+        var installed = versionCurrent && service is not null;
+        if (!versionCurrent)
         {
             problems.Add(installedVersion is null ? "not installed" : $"version {installedVersion}, want {policy.Version}");
         }
@@ -88,6 +89,11 @@ public sealed class OhmGraphiteReconciler(ISystem system) : IComponentReconciler
         await system.StopServiceAsync(Paths.OhmService, ct);
         await system.StartServiceAsync(Paths.OhmService, ct);
         actions.Add("restarted the service");
+        // The sensors enumerate before the listener opens.
+        if (!await Readiness.WaitForHttpAsync(system, new Uri($"http://127.0.0.1:{policy.Port}/metrics/"), ct))
+        {
+            actions.Add($"port {policy.Port} did not answer within {Readiness.Wait.TotalSeconds:0}s");
+        }
 
         if (!await Firewall.RuleExistsAsync(system, Paths.OhmService, ct))
         {

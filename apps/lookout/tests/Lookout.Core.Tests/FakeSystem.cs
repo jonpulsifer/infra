@@ -63,7 +63,14 @@ public sealed class FakeSystem : ISystem
         Commands.Add(line);
         if (OnRun?.Invoke(file, arguments) is { } hooked) return Task.FromResult(hooked);
 
-        if (file == "msiexec.exe") return Task.FromResult(new ProcessResult(MsiExit, "", ""));
+        if (file == "msiexec.exe")
+        {
+            if ((MsiExit is 0 or Msi.RebootRequired) && arguments.StartsWith("/i", StringComparison.Ordinal) && arguments.Contains("ENABLED_COLLECTORS"))
+            {
+                OkUrls.Add("http://127.0.0.1:9182/metrics");
+            }
+            return Task.FromResult(new ProcessResult(MsiExit, "", ""));
+        }
         if (file == "netsh.exe")
         {
             var name = arguments.Split("name=\"")[1].Split('"')[0];
@@ -99,7 +106,18 @@ public sealed class FakeSystem : ISystem
         return Task.FromResult(path);
     }
 
-    public Task<bool> HttpOkAsync(Uri url, CancellationToken ct) => Task.FromResult(OkUrls.Contains(url.ToString()));
+    /// <summary>A test hook on every probe. Returning null falls through to OkUrls.</summary>
+    public Func<string, bool?>? OnProbe { get; set; }
+
+    public Task<bool> HttpOkAsync(Uri url, CancellationToken ct)
+        => Task.FromResult(OnProbe?.Invoke(url.ToString()) ?? OkUrls.Contains(url.ToString()));
+
+    /// <summary>Advances the clock instead of sleeping.</summary>
+    public Task DelayAsync(TimeSpan delay, CancellationToken ct)
+    {
+        Now += delay;
+        return Task.CompletedTask;
+    }
 
     public void InstallEverything(PolicyBundle bundle)
     {

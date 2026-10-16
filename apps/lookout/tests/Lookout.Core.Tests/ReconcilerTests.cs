@@ -41,6 +41,38 @@ public class WindowsExporterTests
     }
 
     [Fact]
+    public async Task TheInstalledVersionIsRemovedBeforeItIsReinstalledWithOtherCollectors()
+    {
+        var system = new FakeSystem();
+        var bundle = Fixtures.Bundle();
+        system.InstallEverything(bundle);
+        system.Services["windows_exporter"] = system.Services["windows_exporter"] with
+        {
+            BinaryPath = "\"C:\\Program Files\\windows_exporter\\windows_exporter.exe\" --collectors.enabled [defaults],gpu,cpu_info,diskdrive",
+        };
+        var reconciler = new WindowsExporterReconciler(system);
+
+        var before = await reconciler.ObserveAsync(bundle, CancellationToken.None);
+        var result = await reconciler.ConvergeAsync(bundle, before, CancellationToken.None);
+
+        var msi = system.Commands.Where(c => c.StartsWith("msiexec.exe")).ToList();
+        Assert.Equal(2, msi.Count);
+        Assert.StartsWith("msiexec.exe /x \"C:\\Temp\\lookout-1.msi\" /qn /norestart", msi[0]);
+        Assert.StartsWith("msiexec.exe /i \"C:\\Temp\\lookout-1.msi\"", msi[1]);
+        Assert.Equal(["removed 0.31.8", "installed 0.31.8 with collectors [defaults],gpu,cpu_info,diskdrive,textfile"], result.Actions);
+    }
+
+    [Fact]
+    public async Task AFreshInstallDoesNotRemoveAnything()
+    {
+        var system = new FakeSystem();
+        var bundle = Fixtures.Bundle();
+        var reconciler = new WindowsExporterReconciler(system);
+        await reconciler.ConvergeAsync(bundle, await reconciler.ObserveAsync(bundle, CancellationToken.None), CancellationToken.None);
+        Assert.DoesNotContain(system.Commands, c => c.StartsWith("msiexec.exe /x"));
+    }
+
+    [Fact]
     public async Task ARebootRequestIsReported()
     {
         var system = new FakeSystem { MsiExit = Msi.RebootRequired };
@@ -79,6 +111,63 @@ public class OhmGraphiteTests
         Assert.Contains("registered the service", result.Actions);
         Assert.Contains("OhmGraphite", system.FirewallRules);
         Assert.True(system.Services["OhmGraphite"].Running);
+    }
+
+    [Fact]
+    public async Task BuildMetadataOnTheProductVersionIsNotDrift()
+    {
+        var system = new FakeSystem();
+        var bundle = Fixtures.Bundle();
+        system.InstallEverything(bundle);
+        system.Versions[Paths.OhmExe(system)] = "0.38.0+fb18a891afd4071ab4bd9c769483f7eb8051c769";
+
+        var state = await new OhmGraphiteReconciler(system).ObserveAsync(bundle, CancellationToken.None);
+
+        Assert.True(state.Current);
+        Assert.Empty(state.Problems);
+    }
+
+    [Fact]
+    public async Task ARestartWaitsForThePortBeforeTheNextObserve()
+    {
+        var system = new FakeSystem();
+        var bundle = Fixtures.Bundle();
+        system.InstallEverything(bundle);
+        system.Files[Paths.OhmConfig(system)] = "<graphite default/>";
+        var url = $"http://127.0.0.1:{bundle.Policy.OhmGraphite.Port}/metrics/";
+        system.OkUrls.Remove(url);
+        var opensAt = system.Now + TimeSpan.FromSeconds(10);
+        var probes = 0;
+        system.OnProbe = u =>
+        {
+            probes++;
+            if (u == url && system.Now >= opensAt) system.OkUrls.Add(url);
+            return null;
+        };
+        var reconciler = new OhmGraphiteReconciler(system);
+
+        var result = await reconciler.ConvergeAsync(bundle, await reconciler.ObserveAsync(bundle, CancellationToken.None), CancellationToken.None);
+
+        Assert.Equal(["wrote config", "restarted the service"], result.Actions);
+        Assert.True(probes > 1);
+        Assert.True((await reconciler.ObserveAsync(bundle, CancellationToken.None)).Healthy);
+    }
+
+    [Fact]
+    public async Task APortThatNeverOpensIsReportedNotWaitedForForever()
+    {
+        var system = new FakeSystem();
+        var bundle = Fixtures.Bundle();
+        system.InstallEverything(bundle);
+        system.Files[Paths.OhmConfig(system)] = "<graphite default/>";
+        system.OkUrls.Remove($"http://127.0.0.1:{bundle.Policy.OhmGraphite.Port}/metrics/");
+        var started = system.Now;
+        var reconciler = new OhmGraphiteReconciler(system);
+
+        var result = await reconciler.ConvergeAsync(bundle, await reconciler.ObserveAsync(bundle, CancellationToken.None), CancellationToken.None);
+
+        Assert.Contains(result.Actions, a => a.StartsWith("port 4445 did not answer"));
+        Assert.True(system.Now - started >= Readiness.Wait);
     }
 
     [Fact]
