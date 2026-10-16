@@ -59,6 +59,7 @@ const decoder = (): Decoder & { deleted: boolean } => ({
 
 function harness(redialCap = 2) {
   const sockets: FakeWebSocket[] = [];
+  const waits: number[] = [];
   const log = capturingLog();
   const partials: string[] = [];
   const commits: string[] = [];
@@ -76,11 +77,17 @@ function harness(redialCap = 2) {
     log,
     connectTimeoutMs: 50,
     redialCap,
+    redialMs: 10,
+    setTimer: ((fn: () => void, ms: number) => {
+      waits.push(ms);
+      fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout,
     onPartial: (text) => partials.push(text),
     onCommitted: (text) => commits.push(text),
     onEnd: (reason) => ends.push(reason),
   });
-  return { ears, sockets, log, partials, commits, ends, dec };
+  return { ears, sockets, log, partials, commits, ends, dec, waits };
 }
 
 describe('the Scribe ears', () => {
@@ -143,6 +150,7 @@ describe('the Scribe ears', () => {
     expect(h.sockets).toHaveLength(2);
     expect(h.ends).toEqual(['redial_cap']);
     expect(h.dec.deleted).toBe(true);
+    expect(h.waits).toEqual([10]);
   });
 
   test('logs server errors by type and stops cleanly without a redial', async () => {
