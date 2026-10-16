@@ -244,6 +244,7 @@ export class Mate {
         model: voice.model,
         thinking: voice.thinking,
         timeoutMs: config.voice.timeoutMs,
+        fillerMs: config.voice.fillerMs,
         log,
       });
       this.edges.speechEngine?.setLane(lane);

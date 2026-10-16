@@ -112,6 +112,7 @@ export function mateConfig(overrides: ConfigOverrides = {}): Config {
       model: 'faux/faux',
       thinking: 'off',
       timeoutMs: 20_000,
+      fillerMs: 1_200,
       speechEngineKeySha256: null,
     },
     brain: {

@@ -44,9 +44,10 @@ describe('config from the environment', () => {
   test('the voice lane has its own model, thinking off, and takes the engine key as a hex hash', () => {
     const voice = readConfig(minimal).voice;
     expect(voice).toEqual({
-      model: 'opencode-go/qwen3.8-flash',
+      model: 'opencode-go/gpt-6-luna',
       thinking: 'off',
       timeoutMs: 20_000,
+      fillerMs: 1_200,
       speechEngineKeySha256: null,
     });
     expect(
@@ -54,16 +55,21 @@ describe('config from the environment', () => {
         ...minimal,
         MATE_VOICE_MODEL: 'faux/fast',
         MATE_VOICE_THINKING: 'low',
+        MATE_VOICE_FILLER_MS: '0',
         MATE_SPEECH_ENGINE_KEY_SHA256: `${'AB'.repeat(32)} `,
       }).voice,
     ).toMatchObject({
       model: 'faux/fast',
       thinking: 'low',
+      fillerMs: 0,
       speechEngineKeySha256: 'ab'.repeat(32),
     });
     expect(() =>
       readConfig({ ...minimal, MATE_SPEECH_ENGINE_KEY_SHA256: 'not-hex' }),
     ).toThrow('MATE_SPEECH_ENGINE_KEY_SHA256');
+    expect(() =>
+      readConfig({ ...minimal, MATE_VOICE_FILLER_MS: '-1' }),
+    ).toThrow('MATE_VOICE_FILLER_MS');
   });
 
   test('refuses a non-positive number', () => {

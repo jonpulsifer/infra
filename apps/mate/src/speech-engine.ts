@@ -42,6 +42,8 @@ const Upstream = z.discriminatedUnion('type', [
  * Streams the spoken reply to a transcript whose last turn is the owner's.
  * `conversationId` names the call on each model request, as a thread's pi
  * session id does: OpenCode Go refuses a request that names no session.
+ * The stream may open with a filler, which is part of what was said;
+ * `fillers: false` keeps it to the model's own words.
  */
 export interface VoiceLane {
   reply(
@@ -49,6 +51,7 @@ export interface VoiceLane {
     signal: AbortSignal,
     conversationId: string,
     tools?: readonly VoiceTool[],
+    say?: { fillers?: boolean },
   ): AsyncIterable<string>;
 }
 

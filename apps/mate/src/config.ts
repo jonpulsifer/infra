@@ -62,6 +62,8 @@ export interface VoiceConfig {
   readonly thinking: ThinkingLevel;
   /** The whole spoken reply, first token included. */
   readonly timeoutMs: number;
+  /** Silence before the first word that earns a spoken filler; 0 for none. */
+  readonly fillerMs: number;
   /** Hex SHA-256 of the API key that owns the engine; `null` refuses every connection. */
   readonly speechEngineKeySha256: string | null;
 }
@@ -557,12 +559,13 @@ export function readVoiceConfig(env: Env): VoiceConfig {
     );
   }
   return {
-    model: modelSpec(env, 'MATE_VOICE_MODEL', 'opencode-go/qwen3.8-flash'),
+    model: modelSpec(env, 'MATE_VOICE_MODEL', 'opencode-go/gpt-6-luna'),
     thinking: thinking(
       'MATE_VOICE_THINKING',
       text(env, 'MATE_VOICE_THINKING', 'off'),
     ),
     timeoutMs: integer(env, 'MATE_VOICE_TIMEOUT_MS', 20_000, 1_000),
+    fillerMs: integer(env, 'MATE_VOICE_FILLER_MS', 1_200, 0),
     speechEngineKeySha256: hash,
   };
 }

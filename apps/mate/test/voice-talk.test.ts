@@ -8,11 +8,13 @@ function scriptedLane(words: string[], gate?: () => Promise<void>) {
   const heard: Turn[][] = [];
   const calls: string[] = [];
   const toolNames: string[][] = [];
+  const fillers: (boolean | undefined)[] = [];
   const lane: VoiceLane = {
-    async *reply(turns, signal, callId, tools = []) {
+    async *reply(turns, signal, callId, tools = [], say = {}) {
       heard.push([...turns]);
       calls.push(callId);
       toolNames.push(tools.map((t) => t.name));
+      fillers.push(say.fillers);
       for (const word of words) {
         if (gate) await gate();
         if (signal.aborted) return;
@@ -20,7 +22,7 @@ function scriptedLane(words: string[], gate?: () => Promise<void>) {
       }
     },
   };
-  return { lane, heard, calls, toolNames };
+  return { lane, heard, calls, toolNames, fillers };
 }
 
 function harness(lane: VoiceLane | null) {
@@ -176,14 +178,18 @@ describe('a spoken conversation', () => {
     expect(h.spoken.length).toBe(before);
   });
 
-  test("hands the call's tools to the lane, and announces a settled task as an aside", async () => {
-    const { lane, heard, toolNames } = scriptedLane(['done, ', 'fence up']);
+  test("hands the call's tools to the lane, and announces a settled task as an aside, without a filler", async () => {
+    const { lane, heard, toolNames, fillers } = scriptedLane([
+      'done, ',
+      'fence up',
+    ]);
     const h = harness(lane);
     h.talk.heard('go', true);
     await settle();
     expect(toolNames[0]).toEqual(['start_task']);
     await h.talk.announce('fix the fence', 'The fence is up and tested.');
     expect(h.announced).toEqual(['done, fence up']);
+    expect(fillers).toEqual([undefined, false]);
     expect(heard[1]?.at(-1)?.content).toContain('one short spoken sentence');
     expect(heard[1]?.at(-2)?.content).toContain('[task result]');
     expect(h.spoken.filter(([, final]) => !final)).toHaveLength(2);

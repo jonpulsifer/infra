@@ -69,6 +69,11 @@ spec:
               value: "308072071949320204"
             # ElevenLabs Speech Engine's JWT key (the hash alone); mate refuses
             # the /speech-engine upgrade while it is unset.
+            # The voice lane's model: the one that called the call's tools
+            # on every try and spoke first within a second; flash missed one
+            # call in eight.
+            - name: MATE_VOICE_MODEL
+              value: opencode-go/gpt-6-luna
             - name: MATE_SPEECH_ENGINE_KEY_SHA256
               valueFrom:
                 secretKeyRef:
