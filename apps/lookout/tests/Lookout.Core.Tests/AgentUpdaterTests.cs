@@ -11,7 +11,7 @@ public class AgentUpdaterTests
     public async Task DoesNothingWithoutAnAgentEntryOrAtTheRunningVersion()
     {
         var system = new FakeSystem();
-        Assert.Null(await new AgentUpdater(system, "0.2.0").UpdateAsync(Policy.Parse(Fixtures.PolicyJson), CancellationToken.None));
+        Assert.Null(await new AgentUpdater(system, "0.2.0").UpdateAsync(Policy.Parse(Fixtures.PolicyJsonWithoutAgent), CancellationToken.None));
         Assert.Null(await new AgentUpdater(system, "0.2.0").UpdateAsync(WithAgent("0.2.0"), CancellationToken.None));
         Assert.Empty(system.Detached);
     }
