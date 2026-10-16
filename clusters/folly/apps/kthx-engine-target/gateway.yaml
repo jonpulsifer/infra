@@ -4,8 +4,8 @@
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: Gateway
 metadata:
-  name: spindrift-apps
-  namespace: spindrift-apps
+  name: kthx-apps
+  namespace: kthx-apps
   annotations:
     cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
 spec:
@@ -32,7 +32,7 @@ spec:
           - kind: HTTPRoute
     # One wildcard for every App: no release could own a per-App listener or
     # certificate. cert-manager issues it from the annotation above.
-    - name: spindrift-apps-tls
+    - name: kthx-apps-tls
       protocol: HTTPS
       port: 443
       hostname: "*.${KTHX_ENGINE_DOMAIN}"
@@ -50,7 +50,7 @@ spec:
           - kind: HTTPRoute
     # cluster-gateway holds the same wildcard on its own address; each App's
     # DNSEndpoint decides which Gateway a name reaches.
-    - name: spindrift-apps-tls-secret-domain
+    - name: kthx-apps-tls-secret-domain
       protocol: HTTPS
       port: 443
       hostname: "*.${SECRET_DOMAIN}"

@@ -35,37 +35,37 @@ module "tunnel_kthx_engine" {
       },
       {
         hostname = "*.${cloudflare_zone.lolwtf_dev.name}"
-        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        service  = "http://cilium-gateway-kthx-apps.kthx-apps.svc.cluster.local"
       },
       # Wildcard rules only route: the module publishes no record for them, so
       # hand-managed names that point elsewhere never reach this tunnel.
       {
         hostname = "*.${cloudflare_zone.lolwtf_ca.name}"
-        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        service  = "http://cilium-gateway-kthx-apps.kthx-apps.svc.cluster.local"
       },
       {
         hostname = "*.${cloudflare_zone.wishin_app.name}"
-        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        service  = "http://cilium-gateway-kthx-apps.kthx-apps.svc.cluster.local"
       },
       # The module publishes into lolwtf.dev only; kthx_apex below is this record.
       {
         hostname       = cloudflare_zone.kthx_dev.name
-        service        = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        service        = "http://cilium-gateway-kthx-apps.kthx-apps.svc.cluster.local"
         publish_record = false
       },
       {
         hostname = "*.${cloudflare_zone.kthx_dev.name}"
-        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        service  = "http://cilium-gateway-kthx-apps.kthx-apps.svc.cluster.local"
       },
       # `*.<zone>` never matches the apex. The App's DNSEndpoint publishes its record.
       {
         hostname       = cloudflare_zone.clankerbanker_ca.name
-        service        = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        service        = "http://cilium-gateway-kthx-apps.kthx-apps.svc.cluster.local"
         publish_record = false
       },
       {
         hostname = "*.${cloudflare_zone.clankerbanker_ca.name}"
-        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        service  = "http://cilium-gateway-kthx-apps.kthx-apps.svc.cluster.local"
       },
       # No embarrassing.ca rule: Vercel and Cloudflare Pages serve that zone, and
       # no cluster gateway listens for it.

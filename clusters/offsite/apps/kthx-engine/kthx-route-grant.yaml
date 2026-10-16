@@ -15,7 +15,7 @@ spec:
       namespace: kthx
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      namespace: spindrift-apps
+      namespace: kthx-apps
   to:
     - group: ""
       kind: Service
