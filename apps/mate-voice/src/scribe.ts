@@ -17,6 +17,11 @@ export const SCRIBE_SAMPLE_RATE = 48_000;
 export const FRAMES_PER_CHUNK = 5;
 /** The first redial's wait; a refused key would otherwise burn the cap in a second. */
 export const REDIAL_MS = 1_000;
+/** Quiet after speech before Scribe's VAD closes the utterance. */
+export const VAD_SILENCE_SECS = 0.8;
+/** One chunk's span: Discord sends nothing in silence, so the bridge sends it. */
+export const CHUNK_MS = FRAMES_PER_CHUNK * 20;
+const SILENCE = Buffer.alloc((SCRIBE_SAMPLE_RATE * 2 * CHUNK_MS) / 1_000);
 
 export interface ScribeOptions {
   /** `https://api.elevenlabs.io`; the socket URL is derived. */
@@ -31,6 +36,9 @@ export interface ScribeOptions {
   /** The wait before the first redial; each later one waits a step longer. */
   redialMs?: number;
   setTimer?: typeof setTimeout;
+  setTicker?: typeof setInterval;
+  clearTicker?: typeof clearInterval;
+  now?: () => number;
   /** An interim transcript of the utterance in progress; it may change. */
   onPartial(text: string): void;
   /** The utterance Scribe's VAD closed. */
@@ -42,6 +50,8 @@ export interface ScribeOptions {
 export interface ScribeCounts {
   heardFrames: number;
   sentChunks: number;
+  /** Chunks of silence sent while Discord sent nothing. */
+  silentChunks: number;
   partials: number;
   commits: number;
   redials: number;
@@ -56,6 +66,7 @@ export function scribeUrl(api: string): string {
   url.searchParams.set('model_id', SCRIBE_MODEL);
   url.searchParams.set('audio_format', `pcm_${SCRIBE_SAMPLE_RATE}`);
   url.searchParams.set('commit_strategy', 'vad');
+  url.searchParams.set('vad_silence_threshold_secs', String(VAD_SILENCE_SECS));
   url.searchParams.set('language_code', 'en');
   return url.toString();
 }
@@ -66,9 +77,12 @@ export class ScribeEars {
   private pending: Buffer[] = [];
   private ended = false;
   private stopping = false;
+  private ticker: ReturnType<typeof setInterval> | null = null;
+  private lastSentAt = 0;
   readonly counts: ScribeCounts = {
     heardFrames: 0,
     sentChunks: 0,
+    silentChunks: 0,
     partials: 0,
     commits: 0,
     redials: 0,
@@ -115,6 +129,8 @@ export class ScribeEars {
     socket.onopen = () => {
       clearTimeout(timer);
       this.decoder ??= this.options.decoder();
+      this.lastSentAt = this.now();
+      this.startTicker();
       log.info('scribe: session open', { redials: this.counts.redials });
     };
     socket.onmessage = (event) => {
@@ -128,6 +144,7 @@ export class ScribeEars {
       if (this.socket !== socket) return;
       this.socket = null;
       this.pending = [];
+      this.stopTicker();
       log.info('scribe: session closed', {
         code: event.code,
         reason: event.reason.slice(0, 120) || null,
@@ -166,11 +183,15 @@ export class ScribeEars {
   }
 
   private flush(): void {
-    const socket = this.socket;
-    if (!socket || socket.readyState !== OPEN || this.pending.length === 0)
-      return;
+    if (this.pending.length === 0) return;
     const chunk = Buffer.concat(this.pending);
     this.pending = [];
+    if (this.sendChunk(chunk)) this.counts.sentChunks += 1;
+  }
+
+  private sendChunk(chunk: Buffer): boolean {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== OPEN) return false;
     socket.send(
       JSON.stringify({
         message_type: 'input_audio_chunk',
@@ -179,7 +200,35 @@ export class ScribeEars {
         sample_rate: SCRIBE_SAMPLE_RATE,
       }),
     );
-    this.counts.sentChunks += 1;
+    this.lastSentAt = this.now();
+    return true;
+  }
+
+  /**
+   * Discord carries no silence, and Scribe's VAD closes an utterance only
+   * after hearing some: every chunk's span with nothing sent gets a silent
+   * one, which also keeps an idle session alive.
+   */
+  private startTicker(): void {
+    this.stopTicker();
+    const tick = () => {
+      if (this.now() - this.lastSentAt < CHUNK_MS) return;
+      if (this.pending.length > 0) {
+        this.flush();
+        return;
+      }
+      if (this.sendChunk(SILENCE)) this.counts.silentChunks += 1;
+    };
+    this.ticker = (this.options.setTicker ?? setInterval)(tick, CHUNK_MS);
+  }
+
+  private stopTicker(): void {
+    if (this.ticker) (this.options.clearTicker ?? clearInterval)(this.ticker);
+    this.ticker = null;
+  }
+
+  private now(): number {
+    return (this.options.now ?? Date.now)();
   }
 
   private receive(text: string): void {
@@ -189,7 +238,11 @@ export class ScribeEars {
       text?: string;
       error?: string;
       warning?: string;
-      config?: { commit_strategy?: string; sample_rate?: number };
+      config?: {
+        vad_commit_strategy?: boolean;
+        vad_silence_threshold_secs?: number;
+        sample_rate?: number;
+      };
     };
     try {
       message = JSON.parse(text);
@@ -199,7 +252,8 @@ export class ScribeEars {
     switch (message.message_type) {
       case 'session_started':
         log.info('scribe: session started', {
-          commitStrategy: message.config?.commit_strategy ?? null,
+          vad: message.config?.vad_commit_strategy ?? null,
+          silenceSecs: message.config?.vad_silence_threshold_secs ?? null,
           sampleRate: message.config?.sample_rate ?? null,
         });
         return;
@@ -241,6 +295,7 @@ export class ScribeEars {
   private end(reason: string): void {
     if (this.ended) return;
     this.ended = true;
+    this.stopTicker();
     const socket = this.socket;
     this.socket = null;
     if (socket && socket.readyState === OPEN) socket.close(1000, reason);
