@@ -512,6 +512,54 @@ describe('a mention', () => {
     expect(log.of('voice: call thread open')).toHaveLength(1);
   });
 
+  test('a join from a place that holds no thread keeps the call to that channel', async () => {
+    const posts: [string, string][] = [];
+    const adopted: string[] = [];
+    const { voice, link, from, state, log } = harness();
+    (
+      voice as unknown as { options: Record<string, unknown> }
+    ).options.rootMessage = async (channelId: string, content: string) => {
+      posts.push([channelId, content]);
+      return `m${posts.length}`;
+    };
+    (
+      voice as unknown as { options: Record<string, unknown> }
+    ).options.openThread = async () => {
+      throw new Error('Cannot execute action on this channel type');
+    };
+    voice.setWork({
+      threads: {
+        onMessage: async () => {},
+        stateOf: () => undefined,
+        adopt: (ref) => adopted.push(ref.id),
+      },
+      recall: null,
+    });
+    voice.setLane({
+      async *reply() {
+        yield 'hi';
+      },
+    });
+    const socket = await link();
+    voice.onGuildCreate([{ user_id: OWNER, channel_id: VOICE } as never]);
+    await voice.join(OWNER, TEXT);
+    await from(socket, state('ready'));
+    await from(socket, {
+      type: 'transcript',
+      speakerId: OWNER,
+      text: 'hello',
+      final: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(adopted).toEqual([TEXT]);
+    expect(voice.current?.threadId).toBe(TEXT);
+    expect(posts.slice(1)).toEqual([
+      [TEXT, 'you: hello'],
+      [TEXT, 'mate: hi'],
+    ]);
+    expect(log.of('voice: the call keeps to its channel')).toHaveLength(1);
+  });
+
   test('is a voice command only when it says just join or leave', () => {
     expect(voiceCommand(`<@${BOT}> join`, BOT)).toBe('join');
     expect(voiceCommand(`<@!${BOT}>  Leave `, BOT)).toBe('leave');

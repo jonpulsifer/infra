@@ -513,25 +513,35 @@ export class Voice {
     }
     const channelId = call.originChannelId;
     this.opening = (async () => {
+      const when = new Date(clock.now())
+        .toISOString()
+        .slice(0, 16)
+        .replace('T', ' ');
+      let threadId = channelId;
       try {
-        const when = new Date(clock.now())
-          .toISOString()
-          .slice(0, 16)
-          .replace('T', ' ');
         const root = await rootMessage(channelId, `voice call · ${when} UTC`);
-        const threadId = await openThread(channelId, root, `voice ${when}`);
-        work.threads.adopt({ surface: 'discord', channelId, id: threadId });
-        if (this.call === call) call.threadId = threadId;
+        threadId = await openThread(channelId, root, `voice ${when}`);
         log.info('voice: call thread open', { threadId });
-        return threadId;
       } catch (error) {
-        log.warn('voice: the call thread could not be opened', {
+        // A join from inside a thread, or from a voice channel's own chat:
+        // Discord opens no thread there, so the call keeps to that channel.
+        log.info('voice: the call keeps to its channel', {
+          channelId,
           error: plain(error),
         });
-        return null;
-      } finally {
-        this.opening = null;
       }
+      try {
+        work.threads.adopt({ surface: 'discord', channelId, id: threadId });
+      } catch (error) {
+        log.warn('voice: the call thread could not be adopted', {
+          error: plain(error),
+        });
+        this.opening = null;
+        return null;
+      }
+      if (this.call === call) call.threadId = threadId;
+      this.opening = null;
+      return threadId;
     })();
     return this.opening;
   }
