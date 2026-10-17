@@ -618,6 +618,13 @@ describe('a mention', () => {
     expect(await peopleTool.execute({})).toBe(
       ['- the owner (Pat): @pat; Crew', '- Pat: @pat; Crew'].join('\n'),
     );
+    // Someone the gateway never listed, heard transmitting, is in the channel.
+    await from(socket, { type: 'speaking', userId: BOT, speaking: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(await peopleTool.execute({})).toContain(
+      '- Pat: @pat; Crew; talking',
+    );
+    expect((await peopleTool.execute({})).split('\n')).toHaveLength(3);
   });
 
   test('is a voice command only when it says just join or leave', () => {

@@ -449,13 +449,20 @@ export class Voice {
       case 'barge_in':
         this.talk?.bargeIn(message.heardChars);
         return;
-      case 'speaking':
+      case 'speaking': {
         this.spoke.set(message.userId, {
           at: this.options.clock.now(),
           now: message.speaking,
         });
+        // A resumed gateway session lists no voice states, so someone who
+        // was already in the channel is unknown until they move; a packet
+        // from them is proof enough that they are here.
+        const call = this.call;
+        if (call && !this.channels.has(message.userId))
+          this.channels.set(message.userId, call.channelId);
         if (message.speaking) this.learn(message.userId);
         return;
+      }
       case 'heartbeat':
         return;
     }
