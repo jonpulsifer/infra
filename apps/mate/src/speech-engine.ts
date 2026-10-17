@@ -63,7 +63,6 @@ export interface EngineSocket {
 /** The call behind a conversation, for tools; absent, a reply has none. */
 export interface EngineCall {
   readonly tools: readonly VoiceTool[];
-  alone(): boolean;
   readonly heard: { value: string };
   /** Results to tell; taken on the next turn. */
   readonly news: string[];
@@ -303,10 +302,7 @@ export class SpeechEngine {
         call.transcript?.('user', last.content);
       }
       let said = '';
-      const alone = call?.alone() ?? false;
-      const tools = (call?.tools ?? []).filter(
-        (tool) => alone || !tool.sideEffect,
-      );
+      const tools = call?.tools ?? [];
       // News of finished work, and a word on the channel, go in just before
       // the owner's latest words.
       const news = call?.news.splice(0) ?? [];

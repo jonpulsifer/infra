@@ -10,15 +10,11 @@ import {
   voiceTools,
 } from '../src/voice-tools.ts';
 
-function harness(
-  options: { alone?: boolean; recall?: RecallSource | null } = {},
-) {
+function harness(options: { recall?: RecallSource | null } = {}) {
   const started: string[] = [];
   const states = new Map<string, ThreadState>();
-  let alone = options.alone ?? true;
   let heard = '';
   const context: VoiceToolContext = {
-    alone: () => alone,
     lastHeard: () => heard,
     started: [],
   };
@@ -50,9 +46,6 @@ function harness(
     context,
     say: (words: string) => {
       heard = words;
-    },
-    setAlone: (value: boolean) => {
-      alone = value;
     },
   };
 }
@@ -98,19 +91,8 @@ describe('the voice tools', () => {
     ).toContain('Not started yet');
   });
 
-  test('start_task refuses when the owner is not alone, and forgets the pending task', async () => {
-    const h = harness({ alone: false });
-    const start = h.tool(START_TASK_TOOL);
-    expect(await start.execute({ task: 'x' })).toContain('Someone else');
-    h.setAlone(true);
-    h.say('yes');
-    expect(await start.execute({ task: 'x' })).toContain('Not started yet');
-    expect(h.started).toEqual([]);
-  });
-
   test('start_task reports a thread that could not start', async () => {
     const context: VoiceToolContext = {
-      alone: () => true,
       lastHeard: () => 'yes',
       started: [],
     };

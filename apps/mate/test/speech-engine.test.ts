@@ -252,7 +252,7 @@ describe('the Speech Engine link', () => {
     expect(engine.connected).toBe(0);
   });
 
-  test("hands the call's tools to the lane, gated on being alone, and folds news in before the latest words", async () => {
+  test("hands the call's tools to the lane and folds news in before the latest words", async () => {
     const seen: { tools: string[]; turns: string[] }[] = [];
     const lane: VoiceLane = {
       async *reply(turns, _signal, _id, tools = []) {
@@ -263,7 +263,6 @@ describe('the Speech Engine link', () => {
         yield 'ok';
       },
     };
-    let alone = false;
     const heard = { value: '' };
     const news: string[] = [];
     const engine = new SpeechEngine({
@@ -286,7 +285,6 @@ describe('the Speech Engine link', () => {
             execute: async () => '',
           },
         ],
-        alone: () => alone,
         heard,
         news,
       }),
@@ -306,9 +304,8 @@ describe('the Speech Engine link', () => {
       }),
     );
     await settle();
-    expect(seen[0]?.tools).toEqual(['task_status']);
+    expect(seen[0]?.tools).toEqual(['start_task', 'task_status']);
     expect(heard.value).toBe('start the backups');
-    alone = true;
     news.push('The task "x" finished.');
     engine.receive(
       socket,
