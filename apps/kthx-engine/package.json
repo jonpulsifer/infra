@@ -27,7 +27,7 @@
     "@opentelemetry/sdk-node": "^0.223.0",
     "@opentelemetry/semantic-conventions": "^1.30.0",
     "@repo/archive": "workspace:*",
-    "drizzle-orm": "0.45.3",
+    "drizzle-orm": "0.45.4",
     "vercel": "63.1.1",
     "zod": "4.6.5"
   },
