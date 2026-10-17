@@ -36,3 +36,4 @@ neovim = { version = "latest", os = ["windows"] }
 ripgrep = { version = "latest", os = ["windows"] }
 sd = { version = "latest", os = ["windows"] }
 zoxide = { version = "latest", os = ["windows"] }
+codex = "latest"
