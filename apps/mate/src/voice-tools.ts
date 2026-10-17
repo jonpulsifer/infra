@@ -1,8 +1,8 @@
 /**
  * What a voice can do: start work in a text thread, ask how it is going, and
- * read mate's other threads. Work from a call is gated twice: only when the
- * owner is alone in the channel with mate, and only after the task was read
- * back and the owner's next words were a yes. The tools run in mate's own
+ * read mate's other threads. Tools go to the owner's turns alone, and work
+ * that changes something starts only after the task was read back and the
+ * owner's next words were a yes. The tools run in mate's own
  * process and answer in a sentence; the work itself runs in the thread, with
  * its sandbox, cards and Stop button, as a typed message would.
  */
@@ -24,7 +24,7 @@ export interface VoiceTool<TParameters extends TSchema = TSchema> {
   readonly name: string;
   readonly description: string;
   readonly parameters: TParameters;
-  /** True for a tool that changes something; such a tool is withheld when the owner is not alone. */
+  /** True for a tool that changes something, which a read-back guards. */
   readonly sideEffect: boolean;
   execute(args: Static<TParameters>): Promise<string>;
 }
@@ -49,8 +49,6 @@ export interface VoiceWork {
 }
 
 export interface VoiceToolContext {
-  /** The owner is the only one in the channel with mate. */
-  alone(): boolean;
   /** The owner's last committed words. */
   lastHeard(): string;
   started: StartedTask[];
@@ -100,10 +98,6 @@ export function voiceTools(
     execute: async ({ task, readOnly }) => {
       const words = task.trim();
       if (!words) return 'No task was given.';
-      if (!context.alone()) {
-        pending = null;
-        return 'Someone else is in the channel, so no work starts from the call. The owner can type it in a thread.';
-      }
       if (readOnly) pending = words;
       if (
         pending === null ||

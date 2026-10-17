@@ -394,6 +394,7 @@ describe('a mention', () => {
       text: 'not me',
       final: true,
     });
+    await new Promise((resolve) => setTimeout(resolve, 5));
     await from(socket, {
       type: 'transcript',
       speakerId: OWNER,
@@ -401,16 +402,19 @@ describe('a mention', () => {
       final: true,
     });
     await new Promise((resolve) => setTimeout(resolve, 5));
+    // A friend's line is answered too; the owner's second line sees three turns.
     expect(socket.frames.filter((f) => f.type === 'speak')).toEqual([
       { type: 'speak', text: 'heard 1', final: false },
+      { type: 'speak', text: '', final: true },
+      { type: 'speak', text: 'heard 3', final: false },
       { type: 'speak', text: '', final: true },
     ]);
     await from(socket, { type: 'barge_in', heardChars: 3 });
     await from(socket, state('destroyed'));
     await from(socket, { type: 'state', call: null });
     expect(log.of('voice: conversation over')[0]?.fields).toMatchObject({
-      turns: 1,
-      replies: 1,
+      turns: 2,
+      replies: 2,
       bargeIns: 1,
     });
   });
@@ -604,7 +608,7 @@ describe('a mention', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(asked).toEqual([FRIEND]);
     expect(notes).toEqual([
-      '[channel] With the owner in the channel: Pat (talking). Only the owner is heard.',
+      '[channel] With the owner in the channel: Pat (talking). Anyone may talk to you; only the owner can ask you for work.',
     ]);
     if (!peopleTool) throw new Error('no channel_members tool');
     await from(socket, { type: 'speaking', userId: FRIEND, speaking: false });
@@ -618,6 +622,13 @@ describe('a mention', () => {
     expect(await peopleTool.execute({})).toBe(
       ['- the owner (Pat): @pat; Crew', '- Pat: @pat; Crew'].join('\n'),
     );
+    // Someone the gateway never listed, heard transmitting, is in the channel.
+    await from(socket, { type: 'speaking', userId: BOT, speaking: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(await peopleTool.execute({})).toContain(
+      '- Pat: @pat; Crew; talking',
+    );
+    expect((await peopleTool.execute({})).split('\n')).toHaveLength(3);
   });
 
   test('is a voice command only when it says just join or leave', () => {

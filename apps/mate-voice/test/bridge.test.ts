@@ -233,10 +233,17 @@ describe('bridge', () => {
     expect(announced).toEqual(['done']);
     expect(hushes).toBe(1);
     expect(bridge.unvoicedChars).toBe(0);
-    started.onTranscript('hi there', true);
+    started.onTranscript(OWNER, 'hi there', true);
+    started.onTranscript('555555555555555555', 'and me', true);
     started.onBargeIn(12);
     expect(sent.filter((m) => m.type === 'transcript')).toEqual([
       { type: 'transcript', speakerId: OWNER, text: 'hi there', final: true },
+      {
+        type: 'transcript',
+        speakerId: '555555555555555555',
+        text: 'and me',
+        final: true,
+      },
     ]);
     expect(sent.filter((m) => m.type === 'barge_in')).toEqual([
       { type: 'barge_in', heardChars: 12 },
@@ -259,7 +266,8 @@ describe('bridge', () => {
       joinTone: null,
       speech: (call) =>
         new NativeSpeech({
-          ears: (handlers) => {
+          ownerId: call.ownerId,
+          ears: (_userId, handlers) => {
             ends.push(handlers.onEnd);
             return {
               start: async () => {},

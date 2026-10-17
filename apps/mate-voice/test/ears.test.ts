@@ -28,7 +28,7 @@ describe('ears', () => {
       ownerId: OWNER,
       log: silentLog,
       resubscribeCap: 1,
-      onFrame: (opus) => heard.push(opus.length),
+      onFrame: (_userId, opus) => heard.push(opus.length),
       onStall: () => {},
     });
     ears.start();

@@ -4,6 +4,9 @@ import { ECHO_WINDOW_MS, NativeSpeech } from '../src/native.ts';
 import type { ScribeEars } from '../src/scribe.ts';
 import { capturingLog } from './fakes.ts';
 
+const OWNER = '222222222222222222';
+const GUEST = '555555555555555555';
+
 function harness() {
   let now = 1_000;
   const said: [string, boolean][] = [];
@@ -31,38 +34,51 @@ function harness() {
     },
     heardChars: 7,
   };
-  let handlers: {
+  type Handlers = {
     onPartial(text: string): void;
     onCommitted(text: string): void;
     onEnd(reason: string): void;
-  } | null = null;
-  const transcripts: [string, boolean][] = [];
+  };
+  const opened: {
+    userId: string;
+    handlers: Handlers;
+    idleMs?: number;
+    heard: number;
+  }[] = [];
+  const transcripts: [string, string, boolean][] = [];
   const bargeIns: number[] = [];
   const deaf: string[] = [];
   const log = capturingLog();
   const speech = new NativeSpeech({
-    ears: (h) => {
-      handlers = h;
+    ownerId: OWNER,
+    ears: (userId, h, idleMs) => {
+      const entry = { userId, handlers: h, idleMs, heard: 0 };
+      opened.push(entry);
       return {
         start: async () => {},
-        hear: () => {},
+        hear: () => {
+          entry.heard += 1;
+        },
         // Scribe's ears end, and say so, on a stop too.
         stop: () => {
           earsStopped += 1;
-          handlers?.onEnd('stopped');
+          h.onEnd('stopped');
         },
       } as unknown as ScribeEars;
     },
     mouth: mouth as unknown as Mouth,
     log,
     now: () => now,
-    onTranscript: (text, final) => transcripts.push([text, final]),
+    onTranscript: (userId, text, final) =>
+      transcripts.push([userId, text, final]),
     onBargeIn: (heardChars) => bargeIns.push(heardChars),
     onDeaf: (reason) => deaf.push(reason),
   });
-  const ears = () => {
-    if (!handlers) throw new Error('no ears');
-    return handlers;
+  void speech.start();
+  const ears = (userId = OWNER) => {
+    const found = opened.find((o) => o.userId === userId);
+    if (!found) throw new Error(`no ears for ${userId}`);
+    return found.handlers;
   };
   return {
     speech,
@@ -73,6 +89,7 @@ function harness() {
     bargeIns,
     deaf,
     log,
+    opened,
     setSpeaking: (value: boolean) => {
       speaking = value;
     },
@@ -89,8 +106,8 @@ describe('native speech', () => {
     h.ears().onPartial('what is');
     h.ears().onCommitted('what is the weather');
     expect(h.transcripts).toEqual([
-      ['what is', false],
-      ['what is the weather', true],
+      [OWNER, 'what is', false],
+      [OWNER, 'what is the weather', true],
     ]);
     h.speech.say('Sunny, ', false);
     h.speech.say('twelve degrees.', true);
@@ -111,8 +128,8 @@ describe('native speech', () => {
     expect(h.bargeIns).toEqual([7]);
     expect(h.stops().hushes).toBe(1);
     expect(h.transcripts).toEqual([
-      ['wait', false],
-      ['wait stop', false],
+      [OWNER, 'wait', false],
+      [OWNER, 'wait stop', false],
     ]);
     h.ears().onCommitted('wait stop');
     h.setSpeaking(true);
@@ -144,7 +161,8 @@ describe('native speech', () => {
     h.ears().onEnd('redial_cap');
     expect(h.deaf).toEqual(['redial_cap']);
     h.speech.stop();
-    expect(h.stops()).toMatchObject({ earsStopped: 1, mouthStopped: 1 });
+    // Ears that already ended are not stopped again.
+    expect(h.stops()).toMatchObject({ earsStopped: 0, mouthStopped: 1 });
     expect(h.deaf).toEqual(['redial_cap']);
   });
 
@@ -158,7 +176,42 @@ describe('native speech', () => {
     expect(h.deaf).toEqual([]);
     expect(h.stops()).toMatchObject({ earsStopped: 1, mouthStopped: 1 });
     expect(h.log.lines).toEqual([
-      { level: 'info', msg: 'speech: stopped', bargeIns: 1, echoes: 0 },
+      {
+        level: 'info',
+        msg: 'speech: stopped',
+        bargeIns: 1,
+        echoes: 0,
+        others: 0,
+      },
     ]);
+  });
+
+  test('someone else gets their own ears at their first frame, is passed through by id, and never barges in', () => {
+    const h = harness();
+    expect(h.opened.map((o) => o.userId)).toEqual([OWNER]);
+    h.speech.hear(GUEST, Buffer.from([1]));
+    h.speech.hear(GUEST, Buffer.from([1]));
+    expect(h.opened.map((o) => [o.userId, o.idleMs])).toEqual([
+      [OWNER, undefined],
+      [GUEST, 60_000],
+    ]);
+    expect(h.opened[1]?.heard).toBe(2);
+    h.speech.say('A long answer about ', false);
+    h.setSpeaking(true);
+    h.ears(GUEST).onPartial('hey');
+    h.ears(GUEST).onCommitted('hey mate what is up');
+    expect(h.bargeIns).toEqual([]);
+    expect(h.transcripts).toEqual([
+      [GUEST, 'hey', false],
+      [GUEST, 'hey mate what is up', true],
+    ]);
+    // Their session going idle is not deafness, and the next frame reopens it.
+    h.ears(GUEST).onEnd('idle');
+    expect(h.deaf).toEqual([]);
+    h.speech.hear(GUEST, Buffer.from([1]));
+    expect(h.opened.filter((o) => o.userId === GUEST)).toHaveLength(2);
+    expect(h.speech.counts.others).toBe(2);
+    h.speech.stop();
+    expect(h.stops().earsStopped).toBe(2);
   });
 });

@@ -33,6 +33,8 @@ export interface ScribeOptions {
   connectTimeoutMs: number;
   /** Redials in one call before the ears give up. */
   redialCap: number;
+  /** Quiet, with no frame heard, after which the session ends as `idle`; unset keeps it open. */
+  idleMs?: number;
   /** The wait before the first redial; each later one waits a step longer. */
   redialMs?: number;
   setTimer?: typeof setTimeout;
@@ -79,6 +81,8 @@ export class ScribeEars {
   private stopping = false;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private lastSentAt = 0;
+  private lastHeardAt = 0;
+  private openedAt = 0;
   readonly counts: ScribeCounts = {
     heardFrames: 0,
     sentChunks: 0,
@@ -130,6 +134,7 @@ export class ScribeEars {
       clearTimeout(timer);
       this.decoder ??= this.options.decoder();
       this.lastSentAt = this.now();
+      this.openedAt = this.now();
       this.startTicker();
       log.info('scribe: session open', { redials: this.counts.redials });
     };
@@ -163,9 +168,10 @@ export class ScribeEars {
     };
   }
 
-  /** One of the owner's Opus frames, straight from Discord. */
+  /** One Opus frame of this person's, straight from Discord. */
   hear(opus: Buffer): void {
     this.counts.heardFrames += 1;
+    this.lastHeardAt = this.now();
     if (!this.open || !this.decoder) return;
     let pcm: Buffer;
     try {
@@ -214,6 +220,18 @@ export class ScribeEars {
   private startTicker(): void {
     this.stopTicker();
     const tick = () => {
+      const { idleMs } = this.options;
+      if (
+        idleMs !== undefined &&
+        this.now() - Math.max(this.lastHeardAt, this.openedAt) >= idleMs
+      ) {
+        this.options.log.info('scribe: idle; session closed', {
+          ...this.counts,
+        });
+        this.stopping = true;
+        this.end('idle');
+        return;
+      }
       if (this.now() - this.lastSentAt < CHUNK_MS) return;
       if (this.pending.length > 0) {
         this.flush();

@@ -35,7 +35,6 @@ function harness(lane: VoiceLane | null) {
     log,
     speak: (text, final) => spoken.push([text, final]),
     announce: (text) => announced.push(text),
-    alone: () => true,
     tools: [
       {
         name: 'start_task',
@@ -194,5 +193,21 @@ describe('a spoken conversation', () => {
     expect(heard[1]?.at(-2)?.content).toContain('[task result]');
     expect(h.spoken.filter(([, final]) => !final)).toHaveLength(2);
     expect(h.log.of('voice talk: announced')).toHaveLength(1);
+  });
+
+  test("a guest's words are answered by name and carry no tools", async () => {
+    const { lane, heard, toolNames } = scriptedLane(['hi']);
+    const h = harness(lane);
+    h.talk.heard('hello', true, { id: '5', name: 'Pat', owner: false });
+    await settle();
+    expect(heard[0]?.map((t) => `${t.role}:${t.content}`)).toEqual([
+      'user:Pat: hello',
+    ]);
+    expect(toolNames[0]).toEqual([]);
+    expect(h.talk.lastHeard).toBe('');
+    h.talk.heard('yes', true);
+    await settle();
+    expect(toolNames[1]).toEqual(['start_task']);
+    expect(h.talk.lastHeard).toBe('yes');
   });
 });

@@ -122,7 +122,6 @@ export const SPOKE_RECENTLY_MS = 15_000;
 export interface EngineCallContext {
   readonly call: Call;
   readonly tools: VoiceTool[];
-  alone(): boolean;
   /** The owner's last words, set before each reply. */
   readonly heard: { value: string };
   /** Results of work started from the call, told on the next turn. */
@@ -239,7 +238,6 @@ export class Voice {
       this.engineContext = {
         call,
         tools: this.toolsFor(call, () => heard.value),
-        alone: () => this.others(call.channelId) === 1,
         heard,
         news: [],
         transcript: (role, text) => this.note(call, role, text),
@@ -440,22 +438,36 @@ export class Voice {
       }
       case 'transcript': {
         const call = this.call;
-        // The bridge's ears are on the owner alone; anyone else is dropped here too.
-        if (!call || message.speakerId !== call.ownerId) return;
+        if (!call) return;
+        // Anyone in the channel may talk to mate; who they are rides along,
+        // and only the owner's words reach a tool.
+        const owner = message.speakerId === call.ownerId;
+        if (!owner) this.learn(message.speakerId);
         this.talk ??= this.startTalk(call);
-        this.talk.heard(message.text, message.final);
+        this.talk.heard(message.text, message.final, {
+          id: message.speakerId,
+          name: this.nameOf(message.speakerId, call),
+          owner,
+        });
         return;
       }
       case 'barge_in':
         this.talk?.bargeIn(message.heardChars);
         return;
-      case 'speaking':
+      case 'speaking': {
         this.spoke.set(message.userId, {
           at: this.options.clock.now(),
           now: message.speaking,
         });
+        // A resumed gateway session lists no voice states, so someone who
+        // was already in the channel is unknown until they move; a packet
+        // from them is proof enough that they are here.
+        const call = this.call;
+        if (call && !this.channels.has(message.userId))
+          this.channels.set(message.userId, call.channelId);
         if (message.speaking) this.learn(message.userId);
         return;
+      }
       case 'heartbeat':
         return;
     }
@@ -475,9 +487,8 @@ export class Voice {
       announce: (text) => {
         this.send({ type: 'announce', text });
       },
-      alone: () => this.others(call.channelId) === 1,
       tools: this.toolsFor(call, () => talk.lastHeard),
-      transcript: (role, text) => this.note(call, role, text),
+      transcript: (role, text, who) => this.note(call, role, text, who),
       context: () => this.channelNote(call),
     });
     return talk;
@@ -488,7 +499,6 @@ export class Voice {
     const { rootMessage } = this.options;
     if (!work) return [];
     const context: VoiceToolContext = {
-      alone: () => this.others(call.channelId) === 1,
       lastHeard,
       started: this.started,
     };
@@ -566,7 +576,7 @@ export class Voice {
   }
 
   /**
-   * A line for the lane when the owner is not alone: who else is here and
+   * A line for the lane when others are in the channel: who they are and
    * who is talking, by name. Nothing when it is just the owner.
    */
   private channelNote(call: Call): string | null {
@@ -578,7 +588,7 @@ export class Voice {
       const name = this.nameOf(id, call);
       return state ? `${name} (${state})` : name;
     });
-    return `[channel] With the owner in the channel: ${parts.join(', ')}. Only the owner is heard.`;
+    return `[channel] With the owner in the channel: ${parts.join(', ')}. Anyone may talk to you; only the owner can ask you for work.`;
   }
 
   /** The channel_members tool's answer. */
@@ -660,13 +670,18 @@ export class Voice {
   }
 
   /** A line of the call, in its thread. Never throws. */
-  private note(call: Call, role: 'user' | 'agent', text: string): void {
+  private note(
+    call: Call,
+    role: 'user' | 'agent',
+    text: string,
+    speaker?: string,
+  ): void {
     const { rootMessage } = this.options;
     if (!rootMessage) return;
     void this.callThread(call)
       .then((threadId) => {
         if (!threadId) return;
-        const who = role === 'user' ? 'you' : 'mate';
+        const who = speaker ?? (role === 'user' ? 'you' : 'mate');
         return rootMessage(threadId, `${who}: ${text.slice(0, 1_800)}`);
       })
       .catch((error) =>

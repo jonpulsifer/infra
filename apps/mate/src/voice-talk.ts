@@ -21,14 +21,22 @@ export interface TalkOptions {
   speak(text: string, final: boolean): void;
   /** A whole line for the bridge to voice outside a reply. */
   announce?(text: string): void;
-  /** Each committed line of the call, for the call's thread. */
-  transcript?(role: 'user' | 'agent', text: string): void;
+  /** Each committed line of the call, for the call's thread; `who` names a speaker other than the owner. */
+  transcript?(role: 'user' | 'agent', text: string, who?: string): void;
   /** A line about the channel for the lane, before the owner's latest words; null for nothing to say. */
   context?(): string | null;
-  /** The call's tools; `sideEffect` ones are withheld while the owner is not alone. */
+  /** The call's tools, offered on the owner's turns alone. */
   tools?: readonly VoiceTool[];
-  alone?(): boolean;
 }
+
+/** Who said a line: the owner, or someone else by name. */
+export interface Speaker {
+  id: string;
+  name: string;
+  owner: boolean;
+}
+
+const OWNER: Speaker = { id: '', name: 'the owner', owner: true };
 
 interface Run {
   abort: AbortController;
@@ -51,6 +59,8 @@ export class Talk {
   private stopped = false;
   /** The owner's last committed words, for the confirmation gate. */
   lastHeard = '';
+  /** Whether the latest words were the owner's; tools go to those turns alone. */
+  private ownerTurn = true;
   readonly counts: TalkCounts = {
     turns: 0,
     replies: 0,
@@ -63,16 +73,24 @@ export class Talk {
   constructor(private readonly options: TalkOptions) {}
 
   /** The owner's words; only a committed transcript starts a reply. */
-  heard(text: string, final: boolean): void {
+  heard(text: string, final: boolean, speaker: Speaker = OWNER): void {
     if (this.stopped) return;
     this.counts.heardChars += text.length;
     if (!final) return;
     const words = text.trim();
     if (!words) return;
-    this.lastHeard = words;
+    this.ownerTurn = speaker.owner;
+    if (speaker.owner) this.lastHeard = words;
     this.cut('interrupted');
-    this.push({ role: 'user', content: words });
-    this.options.transcript?.('user', words);
+    this.push({
+      role: 'user',
+      content: speaker.owner ? words : `${speaker.name}: ${words}`,
+    });
+    this.options.transcript?.(
+      'user',
+      words,
+      speaker.owner ? undefined : speaker.name,
+    );
     this.counts.turns += 1;
     const run: Run = { abort: new AbortController(), said: '' };
     this.current = run;
@@ -146,10 +164,8 @@ export class Talk {
       return;
     }
     try {
-      const alone = this.options.alone?.() ?? false;
-      const tools = (this.options.tools ?? []).filter(
-        (tool) => alone || !tool.sideEffect,
-      );
+      // Anyone may talk to mate; only the owner's words reach a tool.
+      const tools = this.ownerTurn ? (this.options.tools ?? []) : [];
       const note = this.options.context?.() ?? null;
       const last = this.turns.at(-1);
       const turns: Turn[] =
