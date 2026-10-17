@@ -58,9 +58,10 @@ bridge = new Bridge({
   log,
   speech:
     speech?.mode === 'native'
-      ? ({ playback, onTranscript, onBargeIn, onDeaf }) =>
+      ? ({ playback, ownerId, onTranscript, onBargeIn, onDeaf }) =>
           new NativeSpeech({
-            ears: (handlers) =>
+            ownerId,
+            ears: (_userId, handlers, idleMs) =>
               new ScribeEars({
                 api: speech.api,
                 readKey,
@@ -69,6 +70,7 @@ bridge = new Bridge({
                 log,
                 connectTimeoutMs: config.connectTimeoutMs,
                 redialCap: speech.scribeRedialCap,
+                idleMs,
                 ...handlers,
               }),
             mouth: new Mouth({

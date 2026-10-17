@@ -57,7 +57,8 @@ export interface CallOptions {
   resubscribeCap: number;
   onState(state: CallState): void;
   onStall(reason: StallReason, code?: number): void;
-  onFrame(opus: Buffer): void;
+  /** A frame from someone in the channel, the owner included. */
+  onFrame(userId: string, opus: Buffer): void;
   /** Someone in the channel started or stopped transmitting. */
   onSpeaking?(userId: string, speaking: boolean): void;
   connect?: Connect;

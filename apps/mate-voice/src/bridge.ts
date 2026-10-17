@@ -32,7 +32,7 @@ export interface BridgeDeps {
   speech?: (call: {
     playback: Playback;
     ownerId: string;
-    onTranscript(text: string, final: boolean): void;
+    onTranscript(userId: string, text: string, final: boolean): void;
     onBargeIn(heardChars: number): void;
     onDeaf(reason: string): void;
   }) => NativeSpeech;
@@ -132,13 +132,8 @@ export class Bridge {
       const speech = this.deps.speech({
         playback: call.playback,
         ownerId: call.state().ownerId,
-        onTranscript: (text, final) =>
-          link.send({
-            type: 'transcript',
-            speakerId: call.state().ownerId,
-            text,
-            final,
-          }),
+        onTranscript: (userId, text, final) =>
+          link.send({ type: 'transcript', speakerId: userId, text, final }),
         onBargeIn: (heardChars) => link.send({ type: 'barge_in', heardChars }),
         onDeaf: (reason) => {
           if (this.speech !== speech) return;
@@ -206,7 +201,10 @@ export class Bridge {
       onStall: (reason, code) => link.send({ type: 'stall', reason, code }),
       onSpeaking: (userId, speaking) =>
         link.send({ type: 'speaking', userId, speaking }),
-      onFrame: (opus) => (this.speech ?? this.engine)?.hear(opus),
+      onFrame: (userId, opus) => {
+        if (this.speech) this.speech.hear(userId, opus);
+        else if (userId === message.ownerId) this.engine?.hear(opus);
+      },
       connect: this.deps.connect,
       playback: this.deps.playback?.(),
       joinTone: this.deps.joinTone,
