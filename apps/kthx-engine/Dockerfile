@@ -35,7 +35,7 @@ COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
 # First-party stand-in for the cosign and slsa-verifier CLIs.
-FROM ghcr.io/jonpulsifer/kthx-engine-verifier:latest@sha256:8cb7dd2b9463bd4984a4aaba27c9c6cfc32bd6ecadfc622ccc6b9f245fd93368 AS supply-chain-tools
+FROM ghcr.io/jonpulsifer/kthx-engine-verifier:latest@sha256:e191d8415968141d6b205c3660443274e9935072c836cd702a32537cd01d8d79 AS supply-chain-tools
 
 FROM cgr.dev/chainguard/node:latest@sha256:f5b8ab65cbb411f9e1996f8c331c6d8df38291133f0c9b327a893646422237ad AS runner
 ENV NODE_ENV=production \
