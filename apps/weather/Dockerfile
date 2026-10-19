@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # weather: one Bun process that runs its source as committed, with no build step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:e7076475a5978df4626e4fcf99b368c4a8c2741b39249105f42a8fb4579bcb65 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:85a6741a8a56d833f13700d8868de253257fdd4f37e6e8fdd755e3fabbbddf1d AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.2
 ENV BUN_INSTALL=/usr/local \
@@ -23,7 +23,7 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
-FROM cgr.dev/chainguard/node:latest@sha256:f5b8ab65cbb411f9e1996f8c331c6d8df38291133f0c9b327a893646422237ad AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:13c04f76802e60540acb246335d5ef01be929219756841f99cfbbf7d077143d6 AS runner
 ENV NODE_ENV=production \
   WEATHER_PORT=8080
 WORKDIR /app
