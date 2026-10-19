@@ -5,7 +5,7 @@
 # in the runner proves the DAVE and Opus pieces load where they will run.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:e7076475a5978df4626e4fcf99b368c4a8c2741b39249105f42a8fb4579bcb65 AS base
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.2
+ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 USER root
