@@ -3,7 +3,7 @@
 # switchboard: one Bun process that runs its source as committed, with no build step.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:85a6741a8a56d833f13700d8868de253257fdd4f37e6e8fdd755e3fabbbddf1d AS base
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.2
+ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 USER root

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS base
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.2
+ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 RUN apk add --no-cache bash curl libc6-compat \

@@ -2,7 +2,7 @@
 # Static site demo: builds dist/ with build-time git facts, then serves it with bun.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:85a6741a8a56d833f13700d8868de253257fdd4f37e6e8fdd755e3fabbbddf1d AS base
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.2
+ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local
 USER root
 RUN apk add --no-cache bash curl \
