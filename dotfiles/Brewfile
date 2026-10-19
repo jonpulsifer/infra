@@ -5,7 +5,10 @@ brew "git"
 # shell and core developer tools
 brew "bat"
 brew "btop"
-brew "cloudflared"
+# personal machines only; the work profile is MISE_ENV=work
+unless ENV.fetch("MISE_ENV", "").split(",").include?("work")
+  brew "cloudflared"
+end
 brew "eza"
 brew "fd"
 brew "fzf"
@@ -13,7 +16,6 @@ brew "gh"
 brew "git-delta"
 brew "jq"
 brew "neovim"
-brew "nvm"
 brew "pre-commit"
 brew "ripgrep"
 brew "ruby"
@@ -36,11 +38,9 @@ brew "terraform-docs"
 # ai homies
 cask "1password-cli"
 cask "claude-code@latest"
-brew "opencode"
 
 tap "peonping/tap"
 brew "peonping/tap/peon-ping"
 
 # apps and fonts
 cask "font-caskaydia-cove-nerd-font"
-cask "secretive"
