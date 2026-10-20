@@ -33,7 +33,10 @@ import {
 import type { SurfaceName } from './surface.ts';
 
 /** Later directories win a duplicate skill name. */
-export const SKILL_DIRS = ['apps/mate/profile/skills', '.agents/skills'] as const;
+export const SKILL_DIRS = [
+  'apps/mate/profile/skills',
+  '.agents/skills',
+] as const;
 export const AGENTS_FILE = 'AGENTS.md';
 /** Shared with the owner's local pi package, so it holds no capability claims. */
 export const PERSONA_FILE = 'apps/mate/profile/persona.md';
