@@ -29,7 +29,7 @@ shellcheck = "latest"
 shfmt = "latest"
 sops = "latest"
 # The client for the Talos roots; move it with their talos_version.
-talosctl = "1.14.2"
+talosctl = "1.14.4"
 yq = "latest"
 # Atlantis applies with OpenTofu; run tofu locally to match.
 opentofu = "1.13.1"
