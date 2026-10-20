@@ -16,7 +16,6 @@ This page defines the lab's own terms, and the tool terms that have a lab-specif
 | Auto-upgrade | The daily rebuild of a NixOS host from `main` | [NixOS](../platform/nixos.md#auto-upgrade) |
 | bluenose | The GCP project that holds kthx's storage and identities, and its default Vessel | [Cloud accounts](../platform/cloud.md#google-cloud) |
 | Bootstrap root | The OpenTofu root in `clusters/<site>/bootstrap/` that installs Flux on a cluster | [How changes ship](../platform/how-changes-ship.md#kubernetes) |
-| Break-glass certificate | A `system:masters` client certificate for use when tokens fail | [Get cluster admin access](../runbooks/get-cluster-admin-access.md#use-the-break-glass-certificate) |
 | Build | One run of a kthx build route | [Built apps](../apps/kthx/built-apps.md#builds) |
 | Build host | A machine that runs Nix builds for other machines over SSH, such as forge | [Build host and cache](../platform/nixos/build-host-and-cache.md) |
 | Build route | Where a kthx Build runs, chosen by its SLSA level | [Built apps](../apps/kthx/built-apps.md#builds) |
