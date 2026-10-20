@@ -3,7 +3,7 @@ title: Install Windows monitoring
 description: Add a Windows desktop to folly's Prometheus, install or update its monitoring agents, and find why it stopped reporting.
 ---
 
-Use this runbook to make a Windows desktop report to folly's Prometheus and VictoriaLogs, to update its agents, or to find why it stopped reporting. `dotfiles/windows/Install-Monitoring.ps1` installs three agents from downloads pinned by SHA256. [Lookout](../apps/lookout.md) is the app that keeps them installed on a desktop that runs it, such as tallboy; [Install Lookout](#install-lookout) adds it to a desktop.
+Use this runbook to make a Windows desktop report to folly's Prometheus and VictoriaLogs, to update its agents, or to find why it stopped reporting. `apps/lookout/windows/Install-Monitoring.ps1` installs three agents from downloads pinned by SHA256. [Lookout](../apps/lookout.md) is the app that keeps them installed on a desktop that runs it, such as tallboy; [Install Lookout](#install-lookout) adds it to a desktop.
 
 ## Before you start
 
@@ -49,7 +49,7 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 4. Run the installer. To leave out the event logs, add `-SkipVector`.
 
    ```powershell
-   .\dotfiles\windows\Install-Monitoring.ps1
+   .\apps\lookout\windows\Install-Monitoring.ps1
    ```
 
    Result: The last line is `running  Event Log shipping to VictoriaLogs`, or `==> Vector skipped` with `-SkipVector`.

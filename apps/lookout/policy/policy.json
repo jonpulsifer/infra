@@ -12,14 +12,14 @@
     "version": "0.38.0",
     "url": "https://github.com/nickbabcock/OhmGraphite/releases/download/v0.38.0/OhmGraphite-0.38.0.zip",
     "sha256": "35DC1FEA76F3F2F766EA0D416A1AC01CE61E3E6C239E13AAD97B29D7EC9DE418",
-    "configUrl": "https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/monitoring/OhmGraphite.exe.config",
+    "configUrl": "https://raw.githubusercontent.com/jonpulsifer/infra/main/apps/lookout/windows/monitoring/OhmGraphite.exe.config",
     "port": 4445
   },
   "vector": {
     "version": "0.58.0",
     "url": "https://packages.timber.io/vector/0.58.0/vector-x64.msi",
     "sha256": "53B783BF5F39ED317CD9D19DA0D654DE8A963C5971852B0E87BED1B931AF9B29",
-    "configUrl": "https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/monitoring/vector.yaml",
+    "configUrl": "https://raw.githubusercontent.com/jonpulsifer/infra/main/apps/lookout/windows/monitoring/vector.yaml",
     "productCode": "{7FAD6F97-D84E-42CC-A600-5F4EC3460FF5}"
   },
   "agent": {
