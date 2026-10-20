@@ -92,7 +92,7 @@
         "$TURBO_ROOT$/packages/charts/kthx-app/Chart.yaml",
         "$TURBO_ROOT$/packages/charts/kthx-app/values.yaml",
         "$TURBO_ROOT$/packages/charts/kthx-app/templates/**",
-        "$TURBO_ROOT$/clusters/offsite/apps/spindrift/helm-release.yaml",
+        "$TURBO_ROOT$/clusters/offsite/apps/kthx-engine/helm-release.yaml",
         "$TURBO_ROOT$/clusters/base/networking/external-dns/helm-release.yaml",
         "$TURBO_ROOT$/clusters/*/networking/external-dns/kustomization.yaml",
         "$TURBO_ROOT$/.github/workflows/kthx-engine-build.yml",
@@ -110,7 +110,7 @@
         "$TURBO_ROOT$/packages/charts/kthx-engine/Chart.yaml",
         "$TURBO_ROOT$/packages/charts/kthx-app/Chart.yaml",
         "$TURBO_ROOT$/clusters/base/platform/spindrift-target/oci-repository.yaml",
-        "$TURBO_ROOT$/clusters/offsite/apps/spindrift/oci-repository.yaml"
+        "$TURBO_ROOT$/clusters/offsite/apps/kthx-engine/oci-repository.yaml"
       ],
       "env": ["DATABASE_URL"],
       "outputs": []

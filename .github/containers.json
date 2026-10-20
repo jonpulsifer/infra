@@ -54,7 +54,7 @@
       "clusters/folly/apps/smiirl/02-deployment.yaml"
     ],
     "kthx-engine": [
-      "clusters/offsite/apps/spindrift/helm-release.yaml"
+      "clusters/offsite/apps/kthx-engine/helm-release.yaml"
     ],
     "switchboard": [
       "clusters/folly/apps/pbx/switchboard.yaml",
