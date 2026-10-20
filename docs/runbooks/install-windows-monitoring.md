@@ -46,6 +46,14 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 
    Result: `Already up to date.`, or the changed files.
 
+   A sparse checkout of `dotfiles/` alone lacks the installer, so add its directory.
+
+   ```powershell
+   git sparse-checkout add apps/lookout/windows
+   ```
+
+   Result: `apps\lookout\windows\Install-Monitoring.ps1` exists.
+
 4. Run the installer. To leave out the event logs, add `-SkipVector`.
 
    ```powershell
