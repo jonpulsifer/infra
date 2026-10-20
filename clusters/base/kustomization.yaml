@@ -4,4 +4,3 @@ resources:
   - atlantis-bootstrap-rbac.yaml
   - cluster-runtimeclass.yaml
   - cluster-settings.yaml
-  - operator-rbac.yaml
