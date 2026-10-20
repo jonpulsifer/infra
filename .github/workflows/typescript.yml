@@ -58,7 +58,7 @@ jobs:
             clusters/folly/config/cluster-topology.json
             packages/charts/**
             clusters/base/platform/spindrift-target/**
-            clusters/offsite/apps/spindrift/**
+            clusters/offsite/apps/kthx-engine/**
             clusters/*/networking/external-dns/helm-release.yaml
             clusters/*/networking/external-dns/kustomization.yaml
             packages/k6/**

@@ -110,7 +110,7 @@
         "$TURBO_ROOT$/packages/charts/kthx-engine/Chart.yaml",
         "$TURBO_ROOT$/packages/charts/kthx-app/Chart.yaml",
         "$TURBO_ROOT$/clusters/base/platform/spindrift-target/oci-repository.yaml",
-        "$TURBO_ROOT$/clusters/offsite/apps/spindrift/oci-repository.yaml"
+        "$TURBO_ROOT$/clusters/offsite/apps/kthx-engine/oci-repository.yaml"
       ],
       "env": ["DATABASE_URL"],
       "outputs": []
