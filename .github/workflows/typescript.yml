@@ -71,7 +71,6 @@ jobs:
             packages/typescript-config/**
             dotfiles/skills/**
             dotfiles/pi/mate/persona.md
-            dotfiles/pi/mate/memory.md
             dotfiles/.agents/AGENTS.md
             .agents/skills/**
             AGENTS.md

@@ -172,10 +172,12 @@ describe('the profile mate bakes into its image', () => {
       expect(paths.some((path) => build.watch.includes(path))).toBe(true);
       const turbo = JSON.parse(await repoText('turbo.json'));
       const inputs: string[] = turbo.tasks['mate#test'].inputs;
+      const inPackage = file.startsWith('apps/mate/');
       expect(
-        [file, ...paths.map((path) => `${path}/**`)].some((input) =>
-          inputs.includes(`$TURBO_ROOT$/${input}`),
-        ),
+        (inPackage && inputs.includes('$TURBO_DEFAULT$')) ||
+          [file, ...paths.map((path) => `${path}/**`)].some((input) =>
+            inputs.includes(`$TURBO_ROOT$/${input}`),
+          ),
       ).toBe(true);
     },
   );

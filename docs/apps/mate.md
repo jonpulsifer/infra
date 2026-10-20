@@ -53,7 +53,7 @@ A group is one thread while it fires. An alert that joins the group wakes the th
 
 ## Memory and dreams
 
-Rowbutt remembers in `dotfiles/pi/mate/memory.md`: one fact a line about the lab and how the owner works, dated, under the headings the file sets. Every profile reads it into its system prompt after the repository's `AGENTS.md`, and the owner's local pi reads it through the `mate` pi package, so it holds facts and never a capability, a credential or a private detail. The file is kept under 120 lines.
+Rowbutt remembers in `apps/mate/profile/memory.md`: one fact a line about the lab and how the owner works, dated, under the headings the file sets. Every profile reads it into its system prompt after the repository's `AGENTS.md`, and the owner's local pi reads it from an infra checkout when the machine has one, so it holds facts and never a capability, a credential or a private detail. The file is kept under 120 lines.
 
 Each night at 03:00 `America/Halifax` mate opens a dream thread in Slack `#chatops`, configured by `MATE_DREAMS_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`, under the `dreamer` profile in job mode. The assignment reads the threads active since the previous dream, or the last 24 hours the first time and at most 7 days after a gap, with the `recall_threads` and `recall_thread` tools, and distils three kinds of lesson: a fact for the memory, a skill in `.agents/skills/` or `dotfiles/skills/` that misled a turn, and a page in `docs/` that disagrees with what a thread saw. It opens one pull request from branch `dreams/<day>` with every edit and never merges it. The owner's review is the control: the memory reaches the system prompt of every profile, the cluster-admin ones included, and a transcript the dreamer reads is untrusted text with a push token in reach, so read a dream's diff before merging it. The repository is public, so the assignment keeps out anything that names a person other than the owner, a credential or the content of a private conversation, and reports what it kept private in the thread instead. A night with nothing worth keeping opens no pull request and reports one line. The dreamer's sandbox has a GitHub token and no cluster, host, 1Password or phone access. A reply in the thread runs another `dreamer` turn, so the owner can ask it to look again or at something else, and a dream whose turn failed runs again over the same window from a reply; the next night starts where this one's window ended. `apps/mate/src/dreams.ts` owns the schedule, with the rows in `mate_dreams`; unset `MATE_DREAMS_CHANNEL` to stop dreaming.
 
@@ -77,7 +77,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 | [kthx](kthx.md) | Quick sites, through the `kthx` CLI on `kthx.lolwtf.ca`; mate keeps the site bearers in Secret `mate-kthx-sites`. Built apps, through the `kthx_*` tools that mate bridges from the kthx MCP server, when Secret `mate-kthx-agent` holds an agent token. |
 | Weather | Canadian weather and the family Tempest stations, through the `weather_*` tools that mate bridges from the [Weather API](weather.md) at `MATE_WEATHER_MCP_URL`. The server takes no token. |
 | Phone | Rings the owner's cell through [Switchboard](switchboard.md) with a one-line reason, and sends the mission caller, in the owner's voice, after an allow-listed family member with a word to get out of them; Switchboard fixes the numbers and caps the calls. |
-| Memory | `dotfiles/pi/mate/memory.md` in the system prompt, and the `recall_threads` and `recall_thread` tools over mate's own threads in `mate-db` ([Memory and dreams](#memory-and-dreams)) |
+| Memory | `apps/mate/profile/memory.md` in the system prompt, and the `recall_threads` and `recall_thread` tools over mate's own threads in `mate-db` ([Memory and dreams](#memory-and-dreams)) |
 
 [The fence](mate/how-it-works.md#fence) keeps `pods/exec` out of `mate`, which holds mate's own credentials and every sandbox. It guards against accidents only: as `cluster-admin` and root on the hosts, the agent can read mate's Secrets or remove the fence.
 
@@ -121,7 +121,7 @@ To take mate off Discord and Slack, set `replicas` to `0` in `clusters/offsite/a
 ## Reference
 
 - Source: `apps/mate/`, `images/mate-sandbox/`, `packages/mate-hands/` and `packages/pi-store-postgres/`
-- Memory: `dotfiles/pi/mate/memory.md`, beside the persona
+- Memory: `apps/mate/profile/memory.md`
 - Manifests: `clusters/offsite/apps/mate/`, and the alert route in `clusters/offsite/monitoring/alertmanager-mate.yaml`
 - Items in the `homelab` vault: `mate alertmanager token`, the bearer Alertmanager's posts carry
 - Images: `ghcr.io/jonpulsifer/mate`, `ghcr.io/jonpulsifer/mate-sandbox`
