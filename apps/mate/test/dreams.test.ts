@@ -48,7 +48,7 @@ describe('the assignment', () => {
     expect(prompt).toContain(`Edit \`${MEMORY_FILE}\``);
     expect(prompt).toContain('keep the file under 120 lines');
     expect(prompt).toContain('never a capability');
-    expect(prompt).toContain('`.agents/skills/` or `dotfiles/skills/`');
+    expect(prompt).toContain('`.agents/skills/`');
     expect(prompt).toContain('run `mise run docs:check` for a docs change');
     expect(prompt).toContain(
       'branch `dreams/2026-07-03` titled `dreams: 2026-07-03`',

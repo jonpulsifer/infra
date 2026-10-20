@@ -31,7 +31,7 @@ targets() {
     path=${path%\\}
     [[ -n "$path" ]] || continue
     case "$path" in
-      flake.nix | flake.lock | nix/* | apps/ddnsd/* | dotfiles/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/lab-topology.json | .github/workflows/nix-ci.yaml)
+      flake.nix | flake.lock | nix/* | apps/ddnsd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/lab-topology.json | .github/workflows/nix-ci.yaml)
         target_set["nix:flake-check"]=1
         ;;
     esac

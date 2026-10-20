@@ -20,7 +20,7 @@ Use this runbook before you open a pull request. It gives the local command for 
 | --- | --- | --- |
 | `docs/`, a `.md` file, or `.agents/` | `mise run docs:check` | `wiki.yml` |
 | `apps/wiki/` | `bun run --cwd apps/wiki test`, then `mise run docs:build` | `wiki.yml` |
-| `nix/`, `flake.nix`, `flake.lock`, `dotfiles/`, or a topology JSON file | `mise run nix:check` | `nix-ci.yaml`, which builds only after the merge to `main` |
+| `nix/`, `flake.nix`, `flake.lock`, or a topology JSON file | `mise run nix:check` | `nix-ci.yaml`, which builds only after the merge to `main` |
 | `clusters/` or `packages/charts/` | `mise run k8s:render-apps`, then `mise run k8s:check-rules` | `kustomize.yml` |
 | One directory under `clusters/<site>/` with a `kustomization.yaml` | `kubectl kustomize clusters/<site>/<dir>` | None |
 | `clusters/<site>/config/cluster-topology.json` | `conftest verify -p .github/policy`, then the `conftest test` command in `topology-contract.yml` | `topology-contract.yml` |
@@ -30,8 +30,7 @@ Use this runbook before you open a pull request. It gives the local command for 
 | A Go module in `apps/` | `go -C apps/<app> vet ./...`, then `go -C apps/<app> test ./...` | `go.yml`, `rackstat.yml` or `view-counter.yml`, if one of them lists the module |
 | `apps/fml-pki/` or `terraform/pki/certs/` | `mise run pki:verify` | `go.yml` |
 | `apps/fml-derive-rs/` or `apps/fml-ceremony/` | `mise run rust:test`, then `mise run pki:crosscheck` | `rust.yml` |
-| A shell script in `scripts/`, `.github/scripts/` or `dotfiles/` | `mise run check` | `shell.yml` |
-| `dotfiles/` | `mise -C dotfiles run dotfiles:check` | `dotfiles.yml` |
+| A shell script in `scripts/` or `.github/scripts/` | `mise run check` | `shell.yml` |
 | `.github/scripts/validation-impact.sh` | `mise run validation-impact:test` | `terraform.yml` |
 | `.github/scripts/cd-*.sh`, `.github/scripts/detect-containers.sh`, `.github/scripts/image-affected.sh`, `.github/containers.json` or `.github/workflows/containers.yml` | `mise run cd-digest:test` | `containers.yml` |
 

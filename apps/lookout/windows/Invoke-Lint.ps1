@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    PSScriptAnalyzer over the Windows dotfiles.
+    PSScriptAnalyzer over the Lookout Windows installer.
 
 .DESCRIPTION
     Runs on the Linux CI runner as well as on Windows -- pwsh comes from mise

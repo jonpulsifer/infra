@@ -141,7 +141,7 @@ harmonia, the Nix binary cache server on a build host, signs the store paths it 
 5. Copy `cache.pub` to `nix/secrets/<host>-harmonia-cache.pub`.
 
 > [!NOTE]
-> `dotfiles/.config/git/ignore` ignores `*.pub`.
+> The owner's global git ignore file ignores `*.pub`.
 
 6. Add the public key file to git.
 

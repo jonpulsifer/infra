@@ -16,6 +16,22 @@
         "type": "github"
       }
     },
+    "dotfiles": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792491992,
+        "narHash": "sha256-4xuU11dahIy9AI84qk2mDKte8lPt7lfcfp/6fOY32Ak=",
+        "owner": "jonpulsifer",
+        "repo": "dotfiles",
+        "rev": "e98ca17ac6b67b166de3a31de8290dc0877f851b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "jonpulsifer",
+        "repo": "dotfiles",
+        "type": "github"
+      }
+    },
     "flake-compat": {
       "locked": {
         "lastModified": 1767039857,
@@ -235,6 +251,7 @@
     },
     "root": {
       "inputs": {
+        "dotfiles": "dotfiles",
         "home-manager": "home-manager",
         "hosts": "hosts",
         "keys": "keys",

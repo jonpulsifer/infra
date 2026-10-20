@@ -81,7 +81,6 @@ one exists.
 | `apps/` | First-party services and tools. |
 | `packages/` | Shared libraries and the Helm charts Flux installs. |
 | `images/` | Base and tool OCI images. |
-| `dotfiles/` | mise-managed dotfiles. NixOS hosts carry them in the system closure. It has its own `AGENTS.md`. |
 | `docs/` | The wiki pages. `docs/nav.yaml` orders the sidebar. |
 | `.agents/skills/` | Repo agent skills. `.claude/skills` is a symlink to it. |
 

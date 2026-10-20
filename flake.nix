@@ -38,6 +38,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    dotfiles = {
+      url = "github:jonpulsifer/dotfiles";
+      flake = false;
+    };
+
     keys = {
       url = "https://github.com/jonpulsifer.keys";
       flake = false;
