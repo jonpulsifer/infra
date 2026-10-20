@@ -1,5 +1,4 @@
 # bootstrap
-brew "mise"
 brew "git"
 
 # shell and core developer tools
