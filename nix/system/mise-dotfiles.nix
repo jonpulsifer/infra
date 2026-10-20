@@ -7,11 +7,8 @@
 }:
 let
   user = config.users.users.jawn;
-  # Only dotfiles/ enters the closure, so mise applies from a store path with no network clone.
-  dotfilesSource = builtins.path {
-    path = "${inputs.self}/dotfiles";
-    name = "mise-dotfiles";
-  };
+  # The dotfiles flake input is a store path, so mise applies with no network clone.
+  dotfilesSource = inputs.dotfiles;
   mise = pkgs.callPackage ../lib/mise.nix { };
   # Activation's PATH has no shell and no mise, and the task runs under sh and calls mise.
   path = lib.makeBinPath [

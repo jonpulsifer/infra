@@ -1,0 +1,25 @@
+name: mate-profile
+
+# apps/mate/profile is a copy of files that live in the dotfiles repo. A
+# failure means the copy drifted: run `mise run mate:profile` and commit.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/mate/profile/persona.md'
+      - 'apps/mate/profile/owner-agents.md'
+      - 'apps/mate/profile/skills/**'
+      - 'scripts/mate-profile.sh'
+      - '.github/workflows/mate-profile.yml'
+  schedule:
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: bash scripts/mate-profile.sh check

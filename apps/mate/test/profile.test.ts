@@ -335,7 +335,7 @@ describe('loadSystemPrompts', () => {
     const root = mkdtempSync(join(tmpdir(), 'mate-profile-'));
     dirs.push(root);
     writeProfileFiles(root);
-    mkdirSync(join(root, 'dotfiles/skills'), { recursive: true });
+    mkdirSync(join(root, 'apps/mate/profile/skills'), { recursive: true });
     mkdirSync(join(root, '.agents/skills/deploy'), { recursive: true });
     writeFileSync(
       join(root, '.agents/skills/deploy/SKILL.md'),
@@ -347,7 +347,7 @@ describe('loadSystemPrompts', () => {
       `${WORKSPACE}/.agents/skills/deploy/SKILL.md`,
     ]);
     expect(log.of('profile file missing').map((e) => e.fields?.path)).toEqual([
-      `${root}/dotfiles/skills`,
+      `${root}/apps/mate/profile/skills`,
     ]);
   });
 

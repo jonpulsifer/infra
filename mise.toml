@@ -112,6 +112,14 @@ run = "bash .github/scripts/render-cluster-apps.sh"
 description = "Lint every rendered PrometheusRule and run the alert unit tests"
 run = "bash .github/scripts/check-prometheus-rules.sh"
 
+[tasks."mate:profile"]
+description = "Copy mate's persona, owner AGENTS.md and skills from the dotfiles repo's main"
+run = "bash scripts/mate-profile.sh sync"
+
+[tasks."mate:profile:check"]
+description = "Fail when apps/mate/profile differs from the dotfiles repo's main"
+run = "bash scripts/mate-profile.sh check"
+
 [tasks."pbx:check"]
 description = "Boot the PBX image's Asterisk against each site's rendered config with no route off the machine; check PJSIP, 911 routing and what a caller can reach (sites: folly offsite, default both)"
 run = "bash .github/scripts/pbx-check.sh"
@@ -214,7 +222,7 @@ hide = true
 # A script outside these paths or without an sh/bash shebang is never checked,
 # and nothing reports it.
 run = """
-grep -rlE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' dotfiles/.local/bin/* scripts/* .github/scripts/* images/*/gh clusters/offsite/apps/elevenlabs/*.sh 2>/dev/null
+grep -rlE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' scripts/* .github/scripts/* images/*/gh clusters/offsite/apps/elevenlabs/*.sh 2>/dev/null
 """
 
 [tasks.format]
@@ -240,13 +248,8 @@ description = "Lint PowerShell with PSScriptAnalyzer"
 # pwsh aborts with "Couldn't find a valid ICU package" on NixOS. Linting needs
 # no locale data.
 env = { DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1" }
-run = "pwsh -NoProfile -File dotfiles/windows/Invoke-Lint.ps1"
+run = "pwsh -NoProfile -File apps/lookout/windows/Invoke-Lint.ps1"
 
 [tasks.check]
 description = "Run format check and lint"
 depends = ["format:check", "lint", "lint:ps"]
-
-[tasks.deploy]
-description = "Run dotfiles bootstrap deployment"
-dir = "dotfiles"
-run = "mise run bootstrap"

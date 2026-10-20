@@ -3,11 +3,11 @@ title: Install a Windows desktop
 description: Install the owner's Windows configuration on a desktop with one PowerShell script, update it, add the NixOS WSL distro, and test a change to the Windows dotfiles.
 ---
 
-Use this runbook to install or update the owner's Windows configuration on a desktop, such as [tallboy](../hosts/tallboy.md) or [atomic](../hosts/atomic.md). It also adds the NixOS WSL distro and tests a change to the Windows dotfiles. One script, `dotfiles/windows/bootstrap.ps1`, clones the repository and installs the parts in this table.
+Use this runbook to install or update the owner's Windows configuration on a desktop, such as [tallboy](../hosts/tallboy.md) or [atomic](../hosts/atomic.md). It also adds the NixOS WSL distro and tests a change to the Windows dotfiles. The dotfiles live in the owner's [dotfiles repository](https://github.com/jonpulsifer/dotfiles), not in this one. One script, `windows/bootstrap.ps1` in that repository, clones it and installs the parts in this table.
 
 | Part | What it installs |
 | --- | --- |
-| `dotfiles/windows/configuration.winget` | Applications and OS settings |
+| `windows/configuration.winget` | Applications and OS settings |
 | `mise run bootstrap` | CLI tools and the dotfile links |
 | Nerd Font | A terminal font with icons |
 | vibranceGUI | A tool that sets the GPU color saturation (digital vibrance) |
@@ -21,7 +21,7 @@ Use this runbook to install or update the owner's Windows configuration on a des
 - You need an account that can approve administrator prompts.
 - To add the WSL distro, you need the operator age key. See [Manage SOPS secrets](manage-sops-secrets.md).
 
-The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github.com\jonpulsifer\infra`.
+The bootstrap script clones the dotfiles repository to `$HOME\src\github.com\jonpulsifer\dotfiles`.
 
 ## Install the desktop
 
@@ -29,7 +29,7 @@ The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github
 2. Run the bootstrap script. Approve each administrator prompt.
 
    ```powershell
-   irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1 | iex
+   irm https://raw.githubusercontent.com/jonpulsifer/dotfiles/main/windows/bootstrap.ps1 | iex
    ```
 
    Result: The command prints `Done. Open a new PowerShell 7 tab to pick up the profile.` as its last line.
@@ -43,7 +43,7 @@ The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github
 2. Go to the checkout.
 
    ```powershell
-   cd $HOME\src\github.com\jonpulsifer\infra
+   cd $HOME\src\github.com\jonpulsifer\dotfiles
    ```
 
 3. Pull `main`.
@@ -57,7 +57,7 @@ The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github
 4. If `configuration.winget` changed, apply it. Accept each prompt. To see the changes first, add `--what-if`.
 
    ```powershell
-   winget configure --file dotfiles\windows\configuration.winget
+   winget configure --file windows\configuration.winget
    ```
 
    Result: The command prints `Configuration successfully applied.`
@@ -65,7 +65,7 @@ The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github
 5. Run the dotfiles bootstrap.
 
    ```powershell
-   mise run --cd dotfiles bootstrap
+   mise run bootstrap
    ```
 
    Result: The command prints `Windows dotfiles deployed.` as its last line.
@@ -76,7 +76,7 @@ The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github
 2. Run the bootstrap script with `-WithWsl`.
 
    ```powershell
-   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1))) -WithWsl
+   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/jonpulsifer/dotfiles/main/windows/bootstrap.ps1))) -WithWsl
    ```
 
    Result: The command prints `Distro 'NixOS' is up. Finish inside it:` and the next commands.
@@ -112,19 +112,11 @@ The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github
 
 ## Test a Windows dotfiles change
 
-1. On any machine, go to the root of a checkout.
-2. Lint the PowerShell files.
-
-   ```bash
-   mise run lint:ps
-   ```
-
-   Result: The command prints `PSScriptAnalyzer: clean.`
-
-3. On the desktop, in the checkout, make sure every file that a dotfiles link points to exists.
+1. On the desktop, go to the dotfiles checkout.
+2. Make sure every file that a dotfiles link points to exists.
 
    ```powershell
-   mise run --cd dotfiles dotfiles:check
+   mise run dotfiles:check
    ```
 
    Result: The command prints no `source missing` warning, and prints `Windows dotfiles deployed.` as its last line.
@@ -136,7 +128,7 @@ The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github
 | `winget configure` fails on a Store package. | The package needs a license prompt, and the bootstrap script turns prompts off. | Do step 4 of [Update the desktop](#update-the-desktop). |
 | `mise run bootstrap` stops with `Developer Mode is off and this shell is not elevated`. | The winget configuration did not run. | Do step 4 of [Update the desktop](#update-the-desktop). |
 | Windows Terminal does not use the settings from the checkout. | A Terminal update replaced `settings.json`. | Do step 5 of [Update the desktop](#update-the-desktop). The old file stays as `settings.json.bak-<timestamp>`. |
-| `mise install` fails for a tool on Windows only. | The tool has no Windows build. | In `dotfiles/mise-global-config.toml`, give the tool an `os` filter without `windows`. |
+| `mise install` fails for a tool on Windows only. | The tool has no Windows build. | In `mise-global-config.toml` of the dotfiles repository, give the tool an `os` filter without `windows`. |
 | vibranceGUI stops with `Hash mismatch`. | The download is not the pinned file. | Find why the upstream file changed. Change `-Url` and `-Sha256` in `Install-VibranceGui.ps1` together. |
 | The prompt shows the branch with `?`. | `git status` took more than 150 ms, so the prompt does not check for uncommitted changes in that repository. | Open a new shell to check again. To remove the git segment, set the user environment variable `DOTFILES_PROMPT_GIT` to `0`. |
 | Step 2 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro) prints `distro 'NixOS' already exists`. | The script does not replace a distro. | Use the existing distro. |

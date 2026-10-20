@@ -7,7 +7,7 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 
 ## Before you start
 
-- You need an administrator account on the desktop, and its checkout from [Install a Windows desktop](install-a-windows-desktop.md).
+- You need an administrator account on the desktop with PowerShell 7 and git, from [Install a Windows desktop](install-a-windows-desktop.md).
 - You need a full checkout on a Linux machine, such as the WSL distro, and SSH access to a lab host, such as [spore](../hosts/spore.md).
 - The desktop must be on a network in the [Internal firewall zone](../platform/network/routing-and-firewall.md), such as Management or `future`.
 
@@ -32,29 +32,19 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 ## Install or update the agents
 
 1. On the desktop, open PowerShell 7 as administrator.
-2. Go to the checkout.
+2. Check out the installer, or update its checkout. The checkout holds only `apps/lookout/windows`.
 
    ```powershell
-   cd $HOME\src\github.com\jonpulsifer\infra
-   ```
-
-3. Pull `main`.
-
-   ```powershell
+   $infra = "$HOME\src\github.com\jonpulsifer\infra"
+   if (-not (Test-Path $infra)) { git clone --filter=blob:none --sparse https://github.com/jonpulsifer/infra $infra }
+   cd $infra
+   git sparse-checkout set apps/lookout/windows
    git pull --ff-only
-   ```
-
-   Result: `Already up to date.`, or the changed files.
-
-   A sparse checkout of `dotfiles/` alone lacks the installer, so add its directory.
-
-   ```powershell
-   git sparse-checkout add apps/lookout/windows
    ```
 
    Result: `apps\lookout\windows\Install-Monitoring.ps1` exists.
 
-4. Run the installer. To leave out the event logs, add `-SkipVector`.
+3. Run the installer. To leave out the event logs, add `-SkipVector`.
 
    ```powershell
    .\apps\lookout\windows\Install-Monitoring.ps1

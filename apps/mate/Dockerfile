@@ -39,11 +39,11 @@ COPY --from=pruner --chmod=755 /app/out/full/packages/pi-store-postgres/src ./pa
 # The agent's profile: the system prompt is the persona, the owner's AGENTS.md,
 # the overrides, AGENTS.md plus an index of these skills. turbo prune leaves
 # them out, so they come from the raw context.
-COPY --from=pruner --chmod=755 /app/dotfiles/pi/mate/persona.md /app/dotfiles/pi/mate/persona.md
+COPY --from=pruner --chmod=755 /app/apps/mate/profile/persona.md /app/apps/mate/profile/persona.md
 COPY --from=pruner --chmod=755 /app/apps/mate/profile/memory.md /app/apps/mate/profile/memory.md
-COPY --from=pruner --chmod=755 /app/dotfiles/.agents/AGENTS.md /app/dotfiles/.agents/AGENTS.md
+COPY --from=pruner --chmod=755 /app/apps/mate/profile/owner-agents.md /app/apps/mate/profile/owner-agents.md
+COPY --from=pruner --chmod=755 /app/apps/mate/profile/skills /app/apps/mate/profile/skills
 COPY --from=pruner --chmod=755 /app/AGENTS.md /app/AGENTS.md
-COPY --from=pruner --chmod=755 /app/dotfiles/skills /app/dotfiles/skills
 COPY --from=pruner --chmod=755 /app/.agents/skills /app/.agents/skills
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 RUN test -f /app/apps/mate/src/main.ts \
@@ -53,10 +53,10 @@ RUN test -f /app/apps/mate/src/main.ts \
   && test -f /app/apps/mate/node_modules/@repo/mate-voice-protocol/src/index.ts \
   && test -f /app/apps/mate/node_modules/@repo/pi-store-postgres/src/index.ts \
   && test -f /app/AGENTS.md \
-  && test -s /app/dotfiles/pi/mate/persona.md \
+  && test -s /app/apps/mate/profile/persona.md \
   && test -s /app/apps/mate/profile/memory.md \
-  && test -s /app/dotfiles/.agents/AGENTS.md \
-  && ls /app/dotfiles/skills/*/SKILL.md >/dev/null \
+  && test -s /app/apps/mate/profile/owner-agents.md \
+  && ls /app/apps/mate/profile/skills/*/SKILL.md >/dev/null \
   && ls /app/.agents/skills/*/SKILL.md >/dev/null
 WORKDIR /app/apps/mate
 USER 65532:65532

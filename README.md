@@ -15,7 +15,6 @@ and each merge to `main` publishes it.
 | [`apps/`](./apps) | First-party services and tools. |
 | [`packages/`](./packages) | Shared libraries, and the Helm charts that Flux installs. |
 | [`images/`](./images) | Base and tool OCI images. |
-| [`dotfiles/`](./dotfiles) | Shell, editor and agent configuration. NixOS hosts install it on each activation. |
 | [`docs/`](./docs) | The wiki pages. |
 
 ## Get started

@@ -113,7 +113,7 @@ A revoked or expired token makes the engine refuse mate. After the next restart 
 
 ## Give the workstation a token
 
-The `mate` pi package connects pi on the owner's workstation to the engine. `dotfiles/pi/mate/extensions/mcp.ts` reads the token with `op read` when pi starts, so the token never enters pi's environment. pi names the tools `mcp__kthx__*`.
+The `mate` pi package connects pi on the owner's workstation to the engine. `pi/mate/extensions/mcp.ts` in the dotfiles repository reads the token with `op read` when pi starts, so the token never enters pi's environment. pi names the tools `mcp__kthx__*`.
 
 > [!WARNING]
 > pi asks for no approval before each call, so the warning in [Connect a client](#connect-a-client) applies in full. The owner accepts this for the workstation token.

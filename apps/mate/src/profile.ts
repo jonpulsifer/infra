@@ -33,14 +33,14 @@ import {
 import type { SurfaceName } from './surface.ts';
 
 /** Later directories win a duplicate skill name. */
-export const SKILL_DIRS = ['dotfiles/skills', '.agents/skills'] as const;
+export const SKILL_DIRS = ['apps/mate/profile/skills', '.agents/skills'] as const;
 export const AGENTS_FILE = 'AGENTS.md';
 /** Shared with the owner's local pi package, so it holds no capability claims. */
-export const PERSONA_FILE = 'dotfiles/pi/mate/persona.md';
+export const PERSONA_FILE = 'apps/mate/profile/persona.md';
 /** What Rowbutt has learned; the nightly dream edits it through a pull request, and the local pi reads it too. */
 export const MEMORY_FILE = 'apps/mate/profile/memory.md';
 export const MEMORY_HEADING = `# What you remember (${MEMORY_FILE})`;
-export const OWNER_AGENTS_FILE = 'dotfiles/.agents/AGENTS.md';
+export const OWNER_AGENTS_FILE = 'apps/mate/profile/owner-agents.md';
 /** Only when the persona file is missing or empty, so the model keeps an identity. */
 export const FALLBACK_PERSONA =
   "You are Rowbutt, the owner's coding and operations agent for this homelab.";

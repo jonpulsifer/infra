@@ -9,7 +9,7 @@ on:
     paths: &paths
       - 'scripts/**'
       - '.github/scripts/**'
-      - 'dotfiles/**'
+      - 'apps/lookout/windows/**'
       - 'images/*/gh'
       - 'clusters/offsite/apps/elevenlabs/**'
       - 'mise.toml'
