@@ -27,7 +27,7 @@ jobs:
   deploy:
     # The pi4 hosts build natively on aarch64, and radiopi0 cross-compiles from
     # aarch64-linux, so neither needs qemu.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
       id-token: write # required for the Tailscale OIDC / workload-identity exchange
