@@ -69,7 +69,7 @@ jobs:
       - run: nix build .#nixosConfigurations.oldboy.config.system.build.toplevel
   spore:
     name: Build native Spore package and host
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: changed-paths
     if: github.event_name == 'push' && needs.changed-paths.outputs.nix_changed == 'true'
     steps:
