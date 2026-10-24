@@ -58,6 +58,7 @@ in
   };
 
   homelab.spire = {
+    bundleNotifier.enable = true;
     enable = true;
     ekHashes = lib.attrValues tpmNodes;
     entries =
