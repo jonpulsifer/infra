@@ -344,14 +344,14 @@ export class Wakes {
     const due = now >= wake.dueAt;
     let text: string | null = null;
     if (wake.pr === null) {
-      if (due) text = `${WAKE_MARK} wake: ${wake.note}`;
+      if (due) text = `${WAKE_MARK} wake\n${wake.note}`;
     } else {
       const state = await this.pullState(wake);
       if (state?.settled) {
-        text = `${WAKE_MARK} PR ${state.summary}. ${wake.note}`;
+        text = `${WAKE_MARK} PR ${state.summary}\n${wake.note}`;
       } else if (due) {
         const where = state ? `: ${state.summary}` : '';
-        text = `${WAKE_MARK} PR #${wake.pr} was still running at the deadline${where}. ${wake.note}`;
+        text = `${WAKE_MARK} PR #${wake.pr} was still running at the deadline${where}\n${wake.note}`;
       }
     }
     if (text) await this.fire(wake, text);
@@ -418,7 +418,7 @@ const WAKE_PARAMETERS = Type.Object({
     Type.String({
       maxLength: NOTE_LIMIT,
       description:
-        'What to do when woken. The woken turn starts with it, so name the work, the branch or PR, and what to check. Required unless cancel.',
+        'What to do when woken. The woken turn starts with it and the thread shows it, so name the work, the branch or PR, and what to check, one item to a line. Required unless cancel.',
     }),
   ),
   pr: Type.Optional(

@@ -168,7 +168,7 @@ describe('firing wakes', () => {
     expect(target.woken).toEqual([]);
     await clock.advance(WAKE_INTERVAL_MS);
     expect(target.woken).toEqual([
-      { ref: THREAD, asker: OWNER, text: '⏰ wake: check the rollout' },
+      { ref: THREAD, asker: OWNER, text: '⏰ wake\ncheck the rollout' },
     ]);
     expect(await store!.list()).toEqual([]);
     await clock.advance(5 * WAKE_INTERVAL_MS);
@@ -200,7 +200,7 @@ describe('firing wakes', () => {
     state = { settled: true, summary: '#7 at abc1234: 2 success' };
     await clock.advance(WAKE_INTERVAL_MS);
     expect(target.woken.map((w) => w.text)).toEqual([
-      '⏰ PR #7 at abc1234: 2 success. merge it if green',
+      '⏰ PR #7 at abc1234: 2 success\nmerge it if green',
     ]);
     wakes.stop();
   });
@@ -232,8 +232,8 @@ describe('firing wakes', () => {
     state = new Error('github GET: timed out');
     await clock.advance(2 * WAKE_INTERVAL_MS);
     expect(target.woken.map((w) => w.text).sort()).toEqual([
-      '⏰ PR #7 was still running at the deadline. look',
-      '⏰ PR #8 was still running at the deadline. peek',
+      '⏰ PR #7 was still running at the deadline\nlook',
+      '⏰ PR #8 was still running at the deadline\npeek',
     ]);
     expect(
       log.of('a pull request could not be read for a wake').length,
@@ -334,7 +334,7 @@ describe('firing faults', () => {
     };
     await clock.advance(6 * 60_000);
     await wakes.tick();
-    expect(target.woken.map((w) => w.text)).toEqual(['⏰ wake: b']);
+    expect(target.woken.map((w) => w.text)).toEqual(['⏰ wake\nb']);
     wakes.stop();
   });
 });
