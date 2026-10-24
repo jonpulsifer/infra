@@ -26,7 +26,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
 ## Run the build
 
 > [!CAUTION]
-> A run replaces the installer tag and the release assets of `<version>`. A node that installs during the run can pull either build.
+> A run replaces the installer tag and the release of `<version>`. Releases are immutable, so the run deletes the release and its tag and creates them again, and for a moment the release does not exist. A node that installs during the run can pull either build; spore keeps serving its last UKI.
 
 1. Start the workflow on `main`.
 
