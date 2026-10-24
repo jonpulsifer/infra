@@ -18,6 +18,8 @@ resources:
   - smiirl
   - spire
   - talos-enroll
+  - spire-oidc
+  - spire-test
   - kthx-engine-target
   - ../../base/apps/reloader
   # - satisfactory

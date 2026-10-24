@@ -143,7 +143,9 @@ resource "google_org_policy_policy" "allowed_workload_identity_providers" {
           "is:https://oidc.vercel.com/jonpulsifer",
           # Cluster ServiceAccount token issuers, from terraform/pki.
           "is:https://oidc.lolwtf.ca/folly",
-          "is:https://oidc.lolwtf.ca/offsite"
+          "is:https://oidc.lolwtf.ca/offsite",
+          # SPIRE's JWT-SVID issuer, served from folly.
+          "is:https://spire.lolwtf.ca"
         ]
       }
     }

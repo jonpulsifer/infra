@@ -1,0 +1,15 @@
+---
+# The provider reads its keys through the agent's socket on the host, and no
+# level below privileged admits a hostPath volume.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spire-oidc
+  labels:
+    app.kubernetes.io/part-of: spire
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

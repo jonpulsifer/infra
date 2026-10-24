@@ -1,0 +1,30 @@
+---
+# Cloudflare terminates TLS and the folly tunnel forwards plain HTTP here
+# (terraform/network/cloudflare/lolwtf.ca.tf), so the documents always name
+# https URLs. The issuer equals the SPIRE server's jwt_issuer and the
+# fml-pool provider's issuer_uri.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oidc-discovery-provider
+  namespace: spire-oidc
+  labels:
+    app.kubernetes.io/name: oidc-discovery-provider
+    app.kubernetes.io/part-of: spire
+data:
+  oidc-discovery-provider.conf: |
+    log_level = "INFO"
+    domains = ["spire.lolwtf.ca"]
+    jwt_issuer = "https://spire.lolwtf.ca"
+    jwks_uri = "https://spire.lolwtf.ca/keys"
+    insecure_addr = ":8080"
+    set_key_use = true
+
+    workload_api {
+      socket_path = "/run/spire/sockets/agent.sock"
+      trust_domain = "lolwtf.ca"
+    }
+
+    health_checks {
+      bind_port = "8008"
+    }
