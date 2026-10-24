@@ -1,6 +1,6 @@
 ---
 title: spore
-description: A Raspberry Pi 5 on NVMe that serves folly's NFS storage, x86 netboot, forge's HTTP boot image, lab DNS and time, and the SPIRE server.
+description: A Raspberry Pi 5 on NVMe that serves folly's NFS storage, x86 netboot, forge's HTTP boot image, the Talos boot image, lab DNS and time, and the SPIRE server.
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 5 Model B Rev 1.1 (8 GB)
@@ -21,6 +21,7 @@ spore is a Raspberry Pi 5 that serves NFS, x86 netboot, forge's boot image, and 
 
 - NFS for `clusters/folly/storage/` (`nfs-server.nix`)
 - [Netboot](../platform/nixos/netboot.md) for x86 PXE and [rackpi5](rackpi5.md) (`pxe-netboot.nix`, `spore-native-boot.nix`)
+- [Talos boot](../platform/nixos/talos-boot.md) for folly's Talos UKI on the bootstrap VLAN (`spore-talos-boot.nix`)
 - [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time) (`coredns-sinkhole.nix`, `ntp-server.nix`)
 - folly's [backup](../platform/backups.md) Garage store, with data in `/nfs/data/garage` (`garage.nix`).
 - The [SPIRE server](../platform/identity.md) that attests Talos nodes by TPM (`spire-server.nix`)

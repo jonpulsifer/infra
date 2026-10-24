@@ -8,8 +8,11 @@
   "data": {
     "LAB_CIDR": "10.2.0.0/24",
     "FUTURE_CIDR": "10.13.37.0/28",
+    "BOOTSTRAP_CIDR": "10.9.0.0/28",
+    "BOOTSTRAP_VLAN": "9",
     "CAPSULE_IP": "10.2.0.10",
     "SPORE_IP": "10.2.0.11",
+    "SPORE_BOOTSTRAP_IP": "10.9.0.11",
     "FORGE_IP": "10.2.0.12",
     "CLOUDPI4_IP": "10.2.0.20",
     "RADIOPI0_IP": "10.2.0.24",

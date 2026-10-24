@@ -26,6 +26,14 @@ assert_targets 'the Nix workflow validates its routing target' \
   '.github/workflows/nix-ci.yaml' \
   'nix:flake-check'
 
+assert_targets 'the Talos version and UKI cert that spore reads validate Nix' \
+  $'clusters/folly/talos/talos.tf\nclusters/folly/talos/secureboot/uki-signing-cert.pem' \
+  $'nix:flake-check\nterraform:clusters/folly/talos'
+
+assert_targets 'the UKI check that spore runs validates Nix' \
+  '.github/scripts/talos-uki-verify.sh' \
+  'nix:flake-check'
+
 assert_targets 'the retired Spore application has no Nix validation route' \
   'apps/spore/lib/catalog.ts' \
   ''
@@ -99,7 +107,7 @@ if grep -qxF clusters/offsite/talos <<<"$fixture_roots"; then
 fi
 
 assert_targets 'a Talos root file validates its Talos root' \
-  'clusters/folly/talos/talos.tf' \
+  'clusters/folly/talos/main.tf' \
   'terraform:clusters/folly/talos' "$fixture"
 
 assert_targets 'the topology ConfigMap validates its Talos root once that root exists' \
