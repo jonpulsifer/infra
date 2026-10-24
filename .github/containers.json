@@ -36,6 +36,9 @@
     "kthx": [
       "clusters/offsite/apps/kthx/helm-release.yaml"
     ],
+    "kthx-engine": [
+      "clusters/offsite/apps/kthx-engine/helm-release.yaml"
+    ],
     "mate": [
       "clusters/offsite/apps/mate/deployment.yaml"
     ],
@@ -58,12 +61,12 @@
     "spire-agent-tpm": [
       "clusters/folly/apps/spire/daemonset.yaml"
     ],
-    "kthx-engine": [
-      "clusters/offsite/apps/kthx-engine/helm-release.yaml"
-    ],
     "switchboard": [
       "clusters/folly/apps/pbx/switchboard.yaml",
       "clusters/offsite/apps/elevenlabs/switchboard.yaml"
+    ],
+    "talos-enroll": [
+      "clusters/folly/apps/talos-enroll/02-deployment.yaml"
     ],
     "weather": [
       "clusters/offsite/apps/weather/deployment.yaml"
