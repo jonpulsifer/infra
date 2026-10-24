@@ -7,7 +7,7 @@ Ingress gives a cluster service a Gateway address, a Cloudflare DNS name from ex
 
 ## Private names
 
-An app attaches an HTTPRoute to its cluster's shared `cluster-gateway`, or declares its own Gateway. folly's `cluster-gateway` has one `*.lolwtf.ca` wildcard listener that admits routes from any namespace. offsite's has one HTTPS listener for each hostname.
+An app attaches an HTTPRoute to its cluster's shared `cluster-gateway`, or declares its own Gateway. folly's `cluster-gateway` has one `*.lolwtf.ca` wildcard listener that admits routes from any namespace. offsite's has one HTTPS listener for each hostname. folly's enrollment server declares its own Gateway, pinned at `ENROLL_VIP` in `clusters/folly/config/cluster-topology.json`, the one VIP that the [bootstrap VLAN's firewall](routing-and-firewall.md#bootstrap-vlan-and-mac-auth) admits.
 
 external-dns publishes each route's name as an A record at its Gateway's load-balancer address (VIP). The VIP is private, so the name works on the LAN, and over the [tailnet](remote-access.md) for the owner. With policy `sync` and `txtOwnerId` set to `CLUSTER_NAME`, each cluster deletes its own records when their routes go.
 

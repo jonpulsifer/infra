@@ -9,7 +9,7 @@ Two JSON files are the single source of truth for the lab's network facts: addre
 
 | File | Holds | Keys |
 | --- | --- | --- |
-| `clusters/<site>/config/cluster-topology.json` | One cluster: its node, pod, service and load-balancer ranges, API server, gateway router, BGP ASNs and the address of each node | `CLUSTER_NAME`, `API_SERVER_*`, `ROUTER_IP`, `*_CIDR`, `LB_RANGE`, `CLUSTER_DNS`, `BGP_*_ASN`, `NODE_ADDRESSES` |
+| `clusters/<site>/config/cluster-topology.json` | One cluster: its node, pod, service and load-balancer ranges, API server, gateway router, BGP ASNs and the address of each node | `CLUSTER_NAME`, `API_SERVER_*`, `ROUTER_IP`, `*_CIDR`, `LB_RANGE`, `CLUSTER_DNS`, `BGP_*_ASN`, `NODE_ADDRESSES`, and on folly `ENROLL_VIP`, the pinned address of the enrollment server's Gateway |
 | `clusters/folly/config/lab-topology.json` | The folly lab: the Lab Net, `future` and bootstrap ranges, the bootstrap VLAN ID, and the addresses of lab hosts and Windows desktops | `LAB_CIDR`, `FUTURE_CIDR`, `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_IP`, `SPORE_BOOTSTRAP_IP` |
 
 Print the keys and values of a file with `jq .data <file>`.
@@ -50,7 +50,6 @@ The topology contract does not check `lab-topology.json`.
 - Some files hold a literal copy of a topology value: the FRR files, whose `neighbor` lines are the `NODE_ADDRESSES` values, `policy.hujson` and the addresses pinned in app manifests. Change them in the same pull request, as the [Network rules](../platform/network.md#rules) describe.
 - Put a setting that is not a network fact, such as a time zone or a DNS zone for Apps, in `cluster-settings`: `clusters/base/cluster-settings.yaml`, patched by `clusters/<site>/config/cluster-settings.yaml`.
 - `CATHY_IP` and `PBX_SIP_VIP` are addresses in folly's `cluster-settings`, for the [PBX](../apps/pbx.md). `CATHY_IP` is the office phone on Management, which neither topology file covers, and the folly `apps` Flux Kustomization does not substitute from `lab-topology`. `terraform/network/unifi/folly/voip.tf` checks `CATHY_IP` against `clients.yaml`.
-- `ENROLL_VIP` in folly's `cluster-topology.json` is the address of the [Talos enrollment](../apps/talos-enroll.md) Gateway, pinned so that a firewall rule can name it. It must stay free in `LB_RANGE`.
 
 ## Related
 
