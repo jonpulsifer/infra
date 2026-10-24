@@ -1,1 +1,40 @@
-{}
+{
+  "optiplex": {
+    "cluster_endpoint": "https://folly.lolwtf.ca:6443",
+    "cluster_name": "folly",
+    "config_patches": [
+      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SysctlConfig\"\n\"params\":\n  \"fs.inotify.max_user_watches\": \"524288\"\n  \"user.max_user_namespaces\": \"11255\"\n  \"vm.max_map_count\": \"1048576\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"defaultRuntimeSeccompProfileEnabled\": true\n\"kind\": \"KubeletConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"filesystem\":\n  \"type\": \"xfs\"\n\"kind\": \"UserVolumeConfig\"\n\"name\": \"data\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"system_disk\"\n  \"grow\": true\n  \"minSize\": \"100GiB\"\n",
+      "\"machine\":\n  \"logging\":\n    \"destinations\":\n    - \"endpoint\": \"tcp://127.0.0.1:6050/\"\n      \"format\": \"json_lines\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KmsgLogConfig\"\n\"name\": \"vector\"\n\"url\": \"tcp://127.0.0.1:6051/\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"enabled\": false\n\"kind\": \"KubeProxyConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"enabled\": false\n\"kind\": \"KubeCoreDNSConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"certExtraSANs\":\n- \"optiplex\"\n- \"optiplex.lolwtf.ca\"\n- \"optiplex.folly.lolwtf.ca\"\n- \"folly.lolwtf.ca\"\n- \"10.3.0.10\"\n\"extraArgs\":\n  \"enable-aggregator-routing\": \"true\"\n\"kind\": \"KubeAPIServerConfig\"\n",
+      "\"accepted\":\n  \"audiences\":\n  - \"api\"\n  - \"https://kubernetes.default.svc\"\n\"apiVersion\": \"v1alpha1\"\n\"issuer\":\n  \"issuerURL\": \"https://oidc.lolwtf.ca/folly\"\n\"kind\": \"KubeServiceAccountConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"configuration\":\n  \"anonymous\":\n    \"conditions\":\n    - \"path\": \"/livez\"\n    - \"path\": \"/readyz\"\n    - \"path\": \"/healthz\"\n    \"enabled\": true\n  \"jwt\":\n  - \"claimMappings\":\n      \"username\":\n        \"expression\": \"\\\"federated:\\\" + claims.sub\"\n    \"claimValidationRules\":\n    - \"expression\": |\n        claims.sub in [\n          \"system:serviceaccount:atlantis:atlantis\",\n          \"system:serviceaccount:mate:mate-sandbox-admin\",\n          \"system:serviceaccount:mate:mate-sandbox-reader\",\n          \"system:serviceaccount:kthx-engine:kthx-engine\"\n        ]\n      \"message\": \"only the Atlantis, Rowbutt sandbox (admin and reader) and kthx engine\n        service accounts may authenticate across clusters\"\n    \"issuer\":\n      \"audiences\":\n      - \"api\"\n      \"url\": \"https://oidc.lolwtf.ca/offsite\"\n\"kind\": \"KubeAuthenticationConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"ETCD\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"system_disk\"\n  \"maxSize\": \"8GiB\"\n  \"minSize\": \"8GiB\"\n",
+      "\"allowedKubernetesNamespaces\":\n- \"backups\"\n\"allowedRoles\":\n- \"os:etcd:backup\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeTalosAPIAccessConfig\"\n",
+      "\"cluster\":\n  \"etcd\":\n    \"extraArgs\":\n      \"listen-metrics-urls\": \"http://0.0.0.0:2381\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"extraArgs\":\n  \"bind-address\": \"0.0.0.0\"\n\"kind\": \"KubeControllerManagerConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"extraArgs\":\n  \"bind-address\": \"0.0.0.0\"\n\"kind\": \"KubeSchedulerConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"auto\": \"off\"\n\"hostname\": \"optiplex\"\n\"kind\": \"HostnameConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"installer\":\n  \"image\": \"ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4\"\n\"kind\": \"UnattendedInstallConfig\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"disk.dev_path == \\\"/dev/sda\\\"\"\n  \"wipe\": true\n\n---\n\"machine\":\n  \"certSANs\":\n  - \"optiplex.lolwtf.ca\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNodeConfig\"\n\"labels\":\n  \"bgp-enabled\": \"true\"\n  \"lolwtf.ca/tpm\": \"true\"\n  \"node.kubernetes.io/exclude-from-external-load-balancers\":\n    \"$patch\": \"delete\"\n\"taints\":\n  \"node-role.kubernetes.io/control-plane\":\n    \"$patch\": \"delete\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"encryption\":\n  \"keys\":\n  - \"slot\": 0\n    \"tpm\": {}\n  \"provider\": \"luks2\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"STATE\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"encryption\":\n  \"keys\":\n  - \"slot\": 0\n    \"tpm\": {}\n  \"provider\": \"luks2\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"EPHEMERAL\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"EPHEMERAL\"\n\"provisioning\":\n  \"maxSize\": \"100GiB\"\n"
+    ],
+    "kubernetes_version": "v1.36.3",
+    "machine_type": "controlplane",
+    "talos_contract": "v1.14"
+  },
+  "riptide": {
+    "cluster_endpoint": "https://folly.lolwtf.ca:6443",
+    "cluster_name": "folly",
+    "config_patches": [
+      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SysctlConfig\"\n\"params\":\n  \"fs.inotify.max_user_watches\": \"524288\"\n  \"user.max_user_namespaces\": \"11255\"\n  \"vm.max_map_count\": \"1048576\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"defaultRuntimeSeccompProfileEnabled\": true\n\"kind\": \"KubeletConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"filesystem\":\n  \"type\": \"xfs\"\n\"kind\": \"UserVolumeConfig\"\n\"name\": \"data\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"system_disk\"\n  \"grow\": true\n  \"minSize\": \"100GiB\"\n",
+      "\"machine\":\n  \"logging\":\n    \"destinations\":\n    - \"endpoint\": \"tcp://127.0.0.1:6050/\"\n      \"format\": \"json_lines\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KmsgLogConfig\"\n\"name\": \"vector\"\n\"url\": \"tcp://127.0.0.1:6051/\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"auto\": \"off\"\n\"hostname\": \"riptide\"\n\"kind\": \"HostnameConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"installer\":\n  \"image\": \"ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4\"\n\"kind\": \"UnattendedInstallConfig\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"disk.dev_path == \\\"/dev/nvme0n1\\\"\"\n  \"wipe\": true\n\n---\n\"machine\":\n  \"certSANs\":\n  - \"riptide.lolwtf.ca\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNodeConfig\"\n\"labels\":\n  \"bgp-enabled\": \"true\"\n  \"lolwtf.ca/tpm\": \"true\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"encryption\":\n  \"keys\":\n  - \"slot\": 0\n    \"tpm\": {}\n  \"provider\": \"luks2\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"STATE\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"encryption\":\n  \"keys\":\n  - \"slot\": 0\n    \"tpm\": {}\n  \"provider\": \"luks2\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"EPHEMERAL\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"EPHEMERAL\"\n\"provisioning\":\n  \"maxSize\": \"80GiB\"\n"
+    ],
+    "kubernetes_version": "v1.36.3",
+    "machine_type": "worker",
+    "talos_contract": "v1.14"
+  }
+}
