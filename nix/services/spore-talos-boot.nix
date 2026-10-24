@@ -19,6 +19,9 @@ let
   uki = "metal-amd64-secureboot-uki.efi";
   iso = "metal-amd64-secureboot.iso";
   signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
+  # sbverify refuses this cert, whose extended key usage lacks codeSigning, so the image pipeline's
+  # check verifies the signature for any purpose and compares the Authenticode image hash.
+  verifyUki = ../../.github/scripts/talos-uki-verify.sh;
 
   # The release tag follows the Talos version the folly root installs.
   talosVersion =
@@ -126,6 +129,8 @@ in
       coreutils
       curl
       findutils
+      openssl
+      osslsigncode
       sbsigntool
     ];
     serviceConfig = {
@@ -221,7 +226,7 @@ in
       if [ "$code" = 304 ]; then
         echo "current UKI is unchanged"
       else
-        sbverify --cert ${signingCert} "$stage/${uki}"
+        ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${uki}"
         fetch --output "$stage/${iso}" "${releaseUrl}/${iso}"
         test -s "$stage/${iso}"
         printf '%s\n' ${talosVersion} > "$stage/version"

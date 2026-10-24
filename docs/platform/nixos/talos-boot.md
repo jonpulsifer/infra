@@ -29,7 +29,7 @@ Firmware with only PXE needs UniFi's network boot options on the bootstrap netwo
 
 ## The mirror
 
-The mirror downloads both files from the GitHub release `talos-folly/<talos_version>`. It skips the download while the UKI's ETag is unchanged. `sbverify` checks the UKI against the committed signing certificate. A new release moves `current` to `prev`. A failed run changes neither.
+The mirror downloads both files from the GitHub release `talos-folly/<talos_version>`. It skips the download while the UKI's ETag is unchanged. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed signing certificate's key made over the UKI's own image hash. A new release moves `current` to `prev`. A failed run changes neither.
 
 A Talos version bump fails the mirror until that version's release exists. spore serves the old UKI until then.
 
@@ -40,6 +40,8 @@ Its node-exporter metrics are `spore_talos_boot_mirror_success`, `spore_talos_bo
 - spore's switch port must carry the bootstrap VLAN tagged. A DHCP request is a broadcast, so the proxy must be on that VLAN.
 - Keep the URL an IPv4 literal that ends in `.efi`, or EDK2 HTTP boot can reject the offer or the file.
 - Add no `pxe-service` for client architecture 16. dnsmasq then drops the URL from the reply.
+- Check the UKI with `talos-uki-verify.sh`, not `sbverify --cert`. `sbverify` refuses every UKI, because the signing certificate's extended key usage lacks code signing. UEFI firmware ignores that usage.
+- spore's other open ports also answer at `SPORE_BOOTSTRAP_IP`. A machine on the bootstrap VLAN reaches spore directly, so the UniFi firewall cannot filter it.
 - The `spore-reliability` check in `nix/lib/checks.nix` fails if dnsmasq could lease addresses or answer DHCP on `end0`.
 
 ## Where it lives
@@ -48,6 +50,7 @@ Its node-exporter metrics are `spore_talos_boot_mirror_success`, `spore_talos_bo
 - `clusters/folly/config/lab-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `SPORE_BOOTSTRAP_IP`
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
 - `clusters/folly/talos/secureboot/uki-signing-cert.pem`: the certificate the mirror checks
+- `.github/scripts/talos-uki-verify.sh`: the UKI signature check, shared with the image pipeline
 
 ## Related
 

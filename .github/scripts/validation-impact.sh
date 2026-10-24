@@ -35,7 +35,7 @@ targets() {
         target_set["nix:flake-check"]=1
         ;;
       # spore mirrors the Talos release that talos.tf names and checks it against the committed cert.
-      clusters/folly/talos/talos.tf | clusters/folly/talos/secureboot/*)
+      clusters/folly/talos/talos.tf | clusters/folly/talos/secureboot/* | .github/scripts/talos-uki-verify.sh)
         target_set["nix:flake-check"]=1
         ;;
     esac

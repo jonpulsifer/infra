@@ -30,6 +30,10 @@ assert_targets 'the Talos version and UKI cert that spore reads validate Nix' \
   $'clusters/folly/talos/talos.tf\nclusters/folly/talos/secureboot/uki-signing-cert.pem' \
   $'nix:flake-check\nterraform:clusters/folly/talos'
 
+assert_targets 'the UKI check that spore runs validates Nix' \
+  '.github/scripts/talos-uki-verify.sh' \
+  'nix:flake-check'
+
 assert_targets 'the retired Spore application has no Nix validation route' \
   'apps/spore/lib/catalog.ts' \
   ''
