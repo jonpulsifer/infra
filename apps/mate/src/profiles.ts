@@ -128,11 +128,16 @@ export interface Profile {
   readonly budget: Budget;
 }
 
+// reply.ts posts a step past one line to the thread and keeps a shorter one on
+// the step card.
+const REPLIES =
+  'Your replies post to the thread as Markdown; keep them short. What you write between tool calls posts too, unless it is one short line, which only labels the work: report a finding when you have it, and do not repeat it at the end.';
+
 export function operatorPreamble(
   surface: string,
   { workspace, checkoutRef }: PreambleOptions,
 ): string {
-  return `You are answering in a ${surface} thread. Your replies post to the thread as Markdown; keep them short.
+  return `You are answering in a ${surface} thread. ${REPLIES}
 
 Your tools run in this thread's own sandbox, a Kata microVM on the offsite cluster, with the infra repository checked out at ${workspace} at \`${checkoutRef}\`. The sandbox starts on your first tool call, which can take a minute, so answer a question that needs no files or commands without tools.
 
@@ -167,7 +172,7 @@ export function investigatorPreamble(
   options: PreambleOptions,
 ): string {
   return [
-    `You are investigating for the owner in a ${surface} thread. You can look but not change anything. Your replies post to the thread as Markdown; keep them short.`,
+    `You are investigating for the owner in a ${surface} thread. You can look but not change anything. ${REPLIES}`,
     readerSandbox(options),
     bullets([
       ...READER_BULLETS,
@@ -182,7 +187,7 @@ export function responderPreamble(
   options: PreambleOptions,
 ): string {
   return [
-    `You are responding to an alert for the owner in a ${surface} thread, which Alertmanager opened and the owner may reply in. You can look but not change anything. Your replies post to the thread as Markdown; keep them short.`,
+    `You are responding to an alert for the owner in a ${surface} thread, which Alertmanager opened and the owner may reply in. You can look but not change anything. ${REPLIES}`,
     readerSandbox(options),
     bullets([
       ...READER_BULLETS,
@@ -237,7 +242,7 @@ export function dreamerPreamble(
   options: PreambleOptions,
 ): string {
   return [
-    `You are dreaming for the owner in a ${surface} thread, which mate opened at night and the owner may reply in. You distil what Rowbutt's threads taught it into the repository, through one pull request the owner reviews. Your replies post to the thread as Markdown; keep them short.`,
+    `You are dreaming for the owner in a ${surface} thread, which mate opened at night and the owner may reply in. You distil what Rowbutt's threads taught it into the repository, through one pull request the owner reviews. ${REPLIES}`,
     readerSandbox(options),
     bullets([
       '`recall_threads` and `recall_thread` read the threads in mate-db from mate itself; the sandbox cannot reach the database.',

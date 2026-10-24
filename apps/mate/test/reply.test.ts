@@ -325,7 +325,36 @@ describe('what the agent says between tool calls', () => {
     reply.update({ kind: 'text', delta: ' The answer.' });
     await reply.finish('done');
     expect(canvas.steps).toEqual([]);
-    expect(canvas.answer).toBe('a long preamble that kept going. The answer.');
+    expect(canvas.answer).toBe(
+      'a long preamble that kept going.\n\nThe answer.',
+    );
+  });
+
+  test('is a report in the thread when it runs past one line, labelled by its first sentence', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const reply = new Reply(canvas, clock, silentLog, 't', 1_000);
+    const report =
+      'I found 15 open Renovate PRs. Ten have green checks; two change Atlantis-managed infrastructure, and three have failing checks.';
+    reply.update({ kind: 'text', delta: report });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'gh pr merge', state: 'complete' },
+    });
+    await clock.advance(1_000);
+    expect(canvas.answer).toBe(report);
+    reply.update({ kind: 'text', delta: 'Let me merge the green ones.' });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c2', title: 'gh pr merge', state: 'complete' },
+    });
+    reply.update({ kind: 'text', delta: '\n\nNine PRs are merged.' });
+    await reply.finish('done');
+    expect(canvas.steps).toEqual([
+      'I found 15 open Renovate PRs.',
+      'Let me merge the green ones.',
+    ]);
+    expect(canvas.answer).toBe(`${report}\n\nNine PRs are merged.`);
   });
 
   test('is the answer of a turn that ended on a tool call', async () => {
