@@ -13,6 +13,7 @@
     "mate-sandbox",
     "mate-voice",
     "smiirl",
+    "spire-agent-tpm",
     "kthx-engine",
     "kthx-engine-verifier",
     "switchboard",
@@ -53,6 +54,9 @@
     ],
     "smiirl": [
       "clusters/folly/apps/smiirl/02-deployment.yaml"
+    ],
+    "spire-agent-tpm": [
+      "clusters/folly/apps/spire/daemonset.yaml"
     ],
     "kthx-engine": [
       "clusters/offsite/apps/kthx-engine/helm-release.yaml"
