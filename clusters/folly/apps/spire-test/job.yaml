@@ -25,6 +25,9 @@ metadata:
     app.kubernetes.io/name: uploader
     app.kubernetes.io/part-of: spire
 spec:
+  # Suspended until a node carries lolwtf.ca/tpm=true and the agents attest;
+  # a Pending pod would raise KubeJobNotCompleted. Remove the line to run it.
+  suspend: true
   backoffLimit: 6
   template:
     metadata:

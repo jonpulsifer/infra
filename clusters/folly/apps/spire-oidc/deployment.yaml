@@ -25,7 +25,9 @@ metadata:
     # The provider reads its config only at startup.
     configmap.reloader.stakater.com/reload: oidc-discovery-provider
 spec:
-  replicas: 1
+  # 0 until a node carries lolwtf.ca/tpm=true and its agent attests; a
+  # Pending pod would raise a replicas alert. Set to 1 then.
+  replicas: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: oidc-discovery-provider
