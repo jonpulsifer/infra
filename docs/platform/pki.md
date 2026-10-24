@@ -41,6 +41,18 @@ Both clusters run the self-signed Kubernetes CA from their secrets bundle, so no
 
 Each API server also accepts tokens from the other cluster, for the ServiceAccounts `atlantis/atlantis`, `mate/mate-sandbox-admin`, `mate/mate-sandbox-reader` and `spindrift/spindrift` only. RBAC in `clusters/` binds them as `federated:<subject>`.
 
+## Talos Secure Boot keys
+
+folly's signed Talos images use the lab's own Secure Boot keys, outside the FML chain. The 1Password item `talos-secureboot` in the `homelab` vault holds every key. `clusters/folly/talos/secureboot/` holds the public halves. [Kubernetes](kubernetes.md#signed-talos-images) says what the build makes with them.
+
+| Key | Signs | Public half in git |
+| --- | --- | --- |
+| UKI signing key, `FML Secure Boot` | Each UKI and systemd-boot. The firmware boots them because `db` holds its certificate. | `uki-signing-cert.pem`, `uki-signing-cert.der` |
+| PCR signing key | The expected PCR 11 value of each UKI. A TPM opens a sealed disk only under a policy this key signed. | None |
+| `PK`, `KEK` and `db` | The firmware's key lists. A machine in Setup Mode enrolls them, with the Microsoft UEFI certificates in `db`. | `PK.auth`, `KEK.auth`, `db.auth` |
+
+The PCR signing key is fleet-wide. Every disk that a TPM seals to the signed policy is bound to it, so a new key leaves each sealed disk unable to open after the next upgrade. Rotate it only with a plan that reinstalls each such node.
+
 ## Rules
 
 - Never trust the FML Root as a client CA of a cluster, or its API server would accept every client certificate under the FML Root.
@@ -53,6 +65,7 @@ Each API server also accepts tokens from the other cluster, for the ServiceAccou
 - `terraform/pki/`: the certificates, the OIDC documents and the rotation procedure in `README.md`
 - `clusters/<site>/talos/patches.tf`: the issuer and the rule for tokens from the other cluster
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: `fml-pool`
+- `clusters/folly/talos/secureboot/`: the public halves of the Talos Secure Boot keys
 
 ## Related
 
