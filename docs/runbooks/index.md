@@ -24,6 +24,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Move a cluster's data through a Talos rebuild](move-a-clusters-data-through-a-talos-rebuild.md): freeze the writers, take the last backups, and restore the databases, volumes and kthx Apps
 - [Verify a Talos cluster](verify-a-talos-cluster.md): check the nodes, network, identity and workloads of a cluster that runs Talos
 - [Issue a talosconfig](issue-a-talosconfig.md): mint the owner's and Rowbutt's Talos API credentials and store them in 1Password
+- [Add a TPM node to SPIRE](add-a-tpm-node-to-spire.md): read a node's TPM endorsement key hash, admit it on spore, and make sure its agent serves SVIDs
 - [Operate Postgres](operate-postgres.md): connect to, inspect and restart the CloudNativePG databases
 - [Restore a database](restore-a-database.md): restore a Postgres database from its barman backups, and run the restore drill
 - [Recover a re-created database](recover-a-re-created-database.md): bring a database back when its `Cluster` is created again under the same name

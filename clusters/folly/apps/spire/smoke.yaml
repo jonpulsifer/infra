@@ -1,0 +1,73 @@
+---
+# spore registers spiffe://lolwtf.ca/ns/spire-smoke/sa/smoke by the selectors
+# k8s:ns:spire-smoke and k8s:sa:smoke under each TPM node's alias.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: smoke
+  namespace: spire-smoke
+  labels:
+    app.kubernetes.io/name: spire-smoke
+    app.kubernetes.io/part-of: spire
+automountServiceAccountToken: false
+---
+# Prints the SPIFFE ID of the X509-SVID the node's agent serves this pod, and
+# fails while the agent serves none.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spire-smoke
+  namespace: spire-smoke
+  labels:
+    app.kubernetes.io/name: spire-smoke
+    app.kubernetes.io/part-of: spire
+  annotations:
+    # A Job's template is immutable, so Flux replaces the Job to change it.
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 6
+  # Flux recreates a deleted Job at its next reconcile, so the check reruns
+  # about hourly.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spire-smoke
+        app.kubernetes.io/part-of: spire
+    spec:
+      serviceAccountName: smoke
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      nodeSelector:
+        lolwtf.ca/tpm: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fetch
+          image: ghcr.io/spiffe/spire-agent:1.15.5@sha256:3652c732b0f0d36f4dd78394230a1b1cd0ddcc29548a46c67a996b1a78c14481
+          command: ["/opt/spire/bin/spire-agent"]
+          args: ["api", "fetch", "x509", "-socketPath", "/run/spire/sockets/agent.sock"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: sockets
+              mountPath: /run/spire/sockets
+              readOnly: true
+      volumes:
+        - name: sockets
+          hostPath:
+            path: /run/spire/sockets
+            type: Directory
