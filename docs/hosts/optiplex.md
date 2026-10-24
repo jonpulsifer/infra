@@ -13,9 +13,11 @@ specs:
   os: Talos Linux 1.14
   firmware: BIOS 1.27.0
   tpm: Intel PTT, not enabled in the BIOS
+  boot: Image Factory systemd-boot UKI, Secure Boot off
+  disks: plain, not in tpm_nodes
 ---
 
-optiplex is the only control-plane node of the folly [Kubernetes](../platform/kubernetes.md) cluster. It runs Talos Linux, and `clusters/folly/talos/` configures it.
+optiplex is the only control-plane node of the folly [Kubernetes](../platform/kubernetes.md) cluster. It runs [Talos Linux](../platform/kubernetes/talos.md), and `clusters/folly/talos/` configures it.
 
 ## What it runs
 

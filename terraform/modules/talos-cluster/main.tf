@@ -74,5 +74,50 @@ resource "talos_image_factory_schematic" "this" {
 }
 
 locals {
-  installer_image = "factory.talos.dev/metal-installer/${talos_image_factory_schematic.this.id}:${var.talos_version}"
+  installer_image      = "factory.talos.dev/metal-installer/${talos_image_factory_schematic.this.id}:${var.talos_version}"
+  node_installer_image = { for name, n in var.nodes : name => coalesce(n.installer_image, local.installer_image) }
+}
+
+# A node pulls its installer anonymously, and an upgrade to a tag that is not
+# published fails on the node. The plan fails first: each installer_image must
+# be a public GHCR image tagged with talos_version.
+locals {
+  installer_refs = { for image in distinct(compact([for n in var.nodes : n.installer_image])) :
+    image => try(regex("^ghcr\\.io/(?P<repository>[^:@]+):(?P<tag>[^:@]+)$", image), null)
+  }
+}
+
+data "http" "installer_token" {
+  for_each = local.installer_refs
+
+  url = "https://ghcr.io/token?scope=repository:${try(each.value.repository, "")}:pull&service=ghcr.io"
+
+  lifecycle {
+    precondition {
+      condition     = try(each.value.tag, null) == var.talos_version
+      error_message = "${each.key} must be ghcr.io/<repository>:${var.talos_version}, tagged with talos_version and no digest."
+    }
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "GHCR grants no anonymous pull of ${each.key}: the package does not exist or is private."
+    }
+  }
+}
+
+data "http" "installer_manifest" {
+  for_each = local.installer_refs
+
+  url    = "https://ghcr.io/v2/${each.value.repository}/manifests/${each.value.tag}"
+  method = "HEAD"
+  request_headers = {
+    Accept        = "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"
+    Authorization = "Bearer ${jsondecode(data.http.installer_token[each.key].response_body).token}"
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "${each.key} is not published. Publish the signed installer for ${var.talos_version} before talos_version changes."
+    }
+  }
 }

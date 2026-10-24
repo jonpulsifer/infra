@@ -57,6 +57,7 @@ On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/
 
 ## Related
 
+- [Talos Linux](kubernetes/talos.md)
 - [How changes ship](how-changes-ship.md)
 - [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)
 - [Get cluster admin access](../runbooks/get-cluster-admin-access.md)

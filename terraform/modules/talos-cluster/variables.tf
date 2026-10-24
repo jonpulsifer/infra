@@ -65,6 +65,11 @@ variable "nodes" {
     patches     = optional(list(string), [])
     labels      = optional(map(string), {})
     taints      = optional(map(string), {}) # key => "value:Effect"
+    # Replaces the Image Factory installer. Tag it with talos_version and no
+    # digest, or Create upgrades the node.
+    installer_image = optional(string)
+    # A change replaces the node's talos_machine (see nodes.tf).
+    install_generation = optional(string)
   }))
 
   validation {
@@ -93,4 +98,15 @@ variable "controlplane_patches" {
   type        = list(string)
   description = "Patches appended to the control plane only (KubeServiceAccountConfig, KubeAuthenticationConfig, KubeAPIServerConfig extraArgs)."
   default     = []
+}
+
+variable "tpm_nodes" {
+  type        = set(string)
+  description = "Nodes labelled lolwtf.ca/tpm=true whose STATE and EPHEMERAL are LUKS2 volumes sealed to the TPM. Talos encrypts a volume only when it formats it, at install."
+  default     = []
+
+  validation {
+    condition     = alltrue([for name in var.tpm_nodes : contains(keys(var.nodes), name)])
+    error_message = "Every entry of tpm_nodes must be a key of nodes."
+  }
 }

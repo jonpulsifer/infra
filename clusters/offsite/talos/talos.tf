@@ -57,6 +57,14 @@ locals {
   }
 }
 
+# No offsite node has an install generation, so each record is imported rather
+# than created: a created record would replace the node's talos_machine.
+import {
+  for_each = local.nodes
+  to       = module.talos.terraform_data.install[each.key]
+  id       = each.key
+}
+
 module "talos" {
   source = "../../../terraform/modules/talos-cluster"
 
