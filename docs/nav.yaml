@@ -74,6 +74,7 @@ sections:
           - runbooks/deploy-a-nixos-host.md
           - runbooks/install-talos-on-a-node.md
           - runbooks/enroll-a-talos-node.md
+          - runbooks/build-the-signed-talos-images.md
           - runbooks/change-the-forge-eeprom.md
           - runbooks/install-a-windows-desktop.md
           - runbooks/install-windows-monitoring.md
