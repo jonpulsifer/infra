@@ -26,7 +26,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
 ## Run the build
 
 > [!CAUTION]
-> A run replaces the installer tag and the release of `<version>`. Releases are immutable, so the run deletes the release and its tag and creates them again, and for a moment the release does not exist. A node that installs during the run can pull either build; spore keeps serving its last UKI.
+> A run replaces the installer tag and adds a release of `<version>`. Releases are immutable, so each build is its own release, tagged with the run id, and spore's mirror takes the newest. A node that installs during the run can pull either build.
 
 1. Start the workflow on `main`.
 
@@ -58,7 +58,8 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
 3. Download the UKI and the ISO.
 
    ```bash
-   gh release download talos-folly/<version> --repo jonpulsifer/infra --dir /tmp/talos-folly
+   tag=$(gh release list --repo jonpulsifer/infra --json tagName,createdAt --jq '[.[] | select(.tagName | startswith("talos-folly/<version>-"))] | sort_by(.createdAt) | last | .tagName')
+   gh release download "$tag" --repo jonpulsifer/infra --dir /tmp/talos-folly
    ```
 
 4. From the root of the checkout, make sure the UKI verifies against the committed certificate. This is the check that the workflow runs before it publishes.

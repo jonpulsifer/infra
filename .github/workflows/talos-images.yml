@@ -192,21 +192,19 @@ jobs:
           crane push "$RUNNER_TEMP/out/installer-amd64-secureboot.tar" "$image"
           echo "Installer: \`$image@$(crane digest "$image")\`" >>"$GITHUB_STEP_SUMMARY"
 
-      # Releases in this repository are immutable: a published release takes no
-      # new assets. A rebuild deletes the release and its tag, then creates the
-      # release again with both assets, which gh uploads to a draft and
-      # publishes once.
+      # Releases in this repository are immutable, and a tag name that an
+      # immutable release used is spent for good. Each build is its own release,
+      # tagged with the run id; gh uploads the assets to a draft and publishes
+      # once. The mirror on spore takes the newest release of the version.
       - name: Publish the UKI and ISO
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="talos-$SITE/$VERSION"
+          tag="talos-$SITE/$VERSION-$GITHUB_RUN_ID"
           notes="Signed Talos $VERSION boot assets for $SITE, built from $GITHUB_SHA."
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release delete "$tag" --yes --cleanup-tag
-          fi
           gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
-            --title "Talos $VERSION for $SITE" --notes "$notes" \
+            --title "Talos $VERSION for $SITE, build $GITHUB_RUN_ID" --notes "$notes" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot.iso"
+          echo "Release: \`$tag\`" >>"$GITHUB_STEP_SUMMARY"

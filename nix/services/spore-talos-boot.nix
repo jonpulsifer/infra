@@ -37,7 +37,9 @@ let
       lib.head matches
     else
       throw "clusters/folly/talos/talos.tf must set talos_version exactly once";
-  releaseUrl = "https://github.com/jonpulsifer/infra/releases/download/talos-${site}%2F${talosVersion}";
+  # Each image build is its own immutable release, tagged talos-<site>/<version>-<run id>.
+  releasesApi = "https://api.github.com/repos/jonpulsifer/infra/releases?per_page=100";
+  tagPrefix = "talos-${site}/${talosVersion}-";
 
   bootstrapNet = lib.head (lib.splitString "/" lab.bootstrap.cidr);
   bootstrapPrefix = lib.toInt (lib.last (lib.splitString "/" lab.bootstrap.cidr));
@@ -128,6 +130,7 @@ in
       coreutils
       curl
       findutils
+      jq
       openssl
       sbsigntool
     ];
@@ -214,18 +217,29 @@ in
       # mktemp -d makes 0700; nginx and dnsmasq read the release as unprivileged users.
       chmod 0755 "$stage"
 
+      # The newest published release of this Talos version. The tag holds a
+      # slash, which the download URL carries encoded.
+      tag=$(fetch --header 'Accept: application/vnd.github+json' "${releasesApi}" \
+        | jq -r --arg prefix "${tagPrefix}" \
+          '[.[] | select(.draft | not) | select(.tag_name | startswith($prefix))] | sort_by(.created_at) | last | .tag_name // empty')
+      if [ -z "$tag" ]; then
+        echo "no published release is tagged ${tagPrefix}*" >&2
+        exit 1
+      fi
+      release_url="https://github.com/jonpulsifer/infra/releases/download/''${tag//\//%2F}"
+
       etag_args=()
       if [ -s "$site_dir/current/uki.etag" ] && [ -s "$site_dir/current/${iso}" ]; then
         etag_args=(--etag-compare "$site_dir/current/uki.etag")
       fi
       code=$(fetch "''${etag_args[@]}" --etag-save "$stage/uki.etag" \
-        --output "$stage/${uki}" --write-out '%{http_code}' "${releaseUrl}/${uki}")
+        --output "$stage/${uki}" --write-out '%{http_code}' "$release_url/${uki}")
 
       if [ "$code" = 304 ]; then
         echo "current UKI is unchanged"
       else
         ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${uki}"
-        fetch --output "$stage/${iso}" "${releaseUrl}/${iso}"
+        fetch --output "$stage/${iso}" "$release_url/${iso}"
         test -s "$stage/${iso}"
         printf '%s\n' ${talosVersion} > "$stage/version"
 
