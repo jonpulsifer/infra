@@ -62,6 +62,11 @@ in
       default = "lolwtf.ca";
       description = "The SPIFFE trust domain the server issues identities in.";
     };
+    jwtIssuer = lib.mkOption {
+      type = lib.types.str;
+      default = "https://spire.lolwtf.ca";
+      description = "The iss claim of every JWT-SVID. It equals the OIDC discovery provider's public URL, which GCP checks.";
+    };
     port = lib.mkOption {
       type = lib.types.port;
       default = 8081;
@@ -109,6 +114,7 @@ in
       settings = {
         server = {
           trust_domain = cfg.trustDomain;
+          jwt_issuer = cfg.jwtIssuer;
           bind_address = "0.0.0.0";
           bind_port = cfg.port;
           ca_ttl = "24h";

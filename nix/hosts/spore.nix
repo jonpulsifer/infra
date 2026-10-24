@@ -23,6 +23,10 @@ let
       ns = "spire-test";
       sa = "uploader";
     }
+    {
+      ns = "spire-oidc";
+      sa = "oidc-discovery-provider";
+    }
   ];
 in
 {

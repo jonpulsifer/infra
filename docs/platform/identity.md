@@ -28,6 +28,8 @@ The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
 
 The hash is the SHA-256 of the EK public key in DER form, in lowercase hex.
 
+Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`. The OIDC discovery provider serves the JWKS at that address and gets its own SVID as `spire-oidc/oidc-discovery-provider`.
+
 ## Rules
 
 - Change entries and EK hashes in `nix/hosts/spore.nix` only. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
