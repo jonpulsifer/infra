@@ -97,6 +97,17 @@ in
             "NFS does not require post-mount directory setup"
         )
         (
+          if
+            lib.all (range: lib.hasSuffix ",proxy" range) (
+              lib.toList spore.services.dnsmasq.settings."dhcp-range"
+            )
+            && lib.elem "end0" spore.services.dnsmasq.settings."no-dhcpv4-interface"
+          then
+            null
+          else
+            "dnsmasq could hand out leases or answer DHCP on Lab Net"
+        )
+        (
           if lib.hasInfix "spore_native_boot_artifact_available" probe.script then
             null
           else

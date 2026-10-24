@@ -1,4 +1,4 @@
-# spore: NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, DNS and NTP.
+# spore: NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, Talos boot assets, DNS and NTP.
 # First boot grows root to a fixed cap and gives the disk tail to the nfs-data partition at /nfs/data.
 {
   config,
@@ -39,6 +39,7 @@ in
     ../services/pxe-netboot.nix
     ../services/spire-server.nix
     ../services/spore-native-boot.nix
+    ../services/spore-talos-boot.nix
     ../system/sops.nix
   ];
 

@@ -7,6 +7,11 @@ in
   inherit data;
   cidr = data.LAB_CIDR;
   futureCidr = data.FUTURE_CIDR;
+  bootstrap = {
+    cidr = data.BOOTSTRAP_CIDR;
+    vlan = builtins.fromJSON data.BOOTSTRAP_VLAN;
+    spore = data.SPORE_BOOTSTRAP_IP;
+  };
   hosts = {
     capsule = data.CAPSULE_IP;
     spore = data.SPORE_IP;

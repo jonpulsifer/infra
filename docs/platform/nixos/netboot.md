@@ -3,7 +3,7 @@ title: Netboot
 description: The network boot service on spore, with x86 PXE boot for folly's Kubernetes network and a signed RAM-boot image that forge falls back to.
 ---
 
-Netboot is the network boot service on [spore](../../hosts/spore.md). It gives x86 machines on folly's Kubernetes network a PXE boot menu, and publishes a signed RAM-boot image for [forge](../../hosts/forge.md), a headless Raspberry Pi 5.
+Netboot is the network boot service on [spore](../../hosts/spore.md). It gives x86 machines on folly's Kubernetes network a PXE boot menu, and publishes a signed RAM-boot image for [forge](../../hosts/forge.md), a headless Raspberry Pi 5. [Talos boot](talos-boot.md) serves the signed Talos UKI on the bootstrap VLAN.
 
 ## Parts
 
@@ -62,5 +62,6 @@ A failed publisher freezes the fallback at the last published image until spore'
 ## Related
 
 - [NixOS](../nixos.md)
+- [Talos boot](talos-boot.md)
 - [Change the forge EEPROM](../../runbooks/change-the-forge-eeprom.md)
 - [Lab DNS and time](../network/ingress-and-dns.md#lab-dns-and-time)
