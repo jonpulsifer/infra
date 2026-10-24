@@ -29,7 +29,7 @@ Firmware with only PXE needs UniFi's network boot options on the bootstrap netwo
 
 ## The mirror
 
-The mirror downloads both files from the GitHub release `talos-folly/<talos_version>`. It skips the download while the UKI's ETag is unchanged. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed signing certificate's key made over the UKI's own image hash. A new release moves `current` to `prev`. A failed run changes neither.
+Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. The mirror asks the releases API for the newest one of the version and downloads both files from it. It skips the download while the UKI's ETag is unchanged. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed signing certificate's key made over the UKI's own image hash. A new release moves `current` to `prev`. A failed run changes neither.
 
 A Talos version bump fails the mirror until that version's release exists. spore serves the old UKI until then.
 
