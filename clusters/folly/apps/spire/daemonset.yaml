@@ -8,8 +8,10 @@ metadata:
     app.kubernetes.io/name: spire-agent
     app.kubernetes.io/part-of: spire
   annotations:
-    # The agent reads its config and bootstrap bundle only at startup.
-    reloader.stakater.com/auto: "true"
+    # The agent reads its config only at startup. Only a first attestation
+    # reads spire-bundle, which spore rewrites on every CA rotation, so a
+    # bundle change restarts no agent.
+    configmap.reloader.stakater.com/reload: spire-agent
 spec:
   selector:
     matchLabels:

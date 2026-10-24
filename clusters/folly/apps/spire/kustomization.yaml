@@ -6,5 +6,6 @@ resources:
   - rbac.yaml
   - agent-config.yaml
   - bundle.yaml
+  - bundle-writer.yaml
   - daemonset.yaml
   - smoke.yaml

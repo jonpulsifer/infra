@@ -1,0 +1,57 @@
+---
+# spore's SPIRE server writes its bundle into spire-bundle as this account. Its
+# token is `spire/folly-bundle-writer-token` in nix/secrets/spore.sops.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-bundle-writer
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spire-bundle-writer
+    app.kubernetes.io/part-of: spire
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spire-bundle-writer
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spire-bundle-writer
+    app.kubernetes.io/part-of: spire
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["spire-bundle"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spire-bundle-writer
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spire-bundle-writer
+    app.kubernetes.io/part-of: spire
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spire-bundle-writer
+subjects:
+  - kind: ServiceAccount
+    name: spire-bundle-writer
+    namespace: spire
+---
+# The token controller fills this Secret with a token that does not expire.
+# spore runs outside the cluster, so it cannot mount a bound token.
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/service-account-token
+metadata:
+  name: spire-bundle-writer-token
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spire-bundle-writer
+    app.kubernetes.io/part-of: spire
+  annotations:
+    kubernetes.io/service-account.name: spire-bundle-writer

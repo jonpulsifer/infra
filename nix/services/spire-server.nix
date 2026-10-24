@@ -20,6 +20,42 @@ let
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   serverID = "spiffe://${cfg.trustDomain}/spire/server";
 
+  # The notifier's folly credential. The kubeconfig holds no secret: it names the token that
+  # systemd hands the DynamicUser server as a credential.
+  bundleWriterToken = "spire/folly-bundle-writer-token";
+  tokenCredential = "folly-bundle-writer-token";
+  follyKubeconfig = pkgs.writeText "spire-folly-kubeconfig.json" (
+    builtins.toJSON {
+      apiVersion = "v1";
+      kind = "Config";
+      clusters = [
+        {
+          name = "folly";
+          cluster = {
+            server = folly.apiServer;
+            certificate-authority = "${folly.apiServerCA}";
+          };
+        }
+      ];
+      users = [
+        {
+          name = "spire-bundle-writer";
+          user.tokenFile = "/run/credentials/spire-server.service/${tokenCredential}";
+        }
+      ];
+      contexts = [
+        {
+          name = "folly";
+          context = {
+            cluster = "folly";
+            user = "spire-bundle-writer";
+          };
+        }
+      ];
+      current-context = "folly";
+    }
+  );
+
   # Folly's pods reach spore unmasqueraded: spore is inside Cilium's native-routing CIDR.
   agentSources = [
     folly.nodeCidr
@@ -77,6 +113,11 @@ in
       default = 9988;
       description = "The Prometheus exporter's TCP port.";
     };
+    bundleNotifier.enable = lib.mkEnableOption ''
+      the k8sbundle notifier, which writes the bundle into folly's spire/spire-bundle ConfigMap on
+      every rotation. It needs `${bundleWriterToken}` in the host's sops file, and the server
+      fails to start while folly's API server refuses it
+    '';
     ekHashes = lib.mkOption {
       type = lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}");
       default = [ ];
@@ -129,6 +170,14 @@ in
             plugin_cmd = lib.getExe spire.tpmPlugin;
             plugin_data.hash_path = hashPath;
           };
+          Notifier = lib.mkIf cfg.bundleNotifier.enable {
+            k8sbundle.plugin_data = {
+              namespace = "spire";
+              config_map = "spire-bundle";
+              config_map_key = "bundle.crt";
+              kube_config_file_path = "${follyKubeconfig}";
+            };
+          };
         };
         telemetry.Prometheus = {
           host = "0.0.0.0";
@@ -139,7 +188,22 @@ in
 
     environment.etc."spire/tpm-hashes".source = ekHashes;
 
-    systemd.services.spire-server.serviceConfig.StateDirectory = lib.mkForce "spire";
+    systemd.services.spire-server = lib.mkMerge [
+      { serviceConfig.StateDirectory = lib.mkForce "spire"; }
+      # The server exits when the notifier cannot write the bundle at startup, so it retries
+      # every 30s until folly's API server answers instead of hitting the start limit.
+      (lib.mkIf cfg.bundleNotifier.enable {
+        startLimitIntervalSec = 0;
+        serviceConfig = {
+          LoadCredential = "${tokenCredential}:${config.sops.secrets.${bundleWriterToken}.path}";
+          RestartSec = "30s";
+        };
+      })
+    ];
+
+    sops.secrets = lib.mkIf cfg.bundleNotifier.enable {
+      ${bundleWriterToken}.restartUnits = [ "spire-server.service" ];
+    };
 
     systemd.services.spire-server-entries = {
       description = "Sync the SPIRE registration entries declared in git";
