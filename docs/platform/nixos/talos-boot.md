@@ -40,7 +40,7 @@ Its node-exporter metrics are `spore_talos_boot_mirror_success`, `spore_talos_bo
 - spore's switch port must carry the bootstrap VLAN tagged. A DHCP request is a broadcast, so the proxy must be on that VLAN.
 - Keep the URL an IPv4 literal that ends in `.efi`, or EDK2 HTTP boot can reject the offer or the file.
 - Add no `pxe-service` for client architecture 16. dnsmasq then drops the URL from the reply.
-- Check the UKI with `talos-uki-verify.sh`, not `sbverify --cert`. `sbverify` refuses every UKI, because the signing certificate's extended key usage lacks code signing. UEFI firmware ignores that usage.
+- `talos-uki-verify.sh` runs `sbverify --cert` and also requires exactly one signature. sbverify alone passes a file with several signatures when any one of them verifies.
 - spore's other open ports also answer at `SPORE_BOOTSTRAP_IP`. A machine on the bootstrap VLAN reaches spore directly, so the UniFi firewall cannot filter it.
 - The `spore-reliability` check in `nix/lib/checks.nix` fails if dnsmasq could lease addresses or answer DHCP on `end0`.
 
