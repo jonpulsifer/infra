@@ -2,7 +2,7 @@
 
 The OpenTofu root for the Talos Linux machine configuration of the folly cluster: optiplex as the control plane, riptide and shale as workers. It calls `terraform/modules/talos-cluster`. [Rebuild a cluster on Talos](https://wiki.lolwtf.ca/runbooks/rebuild-a-cluster-on-talos/) is the procedure that first applies it.
 
-`talos.tf` holds the version pins, the schematic's extension list and the node map. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`. `patches.tf` holds folly's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/folly/talos`.
+`talos.tf` holds the version pins, the schematic's extension list, the node map and `tpm_nodes`. optiplex and riptide name the signed installer `ghcr.io/jonpulsifer/talos-installer-folly` and an install generation; shale installs from the schematic. [Talos Linux](https://wiki.lolwtf.ca/platform/kubernetes/talos/) has the rules for both. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`. `patches.tf` holds folly's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/folly/talos`.
 
 The secrets bundle is the 1Password Secure Note `talos-folly-secrets`, which [Issue a talosconfig](https://wiki.lolwtf.ca/runbooks/issue-a-talosconfig/) names. `secrets_item_uuid` holds its UUID, and a plan fails until the variable holds a real one.
 
@@ -17,7 +17,9 @@ A plan contacts no node. `tofu validate` cannot see a document that Talos reject
 
 ## Deploy
 
-The owner applies this root by hand once, when folly is rebuilt. Atlantis applies it from the next pull request. An apply that changes `talos_version` or `extensions` reboots every node, the control plane first.
+The owner applies this root by hand once, when folly is rebuilt. Atlantis applies it from the next pull request. An apply that changes `talos_version` reboots every node, the control plane first. An `extensions` change reboots shale only: optiplex and riptide get it from a rebuilt signed installer at their next Talos version.
+
+`.github/scripts/talos-render-parity.sh` renders each node whose inputs are known without state, with the provider and with `talosctl gen config` from a throwaway bundle, and fails on any byte difference. CI runs it on every change to this root or the module.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -47,13 +49,14 @@ No resources.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_secrets_item_uuid"></a> [secrets\_item\_uuid](#input\_secrets\_item\_uuid) | UUID of the 1Password Secure Note talos-folly-secrets, whose note is folly's Talos secrets bundle. Issue a talosconfig names the item. | `string` | `"PLACEHOLDER-create-talos-folly-secrets"` | no |
+| <a name="input_secrets_item_uuid"></a> [secrets\_item\_uuid](#input\_secrets\_item\_uuid) | UUID of the 1Password Secure Note talos-folly-secrets, whose note is folly's Talos secrets bundle. Issue a talosconfig names the item. | `string` | `"a3jq5rtwm4b22eeht7jg6idtli"` | no |
 
 ## Outputs
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_installer_image"></a> [installer\_image](#output\_installer\_image) | Installer image every folly node runs. |
+| <a name="output_installer_image"></a> [installer\_image](#output\_installer\_image) | Installer image each folly node runs. |
+| <a name="output_machine_inputs"></a> [machine\_inputs](#output\_machine\_inputs) | Per node, the inputs of talosctl gen config other than the secrets bundle. The enrollment server renders a node's config from them. |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Node name to address, as applied. |
-| <a name="output_schematic_id"></a> [schematic\_id](#output\_schematic\_id) | Image Factory schematic of folly's nodes. The kexec and PXE assets must use the same ID. |
+| <a name="output_schematic_id"></a> [schematic\_id](#output\_schematic\_id) | Image Factory schematic of folly's nodes without a signed installer. The kexec and PXE assets must use the same ID. |
 <!-- END_TF_DOCS -->

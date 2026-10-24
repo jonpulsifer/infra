@@ -13,9 +13,11 @@ specs:
   os: Talos Linux 1.14
   firmware: R21 Ver. 02.20.00
   tpm: TPM 2.0 (Infineon), working
+  boot: Image Factory systemd-boot UKI, Secure Boot off
+  disks: plain until the signed install, then sealed to the TPM
 ---
 
-riptide is a worker node in the folly [Kubernetes](../platform/kubernetes.md) cluster with an Intel GPU for pods. It runs Talos Linux, and `clusters/folly/talos/` configures it.
+riptide is a worker node in the folly [Kubernetes](../platform/kubernetes.md) cluster with an Intel GPU for pods. It runs [Talos Linux](../platform/kubernetes/talos.md), and `clusters/folly/talos/` configures it.
 
 ## What it runs
 
