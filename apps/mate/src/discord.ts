@@ -473,9 +473,7 @@ export function discordSurface(
       return { surface: 'discord', channelId: message.channelId, id };
     },
     async post(thread, line) {
-      await api.createMessage(thread.id, {
-        content: line.split('\n').map(subtext).join('\n'),
-      });
+      await api.createMessage(thread.id, { content: subtext(line) });
     },
     notice(thread) {
       return new DiscordNotice(api, thread.id);
