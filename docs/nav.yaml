@@ -30,7 +30,8 @@ sections:
       - platform/how-changes-ship.md
       - path: platform/nixos.md
         children: [platform/nixos/netboot.md, platform/nixos/talos-boot.md, platform/nixos/build-host-and-cache.md]
-      - platform/kubernetes.md
+      - path: platform/kubernetes.md
+        children: [platform/kubernetes/talos.md]
       - platform/workloads.md
       - path: platform/network.md
         children:
