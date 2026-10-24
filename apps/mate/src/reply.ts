@@ -1,6 +1,8 @@
 /**
- * One streamed reply. A run of text followed by a tool call is a step and stays
- * out of the answer; the cut is made here because Slack's stream only appends.
+ * One streamed reply. A run of text followed by a tool call is a step: one
+ * short line labels the work and stays out of the answer, and anything longer
+ * is a report that joins it. The cut is made here because Slack's stream only
+ * appends.
  */
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';
@@ -20,6 +22,16 @@ export const RUN_GRACE_MS = 3_000;
 export function oneLine(line: string, max = STATUS_MAX): string {
   const flat = line.replace(/\s+/g, ' ').trim().replaceAll('*', '');
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+// A step the status line would cut short is a report, not a label.
+function isReport(step: string): boolean {
+  return step.replace(/\s+/g, ' ').length > STATUS_MAX;
+}
+
+function firstSentence(text: string): string {
+  const flat = text.replace(/\s+/g, ' ');
+  return flat.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? flat;
 }
 
 export function splitAt(text: string, budget: number): [string, string] {
@@ -90,8 +102,8 @@ export class Reply implements PromptSink {
     }
     if (!this.run) this.runAt = this.clock.now();
     this.run += delta;
-    if (this.clock.now() - this.runAt >= this.graceMs) {
-      this.answer += this.run;
+    if (this.clock.now() - this.runAt >= this.graceMs && this.run.trim()) {
+      this.join(this.run);
       this.run = '';
       this.runLine = null;
       this.answering = true;
@@ -107,11 +119,33 @@ export class Reply implements PromptSink {
     this.run = '';
     if (!step) return;
     this.lastStep = step;
+    const report = isReport(step);
+    if (report) {
+      this.join(step);
+      this.dirty = true;
+      this.schedule();
+    }
     const paint = this.canvas.step;
     if (!paint) return;
+    const label = report ? firstSentence(step) : step;
     this.chain = this.chain
-      .then(() => paint.call(this.canvas, step))
+      .then(() => paint.call(this.canvas, label))
       .catch((error) => this.cardFailed('step', error));
+  }
+
+  // Runs a tool call split are separate paragraphs. The answer only grows,
+  // since the stream has already sent what it holds.
+  private join(text: string): void {
+    const body = text.trimStart();
+    if (!body.trim()) return;
+    const gap = !this.answer
+      ? ''
+      : this.answer.endsWith('\n\n')
+        ? ''
+        : this.answer.endsWith('\n')
+          ? '\n'
+          : '\n\n';
+    this.answer += gap + body;
   }
 
   // Skips the repaint cadence, since tool calls arrive slowly, but queues
@@ -152,7 +186,7 @@ export class Reply implements PromptSink {
     this.stopTimers();
     // The run in flight is the answer. A turn that ended on a tool call
     // answers with its last step.
-    this.answer += this.run;
+    this.join(this.run);
     this.run = '';
     if (!this.answer && this.lastStep) this.answer = this.lastStep;
     this.status = null;

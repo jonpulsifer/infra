@@ -280,7 +280,7 @@ describe('strayTag', () => {
 describe('the preambles', () => {
   test("operator's preamble holds the surface and sandbox facts only", () => {
     expect(operatorPreamble('Slack', OPTIONS)).toBe(
-      `You are answering in a Slack thread. Your replies post to the thread as Markdown; keep them short.
+      `You are answering in a Slack thread. Your replies post to the thread as Markdown; keep them short. What you write between tool calls posts too, unless it is one short line, which only labels the work: report a finding when you have it, and do not repeat it at the end.
 
 Your tools run in this thread's own sandbox, a Kata microVM on the offsite cluster, with the infra repository checked out at /workspace at \`main\`. The sandbox starts on your first tool call, which can take a minute, so answer a question that needs no files or commands without tools.
 
