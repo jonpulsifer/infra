@@ -131,7 +131,7 @@ export interface Profile {
 // reply.ts posts a step past one line to the thread and keeps a shorter one on
 // the step card.
 const REPLIES =
-  'Your replies post to the thread as Markdown; keep them short. What you write between tool calls posts too, unless it is one short line, which only labels the work: report a finding when you have it, and do not repeat it at the end.';
+  'Your replies post to the thread as Markdown; keep them short. What you write between tool calls posts too, unless it is one short line, which only labels the work: report a finding when you have it, and do not repeat it at the end. Put several items, such as pull requests or hosts, in a bulleted list, one to a line, each led by its number or name.';
 
 export function operatorPreamble(
   surface: string,
