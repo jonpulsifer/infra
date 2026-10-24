@@ -1,0 +1,111 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spire-agent
+    app.kubernetes.io/part-of: spire
+  annotations:
+    # The agent reads its config and bootstrap bundle only at startup.
+    reloader.stakater.com/auto: "true"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spire-agent
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spire-agent
+        app.kubernetes.io/part-of: spire
+    spec:
+      serviceAccountName: spire-agent
+      # The workload attestor maps a caller's PID to its pod through the host's
+      # /proc, and reaches the kubelet at <node name>:10250.
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      priorityClassName: system-node-critical
+      # The Talos root labels the nodes whose TPM 2.0 is on.
+      nodeSelector:
+        lolwtf.ca/tpm: "true"
+      containers:
+        - name: spire-agent
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # whole `ghcr.io/…/spire-agent-tpm…@sha256:` string, so keep it one
+          # literal. The zero digest stands until main builds the first image.
+          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/run/spire/config/agent.conf"]
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: health
+              containerPort: 9982
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 60
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          # The device cgroup refuses /dev/tpmrm0 to anything less than
+          # privileged, and the node is 0600 root.
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: bundle
+              mountPath: /run/spire/bundle
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/spire-agent
+            - name: sockets
+              mountPath: /run/spire/sockets
+            - name: tpmrm0
+              mountPath: /dev/tpmrm0
+      volumes:
+        - name: config
+          configMap:
+            name: spire-agent
+        - name: bundle
+          configMap:
+            name: spire-bundle
+        # The agent's key and SVID survive a restart, so a new pod resumes
+        # without attesting again.
+        - name: data
+          hostPath:
+            path: /var/lib/spire-agent
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /run/spire/sockets
+            type: DirectoryOrCreate
+        # Only the resource-managed node. Without /dev/tpm0 the agent cannot
+        # bypass the kernel's resource manager.
+        - name: tpmrm0
+          hostPath:
+            path: /dev/tpmrm0
+            type: CharDevice

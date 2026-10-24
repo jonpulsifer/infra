@@ -88,6 +88,7 @@ sections:
           - runbooks/move-a-clusters-data-through-a-talos-rebuild.md
           - runbooks/verify-a-talos-cluster.md
           - runbooks/issue-a-talosconfig.md
+          - runbooks/add-a-tpm-node-to-spire.md
           - runbooks/operate-postgres.md
           - runbooks/restore-a-database.md
           - runbooks/recover-a-re-created-database.md

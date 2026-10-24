@@ -1,0 +1,15 @@
+---
+# The SPIRE server's X.509 bundle, which an agent trusts for its first
+# attestation. It is public. docs/runbooks/add-a-tpm-node-to-spire.md fills it
+# from `spire-server bundle show` on spore. An agent that has attested keeps
+# the bundle in its data directory and follows the server's rotations.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-bundle
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spire-agent
+    app.kubernetes.io/part-of: spire
+data:
+  bundle.crt: ""

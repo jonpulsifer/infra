@@ -1,0 +1,30 @@
+---
+# The agent opens /dev/tpmrm0, which the device cgroup allows only to a
+# privileged container, and reads the host's processes and kubelet.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spire
+  labels:
+    app.kubernetes.io/part-of: spire
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/warn-version: latest
+---
+# The smoke Job mounts the agent's socket from the host, and no level below
+# privileged admits a hostPath volume.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spire-smoke
+  labels:
+    app.kubernetes.io/part-of: spire
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/warn-version: latest
