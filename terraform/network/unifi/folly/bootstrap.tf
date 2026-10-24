@@ -18,11 +18,14 @@ locals {
     bootstrap  = unifi_network.bootstrap
   }
 
-  # true turns on switch-wide 802.1X and MAC auth on the mab_ports. Set it only
-  # after `systemctl is-active freeradius` on the gateway reports active, or
-  # both nodes lose the network at their next link flap. false keeps the ports
-  # on their open Kubernetes trunk, and is also the revert.
-  mab_enforced = false
+  # The nodes whose switch port runs MAC auth. Any name turns switch-wide
+  # 802.1X on. Add a node only after the gateway's RADIUS server listens:
+  # `ss -lunp | grep :1812` over SSH names a freeradius process (it is no
+  # systemd unit there), and the Default RADIUS profile has RADIUS assigned
+  # VLAN on for wired. Otherwise the node loses the network at its next link
+  # flap. riptide goes first; optiplex is the control plane. An empty set keeps
+  # every port on its open Kubernetes trunk, and is also the revert.
+  mab_enforced = toset(["riptide"])
 
   switch = local.clients.switches["USW 24 PoE"]
 }
@@ -82,13 +85,14 @@ removed {
 
 resource "unifi_setting" "global_switch" {
   global_switch = {
-    dot1x_portctrl_enabled = local.mab_enforced
+    dot1x_portctrl_enabled = length(local.mab_enforced) > 0
   }
 }
 
-# A MAC RADIUS rejects stays closed: no fallback VLAN is set, and the provider
-# cannot set one. RADIUS answers every user with a VLAN, so the native network
-# applies only on a mistake, and it fails into bootstrap.
+# The switch-wide 802.1X fallback network is bootstrap, set in the console: the
+# provider has no field for it. A MAC that RADIUS rejects, or that gets no
+# answer, lands there. RADIUS answers every known user with a VLAN, so the
+# native network applies only on a mistake, and it fails into bootstrap too.
 resource "unifi_port_profile" "mab" {
   name                  = "MAC auth"
   native_networkconf_id = unifi_network.bootstrap.id
@@ -145,7 +149,7 @@ resource "unifi_device" "usw_24_poe" {
   }
 
   dynamic "port_override" {
-    for_each = local.mab_enforced ? local.mab_ports : {}
+    for_each = { for node, port in local.mab_ports : node => port if contains(local.mab_enforced, node) }
     content {
       index           = port_override.value
       name            = port_override.key
@@ -154,7 +158,7 @@ resource "unifi_device" "usw_24_poe" {
   }
 
   dynamic "port_override" {
-    for_each = local.mab_enforced ? {} : local.mab_ports
+    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) }
     content {
       index                 = port_override.value
       name                  = port_override.key
