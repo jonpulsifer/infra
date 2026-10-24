@@ -7,7 +7,7 @@ Use this runbook to build folly's signed Talos boot assets on demand, or to chec
 
 ## Before you start
 
-- You need `gh` signed in to `jonpulsifer/infra`, a checkout of the repo, and `openssl`, `sbsigntool` and `osslsigncode`.
+- You need `gh` signed in to `jonpulsifer/infra`, a checkout of the repo, and `openssl` and `sbsigntool`.
 - You need a 1Password service account that can read the item `talos-secureboot` in the `homelab` vault.
 - `<version>` is `talos_version` in `clusters/folly/talos/talos.tf`.
 
@@ -67,10 +67,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
    bash .github/scripts/talos-uki-verify.sh clusters/folly/talos/secureboot/uki-signing-cert.pem /tmp/talos-folly/metal-amd64-secureboot-uki.efi
    ```
 
-   Result: `/tmp/talos-folly/metal-amd64-secureboot-uki.efi: signed by subject=..., image hash ...`.
-
-> [!NOTE]
-> Plain `sbverify --cert` reports `Signature verification failed` for this certificate. The certificate's extended key usage is serverAuth and clientAuth, with no codeSigning. UEFI firmware ignores that usage, and the script checks the signature with any purpose.
+   Result: `/tmp/talos-folly/metal-amd64-secureboot-uki.efi: one signature, verified against subject=...`.
 
 ## If something goes wrong
 

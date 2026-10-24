@@ -110,7 +110,7 @@ jobs:
         with:
           version: v0.21.6
       - name: Install the signature tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool osslsigncode
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool
 
       - name: Load the signing keys
         id: op
@@ -175,6 +175,15 @@ jobs:
             cat "$RUNNER_TEMP/cmdline.txt"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the UKI for a look when a check fails
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: metal-amd64-secureboot-uki
+          path: ${{ runner.temp }}/out/metal-amd64-secureboot-uki.efi
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Push the installer
         run: |
