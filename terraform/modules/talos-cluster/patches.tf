@@ -100,7 +100,7 @@ locals {
     yamlencode({
       apiVersion = "v1alpha1"
       kind       = "UnattendedInstallConfig"
-      installer  = { image = local.installer_image }
+      installer  = { image = local.node_installer_image[name] }
       provisioning = {
         diskSelector = { match = n.install }
         wipe         = true
@@ -119,10 +119,25 @@ locals {
         labels = merge(
           { "bgp-enabled" = "true" },
           n.role == "controlplane" ? { "node.kubernetes.io/exclude-from-external-load-balancers" = { "$patch" = "delete" } } : {},
+          contains(var.tpm_nodes, name) ? { "lolwtf.ca/tpm" = "true" } : {},
           n.labels,
         )
       },
       length(local.node_taints[name]) > 0 ? { taints = local.node_taints[name] } : {},
     )),
-  ])) }
+  ], contains(var.tpm_nodes, name) ? local.tpm_volume_patches : [])) }
+
+  # A TPM node's STATE and EPHEMERAL are LUKS2 volumes whose key the TPM seals
+  # to PCR 7 and to the PCR 11 policy signed by the UKI's PCR signing key.
+  # Talos encrypts a volume only when it formats it, so this takes effect at
+  # the next install.
+  tpm_volume_patches = [for volume in ["STATE", "EPHEMERAL"] : yamlencode({
+    apiVersion = "v1alpha1"
+    kind       = "VolumeConfig"
+    name       = volume
+    encryption = {
+      provider = "luks2"
+      keys     = [{ slot = 0, tpm = {} }]
+    }
+  })]
 }

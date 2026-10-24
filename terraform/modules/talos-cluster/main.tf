@@ -74,5 +74,6 @@ resource "talos_image_factory_schematic" "this" {
 }
 
 locals {
-  installer_image = "factory.talos.dev/metal-installer/${talos_image_factory_schematic.this.id}:${var.talos_version}"
+  installer_image      = "factory.talos.dev/metal-installer/${talos_image_factory_schematic.this.id}:${var.talos_version}"
+  node_installer_image = { for name, n in var.nodes : name => coalesce(n.installer_image, local.installer_image) }
 }
