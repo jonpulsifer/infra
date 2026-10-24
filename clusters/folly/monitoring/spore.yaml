@@ -1,5 +1,5 @@
-# Service monitoring for spore (nix/hosts/spore.nix): its nginx and CoreDNS
-# exporters and its service alerts. Node metrics come from local-node-exporters.yaml.
+# Service monitoring for spore (nix/hosts/spore.nix): its nginx, CoreDNS and
+# SPIRE server exporters and its service alerts. Node metrics come from local-node-exporters.yaml.
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
@@ -15,6 +15,9 @@ ports:
     protocol: TCP
   - name: dns-metrics
     port: 9253
+    protocol: TCP
+  - name: spire-metrics
+    port: 9988
     protocol: TCP
 endpoints:
   - addresses: ["${SPORE_IP}"]
@@ -38,6 +41,10 @@ spec:
       port: 9253
       protocol: TCP
       targetPort: 9253
+    - name: spire-metrics
+      port: 9988
+      protocol: TCP
+      targetPort: 9988
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -57,6 +64,12 @@ spec:
           sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
           targetLabel: instance
     - port: dns-metrics
+      interval: 30s
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
+          targetLabel: instance
+    - port: spire-metrics
       interval: 30s
       relabelings:
         - action: replace
@@ -97,6 +110,14 @@ spec:
           annotations:
             message: CoreDNS metrics target missing (instance {{ $labels.instance }})
             description: "Prometheus cannot scrape CoreDNS on spore. DNS may be unavailable or its metrics listener may be unreachable."
+        - alert: SporeSpireMetricsMissing
+          expr: (up{endpoint="spire-metrics", namespace="monitoring", service="spore"} == 0) or absent(up{endpoint="spire-metrics", namespace="monitoring", service="spore"})
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: SPIRE server metrics target missing (instance {{ $labels.instance }})
+            description: "Prometheus cannot scrape the SPIRE server on spore. The server may be down or its exporter unreachable from folly."
         # The `or absent(...)` arms also catch the unit dropping out of the
         # node exporter's --collector.systemd.unit-include regex.
         - alert: SporeNfsServerDown
@@ -171,3 +192,27 @@ spec:
           annotations:
             message: /nfs/data on spore is over 85% full
             description: "VALUE = {{ $value }}% used. k8s PVCs provision from this filesystem; expand or prune before it fills."
+        - alert: SporeSpireServerDown
+          expr: (node_systemd_unit_state{instance="spore", name="spire-server.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="spire-server.service", state="active"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: SPIRE server on spore is down
+            description: "spire-server.service is not active on spore. Agents cannot attest or renew, and every SVID in spiffe://lolwtf.ca expires within its TTL."
+        - alert: SporeSpireEntriesSyncFailed
+          expr: node_systemd_unit_state{instance="spore", name="spire-server-entries.service", state="failed"} == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: SPIRE registration entry sync failed on spore
+            description: "spire-server-entries.service failed. The server's registration entries may not match nix/hosts/spore.nix; read the unit's journal."
+        - alert: SpireNoAttestedAgents
+          expr: (spire_server_attested_agents{instance="spore"} < 1) or absent(spire_server_attested_agents{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: No SPIRE agent is attested
+            description: "The SPIRE server on spore has no agent with an unexpired, unbanned SVID, so no workload holds a SPIFFE identity. Check the agents' TPM attestation and their reach to spore on TCP 8081."
