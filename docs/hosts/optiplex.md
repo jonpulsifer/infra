@@ -14,7 +14,7 @@ specs:
   firmware: BIOS 1.27.0
   tpm: Intel PTT, not enabled in the BIOS
   boot: Image Factory systemd-boot UKI, Secure Boot off
-  disks: plain until PTT is on and the signed install, then sealed to the TPM
+  disks: plain, not in tpm_nodes
 ---
 
 optiplex is the only control-plane node of the folly [Kubernetes](../platform/kubernetes.md) cluster. It runs [Talos Linux](../platform/kubernetes/talos.md), and `clusters/folly/talos/` configures it.

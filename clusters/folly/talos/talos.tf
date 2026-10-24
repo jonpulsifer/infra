@@ -67,8 +67,10 @@ locals {
     shale = { role = "worker", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "128GiB" }
   }
 
-  # TPM 2.0 nodes: riptide's discrete TPM, optiplex's Intel PTT.
-  tpm_nodes = ["optiplex", "riptide"]
+  # Nodes whose STATE and EPHEMERAL the TPM unlocks. A node joins in the pull
+  # request that reinstalls it: Talos records the STATE encryption in META
+  # when the config applies, and a plain STATE then fails at the next boot.
+  tpm_nodes = []
 }
 
 # shale has no install generation, so its record is imported rather than
