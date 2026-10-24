@@ -192,8 +192,26 @@ func (h *harness) adminReq(method, path string, v url.Values, login string) *htt
 
 func (h *harness) approve(userCode, node string) (int, map[string]any) {
 	h.t.Helper()
-	code, m, _ := h.do(h.admin, h.adminReq(http.MethodPost, "/approve/"+userCode, url.Values{"node": {node}}, "Owner@example.com"))
+	code, m, _ := h.do(h.admin, h.adminReq(http.MethodPost, "/approve", url.Values{"code": {userCode}, "node": {node}}, "Owner@example.com"))
 	return code, m
+}
+
+func (h *harness) deny(uuid string) (int, map[string]any) {
+	h.t.Helper()
+	code, m, _ := h.do(h.admin, h.adminReq(http.MethodPost, "/deny", url.Values{"uuid": {uuid}}, "owner@example.com"))
+	return code, m
+}
+
+func (h *harness) metric(name string) string {
+	h.t.Helper()
+	_, _, body := h.do(h.public, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, line := range strings.Split(body, "\n") {
+		if v, ok := strings.CutPrefix(line, name+" "); ok {
+			return v
+		}
+	}
+	h.t.Fatalf("/metrics has no %s:\n%s", name, body)
+	return ""
 }
 
 func getConfig(token, rawQuery string) *http.Request {
@@ -213,10 +231,13 @@ func TestApprovedFlowServesConfigOnce(t *testing.T) {
 	dc, uc := h.startDevice(testUUID)
 
 	msg := h.notes.last(t, testUUID, 1)
-	for _, want := range []string{uc, testUUID, "38:22:e2:2d:96:44", "talos-abc-def", "mise run enroll:approve " + uc + " riptide"} {
+	for _, want := range []string{testUUID, "38:22:e2:2d:96:44", "talos-abc-def", "mise run enroll:approve <console code> riptide", "mise run enroll:deny " + testUUID} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("the prompt lacks %q:\n%s", want, msg)
 		}
+	}
+	if strings.Contains(msg, uc) {
+		t.Fatalf("the prompt must not carry the user code, which only the console shows:\n%s", msg)
 	}
 
 	if code, m := h.poll(dc, testUUID); code != 400 || m["error"] != "authorization_pending" {
@@ -266,14 +287,16 @@ func TestDenyRefusesTheMachineAfterwards(t *testing.T) {
 	h := newHarness(t)
 	dc, uc := h.startDevice(testUUID)
 
-	code, m, _ := h.do(h.admin, h.adminReq(http.MethodPost, "/deny/"+strings.ToLower(uc), url.Values{}, "owner@example.com"))
-	if code != 200 || m["phase"] != "denied" {
+	if code, m := h.deny(uc); code != 404 {
+		t.Fatalf("deny takes the uuid, not the user code: %d %v", code, m)
+	}
+	if code, m := h.deny(strings.ToUpper(testUUID)); code != 200 || m["phase"] != "denied" {
 		t.Fatalf("deny: %d %v", code, m)
 	}
 	if code, m := h.poll(dc, testUUID); code != 400 || m["error"] != "access_denied" {
 		t.Fatalf("poll after deny: %d %v", code, m)
 	}
-	code, m, _ = h.do(h.public, form("/device/code", deviceForm(strings.ToUpper(testUUID))))
+	code, m, _ := h.do(h.public, form("/device/code", deviceForm(strings.ToUpper(testUUID))))
 	if code != 403 || m["error"] != "access_denied" {
 		t.Fatalf("a new device request from a denied uuid: %d %v", code, m)
 	}
@@ -300,14 +323,79 @@ func TestNewDeviceCodeSupersedesTheOldOne(t *testing.T) {
 	}
 	_, m, _ := h.do(h.admin, h.adminReq(http.MethodGet, "/pending", nil, "owner@example.com"))
 	list := m["enrollments"].([]any)
-	if len(list) != 1 || list[0].(map[string]any)["user_code"] != uc2 {
+	if len(list) != 1 || list[0].(map[string]any)["device"].(map[string]any)["uuid"] != testUUID {
 		t.Fatalf("one prompt per uuid: %v", list)
+	}
+	if _, ok := list[0].(map[string]any)["user_code"]; ok {
+		t.Fatalf("the pending list must not carry the user code: %v", list[0])
 	}
 	if list[0].(map[string]any)["suggested_node"] != "riptide" {
 		t.Fatalf("the MAC hint is missing: %v", list[0])
 	}
-	if !strings.Contains(h.notes.last(t, testUUID, 2), uc2) {
-		t.Fatal("the prompt for the uuid was not replaced with the new code")
+	if msg := h.notes.last(t, testUUID, 2); strings.Contains(msg, uc2) || !strings.Contains(msg, "waiting for approval") {
+		t.Fatalf("the prompt for the uuid was not replaced, or it carries the code:\n%s", msg)
+	}
+	if code, m := h.approve(uc2, "riptide"); code != 200 {
+		t.Fatalf("approving the code on the console: %d %v", code, m)
+	}
+}
+
+// Talos asks for a new code 30 s after each one expires. The wait must not
+// reset in that gap, or an alert keyed on it never fires.
+func TestWaitSpansDeviceCodes(t *testing.T) {
+	h := newHarness(t)
+	_, _ = h.startDevice(testUUID)
+	if got := h.metric("talos_enroll_waiting_machines"); got != "1" {
+		t.Fatalf("waiting machines at the first code: %s", got)
+	}
+	for range 4 {
+		h.clock.Add(15 * time.Minute)
+		if got := h.metric("talos_enroll_pending"); got != "0" {
+			t.Fatalf("a pending code past its expiry: %s", got)
+		}
+		h.clock.Add(30 * time.Second)
+		if got := h.metric("talos_enroll_waiting_machines"); got != "1" {
+			t.Fatalf("the machine stopped counting as waiting between codes: %s", got)
+		}
+		h.startDevice(testUUID)
+	}
+	if got := h.metric("talos_enroll_longest_wait_seconds"); got != "3720" {
+		t.Fatalf("the wait across four codes: %s", got)
+	}
+
+	_, uc := h.startDevice(testUUID)
+	if code, m := h.approve(uc, "riptide"); code != 200 {
+		t.Fatalf("approve: %d %v", code, m)
+	}
+	if got := h.metric("talos_enroll_waiting_machines"); got != "0" {
+		t.Fatalf("an approved machine still waits: %s", got)
+	}
+	if got := h.metric("talos_enroll_longest_wait_seconds"); got != "0" {
+		t.Fatalf("the wait after approval: %s", got)
+	}
+}
+
+func TestQuietMachineStopsWaiting(t *testing.T) {
+	h := newHarness(t)
+	h.startDevice(testUUID)
+	h.clock.Add(20 * time.Minute)
+	if got := h.metric("talos_enroll_waiting_machines"); got != "1" {
+		t.Fatalf("within the grace after expiry: %s", got)
+	}
+	if code, m := h.deny(testUUID); code != 200 {
+		t.Fatalf("deny between codes: %d %v", code, m)
+	}
+	if code, _, _ := h.do(h.public, form("/device/code", deviceForm(testUUID))); code != 403 {
+		t.Fatalf("a denied uuid asked again: %d", code)
+	}
+
+	h.startDevice("another-machine")
+	h.clock.Add(21 * time.Minute)
+	if got := h.metric("talos_enroll_waiting_machines"); got != "0" {
+		t.Fatalf("a machine quiet past its code and the grace still waits: %s", got)
+	}
+	if code, _ := h.deny("another-machine"); code != 404 {
+		t.Fatalf("deny of a forgotten machine: %d", code)
 	}
 }
 
@@ -412,11 +500,14 @@ func TestAdminRequiresAnApprover(t *testing.T) {
 	h := newHarness(t)
 	_, uc := h.startDevice(testUUID)
 	for _, login := range []string{"", "someone@example.com"} {
-		if code, _, _ := h.do(h.admin, h.adminReq(http.MethodPost, "/approve/"+uc, url.Values{"node": {"riptide"}}, login)); code != 403 {
+		if code, _, _ := h.do(h.admin, h.adminReq(http.MethodPost, "/approve", url.Values{"code": {uc}, "node": {"riptide"}}, login)); code != 403 {
 			t.Fatalf("login %q: %d", login, code)
 		}
+		if code, _, _ := h.do(h.admin, h.adminReq(http.MethodPost, "/deny", url.Values{"uuid": {testUUID}}, login)); code != 403 {
+			t.Fatalf("deny as login %q: %d", login, code)
+		}
 	}
-	req := h.adminReq(http.MethodPost, "/approve/"+uc, url.Values{"node": {"riptide"}}, "owner@example.com")
+	req := h.adminReq(http.MethodPost, "/approve", url.Values{"code": {uc}, "node": {"riptide"}}, "owner@example.com")
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
 	if code, _, _ := h.do(h.admin, req); code != 403 {
@@ -430,8 +521,11 @@ func TestAdminRequiresAnApprover(t *testing.T) {
 		t.Fatal("a refused approval rendered a config")
 	}
 	page := h.adminReq(http.MethodGet, "/?code="+uc, nil, "owner@example.com")
-	if code, _, body := h.do(h.admin, page); code != 200 || !strings.Contains(body, uc) {
-		t.Fatalf("the page: %d", code)
+	if code, _, body := h.do(h.admin, page); code != 200 || !strings.Contains(body, `value="`+uc+`"`) || !strings.Contains(body, "card focus") {
+		t.Fatalf("the page with the console's code: %d", code)
+	}
+	if code, _, body := h.do(h.admin, h.adminReq(http.MethodGet, "/", nil, "owner@example.com")); code != 200 || strings.Contains(body, uc) || !strings.Contains(body, testUUID) {
+		t.Fatalf("the page without a code must list the machine and hide its code: %d\n%s", code, body)
 	}
 }
 

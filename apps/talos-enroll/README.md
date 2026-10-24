@@ -49,12 +49,21 @@ default client, and the token poll twice, with and without Basic auth.
 Every route requires `Tailscale-User-Login` in `ENROLL_APPROVERS`. A POST with
 an `Origin` from another host is refused.
 
+The user code goes only to the machine, which shows it on its console. No
+prompt, log, list or page carries it, so the owner approves the code read off
+the console, and a device request made in another machine's name cannot be
+approved by mistake.
+
 | Route | Does |
 | --- | --- |
-| `GET /` | The approval page. `?code=` highlights one code. |
-| `GET /pending` | The waiting enrollments and the nodes it can render, as JSON |
-| `POST /approve/{user_code}` | Takes `node`. Renders that node's config, then issues the token. A render that fails leaves the enrollment pending. |
-| `POST /deny/{user_code}` | Refuses the code and every later request from its `uuid` until the server restarts |
+| `GET /` | The approval page. `?code=`, from the console's QR code, fills in the code and marks its machine. |
+| `GET /pending` | The waiting enrollments, without their user codes, and the nodes it can render, as JSON |
+| `POST /approve` | Takes `code` and `node` as a form. Renders that node's config, then issues the token. A render that fails leaves the enrollment pending. |
+| `POST /deny` | Takes `uuid` as a form. Refuses its enrollment and every later request from it until the server restarts |
+
+`talos_enroll_longest_wait_seconds` runs from a machine's first device request
+until approval or denial, across its codes. A machine that stays quiet for 5
+minutes past its code's expiry stops counting.
 
 ## Render
 

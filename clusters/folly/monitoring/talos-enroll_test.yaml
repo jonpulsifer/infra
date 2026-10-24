@@ -3,21 +3,29 @@
 rule_files:
   - talos-enroll.yaml
 
-evaluation_interval: 1m
+# folly's Prometheus scrapes and evaluates every 30 s.
+evaluation_interval: 30s
 
 tests:
-  # A machine waits 40 minutes, through two device codes, before approval.
-  - interval: 1m
+  # A machine waits 40 minutes, through three device codes, before approval.
+  # talos_enroll_pending reads 0 for one scrape at each code's expiry, as the
+  # server reports it; the wait keeps growing through that gap.
+  - interval: 30s
     input_series:
       - series: 'talos_enroll_pending{namespace="talos-enroll",job="talos-enroll",instance="10.100.1.5:8080"}'
-        values: 1x40 0x20
+        values: 1x29 0 1x29 0 1x19 0x40
+      - series: 'talos_enroll_longest_wait_seconds{namespace="talos-enroll",job="talos-enroll",instance="10.100.1.5:8080"}'
+        values: 0+30x80 0x40
       - series: 'talos_enroll_approved_unfetched{namespace="talos-enroll",job="talos-enroll",instance="10.100.1.5:8080"}'
-        values: 0x40 1x20
+        values: 0x81 1x40
     alert_rule_test:
       - eval_time: 29m
         alertname: TalosEnrollmentWaiting
         exp_alerts: []
       - eval_time: 31m
+        alertname: TalosEnrollmentWaiting
+        exp_alerts: []
+      - eval_time: 33m
         alertname: TalosEnrollmentWaiting
         exp_alerts:
           - exp_labels:
@@ -26,7 +34,7 @@ tests:
               job: talos-enroll
             exp_annotations:
               message: A Talos machine has waited 30 minutes for enrollment approval
-              description: "talos-enroll has held a device code for 30 minutes with no approval. The machine retries until someone approves or denies it. Run `mise run enroll:pending`, then approve or deny the code. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"
+              description: "A machine has asked talos-enroll for device codes for 30 minutes with no approval or denial, and it retries until one comes. Approve the code on its console with `mise run enroll:approve`, or find its uuid with `mise run enroll:pending` and deny it. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"
       - eval_time: 45m
         alertname: TalosEnrollmentWaiting
         exp_alerts: []

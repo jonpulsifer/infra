@@ -5,7 +5,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: enroll.sh approve <user_code> <node> | deny <user_code> | pending" >&2
+  echo "usage: enroll.sh approve <code on the console> <node> | deny <uuid> | pending" >&2
   exit 64
 }
 
@@ -23,11 +23,12 @@ case "${1:-}" in
   approve)
     [[ $# -eq 3 ]] || usage
     curl -sS --fail-with-body -X POST -H 'Accept: application/json' \
-      --data-urlencode "node=$3" "$base/approve/$2" | jq .
+      --data-urlencode "code=$2" --data-urlencode "node=$3" "$base/approve" | jq .
     ;;
   deny)
     [[ $# -eq 2 ]] || usage
-    curl -sS --fail-with-body -X POST -H 'Accept: application/json' "$base/deny/$2" | jq .
+    curl -sS --fail-with-body -X POST -H 'Accept: application/json' \
+      --data-urlencode "uuid=$2" "$base/deny" | jq .
     ;;
   pending)
     [[ $# -eq 1 ]] || usage

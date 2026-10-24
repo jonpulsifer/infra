@@ -56,7 +56,7 @@ type enrollment struct {
 // Enrollment is a read-only view of one enrollment for the approval page and
 // the notifier.
 type Enrollment struct {
-	UserCode  string    `json:"user_code"`
+	UserCode  string    `json:"user_code,omitempty"`
 	Device    Device    `json:"device"`
 	Phase     string    `json:"phase"`
 	Expires   time.Time `json:"expires"`
@@ -80,6 +80,7 @@ func oauthErr(status int, code, desc string) *OAuthError {
 
 var (
 	ErrUnknownCode = errors.New("no enrollment has that user code")
+	ErrUnknownUUID = errors.New("no machine with that uuid is waiting")
 	ErrNotPending  = errors.New("the enrollment is no longer waiting for approval")
 	ErrUnknownNode = errors.New("no machine inputs name that node")
 	ErrBadToken    = errors.New("the token is unknown, used or expired")
@@ -95,6 +96,9 @@ type Store struct {
 	tokenTTL time.Duration
 	interval time.Duration
 	maxLive  int
+	// waitGrace is how long a machine may stay quiet after its code expires
+	// and still count as waiting.
+	waitGrace time.Duration
 
 	byDevice map[string]*enrollment
 	byUser   map[string]*enrollment
@@ -102,9 +106,14 @@ type Store struct {
 	live     map[string]*enrollment
 	denied   map[string]bool
 	served   map[string]time.Time
+	waiting  map[string]wait
 
 	stats *Stats
 }
+
+// wait spans every device code a machine asks for until the owner approves or
+// denies it, so the gap between two codes does not reset it.
+type wait struct{ since, last time.Time }
 
 // Stats counts what the store did, for /metrics.
 type Stats struct {
@@ -115,18 +124,20 @@ type Stats struct {
 
 func NewStore(now func() time.Time) *Store {
 	return &Store{
-		now:      now,
-		codeTTL:  15 * time.Minute,
-		tokenTTL: 30 * time.Minute,
-		interval: 5 * time.Second,
-		maxLive:  32,
-		byDevice: map[string]*enrollment{},
-		byUser:   map[string]*enrollment{},
-		byToken:  map[string]*enrollment{},
-		live:     map[string]*enrollment{},
-		denied:   map[string]bool{},
-		served:   map[string]time.Time{},
-		stats:    &Stats{Expired: map[string]uint64{}, Refused: map[string]uint64{}},
+		now:       now,
+		codeTTL:   15 * time.Minute,
+		tokenTTL:  30 * time.Minute,
+		interval:  5 * time.Second,
+		maxLive:   32,
+		waitGrace: 5 * time.Minute,
+		byDevice:  map[string]*enrollment{},
+		byUser:    map[string]*enrollment{},
+		byToken:   map[string]*enrollment{},
+		live:      map[string]*enrollment{},
+		denied:    map[string]bool{},
+		served:    map[string]time.Time{},
+		waiting:   map[string]wait{},
+		stats:     &Stats{Expired: map[string]uint64{}, Refused: map[string]uint64{}},
 	}
 }
 
@@ -199,6 +210,12 @@ func (s *Store) Start(d Device) (Enrollment, string, *OAuthError) {
 	s.byDevice[e.deviceCode] = e
 	s.byUser[e.userCode] = e
 	s.live[key] = e
+	w := s.waiting[key]
+	if w.since.IsZero() {
+		w.since = s.now()
+	}
+	w.last = s.now()
+	s.waiting[key] = w
 	s.stats.DeviceCodes++
 	return e.view(), e.deviceCode, nil
 }
@@ -267,26 +284,30 @@ func (s *Store) Approve(userCode, node, approver string, config []byte) (Enrollm
 	e.token = randomToken()
 	e.tokenExpires = s.now().Add(s.tokenTTL)
 	s.byToken[hashToken(e.token)] = e
+	delete(s.waiting, normUUID(e.device.UUID))
 	s.stats.Approvals++
 	return e.view(), e.token, nil
 }
 
-// Deny refuses the enrollment and every later device request from its UUID
-// until the server restarts.
-func (s *Store) Deny(userCode, approver string) (Enrollment, error) {
+// Deny refuses the uuid's live enrollment and every later device request from
+// the uuid until the server restarts. It takes the uuid, not the user code,
+// because the code shows only on the machine's own console.
+func (s *Store) Deny(uuid, approver string) (Enrollment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweepLocked()
 
-	e := s.byUser[normUserCode(userCode)]
+	key := normUUID(uuid)
+	e := s.live[key]
 	if e == nil {
-		return Enrollment{}, ErrUnknownCode
-	}
-	if e.phase != phasePending && e.phase != phaseApproved {
-		return e.view(), ErrNotPending
+		if _, ok := s.waiting[key]; !ok {
+			return Enrollment{}, ErrUnknownUUID
+		}
+		e = &enrollment{device: Device{UUID: uuid}}
 	}
 	e.approver = approver
-	s.denied[normUUID(e.device.UUID)] = true
+	s.denied[key] = true
+	delete(s.waiting, key)
 	s.retireLocked(e, phaseDenied)
 	s.stats.Denials++
 	return e.view(), nil
@@ -324,40 +345,59 @@ func (s *Store) Consume(token string) {
 	s.retireLocked(e, phaseServed)
 }
 
-// List returns the enrollments still waiting on the owner or on Talos.
+// List returns the enrollments still waiting on the owner or on Talos. It
+// leaves out the user codes, so the only code the owner can approve is the
+// one on the machine's own console.
 func (s *Store) List() []Enrollment {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweepLocked()
 	out := make([]Enrollment, 0, len(s.live))
 	for _, e := range s.live {
-		out = append(out, e.view())
+		v := e.view()
+		v.UserCode = ""
+		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Expires.Before(out[j].Expires) })
 	return out
 }
 
-// Gauges reports the live counts and each node's last config fetch.
-func (s *Store) Gauges() (pending, approved int, served map[string]time.Time, st Stats) {
+// Gauges is a snapshot of the store for /metrics.
+type Gauges struct {
+	Pending, Approved, Waiting int
+	LongestWait                time.Duration
+	Served                     map[string]time.Time
+	Stats                      Stats
+}
+
+// Gauges reports the live counts, the machines that wait for the owner across
+// their codes, and each node's last config fetch.
+func (s *Store) Gauges() Gauges {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweepLocked()
+	var g Gauges
 	for _, e := range s.live {
 		switch e.phase {
 		case phasePending:
-			pending++
+			g.Pending++
 		case phaseApproved:
-			approved++
+			g.Approved++
 		}
 	}
-	served = make(map[string]time.Time, len(s.served))
-	for k, v := range s.served {
-		served[k] = v
+	now := s.now()
+	for _, w := range s.waiting {
+		g.Waiting++
+		g.LongestWait = max(g.LongestWait, now.Sub(w.since))
 	}
-	st = *s.stats
-	st.Expired = cloneCounts(s.stats.Expired)
-	st.Refused = cloneCounts(s.stats.Refused)
-	return pending, approved, served, st
+	g.Served = make(map[string]time.Time, len(s.served))
+	for k, v := range s.served {
+		g.Served[k] = v
+	}
+	g.Stats = *s.stats
+	g.Stats.Expired = cloneCounts(s.stats.Expired)
+	g.Stats.Refused = cloneCounts(s.stats.Refused)
+	return g
 }
 
 func (s *Store) refuse(reason string) {
@@ -408,6 +448,11 @@ func (s *Store) sweepLocked() {
 			if s.byUser[e.userCode] == e {
 				delete(s.byUser, e.userCode)
 			}
+		}
+	}
+	for key, w := range s.waiting {
+		if now.Sub(w.last) > s.codeTTL+s.waitGrace {
+			delete(s.waiting, key)
 		}
 	}
 }

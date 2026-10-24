@@ -14,13 +14,16 @@ talos-enroll is the enrollment server for folly's Talos nodes. A machine that bo
 | Approval page and API | `https://talos-enroll.<tailnet>` | Tailnet logins in `ENROLL_APPROVERS` |
 | Prompts | The Discord channel of the Alertmanager webhook | Members of that channel |
 
-Each machine gets one Discord message, which the server edits as its enrollment moves on. `mise run enroll:approve <code> <node>`, `enroll:deny` and `enroll:pending` call the approval API. [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) is the procedure.
+Each machine gets one Discord message, which the server edits as its enrollment moves on. `mise run enroll:approve <code> <node>`, `enroll:deny <uuid>` and `enroll:pending` call the approval API. [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) is the procedure.
+
+The user code shows only on the machine's console. No prompt, log, list or page carries it, so an approval proves that the approver read the console of the machine being enrolled.
 
 ## Limits
 
 - A device code lasts 15 minutes and a token 30 minutes. A token releases one config.
 - State is in memory. A restart forgets every enrollment and denial, and Talos starts a new device flow.
 - The machine's UUID, MAC, serial and hostname are unverified claims. The token is bound to the UUID.
+- Any client that routes to `ENROLL_VIP` can send a device request in another machine's name. The console's user code is the only check against it.
 - A node whose installer image comes from the Image Factory resource is unknown without state, so `machine-inputs.json` leaves it out.
 
 ## How it works
@@ -33,7 +36,7 @@ The Gateway serves the device flow at `ENROLL_VIP` in `clusters/folly/config/clu
 
 | Alert | Meaning | Runbook |
 | --- | --- | --- |
-| `TalosEnrollmentWaiting` | A machine has waited 30 minutes for approval | [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) |
+| `TalosEnrollmentWaiting` | A machine has asked for device codes for 30 minutes with no approval or denial | [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) |
 | `TalosEnrollmentConfigNotFetched` | An approved machine has fetched no config for 10 minutes | [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) |
 | `TalosEnrolledNodeNotReady` | A node fetched its config 30 minutes ago and is not Ready | [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) |
 

@@ -53,8 +53,8 @@ func (s *Server) Admin() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /pending", s.pending)
-	mux.HandleFunc("POST /approve/{code}", s.approve)
-	mux.HandleFunc("POST /deny/{code}", s.deny)
+	mux.HandleFunc("POST /approve", s.approve)
+	mux.HandleFunc("POST /deny", s.deny)
 	return s.requireApprover(mux)
 }
 
@@ -165,8 +165,10 @@ func (s *Server) deviceCode(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, oerr)
 		return
 	}
+	// The user code goes only to the machine, which shows it on its console.
+	// Approval proves the owner read it there, so no log or prompt carries it.
 	suggested := s.suggest(d.MAC)
-	s.Log.Info("device code issued", "user_code", e.UserCode, "uuid", d.UUID, "mac", d.MAC,
+	s.Log.Info("device code issued", "uuid", d.UUID, "mac", d.MAC,
 		"serial", d.Serial, "hostname", d.Hostname, "suggested_node", suggested, "client", client(r))
 	s.Out.Send(normUUID(d.UUID), s.pendingMessage(e, suggested))
 
@@ -261,8 +263,8 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.Consume(token)
 	s.Log.Info("config served", "node", e.Node, "uuid", uuid, "bytes", n, "client", client(r))
-	s.Out.Send(normUUID(e.Device.UUID), fmt.Sprintf("**Talos enrollment** `%s`: **%s** fetched its config <t:%d:R>. Talos installs and reboots next.",
-		e.UserCode, e.Node, s.Now().Unix()))
+	s.Out.Send(normUUID(e.Device.UUID), fmt.Sprintf("**Talos enrollment** uuid `%s`: **%s** fetched its config <t:%d:R>. Talos installs and reboots next.",
+		discordSafe(e.Device.UUID), e.Node, s.Now().Unix()))
 }
 
 func (s *Server) suggest(mac string) string {
@@ -291,22 +293,25 @@ func discordSafe(v string) string {
 	return strings.NewReplacer("`", "'", "\n", " ").Replace(v)
 }
 
+// pendingMessage leaves out the user code. Every fact in it is the requester's
+// own claim, so only the code on the machine's console ties an approval to
+// the machine the owner stands at.
 func (s *Server) pendingMessage(e Enrollment, suggested string) string {
 	d := e.Device
 	var b strings.Builder
-	fmt.Fprintf(&b, "**Talos enrollment** `%s` is waiting for approval.\n", e.UserCode)
+	b.WriteString("**Talos enrollment**: a machine is waiting for approval.\n")
 	fmt.Fprintf(&b, "uuid `%s` · mac `%s` · serial `%s` · hostname `%s`\n",
 		discordSafe(d.UUID), discordSafe(d.MAC), discordSafe(d.Serial), discordSafe(d.Hostname))
 	node := suggested
 	if suggested != "" {
-		fmt.Fprintf(&b, "The MAC is **%s**'s in the UniFi client list.\n", suggested)
+		fmt.Fprintf(&b, "It claims **%s**'s MAC from the UniFi client list. Any host that reaches the server can claim it.\n", suggested)
 	} else {
 		node = "<node>"
-		b.WriteString("The MAC matches no node in the UniFi client list.\n")
+		b.WriteString("Its MAC matches no node in the UniFi client list.\n")
 	}
-	fmt.Fprintf(&b, "Approve: `mise run enroll:approve %s %s` or %s/?code=%s\n", e.UserCode, node, s.AdminURL, e.UserCode)
-	fmt.Fprintf(&b, "Deny: `mise run enroll:deny %s`\n", e.UserCode)
-	fmt.Fprintf(&b, "The code expires <t:%d:R>.", e.Expires.Unix())
+	fmt.Fprintf(&b, "Approve only the code on the machine's own console: `mise run enroll:approve <console code> %s`, or scan the console's QR code.\n", node)
+	fmt.Fprintf(&b, "Deny: `mise run enroll:deny %s`\n", discordSafe(d.UUID))
+	fmt.Fprintf(&b, "Its current code expires <t:%d:R>.", e.Expires.Unix())
 	return b.String()
 }
 
@@ -331,7 +336,7 @@ func reply(w http.ResponseWriter, r *http.Request, status int, v map[string]any)
 
 func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-	code, node, who := r.PathValue("code"), r.FormValue("node"), login(r)
+	code, node, who := r.FormValue("code"), r.FormValue("node"), login(r)
 
 	e, err := s.Store.Lookup(code)
 	switch {
@@ -366,29 +371,28 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 	mismatch := known != "" && !strings.EqualFold(known, e.Device.MAC)
 	s.Log.Info("enrollment approved", "user_code", e.UserCode, "node", node, "uuid", e.Device.UUID,
 		"mac", e.Device.MAC, "mac_mismatch", mismatch, "approver", who)
-	msg := fmt.Sprintf("**Talos enrollment** `%s` approved as **%s** by %s. Waiting for the node to fetch its config.", e.UserCode, node, who)
+	msg := fmt.Sprintf("**Talos enrollment** uuid `%s` approved as **%s** by %s. Waiting for the node to fetch its config.",
+		discordSafe(e.Device.UUID), node, who)
 	if mismatch {
 		msg += fmt.Sprintf("\nThe device's MAC `%s` is not %s's MAC in the UniFi client list.", discordSafe(e.Device.MAC), node)
 	}
 	s.Out.Send(normUUID(e.Device.UUID), msg)
-	reply(w, r, http.StatusOK, map[string]any{"user_code": e.UserCode, "node": node, "phase": e.Phase, "mac_mismatch": mismatch})
+	reply(w, r, http.StatusOK, map[string]any{"user_code": e.UserCode, "node": node, "phase": e.Phase,
+		"uuid": e.Device.UUID, "mac": e.Device.MAC, "mac_mismatch": mismatch})
 }
 
 func (s *Server) deny(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	who := login(r)
-	e, err := s.Store.Deny(r.PathValue("code"), who)
-	switch {
-	case errors.Is(err, ErrUnknownCode):
+	e, err := s.Store.Deny(r.FormValue("uuid"), who)
+	if err != nil {
 		reply(w, r, http.StatusNotFound, map[string]any{"error": err.Error()})
 		return
-	case err != nil:
-		reply(w, r, http.StatusConflict, map[string]any{"error": err.Error(), "phase": e.Phase})
-		return
 	}
-	s.Log.Info("enrollment denied", "user_code", e.UserCode, "uuid", e.Device.UUID, "mac", e.Device.MAC, "approver", who)
-	s.Out.Send(normUUID(e.Device.UUID), fmt.Sprintf("**Talos enrollment** `%s` denied by %s. The server refuses uuid `%s` until it restarts.",
-		e.UserCode, who, discordSafe(e.Device.UUID)))
-	reply(w, r, http.StatusOK, map[string]any{"user_code": e.UserCode, "phase": e.Phase})
+	s.Log.Info("enrollment denied", "uuid", e.Device.UUID, "mac", e.Device.MAC, "approver", who)
+	s.Out.Send(normUUID(e.Device.UUID), fmt.Sprintf("**Talos enrollment** uuid `%s` denied by %s. The server refuses it until it restarts.",
+		discordSafe(e.Device.UUID), who))
+	reply(w, r, http.StatusOK, map[string]any{"uuid": e.Device.UUID, "phase": e.Phase})
 }
 
 func (s *Server) withSuggestions(list []Enrollment) []Enrollment {
@@ -406,10 +410,20 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
+	// ?code= comes from the QR code on the machine's console, so the page can
+	// mark that machine and preselect its suggested node.
+	code := r.URL.Query().Get("code")
+	var focus Enrollment
+	if code != "" {
+		focus, _ = s.Store.Lookup(code)
+		code = normUserCode(code)
+	}
 	_ = indexTmpl.Execute(w, map[string]any{
 		"Enrollments": s.withSuggestions(s.Store.List()),
 		"Nodes":       s.Render.Nodes(),
-		"Code":        normUserCode(r.URL.Query().Get("code")),
+		"Code":        code,
+		"Focus":       focus.Device.UUID,
+		"Suggested":   s.suggest(focus.Device.MAC),
 		"Login":       login(r),
 	})
 }

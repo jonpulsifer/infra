@@ -8,7 +8,8 @@ import (
 )
 
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
-	pending, approved, served, st := s.Store.Gauges()
+	g := s.Store.Gauges()
+	served, st := g.Served, g.Stats
 	var b strings.Builder
 	gauge := func(name, help string, v any) {
 		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n%s %v\n", name, help, name, name, v)
@@ -23,8 +24,10 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	gauge("talos_enroll_pending", "Enrollments waiting for the owner's approval.", pending)
-	gauge("talos_enroll_approved_unfetched", "Approved enrollments whose node has not fetched its config.", approved)
+	gauge("talos_enroll_pending", "Device codes waiting for the owner's approval.", g.Pending)
+	gauge("talos_enroll_approved_unfetched", "Approved enrollments whose node has not fetched its config.", g.Approved)
+	gauge("talos_enroll_waiting_machines", "Machines not yet approved or denied, counted across their device codes.", g.Waiting)
+	gauge("talos_enroll_longest_wait_seconds", "How long the longest-waiting machine has waited for approval, across its device codes.", int64(g.LongestWait.Seconds()))
 	gauge("talos_enroll_nodes", "Nodes in the machine inputs file.", len(s.Render.Nodes()))
 	counter("talos_enroll_device_codes_total", "Device codes issued.", st.DeviceCodes)
 	counter("talos_enroll_approvals_total", "Enrollments approved.", st.Approvals)

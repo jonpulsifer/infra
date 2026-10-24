@@ -109,11 +109,11 @@ description = "Write talos-enroll's per-node render inputs from the folly Talos 
 run = "bash scripts/render-machine-inputs.sh"
 
 [tasks."enroll:approve"]
-description = "Approve a waiting Talos enrollment over the tailnet (args: <user_code> <node>)"
+description = "Approve the Talos enrollment whose code the machine's console shows, over the tailnet (args: <code> <node>)"
 run = "bash scripts/enroll.sh approve"
 
 [tasks."enroll:deny"]
-description = "Deny a waiting Talos enrollment over the tailnet (args: <user_code>)"
+description = "Deny a waiting Talos machine by its uuid over the tailnet (args: <uuid>)"
 run = "bash scripts/enroll.sh deny"
 
 [tasks."enroll:pending"]

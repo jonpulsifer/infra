@@ -14,33 +14,38 @@
   dt { font-weight: 600; }
   dd { margin: 0; }
   form { display: inline-flex; gap: 0.5rem; margin-right: 0.5rem; }
-  button, select { font: inherit; padding: 0.4rem 0.8rem; }
+  button, select, input { font: inherit; padding: 0.4rem 0.8rem; }
+  input[name=code] { width: 9em; text-transform: uppercase; }
 </style>
 </head>
 <body>
 <h1>Talos enrollment</h1>
 <p>Signed in as {{.Login}}.</p>
+<div class="card">
+  <h2>Approve</h2>
+  <p>Type the code that the machine's own console shows. A machine's other facts are its own claims.</p>
+  <form method="post" action="/approve">
+    <input name="code" value="{{.Code}}" required autocomplete="off" placeholder="BCDF-GHJK" aria-label="code on the console">
+    <select name="node" required>
+      <option value="">node</option>
+      {{range .Nodes}}<option value="{{.}}"{{if eq . $.Suggested}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    <button type="submit">Approve</button>
+  </form>
+</div>
+<h2>Waiting machines</h2>
 {{range .Enrollments}}
-<div class="card{{if eq .UserCode $.Code}} focus{{end}}">
-  <h2><code>{{.UserCode}}</code> {{.Phase}}</h2>
+<div class="card{{if and $.Focus (eq .Device.UUID $.Focus)}} focus{{end}}">
+  <h3>{{.Phase}}{{if .Suggested}}, claims {{.Suggested}}'s MAC{{end}}</h3>
   <dl>
     <dt>uuid</dt><dd><code>{{.Device.UUID}}</code></dd>
     <dt>mac</dt><dd><code>{{.Device.MAC}}</code></dd>
     <dt>serial</dt><dd><code>{{.Device.Serial}}</code></dd>
     <dt>hostname</dt><dd><code>{{.Device.Hostname}}</code></dd>
     {{if .Node}}<dt>node</dt><dd>{{.Node}}, approved by {{.Approver}}</dd>{{end}}
-    {{if eq .Phase "pending"}}<dt>expires in</dt><dd>{{until .Expires}}</dd>{{end}}
+    {{if eq .Phase "pending"}}<dt>code expires in</dt><dd>{{until .Expires}}</dd>{{end}}
   </dl>
-  {{if eq .Phase "pending"}}
-  <form method="post" action="/approve/{{.UserCode}}">
-    <select name="node" required>
-      <option value="">node</option>
-      {{$s := .Suggested}}{{range $.Nodes}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{.}}</option>{{end}}
-    </select>
-    <button type="submit">Approve</button>
-  </form>
-  {{end}}
-  <form method="post" action="/deny/{{.UserCode}}"><button type="submit">Deny</button></form>
+  <form method="post" action="/deny"><input type="hidden" name="uuid" value="{{.Device.UUID}}"><button type="submit">Deny</button></form>
 </div>
 {{else}}
 <p>No machine is waiting.</p>
