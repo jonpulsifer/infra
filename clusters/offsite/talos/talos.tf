@@ -63,7 +63,7 @@ module "talos" {
   site = "offsite"
 
   # renovate: datasource=github-releases depName=siderolabs/talos
-  talos_version  = "v1.14.2"
+  talos_version  = "v1.14.4"
   talos_contract = "v1.14"
   # renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
   kubernetes_version = "v1.36.3"
