@@ -2,9 +2,29 @@
 # First boot grows root to a fixed cap and gives the disk tail to the nfs-data partition at /nfs/data.
 {
   config,
+  lib,
   pkgs,
   ...
 }:
+let
+  # Each Talos node's TPM EK public key hash, read on the node (docs/platform/identity.md).
+  tpmNodes = {
+    riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
+  };
+  trustDomain = config.homelab.spire.trustDomain;
+  nodeID = name: "spiffe://${trustDomain}/node/${name}";
+  # Kubernetes service accounts that get an SVID on every TPM node.
+  workloads = [
+    {
+      ns = "spire-smoke";
+      sa = "smoke";
+    }
+    {
+      ns = "spire-test";
+      sa = "uploader";
+    }
+  ];
+in
 {
   imports = [
     ../profiles/pi5-nvme.nix
@@ -13,6 +33,7 @@
     ../services/nfs-server.nix
     ../services/ntp-server.nix
     ../services/pxe-netboot.nix
+    ../services/spire-server.nix
     ../services/spore-native-boot.nix
     ../system/sops.nix
   ];
@@ -29,6 +50,27 @@
     enable = true;
     site = "folly";
     dataDir = "/nfs/data/garage";
+  };
+
+  homelab.spire = {
+    enable = true;
+    ekHashes = lib.attrValues tpmNodes;
+    entries =
+      lib.mapAttrsToList (name: hash: {
+        spiffeID = nodeID name;
+        selectors = [ "tpm:pub_hash:${hash}" ];
+      }) tpmNodes
+      ++ lib.concatMap (
+        name:
+        map (w: {
+          spiffeID = "spiffe://${trustDomain}/ns/${w.ns}/sa/${w.sa}";
+          parentID = nodeID name;
+          selectors = [
+            "k8s:ns:${w.ns}"
+            "k8s:sa:${w.sa}"
+          ];
+        }) workloads
+      ) (lib.attrNames tpmNodes);
   };
 
   sops.defaultSopsFile = ../secrets/spore.sops.yaml;
