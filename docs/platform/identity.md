@@ -11,6 +11,7 @@ SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca`. The server runs 
 | --- | --- | --- |
 | `spire-server` | Attests agents and signs SVIDs with its own CA, which lasts 24 hours. Agents reach it on TCP 8081 at `spore.lolwtf.ca`. | spore, data in `/var/lib/spire` |
 | TPM node attestor | Checks an agent's EK hash against `/etc/spire/tpm-hashes`, and proves that its attestation key is in the same TPM. It reads no PCRs. | spore, the boxboat `spire-tpm-plugin` built in `nix/lib/spire.nix` |
+| `k8sbundle` notifier | Writes the server's bundle into folly's `spire/spire-bundle` at startup and on every CA rotation, as the ServiceAccount `spire-bundle-writer` | spore, in the server, when `homelab.spire.bundleNotifier.enable` is true |
 | `spire-server-entries` | Creates, updates and prunes the registration entries to match git | spore, a oneshot after the server is healthy |
 | `spire-server-agent-count` | Writes `spire_server_attested_agents` for the node exporter every minute | spore, a timer |
 
@@ -37,11 +38,13 @@ The container is privileged, since the device cgroup refuses `/dev/tpmrm0` to an
 
 A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a hostPath volume, which needs a privileged namespace. A node with no label runs no agent, so its pods get no SVID. The Job `spire-smoke` prints the SPIFFE ID that the agent serves it.
 
-- An agent's first attestation trusts the `spire-bundle` ConfigMap. If it is empty or older than the server's CA, a new agent fails.
+- An agent's first attestation trusts the `spire-bundle` ConfigMap. spore's notifier pushes the bundle into it, and Flux declares no `data`, so its server-side apply never overwrites the push. If the ConfigMap is empty or older than the server's CA, a new agent fails.
+- The notifier reads folly's API server from `cluster-topology.json`, the CA from `clusters/folly/config/kubernetes-ca.pem`, and the token from `spire/folly-bundle-writer-token` in `nix/secrets/spore.sops.yaml`. If it cannot write the bundle at startup, the server exits and retries every 30 seconds. A push that fails at a rotation waits for the next rotation or restart.
+- Reloader restarts the agents when `spire-agent` changes, not when the bundle changes. An attested agent follows the rotations itself.
 - A workload gets an SVID only after spore registers its entry under its node's alias.
 - A node pulls the agent image only while its GHCR package is public.
 
-[Runbooks](../runbooks/index.md) has Add a TPM node to SPIRE, which reads a node's EK hash, admits the node and refreshes `spire-bundle`.
+[Runbooks](../runbooks/index.md) has Add a TPM node to SPIRE, which reads a node's EK hash, admits the node and turns on the bundle notifier.
 
 ## GCP access
 
@@ -69,21 +72,21 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 ## Live state
 
-No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. No agent runs, so `SpireNoAttestedAgents` fires, and no pod gets an SVID. The smoke Job is suspended, since a pod that no node can schedule keeps it active until `KubeJobNotCompleted` fires.
+No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. The bundle notifier is off, because `nix/secrets/spore.sops.yaml` has no `spire/folly-bundle-writer-token` yet. No agent runs, so `SpireNoAttestedAgents` fires, and no pod gets an SVID. The smoke Job is suspended, since a pod that no node can schedule keeps it active until `KubeJobNotCompleted` fires.
 
 The allow list holds riptide's EK hash. optiplex has none until Intel PTT is on.
 
 ## Where it lives
 
-- `nix/services/spire-server.nix`: the server, the entry sync, the agent count and the firewall
+- `nix/services/spire-server.nix`: the server, the bundle notifier, the entry sync, the agent count and the firewall
 - `nix/hosts/spore.nix`: `tpmNodes`, `workloads` and the registration entries
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
-- `clusters/folly/apps/`: the agent, its bundle and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
+- `clusters/folly/apps/`: the agent, its bundle, the bundle writer and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: the provider `spire` in `fml-pool`, with the test bucket and its grant in `spire-test.tf` beside it
 - `terraform/network/cloudflare/lolwtf.ca.tf`: the tunnel rule for `spire.lolwtf.ca`
 - `clusters/folly/monitoring/spore.yaml`: the scrape and the SPIRE alerts
-- `clusters/folly/config/cluster-topology.json`: `K8S_NODE_CIDR`, `CILIUM_POD_CIDR`
+- `clusters/folly/config/cluster-topology.json`: `K8S_NODE_CIDR`, `CILIUM_POD_CIDR`, `API_SERVER_HOSTNAME`, `API_SERVER_PORT`
 
 ## Related
 

@@ -3,7 +3,7 @@ title: Add a TPM node to SPIRE
 description: Read a folly node's TPM endorsement key hash, admit it on spore's SPIRE server, label the node, and make sure its agent serves SVIDs.
 ---
 
-Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to refresh the agents' bootstrap bundle. [Identity](../platform/identity.md) describes the agent, the SPIFFE IDs and the endorsement key (EK) hash allow list.
+Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to turn on the notifier that keeps the agents' bootstrap bundle current. [Identity](../platform/identity.md) describes the agent, the SPIFFE IDs and the endorsement key (EK) hash allow list.
 
 `<name>` is the node's host name, and `<hash>` is its EK hash.
 
@@ -14,6 +14,7 @@ Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to refre
 
 - You need the `folly` context with cluster admin, as [Get cluster admin access](get-cluster-admin-access.md) describes.
 - You need a root shell on spore.
+- To turn on the bundle notifier, you need the operator key in `~/.config/age/keys.txt`, as [Manage SOPS secrets](manage-sops-secrets.md) describes.
 - The node is in folly, and its TPM 2.0 is on in the firmware. On optiplex, Intel PTT is the TPM.
 - The GHCR package `ghcr.io/jonpulsifer/spire-agent-tpm` is public.
 
@@ -51,23 +52,46 @@ spore builds its EK hash allow list, each node alias, and the entries under each
 3. Open a pull request, and apply it with Atlantis.
 4. Deploy spore, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
 
-## Refresh the bootstrap bundle
+## Turn on the bundle notifier
 
-Do this before the first agent attests, and before you add a node.
+Do this once, before the first agent attests. spore's `k8sbundle` notifier then writes the server's bundle into `spire-bundle` at startup and on every CA rotation. It signs in to folly as the ServiceAccount `spire-bundle-writer` in `clusters/folly/apps/spire/bundle-writer.yaml`.
 
 > [!NOTE]
-> The bundle holds public certificates, so the repository can hold it.
+> The cluster Secret `spire-bundle-writer-token` is the source of the token, so it has no 1Password item. If the Secret is made again, its token changes.
 
-1. On spore, print the server's bundle.
+1. Make sure that Flux has filled the token.
 
    ```bash
-   spire-server bundle show -socketPath /run/spire/server/private/api.sock -format pem
+   kubectl --context folly -n spire get secret spire-bundle-writer-token -o jsonpath='{.data.token}' | wc -c
    ```
 
-   Result: one or more `CERTIFICATE` blocks.
+   Result: a number larger than zero.
 
-2. Put the output in `bundle.crt` of `clusters/folly/apps/spire/bundle.yaml`.
-3. Merge the pull request. Flux applies the ConfigMap, and Reloader restarts the agents.
+2. On a branch, put the token in spore's SOPS file. The pipe prints nothing.
+
+   ```bash
+   export SOPS_AGE_KEY_FILE=~/.config/age/keys.txt
+   kubectl --context folly -n spire get secret spire-bundle-writer-token -o jsonpath='{.data.token}' | base64 -d \
+     | jq -Rs . | sops set --value-stdin nix/secrets/spore.sops.yaml '["spire"]["folly-bundle-writer-token"]'
+   ```
+
+3. Make sure that the new value is encrypted.
+
+   ```bash
+   grep -A1 '^spire:' nix/secrets/spore.sops.yaml | grep -c 'ENC\['
+   ```
+
+   Result: `1`.
+
+4. In `nix/hosts/spore.nix`, set `homelab.spire.bundleNotifier.enable = true;`.
+5. Merge the pull request, and deploy spore, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
+6. Make sure that the ConfigMap holds the bundle.
+
+   ```bash
+   kubectl --context folly -n spire get cm spire-bundle -o jsonpath='{.data.bundle\.crt}' | grep -c 'BEGIN CERTIFICATE'
+   ```
+
+   Result: `1` or more.
 
 ## Make sure the agent serves SVIDs
 
@@ -113,8 +137,9 @@ Do this before the first agent attests, and before you add a node.
 | --- | --- | --- |
 | No `spire-agent` pod on the node | The node has no `lolwtf.ca/tpm=true` label | Add the label in the Talos root. |
 | The pod shows `ImagePullBackOff` | The GHCR package is private, or the DaemonSet pins no built digest | Make the package public, or merge the digest pull request. |
-| The agent fails to start with a trust bundle error | `spire-bundle` is empty | Refresh the bootstrap bundle. |
-| The first attestation fails with `x509: certificate signed by unknown authority` | The server's CA is newer than the committed bundle | Refresh the bootstrap bundle. |
+| The agent fails to start with a trust bundle error | `spire-bundle` is empty, because the notifier is off | Turn on the bundle notifier. |
+| The first attestation fails with `x509: certificate signed by unknown authority` | The notifier missed a rotation while folly's API server was down | On spore, run `systemctl restart spire-server`. The notifier writes the bundle at startup. |
+| `spire-server` restarts every 30 seconds, and its journal shows `Notifier failed to handle event` | The server cannot write the bundle at startup, and it exits | If the error is `401`, the Secret is new: store its token again. Otherwise, make sure that spore reaches folly's API server. |
 | The server rejects the attestation | The hash is not in `tpmNodes` of `nix/hosts/spore.nix`, or spore runs an older configuration | Add the hash, and deploy spore. |
 | The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM or PTT, and boot the node. |
 | The smoke Job runs no pod | The Job is suspended | Remove `suspend: true` from `clusters/folly/apps/spire/smoke.yaml`. |
