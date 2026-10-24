@@ -7,7 +7,7 @@ Use this runbook to build folly's signed Talos boot assets on demand, or to chec
 
 ## Before you start
 
-- You need `gh` signed in to `jonpulsifer/infra`, and `sbverify` from `sbsigntool`.
+- You need `gh` signed in to `jonpulsifer/infra`, a checkout of the repo, and `openssl`, `sbsigntool` and `osslsigncode`.
 - You need a 1Password service account that can read the item `talos-secureboot` in the `homelab` vault.
 - `<version>` is `talos_version` in `clusters/folly/talos/talos.tf`.
 
@@ -61,13 +61,16 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
    gh release download talos-folly/<version> --repo jonpulsifer/infra --dir /tmp/talos-folly
    ```
 
-4. Make sure the UKI verifies against the committed certificate.
+4. From the root of the checkout, make sure the UKI verifies against the committed certificate. This is the check that the workflow runs before it publishes.
 
    ```bash
-   sbverify --cert clusters/folly/talos/secureboot/uki-signing-cert.pem /tmp/talos-folly/metal-amd64-secureboot-uki.efi
+   bash .github/scripts/talos-uki-verify.sh clusters/folly/talos/secureboot/uki-signing-cert.pem /tmp/talos-folly/metal-amd64-secureboot-uki.efi
    ```
 
-   Result: `Signature verification OK`.
+   Result: `/tmp/talos-folly/metal-amd64-secureboot-uki.efi: signed by subject=..., image hash ...`.
+
+> [!NOTE]
+> Plain `sbverify --cert` reports `Signature verification failed` for this certificate. The certificate's extended key usage is serverAuth and clientAuth, with no codeSigning. UEFI firmware ignores that usage, and the script checks the signature with any purpose.
 
 ## If something goes wrong
 
@@ -77,7 +80,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
 | The step `Load the signing keys` fails. | The service account cannot read the item, or a file label differs. | Make sure the item has the files `uki_signing_key`, `uki_signing_cert` and `pcr_signing_key`, and that the account can read the vault. |
 | The run fails with `the 1Password certificate is not the committed one`. | The item and `clusters/folly/talos/secureboot/` hold different keys. | Find which side changed. Commit the item's public halves only if its keys are the intended ones. |
 | The run fails with `want one image in ghcr.io/siderolabs/extensions`. | Talos builds no extension of that name for this version. | Correct the name in `extensions` in `talos.tf`. |
-| `sbverify` fails on the downloaded UKI. | The release asset is from a build with other keys. | Run the build again. |
+| `talos-uki-verify.sh` fails on the downloaded UKI. | The workflow verifies each UKI before it uploads it, so the asset is not what the newest `main` run built, or the checkout's certificate differs from that build's. | Compare the commit in the release notes with your checkout and with the run that last uploaded the asset. Do not run the build again until you know which side changed. |
 
 ## Related
 
