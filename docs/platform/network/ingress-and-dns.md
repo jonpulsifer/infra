@@ -17,7 +17,7 @@ Hosts resolve as `<host>.lolwtf.ca`. The Kubernetes nodes come from `NODE_ADDRES
 
 | Cloudflare Tunnel | Runs on | Serves |
 | --- | --- | --- |
-| folly | folly | Nothing (HTTP 418) |
+| folly | folly | `spire.lolwtf.ca` on `/.well-known/openid-configuration` and `/keys`, the SPIRE discovery documents that GCP reads. See [Identity](../identity.md). |
 | offsite | offsite | `tf.lolwtf.ca` for Atlantis, and `voice.lolwtf.ca` on `/speech-engine` for ElevenLabs Speech Engine to reach mate, which verifies each connection's JWT |
 | kthx Apps | offsite | Public [kthx](../../apps/kthx.md) App names, quick sites at `<name>.kthx.dev`, the kthx GitHub webhook, and the [Bosun](../../apps/bosun.md) build queue at `/internal/bosun/` |
 

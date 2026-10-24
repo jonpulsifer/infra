@@ -28,7 +28,7 @@ Both clusters run the self-signed Kubernetes CA from their secrets bundle, so no
 
 ## Workload identity
 
-`fml-pool` has one provider for each cluster issuer.
+`fml-pool` has one provider for each cluster issuer. Its provider `spire` takes SPIRE JWT-SVIDs, as [Identity](identity.md#gcp-access) says.
 
 | Workload | Cluster | Gets |
 | --- | --- | --- |

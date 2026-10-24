@@ -104,3 +104,28 @@ resource "google_iam_workload_identity_pool_provider" "fml_k8s" {
 
   depends_on = [time_sleep.workload_identity_org_policy_propagation]
 }
+
+# SPIRE signs JWT-SVIDs for workloads on either cluster, and its OIDC discovery provider
+# publishes the keys at the issuer (clusters/folly/apps/spire-oidc). The subject is the SPIFFE ID,
+# which names the namespace and ServiceAccount and no cluster, so one grant covers a workload
+# wherever it runs. No fml_k8s subject starts with spiffe://, so the two never collide.
+resource "google_iam_workload_identity_pool_provider" "fml_spire" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.fml.workload_identity_pool_id
+  workload_identity_pool_provider_id = "spire"
+
+  attribute_mapping = {
+    "google.subject"      = "assertion.sub"
+    "attribute.spiffe_id" = "assertion.sub"
+  }
+
+  # Admits every workload in the trust domain, so each grant must name the subject.
+  attribute_condition = "assertion.sub.startsWith('spiffe://lolwtf.ca/')"
+
+  # The workload asks SPIRE for this provider's full resource name as aud, the GCP default
+  # audience. Setting allowed_audiences replaces that default.
+  oidc {
+    issuer_uri = "https://spire.lolwtf.ca"
+  }
+
+  depends_on = [time_sleep.workload_identity_org_policy_propagation]
+}

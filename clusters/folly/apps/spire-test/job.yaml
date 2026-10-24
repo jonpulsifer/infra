@@ -1,0 +1,137 @@
+---
+# terraform/gcp/projects/homelab-ng/spire-test.tf grants
+# spiffe://lolwtf.ca/ns/spire-test/sa/uploader object create on the bucket,
+# so the name matters. The pod holds no Kubernetes token and no GCP key.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: uploader
+  namespace: spire-test
+  labels:
+    app.kubernetes.io/name: uploader
+    app.kubernetes.io/part-of: spire
+automountServiceAccountToken: false
+---
+# Proves the SPIRE path to GCP: a JWT-SVID for the fml-pool provider `spire`
+# goes to STS through an external_account config, and the token uploads one
+# object. Nothing here names a cluster. Bump the suffix in the name to run it
+# again.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: upload-1
+  namespace: spire-test
+  labels:
+    app.kubernetes.io/name: uploader
+    app.kubernetes.io/part-of: spire
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: uploader
+        app.kubernetes.io/part-of: spire
+    spec:
+      restartPolicy: Never
+      serviceAccountName: uploader
+      automountServiceAccountToken: false
+      # Only these nodes run a SPIRE agent.
+      nodeSelector:
+        lolwtf.ca/tpm: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: upload
+          image: gcr.io/google.com/cloudsdktool/google-cloud-cli:582.0.0-slim
+          # objectCreator has no object read, and `gcloud storage cp` reads the
+          # destination first. gcloud trades the SVID for a token, and the JSON
+          # API upload needs only storage.objects.create.
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              umask 077
+              mkdir -p /tmp/gcp
+              /opt/spire-agent/opt/spire/bin/spire-agent api fetch jwt \
+                -socketPath /run/spire/sockets/agent.sock \
+                -audience "$GCP_AUDIENCE" -output json > /tmp/gcp/svid.json
+              python3 - <<'PY'
+              import json, os
+
+              svid = json.load(open("/tmp/gcp/svid.json"))[0]["svids"][0]
+              open("/tmp/gcp/jwt", "w").write(svid["svid"])
+              json.dump(
+                  {
+                      "type": "external_account",
+                      "audience": os.environ["GCP_AUDIENCE"],
+                      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+                      "token_url": "https://sts.googleapis.com/v1/token",
+                      "credential_source": {
+                          "file": "/tmp/gcp/jwt",
+                          "format": {"type": "text"},
+                      },
+                  },
+                  open("/tmp/gcp/credentials.json", "w"),
+              )
+              open("/tmp/gcp/object.txt", "w").write(
+                  f"Uploaded by {svid['spiffe_id']} from {os.environ['NODE_NAME']} with no key file.\n"
+              )
+              print("SVID:", svid["spiffe_id"])
+              PY
+              gcloud --quiet auth login --cred-file=/tmp/gcp/credentials.json
+              printf 'Authorization: Bearer %s\n' "$(gcloud auth print-access-token)" > /tmp/gcp/auth-header
+              object="uploads/$(date -u +%Y%m%dT%H%M%SZ)-$NODE_NAME.txt"
+              curl --fail-with-body -sS -X POST -H @/tmp/gcp/auth-header \
+                -H 'Content-Type: text/plain' --data-binary @/tmp/gcp/object.txt \
+                "https://storage.googleapis.com/upload/storage/v1/b/$BUCKET/o?uploadType=media&name=$object" > /dev/null
+              echo "Uploaded gs://$BUCKET/$object"
+          env:
+            # The full resource name of the fml-pool provider `spire`, its default audience.
+            - name: GCP_AUDIENCE
+              value: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/spire
+            # Declared in terraform/gcp/projects/homelab-ng/spire-test.tf.
+            - name: BUCKET
+              value: homelab-ng-spire-test
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HOME
+              value: /tmp
+            # gcloud's credential store and logs; the root filesystem is read-only.
+            - name: CLOUDSDK_CONFIG
+              value: /tmp/gcloud
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: sockets
+              mountPath: /run/spire/sockets
+              readOnly: true
+            # The spire-agent CLI. Its image has no shell to write the SVID to a file.
+            - name: spire-agent
+              mountPath: /opt/spire-agent
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: sockets
+          hostPath:
+            path: /run/spire/sockets
+            type: Directory
+        - name: spire-agent
+          image:
+            reference: ghcr.io/spiffe/spire-agent:1.15.5
+            pullPolicy: IfNotPresent

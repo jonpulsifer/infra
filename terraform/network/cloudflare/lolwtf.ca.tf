@@ -17,6 +17,13 @@ module "tunnel_folly" {
   name       = "folly"
   config = {
     ingress = [
+      # SPIRE's OIDC discovery documents, which GCP reads to check JWT-SVIDs.
+      # Public and read-only. Cloudflare's certificate is the one GCP sees.
+      {
+        hostname = "spire.${cloudflare_zone.lolwtf_ca.name}"
+        path     = "^/(\\.well-known/openid-configuration|keys)$"
+        service  = "http://oidc-discovery-provider.spire-oidc"
+      },
       {
         service = "http_status:418"
       }

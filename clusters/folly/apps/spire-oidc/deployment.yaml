@@ -1,0 +1,110 @@
+---
+# The SPIRE server registers spiffe://lolwtf.ca/ns/spire-oidc/sa/oidc-discovery-provider.
+# The agent serves the JWT bundle only to a registered workload.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oidc-discovery-provider
+  namespace: spire-oidc
+  labels:
+    app.kubernetes.io/name: oidc-discovery-provider
+    app.kubernetes.io/part-of: spire
+automountServiceAccountToken: false
+---
+# Publishes the JWKS that checks JWT-SVIDs at https://spire.lolwtf.ca. GCP
+# reads it for the fml-pool provider `spire`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oidc-discovery-provider
+  namespace: spire-oidc
+  labels:
+    app.kubernetes.io/name: oidc-discovery-provider
+    app.kubernetes.io/part-of: spire
+  annotations:
+    # The provider reads its config only at startup.
+    configmap.reloader.stakater.com/reload: oidc-discovery-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oidc-discovery-provider
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oidc-discovery-provider
+        app.kubernetes.io/part-of: spire
+    spec:
+      serviceAccountName: oidc-discovery-provider
+      automountServiceAccountToken: false
+      # Only these nodes run a SPIRE agent.
+      nodeSelector:
+        lolwtf.ca/tpm: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oidc-discovery-provider
+          image: ghcr.io/spiffe/oidc-discovery-provider:1.15.5
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/run/spire/config/oidc-discovery-provider.conf"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8008
+              protocol: TCP
+          # Ready once it holds a key set. No liveness probe: a restart cannot
+          # bring back an unreachable agent.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: sockets
+              mountPath: /run/spire/sockets
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: oidc-discovery-provider
+        - name: sockets
+          hostPath:
+            path: /run/spire/sockets
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oidc-discovery-provider
+  namespace: spire-oidc
+  labels:
+    app.kubernetes.io/name: oidc-discovery-provider
+    app.kubernetes.io/part-of: spire
+spec:
+  selector:
+    app.kubernetes.io/name: oidc-discovery-provider
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

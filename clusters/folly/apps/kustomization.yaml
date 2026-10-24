@@ -17,6 +17,8 @@ resources:
   - pbx
   - smiirl
   - talos-enroll
+  - spire-oidc
+  - spire-test
   - kthx-engine-target
   - ../../base/apps/reloader
   # - satisfactory
