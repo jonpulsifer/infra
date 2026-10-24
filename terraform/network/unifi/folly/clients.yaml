@@ -11,6 +11,12 @@ cameras:
     mac: d4:9c:dd:90:48:82
     dev-id: 2051
 
+# Adopted UniFi switches that bootstrap.tf imports by MAC.
+switches:
+  USW 24 PoE:
+    mac: 74:ac:b9:1a:fb:f2
+    model: USL24P
+
 unmanaged-infra:
   Wall Unit PoE Switch:
     mac: 18:8b:45:3a:ea:4b

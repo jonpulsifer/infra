@@ -1,6 +1,6 @@
 ---
 title: Routing and firewall
-description: The BGP routes and zone firewall that connect the folly and offsite clusters through the UniFi gateways.
+description: The BGP routes and zone firewall that connect the folly and offsite clusters through the UniFi gateways, and the MAC-auth gate on folly's bootstrap VLAN.
 ---
 
 Cilium on each node announces the cluster's pod and load-balancer addresses (VIPs) over BGP to FRR on its site's UniFi gateway. The gateways share these routes through Site Magic, UniFi's WireGuard tunnel between them. Each gateway's zone firewall decides which cross-site traffic passes.
@@ -17,6 +17,16 @@ The gateway filters traffic between zones, which are groups of networks declared
 
 folly holds Lab Net and Kubernetes in a custom `Lab` zone. offsite has no custom policies, and the built-in rules between its `Internal` zone and `Vpn`, the tunnel's zone, allow cross-site traffic.
 
+## Bootstrap VLAN and MAC auth
+
+The `bootstrap` network is folly's quarantine VLAN for Talos nodes that are not enrolled. Its keys are `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN` and `SPORE_BOOTSTRAP_IP` in `clusters/folly/config/lab-topology.json`. UniFi DHCP names spore as its DNS, NTP and TFTP server, and points PXE firmware at the signed UKI on spore. spore's switch port carries the VLAN tagged.
+
+The network is alone in the `Bootstrap` zone. Its policies admit DHCP to the gateway and TCP 443 to `ENROLL_VIP` in `clusters/folly/config/cluster-topology.json`, the pinned address of the enrollment server's Gateway, which serves `enroll.lolwtf.ca`. They block the rest of the gateway and every other address in `LB_RANGE`. The internet stays open, so a Talos install can pull its installer image, and the zone's defaults block the LAN, Lab Net and the Kubernetes VLAN. Traffic to spore stays on the VLAN, where the gateway does not filter it.
+
+Each of riptide and optiplex has a RADIUS user on the gateway's built-in RADIUS server, whose VLAN is the node's enrolled state, set in `enrolled` in `terraform/network/unifi/folly/bootstrap.tf`. `mab_enforced` in the same file is `false`, so switch-wide 802.1X is off and switch ports 8 and 10 stay open Kubernetes trunks. Setting it to `true` turns on 802.1X and puts both ports on the `MAC auth` port profile, which authenticates each MAC (MAB) against RADIUS. The gateway's `freeradius` unit must be active first. With MAC auth on, RADIUS rejects an unknown MAC and the port is expected to pass none of its traffic. The switch asks RADIUS at link-up, so a change to a user is expected to take effect at the node's next link flap. Neither behaviour has a hardware test on this switch yet.
+
+A MAC can be copied, so MAC auth sorts machines and does not authenticate them. Secure Boot and the TPM-sealed disks are the lock. The gate keeps an unknown or unenrolled machine off the Kubernetes VLAN, Lab Net and the LAN.
+
 ## Rules
 
 - A new node needs its `bgp-enabled` label and a `neighbor <ip> peer-group HOMELAB` line in its site's FRR file, or it has no BGP session. Talos sets the label on folly's nodes, and `clusters/offsite/bootstrap/node-labels.tf` sets it on offsite's. The `<ip>` is the node's `NODE_ADDRESSES` value in its cluster's [topology file](../../reference/topology.md), copied by hand.
@@ -26,6 +36,11 @@ folly holds Lab Net and Kubernetes in a custom `Lab` zone. offsite has no custom
 - Keep the policy `folly_lb_to_nest_lan`, or replies from folly VIPs to offsite's Default network drop. folly pods and nodes cannot open connections to that network.
 - Keep Management, `future` and offsite's Kubernetes network in `Internal`, where the policies expect them. If offsite's Kubernetes network moves to a custom zone, copy folly's cross-site policies to offsite.
 - The gateway does not filter tunnel traffic to folly VIPs and pods, because the `Vpn` chain to the WAN accepts it. To restrict it, write a Cilium network policy.
+- Set `mab_enforced = true` only in its own change, after `systemctl is-active freeradius` on the gateway reports `active`, both RADIUS users exist, and the Default RADIUS profile has RADIUS-assigned VLAN on for wired networks. The API refuses writes to that profile, so the owner sets it once in the console under Settings, Profiles, RADIUS. No fallback VLAN is set, so a port whose RADIUS gets no answer stays closed.
+- With MAC auth on, a reinstall begins by setting the node to `bootstrap` in `enrolled`, and ends by setting it back to `kubernetes` after the install reboot.
+- To open ports 8 and 10 again, set `mab_enforced = false` in `bootstrap.tf`. Removing a `port_override` block does not reset a port.
+- A MAC-auth port whose link flaps while the gateway's RADIUS server is down stays closed. optiplex is folly's only control plane.
+- The `Bootstrap` zone reaches spore, DHCP on the gateway, `ENROLL_VIP` on TCP 443, and the internet for the installer image pull. It reaches nothing else on the LAN or in `LB_RANGE`. Keep the enrollment server's Gateway at `ENROLL_VIP`, and keep each block policy ordered after its allow with `depends_on`.
 
 ## Where it lives
 
@@ -33,7 +48,8 @@ folly holds Lab Net and Kubernetes in a custom `Lab` zone. offsite has no custom
 - `clusters/folly/config/lab-topology.json`: `LAB_CIDR` and `CAPSULE_IP`
 - `clusters/<site>/networking/cilium/`: the pod pool, VIP pool and BGP config
 - `terraform/network/unifi/folly/bgp-folly.conf` and `terraform/network/unifi/offsite/bgp.conf`: the FRR files
-- `terraform/network/unifi/folly/firewall.tf`: the `Lab` zone and cross-site policies
+- `terraform/network/unifi/folly/firewall.tf`: the `Lab` and `Bootstrap` zones and their policies
+- `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network, the RADIUS users and the switch port overrides
 - Each console's UI: the Site Magic tunnel and its subnet lists
 
 ## Related

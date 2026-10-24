@@ -14,6 +14,10 @@ data "unifi_firewall_zone" "vpn" {
   name = "Vpn"
 }
 
+data "unifi_firewall_zone" "gateway" {
+  name = "Gateway"
+}
+
 data "unifi_network" "nest" {
   name = "nest.pulsifer.ca"
 }
@@ -24,6 +28,16 @@ resource "unifi_firewall_zone" "lab" {
   network_ids = [
     unifi_network.lab.id,
     unifi_network.k8s.id,
+  ]
+}
+
+# A custom zone blocks every other zone by default except External and Gateway,
+# so the bootstrap policies at the end close those two.
+resource "unifi_firewall_zone" "bootstrap" {
+  name = "Bootstrap"
+
+  network_ids = [
+    unifi_network.bootstrap.id,
   ]
 }
 
@@ -509,5 +523,142 @@ resource "unifi_firewall_policy" "folly_pbx_to_handset" {
     ips                = ["${cidrhost(local.fml_cidr, local.clients.voip.cathy.ip)}/32"]
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.internal.id
+  }
+}
+
+# The bootstrap VLAN reaches spore on its own subnet, which the switch carries and
+# the gateway never filters, the gateway's DHCP, the enrollment server's VIP, and
+# the internet, where a Talos install pulls its installer image. Nothing else on
+# the LAN or in the cluster's VIP range. The controller appends each policy to its
+# zone pair, so each block depends on its allow to be created after it.
+locals {
+  enroll_ips = ["${local.topology.ENROLL_VIP}/32"]
+}
+
+resource "unifi_firewall_policy" "bootstrap_dhcp" {
+  name                 = "Allow Bootstrap DHCP"
+  action               = "ALLOW"
+  protocol             = "udp"
+  ip_version           = "IPV4"
+  create_allow_respond = false
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "ANY"
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+
+  destination = {
+    matching_target    = "ANY"
+    port               = "67"
+    port_matching_type = "SPECIFIC"
+    zone_id            = data.unifi_firewall_zone.gateway.id
+  }
+}
+
+resource "unifi_firewall_policy" "bootstrap_block_gateway" {
+  name                 = "Block Bootstrap to Gateway"
+  action               = "BLOCK"
+  protocol             = "all"
+  ip_version           = "BOTH"
+  create_allow_respond = false
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "ANY"
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+
+  destination = {
+    matching_target    = "ANY"
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.gateway.id
+  }
+
+  depends_on = [unifi_firewall_policy.bootstrap_dhcp]
+}
+
+# VIPs are in no zone, so the enrollment server's address is an External
+# destination. The controller refuses an auto-reply rule towards External, so
+# the reply is the explicit RESPOND_ONLY policy below.
+resource "unifi_firewall_policy" "bootstrap_to_enroll" {
+  name                 = "Allow Bootstrap to Enrollment"
+  action               = "ALLOW"
+  protocol             = "tcp"
+  ip_version           = "IPV4"
+  create_allow_respond = false
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "ANY"
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = local.enroll_ips
+    port               = "443"
+    port_matching_type = "SPECIFIC"
+    zone_id            = data.unifi_firewall_zone.external.id
+  }
+}
+
+# Every other cluster VIP. The rest of External, the internet, stays open by the
+# zone's default.
+resource "unifi_firewall_policy" "bootstrap_block_lb" {
+  name                 = "Block Bootstrap to Cluster VIPs"
+  action               = "BLOCK"
+  protocol             = "all"
+  ip_version           = "IPV4"
+  create_allow_respond = false
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "ANY"
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = [local.lb_range]
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.external.id
+  }
+
+  depends_on = [unifi_firewall_policy.bootstrap_to_enroll]
+}
+
+# The node behind the VIP answers from the Kubernetes VLAN, so the reply is
+# Lab-zone traffic, which Lab -> Bootstrap blocks by default.
+resource "unifi_firewall_policy" "enroll_reply_to_bootstrap" {
+  name                  = "Allow Enrollment replies to Bootstrap"
+  action                = "ALLOW"
+  protocol              = "tcp"
+  ip_version            = "IPV4"
+  connection_state_type = "RESPOND_ONLY"
+  create_allow_respond  = false
+  enabled               = true
+  logging               = false
+
+  source = {
+    matching_target    = "IP"
+    ips                = local.enroll_ips
+    port               = "443"
+    port_matching_type = "SPECIFIC"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+
+  destination = {
+    matching_target    = "ANY"
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.bootstrap.id
   }
 }
