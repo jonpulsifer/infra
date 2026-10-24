@@ -13,7 +13,7 @@ Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to refre
 ## Before you start
 
 - You need the `folly` context with cluster admin, as [Get cluster admin access](get-cluster-admin-access.md) describes.
-- You need a shell on spore where `spire-server` reaches the server.
+- You need a root shell on spore.
 - The node is in folly, and its TPM 2.0 is on in the firmware. On optiplex, Intel PTT is the TPM.
 - The GHCR package `ghcr.io/jonpulsifer/spire-agent-tpm` is public.
 
@@ -44,12 +44,12 @@ Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to refre
 
 ## Admit the node
 
-1. On a branch, add an empty file named `<hash>` to `clusters/base/spire/ek/`. spore's SPIRE server reads that directory as its EK hash allow list.
-2. To spore's registration entries, add the node alias entry `spiffe://lolwtf.ca/node/<name>` with the selector `tpm:pub_hash:<hash>`.
-3. For each workload that the node must serve, add an entry with the new alias as its parent. Include `spire-smoke/smoke`.
-4. In `clusters/folly/talos/talos.tf`, give the node the label `lolwtf.ca/tpm` with the value `true`.
-5. Open a pull request, and apply it with Atlantis.
-6. Deploy spore, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
+spore builds its EK hash allow list, each node alias, and the entries under each alias from `tpmNodes` and `workloads` in `nix/hosts/spore.nix`.
+
+1. On a branch, add `<name> = "<hash>";` to `tpmNodes` in `nix/hosts/spore.nix`.
+2. In `clusters/folly/talos/talos.tf`, give the node the label `lolwtf.ca/tpm` with the value `true`.
+3. Open a pull request, and apply it with Atlantis.
+4. Deploy spore, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
 
 ## Refresh the bootstrap bundle
 
@@ -61,7 +61,7 @@ Do this before the first agent attests, and before you add a node.
 1. On spore, print the server's bundle.
 
    ```bash
-   spire-server bundle show -format pem
+   spire-server bundle show -socketPath /run/spire/server/private/api.sock -format pem
    ```
 
    Result: one or more `CERTIFICATE` blocks.
@@ -90,7 +90,7 @@ Do this before the first agent attests, and before you add a node.
 3. On spore, list the agents.
 
    ```bash
-   spire-server agent list
+   spire-server agent list -socketPath /run/spire/server/private/api.sock
    ```
 
    Result: the agent ID of step 2.
@@ -115,8 +115,8 @@ Do this before the first agent attests, and before you add a node.
 | The pod shows `ImagePullBackOff` | The GHCR package is private, or the DaemonSet pins no built digest | Make the package public, or merge the digest pull request. |
 | The agent fails to start with a trust bundle error | `spire-bundle` is empty | Refresh the bootstrap bundle. |
 | The first attestation fails with `x509: certificate signed by unknown authority` | The server's CA is newer than the committed bundle | Refresh the bootstrap bundle. |
-| The server rejects the attestation | No file named the hash is in `clusters/base/spire/ek/`, or spore runs an older configuration | Add the file, and deploy spore. |
+| The server rejects the attestation | The hash is not in `tpmNodes` of `nix/hosts/spore.nix`, or spore runs an older configuration | Add the hash, and deploy spore. |
 | The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM or PTT, and boot the node. |
 | The smoke Job runs no pod | The Job is suspended | Remove `suspend: true` from `clusters/folly/apps/spire/smoke.yaml`. |
-| The smoke Job prints `no identity issued` | No entry for `spire-smoke/smoke` has the node's alias as parent | Add the entry, and deploy spore. |
+| The smoke Job prints `no identity issued` | No entry for `spire-smoke/smoke` has the node's alias as parent | Add the pair to `workloads` in `nix/hosts/spore.nix`, and deploy spore. |
 | The agent logs `403` from the kubelet | The `spire-agent` ClusterRole lacks `nodes/pods` | Read `clusters/folly/apps/spire/rbac.yaml`. |
