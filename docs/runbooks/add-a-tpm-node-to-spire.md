@@ -44,8 +44,8 @@ Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to refre
 
 ## Admit the node
 
-1. On a branch, add `<name>` and `<hash>` to `ekHashes` in spore's SPIRE server configuration.
-2. Add the node alias entry `spiffe://lolwtf.ca/node/<name>` with the selector `tpm:pub_hash:<hash>`.
+1. On a branch, add an empty file named `<hash>` to `clusters/base/spire/ek/`. spore's SPIRE server reads that directory as its EK hash allow list.
+2. To spore's registration entries, add the node alias entry `spiffe://lolwtf.ca/node/<name>` with the selector `tpm:pub_hash:<hash>`.
 3. For each workload that the node must serve, add an entry with the new alias as its parent. Include `spire-smoke/smoke`.
 4. In `clusters/folly/talos/talos.tf`, give the node the label `lolwtf.ca/tpm` with the value `true`.
 5. Open a pull request, and apply it with Atlantis.
@@ -95,7 +95,8 @@ Do this before the first agent attests, and before you add a node.
 
    Result: the agent ID of step 2.
 
-4. Read the smoke Job's log.
+4. If the Job in `clusters/folly/apps/spire/smoke.yaml` has `suspend: true`, remove that line in a pull request, and merge it. Only the first node needs this step.
+5. Read the smoke Job's log.
 
    ```bash
    kubectl --context folly -n spire-smoke logs job/spire-smoke
@@ -104,7 +105,7 @@ Do this before the first agent attests, and before you add a node.
    Result: `SPIFFE ID: spiffe://lolwtf.ca/ns/spire-smoke/sa/smoke`.
 
 > [!NOTE]
-> The Job reruns about every hour. If the log is empty, wait for the next run.
+> The Job reruns every one to two hours. If the log is empty, wait for the next run.
 
 ## If something goes wrong
 
@@ -114,7 +115,8 @@ Do this before the first agent attests, and before you add a node.
 | The pod shows `ImagePullBackOff` | The GHCR package is private, or the DaemonSet pins no built digest | Make the package public, or merge the digest pull request. |
 | The agent fails to start with a trust bundle error | `spire-bundle` is empty | Refresh the bootstrap bundle. |
 | The first attestation fails with `x509: certificate signed by unknown authority` | The server's CA is newer than the committed bundle | Refresh the bootstrap bundle. |
-| The server rejects the attestation | The hash is not in `ekHashes`, or spore runs an older configuration | Add the hash, and deploy spore. |
+| The server rejects the attestation | No file named the hash is in `clusters/base/spire/ek/`, or spore runs an older configuration | Add the file, and deploy spore. |
 | The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM or PTT, and boot the node. |
+| The smoke Job runs no pod | The Job is suspended | Remove `suspend: true` from `clusters/folly/apps/spire/smoke.yaml`. |
 | The smoke Job prints `no identity issued` | No entry for `spire-smoke/smoke` has the node's alias as parent | Add the entry, and deploy spore. |
 | The agent logs `403` from the kubelet | The `spire-agent` ClusterRole lacks `nodes/pods` | Read `clusters/folly/apps/spire/rbac.yaml`. |

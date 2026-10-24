@@ -24,7 +24,7 @@ spec:
     spec:
       serviceAccountName: spire-agent
       # The workload attestor maps a caller's PID to its pod through the host's
-      # /proc, and reaches the kubelet on 127.0.0.1.
+      # /proc, and reaches the kubelet at <node name>:10250.
       hostPID: true
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet

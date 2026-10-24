@@ -9,9 +9,9 @@ SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca` from a server on 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| SPIRE server | Admits an agent whose TPM endorsement key (EK) hash is on its allow list, and signs SVIDs | spore, TCP 8081 at `spore.lolwtf.ca` |
+| SPIRE server | Admits an agent whose TPM endorsement key (EK) hash is on its allow list in `clusters/base/spire/ek/`, and signs SVIDs | spore, TCP 8081 at `spore.lolwtf.ca` |
 | SPIRE agent | Attests its node by TPM and serves the Workload API | DaemonSet `spire-agent` in the `spire` namespace on folly, on nodes labelled `lolwtf.ca/tpm=true` |
-| Smoke Job | Prints the SPIFFE ID the agent serves it, about every hour | Job `spire-smoke` in the `spire-smoke` namespace |
+| Smoke Job | Prints the SPIFFE ID the agent serves it, every one to two hours | Job `spire-smoke` in the `spire-smoke` namespace |
 
 ## Agents
 
@@ -35,11 +35,14 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 ## Live state
 
-No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. No agent runs until the Talos root labels riptide and optiplex and spore's server runs.
+No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. No agent runs until the Talos root labels riptide and optiplex and spore's server runs. The smoke Job is suspended, since a pod that no node can schedule keeps it active until `KubeJobNotCompleted` fires.
+
+The allow list holds riptide's EK hash. optiplex has none until Intel PTT is on.
 
 ## Where it lives
 
 - `clusters/folly/apps/spire/`: the agent DaemonSet, its config, the bootstrap bundle and the smoke Job
+- `clusters/base/spire/ek/`: the EK hash allow list, one empty file named by each allowed hash
 - `images/spire-agent-tpm/Dockerfile`: the agent image
 
 ## Related

@@ -25,9 +25,13 @@ metadata:
     # A Job's template is immutable, so Flux replaces the Job to change it.
     kustomize.toolkit.fluxcd.io/force: enabled
 spec:
+  # Suspended until a node carries lolwtf.ca/tpm=true and spore admits it. A
+  # pod that no node can schedule keeps the Job active, and KubeJobNotCompleted
+  # fires after 12 hours.
+  suspend: true
   backoffLimit: 6
   # Flux recreates a deleted Job at its next reconcile, so the check reruns
-  # about hourly.
+  # every one to two hours.
   ttlSecondsAfterFinished: 3600
   template:
     metadata:
