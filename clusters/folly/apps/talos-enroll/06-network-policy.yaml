@@ -1,0 +1,59 @@
+# The admin port trusts Tailscale-User-Login, so only the tailnet Ingress proxy
+# may reach it. Namespace and pod are one entry: two entries are an OR.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: talos-enroll
+  namespace: talos-enroll
+  labels:
+    app.kubernetes.io/part-of: talos-enroll
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: talos-enroll
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+          podSelector:
+            matchLabels:
+              tailscale.com/managed: "true"
+              tailscale.com/parent-resource-type: ingress
+              tailscale.com/parent-resource: talos-enroll-tailnet
+              tailscale.com/parent-resource-ns: talos-enroll
+      ports:
+        - port: 8081
+          protocol: TCP
+    # Prometheus scrapes /metrics on the public port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+# Cilium's host-networked gateway Envoy reaches the pod as the `ingress`
+# identity, which no NetworkPolicy selector matches; `host` admits the probes.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: talos-enroll-gateway
+  namespace: talos-enroll
+  labels:
+    app.kubernetes.io/part-of: talos-enroll
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: talos-enroll
+  ingress:
+    - fromEntities:
+        - ingress
+        - host
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

@@ -1,0 +1,43 @@
+# Talos enrollment alerts on the series apps/talos-enroll exports. A machine
+# that waits on the device flow never gives up, so a stuck one shows only here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: talos-enroll
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: talos-enroll
+    release: prom-stack
+spec:
+  groups:
+    - name: talos-enroll
+      rules:
+        # A code lasts 15 minutes and Talos asks for the next one 30 s later,
+        # so a waiting machine keeps the gauge above zero.
+        - alert: TalosEnrollmentWaiting
+          expr: max by (namespace, job) (talos_enroll_pending{namespace="talos-enroll"}) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: A Talos machine has waited 30 minutes for enrollment approval
+            description: "talos-enroll has held a device code for 30 minutes with no approval. The machine retries until someone approves or denies it. Run `mise run enroll:pending`, then approve or deny the code. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"
+        - alert: TalosEnrollmentConfigNotFetched
+          expr: max by (namespace, job) (talos_enroll_approved_unfetched{namespace="talos-enroll"}) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: An approved Talos machine has not fetched its config
+            description: "talos-enroll approved a machine 10 minutes ago and has served it no config. Talos picks up the token within one poll, so the GET of /config fails before it reaches the server: check the machine's console for a TLS or clock error. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"
+        - alert: TalosEnrolledNodeNotReady
+          expr: |
+            (time() - talos_enroll_config_served_timestamp_seconds{namespace="talos-enroll"}) > 1800
+              and (time() - talos_enroll_config_served_timestamp_seconds{namespace="talos-enroll"}) < 21600
+              unless on (node) (kube_node_status_condition{condition="Ready", status="true"} == 1)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.node }} fetched its Talos config 30 minutes ago and is not a Ready node"
+            description: "The install and reboot take a few minutes. A node that is still not Ready did not install, or cannot reach the Kubernetes VLAN: check its RADIUS user and the machine's console. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"

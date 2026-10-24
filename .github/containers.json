@@ -16,6 +16,7 @@
     "kthx-engine",
     "kthx-engine-verifier",
     "switchboard",
+    "talos-enroll",
     "weather"
   ],
   "deploy": {

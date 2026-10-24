@@ -1,0 +1,22 @@
+# The approval host. A tailscale L7 Ingress sets Tailscale-User-Login on each
+# request and overwrites a copy the client sends. No Funnel: a funnelled
+# request carries no login. The first label of tls.hosts[0] is the tailnet name.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: talos-enroll-tailnet
+  namespace: talos-enroll
+  labels:
+    app.kubernetes.io/part-of: talos-enroll
+  annotations:
+    external-dns.alpha.kubernetes.io/exclude: "true"
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: talos-enroll-admin
+      port:
+        number: 8081
+  tls:
+    - hosts:
+        - talos-enroll
