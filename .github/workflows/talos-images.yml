@@ -1,0 +1,201 @@
+name: talos-images
+# Builds folly's signed Talos boot assets with the siderolabs imager and the
+# Secure Boot keys in 1Password, then publishes them. A pull request only
+# checks the inputs: the build needs the keys.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - clusters/folly/talos/**
+      - .github/scripts/talos-image-inputs.sh
+      - .github/scripts/talos-image-inputs_test.sh
+      - .github/scripts/talos-images-build.sh
+      - .github/scripts/talos-uki-verify.sh
+      - .github/workflows/talos-images.yml
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+# An evicted pending run publishes nothing, so runs queue.
+concurrency:
+  group: talos-images-${{ github.ref }}
+  queue: max
+
+permissions:
+  contents: read
+
+env:
+  SITE: folly
+  ROOT: clusters/folly/talos
+  ENROLL_HOST: enroll.lolwtf.ca
+  INSTALLER_REPO: ghcr.io/jonpulsifer/talos-installer-folly
+  OP_ITEM: op://homelab/talos-secureboot
+
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.inputs.outputs.version }}
+      build: ${{ steps.gate.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2
+      - name: Test the input parser
+        run: bash .github/scripts/talos-image-inputs_test.sh
+      - name: Read the inputs
+        id: inputs
+        run: |
+          set -euo pipefail
+          bash .github/scripts/talos-image-inputs.sh "$ROOT/talos.tf" | tee inputs.json
+          echo "version=$(jq -r .talos_version inputs.json)" >>"$GITHUB_OUTPUT"
+      - name: The committed certificate halves must agree
+        run: |
+          set -euo pipefail
+          pem=$(openssl x509 -in "$ROOT/secureboot/uki-signing-cert.pem" -noout -fingerprint -sha256)
+          der=$(openssl x509 -inform der -in "$ROOT/secureboot/uki-signing-cert.der" -noout -fingerprint -sha256)
+          [[ "$pem" == "$der" ]] || { echo "::error::uki-signing-cert.pem and .der differ"; exit 1; }
+          for f in PK.auth KEK.auth db.auth; do
+            [[ -s "$ROOT/secureboot/$f" ]] || { echo "::error::missing $ROOT/secureboot/$f"; exit 1; }
+          done
+      # A push builds only when the version, the extensions, the baked kernel
+      # arguments, the public keys or this pipeline changed.
+      - name: Decide whether to build
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          HAS_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          fingerprint() {
+            local rev=$1 tf
+            tf=$(mktemp)
+            git show "$rev:$ROOT/talos.tf" >"$tf" || return 1
+            bash .github/scripts/talos-image-inputs.sh "$tf" || return 1
+            git ls-tree -r "$rev" -- "$ROOT/secureboot" \
+              .github/scripts/talos-images-build.sh .github/workflows/talos-images.yml
+          }
+          build=false
+          case "$EVENT" in
+            workflow_dispatch) build=true ;;
+            push)
+              if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                git fetch --quiet --depth=1 origin "$BEFORE" || true
+              fi
+              if ! before=$(fingerprint "$BEFORE" 2>/dev/null) || [[ "$before" != "$(fingerprint HEAD)" ]]; then
+                build=true
+              fi
+              ;;
+          esac
+          if [[ "$build" == true && "$HAS_TOKEN" != true ]]; then
+            echo "::warning::OP_SERVICE_ACCOUNT_TOKEN is not set, so no image is built"
+            build=false
+          fi
+          echo "build=$build" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: inputs
+    if: needs.inputs.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ needs.inputs.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+        with:
+          version: v0.21.6
+      - name: Install the signature tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool osslsigncode
+
+      - name: Load the signing keys
+        id: op
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          UKI_SIGNING_KEY: ${{ env.OP_ITEM }}/uki_signing_key
+          UKI_SIGNING_CERT: ${{ env.OP_ITEM }}/uki_signing_cert
+          PCR_SIGNING_KEY: ${{ env.OP_ITEM }}/pcr_signing_key
+
+      # The imager reads /secureboot. The .auth files are public and come from
+      # git; the private keys live only in this runner's temp directory.
+      - name: Stage the keys
+        env:
+          UKI_SIGNING_KEY: ${{ steps.op.outputs.UKI_SIGNING_KEY }}
+          UKI_SIGNING_CERT: ${{ steps.op.outputs.UKI_SIGNING_CERT }}
+          PCR_SIGNING_KEY: ${{ steps.op.outputs.PCR_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keys="$RUNNER_TEMP/secureboot"
+          mkdir -p "$keys"
+          printf '%s\n' "$UKI_SIGNING_KEY" >"$keys/uki-signing-key.pem"
+          printf '%s\n' "$UKI_SIGNING_CERT" >"$keys/uki-signing-cert.pem"
+          printf '%s\n' "$PCR_SIGNING_KEY" >"$keys/pcr-signing-key.pem"
+          cp "$ROOT"/secureboot/{PK,KEK,db}.auth "$keys/"
+          committed=$(openssl x509 -in "$ROOT/secureboot/uki-signing-cert.pem" -noout -fingerprint -sha256)
+          loaded=$(openssl x509 -in "$keys/uki-signing-cert.pem" -noout -fingerprint -sha256)
+          [[ "$committed" == "$loaded" ]] || { echo "::error::the 1Password certificate is not the committed one"; exit 1; }
+          echo "KEYS=$keys" >>"$GITHUB_ENV"
+
+      - name: Build the installer, ISO and UKI
+        run: |
+          set -euo pipefail
+          bash .github/scripts/talos-image-inputs.sh "$ROOT/talos.tf" >"$RUNNER_TEMP/inputs.json"
+          bash .github/scripts/talos-images-build.sh "$RUNNER_TEMP/inputs.json" "$KEYS" "$RUNNER_TEMP/out" "$ENROLL_HOST"
+
+      - name: Remove the keys
+        if: always()
+        run: |
+          if [[ -n "${KEYS:-}" ]]; then
+            find "$KEYS" -type f -exec shred -u {} +
+            rm -rf "$KEYS"
+          fi
+
+      - name: The UKI must verify against the committed certificate
+        run: |
+          set -euo pipefail
+          uki="$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi"
+          bash .github/scripts/talos-uki-verify.sh "$ROOT/secureboot/uki-signing-cert.pem" "$uki"
+          objcopy -O binary --only-section=.cmdline "$uki" "$RUNNER_TEMP/cmdline"
+          tr -d '\0' <"$RUNNER_TEMP/cmdline" >"$RUNNER_TEMP/cmdline.txt"
+          grep -q "talos.config=https://$ENROLL_HOST/config" "$RUNNER_TEMP/cmdline.txt" || {
+            echo "::error::the UKI command line lacks the enrollment URL"
+            exit 1
+          }
+          {
+            echo "### UKI command line"
+            echo '```'
+            cat "$RUNNER_TEMP/cmdline.txt"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Push the installer
+        run: |
+          set -euo pipefail
+          image="$INSTALLER_REPO:$VERSION"
+          crane push "$RUNNER_TEMP/out/installer-amd64-secureboot.tar" "$image"
+          echo "Installer: \`$image@$(crane digest "$image")\`" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the UKI and ISO
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="talos-$SITE/$VERSION"
+          notes="Signed Talos $VERSION boot assets for $SITE, last built from $GITHUB_SHA."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --notes "$notes"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
+              --title "Talos $VERSION for $SITE" --notes "$notes"
+          fi
+          gh release upload "$tag" --clobber \
+            "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi" \
+            "$RUNNER_TEMP/out/metal-amd64-secureboot.iso"

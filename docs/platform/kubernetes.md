@@ -38,6 +38,18 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 
 On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/talos/talos.tf` gives it the `lolwtf.ca/sandbox` label and a `NoSchedule` taint of the same key, so only a pod that selects the label and tolerates the taint lands there: the Rowbutt sandboxes, the GitHub Actions runners and the kthx engine's in-cluster build Jobs. A DaemonSet that should run on every node tolerates the taint in its chart values. folly has no sandbox node. Talos hands a node's taints to the kubelet, which applies them when it registers the Node, and NodeRestriction refuses the kubelet's later change, so a taint declared for a registered node is applied once by hand with `kubectl taint`.
 
+## Signed Talos images
+
+`.github/workflows/talos-images.yml` builds folly's Secure Boot images with the siderolabs imager. It uses the `talos_version`, `extensions` and any `extra_kernel_args` in `clusters/folly/talos/talos.tf`, and signs with the keys in [PKI](pki.md#talos-secure-boot-keys).
+
+| Output | Where | Use |
+| --- | --- | --- |
+| Installer | `ghcr.io/jonpulsifer/talos-installer-folly:<version>` | Installs and upgrades a node. It carries no enrollment arguments. |
+| ISO | `metal-amd64-secureboot.iso` on the release `talos-folly/<version>` | Enrolls the Secure Boot keys at the machine, and rescues a node |
+| HTTP-boot UKI | `metal-amd64-secureboot-uki.efi` on the same release | Boots an unenrolled node into the enrollment server's OAuth device flow at `enroll.lolwtf.ca`. It halts on a disk that has Talos installed. |
+
+A push to `main` rebuilds them when the version, the extensions, the kernel arguments, the public keys or the pipeline change. The nodes still run the Image Factory installer that `terraform/modules/talos-cluster/main.tf` names. [Build the signed Talos images](../runbooks/build-the-signed-talos-images.md) is the procedure.
+
 ## Rules
 
 - Deploy a new containerd handler to every node from `main` before a workload names its RuntimeClass. The kubelet rejects a pod whose handler is missing.
@@ -62,3 +74,4 @@ On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/
 - [Get cluster admin access](../runbooks/get-cluster-admin-access.md)
 - [Operate Postgres](../runbooks/operate-postgres.md)
 - [Install Talos on a node](../runbooks/install-talos-on-a-node.md)
+- [Build the signed Talos images](../runbooks/build-the-signed-talos-images.md)
