@@ -192,19 +192,21 @@ jobs:
           crane push "$RUNNER_TEMP/out/installer-amd64-secureboot.tar" "$image"
           echo "Installer: \`$image@$(crane digest "$image")\`" >>"$GITHUB_STEP_SUMMARY"
 
+      # Releases in this repository are immutable: a published release takes no
+      # new assets. A rebuild deletes the release and its tag, then creates the
+      # release again with both assets, which gh uploads to a draft and
+      # publishes once.
       - name: Publish the UKI and ISO
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="talos-$SITE/$VERSION"
-          notes="Signed Talos $VERSION boot assets for $SITE, last built from $GITHUB_SHA."
+          notes="Signed Talos $VERSION boot assets for $SITE, built from $GITHUB_SHA."
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --notes "$notes"
-          else
-            gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
-              --title "Talos $VERSION for $SITE" --notes "$notes"
+            gh release delete "$tag" --yes --cleanup-tag
           fi
-          gh release upload "$tag" --clobber \
+          gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
+            --title "Talos $VERSION for $SITE" --notes "$notes" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot.iso"
