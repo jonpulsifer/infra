@@ -11,20 +11,23 @@ Every Kubernetes node runs Talos Linux. `clusters/<site>/talos/` is an OpenTofu 
 | --- | --- | --- |
 | Image Factory installer | Installs a node from the cluster's schematic | [shale](../../hosts/shale.md) and every offsite node |
 | Signed installer | `ghcr.io/jonpulsifer/talos-installer-folly`, a UKI signed with the lab's Secure Boot keys | [optiplex](../../hosts/optiplex.md) and [riptide](../../hosts/riptide.md) |
-| TPM disk encryption | Makes `STATE` and `EPHEMERAL` LUKS2 volumes whose key the TPM seals to PCR 7 and to a PCR 11 policy signed by the PCR signing key. Adds the `lolwtf.ca/tpm=true` label. | optiplex and riptide |
+| TPM disk encryption | Makes `STATE` and `EPHEMERAL` LUKS2 volumes whose key the TPM seals to PCR 7 and to a PCR 11 policy signed by the PCR signing key. Adds the `lolwtf.ca/tpm=true` label. | No node: `tpm_nodes` is empty |
+| Installer check | Fails the plan when a node's `installer_image` is not a public GHCR image tagged with `talos_version` | `terraform/modules/talos-cluster/main.tf` |
 | Render parity check | Renders folly's nodes with the provider and with `talosctl gen config`, and fails on any byte difference | `.github/workflows/talos-render-parity.yml` |
 
 The `ETCD` volume and the `data` user volume stay plain. Talos encrypts a volume only when it formats it, at install.
 
-optiplex and riptide boot Image Factory systemd-boot UKI installs, with Secure Boot off and plain volumes. The signed installer and the encryption take effect when each is reinstalled. optiplex has no TPM until Intel PTT is on in its BIOS.
+optiplex and riptide boot Image Factory systemd-boot UKI installs, with Secure Boot off and plain volumes. The signed installer takes effect when each is reinstalled, and the encryption when the pull request that reinstalls it adds it to `tpm_nodes`. optiplex has no TPM until Intel PTT is on in its BIOS.
+
+The folly plan fails until `ghcr.io/jonpulsifer/talos-installer-folly` is published for folly's `talos_version`, because optiplex and riptide name it.
 
 ## Rules
 
 - Keep the PCR signing key and the Secure Boot keys in the 1Password item `talos-secureboot`. A UKI signed with other keys does not boot under the enrolled `db`, and a policy signed with another key does not unseal the disks.
-- Publish the signed installer for a Talos version before `talos_version` changes in `clusters/folly/talos/talos.tf`. The upgrade pulls the tag that equals `talos_version`.
-- Tag the signed installer with the Talos version alone, with no digest. Any other form makes Create reinstall the node.
+- Publish the signed installer for a Talos version before `talos_version` changes in `clusters/folly/talos/talos.tf`. The upgrade pulls the tag that equals `talos_version`, and the plan fails until GHCR serves it.
+- Tag the signed installer with the Talos version alone, with no digest. Any other form makes Create reinstall the node, and the plan rejects it.
 - Change a node's `installer` together with its `generation`. A new generation replaces its `talos_machine`, whose Create applies the config and upgrades only for a new version tag. An `image` change alone upgrades the node at once.
-- Add a node to `tpm_nodes` only right before it is reinstalled. Talos writes the `STATE` encryption to META when the config applies, and the next boot fails on the plain `STATE`.
+- Add a node to `tpm_nodes` in the pull request that reinstalls it, and reinstall it right after the apply. Talos writes the `STATE` encryption to META when the config applies, and any later boot from the plain `STATE`, such as a power loss or a `talos_version` upgrade, fails until the node is wiped.
 - Run `talosctl apply-config --dry-run` with the render before a `VolumeConfig` change reaches a running node.
 
 ## Where it lives

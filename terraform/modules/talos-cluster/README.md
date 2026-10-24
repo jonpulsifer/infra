@@ -21,6 +21,7 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11 |
+| <a name="requirement_http"></a> [http](#requirement\_http) | ~> 3.6 |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
 | <a name="requirement_talos"></a> [talos](#requirement\_talos) | ~> 0.12 |
 
@@ -28,6 +29,7 @@ tofu -chdir=terraform/modules/talos-cluster validate
 
 | Name | Version |
 | ---- | ------- |
+| <a name="provider_http"></a> [http](#provider\_http) | ~> 3.6 |
 | <a name="provider_talos"></a> [talos](#provider\_talos) | ~> 0.12 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
 
@@ -46,6 +48,8 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | [talos_machine.controlplane](https://registry.terraform.io/providers/siderolabs/talos/latest/docs/resources/machine) | resource |
 | [talos_machine.worker](https://registry.terraform.io/providers/siderolabs/talos/latest/docs/resources/machine) | resource |
 | [terraform_data.install](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
+| [http_http.installer_manifest](https://registry.terraform.io/providers/hashicorp/http/latest/docs/data-sources/http) | data source |
+| [http_http.installer_token](https://registry.terraform.io/providers/hashicorp/http/latest/docs/data-sources/http) | data source |
 
 ## Inputs
 
