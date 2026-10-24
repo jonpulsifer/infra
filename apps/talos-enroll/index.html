@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talos enrollment</title>
+<style>
+  body { font: 16px/1.4 system-ui, sans-serif; margin: 0 auto; max-width: 44rem; padding: 1rem; color: #1b1b1b; background: #fafafa; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #161616; } .card { background: #222; border-color: #333; } }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; background: #fff; }
+  .card.focus { border-color: #4a6cf7; border-width: 2px; }
+  code { font-size: 0.95em; word-break: break-all; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.5rem 0 1rem; }
+  dt { font-weight: 600; }
+  dd { margin: 0; }
+  form { display: inline-flex; gap: 0.5rem; margin-right: 0.5rem; }
+  button, select, input { font: inherit; padding: 0.4rem 0.8rem; }
+  input[name=code] { width: 9em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<h1>Talos enrollment</h1>
+<p>Signed in as {{.Login}}.</p>
+<div class="card">
+  <h2>Approve</h2>
+  <p>Type the code that the machine's own console shows. A machine's other facts are its own claims.</p>
+  <form method="post" action="/approve">
+    <input name="code" value="{{.Code}}" required autocomplete="off" placeholder="BCDF-GHJK" aria-label="code on the console">
+    <select name="node" required>
+      <option value="">node</option>
+      {{range .Nodes}}<option value="{{.}}"{{if eq . $.Suggested}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    <button type="submit">Approve</button>
+  </form>
+</div>
+<h2>Waiting machines</h2>
+{{range .Enrollments}}
+<div class="card{{if and $.Focus (eq .Device.UUID $.Focus)}} focus{{end}}">
+  <h3>{{.Phase}}{{if .Suggested}}, claims {{.Suggested}}'s MAC{{end}}</h3>
+  <dl>
+    <dt>uuid</dt><dd><code>{{.Device.UUID}}</code></dd>
+    <dt>mac</dt><dd><code>{{.Device.MAC}}</code></dd>
+    <dt>serial</dt><dd><code>{{.Device.Serial}}</code></dd>
+    <dt>hostname</dt><dd><code>{{.Device.Hostname}}</code></dd>
+    {{if .Node}}<dt>node</dt><dd>{{.Node}}, approved by {{.Approver}}</dd>{{end}}
+    {{if eq .Phase "pending"}}<dt>code expires in</dt><dd>{{until .Expires}}</dd>{{end}}
+  </dl>
+  <form method="post" action="/deny"><input type="hidden" name="uuid" value="{{.Device.UUID}}"><button type="submit">Deny</button></form>
+</div>
+{{else}}
+<p>No machine is waiting.</p>
+{{end}}
+</body>
+</html>

@@ -9,6 +9,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host's configuration or restore its previous generation
 - [Install Talos on a node](install-talos-on-a-node.md): boot a NixOS node into the Talos installer with kexec, and check its volumes
+- [Enroll a Talos node](enroll-a-talos-node.md): wipe a folly node, boot it from the network, approve its enrollment, and return it to the Kubernetes VLAN
 - [Change the forge EEPROM](change-the-forge-eeprom.md): change forge's boot settings and keep its HTTP boot fallback
 - [Install a Windows desktop](install-a-windows-desktop.md): install and update the owner's Windows configuration
 - [Install Windows monitoring](install-windows-monitoring.md): add a desktop to folly's Prometheus and repair its agents

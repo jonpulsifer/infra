@@ -50,6 +50,7 @@ The topology contract does not check `lab-topology.json`.
 - Some files hold a literal copy of a topology value: the FRR files, whose `neighbor` lines are the `NODE_ADDRESSES` values, `policy.hujson` and the addresses pinned in app manifests. Change them in the same pull request, as the [Network rules](../platform/network.md#rules) describe.
 - Put a setting that is not a network fact, such as a time zone or a DNS zone for Apps, in `cluster-settings`: `clusters/base/cluster-settings.yaml`, patched by `clusters/<site>/config/cluster-settings.yaml`.
 - `CATHY_IP` and `PBX_SIP_VIP` are addresses in folly's `cluster-settings`, for the [PBX](../apps/pbx.md). `CATHY_IP` is the office phone on Management, which neither topology file covers, and the folly `apps` Flux Kustomization does not substitute from `lab-topology`. `terraform/network/unifi/folly/voip.tf` checks `CATHY_IP` against `clients.yaml`.
+- `ENROLL_VIP` in folly's `cluster-topology.json` is the address of the [Talos enrollment](../apps/talos-enroll.md) Gateway, pinned so that a firewall rule can name it. It must stay free in `LB_RANGE`.
 
 ## Related
 

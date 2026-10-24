@@ -16,6 +16,7 @@ resources:
   - netbench
   - pbx
   - smiirl
+  - talos-enroll
   - kthx-engine-target
   - ../../base/apps/reloader
   # - satisfactory

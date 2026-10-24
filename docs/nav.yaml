@@ -21,7 +21,7 @@ sections:
       - apps/wiki.md
       - apps/lookout.md
       - group: Internal tools
-        items: [apps/netbench.md]
+        items: [apps/netbench.md, apps/talos-enroll.md]
       - group: Parked
         items: [apps/bosun.md]
   - title: Platform
@@ -73,6 +73,7 @@ sections:
         items:
           - runbooks/deploy-a-nixos-host.md
           - runbooks/install-talos-on-a-node.md
+          - runbooks/enroll-a-talos-node.md
           - runbooks/change-the-forge-eeprom.md
           - runbooks/install-a-windows-desktop.md
           - runbooks/install-windows-monitoring.md
