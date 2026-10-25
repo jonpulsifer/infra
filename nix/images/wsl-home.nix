@@ -35,7 +35,7 @@ let
       fi
 
       before=$(lsblk -dnro NAME | sort)
-      qemu-img create -q -f vhdx -o subformat=dynamic "$path" ${cfg.homeDiskSize}
+      qemu-img create -q -f vhdx -o subformat=dynamic,block_size=1M "$path" ${cfg.homeDiskSize}
       ${wslExe} --mount --vhd "$disk" --bare
       udevadm settle
       new=$(comm -13 <(echo "$before") <(lsblk -dnro NAME | sort))
@@ -50,7 +50,7 @@ let
       install -d -m 0700 -o ${toString user.uid} -g ${user.group} "$mnt/${config.wsl.defaultUser}"
       umount "$mnt"
       rmdir "$mnt"
-      echo "Created $disk. Restart the distro to mount it on /home: wsl.exe --terminate $WSL_DISTRO_NAME"
+      echo "Created $disk. Restart the distro to mount it on /home: wsl.exe --terminate ''${WSL_DISTRO_NAME:-NixOS}"
     '';
   };
 in
