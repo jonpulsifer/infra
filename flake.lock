@@ -19,11 +19,11 @@
     "dotfiles": {
       "flake": false,
       "locked": {
-        "lastModified": 1792510095,
-        "narHash": "sha256-/wffnOE0swoyBn02AR99GrvJi3ivAyY1f26xonHfK3w=",
+        "lastModified": 1792893838,
+        "narHash": "sha256-s2ijqMDDPgDXQxi58nDuu1m8u753K/+FPxh3bvkTbQ8=",
         "owner": "jonpulsifer",
         "repo": "dotfiles",
-        "rev": "188d5be2b8eeecedca9495a9abdb5536e533df93",
+        "rev": "66f252a0371864d83d3011a10f5057badfe80fbf",
         "type": "github"
       },
       "original": {
