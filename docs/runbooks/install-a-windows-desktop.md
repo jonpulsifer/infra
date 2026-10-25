@@ -1,9 +1,9 @@
 ---
 title: Install a Windows desktop
-description: Install the owner's Windows configuration on a desktop with one PowerShell script, update it, add the NixOS WSL distro, and test a change to the Windows dotfiles.
+description: Install the owner's Windows configuration on a desktop with one PowerShell script, update it, add or replace the NixOS WSL distro, and test a change to the Windows dotfiles.
 ---
 
-Use this runbook to install or update the owner's Windows configuration on a desktop, such as [tallboy](../hosts/tallboy.md) or [atomic](../hosts/atomic.md). It also adds the NixOS WSL distro and tests a change to the Windows dotfiles. The dotfiles live in the owner's [dotfiles repository](https://github.com/jonpulsifer/dotfiles), not in this one. One script, `windows/bootstrap.ps1` in that repository, clones it and installs the parts in this table.
+Use this runbook to install or update the owner's Windows configuration on a desktop, such as [tallboy](../hosts/tallboy.md) or [atomic](../hosts/atomic.md). It also adds or replaces the NixOS WSL distro and tests a change to the Windows dotfiles. The dotfiles live in the owner's [dotfiles repository](https://github.com/jonpulsifer/dotfiles), not in this one. One script, `windows/bootstrap.ps1` in that repository, clones it and installs the parts in this table.
 
 | Part | What it installs |
 | --- | --- |
@@ -14,6 +14,8 @@ Use this runbook to install or update the owner's Windows configuration on a des
 
 > [!NOTE]
 > Windows and the WSL distro each have their own checkout. No link crosses between the two, so the PowerShell profile works when WSL is not running.
+
+The distro keeps `/home` on its own virtual disk, the `homelab.wsl.homeDisk` option in `nix/images/wsl-home.nix`. At each boot the distro attaches that disk and mounts it on `/home`. Without the disk, the boot stops short of `/home`. Replacing the distro deletes only its root disk, so home stays.
 
 ## Before you start
 
@@ -81,13 +83,39 @@ The bootstrap script clones the dotfiles repository to `$HOME\src\github.com\jon
 
    Result: The command prints `Distro 'NixOS' is up. Finish inside it:` and the next commands.
 
-3. Open the distro.
+3. Stage the `wsl` configuration. It takes effect at the next boot.
+
+   ```powershell
+   wsl -d NixOS -- sudo nixos-rebuild boot --flake github:jonpulsifer/infra#wsl
+   ```
+
+4. Stop the distro.
+
+   ```powershell
+   wsl --terminate NixOS
+   ```
+
+5. Create the home disk. If the desktop is not tallboy, set `homelab.wsl.homeDisk` for it first.
+
+   ```powershell
+   wsl -d NixOS -u root -- wsl-home-init
+   ```
+
+   Result: The command prints `Created D:\WSL\home.vhdx.`, or `The home disk is already attached.` when it exists.
+
+6. Stop the distro again, so that the next boot mounts the home disk.
+
+   ```powershell
+   wsl --terminate NixOS
+   ```
+
+7. Open the distro.
 
    ```powershell
    wsl -d NixOS
    ```
 
-4. Clone the repository.
+8. Clone the repository.
 
    ```bash
    git clone https://github.com/jonpulsifer/infra ~/src/github.com/jonpulsifer/infra
@@ -95,20 +123,53 @@ The bootstrap script clones the dotfiles repository to `$HOME\src\github.com\jon
 
    Result: The command prints `Cloning into` and the path of the checkout.
 
-5. Go to the checkout.
+9. Put the operator age key in `~/.config/age/keys.txt`.
+
+## Replace the WSL distro
+
+Replace the distro to start from a fresh root disk. Home stays on the home disk.
+
+1. In the distro, build the image from `main`.
 
    ```bash
-   cd ~/src/github.com/jonpulsifer/infra
+   gh workflow run nix-image-builder.yaml -f image=wsl
    ```
 
-6. Put the operator age key in `~/.config/age/keys.txt`.
-7. Apply the `wsl` configuration.
+   Result: The run uploads `nixos.wsl` to the `homelab-ng-free` bucket.
+
+2. Copy the image to the Windows downloads folder. Replace `<user>` with the Windows user name.
 
    ```bash
-   sudo nixos-rebuild switch --flake .#wsl
+   gcloud storage cp gs://homelab-ng-free/nixos.wsl /mnt/c/Users/<user>/Downloads/nixos.wsl
    ```
 
-   Result: The command prints `Done. The new configuration is` and a store path.
+3. Open PowerShell 7 and go to the dotfiles checkout.
+
+   ```powershell
+   cd $HOME\src\github.com\jonpulsifer\dotfiles
+   ```
+
+4. Replace the distro. `-Location` is the folder that holds the distro's folder, such as `D:\WSL` on tallboy.
+
+   ```powershell
+   .\windows\Install-Wsl.ps1 -TarballPath $HOME\Downloads\nixos.wsl -Location D:\WSL -Replace
+   ```
+
+   Result: The command prints `Distro 'NixOS' is up.` The script refuses a distro whose `/home` is not on the home disk.
+
+5. Open the distro and check that `/home` is on the home disk.
+
+   ```bash
+   findmnt -no LABEL /home
+   ```
+
+   Result: The command prints `nixos-home`.
+
+6. Install the tools that the home disk does not keep, such as mise's installs.
+
+   ```bash
+   mise install
+   ```
 
 ## Test a Windows dotfiles change
 
@@ -131,7 +192,8 @@ The bootstrap script clones the dotfiles repository to `$HOME\src\github.com\jon
 | `mise install` fails for a tool on Windows only. | The tool has no Windows build. | In `mise-global-config.toml` of the dotfiles repository, give the tool an `os` filter without `windows`. |
 | vibranceGUI stops with `Hash mismatch`. | The download is not the pinned file. | Find why the upstream file changed. Change `-Url` and `-Sha256` in `Install-VibranceGui.ps1` together. |
 | The prompt shows the branch with `?`. | `git status` took more than 150 ms, so the prompt does not check for uncommitted changes in that repository. | Open a new shell to check again. To remove the git segment, set the user environment variable `DOTFILES_PROMPT_GIT` to `0`. |
-| Step 2 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro) prints `distro 'NixOS' already exists`. | The script does not replace a distro. | Use the existing distro. |
+| Step 2 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro) prints `distro 'NixOS' already exists`. | The script replaces a distro only with `-Replace`. | Use the existing distro, or do [Replace the WSL distro](#replace-the-wsl-distro). |
+| The distro opens with an empty home, or `systemctl --failed` lists `home.mount`. | The home disk did not attach. | Run `wsl -d NixOS -u root -- systemctl status wsl-home-disk`. If the VHDX is missing, do steps 5 and 6 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro). |
 
 ## Related
 
