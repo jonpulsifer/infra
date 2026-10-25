@@ -15,7 +15,7 @@ Use this runbook to install or update the owner's Windows configuration on a des
 > [!NOTE]
 > Windows and the WSL distro each have their own checkout. No link crosses between the two, so the PowerShell profile works when WSL is not running.
 
-The distro keeps `/home` on its own virtual disk, the `homelab.wsl.homeDisk` option in `nix/images/wsl-home.nix`. At each boot the distro attaches that disk and mounts it on `/home`. Without the disk, the boot stops short of `/home`. Replacing the distro deletes only its root disk, so home stays.
+The distro keeps `/home` on its own virtual disk, the `homelab.wsl.homeDisk` option in `nix/images/wsl-home.nix`. At each boot the distro attaches that disk and mounts it on `/home`. Without the disk, a user shell waits 30 seconds for `/home`, then exits. Root still gets a shell. Replacing the distro deletes only its root disk, so home stays.
 
 ## Before you start
 
@@ -193,7 +193,7 @@ Replace the distro to start from a fresh root disk. Home stays on the home disk.
 | vibranceGUI stops with `Hash mismatch`. | The download is not the pinned file. | Find why the upstream file changed. Change `-Url` and `-Sha256` in `Install-VibranceGui.ps1` together. |
 | The prompt shows the branch with `?`. | `git status` took more than 150 ms, so the prompt does not check for uncommitted changes in that repository. | Open a new shell to check again. To remove the git segment, set the user environment variable `DOTFILES_PROMPT_GIT` to `0`. |
 | Step 2 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro) prints `distro 'NixOS' already exists`. | The script replaces a distro only with `-Replace`. | Use the existing distro, or do [Replace the WSL distro](#replace-the-wsl-distro). |
-| The distro opens with an empty home, or `systemctl --failed` lists `home.mount`. | The home disk did not attach. | Run `wsl -d NixOS -u root -- systemctl status wsl-home-disk`. If the VHDX is missing, do steps 5 and 6 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro). |
+| The distro prints `/home is not mounted` and closes the shell. | The home disk did not attach. | Run `wsl -d NixOS -u root -- systemctl status wsl-home-disk`. If the VHDX is missing, do steps 5 and 6 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro). |
 
 ## Related
 
