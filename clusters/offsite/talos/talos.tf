@@ -44,21 +44,36 @@ locals {
   # hotrod is the sandbox node: Rowbutt's sandboxes, the ARC runners and the
   # kthx engine's in-cluster build Jobs select its label and tolerate its
   # taint, and the taint keeps every other pod off it.
+  # generation changes when a node's recorded install must be re-created
+  # without a reboot: the module re-creates its talos_machine, which upgrades
+  # only when the running version differs from the image's.
   nodes = {
-    retrofit  = { role = "controlplane", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "100GiB" }
-    oldschool = { role = "worker", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "100GiB" }
+    retrofit = {
+      role       = "controlplane"
+      install    = "disk.dev_path == \"/dev/sda\""
+      ephemeral  = "100GiB"
+      generation = "v1.14.4-1"
+    }
+    oldschool = {
+      role       = "worker"
+      install    = "disk.dev_path == \"/dev/sda\""
+      ephemeral  = "100GiB"
+      generation = "v1.14.4-1"
+    }
     hotrod = {
-      role      = "worker"
-      install   = "disk.dev_path == \"/dev/nvme0n1\""
-      ephemeral = "64GiB"
-      labels    = { "lolwtf.ca/sandbox" = "true" }
-      taints    = { "lolwtf.ca/sandbox" = "true:NoSchedule" }
+      role       = "worker"
+      install    = "disk.dev_path == \"/dev/nvme0n1\""
+      ephemeral  = "64GiB"
+      generation = "v1.14.4-1"
+      labels     = { "lolwtf.ca/sandbox" = "true" }
+      taints     = { "lolwtf.ca/sandbox" = "true:NoSchedule" }
     }
   }
 }
 
-# No offsite node has an install generation, so each record is imported rather
-# than created: a created record would replace the node's talos_machine.
+# Each node's install record is imported, not created. The generation set
+# above then changes the record, which re-creates the node's talos_machine
+# through Create: no reboot while the running version matches the image's.
 import {
   for_each = local.nodes
   to       = module.talos.terraform_data.install[each.key]
@@ -71,7 +86,7 @@ module "talos" {
   site = "offsite"
 
   # renovate: datasource=github-releases depName=siderolabs/talos
-  talos_version  = "v1.14.2"
+  talos_version  = "v1.14.4"
   talos_contract = "v1.14"
   # renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
   kubernetes_version = "v1.36.3"
@@ -96,6 +111,8 @@ module "talos" {
     patches = [local.ephemeral_patch[name]]
     labels  = try(n.labels, {})
     taints  = try(n.taints, {})
+
+    install_generation = try(n.generation, null)
   } }
 
   cluster_patches      = local.cluster_patches
