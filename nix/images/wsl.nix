@@ -11,6 +11,7 @@
     ../system/user.nix
     ../system/nixos.nix
     ../system/mise-dotfiles.nix
+    ./wsl-home.nix
   ];
 
   nixpkgs.config.allowUnfree = true;
