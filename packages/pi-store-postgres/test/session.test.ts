@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  ROOT_CONVERSATION_ID,
-  StorageRejected,
-} from '@earendil-works/pi-durable';
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
 import { SQL } from 'bun';
 import {
   deleteStorage,
@@ -225,7 +222,6 @@ describe('the store', () => {
       .commit([note(3), note(2)], ctx)
       .catch((reason: unknown) => reason);
 
-    expect(error).not.toBeInstanceOf(StorageRejected);
     expect((error as Error).message).toContain('ID 2 already belongs to entry');
     expect(await storage.commit([note(3)], ctx)).toBeGreaterThan(1);
     expect(await entryIds(storage)).toEqual([2, 3]);

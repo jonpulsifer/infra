@@ -542,7 +542,7 @@ describe('brainProfiles', () => {
     const made = setup();
     const own: Profile = {
       ...(PROFILES.get('operator') as Profile),
-      model: { spec: 'opencode-go/minimax-m2.7', thinking: 'high' },
+      model: { spec: 'opencode-go/minimax-m3', thinking: 'high' },
     };
     const profiles = brainProfiles(
       made,
@@ -550,14 +550,14 @@ describe('brainProfiles', () => {
       60_000,
       new Map([[own.id, own]]),
     );
-    expect(profiles.get('operator')?.model.id).toBe('minimax-m2.7');
+    expect(profiles.get('operator')?.model.id).toBe('minimax-m3');
     expect(profiles.get('operator')?.thinking).toBe('high');
   });
 
   test.each([
     ['opencode-go/no-such-model', 'medium', 'which pi-ai does not list'],
     ['qwen3.8-max', 'medium', 'must be'],
-    ['opencode-go/qwen3.8-max', 'high', 'is not a level'],
+    ['opencode-go/glm-5.3', 'medium', 'is not a level'],
   ] as const)('refuses a profile model %s at %s', (spec, thinking, why) => {
     const own: Profile = {
       ...(PROFILES.get('investigator') as Profile),

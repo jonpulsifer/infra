@@ -369,10 +369,10 @@ describe('the wake tool', () => {
 
     const refused = await run({ minutes: 15, note: 'n', pr: 4 });
     expect(refused.isError).toBe(true);
-    expect(JSON.stringify(refused.content)).toContain('no GitHub App');
+    expect(JSON.stringify(refused.output)).toContain('no GitHub App');
 
     const cancelled = await run({ minutes: 15, note: 'n', cancel: true });
-    expect(JSON.stringify(cancelled.content)).toContain('cancelled');
+    expect(JSON.stringify(cancelled.output)).toContain('cancelled');
     expect(await store!.list()).toEqual([]);
 
     asker = null;

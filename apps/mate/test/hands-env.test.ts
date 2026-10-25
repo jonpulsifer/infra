@@ -178,7 +178,7 @@ async function script(env: ExecutionEnv, root: string): Promise<unknown[]> {
   const note = (label: string, result: unknown) =>
     out.push([label, shape(result, root)]);
   const exec = async (
-    command: string,
+    command: Parameters<ExecutionEnv['exec']>[0],
     options: Parameters<ExecutionEnv['exec']>[1] = {},
   ) => {
     let text = '';
@@ -229,6 +229,45 @@ async function script(env: ExecutionEnv, root: string): Promise<unknown[]> {
   } else {
     note('reader', reader);
   }
+  const binary = await env.openBinaryReader('a/c.txt', undefined, C);
+  if (binary.ok) {
+    const info = await binary.value.info(C);
+    note('binary reader', [
+      info.ok ? info.value.size : info,
+      await binary.value.read(4, 3, C),
+      await binary.value.read(100, 3, C),
+      await binary.value.scanLines({ startLine: 1, endLine: 3 }, C),
+    ]);
+    await binary.value.close(C);
+  } else {
+    note('binary reader', binary);
+  }
+  note(
+    'binary reader on a directory',
+    await env.openBinaryReader('a', undefined, C),
+  );
+  note(
+    'binary reader missing',
+    await env.openBinaryReader('nope', undefined, C),
+  );
+  const dir = await env.openDirReader('a', C);
+  if (dir.ok) {
+    const names: string[] = [];
+    for (let page = 0; page < 5; page += 1) {
+      const next = await dir.value.next(1, C);
+      if (!next.ok) {
+        note('dir reader', next);
+        break;
+      }
+      names.push(...next.value.entries.map((entry) => entry.name));
+      if (next.value.done) break;
+    }
+    await dir.value.close(C);
+    note('dir reader', names.sort());
+  } else {
+    note('dir reader', dir);
+  }
+  note('exec argv', await exec(['printf', '%s|', "it's", 'a b', '$HOME']));
   // stdout and stderr are separate pipes; either may arrive first. Compare
   // their content without assuming a cross-pipe order.
   const mixed = await exec('echo hi; echo err >&2; exit 3');
@@ -269,6 +308,8 @@ describe('HandsEnv', () => {
       target.openTextLineReader('a', C),
       target.readTextLines('a', { maxLines: Number.NaN }, C),
       target.readBinaryFile('a', C),
+      target.openBinaryReader('a', undefined, C),
+      target.openDirReader('a', C),
       target.writeFile('a', 'x', C),
       target.appendFile('a', new Uint8Array([1]), C),
       target.renameFile('a', 'b', C),

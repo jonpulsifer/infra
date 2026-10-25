@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { type Storage, StorageRejected } from '@earendil-works/pi-durable';
+import type { Storage } from '@earendil-works/pi-durable';
 import { SQL } from 'bun';
 import { CommitOutcomeUnknownError, openStorage } from '../src/index.ts';
 import { isTransient, RETRY_WINDOW_MS } from '../src/retry.ts';
@@ -76,7 +76,6 @@ describe('a commit whose connection fails', () => {
 
     const error = await failure(failed);
     expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
-    expect(error).not.toBeInstanceOf(StorageRejected);
     expect((error as CommitOutcomeUnknownError).firstSeq).toBe(2);
     expect(await entryIds(storage)).toEqual([2, 3]);
   });
@@ -124,9 +123,8 @@ describe('a commit whose connection fails', () => {
     await down;
 
     const error = await failure(failed);
-    expect(error).toBeInstanceOf(StorageRejected);
     expect(error).not.toBeInstanceOf(CommitOutcomeUnknownError);
-    expect(isTransient((error as Error).cause)).toBe(true);
+    expect(isTransient(error)).toBe(true);
     expect(await entryIds(await openStorage(database().sql, id))).toEqual([2]);
   });
 
@@ -143,8 +141,8 @@ describe('a commit whose connection fails', () => {
     await down;
 
     const error = await failure(failed);
-    expect(error).toBeInstanceOf(StorageRejected);
-    expect(isTransient((error as Error).cause)).toBe(true);
+    expect(error).not.toBeInstanceOf(CommitOutcomeUnknownError);
+    expect(isTransient(error)).toBe(true);
     expect(await entryIds(await openStorage(database().sql, id))).toEqual([2]);
   });
 
@@ -155,7 +153,6 @@ describe('a commit whose connection fails', () => {
     const error = await failure(storage.commit([note(2)], ctx));
 
     expect(error).toBeInstanceOf(Error);
-    expect(error).not.toBeInstanceOf(StorageRejected);
     expect(error).not.toBeInstanceOf(CommitOutcomeUnknownError);
     expect((error as Error).message).toContain('ID 2 already belongs to entry');
     const attempts = proxy.sent
@@ -184,7 +181,6 @@ test('a commit refuses a session another writer moved', async () => {
   const error = await failure(first.commit([note(4)], ctx));
 
   expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
-  expect(error).not.toBeInstanceOf(StorageRejected);
   expect(error).toMatchObject({ firstSeq: 2, foundSeq: 3 });
   expect(await entryIds(first)).toEqual([2, 3]);
 });
@@ -266,8 +262,7 @@ describe('a server that is down', () => {
         postgresStorage(sql, sessionId('silent')).commit([createRoot], ctx),
       );
 
-      expect(failed).toBeInstanceOf(StorageRejected);
-      expect((failed as Error).cause).toMatchObject({
+      expect(failed).toMatchObject({
         code: 'ERR_POSTGRES_CONNECTION_TIMEOUT',
       });
       expect(connections).toBe(1);

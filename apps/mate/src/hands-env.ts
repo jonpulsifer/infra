@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Context } from '@earendil-works/chord';
 import {
+  type BinaryReader,
+  type DirReader,
   type ExecutionEnv,
   ExecutionError,
   type ExecutionErrorCode,
@@ -15,6 +17,9 @@ import {
   FileError,
   type FileErrorCode,
   type FileInfo,
+  type FileWatcher,
+  type LineScan,
+  LineScanner,
   ok,
   type Result,
   type ShellExecOptions,
@@ -510,6 +515,56 @@ export class HandsEnv implements ExecutionEnv {
     );
   }
 
+  /**
+   * The daemon has no positional reads, so the file is read whole, within its
+   * read limit, and served from memory.
+   */
+  async openBinaryReader(
+    path: string,
+    options: { noFollow?: boolean } | undefined,
+    context: Context,
+  ): Promise<Result<BinaryReader, FileError>> {
+    const resolved = this.resolve(path);
+    let info = await this.fileInfo(resolved, context);
+    if (info.ok && info.value.kind === 'symlink') {
+      if (options?.noFollow) {
+        return err(
+          new FileError('invalid', 'Path is a symbolic link', resolved),
+        );
+      }
+      const target = await this.canonicalPath(resolved, context);
+      if (!target.ok) return err(target.error);
+      info = await this.fileInfo(target.value, context);
+    }
+    if (!info.ok) return err(info.error);
+    if (info.value.kind === 'directory') {
+      return err(
+        new FileError('is_directory', 'Path is a directory', resolved),
+      );
+    }
+    const bytes = await this.readBinaryFile(resolved, context);
+    if (!bytes.ok) return err(bytes.error);
+    const opened = { ...info.value, size: bytes.value.byteLength };
+    return ok(new BufferedBinaryReader(opened, bytes.value, resolved));
+  }
+
+  /** One page of the daemon's whole listing at a time. */
+  async openDirReader(
+    path: string,
+    context: Context,
+  ): Promise<Result<DirReader, FileError>> {
+    const listed = await this.listDir(path, context);
+    return listed.ok
+      ? ok(new ListedDirReader(listed.value))
+      : err(listed.error);
+  }
+
+  async watch(): Promise<Result<FileWatcher, FileError>> {
+    return err(
+      new FileError('not_supported', 'the sandbox daemon has no watch'),
+    );
+  }
+
   writeFile(
     path: string,
     content: string | Uint8Array,
@@ -662,7 +717,7 @@ export class HandsEnv implements ExecutionEnv {
   }
 
   async exec(
-    command: string,
+    command: string | readonly string[],
     options: ShellExecOptions | undefined,
     context: Context,
   ): Promise<Result<ShellExecResult, ExecutionError>> {
@@ -680,10 +735,11 @@ export class HandsEnv implements ExecutionEnv {
           : outputText(update);
       tail = update.kind === 'replace' ? update.output.text : tail + text;
       if (tail.length > TAIL_KEPT) tail = tail.slice(-TAIL_KEPT);
-      if (text !== '') onOutput?.(text, context);
+      // The daemon merges both streams into one.
+      if (text !== '') onOutput?.(text, context, { stream: 'stdout' });
     };
     const params = {
-      command,
+      command: typeof command === 'string' ? command : shellWords(command),
       cwd: options?.cwd ? this.resolve(options.cwd) : this.cwd,
       ...(options?.env === undefined ? {} : { env: options.env }),
       ...(options?.inheritEnv === undefined
@@ -912,6 +968,88 @@ class HandsLineReader implements TextLineReader {
       .call('reader.close', { reader: this.reader })
       .catch(() => {});
   }
+}
+
+/** A file read whole, so every read sees the bytes it was opened with. */
+class BufferedBinaryReader implements BinaryReader {
+  private closed = false;
+
+  constructor(
+    private readonly opened: FileInfo,
+    private readonly bytes: Uint8Array,
+    private readonly path: string,
+  ) {}
+
+  async info(context: Context): Promise<Result<FileInfo, FileError>> {
+    return this.usable(context) ?? ok({ ...this.opened });
+  }
+
+  async read(
+    offset: number,
+    length: number,
+    context: Context,
+  ): Promise<Result<Uint8Array, FileError>> {
+    return (
+      this.usable(context) ??
+      ok(this.bytes.slice(offset, offset + Math.max(0, length)))
+    );
+  }
+
+  async scanLines(
+    options: { startLine: number; endLine?: number },
+    context: Context,
+  ): Promise<Result<LineScan, FileError>> {
+    const unusable = this.usable(context);
+    if (unusable) return unusable;
+    try {
+      const scanner = new LineScanner(options.startLine, options.endLine);
+      scanner.push(this.bytes);
+      return ok(scanner.finish());
+    } catch (error) {
+      return err(new FileError('invalid', plain(error), this.path));
+    }
+  }
+
+  async close(_context: Context): Promise<void> {
+    this.closed = true;
+  }
+
+  private usable(context: Context): Result<never, FileError> | undefined {
+    if (context.abortSignal?.aborted) {
+      return err(new FileError('aborted', 'aborted', this.path));
+    }
+    if (this.closed) {
+      return err(
+        new FileError('invalid', 'Binary reader is closed', this.path),
+      );
+    }
+    return undefined;
+  }
+}
+
+class ListedDirReader implements DirReader {
+  private at = 0;
+
+  constructor(private readonly entries: FileInfo[]) {}
+
+  async next(
+    maxEntries: number,
+    context: Context,
+  ): Promise<Result<{ entries: FileInfo[]; done: boolean }, FileError>> {
+    if (context.abortSignal?.aborted) {
+      return err(new FileError('aborted', 'aborted'));
+    }
+    const page = this.entries.slice(this.at, this.at + Math.max(0, maxEntries));
+    this.at += page.length;
+    return ok({ entries: page, done: this.at >= this.entries.length });
+  }
+
+  async close(_context: Context): Promise<void> {}
+}
+
+/** An argv as one shell command whose words reach the program unparsed. */
+export function shellWords(argv: readonly string[]): string {
+  return argv.map((word) => `'${word.replaceAll("'", `'\\''`)}'`).join(' ');
 }
 
 function notSupported(method: string, path: string): Result<never, FileError> {

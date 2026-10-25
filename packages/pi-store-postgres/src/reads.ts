@@ -21,6 +21,7 @@ import type {
   TaskQuery,
   TaskRecord,
 } from '@earendil-works/pi-durable';
+import { StorageRequestError } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
 import {
   addressColumns,
@@ -34,9 +35,24 @@ import {
   int,
   page,
   type RecordRow,
+  type ScanStart,
+  scanStart,
 } from './rows.ts';
 
 type AnyTask = TaskRecord<never, never, never>;
+
+/** The id bound and direction of a table scan, oldest or newest first. */
+function idScan(
+  sql: SQL,
+  start: ScanStart,
+): { from: SQL.Query<unknown>; by: SQL.Query<unknown> } {
+  return start.order === 'ascending'
+    ? { from: sql`id > ${start.after ?? -1}`, by: sql`id ASC` }
+    : {
+        from: sql`id < ${start.after ?? Number.MAX_SAFE_INTEGER}`,
+        by: sql`id DESC`,
+      };
+}
 
 export async function readConversation(
   sql: SQL,
@@ -57,16 +73,19 @@ export async function scanConversations(
   limit: number,
   cursor: Cursor | undefined,
 ): Promise<Page<ConversationRecord, Cursor>> {
+  const start = scanStart(query.order, cursor, 'ascending');
+  const scan = idScan(sql, start);
   const rows: RecordRow[] = await sql`
     SELECT record FROM pi_conversations
-    WHERE session_id = ${sessionId} AND id > ${cursorAfter(cursor) ?? -1}
+    WHERE session_id = ${sessionId} AND ${scan.from}
       ${query.ownerConversationId === undefined ? sql`` : sql`AND owner_conversation_id = ${query.ownerConversationId}`}
       ${query.ownerTaskId === undefined ? sql`` : sql`AND owner_task_id = ${query.ownerTaskId}`}
-    ORDER BY id LIMIT ${limit + 1}
+    ORDER BY ${scan.by} LIMIT ${limit + 1}
   `;
   return page(
     rows.map((row) => decode<ConversationRecord>(row)),
     limit,
+    start.order,
   );
 }
 
@@ -84,7 +103,7 @@ export async function readEntry(
   if (conversationId !== undefined) {
     conversation = await readConversation(sql, sessionId, conversationId);
     if (conversation === undefined) {
-      throw new Error(`Unknown conversation: ${conversationId}`);
+      throw new StorageRequestError(`Unknown conversation: ${conversationId}`);
     }
   }
   const [row]: EntryRow[] = await sql`
@@ -117,7 +136,7 @@ export async function findLatestHeadMarker(
 ): Promise<(EntryRecord & { readonly head: EntryId }) | undefined> {
   let conversation = await readConversation(sql, sessionId, conversationId);
   if (conversation === undefined) {
-    throw new Error(`Unknown conversation: ${conversationId}`);
+    throw new StorageRequestError(`Unknown conversation: ${conversationId}`);
   }
   let upper: number | undefined = atOrBefore;
   for (;;) {
@@ -148,15 +167,20 @@ export async function scanEntries(
   limit: number,
   cursor: Cursor | undefined,
 ): Promise<Page<EntryRecord, Cursor>> {
+  const { order, after } = scanStart(query.order, cursor, 'descending');
+  if (order === 'ascending') {
+    return scanEntriesAscending(sql, sessionId, query, limit, after);
+  }
   let conversation = await readConversation(
     sql,
     sessionId,
     query.conversationId,
   );
   if (conversation === undefined) {
-    throw new Error(`Unknown conversation: ${query.conversationId}`);
+    throw new StorageRequestError(
+      `Unknown conversation: ${query.conversationId}`,
+    );
   }
-  const after = cursorAfter(cursor);
   let upper: number | undefined = query.maxEntryId;
   if (after !== undefined) {
     upper = Math.min(upper ?? Number.MAX_SAFE_INTEGER, after - 1);
@@ -180,7 +204,57 @@ export async function scanEntries(
       conversation.parent.conversationId,
     ))!;
   }
-  return page(values, limit);
+  return page(values, limit, 'descending');
+}
+
+/** Oldest first: the fork chain from its root forward, each conversation up to its fork point. */
+async function scanEntriesAscending(
+  sql: SQL,
+  sessionId: string,
+  query: EntryQuery,
+  limit: number,
+  after: number | undefined,
+): Promise<Page<EntryRecord, Cursor>> {
+  const segments: { conversationId: ConversationId; upper?: number }[] = [];
+  let conversation = await readConversation(
+    sql,
+    sessionId,
+    query.conversationId,
+  );
+  if (conversation === undefined) {
+    throw new StorageRequestError(
+      `Unknown conversation: ${query.conversationId}`,
+    );
+  }
+  let upper: number | undefined = query.maxEntryId;
+  for (;;) {
+    segments.push({ conversationId: conversation.id, upper });
+    if (conversation.parent === undefined) break;
+    upper = Math.min(upper ?? conversation.parent.at, conversation.parent.at);
+    if (query.minEntryId !== undefined && upper < query.minEntryId) break;
+    conversation = (await readConversation(
+      sql,
+      sessionId,
+      conversation.parent.conversationId,
+    ))!;
+  }
+  const lower =
+    after === undefined
+      ? query.minEntryId
+      : Math.max(query.minEntryId ?? after + 1, after + 1);
+  const values: EntryRecord[] = [];
+  for (const segment of segments.reverse()) {
+    const rows: RecordRow[] = await sql`
+      SELECT record FROM pi_entries
+      WHERE session_id = ${sessionId} AND conversation_id = ${segment.conversationId}
+        ${lower === undefined ? sql`` : sql`AND id >= ${lower}`}
+        ${segment.upper === undefined ? sql`` : sql`AND id <= ${segment.upper}`}
+      ORDER BY id ASC LIMIT ${limit + 1 - values.length}
+    `;
+    values.push(...rows.map((row) => decode<EntryRecord>(row)));
+    if (values.length > limit) break;
+  }
+  return page(values, limit, 'ascending');
 }
 
 export async function readTask(
@@ -201,19 +275,22 @@ export async function scanTasks(
   limit: number,
   cursor: Cursor | undefined,
 ): Promise<Page<AnyTask, Cursor>> {
+  const start = scanStart(query.order, cursor, 'ascending');
+  const scan = idScan(sql, start);
   const rows: RecordRow[] = await sql`
     SELECT record FROM pi_tasks
-    WHERE session_id = ${sessionId} AND id > ${cursorAfter(cursor) ?? -1}
+    WHERE session_id = ${sessionId} AND ${scan.from}
       ${query.conversationId === undefined ? sql`` : sql`AND conversation_id = ${query.conversationId}`}
       ${query.kind === undefined ? sql`` : sql`AND kind = ${indexed(query.kind)}`}
       ${query.status === undefined ? sql`` : sql`AND status = ${query.status}`}
       ${query.abortRequested === undefined ? sql`` : sql`AND abort_requested = ${query.abortRequested}`}
       ${query.background === undefined ? sql`` : sql`AND background = ${query.background}`}
-    ORDER BY id LIMIT ${limit + 1}
+    ORDER BY ${scan.by} LIMIT ${limit + 1}
   `;
   return page(
     rows.map((row) => decode<AnyTask>(row)),
     limit,
+    start.order,
   );
 }
 
@@ -236,16 +313,19 @@ export async function scanSubmissions(
   limit: number,
   cursor: Cursor | undefined,
 ): Promise<Page<SubmissionRecord, Cursor>> {
+  const start = scanStart(query.order, cursor, 'ascending');
+  const scan = idScan(sql, start);
   const rows: RecordRow[] = await sql`
     SELECT record FROM pi_submissions
-    WHERE session_id = ${sessionId} AND id > ${cursorAfter(cursor) ?? -1}
+    WHERE session_id = ${sessionId} AND ${scan.from}
       ${query.conversationId === undefined ? sql`` : sql`AND conversation_id = ${query.conversationId}`}
       ${query.status === undefined ? sql`` : sql`AND status = ${query.status}`}
-    ORDER BY id LIMIT ${limit + 1}
+    ORDER BY ${scan.by} LIMIT ${limit + 1}
   `;
   return page(
     rows.map((row) => decode<SubmissionRecord>(row)),
     limit,
+    start.order,
   );
 }
 

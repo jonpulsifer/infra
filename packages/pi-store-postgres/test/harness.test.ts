@@ -86,7 +86,7 @@ async function harnessOver(storage: Storage, effects: string[]) {
           parameters: Type.Object({ text: Type.String() }),
           execute: async (args) => {
             effects.push(args.text);
-            return { content: [{ type: 'text', text: 'saved' }] };
+            return { output: [{ type: 'text', text: 'saved' }] };
           },
         }),
       ],

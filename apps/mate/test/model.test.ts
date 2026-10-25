@@ -18,6 +18,8 @@ import {
 import { RecordingLog } from './support.ts';
 
 const SPEC = 'opencode-go/qwen3.8-max';
+/** A catalog model that takes only some thinking levels. */
+const LIMITED = 'opencode-go/glm-5.3';
 const dirs: string[] = [];
 
 afterEach(() => {
@@ -65,8 +67,8 @@ describe('createModelSetup', () => {
     const made = setup();
     expect(made.model.provider).toBe('opencode-go');
     expect(made.model.id).toBe('qwen3.8-max');
-    expect(made.model.api).toBe('openai-completions');
-    expect(made.model.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+    expect(made.model.api).toBe('anthropic-messages');
+    expect(made.model.baseUrl).toBe('https://opencode.ai/inference/go');
     expect(made.thinking).toBe('medium');
     // `none` is the rollback: nothing routes, and a request drops another
     // model's reasoning, as the fallback's does.
@@ -132,9 +134,9 @@ describe('createModelSetup', () => {
     [CODEX, 'opencode-go/no-such-model', null, 'which pi-ai does not list'],
     [
       CODEX,
-      SPEC,
-      'high',
-      `MATE_FALLBACK_THINKING=high is not a level ${SPEC} supports: low, medium, xhigh`,
+      LIMITED,
+      'medium',
+      `MATE_FALLBACK_THINKING=medium is not a level ${LIMITED} supports: low, high, max`,
     ],
   ])(
     'refuses %s falling back to %s at %p',
@@ -147,13 +149,17 @@ describe('createModelSetup', () => {
 
   // Raising MATE_THINKING must never make mate refuse to boot over the fallback.
   test("an unset fallback level is the fallback's nearest to MATE_THINKING", () => {
-    const made = setup({ spec: CODEX, thinking: 'high', fallbackSpec: SPEC });
-    expect(made.thinking).toBe('high');
-    expect(made.router?.status().fallback?.thinking).toBe('xhigh');
+    const made = setup({
+      spec: CODEX,
+      thinking: 'xhigh',
+      fallbackSpec: LIMITED,
+    });
+    expect(made.thinking).toBe('xhigh');
+    expect(made.router?.status().fallback?.thinking).toBe('max');
     const low = setup({
       spec: CODEX,
-      thinking: 'high',
-      fallbackSpec: SPEC,
+      thinking: 'xhigh',
+      fallbackSpec: LIMITED,
       fallbackThinking: 'low',
     });
     expect(low.router?.status().fallback?.thinking).toBe('low');
@@ -162,7 +168,7 @@ describe('createModelSetup', () => {
   test('a fallback with the smaller context window is warned of, since compaction follows the primary', () => {
     const made = setup({
       spec: CODEX,
-      fallbackSpec: 'opencode-go/minimax-m2.7',
+      fallbackSpec: 'opencode-go/kimi-k2.7-code',
     });
     expect(
       made.log.of('the fallback model has the smaller context window'),
@@ -171,7 +177,7 @@ describe('createModelSetup', () => {
         level: 'warn',
         fields: expect.objectContaining({
           primaryWindow: 272_000,
-          fallbackWindow: 204_800,
+          fallbackWindow: 262_144,
         }),
       }),
     ]);
@@ -223,12 +229,12 @@ describe('createModelSetup', () => {
     expect(made.model.cost.input).toBe(0);
   });
 
-  test.each<ThinkingLevel>(['off', 'high'])(
+  test.each<ThinkingLevel>(['off', 'medium'])(
     'refuses thinking %s, naming the levels the model takes',
     (thinking) => {
-      expect(() => setup({ thinking })).toThrow(
+      expect(() => setup({ spec: LIMITED, thinking })).toThrow(
         new ConfigError(
-          `MATE_THINKING=${thinking} is not a level ${SPEC} supports: low, medium, xhigh`,
+          `MATE_THINKING=${thinking} is not a level ${LIMITED} supports: low, high, max`,
         ),
       );
     },
@@ -320,20 +326,20 @@ describe('profileModel', () => {
     const own = profileModel(
       made,
       'profile p',
-      'opencode-go/minimax-m2.7',
+      'opencode-go/minimax-m3',
       'medium',
     );
     expect(own.model).toBe(
-      made.direct.getModel('opencode-go', 'minimax-m2.7') as typeof own.model,
+      made.direct.getModel('opencode-go', 'minimax-m3') as typeof own.model,
     );
     expect(own.thinking).toBe('medium');
   });
 
   test('refuses a level the model does not support, and a model the catalog lacks', () => {
     const made = setup();
-    expect(() => profileModel(made, 'profile p', SPEC, 'high')).toThrow(
+    expect(() => profileModel(made, 'profile p', LIMITED, 'medium')).toThrow(
       new ConfigError(
-        `profile p=high is not a level ${SPEC} supports: low, medium, xhigh`,
+        `profile p=medium is not a level ${LIMITED} supports: low, high, max`,
       ),
     );
     expect(() =>

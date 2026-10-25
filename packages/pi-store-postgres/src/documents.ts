@@ -7,6 +7,7 @@ import type {
   JsonObject,
   StoredDocument,
 } from '@earendil-works/pi-durable';
+import { StorageRequestError } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
 import { decode, indexed, type RecordRow } from './rows.ts';
 
@@ -77,7 +78,9 @@ export async function materializeDocument(
   if (row === undefined) return undefined;
   const record = decode<DocumentRecord>(row);
   if (at !== 'current' && isCurrentOnly(record)) {
-    throw new Error(`Document ${id} does not retain historical content`);
+    throw new StorageRequestError(
+      `Document ${id} does not retain historical content`,
+    );
   }
   if (!isAliveAt(record, at)) return undefined;
   const upper = at === 'current' ? Number.MAX_SAFE_INTEGER : at;

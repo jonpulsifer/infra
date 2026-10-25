@@ -324,17 +324,17 @@ describe('the tools', () => {
     expect(src.asked).toEqual([
       { since: NOW - 24 * HOUR, until: NOW, limit: RECALL_LIST_MAX },
     ]);
-    expect(JSON.stringify(said.content)).toContain(
+    expect(JSON.stringify(said.output)).toContain(
       '1 thread active from 2026-10-12T06:00:00.000Z to 2026-10-13T06:00:00.000Z:',
     );
-    expect(JSON.stringify(said.content)).toContain(
+    expect(JSON.stringify(said.output)).toContain(
       '- slack:C1:p-9 · slack · operator · 3 turns · last 2026-10-13T05:00:00.000Z · Fix the thing',
     );
     const none = await run(RECALL_THREADS_TOOL, {
       since: '1970-01-01T00:00:00Z',
       until: '1970-01-02T00:00:00Z',
     });
-    expect(JSON.stringify(none.content)).toContain('No thread was active');
+    expect(JSON.stringify(none.output)).toContain('No thread was active');
   });
 
   test('recall_threads refuses a bad, reversed or too wide window', async () => {
@@ -351,7 +351,7 @@ describe('the tools', () => {
   test('recall_thread reads a page of the transcript, and says so for an unknown key or a page past the end', async () => {
     const said = await run(RECALL_THREAD_TOOL, { key: 'slack:C1:p-9' });
     expect(said.isError).toBeUndefined();
-    const text = JSON.stringify(said.content);
+    const text = JSON.stringify(said.output);
     expect(text).toContain('[slack:C1:p-9, page 1 of 1]');
     expect(text).toContain('owner: What is up with flux on offsite?');
     const unknown = await run(RECALL_THREAD_TOOL, { key: 'slack:C1:p-0' });
@@ -361,6 +361,6 @@ describe('the tools', () => {
       page: 2,
     });
     expect(past.isError).toBe(true);
-    expect(JSON.stringify(past.content)).toContain('page 2 is past the end');
+    expect(JSON.stringify(past.output)).toContain('page 2 is past the end');
   });
 });
