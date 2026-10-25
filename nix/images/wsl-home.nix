@@ -1,6 +1,7 @@
 # /home lives on its own VHDX, so the distro can be replaced without losing home. WSL forgets an attached
-# disk at every shutdown, so a unit attaches it on each boot before /home mounts. The mount is required: a
-# missing disk stops the boot instead of handing out an empty /home on the root disk.
+# disk at every shutdown, so a unit attaches it on each boot before /home mounts. WSL starts shells without
+# waiting for systemd, so a user's zsh waits for /home and exits if it never mounts, rather than working in
+# the empty /home on the root disk. Root still gets a shell to repair it.
 {
   config,
   lib,
@@ -78,6 +79,7 @@ in
       before = [ "home.mount" ];
       requiredBy = [ "home.mount" ];
       unitConfig.DefaultDependencies = false;
+      environment.WSL_UTF8 = "1";
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -87,6 +89,22 @@ in
         ${wslExe} --mount --vhd '${cfg.homeDisk}' --bare
       '';
     };
+
+    programs.zsh.shellInit = ''
+      if (( EUID != 0 )) && ! ${pkgs.util-linux}/bin/mountpoint -q /home; then
+        for _ in {1..300}; do
+          ${pkgs.util-linux}/bin/mountpoint -q /home && break
+          ${pkgs.coreutils}/bin/sleep 0.1
+        done
+        if ! ${pkgs.util-linux}/bin/mountpoint -q /home; then
+          print -ru2 "/home is not mounted: ${cfg.homeDisk} did not attach."
+          print -ru2 "Repair it as root: wsl -u root -- systemctl status wsl-home-disk"
+          exit 1
+        fi
+        # The shell started in the root disk's /home/<user>, which the mount now hides.
+        cd -q -- "$PWD"
+      fi
+    '';
 
     fileSystems."/home" = {
       device = "/dev/disk/by-label/${label}";
