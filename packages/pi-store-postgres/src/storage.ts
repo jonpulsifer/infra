@@ -31,11 +31,10 @@ import type {
   TaskQuery,
   TaskRecord,
 } from '@earendil-works/pi-durable';
-import { StorageRejected } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
 import { applyCommit, prepareCommit } from './commit.ts';
 import * as reads from './reads.ts';
-import { isTransient, retrying } from './retry.ts';
+import { retrying } from './retry.ts';
 import { int } from './rows.ts';
 
 /**
@@ -108,7 +107,7 @@ class PostgresStorage implements Storage {
 
   commit(writes: readonly StorageWrite[], _context: Context): Promise<Seq> {
     if (!this.open) {
-      return Promise.reject(new StorageRejected(this.closedError().message));
+      return Promise.reject(this.closedError());
     }
     return this.admit(() => {
       const result = this.tail.then(() => this.commitWithRetry(writes));
@@ -316,10 +315,9 @@ class PostgresStorage implements Storage {
    * Retries only a commit whose earlier attempts provably did not commit: a
    * retry takes the session's locks, which waits out any attempt still in
    * flight, and proceeds only while next_seq is where this Storage expects
-   * it. Every failure that provably left nothing behind is a StorageRejected,
-   * after which pi-durable's Session carries on. Running out of retries while
-   * an attempt may have committed leaves the outcome unknown, which poisons
-   * the Session so the host reopens it.
+   * it. Running out of retries while an attempt may have committed leaves the
+   * outcome unknown; any other failure is rethrown as it is. pi-durable's
+   * Session fails on either, and the host reopens it.
    */
   private async commitWithRetry(writes: readonly StorageWrite[]): Promise<Seq> {
     const doubt: Doubt = {};
@@ -333,11 +331,7 @@ class PostgresStorage implements Storage {
           cause: error,
         });
       }
-      if (!isTransient(error)) throw error;
-      throw new StorageRejected(
-        error instanceof Error ? error.message : String(error),
-        { cause: error },
-      );
+      throw error;
     }
   }
 

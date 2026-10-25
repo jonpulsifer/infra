@@ -350,12 +350,12 @@ class ServerBridge implements McpBridge {
       return failed(text || `${server} ${name} failed`);
     }
     metrics?.mcpCall(server, 'ok');
-    return { content: [{ type: 'text', text }] };
+    return { output: [{ type: 'text', text }] };
   }
 }
 
 function failed(text: string): ToolExecutionResult {
-  return { content: [{ type: 'text', text }], isError: true };
+  return { output: [{ type: 'text', text }], isError: true };
 }
 
 async function listAll(client: Client): Promise<McpTool[]> {

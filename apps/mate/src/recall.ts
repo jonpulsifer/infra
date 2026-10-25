@@ -265,7 +265,7 @@ const THREAD_PARAMETERS = Type.Object({
 });
 
 function said(text: string, isError = false): ToolExecutionResult {
-  return { content: [{ type: 'text', text }], ...(isError ? { isError } : {}) };
+  return { output: [{ type: 'text', text }], ...(isError ? { isError } : {}) };
 }
 
 function iso(ms: number): string {

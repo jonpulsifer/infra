@@ -48,15 +48,14 @@ Records are JSON stored as `text`: `jsonb` refuses `\u0000` and reorders keys. I
 
 Each `commit()` is one transaction. It takes `pg_advisory_xact_lock(hashtext(session_id))`, then the session row `FOR UPDATE`, so one writer at a time assigns seqs whichever process it runs in. A commit's seq is the `next_seq` it read. `src/commit.ts` holds pi-durable's checks, which are the id namespace, document addresses, version transitions and copies, and the table writes. Commits from one `Storage` run in the order they were admitted.
 
-A failed commit throws one of two classes, which decide what pi-durable's `Session` does next:
+Any error from `commit()` fails pi-durable's `Session`, which closes itself; reopen it. Commits are atomic, so the session is consistent either way, and the class says what is known about the commit:
 
-| Failure | Thrown | The `Session` |
-| --- | --- | --- |
-| A rule of the contract, a constraint, or an unknown session, rolled back | A plain `Error`, as pi-durable's SQLite and memory backends throw it | Poisons itself; reopen it |
-| A failed document copy | `StorageRejected`, as the reference wraps it | Carries on |
-| A connection failure whose every attempt provably did not commit | `StorageRejected`, with the connection error as `cause` | Carries on |
-| A commit after `close()` | `StorageRejected` | Carries on |
-| Retries ran out while an attempt may have committed, or `next_seq` is not where the `Storage` left it | `CommitOutcomeUnknownError`, which is not a `StorageRejected` | Poisons itself; reopen it |
+| Failure | Thrown |
+| --- | --- |
+| A rule of the contract, a constraint, a failed document copy, or an unknown session, rolled back | A plain `Error`, as pi-durable's SQLite and memory backends throw it |
+| A connection failure whose every attempt provably did not commit | The last connection error |
+| A commit after `close()` | A plain `Error` that says `closed` |
+| Retries ran out while an attempt may have committed, or `next_seq` is not where the `Storage` left it | `CommitOutcomeUnknownError` |
 
 A `Storage` expects to be its session's only writer. It remembers the `next_seq` it read when `openStorage` opened it, or last left under those locks, and a commit that finds any other value there throws `CommitOutcomeUnknownError` instead of writing: a commit was lost, one landed that the `Storage` could not confirm, or another writer moved the session. The `Storage` then takes the value it found as its own.
 
@@ -64,9 +63,13 @@ A commit that hits a lost connection, or a Postgres error that asks for a retry,
 
 Each call makes up to four attempts, 0.1 s, 0.3 s and 0.9 s apart, and starts none more than 2 s after the first. A server that refuses connections fails each attempt at once, so the retries ride out about 1.3 s of it. A server that does not answer holds each attempt for the pool's `connectionTimeout`, which Bun sets to 30 s unless the caller sets it; such a failure is not retried. A call against a server that is down therefore rejects after at most about 2 s plus one `connectionTimeout`. Set `connectionTimeout` on the pool to shorten that.
 
-A document read runs its queries in one read-only `REPEATABLE READ` transaction, so a commit between them cannot replace the base it reads.
-
 `bun run --cwd packages/pi-store-postgres bench` times 200 document deltas and 200 entry appends, one commit at a time. It takes the test URL, or `PI_STORE_BENCH_SOCKET` for a Unix socket. A commit is about eight round trips, so the network sets the floor.
+
+## Reads
+
+Conversation, task and submission scans run oldest first and entry scans newest first, unless the query's `order` asks for the other; a cursor carries its scan's order and continues in it. A read with an invalid request, which is an unknown conversation, a malformed or foreign cursor, or history a document does not keep, throws pi-durable's `StorageRequestError`, which fails only that read. Any other read error fails the `Session`.
+
+A document read runs its queries in one read-only `REPEATABLE READ` transaction, so a commit between them cannot replace the base it reads.
 
 ## Limits
 
