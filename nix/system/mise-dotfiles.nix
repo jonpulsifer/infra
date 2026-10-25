@@ -34,7 +34,7 @@ let
       "MISE_QUIET=1"
       "MISE_TASK_RUN_AUTO_INSTALL=0"
     ]
-    # mise.hm.toml leaves zsh and nvim to home-manager.
+    # mise.hm.toml leaves zsh to home-manager.
     ++ lib.optional config.homelab.fleet.homeManager "MISE_ENV=hm"
     ++ lib.optional (config.wsl.enable or false) "WSL_DISTRO_NAME=\"\${WSL_DISTRO_NAME:-NixOS}\""
   );

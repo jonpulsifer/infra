@@ -80,11 +80,8 @@ in
     settings.gitProtocol = "ssh";
   };
 
-  programs.neovim = {
-    enable = true;
-    vimAlias = true;
-    defaultEditor = true;
-  };
+  # Plain vim reads the dotfiles' ~/.vimrc; home-manager's programs.vim would write its own.
+  home.sessionVariables.EDITOR = "vim";
 
   programs.zsh = {
     enable = true;
@@ -250,5 +247,6 @@ in
     sd
     delta
     _1password-cli
+    vim
   ];
 }
