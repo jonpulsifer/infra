@@ -128,7 +128,7 @@ The bootstrap script clones the dotfiles repository to `$HOME\src\github.com\jon
 | `winget configure` fails on a Store package. | The package needs a license prompt, and the bootstrap script turns prompts off. | Do step 4 of [Update the desktop](#update-the-desktop). |
 | `mise run bootstrap` stops with `Developer Mode is off and this shell is not elevated`. | The winget configuration did not run. | Do step 4 of [Update the desktop](#update-the-desktop). |
 | Windows Terminal does not use the settings from the checkout. | A Terminal update replaced `settings.json`. | Do step 5 of [Update the desktop](#update-the-desktop). The old file stays as `settings.json.bak-<timestamp>`. |
-| `mise install` fails for a tool on Windows only. | The tool has no Windows build. | In `mise-global-config.toml` of the dotfiles repository, give the tool an `os` filter without `windows`. |
+| `mise install` fails for a tool on Windows only. | The tool has no Windows build. | In `mise/global.toml` of the dotfiles repository, give the tool an `os` filter without `windows`. |
 | vibranceGUI stops with `Hash mismatch`. | The download is not the pinned file. | Find why the upstream file changed. Change `-Url` and `-Sha256` in `Install-VibranceGui.ps1` together. |
 | The prompt shows the branch with `?`. | `git status` took more than 150 ms, so the prompt does not check for uncommitted changes in that repository. | Open a new shell to check again. To remove the git segment, set the user environment variable `DOTFILES_PROMPT_GIT` to `0`. |
 | Step 2 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro) prints `distro 'NixOS' already exists`. | The script does not replace a distro. | Use the existing distro. |
