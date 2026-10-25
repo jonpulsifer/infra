@@ -123,8 +123,8 @@ function run(
   return bridged.execute(args, {} as ToolExecutionApi, context);
 }
 
-function text(result: Pick<ToolExecutionResult, 'content'>) {
-  return (result.content ?? [])
+function text(result: Pick<ToolExecutionResult, 'output'>) {
+  return (result.output ?? [])
     .map((c) => (c.type === 'text' ? c.text : ''))
     .join('');
 }
@@ -292,7 +292,7 @@ describe('createMcpBridge', () => {
               {
                 name: message.toolName,
                 isError: message.isError,
-                text: text(message),
+                text: text({ output: message.content }),
               },
             ]
           : [],
@@ -520,7 +520,7 @@ describe('createMcpBridge', () => {
       .flatMap((message) => (message.role === 'toolResult' ? [message] : []));
     await harness.close(BACKGROUND_CONTEXT);
 
-    expect(text(result!)).toBe(
+    expect(text({ output: result!.content })).toBe(
       `${lines.slice(0, MAX_RESULT_CHARS)}\n[kthx output cut to ${MAX_RESULT_CHARS} of ${lines.length} characters]`,
     );
   });

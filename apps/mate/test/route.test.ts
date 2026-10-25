@@ -469,7 +469,7 @@ const echo = defineTool({
   description: 'Says its text back.',
   parameters: Type.Object({ text: Type.String() }),
   replay: 'safe',
-  execute: async (args) => ({ content: [{ type: 'text', text: args.text }] }),
+  execute: async (args) => ({ output: [{ type: 'text', text: args.text }] }),
 });
 
 // pi-durable sends no sessionId, so the harness is given Models that add one.
@@ -539,8 +539,8 @@ describe('the harness', () => {
       ]);
       expect(made.go.calls.map((call) => call.reasoning)).toEqual(['low']);
       expect(made.go.calls[0]?.messages.map((m) => m.role)).toEqual([
-        'user',
         'system',
+        'user',
         'assistant',
         'toolResult',
       ]);

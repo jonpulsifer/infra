@@ -843,7 +843,7 @@ function kthxTool(
     description: 'a kthx tool',
     parameters: Type.Object({ app: Type.Optional(Type.String()) }),
     execute: async (_args, _api, context) => ({
-      content: [{ type: 'text', text: await execute(context) }],
+      output: [{ type: 'text', text: await execute(context) }],
     }),
   };
 }
@@ -1169,7 +1169,7 @@ describe('a restart mid-turn', () => {
     const first = build(model, {
       hands: {
         root,
-        hold: (method) => (method === 'readBinaryFile' ? held.wait : null),
+        hold: (method) => (method === 'openBinaryReader' ? held.wait : null),
       },
     });
     const { session, row } = await opened(first);
@@ -1180,7 +1180,7 @@ describe('a restart mid-turn', () => {
       (error: unknown) => error,
     );
     await until(() =>
-      ['exec', 'readBinaryFile'].every((method) =>
+      ['exec', 'openBinaryReader'].every((method) =>
         first.hands.calls.some((call) => call.method === method),
       ),
     );
@@ -1214,7 +1214,7 @@ describe('a restart mid-turn', () => {
     expect(toolText(said, 'c-bash')).toContain(INTERRUPTED);
     expect(toolText(said, 'c-read')).toContain('the notes');
     expect(
-      second.hands.calls.filter((call) => call.method === 'readBinaryFile'),
+      second.hands.calls.filter((call) => call.method === 'openBinaryReader'),
     ).toHaveLength(1);
     held.open();
   });

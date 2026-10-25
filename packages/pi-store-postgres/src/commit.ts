@@ -4,14 +4,13 @@
  * travel as one JSON document per statement: Bun's array parameters cannot
  * carry SQL nulls, and one parameter never meets Postgres's limit.
  */
-import {
-  type DocumentContent,
-  type DocumentCopySource,
-  type DocumentCreate,
-  type DocumentId,
-  type DocumentRecord,
-  StorageRejected,
-  type StorageWrite,
+import type {
+  DocumentContent,
+  DocumentCopySource,
+  DocumentCreate,
+  DocumentId,
+  DocumentRecord,
+  StorageWrite,
 } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
 import {
@@ -207,7 +206,7 @@ async function checkDocuments(
   const live = new Map<string, number>();
   for (const [id, action] of actions) {
     if (action.copy !== undefined && actions.has(action.copy.id)) {
-      throw new StorageRejected(
+      throw new Error(
         `Document copy ${id} source is changed in the copy batch`,
       );
     }
@@ -465,8 +464,7 @@ async function copiedContent(
     }
     return { kind: 'base', version: stored.version, value: stored.value };
   } catch (error) {
-    if (error instanceof StorageRejected) throw error;
-    throw new StorageRejected(`Document copy ${id} was rejected`, {
+    throw new Error(`Document copy ${id} was rejected`, {
       cause: error,
     });
   }

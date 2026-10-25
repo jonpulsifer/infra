@@ -162,7 +162,7 @@ function fromRegistration(tool: ToolRegistration): VoiceTool {
     sideEffect: false,
     execute: async (args) => {
       const result = await tool.execute(args, {} as never, {} as never);
-      return (result.content ?? [])
+      return (result.output ?? [])
         .map((part) => (part.type === 'text' ? part.text : ''))
         .join('\n')
         .trim();
