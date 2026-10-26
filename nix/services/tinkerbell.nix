@@ -85,9 +85,11 @@ let
           rules = [
             {
               apiGroups = [ "tinkerbell.org" ];
+              # A Workflow in git starts a reprovision; the controller creates its Rufio Job.
               resources = [
                 "hardware"
                 "templates"
+                "workflows"
               ];
               verbs = manage;
             }

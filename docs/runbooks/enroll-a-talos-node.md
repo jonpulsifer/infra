@@ -3,7 +3,7 @@ title: Enroll a Talos node
 description: Wipe a folly node's system disk, boot it from the network on the bootstrap VLAN, approve its enrollment, and return it to the Kubernetes VLAN.
 ---
 
-Use this runbook to install Talos on riptide or optiplex with Secure Boot. The node network boots the signed UKI from spore through [Tinkerbell](../platform/nixos/tinkerbell.md), asks [Talos enrollment](../apps/talos-enroll.md) for its config, and installs once you approve it. For these nodes, it replaces the kexec path of [Install Talos on a node](install-talos-on-a-node.md).
+Use this runbook to install Talos on riptide or optiplex with Secure Boot. The node network boots the signed UKI from spore through [Tinkerbell](../platform/nixos/tinkerbell.md), asks [Talos enrollment](../apps/talos-enroll.md) for its config, and installs once you approve it. For these nodes, it replaces the kexec path of [Install Talos on a node](install-talos-on-a-node.md). On a node with Intel AMT, [Reprovision a Talos node](reprovision-a-talos-node.md) replaces the wipe and the power-on at the machine.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because the disk wipe and the firmware settings happen at the machine.
@@ -11,7 +11,7 @@ Use this runbook to install Talos on riptide or optiplex with Secure Boot. The n
 ## Before you start
 
 - Our Secure Boot keys are enrolled on the node, and its TPM or PTT is on. Its boot order has the system disk first and PXE after it, so a wiped disk falls through to PXE and the installed disk boots after the install.
-- Tinkerbell has a `Hardware` object for the node, and its iPXE script chains the UKI. Git declares no `Hardware` object, so no node can boot this path today.
+- Tinkerbell has a `Hardware` object for the node with `allowPXE` on, and its iPXE script chains the UKI. Each `Hardware` in `clusters/folly/tinkerbell/` chains HookOS and has `allowPXE` off, so no node boots the UKI over the network today.
 - You can see the node's screen. The user code that you approve shows only there.
 - `clusters/folly/apps/talos-enroll/machine-inputs.json` has the node. If it does not, run `mise run render-machine-inputs`, then commit and merge the result.
 - You are on the tailnet as a login in `ENROLL_APPROVERS`, and you can read the Discord prompts.

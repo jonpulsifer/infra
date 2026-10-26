@@ -17,7 +17,7 @@ Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's sign
 
 ## Boot path
 
-Firmware PXE takes the address from UniFi and the boot file from Smee's proxy offer, then loads the signed iPXE over TFTP. iPXE fetches the node's script from Smee, and the script chains the UKI or HookOS from nginx. [Tinkerbell](tinkerbell.md#boot-path) has the details and what the path still lacks. The UKI is about 280 MB, too large for TFTP, so it goes over HTTP.
+Firmware PXE takes the address from UniFi and the boot file from Smee's proxy offer, then loads the signed iPXE over TFTP. iPXE fetches the node's script from Smee, and the script chains HookOS from nginx. HookOS fetches the UKI from nginx onto the node's disk, and the firmware boots it from there. [Tinkerbell](tinkerbell.md#boot-path) has the details. The UKI is about 280 MB, too large for TFTP, so it goes over HTTP.
 
 ## Netboot images
 

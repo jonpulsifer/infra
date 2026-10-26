@@ -1,31 +1,34 @@
 # One Hardware per folly node. Smee offers a boot file to a MAC that has one, and the file boots only
-# while allowPXE is true. The MAC and address come from nodes.env through kustomization.yaml.
-# netboot.ipxe.url names the image Smee chains for the MAC. The reprovision template sets it; with
-# no url Smee serves its default HookOS script.
+# while allowPXE is true, which a reprovision Workflow sets for its run. UniFi leases the address, and
+# Smee refuses a dhcp.ip without a netmask, so there is none. The MAC, disk and HookOS UKI URL come
+# from nodes.env through kustomization.yaml.
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Hardware
 metadata:
   name: optiplex
 spec:
+  disks:
+    - device: from-nodes-env
   interfaces:
     - dhcp:
         mac: from-nodes-env
         hostname: optiplex
         arch: x86_64
         uefi: true
-        ip:
-          address: from-nodes-env
-          family: 4
       netboot:
         allowPXE: false
         allowWorkflow: false
+        ipxe:
+          url: from-nodes-env
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Hardware
 metadata:
   name: riptide
 spec:
+  disks:
+    - device: from-nodes-env
   bmcRef:
     apiGroup: bmc.tinkerbell.org
     kind: Machine
@@ -36,18 +39,19 @@ spec:
         hostname: riptide
         arch: x86_64
         uefi: true
-        ip:
-          address: from-nodes-env
-          family: 4
       netboot:
         allowPXE: false
         allowWorkflow: false
+        ipxe:
+          url: from-nodes-env
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Hardware
 metadata:
   name: shale
 spec:
+  disks:
+    - device: from-nodes-env
   bmcRef:
     apiGroup: bmc.tinkerbell.org
     kind: Machine
@@ -58,9 +62,8 @@ spec:
         hostname: shale
         arch: x86_64
         uefi: true
-        ip:
-          address: from-nodes-env
-          family: 4
       netboot:
         allowPXE: false
         allowWorkflow: false
+        ipxe:
+          url: from-nodes-env
