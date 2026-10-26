@@ -131,7 +131,7 @@
         "@repo/mate-hands": "workspace:*",
         "@repo/mate-voice-protocol": "workspace:*",
         "@repo/pi-store-postgres": "workspace:*",
-        "discord-api-types": "0.38.56",
+        "discord-api-types": "0.38.57",
         "zod": "4.6.7",
       },
       "devDependencies": {
@@ -147,7 +147,7 @@
         "@noble/ciphers": "2.4.0",
         "@repo/mate-voice-protocol": "workspace:*",
         "@snazzah/davey": "0.1.12",
-        "discord-api-types": "0.38.56",
+        "discord-api-types": "0.38.57",
         "opusscript": "0.1.1",
         "zod": "4.6.7",
       },
@@ -1646,7 +1646,7 @@
 
     "diff": ["diff@8.0.4", "", {}, "sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw=="],
 
-    "discord-api-types": ["discord-api-types@0.38.56", "", {}, "sha512-Hti4RZsGvF5C7SM8rF2MDHtIm0Hyfrlk84GpEA29nj91tvVVMvX+oQSCodu10t2ZcjFGofq8TX0YyC04B2E69Q=="],
+    "discord-api-types": ["discord-api-types@0.38.57", "", {}, "sha512-R1CTSSt4RshqCq23j2Xq2ZscvzB4LzG9OB1CYQdKUGdw8Ti/oF/72EEtK2mNpagG/Vj9NcBT7dw9lKLf+Dacfg=="],
 
     "dompurify": ["dompurify@3.4.15", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-EUBjM+B+lkDE41iE82DDSCfkoPGfXx8IxFxPMjNzm/Uk4xDet77rTN9wqlxlVg71kK7XGuUMv6wUxJUwwv+Xyw=="],
 
