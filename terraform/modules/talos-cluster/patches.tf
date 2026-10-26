@@ -89,7 +89,7 @@ locals {
 
   # Per node: hostname, install target, and its labels and taints. The
   # control plane drops its LB-exclusion label too.
-  node_patch = { for name, n in var.nodes : name => join("\n---\n", concat([
+  node_docs = { for name, n in var.nodes : name => [
     # The generator emits auto: stable, and Talos rejects auto beside hostname.
     yamlencode({
       apiVersion = "v1alpha1"
@@ -125,12 +125,23 @@ locals {
       },
       length(local.node_taints[name]) > 0 ? { taints = local.node_taints[name] } : {},
     )),
-  ], contains(var.tpm_nodes, name) ? local.tpm_volume_patches : [])) }
+  ] }
+
+  # A fresh install formats STATE and EPHEMERAL, so the install render of a
+  # TPM node encrypts them. A running node keeps the volumes it was installed
+  # with: Talos refuses to mount a plain volume that its config calls
+  # encrypted, so only a node reinstalled encrypted carries the documents.
+  node_patch_install = { for name, n in var.nodes : name => join("\n---\n", concat(
+    local.node_docs[name],
+    contains(var.tpm_nodes, name) ? local.tpm_volume_patches : [],
+  )) }
+  node_patch = { for name, n in var.nodes : name => join("\n---\n", concat(
+    local.node_docs[name],
+    contains(var.encrypted_nodes, name) ? local.tpm_volume_patches : [],
+  )) }
 
   # A TPM node's STATE and EPHEMERAL are LUKS2 volumes whose key the TPM seals
   # to PCR 7 and to the PCR 11 policy signed by the UKI's PCR signing key.
-  # Talos encrypts a volume only when it formats it, so this takes effect at
-  # the next install.
   tpm_volume_patches = [for volume in ["STATE", "EPHEMERAL"] : yamlencode({
     apiVersion = "v1alpha1"
     kind       = "VolumeConfig"
