@@ -40,6 +40,7 @@ in
     ../services/spire-server.nix
     ../services/spore-native-boot.nix
     ../services/spore-talos-boot.nix
+    ../services/tinkerbell.nix
     ../system/sops.nix
   ];
 

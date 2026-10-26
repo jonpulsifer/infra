@@ -39,6 +39,7 @@ in
       tftpRanges = spore.networking.firewall.allowedUDPPortRanges;
       hasTftpRange = lib.any (range: range.from == 30000 && range.to == 30099) tftpRanges;
       fetchScript = rackpi5.boot.initrd.systemd.services.fetch-nix-store.script;
+      smee = "${spore.systemd.services.tinkerbell.serviceConfig.ExecStart} ";
       failures = lib.filter (failure: failure != null) [
         (
           if lib.hasInfix "/$expected.squashfs" fetchScript then
@@ -97,15 +98,36 @@ in
             "NFS does not require post-mount directory setup"
         )
         (
+          if !(spore.services.dnsmasq.settings ? "dhcp-range") then
+            null
+          else
+            "dnsmasq could hand out leases or answer DHCP beside Smee"
+        )
+        (
           if
-            lib.all (range: lib.hasSuffix ",proxy" range) (
-              lib.toList spore.services.dnsmasq.settings."dhcp-range"
-            )
-            && lib.elem "end0" spore.services.dnsmasq.settings."no-dhcpv4-interface"
+            lib.all (flag: lib.hasInfix flag smee) [
+              " --dhcp-mode=proxy "
+              " --dhcp-bind-interface=bootstrap "
+            ]
           then
             null
           else
-            "dnsmasq could hand out leases or answer DHCP on Lab Net"
+            "Smee could hand out leases or answer DHCP beyond the bootstrap VLAN"
+        )
+        (
+          if lib.hasInfix " --tftp-server-enabled=false " smee then
+            null
+          else
+            "Smee's TFTP listener would collide with dnsmasq's"
+        )
+        (
+          if
+            !(lib.elem 6443 spore.networking.firewall.allowedTCPPorts)
+            && !(lib.elem 6443 spore.networking.firewall.interfaces.bootstrap.allowedTCPPorts)
+          then
+            null
+          else
+            "the Tinkerbell API is open beyond Lab Net and the tailnet"
         )
         (
           if lib.hasInfix "spore_native_boot_artifact_available" probe.script then

@@ -29,7 +29,7 @@ sections:
     items:
       - platform/how-changes-ship.md
       - path: platform/nixos.md
-        children: [platform/nixos/netboot.md, platform/nixos/talos-boot.md, platform/nixos/build-host-and-cache.md]
+        children: [platform/nixos/netboot.md, platform/nixos/talos-boot.md, platform/nixos/tinkerbell.md, platform/nixos/build-host-and-cache.md]
       - path: platform/kubernetes.md
         children: [platform/kubernetes/talos.md]
       - platform/workloads.md
