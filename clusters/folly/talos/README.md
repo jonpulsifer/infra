@@ -2,7 +2,7 @@
 
 The OpenTofu root for the Talos Linux machine configuration of the folly cluster: optiplex as the control plane, riptide and shale as workers. It calls `terraform/modules/talos-cluster`. [Rebuild a cluster on Talos](https://wiki.lolwtf.ca/runbooks/rebuild-a-cluster-on-talos/) is the procedure that first applies it.
 
-`talos.tf` holds the version pins, the schematic's extension list, the node map, `tpm_nodes` and `encrypted_nodes`. optiplex and riptide name the signed installer `ghcr.io/jonpulsifer/talos-installer-folly` and an install generation; shale installs from the schematic. [Talos Linux](https://wiki.lolwtf.ca/platform/kubernetes/talos/) has the rules for both. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`. `patches.tf` holds folly's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/folly/talos`.
+`talos.tf` holds the version pins, the schematic's extension list, the node map, `tpm_nodes` and `encrypted_nodes`. Every node names the signed installer `ghcr.io/jonpulsifer/talos-installer-folly` and an install generation. [Talos Linux](https://wiki.lolwtf.ca/platform/kubernetes/talos/) has the installer rules. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`. `patches.tf` holds folly's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/folly/talos`.
 
 OpenTofu reads neither `secureboot/` nor `netboot.json`. They hold the public Secure Boot material and the HookOS inputs that `.github/workflows/talos-images.yml` signs into folly's boot images.
 
@@ -19,7 +19,7 @@ A plan contacts no node. `tofu validate` cannot see a document that Talos reject
 
 ## Deploy
 
-The owner applies this root by hand once, when folly is rebuilt. Atlantis applies it from the next pull request. An apply that changes `talos_version` reboots every node, the control plane first. An `extensions` change reboots shale only: optiplex and riptide get it from a rebuilt signed installer at their next Talos version.
+The owner applies this root by hand once, when folly is rebuilt. Atlantis applies it from the next pull request. An apply that changes `talos_version` reboots every node, the control plane first. An `extensions` change reaches the nodes from a rebuilt signed installer at their next Talos version.
 
 `.github/scripts/talos-render-parity.sh` renders each node whose inputs are known without state, with the provider and with `talosctl gen config` from a throwaway bundle, and fails on any byte difference. CI runs it on every change to this root or the module.
 

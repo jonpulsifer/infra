@@ -64,7 +64,13 @@ locals {
       installer  = local.secureboot_installer
       generation = "secureboot-1"
     }
-    shale = { role = "worker", install = "disk.dev_path == \"/dev/sda\"", ephemeral = "128GiB" }
+    shale = {
+      role       = "worker"
+      install    = "disk.dev_path == \"/dev/sda\""
+      ephemeral  = "128GiB"
+      installer  = local.secureboot_installer
+      generation = "secureboot-1"
+    }
   }
 
   # TPM 2.0 nodes: riptide's discrete TPM, optiplex's Intel PTT.
@@ -73,13 +79,6 @@ locals {
   # Nodes whose running STATE and EPHEMERAL are encrypted. A node joins only
   # after a reinstall formats them encrypted; both still run plain volumes.
   encrypted_nodes = []
-}
-
-# shale has no install generation, so its record is imported rather than
-# created: a created record would replace its talos_machine.
-import {
-  to = module.talos.terraform_data.install["shale"]
-  id = "shale"
 }
 
 module "talos" {

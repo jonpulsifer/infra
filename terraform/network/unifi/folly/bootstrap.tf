@@ -6,10 +6,12 @@ locals {
   # network its RADIUS user puts it on. A reinstall flips a node to bootstrap,
   # and the install reboot's link flap moves it.
   mab_ports = {
+    shale    = 6
     riptide  = 8
     optiplex = 10
   }
   enrolled = {
+    shale    = "kubernetes"
     riptide  = "kubernetes"
     optiplex = "kubernetes"
   }

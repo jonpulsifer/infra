@@ -9,14 +9,14 @@ Every Kubernetes node runs Talos Linux. `clusters/<site>/talos/` is an OpenTofu 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| Image Factory installer | Installs a node from the cluster's schematic | [shale](../../hosts/shale.md) and every offsite node |
-| Signed installer | `ghcr.io/jonpulsifer/talos-installer-folly`, a UKI signed with the lab's Secure Boot keys | [optiplex](../../hosts/optiplex.md) and [riptide](../../hosts/riptide.md) |
+| Image Factory installer | Installs a node from the cluster's schematic | Every offsite node |
+| Signed installer | `ghcr.io/jonpulsifer/talos-installer-folly`, a UKI signed with the lab's Secure Boot keys | [optiplex](../../hosts/optiplex.md), [riptide](../../hosts/riptide.md) and [shale](../../hosts/shale.md) |
 | TPM disk encryption | A fresh install makes `STATE` and `EPHEMERAL` LUKS2 volumes whose key the TPM seals to PCR 7 and to a PCR 11 policy signed by the PCR signing key. Adds the `lolwtf.ca/tpm=true` label. | The install render of optiplex and riptide. No running node yet. |
 | Render parity check | Renders folly's nodes with the provider and with `talosctl gen config`, and fails on any byte difference | `.github/workflows/talos-render-parity.yml` |
 
 The `ETCD` volume and the `data` user volume stay plain. Talos encrypts a volume only when it formats it, at install.
 
-optiplex and riptide boot Image Factory systemd-boot UKI installs, with Secure Boot off and plain volumes. The signed installer and the encryption take effect when each is reinstalled. optiplex has no TPM until Intel PTT is on in its BIOS.
+optiplex, riptide and shale boot Image Factory systemd-boot UKI installs, with Secure Boot off and plain volumes. The signed installer and the encryption take effect when each is reinstalled. optiplex has no TPM until Intel PTT is on in its BIOS.
 
 ## Rules
 
