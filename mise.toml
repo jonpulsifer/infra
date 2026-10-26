@@ -108,6 +108,10 @@ run = "bash scripts/alerts.sh"
 description = "Write talos-enroll's per-node render inputs from the folly Talos root, with no state, and the nodes' MACs from the UniFi client list"
 run = "bash scripts/render-machine-inputs.sh"
 
+[tasks.render-tinkerbell-nodes]
+description = "Write each folly node's MAC and address for the Tinkerbell objects in clusters/folly/tinkerbell/ (--check compares)"
+run = "bash scripts/render-tinkerbell-nodes.sh"
+
 [tasks."enroll:approve"]
 description = "Approve the Talos enrollment whose code the machine's console shows, over the tailnet (args: <code> <node>)"
 run = "bash scripts/enroll.sh approve"

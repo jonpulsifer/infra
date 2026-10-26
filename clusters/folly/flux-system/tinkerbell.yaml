@@ -1,0 +1,48 @@
+---
+# The kubeconfig for spore's Tinkerbell API, from 1Password.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: tinkerbell-access
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/folly/tinkerbell-access
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    # Serves the ClusterSecretStore the ExternalSecret reads.
+    - name: onepassword-connect
+  healthChecks:
+    - apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      name: spore-tinkerbell-kubeconfig
+      namespace: flux-system
+---
+# Applies the Hardware, Rufio Machine and AMT Secret objects to spore's Tinkerbell API, which runs
+# outside both clusters. Its identity may manage only those kinds in the tinkerbell namespace.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: tinkerbell
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/folly/tinkerbell
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    - name: tinkerbell-access
+  kubeConfig:
+    secretRef:
+      name: spore-tinkerbell-kubeconfig
+      key: value
+  # folly's own sops-age Secret decrypts the AMT Secret before Flux sends it to spore.
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

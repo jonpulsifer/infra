@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: amt
+    namespace: tinkerbell
+type: kubernetes.io/basic-auth
+stringData:
+    username: ENC[AES256_GCM,data:Eyhb80c=,iv:8XP4tthytiXatqFgE1h7Bl7hcDsm5mQiHJj+X5q9UGQ=,tag:jvmgJL1vlz5JOASwc8Tazg==,type:str]
+    password: ENC[AES256_GCM,data:EOuYy6B0sB1OarFSxtQjXC9siBXt/q6BBo0=,iv:hY2mOlAhed7m6+mUQhTeIVqdXGJLAaPV+mSZO5F0b5I=,tag:OjugJ46K35r0LtA9iGeU7w==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBTNzBQc1YzRmZ4M1laeTlr
+            LzVYVjFMeDZBaU9TaUVMakl6NWRqSGVnTlFZClBhNDFJSHlJT2NwY2ZFVlZ0VE9C
+            cnNJekl0aWJOTGplR0gzb3Znd0pGa2sKLS0tIFJvRTJSYzZWME1HbW5TcWYvdGl3
+            eHh5c0lhWFd0aG5IQ040Q1MxQXRvYzgKOUJoC7ntN6wUVO/NPU9hW9EVqbvvtPzT
+            mVgfcYjdp5Z8rPJXj5Kt4JxlxxlJ83qlbGReOlQJFGDkNUiRd8G4ew==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-26T20:21:56Z"
+    mac: ENC[AES256_GCM,data:rSRyDHSdKH7r3eRUijPihurU6La9XdI35TdsHpiQeo5znzxfxiz1ysJJRbmVxr/VfZAy53q2AicojNlCUxF0ErcfsjaHlMZKC7YlF69l5uX0phlw3f2fFG0vsZepdNQ7QSVHBciIfIyXiuo32sh7mjRJMSJWXCbkmAnIVAaDifg=,iv:GIhN6WnUSrcgTKRTn+OQAw2uUWLJhPyQgzVlrmjtuT0=,tag:mVKEuUi0JBm/8803UUVlow==,type:str]
+    version: 3.13.3

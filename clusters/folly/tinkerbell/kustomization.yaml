@@ -1,0 +1,50 @@
+# Applied by Flux on folly to spore's Tinkerbell API (the tinkerbell Kustomization in
+# clusters/folly/flux-system/tinkerbell.yaml). spore's tinkerbell-rbac unit creates the namespace
+# and lets Flux's identity manage these kinds in it.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tinkerbell
+resources:
+  - hardware.yaml
+  - machines.yaml
+  - amt.sops.yaml
+configMapGenerator:
+  # `mise run render-tinkerbell-nodes` writes nodes.env. local-config keeps the ConfigMap out of
+  # the build; it exists only as the source of the replacements below.
+  - name: tinkerbell-nodes
+    envs:
+      - nodes.env
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        config.kubernetes.io/local-config: "true"
+replacements:
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.OPTIPLEX_MAC}
+    targets:
+      - select: {kind: Hardware, name: optiplex}
+        fieldPaths: [spec.interfaces.0.dhcp.mac]
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.OPTIPLEX_ADDRESS}
+    targets:
+      - select: {kind: Hardware, name: optiplex}
+        fieldPaths: [spec.interfaces.0.dhcp.ip.address]
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.RIPTIDE_MAC}
+    targets:
+      - select: {kind: Hardware, name: riptide}
+        fieldPaths: [spec.interfaces.0.dhcp.mac]
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.RIPTIDE_ADDRESS}
+    targets:
+      - select: {kind: Hardware, name: riptide}
+        fieldPaths: [spec.interfaces.0.dhcp.ip.address]
+      - select: {kind: Machine, name: riptide}
+        fieldPaths: [spec.connection.host]
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.SHALE_MAC}
+    targets:
+      - select: {kind: Hardware, name: shale}
+        fieldPaths: [spec.interfaces.0.dhcp.mac]
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.SHALE_ADDRESS}
+    targets:
+      - select: {kind: Hardware, name: shale}
+        fieldPaths: [spec.interfaces.0.dhcp.ip.address]
+      - select: {kind: Machine, name: shale}
+        fieldPaths: [spec.connection.host]

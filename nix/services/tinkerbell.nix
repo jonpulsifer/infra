@@ -51,41 +51,139 @@ let
     "service-account-key"
   ];
 
-  # Tinkerbell's own services reach the API as system:masters through this file.
-  kubeconfig = pkgs.writeText "tinkerbell-kubeconfig.json" (
+  # Flux on folly applies the objects in clusters/folly/tinkerbell/ to this namespace, as the client
+  # certificate CN that scripts/tinkerbell-certs.sh --client issues. RBAC cannot be bootstrapped by
+  # the identity it authorizes, so tinkerbell-rbac applies it with the admin certificate.
+  namespace = "tinkerbell";
+  fluxUser = "folly-flux";
+  manage = [
+    "get"
+    "list"
+    "watch"
+    "create"
+    "update"
+    "patch"
+    "delete"
+  ];
+  rbac = pkgs.writeText "tinkerbell-rbac.json" (
     builtins.toJSON {
       apiVersion = "v1";
-      kind = "Config";
-      clusters = [
+      kind = "List";
+      items = [
         {
-          name = "tinkerbell";
-          cluster = {
-            server = "https://localhost:${toString apiPort}";
-            certificate-authority = "${credentials}/ca-crt";
+          apiVersion = "v1";
+          kind = "Namespace";
+          metadata.name = namespace;
+        }
+        {
+          apiVersion = "rbac.authorization.k8s.io/v1";
+          kind = "Role";
+          metadata = {
+            name = fluxUser;
+            inherit namespace;
           };
+          rules = [
+            {
+              apiGroups = [ "tinkerbell.org" ];
+              resources = [
+                "hardware"
+                "templates"
+              ];
+              verbs = manage;
+            }
+            {
+              apiGroups = [ "bmc.tinkerbell.org" ];
+              resources = [ "machines" ];
+              verbs = manage;
+            }
+            {
+              apiGroups = [ "" ];
+              resources = [ "secrets" ];
+              verbs = manage;
+            }
+          ];
+        }
+        {
+          apiVersion = "rbac.authorization.k8s.io/v1";
+          kind = "RoleBinding";
+          metadata = {
+            name = fluxUser;
+            inherit namespace;
+          };
+          roleRef = {
+            apiGroup = "rbac.authorization.k8s.io";
+            kind = "Role";
+            name = fluxUser;
+          };
+          subjects = [
+            {
+              apiGroup = "rbac.authorization.k8s.io";
+              kind = "User";
+              name = fluxUser;
+            }
+          ];
         }
       ];
-      users = [
-        {
-          name = "tinkerbell-admin";
-          user = {
-            client-certificate = "${credentials}/admin-crt";
-            client-key = "${credentials}/admin-key";
-          };
-        }
-      ];
-      contexts = [
-        {
-          name = "tinkerbell";
-          context = {
-            cluster = "tinkerbell";
-            user = "tinkerbell-admin";
-          };
-        }
-      ];
-      current-context = "tinkerbell";
     }
   );
+
+  applyRbac = pkgs.writeShellApplication {
+    name = "tinkerbell-rbac";
+    runtimeInputs = [ pkgs.kubectl ];
+    text = ''
+      k() {
+        kubectl --server=https://localhost:${toString apiPort} \
+          --certificate-authority="$CREDENTIALS_DIRECTORY/ca-crt" \
+          --client-certificate="$CREDENTIALS_DIRECTORY/admin-crt" \
+          --client-key="$CREDENTIALS_DIRECTORY/admin-key" "$@"
+      }
+      for _ in $(seq 60); do
+        k get --raw /readyz >/dev/null 2>&1 && break
+        sleep 5
+      done
+      k apply --server-side --field-manager=nixos --force-conflicts -f ${rbac}
+    '';
+  };
+
+  # Tinkerbell's own services reach the API as system:masters through this file, and root on spore
+  # through /etc/tinkerbell/kubeconfig, which reads the same certificates from sops-nix.
+  kubeconfigFrom =
+    dir:
+    pkgs.writeText "tinkerbell-kubeconfig.json" (
+      builtins.toJSON {
+        apiVersion = "v1";
+        kind = "Config";
+        clusters = [
+          {
+            name = "tinkerbell";
+            cluster = {
+              server = "https://localhost:${toString apiPort}";
+              certificate-authority = "${dir}/ca-crt";
+            };
+          }
+        ];
+        users = [
+          {
+            name = "tinkerbell-admin";
+            user = {
+              client-certificate = "${dir}/admin-crt";
+              client-key = "${dir}/admin-key";
+            };
+          }
+        ];
+        contexts = [
+          {
+            name = "tinkerbell";
+            context = {
+              cluster = "tinkerbell";
+              user = "tinkerbell-admin";
+            };
+          }
+        ];
+        current-context = "tinkerbell";
+      }
+    );
+  kubeconfig = kubeconfigFrom credentials;
 
   flags = [
     "--backend-kube-config=${kubeconfig}"
@@ -155,7 +253,13 @@ in
     tailscale0.allowedTCPPorts = [ apiPort ];
   };
 
-  environment.systemPackages = [ tinkerbell ];
+  environment.systemPackages = [
+    tinkerbell
+    pkgs.kubectl
+  ];
+  environment.etc."tinkerbell/kubeconfig".source = kubeconfigFrom (
+    dirOf config.sops.secrets."tinkerbell/ca-crt".path
+  );
 
   systemd.services.tinkerbell = {
     description = "Tinkerbell bare-metal provisioning";
@@ -213,6 +317,50 @@ in
       SystemCallArchitectures = "native";
       SystemCallFilter = [ "@system-service" ];
       SystemCallErrorNumber = "EPERM";
+    };
+  };
+
+  # Re-applies the namespace and Flux's Role whenever Tinkerbell starts, so a wiped etcd gets them back.
+  systemd.services.tinkerbell-rbac = {
+    description = "Namespace and RBAC for Flux on folly in Tinkerbell's API";
+    wantedBy = [
+      "multi-user.target"
+      "tinkerbell.service"
+    ];
+    partOf = [ "tinkerbell.service" ];
+    after = [ "tinkerbell.service" ];
+    environment.HOME = "/tmp";
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = lib.getExe applyRbac;
+      Restart = "on-failure";
+      RestartSec = "30s";
+      LoadCredential = map (name: "${name}:${config.sops.secrets."tinkerbell/${name}".path}") [
+        "ca-crt"
+        "admin-crt"
+        "admin-key"
+      ];
+      DynamicUser = true;
+      UMask = "0077";
+      CapabilityBoundingSet = "";
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      PrivateDevices = true;
+      ProtectHome = true;
+      ProtectSystem = "strict";
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectControlGroups = true;
+      RestrictAddressFamilies = [
+        "AF_UNIX"
+        "AF_INET"
+        "AF_INET6"
+      ];
+      RestrictNamespaces = true;
+      LockPersonality = true;
+      SystemCallArchitectures = "native";
+      SystemCallFilter = [ "@system-service" ];
     };
   };
 }
