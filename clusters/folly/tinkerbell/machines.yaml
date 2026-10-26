@@ -1,0 +1,38 @@
+# Rufio drives each node's Intel AMT over plain HTTP digest auth on 16992. AMT's TLS on 16993 offers
+# only RSA key exchange, which Go's TLS client refuses by default. optiplex has no AMT.
+---
+apiVersion: bmc.tinkerbell.org/v1alpha1
+kind: Machine
+metadata:
+  name: riptide
+spec:
+  connection:
+    host: from-nodes-env
+    insecureTLS: false
+    authSecretRef:
+      name: amt
+      namespace: tinkerbell
+    providerOptions:
+      preferredOrder:
+        - IntelAMT
+      intelAMT:
+        hostScheme: http
+        port: 16992
+---
+apiVersion: bmc.tinkerbell.org/v1alpha1
+kind: Machine
+metadata:
+  name: shale
+spec:
+  connection:
+    host: from-nodes-env
+    insecureTLS: false
+    authSecretRef:
+      name: amt
+      namespace: tinkerbell
+    providerOptions:
+      preferredOrder:
+        - IntelAMT
+      intelAMT:
+        hostScheme: http
+        port: 16992

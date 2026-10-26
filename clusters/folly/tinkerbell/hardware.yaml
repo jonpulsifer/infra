@@ -1,0 +1,66 @@
+# One Hardware per folly node. Smee offers a boot file to a MAC that has one, and the file boots only
+# while allowPXE is true. The MAC and address come from nodes.env through kustomization.yaml.
+# netboot.ipxe.url names the image Smee chains for the MAC. The reprovision template sets it; with
+# no url Smee serves its default HookOS script.
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Hardware
+metadata:
+  name: optiplex
+spec:
+  interfaces:
+    - dhcp:
+        mac: from-nodes-env
+        hostname: optiplex
+        arch: x86_64
+        uefi: true
+        ip:
+          address: from-nodes-env
+          family: 4
+      netboot:
+        allowPXE: false
+        allowWorkflow: false
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Hardware
+metadata:
+  name: riptide
+spec:
+  bmcRef:
+    apiGroup: bmc.tinkerbell.org
+    kind: Machine
+    name: riptide
+  interfaces:
+    - dhcp:
+        mac: from-nodes-env
+        hostname: riptide
+        arch: x86_64
+        uefi: true
+        ip:
+          address: from-nodes-env
+          family: 4
+      netboot:
+        allowPXE: false
+        allowWorkflow: false
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Hardware
+metadata:
+  name: shale
+spec:
+  bmcRef:
+    apiGroup: bmc.tinkerbell.org
+    kind: Machine
+    name: shale
+  interfaces:
+    - dhcp:
+        mac: from-nodes-env
+        hostname: shale
+        arch: x86_64
+        uefi: true
+        ip:
+          address: from-nodes-env
+          family: 4
+      netboot:
+        allowPXE: false
+        allowWorkflow: false
