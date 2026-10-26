@@ -69,6 +69,10 @@ locals {
 
   # TPM 2.0 nodes: riptide's discrete TPM, optiplex's Intel PTT.
   tpm_nodes = ["optiplex", "riptide"]
+
+  # Nodes whose running STATE and EPHEMERAL are encrypted. A node joins only
+  # after a reinstall formats them encrypted; both still run plain volumes.
+  encrypted_nodes = []
 }
 
 # shale has no install generation, so its record is imported rather than
@@ -108,7 +112,8 @@ module "talos" {
     installer_image    = try(n.installer, null)
     install_generation = try(n.generation, null)
   } }
-  tpm_nodes = local.tpm_nodes
+  tpm_nodes       = local.tpm_nodes
+  encrypted_nodes = local.encrypted_nodes
 
   cluster_patches      = local.cluster_patches
   controlplane_patches = local.controlplane_patches

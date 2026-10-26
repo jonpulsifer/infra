@@ -1,12 +1,20 @@
-# Each patch is one talosctl --config-patch-<type> file, in this order. The
-# machine_inputs output and the enrollment server's talosctl render use the
-# same list.
+# Each patch is one talosctl --config-patch-<type> file, in this order.
+# config_patches is what a running node gets; install_patches is the render
+# for a fresh install, which the machine_inputs output and the enrollment
+# server's talosctl render use.
 locals {
   config_patches = { for name, n in var.nodes : name => concat(
     [local.cluster_patch],
     var.cluster_patches,
     n.role == "controlplane" ? concat([local.controlplane_patch], var.controlplane_patches) : [],
     [local.node_patch[name]],
+    n.patches,
+  ) }
+  install_patches = { for name, n in var.nodes : name => concat(
+    [local.cluster_patch],
+    var.cluster_patches,
+    n.role == "controlplane" ? concat([local.controlplane_patch], var.controlplane_patches) : [],
+    [local.node_patch_install[name]],
     n.patches,
   ) }
 }

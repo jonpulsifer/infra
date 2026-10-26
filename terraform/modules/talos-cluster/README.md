@@ -53,6 +53,7 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_cluster_patches"></a> [cluster\_patches](#input\_cluster\_patches) | Multi-document YAML patches appended to every node after the module's own (CNI inline manifest, sysctls, volumes). | `list(string)` | `[]` | no |
 | <a name="input_controlplane_patches"></a> [controlplane\_patches](#input\_controlplane\_patches) | Patches appended to the control plane only (KubeServiceAccountConfig, KubeAuthenticationConfig, KubeAPIServerConfig extraArgs). | `list(string)` | `[]` | no |
+| <a name="input_encrypted_nodes"></a> [encrypted\_nodes](#input\_encrypted\_nodes) | TPM nodes that were installed with encrypted STATE and EPHEMERAL. Only these get the encryption documents while running; a plain-installed node that gets them fails its next boot. | `set(string)` | `[]` | no |
 | <a name="input_extensions"></a> [extensions](#input\_extensions) | Official Image Factory system extensions baked into the schematic. | `list(string)` | n/a | yes |
 | <a name="input_extra_kernel_args"></a> [extra\_kernel\_args](#input\_extra\_kernel\_args) | Kernel arguments baked into the schematic (UKI installs cannot change them any other way). | `list(string)` | `[]` | no |
 | <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | Kubernetes version, e.g. v1.36.3. Changing it runs upgrade-k8s through talos\_cluster. | `string` | n/a | yes |
@@ -62,7 +63,7 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | <a name="input_site"></a> [site](#input\_site) | Cluster site (folly or offsite). Selects the topology ConfigMap. | `string` | n/a | yes |
 | <a name="input_talos_contract"></a> [talos\_contract](#input\_talos\_contract) | Machine-config version contract passed to the generator. Pinned at the version the cluster was created with; never bumped on an OS upgrade. | `string` | `"v1.14"` | no |
 | <a name="input_talos_version"></a> [talos\_version](#input\_talos\_version) | Installer tag, e.g. v1.14.2. Changing it upgrades every node (a reboot each). | `string` | n/a | yes |
-| <a name="input_tpm_nodes"></a> [tpm\_nodes](#input\_tpm\_nodes) | Nodes labelled lolwtf.ca/tpm=true whose STATE and EPHEMERAL are LUKS2 volumes sealed to the TPM. Talos encrypts a volume only when it formats it, at install. | `set(string)` | `[]` | no |
+| <a name="input_tpm_nodes"></a> [tpm\_nodes](#input\_tpm\_nodes) | Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM. | `set(string)` | `[]` | no |
 | <a name="input_workload_isolation"></a> [workload\_isolation](#input\_workload\_isolation) | SecurityProfileConfig.workloadIsolation (sandboxd). Talos 1.14 defaults new clusters to true. | `bool` | `true` | no |
 
 ## Outputs
@@ -70,7 +71,7 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_installer_image"></a> [installer\_image](#output\_installer\_image) | Image Factory installer of every node that sets no installer\_image. |
-| <a name="output_machine_inputs"></a> [machine\_inputs](#output\_machine\_inputs) | Per node: machine\_type, cluster\_name, cluster\_endpoint, talos\_contract, kubernetes\_version and the ordered config\_patches. |
+| <a name="output_machine_inputs"></a> [machine\_inputs](#output\_machine\_inputs) | Per node: machine\_type, cluster\_name, cluster\_endpoint, talos\_contract, kubernetes\_version and the ordered config\_patches of a fresh install. |
 | <a name="output_node_installer_images"></a> [node\_installer\_images](#output\_node\_installer\_images) | Installer image each node runs or is upgraded to. |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Node name to address, as applied. |
 | <a name="output_schematic_id"></a> [schematic\_id](#output\_schematic\_id) | Image Factory schematic the nodes are installed from. The install media must use the same ID. |

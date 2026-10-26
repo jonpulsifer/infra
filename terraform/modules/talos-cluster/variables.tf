@@ -102,11 +102,22 @@ variable "controlplane_patches" {
 
 variable "tpm_nodes" {
   type        = set(string)
-  description = "Nodes labelled lolwtf.ca/tpm=true whose STATE and EPHEMERAL are LUKS2 volumes sealed to the TPM. Talos encrypts a volume only when it formats it, at install."
+  description = "Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM."
   default     = []
 
   validation {
     condition     = alltrue([for name in var.tpm_nodes : contains(keys(var.nodes), name)])
     error_message = "Every entry of tpm_nodes must be a key of nodes."
+  }
+}
+
+variable "encrypted_nodes" {
+  type        = set(string)
+  description = "TPM nodes that were installed with encrypted STATE and EPHEMERAL. Only these get the encryption documents while running; a plain-installed node that gets them fails its next boot."
+  default     = []
+
+  validation {
+    condition     = alltrue([for name in var.encrypted_nodes : contains(var.tpm_nodes, name)])
+    error_message = "Every entry of encrypted_nodes must be in tpm_nodes."
   }
 }

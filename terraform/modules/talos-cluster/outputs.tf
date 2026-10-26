@@ -23,13 +23,13 @@ output "nodes" {
 # order. tofu console evaluates it with a local backend and no state, where a
 # node whose installer comes from the schematic is unknown.
 output "machine_inputs" {
-  description = "Per node: machine_type, cluster_name, cluster_endpoint, talos_contract, kubernetes_version and the ordered config_patches."
+  description = "Per node: machine_type, cluster_name, cluster_endpoint, talos_contract, kubernetes_version and the ordered config_patches of a fresh install."
   value = { for name, n in var.nodes : name => {
     machine_type       = n.role
     cluster_name       = local.topology.CLUSTER_NAME
     cluster_endpoint   = local.cluster_endpoint
     talos_contract     = var.talos_contract
     kubernetes_version = var.kubernetes_version
-    config_patches     = local.config_patches[name]
+    config_patches     = local.install_patches[name]
   } }
 }
