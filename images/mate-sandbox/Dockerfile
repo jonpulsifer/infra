@@ -189,7 +189,7 @@ COPY images/mate-sandbox/gh /usr/local/bin/gh
 # so the sandbox can run a build up to a week behind the one the apex serves.
 # It is a Bun bundle: `kthx` on PATH is the shim copied in below, and
 # `kthx upgrade` would install a second copy the shim never runs.
-COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:bdab01ba3153b88984bbc695cbb97379dfec342813ff0205b66e298890ea3882 /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
+COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:2ceb09ce17be3378b0c9df70cc6cf867d9b4161c786f6fc36a21cc668736c99f /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
 RUN set -eux; \
     mkdir -m 0755 -p /usr/local/lib/kthx; \
     tar -xzf /tmp/kthx.tgz --no-same-owner -C /usr/local/lib/kthx --strip-components=1 \
