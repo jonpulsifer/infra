@@ -1,0 +1,26 @@
+---
+# Intel AMT shares each node's NIC and address and answers on these ports
+# before the OS sees them. No pod has a reason to reach a management engine,
+# on this cluster's nodes or the other site's.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: deny-pod-egress-to-amt
+spec:
+  endpointSelector: {}
+  # A deny-only policy must not put every pod into default deny.
+  enableDefaultDeny:
+    egress: false
+    ingress: false
+  egressDeny:
+    - toEntities:
+        - all
+      toPorts:
+        - ports:
+            - port: "16992"
+              endPort: 16995
+              protocol: TCP
+            - port: "623"
+              protocol: ANY
+            - port: "664"
+              protocol: ANY

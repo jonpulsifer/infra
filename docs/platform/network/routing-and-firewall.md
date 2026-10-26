@@ -36,6 +36,7 @@ A MAC can be copied, so MAC auth sorts machines and does not authenticate them. 
 - Keep the policy `folly_lb_to_nest_lan`, or replies from folly VIPs to offsite's Default network drop. folly pods and nodes cannot open connections to that network.
 - Keep Management, `future` and offsite's Kubernetes network in `Internal`, where the policies expect them. If offsite's Kubernetes network moves to a custom zone, copy folly's cross-site policies to offsite.
 - The gateway does not filter tunnel traffic to folly VIPs and pods, because the `Vpn` chain to the WAN accepts it. To restrict it, write a Cilium network policy.
+- Intel AMT shares each AMT node's NIC and address, so no zone separates it from the Kubernetes VLAN. The cluster-wide Cilium policy `deny-pod-egress-to-amt` stops every pod on both clusters from reaching AMT's ports (TCP 16992–16995, 623 and 664) on any address. Host-network pods are not Cilium endpoints, so the policy does not cover them.
 - Add a node to `mab_enforced` only in its own change, after the gateway's RADIUS server listens on port 1812 (over SSH, `ss -lunp` names a `freeradius` process; it is no systemd unit there), both RADIUS users exist, and the Default RADIUS profile has RADIUS-assigned VLAN on for wired networks. The API refuses writes to that profile, so the owner sets it once in the console under Settings, Profiles, RADIUS. The switch-wide 802.1X fallback network is `bootstrap`, set in the console because the provider has no field for it, so a MAC that RADIUS rejects or cannot answer lands on the bootstrap VLAN.
 - With MAC auth on, a reinstall begins by setting the node to `bootstrap` in `enrolled`, and ends by setting it back to `kubernetes` after the install reboot.
 - To open a port again, remove its node from `mab_enforced` in `bootstrap.tf`. Removing a `port_override` block does not reset a port.
@@ -47,6 +48,7 @@ A MAC can be copied, so MAC auth sorts machines and does not authenticate them. 
 - `clusters/<site>/config/cluster-topology.json`: `ROUTER_IP`, `BGP_CILIUM_ASN`, `BGP_GATEWAY_ASN`, `CILIUM_POD_CIDR` and `LB_RANGE`
 - `clusters/folly/config/lab-topology.json`: `LAB_CIDR` and `CAPSULE_IP`
 - `clusters/<site>/networking/cilium/`: the pod pool, VIP pool and BGP config
+- `clusters/base/networking/cilium-policies/`: the cluster-wide policies both clusters run
 - `terraform/network/unifi/folly/bgp-folly.conf` and `terraform/network/unifi/offsite/bgp.conf`: the FRR files
 - `terraform/network/unifi/folly/firewall.tf`: the `Lab` and `Bootstrap` zones and their policies
 - `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network, the RADIUS users and the switch port overrides
