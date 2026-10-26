@@ -5,7 +5,7 @@ metadata:
   name: tronbyt
   namespace: tronbyt
 spec:
-  instances: 1
+  instances: 2
   # serverName is one prefix per generation of this Cluster. Recovery reads
   # the previous one, tronbyt; recover-a-re-created-database removes it once
   # tronbyt-2 holds a base backup.
