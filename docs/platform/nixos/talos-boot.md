@@ -1,9 +1,9 @@
 ---
 title: Talos boot
-description: The boot server on spore that gives folly's Talos nodes the signed UKI on the bootstrap VLAN, through Tinkerbell's PXE answers.
+description: The boot server on spore that gives folly's Talos nodes the signed UKI on the bootstrap VLAN, through Tinkerbell's PXE answers, and serves the signed iPXE and HookOS that the path loads.
 ---
 
-Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN. [Tinkerbell](tinkerbell.md) decides which machine boots what.
+Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN, with the signed iPXE and HookOS UKI that the netboot path loads. [Tinkerbell](tinkerbell.md) decides which machine boots what.
 
 ## Parts
 
@@ -11,25 +11,32 @@ Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's sign
 | --- | --- | --- |
 | `bootstrap` VLAN interface | Gives spore `SPORE_BOOTSTRAP_IP`, tagged on `end0` | spore |
 | Smee | Answers PXE on `bootstrap` as a proxy DHCP server. UniFi leases the address. | spore |
-| dnsmasq TFTP | Serves the signed iPXE that Smee's offer names, from `/var/lib/tftpboot` | spore |
-| nginx `spore-pxe` | Serves the UKI, the previous UKI and the ISO on port 80 | spore |
+| dnsmasq TFTP | Serves the signed iPXE that Smee's offer names, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | spore |
+| nginx `spore-pxe` | Serves the UKI, the previous UKI, the ISO and HookOS on port 80 | spore |
 | `spore-talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | spore |
 
 ## Boot path
 
-Firmware PXE takes the address from UniFi and the boot file from Smee's proxy offer, then loads the signed iPXE over TFTP. iPXE fetches the node's script from Smee, and the script chains the UKI from nginx. [Tinkerbell](tinkerbell.md#boot-path) has the details and what the path still lacks.
+Firmware PXE takes the address from UniFi and the boot file from Smee's proxy offer, then loads the signed iPXE over TFTP. iPXE fetches the node's script from Smee, and the script chains the UKI or HookOS from nginx. [Tinkerbell](tinkerbell.md#boot-path) has the details and what the path still lacks. The UKI is about 280 MB, too large for TFTP, so it goes over HTTP.
+
+## Netboot images
+
+iPXE, about 1.2 MB, carries an embedded script that runs `dhcp` and chains `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/${net0/mac}/auto.ipxe`, Smee's script for the booting MAC. If the chain fails, iPXE exits to the firmware.
+
+HookOS is one UKI for every node, signed with the HookOS key. Its signed command line names no worker, and pins the agent image `ghcr.io/jonpulsifer/tink-agent-autoid` by digest. That image sets the agent ID to the MAC of the NIC that holds the default route. The firmware checks iPXE, HookOS and each image iPXE chains against `db`, and [PKI](../pki.md#talos-secure-boot-keys) says which key signs what.
 
 | URL path | File under `/var/lib/spore-talos-boot/folly/` |
 | --- | --- |
 | `/talos/folly/metal-amd64-secureboot-uki.efi` | `current/metal-amd64-secureboot-uki.efi` |
 | `/talos/folly/prev/metal-amd64-secureboot-uki.efi` | `prev/metal-amd64-secureboot-uki.efi` |
 | `/talos/folly/metal-amd64-secureboot.iso` | `current/metal-amd64-secureboot.iso` |
+| `/talos/folly/hookos-amd64-secureboot-uki.efi` | `current/hookos-amd64-secureboot-uki.efi` |
 
 ## The mirror
 
-Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. The mirror asks the releases API for the newest one of the version and downloads both files from it. It skips the download while the UKI's ETag is unchanged. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed signing certificate's key made over the UKI's own image hash. A new release moves `current` to `prev`. A failed run changes neither.
+Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. The mirror asks the releases API for the newest one of the version and downloads its four files. It skips the download while the UKI's ETag is unchanged. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed certificate's key made over the image's own hash: the UKI signing certificate for the UKI and iPXE, and the HookOS certificate for HookOS. A new release moves `current` to `prev`. A failed run changes neither.
 
-A Talos version bump fails the mirror until that version's release exists. spore serves the old UKI until then.
+A Talos version bump fails the mirror until that version's release exists. spore serves the old UKI until then. A release without iPXE and HookOS also fails it.
 
 Its node-exporter metrics are `spore_talos_boot_mirror_success`, `spore_talos_boot_mirror_last_success_timestamp_seconds` and `spore_talos_boot_uki_info`, which names each slot's version. No alert reads them.
 
@@ -46,8 +53,11 @@ Its node-exporter metrics are `spore_talos_boot_mirror_success`, `spore_talos_bo
 - `nix/services/tinkerbell.nix`: Smee and the rest of Tinkerbell
 - `clusters/folly/config/lab-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `SPORE_BOOTSTRAP_IP`
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
-- `clusters/folly/talos/secureboot/uki-signing-cert.pem`: the certificate the mirror checks
-- `.github/scripts/talos-uki-verify.sh`: the UKI signature check, shared with the image pipeline
+- `clusters/folly/talos/secureboot/uki-signing-cert.pem`, `hookos-signing-cert.pem`: the certificates the mirror checks
+- `clusters/folly/talos/netboot.json`: the HookOS release and the agent image digest
+- `nix/images/ipxe-folly.nix`, `nix/images/hookos-folly.nix`: the unsigned iPXE and HookOS
+- `images/tink-agent-autoid/`: the agent image
+- `.github/scripts/talos-uki-verify.sh`: the signature check, shared with the image pipeline
 
 ## Related
 

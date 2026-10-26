@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Checks that a UKI carries exactly one Authenticode signature, and that
-# sbverify accepts it against the given certificate: the signature, the image
-# hash it signs and the certificate itself. sbverify accepts only a certificate
-# with the codeSigning extended key usage, so the check says so when the
-# certificate lacks it.
+# Checks that an EFI image, such as a UKI or iPXE, carries exactly one
+# Authenticode signature, and that sbverify accepts it against the given
+# certificate: the signature, the image hash it signs and the certificate
+# itself. sbverify accepts only a certificate with the codeSigning extended key
+# usage, so the check says so when the certificate lacks it.
 #
-# usage: talos-uki-verify.sh <uki-signing-cert.pem> <uki.efi>
+# usage: talos-uki-verify.sh <signing-cert.pem> <image.efi>
 # Needs openssl and sbsigntool.
 
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-  echo "usage: $0 <uki-signing-cert.pem> <uki.efi>" >&2
+  echo "usage: $0 <signing-cert.pem> <image.efi>" >&2
   exit 64
 fi
 cert=$1 uki=$2

@@ -108,4 +108,14 @@
     kind = "package";
     module = ../images/asterisk.nix;
   };
+
+  # folly's unsigned netboot iPXE and generic HookOS UKI. The Talos images pipeline signs both.
+  ipxe-folly = {
+    kind = "package";
+    module = ../images/ipxe-folly.nix;
+  };
+  hookos-folly = {
+    kind = "package";
+    module = ../images/hookos-folly.nix;
+  };
 }

@@ -1,15 +1,21 @@
 name: talos-images
-# Builds folly's signed Talos boot assets with the siderolabs imager and the
-# Secure Boot keys in 1Password, then publishes them. A pull request only
-# checks the inputs: the build needs the keys.
+# Builds folly's signed Talos boot assets with the siderolabs imager, and its
+# signed netboot iPXE and HookOS with Nix, using the Secure Boot keys in
+# 1Password, then publishes them. A pull request only checks the inputs: the
+# build needs the keys.
 on:
   push:
     branches: [main]
     paths: &paths
       - clusters/folly/talos/**
+      - clusters/folly/config/lab-topology.json
+      - nix/images/ipxe-folly.nix
+      - nix/images/hookos-folly.nix
       - .github/scripts/talos-image-inputs.sh
       - .github/scripts/talos-image-inputs_test.sh
       - .github/scripts/talos-images-build.sh
+      - .github/scripts/talos-netboot-build.sh
+      - .github/scripts/talos-netboot-verify.sh
       - .github/scripts/talos-uki-verify.sh
       - .github/workflows/talos-images.yml
   pull_request:
@@ -53,14 +59,24 @@ jobs:
       - name: The committed certificate halves must agree
         run: |
           set -euo pipefail
-          pem=$(openssl x509 -in "$ROOT/secureboot/uki-signing-cert.pem" -noout -fingerprint -sha256)
-          der=$(openssl x509 -inform der -in "$ROOT/secureboot/uki-signing-cert.der" -noout -fingerprint -sha256)
-          [[ "$pem" == "$der" ]] || { echo "::error::uki-signing-cert.pem and .der differ"; exit 1; }
+          hex() { od -An -tx1 -v "$1" | tr -d ' \n'; }
           for f in PK.auth KEK.auth db.auth; do
             [[ -s "$ROOT/secureboot/$f" ]] || { echo "::error::missing $ROOT/secureboot/$f"; exit 1; }
           done
+          for cert in uki-signing-cert hookos-signing-cert; do
+            pem=$(openssl x509 -in "$ROOT/secureboot/$cert.pem" -noout -fingerprint -sha256)
+            der=$(openssl x509 -inform der -in "$ROOT/secureboot/$cert.der" -noout -fingerprint -sha256)
+            [[ "$pem" == "$der" ]] || { echo "::error::$cert.pem and .der differ"; exit 1; }
+            # The firmware boots an image only when db holds its certificate.
+            [[ "$(hex "$ROOT/secureboot/db.auth")" == *"$(hex "$ROOT/secureboot/$cert.der")"* ]] || {
+              echo "::error::db.auth does not enroll $cert"
+              exit 1
+            }
+          done
       # A push builds only when the version, the extensions, the baked kernel
-      # arguments, the public keys or this pipeline changed.
+      # arguments, the public keys, the netboot inputs or this pipeline changed.
+      # HookOS pins the agent image by digest, so nothing builds until the
+      # containers workflow's delivery has pinned one.
       - name: Decide whether to build
         id: gate
         env:
@@ -74,8 +90,11 @@ jobs:
             tf=$(mktemp)
             git show "$rev:$ROOT/talos.tf" >"$tf" || return 1
             bash .github/scripts/talos-image-inputs.sh "$tf" || return 1
-            git ls-tree -r "$rev" -- "$ROOT/secureboot" \
-              .github/scripts/talos-images-build.sh .github/workflows/talos-images.yml
+            git show "$rev:clusters/folly/config/lab-topology.json" | jq -r .data.SPORE_BOOTSTRAP_IP || return 1
+            git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
+              nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
+              .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
+              .github/workflows/talos-images.yml
           }
           build=false
           case "$EVENT" in
@@ -89,6 +108,10 @@ jobs:
               fi
               ;;
           esac
+          if [[ "$build" == true ]] && jq -e '.tink_agent_image | test("@sha256:0{64}$")' "$ROOT/netboot.json" >/dev/null; then
+            echo "::warning::$ROOT/netboot.json pins no agent image yet, so no image is built"
+            build=false
+          fi
           if [[ "$build" == true && "$HAS_TOKEN" != true ]]; then
             echo "::warning::OP_SERVICE_ACCOUNT_TOKEN is not set, so no image is built"
             build=false
@@ -111,6 +134,11 @@ jobs:
           version: v0.21.6
       - name: Install the signature tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool
+      - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
 
       - name: Load the signing keys
         id: op
@@ -122,27 +150,39 @@ jobs:
           UKI_SIGNING_KEY: ${{ env.OP_ITEM }}/uki_signing_key
           UKI_SIGNING_CERT: ${{ env.OP_ITEM }}/uki_signing_cert
           PCR_SIGNING_KEY: ${{ env.OP_ITEM }}/pcr_signing_key
+          HOOKOS_SIGNING_KEY: ${{ env.OP_ITEM }}/hookos_signing_key
+          HOOKOS_SIGNING_CERT: ${{ env.OP_ITEM }}/hookos_signing_cert
 
       # The imager reads /secureboot. The .auth files are public and come from
-      # git; the private keys live only in this runner's temp directory.
+      # git; the private keys live only in this runner's temp directory. The
+      # HookOS key stays out of the imager's directory.
       - name: Stage the keys
         env:
           UKI_SIGNING_KEY: ${{ steps.op.outputs.UKI_SIGNING_KEY }}
           UKI_SIGNING_CERT: ${{ steps.op.outputs.UKI_SIGNING_CERT }}
           PCR_SIGNING_KEY: ${{ steps.op.outputs.PCR_SIGNING_KEY }}
+          HOOKOS_SIGNING_KEY: ${{ steps.op.outputs.HOOKOS_SIGNING_KEY }}
+          HOOKOS_SIGNING_CERT: ${{ steps.op.outputs.HOOKOS_SIGNING_CERT }}
         run: |
           set -euo pipefail
           umask 077
           keys="$RUNNER_TEMP/secureboot"
-          mkdir -p "$keys"
+          hookos="$RUNNER_TEMP/hookos"
+          mkdir -p "$keys" "$hookos"
           printf '%s\n' "$UKI_SIGNING_KEY" >"$keys/uki-signing-key.pem"
           printf '%s\n' "$UKI_SIGNING_CERT" >"$keys/uki-signing-cert.pem"
           printf '%s\n' "$PCR_SIGNING_KEY" >"$keys/pcr-signing-key.pem"
+          printf '%s\n' "$HOOKOS_SIGNING_KEY" >"$hookos/hookos-signing-key.pem"
+          printf '%s\n' "$HOOKOS_SIGNING_CERT" >"$hookos/hookos-signing-cert.pem"
           cp "$ROOT"/secureboot/{PK,KEK,db}.auth "$keys/"
-          committed=$(openssl x509 -in "$ROOT/secureboot/uki-signing-cert.pem" -noout -fingerprint -sha256)
-          loaded=$(openssl x509 -in "$keys/uki-signing-cert.pem" -noout -fingerprint -sha256)
-          [[ "$committed" == "$loaded" ]] || { echo "::error::the 1Password certificate is not the committed one"; exit 1; }
+          for pair in "uki-signing-cert $keys" "hookos-signing-cert $hookos"; do
+            read -r cert dir <<<"$pair"
+            committed=$(openssl x509 -in "$ROOT/secureboot/$cert.pem" -noout -fingerprint -sha256)
+            loaded=$(openssl x509 -in "$dir/$cert.pem" -noout -fingerprint -sha256)
+            [[ "$committed" == "$loaded" ]] || { echo "::error::the 1Password $cert is not the committed one"; exit 1; }
+          done
           echo "KEYS=$keys" >>"$GITHUB_ENV"
+          echo "HOOKOS_KEYS=$hookos" >>"$GITHUB_ENV"
 
       - name: Build the installer, ISO and UKI
         run: |
@@ -150,13 +190,23 @@ jobs:
           bash .github/scripts/talos-image-inputs.sh "$ROOT/talos.tf" >"$RUNNER_TEMP/inputs.json"
           bash .github/scripts/talos-images-build.sh "$RUNNER_TEMP/inputs.json" "$KEYS" "$RUNNER_TEMP/out" "$ENROLL_HOST"
 
+      - name: Build and sign iPXE and HookOS
+        run: |
+          set -euo pipefail
+          bash .github/scripts/talos-netboot-build.sh \
+            "$KEYS/uki-signing-key.pem" "$KEYS/uki-signing-cert.pem" \
+            "$HOOKOS_KEYS/hookos-signing-key.pem" "$HOOKOS_KEYS/hookos-signing-cert.pem" \
+            "$RUNNER_TEMP/out"
+
       - name: Remove the keys
         if: always()
         run: |
-          if [[ -n "${KEYS:-}" ]]; then
-            find "$KEYS" -type f -exec shred -u {} +
-            rm -rf "$KEYS"
-          fi
+          for dir in "${KEYS:-}" "${HOOKOS_KEYS:-}"; do
+            if [[ -n "$dir" ]]; then
+              find "$dir" -type f -exec shred -u {} +
+              rm -rf "$dir"
+            fi
+          done
 
       - name: The UKI must verify against the committed certificate
         run: |
@@ -173,6 +223,18 @@ jobs:
             echo "### UKI command line"
             echo '```'
             cat "$RUNNER_TEMP/cmdline.txt"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: iPXE and HookOS must verify against the committed certificates
+        run: |
+          set -euo pipefail
+          bash .github/scripts/talos-netboot-verify.sh "$ROOT/secureboot" "$ROOT/netboot.json" "$RUNNER_TEMP/out" \
+            | tee "$RUNNER_TEMP/netboot.txt"
+          {
+            echo "### HookOS command line"
+            echo '```'
+            sed -n 's/^.*: command line: //p' "$RUNNER_TEMP/netboot.txt"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
@@ -196,7 +258,7 @@ jobs:
       # immutable release used is spent for good. Each build is its own release,
       # tagged with the run id; gh uploads the assets to a draft and publishes
       # once. The mirror on spore takes the newest release of the version.
-      - name: Publish the UKI and ISO
+      - name: Publish the UKI, ISO, iPXE and HookOS
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -206,5 +268,7 @@ jobs:
           gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
             --title "Talos $VERSION for $SITE, build $GITHUB_RUN_ID" --notes "$notes" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi" \
-            "$RUNNER_TEMP/out/metal-amd64-secureboot.iso"
+            "$RUNNER_TEMP/out/metal-amd64-secureboot.iso" \
+            "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi" \
+            "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi"
           echo "Release: \`$tag\`" >>"$GITHUB_STEP_SUMMARY"

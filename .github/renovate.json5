@@ -120,6 +120,21 @@
       ],
       versioningTemplate: 'semver',
     },
+    {
+      // JSON has no comments, so this file has its own pattern. The
+      // release-attachments datasource finds the sha512 in the release's
+      // checksum.txt and bumps it with the version.
+      customType: 'regex',
+      description: 'HookOS release that the signed HookOS UKI packs',
+      managerFilePatterns: [
+        '/^clusters/folly/talos/netboot\\.json$/',
+      ],
+      matchStrings: [
+        '"version":\\s*"(?<currentValue>[^"]+)",\\s*"sha512":\\s*"(?<currentDigest>[0-9a-f]{128})"',
+      ],
+      depNameTemplate: 'tinkerbell/hook',
+      datasourceTemplate: 'github-release-attachments',
+    },
   ],
   customDatasources: {
     // The CloudNativePG operator versions that a cloudnative-pg chart ships,

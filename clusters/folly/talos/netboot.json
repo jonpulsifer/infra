@@ -1,0 +1,8 @@
+{
+  "_comment": "Inputs of folly's generic HookOS UKI, which .github/workflows/talos-images.yml signs. hookos is a tinkerbell/hook release and the sha512 of its hook_latest-lts-x86_64.tar.gz, as its checksum.txt lists it; Renovate bumps both together. The containers workflow's delivery rewrites tink_agent_image when images/tink-agent-autoid builds.",
+  "hookos": {
+    "version": "v0.11.1",
+    "sha512": "24bc6ccf225b5ce1033cdfa155d14c01da175a2e1c5268e5e64bda76fd94af7f72d841e0e0045fbf232486bc89f35251ba551aa810e30d4bebce0d5083bce61d"
+  },
+  "tink_agent_image": "ghcr.io/jonpulsifer/tink-agent-autoid@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+}

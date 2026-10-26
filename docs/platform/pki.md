@@ -47,11 +47,12 @@ folly's signed Talos images use the lab's own Secure Boot keys, outside the FML 
 
 | Key | Signs | Public half in git |
 | --- | --- | --- |
-| UKI signing key, `FML Secure Boot` | Each UKI and systemd-boot. The firmware boots them because `db` holds its certificate. | `uki-signing-cert.pem`, `uki-signing-cert.der` |
+| UKI signing key, `FML Secure Boot` | Each UKI, systemd-boot and the netboot iPXE. The firmware boots them because `db` holds its certificate. | `uki-signing-cert.pem`, `uki-signing-cert.der` |
+| HookOS signing key, `FML HookOS Secure Boot` | The HookOS UKI. PCR 7 records which `db` certificate verified a boot, so a HookOS boot never measures Talos's PCR 7. | `hookos-signing-cert.pem`, `hookos-signing-cert.der` |
 | PCR signing key | The expected PCR 11 value of each UKI. A TPM opens a sealed disk only under a policy this key signed. | None |
-| `PK`, `KEK` and `db` | The firmware's key lists. A machine in Setup Mode enrolls them, with the Microsoft UEFI certificates in `db`. | `PK.auth`, `KEK.auth`, `db.auth` |
+| `PK`, `KEK` and `db` | The firmware's key lists. A machine in Setup Mode enrolls them. `db` holds both lab certificates and the Microsoft UEFI certificates. The UKI signing key signs all three. | `PK.auth`, `KEK.auth`, `db.auth` |
 
-The PCR signing key is fleet-wide. Every disk that a TPM seals to the signed policy is bound to it, so a new key leaves each sealed disk unable to open after the next upgrade. Rotate it only with a plan that reinstalls each such node.
+The item's `db_auth` file predates the HookOS certificate; the committed `db.auth` is the one to enroll. The PCR signing key is fleet-wide. Every disk that a TPM seals to the signed policy is bound to it, so a new key leaves each sealed disk unable to open after the next upgrade. Rotate it only with a plan that reinstalls each such node.
 
 ## Rules
 

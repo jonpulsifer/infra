@@ -1,6 +1,8 @@
-# Talos boot server for folly's bootstrap VLAN. A timer mirrors the signed UKI and SecureBoot ISO
-# from the talos-folly/<version> GitHub release, checks the UKI against the committed signing cert,
-# and keeps the previous release as prev. Smee (./tinkerbell.nix) answers PXE on the VLAN.
+# Talos boot server for folly's bootstrap VLAN. A timer mirrors the signed UKI, SecureBoot ISO,
+# netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed
+# image against its committed signing cert, and keeps the previous release as prev. Smee
+# (./tinkerbell.nix) answers PXE on the VLAN and names the iPXE under dnsmasq's TFTP root; nginx
+# serves the UKI, ISO and HookOS.
 {
   config,
   lib,
@@ -14,9 +16,15 @@ let
   stateDir = "/var/lib/spore-talos-boot";
   siteDir = "${stateDir}/${site}";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
+  tftpDir = "/var/lib/tftpboot/talos/${site}";
   uki = "metal-amd64-secureboot-uki.efi";
   iso = "metal-amd64-secureboot.iso";
+  # Signed with the UKI key; Smee's offer names talos/folly/<this> under dnsmasq's TFTP root.
+  ipxe = "ipxe-amd64-secureboot.efi";
+  # Signed with the HookOS key; iPXE fetches it over HTTP.
+  hookos = "hookos-amd64-secureboot-uki.efi";
   signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
+  hookosCert = ../../clusters/folly/talos/secureboot/hookos-signing-cert.pem;
   # The pipeline's check: exactly one signature, and sbverify against the committed certificate.
   verifyUki = ../../.github/scripts/talos-uki-verify.sh;
 
@@ -88,11 +96,15 @@ in
     "= /talos/${site}/${uki}" = readOnlyLocation "${siteDir}/current/${uki}";
     "= /talos/${site}/prev/${uki}" = readOnlyLocation "${siteDir}/prev/${uki}";
     "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
+    "= /talos/${site}/${hookos}" = readOnlyLocation "${siteDir}/current/${hookos}";
   };
 
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0755 root root -"
     "d ${siteDir} 0755 root root -"
+    "d /var/lib/tftpboot/talos 0755 root root -"
+    "d ${tftpDir} 0755 root root -"
+    "L+ ${tftpDir}/${ipxe} - - - - ${siteDir}/current/${ipxe}"
   ];
 
   systemd.services.spore-talos-boot-mirror = {
@@ -201,8 +213,10 @@ in
       fi
       release_url="https://github.com/jonpulsifer/infra/releases/download/''${tag//\//%2F}"
 
+      # Each release has a new UKI asset, so an unchanged UKI ETag means an unchanged release.
       etag_args=()
-      if [ -s "$site_dir/current/uki.etag" ] && [ -s "$site_dir/current/${iso}" ]; then
+      if [ -s "$site_dir/current/uki.etag" ] && [ -s "$site_dir/current/${iso}" ] \
+        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ]; then
         etag_args=(--etag-compare "$site_dir/current/uki.etag")
       fi
       code=$(fetch "''${etag_args[@]}" --etag-save "$stage/uki.etag" \
@@ -212,11 +226,16 @@ in
         echo "current UKI is unchanged"
       else
         ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${uki}"
+        fetch --output "$stage/${ipxe}" "$release_url/${ipxe}"
+        ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${ipxe}"
+        fetch --output "$stage/${hookos}" "$release_url/${hookos}"
+        ${pkgs.bash}/bin/bash ${verifyUki} ${hookosCert} "$stage/${hookos}"
         fetch --output "$stage/${iso}" "$release_url/${iso}"
         test -s "$stage/${iso}"
         printf '%s\n' ${talosVersion} > "$stage/version"
 
-        id=$(sha256sum "$stage/${uki}" | cut -d ' ' -f 1)
+        # A build can change iPXE or HookOS and leave the UKI as it was.
+        id=$(cd "$stage" && sha256sum ${uki} ${ipxe} ${hookos} | sha256sum | cut -d ' ' -f 1)
         release="$releases/$id"
         if [ -e "$release" ]; then
           install -m 0644 "$stage/uki.etag" "$release/uki.etag"
