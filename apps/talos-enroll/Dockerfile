@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 go build -o talos-enroll .
 
 # The render must match the Talos root's provider, so talosctl moves with
 # talos_version in clusters/folly/talos/talos.tf, checksums included.
-FROM alpine:3.24.2 AS talosctl
+FROM alpine:3.24.3 AS talosctl
 ARG TARGETARCH=amd64
 RUN case "$TARGETARCH" in \
       amd64) sum=c6c9552b0e5f767352c595fa1c0af4f186f697488646872955057d23990a66c4 ;; \
