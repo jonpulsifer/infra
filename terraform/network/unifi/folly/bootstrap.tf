@@ -11,7 +11,7 @@ locals {
     optiplex = 10
   }
   enrolled = {
-    shale    = "kubernetes"
+    shale    = "bootstrap"
     riptide  = "kubernetes"
     optiplex = "kubernetes"
   }
