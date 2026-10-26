@@ -4,7 +4,7 @@ description: A Go service on the folly cluster that answers the OAuth device flo
 status: unverified
 ---
 
-talos-enroll is the enrollment server for folly's Talos nodes. A machine that boots the signed Talos image over UEFI HTTP boot asks it for a device code, waits for the owner's approval, and then fetches its machine config. No machine has enrolled through it yet.
+talos-enroll is the enrollment server for folly's Talos nodes. A machine that network boots the signed Talos image asks it for a device code, waits for the owner's approval, and then fetches its machine config. No machine has enrolled through it yet.
 
 ## Use it
 
@@ -28,7 +28,7 @@ The user code shows only on the machine's console. No prompt, log, list or page 
 
 ## How it works
 
-The HTTP boot UKI carries `talos.config` and the `talos.config.oauth.*` arguments, with client `talos-enroll`. On approval, the server renders the node's config with `talosctl gen config --with-secrets`, the 1Password note `talos-folly-secrets` and the node's entry in `clusters/folly/apps/talos-enroll/machine-inputs.json`, as the `clusters/folly/talos/` root does. The token exists only once the config renders. `mise run render-machine-inputs` writes that file from the root's `machine_inputs` output with `tofu console` and no state.
+The netboot UKI carries `talos.config` and the `talos.config.oauth.*` arguments, with client `talos-enroll`. On approval, the server renders the node's config with `talosctl gen config --with-secrets`, the 1Password note `talos-folly-secrets` and the node's entry in `clusters/folly/apps/talos-enroll/machine-inputs.json`, as the `clusters/folly/talos/` root does. The token exists only once the config renders. `mise run render-machine-inputs` writes that file from the root's `machine_inputs` output with `tofu console` and no state.
 
 The Gateway serves the device flow at `ENROLL_VIP` in `clusters/folly/config/cluster-topology.json` with a Let's Encrypt certificate, because Talos trusts only its bundled roots before it has a config. The approval listener trusts `Tailscale-User-Login`, and its NetworkPolicy admits only the tailnet Ingress proxy.
 

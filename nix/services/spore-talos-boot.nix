@@ -1,7 +1,6 @@
 # Talos boot server for folly's bootstrap VLAN. A timer mirrors the signed UKI and SecureBoot ISO
 # from the talos-folly/<version> GitHub release, checks the UKI against the committed signing cert,
-# and keeps the previous release as prev. dnsmasq answers UEFI HTTP boot clients as a proxy DHCP
-# server, and the same UKI sits under the TFTP root for firmware that only does PXE.
+# and keeps the previous release as prev. Smee (./tinkerbell.nix) answers PXE on the VLAN.
 {
   config,
   lib,
@@ -15,7 +14,6 @@ let
   stateDir = "/var/lib/spore-talos-boot";
   siteDir = "${stateDir}/${site}";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
-  tftpDir = "/var/lib/tftpboot/talos/${site}";
   uki = "metal-amd64-secureboot-uki.efi";
   iso = "metal-amd64-secureboot.iso";
   signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
@@ -41,10 +39,7 @@ let
   releasesApi = "https://api.github.com/repos/jonpulsifer/infra/releases?per_page=100";
   tagPrefix = "talos-${site}/${talosVersion}-";
 
-  bootstrapNet = lib.head (lib.splitString "/" lab.bootstrap.cidr);
   bootstrapPrefix = lib.toInt (lib.last (lib.splitString "/" lab.bootstrap.cidr));
-  # EDK2 pairs a proxy offer with UniFi's lease only when the URI host is an IPv4 literal.
-  ukiUrl = "http://${lab.bootstrap.spore}/talos/${site}/${uki}";
 
   readOnlyLocation = alias: {
     inherit alias;
@@ -80,32 +75,13 @@ in
 
   networking.firewall.interfaces.${iface} = {
     allowedTCPPorts = [ 80 ];
-    allowedUDPPorts = [
-      67
-      69
-    ];
+    allowedUDPPorts = [ 69 ];
     allowedUDPPortRanges = [
       {
         from = 30000;
         to = 30099;
       }
     ];
-  };
-
-  services.dnsmasq.settings = {
-    # Proxy DHCP only, on the bootstrap VLAN only; UniFi leases the address. TFTP keeps every interface.
-    no-dhcpv4-interface = [
-      "end0"
-      "tailscale0"
-    ];
-    dhcp-range = "${bootstrapNet},proxy";
-    dhcp-vendorclass = "set:httpboot,HTTPClient";
-    # dnsmasq answers proxy requests only from these vendor classes, so PXEClient gets no answer.
-    dhcp-pxe-vendor = "HTTPClient";
-    # Turns on dnsmasq's PXE path; arch-16 clients never see the prompt. No pxe-service for CSA 16,
-    # or dnsmasq drops the dhcp-boot file from the reply.
-    pxe-prompt = ''tag:httpboot,"HTTP boot",0'';
-    dhcp-boot = "tag:httpboot,${ukiUrl}";
   };
 
   services.nginx.virtualHosts."spore-pxe".locations = {
@@ -117,9 +93,6 @@ in
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0755 root root -"
     "d ${siteDir} 0755 root root -"
-    "d /var/lib/tftpboot/talos 0755 root root -"
-    "d ${tftpDir} 0755 root root -"
-    "L+ ${tftpDir}/${uki} - - - - ${siteDir}/current/${uki}"
   ];
 
   systemd.services.spore-talos-boot-mirror = {
@@ -214,7 +187,7 @@ in
       install -d -m 0755 "$releases"
       find "$releases" -mindepth 1 -maxdepth 1 -name '.stage.*' -exec rm -rf {} +
       stage=$(mktemp -d "$releases/.stage.XXXXXX")
-      # mktemp -d makes 0700; nginx and dnsmasq read the release as unprivileged users.
+      # mktemp -d makes 0700; nginx reads the release as an unprivileged user.
       chmod 0755 "$stage"
 
       # The newest published release of this Talos version. The tag holds a

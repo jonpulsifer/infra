@@ -42,8 +42,8 @@ resource "unifi_network" "bootstrap" {
   multicast_dns       = false
   ipv6_interface_type = "none"
 
-  # Firmware that only speaks PXE gets the UKI over TFTP from spore. UEFI HTTP
-  # boot ignores 66 and 67 and takes spore's proxy offer instead.
+  # Smee on spore names the boot file in a proxy offer, which EDK2 prefers. A
+  # file here would boot the MACs that Smee ignores, which must not boot.
   dhcp_server = {
     enabled     = true
     leasetime   = "1h0m0s"
@@ -51,11 +51,8 @@ resource "unifi_network" "bootstrap" {
     stop        = cidrhost(local.bootstrap_cidr, 10)
     dns_enabled = true
     dns_servers = [local.spore_boot_ip]
-    tftp_server = local.spore_boot_ip
     boot = {
-      enabled  = true
-      server   = local.spore_boot_ip
-      filename = "talos/folly/metal-amd64-secureboot-uki.efi"
+      enabled = false
     }
   }
 

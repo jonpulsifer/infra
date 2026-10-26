@@ -1,25 +1,23 @@
 ---
 title: Talos boot
-description: The boot server on spore that gives folly's Talos nodes the signed UKI on the bootstrap VLAN, over UEFI HTTP boot or PXE.
+description: The boot server on spore that gives folly's Talos nodes the signed UKI on the bootstrap VLAN, through Tinkerbell's PXE answers.
 ---
 
-Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN.
+Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN. [Tinkerbell](tinkerbell.md) decides which machine boots what.
 
 ## Parts
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
 | `bootstrap` VLAN interface | Gives spore `SPORE_BOOTSTRAP_IP`, tagged on `end0` | spore |
-| dnsmasq proxy DHCP | Answers `HTTPClient` requests on `bootstrap` with option 60 and the UKI URL. UniFi leases the address. | spore |
-| dnsmasq TFTP | Serves the same UKI at `talos/folly/metal-amd64-secureboot-uki.efi` for firmware with only PXE | spore |
+| Smee | Answers PXE on `bootstrap` as a proxy DHCP server. UniFi leases the address. | spore |
+| dnsmasq TFTP | Serves the signed iPXE that Smee's offer names, from `/var/lib/tftpboot` | spore |
 | nginx `spore-pxe` | Serves the UKI, the previous UKI and the ISO on port 80 | spore |
 | `spore-talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | spore |
 
-## Boot paths
+## Boot path
 
-UEFI HTTP boot takes the address from UniFi and the URL from spore's proxy offer. EDK2 pairs the two offers only when the URL host is an IPv4 literal, so the URL is `http://<SPORE_BOOTSTRAP_IP>/talos/folly/metal-amd64-secureboot-uki.efi`.
-
-Firmware with only PXE needs UniFi's network boot options on the bootstrap network: spore as the TFTP server and the TFTP path above as the file. No network in `terraform/network/unifi/folly/` sets them today. A TFTP transfer of the UKI, about 110 MiB, is untested.
+Firmware PXE takes the address from UniFi and the boot file from Smee's proxy offer, then loads the signed iPXE over TFTP. iPXE fetches the node's script from Smee, and the script chains the UKI from nginx. [Tinkerbell](tinkerbell.md#boot-path) has the details and what the path still lacks.
 
 | URL path | File under `/var/lib/spore-talos-boot/folly/` |
 | --- | --- |
@@ -38,15 +36,14 @@ Its node-exporter metrics are `spore_talos_boot_mirror_success`, `spore_talos_bo
 ## Rules
 
 - spore's switch port must carry the bootstrap VLAN tagged. A DHCP request is a broadcast, so the proxy must be on that VLAN.
-- Keep the URL an IPv4 literal that ends in `.efi`, or EDK2 HTTP boot can reject the offer or the file.
-- Add no `pxe-service` for client architecture 16. dnsmasq then drops the URL from the reply.
 - `talos-uki-verify.sh` runs `sbverify --cert` and also requires exactly one signature. sbverify alone passes a file with several signatures when any one of them verifies.
-- spore's other open ports also answer at `SPORE_BOOTSTRAP_IP`. A machine on the bootstrap VLAN reaches spore directly, so the UniFi firewall cannot filter it.
-- The `spore-reliability` check in `nix/lib/checks.nix` fails if dnsmasq could lease addresses or answer DHCP on `end0`.
+- spore's ports that the firewall opens on every interface also answer at `SPORE_BOOTSTRAP_IP`. A machine on the bootstrap VLAN reaches spore directly, so the UniFi firewall cannot filter it.
+- The `spore-reliability` check in `nix/lib/checks.nix` fails if dnsmasq could lease addresses or answer DHCP.
 
 ## Where it lives
 
-- `nix/services/spore-talos-boot.nix`: the VLAN, firewall, proxy DHCP, nginx paths and the mirror
+- `nix/services/spore-talos-boot.nix`: the VLAN, firewall, nginx paths and the mirror
+- `nix/services/tinkerbell.nix`: Smee and the rest of Tinkerbell
 - `clusters/folly/config/lab-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `SPORE_BOOTSTRAP_IP`
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
 - `clusters/folly/talos/secureboot/uki-signing-cert.pem`: the certificate the mirror checks
@@ -54,6 +51,7 @@ Its node-exporter metrics are `spore_talos_boot_mirror_success`, `spore_talos_bo
 
 ## Related
 
+- [Tinkerbell](tinkerbell.md)
 - [Netboot](netboot.md)
-- [Install Talos on a node](../../runbooks/install-talos-on-a-node.md)
+- [Enroll a Talos node](../../runbooks/enroll-a-talos-node.md)
 - [Topology](../../reference/topology.md)

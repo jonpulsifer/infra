@@ -107,6 +107,19 @@
       ],
       versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}',
     },
+    {
+      description: 'Release binaries that NixOS modules pin by version and hash',
+      managerFilePatterns: [
+        '/^nix/.+\\.nix$/',
+      ],
+      customType: 'regex',
+      matchStrings: [
+        // # renovate: datasource=github-releases depName=tinkerbell/tinkerbell
+        // version = "v0.25.0";
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*version\\s*=\\s*"(?<currentValue>[^"]+)";',
+      ],
+      versioningTemplate: 'semver',
+    },
   ],
   customDatasources: {
     // The CloudNativePG operator versions that a cloudnative-pg chart ships,
@@ -627,6 +640,14 @@
       matchManagers: ['nix'],
       matchPackageNames: ['dotfiles'],
       automerge: true,
+    },
+    {
+      // Renovate bumps the version but not the fetchurl hash beside it, and
+      // only a build checks the hash, so a person replaces it before merging.
+      description: 'Pinned release binaries in NixOS modules: replace the hash by hand',
+      matchFileNames: ['nix/**/*.nix'],
+      matchManagers: ['custom.regex'],
+      automerge: false,
     },
     // ============================================================
     // Talos roots — an apply reboots nodes, so a pin is never merged unapplied
