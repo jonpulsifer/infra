@@ -27,7 +27,7 @@ locals {
   # VLAN on for wired. Otherwise the node loses the network at its next link
   # flap. riptide goes first; optiplex is the control plane. An empty set keeps
   # every port on its open Kubernetes trunk, and is also the revert.
-  mab_enforced = toset(["riptide", "shale"])
+  mab_enforced = toset(["riptide"])
 
   switch = local.clients.switches["USW 24 PoE"]
 }
