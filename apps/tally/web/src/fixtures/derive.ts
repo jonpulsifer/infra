@@ -92,7 +92,10 @@ export function topMerchants(
   ledger: Ledger,
   opts: { from?: string; to?: string; limit?: number } = {},
 ) {
-  const agg = new Map<string, { merchant: string; total: number; count: number; categoryId: string }>();
+  const agg = new Map<
+    string,
+    { merchant: string; total: number; count: number; categoryId: string }
+  >();
   for (const t of ledger.transactions) {
     if (!isSpend(t, ledger)) continue;
     if (opts.from && t.date < opts.from) continue;
@@ -113,8 +116,14 @@ export function topMerchants(
 }
 
 /** Per month: income in, spend out, net. */
-export function cashFlow(ledger: Ledger, opts: { from?: string; to?: string } = {}) {
-  const rows = new Map<string, { month: string; income: number; spend: number; net: number }>();
+export function cashFlow(
+  ledger: Ledger,
+  opts: { from?: string; to?: string } = {},
+) {
+  const rows = new Map<
+    string,
+    { month: string; income: number; spend: number; net: number }
+  >();
   for (const t of ledger.transactions) {
     const m = monthKey(t.date);
     if (opts.from && m < opts.from) continue;
@@ -166,9 +175,14 @@ export function netWorthSeries(ledger: Ledger): NetWorthPoint[] {
   const ms = months(ledger);
   const bal = balancesByMonth(ledger);
   const cashIds = ledger.accounts
-    .filter((a) => a.kind === 'chequing' || a.kind === 'savings' || a.kind === 'credit')
+    .filter(
+      (a) =>
+        a.kind === 'chequing' || a.kind === 'savings' || a.kind === 'credit',
+    )
     .map((a) => a.id);
-  const invIds = ledger.accounts.filter((a) => a.kind === 'investment').map((a) => a.id);
+  const invIds = ledger.accounts
+    .filter((a) => a.kind === 'investment')
+    .map((a) => a.id);
   const points: NetWorthPoint[] = [];
   for (const m of ms) {
     const end = `${m}-31`;
@@ -176,7 +190,9 @@ export function netWorthSeries(ledger: Ledger): NetWorthPoint[] {
     let investments = 0;
     let estimated = false;
     for (const id of invIds) {
-      const snaps = ledger.holdings.filter((h) => h.accountId === id && h.date <= end);
+      const snaps = ledger.holdings.filter(
+        (h) => h.accountId === id && h.date <= end,
+      );
       const last = snaps[snaps.length - 1];
       if (last) {
         investments += last.total;
@@ -185,7 +201,8 @@ export function netWorthSeries(ledger: Ledger): NetWorthPoint[] {
     }
     const vals = ledger.valuations.filter((v) => v.date <= end);
     const house = vals.length ? vals[vals.length - 1].value : 0;
-    if (vals.length && vals[vals.length - 1].date.slice(0, 7) !== m) estimated = true;
+    if (vals.length && vals[vals.length - 1].date.slice(0, 7) !== m)
+      estimated = true;
     const mort = ledger.assertions
       .filter((a) => a.accountId === 'mortgage' && a.date <= end)
       .slice(-1)[0];
@@ -210,25 +227,42 @@ export type SankeyData = {
 };
 
 /** Income sources -> top-level groups -> leaf categories, for one period. */
-export function sankey(ledger: Ledger, opts: { from: string; to: string }): SankeyData {
+export function sankey(
+  ledger: Ledger,
+  opts: { from: string; to: string },
+): SankeyData {
   const byId = categoryById(ledger);
   const nodes = new Map<string, SankeyData['nodes'][number]>();
   const links = new Map<string, number>();
-  const add = (s: string, t: string, v: number) => links.set(`${s}→${t}`, (links.get(`${s}→${t}`) ?? 0) + v);
+  const add = (s: string, t: string, v: number) =>
+    links.set(`${s}→${t}`, (links.get(`${s}→${t}`) ?? 0) + v);
   let income = 0;
   for (const t of ledger.transactions) {
     if (t.date < opts.from || t.date > opts.to) continue;
     if (isIncome(t, ledger)) {
-      nodes.set(`src:${t.merchant}`, { id: `src:${t.merchant}`, name: t.merchant, kind: 'source' });
+      nodes.set(`src:${t.merchant}`, {
+        id: `src:${t.merchant}`,
+        name: t.merchant,
+        kind: 'source',
+      });
       add(`src:${t.merchant}`, 'all', t.amount);
       income += t.amount;
     } else if (isSpend(t, ledger)) {
       const top = topLevel(ledger, t.categoryId);
       const leaf = byId.get(t.categoryId)!;
-      nodes.set(`grp:${top.id}`, { id: `grp:${top.id}`, name: top.name, kind: 'group' });
-      nodes.set(`leaf:${leaf.id}`, { id: `leaf:${leaf.id}`, name: leaf.name, kind: 'leaf' });
+      nodes.set(`grp:${top.id}`, {
+        id: `grp:${top.id}`,
+        name: top.name,
+        kind: 'group',
+      });
+      nodes.set(`leaf:${leaf.id}`, {
+        id: `leaf:${leaf.id}`,
+        name: leaf.name,
+        kind: 'leaf',
+      });
       add('all', `grp:${top.id}`, -t.amount);
-      if (leaf.id !== top.id) add(`grp:${top.id}`, `leaf:${leaf.id}`, -t.amount);
+      if (leaf.id !== top.id)
+        add(`grp:${top.id}`, `leaf:${leaf.id}`, -t.amount);
     }
   }
   nodes.set('all', { id: 'all', name: 'Income', kind: 'group' });
@@ -249,31 +283,62 @@ export function sankey(ledger: Ledger, opts: { from: string; to: string }): Sank
 }
 
 export function latestHoldings(ledger: Ledger, accountId: string) {
-  return ledger.holdings.filter((h) => h.accountId === accountId).slice(-1)[0] ?? null;
+  return (
+    ledger.holdings.filter((h) => h.accountId === accountId).slice(-1)[0] ??
+    null
+  );
 }
 
 export function accountBalance(ledger: Ledger, accountId: string) {
   const acct = ledger.accounts.find((a) => a.id === accountId);
   if (!acct) return 0;
-  if (acct.kind === 'investment') return latestHoldings(ledger, accountId)?.total ?? 0;
-  if (acct.kind === 'asset') return ledger.valuations.filter((v) => v.accountId === accountId).slice(-1)[0]?.value ?? 0;
-  if (acct.kind === 'mortgage') return ledger.assertions.filter((a) => a.accountId === accountId).slice(-1)[0]?.balance ?? 0;
-  return ledger.transactions.filter((t) => t.accountId === accountId).reduce((s, t) => s + t.amount, 0);
+  if (acct.kind === 'investment')
+    return latestHoldings(ledger, accountId)?.total ?? 0;
+  if (acct.kind === 'asset')
+    return (
+      ledger.valuations.filter((v) => v.accountId === accountId).slice(-1)[0]
+        ?.value ?? 0
+    );
+  if (acct.kind === 'mortgage')
+    return (
+      ledger.assertions.filter((a) => a.accountId === accountId).slice(-1)[0]
+        ?.balance ?? 0
+    );
+  return ledger.transactions
+    .filter((t) => t.accountId === accountId)
+    .reduce((s, t) => s + t.amount, 0);
 }
 
 export function searchTransactions(
   ledger: Ledger,
-  q: { text?: string; accountId?: string; categoryId?: string; from?: string; to?: string; limit?: number },
+  q: {
+    text?: string;
+    accountId?: string;
+    categoryId?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  },
 ) {
   const text = q.text?.trim().toLowerCase();
   const out: Transaction[] = [];
   for (let i = ledger.transactions.length - 1; i >= 0; i--) {
     const t = ledger.transactions[i];
     if (q.accountId && t.accountId !== q.accountId) continue;
-    if (q.categoryId && t.categoryId !== q.categoryId && topLevel(ledger, t.categoryId).id !== q.categoryId) continue;
+    if (
+      q.categoryId &&
+      t.categoryId !== q.categoryId &&
+      topLevel(ledger, t.categoryId).id !== q.categoryId
+    )
+      continue;
     if (q.from && t.date < q.from) continue;
     if (q.to && t.date > q.to) continue;
-    if (text && !t.descriptor.toLowerCase().includes(text) && !t.merchant.toLowerCase().includes(text)) continue;
+    if (
+      text &&
+      !t.descriptor.toLowerCase().includes(text) &&
+      !t.merchant.toLowerCase().includes(text)
+    )
+      continue;
     out.push(t);
     if (q.limit && out.length >= q.limit) break;
   }
