@@ -10,7 +10,7 @@ ENV PATH="/root/.bun/bin:${PATH}" \
 
 FROM base AS pruner
 # renovate: datasource=npm depName=turbo
-ARG TURBO_VERSION=2.11.7
+ARG TURBO_VERSION=2.11.9
 WORKDIR /app
 COPY . .
 RUN bun x "turbo@${TURBO_VERSION}" prune slingshot --docker
