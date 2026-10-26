@@ -34,8 +34,9 @@ targets() {
       flake.nix | flake.lock | nix/* | apps/ddnsd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/lab-topology.json | .github/workflows/nix-ci.yaml)
         target_set["nix:flake-check"]=1
         ;;
-      # spore mirrors the Talos release that talos.tf names and checks it against the committed cert.
-      clusters/folly/talos/talos.tf | clusters/folly/talos/secureboot/* | .github/scripts/talos-uki-verify.sh)
+      # spore mirrors the Talos release that talos.tf names and checks it against the committed certs,
+      # and the HookOS package reads netboot.json.
+      clusters/folly/talos/talos.tf | clusters/folly/talos/netboot.json | clusters/folly/talos/secureboot/* | .github/scripts/talos-uki-verify.sh)
         target_set["nix:flake-check"]=1
         ;;
     esac

@@ -4,6 +4,8 @@ The OpenTofu root for the Talos Linux machine configuration of the folly cluster
 
 `talos.tf` holds the version pins, the schematic's extension list, the node map, `tpm_nodes` and `encrypted_nodes`. optiplex and riptide name the signed installer `ghcr.io/jonpulsifer/talos-installer-folly` and an install generation; shale installs from the schematic. [Talos Linux](https://wiki.lolwtf.ca/platform/kubernetes/talos/) has the rules for both. Each node's address is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`. `patches.tf` holds folly's machine-config documents: sysctls, the kubelet seccomp default, the `data` user volume and the capped `EPHEMERAL`, log shipping to Vector, and, on the control plane, the service-account issuer, cross-cluster federation, the `ETCD` partition, Talos API access for the etcd snapshot and the control-plane metrics listeners. State is in `gs://homelab-ng/clusters/folly/talos`.
 
+OpenTofu reads neither `secureboot/` nor `netboot.json`. They hold the public Secure Boot material and the HookOS inputs that `.github/workflows/talos-images.yml` signs into folly's boot images.
+
 The secrets bundle is the 1Password Secure Note `talos-folly-secrets`, which [Issue a talosconfig](https://wiki.lolwtf.ca/runbooks/issue-a-talosconfig/) names. `secrets_item_uuid` holds its UUID, and a plan fails until the variable holds a real one.
 
 ## Develop

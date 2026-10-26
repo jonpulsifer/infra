@@ -18,6 +18,7 @@
     "kthx-engine-verifier",
     "switchboard",
     "talos-enroll",
+    "tink-agent-autoid",
     "weather"
   ],
   "deploy": {
@@ -67,6 +68,9 @@
     ],
     "talos-enroll": [
       "clusters/folly/apps/talos-enroll/02-deployment.yaml"
+    ],
+    "tink-agent-autoid": [
+      "clusters/folly/talos/netboot.json"
     ],
     "weather": [
       "clusters/offsite/apps/weather/deployment.yaml"
