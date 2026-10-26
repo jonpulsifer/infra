@@ -41,7 +41,7 @@ A MAC can be copied, so MAC auth sorts machines and does not authenticate them. 
 - With MAC auth on, a reinstall begins by setting the node to `bootstrap` in `enrolled`, and ends by setting it back to `kubernetes` after the install reboot.
 - To open a port again, remove its node from `mab_enforced` in `bootstrap.tf`. Removing a `port_override` block does not reset a port.
 - A MAC-auth port whose link flaps while the gateway's RADIUS server is down stays closed. optiplex is folly's only control plane.
-- The `Bootstrap` zone reaches spore, DHCP on the gateway, `ENROLL_VIP` on TCP 443, and the internet for the installer image pull. It reaches nothing else on the LAN or in `LB_RANGE`. Keep the enrollment server's Gateway at `ENROLL_VIP`, and keep each block policy ordered after its allow with `depends_on`.
+- The `Bootstrap` zone reaches spore, DHCP on the gateway, `ENROLL_VIP` on TCP 443, and the internet for the installer image pull. It reaches nothing else on the LAN or in `LB_RANGE`. Only the `future` network reaches into it, on TCP 16992–16995, so MeshCommander keeps a reinstalling node's Intel AMT console, which follows the node's MAC onto the bootstrap VLAN (policy `future_to_bootstrap_amt`). Keep the enrollment server's Gateway at `ENROLL_VIP`, and keep each block policy ordered after its allow with `depends_on`.
 
 ## Where it lives
 

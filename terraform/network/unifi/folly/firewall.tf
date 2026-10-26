@@ -662,3 +662,30 @@ resource "unifi_firewall_policy" "enroll_reply_to_bootstrap" {
     zone_id            = unifi_firewall_zone.bootstrap.id
   }
 }
+
+# Intel AMT shares a node's NIC and MAC, so it follows the node onto the bootstrap
+# VLAN during a reinstall. The owner's MeshCommander on the future network keeps
+# the node's console and power there; nothing else reaches Bootstrap.
+resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
+  name                 = "Allow future to Bootstrap AMT"
+  action               = "ALLOW"
+  protocol             = "tcp"
+  ip_version           = "IPV4"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "NETWORK"
+    network_ids        = [unifi_network.future.id]
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.internal.id
+  }
+
+  destination = {
+    matching_target    = "ANY"
+    port               = "16992-16995"
+    port_matching_type = "SPECIFIC"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+}
