@@ -1,6 +1,7 @@
 # Applied by Flux on folly to spore's Tinkerbell API (the tinkerbell Kustomization in
 # clusters/folly/flux-system/tinkerbell.yaml). spore's tinkerbell-rbac unit creates the namespace
-# and lets Flux's identity manage these kinds in it.
+# and lets Flux's identity manage these kinds in it. A reprovision Workflow is a file added to
+# resources for one run; docs/runbooks/reprovision-a-talos-node.md has the steps.
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -9,6 +10,21 @@ resources:
   - hardware.yaml
   - machines.yaml
   - amt.sops.yaml
+  - template.yaml
+# Every Workflow here reprovisions its Hardware: Rufio PXE-boots the node into HookOS, and the
+# controller turns the Hardware's allowPXE on for the run and off once the Template succeeds.
+patches:
+  - target: {kind: Workflow}
+    patch: |
+      apiVersion: tinkerbell.org/v1alpha1
+      kind: Workflow
+      metadata:
+        name: any
+      spec:
+        templateRef: reprovision-talos
+        bootOptions:
+          toggleAllowNetboot: true
+          bootMode: netboot
 configMapGenerator:
   # `mise run render-tinkerbell-nodes` writes nodes.env. local-config keeps the ConfigMap out of
   # the build; it exists only as the source of the replacements below.
@@ -20,31 +36,39 @@ configMapGenerator:
       annotations:
         config.kubernetes.io/local-config: "true"
 replacements:
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.HOOKOS_URL}
+    targets:
+      - select: {kind: Hardware}
+        fieldPaths: [spec.interfaces.0.netboot.ipxe.url]
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.OPTIPLEX_MAC}
     targets:
       - select: {kind: Hardware, name: optiplex}
         fieldPaths: [spec.interfaces.0.dhcp.mac]
-  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.OPTIPLEX_ADDRESS}
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.OPTIPLEX_DISK}
     targets:
       - select: {kind: Hardware, name: optiplex}
-        fieldPaths: [spec.interfaces.0.dhcp.ip.address]
+        fieldPaths: [spec.disks.0.device]
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.RIPTIDE_MAC}
     targets:
       - select: {kind: Hardware, name: riptide}
         fieldPaths: [spec.interfaces.0.dhcp.mac]
-  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.RIPTIDE_ADDRESS}
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.RIPTIDE_DISK}
     targets:
       - select: {kind: Hardware, name: riptide}
-        fieldPaths: [spec.interfaces.0.dhcp.ip.address]
+        fieldPaths: [spec.disks.0.device]
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.RIPTIDE_ADDRESS}
+    targets:
       - select: {kind: Machine, name: riptide}
         fieldPaths: [spec.connection.host]
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.SHALE_MAC}
     targets:
       - select: {kind: Hardware, name: shale}
         fieldPaths: [spec.interfaces.0.dhcp.mac]
-  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.SHALE_ADDRESS}
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.SHALE_DISK}
     targets:
       - select: {kind: Hardware, name: shale}
-        fieldPaths: [spec.interfaces.0.dhcp.ip.address]
+        fieldPaths: [spec.disks.0.device]
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.SHALE_ADDRESS}
+    targets:
       - select: {kind: Machine, name: shale}
         fieldPaths: [spec.connection.host]

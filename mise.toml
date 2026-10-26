@@ -109,7 +109,7 @@ description = "Write talos-enroll's per-node render inputs from the folly Talos 
 run = "bash scripts/render-machine-inputs.sh"
 
 [tasks.render-tinkerbell-nodes]
-description = "Write each folly node's MAC and address for the Tinkerbell objects in clusters/folly/tinkerbell/ (--check compares)"
+description = "Write each folly node's MAC, address and install disk, and the HookOS URL, for the Tinkerbell objects in clusters/folly/tinkerbell/ (--check compares)"
 run = "bash scripts/render-tinkerbell-nodes.sh"
 
 [tasks."enroll:approve"]
