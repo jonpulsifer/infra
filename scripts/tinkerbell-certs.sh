@@ -2,6 +2,8 @@
 # Mints the CA, serving certificate, admin client certificate and service-account key of the
 # kube-apiserver that Tinkerbell embeds on spore. With --out <dir> it only writes the files there.
 # Otherwise it stores them in spore's SOPS file and the 1Password item, and shreds its copy.
+# With --client <name> it issues one client certificate, CN <name>, from the CA in the 1Password
+# item and stores it there as <name>.crt and <name>.key. RBAC on spore decides what <name> may do.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,13 +14,21 @@ readonly vault="homelab"
 readonly days=3650
 
 out=""
+client=""
 case "${1:-}" in
   --out)
     out="${2:?--out needs a directory}"
     ;;
+  --client)
+    client="${2:?--client needs a name}"
+    [[ "$client" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
+      echo "--client takes a lowercase DNS label" >&2
+      exit 2
+    }
+    ;;
   "") ;;
   *)
-    echo "usage: $0 [--out <dir>]" >&2
+    echo "usage: $0 [--out <dir> | --client <name>]" >&2
     exit 2
     ;;
 esac
@@ -44,6 +54,36 @@ sign() {
     -days "$days" -set_serial "0x$(openssl rand -hex 16)" -extfile "$work/$name.ext" \
     -out "$work/$name.crt" 2>/dev/null
 }
+
+if [[ -n "$client" ]]; then
+  op item get "$item" --vault "$vault" --reveal --format json >"$work/item.json"
+  for f in ca.crt ca.key; do
+    jq -je --arg label "$f" '.fields[] | select(.label == $label) | .value' "$work/item.json" >"$work/$f"
+  done
+  sign "$client" "/CN=$client" "basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=clientAuth"
+  openssl verify -CAfile "$work/ca.crt" "$work/$client.crt" >/dev/null
+
+  # Replaces the client's fields on a reissue and leaves every other field as it is.
+  jq --arg crt "$client.crt" --arg key "$client.key" \
+    --rawfile crtv "$work/$client.crt" --rawfile keyv "$work/$client.key" '
+    .fields |= (map(select(.label != $crt and .label != $key))
+      + [{label: $crt, type: "STRING", value: $crtv}, {label: $key, type: "CONCEALED", value: $keyv}])
+  ' "$work/item.json" >"$work/edit.json"
+  op item edit "$item" --vault "$vault" --template "$work/edit.json" >/dev/null
+
+  op item get "$item" --vault "$vault" --reveal --format json >"$work/stored.json"
+  for f in "$client.crt" "$client.key"; do
+    stored="$(jq -j --arg label "$f" '.fields[] | select(.label == $label) | .value' "$work/stored.json" | sha256sum)"
+    if [[ "$stored" != "$(sha256sum <"$work/$f")" ]]; then
+      echo "1Password item '$item' does not hold $f as minted" >&2
+      exit 1
+    fi
+  done
+  echo "stored $client.crt and $client.key in the 1Password item '$item'"
+  exit 0
+fi
 
 key ca
 openssl req -x509 -new -key "$work/ca.key" -subj "/CN=spore tinkerbell CA" -days "$days" \
