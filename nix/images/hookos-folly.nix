@@ -29,7 +29,8 @@ let
     "tink_worker_image=${pins.tink_agent_image}"
   ];
   tarball = fetchurl {
-    inherit (pins.hookos) url sha512;
+    url = "https://github.com/tinkerbell/hook/releases/download/${pins.hookos.version}/hook_latest-lts-x86_64.tar.gz";
+    inherit (pins.hookos) sha512;
   };
   ukify = systemdUkify.out;
 in
@@ -44,7 +45,7 @@ runCommand "hookos-folly-uki"
       --linux=vmlinuz-latest-lts-x86_64 \
       --initrd=initramfs-latest-lts-x86_64 \
       --stub=${ukify}/lib/systemd/boot/efi/linuxx64.efi.stub \
-      --uname=hookos-latest-lts \
+      --uname=hookos-${pins.hookos.version} \
       --os-release='ID=hookos' \
       --cmdline=${lib.escapeShellArg cmdline} \
       --output=$out/hookos.efi

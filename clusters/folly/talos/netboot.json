@@ -1,8 +1,8 @@
 {
-  "_comment": "Inputs of folly's generic HookOS UKI, which .github/workflows/talos-images.yml signs. The containers workflow's delivery rewrites tink_agent_image when images/tink-agent-autoid builds. HookOS is the upstream development build that ran tink-agent v0.25.0 in test; the v0.11.1 hook-bootkit lacks the /dev and /run bind mounts that this build gives the agent.",
+  "_comment": "Inputs of folly's generic HookOS UKI, which .github/workflows/talos-images.yml signs. hookos is a tinkerbell/hook release and the sha512 of its hook_latest-lts-x86_64.tar.gz, as its checksum.txt lists it; Renovate bumps both together. The containers workflow's delivery rewrites tink_agent_image when images/tink-agent-autoid builds.",
   "hookos": {
-    "url": "https://github.com/tinkerbell/hook/releases/download/latest/hook_latest-lts-x86_64.tar.gz",
-    "sha512": "0d73fb916d5f293476a5c926fb10ae2fc26c7e938539fb7af11e12b9ddf7a30013c03ebcd5fa534c470a1104e02e79d286e32d31f0603d078da248e9aa60b10a"
+    "version": "v0.11.1",
+    "sha512": "24bc6ccf225b5ce1033cdfa155d14c01da175a2e1c5268e5e64bda76fd94af7f72d841e0e0045fbf232486bc89f35251ba551aa810e30d4bebce0d5083bce61d"
   },
   "tink_agent_image": "ghcr.io/jonpulsifer/tink-agent-autoid@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 }
