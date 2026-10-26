@@ -148,7 +148,7 @@ To run the `Workflow` again, rename it, for example to `reprovision-<node>-2`, a
 | The `Workflow` stays `PENDING`, and the node boots its old Talos | The node PXE-booted off the bootstrap VLAN, or Flux turned `allowPXE` off before the node fetched HookOS | Move the node to the bootstrap VLAN, and run the `Workflow` again. |
 | The `Workflow` is `FAILED` | An action failed | Read the action's message in the `Workflow` on spore, and the HookOS console. |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware skipped the staged boot entry | Boot `Talos Linux UKI` from the F9 menu. |
-| MeshCommander cannot reach AMT after the move | AMT shares the node's MAC and moved to the bootstrap VLAN | On riptide, use the PiKVM. shale has no other console. |
+| MeshCommander cannot reach AMT after the move | AMT shares the node's MAC, so it moved to the bootstrap VLAN with a new address | Find the node's bootstrap lease in UniFi and connect from the `future` network, which the policy `future_to_bootstrap_amt` admits on TCP 16992–16995. On riptide, the PiKVM also works. |
 | The enrollment fails | See [Enroll a Talos node](enroll-a-talos-node.md#if-something-goes-wrong) | Follow its table. |
 
 ## Related
