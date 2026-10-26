@@ -7,7 +7,7 @@ Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull r
 
 ## Before you start
 
-- The node is riptide. shale has AMT, but it has no MAC auth port in `terraform/network/unifi/folly/bootstrap.tf` and no entry in `clusters/folly/apps/talos-enroll/machine-inputs.json`.
+- The node is riptide or shale, and it has an entry in `clusters/folly/apps/talos-enroll/machine-inputs.json`.
 - Its Rufio `Machine` is contactable:
 
   ```bash
@@ -148,7 +148,7 @@ To run the `Workflow` again, rename it, for example to `reprovision-<node>-2`, a
 | The `Workflow` stays `PENDING`, and the node boots its old Talos | The node PXE-booted off the bootstrap VLAN, or Flux turned `allowPXE` off before the node fetched HookOS | Move the node to the bootstrap VLAN, and run the `Workflow` again. |
 | The `Workflow` is `FAILED` | An action failed | Read the action's message in the `Workflow` on spore, and the HookOS console. |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware skipped the staged boot entry | Boot `Talos Linux UKI` from the F9 menu. |
-| MeshCommander cannot reach AMT after the move | AMT shares the node's MAC and moved to the bootstrap VLAN | Use riptide's PiKVM. |
+| MeshCommander cannot reach AMT after the move | AMT shares the node's MAC and moved to the bootstrap VLAN | On riptide, use the PiKVM. shale has no other console. |
 | The enrollment fails | See [Enroll a Talos node](enroll-a-talos-node.md#if-something-goes-wrong) | Follow its table. |
 
 ## Related

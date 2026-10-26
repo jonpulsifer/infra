@@ -3,7 +3,7 @@ title: Enroll a Talos node
 description: Wipe a folly node's system disk, boot it from the network on the bootstrap VLAN, approve its enrollment, and return it to the Kubernetes VLAN.
 ---
 
-Use this runbook to install Talos on riptide or optiplex with Secure Boot. The node network boots the signed UKI from spore through [Tinkerbell](../platform/nixos/tinkerbell.md), asks [Talos enrollment](../apps/talos-enroll.md) for its config, and installs once you approve it. For these nodes, it replaces the kexec path of [Install Talos on a node](install-talos-on-a-node.md). On a node with Intel AMT, [Reprovision a Talos node](reprovision-a-talos-node.md) replaces the wipe and the power-on at the machine.
+Use this runbook to install Talos on riptide, shale or optiplex with Secure Boot. The node network boots the signed UKI from spore through [Tinkerbell](../platform/nixos/tinkerbell.md), asks [Talos enrollment](../apps/talos-enroll.md) for its config, and installs once you approve it. For these nodes, it replaces the kexec path of [Install Talos on a node](install-talos-on-a-node.md). On a node with Intel AMT, [Reprovision a Talos node](reprovision-a-talos-node.md) replaces the wipe and the power-on at the machine.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because the disk wipe and the firmware settings happen at the machine.
@@ -41,7 +41,7 @@ The netboot UKI sets `talos.halt_if_installed=1`. Talos halts on any disk that h
 
 The node checks the server's certificate against its own clock. The bootstrap VLAN gives it no time source before it has a config.
 
-1. Open the firmware setup: F10 on riptide, F2 on optiplex.
+1. Open the firmware setup: F10 on riptide and shale, F2 on optiplex.
 2. Make sure that the date and time are the current UTC time.
 
 ## Boot and approve
