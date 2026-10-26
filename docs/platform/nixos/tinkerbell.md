@@ -18,9 +18,9 @@ The UI, Tootles, SecondStar and Smee's own TFTP and iPXE binaries are off.
 
 ## Boot path
 
-Firmware PXE on the bootstrap VLAN takes its address from UniFi, whose DHCP names no boot file. Smee answers only a MAC that has a `Hardware` object, and names `ipxe-signed.efi` on spore's bootstrap address. dnsmasq serves that file from `/var/lib/tftpboot`. The signed iPXE then fetches the node's script from `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/<mac>/auto.ipxe`.
+Firmware PXE on the bootstrap VLAN takes its address from UniFi, whose DHCP names no boot file. Smee answers only a MAC that has a `Hardware` object, and names `talos/folly/ipxe-amd64-secureboot.efi` on spore's bootstrap address. dnsmasq serves that file from `/var/lib/tftpboot`, and nginx serves the signed HookOS UKI at `/talos/folly/hookos-amd64-secureboot-uki.efi`. The signed iPXE then fetches the node's script from `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/<mac>/auto.ipxe`.
 
-Git declares no `Hardware` object and the images pipeline builds no signed iPXE, so no node boots this path today.
+Git declares no `Hardware` object, so no node boots this path today.
 
 ## API access
 

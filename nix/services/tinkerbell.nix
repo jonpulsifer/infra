@@ -18,8 +18,10 @@ let
   sha256 = "e76cac8bd46a5a4123c5ac87dae18e68b72f60b4eaa6e73247f1364c92382b16";
 
   # Under dnsmasq's TFTP root; Smee names it in its offer to UEFI x86-64 PXE clients (arch 7).
-  ipxeFile = "ipxe-signed.efi";
-  osieUrl = "http://${bootstrapIp}/hookos";
+  ipxeFile = "talos/folly/ipxe-amd64-secureboot.efi";
+  # nginx's base for the signed HookOS UKI. Smee's default HookOS script reads it; a Hardware
+  # object's netboot.ipxe.url replaces that script, so Secure Boot nodes never use it.
+  osieUrl = "http://${bootstrapIp}/talos/folly";
 
   apiPort = 6443;
   httpPort = 7080;
