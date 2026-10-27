@@ -5,7 +5,11 @@ metadata:
   name: tronbyt
   namespace: tronbyt
 spec:
+  # Two instances on two nodes: either node can go away, for a reinstall or a
+  # failure, and CNPG promotes the other.
   instances: 2
+  affinity:
+    podAntiAffinityType: required
   # serverName is one prefix per generation of this Cluster. Recovery reads
   # the previous one, tronbyt; recover-a-re-created-database removes it once
   # tronbyt-2 holds a base backup.
