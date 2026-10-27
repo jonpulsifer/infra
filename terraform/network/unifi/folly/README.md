@@ -33,8 +33,8 @@ Atlantis plans this root on a pull request that changes a `.tf` or `.conf` file 
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.28.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.3.1 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.28.1 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.4.1 |
 | <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.59.0 |
 
 ## Modules
@@ -52,6 +52,8 @@ Atlantis plans this root on a pull request that changes a `.tf` or `.conf` file 
 | [cloudflare_dns_record.k8s_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_dns_record.lab_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_dns_record.lab_service_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
+| [unifi_ap_group.lab_only](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/ap_group) | resource |
+| [unifi_ap_group.role](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/ap_group) | resource |
 | [unifi_bgp.folly](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/bgp) | resource |
 | [unifi_client.cathy](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
 | [unifi_client.k8s_nodes](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
@@ -59,6 +61,7 @@ Atlantis plans this root on a pull request that changes a `.tf` or `.conf` file 
 | [unifi_client_qos_rate.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
 | [unifi_client_qos_rate.streaming](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
 | [unifi_client_qos_rate.unmetered](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
+| [unifi_device.ap](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/device) | resource |
 | [unifi_device.usw_24_poe](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/device) | resource |
 | [unifi_firewall_group.teleport_cidr](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_group) | resource |
 | [unifi_firewall_policy.allow_established_related_external](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
@@ -77,6 +80,7 @@ Atlantis plans this root on a pull request that changes a `.tf` or `.conf` file 
 | [unifi_firewall_policy.folly_k8s_to_nest_k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.folly_lb_to_nest_lan](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.folly_pbx_to_handset](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
+| [unifi_firewall_policy.future_to_bootstrap_amt](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.internal_to_lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.internal_to_nest_k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.lab_clients_to_nest_k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |

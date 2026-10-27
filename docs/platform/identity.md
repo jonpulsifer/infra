@@ -74,7 +74,7 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. The bundle notifier is off, because `nix/secrets/spore.sops.yaml` has no `spire/folly-bundle-writer-token` yet. No agent runs, so `SpireNoAttestedAgents` fires, and no pod gets an SVID. The smoke Job is suspended, since a pod that no node can schedule keeps it active until `KubeJobNotCompleted` fires.
 
-The allow list holds riptide's EK hash. optiplex has none until Intel PTT is on.
+The allow list holds riptide's EK hash. optiplex's TPM is on, and its EK hash is not on the list yet.
 
 ## Where it lives
 

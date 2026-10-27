@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from rich.console import Console
 from typer.testing import CliRunner
 
-from tally import cli, config, files, load
+from tally import cli, config, files, load, parsers
 from tally.engine import Decisions
 from tally.model import (
     Account,
@@ -413,6 +413,55 @@ def test_balance_gaps_cover_the_whole_ledger_for_laddered_accounts_only():
     assert body["ladders"][0]["span_difference"] == "5.00"
     assert body["ladders"][0]["date_from"] == "2031-01-01"
     assert report.discrepancies == 1
+
+
+def test_a_scan_goes_through_ocr_once_and_its_pages_are_kept_by_hash(
+    tmp_path, settings, monkeypatch
+):
+    from tally.parsers import pdf
+    from tally.parsers.statements import Page
+
+    root = tmp_path / "f"
+    root.mkdir()
+    scan = root / "scan.pdf"
+    scan.write_bytes(b"%PDF-1.4 a scan with no text layer")
+    monkeypatch.setattr(pdf, "text_layer", lambda _path: [Page(text=""), Page(text=" ")])
+    reads: list[str] = []
+
+    def ocr(_path, shown):
+        reads.append(shown)
+        return ["Shareworks statement page one", "page two"]
+
+    found = load.collect(root, settings, tmp_path / "s", ocr=ocr)
+    assert reads == ["scan.pdf"]
+    assert [(s.name, s.reason) for s in found.skipped] == [
+        ("scan.pdf", "no statement family recognises this PDF")
+    ]
+    assert load.collect(root, settings, tmp_path / "s").skipped[0].reason == (
+        "scanned PDF; install tally[ocr]"
+    )
+
+    calls: list[Path] = []
+
+    def fake_ocr_pages(path):
+        calls.append(path)
+        return ["Shareworks", "again"]
+
+    monkeypatch.setattr(pdf, "ocr_pages", fake_ocr_pages)
+    said: list[str] = []
+    with Store.open(settings.db_path) as store:
+        cached = load.cached_ocr(store, said.append)
+        assert cached(scan, "scan.pdf") == ["Shareworks", "again"]
+        assert cached(scan, "scan.pdf") == ["Shareworks", "again"]
+        assert store.ocr_pages(files.sha256(scan)) == ["Shareworks", "again"]
+    assert len(calls) == 1 and said == ["OCR: scan.pdf, 2 pages"]
+
+    def no_ocr(_path):
+        raise parsers.ParseError("scanned PDF; install tally[ocr]")
+
+    monkeypatch.setattr(pdf, "ocr_pages", no_ocr)
+    with Store.open(tmp_path / "other.db") as store:
+        assert load.cached_ocr(store, said.append)(scan, "scan.pdf") is None
 
 
 def test_unpack_refuses_what_is_not_a_zip(tmp_path, settings):

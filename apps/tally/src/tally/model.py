@@ -36,13 +36,19 @@ class AccountKind(StrEnum):
     asset = "asset"
 
 
+Currency = Literal["CAD", "USD"]
+
+
 class Account(Model):
     id: str
     name: str
     institution: str
     kind: AccountKind
     since: date
-    currency: Literal["CAD"] = "CAD"
+    currency: Currency = Field(
+        default="CAD",
+        description="Every amount, balance and snapshot of this account is in this currency.",
+    )
 
 
 class Flow(StrEnum):
@@ -177,6 +183,7 @@ class ParsedFile(Model):
     rows: tuple[ParsedRow, ...]
     assertions: tuple[BalanceAssertion, ...] = ()
     holdings: tuple[HoldingSnapshot, ...] = ()
+    currency: Currency = "CAD"
     profile_id: str | None = Field(default=None, description="The CSV profile that parsed it.")
     sha256: str
     date_from: date | None
@@ -197,6 +204,7 @@ class PreviewFile(Model):
     scanned: bool | None = None
     needs_account: bool = False
     account_kind: AccountKind | None = None
+    currency: Currency = "CAD"
 
 
 class DuplicateFinding(Model):

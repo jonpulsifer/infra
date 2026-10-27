@@ -548,6 +548,7 @@ def _preview_file(f: _File) -> PreviewFile:
         scanned=pf.scanned,
         needs_account=f.needs_account,
         account_kind=f.kind,
+        currency=pf.currency,
     )
 
 
@@ -955,6 +956,7 @@ def _new_accounts(
                 institution=institution,
                 kind=kind,
                 since=since,
+                currency=f.currency if f else "CAD",
             )
         )
     return out

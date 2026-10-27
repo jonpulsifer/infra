@@ -106,7 +106,7 @@ resource "unifi_wlan" "lab" {
   name                      = local.lab_wlan
   security                  = "open"
   hide_ssid                 = true
-  ap_group_ids              = ["693c98563a6bcc1ba862e1ae"]
+  ap_group_ids              = [unifi_ap_group.lab_only.id]
   ap_group_mode             = "devices"
   network_id                = unifi_network.lab.id
   user_group_id             = unifi_client_qos_rate.unmetered.id

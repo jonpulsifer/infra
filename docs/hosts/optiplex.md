@@ -12,9 +12,9 @@ specs:
   storage: 256 GB SK hynix SC311 SATA SSD
   os: Talos Linux 1.14
   firmware: BIOS 1.27.0
-  tpm: Intel PTT, not enabled in the BIOS
+  tpm: Nuvoton TPM 2.0, discrete and on, with EK certificates in NV
   boot: Image Factory systemd-boot UKI, Secure Boot off
-  disks: plain until PTT is on and the signed install, then sealed to the TPM
+  disks: plain until the signed install, then sealed to the TPM
 ---
 
 optiplex is the only control-plane node of the folly [Kubernetes](../platform/kubernetes.md) cluster. It runs [Talos Linux](../platform/kubernetes/talos.md), and `clusters/folly/talos/` configures it.

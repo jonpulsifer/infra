@@ -98,11 +98,18 @@ class Collected:
     twins: int = 0
 
 
-def collect(root: Path, settings: config.Settings, scratch: Path) -> Collected:
+type Ocr = Callable[[Path, str], list[str] | None]
+"""Page texts for a scanned PDF, or None when nothing here can read a scan."""
+
+
+def collect(
+    root: Path, settings: config.Settings, scratch: Path, *, ocr: Ocr | None = None
+) -> Collected:
     """Every readable file under `root`, parsed, with zip members written under `scratch`.
 
     A file whose bytes another file already supplied (a zip of the same export
-    beside it) is a twin and is counted, not loaded twice.
+    beside it) is a twin and is counted, not loaded twice. A scanned PDF goes
+    through `ocr` when one is given; without one it is listed as not read.
     """
     paths, excluded, hidden = files.walk(root, settings)
     sources: list[Source] = []
@@ -114,11 +121,11 @@ def collect(root: Path, settings: config.Settings, scratch: Path) -> Collected:
                 if member.path is None:
                     skipped.append(Skipped(member.shown, member.reason or "not opened"))
                 else:
-                    _parse_into(member.path, member.shown, sources, skipped, packed=True)
+                    _parse_into(member.path, member.shown, sources, skipped, ocr, packed=True)
         elif files.is_archive(path):
             skipped.append(Skipped(shown, "an archive tally does not open"))
         else:
-            _parse_into(path, shown, sources, skipped)
+            _parse_into(path, shown, sources, skipped, ocr)
     seen: set[str] = set()
     unique: list[Source] = []
     for s in sorted(sources, key=lambda s: s.packed):  # a loose file beats its zipped twin
@@ -131,10 +138,16 @@ def collect(root: Path, settings: config.Settings, scratch: Path) -> Collected:
 
 
 def _parse_into(
-    path: Path, shown: str, sources: list[Source], skipped: list[Skipped], *, packed: bool = False
+    path: Path,
+    shown: str,
+    sources: list[Source],
+    skipped: list[Skipped],
+    ocr: Ocr | None,
+    *,
+    packed: bool = False,
 ) -> None:
     try:
-        pf = parsers.parse(path)
+        pf = _parse(path, shown, ocr)
     except parsers.ParseError as exc:
         skipped.append(Skipped(shown, _reason(str(exc), path.name)))
         return
@@ -142,6 +155,44 @@ def _parse_into(
         skipped.append(Skipped(shown, type(exc).__name__))
         return
     sources.append(Source(path, shown, pf.model_copy(update={"name": shown}), packed))
+
+
+def _parse(path: Path, shown: str, ocr: Ocr | None) -> ParsedFile:
+    """`parsers.parse`, except that a scanned PDF's pages come from `ocr`."""
+    from tally.parsers import pdf
+    from tally.parsers.statements import Page
+
+    with path.open("rb") as fh:
+        head = fh.read(1024)
+    if b"%PDF-" not in head:
+        return parsers.parse(path)
+    pages = pdf.text_layer(path)
+    if not pdf.is_scanned([p.text for p in pages]):
+        return pdf.from_pages(path, pages, scanned=False)
+    texts = ocr(path, shown) if ocr is not None else None
+    if texts is None:
+        raise parsers.ParseError(f"{path.name}: scanned PDF; install tally[ocr]")
+    return pdf.from_pages(path, [Page(text=t) for t in texts], scanned=True)
+
+
+def cached_ocr(store: Store, say: Callable[[str], None]) -> Ocr:
+    """OCR through the local store: a scan is read once and its pages kept by its hash."""
+
+    def read(path: Path, shown: str) -> list[str] | None:
+        from tally.parsers.pdf import ocr_pages
+
+        sha = files.sha256(path)
+        if (kept := store.ocr_pages(sha)) is not None:
+            return kept
+        try:
+            texts = ocr_pages(path)
+        except parsers.ParseError:
+            return None
+        store.put_ocr_pages(sha, texts)
+        say(f"OCR: {shown}, {len(texts)} pages")
+        return texts
+
+    return read
 
 
 def _shown(path: Path, root: Path) -> str:
@@ -655,7 +706,7 @@ def run(
 ) -> Report:
     report = Report(root=root, dry_run=dry_run)
     with tempfile.TemporaryDirectory(prefix="tally-load-") as tmp:
-        found = collect(root, settings, Path(tmp))
+        found = collect(root, settings, Path(tmp), ocr=cached_ocr(store, say))
         report.excluded, report.hidden = found.excluded, found.hidden
         report.twins = found.twins
         report.skipped.extend(found.skipped)
