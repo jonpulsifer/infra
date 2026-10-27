@@ -1,9 +1,0 @@
----
-apiVersion: tinkerbell.org/v1alpha1
-kind: Workflow
-metadata:
-  name: reprovision-riptide-2
-  labels:
-    tinkerbell.lolwtf.ca/boot: manual
-spec:
-  hardwareRef: riptide
