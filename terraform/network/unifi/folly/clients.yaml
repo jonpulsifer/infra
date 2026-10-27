@@ -78,17 +78,19 @@ aps:
     band_steering: "off"
     outdoor_mode: "off"
     # The 5 GHz radio is off because it has never had a client here. The 2.4 GHz
-    # radio keeps auto power and no floor: the Tempest hub lives on it and is
-    # dropped by a floor before it reports a signal, and it has no nearer
-    # 2.4 GHz radio until the Express 7's is enabled.
+    # radio keeps auto power and a floor no client can fall below: the Tempest
+    # hub lives on it and a real floor drops it before it reports a signal, and
+    # it has no nearer 2.4 GHz radio until the Express 7's is enabled. The
+    # provider does not write min_rssi_enabled: false, so the floor stays
+    # enabled at the controller's default.
     radios:
       - name: ra0
         radio: ng
         channel: "6"
         ht: 20
         tx_power_mode: auto
-        min_rssi_enabled: false
-        min_rssi: -75
+        min_rssi_enabled: true
+        min_rssi: -90
         antenna_gain: 3
         antenna_id: -1
         hard_noise_floor_enabled: false
