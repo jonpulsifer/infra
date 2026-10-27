@@ -22,7 +22,7 @@ Use this runbook to add a new machine to folly as a Talos worker. You set its fi
 3. Turn off legacy support. Turn on UEFI network boot over IPv4. Set the boot order to the NVMe disk first and IPv4 network boot second, so an empty disk falls through to PXE.
 4. Set the power-loss behaviour to power on.
 5. Turn on the TPM and set it to clear at the next boot. The clear removes an earlier owner's settings and keeps the endorsement key and its certificate.
-6. Clear the Secure Boot keys. The firmware is then in Setup Mode.
+6. Turn Secure Boot off, and clear the Secure Boot keys. The firmware is then in Setup Mode. With Secure Boot on, HP reloads its factory keys at the next boot instead.
 7. Save, then confirm the TPM clear with F1.
 8. Press Ctrl+P at boot to open MEBx. Set the AMT password, turn on AMT and network access, and set the KVM user consent to none.
 
@@ -33,7 +33,7 @@ Use this runbook to add a new machine to folly as a Talos worker. You set its fi
 
    Result: iPXE boots the signed ISO from spore. Its systemd-boot prints `Enrolling secure boot keys from directory: \loader\keys\auto` and `Secure Boot keys successfully enrolled`, then reboots.
 
-3. Open the firmware setup and make sure that Secure Boot is on and in user mode.
+3. Open the firmware setup and turn Secure Boot on.
 4. Power off the machine.
 
 ## Rack and enroll
@@ -82,6 +82,7 @@ Use this runbook to add a new machine to folly as a Talos worker. You set its fi
 | --- | --- | --- |
 | iPXE says `sanboot` failed. | The firmware cannot boot the ISO over HTTP. | Write the ISO from spore's `/talos/folly/metal-amd64-secureboot.iso` to a USB stick and boot it. |
 | systemd-boot shows no enrollment message. | The firmware is not in Setup Mode. | Clear the Secure Boot keys again. |
+| The firmware says `Selected boot image did not authenticate`, or skips the disk and PXE. | Its `db` lacks the lab's certificate, or holds only HP's factory keys. | Turn Secure Boot off, clear the keys, enroll again, then turn it on. The lab's signing keys are RSA-2048, the size HP firmware verifies. |
 | The screen is black after enrollment. | An option ROM is not signed by a certificate in `db`. | Clear the Secure Boot keys to boot without them, and note the model. `db` already holds Microsoft's option ROM and UEFI CAs. |
 | Talos stops at `failed to read pcr signing public key`. | Talos booted by kexec, not through the firmware. | Power-cycle the node. |
 | The enrollment fails. | See [Enroll a Talos node](enroll-a-talos-node.md#if-something-goes-wrong). | Follow its table. |
