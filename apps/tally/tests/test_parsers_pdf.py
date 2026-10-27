@@ -95,6 +95,21 @@ def test_a_recognised_unparsed_family_names_itself(tmp_path):
         PdfParser().parse(path)
 
 
+def test_importing_one_parser_first_does_not_hide_the_others(monkeypatch):
+    import importlib
+
+    import tally.parsers as registry
+
+    monkeypatch.setattr(registry, "_REGISTRY", [])
+    monkeypatch.setattr(registry, "_LOADED", False)
+    for name in ("csv_", "ofx", "xlsx", "pdf"):
+        monkeypatch.delitem(sys.modules, f"tally.parsers.{name}", raising=False)
+    importlib.import_module("tally.parsers.pdf")  # a direct import registers PdfParser alone
+    assert [type(p).__name__ for p in registry._REGISTRY] == ["PdfParser"]
+    names = {type(p).__name__ for p in registry.parsers()}
+    assert {"CsvParser", "OfxParser", "XlsxParser", "PdfParser"} <= names
+
+
 def test_a_broken_file_is_unreadable_not_a_crash(tmp_path):
     path = tmp_path / "broken.pdf"
     path.write_bytes(b"%PDF-1.4\nnot really")

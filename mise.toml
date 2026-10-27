@@ -86,6 +86,11 @@ description = "Load ~/finance into the live tally ledger, once, and show what di
 dir = "apps/tally"
 run = "scripts/load.sh"
 
+[tasks."tally:ocr"]
+description = "Install tally's OCR extra and Docling's models locally, so tally:load reads scans (apps/tally)"
+dir = "apps/tally"
+run = "scripts/ocr-models.sh"
+
 [tasks.kthx]
 description = "Run the kthx CLI from this checkout"
 # The root package does not depend on the CLI's workspace, so turbo leaves it
