@@ -30,6 +30,7 @@ class Parser(Protocol):
 
 
 _REGISTRY: list[Parser] = []
+_LOADED = False
 
 
 def register(parser: Parser) -> Parser:
@@ -38,13 +39,20 @@ def register(parser: Parser) -> Parser:
 
 
 def parsers() -> tuple[Parser, ...]:
-    if not _REGISTRY:
+    if not _LOADED:
         _load()
     return tuple(_REGISTRY)
 
 
 def _load() -> None:
-    """Import each parser for its `register` side effect, in sniff order."""
+    """Import each parser for its `register` side effect, in sniff order.
+
+    Importing a parser module directly (a caller that wants `pdf` alone)
+    registers it early; the flag, not the registry's size, says whether the
+    whole set has been loaded, so that early import cannot hide the rest.
+    """
+    global _LOADED
+    _LOADED = True
     for name in ("csv_", "ofx", "xlsx"):
         importlib.import_module(f"tally.parsers.{name}")
     with contextlib.suppress(ImportError):

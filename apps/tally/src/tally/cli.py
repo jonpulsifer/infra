@@ -6,10 +6,12 @@ that needs them, so the CLI starts while any of them is unfinished.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import inspect
 import json
 import os
+import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -760,8 +762,11 @@ def load(
         raise _fail("no server token: set TALLY_TOKEN or token_command", 2)
     overrides = _overrides(account or ())
     say = (lambda _: None) if as_json else (lambda m: err.print(Text(m, style="dim")))
+    # OCR's libraries log to stdout; with --json that stream is the report, so it is lent
+    # to stderr for the run.
+    quiet = contextlib.redirect_stdout(sys.stderr) if as_json else contextlib.nullcontext()
     try:
-        with _server(settings, token) as http, Store.open(settings.db_path) as store:
+        with quiet, _server(settings, token) as http, Store.open(settings.db_path) as store:
             remote = loader.Remote(http, dedupe_window_days=settings.dedupe_window_days)
             target: loader.Target = remote
             if dry_run:
