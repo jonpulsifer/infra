@@ -435,7 +435,7 @@ def test_a_scan_goes_through_ocr_once_and_its_pages_are_kept_by_hash(
     found = load.collect(root, settings, tmp_path / "s", ocr=ocr)
     assert reads == ["scan.pdf"]
     assert [(s.name, s.reason) for s in found.skipped] == [
-        ("scan.pdf", "shareworks statement: recognised, not parsed yet")
+        ("scan.pdf", "no statement family recognises this PDF")
     ]
     assert load.collect(root, settings, tmp_path / "s").skipped[0].reason == (
         "scanned PDF; install tally[ocr]"

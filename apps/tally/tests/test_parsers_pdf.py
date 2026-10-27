@@ -90,8 +90,8 @@ def test_an_unrecognised_pdf_is_a_parse_error(tmp_path):
 
 
 def test_a_recognised_unparsed_family_names_itself(tmp_path):
-    path = write_pdf(tmp_path / "s.pdf", [["Statement of Account"] * 3, ["Solium Capital"] * 3])
-    with pytest.raises(ParseError, match="shareworks statement: recognised"):
+    path = write_pdf(tmp_path / "s.pdf", [["Quarterly report"] * 3, ["PWL Capital Inc."] * 3])
+    with pytest.raises(ParseError, match="pwl statement: recognised"):
         PdfParser().parse(path)
 
 

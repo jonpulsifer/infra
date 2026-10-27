@@ -37,7 +37,7 @@ class AccountOut(Wire):
     institution: str
     kind: model.AccountKind
     since: date
-    currency: Literal["CAD"] = "CAD"
+    currency: model.Currency = "CAD"
 
 
 class CategoryOut(Wire):
@@ -130,6 +130,7 @@ class PreviewFileOut(Wire):
     scanned: bool | None = None
     needs_account: bool = False
     account_kind: model.AccountKind | None = None
+    currency: model.Currency = "CAD"
 
 
 class DuplicateFindingOut(Wire):
