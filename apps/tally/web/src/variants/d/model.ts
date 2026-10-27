@@ -1,0 +1,25 @@
+export {
+  type Action,
+  accountSeries,
+  categoryOptions,
+  type DeskState,
+  initState,
+  type LedgerRow,
+  ladder,
+  liveLedger,
+  patternFor,
+  type Resolution,
+  reduce,
+  type Screen,
+  similarTo,
+  topResolver,
+  toRows,
+  transferIndex,
+} from '~/variants/a/model';
+export {
+  addMonths,
+  PERIODS,
+  type Period,
+  type PeriodKey,
+  resolvePeriod,
+} from '~/variants/a/period';
