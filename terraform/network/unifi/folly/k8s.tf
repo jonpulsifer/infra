@@ -52,11 +52,15 @@ resource "unifi_network" "k8s" {
 resource "unifi_client" "k8s_nodes" {
   for_each = local.node_addresses
 
-  mac        = local.clients.k8s[each.key].mac
-  name       = each.key
-  fixed_ip   = each.value
-  network_id = unifi_network.k8s.id
-  note       = "terraform managed - folly Kubernetes node"
+  # No network_id: the provider sends it as a Virtual Network Override, which
+  # the switch enforces as a MAC-based VLAN on every port. That pins a node to
+  # the Kubernetes VLAN whatever its port or RADIUS assigns, so a reinstall
+  # could never reach the bootstrap VLAN. The node ports carry the Kubernetes
+  # VLAN untagged already.
+  mac      = local.clients.k8s[each.key].mac
+  name     = each.key
+  fixed_ip = each.value
+  note     = "terraform managed - folly Kubernetes node"
 
   # The controller already knows these MACs.
   allow_existing         = true
