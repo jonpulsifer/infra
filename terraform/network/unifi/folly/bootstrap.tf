@@ -11,7 +11,7 @@ locals {
     optiplex = 10
   }
   enrolled = {
-    shale    = "bootstrap"
+    shale    = "kubernetes"
     riptide  = "kubernetes"
     optiplex = "kubernetes"
   }
@@ -32,7 +32,7 @@ locals {
   # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
   # reinstall. shale's port drops its frames when RADIUS assigns VLAN 9, while
   # VLAN 8 assignment works, so its reinstall uses a plain bootstrap port.
-  boot_native = toset(["shale"])
+  boot_native = toset([])
 
   switch = local.clients.switches["USW 24 PoE"]
 }
