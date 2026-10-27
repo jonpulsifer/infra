@@ -1,6 +1,6 @@
-# x86 PXE: dnsmasq serves TFTP only (port=0), and terraform/network/unifi/folly/k8s.tf points netboot at
-# boot/ipxe.efi. iPXE fetches kernels and initrds over HTTP, since TFTP is too slow for them.
-# Nix does not generate /var/lib/tftpboot; restore it from backup or `nix build .#netboot`.
+# dnsmasq serves TFTP only (port=0): the signed iPXE that the bootstrap network names, linked into
+# /var/lib/tftpboot by ./spore-talos-boot.nix. nginx serves the boot files over HTTP, since TFTP is
+# too slow for them.
 { ... }:
 {
   systemd.tmpfiles.rules = [

@@ -151,7 +151,7 @@ spec:
             severity: warning
           annotations:
             message: PXE TFTP (dnsmasq) on spore is down
-            description: "dnsmasq.service is not active on spore. Bare-metal k8s nodes cannot netboot (ipxe.efi via terraform/network/unifi/folly/k8s.tf)."
+            description: "dnsmasq.service is not active on spore. A node on the bootstrap VLAN cannot load the signed iPXE (terraform/network/unifi/folly/bootstrap.tf)."
         - alert: SporePxeHttpDown
           expr: (nginx_up{instance="spore"} == 0) or absent(nginx_up{instance="spore"})
           for: 5m
