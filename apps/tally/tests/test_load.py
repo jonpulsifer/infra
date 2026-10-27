@@ -464,6 +464,41 @@ def test_a_scan_goes_through_ocr_once_and_its_pages_are_kept_by_hash(
         assert load.cached_ocr(store, said.append)(scan, "scan.pdf") is None
 
 
+def test_a_scan_read_here_is_held_back_from_a_server_that_cannot_read_one(
+    finance, settings, http, monkeypatch
+):
+    from tally.parsers import pdf
+    from tally.parsers.statements import Page
+
+    scan = finance / "Finances" / "scan.pdf"
+    scan.write_bytes(b"%PDF-1.4 a scan")
+    real = pdf.text_layer
+    monkeypatch.setattr(
+        pdf, "text_layer", lambda p: [Page(text="")] if p.name == "scan.pdf" else real(p)
+    )
+    monkeypatch.setattr(pdf, "ocr_pages", lambda _p: [STATEMENT_TEXT])
+    report = run(finance, settings, http, dry_run=False)
+    assert ("Finances__scan.pdf", load.SCAN_HELD) in [(s.name, s.reason) for s in report.skipped]
+    assert report.added == len(YNAB_ROWS) + 1
+    with Store.open(settings.db_path) as store:
+        assert not store.seen(files.sha256(scan), "pushed")
+
+
+STATEMENT_TEXT = """Statement of Account
+Statement Period: 01-Mar-2031 to 31-Aug-2031
+Account Number: CS-123456-01
+Company: Example Corp.
+Example, Inc - Class A NYSE $10.00 $20.00 100%
+All currencies are in US Dollars unless specified.
+Account Summary
+Total Quantity
+Share Units (RSU) 10
+Total Value
+Share Units (RSU) $200.00
+Total $200.00
+Shareworks"""
+
+
 def test_unpack_refuses_what_is_not_a_zip(tmp_path, settings):
     bad = tmp_path / "x.zip"
     bad.write_bytes(b"nope")

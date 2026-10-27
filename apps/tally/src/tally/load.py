@@ -57,6 +57,7 @@ from tally.model import (
 from tally.store import Store
 
 REGISTER = "ynab-register"
+SCAN_HELD = "a scan: read here by OCR, but the server cannot read one yet"
 MATCH_SHARE = 0.5
 MIN_ROWS = 3  # fewer rows cannot tell an account from one it transfers to
 BATCH_LIMIT = 64
@@ -371,6 +372,11 @@ def choose_accounts(
 class Target(Protocol):
     """Where a batch goes: the server, or a local copy of the ledger for a dry run."""
 
+    @property
+    def reads_scans(self) -> bool:
+        """True when the target can parse a scanned PDF it is handed as bytes."""
+        ...
+
     def ledger(self) -> Ledger: ...
 
     def preview(
@@ -388,6 +394,8 @@ def rules_only(ledger: Ledger) -> Classifier:
 
 class Local:
     """A dry run: the engine against a copy of the ledger, applied in memory, nothing sent."""
+
+    reads_scans = True
 
     def __init__(
         self, ledger: Ledger, *, dedupe_window_days: int, transfer_window_days: int
@@ -424,7 +432,13 @@ class Local:
 
 
 class Remote:
-    """The server's import routes over an httpx client that already authenticates."""
+    """The server's import routes over an httpx client that already authenticates.
+
+    The server parses the bytes it is sent and has no OCR, so a scan read here
+    stays here until the API has a queue of its own.
+    """
+
+    reads_scans = False
 
     def __init__(self, http: Any, *, dedupe_window_days: int | None = None) -> None:
         self.http = http
@@ -714,6 +728,8 @@ def run(
         for s in found.sources:
             if not force and not dry_run and store.seen(s.parsed.sha256, "pushed"):
                 report.already += 1
+            elif s.parsed.scanned and not target.reads_scans:
+                report.skipped.append(Skipped(s.shown, SCAN_HELD))
             else:
                 fresh.append(s)
         n, k, had = len(found.sources), len(found.skipped), report.already
