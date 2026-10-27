@@ -1,6 +1,6 @@
-# The access points, imported as they are. Band steering and outdoor mode are
-# declared where the console reports them; the radios stay computed until the
-# radio plan lands in its own change.
+# The access points. Band steering and outdoor mode are declared where the
+# console reports them. An AP with a `radios` list in clients.yaml owns its
+# radio table in git; the others keep whatever the console holds.
 locals {
   aps      = local.clients.aps
   ap_roles = toset(flatten([for ap in values(local.aps) : ap.roles]))
@@ -22,6 +22,7 @@ resource "unifi_device" "ap" {
 
   bandsteering_mode     = try(each.value.band_steering, null)
   outdoor_mode_override = try(each.value.outdoor_mode, null)
+  radio_table           = try(each.value.radios, null)
 }
 
 # One group per role. A WLAN names the group whose APs should carry it.

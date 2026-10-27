@@ -48,6 +48,28 @@ aps:
     roles: [people, things]
     band_steering: prefer_5g
     outdoor_mode: "on"
+    # Garden coverage. A 40 MHz cell on a quiet block is plenty for a phone
+    # outside and halves the footprint; min RSSI sends it home at the door.
+    radios:
+      - name: ra0
+        radio: ng
+        channel: "1"
+        ht: 20
+        tx_power_mode: low
+        min_rssi_enabled: true
+        min_rssi: -75
+        antenna_gain: 3
+        antenna_id: -1
+        vwire_enabled: true
+      - name: rai0
+        radio: na
+        channel: "52"
+        ht: 40
+        tx_power_mode: auto
+        min_rssi_enabled: false
+        antenna_gain: 3
+        antenna_id: -1
+        vwire_enabled: true
   Chicken Coop:
     mac: 68:d7:9a:44:04:e1
     model: UFLHD
@@ -55,6 +77,35 @@ aps:
     roles: [things]
     band_steering: "off"
     outdoor_mode: "off"
+    # Serves the yard, not the living room: medium power and a −75 floor on
+    # 2.4 GHz, and the 5 GHz radio off because it has never had a client here.
+    radios:
+      - name: ra0
+        radio: ng
+        channel: "6"
+        ht: 20
+        tx_power_mode: medium
+        min_rssi_enabled: true
+        min_rssi: -75
+        antenna_gain: 3
+        antenna_id: -1
+        hard_noise_floor_enabled: false
+        sens_level_enabled: false
+        loadbalance_enabled: false
+        vwire_enabled: true
+      - name: rai0
+        radio: na
+        channel: auto
+        ht: 80
+        tx_power_mode: disabled
+        min_rssi_enabled: false
+        min_rssi: -90
+        antenna_gain: 3
+        antenna_id: -1
+        hard_noise_floor_enabled: false
+        sens_level_enabled: false
+        loadbalance_enabled: false
+        vwire_enabled: true
   Driveway:
     mac: e0:63:da:85:9a:59
     model: UFLHD
