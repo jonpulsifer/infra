@@ -782,3 +782,63 @@ def test_a_trusted_tag_whose_category_the_ledger_lacks_is_added_before_classifyi
     (txn,) = got.new_transactions
     assert txn.category_id == got.new_categories[-1].id
     assert not got.findings
+
+
+def card_statement(name, opening, closing, rows):
+    """A card statement: rows posted after the opening date through the closing date."""
+    assertions = [
+        BalanceAssertion(account_id="card", date=on, balance=D(balance), origin=name)
+        for on, balance in (opening, closing)
+    ]
+    return parsed(name, rows, fmt="pdf", assertions=assertions)
+
+
+FEB = date(2030, 2, 10)
+FARE = "TRANSIT FARE"
+JANUARY = card_statement(
+    "jan.pdf",
+    (date(2029, 12, 10), "0.00"),
+    (JAN, "-10.00"),
+    [row(date(2030, 1, 5), "-3.25", "BUS"), row(date(2030, 1, 9), "-6.75", FARE)],
+)
+FEBRUARY = card_statement(
+    "feb.pdf", (JAN, "-10.00"), (FEB, "-16.75"), [row(date(2030, 1, 11), "-6.75", FARE)]
+)
+
+
+def dups(p):
+    return [f for f in p.findings if isinstance(f, DuplicateFinding)]
+
+
+def test_a_repeat_purchase_either_side_of_a_statement_date_is_kept_in_one_import():
+    p = preview([JANUARY, FEBRUARY], make_ledger(), Stub())
+    assert dups(p) == []
+    after = apply(make_ledger(), p, Decisions())
+    assert len(after.transactions) == 3
+    assert tally.reconcile.balances.check(after.transactions, after.assertions) == []
+
+
+def test_a_repeat_purchase_is_kept_against_a_statement_the_ledger_already_reconciles():
+    first = make_ledger()
+    led = apply(first, preview([JANUARY], first, Stub()), Decisions())
+    p = preview([FEBRUARY], led, Stub())
+    assert dups(p) == []
+    assert len(apply(led, p, Decisions()).transactions) == 3
+
+
+def test_a_statement_that_does_not_reconcile_is_still_deduped():
+    unanchored = FEBRUARY.model_copy(update={"assertions": FEBRUARY.assertions[1:]})
+    off = card_statement(
+        "feb.pdf", (JAN, "-10.00"), (FEB, "-99.00"), [row(date(2030, 1, 11), "-6.75", FARE)]
+    )
+    for second in (unanchored, off):
+        (dup,) = dups(preview([JANUARY, second], make_ledger(), Stub()))
+        assert dup.tier == "fuzzy"
+
+
+def test_an_export_overlapping_a_reconciled_statement_is_still_deduped():
+    first = make_ledger()
+    led = apply(first, preview([JANUARY], first, Stub()), Decisions())
+    export = parsed("card.csv", [row(date(2030, 1, 11), "-6.75", FARE)])
+    (dup,) = dups(preview([export], led, Stub()))
+    assert dup.tier == "fuzzy"

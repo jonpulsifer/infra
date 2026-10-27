@@ -15,6 +15,11 @@ duplicate keeps the incoming row and retires the pending one only on accept.
 A posted row with the same id as a pending one (the same row, now cleared)
 posts that row in place, keeping its category.
 
+Dedupe is told which rows sit in a closed period. A statement whose rows add
+up to its own opening and closing balances closes that span for its account,
+and a ledger row is in a closed period when the balance ladder holds over it.
+Rows of two disjoint closed periods are never fuzzy duplicates.
+
 Rows moved to the account the owner names at apply were deduped at preview
 under their placeholder account, so apply dedupes them again against the
 chosen account and drops FITID duplicates, as preview would have.
@@ -34,9 +39,12 @@ and the preview's other rows already match those rules.
 from __future__ import annotations
 
 import hashlib
+from bisect import bisect_left
+from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,6 +77,7 @@ from tally.report import Taxonomy
 
 if TYPE_CHECKING:
     from tally.engine import Decisions
+    from tally.reconcile.dedupe import Period
 
 UNCATEGORIZED = "uncategorized"
 TRANSFER = "transfer"
@@ -220,7 +229,16 @@ def preview(
     chosen = dict(account_for_file or {})
     resolved = [_resolve(i, _parse(f), known, chosen) for i, f in enumerate(files)]
     rows, sources, owners = _incoming(resolved, known)
-    result = dedupe(ledger.transactions, rows, window_days=dedupe_window_days, sources=sources)
+    file_assertions = [r.restamp(a, known) for r in resolved for a in r.parsed.assertions]
+    kinds = _kinds(ledger, resolved)
+    result = dedupe(
+        ledger.transactions,
+        rows,
+        window_days=dedupe_window_days,
+        sources=sources,
+        periods=_file_periods(resolved, rows, owners, known, kinds),
+        existing_periods=_ledger_periods(ledger, kinds),
+    )
     drafts = _drafts(rows, owners, result.ids, frozenset(result.new), ledger, tombstones)
     drafted = {d.id for d in drafts}
     dups = [f for f in result.findings if f.transaction_id in drafted]
@@ -237,11 +255,10 @@ def preview(
         [d for d in drafts if d.new], working, classifier, threshold, frozenset(withhold), paired
     )
     txns = [d.freeze(batch_id) for d in drafts]
-    file_assertions = [r.restamp(a, known) for r in resolved for a in r.parsed.assertions]
     file_holdings = [r.restamp(h, known) for r in resolved for h in r.parsed.holdings]
     findings: list[Finding] = [
         *dups,
-        *_missing_periods(ledger, fresh, file_assertions, _kinds(ledger, resolved)),
+        *_missing_periods(ledger, fresh, file_assertions, kinds),
         *transfers,
         *classified.low,
     ]
@@ -501,6 +518,63 @@ def _kinds(ledger: Ledger, resolved: Sequence[_File]) -> dict[str, AccountKind |
     }
     kinds.update({a.id: a.kind for a in ledger.accounts})
     return kinds
+
+
+def _file_periods(
+    resolved: Sequence[_File],
+    rows: Sequence[ParsedRow],
+    owners: Sequence[_File],
+    known: Mapping[str, Account],
+    kinds: Mapping[str, AccountKind | None],
+) -> list[Period | None]:
+    """Each row's closed period: its statement's, when that statement's rows sum to its balances.
+
+    A file closes the span from its earliest assertion to its latest for an
+    account when every row it lists there is posted, dated inside the span,
+    and adds up to the difference of the two balances.
+    """
+    listed: dict[tuple[str, str], list[ParsedRow]] = defaultdict(list)
+    for row, owner in zip(rows, owners, strict=True):
+        listed[(owner.source, row.account_hint or "")].append(row)
+    closed: dict[tuple[str, str], Period] = {}
+    for f in resolved:
+        assertions = [f.restamp(a, known) for a in f.parsed.assertions]
+        for account in dict.fromkeys(a.account_id for a in assertions):
+            if kinds.get(account) not in (*LADDERED, None):
+                continue
+            mine = sorted((a for a in assertions if a.account_id == account), key=lambda a: a.date)
+            first, last = mine[0], mine[-1]
+            own = listed[(f.source, account)]
+            inside = all(not r.pending and first.date < r.date <= last.date for r in own)
+            total = sum((r.amount for r in own), Decimal())
+            if first.date < last.date and inside and total == last.balance - first.balance:
+                closed[(f.source, account)] = (first.date, last.date)
+    return [
+        closed.get((owner.source, row.account_hint or ""))
+        for row, owner in zip(rows, owners, strict=True)
+    ]
+
+
+def _ledger_periods(ledger: Ledger, kinds: Mapping[str, AccountKind | None]) -> dict[str, Period]:
+    """Ledger rows by id, each with the asserted period it reconciles in, if one holds."""
+    from tally.reconcile.balances import ladder
+
+    out: dict[str, Period] = {}
+    laddered = [a for a in ledger.assertions if kinds.get(a.account_id) in (*LADDERED, None)]
+    for account in dict.fromkeys(a.account_id for a in laddered):
+        spans = [
+            (r.since, r.assertion.date)
+            for r in ladder(account, ledger.transactions, laddered)
+            if r.held and not r.anchor and r.since < r.assertion.date
+        ]
+        ends = [through for _, through in spans]
+        for t in ledger.transactions:
+            if t.account_id != account or t.pending:
+                continue
+            i = bisect_left(ends, t.date)
+            if i < len(spans) and spans[i][0] < t.date:
+                out[t.id] = spans[i]
+    return out
 
 
 def _missing_periods(
