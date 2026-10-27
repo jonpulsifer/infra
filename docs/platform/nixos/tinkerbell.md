@@ -20,7 +20,7 @@ Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace
 
 1. The controller turns the `Hardware`'s `allowPXE` on. Rufio powers the node off, sets a one-time PXE boot and powers it on.
 2. UniFi's offer names the signed iPXE, which dnsmasq serves. iPXE chains Smee's script for its MAC, and the script chains the signed HookOS UKI from nginx.
-3. The `reprovision-talos` Template wipes the `Hardware`'s disk, makes the IPv4 network boot entry the next boot, and reboots.
+3. The `reprovision-talos` Template wipes the `Hardware`'s disk, makes the IPv4 network boot entry the next boot, and reboots. Its actions run `images/tink-reprovision-tools`, which carries the disk, EFI and Docker tools, so the boot VLAN needs no package mirror.
 4. The controller turns `allowPXE` off, so Smee has no script for the MAC. iPXE chains the [signed Talos UKI's script](talos-boot.md#netboot-images), and [Talos enrollment](../../apps/talos-enroll.md) releases the config.
 
 A node with no `Hardware` or no running `Workflow` takes step 4 directly when it PXE-boots on the bootstrap VLAN.
