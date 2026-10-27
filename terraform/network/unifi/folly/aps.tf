@@ -4,7 +4,8 @@
 #
 # A change to clients.yaml alone gets no autoplan: comment
 # `atlantis plan -d terraform/network/unifi/folly` on the pull request and
-# wait for the plan before merging.
+# wait for the plan before merging. A minimum RSSI on an outdoor radio drops
+# an idle IoT client before it reports a signal; the Tempest hub proved it.
 locals {
   aps      = local.clients.aps
   ap_roles = toset(flatten([for ap in values(local.aps) : ap.roles]))
