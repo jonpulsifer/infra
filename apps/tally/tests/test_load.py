@@ -405,6 +405,11 @@ def test_balance_gaps_cover_the_whole_ledger_for_laddered_accounts_only():
     (ladder,) = load.ladders(ledger)
     assert (ladder.account_id, ladder.assertions, ladder.periods_off) == ("c", 2, 1)
     assert ladder.span_difference == Decimal("5") and not ladder.holds
+    report = load.Report(root=Path("r"), dry_run=True, gaps=[gap], ladders=[ladder])
+    body = json.loads(json.dumps(report.as_json()))
+    assert body["ladders"][0]["span_difference"] == "5.00"
+    assert body["ladders"][0]["date_from"] == "2031-01-01"
+    assert report.discrepancies == 1
 
 
 def test_unpack_refuses_what_is_not_a_zip(tmp_path, settings):

@@ -483,7 +483,12 @@ class Report:
             "accounts": self.accounts,
             "gaps": [g.model_dump(mode="json") for g in self.gaps],
             "ladders": [
-                {**ladder.__dict__, "span_difference": str(ladder.span_difference)}
+                {
+                    **ladder.__dict__,
+                    "span_difference": str(ladder.span_difference),
+                    "date_from": ladder.date_from.isoformat(),
+                    "date_to": ladder.date_to.isoformat(),
+                }
                 for ladder in self.ladders
             ],
             "uncategorised": self.uncategorised,
