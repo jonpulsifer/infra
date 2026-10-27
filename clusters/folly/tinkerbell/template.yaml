@@ -1,6 +1,6 @@
-# Every reprovision Workflow runs this in HookOS: wipe the Hardware's disk, META included, stage the
-# signed Talos UKI from spore (syslog_host on HookOS's signed command line) on a new EFI partition as
-# the next boot, and reboot. No second network boot, so netboot goes off when this succeeds.
+# Every reprovision Workflow runs this in HookOS: wipe the Hardware's disk, META included, make the
+# network the next boot, and reboot. Netboot goes off when this succeeds, so Smee has no script for
+# the MAC on that boot and the signed iPXE boots the signed Talos UKI (nix/images/ipxe-folly.nix).
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Template
@@ -42,44 +42,26 @@ spec:
                 blockdev --rereadpt "$DISK" || true
                 if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
                 log "wiped $DISK"
-          - name: stage-talos-uki
+          - name: netboot-next
             image: docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
-            timeout: 900
+            timeout: 300
             command:
               - /bin/sh
               - -c
               - |
                 set -eu
                 log() { echo "reprovision: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: $*" >"$t" 2>/dev/null || true; done; }
-                spore=$(sed -n 's/.*syslog_host=\([^ ]*\).*/\1/p' /proc/cmdline)
-                [ -n "$spore" ] || { log "no syslog_host on the kernel command line"; exit 1; }
-                apk add --no-cache sgdisk util-linux dosfstools efibootmgr >/dev/null
-                sgdisk --new=1:0:+1G --typecode=1:EF00 --change-name=1:EFI "$DISK"
-                blockdev --rereadpt "$DISK"
-                esp=""
-                for _ in $(seq 30); do
-                  esp=$(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1; exit }')
-                  [ -n "$esp" ] && [ -b "$esp" ] && break
-                  sleep 1
-                done
-                [ -b "$esp" ] || { log "no EFI partition device on $DISK"; exit 1; }
-                mkfs.vfat -F 32 -n EFI "$esp"
-                mkdir -p /esp
-                mount -t vfat "$esp" /esp
-                mkdir -p /esp/EFI/BOOT
-                log "fetching http://$spore/talos/folly/metal-amd64-secureboot-uki.efi to $esp"
-                wget -q -O /esp/EFI/BOOT/BOOTX64.EFI "http://$spore/talos/folly/metal-amd64-secureboot-uki.efi"
-                sync
-                umount /esp
+                apk add --no-cache efibootmgr >/dev/null
                 mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars
-                # Talos's installer reuses the entry with this label, so the install replaces it.
-                for n in $(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} Talos Linux UKI.*/\1/p'); do
-                  efibootmgr -q -b "$n" -B
-                done
-                efibootmgr -q -c -d "$DISK" -p 1 -L "Talos Linux UKI" -l '\EFI\BOOT\BOOTX64.EFI'
-                n=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} Talos Linux UKI.*/\1/p')
+                # The wiped disk has nothing to boot, so the firmware would fall through its boot
+                # order anyway; BootNext makes the network boot certain.
+                n=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                if [ -z "$n" ]; then
+                  log "no IPv4 network boot entry; the firmware's boot order decides the next boot"
+                  exit 0
+                fi
                 efibootmgr -q -n "$n"
-                log "staged the Talos UKI on $esp; Boot$n is the next boot"
+                log "Boot$n (IPv4 network) is the next boot"
           - name: reboot
             image: docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
             timeout: 300
@@ -95,4 +77,4 @@ spec:
                 docker run -d --privileged --name reprovision-reboot \
                   docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a \
                   sh -c 'sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo b >/proc/sysrq-trigger'
-                for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: rebooting into the staged Talos UKI in 10 seconds" >"$t" 2>/dev/null || true; done
+                for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: rebooting into the Talos UKI netboot in 10 seconds" >"$t" 2>/dev/null || true; done

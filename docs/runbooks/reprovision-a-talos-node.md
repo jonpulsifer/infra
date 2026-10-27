@@ -3,7 +3,7 @@ title: Reprovision a Talos node
 description: Wipe a folly node that has Intel AMT and reinstall Talos through Tinkerbell, started by a pull request, with nobody at the machine.
 ---
 
-Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull request adds a `Workflow`, and [Tinkerbell](../platform/nixos/tinkerbell.md#boot-path) power-cycles the node into HookOS, which wipes the system disk and boots the signed Talos UKI from it. You then approve the node's enrollment. For a node without AMT, use [Enroll a Talos node](enroll-a-talos-node.md).
+Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull request adds a `Workflow`, and [Tinkerbell](../platform/nixos/tinkerbell.md#boot-path) power-cycles the node into HookOS, which wipes the system disk, and the node then netboots the signed Talos UKI. You then approve the node's enrollment. For a node without AMT, use [Enroll a Talos node](enroll-a-talos-node.md).
 
 ## Before you start
 
@@ -21,7 +21,7 @@ Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull r
 - `<node>` is the host name, and `<addr>` is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`.
 
 > [!CAUTION]
-> Smee answers only on the bootstrap VLAN, and on folly's switch a port that carries the bootstrap VLAN untagged passes none of the node's frames: no DHCP, no ARP, with or without MAC auth and with DHCP snooping off. The VLAN passes traffic only tagged, on spore's port. No reprovision reaches HookOS until the boot path moves off the bootstrap access VLAN.
+> A UniFi client with a Virtual Network Override is held on that network on every switch port, ahead of the port's native network and MAC auth. riptide's and optiplex's overrides to the Kubernetes network stay in the controller after `network_id` left `terraform/network/unifi/folly/k8s.tf`, because the provider does not clear them. Clear the node's override in the controller before you start, or the node never reaches the bootstrap VLAN.
 
 ## Back up and drain
 
@@ -83,11 +83,11 @@ Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull r
    ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tinkerbell get workflow reprovision-<node> -w
    ```
 
-   Result: `PREPARING`, `PENDING`, then `RUNNING` through `wipe-disk`, `stage-talos-uki` and `reboot`, then `SUCCESS`.
+   Result: `PREPARING`, `PENDING`, then `RUNNING` through `wipe-disk`, `netboot-next` and `reboot`, then `SUCCESS`.
 
 2. Watch the node's console.
 
-   Result: HookOS prints `reprovision:` lines and reboots. The Talos UKI boots from the disk and shows a user code and a QR code.
+   Result: HookOS prints `reprovision:` lines and reboots. iPXE downloads the Talos UKI, about 280 MB, and Talos shows a user code and a QR code.
 
 3. Make sure that netboot is off.
 
@@ -147,7 +147,7 @@ To run the `Workflow` again, rename it, for example to `reprovision-<node>-2`, a
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach AMT | Read the `Machine`'s conditions, fix AMT, and run the `Workflow` again. |
 | The `Workflow` stays `PENDING`, and the node boots its old Talos | The node PXE-booted off the bootstrap VLAN, or Flux turned `allowPXE` off before the node fetched HookOS | Move the node to the bootstrap VLAN, and run the `Workflow` again. |
 | The `Workflow` is `FAILED` | An action failed | Read the action's message in the `Workflow` on spore, and the HookOS console. |
-| HP shows 3F0 Boot Device Not Found after HookOS | The firmware skipped the staged boot entry | Boot `Talos Linux UKI` from the F9 menu. |
+| HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry, so `netboot-next` set none | Boot `IPV4 Network` from the F9 menu. |
 | MeshCommander cannot reach AMT after the move | AMT shares the node's MAC, so it moved to the bootstrap VLAN with a new address | Find the node's bootstrap lease in UniFi and connect from the `future` network, which the policy `future_to_bootstrap_amt` admits on TCP 16992–16995. On riptide, the PiKVM also works. |
 | The enrollment fails | See [Enroll a Talos node](enroll-a-talos-node.md#if-something-goes-wrong) | Follow its table. |
 

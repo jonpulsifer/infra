@@ -16,6 +16,7 @@ on:
       - .github/scripts/talos-images-build.sh
       - .github/scripts/talos-netboot-build.sh
       - .github/scripts/talos-netboot-verify.sh
+      - .github/scripts/talos-uki-ipxe.sh
       - .github/scripts/talos-uki-verify.sh
       - .github/workflows/talos-images.yml
   pull_request:
@@ -94,6 +95,7 @@ jobs:
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
               nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
+              .github/scripts/talos-uki-ipxe.sh \
               .github/workflows/talos-images.yml
           }
           build=false
@@ -225,6 +227,8 @@ jobs:
             cat "$RUNNER_TEMP/cmdline.txt"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
+          bash .github/scripts/talos-uki-ipxe.sh "$RUNNER_TEMP/cmdline.txt" \
+            >"$RUNNER_TEMP/out/metal-amd64-secureboot-uki.ipxe"
 
       - name: iPXE and HookOS must verify against the committed certificates
         run: |
@@ -258,7 +262,7 @@ jobs:
       # immutable release used is spent for good. Each build is its own release,
       # tagged with the run id; gh uploads the assets to a draft and publishes
       # once. The mirror on spore takes the newest release of the version.
-      - name: Publish the UKI, ISO, iPXE and HookOS
+      - name: Publish the UKI, its iPXE script, ISO, iPXE and HookOS
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -268,6 +272,7 @@ jobs:
           gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
             --title "Talos $VERSION for $SITE, build $GITHUB_RUN_ID" --notes "$notes" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi" \
+            "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.ipxe" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot.iso" \
             "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi" \
             "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi"
