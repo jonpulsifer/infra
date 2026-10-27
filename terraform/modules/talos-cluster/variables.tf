@@ -70,6 +70,9 @@ variable "nodes" {
     installer_image = optional(string)
     # A change replaces the node's talos_machine (see nodes.tf).
     install_generation = optional(string)
+    # talos-enroll is installing the node: it is in machine_inputs, and the
+    # root applies no config to it until it has joined and this is unset.
+    enrolling = optional(bool, false)
   }))
 
   validation {
