@@ -145,7 +145,7 @@ To run the `Workflow` again, rename it, for example to `reprovision-<node>-2`, a
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach AMT | Read the `Machine`'s conditions, fix AMT, and run the `Workflow` again. |
-| The `Workflow` stays `PENDING`, and the node boots its old Talos | The node PXE-booted off the bootstrap VLAN, or Flux turned `allowPXE` off before the node fetched HookOS | Move the node to the bootstrap VLAN, and run the `Workflow` again. |
+| The `Workflow` stays `PENDING`, and the node boots its old Talos | The node PXE-booted off the bootstrap VLAN | Move the node to the bootstrap VLAN, and run the `Workflow` again. |
 | The `Workflow` is `FAILED` | An action failed | Read the action's message in the `Workflow` on spore, and the HookOS console. |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry, so `netboot-next` set none | Boot `IPV4 Network` from the F9 menu. |
 | MeshCommander cannot reach AMT after the move | AMT shares the node's MAC, so it moved to the bootstrap VLAN with a new address | Find the node's bootstrap lease in UniFi and connect from the `future` network, which the policy `future_to_bootstrap_amt` admits on TCP 16992–16995. On riptide, the PiKVM also works. |
