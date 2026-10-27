@@ -1,7 +1,9 @@
 # One Hardware per folly node. Smee offers a boot file to a MAC that has one, and the file boots only
 # while allowPXE is true, which a reprovision Workflow sets for its run. UniFi leases the address, and
-# Smee refuses a dhcp.ip without a netmask, so there is none. The MAC, disk and HookOS UKI URL come
-# from nodes.env through kustomization.yaml.
+# Smee refuses a dhcp.ip without a netmask, so there is none. The MAC, disk, HookOS UKI URL and its
+# command line come from nodes.env through kustomization.yaml. The script frees every iPXE image
+# before the chain: iPXE claims the Linux initrd device whenever another image is loaded, and
+# systemd-stub then fails to register the UKI's initrd ("Already started").
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Hardware
@@ -20,7 +22,10 @@ spec:
         allowPXE: false
         allowWorkflow: false
         ipxe:
-          url: from-nodes-env
+          contents: |
+            #!ipxe
+            imgfree
+            chain --autofree from-nodes-env from-nodes-env
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Hardware
@@ -43,7 +48,10 @@ spec:
         allowPXE: false
         allowWorkflow: false
         ipxe:
-          url: from-nodes-env
+          contents: |
+            #!ipxe
+            imgfree
+            chain --autofree from-nodes-env from-nodes-env
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Hardware
@@ -66,4 +74,7 @@ spec:
         allowPXE: false
         allowWorkflow: false
         ipxe:
-          url: from-nodes-env
+          contents: |
+            #!ipxe
+            imgfree
+            chain --autofree from-nodes-env from-nodes-env
