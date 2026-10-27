@@ -1,5 +1,6 @@
-# One Hardware per folly node. Smee offers a boot file to a MAC that has one, and the file boots only
-# while allowPXE is true, which a reprovision Workflow sets for its run. UniFi leases the address, and
+# One Hardware per folly node. Smee serves the script below only while allowPXE is true, which a
+# reprovision Workflow sets for its run. allowPXE stays out of git: Flux would own it and set it back
+# to false at its next apply, mid-run. Unset, Smee treats it as false. UniFi leases the address, and
 # Smee refuses a dhcp.ip without a netmask, so there is none. The MAC, disk, HookOS UKI URL and its
 # command line come from nodes.env through kustomization.yaml. The script frees every iPXE image
 # before the chain: iPXE claims the Linux initrd device whenever another image is loaded, and
@@ -19,7 +20,6 @@ spec:
         arch: x86_64
         uefi: true
       netboot:
-        allowPXE: false
         allowWorkflow: false
         ipxe:
           contents: |
@@ -45,7 +45,6 @@ spec:
         arch: x86_64
         uefi: true
       netboot:
-        allowPXE: false
         allowWorkflow: false
         ipxe:
           contents: |
@@ -71,7 +70,6 @@ spec:
         arch: x86_64
         uefi: true
       netboot:
-        allowPXE: false
         allowWorkflow: false
         ipxe:
           contents: |
