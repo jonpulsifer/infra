@@ -315,6 +315,8 @@ def apply_preview(
         recategorise=dict(d.recategorise),
         make_rules=d.make_rules,
         withhold_strings=d.withhold_strings,
+        replace_findings=d.replace_findings,
+        authoritative_files=d.authoritative_files,
     )
     try:
         candidate = svc.settings.engine.apply(base, stored.preview, decisions)

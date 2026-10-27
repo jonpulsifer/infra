@@ -564,12 +564,18 @@ def apply(
     ledger = _with_schema(ledger, preview)
     accept, dismiss = decisions.accept_findings, decisions.dismiss_findings
     dups = [f for f in preview.findings if isinstance(f, DuplicateFinding)]
-    drop = {f.transaction_id for f in dups if _drops(f, accept, dismiss)}
+    replacing = _replacements(dups, decisions.replace_findings)
+    drop = {
+        f.transaction_id
+        for f in dups
+        if f.id not in decisions.replace_findings and _drops(f, accept, dismiss)
+    }
     retire = {
         f.matches_id
         for f in dups
         if f.id in accept and _replaces(f) and f.transaction_id != f.matches_id
-    }
+    } | set(replacing.values())
+    retire |= _unlisted(ledger, preview, decisions.authoritative_files, dups)
     kept, id_map, moves = _assign_accounts(
         [t for t in preview.new_transactions if t.id not in drop | retire],
         preview,
@@ -582,11 +588,16 @@ def apply(
     kept = [t for t in kept if t.id not in buried]
     kept = _forget(kept, decisions.withhold_strings)
     kept = _recategorise(kept, preview, decisions, id_map, ledger)
+    kept = _take_over(kept, replacing, id_map, ledger)
     rules = _mint_rules(kept, decisions, id_map, ledger)
     rules += _cache_answers(kept, preview, id_map, [*ledger.rules, *rules])
     rows = _stamp_transfers(
         ledger,
-        [_post(t, posted) for t in ledger.transactions if t.id not in retire],
+        [
+            _unpair(_post(t, posted), retire, ledger)
+            for t in ledger.transactions
+            if t.id not in retire
+        ],
         kept,
         preview,
         decisions,
@@ -705,6 +716,92 @@ def _new_assertions(ledger: Ledger, incoming: Sequence[BalanceAssertion]) -> lis
 
 def _replaces(f: DuplicateFinding) -> bool:
     return f.reason.startswith(REPLACES_PENDING)
+
+
+def _replacements(dups: Sequence[DuplicateFinding], chosen: frozenset[str]) -> dict[str, str]:
+    """Incoming id to the ledger id it replaces. One ledger row gives way to one row only."""
+    out: dict[str, str] = {}
+    taken: set[str] = set()
+    for f in dups:
+        if f.id not in chosen or _replaces(f) or f.transaction_id == f.matches_id:
+            continue
+        if f.matches_id in taken or f.transaction_id in out:
+            continue
+        out[f.transaction_id] = f.matches_id
+        taken.add(f.matches_id)
+    return out
+
+
+def _take_over(
+    kept: list[Transaction],
+    replacing: Mapping[str, str],
+    id_map: Mapping[str, str],
+    ledger: Ledger,
+) -> list[Transaction]:
+    """A row that replaces a ledger row keeps that row's category, transfer and tags.
+
+    Preview already gave it the matched row's category and merchant; the
+    transfer pairing and the owner's tags are what apply carries across.
+    """
+    if not replacing:
+        return kept
+    old = {t.id: t for t in ledger.transactions}
+    moved = {id_map.get(incoming, incoming): gone for incoming, gone in replacing.items()}
+    out: list[Transaction] = []
+    for t in kept:
+        prior = old.get(moved.get(t.id, ""))
+        if prior is None:
+            out.append(t)
+            continue
+        out.append(
+            t.model_copy(
+                update={
+                    "category_id": prior.category_id,
+                    "merchant": prior.merchant,
+                    "source": prior.source,
+                    "confidence": prior.confidence,
+                    "transfer_id": prior.transfer_id,
+                    "tags": prior.tags or t.tags,
+                }
+            )
+        )
+    return out
+
+
+def _unlisted(
+    ledger: Ledger,
+    preview: ImportPreview,
+    authoritative: frozenset[str],
+    dups: Sequence[DuplicateFinding],
+) -> set[str]:
+    """Posted ledger rows in an authoritative file's account and span that nothing in it matched."""
+    if not authoritative:
+        return set()
+    spans = [
+        (f.account_id, f.date_from, f.date_to)
+        for f in preview.files
+        if f.name in authoritative and f.account_id and f.date_from and f.date_to
+    ]
+    if not spans:
+        return set()
+    matched = {f.matches_id for f in dups} | {t.id for t in preview.new_transactions}
+    return {
+        t.id
+        for t in ledger.transactions
+        if t.id not in matched
+        and not t.pending
+        and any(t.account_id == a and lo <= t.date <= hi for a, lo, hi in spans)
+    }
+
+
+def _unpair(t: Transaction, retire: Collection[str], ledger: Ledger) -> Transaction:
+    """A row whose transfer partner is retired is left unpaired, free to pair again."""
+    if t.transfer_id is None:
+        return t
+    partners = [x for x in ledger.transactions if x.transfer_id == t.transfer_id and x.id != t.id]
+    if partners and all(x.id in retire for x in partners):
+        return t.model_copy(update={"transfer_id": None})
+    return t
 
 
 def _drops(f: DuplicateFinding, accept: frozenset[str], dismiss: frozenset[str]) -> bool:

@@ -202,6 +202,63 @@ def test_fuzzy_duplicates_are_flagged_and_dropped_only_on_accept():
     assert [t.id for t in dropped.transactions] == ["old"]
 
 
+def test_a_replaced_row_gives_way_and_the_incoming_keeps_its_category_and_transfer():
+    old = existing("old", "card", JAN, "-12.34", "SHOP A", category="shopping").model_copy(
+        update={"transfer_id": "xf1", "tags": ("ynab:Fun/Shops",)}
+    )
+    led = make_ledger([old])
+    posted = row(date(2030, 1, 12), "-12.34", "SHOP A 0042")
+    p = preview([parsed("stmt.pdf", [posted], fmt="pdf")], led, Stub())
+    (dup,) = [f for f in p.findings if isinstance(f, DuplicateFinding)]
+    after = apply(led, p, Decisions(replace_findings=frozenset({dup.id})))
+    (t,) = after.transactions
+    assert t.id == dup.transaction_id and t.date == date(2030, 1, 12)
+    assert (t.category_id, t.transfer_id, t.tags) == ("shopping", "xf1", ("ynab:Fun/Shops",))
+    # the retired row never comes back: the same preview applied again changes nothing
+    again = apply(
+        after, preview([parsed("stmt.pdf", [posted], fmt="pdf")], after, Stub()), Decisions()
+    )
+    assert [x.id for x in again.transactions] == [t.id]
+    # a replacement is not a drop: the same finding accepted instead keeps the old row
+    dropped = apply(led, p, Decisions(accept_findings=frozenset({dup.id})))
+    assert [x.id for x in dropped.transactions] == ["old"]
+
+
+def test_an_authoritative_statement_retires_the_rows_of_its_span_it_does_not_list():
+    listed = existing("listed", "card", date(2030, 1, 5), "-20.00", "SHOP A", category="shopping")
+    phantom = existing("phantom", "card", date(2030, 1, 9), "-7.00", "NOT ON STATEMENT")
+    partner = existing("partner", "chq", date(2030, 1, 9), "7.00", "TRANSFER IN")
+    phantom = phantom.model_copy(update={"transfer_id": "xf9"})
+    partner = partner.model_copy(update={"transfer_id": "xf9"})
+    outside = existing("outside", "card", date(2030, 2, 9), "-9.00", "LATER")
+    led = make_ledger([listed, phantom, partner, outside])
+    stmt = parsed(
+        "jan.pdf",
+        [row(date(2030, 1, 6), "-20.00", "SHOP A 0042")],
+        fmt="pdf",
+        assertions=[
+            BalanceAssertion(
+                account_id="card", date=date(2030, 1, 31), balance=D("-20.00"), origin="jan.pdf"
+            )
+        ],
+    )
+    stmt = stmt.model_copy(update={"date_from": date(2030, 1, 1), "date_to": date(2030, 1, 31)})
+    p = preview([stmt], led, Stub())
+    (dup,) = [f for f in p.findings if isinstance(f, DuplicateFinding)]
+    after = apply(
+        led,
+        p,
+        Decisions(replace_findings=frozenset({dup.id}), authoritative_files=frozenset({"jan.pdf"})),
+    )
+    ids = {t.id for t in after.transactions}
+    assert "phantom" not in ids and "listed" not in ids
+    assert {"partner", "outside", dup.transaction_id} <= ids
+    assert next(t for t in after.transactions if t.id == "partner").transfer_id is None
+    # without the authority, the unlisted row stays
+    kept = apply(led, p, Decisions(replace_findings=frozenset({dup.id})))
+    assert "phantom" in {t.id for t in kept.transactions}
+
+
 def test_fitid_duplicates_drop_unless_dismissed():
     old = existing("old", "card", JAN, "-20.00", "SHOP B", fitid="F-1")
     led = make_ledger([old])

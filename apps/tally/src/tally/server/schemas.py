@@ -304,6 +304,8 @@ class DecisionsIn(Wire):
     recategorise: dict[str, str] = Field(default_factory=dict)
     make_rules: frozenset[str] = frozenset()
     withhold_strings: frozenset[str] = frozenset()
+    replace_findings: frozenset[str] = frozenset()
+    authoritative_files: frozenset[str] = frozenset()
 
 
 class RecategoriseIn(Wire):
