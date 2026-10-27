@@ -77,17 +77,17 @@ aps:
     roles: [things]
     band_steering: "off"
     outdoor_mode: "off"
-    # Serves the yard, not the living room: a −75 floor on 2.4 GHz, and the
-    # 5 GHz radio off because it has never had a client here. Power stays auto
-    # because the Tempest hub has no nearer 2.4 GHz radio until the Express 7's
-    # is enabled.
+    # The 5 GHz radio is off because it has never had a client here. The 2.4 GHz
+    # radio keeps auto power and no floor: the Tempest hub lives on it and is
+    # dropped by a floor before it reports a signal, and it has no nearer
+    # 2.4 GHz radio until the Express 7's is enabled.
     radios:
       - name: ra0
         radio: ng
         channel: "6"
         ht: 20
         tx_power_mode: auto
-        min_rssi_enabled: true
+        min_rssi_enabled: false
         min_rssi: -75
         antenna_gain: 3
         antenna_id: -1
