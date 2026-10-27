@@ -11,7 +11,7 @@ resources:
   - machines.yaml
   - amt.sops.yaml
   - template.yaml
-  - reprovision-shale.yaml
+  - reprovision-shale-2.yaml
 # Every Workflow here reprovisions its Hardware: Rufio PXE-boots the node into HookOS, and the
 # controller turns the Hardware's allowPXE on for the run and off once the Template succeeds.
 patches:
