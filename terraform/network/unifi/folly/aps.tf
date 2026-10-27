@@ -1,6 +1,10 @@
 # The access points. Band steering and outdoor mode are declared where the
 # console reports them. An AP with a `radios` list in clients.yaml owns its
 # radio table in git; the others keep whatever the console holds.
+#
+# A change to clients.yaml alone gets no autoplan: comment
+# `atlantis plan -d terraform/network/unifi/folly` on the pull request and
+# wait for the plan before merging.
 locals {
   aps      = local.clients.aps
   ap_roles = toset(flatten([for ap in values(local.aps) : ap.roles]))
