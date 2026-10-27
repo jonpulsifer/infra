@@ -1,0 +1,16 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tally
+components:
+  - ../../../base/components/garage-cnpg
+resources:
+  - namespace.yaml
+  - external-secret.yaml
+  - config.yaml
+  - database.yaml
+  - network-policy.yaml
+  - service.yaml
+  - deployment.yaml
+  - ocr-worker.yaml
+  - tailnet-ingress.yaml

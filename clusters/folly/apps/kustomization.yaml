@@ -18,6 +18,7 @@ resources:
   - smiirl
   - spire
   - talos-enroll
+  - tally
   - spire-oidc
   - spire-test
   - kthx-engine-target

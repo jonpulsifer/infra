@@ -1,0 +1,103 @@
+---
+# The api pod. It trusts Tailscale-User-Login, so the tailnet Ingress's proxy
+# is its only client. folly's Cilium runs with allow-localhost=always, which
+# admits the node's own kubelet probes with no rule here; it also admits any
+# other process on that node, so the header is only as true as the node.
+# Egress is the ledger, DNS for the names below, and the classifier
+# provider's hosts on 443: descriptor strings go there and nothing else
+# leaves.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tally
+  namespace: tally
+  labels:
+    app.kubernetes.io/name: tally
+    app.kubernetes.io/part-of: tally
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: tally
+  ingress:
+    # The proxy the operator runs for tailnet-ingress.yaml.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: tailscale
+            tailscale.com/managed: "true"
+            tailscale.com/parent-resource-type: ingress
+            tailscale.com/parent-resource: tally
+            tailscale.com/parent-resource-ns: tally
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+    # No rule admits the OCR worker. It parses untrusted PDFs, and 8080
+    # believes any Tailscale-User-Login, so the worker gets its own listener
+    # and token when its queue lands, not this port.
+  egress:
+    # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
+    # rule; without it every provider call fails closed. Only these names
+    # resolve, so a query name cannot carry ledger data off the cluster:
+    # CoreDNS answers cluster.local itself and forwards none of it. That zone
+    # also covers the search domains `tally-db-rw.tally` is tried under.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+          rules:
+            dns:
+              - matchName: api.openai.com
+              - matchName: auth.openai.com
+              - matchName: chatgpt.com
+              - matchPattern: "**.cluster.local"
+    # The classifier: api.openai.com for the API-key route; auth.openai.com
+    # and chatgpt.com for the ChatGPT sign-in and its model.
+    - toFQDNs:
+        - matchName: api.openai.com
+        - matchName: auth.openai.com
+        - matchName: chatgpt.com
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+    # The ledger's instance (database.yaml), by the label CNPG stamps on it.
+    # The `tally-db-rw` Service resolves to it before the verdict.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: tally-db
+      toPorts:
+        - ports:
+            - {port: "5432", protocol: TCP}
+---
+# The OCR worker reads statements, so it gets no route off the cluster: DNS
+# answers only names in this namespace, and it has no destination until its
+# own listener on the api exists. `ingress: [{}]` admits nothing and makes
+# ingress default-deny.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tally-ocr
+  namespace: tally
+  labels:
+    app.kubernetes.io/name: tally-ocr
+    app.kubernetes.io/part-of: tally
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: tally-ocr
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+          rules:
+            dns:
+              - matchPattern: "*.tally.svc.cluster.local"
