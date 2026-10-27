@@ -133,12 +133,22 @@ locals {
   # encrypted, so only a node reinstalled encrypted carries the documents.
   node_patch_install = { for name, n in var.nodes : name => join("\n---\n", concat(
     local.node_docs[name],
-    contains(var.tpm_nodes, name) ? local.tpm_volume_patches : [],
+    contains(var.tpm_nodes, name) ? concat(local.tpm_volume_patches, [local.tpm_no_kexec_patch]) : [],
   )) }
   node_patch = { for name, n in var.nodes : name => join("\n---\n", concat(
     local.node_docs[name],
+    contains(var.tpm_nodes, name) ? [local.tpm_no_kexec_patch] : [],
     contains(var.encrypted_nodes, name) ? local.tpm_volume_patches : [],
   )) }
+
+  # A kexec skips systemd-stub, which puts the UKI's PCR signing key in
+  # /.extra, so the TPM cannot unseal STATE and the boot loops. With kexec off,
+  # every reboot, the one after install included, goes through the firmware.
+  tpm_no_kexec_patch = yamlencode({
+    apiVersion = "v1alpha1"
+    kind       = "SysctlConfig"
+    params     = { "kernel.kexec_load_disabled" = "1" }
+  })
 
   # A TPM node's STATE and EPHEMERAL are LUKS2 volumes whose key the TPM seals
   # to PCR 7 and to the PCR 11 policy signed by the UKI's PCR signing key.
