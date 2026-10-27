@@ -42,7 +42,7 @@ spec:
         - name: tally
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/tally…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/tally:latest@sha256:a87e625ee8a7df9fd8be8f12e66b9e50a7cda9b1669dde5807a3dc933b8f17eb
+          image: ghcr.io/jonpulsifer/tally:latest@sha256:68dd4c76ca38033ce61ee38364148786bdf0f2ad94b393cf3a7dda9f7946e9d2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
