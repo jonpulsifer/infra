@@ -49,8 +49,9 @@ resource "unifi_network" "bootstrap" {
   multicast_dns       = false
   ipv6_interface_type = "none"
 
-  # Smee on spore names the boot file in a proxy offer, which EDK2 prefers. A
-  # file here would boot the MACs that Smee ignores, which must not boot.
+  # HP's UEFI PXE ignores Smee's ProxyDHCP offer and needs the boot file in the
+  # address offer, so UniFi names spore's signed iPXE. A MAC with no Hardware
+  # object gets that iPXE, and Smee answers its script request with nothing.
   dhcp_server = {
     enabled     = true
     leasetime   = "1h0m0s"
@@ -58,8 +59,11 @@ resource "unifi_network" "bootstrap" {
     stop        = cidrhost(local.bootstrap_cidr, 10)
     dns_enabled = true
     dns_servers = [local.spore_boot_ip]
+    tftp_server = local.spore_boot_ip
     boot = {
-      enabled = false
+      enabled  = true
+      server   = local.spore_boot_ip
+      filename = "talos/folly/ipxe-amd64-secureboot.efi"
     }
   }
 
