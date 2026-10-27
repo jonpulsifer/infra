@@ -37,7 +37,7 @@ The network connects two sites, folly (home) and offsite (remote). Each site has
 
 ## Where it lives
 
-- `terraform/network/unifi/<site>/`: networks and their VLAN IDs, WLANs, firewall and gateway BGP config. `terraform/network/unifi/folly/home.tf` and `terraform/network/unifi/offsite/networks.tf` hold the Management, iot and offsite Default subnets.
+- `terraform/network/unifi/<site>/`: networks and their VLAN IDs, WLANs, firewall and gateway BGP config. `terraform/network/unifi/folly/home.tf` and `terraform/network/unifi/offsite/networks.tf` hold the Management, iot and offsite Default subnets. `terraform/network/unifi/folly/aps.tf` declares folly's access points and the AP groups a WLAN is assigned to, from the `aps` map in `clients.yaml`.
 - Each console's UI: the Site Magic tunnel, its subnet lists and the console's Let's Encrypt certificate
 - `clusters/<site>/config/cluster-topology.json`: `K8S_NODE_CIDR`, `LB_RANGE`, `ROUTER_IP` and the other cluster keys. Print them with `jq .data <file>`.
 - `clusters/folly/config/lab-topology.json`: `LAB_CIDR`, `FUTURE_CIDR` and the lab host addresses
