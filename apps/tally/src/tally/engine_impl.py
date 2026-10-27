@@ -653,6 +653,9 @@ def apply(
         if f.id in accept and _replaces(f) and f.transaction_id != f.matches_id
     } | set(replacing.values())
     retire |= _unlisted(ledger, preview, decisions.authoritative_files, dups)
+    # A row the files state again under its own id is not given way by anything: the
+    # incoming row that matched it is a second purchase, kept beside it.
+    retire -= set(preview.held_ids)
     kept, id_map, moves = _assign_accounts(
         [t for t in preview.new_transactions if t.id not in drop | retire],
         preview,

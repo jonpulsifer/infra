@@ -270,6 +270,21 @@ def test_an_authoritative_statement_retires_the_rows_of_its_span_it_does_not_lis
     assert "phantom" in {t.id for t in kept.transactions}
 
 
+def test_a_row_the_file_states_again_is_never_given_way_by_a_repeat_purchase():
+    first = row(date(2030, 1, 20), "-3.00", "COFFEE BAR")
+    held_id = transaction_id("card", first.date, -300, first.descriptor)
+    led = make_ledger([existing(held_id, "card", first.date, "-3.00", "COFFEE BAR")])
+    again = row(date(2030, 1, 23), "-3.00", "COFFEE BAR")
+    # two statements: the first states the held row again, the next holds the repeat
+    files = [parsed("jan.pdf", [first], fmt="pdf"), parsed("feb.pdf", [again], fmt="pdf")]
+    p = preview(files, led, Stub())
+    assert p.held_ids == (held_id,)
+    (dup,) = [f for f in p.findings if isinstance(f, DuplicateFinding)]
+    assert dup.matches_id == held_id
+    after = apply(led, p, Decisions(replace_findings=frozenset({dup.id})))
+    assert {t.date for t in after.transactions} == {first.date, again.date}
+
+
 def test_fitid_duplicates_drop_unless_dismissed():
     old = existing("old", "card", JAN, "-20.00", "SHOP B", fitid="F-1")
     led = make_ledger([old])
