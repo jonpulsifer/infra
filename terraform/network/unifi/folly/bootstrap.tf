@@ -52,9 +52,11 @@ resource "unifi_network" "bootstrap" {
   # HP's UEFI PXE ignores Smee's ProxyDHCP offer and needs the boot file in the
   # address offer, so UniFi names spore's signed iPXE. A MAC with no Hardware
   # object gets that iPXE, and Smee answers its script request with nothing.
+  # The short lease expires a bootstrap address within a minute of the port
+  # moving to the Kubernetes VLAN, which flips without a link flap.
   dhcp_server = {
     enabled     = true
-    leasetime   = "1h0m0s"
+    leasetime   = "1m0s"
     start       = cidrhost(local.bootstrap_cidr, 2)
     stop        = cidrhost(local.bootstrap_cidr, 10)
     dns_enabled = true
