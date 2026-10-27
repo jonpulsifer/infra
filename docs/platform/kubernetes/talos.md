@@ -16,7 +16,7 @@ Every Kubernetes node runs Talos Linux. `clusters/<site>/talos/` is an OpenTofu 
 
 The `ETCD` volume and the `data` user volume stay plain. Talos encrypts a volume only when it formats it, at install.
 
-optiplex, riptide and shale boot Image Factory systemd-boot UKI installs, with Secure Boot off and plain volumes. The signed installer and the encryption take effect when each is reinstalled. optiplex has no TPM until Intel PTT is on in its BIOS.
+optiplex, riptide and shale boot Image Factory systemd-boot UKI installs, with Secure Boot off and plain volumes. The signed installer and the encryption take effect when each is reinstalled.
 
 ## Rules
 

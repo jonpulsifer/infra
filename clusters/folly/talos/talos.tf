@@ -73,7 +73,7 @@ locals {
     }
   }
 
-  # TPM 2.0 nodes: riptide's discrete TPM, optiplex's Intel PTT.
+  # TPM 2.0 nodes: riptide's Infineon and optiplex's Nuvoton, both discrete.
   tpm_nodes = ["optiplex", "riptide"]
 
   # Nodes whose running STATE and EPHEMERAL are encrypted. A node joins only
