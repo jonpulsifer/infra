@@ -1,11 +1,15 @@
 # tally UI prototype
 
-Three variants of the whole tally app on one route, switchable with
-`?variant=a|b|c` and the floating bar at the bottom (← and → keys work too).
+Six variants of the whole tally app on one route, switchable with
+`?variant=a..f` and the floating bar at the bottom (← and → keys work too).
 `?theme=dark` forces dark mode; the default follows the OS.
 
+The owner chose **f, Reader and inspector** (2026-10-27) after two rounds:
+a (Desk), b (Editorial), c (Questions), then the fusions d (Desk, written),
+e (Hero desk) and f. The others stay for comparison.
+
 Run it: `bun run --cwd apps/tally/web dev`, then open
-http://localhost:5180/?variant=a
+http://localhost:5180/?variant=f
 
 Each variant is a self-contained app under `src/variants/<key>/` with a
 default export `{ name, Component }`. Variants share only the fixtures in
