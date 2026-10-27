@@ -27,7 +27,12 @@ locals {
   # VLAN on for wired. Otherwise the node loses the network at its next link
   # flap. riptide goes first; optiplex is the control plane. An empty set keeps
   # every port on its open Kubernetes trunk, and is also the revert.
-  mab_enforced = toset(["riptide", "shale"])
+  mab_enforced = toset(["riptide"])
+
+  # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
+  # reinstall. shale's port drops its frames when RADIUS assigns VLAN 9, while
+  # VLAN 8 assignment works, so its reinstall uses a plain bootstrap port.
+  boot_native = toset(["shale"])
 
   switch = local.clients.switches["USW 24 PoE"]
 }
@@ -157,13 +162,25 @@ resource "unifi_device" "usw_24_poe" {
   }
 
   dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) }
+    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) && !contains(local.boot_native, node) }
     content {
       index                 = port_override.value
       name                  = port_override.key
       forward               = "customize"
       native_networkconf_id = unifi_network.k8s.id
       tagged_vlan_mgmt      = "auto"
+      dot1x_ctrl            = "force_authorized"
+    }
+  }
+
+  dynamic "port_override" {
+    for_each = { for node, port in local.mab_ports : node => port if contains(local.boot_native, node) }
+    content {
+      index                 = port_override.value
+      name                  = port_override.key
+      forward               = "customize"
+      native_networkconf_id = unifi_network.bootstrap.id
+      tagged_vlan_mgmt      = "block_all"
       dot1x_ctrl            = "force_authorized"
     }
   }
