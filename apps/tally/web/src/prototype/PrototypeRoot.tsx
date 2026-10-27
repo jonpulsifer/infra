@@ -19,7 +19,7 @@ const KEYS = Object.keys(VARIANTS) as VariantKey[];
 export function PrototypeRoot() {
   const [variant, setVariant] = useState<VariantKey>(() => {
     const v = readParam('variant');
-    return v && v in VARIANTS ? (v as VariantKey) : 'a';
+    return v && v in VARIANTS ? (v as VariantKey) : 'd';
   });
   const [dark, setDark] = useState<boolean>(() => {
     const t = readParam('theme');
