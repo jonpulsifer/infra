@@ -52,7 +52,13 @@ replacements:
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.HOOKOS_URL}
     targets:
       - select: {kind: Hardware}
-        fieldPaths: [spec.interfaces.0.netboot.ipxe.url]
+        fieldPaths: [spec.interfaces.0.netboot.ipxe.contents]
+        options: {delimiter: " ", index: 2}
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.HOOKOS_CMDLINE}
+    targets:
+      - select: {kind: Hardware}
+        fieldPaths: [spec.interfaces.0.netboot.ipxe.contents]
+        options: {delimiter: " ", index: 3}
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.OPTIPLEX_MAC}
     targets:
       - select: {kind: Hardware, name: optiplex}
