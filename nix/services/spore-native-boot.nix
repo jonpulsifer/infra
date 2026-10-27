@@ -17,6 +17,7 @@ let
   cfg = config.services.spore;
   stateDir = "/var/lib/spore-native-boot";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
+  keepReleases = 4;
 
   targetType = types.submodule {
     options = {
@@ -119,6 +120,7 @@ in
             coreutils
             gawk
             gnugrep
+            gnused
             openssl
             raspberrypi-eeprom
             xxd
@@ -190,6 +192,21 @@ in
             trap - EXIT
             ln -sfn "releases/${id}-$release_id" "$state/.${id}.new"
             mv -Tf "$state/.${id}.new" "$state/${id}"
+
+            # Keep the newest ${toString keepReleases} releases and the one the live link names; each holds a
+            # boot.img of about 1G. A stores link stays only while a kept release pins its squashfs.
+            live=$(readlink "$state/${id}")
+            keep=$(ls -dt "$state"/releases/${id}-*/ | head -n ${toString keepReleases} | sed 's:/$::')
+            keep="$keep"$'\n'"$state/$live"
+            for dir in "$state"/releases/${id}-*/; do
+              dir=''${dir%/}
+              grep -qxF "$dir" <<< "$keep" || rm -rf "$dir"
+            done
+            for link in "$state/stores/${id}"/*.squashfs; do
+              [ -L "$link" ] || continue
+              digest=$(basename "$link" .squashfs)
+              grep -qsx "$digest" "$state"/releases/${id}-*/squashfs.sha256 || rm -f "$link"
+            done
           '';
         }
       ) cfg.nativeBootTargets)

@@ -82,12 +82,16 @@ in
 
   sops.defaultSopsFile = ../secrets/spore.sops.yaml;
 
-  # Root is capped at 32G and each daily generation carries a ~1G rackpi5 boot image, so the
-  # fleet's 30d GC fills the disk.
+  # Root is capped at 32G and each generation carries a ~1G rackpi5 boot image, so same-day
+  # deploys fill it. GC keeps 7 days, and first trims the system profile to the current
+  # generation and 3 before it. spore has no generation menu, so no bootloader limit applies.
   nix.gc = {
     dates = "daily";
     options = "--delete-older-than 7d";
   };
+  systemd.services.nix-gc.preStart = ''
+    ${config.nix.package}/bin/nix-env --profile /nix/var/nix/profiles/system --delete-generations +4
+  '';
 
   # The rackpi5 target is wired in nix/lib/registry.nix, where its piBootImg is in scope.
   services.spore.enable = true;
