@@ -34,6 +34,17 @@ locals {
   # 7.5.15) forwarded none of the node's untagged frames.
   boot_native = toset([])
 
+  # Ports with the bootstrap VLAN untagged and no 802.1X, for machines that
+  # are not yet in clients.yaml. The rack ports hold new workers until their
+  # MACs are known, when they move to mab_ports; the provisioning station
+  # stays here.
+  intake_ports = {
+    swell        = 4
+    surge        = 12
+    shoal        = 20
+    provisioning = 24
+  }
+
   switch = local.clients.switches["USW 24 PoE"]
 }
 
@@ -181,6 +192,18 @@ resource "unifi_device" "usw_24_poe" {
 
   dynamic "port_override" {
     for_each = { for node, port in local.mab_ports : node => port if contains(local.boot_native, node) }
+    content {
+      index                 = port_override.value
+      name                  = port_override.key
+      forward               = "customize"
+      native_networkconf_id = unifi_network.bootstrap.id
+      tagged_vlan_mgmt      = "auto"
+      dot1x_ctrl            = "force_authorized"
+    }
+  }
+
+  dynamic "port_override" {
+    for_each = local.intake_ports
     content {
       index                 = port_override.value
       name                  = port_override.key
