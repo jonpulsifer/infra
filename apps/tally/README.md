@@ -39,9 +39,10 @@ mise run tally:load                  # load ~/finance into the live ledger, once
 `tally load` is idempotent: a file already loaded is skipped by its hash and
 a row already held is never added twice. It needs a bearer token the owner
 minted in the app (`token_command` in `~/.config/tally/config.toml`). It
-exits 3 when something needs the owner: a balance a statement asserts that
-the ledger does not sum to, a file whose account it could not decide
-(`--account FILE=ACCOUNT_ID` settles it), or a file it could not read.
+exits 3 when something needs the owner: an account whose rows do not sum to
+the balances its statements assert, or a file whose account it could not
+decide (`--account FILE=ACCOUNT_ID` settles it). Files it could not read
+are listed with the reason.
 
 ## The privacy line
 

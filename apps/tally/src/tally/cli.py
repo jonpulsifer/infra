@@ -605,7 +605,7 @@ def _examples(names: Iterable[str], limit: int = 3) -> str:
 
 
 def _print_report(report: Report) -> None:
-    from tally.load import difference, totals
+    from tally.load import totals
 
     sums = totals(report)
     what = "would be added" if report.dry_run else "added"
@@ -613,7 +613,7 @@ def _print_report(report: Report) -> None:
         Text(
             f"{sums['files']} files in {len(report.batches)} batches: {sums['added']} rows {what},"
             f" {sums['held'] + sums['dropped']} already held, {report.already} files"
-            f" already loaded,"
+            f" already loaded, {report.twins} twins,"
             f" {report.excluded} excluded. The ledger holds {report.transactions} rows.",
             style="bold",
         )
@@ -667,22 +667,30 @@ def _print_report(report: Report) -> None:
             )
         )
     names = report.ledger_accounts
-    if report.gaps:
-        err.print(Text(f"{len(report.gaps)} balances the ledger does not sum to", style="bold red"))
+    if report.ladders:
+        off = [ladder for ladder in report.ladders if not ladder.holds]
+        if off:
+            err.print(
+                Text(
+                    f"{len(off)} accounts do not sum to the balances their statements assert",
+                    style="bold red",
+                )
+            )
         console.print(
             _table(
-                "Balance gaps (difference: positive means money in is missing, negative money out)",
-                ("account", "from", "to", "asserted", "ledger", "difference"),
+                "Balance check (span: positive means money in is missing, negative money out"
+                " or counted twice; periods off with a span of 0 is a date shift)",
+                ("account", "from", "to", "statements", "periods off", "span difference"),
                 (
                     (
-                        names.get(g.account_id, g.account_id),
-                        g.date_from,
-                        g.date_to,
-                        g.expected_balance,
-                        g.actual_balance,
-                        difference(g),
+                        names.get(ladder.account_id, ladder.account_id),
+                        ladder.date_from,
+                        ladder.date_to,
+                        ladder.assertions,
+                        ladder.periods_off,
+                        ladder.span_difference,
                     )
-                    for g in report.gaps
+                    for ladder in report.ladders
                 ),
             )
         )
@@ -715,7 +723,7 @@ def _print_report(report: Report) -> None:
         err.print(
             Text(f"{report.uncategorised} rows in the ledger have no category", style="yellow")
         )
-    if not report.discrepancies and not report.uncategorised:
+    if not report.discrepancies:
         console.print(Text("No discrepancies.", style="green"))
 
 
@@ -735,9 +743,9 @@ def load(
     """Load every file under ROOT into the server's ledger, once, and show what disagrees.
 
     A file already loaded is skipped by its hash; a row already held is never
-    added twice. Exits 3 when something needs the owner: a balance the ledger
-    does not sum to, a file that needs an account, or a file that could not
-    be read.
+    added twice. Exits 3 when something needs the owner: an account whose rows
+    do not sum to the balances its statements assert, or a file that needs an
+    account. Files that could not be read are listed.
     """
     import httpx
 
@@ -754,7 +762,7 @@ def load(
     say = (lambda _: None) if as_json else (lambda m: err.print(Text(m, style="dim")))
     try:
         with _server(settings, token) as http, Store.open(settings.db_path) as store:
-            remote = loader.Remote(http)
+            remote = loader.Remote(http, dedupe_window_days=settings.dedupe_window_days)
             target: loader.Target = remote
             if dry_run:
                 target = loader.Local(

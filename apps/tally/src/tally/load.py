@@ -17,9 +17,10 @@ The run is a pipeline of pure steps over one `Plan`:
 4. Each batch is previewed and applied through a `Target`, the server or a
    local copy for a dry run. A fuzzy duplicate is dropped: an overlapping
    export of an account the ledger holds adds nothing.
-5. `Report` says what happened and highlights what disagrees: balances the
-   institutions asserted that the ledger does not sum to, files that need an
-   account, rows that could not be read, and rows nobody categorised.
+5. `Report` says what happened and highlights what disagrees: accounts whose
+   rows do not sum to the balances their statements assert (per period and
+   over the whole span), files that need an account, files that could not
+   be read, and rows nobody categorised. The first two are the exit code.
 
 Running it again changes nothing: a file already applied is skipped by its
 hash, and a row already held keeps its id and is never drafted twice.
@@ -66,6 +67,7 @@ class Source:
     path: Path
     shown: str
     parsed: ParsedFile
+    packed: bool = False
 
     @property
     def key(self) -> str:
@@ -87,10 +89,15 @@ class Collected:
     skipped: tuple[Skipped, ...]
     excluded: int
     hidden: int
+    twins: int = 0
 
 
 def collect(root: Path, settings: config.Settings, scratch: Path) -> Collected:
-    """Every readable file under `root`, parsed, with zip members written under `scratch`."""
+    """Every readable file under `root`, parsed, with zip members written under `scratch`.
+
+    A file whose bytes another file already supplied (a zip of the same export
+    beside it) is a twin and is counted, not loaded twice.
+    """
     paths, excluded, hidden = files.walk(root, settings)
     sources: list[Source] = []
     skipped: list[Skipped] = []
@@ -100,15 +107,25 @@ def collect(root: Path, settings: config.Settings, scratch: Path) -> Collected:
                 if member.path is None:
                     skipped.append(Skipped(member.shown, member.reason or "not opened"))
                 else:
-                    _parse_into(member.path, member.shown, sources, skipped)
+                    _parse_into(member.path, member.shown, sources, skipped, packed=True)
         elif files.is_archive(path):
             skipped.append(Skipped(path.name, "an archive tally does not open"))
         else:
             _parse_into(path, path.name, sources, skipped)
-    return Collected(tuple(sources), tuple(skipped), excluded, hidden)
+    seen: set[str] = set()
+    unique: list[Source] = []
+    for s in sorted(sources, key=lambda s: s.packed):  # a loose file beats its zipped twin
+        if s.parsed.sha256 not in seen:
+            seen.add(s.parsed.sha256)
+            unique.append(s)
+    return Collected(
+        tuple(unique), tuple(skipped), excluded, hidden, twins=len(sources) - len(unique)
+    )
 
 
-def _parse_into(path: Path, shown: str, sources: list[Source], skipped: list[Skipped]) -> None:
+def _parse_into(
+    path: Path, shown: str, sources: list[Source], skipped: list[Skipped], *, packed: bool = False
+) -> None:
     try:
         pf = parsers.parse(path)
     except parsers.ParseError as exc:
@@ -117,7 +134,7 @@ def _parse_into(path: Path, shown: str, sources: list[Source], skipped: list[Ski
     except Exception as exc:
         skipped.append(Skipped(shown, type(exc).__name__))
         return
-    sources.append(Source(path, shown, pf.model_copy(update={"name": shown})))
+    sources.append(Source(path, shown, pf.model_copy(update={"name": shown}), packed))
 
 
 def _reason(message: str, name: str) -> str:
@@ -143,13 +160,15 @@ def _shape(s: Source) -> tuple[Any, ...]:
 
 
 def batches(sources: Iterable[Source]) -> list[list[Source]]:
-    """Sources in load order, grouped by shape, at most BATCH_LIMIT to a batch."""
-    out: list[list[Source]] = []
+    """Sources in load order: one group per shape, groups by their earliest file, at most
+    BATCH_LIMIT to a batch, so every statement of one card is decided together.
+    """
+    groups: dict[tuple[Any, ...], list[Source]] = {}
     for s in sorted(sources, key=_rank):
-        if out and _shape(out[-1][-1]) == _shape(s) and len(out[-1]) < BATCH_LIMIT:
-            out[-1].append(s)
-        else:
-            out.append([s])
+        groups.setdefault(_shape(s), []).append(s)
+    out: list[list[Source]] = []
+    for members in sorted(groups.values(), key=lambda g: _rank(g[0])):
+        out.extend(members[i : i + BATCH_LIMIT] for i in range(0, len(members), BATCH_LIMIT))
     return out
 
 
@@ -173,17 +192,21 @@ class Chosen:
 
 
 def own_account(s: Source, known: Mapping[str, Account]) -> str | None:
-    """The account the engine would give the file's rows with no decision, or None if mixed."""
+    """The account the engine would give the file's rows with no decision.
+
+    None when there is nothing to decide: the rows name more than one account,
+    or the file has no rows and its snapshots and assertions name their own.
+    """
     pf = s.parsed
     hints = {r.account_hint for r in pf.rows if r.account_hint}
     if len(hints) > 1:
         return None
-    if pf.account_hint:
-        return (
-            pf.account_hint
-            if pf.account_hint in known
-            else minted_account_id(pf.institution, pf.account_hint)
-        )
+    hint = pf.account_hint or next(iter(hints), None)
+    if hint:
+        return hint if hint in known else minted_account_id(pf.institution, hint)
+    stated = [*(a.account_id for a in pf.assertions), *(h.account_id for h in pf.holdings)]
+    if not pf.rows and stated and all(stated):
+        return None
     return placeholder(pf.name)
 
 
@@ -224,7 +247,8 @@ def choose_accounts(
         own = own_account(s, known)
         if own is None or own in known:
             continue
-        if (kept := remembered.get(s.key)) in known and kept is not None:
+        kept = decided.get(s.key, remembered.get(s.key))
+        if kept is not None and kept in known:
             chosen[s.shown] = kept
             continue
         if s.parsed.rows:
@@ -314,8 +338,9 @@ class Local:
 class Remote:
     """The server's import routes over an httpx client that already authenticates."""
 
-    def __init__(self, http: Any) -> None:
+    def __init__(self, http: Any, *, dedupe_window_days: int | None = None) -> None:
         self.http = http
+        self._window = dedupe_window_days
         self._ids: dict[int, str] = {}
 
     def ledger(self) -> Ledger:
@@ -329,11 +354,10 @@ class Remote:
         uploads = [
             ("files", (s.shown, s.path.read_bytes(), "application/octet-stream")) for s in batch
         ]
-        resp = self.http.post(
-            "/api/import/preview",
-            files=uploads,
-            data={"account_for_file": json.dumps(dict(account_for_file))},
-        )
+        form = {"account_for_file": json.dumps(dict(account_for_file))}
+        if self._window is not None:
+            form["dedupe_window_days"] = str(self._window)
+        resp = self.http.post("/api/import/preview", files=uploads, data=form)
         resp.raise_for_status()
         body = resp.json()
         preview = preview_from_wire(body["preview"])
@@ -393,11 +417,13 @@ class Report:
     excluded: int = 0
     hidden: int = 0
     already: int = 0
+    twins: int = 0
     batches: list[BatchResult] = field(default_factory=list)
     skipped: list[Skipped] = field(default_factory=list)
     unclear: list[Unclear] = field(default_factory=list)
     accounts: dict[str, str] = field(default_factory=dict)
     gaps: list[MissingPeriodFinding] = field(default_factory=list)
+    ladders: list[AccountLadder] = field(default_factory=list)
     uncategorised: int = 0
     transactions: int = 0
     ledger_accounts: dict[str, str] = field(default_factory=dict)
@@ -408,7 +434,13 @@ class Report:
 
     @property
     def discrepancies(self) -> int:
-        return len(self.gaps) + len(self.unclear) + len(self.skipped)
+        """What needs the owner: an account off its statements, a file with no account.
+
+        A file that could not be read is listed, not counted: a finance folder
+        holds tax slips and receipts that are not ledger input.
+        """
+        off = sum(1 for ladder in self.ladders if not ladder.holds)
+        return off + len(self.unclear)
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -416,26 +448,43 @@ class Report:
             "dryRun": self.dry_run,
             "added": self.added,
             "already": self.already,
+            "twins": self.twins,
             "batches": [b.__dict__ for b in self.batches],
             "skipped": [s.__dict__ for s in self.skipped],
             "unclear": [u.__dict__ for u in self.unclear],
             "accounts": self.accounts,
             "gaps": [g.model_dump(mode="json") for g in self.gaps],
+            "ladders": [
+                {**ladder.__dict__, "span_difference": str(ladder.span_difference)}
+                for ladder in self.ladders
+            ],
             "uncategorised": self.uncategorised,
             "transactions": self.transactions,
         }
 
 
 def decide(preview: ImportPreview) -> Decisions:
-    """Drop every fuzzy duplicate; keep an incoming row that posts a pending one."""
-    accept = frozenset(
+    """Drop every fuzzy duplicate, keep a posting of a pending row, and pair the transfers
+    the file itself tagged as transfers on both legs.
+    """
+    tagged = {
+        t.id
+        for t in preview.new_transactions
+        if any(tag.partition(":")[2] == "transfer" for tag in t.tags)
+    }
+    accept = {
         f.id
         for f in preview.findings
         if isinstance(f, DuplicateFinding)
         and f.tier == "fuzzy"
         and not f.reason.startswith("replaces pending")
-    )
-    return Decisions(accept_findings=accept)
+    }
+    accept |= {
+        f.id
+        for f in preview.findings
+        if isinstance(f, TransferFinding) and f.out_id in tagged and f.in_id in tagged
+    }
+    return Decisions(accept_findings=frozenset(accept))
 
 
 def _unmatched_in_overlap(preview: ImportPreview, ledger: Ledger, chosen: Mapping[str, str]) -> int:
@@ -444,7 +493,11 @@ def _unmatched_in_overlap(preview: ImportPreview, ledger: Ledger, chosen: Mappin
     for t in ledger.transactions:
         lo, hi = spans.get(t.account_id, (t.date, t.date))
         spans[t.account_id] = (min(lo, t.date), max(hi, t.date))
-    dropped = {f.transaction_id for f in preview.findings if isinstance(f, DuplicateFinding)}
+    dropped = {
+        f.transaction_id
+        for f in preview.findings
+        if isinstance(f, DuplicateFinding) and f.transaction_id != f.matches_id
+    }
     count = 0
     for t in preview.new_transactions:
         span = spans.get(t.account_id)
@@ -496,6 +549,57 @@ def balance_gaps(ledger: Ledger) -> list[MissingPeriodFinding]:
     return check(ledger.transactions, laddered)
 
 
+@dataclass(frozen=True)
+class AccountLadder:
+    """How one account's rows stand against every balance an institution asserted for it.
+
+    `periods_off` counts assertions the running total misses. `span_difference`
+    is what the whole span is off by: the last asserted balance less the
+    first, less every row dated between them. Periods off with a span that
+    holds means rows sit on the wrong side of statement dates (a register
+    kept by purchase date against statements kept by posting date); a span
+    off means money is missing (positive: money in) or counted twice.
+    """
+
+    account_id: str
+    assertions: int
+    periods_off: int
+    span_difference: Decimal
+    date_from: date
+    date_to: date
+
+    @property
+    def holds(self) -> bool:
+        return self.periods_off == 0 and self.span_difference == 0
+
+
+def ladders(ledger: Ledger) -> list[AccountLadder]:
+    """One summary per account that has balance assertions and is summed from its rows."""
+    kinds = {a.id: a.kind for a in ledger.accounts}
+    gaps = Counter(g.account_id for g in balance_gaps(ledger))
+    out: list[AccountLadder] = []
+    for account_id in dict.fromkeys(a.account_id for a in ledger.assertions):
+        if kinds.get(account_id) not in (*LADDERED, None):
+            continue
+        asserted = sorted(
+            (a for a in ledger.assertions if a.account_id == account_id), key=lambda a: a.date
+        )
+        first, last = asserted[0], asserted[-1]
+        between = sum(
+            (
+                t.amount
+                for t in ledger.transactions
+                if t.account_id == account_id and not t.pending and first.date < t.date <= last.date
+            ),
+            Decimal(),
+        )
+        span = ((last.balance - first.balance) - between).quantize(Decimal("0.01"))
+        out.append(
+            AccountLadder(account_id, len(asserted), gaps[account_id], span, first.date, last.date)
+        )
+    return out
+
+
 def run(
     root: Path,
     settings: config.Settings,
@@ -511,6 +615,7 @@ def run(
     with tempfile.TemporaryDirectory(prefix="tally-load-") as tmp:
         found = collect(root, settings, Path(tmp))
         report.excluded, report.hidden = found.excluded, found.hidden
+        report.twins = found.twins
         report.skipped.extend(found.skipped)
         fresh: list[Source] = []
         for s in found.sources:
@@ -540,15 +645,16 @@ def run(
             report.batches.append(_summarise(sending, preview, ledger, mapping.chosen, added))
             verb = "would add" if dry_run else "added"
             say(f"{report.batches[-1].shape}: {len(sending)} files, {verb} {added} rows")
+            remembered = {**remembered, **mapping.decided}
             if not dry_run:
                 for key, account_id in mapping.decided.items():
                     store.remember_account(key, account_id)
-                    remembered = {**remembered, key: account_id}
                 for s in sending:
                     store.mark_file(s.parsed.sha256, "pushed")
             report.accounts.update(mapping.chosen)
     final = target.ledger()
     report.gaps = balance_gaps(final)
+    report.ladders = ladders(final)
     report.transactions = len(final.transactions)
     report.uncategorised = sum(1 for t in final.transactions if t.category_id == UNCATEGORIZED)
     report.ledger_accounts = {a.id: a.name for a in final.accounts}

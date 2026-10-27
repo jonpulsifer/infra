@@ -246,6 +246,9 @@ def import_preview(
     withhold: Annotated[
         str | None, Form(description="JSON list of descriptors no classifier may see.")
     ] = None,
+    dedupe_window_days: Annotated[
+        int | None, Form(ge=0, le=31, description="Days apart two rows may be and match.")
+    ] = None,
 ) -> s.StoredPreviewOut:
     """Parse the uploads, preview them against the ledger, and keep the preview sealed.
 
@@ -272,7 +275,12 @@ def import_preview(
     classifier = svc.settings.classifier_for(ledger)
     try:
         result = svc.settings.engine.preview(
-            parsed, ledger, classifier, account_for_file=chosen, withhold=frozenset(held)
+            parsed,
+            ledger,
+            classifier,
+            account_for_file=chosen,
+            withhold=frozenset(held),
+            dedupe_window_days=dedupe_window_days,
         )
     except ValueError as err:
         raise _invalid(str(err)) from None

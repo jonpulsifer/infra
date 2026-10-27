@@ -35,6 +35,7 @@ class Engine(Protocol):
         *,
         account_for_file: Mapping[str, str] | None = None,
         withhold: Collection[str] = (),
+        dedupe_window_days: int | None = None,
     ) -> ImportPreview: ...
 
     def apply(self, ledger: Ledger, preview: ImportPreview, decisions: Decisions) -> Ledger: ...
@@ -49,11 +50,21 @@ class LibraryEngine:
         *,
         account_for_file: Mapping[str, str] | None = None,
         withhold: Collection[str] = (),
+        dedupe_window_days: int | None = None,
     ) -> ImportPreview:
         from tally import engine
 
+        if dedupe_window_days is None:
+            return engine.preview(
+                files, ledger, classifier, account_for_file=account_for_file, withhold=withhold
+            )
         return engine.preview(
-            files, ledger, classifier, account_for_file=account_for_file, withhold=withhold
+            files,
+            ledger,
+            classifier,
+            account_for_file=account_for_file,
+            withhold=withhold,
+            dedupe_window_days=dedupe_window_days,
         )
 
     def apply(self, ledger: Ledger, preview: ImportPreview, decisions: Decisions) -> Ledger:

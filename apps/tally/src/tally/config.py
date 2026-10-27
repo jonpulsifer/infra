@@ -61,7 +61,8 @@ class Settings(BaseModel):
     model: str = "gpt-6-luna"
     codex_home: Path = Field(default_factory=lambda: _config_home() / "tally" / "codex")
     threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    dedupe_window_days: int = Field(default=3, ge=0)
+    # A card posts up to a week after the purchase a hand-kept register dates.
+    dedupe_window_days: int = Field(default=7, ge=0)
     transfer_window_days: int = Field(default=4, ge=0)
     import_root: Path = Field(default_factory=lambda: Path.home() / "finance")
     db_path: Path = Field(default_factory=lambda: _data_home() / "tally" / "tally.db")

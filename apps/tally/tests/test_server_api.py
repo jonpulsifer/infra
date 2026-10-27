@@ -221,6 +221,7 @@ def test_preview_takes_an_account_and_withheld_strings_as_form_fields(client):
         data={
             "account_for_file": json.dumps({"january.json": "chq"}),
             "withhold": json.dumps([ROWS[3][2]]),
+            "dedupe_window_days": "7",
         },
         headers=HEADERS,
     )
@@ -233,7 +234,7 @@ def test_preview_takes_an_account_and_withheld_strings_as_form_fields(client):
     bad = client.post(
         "/api/import/preview",
         files=[("files", ("january.json", stand_in(), "application/json"))],
-        data={"account_for_file": "[1, 2]"},
+        data={"account_for_file": "[1, 2]", "dedupe_window_days": "99"},
         headers=HEADERS,
     )
     assert bad.status_code == 422

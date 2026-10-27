@@ -107,13 +107,15 @@ def settings(tmp_path: Path) -> config.Settings:
 
 def run(root: Path, settings: config.Settings, http: TestClient, **kw) -> load.Report:
     with Store.open(settings.db_path) as store:
-        return load.run(root, settings, load.Remote(http), store, **kw)
+        remote = load.Remote(http, dedupe_window_days=settings.dedupe_window_days)
+        return load.run(root, settings, remote, store, **kw)
 
 
 def test_collect_opens_zips_sniffs_members_and_keeps_identity_names_out(finance, settings, tmp):
     found = load.collect(finance, settings, tmp)
     shown = {s.shown for s in found.sources}
-    assert shown == {"Register.csv", "chq.csv", "2031 e-statements__chq-copy.csv"}
+    assert shown == {"Register.csv", "chq.csv"}
+    assert found.twins == 1
     reasons = {s.name: s.reason for s in found.skipped}
     assert reasons["2031 e-statements__Passport.pdf"] == "excluded"
     assert reasons["2031 e-statements__inner.zip"] == "an archive inside an archive"
@@ -156,6 +158,10 @@ def test_batches_put_the_register_first_then_rows_by_date_then_statements():
     ]
     got = [[s.shown for s in b] for b in load.batches(sources)]
     assert got == [["Register.csv"], ["early.csv", "late.csv"], ["holdings.pdf"]]
+    # one group per shape, however the dates interleave
+    mixed = [*sources, src("later.pdf", fmt="pdf", on=date(2031, 4, 1))]
+    got = [[s.shown for s in b] for b in load.batches(mixed)]
+    assert got == [["Register.csv"], ["early.csv", "late.csv"], ["later.pdf"], ["holdings.pdf"]]
 
 
 def test_load_twice_adds_once_and_maps_the_bank_export_onto_the_register_account(
@@ -172,8 +178,10 @@ def test_load_twice_adds_once_and_maps_the_bank_export_onto_the_register_account
     assert first.accounts["chq.csv"] == names["Test Chequing"].id
     (register, bank) = first.batches
     assert (register.added, bank.added) == (len(YNAB_ROWS), 1)
-    # the export and its copy in the zip: 2 x 4 rows; 6 already held by id, 3 dropped
-    assert (bank.files, bank.rows, bank.held, bank.new, bank.dropped) == (2, 8, 6, 2, 3)
+    # the copy in the zip is a twin by content; of the export's 4 rows the register
+    # holds 2 by id, 1 matches fuzzily (dropped), 1 is new
+    assert first.twins == 1
+    assert (bank.files, bank.rows, bank.held, bank.new, bank.dropped) == (1, 4, 2, 2, 1)
     assert bank.unmatched_in_overlap == 0
     assert first.added == len(ledger.transactions) == len(YNAB_ROWS) + 1
     # the owner's categories came along, and the rules they seed classified the bank spellings
@@ -198,7 +206,7 @@ def test_load_twice_adds_once_and_maps_the_bank_export_onto_the_register_account
 
     second = run(finance, settings, http, dry_run=False)
     assert second.added == 0
-    assert second.already == 3
+    assert second.already == 2
     assert second.batches == []
     again = load.Remote(http).ledger()
     assert len(again.transactions) == len(ledger.transactions)
@@ -268,6 +276,26 @@ def test_an_export_that_matches_two_accounts_waits_for_the_owner():
     (u,) = got.unclear
     assert (u.shown, set(u.candidates)) == ("chq.csv", {"a", "b"})
     assert got.chosen == {}
+
+    # a decision sticks to its key for the rest of the batch, so a later statement
+    # of the same card with no overlap lands in the same account
+    later = load.Source(
+        Path("later.csv"),
+        "later.csv",
+        pf.model_copy(
+            update={
+                "name": "later.csv",
+                "sha256": "2" * 64,
+                "rows": (
+                    ParsedRow(date=date(2031, 6, 2), amount=Decimal("-9.99"), descriptor="NEW"),
+                ),
+            }
+        ),
+    )
+    both = load.choose_accounts(
+        [s, later], ledger, remembered={}, overrides={"chq.csv": "b"}, window_days=3
+    )
+    assert both.chosen == {"chq.csv": "b", "later.csv": "b"}
 
     forced = load.choose_accounts(
         [s], ledger, remembered={}, overrides={"chq.csv": "b"}, window_days=3
@@ -343,6 +371,9 @@ def test_balance_gaps_cover_the_whole_ledger_for_laddered_accounts_only():
     )
     (gap,) = load.balance_gaps(ledger)
     assert (gap.account_id, load.difference(gap)) == ("c", Decimal("5"))
+    (ladder,) = load.ladders(ledger)
+    assert (ladder.account_id, ladder.assertions, ladder.periods_off) == ("c", 2, 1)
+    assert ladder.span_difference == Decimal("5") and not ladder.holds
 
 
 def test_unpack_refuses_what_is_not_a_zip(tmp_path, settings):
@@ -355,7 +386,7 @@ def test_unpack_refuses_what_is_not_a_zip(tmp_path, settings):
 # the command
 
 
-def test_the_load_command_reports_and_exits_3_on_discrepancies(
+def test_the_load_command_reports_and_exits_3_when_a_file_needs_an_account(
     finance, settings, http, monkeypatch
 ):
     monkeypatch.setenv("TALLY_CONFIG", str(finance / "absent.toml"))
@@ -367,14 +398,14 @@ def test_the_load_command_reports_and_exits_3_on_discrepancies(
     runner = CliRunner()
 
     result = runner.invoke(cli.app, ["load", str(finance), "--dry-run"])
-    assert result.exit_code == 3, result.output
+    assert result.exit_code == 0, result.output  # junk files are listed, not counted
     assert "rows would be added" in result.output
     assert "Accounts decided" in result.output and "Test Chequing" in result.output
     assert "Not read" in result.output and "junk.pdf" in result.output
     assert load.Remote(http).ledger().transactions == ()
 
     result = runner.invoke(cli.app, ["load", str(finance), "--json"])
-    assert result.exit_code == 3, result.output
+    assert result.exit_code == 0, result.output
     body = json.loads(result.output)
     assert body["added"] == len(YNAB_ROWS) + 1
     assert [s["name"] for s in body["skipped"]]
