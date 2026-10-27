@@ -1,6 +1,6 @@
 ---
 title: capsule
-description: A Raspberry Pi 5 on NVMe that is one of the two lab DNS resolvers and time servers.
+description: A Raspberry Pi 5 on NVMe that is one of the three lab DNS and time anchors.
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 5 Model B Rev 1.1 (8 GB)
@@ -13,12 +13,11 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-capsule is a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. With [spore](spore.md), it serves [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time). `nix/hosts/capsule.nix` configures it.
+capsule is a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. With [spore](spore.md) and [forge](forge.md), it serves [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time). `nix/hosts/capsule.nix` configures it.
 
 ## What it runs
 
-- CoreDNS from `nix/services/coredns-sinkhole.nix`
-- chrony from `nix/services/ntp-server.nix`
+- CoreDNS from `nix/services/coredns-sinkhole.nix` and chrony from `nix/services/ntp-server.nix`, both through `nix/profiles/anchor.nix`
 
 `clusters/folly/monitoring/capsule.yaml` declares the alerts `CapsuleCoreDnsDown` and `CapsuleChronyDown`.
 

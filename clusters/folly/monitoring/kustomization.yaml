@@ -10,6 +10,7 @@ resources:
   - victoria-logs-route.yaml
   - capsule.yaml
   - spore.yaml
+  - forge.yaml
   - tempo.yaml
   - flameboss.yaml
   - flameboss-rules.yaml

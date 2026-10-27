@@ -31,11 +31,10 @@ let
 in
 {
   imports = [
+    ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
-    ../services/coredns-sinkhole.nix
     ../services/garage.nix
     ../services/nfs-server.nix
-    ../services/ntp-server.nix
     ../services/pxe-netboot.nix
     ../services/spire-server.nix
     ../services/spore-native-boot.nix

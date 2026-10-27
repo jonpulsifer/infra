@@ -1,15 +1,14 @@
-# LAN time service on capsule and spore. Each syncs from NTS sources and polls the other, and
-# orphan mode keeps a common stratum 10 timebase if every upstream fails.
+# LAN time service on the anchors (capsule, spore and forge). Each syncs from NTS sources and polls
+# the other anchors, and orphan mode keeps a common stratum 10 timebase if every upstream fails.
 { lib, name, ... }:
 let
   lab = import ../lib/lab.nix;
-  peer =
-    if name == "capsule" then
-      lab.hosts.spore
-    else if name == "spore" then
-      lab.hosts.capsule
-    else
-      throw "ntp-server.nix supports only capsule and spore, not ${name}";
+  anchors = [
+    "capsule"
+    "spore"
+    "forge"
+  ];
+  peers = map (peer: lab.hosts.${peer}) (lib.remove name anchors);
 in
 {
   services.chrony = {
@@ -23,9 +22,9 @@ in
       "nts.netnod.se"
     ];
     extraConfig = ''
-      # The two LAN servers poll one another so orphan mode can elect a leader
+      # The anchors poll one another so orphan mode can elect a leader
       # and preserve a common timebase during a total upstream outage.
-      server ${peer} iburst
+      ${lib.concatMapStringsSep "\n      " (peer: "server ${peer} iburst") peers}
       local stratum 10 orphan
 
       # Serve routed homelab IPv4 networks, but never become a public NTP
@@ -39,11 +38,8 @@ in
 
   assertions = [
     {
-      assertion = lib.elem name [
-        "capsule"
-        "spore"
-      ];
-      message = "ntp-server.nix may only be imported by capsule or spore";
+      assertion = lib.elem name anchors;
+      message = "ntp-server.nix may only be imported by an anchor: ${lib.concatStringsSep ", " anchors}";
     }
   ];
 }
