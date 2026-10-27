@@ -17,6 +17,52 @@ switches:
     mac: 74:ac:b9:1a:fb:f2
     model: USL24P
 
+# Adopted UniFi access points that aps.tf imports by MAC. `roles` lists the AP
+# groups the AP belongs to; a WLAN is assigned to a group, never to an AP.
+# `where` is the AP's place on the property. The Beacon HD named Wart is
+# offline and is not declared.
+aps:
+  Lab:
+    mac: 70:a7:41:9e:e2:95
+    model: UAP6MP
+    where: garage, second-floor office
+    roles: [people, things]
+    band_steering: "off"
+    outdoor_mode: "off"
+  Wall Unit:
+    mac: 8c:30:66:9a:9a:0e
+    model: UDMA69B
+    where: house, meshed
+    roles: [people, things, guest]
+  Express 7:
+    mac: 8c:30:66:9e:e7:06
+    model: UDMA69B
+    where: house, meshed
+    roles: [people, things, guest]
+    band_steering: "off"
+    outdoor_mode: "off"
+  Gym:
+    mac: 68:d7:9a:44:0c:d9
+    model: UFLHD
+    where: gym pergola, outdoors
+    roles: [people, things]
+    band_steering: prefer_5g
+    outdoor_mode: "on"
+  Chicken Coop:
+    mac: 68:d7:9a:44:04:e1
+    model: UFLHD
+    where: chicken coop, outdoors
+    roles: [things]
+    band_steering: "off"
+    outdoor_mode: "off"
+  Driveway:
+    mac: e0:63:da:85:9a:59
+    model: UFLHD
+    where: front of the garage, outdoors
+    roles: []
+    band_steering: "off"
+    outdoor_mode: default
+
 unmanaged-infra:
   Wall Unit PoE Switch:
     mac: 18:8b:45:3a:ea:4b
