@@ -28,7 +28,7 @@
     "@opentelemetry/semantic-conventions": "^1.30.0",
     "@repo/archive": "workspace:*",
     "drizzle-orm": "0.45.4",
-    "vercel": "64.5.0",
+    "vercel": "65.0.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
