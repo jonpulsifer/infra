@@ -187,6 +187,7 @@ class ImportPreviewOut(Wire):
     new_accounts: tuple[AccountOut, ...] = ()
     new_categories: tuple[CategoryOut, ...] = ()
     seed_rules: tuple[RuleOut, ...] = ()
+    held_ids: tuple[str, ...] = ()
 
 
 class StoredPreviewOut(Wire):

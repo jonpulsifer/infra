@@ -416,27 +416,6 @@ def test_decide_lets_a_statement_row_replace_the_register_row_it_matches():
     assert got.accept_findings == frozenset({"d2", "d3"})
     assert got.authoritative_files == frozenset({"stmt.pdf"})
 
-    # two statement rows days apart are two purchases; on the same day, one posting read twice
-    pair = p.model_copy(
-        update={
-            "new_transactions": (
-                txn("a", "card", date(2031, 1, 10)),
-                txn("b", "card", date(2031, 1, 14)),
-                txn("c", "card", date(2031, 1, 14)),
-            ),
-            "findings": (
-                DuplicateFinding(
-                    id="x", transaction_id="b", matches_id="a", reason="4 days apart", tier="fuzzy"
-                ),
-                DuplicateFinding(
-                    id="y", transaction_id="c", matches_id="b", reason="same day", tier="fuzzy"
-                ),
-            ),
-        }
-    )
-    got = load.decide(pair)
-    assert got.replace_findings == frozenset({"y"}) and got.accept_findings == frozenset()
-
 
 def test_balance_gaps_cover_the_whole_ledger_for_laddered_accounts_only():
     ledger = Ledger(

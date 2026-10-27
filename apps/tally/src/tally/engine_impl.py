@@ -241,6 +241,8 @@ def preview(
     )
     drafts = _drafts(rows, owners, result.ids, frozenset(result.new), ledger, tombstones)
     drafted = {d.id for d in drafts}
+    stored = {t.id for t in ledger.transactions}
+    held_ids = tuple(sorted({tid for tid in result.ids if tid in stored}))
     dups = [f for f in result.findings if f.transaction_id in drafted]
     _inherit(drafts, dups, ledger)
     batch_id = _batch_id([r.parsed for r in resolved])
@@ -283,6 +285,7 @@ def preview(
             )
         ),
         new_categories=tuple(new_categories),
+        held_ids=held_ids,
         seed_rules=tuple(seed_rules),
     )
 
@@ -858,7 +861,11 @@ def _unlisted(
     ]
     if not spans:
         return set()
-    matched = {f.matches_id for f in dups} | {t.id for t in preview.new_transactions}
+    matched = (
+        {f.matches_id for f in dups}
+        | {t.id for t in preview.new_transactions}
+        | set(preview.held_ids)
+    )
     return {
         t.id
         for t in ledger.transactions

@@ -609,15 +609,6 @@ def decide(preview: ImportPreview) -> Decisions:
             continue
         if f.reason.startswith("replaces pending"):
             continue
-        twin = incoming.get(f.matches_id)
-        # Two statements never list one posting twice, so two statement rows that agree
-        # only on the amount, days apart, are two purchases.
-        if (
-            twin is not None
-            and on_a_statement(f.transaction_id)
-            and twin.date != incoming[f.transaction_id].date
-        ):
-            continue
         (replace if on_a_statement(f.transaction_id) else accept).add(f.id)
     accept |= {
         f.id

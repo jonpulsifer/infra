@@ -253,6 +253,17 @@ def test_an_authoritative_statement_retires_the_rows_of_its_span_it_does_not_lis
     ids = {t.id for t in after.transactions}
     assert "phantom" not in ids and "listed" not in ids
     assert {"partner", "outside", dup.transaction_id} <= ids
+    # a ledger row the statement holds under the very same id is listed, not retired
+    same = row(date(2030, 1, 20), "-3.00", "PAYMENT THANK YOU")
+    same_id = transaction_id("card", same.date, -300, same.descriptor)
+    held = existing(same_id, "card", same.date, "-3.00", "PAYMENT THANK YOU")
+    led2 = make_ledger([listed, phantom, held])
+    stmt2 = stmt.model_copy(update={"rows": (*stmt.rows, same)})
+    p2 = preview([stmt2], led2, Stub())
+    assert same_id in p2.held_ids
+    after2 = apply(led2, p2, Decisions(authoritative_files=frozenset({"jan.pdf"})))
+    ids2 = {t.id for t in after2.transactions}
+    assert same_id in ids2 and "phantom" not in ids2
     assert next(t for t in after.transactions if t.id == "partner").transfer_id is None
     # without the authority, the unlisted row stays
     kept = apply(led, p, Decisions(replace_findings=frozenset({dup.id})))

@@ -48,6 +48,7 @@ _OPENING = re.compile(r"Opening ?Balance" + _ON)
 _CLOSING = re.compile(r"Closing ?Balance" + _ON)
 _WITHDRAWN = re.compile(r"Minus ?total ?withdrawals (?P<amt>\$?[\d,]+\.\d{2})")
 _DEPOSITED = re.compile(r"Plus ?total ?deposits (?P<amt>\$?[\d,]+\.\d{2})")
+ACCOUNT_DIGITS = 12
 _ACCOUNT = re.compile(r"Your ?account ?number:[^\n]*\n[^\n]*?(\d[\d -]{4,}\d)[ \t]*$", re.M)
 _TABLE_START = re.compile(r"^Date Transactions")
 _TABLE_STOP = re.compile(r"Closing ?Balance|continued ?on ?next ?page")
@@ -75,7 +76,9 @@ class ScotiaChequing:
         closing = search(_CLOSING, first, f"{NAME}: closing balance")
         start, end = _day(opening), _day(closing)
         found = search(_ACCOUNT, first, f"{NAME}: account number")
-        account = re.sub(r"\D", "", found[1])
+        # Transit and account number are twelve digits; a later layout prints one more
+        # digit in front, and the same account must resolve to the same hint.
+        account = re.sub(r"\D", "", found[1])[-ACCOUNT_DIGITS:]
         product = search(_SUMMARY, first, f"{NAME}: account summary")["product"]
         kind = AccountKind.savings if "sav" in product.lower() else AccountKind.chequing
         table = between(document_lines(_in_table(pages)), _TABLE_START, _TABLE_STOP)
