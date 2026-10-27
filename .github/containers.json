@@ -21,6 +21,7 @@
     "tally",
     "tally-ocr",
     "tink-agent-autoid",
+    "tink-reprovision-tools",
     "weather"
   ],
   "deploy": {
@@ -79,6 +80,9 @@
     ],
     "tink-agent-autoid": [
       "clusters/folly/talos/netboot.json"
+    ],
+    "tink-reprovision-tools": [
+      "clusters/folly/tinkerbell/template.yaml"
     ],
     "weather": [
       "clusters/offsite/apps/weather/deployment.yaml"

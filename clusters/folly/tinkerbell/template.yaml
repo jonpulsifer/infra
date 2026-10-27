@@ -1,6 +1,8 @@
 # Every reprovision Workflow runs this in HookOS: wipe the Hardware's disk, META included, make the
 # network the next boot, and reboot. Netboot goes off when this succeeds, so Smee has no script for
 # the MAC on that boot and the signed iPXE boots the signed Talos UKI (nix/images/ipxe-folly.nix).
+# Its actions run images/tink-reprovision-tools, which the containers workflow's delivery pins by
+# digest. An all-zero digest means the image has not been delivered yet and the run cannot pull it.
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Template
@@ -20,7 +22,7 @@ spec:
           DISK: "{{ index .Hardware.Disks 0 }}"
         actions:
           - name: wipe-disk
-            image: docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000
             timeout: 600
             command:
               - /bin/sh
@@ -29,7 +31,6 @@ spec:
                 set -eu
                 log() { echo "reprovision: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: $*" >"$t" 2>/dev/null || true; done; }
                 [ -b "$DISK" ] || { log "$DISK is not a block device"; exit 1; }
-                apk add --no-cache sgdisk util-linux >/dev/null
                 log "wiping every partition of $DISK"
                 for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
                   wipefs --all --force "$p"
@@ -43,7 +44,7 @@ spec:
                 if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
                 log "wiped $DISK"
           - name: netboot-next
-            image: docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000
             timeout: 300
             command:
               - /bin/sh
@@ -51,7 +52,6 @@ spec:
               - |
                 set -eu
                 log() { echo "reprovision: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: $*" >"$t" 2>/dev/null || true; done; }
-                apk add --no-cache efibootmgr >/dev/null
                 mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars
                 # The wiped disk has nothing to boot, so the firmware would fall through its boot
                 # order anyway; BootNext makes the network boot certain.
@@ -63,7 +63,7 @@ spec:
                 efibootmgr -q -n "$n"
                 log "Boot$n (IPv4 network) is the next boot"
           - name: reboot
-            image: docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000
             timeout: 300
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
@@ -73,8 +73,7 @@ spec:
               - |
                 set -eu
                 # A detached container reboots the node after this action reports success.
-                apk add --no-cache docker-cli >/dev/null
                 docker run -d --privileged --name reprovision-reboot \
-                  docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a \
+                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000 \
                   sh -c 'sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo b >/proc/sysrq-trigger'
                 for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: rebooting into the Talos UKI netboot in 10 seconds" >"$t" 2>/dev/null || true; done
