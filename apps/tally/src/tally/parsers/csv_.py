@@ -1,9 +1,9 @@
 """CSV through the profile registry, matched by column fingerprint.
 
-`read(path)` returns the ParsedFile plus per-row tags (the trusted category
-hints a ParsedRow has no field for); `CsvParser.parse` returns the file alone.
-Error messages name the column count and a header only when every cell of it is a
-known column name, never a cell of a data row.
+Trusted category hints ride on each row as `ParsedRow.tags`; `read(path)` also
+lists them per row for the seeding helpers. Error messages name the column
+count and a header only when every cell of it is a known column name, never a
+cell of a data row.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-from tally.model import ParsedFile, ParsedRow
+from tally.model import AccountHint, ParsedFile, ParsedRow
 from tally.parsers import ParseError, register, sha256_of
 from tally.parsers.profiles import PROFILES, describe_header
 from tally.parsers.profiles.base import (
@@ -26,6 +26,7 @@ from tally.parsers.profiles.base import (
     Row,
     Sign,
     Table,
+    account_kind,
     detect_date_format,
     norm,
     parse_amount,
@@ -184,6 +185,7 @@ def _row(layout: _Layout, row: Row, n: int) -> tuple[ParsedRow, tuple[str, ...]]
     except ValueError:
         balance = None
     descriptor = _join(row, r.descriptor) or _cell(row, r.type) or _join(row, r.memo)
+    tags = _tags(p, r, row, descriptor)
     parsed = ParsedRow(
         account_hint=_cell(row, r.account) or None,
         date=day,
@@ -192,8 +194,9 @@ def _row(layout: _Layout, row: Row, n: int) -> tuple[ParsedRow, tuple[str, ...]]
         memo=_join(row, [c for c in (r.type, *r.memo) if c is not None]),
         pending=norm(_cell(row, r.pending)) in p.pending_values,
         balance_after=balance,
+        tags=tags,
     )
-    return parsed, _tags(p, r, row, descriptor)
+    return parsed, tags
 
 
 def _layout(
@@ -232,6 +235,10 @@ def read(path: Path, date_format: str | None = None) -> CsvImport:
         institution=profile.institution,
         account_hint=_only([r.account_hint for r in rows]),
         account_kind_hint=profile.account_kind,
+        accounts=tuple(
+            AccountHint(hint=h, name=h, kind=account_kind(h))
+            for h in dict.fromkeys(r.account_hint for r in rows if r.account_hint)
+        ),
         rows=rows,
         profile_id=profile.id,
         sha256=sha256_of(path),

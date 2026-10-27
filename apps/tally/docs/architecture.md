@@ -17,7 +17,8 @@ are its only shells, and only they do I/O.
 | `engine.py` | The contract: `preview(files, ledger, classifier)` and `apply(ledger, preview, decisions)`. `engine_impl.py` implements it. |
 | `report.py` | The dashboard aggregates, a port of `web/src/fixtures/derive.ts`. |
 | `synthetic.py` | The seeded synthetic ledger, a port of `web/src/fixtures/generate.ts`. Tests and the demo use it. |
-| `cli.py`, `config.py`, `store/` | The local shell: `inventory`, `preview`, `push`, `report`, `rules` and `serve`, with a SQLite cache of rules and model answers. |
+| `cli.py`, `config.py`, `store/` | The local shell: `inventory`, `preview`, `push`, `load`, `report`, `rules` and `serve`, with a SQLite cache of rules, model answers, loaded files and account decisions. |
+| `load.py`, `files.py` | `tally load`: the walk (identity exclusions, zips one level deep), the load order (a YNAB register first), the account decision per file from the rows it overlaps, preview and apply through the server, and the report of what disagrees. |
 | `server/` | The hosted shell: a FastAPI app, sealed rows in SQLite or Postgres, tailnet identity, and the built SPA. |
 | `web/` | The Vite React reader. It falls back to the synthetic ledger on `?synthetic=1`. |
 
@@ -32,6 +33,13 @@ Account numbers never become ids. A hint from a file that is not already a
 ledger account id becomes `acct_<sha12>`. A file that names no account holds
 its rows under `unassigned:<file>`, and `apply` refuses it until
 `account_for_file` names the account.
+
+A file the owner categorised by hand (a YNAB register) carries its categories
+as `ParsedRow.tags`. The preview keeps each tagged row's category as a manual
+choice, lists the categories the ledger's tree lacks as `new_categories`, and
+seeds one rule per payee the tags categorise consistently as `seed_rules`;
+the preview's untagged rows already match those rules. `apply` folds both in.
+A new ledger starts with the seed tree in `classify/taxonomy.py`.
 
 ## The privacy line
 
@@ -93,6 +101,8 @@ bun run --cwd web build                               # web/dist, served by the 
 uv run tally inventory ~/finance                      # shapes and counts, never a value
 uv run tally preview --synthetic --dry-run FILES...   # what an import would do and send
 uv run tally rules seed-ynab Register.csv             # seed rules from a YNAB register
+mise run tally:load -- --dry-run                      # what loading ~/finance would do
+mise run tally:load                                   # load it, once; exit 3 on a discrepancy
 ```
 
 Without `--synthetic`, the server needs `TALLY_DATABASE_URL` and a keyring.

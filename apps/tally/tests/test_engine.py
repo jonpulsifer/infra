@@ -640,3 +640,88 @@ def test_a_string_withheld_at_apply_keeps_no_model_answer():
     (t,) = after.transactions
     assert (t.category_id, t.source) == ("uncategorized", Source.manual)
     assert not [r for r in after.rules if r.created_from == "model"]
+
+
+# trusted tags: a register the owner categorised by hand
+
+
+def tagged(on, amount, descriptor, *tags, hint="Test Card"):
+    return ParsedRow(account_hint=hint, date=on, amount=D(amount), descriptor=descriptor, tags=tags)
+
+
+def register(rows):
+    from tally.model import AccountHint
+
+    hints = dict.fromkeys(r.account_hint for r in rows if r.account_hint)
+    return ParsedFile(
+        name="Register.csv",
+        format="csv",
+        institution="YNAB",
+        account_hint=None,
+        accounts=tuple(
+            AccountHint(hint=h, name=h, kind=AccountKind.credit if "Card" in h else None)
+            for h in hints
+        ),
+        rows=tuple(rows),
+        sha256="5" * 64,
+        date_from=min(r.date for r in rows),
+        date_to=max(r.date for r in rows),
+    )
+
+
+def test_trusted_tags_keep_their_category_grow_the_tree_and_seed_rules():
+    rows = [
+        tagged(JAN, "-4.50", "Lantern Cafe", "ynab:Everyday/Coffee"),
+        tagged(JAN, "-9.00", "Lantern Cafe", "ynab:Everyday/Coffee"),
+        tagged(JAN, "-30.00", "Widget Shop", "ynab:Odd Group/Widgets"),
+        tagged(JAN, "-100.00", "Transfer : Test Chequing", "ynab:transfer"),
+        tagged(JAN, "100.00", "Transfer : Test Card", "ynab:transfer", hint="Test Chequing"),
+        tagged(JAN, "-5.00", "Lantern Cafe"),
+        tagged(JAN, "-7.00", "Nothing Known"),
+    ]
+    stub = Stub()
+    led = make_ledger(rules=())
+    got = preview([register(rows)], led, stub)
+
+    by_desc = {(t.descriptor, t.amount): t for t in got.new_transactions}
+    assert by_desc[("Lantern Cafe", D("-4.50"))].category_id == "coffee"
+    assert by_desc[("Lantern Cafe", D("-4.50"))].source is Source.manual
+    assert by_desc[("Lantern Cafe", D("-4.50"))].tags == ("ynab:Everyday/Coffee",)
+    widgets = by_desc[("Widget Shop", D("-30.00"))].category_id
+    assert widgets not in {c.id for c in led.categories}
+    assert {c.id for c in got.new_categories} >= {widgets}
+    assert all(c.id not in {x.id for x in led.categories} for c in got.new_categories)
+    # the untagged coffee row matches the rule the tagged rows seeded, in this same preview
+    assert by_desc[("Lantern Cafe", D("-5.00"))].category_id == "coffee"
+    assert by_desc[("Lantern Cafe", D("-5.00"))].source is Source.rule
+    assert {r.match for r in got.seed_rules} == {"lantern cafe", "widget shop"}
+    assert all(r.created_from == "seed" for r in got.seed_rules)
+    # the transfer pair is stamped under the transfer root, and only the unknown row is asked
+    legs = [t for t in got.new_transactions if t.descriptor.startswith("Transfer")]
+    assert {t.category_id for t in legs} == {"transfer"}
+    assert [r.descriptor for r in stub.requests] == ["Nothing Known"]
+    # the register's accounts carry their names and kinds
+    assert {(a.name, a.kind) for a in got.new_accounts} == {
+        ("Test Card", AccountKind.credit),
+        ("Test Chequing", AccountKind.chequing),
+    }
+
+    after = apply(led, got, Decisions())
+    assert widgets in {c.id for c in after.categories}
+    assert {r.match for r in after.rules} == {"lantern cafe", "widget shop"}
+    assert {a.name for a in after.accounts} >= {"Test Card", "Test Chequing"}
+    assert {t.account_id for t in after.transactions} <= {a.id for a in after.accounts}
+    assert next(t for t in after.transactions if t.transfer_id).category_id == "transfer"
+
+    again = apply(after, preview([register(rows)], after, stub), Decisions())
+    assert again.categories == after.categories
+    assert again.rules == after.rules
+    assert len(again.transactions) == len(after.transactions)
+
+
+def test_a_trusted_tag_whose_category_the_ledger_lacks_is_added_before_classifying():
+    rows = [tagged(JAN, "-1.00", "Odd Vendor", "ynab:Odd Group/Widgets")]
+    got = preview([register(rows)], make_ledger(rules=()), Stub())
+    (txn,) = got.new_transactions
+    assert txn.category_id == got.new_categories[-1].id
+    assert not got.findings

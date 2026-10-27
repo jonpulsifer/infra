@@ -22,6 +22,13 @@ chosen account and drops FITID duplicates, as preview would have.
 Only `scrub`bed descriptors reach a classifier: number-shaped identifiers in
 payee text are replaced first, and the scrubbed form is what is audited and
 cached as a rule.
+
+A row whose file carried a trusted category tag (`<prefix>:<group>/<name>`,
+the owner's own hand in a YNAB register) keeps that category as a manual
+choice and asks no rule or model. The categories such tags need beyond the
+ledger's tree come back as `new_categories`, and one seed rule per payee the
+tags categorise consistently comes back as `seed_rules`; apply keeps both,
+and the preview's other rows already match those rules.
 """
 
 from __future__ import annotations
@@ -166,6 +173,10 @@ class _Draft:
     source: Source = Source.rule
     confidence: float | None = None
 
+    @property
+    def tags(self) -> tuple[str, ...]:
+        return self.row.tags
+
     def freeze(self, batch_id: str) -> Transaction:
         return Transaction(
             id=self.id,
@@ -175,6 +186,7 @@ class _Draft:
             descriptor=self.row.descriptor,
             merchant=self.merchant or self.row.descriptor,
             category_id=self.category_id,
+            tags=self.row.tags,
             source=self.source,
             confidence=self.confidence,
             batch_id=batch_id,
@@ -217,8 +229,12 @@ def preview(
     fresh = [d.freeze(batch_id) for d in drafts if d.new]
     transfers = _transfers(ledger, fresh, transfer_window_days)
     paired = frozenset(leg for f in transfers if f.auto for leg in (f.out_id, f.in_id))
+    new_categories = _trusted_categories(drafts, ledger)
+    working = ledger.model_copy(update={"categories": (*ledger.categories, *new_categories)})
+    seed_rules = _seed_rules(drafts, working)
+    working = working.model_copy(update={"rules": (*ledger.rules, *seed_rules)})
     classified = _classify(
-        [d for d in drafts if d.new], ledger, classifier, threshold, frozenset(withhold), paired
+        [d for d in drafts if d.new], working, classifier, threshold, frozenset(withhold), paired
     )
     txns = [d.freeze(batch_id) for d in drafts]
     file_assertions = [r.restamp(a, known) for r in resolved for a in r.parsed.assertions]
@@ -229,8 +245,9 @@ def preview(
         *transfers,
         *classified.low,
     ]
+    shown = tuple(_preview_file(r) for r in resolved)
     return ImportPreview(
-        files=tuple(_preview_file(r) for r in resolved),
+        files=shown,
         new_transactions=tuple(txns),
         findings=tuple(findings),
         outbound_strings=classified.outbound,
@@ -238,7 +255,82 @@ def preview(
         model_calls=len(classified.outbound),
         holdings=tuple(file_holdings),
         assertions=tuple(file_assertions),
+        new_accounts=tuple(
+            _new_accounts(
+                [d.freeze(batch_id) for d in drafts if d.new],
+                file_holdings,
+                file_assertions,
+                shown,
+                ledger,
+                named=_named_accounts(resolved, known),
+            )
+        ),
+        new_categories=tuple(new_categories),
+        seed_rules=tuple(seed_rules),
     )
+
+
+def _hint(tags: Sequence[str]) -> tuple[str, str] | None:
+    """The (group, category) a trusted tag names, or None when the row carries none."""
+    for tag in tags:
+        _, _, value = tag.partition(":")
+        group, slash, name = value.partition("/")
+        if slash and name.strip():
+            return group, name
+    return None
+
+
+def _is_transfer(tags: Sequence[str]) -> bool:
+    return any(t.partition(":")[2] == TRANSFER for t in tags)
+
+
+def _trusted_categories(drafts: Sequence[_Draft], ledger: Ledger) -> list[Category]:
+    """The categories the new rows' trusted tags need that the ledger's tree lacks."""
+    from tally.classify.taxonomy import from_ynab
+
+    hints = [h for d in drafts if d.new and (h := _hint(d.tags)) is not None]
+    return from_ynab(hints, seed=ledger.categories) if hints else []
+
+
+def _trusted_category(d: _Draft, categories: Sequence[Category]) -> str | None:
+    from tally.classify.taxonomy import ynab_category_id
+
+    hint = _hint(d.tags)
+    if hint is None:
+        return _transfer_root(categories) if _is_transfer(d.tags) else None
+    return ynab_category_id(*hint, categories)
+
+
+def _seed_rules(drafts: Sequence[_Draft], ledger: Ledger) -> list[Rule]:
+    """One rule per payee the trusted tags categorise consistently, minus those the ledger has."""
+    from tally.classify.rules import seed_from_ynab
+
+    pairs: list[tuple[str, str]] = []
+    for d in drafts:
+        if not d.new or _is_transfer(d.tags) or _hint(d.tags) is None:
+            continue
+        cid = _trusted_category(d, ledger.categories)
+        if cid is not None:
+            pairs.append((d.row.descriptor, cid))
+    have = {r.id for r in ledger.rules}
+    return [r for r in seed_from_ynab(pairs) if r.id not in have] if pairs else []
+
+
+def _named_accounts(resolved: Sequence[_File], known: Mapping[str, Account]) -> dict[str, Account]:
+    """Accounts the files describe by name, keyed by the id their rows resolve to."""
+    out: dict[str, Account] = {}
+    for f in resolved:
+        for h in f.parsed.accounts:
+            aid = _resolve_hint(h.hint, f.parsed.institution, known)
+            if aid not in known and aid not in out:
+                out[aid] = Account(
+                    id=aid,
+                    name=h.name,
+                    institution=f.parsed.institution or "Unknown",
+                    kind=h.kind or f.kind or AccountKind.chequing,
+                    since=date.min,
+                )
+    return out
 
 
 def _incoming(
@@ -315,14 +407,17 @@ def _classify(
     withhold: frozenset[str],
     paired: frozenset[str],
 ) -> _Classified:
-    """Rules first, then the classifier. A leg of an auto transfer needs no model."""
+    """A trusted tag first, then rules, then the classifier. An auto transfer leg needs no model."""
     match = _rule_matcher(ledger.rules)
     known = {c.id for c in ledger.categories}
     rules_hit = 0
     asking: list[_Draft] = []
     for d in drafts:
+        trusted = _trusted_category(d, ledger.categories)
         rule = match(d.row.descriptor, d.account_id)
-        if rule is not None and rule.category_id in known:
+        if trusted is not None and trusted in known:
+            d.category_id, d.source, d.confidence = trusted, Source.manual, None
+        elif rule is not None and rule.category_id in known:
             d.category_id, d.merchant, d.source = rule.category_id, rule.merchant, Source.rule
             rules_hit += 1
         elif d.id in paired:
@@ -465,6 +560,7 @@ def apply(
     now: datetime | None = None,
 ) -> Ledger:
     """Fold the preview in as decided. Raises EngineError rather than guess an account."""
+    ledger = _with_schema(ledger, preview)
     accept, dismiss = decisions.accept_findings, decisions.dismiss_findings
     dups = [f for f in preview.findings if isinstance(f, DuplicateFinding)]
     drop = {f.transaction_id for f in dups if _drops(f, accept, dismiss)}
@@ -501,7 +597,14 @@ def apply(
         update={
             "accounts": (
                 *ledger.accounts,
-                *_new_accounts(kept, holdings, assertions, preview, ledger),
+                *_new_accounts(
+                    kept,
+                    holdings,
+                    assertions,
+                    preview.files,
+                    ledger,
+                    named={a.id: a for a in preview.new_accounts},
+                ),
             ),
             "transactions": tuple(sorted(rows, key=lambda t: (t.date, t.id))),
             "holdings": (*ledger.holdings, *holdings),
@@ -510,6 +613,19 @@ def apply(
             "batches": _batches(ledger, preview, kept, now),
         }
     )
+
+
+def _with_schema(ledger: Ledger, preview: ImportPreview) -> Ledger:
+    """The ledger with the categories and seed rules the preview brought, minus what it has."""
+    from tally.classify.taxonomy import TaxonomyError, merge
+
+    try:
+        categories = merge(ledger.categories, preview.new_categories)
+    except TaxonomyError as err:
+        raise EngineError(str(err)) from None
+    have = {r.id for r in ledger.rules}
+    rules = [r for r in preview.seed_rules if r.id not in have]
+    return ledger.model_copy(update={"categories": categories, "rules": (*ledger.rules, *rules)})
 
 
 def _drop_moved_twins(
@@ -801,12 +917,18 @@ def _new_accounts(
     kept: Sequence[Transaction],
     holdings: Sequence[HoldingSnapshot],
     assertions: Sequence[BalanceAssertion],
-    preview: ImportPreview,
+    files: Sequence[PreviewFile],
     ledger: Ledger,
+    *,
+    named: Mapping[str, Account],
 ) -> list[Account]:
-    """Accounts the import names but the ledger lacks, with the kind their file declared."""
+    """Accounts the import names but the ledger lacks.
+
+    `named` holds what a file said about an account (its name and kind); any
+    other account takes the kind its file declared and a generic name.
+    """
     known = {a.id for a in ledger.accounts}
-    files = {f.account_id: f for f in preview.files if f.account_id}
+    by_file = {f.account_id: f for f in files if f.account_id}
     investing = {h.account_id for h in holdings}
     first: dict[str, date] = {}
     for account_id, on in (
@@ -818,7 +940,10 @@ def _new_accounts(
             first[account_id] = min(first.get(account_id, on), on)
     out: list[Account] = []
     for account_id, since in first.items():
-        f = files.get(account_id)
+        if (described := named.get(account_id)) is not None:
+            out.append(described.model_copy(update={"since": since}))
+            continue
+        f = by_file.get(account_id)
         institution = (f.institution if f else None) or "Unknown"
         kind = f.account_kind if f and f.account_kind else None
         if kind is None:

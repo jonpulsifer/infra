@@ -80,6 +80,24 @@ def norm(cell: str) -> str:
     return " ".join(cell.replace("﻿", "").split()).casefold()
 
 
+_KIND_WORDS: tuple[tuple[AccountKind, tuple[str, ...]], ...] = (
+    (AccountKind.mortgage, ("mortgage",)),
+    (AccountKind.investment, ("rsp", "rrsp", "lrsp", "lira", "tfsa", "resp", "fhsa", "invest")),
+    (AccountKind.savings, ("saving", "sav")),
+    (AccountKind.credit, ("visa", "mastercard", "amex", "credit", "card", "loc", "line")),
+    (AccountKind.chequing, ("cheq", "chequing", "checking")),
+)
+
+
+def account_kind(name: str) -> AccountKind | None:
+    """The kind an account's name suggests, or None when it says nothing."""
+    words = re.findall(r"[a-z]+", name.casefold())
+    for kind, stems in _KIND_WORDS:
+        if any(w == s or (len(s) >= 3 and w.startswith(s)) for w in words for s in stems):
+            return kind
+    return None
+
+
 def parse_amount(cell: str) -> Decimal | None:
     """`$1,234.56`, `-$5.00`, `(5.00)` and `5.00-` all read; blank is None."""
     text = _MONEY_NOISE.sub("", cell)

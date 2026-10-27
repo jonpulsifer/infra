@@ -183,6 +183,9 @@ class ImportPreviewOut(Wire):
     model_calls: int
     holdings: tuple[HoldingSnapshotOut, ...] = ()
     assertions: tuple[BalanceAssertionOut, ...] = ()
+    new_accounts: tuple[AccountOut, ...] = ()
+    new_categories: tuple[CategoryOut, ...] = ()
+    seed_rules: tuple[RuleOut, ...] = ()
 
 
 class StoredPreviewOut(Wire):
