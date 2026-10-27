@@ -119,6 +119,28 @@ def test_different_fitids_block_a_fuzzy_match_unless_descriptor_agrees():
     assert "FITIDs differ" in finding.reason
 
 
+def test_rows_in_disjoint_closed_periods_are_two_purchases():
+    march, april = (D - timedelta(days=30), D), (D, D + timedelta(days=30))
+    existing = [tx("e1", "-3.25", on=D)]
+    repeat = [row("-3.25", on=D + timedelta(days=2))]
+    assert find_duplicates(existing, repeat, periods=[april], existing_periods={"e1": march}) == []
+    assert find_duplicates(existing, repeat, periods=[march], existing_periods={"e1": march})
+    assert find_duplicates(existing, repeat, periods=[None], existing_periods={"e1": march})
+    assert find_duplicates(existing, repeat, periods=[april])
+
+
+def test_closed_periods_keep_both_files_of_one_import():
+    rows = [row("-3.25", on=D), row("-3.25", on=D + timedelta(days=1))]
+    periods = [(D - timedelta(days=30), D), (D, D + timedelta(days=30))]
+    assert find_duplicates([], rows, sources=["mar", "apr"], periods=periods) == []
+    assert find_duplicates([], rows, sources=["mar", "apr"])
+
+
+def test_periods_must_cover_every_incoming_row():
+    with pytest.raises(ValueError, match="periods"):
+        dedupe([], [row("-1.00")], periods=[])
+
+
 def test_pending_incoming_matching_posted_existing_is_a_duplicate():
     result = dedupe([tx("e1", "-30.00")], [row("-30.00", on=D - timedelta(days=1), pending=True)])
     [finding] = result.findings

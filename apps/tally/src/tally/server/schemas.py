@@ -187,6 +187,7 @@ class ImportPreviewOut(Wire):
     new_accounts: tuple[AccountOut, ...] = ()
     new_categories: tuple[CategoryOut, ...] = ()
     seed_rules: tuple[RuleOut, ...] = ()
+    held_ids: tuple[str, ...] = ()
 
 
 class StoredPreviewOut(Wire):
@@ -304,6 +305,8 @@ class DecisionsIn(Wire):
     recategorise: dict[str, str] = Field(default_factory=dict)
     make_rules: frozenset[str] = frozenset()
     withhold_strings: frozenset[str] = frozenset()
+    replace_findings: frozenset[str] = frozenset()
+    authoritative_files: frozenset[str] = frozenset()
 
 
 class RecategoriseIn(Wire):

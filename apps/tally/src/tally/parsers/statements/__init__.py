@@ -117,6 +117,7 @@ class Family(Protocol):
 def families() -> tuple[Family, ...]:
     from tally.parsers.statements import (
         questrade,
+        scotia_chequing,
         scotia_portfolio,
         scotia_visa,
         shareworks,
@@ -127,6 +128,7 @@ def families() -> tuple[Family, ...]:
         questrade.FAMILY,
         scotia_visa.FAMILY,
         scotia_portfolio.FAMILY,
+        scotia_chequing.FAMILY,
         shareworks.FAMILY,
         unparsed.PWL,
     )

@@ -470,6 +470,8 @@ class Remote:
         pid = self._ids.pop(id(preview))
         body = {
             "acceptFindings": sorted(decisions.accept_findings),
+            "replaceFindings": sorted(decisions.replace_findings),
+            "authoritativeFiles": sorted(decisions.authoritative_files),
             "dismissFindings": sorted(decisions.dismiss_findings),
             "accountForFile": dict(decisions.account_for_file),
         }
@@ -571,27 +573,58 @@ class Report:
 
 
 def decide(preview: ImportPreview) -> Decisions:
-    """Drop every fuzzy duplicate, keep a posting of a pending row, and pair the transfers
-    the file itself tagged as transfers on both legs.
+    """A statement's row replaces the ledger row it matches; any other fuzzy duplicate is
+    dropped; a posting of a pending row is kept; a transfer the file tagged on both legs
+    is paired.
+
+    A statement is a file that asserts balances. Its rows are dated as the
+    institution posted them, so once they replace a hand-kept register's rows
+    the account sums to the balances the statement asserts.
     """
     tagged = {
         t.id
         for t in preview.new_transactions
         if any(tag.partition(":")[2] == "transfer" for tag in t.tags)
     }
-    accept = {
-        f.id
-        for f in preview.findings
-        if isinstance(f, DuplicateFinding)
-        and f.tier == "fuzzy"
-        and not f.reason.startswith("replaces pending")
-    }
+    incoming = {t.id: t for t in preview.new_transactions}
+    statement_spans = [
+        (f.account_id, f.date_from, f.date_to)
+        for f in preview.files
+        if f.account_id
+        and f.date_from
+        and f.date_to
+        and any(a.account_id == f.account_id for a in preview.assertions)
+    ]
+
+    def on_a_statement(tid: str) -> bool:
+        t = incoming.get(tid)
+        return t is not None and any(
+            t.account_id == account and lo <= t.date <= hi for account, lo, hi in statement_spans
+        )
+
+    accept: set[str] = set()
+    replace: set[str] = set()
+    for f in preview.findings:
+        if not isinstance(f, DuplicateFinding) or f.tier != "fuzzy":
+            continue
+        if f.reason.startswith("replaces pending"):
+            continue
+        (replace if on_a_statement(f.transaction_id) else accept).add(f.id)
     accept |= {
         f.id
         for f in preview.findings
         if isinstance(f, TransferFinding) and f.out_id in tagged and f.in_id in tagged
     }
-    return Decisions(accept_findings=frozenset(accept))
+    statements = frozenset(
+        f.name
+        for f in preview.files
+        if f.account_id and any(a.account_id == f.account_id for a in preview.assertions)
+    )
+    return Decisions(
+        accept_findings=frozenset(accept),
+        replace_findings=frozenset(replace),
+        authoritative_files=statements,
+    )
 
 
 def _unmatched_in_overlap(preview: ImportPreview, ledger: Ledger, chosen: Mapping[str, str]) -> int:

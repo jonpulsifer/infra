@@ -23,6 +23,17 @@ class Decisions:
     cannot stop a string leaving; apply drops the model's answer for them,
     leaves their rows uncategorised and caches no rule. `preview(withhold=...)`
     is what keeps a string in the lab.
+
+    A duplicate finding in `replace_findings` is resolved the other way round
+    from `accept_findings`: the incoming row stays and the ledger row it
+    matched is retired, keeping that row's category, transfer and tags. A
+    statement's row, dated as the institution posted it, replaces a hand-kept
+    register's row that way, so the account sums to the statement's balances.
+
+    A file in `authoritative_files` lists every posting of its account over
+    its dates, as a bank statement does, so a ledger row in that account and
+    span that no row of the file matched is retired too; a transfer partner
+    it leaves behind is unpaired, not removed.
     """
 
     accept_findings: frozenset[str] = frozenset()
@@ -31,6 +42,8 @@ class Decisions:
     recategorise: dict[str, str] = field(default_factory=dict)  # transaction id -> category id
     make_rules: frozenset[str] = frozenset()  # transaction ids whose correction becomes a rule
     withhold_strings: frozenset[str] = frozenset()  # descriptors whose model answer is refused
+    replace_findings: frozenset[str] = frozenset()  # duplicates where the ledger row gives way
+    authoritative_files: frozenset[str] = frozenset()  # files that list every row of their span
 
 
 def preview(

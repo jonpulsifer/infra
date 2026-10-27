@@ -362,6 +362,61 @@ def test_decide_drops_fuzzy_duplicates_but_keeps_a_posting():
     assert load.decide(p) == Decisions(accept_findings=frozenset({"d1"}))
 
 
+def test_decide_lets_a_statement_row_replace_the_register_row_it_matches():
+    def txn(id_, acct, on):
+        return Transaction(
+            id=id_,
+            account_id=acct,
+            date=on,
+            amount=Decimal("-5"),
+            descriptor="X",
+            merchant="X",
+            category_id="uncategorized",
+            batch_id="b",
+        )
+
+    def dup(i, tid):
+        return DuplicateFinding(
+            id=f"d{i}", transaction_id=tid, matches_id="m", reason="same amount", tier="fuzzy"
+        )
+
+    def file(name, acct, lo, hi):
+        return PreviewFile(
+            name=name,
+            format="pdf",
+            institution="Bank",
+            account_id=acct,
+            rows=1,
+            date_from=lo,
+            date_to=hi,
+        )
+
+    p = ImportPreview(
+        files=(
+            file("stmt.pdf", "card", date(2031, 1, 1), date(2031, 1, 31)),
+            file("export.csv", "chq", date(2031, 1, 1), date(2031, 1, 31)),
+        ),
+        new_transactions=(
+            txn("on-stmt", "card", date(2031, 1, 10)),
+            txn("after-stmt", "card", date(2031, 2, 10)),
+            txn("in-csv", "chq", date(2031, 1, 10)),
+        ),
+        findings=(dup(1, "on-stmt"), dup(2, "after-stmt"), dup(3, "in-csv")),
+        outbound_strings=(),
+        rules_hit=0,
+        model_calls=0,
+        assertions=(
+            BalanceAssertion(
+                account_id="card", date=date(2031, 1, 31), balance=Decimal("-1"), origin="s"
+            ),
+        ),
+    )
+    got = load.decide(p)
+    assert got.replace_findings == frozenset({"d1"})
+    assert got.accept_findings == frozenset({"d2", "d3"})
+    assert got.authoritative_files == frozenset({"stmt.pdf"})
+
+
 def test_balance_gaps_cover_the_whole_ledger_for_laddered_accounts_only():
     ledger = Ledger(
         id="l",

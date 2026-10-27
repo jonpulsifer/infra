@@ -266,6 +266,10 @@ class ImportPreview(Model):
     seed_rules: tuple[Rule, ...] = Field(
         default=(), description="Rules the files' trusted tags imply, for the ledger to keep."
     )
+    held_ids: tuple[str, ...] = Field(
+        default=(),
+        description="Ids of incoming rows the ledger already holds; nothing drafts them.",
+    )
 
 
 class Member(Model):

@@ -15,6 +15,11 @@ duplicate keeps the incoming row and retires the pending one only on accept.
 A posted row with the same id as a pending one (the same row, now cleared)
 posts that row in place, keeping its category.
 
+Dedupe is told which rows sit in a closed period. A statement whose rows add
+up to its own opening and closing balances closes that span for its account,
+and a ledger row is in a closed period when the balance ladder holds over it.
+Rows of two disjoint closed periods are never fuzzy duplicates.
+
 Rows moved to the account the owner names at apply were deduped at preview
 under their placeholder account, so apply dedupes them again against the
 chosen account and drops FITID duplicates, as preview would have.
@@ -34,9 +39,12 @@ and the preview's other rows already match those rules.
 from __future__ import annotations
 
 import hashlib
+from bisect import bisect_left
+from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,6 +77,7 @@ from tally.report import Taxonomy
 
 if TYPE_CHECKING:
     from tally.engine import Decisions
+    from tally.reconcile.dedupe import Period
 
 UNCATEGORIZED = "uncategorized"
 TRANSFER = "transfer"
@@ -220,9 +229,20 @@ def preview(
     chosen = dict(account_for_file or {})
     resolved = [_resolve(i, _parse(f), known, chosen) for i, f in enumerate(files)]
     rows, sources, owners = _incoming(resolved, known)
-    result = dedupe(ledger.transactions, rows, window_days=dedupe_window_days, sources=sources)
+    file_assertions = [r.restamp(a, known) for r in resolved for a in r.parsed.assertions]
+    kinds = _kinds(ledger, resolved)
+    result = dedupe(
+        ledger.transactions,
+        rows,
+        window_days=dedupe_window_days,
+        sources=sources,
+        periods=_file_periods(resolved, rows, owners, known, kinds),
+        existing_periods=_ledger_periods(ledger, kinds),
+    )
     drafts = _drafts(rows, owners, result.ids, frozenset(result.new), ledger, tombstones)
     drafted = {d.id for d in drafts}
+    stored = {t.id for t in ledger.transactions}
+    held_ids = tuple(sorted({tid for tid in result.ids if tid in stored}))
     dups = [f for f in result.findings if f.transaction_id in drafted]
     _inherit(drafts, dups, ledger)
     batch_id = _batch_id([r.parsed for r in resolved])
@@ -237,11 +257,10 @@ def preview(
         [d for d in drafts if d.new], working, classifier, threshold, frozenset(withhold), paired
     )
     txns = [d.freeze(batch_id) for d in drafts]
-    file_assertions = [r.restamp(a, known) for r in resolved for a in r.parsed.assertions]
     file_holdings = [r.restamp(h, known) for r in resolved for h in r.parsed.holdings]
     findings: list[Finding] = [
         *dups,
-        *_missing_periods(ledger, fresh, file_assertions, _kinds(ledger, resolved)),
+        *_missing_periods(ledger, fresh, file_assertions, kinds),
         *transfers,
         *classified.low,
     ]
@@ -266,6 +285,7 @@ def preview(
             )
         ),
         new_categories=tuple(new_categories),
+        held_ids=held_ids,
         seed_rules=tuple(seed_rules),
     )
 
@@ -503,6 +523,63 @@ def _kinds(ledger: Ledger, resolved: Sequence[_File]) -> dict[str, AccountKind |
     return kinds
 
 
+def _file_periods(
+    resolved: Sequence[_File],
+    rows: Sequence[ParsedRow],
+    owners: Sequence[_File],
+    known: Mapping[str, Account],
+    kinds: Mapping[str, AccountKind | None],
+) -> list[Period | None]:
+    """Each row's closed period: its statement's, when that statement's rows sum to its balances.
+
+    A file closes the span from its earliest assertion to its latest for an
+    account when every row it lists there is posted, dated inside the span,
+    and adds up to the difference of the two balances.
+    """
+    listed: dict[tuple[str, str], list[ParsedRow]] = defaultdict(list)
+    for row, owner in zip(rows, owners, strict=True):
+        listed[(owner.source, row.account_hint or "")].append(row)
+    closed: dict[tuple[str, str], Period] = {}
+    for f in resolved:
+        assertions = [f.restamp(a, known) for a in f.parsed.assertions]
+        for account in dict.fromkeys(a.account_id for a in assertions):
+            if kinds.get(account) not in (*LADDERED, None):
+                continue
+            mine = sorted((a for a in assertions if a.account_id == account), key=lambda a: a.date)
+            first, last = mine[0], mine[-1]
+            own = listed[(f.source, account)]
+            inside = all(not r.pending and first.date < r.date <= last.date for r in own)
+            total = sum((r.amount for r in own), Decimal())
+            if first.date < last.date and inside and total == last.balance - first.balance:
+                closed[(f.source, account)] = (first.date, last.date)
+    return [
+        closed.get((owner.source, row.account_hint or ""))
+        for row, owner in zip(rows, owners, strict=True)
+    ]
+
+
+def _ledger_periods(ledger: Ledger, kinds: Mapping[str, AccountKind | None]) -> dict[str, Period]:
+    """Ledger rows by id, each with the asserted period it reconciles in, if one holds."""
+    from tally.reconcile.balances import ladder
+
+    out: dict[str, Period] = {}
+    laddered = [a for a in ledger.assertions if kinds.get(a.account_id) in (*LADDERED, None)]
+    for account in dict.fromkeys(a.account_id for a in laddered):
+        spans = [
+            (r.since, r.assertion.date)
+            for r in ladder(account, ledger.transactions, laddered)
+            if r.held and not r.anchor and r.since < r.assertion.date
+        ]
+        ends = [through for _, through in spans]
+        for t in ledger.transactions:
+            if t.account_id != account or t.pending:
+                continue
+            i = bisect_left(ends, t.date)
+            if i < len(spans) and spans[i][0] < t.date:
+                out[t.id] = spans[i]
+    return out
+
+
 def _missing_periods(
     ledger: Ledger,
     fresh: Sequence[Transaction],
@@ -564,12 +641,21 @@ def apply(
     ledger = _with_schema(ledger, preview)
     accept, dismiss = decisions.accept_findings, decisions.dismiss_findings
     dups = [f for f in preview.findings if isinstance(f, DuplicateFinding)]
-    drop = {f.transaction_id for f in dups if _drops(f, accept, dismiss)}
+    replacing = _replacements(dups, decisions.replace_findings)
+    drop = {
+        f.transaction_id
+        for f in dups
+        if f.id not in decisions.replace_findings and _drops(f, accept, dismiss)
+    }
     retire = {
         f.matches_id
         for f in dups
         if f.id in accept and _replaces(f) and f.transaction_id != f.matches_id
-    }
+    } | set(replacing.values())
+    retire |= _unlisted(ledger, preview, decisions.authoritative_files, dups)
+    # A row the files state again under its own id is not given way by anything: the
+    # incoming row that matched it is a second purchase, kept beside it.
+    retire -= set(preview.held_ids)
     kept, id_map, moves = _assign_accounts(
         [t for t in preview.new_transactions if t.id not in drop | retire],
         preview,
@@ -582,11 +668,16 @@ def apply(
     kept = [t for t in kept if t.id not in buried]
     kept = _forget(kept, decisions.withhold_strings)
     kept = _recategorise(kept, preview, decisions, id_map, ledger)
+    kept = _take_over(kept, replacing, id_map, ledger)
     rules = _mint_rules(kept, decisions, id_map, ledger)
     rules += _cache_answers(kept, preview, id_map, [*ledger.rules, *rules])
     rows = _stamp_transfers(
         ledger,
-        [_post(t, posted) for t in ledger.transactions if t.id not in retire],
+        [
+            _unpair(_post(t, posted), retire, ledger)
+            for t in ledger.transactions
+            if t.id not in retire
+        ],
         kept,
         preview,
         decisions,
@@ -705,6 +796,96 @@ def _new_assertions(ledger: Ledger, incoming: Sequence[BalanceAssertion]) -> lis
 
 def _replaces(f: DuplicateFinding) -> bool:
     return f.reason.startswith(REPLACES_PENDING)
+
+
+def _replacements(dups: Sequence[DuplicateFinding], chosen: frozenset[str]) -> dict[str, str]:
+    """Incoming id to the ledger id it replaces. One ledger row gives way to one row only."""
+    out: dict[str, str] = {}
+    taken: set[str] = set()
+    for f in dups:
+        if f.id not in chosen or _replaces(f) or f.transaction_id == f.matches_id:
+            continue
+        if f.matches_id in taken or f.transaction_id in out:
+            continue
+        out[f.transaction_id] = f.matches_id
+        taken.add(f.matches_id)
+    return out
+
+
+def _take_over(
+    kept: list[Transaction],
+    replacing: Mapping[str, str],
+    id_map: Mapping[str, str],
+    ledger: Ledger,
+) -> list[Transaction]:
+    """A row that replaces a ledger row keeps that row's category, transfer and tags.
+
+    Preview already gave it the matched row's category and merchant; the
+    transfer pairing and the owner's tags are what apply carries across.
+    """
+    if not replacing:
+        return kept
+    old = {t.id: t for t in ledger.transactions}
+    moved = {id_map.get(incoming, incoming): gone for incoming, gone in replacing.items()}
+    out: list[Transaction] = []
+    for t in kept:
+        prior = old.get(moved.get(t.id, ""))
+        if prior is None:
+            out.append(t)
+            continue
+        out.append(
+            t.model_copy(
+                update={
+                    "category_id": prior.category_id,
+                    "merchant": prior.merchant,
+                    "source": prior.source,
+                    "confidence": prior.confidence,
+                    "transfer_id": prior.transfer_id,
+                    "tags": prior.tags or t.tags,
+                }
+            )
+        )
+    return out
+
+
+def _unlisted(
+    ledger: Ledger,
+    preview: ImportPreview,
+    authoritative: frozenset[str],
+    dups: Sequence[DuplicateFinding],
+) -> set[str]:
+    """Posted ledger rows in an authoritative file's account and span that nothing in it matched."""
+    if not authoritative:
+        return set()
+    spans = [
+        (f.account_id, f.date_from, f.date_to)
+        for f in preview.files
+        if f.name in authoritative and f.account_id and f.date_from and f.date_to
+    ]
+    if not spans:
+        return set()
+    matched = (
+        {f.matches_id for f in dups}
+        | {t.id for t in preview.new_transactions}
+        | set(preview.held_ids)
+    )
+    return {
+        t.id
+        for t in ledger.transactions
+        if t.id not in matched
+        and not t.pending
+        and any(t.account_id == a and lo <= t.date <= hi for a, lo, hi in spans)
+    }
+
+
+def _unpair(t: Transaction, retire: Collection[str], ledger: Ledger) -> Transaction:
+    """A row whose transfer partner is retired is left unpaired, free to pair again."""
+    if t.transfer_id is None:
+        return t
+    partners = [x for x in ledger.transactions if x.transfer_id == t.transfer_id and x.id != t.id]
+    if partners and all(x.id in retire for x in partners):
+        return t.model_copy(update={"transfer_id": None})
+    return t
 
 
 def _drops(f: DuplicateFinding, accept: frozenset[str], dismiss: frozenset[str]) -> bool:
