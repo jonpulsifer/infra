@@ -71,6 +71,12 @@
     "talos-enroll": [
       "clusters/folly/apps/talos-enroll/02-deployment.yaml"
     ],
+    "tally": [
+      "clusters/folly/apps/tally/deployment.yaml"
+    ],
+    "tally-ocr": [
+      "clusters/folly/apps/tally/ocr-worker.yaml"
+    ],
     "tink-agent-autoid": [
       "clusters/folly/talos/netboot.json"
     ],

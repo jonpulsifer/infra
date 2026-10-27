@@ -1,0 +1,13 @@
+---
+# Who owns a ledger, by tailnet login, comma-separated. The tailnet Ingress
+# (tailnet-ingress.yaml) sets Tailscale-User-Login; a tagged node carries none.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tally
+  namespace: tally
+  labels:
+    app.kubernetes.io/name: tally
+    app.kubernetes.io/part-of: tally
+data:
+  TALLY_OWNERS: jonathan@pulsifer.ca

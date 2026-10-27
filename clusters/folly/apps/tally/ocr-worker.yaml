@@ -1,0 +1,85 @@
+---
+# The OCR worker: Docling on CPU for scanned statements, in an image that holds
+# its own models (apps/tally/Dockerfile.ocr). network-policy.yaml gives it DNS
+# for names in this namespace and no destination: the api admits it only once
+# a worker listener with its own token exists. Scaled to zero until the
+# worker's queue lands; the image's command is an import smoke test.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tally-ocr
+  namespace: tally
+  labels:
+    app.kubernetes.io/name: tally-ocr
+    app.kubernetes.io/part-of: tally
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tally-ocr
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tally-ocr
+        app.kubernetes.io/part-of: tally
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The DNS proxy answers only names in this namespace (network-policy.yaml),
+      # so the api's full name is looked up as written, before any search
+      # domain the proxy would refuse.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "1"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # A page of OCR is seconds of every core; optiplex runs folly's control
+      # plane and cannot spare them.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [optiplex]
+      containers:
+        - name: tally-ocr
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # whole `ghcr.io/…/tally-ocr…@sha256:` string, so keep it one literal.
+          image: ghcr.io/jonpulsifer/tally-ocr:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TALLY_API_URL
+              value: http://tally.tally.svc.cluster.local:8080
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi

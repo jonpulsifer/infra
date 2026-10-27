@@ -1,0 +1,129 @@
+---
+# tally's API, CLI push endpoint and web app (`apps/tally`). It decrypts rows
+# in memory with the keyring from external-secret.yaml and stores them sealed
+# in tally-db. The only text it sends off-box is merchant descriptor strings,
+# to the classifier provider network-policy.yaml admits.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tally
+  namespace: tally
+  labels:
+    app.kubernetes.io/name: tally
+    app.kubernetes.io/part-of: tally
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tally
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tally
+        app.kubernetes.io/part-of: tally
+      annotations:
+        # tally reads the keyring, the key and the database URI at boot, so a
+        # rotation of any of them rolls the pod.
+        secret.reloader.stakater.com/reload: tally,tally-db-app
+        configmap.reloader.stakater.com/reload: tally
+    spec:
+      automountServiceAccountToken: false
+      # A service link would set TALLY_PORT and TALLY_SERVICE_HOST, which share
+      # the app's own TALLY_ settings prefix.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tally
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # whole `ghcr.io/…/tally…@sha256:` string, so keep it one literal.
+          image: ghcr.io/jonpulsifer/tally:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: TALLY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tally-db-app
+                  key: uri
+            - name: TALLY_KEYRING_FILE
+              value: /var/run/tally/secrets/keyring.json
+            - name: TALLY_OWNERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tally
+                  key: TALLY_OWNERS
+            # The API-key route. The ChatGPT route runs the codex CLI under a
+            # writable CODEX_HOME, which this image does not carry yet, so the
+            # Secret's codex-auth field is not mounted.
+            - name: TALLY_PROVIDER
+              value: openai_api
+            - name: TALLY_OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tally
+                  key: openai-api-key
+                  optional: true
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: secrets
+              mountPath: /var/run/tally/secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              # Dashboards decrypt and aggregate the ledger in memory.
+              memory: 1Gi
+              # No CPU limit: an import's parse and a dashboard's decrypt burst.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: secrets
+          secret:
+            secretName: tally
+            defaultMode: 0440
+            items:
+              - key: keyring.json
+                path: keyring.json
+        # Uploads spool here before the parser reads them.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
