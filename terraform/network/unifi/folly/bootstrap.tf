@@ -30,9 +30,9 @@ locals {
   mab_enforced = toset(["riptide"])
 
   # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
-  # reinstall. shale's port drops its frames when RADIUS assigns VLAN 9, while
-  # VLAN 8 assignment works, so its reinstall uses a plain bootstrap port.
-  boot_native = toset([])
+  # reinstall. With tagged VLAN management "block_all", the switch (USL24P,
+  # 7.5.15) forwarded none of the node's untagged frames.
+  boot_native = toset(["shale"])
 
   switch = local.clients.switches["USW 24 PoE"]
 }
@@ -180,7 +180,7 @@ resource "unifi_device" "usw_24_poe" {
       name                  = port_override.key
       forward               = "customize"
       native_networkconf_id = unifi_network.bootstrap.id
-      tagged_vlan_mgmt      = "block_all"
+      tagged_vlan_mgmt      = "auto"
       dot1x_ctrl            = "force_authorized"
     }
   }
