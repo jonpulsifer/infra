@@ -590,6 +590,15 @@ def _server(settings: config.Settings, token: str) -> httpx.Client:
     )
 
 
+def _detail(exc: httpx.HTTPStatusError) -> str:
+    """The server's own reason, which names an upload by position and never a row."""
+    try:
+        detail = exc.response.json().get("detail")
+    except ValueError:
+        return ""
+    return str(detail)[:200] if detail else ""
+
+
 def _overrides(pairs: Sequence[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for pair in pairs:
@@ -786,7 +795,7 @@ def load(
                 say=say,
             )
     except httpx.HTTPStatusError as exc:
-        raise _fail(f"the server refused: HTTP {exc.response.status_code}") from exc
+        raise _fail(f"the server refused: HTTP {exc.response.status_code} {_detail(exc)}") from exc
     except httpx.TransportError as exc:
         raise _fail(f"the server at {settings.server_url} is unreachable") from exc
     if as_json:
