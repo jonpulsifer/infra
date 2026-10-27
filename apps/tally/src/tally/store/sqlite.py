@@ -59,6 +59,13 @@ MIGRATIONS: tuple[str, ...] = (
         body TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE account_map (
+        key TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        decided_at TEXT NOT NULL
+    );
+    """,
 )
 
 
@@ -212,6 +219,18 @@ class Store:
             "SELECT 1 FROM files WHERE sha256 = ? AND action = ?", (sha256, action)
         ).fetchone()
         return row is not None
+
+    def account_map(self) -> dict[str, str]:
+        """Which ledger account a source resolves to, by `tally.load` key, as decided earlier."""
+        rows = self.conn.execute("SELECT key, account_id FROM account_map ORDER BY key")
+        return {k: a for k, a in rows}
+
+    def remember_account(self, key: str, account_id: str) -> None:
+        with self._tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO account_map VALUES (?, ?, ?)",
+                (key, account_id, _now().isoformat()),
+            )
 
     def save_snapshot(self, ledger: Ledger) -> None:
         with self._tx() as c:

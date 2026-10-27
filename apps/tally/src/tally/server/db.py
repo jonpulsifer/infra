@@ -311,7 +311,12 @@ class LedgerRepository:
         return self.load_versioned(ledger_id)[1]
 
     def load_versioned(self, ledger_id: str) -> tuple[int, Ledger]:
-        """The ledger and the version it was read at, for `save(expected_version=...)`."""
+        """The ledger and the version it was read at, for `save(expected_version=...)`.
+
+        A ledger with no categories gets the seed tree the first time it is
+        read: the engine files rows under `uncategorized` and transfers under
+        `transfer`, so an empty tree is never what the owner meant.
+        """
         version = self.version(ledger_id)
         cached = self._cache.get(ledger_id)
         if cached and cached[0] == version:
@@ -321,8 +326,21 @@ class LedgerRepository:
             fields: dict[str, Any] = {c.attr: self._read(conn, keys, c) for c in _COLLECTIONS}
             fields["members"] = self._members(conn, ledger_id)
         ledger = Ledger(id=ledger_id, **fields)
+        if not ledger.categories:
+            ledger = self._seed_categories(ledger, keys)
+            version = self.version(ledger_id)
         self._cache[ledger_id] = (version, ledger)
         return version, ledger
+
+    def _seed_categories(self, ledger: Ledger, keys: LedgerKeys) -> Ledger:
+        from tally.classify.taxonomy import SEED
+
+        seeded = ledger.model_copy(update={"categories": SEED})
+        column = next(c for c in _COLLECTIONS if c.attr == "categories")
+        with self.engine.begin() as conn:
+            self._write(conn, keys, column, ledger, seeded)
+            self._bump(conn, ledger.id)
+        return seeded
 
     def _read(self, conn: sa.Connection, keys: LedgerKeys, c: _Collection) -> tuple[Any, ...]:
         rows = conn.execute(

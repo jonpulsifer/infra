@@ -81,6 +81,11 @@ description = "Run the tally API with the synthetic ledger on :8081 (apps/tally)
 dir = "apps/tally"
 run = "uv run tally serve --synthetic --port 8081"
 
+[tasks."tally:load"]
+description = "Load ~/finance into the live tally ledger, once, and show what disagrees (apps/tally)"
+dir = "apps/tally"
+run = "scripts/load.sh"
+
 [tasks.kthx]
 description = "Run the kthx CLI from this checkout"
 # The root package does not depend on the CLI's workspace, so turbo leaves it

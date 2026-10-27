@@ -199,6 +199,46 @@ def test_statement_holdings_and_balances_survive_preview_and_apply(client):
     assert [a["accountId"] for a in ledger["assertions"]] == [account["id"]]
 
 
+def test_preview_takes_an_account_and_withheld_strings_as_form_fields(client):
+    client.post(
+        "/api/accounts",
+        json={"id": "chq", "name": "Chequing", "kind": "chequing", "since": "2029-01-01"},
+        headers=HEADERS,
+    )
+    fake = FakeClassifier()
+    client.app.state.services = Services(
+        settings=client.app.state.services.settings.__class__(
+            **{
+                **client.app.state.services.settings.__dict__,
+                "classifier_for": lambda _ledger: fake,
+            }
+        ),
+        repo=client.app.state.services.repo,
+    )
+    got = client.post(
+        "/api/import/preview",
+        files=[("files", ("january.json", stand_in(), "application/json"))],
+        data={
+            "account_for_file": json.dumps({"january.json": "chq"}),
+            "withhold": json.dumps([ROWS[3][2]]),
+        },
+        headers=HEADERS,
+    )
+    assert got.status_code == 201, got.text
+    preview = got.json()["preview"]
+    assert preview["files"][0]["accountId"] == "chq"
+    assert {t["accountId"] for t in preview["newTransactions"]} == {"chq"}
+    assert ROWS[3][2] not in {r.descriptor for r in fake.seen}
+    assert ROWS[3][2] not in preview["outboundStrings"]
+    bad = client.post(
+        "/api/import/preview",
+        files=[("files", ("january.json", stand_in(), "application/json"))],
+        data={"account_for_file": "[1, 2]"},
+        headers=HEADERS,
+    )
+    assert bad.status_code == 422
+
+
 def test_reimport_finds_nothing_new(client):
     imported(client)
     preview = upload(client, ("january.json", stand_in())).json()["preview"]

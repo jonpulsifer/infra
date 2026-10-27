@@ -9,7 +9,18 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
+from pydantic import TypeAdapter, ValidationError
 
 from tally import report
 from tally.classify.audit import Audit
@@ -213,9 +224,28 @@ def _record_outbound(svc: Services, ledger_id: str, c: Classifier, p: ImportPrev
         svc.repo.record_audit(ledger_id, c.name, p.outbound_strings)
 
 
+def _json_form[T](raw: str | None, shape: type[T], what: str) -> T | None:
+    """A JSON form field beside the uploads, or None when the field was not sent."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        parsed = TypeAdapter(shape).validate_json(raw)
+    except ValidationError:
+        raise _invalid(f"{what} is not JSON of the expected shape") from None
+    return parsed
+
+
 @router.post("/import/preview", status_code=status.HTTP_201_CREATED)
 def import_preview(
-    files: Annotated[list[UploadFile], File()], who: Owner, svc: Svc
+    files: Annotated[list[UploadFile], File()],
+    who: Owner,
+    svc: Svc,
+    account_for_file: Annotated[
+        str | None, Form(description="JSON object: upload name to ledger account id.")
+    ] = None,
+    withhold: Annotated[
+        str | None, Form(description="JSON list of descriptors no classifier may see.")
+    ] = None,
 ) -> s.StoredPreviewOut:
     """Parse the uploads, preview them against the ledger, and keep the preview sealed.
 
@@ -227,6 +257,8 @@ def import_preview(
         raise _invalid("no files")
     if len(files) > svc.settings.max_upload_files:
         raise _invalid(f"at most {svc.settings.max_upload_files} files at once")
+    chosen = _json_form(account_for_file, dict[str, str], "account_for_file") or {}
+    held = _json_form(withhold, list[str], "withhold") or []
     with tempfile.TemporaryDirectory(prefix="tally-upload-") as tmp:
         uploads = _read_uploads(files, svc.settings.max_upload_bytes, Path(tmp))
         try:
@@ -239,7 +271,9 @@ def import_preview(
     base_version, ledger = svc.repo.load_versioned(who.ledger_id)
     classifier = svc.settings.classifier_for(ledger)
     try:
-        result = svc.settings.engine.preview(parsed, ledger, classifier)
+        result = svc.settings.engine.preview(
+            parsed, ledger, classifier, account_for_file=chosen, withhold=frozenset(held)
+        )
     except ValueError as err:
         raise _invalid(str(err)) from None
     _record_outbound(svc, who.ledger_id, classifier, result)

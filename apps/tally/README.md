@@ -16,7 +16,8 @@ category, top merchants, cash flow, and where the money went.
 | `src/tally/engine.py` | `preview()` and `apply()`: the two functions both shells call. `engine_impl.py` implements them. |
 | `src/tally/report.py` | The dashboard aggregates. Mirrors `web/src/fixtures/derive.ts`. |
 | `src/tally/synthetic.py` | The deterministic synthetic ledger, a port of `web/src/fixtures/generate.ts`. Tests and the demo use it. |
-| `src/tally/cli.py` | `tally inventory`, `tally preview`, `tally push`, `tally report`, `tally rules`, `tally serve`. |
+| `src/tally/cli.py` | `tally inventory`, `tally preview`, `tally push`, `tally load`, `tally report`, `tally rules`, `tally serve`. |
+| `src/tally/load.py`, `src/tally/files.py` | `tally load`: walk a directory, open zips, order the sources, decide each file's account from the rows it overlaps, preview and apply through the server, and report what disagrees. |
 | `src/tally/store/` | The CLI's SQLite cache. |
 | `src/tally/server/` | FastAPI: the API, sealed rows on Postgres, tailnet identity, and the built SPA. |
 | `web/` | The Vite React app. |
@@ -31,7 +32,16 @@ mise run tally:dev         # API and built SPA on :8081 with the synthetic ledge
 bun run --cwd apps/tally/web dev    # web on :5180, proxying /api to :8081
 uv run --directory apps/tally tally inventory ~/finance
 uv run --directory apps/tally tally preview --dry-run ~/finance/raw/rbc/*.qfx
+mise run tally:load -- --dry-run     # decide and report against a copy of the live ledger
+mise run tally:load                  # load ~/finance into the live ledger, once
 ```
+
+`tally load` is idempotent: a file already loaded is skipped by its hash and
+a row already held is never added twice. It needs a bearer token the owner
+minted in the app (`token_command` in `~/.config/tally/config.toml`). It
+exits 3 when something needs the owner: a balance a statement asserts that
+the ledger does not sum to, a file whose account it could not decide
+(`--account FILE=ACCOUNT_ID` settles it), or a file it could not read.
 
 ## The privacy line
 

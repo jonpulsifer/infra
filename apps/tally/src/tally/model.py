@@ -150,6 +150,19 @@ class ParsedRow(Model):
     balance_after: Decimal | None = Field(
         default=None, description="A running balance the row carried, if the file had one."
     )
+    tags: tuple[str, ...] = Field(
+        default=(),
+        description="Trusted hints the file carried, `<prefix>:<group>/<category>` for a category"
+        " the owner chose by hand and `<prefix>:transfer` for a transfer.",
+    )
+
+
+class AccountHint(Model):
+    """What a file says about an account its rows name, for the account the import creates."""
+
+    hint: str
+    name: str
+    kind: AccountKind | None = None
 
 
 class ParsedFile(Model):
@@ -160,6 +173,7 @@ class ParsedFile(Model):
     institution: str | None
     account_hint: str | None
     account_kind_hint: AccountKind | None = None
+    accounts: tuple[AccountHint, ...] = ()
     rows: tuple[ParsedRow, ...]
     assertions: tuple[BalanceAssertion, ...] = ()
     holdings: tuple[HoldingSnapshot, ...] = ()
@@ -235,6 +249,15 @@ class ImportPreview(Model):
     model_calls: int
     holdings: tuple[HoldingSnapshot, ...] = ()
     assertions: tuple[BalanceAssertion, ...] = ()
+    new_accounts: tuple[Account, ...] = Field(
+        default=(), description="Accounts the files name that the ledger lacks."
+    )
+    new_categories: tuple[Category, ...] = Field(
+        default=(), description="Categories the files' trusted tags need that the ledger lacks."
+    )
+    seed_rules: tuple[Rule, ...] = Field(
+        default=(), description="Rules the files' trusted tags imply, for the ledger to keep."
+    )
 
 
 class Member(Model):

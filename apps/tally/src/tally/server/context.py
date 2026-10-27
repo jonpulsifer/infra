@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -28,7 +28,13 @@ DEFAULT_WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 
 class Engine(Protocol):
     def preview(
-        self, files: Sequence[Path | ParsedFile], ledger: Ledger, classifier: Classifier
+        self,
+        files: Sequence[Path | ParsedFile],
+        ledger: Ledger,
+        classifier: Classifier,
+        *,
+        account_for_file: Mapping[str, str] | None = None,
+        withhold: Collection[str] = (),
     ) -> ImportPreview: ...
 
     def apply(self, ledger: Ledger, preview: ImportPreview, decisions: Decisions) -> Ledger: ...
@@ -36,11 +42,19 @@ class Engine(Protocol):
 
 class LibraryEngine:
     def preview(
-        self, files: Sequence[Path | ParsedFile], ledger: Ledger, classifier: Classifier
+        self,
+        files: Sequence[Path | ParsedFile],
+        ledger: Ledger,
+        classifier: Classifier,
+        *,
+        account_for_file: Mapping[str, str] | None = None,
+        withhold: Collection[str] = (),
     ) -> ImportPreview:
         from tally import engine
 
-        return engine.preview(files, ledger, classifier)
+        return engine.preview(
+            files, ledger, classifier, account_for_file=account_for_file, withhold=withhold
+        )
 
     def apply(self, ledger: Ledger, preview: ImportPreview, decisions: Decisions) -> Ledger:
         from tally import engine
