@@ -22,7 +22,7 @@ spec:
           DISK: "{{ index .Hardware.Disks 0 }}"
         actions:
           - name: wipe-disk
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
             timeout: 600
             command:
               - /bin/sh
@@ -44,7 +44,7 @@ spec:
                 if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
                 log "wiped $DISK"
           - name: netboot-next
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
             timeout: 300
             command:
               - /bin/sh
@@ -63,7 +63,7 @@ spec:
                 efibootmgr -q -n "$n"
                 log "Boot$n (IPv4 network) is the next boot"
           - name: reboot
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
             timeout: 300
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
@@ -74,6 +74,6 @@ spec:
                 set -eu
                 # A detached container reboots the node after this action reports success.
                 docker run -d --privileged --name reprovision-reboot \
-                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827 \
                   sh -c 'sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo b >/proc/sysrq-trigger'
                 for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: rebooting into the Talos UKI netboot in 10 seconds" >"$t" 2>/dev/null || true; done
