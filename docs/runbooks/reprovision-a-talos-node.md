@@ -21,7 +21,7 @@ Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull r
 - `<node>` is the host name, and `<addr>` is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`.
 
 > [!CAUTION]
-> Smee answers only on the bootstrap VLAN, and a node's port moves there only while it runs MAC auth. No port does today: the gateway's RADIUS server does not list the switch's management network as a client. Until that is fixed, Smee never sees the node.
+> Smee answers only on the bootstrap VLAN, and on folly's switch a port that carries the bootstrap VLAN untagged passes none of the node's frames: no DHCP, no ARP, with or without MAC auth and with DHCP snooping off. The VLAN passes traffic only tagged, on spore's port. No reprovision reaches HookOS until the boot path moves off the bootstrap access VLAN.
 
 ## Back up and drain
 
