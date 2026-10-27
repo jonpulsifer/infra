@@ -58,6 +58,7 @@ from tally.store import Store
 
 REGISTER = "ynab-register"
 MATCH_SHARE = 0.5
+MIN_ROWS = 3  # fewer rows cannot tell an account from one it transfers to
 BATCH_LIMIT = 64
 UNCATEGORIZED = "uncategorized"
 
@@ -253,16 +254,21 @@ def choose_accounts(
 ) -> Chosen:
     """`account_for_file` per file: an override, else the overlap, else memory, else a lone fit.
 
-    The overlap is asked before memory, so a second card that shares a key
-    with a first (a bank's hint-less CSV profile) still lands where its own
-    rows already are. Memory answers only when the rows say nothing. An
-    override is remembered only under a precise key: one that names the
-    account the file came from, not a profile every card of a bank shares.
+    Two passes. The first takes every override and asks the overlap for every
+    file with enough rows, among the accounts of the kind the file declares,
+    so a two-row investment statement never lands in the chequing account its
+    contribution came from. The second gives each undecided file what the
+    first pass decided for its key, or what an earlier run remembered, so
+    the statements of one card land together whichever of them carried the
+    overlap. Memory answers only when the rows say nothing. An override is
+    remembered only under a precise key: one that names the account the file
+    came from, not a profile every card of a bank shares.
     """
     known = {a.id: a for a in ledger.accounts}
     chosen: dict[str, str] = {}
     decided: dict[str, str] = {}
     unclear: list[Unclear] = []
+    pending: list[tuple[Source, str]] = []
     for s in batch:
         if (forced := overrides.get(s.shown)) is not None:
             if forced not in known:
@@ -275,10 +281,11 @@ def choose_accounts(
         own = own_account(s, known)
         if own is None or own in known:
             continue
-        if s.parsed.rows:
-            scores = {a.id: overlap(s, a, ledger, window_days) for a in known.values()}
-            best = sorted(scores.items(), key=lambda kv: -kv[1])
-            clear = [aid for aid, share in best if share >= MATCH_SHARE]
+        if len(s.parsed.rows) >= MIN_ROWS:
+            kind = s.parsed.account_kind_hint
+            candidates = [a for a in known.values() if kind is None or a.kind == kind]
+            scores = {a.id: overlap(s, a, ledger, window_days) for a in candidates}
+            clear = [aid for aid, share in scores.items() if share >= MATCH_SHARE]
             if len(clear) == 1:
                 chosen[s.shown] = decided[s.key] = clear[0]
                 continue
@@ -287,6 +294,8 @@ def choose_accounts(
                     Unclear(s.shown, "its rows match more than one account", tuple(clear))
                 )
                 continue
+        pending.append((s, own))
+    for s, own in pending:
         kept = decided.get(s.key, remembered.get(s.key))
         if kept is not None and kept in known:
             chosen[s.shown] = kept

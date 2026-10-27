@@ -244,13 +244,13 @@ def test_an_export_that_matches_two_accounts_waits_for_the_owner():
             id=id_, name=id_, institution="Bank", kind=AccountKind.chequing, since=date(2031, 1, 1)
         )
 
-    def txn(id_, acct_id):
+    def txn(id_, acct_id, n=0):
         return Transaction(
             id=id_,
             account_id=acct_id,
-            date=date(2031, 1, 2),
-            amount=Decimal("-25.10"),
-            descriptor="FAKE MART",
+            date=date(2031, 1, 2 + n),
+            amount=Decimal(f"-{25 + n}.10"),
+            descriptor=f"FAKE MART {n}",
             merchant="Fake Mart",
             category_id="uncategorized",
             batch_id="b",
@@ -261,7 +261,7 @@ def test_an_export_that_matches_two_accounts_waits_for_the_owner():
         members=(Member(login=OWNER, role="owner"),),
         accounts=(acct("a"), acct("b")),
         categories=(),
-        transactions=(txn("t1", "a"), txn("t2", "b")),
+        transactions=tuple(txn(f"t{a}{n}", a, n) for a in "ab" for n in range(3)),
     )
     pf = ParsedFile(
         name="chq.csv",
@@ -270,12 +270,15 @@ def test_an_export_that_matches_two_accounts_waits_for_the_owner():
         account_hint=None,
         account_kind_hint=AccountKind.chequing,
         profile_id="p",
-        rows=(
-            ParsedRow(date=date(2031, 1, 2), amount=Decimal("-25.10"), descriptor="FAKE MART 1"),
+        rows=tuple(
+            ParsedRow(
+                date=date(2031, 1, 2 + n), amount=Decimal(f"-{25 + n}.10"), descriptor=f"MART {n}"
+            )
+            for n in range(3)
         ),
         sha256="1" * 64,
         date_from=date(2031, 1, 2),
-        date_to=date(2031, 1, 2),
+        date_to=date(2031, 1, 4),
     )
     s = load.Source(Path("chq.csv"), "chq.csv", pf)
     got = load.choose_accounts([s], ledger, remembered={}, overrides={}, window_days=3)
@@ -316,7 +319,7 @@ def test_an_export_that_matches_two_accounts_waits_for_the_owner():
         "other.csv",
         pf.model_copy(update={"name": "other.csv", "sha256": "3" * 64}),
     )
-    two = ledger.model_copy(update={"transactions": (txn("t1", "a"),)})
+    two = ledger.model_copy(update={"transactions": tuple(txn(f"t{n}", "a", n) for n in range(3))})
     got = load.choose_accounts(
         [other], two, remembered={"Bank:p": "b"}, overrides={}, window_days=3
     )
