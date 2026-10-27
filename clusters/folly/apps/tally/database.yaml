@@ -16,7 +16,11 @@ metadata:
     # CNPG deletes the volume with the Cluster; Flux never prunes the ledger.
     kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
-  instances: 1
+  # Two instances on two nodes: either node can go away, for a reinstall or a
+  # failure, and CNPG promotes the other.
+  instances: 2
+  affinity:
+    podAntiAffinityType: required
   enableSuperuserAccess: false
   # serverName is one prefix per generation of this Cluster. A re-created
   # Cluster recovers from this one and archives under the next.
