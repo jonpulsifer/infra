@@ -12,7 +12,7 @@ locals {
   }
   enrolled = {
     shale    = "kubernetes"
-    riptide  = "kubernetes"
+    riptide  = "bootstrap"
     optiplex = "kubernetes"
   }
   mab_networks = {
