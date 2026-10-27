@@ -43,6 +43,7 @@ disable_tools = [
   "talosctl",
   "terraform",
   "terraform-docs",
+  "uv",
   "velero",
   "vim",
   "yq",
