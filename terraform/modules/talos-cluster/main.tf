@@ -9,8 +9,8 @@ module "topology" {
 locals {
   topology         = module.topology.data
   cluster_endpoint = "https://${local.topology.API_SERVER_HOSTNAME}:${local.topology.API_SERVER_PORT}"
-  controlplanes    = { for name, n in var.nodes : name => n if n.role == "controlplane" }
-  workers          = { for name, n in var.nodes : name => n if n.role == "worker" }
+  controlplanes    = { for name, n in var.nodes : name => n if n.role == "controlplane" && !n.enrolling }
+  workers          = { for name, n in var.nodes : name => n if n.role == "worker" && !n.enrolling }
   controlplane     = one(values(local.controlplanes))
 }
 

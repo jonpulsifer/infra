@@ -110,6 +110,7 @@ module "talos" {
     patches            = [local.ephemeral_patch[name]]
     installer_image    = try(n.installer, null)
     install_generation = try(n.generation, null)
+    enrolling          = try(n.enrolling, false)
   } }
   tpm_nodes       = local.tpm_nodes
   encrypted_nodes = local.encrypted_nodes
