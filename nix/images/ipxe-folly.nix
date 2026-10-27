@@ -15,9 +15,11 @@ let
   script = writeText "folly-netboot.ipxe" ''
     #!ipxe
     dhcp || goto failed
+    # The UKI's menu script sanboots the ISO, and sanboot takes no relative URL.
+    set boot-url http://${lab.bootstrap.spore}/talos/folly
     chain http://${lab.bootstrap.spore}:7080/ipxe/script/''${net0/mac}/auto.ipxe || goto talos
     :talos
-    chain http://${lab.bootstrap.spore}/talos/folly/metal-amd64-secureboot-uki.ipxe || goto failed
+    chain ''${boot-url}/metal-amd64-secureboot-uki.ipxe || goto failed
     :failed
     echo folly netboot failed (''${errno}), back to the firmware
     exit 1
