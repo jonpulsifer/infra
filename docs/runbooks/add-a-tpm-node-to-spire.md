@@ -15,7 +15,7 @@ Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to turn 
 - You need the `folly` context with cluster admin, as [Get cluster admin access](get-cluster-admin-access.md) describes.
 - You need a root shell on spore.
 - To turn on the bundle notifier, you need the operator key in `~/.config/age/keys.txt`, as [Manage SOPS secrets](manage-sops-secrets.md) describes.
-- The node is in folly, and its TPM 2.0 is on in the firmware. On optiplex, Intel PTT is the TPM.
+- The node is in folly, and its TPM 2.0 is on in the firmware.
 - The GHCR package `ghcr.io/jonpulsifer/spire-agent-tpm` is public.
 
 ## Read the EK hash
@@ -141,7 +141,7 @@ Do this once, before the first agent attests. spore's `k8sbundle` notifier then 
 | The first attestation fails with `x509: certificate signed by unknown authority` | The notifier missed a rotation while folly's API server was down | On spore, run `systemctl restart spire-server`. The notifier writes the bundle at startup. |
 | `spire-server` restarts every 30 seconds, and its journal shows `Notifier failed to handle event` | The server cannot write the bundle at startup, and it exits | If the error is `401`, the Secret is new: store its token again. Otherwise, make sure that spore reaches folly's API server. |
 | The server rejects the attestation | The hash is not in `tpmNodes` of `nix/hosts/spore.nix`, or spore runs an older configuration | Add the hash, and deploy spore. |
-| The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM or PTT, and boot the node. |
+| The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM, and boot the node. |
 | The smoke Job runs no pod | The Job is suspended | Remove `suspend: true` from `clusters/folly/apps/spire/smoke.yaml`. |
 | The smoke Job prints `no identity issued` | No entry for `spire-smoke/smoke` has the node's alias as parent | Add the pair to `workloads` in `nix/hosts/spore.nix`, and deploy spore. |
 | The agent logs `403` from the kubelet | The `spire-agent` ClusterRole lacks `nodes/pods` | Read `clusters/folly/apps/spire/rbac.yaml`. |
