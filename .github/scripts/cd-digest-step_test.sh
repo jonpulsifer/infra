@@ -159,9 +159,11 @@ declare -A manifest=(
   [hub]=clusters/folly/apps/hub/deployment.yaml
   [mate]=clusters/offsite/apps/mate/deployment.yaml
   [weather]=clusters/folly/apps/weather/deployment.yaml
+  [tink-agent-autoid]=clusters/folly/talos/netboot.json
 )
 jq -n --arg hub "${manifest[hub]}" --arg mate "${manifest[mate]}" --arg weather "${manifest[weather]}" \
-  '{deploy: {hub: [$hub], mate: [$mate], weather: [$weather]}}' >"$seed/.github/containers.json"
+  --arg tink "${manifest[tink-agent-autoid]}" \
+  '{deploy: {hub: [$hub], mate: [$mate], weather: [$weather], "tink-agent-autoid": [$tink]}}' >"$seed/.github/containers.json"
 
 digest() { printf 'sha256:%s' "$(printf '%s' "$1" | sha256sum | cut -c1-64)"; }
 
@@ -178,7 +180,7 @@ commit() {
   git -C "$seed" rev-parse HEAD
 }
 
-for image in hub mate weather; do pin "$image" "$(digest "$image-0")"; done
+for image in hub mate weather tink-agent-autoid; do pin "$image" "$(digest "$image-0")"; done
 c0=$(commit 'pin the first builds')
 echo one >"$seed/unrelated"
 c1=$(commit 'a commit whose build was cancelled')
@@ -187,7 +189,7 @@ c2=$(commit 'a later commit')
 git -C "$seed" remote add origin "$remote"
 git -C "$seed" push -q origin main
 
-for image in hub mate weather; do
+for image in hub mate weather tink-agent-autoid; do
   publish "$(digest "$image-0")" "$c0"
   publish "$(digest "$image-1")" "$c1"
   publish "$(digest "$image-2")" "$c2"
@@ -280,10 +282,23 @@ grep -qF "pr create --repo $repository --title fix(cd): update image digests (ma
 grep -qxF "pr merge $branch --repo $repository --auto --squash --body [skip ci]" "$GH_LOG" \
   || fail "the digest pull request merges without [skip ci]: $(grep 'pr merge' "$GH_LOG")"
 while IFS= read -r call; do
-  [[ "$call" == *'--body "[skip ci]"'* ]] || fail "a merge form in the step lacks [skip ci]: $call"
+  # shellcheck disable=SC2016
+  [[ "$call" == *'--body "$merge_body"'* ]] || fail "a merge form in the step lacks the merge body: $call"
 done < <(grep -oE 'gh pr merge [^|]*' "$deliver")
 [[ "$(git -C "$remote" log -1 --format=%B "$branch")" != *'skip ci'* ]] \
   || fail 'the delivery branch commit skips CI, so its pull request never reports its checks'
+
+# The agent image HookOS pins is read by talos-images, which a [skip ci] merge
+# never starts, so its digest pull request merges without the skip.
+reset_queue
+run "$c2" "tink-agent-autoid=$(digest tink-agent-autoid-2)" >"$work/log.tink" 2>&1 \
+  || fail "the run failed: $(cat "$work/log.tink")"
+grep -q '^pr merge ' "$GH_LOG" || fail 'the agent digest pull request was never merged'
+! grep '^pr merge ' "$GH_LOG" | grep -qF 'skip ci' \
+  || fail "the agent digest pull request merges with [skip ci]: $(grep 'pr merge' "$GH_LOG")"
+reset_queue
+echo 100 >"$GH_STATE/next"
+run "$c2" "mate=$m2" "weather=$w2" >"$work/log.two" 2>&1 || fail "the run failed: $(cat "$work/log.two")"
 
 # A later run builds only a third image. The force push recuts the branch from
 # main, and the two digests waiting on it must come along.
