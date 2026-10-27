@@ -1,8 +1,8 @@
-# Talos boot server for folly's bootstrap VLAN. A timer mirrors the signed UKI, SecureBoot ISO,
-# netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed
+# Talos boot server for folly's bootstrap VLAN. A timer mirrors the signed UKI and the iPXE script
+# that boots it, SecureBoot ISO, netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed
 # image against its committed signing cert, and keeps the previous release as prev. Smee
 # (./tinkerbell.nix) answers PXE on the VLAN and names the iPXE under dnsmasq's TFTP root; nginx
-# serves the UKI, ISO and HookOS.
+# serves the UKI, its script, ISO and HookOS.
 {
   config,
   lib,
@@ -18,6 +18,8 @@ let
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   tftpDir = "/var/lib/tftpboot/talos/${site}";
   uki = "metal-amd64-secureboot-uki.efi";
+  # iPXE chains this when Smee has no script for the MAC; it boots the UKI with its own command line.
+  ukiScript = "metal-amd64-secureboot-uki.ipxe";
   iso = "metal-amd64-secureboot.iso";
   # Signed with the UKI key; Smee's offer names talos/folly/<this> under dnsmasq's TFTP root.
   ipxe = "ipxe-amd64-secureboot.efi";
@@ -95,6 +97,7 @@ in
   services.nginx.virtualHosts."spore-pxe".locations = {
     "= /talos/${site}/${uki}" = readOnlyLocation "${siteDir}/current/${uki}";
     "= /talos/${site}/prev/${uki}" = readOnlyLocation "${siteDir}/prev/${uki}";
+    "= /talos/${site}/${ukiScript}" = readOnlyLocation "${siteDir}/current/${ukiScript}";
     "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
     "= /talos/${site}/${hookos}" = readOnlyLocation "${siteDir}/current/${hookos}";
   };
@@ -216,7 +219,8 @@ in
       # Each release has a new UKI asset, so an unchanged UKI ETag means an unchanged release.
       etag_args=()
       if [ -s "$site_dir/current/uki.etag" ] && [ -s "$site_dir/current/${iso}" ] \
-        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ]; then
+        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ] \
+        && [ -s "$site_dir/current/${ukiScript}" ]; then
         etag_args=(--etag-compare "$site_dir/current/uki.etag")
       fi
       code=$(fetch "''${etag_args[@]}" --etag-save "$stage/uki.etag" \
@@ -226,6 +230,8 @@ in
         echo "current UKI is unchanged"
       else
         ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${uki}"
+        fetch --output "$stage/${ukiScript}" "$release_url/${ukiScript}"
+        grep -q '^chain --autofree ${uki} ' "$stage/${ukiScript}"
         fetch --output "$stage/${ipxe}" "$release_url/${ipxe}"
         ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${ipxe}"
         fetch --output "$stage/${hookos}" "$release_url/${hookos}"
@@ -234,8 +240,8 @@ in
         test -s "$stage/${iso}"
         printf '%s\n' ${talosVersion} > "$stage/version"
 
-        # A build can change iPXE or HookOS and leave the UKI as it was.
-        id=$(cd "$stage" && sha256sum ${uki} ${ipxe} ${hookos} | sha256sum | cut -d ' ' -f 1)
+        # A build can change iPXE, HookOS or the script and leave the UKI as it was.
+        id=$(cd "$stage" && sha256sum ${uki} ${ukiScript} ${ipxe} ${hookos} | sha256sum | cut -d ' ' -f 1)
         release="$releases/$id"
         if [ -e "$release" ]; then
           install -m 0644 "$stage/uki.etag" "$release/uki.etag"
