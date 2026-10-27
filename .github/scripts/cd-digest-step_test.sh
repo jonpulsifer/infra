@@ -159,10 +159,10 @@ declare -A manifest=(
   [hub]=clusters/folly/apps/hub/deployment.yaml
   [mate]=clusters/offsite/apps/mate/deployment.yaml
   [weather]=clusters/folly/apps/weather/deployment.yaml
-  [tink-agent-autoid]=clusters/folly/talos/netboot.json
+  ["tink-agent-autoid"]=clusters/folly/talos/netboot.json
 )
 jq -n --arg hub "${manifest[hub]}" --arg mate "${manifest[mate]}" --arg weather "${manifest[weather]}" \
-  --arg tink "${manifest[tink-agent-autoid]}" \
+  --arg tink "${manifest["tink-agent-autoid"]}" \
   '{deploy: {hub: [$hub], mate: [$mate], weather: [$weather], "tink-agent-autoid": [$tink]}}' >"$seed/.github/containers.json"
 
 digest() { printf 'sha256:%s' "$(printf '%s' "$1" | sha256sum | cut -c1-64)"; }
