@@ -194,9 +194,9 @@ in
             mv -Tf "$state/.${id}.new" "$state/${id}"
 
             # Keep the newest ${toString keepReleases} releases and the one the live link names; each holds a
-            # boot.img of about 1G. A stores link stays only while a kept release pins its squashfs.
+            # boot.img of about 80 MB. A stores link stays only while a kept release pins its squashfs.
             live=$(readlink "$state/${id}")
-            keep=$(ls -dt "$state"/releases/${id}-*/ | head -n ${toString keepReleases} | sed 's:/$::')
+            keep=$(ls -dt "$state"/releases/${id}-*/ | sed -n '1,${toString keepReleases}{s:/$::;p}')
             keep="$keep"$'\n'"$state/$live"
             for dir in "$state"/releases/${id}-*/; do
               dir=''${dir%/}

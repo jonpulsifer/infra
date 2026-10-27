@@ -25,7 +25,7 @@ Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace
 
 A node with no `Hardware` or no running `Workflow` takes step 4 directly when it PXE-boots on the bootstrap VLAN.
 
-The firmware verifies each image against `db`. Between runs, `allowPXE` is off in the repo and on spore.
+The firmware verifies each image against `db`. Between runs, `allowPXE` is unset or off on spore. The repo leaves it out, so that Flux never turns it off during a run.
 
 ## Rules
 

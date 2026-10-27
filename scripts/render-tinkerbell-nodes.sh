@@ -39,7 +39,6 @@ rendered="$(
   echo "# Written by mise run render-tinkerbell-nodes from the UniFi client list, NODE_ADDRESSES, the Talos"
   echo "# install selectors and SPORE_BOOTSTRAP_IP."
   echo "HOOKOS_URL=http://$spore/talos/folly/hookos-amd64-secureboot-uki.efi"
-  echo "TALOS_UKI_URL=http://$spore/talos/folly/metal-amd64-secureboot-uki.efi"
   # The command line nix/images/hookos-folly.nix bakes into the UKI. Without Secure Boot,
   # systemd-stub takes iPXE's arguments instead, so the per-MAC script passes the same one.
   echo "HOOKOS_CMDLINE=facility= syslog_host=$spore grpc_authority=$spore:42113 tinkerbell_tls=false tinkerbell_insecure_tls=false modules=loop,squashfs,sd-mod,usb-storage intel_iommu=on iommu=pt console=ttyS0,115200 console=tty0 tink_worker_image=$agent"

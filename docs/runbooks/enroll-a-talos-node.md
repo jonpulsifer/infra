@@ -11,7 +11,7 @@ Use this runbook to install Talos on riptide, shale or optiplex with Secure Boot
 ## Before you start
 
 - Our Secure Boot keys are enrolled on the node, and its TPM or PTT is on. Its boot order has the system disk first and PXE after it, so a wiped disk falls through to PXE and the installed disk boots after the install.
-- Tinkerbell has a `Hardware` object for the node with `allowPXE` on, and its iPXE script chains the UKI. Each `Hardware` in `clusters/folly/tinkerbell/` chains HookOS and has `allowPXE` off, so no node boots the UKI over the network today.
+- The node PXE-boots on the bootstrap VLAN, and Smee has no script for its MAC: it has no `Hardware`, or its `allowPXE` is off. The signed iPXE then chains [the UKI's script](../platform/nixos/talos-boot.md#netboot-images).
 - You can see the node's screen. The user code that you approve shows only there.
 - `clusters/folly/apps/talos-enroll/machine-inputs.json` has the node. If it does not, run `mise run render-machine-inputs`, then commit and merge the result.
 - You are on the tailnet as a login in `ENROLL_APPROVERS`, and you can read the Discord prompts.

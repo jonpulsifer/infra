@@ -642,8 +642,16 @@ jobs:
           # `[skip ci]` goes on the merge commit only. The branch commit keeps
           # none, so the pull request's own checks still run and gate it, and
           # the merge, which differs only in digests they checked, runs none.
-          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash --body "[skip ci]" \
-            || gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --merge --body "[skip ci]"
+          # The exception is the agent image HookOS pins by digest in
+          # clusters/folly/talos/netboot.json: talos-images rebuilds on a push
+          # that changes it, so that merge must not skip. The other workflows
+          # that watch clusters/ run once more for it, which is rare.
+          merge_body="[skip ci]"
+          if printf '%s\n' "${written_images[@]}" | grep -qxF tink-agent-autoid; then
+            merge_body="Rebuilds the netboot images that pin the agent digest."
+          fi
+          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash --body "$merge_body" \
+            || gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --merge --body "$merge_body"
 
           # A pull request on an image's own branch, from before one branch
           # carried every image, rewrites the same line as this one, so
