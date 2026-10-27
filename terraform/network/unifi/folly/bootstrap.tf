@@ -6,7 +6,7 @@ locals {
   # network its RADIUS user puts it on. A reinstall flips a node to bootstrap,
   # and the install reboot's link flap moves it.
   mab_ports = {
-    shale    = 12
+    shale    = 6
     riptide  = 8
     optiplex = 10
   }
@@ -32,7 +32,7 @@ locals {
   # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
   # reinstall. With tagged VLAN management "block_all", the switch (USL24P,
   # 7.5.15) forwarded none of the node's untagged frames.
-  boot_native = toset([])
+  boot_native = toset(["shale"])
 
   switch = local.clients.switches["USW 24 PoE"]
 }
