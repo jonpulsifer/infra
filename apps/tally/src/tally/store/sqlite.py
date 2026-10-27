@@ -66,6 +66,13 @@ MIGRATIONS: tuple[str, ...] = (
         decided_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE ocr (
+        sha256 TEXT PRIMARY KEY,
+        pages TEXT NOT NULL,
+        read_at TEXT NOT NULL
+    );
+    """,
 )
 
 
@@ -230,6 +237,18 @@ class Store:
             c.execute(
                 "INSERT OR REPLACE INTO account_map VALUES (?, ?, ?)",
                 (key, account_id, _now().isoformat()),
+            )
+
+    def ocr_pages(self, sha256: str) -> list[str] | None:
+        """The page texts OCR read from a scan, by the scan's hash, so a scan is read once."""
+        row = self.conn.execute("SELECT pages FROM ocr WHERE sha256 = ?", (sha256,)).fetchone()
+        return None if row is None else [str(p) for p in json.loads(row[0])]
+
+    def put_ocr_pages(self, sha256: str, pages: Sequence[str]) -> None:
+        with self._tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO ocr VALUES (?, ?, ?)",
+                (sha256, json.dumps(list(pages)), _now().isoformat()),
             )
 
     def save_snapshot(self, ledger: Ledger) -> None:

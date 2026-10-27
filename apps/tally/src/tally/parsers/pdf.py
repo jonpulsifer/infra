@@ -35,28 +35,37 @@ class PdfParser:
 
     def parse(self, path: Path) -> ParsedFile:
         pages, scanned = read(path)
-        family = identify([p.text for p in pages])
-        if family is None:
-            raise ParseError(f"{path.name}: no statement family recognises this PDF")
-        try:
-            statement = family.parse(pages, origin=path.name)
-        except ParseError as e:
-            raise ParseError(f"{path.name}: {e}") from None
-        return ParsedFile(
-            name=path.name,
-            format="pdf",
-            institution=statement.institution,
-            account_hint=statement.account_hint,
-            account_kind_hint=statement.account_kind,
-            rows=statement.rows,
-            assertions=statement.assertions,
-            holdings=statement.holdings,
-            sha256=sha256_of(path),
-            date_from=statement.date_from,
-            date_to=statement.date_to,
-            pages=len(pages),
-            scanned=scanned,
-        )
+        return from_pages(path, pages, scanned=scanned)
+
+
+def from_pages(path: Path, pages: Sequence[Page], *, scanned: bool) -> ParsedFile:
+    """The ParsedFile for pages already extracted, by whichever family claims them.
+
+    A caller that OCRs on its own terms (a cache, a worker) hands the pages
+    in here; `PdfParser.parse` is this after `read`.
+    """
+    family = identify([p.text for p in pages])
+    if family is None:
+        raise ParseError(f"{path.name}: no statement family recognises this PDF")
+    try:
+        statement = family.parse(pages, origin=path.name)
+    except ParseError as e:
+        raise ParseError(f"{path.name}: {e}") from None
+    return ParsedFile(
+        name=path.name,
+        format="pdf",
+        institution=statement.institution,
+        account_hint=statement.account_hint,
+        account_kind_hint=statement.account_kind,
+        rows=statement.rows,
+        assertions=statement.assertions,
+        holdings=statement.holdings,
+        sha256=sha256_of(path),
+        date_from=statement.date_from,
+        date_to=statement.date_to,
+        pages=len(pages),
+        scanned=scanned,
+    )
 
 
 def is_scanned(texts: Sequence[str]) -> bool:

@@ -2,8 +2,20 @@
 # Load the import root into the live ledger: `tally load`, reaching the server
 # directly when the configured server_url answers, else through a port-forward
 # to the tally Service on folly. Every argument goes to `tally load`.
+#
+# Scans are OCR'd locally when `scripts/ocr-models.sh` has run: the models live
+# in ~/.cache/tally/docling and Docling never reaches for the network.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+models="${TALLY_DOCLING_MODELS:-$HOME/.cache/tally/docling}"
+if [ -d "$models/RapidOcr" ]; then
+  export DOCLING_ARTIFACTS_PATH="$models" HF_HUB_OFFLINE=1
+  # NixOS: torch's wheels need the libstdc++ that nix-ld provides.
+  if [ -n "${NIX_LD_LIBRARY_PATH:-}" ]; then
+    export LD_LIBRARY_PATH="${NIX_LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+fi
 
 url="${TALLY_SERVER_URL:-$(uv run python -c 'from tally import config; print(config.load().server_url)')}"
 forward=""

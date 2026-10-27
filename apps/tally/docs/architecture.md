@@ -101,6 +101,7 @@ bun run --cwd web build                               # web/dist, served by the 
 uv run tally inventory ~/finance                      # shapes and counts, never a value
 uv run tally preview --synthetic --dry-run FILES...   # what an import would do and send
 uv run tally rules seed-ynab Register.csv             # seed rules from a YNAB register
+mise run tally:ocr                                    # Docling and its models, so load reads scans
 mise run tally:load -- --dry-run                      # what loading ~/finance would do
 mise run tally:load                                   # load it, once; exit 3 on a discrepancy
 ```
