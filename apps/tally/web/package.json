@@ -8,6 +8,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "preview": "vite preview --host --port 5180",
+    "test": "bun test",
     "typecheck": "tsc"
   },
   "dependencies": {

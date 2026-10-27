@@ -127,7 +127,7 @@ class Rule(Model):
     match: str = Field(description="Case-insensitive substring over the descriptor, or /regex/.")
     category_id: str
     merchant: str
-    created_from: Literal["correction", "seed"]
+    created_from: Literal["correction", "seed", "model"]
     account_id: str | None = None
     hits: int = 0
 
@@ -156,7 +156,7 @@ class ParsedFile(Model):
     """What a parser hands the engine. Shapes only: no bytes of the file survive here."""
 
     name: str
-    format: Literal["csv", "qfx", "ofx", "pdf"]
+    format: Literal["csv", "qfx", "ofx", "pdf", "xlsx"]
     institution: str | None
     account_hint: str | None
     account_kind_hint: AccountKind | None = None
@@ -173,7 +173,7 @@ class ParsedFile(Model):
 
 class PreviewFile(Model):
     name: str
-    format: Literal["csv", "qfx", "ofx", "pdf"]
+    format: Literal["csv", "qfx", "ofx", "pdf", "xlsx"]
     institution: str | None
     account_id: str | None
     rows: int
@@ -182,6 +182,7 @@ class PreviewFile(Model):
     pages: int | None = None
     scanned: bool | None = None
     needs_account: bool = False
+    account_kind: AccountKind | None = None
 
 
 class DuplicateFinding(Model):
@@ -232,6 +233,8 @@ class ImportPreview(Model):
     )
     rules_hit: int
     model_calls: int
+    holdings: tuple[HoldingSnapshot, ...] = ()
+    assertions: tuple[BalanceAssertion, ...] = ()
 
 
 class Member(Model):

@@ -1,5 +1,6 @@
 {
   "include": ["src/**/*", "vite.config.ts"],
+  "exclude": ["src/**/*.test.ts"],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["vite/client"],

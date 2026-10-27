@@ -1,5 +1,5 @@
-// Provisional nouns for the tally UI prototype. The domain-model ticket (08)
-// settles the real glossary; keep these names until it does.
+// The app's in-memory nouns. src/tally/model.py is the server's side of the
+// same nouns; src/api/client.ts adapts its camelCase JSON into these.
 
 export type AccountKind =
   | 'chequing'
@@ -46,6 +46,9 @@ export type Transaction = {
   /** 0..1 when source is 'model'. */
   confidence: number | null;
   batchId: string;
+  /** The institution's id. A dedupe hint only. */
+  fitid?: string | null;
+  pending?: boolean;
 };
 
 export type Position = {
@@ -79,6 +82,8 @@ export type BalanceAssertion = {
   balance: number;
   /** Whether the ledger's running total agrees. */
   ok: boolean;
+  /** Which file or statement said so. */
+  origin?: string;
 };
 
 export type ImportBatch = {
@@ -95,15 +100,16 @@ export type Rule = {
   match: string;
   categoryId: string;
   merchant: string;
-  createdFrom: 'correction' | 'seed';
+  createdFrom: 'correction' | 'seed' | 'model';
   hits: number;
+  accountId?: string | null;
 };
 
 // Import preview: the shape the review screen reacts to.
 
 export type PreviewFile = {
   name: string;
-  format: 'csv' | 'qfx' | 'ofx' | 'pdf';
+  format: 'csv' | 'qfx' | 'ofx' | 'pdf' | 'xlsx';
   institution: string;
   accountId: string | null;
   rows: number;
@@ -112,6 +118,10 @@ export type PreviewFile = {
   /** For PDFs: page count and whether OCR is needed. */
   pages?: number;
   scanned?: boolean;
+  /** A CSV that names no account: the import asks which one. */
+  needsAccount?: boolean;
+  /** The account kind the file declares, for an account the import creates. */
+  accountKind?: AccountKind | null;
 };
 
 export type Finding =
@@ -121,6 +131,7 @@ export type Finding =
       transactionId: string;
       matchesId: string;
       reason: string;
+      tier?: 'fitid' | 'fuzzy';
     }
   | {
       kind: 'missing-period';
@@ -137,6 +148,8 @@ export type Finding =
       outId: string;
       inId: string;
       daysApart: number;
+      /** Unique on both sides, so paired without asking. */
+      auto?: boolean;
     }
   | {
       kind: 'low-confidence';
@@ -147,6 +160,7 @@ export type Finding =
     };
 
 export type ImportPreview = {
+  id: string;
   files: PreviewFile[];
   newTransactions: Transaction[];
   findings: Finding[];
@@ -154,6 +168,9 @@ export type ImportPreview = {
   outboundStrings: string[];
   rulesHit: number;
   modelCalls: number;
+  /** Statement snapshots and balances the files carry, folded in on apply. */
+  holdings?: HoldingSnapshot[];
+  assertions?: BalanceAssertion[];
 };
 
 export type Ledger = {
@@ -167,7 +184,6 @@ export type Ledger = {
   assertions: BalanceAssertion[];
   batches: ImportBatch[];
   rules: Rule[];
-  preview: ImportPreview;
   /** Last day of data. */
   asOf: string;
 };

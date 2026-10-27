@@ -1,4 +1,4 @@
-// Derivations every variant can call. Pure functions over the Ledger.
+// Derivations over the Ledger. Pure. src/tally/report.py mirrors them.
 
 import type { Category, Ledger, Transaction } from './types';
 
@@ -29,14 +29,52 @@ export function monthLabel(ym: string) {
   });
 }
 
+export const UNCATEGORIZED = 'uncategorized';
+
+const FALLBACK: Category = {
+  id: UNCATEGORIZED,
+  name: 'Uncategorized',
+  parentId: null,
+  flow: 'expense',
+};
+
+const byIdCache = new WeakMap<Category[], Map<string, Category>>();
+const topCache = new WeakMap<Category[], Map<string, Category>>();
+
 export function categoryById(ledger: Ledger) {
-  return new Map(ledger.categories.map((c) => [c.id, c]));
+  return categoriesById(ledger.categories);
+}
+
+function categoriesById(categories: Category[]) {
+  let m = byIdCache.get(categories);
+  if (!m) {
+    m = new Map(categories.map((c) => [c.id, c]));
+    byIdCache.set(categories, m);
+  }
+  return m;
 }
 
 export function topLevel(ledger: Ledger, categoryId: string): Category {
-  const byId = categoryById(ledger);
-  let c = byId.get(categoryId) ?? byId.get('uncategorized')!;
-  while (c.parentId) c = byId.get(c.parentId)!;
+  return topOf(ledger.categories, categoryId);
+}
+
+/** The top-level category of any id; unknown ids read as uncategorised. */
+export function topOf(categories: Category[], categoryId: string): Category {
+  let tops = topCache.get(categories);
+  if (!tops) {
+    tops = new Map();
+    topCache.set(categories, tops);
+  }
+  const hit = tops.get(categoryId);
+  if (hit) return hit;
+  const byId = categoriesById(categories);
+  let c = byId.get(categoryId) ?? byId.get(UNCATEGORIZED) ?? FALLBACK;
+  const seen = new Set<string>();
+  while (c.parentId && !seen.has(c.id)) {
+    seen.add(c.id);
+    c = byId.get(c.parentId) ?? c;
+  }
+  tops.set(categoryId, c);
   return c;
 }
 
@@ -140,21 +178,28 @@ export function cashFlow(
 /** Running balance per account per month end, from transactions. */
 export function balancesByMonth(ledger: Ledger) {
   const ms = months(ledger);
+  const cents = monthlyCents(ledger);
   const out = new Map<string, Map<string, number>>();
   for (const acct of ledger.accounts) {
+    const flows = cents.get(acct.id);
     const series = new Map<string, number>();
     let bal = 0;
-    const byMonth = new Map<string, number>();
-    for (const t of ledger.transactions) {
-      if (t.accountId !== acct.id) continue;
-      const m = monthKey(t.date);
-      byMonth.set(m, (byMonth.get(m) ?? 0) + t.amount);
-    }
     for (const m of ms) {
-      bal += byMonth.get(m) ?? 0;
-      series.set(m, Math.round(bal * 100) / 100);
+      bal += flows?.get(m) ?? 0;
+      series.set(m, bal / 100);
     }
     out.set(acct.id, series);
+  }
+  return out;
+}
+
+function monthlyCents(ledger: Ledger) {
+  const out = new Map<string, Map<string, number>>();
+  for (const t of ledger.transactions) {
+    const flows = out.get(t.accountId) ?? new Map<string, number>();
+    const m = monthKey(t.date);
+    flows.set(m, (flows.get(m) ?? 0) + Math.round(t.amount * 100));
+    out.set(t.accountId, flows);
   }
   return out;
 }
@@ -170,55 +215,133 @@ export type NetWorthPoint = {
   estimated: boolean;
 };
 
-/** Net worth per month end. Investments and house use the latest snapshot on or before the month. */
-export function netWorthSeries(ledger: Ledger): NetWorthPoint[] {
+type Stated = { date: string; value: number };
+
+function latestOnOrBefore(points: Stated[], end: string): Stated | null {
+  let last: Stated | null = null;
+  for (const p of points) if (p.date <= end) last = p;
+  return last;
+}
+
+function byDate<T extends { date: string }>(rows: T[]) {
+  return [...rows].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
+}
+
+/** What each account states for itself: snapshots, valuations or statements. */
+function statedPoints(
+  ledger: Ledger,
+  accountId: string,
+  kind: string,
+): Stated[] | null {
+  if (kind === 'investment')
+    return byDate(ledger.holdings.filter((h) => h.accountId === accountId)).map(
+      (h) => ({ date: h.date, value: h.total }),
+    );
+  if (kind === 'asset')
+    return byDate(
+      ledger.valuations.filter((v) => v.accountId === accountId),
+    ).map((v) => ({ date: v.date, value: v.value }));
+  if (kind === 'mortgage')
+    return byDate(
+      ledger.assertions.filter((a) => a.accountId === accountId),
+    ).map((a) => ({ date: a.date, value: a.balance }));
+  return null;
+}
+
+type AccountValue = {
+  cents: number;
+  /** The value is an older statement carried forward. */
+  carried: boolean;
+  /** False before an account's first statement or valuation. */
+  stated: boolean;
+};
+
+/**
+ * Every account's value at every ledger month end, in integer cents. The
+ * reader's net worth and the Accounts screen both sum this one table, so the
+ * two can never disagree by a rounding.
+ */
+export function accountValues(ledger: Ledger) {
+  const hit = valuesCache.get(ledger);
+  if (hit) return hit;
   const ms = months(ledger);
-  const bal = balancesByMonth(ledger);
-  const cashIds = ledger.accounts
-    .filter(
-      (a) =>
-        a.kind === 'chequing' || a.kind === 'savings' || a.kind === 'credit',
-    )
-    .map((a) => a.id);
-  const invIds = ledger.accounts
-    .filter((a) => a.kind === 'investment')
-    .map((a) => a.id);
-  const points: NetWorthPoint[] = [];
-  for (const m of ms) {
-    const end = `${m}-31`;
-    const cash = cashIds.reduce((s, id) => s + (bal.get(id)?.get(m) ?? 0), 0);
-    let investments = 0;
-    let estimated = false;
-    for (const id of invIds) {
-      const snaps = ledger.holdings.filter(
-        (h) => h.accountId === id && h.date <= end,
+  const flows = monthlyCents(ledger);
+  const out = new Map<string, AccountValue[]>();
+  for (const acct of ledger.accounts) {
+    const stated = statedPoints(ledger, acct.id, acct.kind);
+    if (stated) {
+      out.set(
+        acct.id,
+        ms.map((m) => {
+          const p = latestOnOrBefore(stated, `${m}-31`);
+          return {
+            cents: p ? Math.round(p.value * 100) : 0,
+            carried: !!p && p.date.slice(0, 7) !== m,
+            stated: !!p,
+          };
+        }),
       );
-      const last = snaps[snaps.length - 1];
-      if (last) {
-        investments += last.total;
-        if (last.date.slice(0, 7) !== m) estimated = true;
-      }
+      continue;
     }
-    const vals = ledger.valuations.filter((v) => v.date <= end);
-    const house = vals.length ? vals[vals.length - 1].value : 0;
-    if (vals.length && vals[vals.length - 1].date.slice(0, 7) !== m)
-      estimated = true;
-    const mort = ledger.assertions
-      .filter((a) => a.accountId === 'mortgage' && a.date <= end)
-      .slice(-1)[0];
-    const mortgage = mort ? mort.balance : 0;
-    const r = (n: number) => Math.round(n);
-    points.push({
-      month: m,
-      cash: r(cash),
-      investments: r(investments),
-      house: r(house),
-      mortgage: r(mortgage),
-      total: r(cash + investments + house + mortgage),
-      estimated,
-    });
+    const f = flows.get(acct.id);
+    let bal = 0;
+    out.set(
+      acct.id,
+      ms.map((m) => {
+        bal += f?.get(m) ?? 0;
+        return { cents: bal, carried: false, stated: true };
+      }),
+    );
   }
-  return points;
+  const result = { months: ms, values: out };
+  valuesCache.set(ledger, result);
+  return result;
+}
+
+const valuesCache = new WeakMap<
+  Ledger,
+  {
+    months: string[];
+    values: Map<string, AccountValue[]>;
+  }
+>();
+
+const PART: Record<
+  string,
+  keyof Omit<NetWorthPoint, 'month' | 'total' | 'estimated'>
+> = {
+  chequing: 'cash',
+  savings: 'cash',
+  credit: 'cash',
+  investment: 'investments',
+  asset: 'house',
+  mortgage: 'mortgage',
+};
+
+/** Net worth per month end. Investments, assets and the mortgage use their latest statement on or before the month. */
+export function netWorthSeries(ledger: Ledger): NetWorthPoint[] {
+  const { months: ms, values } = accountValues(ledger);
+  return ms.map((month, i) => {
+    const c = { cash: 0, investments: 0, house: 0, mortgage: 0 };
+    let estimated = false;
+    for (const acct of ledger.accounts) {
+      const v = values.get(acct.id)?.[i];
+      if (!v) continue;
+      c[PART[acct.kind]] += v.cents;
+      if (v.carried) estimated = true;
+    }
+    return {
+      month,
+      cash: c.cash / 100,
+      investments: c.investments / 100,
+      house: c.house / 100,
+      mortgage: c.mortgage / 100,
+      total: (c.cash + c.investments + c.house + c.mortgage) / 100,
+      estimated,
+    };
+  });
 }
 
 export type SankeyData = {
@@ -284,29 +407,28 @@ export function sankey(
 
 export function latestHoldings(ledger: Ledger, accountId: string) {
   return (
-    ledger.holdings.filter((h) => h.accountId === accountId).slice(-1)[0] ??
-    null
+    byDate(ledger.holdings.filter((h) => h.accountId === accountId)).slice(
+      -1,
+    )[0] ?? null
   );
 }
 
+/** An account's value at the ledger's last month end, from the same table as net worth. */
 export function accountBalance(ledger: Ledger, accountId: string) {
-  const acct = ledger.accounts.find((a) => a.id === accountId);
-  if (!acct) return 0;
-  if (acct.kind === 'investment')
-    return latestHoldings(ledger, accountId)?.total ?? 0;
-  if (acct.kind === 'asset')
-    return (
-      ledger.valuations.filter((v) => v.accountId === accountId).slice(-1)[0]
-        ?.value ?? 0
-    );
-  if (acct.kind === 'mortgage')
-    return (
-      ledger.assertions.filter((a) => a.accountId === accountId).slice(-1)[0]
-        ?.balance ?? 0
-    );
-  return ledger.transactions
-    .filter((t) => t.accountId === accountId)
-    .reduce((s, t) => s + t.amount, 0);
+  const { values } = accountValues(ledger);
+  const v = values.get(accountId);
+  return v?.length ? v[v.length - 1].cents / 100 : 0;
+}
+
+/** Every account's latest value, keyed by id. */
+export function accountBalances(ledger: Ledger) {
+  const { values } = accountValues(ledger);
+  return new Map(
+    [...values.entries()].map(([id, v]) => [
+      id,
+      v.length ? v[v.length - 1].cents / 100 : 0,
+    ]),
+  );
 }
 
 export function searchTransactions(

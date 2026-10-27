@@ -49,6 +49,8 @@ class Cascade:
     descriptor string that leaves the process, for the audit trail.
     """
 
+    name = "cascade"
+
     def __init__(
         self,
         layers: Sequence[Classifier],

@@ -1,0 +1,55 @@
+name: python
+
+# tally (apps/tally) is the repo's first Python app. Its path is on no other
+# workflow's filter, so without this file a change to it runs nothing and goes
+# green. The web app is the `tally-web` Bun workspace; it is checked here too,
+# because typescript.yml's filter does not list apps/tally.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/tally/**'
+      - '.github/workflows/python.yml'
+  pull_request:
+    paths:
+      - 'apps/tally/**'
+      - '.github/workflows/python.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/tally
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # uv reads the interpreter from apps/tally/.python-version.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          working-directory: apps/tally
+          cache-dependency-glob: apps/tally/uv.lock
+      # --locked fails when pyproject.toml has moved on without uv.lock.
+      - run: uv sync --all-groups --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/tally/web typecheck
+      - run: bun run --cwd apps/tally/web build

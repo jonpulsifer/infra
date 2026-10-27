@@ -547,7 +547,14 @@ const UNKNOWN_DESCRIPTORS = [
   'ZEHRS? NO: SOBEYS LIQUOR',
 ];
 
-export function buildLedger(seed = 1337): Ledger {
+/** The synthetic ledger and the import preview waiting on it. */
+export type Synthetic = { ledger: Ledger; preview: ImportPreview };
+
+/**
+ * The preview's rows are October's exports; they are not in the ledger until
+ * the preview is applied, exactly as with a server.
+ */
+export function buildLedger(seed = 1337): Synthetic {
   const rnd = mulberry32(seed);
   const gauss = () => {
     const u = 1 - rnd();
@@ -629,7 +636,7 @@ export function buildLedger(seed = 1337): Ledger {
   for (const spec of MERCHANTS) {
     for (const m of months) {
       const ms = iso(m);
-      if (spec.from && ms < spec.from.slice(0, 7) + '-01') continue;
+      if (spec.from && ms < `${spec.from.slice(0, 7)}-01`) continue;
       if (spec.to && ms > spec.to) continue;
       const n =
         spec.perMonth >= 1
@@ -1041,6 +1048,7 @@ export function buildLedger(seed = 1337): Ledger {
   const outbound = Array.from(new Set(low.map((t) => t.descriptor)));
 
   const preview: ImportPreview = {
+    id: 'synthetic',
     files: [
       {
         name: 'rbc-chequing-2026-10.qfx',
@@ -1088,18 +1096,22 @@ export function buildLedger(seed = 1337): Ledger {
     modelCalls: outbound.length,
   };
 
+  const incoming = new Set(previewTxns.map((t) => t.id));
+  const kept = txns.filter((t) => !incoming.has(t.id));
   return {
-    owner: 'jon@lolwtf.ca',
-    viewers: ['partner@lolwtf.ca'],
-    accounts: ACCOUNTS,
-    categories: CATEGORIES,
-    transactions: txns,
-    holdings,
-    valuations,
-    assertions,
-    batches,
-    rules,
+    ledger: {
+      owner: 'jon@lolwtf.ca',
+      viewers: ['partner@lolwtf.ca'],
+      accounts: ACCOUNTS,
+      categories: CATEGORIES,
+      transactions: kept,
+      holdings,
+      valuations,
+      assertions,
+      batches: batches.filter((b) => kept.some((t) => t.batchId === b.id)),
+      rules,
+      asOf: kept.reduce((m, t) => (t.date > m ? t.date : m), ''),
+    },
     preview,
-    asOf: iso(END),
   };
 }

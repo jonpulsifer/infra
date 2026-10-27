@@ -3,11 +3,13 @@
 `parse(path)` sniffs the format and dispatches. OFX/QFX goes through
 `tally.parsers.ofx` (a wrapped ofxtools). CSV goes through
 `tally.parsers.csv_` and its profile registry, matched by column fingerprint.
-PDF goes through `tally.parsers.pdf`, which needs the `ocr` extra.
+PDF goes through `tally.parsers.pdf`; only a scanned PDF needs the `ocr` extra.
 """
 
 from __future__ import annotations
 
+import contextlib
+import importlib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -42,13 +44,11 @@ def parsers() -> tuple[Parser, ...]:
 
 
 def _load() -> None:
-    # Import for the registration side effect. Order is the sniff order.
-    from tally.parsers import csv_, ofx  # noqa: F401
-
-    try:
-        from tally.parsers import pdf  # noqa: F401
-    except ImportError:
-        pass
+    """Import each parser for its `register` side effect, in sniff order."""
+    for name in ("csv_", "ofx", "xlsx"):
+        importlib.import_module(f"tally.parsers.{name}")
+    with contextlib.suppress(ImportError):
+        importlib.import_module("tally.parsers.pdf")
 
 
 def parse(path: Path) -> ParsedFile:
