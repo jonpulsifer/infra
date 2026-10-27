@@ -32,7 +32,7 @@ locals {
   # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
   # reinstall. With tagged VLAN management "block_all", the switch (USL24P,
   # 7.5.15) forwarded none of the node's untagged frames.
-  boot_native = toset(["shale"])
+  boot_native = toset([])
 
   switch = local.clients.switches["USW 24 PoE"]
 }
