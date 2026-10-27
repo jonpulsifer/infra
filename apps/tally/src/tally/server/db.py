@@ -337,9 +337,14 @@ class LedgerRepository:
 
         seeded = ledger.model_copy(update={"categories": SEED})
         column = next(c for c in _COLLECTIONS if c.attr == "categories")
-        with self.engine.begin() as conn:
-            self._write(conn, keys, column, ledger, seeded)
-            self._bump(conn, ledger.id)
+        try:
+            with self.engine.begin() as conn:
+                self._write(conn, keys, column, ledger, seeded)
+                self._bump(conn, ledger.id)
+        except sa.exc.IntegrityError:
+            # Another reader seeded first; take what it wrote.
+            with self.engine.connect() as conn:
+                return ledger.model_copy(update={"categories": self._read(conn, keys, column)})
         return seeded
 
     def _read(self, conn: sa.Connection, keys: LedgerKeys, c: _Collection) -> tuple[Any, ...]:

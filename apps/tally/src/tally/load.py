@@ -76,6 +76,11 @@ class Source:
         hint = pf.account_hint or pf.profile_id or pf.account_kind_hint or "file"
         return f"{pf.institution or 'unknown'}:{hint}"
 
+    @property
+    def precise(self) -> bool:
+        """True when the key names the account the file came from, not just a file shape."""
+        return bool(self.parsed.account_hint)
+
 
 @dataclass(frozen=True)
 class Skipped:
@@ -102,16 +107,17 @@ def collect(root: Path, settings: config.Settings, scratch: Path) -> Collected:
     sources: list[Source] = []
     skipped: list[Skipped] = []
     for path in paths:
+        shown = _shown(path, root)
         if path.suffix.lower() == ".zip":
-            for member in files.unpack(path, settings, scratch):
+            for member in files.unpack(path, settings, scratch, label=shown):
                 if member.path is None:
                     skipped.append(Skipped(member.shown, member.reason or "not opened"))
                 else:
                     _parse_into(member.path, member.shown, sources, skipped, packed=True)
         elif files.is_archive(path):
-            skipped.append(Skipped(path.name, "an archive tally does not open"))
+            skipped.append(Skipped(shown, "an archive tally does not open"))
         else:
-            _parse_into(path, path.name, sources, skipped)
+            _parse_into(path, shown, sources, skipped)
     seen: set[str] = set()
     unique: list[Source] = []
     for s in sorted(sources, key=lambda s: s.packed):  # a loose file beats its zipped twin
@@ -135,6 +141,19 @@ def _parse_into(
         skipped.append(Skipped(shown, type(exc).__name__))
         return
     sources.append(Source(path, shown, pf.model_copy(update={"name": shown}), packed))
+
+
+def _shown(path: Path, root: Path) -> str:
+    """The name a file goes by in the run: its path under the root, one segment per directory.
+
+    Two statements that share a basename in different folders stay apart, and
+    the name survives the server keeping only a basename.
+    """
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError:
+        parts = (path.name,)
+    return "__".join(parts)
 
 
 def _reason(message: str, name: str) -> str:
@@ -232,7 +251,14 @@ def choose_accounts(
     overrides: Mapping[str, str],
     window_days: int,
 ) -> Chosen:
-    """`account_for_file` for the batch: overrides, then memory, then overlap, then a lone fit."""
+    """`account_for_file` per file: an override, else the overlap, else memory, else a lone fit.
+
+    The overlap is asked before memory, so a second card that shares a key
+    with a first (a bank's hint-less CSV profile) still lands where its own
+    rows already are. Memory answers only when the rows say nothing. An
+    override is remembered only under a precise key: one that names the
+    account the file came from, not a profile every card of a bank shares.
+    """
     known = {a.id: a for a in ledger.accounts}
     chosen: dict[str, str] = {}
     decided: dict[str, str] = {}
@@ -242,14 +268,12 @@ def choose_accounts(
             if forced not in known:
                 unclear.append(Unclear(s.shown, f"no account {forced}", tuple(known)))
                 continue
-            chosen[s.shown] = decided[s.key] = forced
+            chosen[s.shown] = forced
+            if s.precise:
+                decided[s.key] = forced
             continue
         own = own_account(s, known)
         if own is None or own in known:
-            continue
-        kept = decided.get(s.key, remembered.get(s.key))
-        if kept is not None and kept in known:
-            chosen[s.shown] = kept
             continue
         if s.parsed.rows:
             scores = {a.id: overlap(s, a, ledger, window_days) for a in known.values()}
@@ -263,6 +287,10 @@ def choose_accounts(
                     Unclear(s.shown, "its rows match more than one account", tuple(clear))
                 )
                 continue
+        kept = decided.get(s.key, remembered.get(s.key))
+        if kept is not None and kept in known:
+            chosen[s.shown] = kept
+            continue
         if own.startswith(UNASSIGNED):
             fits = [
                 a.id

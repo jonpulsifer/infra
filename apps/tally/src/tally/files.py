@@ -80,24 +80,29 @@ def _suffix(data: bytes, member: PurePosixPath) -> str | None:
     return None
 
 
-def unpack(path: Path, settings: config.Settings, into: Path) -> Iterator[Unpacked]:
+def unpack(
+    path: Path, settings: config.Settings, into: Path, *, label: str | None = None
+) -> Iterator[Unpacked]:
     """Each member of a zip, one level deep, written under `into` with a sniffed suffix.
 
-    The written name carries the zip's stem so members of different zips that
-    share a name stay apart. A member whose name is an identity name, an
-    archive, or too large stays in the zip.
+    The written name carries `label` (the zip's name in the run, its stem by
+    default) and the member's whole path inside the zip, one segment per
+    directory, so members that share a basename stay apart. A member whose
+    name is an identity name, an archive, or too large stays in the zip.
     """
     try:
         archive = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError):
-        yield Unpacked(path.name, reason="not a zip tally can open")
+        yield Unpacked(label or path.name, reason="not a zip tally can open")
         return
+    stem = Path(label).stem if label and label.lower().endswith(".zip") else (label or path.stem)
     with archive:
         for info in archive.infolist():
             if info.is_dir():
                 continue
             member = PurePosixPath(info.filename)
-            shown = f"{path.stem}__{member.name}"
+            inside = "__".join(p for p in member.parts if p not in ("/", "..", "."))
+            shown = f"{stem}__{inside}"
             if guarded(path / Path(*member.parts), settings):
                 yield Unpacked(shown, reason="excluded")
             elif is_archive(member):

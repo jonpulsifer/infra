@@ -114,13 +114,19 @@ def run(root: Path, settings: config.Settings, http: TestClient, **kw) -> load.R
 def test_collect_opens_zips_sniffs_members_and_keeps_identity_names_out(finance, settings, tmp):
     found = load.collect(finance, settings, tmp)
     shown = {s.shown for s in found.sources}
-    assert shown == {"Register.csv", "chq.csv"}
+    assert shown == {"Finances__Register.csv", "Finances__Scotiabank__chq.csv"}
     assert found.twins == 1
     reasons = {s.name: s.reason for s in found.skipped}
-    assert reasons["2031 e-statements__Passport.pdf"] == "excluded"
-    assert reasons["2031 e-statements__inner.zip"] == "an archive inside an archive"
-    assert reasons["2031 e-statements__manage.statements.pdfFilename.pdf"] == "unreadable PDF"
-    assert reasons["junk.pdf"] == "unreadable PDF"
+    assert reasons["Finances__Scotiabank__2031 e-statements__Passport.pdf"] == "excluded"
+    assert (
+        reasons["Finances__Scotiabank__2031 e-statements__inner.zip"]
+        == "an archive inside an archive"
+    )
+    assert (
+        reasons["Finances__Scotiabank__2031 e-statements__manage.statements.pdfFilename.pdf"]
+        == "unreadable PDF"
+    )
+    assert reasons["Finances__junk.pdf"] == "unreadable PDF"
     assert found.excluded == 1  # the CRA directory, pruned before descent
     assert "secret.csv" not in shown
 
@@ -175,7 +181,7 @@ def test_load_twice_adds_once_and_maps_the_bank_export_onto_the_register_account
     assert names["Test Visa"].kind is AccountKind.credit
     assert names["Test Chequing"].kind is AccountKind.chequing
     # the bank export landed in the register's chequing account: three duplicates, one new row
-    assert first.accounts["chq.csv"] == names["Test Chequing"].id
+    assert first.accounts["Finances__Scotiabank__chq.csv"] == names["Test Chequing"].id
     (register, bank) = first.batches
     assert (register.added, bank.added) == (len(YNAB_ROWS), 1)
     # the copy in the zip is a twin by content; of the export's 4 rows the register
@@ -196,10 +202,10 @@ def test_load_twice_adds_once_and_maps_the_bank_export_onto_the_register_account
     assert [t for t in ledger.transactions if t.transfer_id]
     # what disagreed: the junk PDF and the identity member, nothing else
     assert {s.name for s in first.skipped} == {
-        "junk.pdf",
-        "2031 e-statements__Passport.pdf",
-        "2031 e-statements__inner.zip",
-        "2031 e-statements__manage.statements.pdfFilename.pdf",
+        "Finances__junk.pdf",
+        "Finances__Scotiabank__2031 e-statements__Passport.pdf",
+        "Finances__Scotiabank__2031 e-statements__inner.zip",
+        "Finances__Scotiabank__2031 e-statements__manage.statements.pdfFilename.pdf",
     }
     assert first.unclear == [] and first.gaps == []
     assert first.uncategorised == 2  # the mystery vendor and the monthly fee
@@ -228,7 +234,7 @@ def test_a_dry_run_decides_everything_and_sends_nothing(finance, settings, http)
         report = load.run(finance, settings, target, store, dry_run=True)
         assert store.account_map() == {}
     assert report.added == len(YNAB_ROWS) + 1
-    assert report.dry_run and "chq.csv" in report.accounts
+    assert report.dry_run and "Finances__Scotiabank__chq.csv" in report.accounts
     assert remote.ledger().transactions == ()
 
 
@@ -278,13 +284,20 @@ def test_an_export_that_matches_two_accounts_waits_for_the_owner():
     assert got.chosen == {}
 
     # a decision sticks to its key for the rest of the batch, so a later statement
-    # of the same card with no overlap lands in the same account
+    # of the same card (a precise key: the file names its account) with no overlap
+    # lands in the same account
+    card = load.Source(
+        Path("card.csv"),
+        "card.csv",
+        pf.model_copy(update={"name": "card.csv", "account_hint": "CARD-1"}),
+    )
     later = load.Source(
         Path("later.csv"),
         "later.csv",
         pf.model_copy(
             update={
                 "name": "later.csv",
+                "account_hint": "CARD-1",
                 "sha256": "2" * 64,
                 "rows": (
                     ParsedRow(date=date(2031, 6, 2), amount=Decimal("-9.99"), descriptor="NEW"),
@@ -293,18 +306,36 @@ def test_an_export_that_matches_two_accounts_waits_for_the_owner():
         ),
     )
     both = load.choose_accounts(
-        [s, later], ledger, remembered={}, overrides={"chq.csv": "b"}, window_days=3
+        [card, later], ledger, remembered={}, overrides={"card.csv": "b"}, window_days=3
     )
-    assert both.chosen == {"chq.csv": "b", "later.csv": "b"}
+    assert both.chosen == {"card.csv": "b", "later.csv": "b"}
+    assert both.decided == {"Bank:CARD-1": "b"}
+    # the overlap outranks memory: a second card whose rows sit in another account
+    other = load.Source(
+        Path("other.csv"),
+        "other.csv",
+        pf.model_copy(update={"name": "other.csv", "sha256": "3" * 64}),
+    )
+    two = ledger.model_copy(update={"transactions": (txn("t1", "a"),)})
+    got = load.choose_accounts(
+        [other], two, remembered={"Bank:p": "b"}, overrides={}, window_days=3
+    )
+    assert got.chosen == {"other.csv": "a"}
 
     forced = load.choose_accounts(
         [s], ledger, remembered={}, overrides={"chq.csv": "b"}, window_days=3
     )
-    assert forced.chosen == {"chq.csv": "b"} and forced.decided == {"Bank:p": "b"}
-    kept = load.choose_accounts(
-        [s], ledger, remembered={"Bank:p": "a"}, overrides={}, window_days=3
+    assert forced.chosen == {"chq.csv": "b"} and forced.decided == {}  # a shape is not a card
+    # memory answers only when the rows say nothing
+    quiet = load.Source(
+        Path("quiet.csv"),
+        "quiet.csv",
+        later.parsed.model_copy(update={"name": "quiet.csv", "account_hint": None}),
     )
-    assert kept.chosen == {"chq.csv": "a"} and kept.decided == {}
+    kept = load.choose_accounts(
+        [quiet], ledger, remembered={"Bank:p": "a"}, overrides={}, window_days=3
+    )
+    assert kept.chosen == {"quiet.csv": "a"} and kept.decided == {}
 
 
 def test_decide_drops_fuzzy_duplicates_but_keeps_a_posting():
@@ -410,7 +441,7 @@ def test_the_load_command_reports_and_exits_3_when_a_file_needs_an_account(
     assert body["added"] == len(YNAB_ROWS) + 1
     assert [s["name"] for s in body["skipped"]]
 
-    args = ["load", str(finance), "--force", "--account", "chq.csv=nope"]
+    args = ["load", str(finance), "--force", "--account", "Finances__Scotiabank__chq.csv=nope"]
     again = runner.invoke(cli.app, args)
     assert again.exit_code == 3
     assert "no account nope" in again.output
