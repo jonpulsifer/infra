@@ -25,6 +25,10 @@ let
   ipxe = "ipxe-amd64-secureboot.efi";
   # Signed with the HookOS key; iPXE fetches it over HTTP.
   hookos = "hookos-amd64-secureboot-uki.efi";
+  # Some firmware (riptide's) takes Smee's ProxyDHCP offer over UniFi's. With allowPXE off, Smee
+  # names /<mac>/netboot-not-allowed, so that path serves the same signed iPXE, which falls back
+  # to the Talos UKI when Smee has no script.
+  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/folly/apps/talos-enroll/node-macs.json);
   signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
   hookosCert = ../../clusters/folly/talos/secureboot/hookos-signing-cert.pem;
   # The pipeline's check: exactly one signature, and sbverify against the committed certificate.
@@ -108,7 +112,11 @@ in
     "d /var/lib/tftpboot/talos 0755 root root -"
     "d ${tftpDir} 0755 root root -"
     "L+ ${tftpDir}/${ipxe} - - - - ${siteDir}/current/${ipxe}"
-  ];
+  ]
+  ++ lib.concatMap (mac: [
+    "d /var/lib/tftpboot/${mac} 0755 root root -"
+    "L+ /var/lib/tftpboot/${mac}/netboot-not-allowed - - - - ${siteDir}/current/${ipxe}"
+  ]) nodeMacs;
 
   systemd.services.spore-talos-boot-mirror = {
     description = "Mirror the signed Talos boot assets for ${site}";

@@ -11,7 +11,7 @@ Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's sign
 | --- | --- | --- |
 | `bootstrap` VLAN interface | Gives spore `SPORE_BOOTSTRAP_IP`, tagged on `end0` | spore |
 | Smee | Answers PXE on `bootstrap` as a proxy DHCP server. UniFi leases the address. | spore |
-| dnsmasq TFTP | Serves the signed iPXE that Smee's offer names, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | spore |
+| dnsmasq TFTP | Serves the signed iPXE, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot`. The same file is at `<mac>/netboot-not-allowed` for each MAC in `node-macs.json`, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not). | spore |
 | nginx `spore-pxe` | Serves the UKI, its iPXE script, the previous UKI, the ISO and HookOS on port 80 | spore |
 | `spore-talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | spore |
 
