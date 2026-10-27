@@ -2,7 +2,7 @@
 apiVersion: tinkerbell.org/v1alpha1
 kind: Workflow
 metadata:
-  name: reprovision-shale-2
+  name: reprovision-shale-3
   labels:
     tinkerbell.lolwtf.ca/boot: manual
 spec:
