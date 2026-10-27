@@ -1,0 +1,33 @@
+[
+  {
+    "_comment": "The context is the repo root because the Dockerfile prunes the tally-web workspace. The root package.json, bun.lock and turbo.json rebuild the image only when turbo ls --affected names its workspace.",
+    "image": "tally",
+    "workspace": "tally-web",
+    "context": ".",
+    "file": "apps/tally/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "apps/tally",
+      "package.json",
+      "bun.lock",
+      "turbo.json"
+    ]
+  },
+  {
+    "_comment": "The OCR worker installs the Python project alone, so a change to the web or to the API's Dockerfile leaves this multi-gigabyte image unbuilt.",
+    "image": "tally-ocr",
+    "context": ".",
+    "file": "apps/tally/Dockerfile.ocr",
+    "platforms": "linux/amd64",
+    "watch": [
+      "apps/tally/src",
+      "apps/tally/pyproject.toml",
+      "apps/tally/uv.lock",
+      "apps/tally/.python-version",
+      "apps/tally/README.md",
+      "apps/tally/Dockerfile.ocr",
+      "apps/tally/Dockerfile.ocr.dockerignore",
+      "apps/tally/build.json"
+    ]
+  }
+]

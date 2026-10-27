@@ -1,0 +1,20 @@
+# BuildKit reads this file in place of the root .dockerignore when it builds
+# Dockerfile from the repo root. turbo prune needs every workspace manifest and
+# the root lockfile; the Python stages need the project files under apps/tally.
+*
+!apps
+!packages
+!package.json
+!bun.lock
+!turbo.json
+
+**/node_modules
+**/dist
+**/.cache
+**/.turbo
+**/*.log
+**/.venv
+**/__pycache__
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache

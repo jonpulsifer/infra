@@ -31,6 +31,8 @@ sops = "latest"
 # The client for the Talos roots; move it with their talos_version.
 talosctl = "1.14.4"
 yq = "latest"
+# tally (apps/tally) is the first Python app: uv owns its env, lockfile and Python.
+uv = "latest"
 # Atlantis applies with OpenTofu; run tofu locally to match.
 opentofu = "1.13.2"
 terraform = "latest"
@@ -48,6 +50,36 @@ run = "claude --permission-mode auto"
 [tasks.devshell]
 description = "Enter the Nix dev shell"
 run = "nix develop"
+
+[tasks."tally:install"]
+description = "Sync tally's Python env from uv.lock (apps/tally)"
+dir = "apps/tally"
+run = "uv sync --all-groups"
+
+[tasks."tally:lint"]
+description = "Lint and format-check tally with ruff (apps/tally)"
+dir = "apps/tally"
+run = ["uv run ruff check .", "uv run ruff format --check ."]
+
+[tasks."tally:fmt"]
+description = "Format tally with ruff (apps/tally)"
+dir = "apps/tally"
+run = ["uv run ruff check --fix .", "uv run ruff format ."]
+
+[tasks."tally:typecheck"]
+description = "Typecheck tally with mypy (apps/tally)"
+dir = "apps/tally"
+run = "uv run mypy"
+
+[tasks."tally:test"]
+description = "Lint, typecheck and test tally (apps/tally)"
+dir = "apps/tally"
+run = ["uv run ruff check .", "uv run ruff format --check .", "uv run mypy", "uv run pytest -q"]
+
+[tasks."tally:dev"]
+description = "Run the tally API with the synthetic ledger on :8081 (apps/tally)"
+dir = "apps/tally"
+run = "uv run tally serve --synthetic --port 8081"
 
 [tasks.kthx]
 description = "Run the kthx CLI from this checkout"

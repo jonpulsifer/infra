@@ -18,6 +18,8 @@
     "kthx-engine-verifier",
     "switchboard",
     "talos-enroll",
+    "tally",
+    "tally-ocr",
     "tink-agent-autoid",
     "weather"
   ],

@@ -1,0 +1,72 @@
+[project]
+name = "tally"
+version = "0.1.0"
+description = "A privacy-first household ledger: import bank exports, reconcile, classify, read."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+dependencies = [
+  "pydantic>=2.11,<3",
+  "ofxtools>=1.1,<2",
+  "typer>=0.15,<1",
+  "rich>=13,<15",
+  "httpx>=0.28,<1",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "sqlalchemy>=2.0,<3",
+  "psycopg[binary]>=3.2,<4",
+  "cryptography>=44,<47",
+  "python-multipart>=0.0.20,<1",
+  "pdfplumber>=0.11,<1",
+  "openpyxl>=3.1,<4",
+]
+
+[project.optional-dependencies]
+# The OCR worker: Docling and friends are heavy, so they live in their own image.
+ocr = ["docling>=2.0,<3"]
+
+[project.scripts]
+tally = "tally.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.25,<2",
+  "ruff>=0.11,<1",
+  "mypy>=1.14,<2",
+  "hypothesis>=6,<7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tally"]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "N", "ANN", "T20"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "T20"]
+"src/tally/cli.py" = ["T20"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["tally"]
+mypy_path = "src"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

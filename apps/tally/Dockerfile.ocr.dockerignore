@@ -1,0 +1,10 @@
+# BuildKit reads this file in place of the root .dockerignore when it builds
+# Dockerfile.ocr from the repo root. The worker needs only the Python project.
+*
+!apps/tally/pyproject.toml
+!apps/tally/uv.lock
+!apps/tally/.python-version
+!apps/tally/README.md
+!apps/tally/src
+
+**/__pycache__
