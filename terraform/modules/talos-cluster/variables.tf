@@ -102,7 +102,7 @@ variable "controlplane_patches" {
 
 variable "tpm_nodes" {
   type        = set(string)
-  description = "Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM."
+  description = "Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM, and kexec is off on them."
   default     = []
 
   validation {

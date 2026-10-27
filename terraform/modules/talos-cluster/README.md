@@ -63,7 +63,7 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | <a name="input_site"></a> [site](#input\_site) | Cluster site (folly or offsite). Selects the topology ConfigMap. | `string` | n/a | yes |
 | <a name="input_talos_contract"></a> [talos\_contract](#input\_talos\_contract) | Machine-config version contract passed to the generator. Pinned at the version the cluster was created with; never bumped on an OS upgrade. | `string` | `"v1.14"` | no |
 | <a name="input_talos_version"></a> [talos\_version](#input\_talos\_version) | Installer tag, e.g. v1.14.2. Changing it upgrades every node (a reboot each). | `string` | n/a | yes |
-| <a name="input_tpm_nodes"></a> [tpm\_nodes](#input\_tpm\_nodes) | Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM. | `set(string)` | `[]` | no |
+| <a name="input_tpm_nodes"></a> [tpm\_nodes](#input\_tpm\_nodes) | Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM, and kexec is off on them. | `set(string)` | `[]` | no |
 | <a name="input_workload_isolation"></a> [workload\_isolation](#input\_workload\_isolation) | SecurityProfileConfig.workloadIsolation (sandboxd). Talos 1.14 defaults new clusters to true. | `bool` | `true` | no |
 
 ## Outputs

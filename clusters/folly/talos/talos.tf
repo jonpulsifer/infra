@@ -77,8 +77,8 @@ locals {
   tpm_nodes = ["optiplex", "riptide"]
 
   # Nodes whose running STATE and EPHEMERAL are encrypted. A node joins only
-  # after a reinstall formats them encrypted; both still run plain volumes.
-  encrypted_nodes = []
+  # after a reinstall formats them encrypted. optiplex still runs plain volumes.
+  encrypted_nodes = ["riptide"]
 }
 
 module "talos" {
