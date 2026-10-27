@@ -60,6 +60,7 @@ def from_pages(path: Path, pages: Sequence[Page], *, scanned: bool) -> ParsedFil
         rows=statement.rows,
         assertions=statement.assertions,
         holdings=statement.holdings,
+        currency=statement.currency,
         sha256=sha256_of(path),
         date_from=statement.date_from,
         date_to=statement.date_to,

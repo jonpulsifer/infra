@@ -15,12 +15,11 @@ class Recognised:
     needles: tuple[str, ...]
 
     def sniff(self, texts: Sequence[str]) -> bool:
-        """Any page: a Shareworks statement names its issuer only after page 1."""
+        """Any page: an issuer may be named only after page 1."""
         return any(n in t for t in texts for n in self.needles)
 
     def parse(self, pages: Sequence[Page], origin: str) -> Statement:
         raise ParseError(f"{self.name} statement: recognised, not parsed yet")
 
 
-SHAREWORKS = Recognised("shareworks", ("Shareworks", "Solium"))
 PWL = Recognised("pwl", ("PWL Capital",))

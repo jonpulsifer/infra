@@ -16,6 +16,7 @@ are its only shells, and only they do I/O.
 | `classify/` | `base.Cascade` and the `Classifier` protocol, `rules`, `taxonomy`, `cascade.build` (rules, then memory, then a provider), and `providers/` (`openai_api`, `codex`, `fake`). |
 | `engine.py` | The contract: `preview(files, ledger, classifier)` and `apply(ledger, preview, decisions)`. `engine_impl.py` implements it. |
 | `report.py` | The dashboard aggregates, a port of `web/src/fixtures/derive.ts`. |
+| `fx.py` | The one rate table: a US-dollar account (a Shareworks plan) converts in the reports at the Bank of Canada annual average for the year. Rows and snapshots stay in their account's currency. |
 | `synthetic.py` | The seeded synthetic ledger, a port of `web/src/fixtures/generate.ts`. Tests and the demo use it. |
 | `cli.py`, `config.py`, `store/` | The local shell: `inventory`, `preview`, `push`, `load`, `report`, `rules` and `serve`, with a SQLite cache of rules, model answers, loaded files and account decisions. |
 | `load.py`, `files.py` | `tally load`: the walk (identity exclusions, zips one level deep), the load order (a YNAB register first), the account decision per file from the rows it overlaps, preview and apply through the server, and the report of what disagrees. |
