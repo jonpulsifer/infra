@@ -119,6 +119,7 @@ Stop the loop and report to the user when **all** of the following are true:
 - `reviewDecision` is `APPROVED` or there are no reviews requiring changes.
 - `mergeable` is `MERGEABLE` (not `CONFLICTING` or `UNKNOWN`).
 - No unresolved review comments that were not addressed this session.
+- For a PR changing `.terraform.lock.hcl` files, each affected OpenTofu root has an Atlantis plan that you have read. Passing CI alone does not establish this: `ATLANTIS_AUTOPLAN_FILE_LIST` in `clusters/offsite/apps/atlantis/helm-release.yaml` does not match lockfiles. Use `.github/scripts/validation-impact.sh targets` to identify affected roots. If a plan is missing, follow `docs/runbooks/apply-an-opentofu-change.md` to request one; do not merge the PR without reviewing the plans.
 
 Report a brief summary:
 ```
