@@ -11,7 +11,7 @@ resources:
   - machines.yaml
   - amt.sops.yaml
   - template.yaml
-  - reprovision-shale-5.yaml
+  - reprovision-shale-6.yaml
 # Every Workflow here reprovisions its Hardware: Rufio PXE-boots the node into HookOS, and the
 # controller turns the Hardware's allowPXE on for the run and off once the Template succeeds. A
 # Workflow labelled tinkerbell.lolwtf.ca/boot=manual skips Rufio; someone PXE-boots the node by
@@ -38,6 +38,18 @@ patches:
         templateRef: reprovision-talos
         bootOptions:
           toggleAllowNetboot: true
+  # shale's staged UKI does not start from its disk on the HP firmware, so its
+  # wiped disk boots the signed Talos UKI over iPXE instead. Without Secure
+  # Boot, systemd-stub takes iPXE's arguments, so the chain passes the UKI's
+  # own command line (iPXE fills in ${uuid}, ${mac} and ${serial} itself).
+  - target: {kind: Hardware, name: shale}
+    patch: |
+      - op: replace
+        path: /spec/interfaces/0/netboot/ipxe/contents
+        value: |
+          #!ipxe
+          imgfree
+          chain --autofree from-nodes-env talos.platform=metal console=tty0 slab_nomerge pti=on consoleblank=0 printk.devkmsg=on selinux=1 module.sig_enforce=1 proc_mem.force_override=never talos.config=https://enroll.lolwtf.ca/config?uuid=${uuid}&mac=${mac}&serial=${serial} talos.config.oauth.client_id=talos-enroll talos.config.oauth.device_auth_url=https://enroll.lolwtf.ca/device/code talos.config.oauth.token_url=https://enroll.lolwtf.ca/token talos.config.oauth.extra_variable=uuid talos.config.oauth.extra_variable=mac talos.config.oauth.extra_variable=serial talos.config.oauth.extra_variable=hostname talos.halt_if_installed=1
 configMapGenerator:
   # `mise run render-tinkerbell-nodes` writes nodes.env. local-config keeps the ConfigMap out of
   # the build; it exists only as the source of the replacements below.
@@ -52,13 +64,20 @@ replacements:
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.HOOKOS_URL}
     targets:
       - select: {kind: Hardware}
+        reject: [{name: shale}]
         fieldPaths: [spec.interfaces.0.netboot.ipxe.contents]
         options: {delimiter: " ", index: 2}
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.HOOKOS_CMDLINE}
     targets:
       - select: {kind: Hardware}
+        reject: [{name: shale}]
         fieldPaths: [spec.interfaces.0.netboot.ipxe.contents]
         options: {delimiter: " ", index: 3}
+  - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.TALOS_UKI_URL}
+    targets:
+      - select: {kind: Hardware, name: shale}
+        fieldPaths: [spec.interfaces.0.netboot.ipxe.contents]
+        options: {delimiter: " ", index: 2}
   - source: {kind: ConfigMap, name: tinkerbell-nodes, fieldPath: data.OPTIPLEX_MAC}
     targets:
       - select: {kind: Hardware, name: optiplex}
