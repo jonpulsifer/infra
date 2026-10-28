@@ -31,7 +31,7 @@ RUN bun run --cwd apps/tally/web build \
 
 # The builder and the runner share one Python image, so the virtualenv's
 # interpreter links resolve in both.
-FROM python:3.13-slim-trixie@sha256:5dde09372dfa8e7762892b2a12619fcf6c23b0b78bce1058a9fa5a3a7a40e68e AS python
+FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS python
 ENV PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1
 
