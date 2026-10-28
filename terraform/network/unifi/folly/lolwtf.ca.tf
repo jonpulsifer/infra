@@ -34,6 +34,10 @@ locals {
       name    = "ns2"
       content = local.anchor_topology.NS2_IP
     }
+    s3 = {
+      name    = "s3"
+      content = local.anchor_topology.S3_VIP
+    }
   }
 }
 

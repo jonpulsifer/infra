@@ -74,7 +74,7 @@ Use this runbook once, to move folly's Garage store from spore alone to the thre
 
 ## Clients
 
-Every client names `GARAGE_S3_ENDPOINT` in `clusters/folly/config/cluster-settings.yaml`, which points at spore. Each anchor serves S3 on the same port, so clients keep working while spore is up and lose the endpoint, not the data, when it is down. A name that resolves to all three anchors is the follow-up.
+Every client names `GARAGE_S3_ENDPOINT` in `clusters/folly/config/cluster-settings.yaml`, which names `s3.lolwtf.ca`, the S3 VIP the anchors share. Each anchor serves S3 on the same port, so the VIP follows a working Garage and clients keep writing when any one anchor is down.
 
 ## Roll back
 

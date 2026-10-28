@@ -1,6 +1,7 @@
 # Scrapes CoreDNS's metrics through ns1 and ns2. A target that answers proves the VIP has a holder
-# and its CoreDNS runs; AnchorVipDown fires when neither is true. The AnchorBoot alerts read the
-# boot VIP's state from each anchor's node exporter (local-node-exporters.yaml).
+# and its CoreDNS runs; AnchorVipDown fires when neither is true. The AnchorBoot and AnchorS3
+# alerts read the boot and S3 VIPs' state from each anchor's node exporter
+# (local-node-exporters.yaml).
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
@@ -79,6 +80,17 @@ spec:
           annotations:
             message: "Anchor VIP {{ $labels.instance }} does not answer"
             description: "No anchor holds the VIP, or the holder's CoreDNS is down. Check keepalived and coredns on capsule, forge and spore (nix/services/anchor-vips.nix)."
+        # Garage's admin API listens on loopback, so each anchor's node exporter
+        # reports whether it holds the S3 VIP and passes the check keepalived
+        # tracks (nix/services/anchor-vips.nix).
+        - alert: AnchorS3VipDown
+          expr: (count((garage_s3_vip_held == 1) and on (instance) (garage_s3_serving == 1)) or vector(0)) < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: No anchor serves Garage at the S3 VIP
+            description: "No anchor holds the S3 VIP while Garage has a quorum and answers S3, so folly's backups cannot write. Check keepalived and garage on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/garage.nix)."
         # The cluster cannot reach the bootstrap VLAN, so each anchor's node
         # exporter reports whether it holds the boot VIP and passes the check
         # keepalived tracks (nix/services/talos-boot.nix).

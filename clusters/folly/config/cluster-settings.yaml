@@ -21,7 +21,7 @@ data:
 
   # Garage on spore, outside the cluster, is the S3 endpoint for backups. Its
   # push to GCS goes out on Starlink's uplink once a week, early Wednesday.
-  GARAGE_S3_ENDPOINT: http://spore.lolwtf.ca:3900
+  GARAGE_S3_ENDPOINT: http://s3.lolwtf.ca:3900
   BACKUP_PUSH_SCHEDULE: "0 5 * * 3"
 
   # folly's nodes run Talos: the kubelet's own root, and the `data` user
