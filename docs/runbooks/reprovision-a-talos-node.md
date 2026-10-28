@@ -15,7 +15,7 @@ Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull r
   ```
 
 - The firmware has PXE on, and its boot order has the system disk first and IPv4 PXE after it.
-- No node has our Secure Boot keys, and Secure Boot is off on riptide. The path loads only signed images, so it runs either way. Key enrollment goes first in this list once the keys exist.
+- Our Secure Boot keys are enrolled and Secure Boot is on, as on riptide and shale. The path loads only signed images, so it also runs with Secure Boot off.
 - You can see the node's console in MeshCommander, or on riptide's PiKVM.
 - You are on the tailnet as a login in `ENROLL_APPROVERS`, and you can read the Discord prompts.
 - `<node>` is the host name, and `<addr>` is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`.
@@ -161,6 +161,7 @@ To run the `Workflow` again, rename it, for example to `reprovision-<node>-2`, a
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach AMT | Read the `Machine`'s conditions, fix AMT, and run the `Workflow` again. |
+| `BootJobFailed` with "no route to host" or a timeout after the port moved to bootstrap | AMT shares the node's MAC, so it follows the port to the bootstrap VLAN and takes a bootstrap lease. The `Machine` dials the node's Kubernetes address. | Find the AMT's bootstrap lease in UniFi. Suspend the `tinkerbell` Flux Kustomization, set the `Machine`'s `spec.connection.host` to that address, recreate the `Workflow` from `kubectl kustomize clusters/folly/tinkerbell`, then resume the Kustomization once it succeeds. |
 | The `Workflow` stays `PENDING`, and the node boots its old Talos | The node PXE-booted off the bootstrap VLAN | Move the node to the bootstrap VLAN, and run the `Workflow` again. |
 | The `Workflow` is `FAILED` | An action failed | Read the action's message in the `Workflow` on spore, and the HookOS console. |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry, so `netboot-next` set none | Boot `IPV4 Network` from the F9 menu. |

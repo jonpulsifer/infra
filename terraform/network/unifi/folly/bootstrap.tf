@@ -4,7 +4,8 @@ locals {
 
   # The switch ports that run MAC auth, from the inventory, and each node's
   # enrolled state: the network its RADIUS user puts it on. A reinstall flips a
-  # node to bootstrap, and the install reboot's link flap moves it.
+  # node to bootstrap, and the switch's re-authentication moves the port within
+  # a minute or two, with no link flap.
   mab_ports = { for node, m in local.machines : node => m.switch_port }
   enrolled = {
     shale    = "kubernetes"
