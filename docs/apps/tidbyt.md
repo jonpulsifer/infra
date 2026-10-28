@@ -42,7 +42,7 @@ Tronbyt keeps in its database which apps each display shows. Git does not record
 
 ## How it works
 
-Tronbyt runs the `ghcr.io/tronbyt/server` image, with a CloudNativePG database and an NFS volume from spore. CloudNativePG archives the database to folly's Garage through the barman-cloud plugin, and Velero backs up the data volume each night.
+Tronbyt runs the `ghcr.io/tronbyt/server` image, with a CloudNativePG database and a `local-path` volume on a worker node. CloudNativePG archives the database to folly's Garage through the barman-cloud plugin, and Velero backs up the data volume each night. The pod cannot move to another node without a restore of that volume ([Restore a volume](../runbooks/restore-a-volume.md)).
 
 The rackstat aggregator runs in the `tronbyt` namespace. It merges Prometheus data, the Flux Kustomization and HelmRelease objects, the folly PBX's line and trunk registration state, and TCP probe results into one JSON snapshot. It caches the snapshot for 15 seconds. The `rackstat-flux-reader` ClusterRole gives it read access to the Flux objects. `PROBES` in `clusters/folly/apps/tronbyt/07-rackstat-deployment.yaml` names the probe targets. `rackstat.star` reads the snapshot from `http://rackstat:8080/api/rackstat` in the same namespace. `flameboss.star` reads `http://flameboss.monitoring:8080/api/cook`, the exporter's Service in `monitoring`.
 

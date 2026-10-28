@@ -14,7 +14,7 @@ The lab runs two Kubernetes clusters on Talos Linux nodes: `folly` at home and `
 | Bootstrap root | The OpenTofu root module that installs CoreDNS, `flux-operator` and the `FluxInstance`, the object that `flux-operator` installs Flux from | Atlantis |
 | Flux | Applies `clusters/` from the `infra` GitRepository | The `flux-system` namespace |
 | Shared controllers | CloudNativePG, External Secrets, Kyverno and others | Both clusters |
-| Storage | `local-path` volumes, and NFS volumes from [spore](../hosts/spore.md) | Both clusters, NFS on folly |
+| Storage | `local-path` volumes on each node's `data` volume | Both clusters |
 | GPU plugin | Offers riptide's GPU to pods | folly |
 
 ## How state reaches a cluster

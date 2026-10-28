@@ -43,6 +43,8 @@ folly's Garage runs at replication factor 3 on the anchors: spore, capsule and f
 
 ## Volumes
 
+Every claim on folly uses `local-path`, a `local` volume on one node's `data` volume. No pod mounts storage from a host outside the cluster, so a stopped anchor does not hang a pod. A claim lives on one node, so Velero is the copy of a claim that has no second instance. [Restore a volume](../runbooks/restore-a-volume.md) recovers it on another node.
+
 Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `local` volume with [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md) before relying on its backup.
 
 ## Rules

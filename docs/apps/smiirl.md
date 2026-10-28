@@ -31,7 +31,7 @@ The counter shows one mode at a time, in `Canada/Atlantic` time.
 - Every change turns the drums one full revolution. `tick` (1 to 60 minutes, default 1) limits `clock`, `countdown` and `countup` to one change every `tick` minutes.
 - The app waits at least 10 seconds between values. A value sent sooner leaves the drums offset. [Calibrate the drums](../runbooks/operate-the-smiirl-counter.md#calibrate-the-drums) corrects it.
 - The GitHub count refreshes at most every 5 minutes, without a token. `robocalls` refreshes at most every minute, in-cluster only. No mode needs internet access beyond GitHub's.
-- The app state is `number.json` on the `smiirl-data` NFS share from spore. If NFS on spore stops, the page and the counter stop updating.
+- The app state is `number.json` on the `smiirl-data-local` `local-path` volume of a worker node. If that node stops, the page and the counter stop updating until it returns or Velero restores the volume.
 
 ## How it works
 
@@ -45,7 +45,7 @@ The counter is on folly's `iot` network, where DHCP gives capsule and spore as D
 
 No alerts watch the counter. See [Operate the Smiirl counter](../runbooks/operate-the-smiirl-counter.md).
 
-Velero backs up the `smiirl-data` volume each night, because the pod has the annotation `backup.velero.io/backup-volumes`.
+Velero backs up the `smiirl-data-local` volume each night, because the pod has the annotation `backup.velero.io/backup-volumes`.
 
 ## Reference
 

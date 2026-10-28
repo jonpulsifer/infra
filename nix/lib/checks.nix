@@ -95,7 +95,7 @@ in
           then
             null
           else
-            "NFS does not require post-mount directory setup"
+            "NFS does not require the data mount check"
         )
         (
           if !(spore.services.dnsmasq.settings ? "dhcp-range") then

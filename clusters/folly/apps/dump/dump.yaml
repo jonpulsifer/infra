@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: dump-nfs
+  name: dump
   namespace: dump
   labels:
     app.kubernetes.io/name: dump
@@ -19,6 +19,15 @@ spec:
         app.kubernetes.io/name: dump
         app.kubernetes.io/part-of: dump
     spec:
+      # No node is tainted, so this term keeps the volume off the control-plane
+      # node's disk, which etcd shares.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
@@ -67,8 +76,8 @@ spec:
   - metadata:
       name: dump-data
     spec:
-      accessModes: [ "ReadWriteMany" ]
-      storageClassName: nfs
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: local-path
       resources:
         requests:
           storage: 1Gi
