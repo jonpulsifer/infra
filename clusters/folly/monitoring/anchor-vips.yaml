@@ -1,5 +1,6 @@
 # Scrapes CoreDNS's metrics through ns1 and ns2. A target that answers proves the VIP has a holder
-# and its CoreDNS runs; AnchorVipDown fires when neither is true.
+# and its CoreDNS runs; AnchorVipDown fires when neither is true. The AnchorBoot alerts read the
+# boot VIP's state from each anchor's node exporter (local-node-exporters.yaml).
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
@@ -78,3 +79,38 @@ spec:
           annotations:
             message: "Anchor VIP {{ $labels.instance }} does not answer"
             description: "No anchor holds the VIP, or the holder's CoreDNS is down. Check keepalived and coredns on capsule, forge and spore (nix/services/anchor-vips.nix)."
+        # The cluster cannot reach the bootstrap VLAN, so each anchor's node
+        # exporter reports whether it holds the boot VIP and passes the check
+        # keepalived tracks (nix/services/talos-boot.nix).
+        - alert: AnchorBootVipDown
+          expr: (count((talos_boot_vip_held == 1) and on (instance) (talos_boot_serving == 1)) or vector(0)) < 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: No anchor serves the Talos boot files at the boot VIP
+            description: "No anchor holds the boot VIP while dnsmasq runs and nginx serves the UKI script, so firmware on the bootstrap VLAN cannot load the signed iPXE. Check keepalived, dnsmasq and nginx on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/talos-boot.nix)."
+        - alert: AnchorBootNotServing
+          expr: (talos_boot_serving == 0) or absent(talos_boot_serving{instance="capsule"}) or absent(talos_boot_serving{instance="forge"}) or absent(talos_boot_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "Anchor {{ $labels.instance }} does not serve the Talos boot files"
+            description: "dnsmasq is down, nginx does not serve the UKI script at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
+        - alert: AnchorBootMirrorStale
+          expr: time() - talos_boot_mirror_last_success_timestamp_seconds > 6 * 3600
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "The Talos boot mirror on {{ $labels.instance }} has not verified a release for 6 hours"
+            description: "talos-boot-mirror.service fails, or has never succeeded. The anchor serves its last verified release. A Talos version bump fails the mirror until that version's release exists."
+        - alert: AnchorBootReleasesDiffer
+          expr: count(count by (release) (talos_boot_uki_info{slot="current"})) > 1
+          for: 3h
+          labels:
+            severity: warning
+          annotations:
+            message: The anchors serve different Talos boot releases
+            description: "The anchors' current boot files differ, so a boot VIP failover changes the UKI, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."
