@@ -11,10 +11,19 @@ let
   cfg = config.services.netbox;
   backups = import ../lib/backups.nix { inherit pkgs; };
   fleet = import ../lib/fleet.nix;
+  lab = import ../lib/anchor.nix;
   secret = name: config.sops.secrets.${name}.path;
   tailscale = "${config.services.tailscale.package}/bin/tailscale";
 
   host = "${config.networking.hostName}.${fleet.tailnet}";
+  # The other anchors are no tailnet peers of this host, so they reach NetBox on the Anchor
+  # network instead (talos-attest, nix/services/talos-attest.nix).
+  anchorAddr = lab.hosts.${config.networking.hostName};
+  anchorPeers = lib.attrValues (
+    lib.filterAttrs (name: _: name != config.networking.hostName) {
+      inherit (lab.hosts) capsule spore forge;
+    }
+  );
   nginxPort = 8080;
   superuser = "admin";
   retentionDays = 30;
@@ -75,7 +84,10 @@ in
       "500"
     ];
     settings = {
-      ALLOWED_HOSTS = [ host ];
+      ALLOWED_HOSTS = [
+        host
+        anchorAddr
+      ];
       CSRF_TRUSTED_ORIGINS = [ "https://${host}" ];
     };
   };
@@ -94,6 +106,10 @@ in
   systemd.tmpfiles.rules = [ "d ${cfg.dataDir}/media 0750 netbox netbox -" ];
 
   users.users.nginx.extraGroups = [ "netbox" ];
+  networking.firewall.extraCommands = lib.concatMapStrings (peer: ''
+    iptables -A nixos-fw -p tcp -s ${peer} --dport ${toString nginxPort} -j nixos-fw-accept
+  '') anchorPeers;
+
   services.nginx = {
     enable = true;
     virtualHosts.netbox = {
@@ -101,6 +117,10 @@ in
       listen = [
         {
           addr = "127.0.0.1";
+          port = nginxPort;
+        }
+        {
+          addr = anchorAddr;
           port = nginxPort;
         }
       ];
