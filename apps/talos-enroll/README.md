@@ -20,8 +20,8 @@ ENROLL_ADMIN_URL=http://localhost:8081 \
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ENROLL_ADDR` | `:8080` | The listener Talos reaches through the Gateway |
-| `ENROLL_ADMIN_ADDR` | `:8081` | The listener the owner reaches through the tailnet Ingress |
+| `ENROLL_ADDR` | `:8080` | The listener Talos reaches through the Gateway or the anchors' nginx. `unix:<path>` makes a socket with mode 0660. |
+| `ENROLL_ADMIN_ADDR` | `:8081` | The listener the owner reaches through the tailnet Ingress or `tailscale serve`. `unix:<path>` makes a socket with mode 0600. |
 | `ENROLL_CLIENT_ID` | `talos-enroll` | The `talos.config.oauth.client_id` baked into the UKI |
 | `ENROLL_MACHINE_INPUTS` | `/etc/talos-enroll/machine-inputs.json` | Per-node render inputs, written by `mise run render-machine-inputs` |
 | `ENROLL_NODE_MACS` | `/etc/talos-enroll/node-macs.json` | Node to MAC hints for the approval prompt. Optional. |

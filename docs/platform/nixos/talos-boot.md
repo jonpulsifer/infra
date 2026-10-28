@@ -10,14 +10,15 @@ Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](
 | Part | Job | Where it runs |
 | --- | --- | --- |
 | `bootstrap` VLAN interface | Gives each anchor its `<HOST>_BOOTSTRAP_IP`, tagged on `end0` | every anchor |
-| keepalived `boot` instance | Holds `BOOT_VIP` on the anchor that passes the check below. It prefers spore, then capsule, then forge, and uses unicast VRRP from the other anchors' bootstrap addresses only. | every anchor |
+| keepalived `boot` instance | Holds `BOOT_VIP` on the anchor that passes the checks below. It prefers spore, then capsule, then forge, and uses unicast VRRP from the other anchors' bootstrap addresses only. | every anchor |
 | dnsmasq TFTP | Serves the signed iPXE, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | every anchor |
 | `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC in `node-macs.json`, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not) | spore |
 | nginx `talos-boot` | Serves the UKI, its iPXE script, the previous UKI, the ISO and HookOS on port 80, at the anchor's bootstrap address and at `BOOT_VIP` | every anchor |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | every anchor |
 | `talos-boot-check` | Exports whether the anchor holds `BOOT_VIP` and passes the check, each minute | every anchor |
+| [Talos enrollment](../../apps/talos-enroll.md) | nginx serves `enroll.lolwtf.ca` on port 443 at `BOOT_VIP` in front of talos-enroll; `talos-enroll-check` exports whether it serves, each minute | every anchor |
 
-The check passes when dnsmasq is active and nginx serves the UKI's script at the anchor's bootstrap address. keepalived runs it every 5 seconds; two failures drop the anchor below every healthy one.
+The boot check passes when dnsmasq is active and nginx serves the UKI's script at the anchor's bootstrap address. The enrollment check passes when nginx serves `enroll.lolwtf.ca` on loopback with a certificate that public roots trust, and talos-enroll answers behind it. keepalived runs each every 5 seconds; two failures of either drop the anchor below every healthy one.
 
 ## Boot path
 
@@ -49,7 +50,7 @@ A Talos version bump fails the mirror until that version's release exists. The a
 
 ## Alerts
 
-The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carries `talos_boot_vip_held`, `talos_boot_serving`, `talos_boot_mirror_success`, `talos_boot_mirror_last_success_timestamp_seconds` and `talos_boot_uki_info`, which names each slot's version and release. `clusters/folly/monitoring/anchor-vips.yaml` declares the alerts.
+The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carries `talos_boot_vip_held`, `talos_boot_serving`, `talos_enroll_serving`, `talos_boot_mirror_success`, `talos_boot_mirror_last_success_timestamp_seconds` and `talos_boot_uki_info`, which names each slot's version and release. `clusters/folly/monitoring/anchor-vips.yaml` declares the alerts.
 
 | Alert | Meaning |
 | --- | --- |
@@ -57,19 +58,22 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 | `AnchorBootNotServing` | One anchor fails the check or exports no metrics |
 | `AnchorBootMirrorStale` | One anchor's mirror has not verified a release for 6 hours |
 | `AnchorBootReleasesDiffer` | The anchors serve different releases for 3 hours |
+| `AnchorEnrollVipDown` | No anchor holds `BOOT_VIP` and passes the enrollment check |
+| `AnchorEnrollNotServing` | One anchor fails the enrollment check or exports no metrics |
 
 ## Rules
 
 - Each anchor's switch port must carry the bootstrap VLAN tagged. spore's Smee answers DHCP broadcasts, and VRRP between the anchors runs on the VLAN.
 - spore serves the boot files at its own bootstrap address as well as at `BOOT_VIP`. The netboot iPXE falls back to that address when no anchor holds the VIP.
 - `talos-uki-verify.sh` runs `sbverify --cert` and also requires exactly one signature. sbverify alone passes a file with several signatures when any one of them verifies.
-- A machine on the bootstrap VLAN reaches the anchors directly, where the UniFi firewall cannot filter it. Each anchor's `nixos-fw-bootstrap` chain, from `talos-boot.nix`, runs before the ports the NixOS firewall opens on every interface. Over IPv4 it admits the ports declared for `bootstrap` (TFTP and HTTP, and on spore Smee and the Tink server), DNS, NTP, ping and VRRP from the other anchors' bootstrap addresses, and drops the rest. Over IPv6 it admits only ICMPv6. Declare a new bootstrap service in `networking.firewall.interfaces.bootstrap`, or the chain drops it. The `anchor-boot` check fails if the chain admits ssh, NFS, Garage, an exporter or the Tinkerbell API.
+- A machine on the bootstrap VLAN reaches the anchors directly, where the UniFi firewall cannot filter it. Each anchor's `nixos-fw-bootstrap` chain, from `talos-boot.nix`, runs before the ports the NixOS firewall opens on every interface. Over IPv4 it admits the ports declared for `bootstrap` (TFTP, HTTP and HTTPS, and on spore Smee and the Tink server), DNS, NTP, ping and VRRP from the other anchors' bootstrap addresses, and drops the rest. Over IPv6 it admits only ICMPv6. Declare a new bootstrap service in `networking.firewall.interfaces.bootstrap`, or the chain drops it. The `anchor-boot` check fails if the chain admits ssh, NFS, Garage, an exporter or the Tinkerbell API.
 - The `anchor-boot` and `spore-reliability` checks in `nix/lib/checks.nix` fail if dnsmasq could lease addresses or answer DHCP.
 
 ## Where it lives
 
 - `nix/services/talos-boot.nix`: the VLAN, firewall, dnsmasq, nginx paths, the check and the mirror
 - `nix/services/anchor-vips.nix`: the keepalived `boot` instance and its VRRP firewall
+- `nix/services/talos-enroll.nix`: the enrollment server, its certificate and its check
 - `nix/services/tinkerbell.nix`: Smee, the rest of Tinkerbell and the `netboot-not-allowed` links
 - `clusters/folly/config/anchor-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP`
 - `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network's DHCP and the anchors' switch ports
