@@ -6,7 +6,7 @@ description: Check the Smiirl counter, calibrate its drums, repair it when it do
 This runbook checks, calibrates and repairs the [Smiirl counter](../apps/smiirl.md), and returns it to Smiirl's cloud. A cell is the character for one drum: a digit, `a` for blank, or `b` for stripes.
 
 > [!WARNING]
-> This runbook changes counter settings and starts the NFS server on spore by hand. It is an exception to the GitOps rule because git cannot hold counter settings or start a stopped service.
+> This runbook changes counter settings by hand. It is an exception to the GitOps rule because git cannot hold counter settings.
 
 ## Before you start
 
@@ -148,30 +148,6 @@ If the setup wizard says "Counter does not have access to internet", do this pro
 
    Result: The reply to the internet check matches step 5 of [Check the counter](#check-the-counter).
 
-## Start the NFS server on spore
-
-If `/api/state` does not answer in 5 seconds, do this procedure.
-
-1. Read the NFS registration on spore.
-
-   ```bash
-   ssh spore.lolwtf.ca rpcinfo -T tcp localhost nfs
-   ```
-
-   Result: `ready and waiting` if NFS runs, or `Program not registered` if it is stopped.
-
-2. If NFS is stopped, start it.
-
-   ```bash
-   ssh spore.lolwtf.ca sudo systemctl start nfs-server.service
-   ```
-
-3. Make sure `/api/state` returns `200`.
-
-   ```bash
-   curl -s --max-time 5 -o /dev/null -w '%{http_code}\n' https://smiirl.lolwtf.ca/api/state
-   ```
-
 ## Return the counter to Smiirl's cloud
 
 If the counter must use Smiirl's cloud again, do this procedure. The counter then needs a Smiirl account.
@@ -196,7 +172,6 @@ If the counter must use Smiirl's cloud again, do this procedure. The counter the
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| `nfs-server.service` does not start. | `/nfs/data` is not mounted. | Read `journalctl -b -u nfs-data.mount` on spore. |
 | The Gateway has no address. | Cilium did not assign the address. | Read `kubectl --context folly -n smiirl describe gateway smiirl`. |
 | capsule or spore gives another address for `api.smiirl.com`. | That host does not run `main`. | Run `sudo systemctl start nixos-upgrade.service` on that host. |
 | `online` is `false`, and all checks pass. | A browser opened a counter page, or the counter cached an old DNS answer. | Power-cycle the counter. |

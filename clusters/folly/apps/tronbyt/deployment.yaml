@@ -8,6 +8,10 @@ metadata:
     app.kubernetes.io/part-of: tronbyt
 spec:
   replicas: 1
+  # The volume is node-local and read-write by one pod: a surge pod would
+  # share the git checkouts under /app/data with the old one.
+  strategy:
+    type: Recreate
   selector:
     matchLabels: *labels
   template:
@@ -16,6 +20,15 @@ spec:
       annotations:
         backup.velero.io/backup-volumes: tronbyt-data
     spec:
+      # No node is tainted, so this term keeps the volume off the control-plane
+      # node's disk, which etcd shares.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       automountServiceAccountToken: false
       # A service link sets TRONBYT_PORT to tcp://<ip>:8000, which overrides the
       # app's listen port and crashes it with "too many colons in address".
@@ -53,7 +66,7 @@ spec:
           volumeMounts:
             - name: tronbyt-data
               mountPath: /app/data
-          # First boot checks out ~1000 system apps onto NFS, which can take
+          # First boot checks out ~1000 system apps onto the volume, which can take
           # over a minute.
           startupProbe:
             httpGet:
@@ -91,4 +104,4 @@ spec:
       volumes:
         - name: tronbyt-data
           persistentVolumeClaim:
-            claimName: tronbyt-data
+            claimName: tronbyt-data-local
