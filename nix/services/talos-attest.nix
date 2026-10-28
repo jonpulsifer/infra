@@ -149,7 +149,9 @@ in
           { ATTEST_CA_KEY = "%d/devid-ca-key"; }
       )
       // lib.optionalAttrs netbox {
-        ATTEST_NETBOX_URL = "https://capsule.${fleet.tailnet}";
+        # NetBox runs on capsule (nix/services/netbox.nix) and serves the anchors on its Anchor
+        # network address; the anchors are no tailnet peers of one another.
+        ATTEST_NETBOX_URL = "http://${lab.hosts.capsule}:8080";
         ATTEST_NETBOX_TOKEN_FILE = "%d/netbox-token";
       };
       serviceConfig = {
