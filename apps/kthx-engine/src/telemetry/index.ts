@@ -1,19 +1,17 @@
 import {
+  type Attributes,
   type Counter,
   type Gauge,
   type Histogram,
+  logs,
   type Meter,
   type MeterProvider,
   type MetricOptions,
   metrics,
+  SeverityNumber,
   type Tracer,
   trace,
 } from '@opentelemetry/api';
-import {
-  type LogAttributes,
-  logs,
-  SeverityNumber,
-} from '@opentelemetry/api-logs';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -70,8 +68,8 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
   sdkInstance = new NodeSDK({
     resource,
     traceExporter,
-    metricReader,
-    logRecordProcessor,
+    metricReaders: [metricReader],
+    logRecordProcessors: [logRecordProcessor],
   });
 
   try {
@@ -241,7 +239,7 @@ function emitSafely(record: Parameters<typeof logger.emit>[0]): void {
   }
 }
 
-export function logInfo(message: string, attributes: LogAttributes = {}) {
+export function logInfo(message: string, attributes: Attributes = {}) {
   console.log(`[INFO] ${message}`, attributes);
   emitSafely({
     severityNumber: SeverityNumber.INFO,
@@ -251,7 +249,7 @@ export function logInfo(message: string, attributes: LogAttributes = {}) {
   });
 }
 
-export function logWarn(message: string, attributes: LogAttributes = {}) {
+export function logWarn(message: string, attributes: Attributes = {}) {
   console.warn(`[WARN] ${message}`, attributes);
   emitSafely({
     severityNumber: SeverityNumber.WARN,
@@ -264,7 +262,7 @@ export function logWarn(message: string, attributes: LogAttributes = {}) {
 export function logError(
   message: string,
   error?: unknown,
-  attributes: LogAttributes = {},
+  attributes: Attributes = {},
 ) {
   console.error(`[ERROR] ${message}`, error, attributes);
   emitSafely({
