@@ -26,6 +26,7 @@ on:
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
       - 'apps/talos-enroll/**'
+      - 'images/spire-agent-tpm/devid-init/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -41,6 +42,7 @@ on:
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
       - 'apps/talos-enroll/**'
+      - 'images/spire-agent-tpm/devid-init/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -69,6 +71,7 @@ jobs:
           - apps/netbench
           - apps/smiirl
           - apps/talos-enroll
+          - images/spire-agent-tpm/devid-init
     defaults:
       run:
         working-directory: ${{ matrix.module }}

@@ -1,6 +1,6 @@
-# The lab's SPIRE server. Agents on Talos nodes attest by their TPM's EK public key hash, and every
-# registration entry is declared here and synced by a oneshot, so git holds the whole entry list.
-# docs/platform/identity.md has the design.
+# The lab's SPIRE server. Agents on Talos nodes attest by their TPM's LDevID (`tpm_devid`) or by
+# their EK public key hash (the boxboat plugin), and every registration entry is declared here and
+# synced by a oneshot, so git holds the whole entry list. docs/platform/identity.md has the design.
 {
   config,
   lib,
@@ -67,13 +67,27 @@ let
     ${lib.concatMapStrings (hash: "touch $out/${hash}\n") cfg.ekHashes}
   '';
 
+  # tpm_devid loads each file into an x509.CertPool and checks a chain only up to a certificate in
+  # the pool, so every certificate here is a trust anchor. The DevID file takes only the first
+  # certificate of each chain, so the fml intermediate and root above a DevID CA never become
+  # anchors. The agent sends no EK intermediates, so a manufacturer's issuing CA sits beside its root.
+  devidCAs = pkgs.runCommand "spire-devid-ca.pem" { nativeBuildInputs = [ pkgs.openssl ]; } ''
+    ${lib.concatMapStrings (chain: "openssl x509 -in ${chain} >> $out\n") cfg.devid.caChains}
+  '';
+  endorsementCAs = pkgs.concatText "spire-endorsement-ca.pem" cfg.devid.endorsementCAs;
+
   parentOf = entry: if entry.parentID == null then serverID else entry.parentID;
   # Stable across selector edits, so a changed entry updates in place. The prefix marks the
-  # entries this sync owns and may prune.
+  # entries this sync owns and may prune. A key tells apart two entries for one SPIFFE ID, such as
+  # a node's alias by EK hash and its alias by LDevID.
   entryID =
     entry:
     "git-"
-    + builtins.substring 0 16 (builtins.hashString "sha256" "${parentOf entry} ${entry.spiffeID}");
+    + builtins.substring 0 16 (
+      builtins.hashString "sha256" (
+        "${parentOf entry} ${entry.spiffeID}" + lib.optionalString (entry.key != null) " ${entry.key}"
+      )
+    );
   entryArgs =
     entry:
     lib.escapeShellArgs (
@@ -121,7 +135,28 @@ in
     ekHashes = lib.mkOption {
       type = lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}");
       default = [ ];
-      description = "SHA-256 hashes of the TPM EK public keys allowed to attest, lowercase hex.";
+      description = "SHA-256 hashes of the TPM EK public keys allowed to attest, lowercase hex. An empty list removes the EK node attestor.";
+    };
+    devid = {
+      enable = lib.mkEnableOption ''
+        SPIRE's `tpm_devid` node attestor beside the EK one. An agent attests with the LDevID that the
+        attest service issued its TPM, and the server checks the LDevID's chain and the EK
+        certificate's manufacturer chain
+      '';
+      caChains = lib.mkOption {
+        type = lib.types.nonEmptyListOf lib.types.path;
+        description = ''
+          PEM chains of the DevID issuing CAs, each with its CA first. The server trusts only the
+          first certificate of each, since an fml intermediate or root in the pool would admit any
+          certificate it signs.
+        '';
+      };
+      endorsementCAs = lib.mkOption {
+        type = lib.types.listOf lib.types.path;
+        default = lib.filesystem.listFilesRecursive ./spire/roots;
+        defaultText = lib.literalExpression "lib.filesystem.listFilesRecursive ./spire/roots";
+        description = "PEM files of the TPM manufacturers' EK issuing and root CAs.";
+      };
     };
     entries = lib.mkOption {
       default = [ ];
@@ -137,6 +172,11 @@ in
               type = lib.types.nullOr lib.types.str;
               default = null;
               description = "The parent's SPIFFE ID. Null makes a node entry: an alias for every agent whose node selectors match.";
+            };
+            key = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Tells apart entries with one parent and SPIFFE ID. An agent matches an entry only when it has every selector, so each node attestor needs its own node entry.";
             };
             selectors = lib.mkOption {
               type = lib.types.nonEmptyListOf lib.types.str;
@@ -166,9 +206,15 @@ in
             connection_string = "$STATE_DIRECTORY/datastore.sqlite3";
           };
           KeyManager.disk.plugin_data.keys_path = "$STATE_DIRECTORY/keys.json";
-          NodeAttestor.tpm = {
+          NodeAttestor.tpm = lib.mkIf (cfg.ekHashes != [ ]) {
             plugin_cmd = lib.getExe spire.tpmPlugin;
             plugin_data.hash_path = hashPath;
+          };
+          NodeAttestor.tpm_devid = lib.mkIf cfg.devid.enable {
+            plugin_data = {
+              devid_ca_path = "${devidCAs}";
+              endorsement_ca_path = "${endorsementCAs}";
+            };
           };
           Notifier = lib.mkIf cfg.bundleNotifier.enable {
             k8sbundle.plugin_data = {
@@ -186,7 +232,7 @@ in
       };
     };
 
-    environment.etc."spire/tpm-hashes".source = ekHashes;
+    environment.etc."spire/tpm-hashes" = lib.mkIf (cfg.ekHashes != [ ]) { source = ekHashes; };
 
     systemd.services.spire-server = lib.mkMerge [
       { serviceConfig.StateDirectory = lib.mkForce "spire"; }
@@ -292,6 +338,10 @@ in
     };
 
     assertions = [
+      {
+        assertion = cfg.ekHashes != [ ] || cfg.devid.enable;
+        message = "homelab.spire needs a node attestor: an EK hash in ekHashes, or devid.enable";
+      }
       {
         assertion = lib.elem "--collector.textfile.directory=${metricsDir}" config.services.prometheus.exporters.node.extraFlags;
         message = "spire-server.nix writes its agent gauge to ${metricsDir}; the node exporter's textfile collector must read it";

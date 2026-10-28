@@ -1,14 +1,13 @@
 ---
 title: Add a TPM node to SPIRE
-description: Read a folly node's TPM endorsement key hash, admit it on spore's SPIRE server, label the node, and make sure its agent serves SVIDs.
+description: Admit a folly node with a TPM 2.0 to spore's SPIRE server by its LDevID, or by its endorsement key hash as the fallback, and make sure its agent serves SVIDs.
 ---
 
-Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to turn on the notifier that keeps the agents' bootstrap bundle current. [Identity](../platform/identity.md) describes the agent, the SPIFFE IDs and the endorsement key (EK) hash allow list.
+Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, to turn on LDevID attestation, and to turn on the notifier that keeps the agents' bootstrap bundle current. [Identity](../platform/identity.md) describes the agent, both node attestors and the SPIFFE IDs.
+
+A node that passed attestation has an LDevID from the attest service, and its agent attests with it. The endorsement key (EK) hash allow list is the fallback for a node with no LDevID.
 
 `<name>` is the node's host name, and `<hash>` is its EK hash.
-
-> [!WARNING]
-> This procedure changes live state by hand. It is an exception to the GitOps rule because only a privileged process on the node can read the TPM. The debug pod reads the EK hash, and you delete it at once.
 
 ## Before you start
 
@@ -17,8 +16,46 @@ Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to turn 
 - To turn on the bundle notifier, you need the operator key in `~/.config/age/keys.txt`, as [Manage SOPS secrets](manage-sops-secrets.md) describes.
 - The node is in folly, and its TPM 2.0 is on in the firmware.
 - The GHCR package `ghcr.io/jonpulsifer/spire-agent-tpm` is public.
+- To admit the node by LDevID, LDevID attestation is on, and the node passed attestation.
+
+## Admit the node
+
+spore builds the EK hash allow list, each node alias, and the entries under each alias from `tpmNodes` and `workloads` in `nix/hosts/spore.nix`.
+
+1. On a branch, add `<name> = { };` to `tpmNodes` in `nix/hosts/spore.nix`.
+2. If the node has no LDevID, read its EK hash, and set `<name>.ekHash = "<hash>";`.
+3. In `clusters/folly/talos/talos.tf`, give the node the label `lolwtf.ca/tpm` with the value `true`.
+4. Open a pull request, and apply it with Atlantis.
+5. Deploy spore, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
+
+## Turn on LDevID attestation
+
+Do this once. The server then runs `tpm_devid` beside the EK attestor, and each agent attests by LDevID when the attest service serves one for its node.
+
+1. On a branch, in `homelab.spire` of `nix/hosts/spore.nix`, set `devid.caChains` to the DevID CA's chain under `terraform/pki/certs/`.
+2. Set `devid.enable = true;`.
+3. Merge the pull request, and deploy spore.
+4. In a second pull request, set `ATTEST_URL` in the `spire-attest` ConfigMap of `clusters/folly/apps/spire/agent-config.yaml`.
+
+   The value is the attest service's base URL on the Anchor network.
+
+5. Merge the pull request.
+
+   Result: Reloader restarts the agents.
+
+6. Read the attestation of each agent, as [Make sure the agent serves SVIDs](#make-sure-the-agent-serves-svids) describes.
+
+   Result: `spiffe_id="spiffe://lolwtf.ca/spire/agent/tpm_devid/<fingerprint>"`.
+
+> [!CAUTION]
+> With no EK hash left, the server has no EK attestor. An agent whose LDevID fetch fails then cannot attest.
+
+7. When every node attests by LDevID, delete each `ekHash` from `tpmNodes`, and deploy spore.
 
 ## Read the EK hash
+
+> [!WARNING]
+> This procedure changes live state by hand. It is an exception to the GitOps rule because only a privileged process on the node can read the TPM. The debug pod reads the EK hash, and you delete it at once.
 
 1. Start a privileged debug pod on the node, and print the hash.
 
@@ -42,15 +79,6 @@ Use this runbook to give a folly node with a TPM 2.0 a SPIRE agent, and to turn 
    ```bash
    kubectl --context folly -n spire delete pod node-debugger-<name>-<suffix>
    ```
-
-## Admit the node
-
-spore builds its EK hash allow list, each node alias, and the entries under each alias from `tpmNodes` and `workloads` in `nix/hosts/spore.nix`.
-
-1. On a branch, add `<name> = "<hash>";` to `tpmNodes` in `nix/hosts/spore.nix`.
-2. In `clusters/folly/talos/talos.tf`, give the node the label `lolwtf.ca/tpm` with the value `true`.
-3. Open a pull request, and apply it with Atlantis.
-4. Deploy spore, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
 
 ## Turn on the bundle notifier
 
@@ -109,9 +137,17 @@ Do this once, before the first agent attests. spore's `k8sbundle` notifier then 
    kubectl --context folly -n spire logs <pod> | grep 'Node attestation was successful'
    ```
 
-   Result: a line with `spiffe_id="spiffe://lolwtf.ca/spire/agent/tpm/<hash>"`.
+   Result: a line with `spiffe_id="spiffe://lolwtf.ca/spire/agent/tpm_devid/<fingerprint>"`, or `spiffe_id="spiffe://lolwtf.ca/spire/agent/tpm/<hash>"` for the EK attestor.
 
-3. On spore, list the agents.
+3. If the agent attests by EK hash and you expect its LDevID, read the init container's log.
+
+   ```bash
+   kubectl --context folly -n spire logs <pod> -c devid-init
+   ```
+
+   Result: a line with `"attestor":"tpm_devid"`, or a warning that names the reason for the fallback.
+
+4. On spore, list the agents.
 
    ```bash
    spire-server agent list -socketPath /run/spire/server/private/api.sock
@@ -119,8 +155,8 @@ Do this once, before the first agent attests. spore's `k8sbundle` notifier then 
 
    Result: the agent ID of step 2.
 
-4. If the Job in `clusters/folly/apps/spire/smoke.yaml` has `suspend: true`, remove that line in a pull request, and merge it. Only the first node needs this step.
-5. Read the smoke Job's log.
+5. If the Job in `clusters/folly/apps/spire/smoke.yaml` has `suspend: true`, remove that line in a pull request, and merge it. Only the first node needs this step.
+6. Read the smoke Job's log.
 
    ```bash
    kubectl --context folly -n spire-smoke logs job/spire-smoke
@@ -141,6 +177,11 @@ Do this once, before the first agent attests. spore's `k8sbundle` notifier then 
 | The first attestation fails with `x509: certificate signed by unknown authority` | The notifier missed a rotation while folly's API server was down | On spore, run `systemctl restart spire-server`. The notifier writes the bundle at startup. |
 | `spire-server` restarts every 30 seconds, and its journal shows `Notifier failed to handle event` | The server cannot write the bundle at startup, and it exits | If the error is `401`, the Secret is new: store its token again. Otherwise, make sure that spore reaches folly's API server. |
 | The server rejects the attestation | The hash is not in `tpmNodes` of `nix/hosts/spore.nix`, or spore runs an older configuration | Add the hash, and deploy spore. |
+| `devid-init` logs `no usable LDevID` | The attest service is unreachable, holds no LDevID for the serial, or serves one for another node, serial or key | Read the reason in the log. Attest the node again, or fix `ATTEST_URL`. |
+| The agent logs `tpm2.Load failed` | The attest service wrapped the LDevID key under another parent than the TCG H-1 or H-2 storage root key | Attest the node again after the attest service creates the key under that parent. |
+| The server logs `cannot verify EK signature` | The CA that signed the node's EK certificate is not in `nix/services/spire/roots/` | Add the CA from the EK certificate's AIA URL, and deploy spore. |
+| The agent logs `unable to get endorsement certificate` | The TPM has no RSA EK certificate in NV, which `tpm_devid` reads | Admit the node by EK hash. |
+| The agent attests by LDevID, and workloads get no SVID | No alias selects the LDevID's subject CN | Make sure that `<name>` is in `tpmNodes` and that `devid.enable` is on. |
 | The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM, and boot the node. |
 | The smoke Job runs no pod | The Job is suspended | Remove `suspend: true` from `clusters/folly/apps/spire/smoke.yaml`. |
 | The smoke Job prints `no identity issued` | No entry for `spire-smoke/smoke` has the node's alias as parent | Add the pair to `workloads` in `nix/hosts/spore.nix`, and deploy spore. |
