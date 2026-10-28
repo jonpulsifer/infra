@@ -74,6 +74,10 @@ in
           });
         '';
         services.udev.packages = [ pkgs.yubikey-personalization ];
+        # pcscd runs as its own user; the Yubico rules admit only logged-in users.
+        services.udev.extraRules = ''
+          SUBSYSTEM=="usb", ATTR{idVendor}=="1050", GROUP="pcscd", MODE="0660"
+        '';
 
         users.groups.talos-attest = { };
 

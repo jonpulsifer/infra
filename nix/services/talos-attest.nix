@@ -90,6 +90,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # The service's own metrics file lives in node-exporter's root-owned textfile directory.
+    systemd.tmpfiles.rules = [ "a+ ${metricsDir} - - - - g:talos-attest:rwx" ];
+
     assertions = [
       {
         assertion = pkcs11 -> yubikey.enable && yubikey.serial != null;
