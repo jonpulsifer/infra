@@ -37,6 +37,10 @@ jobs:
           # lint job.
           install_args: shfmt
       - name: Format and lint
+        # mise run installs every tool in [tools] that is missing; gcloud's
+        # vfox plugin fails to install on mise 2026.10.21.
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
         run: mise run check
       - name: Test the ElevenLabs reconciler
         run: bash .github/scripts/elevenlabs-reconcile_test.sh
