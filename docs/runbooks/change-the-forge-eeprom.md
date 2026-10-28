@@ -12,7 +12,7 @@ Use this runbook to change the boot order or the HTTP boot settings of [forge](.
 
 - Get SSH access to forge and [spore](../hosts/spore.md) as `jawn`.
 - Reach `https://prom.lolwtf.ca`, folly's Prometheus.
-- `<spore-ip>` is `SPORE_IP` in `clusters/folly/config/lab-topology.json`.
+- `<spore-ip>` is `SPORE_IP` in `clusters/folly/config/anchor-topology.json`.
 
 ## Check the fallback
 

@@ -3,7 +3,7 @@
 { config, ... }:
 let
   fleet = import ../lib/fleet.nix;
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
 in
 {
   imports = [

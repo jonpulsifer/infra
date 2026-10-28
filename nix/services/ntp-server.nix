@@ -2,7 +2,7 @@
 # the other anchors, and orphan mode keeps a common stratum 10 timebase if every upstream fails.
 { lib, name, ... }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   anchors = [
     "capsule"
     "spore"

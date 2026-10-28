@@ -6,13 +6,13 @@ locals {
       client     = local.clients.desktops.tallboy
       network_id = unifi_network.future.id
       cidr       = local.future_cidr
-      fixed_ip   = local.lab_topology.TALLBOY_IP
+      fixed_ip   = local.anchor_topology.TALLBOY_IP
     }
     atomic = {
       client     = local.clients.desktops.atomic
       network_id = unifi_network.future.id
       cidr       = local.future_cidr
-      fixed_ip   = local.lab_topology.ATOMIC_IP
+      fixed_ip   = local.anchor_topology.ATOMIC_IP
     }
   }
 }
@@ -33,7 +33,7 @@ resource "unifi_client" "windows_hosts" {
   lifecycle {
     precondition {
       condition     = each.value.fixed_ip == cidrhost(each.value.cidr, each.value.client.ip)
-      error_message = "lab-topology.json's ${upper(each.key)}_IP disagrees with the clients.yaml octet for ${each.key}."
+      error_message = "anchor-topology.json's ${upper(each.key)}_IP disagrees with the clients.yaml octet for ${each.key}."
     }
   }
 }

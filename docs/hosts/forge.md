@@ -13,7 +13,7 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-forge is the lab's native arm64 build host, a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. `nix/hosts/forge.nix` configures it.
+forge is the lab's native arm64 build host, a Raspberry Pi 5 on [the Anchor network](../platform/network.md#networks), folly's network for lab hosts. `nix/hosts/forge.nix` configures it.
 
 ## What it runs
 

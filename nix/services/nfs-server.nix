@@ -7,7 +7,7 @@
   ...
 }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
 in
 {
   options.homelab.nfsServer.dataDevice = lib.mkOption {

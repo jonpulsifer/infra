@@ -12,7 +12,7 @@
   ...
 }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   iface = "bootstrap";
   peers = map (anchor: lab.bootstrap.hosts.${anchor}) (
     lib.remove name (lib.attrNames lab.bootstrap.hosts)

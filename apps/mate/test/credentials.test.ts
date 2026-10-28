@@ -200,7 +200,7 @@ describe('the stamp', () => {
     });
   });
 
-  test('the Lab Net jump host is the one the config names', async () => {
+  test('the Anchor network jump host is the one the config names', async () => {
     const r = credentialled({
       ssh: 'PRIVATE-KEY-BYTES',
       jump: 'spore.lolwtf.ca',

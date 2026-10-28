@@ -8,7 +8,7 @@
   ...
 }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   iface = "bootstrap";
   bootstrapIp = lab.bootstrap.hosts.spore;
 
@@ -195,7 +195,7 @@ let
     "--backend-kube-config=${kubeconfig}"
     "--etcd-dir=%S/tinkerbell/etcd"
     "--etcd-servers=http://localhost:2379"
-    # Every address, so localhost serves the kubeconfig above; the firewall admits Lab Net and the tailnet.
+    # Every address, so localhost serves the kubeconfig above; the firewall admits the Anchor network and the tailnet.
     "--kube-apiserver-bind-address=0.0.0.0"
     "--secure-port=${toString apiPort}"
     "--kube-apiserver-tls-cert-file=%d/server-crt"

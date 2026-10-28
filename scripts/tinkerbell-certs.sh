@@ -33,7 +33,7 @@ case "${1:-}" in
     ;;
 esac
 
-spore_ip="$(jq -er .data.SPORE_IP "$root/clusters/folly/config/lab-topology.json")"
+spore_ip="$(jq -er .data.SPORE_IP "$root/clusters/folly/config/anchor-topology.json")"
 zone="$(jq -er .locals.fleet.dns_zone "$root/terraform/network/tailscale/fleet.tf.json")"
 tailnet="$(jq -er .locals.fleet.tailnet "$root/terraform/network/tailscale/fleet.tf.json")"
 

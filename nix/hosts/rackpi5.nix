@@ -9,7 +9,7 @@
   ...
 }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   storeUrl = "http://${lab.hosts.spore}/rackpi5-ram";
   roStoreMount = "sysroot-nix-.ro\\x2dstore.mount";
   # Only the stage-1 debug sshd uses this key. boot.img carries it and spore serves boot.img

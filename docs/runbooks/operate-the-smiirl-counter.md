@@ -12,7 +12,7 @@ This runbook checks, calibrates and repairs the [Smiirl counter](../apps/smiirl.
 
 - Get `kubectl` access to folly ([Get cluster admin access](get-cluster-admin-access.md)) and SSH access to [capsule](../hosts/capsule.md) and [spore](../hosts/spore.md).
 - Reach the `iot` network from your shell and browser.
-- Make sure `.agents/skills/unifi-network/unifi.sh` works ([Inspect the UniFi network](inspect-the-unifi-network.md)). If `unifi.fml.pulsifer.ca` does not resolve, set `UNIFI_HOST=https://<udm>` and `UNIFI_SSH_HOST=<udm>`, where `<udm>` is the first host in `FUTURE_CIDR` in `clusters/folly/config/lab-topology.json`.
+- Make sure `.agents/skills/unifi-network/unifi.sh` works ([Inspect the UniFi network](inspect-the-unifi-network.md)). If `unifi.fml.pulsifer.ca` does not resolve, set `UNIFI_HOST=https://<udm>` and `UNIFI_SSH_HOST=<udm>`, where `<udm>` is the first host in `FUTURE_CIDR` in `clusters/folly/config/anchor-topology.json`.
 
 ## Check the counter
 

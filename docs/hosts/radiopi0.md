@@ -16,7 +16,7 @@ specs:
   case: Pimoroni Pirate Radio
 ---
 
-radiopi0 is a Raspberry Pi Zero W on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. It lights its pHAT BEAT LEDs when it receives a CloudEvent. It runs Raspbian, and its NixOS config is not applied.
+radiopi0 is a Raspberry Pi Zero W on [the Anchor network](../platform/network.md#networks), folly's network for lab hosts. It lights its pHAT BEAT LEDs when it receives a CloudEvent. It runs Raspbian, and its NixOS config is not applied.
 
 ## What it runs
 

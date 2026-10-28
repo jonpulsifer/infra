@@ -80,7 +80,7 @@ spec:
               protocol: TCP
             - port: "50000"
               protocol: TCP
-    # folly's hosts, its Lab Net jump host (MATE_SANDBOX_LAB_JUMP), its Talos
+    # folly's hosts, the Anchor network jump host (MATE_SANDBOX_LAB_JUMP), its Talos
     # API and its apiserver, across the site-to-site tunnel.
     - toCIDRSet:
         - cidr: ${CILIUM_NATIVE_ROUTING_CIDR}

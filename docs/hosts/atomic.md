@@ -20,7 +20,7 @@ atomic is set up like [tallboy](tallboy.md), with `windows_exporter` and OhmGrap
 
 ## Reach
 
-Reach it at [`atomic.<tailnet>`](index.md#reach-a-host). `terraform/network/unifi/folly/windows-hosts.tf` reserves its address from `ATOMIC_IP` in `clusters/folly/config/lab-topology.json`.
+Reach it at [`atomic.<tailnet>`](index.md#reach-a-host). `terraform/network/unifi/folly/windows-hosts.tf` reserves its address from `ATOMIC_IP` in `clusters/folly/config/anchor-topology.json`.
 
 ## Quirks
 

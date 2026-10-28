@@ -7,7 +7,7 @@ on:
       - '**/*.tf'
       - '**/*.tftest.hcl'
       - '**/.terraform.lock.hcl'
-      - clusters/folly/config/lab-topology.json
+      - clusters/folly/config/anchor-topology.json
       - clusters/*/config/cluster-topology.json
       - terraform/network/unifi/folly/clients.yaml
       - .github/scripts/validation-impact.sh
@@ -18,7 +18,7 @@ on:
       - '**/*.tf'
       - '**/*.tftest.hcl'
       - '**/.terraform.lock.hcl'
-      - clusters/folly/config/lab-topology.json
+      - clusters/folly/config/anchor-topology.json
       - clusters/*/config/cluster-topology.json
       - terraform/network/unifi/folly/clients.yaml
       - .github/scripts/validation-impact.sh
@@ -52,7 +52,7 @@ jobs:
             **/*.tf
             **/*.tftest.hcl
             **/.terraform.lock.hcl
-            clusters/folly/config/lab-topology.json
+            clusters/folly/config/anchor-topology.json
             clusters/*/config/cluster-topology.json
             terraform/network/unifi/folly/clients.yaml
             .github/scripts/validation-impact.sh

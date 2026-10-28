@@ -1,4 +1,4 @@
-# The anchors' shared addresses. ns1 and ns2 carry DNS and NTP on Lab Net; boot carries the Talos
+# The anchors' shared addresses. ns1 and ns2 carry DNS and NTP on the Anchor network; boot carries the Talos
 # boot files on the bootstrap VLAN (./talos-boot.nix). keepalived on every anchor runs unicast VRRP
 # for each. Each VIP prefers its own order of anchors, and an anchor whose service stops answering
 # drops below every healthy one, so the VIP follows a working server.
@@ -9,7 +9,7 @@
   ...
 }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   anchors = [
     "capsule"
     "forge"

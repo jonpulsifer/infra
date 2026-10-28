@@ -1,7 +1,7 @@
 # A site's Garage S3 store, the primary target of its backups: Velero, CNPG and the etcd snapshots
 # write into it over the LAN, and a cluster CronJob copies it off-site. A node is either the
 # standalone store (replication factor 1, RPC on loopback) or a member of the anchors' cluster
-# (replication factor 3, RPC on Lab Net, open to the other anchors only).
+# (replication factor 3, RPC on the Anchor network, open to the other anchors only).
 # docs/runbooks/migrate-garage-to-three-nodes.md moves the store from the first to the second.
 {
   config,
@@ -12,7 +12,7 @@
 let
   cfg = config.homelab.garage;
   backups = import ../lib/backups.nix { inherit pkgs; };
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   garage = lib.getExe config.services.garage.package;
   secret = name: config.sops.secrets.${name}.path;
 
@@ -92,7 +92,7 @@ in
       type = lib.types.bool;
       default = false;
       description = ''
-        Join the anchors' three-node cluster at replication factor 3, with RPC on Lab Net. Every
+        Join the anchors' three-node cluster at replication factor 3, with RPC on the Anchor network. Every
         anchor of the cluster sets it, on a data directory that no standalone store has used.
       '';
     };

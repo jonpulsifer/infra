@@ -146,7 +146,7 @@ export interface SandboxConfig {
    */
   readonly kubePeers: readonly string[];
   /**
-   * The host the sandbox's ssh reaches folly's Lab Net hosts through, which
+   * The host the sandbox's ssh reaches folly's Anchor network hosts through, which
    * offsite routes to and the folly firewall admits on 22. A name, never a
    * key, so `sandboxManifest` may read it.
    */

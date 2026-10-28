@@ -52,7 +52,7 @@ ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tink
 - `clusters/folly/flux-system/tinkerbell.yaml`: the Flux Kustomizations
 - `clusters/folly/tinkerbell-access/`: the kubeconfig, from the 1Password item `spore tinkerbell api`
 - `scripts/tinkerbell-certs.sh`: the API's certificates
-- `clusters/folly/config/lab-topology.json`: `SPORE_BOOTSTRAP_IP`
+- `clusters/folly/config/anchor-topology.json`: `SPORE_BOOTSTRAP_IP`
 
 ## Related
 
