@@ -151,8 +151,20 @@ description = "Write talos-enroll's per-node render inputs from the folly Talos 
 run = "bash scripts/render-machine-inputs.sh"
 
 [tasks."inventory:check"]
-description = "Compare folly's hardware inventory with what each node reports over the Talos API; exits 1 on drift"
+description = "Compare each folly node's NetBox device with what the node reports over the Talos API; exits 1 on drift"
 run = "bash scripts/inventory.sh check"
+
+[tasks."netbox:seed"]
+description = "Import folly's site, device types, custom fields, nodes, anchors, switch, cables and prefixes from git into NetBox; a second run changes nothing"
+run = "bash scripts/netbox-seed.sh"
+
+[tasks."netbox:export"]
+description = "Write clusters/folly/inventory/machines.yaml from NetBox's active and staged kubernetes-node devices"
+run = "bash scripts/netbox-export.sh"
+
+[tasks."netbox:check"]
+description = "Fail when clusters/folly/inventory/machines.yaml differs from NetBox's export"
+run = "bash scripts/netbox-export.sh --check"
 
 [tasks."inventory:observe"]
 description = "Print a folly node's observed inventory entry (args: [--insecure] <address>)"

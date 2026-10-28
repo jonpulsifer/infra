@@ -1,5 +1,5 @@
 ---
-# promtool tests for CapsuleNetboxDown in capsule.yaml, run by `mise run k8s:check-rules`.
+# promtool tests for the NetBox alerts in capsule.yaml, run by `mise run k8s:check-rules`.
 rule_files:
   - capsule.yaml
 
@@ -48,3 +48,61 @@ tests:
             exp_annotations:
               message: "netbox.service on capsule is not active"
               description: "NetBox, its PostgreSQL, Redis or RQ worker, or the Tailscale serve that publishes it is down on capsule. The UI and API at https://capsule.<tailnet> fail, and intake that writes NetBox stops; the clusters keep running. `systemctl status` and `journalctl -u` on the unit show why."
+
+  # optiplex drifts at minute 10; riptide stays in step. The check keeps finishing, and the export
+  # differs from minute 30.
+  - interval: 1m
+    input_series:
+      - series: 'netbox_drift{instance="capsule",job="node-exporter",device="optiplex"}'
+        values: 0x9 1x30
+      - series: 'netbox_drift{instance="capsule",job="node-exporter",device="riptide"}'
+        values: 0x40
+      - series: 'netbox_drift_last_success_timestamp_seconds{instance="capsule"}'
+        values: 0+60x200
+      - series: 'netbox_export_drift{instance="capsule"}'
+        values: 0x29 1x200
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: NetboxNodeDrift
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: NetboxNodeDrift
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: optiplex
+            exp_annotations:
+              message: "optiplex differs from its NetBox device"
+              description: "The hourly drift check on capsule found that optiplex reports a model, SKU, serial, BIOS, MAC, Secure Boot state or address that differs from NetBox, or has no NetBox device. The device's journal and `mise run inventory:check` list the differences. Fix NetBox or the node, then run `mise run netbox:export`. https://wiki.lolwtf.ca/reference/inventory/#drift"
+      - eval_time: 2h
+        alertname: NetboxExportDiffers
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: NetboxExportDiffers
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: NetBox differs from clusters/folly/inventory/machines.yaml on main
+              description: "A device changed in NetBox and its export has not merged. Run `mise run netbox:export` and open a pull request with clusters/folly/inventory/machines.yaml. https://wiki.lolwtf.ca/reference/inventory/#export"
+      - eval_time: 3h
+        alertname: NetboxDriftCheckStale
+        exp_alerts: []
+
+  # The check's last finished run stays at time zero, so it goes stale after three hours.
+  - interval: 1m
+    input_series:
+      - series: 'netbox_drift_last_success_timestamp_seconds{instance="capsule"}'
+        values: 0x300
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: NetboxDriftCheckStale
+        exp_alerts: []
+      - eval_time: 3h20m
+        alertname: NetboxDriftCheckStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: The NetBox drift check on capsule has not finished for three hours
+              description: "netbox-drift.service on capsule has not finished a run, so node drift goes unseen. `journalctl -u netbox-drift` on capsule shows why: NetBox, the Talos API or the minted os:reader certificate. https://wiki.lolwtf.ca/reference/inventory/#drift"
