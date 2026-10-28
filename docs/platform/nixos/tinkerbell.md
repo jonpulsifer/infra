@@ -19,7 +19,7 @@ Tinkerbell is the provisioning stack on [spore](../../hosts/spore.md) that reins
 Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace. A pull request that adds a `Workflow` there starts a [reprovision](../../runbooks/reprovision-a-talos-node.md):
 
 1. The controller turns the `Hardware`'s `allowPXE` on. Rufio powers the node off, sets a one-time PXE boot and powers it on.
-2. UniFi's offer names the signed iPXE, which dnsmasq serves. iPXE chains Smee's script for its MAC, and the script chains the signed HookOS UKI from nginx.
+2. UniFi's offer names the signed iPXE at the boot VIP, which dnsmasq serves on whichever anchor holds it. iPXE chains Smee's script for its MAC, and the script chains the signed HookOS UKI from nginx.
 3. The `reprovision-talos` Template wipes the `Hardware`'s disk, makes the IPv4 network boot entry the next boot, and reboots. Its actions run `images/tink-reprovision-tools`, which carries the disk, EFI and Docker tools, so the boot VLAN needs no package mirror.
 4. The controller turns `allowPXE` off, so Smee has no script for the MAC. iPXE chains the [signed Talos UKI's script](talos-boot.md#netboot-images), and [Talos enrollment](../../apps/talos-enroll.md) releases the config.
 
@@ -47,7 +47,7 @@ ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tink
 
 ## Where it lives
 
-- `nix/services/tinkerbell.nix`: the pinned binary, flags, firewall, unit and Flux's Role
+- `nix/services/tinkerbell.nix`: the pinned binary, flags, firewall, unit, Flux's Role and the `netboot-not-allowed` TFTP links
 - `clusters/folly/tinkerbell/`: the `Hardware`, `Machine`, Secret and `Template` objects, and `nodes.env`
 - `clusters/folly/flux-system/tinkerbell.yaml`: the Flux Kustomizations
 - `clusters/folly/tinkerbell-access/`: the kubeconfig, from the 1Password item `spore tinkerbell api`

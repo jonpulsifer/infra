@@ -27,7 +27,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
 ## Run the build
 
 > [!CAUTION]
-> A run replaces the installer tag and adds a release of `<version>`. Releases are immutable, so each build is its own release, tagged with the run id, and spore's mirror takes the newest. A node that installs during the run can pull either build.
+> A run replaces the installer tag and adds a release of `<version>`. Releases are immutable, so each build is its own release, tagged with the run id, and each anchor's mirror takes the newest. A node that installs during the run can pull either build.
 
 1. Start the workflow on `main`.
 
