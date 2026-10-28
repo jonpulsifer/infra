@@ -1,0 +1,50 @@
+---
+# promtool tests for CapsuleNetboxDown in capsule.yaml, run by `mise run k8s:check-rules`.
+rule_files:
+  - capsule.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # PostgreSQL stops at minute 5; the other units stay active.
+  - interval: 1m
+    input_series:
+      - series: 'node_systemd_unit_state{instance="capsule",name="netbox.service",state="active"}'
+        values: 1x30
+      - series: 'node_systemd_unit_state{instance="capsule",name="netbox-rq.service",state="active"}'
+        values: 1x30
+      - series: 'node_systemd_unit_state{instance="capsule",name="postgresql.service",state="active"}'
+        values: 1x4 0x26
+      - series: 'node_systemd_unit_state{instance="capsule",name="coredns.service",state="active"}'
+        values: 0x30
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: CapsuleNetboxDown
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CapsuleNetboxDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: postgresql.service
+            exp_annotations:
+              message: "postgresql.service on capsule is not active"
+              description: "NetBox, its PostgreSQL, Redis or RQ worker, or the Tailscale serve that publishes it is down on capsule. The UI and API at https://capsule.<tailnet> fail, and intake that writes NetBox stops; the clusters keep running. `systemctl status` and `journalctl -u` on the unit show why."
+
+  # node-exporter on capsule exports no NetBox unit at all.
+  - interval: 1m
+    input_series:
+      - series: 'node_systemd_unit_state{instance="capsule",name="chronyd.service",state="active"}'
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CapsuleNetboxDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: capsule
+              name: netbox.service
+              state: active
+            exp_annotations:
+              message: "netbox.service on capsule is not active"
+              description: "NetBox, its PostgreSQL, Redis or RQ worker, or the Tailscale serve that publishes it is down on capsule. The UI and API at https://capsule.<tailnet> fail, and intake that writes NetBox stops; the clusters keep running. `systemctl status` and `journalctl -u` on the unit show why."
