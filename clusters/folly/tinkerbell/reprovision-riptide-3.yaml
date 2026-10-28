@@ -1,7 +1,0 @@
----
-apiVersion: tinkerbell.org/v1alpha1
-kind: Workflow
-metadata:
-  name: reprovision-riptide-3
-spec:
-  hardwareRef: riptide

@@ -12,7 +12,6 @@ locals {
     {
       "erx" = cidrhost(local.lab_cidr, 5)
       "k8s" = local.topology.API_SERVER_IP
-      "nuc" = cidrhost(local.node_cidr, 13)
     },
     local.node_addresses,
   )
