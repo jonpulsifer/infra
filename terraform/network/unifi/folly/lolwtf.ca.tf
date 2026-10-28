@@ -25,6 +25,14 @@ locals {
       name    = "time"
       content = local.lab.hosts.spore
     }
+    ns1 = {
+      name    = "ns1"
+      content = local.lab_topology.NS1_IP
+    }
+    ns2 = {
+      name    = "ns2"
+      content = local.lab_topology.NS2_IP
+    }
   }
 }
 

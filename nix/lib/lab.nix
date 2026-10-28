@@ -12,6 +12,11 @@ in
     vlan = builtins.fromJSON data.BOOTSTRAP_VLAN;
     spore = data.SPORE_BOOTSTRAP_IP;
   };
+  # The anchors' shared VIPs for DNS and NTP (../services/anchor-vips.nix).
+  ns = {
+    ns1 = data.NS1_IP;
+    ns2 = data.NS2_IP;
+  };
   hosts = {
     capsule = data.CAPSULE_IP;
     spore = data.SPORE_IP;
