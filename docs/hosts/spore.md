@@ -21,9 +21,8 @@ spore is a Raspberry Pi 5 that serves NFS, x86 netboot, forge's boot image, and 
 
 - NFS for `clusters/folly/storage/` (`nfs-server.nix`)
 - [Netboot](../platform/nixos/netboot.md) for x86 PXE and [rackpi5](rackpi5.md) (`pxe-netboot.nix`, `spore-native-boot.nix`)
-- [Talos boot](../platform/nixos/talos-boot.md) for folly's Talos UKI on the bootstrap VLAN (`spore-talos-boot.nix`)
 - [Tinkerbell](../platform/nixos/tinkerbell.md), which answers PXE on the bootstrap VLAN and reprovisions folly's Talos nodes (`tinkerbell.nix`)
-- [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time) (`nix/profiles/anchor.nix`, which imports `coredns-sinkhole.nix` and `ntp-server.nix`)
+- [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time) and [Talos boot](../platform/nixos/talos-boot.md) on the bootstrap VLAN (`nix/profiles/anchor.nix`, which imports `coredns-sinkhole.nix`, `ntp-server.nix` and `talos-boot.nix`)
 - folly's [backup](../platform/backups.md) Garage store, with data in `/nfs/data/garage-ha` (`garage.nix`), as a node of the [Garage cluster](../platform/backups.md#garage-cluster). The old standalone store in `/nfs/data/garage` is the rollback.
 - The [SPIRE server](../platform/identity.md) that attests Talos nodes by TPM (`spire-server.nix`)
 

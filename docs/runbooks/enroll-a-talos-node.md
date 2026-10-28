@@ -3,7 +3,7 @@ title: Enroll a Talos node
 description: Wipe a folly node's system disk, boot it from the network on the bootstrap VLAN, approve its enrollment, and return it to the Kubernetes VLAN.
 ---
 
-Use this runbook to install Talos on riptide, shale or optiplex with Secure Boot. The node network boots the signed UKI from spore through [Tinkerbell](../platform/nixos/tinkerbell.md), asks [Talos enrollment](../apps/talos-enroll.md) for its config, and installs once you approve it. For these nodes, it replaces the kexec path of [Install Talos on a node](install-talos-on-a-node.md). On a node with Intel AMT, [Reprovision a Talos node](reprovision-a-talos-node.md) replaces the wipe and the power-on at the machine.
+Use this runbook to install Talos on riptide, shale or optiplex with Secure Boot. The node network boots the signed UKI from the anchors through [Tinkerbell](../platform/nixos/tinkerbell.md), asks [Talos enrollment](../apps/talos-enroll.md) for its config, and installs once you approve it. For these nodes, it replaces the kexec path of [Install Talos on a node](install-talos-on-a-node.md). On a node with Intel AMT, [Reprovision a Talos node](reprovision-a-talos-node.md) replaces the wipe and the power-on at the machine.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because the disk wipe and the firmware settings happen at the machine.

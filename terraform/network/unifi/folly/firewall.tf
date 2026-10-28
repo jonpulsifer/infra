@@ -526,7 +526,7 @@ resource "unifi_firewall_policy" "folly_pbx_to_handset" {
   }
 }
 
-# The bootstrap VLAN reaches spore on its own subnet, which the switch carries and
+# The bootstrap VLAN reaches the anchors on its own subnet, which the switch carries and
 # the gateway never filters, the gateway's DHCP, the enrollment server's VIP, and
 # the internet, where a Talos install pulls its installer image. Nothing else on
 # the LAN or in the cluster's VIP range. The controller appends each policy to its

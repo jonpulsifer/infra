@@ -14,7 +14,7 @@ let
   lab = import ../lib/lab.nix;
   pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
   # Tink server and syslog are Tinkerbell's on spore's bootstrap address, at its default ports.
-  tink = lab.bootstrap.spore;
+  tink = lab.bootstrap.hosts.spore;
   cmdline = lib.concatStringsSep " " [
     "facility="
     "syslog_host=${tink}"

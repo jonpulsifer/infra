@@ -1,0 +1,458 @@
+# Talos boot server for folly's bootstrap VLAN, on every anchor. A timer mirrors the signed UKI and
+# the iPXE script that boots it, SecureBoot ISO, netboot iPXE and HookOS UKI from the
+# talos-folly/<version> GitHub release, checks each signed image against its committed signing cert,
+# and keeps the previous release as prev. dnsmasq serves the iPXE over TFTP and nginx serves the
+# rest, at the anchor's own bootstrap address and at the boot VIP, which ./anchor-vips.nix moves to
+# an anchor that passes the check below. Smee (./tinkerbell.nix, spore only) answers PXE on the VLAN.
+{
+  config,
+  lib,
+  pkgs,
+  name,
+  ...
+}:
+let
+  lab = import ../lib/lab.nix;
+  iface = "bootstrap";
+  peers = map (anchor: lab.bootstrap.hosts.${anchor}) (
+    lib.remove name (lib.attrNames lab.bootstrap.hosts)
+  );
+  site = "folly";
+  address = lab.bootstrap.hosts.${name};
+  stateDir = "/var/lib/talos-boot";
+  siteDir = "${stateDir}/${site}";
+  metricsDir = "/var/lib/prometheus-node-exporter-text-files";
+  tftpDir = "/var/lib/tftpboot/talos/${site}";
+  uki = "metal-amd64-secureboot-uki.efi";
+  # iPXE chains this when Smee has no script for the MAC; it boots the UKI with its own command line.
+  ukiScript = "metal-amd64-secureboot-uki.ipxe";
+  iso = "metal-amd64-secureboot.iso";
+  # Signed with the UKI key; the bootstrap network's DHCP names talos/folly/<this> under dnsmasq's
+  # TFTP root.
+  ipxe = "ipxe-amd64-secureboot.efi";
+  # Signed with the HookOS key; iPXE fetches it over HTTP.
+  hookos = "hookos-amd64-secureboot-uki.efi";
+  signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
+  hookosCert = ../../clusters/folly/talos/secureboot/hookos-signing-cert.pem;
+  # The pipeline's check: exactly one signature, and sbverify against the committed certificate.
+  verifyUki = ../../.github/scripts/talos-uki-verify.sh;
+
+  # The release tag follows the Talos version the folly root installs.
+  talosVersion =
+    let
+      matches = lib.concatMap (
+        line:
+        let
+          m = builtins.match ''[[:space:]]*talos_version[[:space:]]*=[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*'' line;
+        in
+        if m == null then [ ] else m
+      ) (lib.splitString "\n" (builtins.readFile ../../clusters/folly/talos/talos.tf));
+    in
+    if lib.length matches == 1 then
+      lib.head matches
+    else
+      throw "clusters/folly/talos/talos.tf must set talos_version exactly once";
+  # Each image build is its own immutable release, tagged talos-<site>/<version>-<run id>.
+  releasesApi = "https://api.github.com/repos/jonpulsifer/infra/releases?per_page=100";
+  tagPrefix = "talos-${site}/${talosVersion}-";
+
+  bootstrapPrefix = lib.toInt (lib.last (lib.splitString "/" lab.bootstrap.cidr));
+
+  readOnlyLocation = alias: {
+    inherit alias;
+    extraConfig = ''
+      limit_except GET {
+        deny all;
+      }
+      autoindex off;
+    '';
+  };
+
+  # The bootstrap VLAN holds unenrolled machines, so its interface admits only what they use: the
+  # ports declared for it (here and in ./tinkerbell.nix), the DNS and NTP that its DHCP names, ping,
+  # and the boot VIP's VRRP from the other anchors. The global allowed ports apply on every
+  # interface, so the chain runs before them, after nixos-fw's trusted-interface and
+  # established-connection accepts. NixOS deletes and recreates nixos-fw-accept and
+  # nixos-fw-log-refuse on every reload, which fails while another chain refers to them, so this
+  # chain ends in the built-in ACCEPT and DROP.
+  bootstrapChain = "nixos-fw-bootstrap";
+  bootstrapPosition = lib.length config.networking.firewall.trustedInterfaces + 2;
+  bootstrapRules =
+    let
+      allowed = config.networking.firewall.interfaces.${iface};
+      dports =
+        proto: ports: ranges:
+        map (port: "-p ${proto} --dport ${toString port}") (lib.unique ports)
+        ++ map (range: "-p ${proto} --dport ${toString range.from}:${toString range.to}") ranges;
+    in
+    dports "tcp" (allowed.allowedTCPPorts ++ [ 53 ]) allowed.allowedTCPPortRanges
+    ++ dports "udp" (
+      allowed.allowedUDPPorts
+      ++ [
+        53
+        123
+      ]
+    ) allowed.allowedUDPPortRanges
+    ++ [ "-p icmp --icmp-type echo-request" ]
+    ++ map (peer: "-p 112 -s ${peer}") peers;
+
+  # keepalived's track script for the boot VIP, and the probe below: dnsmasq runs, and nginx serves
+  # the UKI's script at this anchor's own bootstrap address.
+  serves = pkgs.writeShellScript "talos-boot-serves" ''
+    ${pkgs.systemd}/bin/systemctl is-active --quiet dnsmasq.service
+    ${pkgs.curl}/bin/curl --fail --silent --output /dev/null --max-time 2 http://${address}/talos/${site}/${ukiScript}
+  '';
+in
+{
+  assertions = [
+    {
+      assertion = lab.bootstrap.hosts ? ${name};
+      message = "talos-boot.nix may only be imported by an anchor with a bootstrap address: ${lib.concatStringsSep ", " (lib.attrNames lab.bootstrap.hosts)}";
+    }
+  ];
+
+  services.prometheus.exporters.node = {
+    enabledCollectors = [ "textfile" ];
+    extraFlags = [ "--collector.textfile.directory=${metricsDir}" ];
+  };
+
+  networking.vlans.${iface} = {
+    id = lab.bootstrap.vlan;
+    interface = "end0";
+  };
+  networking.interfaces.${iface} = {
+    useDHCP = false;
+    ipv4.addresses = [
+      {
+        inherit address;
+        prefixLength = bootstrapPrefix;
+      }
+    ];
+  };
+
+  # nginx listens on the boot VIP whether or not this anchor holds it.
+  boot.kernel.sysctl."net.ipv4.ip_nonlocal_bind" = 1;
+
+  networking.firewall.interfaces.${iface} = {
+    allowedTCPPorts = [ 80 ];
+    allowedUDPPorts = [ 69 ];
+    allowedUDPPortRanges = [
+      {
+        from = 30000;
+        to = 30099;
+      }
+    ];
+  };
+
+  # IPv6 on the VLAN is link-local only, so it gets neighbour discovery and nothing else.
+  networking.firewall.extraCommands = ''
+    iptables -w -N ${bootstrapChain} 2>/dev/null || true
+    iptables -w -F ${bootstrapChain}
+    ${lib.concatMapStrings (rule: ''
+      iptables -w -A ${bootstrapChain} ${rule} -j ACCEPT
+    '') bootstrapRules}
+    iptables -w -A ${bootstrapChain} -j DROP
+    iptables -w -I nixos-fw ${toString bootstrapPosition} -i ${iface} -j ${bootstrapChain}
+
+    ip6tables -w -N ${bootstrapChain} 2>/dev/null || true
+    ip6tables -w -F ${bootstrapChain}
+    ip6tables -w -A ${bootstrapChain} -p icmpv6 --icmpv6-type redirect -j DROP
+    ip6tables -w -A ${bootstrapChain} -p icmpv6 --icmpv6-type 139 -j DROP
+    ip6tables -w -A ${bootstrapChain} -p icmpv6 -j ACCEPT
+    ip6tables -w -A ${bootstrapChain} -j DROP
+    ip6tables -w -I nixos-fw ${toString bootstrapPosition} -i ${iface} -j ${bootstrapChain}
+  '';
+
+  # TFTP only (port=0): no DHCP and no DNS.
+  services.dnsmasq = {
+    enable = true;
+    resolveLocalQueries = false;
+    settings = {
+      port = 0;
+      enable-tftp = true;
+      tftp-root = "/var/lib/tftpboot";
+      tftp-max = 100;
+      # TFTP data leaves UDP/69 on a server-chosen port; bound it so the firewall admits it
+      # without a conntrack helper.
+      tftp-port-range = "30000,30099";
+    };
+  };
+
+  services.nginx = {
+    enable = true;
+    virtualHosts.talos-boot = {
+      listen =
+        map
+          (addr: {
+            inherit addr;
+            port = 80;
+          })
+          [
+            address
+            lab.bootstrap.vip
+          ];
+      locations = {
+        "/".return = "404";
+        "= /talos/${site}/${uki}" = readOnlyLocation "${siteDir}/current/${uki}";
+        "= /talos/${site}/prev/${uki}" = readOnlyLocation "${siteDir}/prev/${uki}";
+        "= /talos/${site}/${ukiScript}" = readOnlyLocation "${siteDir}/current/${ukiScript}";
+        "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
+        "= /talos/${site}/${hookos}" = readOnlyLocation "${siteDir}/current/${hookos}";
+      };
+    };
+  };
+
+  systemd.tmpfiles.rules = [
+    "d ${metricsDir} 0755 root root -"
+    "d ${stateDir} 0755 root root -"
+    "d ${siteDir} 0755 root root -"
+    "d /var/lib/tftpboot 0755 root root -"
+    "d /var/lib/tftpboot/talos 0755 root root -"
+    "d ${tftpDir} 0755 root root -"
+    "L+ ${tftpDir}/${ipxe} - - - - ${siteDir}/current/${ipxe}"
+  ];
+
+  services.keepalived.vrrpScripts.talos-boot = {
+    script = toString serves;
+    interval = 5;
+    fall = 2;
+    rise = 2;
+    weight = -120;
+    user = "nobody";
+  };
+
+  # Whether this anchor holds the boot VIP and passes the check. The cluster cannot reach the
+  # bootstrap VLAN, so node-exporter carries both.
+  systemd.services.talos-boot-check = {
+    description = "Export whether this anchor holds the boot VIP and serves the Talos boot files";
+    path = with pkgs; [
+      coreutils
+      gnugrep
+      iproute2
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      UMask = "0022";
+      NoNewPrivileges = true;
+      PrivateDevices = true;
+      PrivateTmp = true;
+      ProtectHome = true;
+      ProtectSystem = "strict";
+      ReadWritePaths = [ metricsDir ];
+    };
+    script = ''
+      set -u
+      held=0
+      if ip -4 -o addr show dev ${iface} | grep -qF ' ${lab.bootstrap.vip}/'; then
+        held=1
+      fi
+      serving=0
+      if ${serves}; then
+        serving=1
+      fi
+      metrics=$(mktemp ${metricsDir}/.talos-boot-check.XXXXXX)
+      trap 'rm -f "$metrics"' EXIT
+      {
+        printf '# HELP talos_boot_vip_held Whether this anchor holds the boot VIP.\n'
+        printf '# TYPE talos_boot_vip_held gauge\n'
+        printf 'talos_boot_vip_held{site="${site}"} %s\n' "$held"
+        printf '# HELP talos_boot_serving Whether dnsmasq runs and nginx serves the UKI script at this anchor.\n'
+        printf '# TYPE talos_boot_serving gauge\n'
+        printf 'talos_boot_serving{site="${site}"} %s\n' "$serving"
+      } > "$metrics"
+      # node_exporter reads the textfile directory as its own user.
+      chmod 0644 "$metrics"
+      mv "$metrics" ${metricsDir}/talos-boot-check.prom
+      trap - EXIT
+    '';
+  };
+
+  systemd.timers.talos-boot-check = {
+    description = "Periodically export the boot VIP and Talos boot file state";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2m";
+      OnUnitActiveSec = "1m";
+      Unit = "talos-boot-check.service";
+    };
+  };
+
+  systemd.services.talos-boot-mirror = {
+    description = "Mirror the signed Talos boot assets for ${site}";
+    wants = [ "network-online.target" ];
+    after = [ "network-online.target" ];
+    path = with pkgs; [
+      coreutils
+      curl
+      findutils
+      jq
+      openssl
+      sbsigntool
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      TimeoutStartSec = "1h";
+      User = "root";
+      Group = "root";
+      UMask = "0022";
+      NoNewPrivileges = true;
+      PrivateDevices = true;
+      PrivateTmp = true;
+      ProtectClock = true;
+      ProtectControlGroups = true;
+      ProtectHome = true;
+      ProtectKernelLogs = true;
+      ProtectKernelModules = true;
+      ProtectKernelTunables = true;
+      ProtectSystem = "strict";
+      ReadWritePaths = [
+        stateDir
+        metricsDir
+      ];
+      RestrictAddressFamilies = [
+        "AF_UNIX"
+        "AF_INET"
+        "AF_INET6"
+      ];
+      RestrictNamespaces = true;
+      RestrictRealtime = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = true;
+      CapabilityBoundingSet = "";
+      SystemCallArchitectures = "native";
+    };
+    script = ''
+      set -euo pipefail
+
+      site_dir=${siteDir}
+      releases="$site_dir/releases"
+      success=0
+      stage=""
+
+      write_metrics() {
+        local metrics slot version release
+        metrics=$(mktemp ${metricsDir}/.talos-boot-mirror.XXXXXX)
+        {
+          printf '# HELP talos_boot_mirror_success Whether the last mirror run verified and published the release.\n'
+          printf '# TYPE talos_boot_mirror_success gauge\n'
+          printf 'talos_boot_mirror_success{site="${site}",wanted_version="${talosVersion}"} %s\n' "$success"
+          printf '# HELP talos_boot_mirror_last_success_timestamp_seconds When the mirror last verified the release.\n'
+          printf '# TYPE talos_boot_mirror_last_success_timestamp_seconds gauge\n'
+          printf 'talos_boot_mirror_last_success_timestamp_seconds{site="${site}"} %s\n' \
+            "$(cat "$site_dir/last-success" 2>/dev/null || echo 0)"
+          printf '# HELP talos_boot_uki_info The Talos version and release (the digest of its boot files) of each served UKI.\n'
+          printf '# TYPE talos_boot_uki_info gauge\n'
+          for slot in current prev; do
+            version=$(cat "$site_dir/$slot/version" 2>/dev/null || true)
+            release=$(basename "$(readlink "$site_dir/$slot" || true)")
+            if [ -n "$version" ]; then
+              printf 'talos_boot_uki_info{site="${site}",slot="%s",version="%s",release="%s"} 1\n' "$slot" "$version" "$release"
+            fi
+          done
+        } > "$metrics"
+        # node_exporter reads the textfile directory as its own user.
+        chmod 0644 "$metrics"
+        mv "$metrics" ${metricsDir}/talos-boot-mirror.prom
+      }
+
+      cleanup() {
+        if [ -n "$stage" ]; then
+          rm -rf "$stage"
+        fi
+        write_metrics
+      }
+      trap cleanup EXIT
+
+      fetch() {
+        curl --fail --location --silent --show-error --retry 3 --max-time 1800 "$@"
+      }
+
+      install -d -m 0755 "$releases"
+      find "$releases" -mindepth 1 -maxdepth 1 -name '.stage.*' -exec rm -rf {} +
+      stage=$(mktemp -d "$releases/.stage.XXXXXX")
+      # mktemp -d makes 0700; nginx reads the release as an unprivileged user.
+      chmod 0755 "$stage"
+
+      # The newest published release of this Talos version. The tag holds a
+      # slash, which the download URL carries encoded.
+      tag=$(fetch --header 'Accept: application/vnd.github+json' "${releasesApi}" \
+        | jq -r --arg prefix "${tagPrefix}" \
+          '[.[] | select(.draft | not) | select(.tag_name | startswith($prefix))] | sort_by(.created_at) | last | .tag_name // empty')
+      if [ -z "$tag" ]; then
+        echo "no published release is tagged ${tagPrefix}*" >&2
+        exit 1
+      fi
+      release_url="https://github.com/jonpulsifer/infra/releases/download/''${tag//\//%2F}"
+
+      # Each release has a new UKI asset, so an unchanged UKI ETag means an unchanged release.
+      etag_args=()
+      if [ -s "$site_dir/current/uki.etag" ] && [ -s "$site_dir/current/${iso}" ] \
+        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ] \
+        && [ -s "$site_dir/current/${ukiScript}" ]; then
+        etag_args=(--etag-compare "$site_dir/current/uki.etag")
+      fi
+      code=$(fetch "''${etag_args[@]}" --etag-save "$stage/uki.etag" \
+        --output "$stage/${uki}" --write-out '%{http_code}' "$release_url/${uki}")
+
+      if [ "$code" = 304 ]; then
+        echo "current UKI is unchanged"
+      else
+        ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${uki}"
+        fetch --output "$stage/${ukiScript}" "$release_url/${ukiScript}"
+        grep -q '^chain --autofree ${uki} ' "$stage/${ukiScript}"
+        fetch --output "$stage/${ipxe}" "$release_url/${ipxe}"
+        ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${ipxe}"
+        fetch --output "$stage/${hookos}" "$release_url/${hookos}"
+        ${pkgs.bash}/bin/bash ${verifyUki} ${hookosCert} "$stage/${hookos}"
+        fetch --output "$stage/${iso}" "$release_url/${iso}"
+        test -s "$stage/${iso}"
+        printf '%s\n' ${talosVersion} > "$stage/version"
+
+        # A build can change iPXE, HookOS or the script and leave the UKI as it was.
+        id=$(cd "$stage" && sha256sum ${uki} ${ukiScript} ${ipxe} ${hookos} | sha256sum | cut -d ' ' -f 1)
+        release="$releases/$id"
+        if [ -e "$release" ]; then
+          install -m 0644 "$stage/uki.etag" "$release/uki.etag"
+        else
+          mv "$stage" "$release"
+          stage=""
+        fi
+
+        old=$(readlink "$site_dir/current" || true)
+        if [ "$old" != "releases/$id" ]; then
+          if [ -n "$old" ]; then
+            ln -sfn "$old" "$site_dir/.prev.new"
+            mv -Tf "$site_dir/.prev.new" "$site_dir/prev"
+          fi
+          ln -sfn "releases/$id" "$site_dir/.current.new"
+          mv -Tf "$site_dir/.current.new" "$site_dir/current"
+          echo "published ${talosVersion} UKI $id"
+        fi
+
+        keep_current=$(readlink "$site_dir/current" || true)
+        keep_prev=$(readlink "$site_dir/prev" || true)
+        for dir in "$releases"/*; do
+          [ -d "$dir" ] || continue
+          rel="releases/$(basename "$dir")"
+          if [ "$rel" != "$keep_current" ] && [ "$rel" != "$keep_prev" ]; then
+            rm -rf "$dir"
+          fi
+        done
+      fi
+
+      date +%s > "$site_dir/last-success"
+      success=1
+    '';
+  };
+
+  systemd.timers.talos-boot-mirror = {
+    description = "Periodically mirror the signed Talos boot assets";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "5m";
+      OnUnitActiveSec = "1h";
+      RandomizedDelaySec = "5m";
+      Unit = "talos-boot-mirror.service";
+    };
+  };
+}

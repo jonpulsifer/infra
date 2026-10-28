@@ -1,6 +1,21 @@
 locals {
   bootstrap_cidr = "${cidrhost(local.lab_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.lab_topology.BOOTSTRAP_CIDR)[1]}"
-  spore_boot_ip  = local.lab_topology.SPORE_BOOTSTRAP_IP
+
+  # The anchors' bootstrap addresses, spore first, and the boot VIP that
+  # keepalived moves between them (nix/services/anchor-vips.nix).
+  anchor_boot_ips = [
+    local.lab_topology.SPORE_BOOTSTRAP_IP,
+    local.lab_topology.CAPSULE_BOOTSTRAP_IP,
+    local.lab_topology.FORGE_BOOTSTRAP_IP,
+  ]
+  boot_vip = local.lab_topology.BOOT_VIP
+
+  # The switch port of each anchor, read from the live switch.
+  anchor_ports = {
+    capsule = 5
+    spore   = 7
+    forge   = 9
+  }
 
   # The switch ports that run MAC auth, from the inventory, and each node's
   # enrolled state: the network its RADIUS user puts it on. A reinstall flips a
@@ -58,35 +73,40 @@ resource "unifi_network" "bootstrap" {
   ipv6_interface_type = "none"
 
   # HP's UEFI PXE ignores Smee's ProxyDHCP offer and needs the boot file in the
-  # address offer, so UniFi names spore's signed iPXE. A MAC with no Hardware
-  # object gets that iPXE, and Smee answers its script request with nothing.
-  # The short lease expires a bootstrap address within a minute of the port
-  # moving to the Kubernetes VLAN, which flips without a link flap.
+  # address offer, so UniFi names the signed iPXE at the boot VIP. A MAC with
+  # no Hardware object gets that iPXE, and Smee answers its script request with
+  # nothing. The short lease expires a bootstrap address within a minute of the
+  # port moving to the Kubernetes VLAN, which flips without a link flap.
   dhcp_server = {
     enabled     = true
     leasetime   = "1m0s"
     start       = cidrhost(local.bootstrap_cidr, 2)
     stop        = cidrhost(local.bootstrap_cidr, 10)
     dns_enabled = true
-    dns_servers = [local.spore_boot_ip]
-    # spore's chrony, so an installing node keeps time without the internet.
+    # Every anchor's CoreDNS answers on its bootstrap address, and a client
+    # tries the next resolver itself. The boot VIP follows nginx, not CoreDNS.
+    dns_servers = local.anchor_boot_ips
+    # The anchors' chrony, so an installing node keeps time without the
+    # internet. UniFi takes two NTP servers, so the VIP stands for all three.
     ntp_enabled = true
-    ntp_servers = [local.spore_boot_ip]
-    tftp_server = local.spore_boot_ip
+    ntp_servers = [local.boot_vip]
+    tftp_server = local.boot_vip
     boot = {
       enabled  = true
-      server   = local.spore_boot_ip
+      server   = local.boot_vip
       filename = "talos/folly/ipxe-amd64-secureboot.efi"
     }
   }
 
   lifecycle {
     precondition {
-      condition = contains(
-        [for i in range(11, pow(2, 32 - tonumber(split("/", local.bootstrap_cidr)[1])) - 1) : cidrhost(local.bootstrap_cidr, i)],
-        local.spore_boot_ip,
-      )
-      error_message = "lab-topology.json's SPORE_BOOTSTRAP_IP must be in BOOTSTRAP_CIDR above the DHCP pool, which ends at host 10."
+      condition = alltrue([
+        for ip in concat(local.anchor_boot_ips, [local.boot_vip]) : contains(
+          [for i in range(11, pow(2, 32 - tonumber(split("/", local.bootstrap_cidr)[1])) - 1) : cidrhost(local.bootstrap_cidr, i)],
+          ip,
+        )
+      ]) && length(distinct(concat(local.anchor_boot_ips, [local.boot_vip]))) == 4
+      error_message = "lab-topology.json's SPORE_BOOTSTRAP_IP, CAPSULE_BOOTSTRAP_IP, FORGE_BOOTSTRAP_IP and BOOT_VIP must be four distinct addresses in BOOTSTRAP_CIDR above the DHCP pool, which ends at host 10."
     }
   }
 }
@@ -150,23 +170,27 @@ resource "unifi_device" "usw_24_poe" {
   forget_on_destroy = false
   allow_adoption    = false
 
-  # spore keeps Lab Net untagged and its PoE, and gains the bootstrap VLAN
-  # tagged for its proxy DHCP, TFTP and HTTP. The provider cannot write
-  # tagged_networkconf_ids, so the custom list names what to leave off.
-  port_override {
-    index                 = 7
-    name                  = "spore"
-    poe_mode              = "auto"
-    dot1x_ctrl            = "force_authorized"
-    forward               = "customize"
-    native_networkconf_id = unifi_network.lab.id
-    tagged_vlan_mgmt      = "custom"
-    excluded_networkconf_ids = [
-      unifi_network.fml.id,
-      unifi_network.k8s.id,
-      unifi_network.future.id,
-      unifi_network.iot.id,
-    ]
+  # Each anchor keeps Lab Net untagged and its PoE, and gains the bootstrap
+  # VLAN tagged for TFTP, HTTP, DNS, NTP and the boot VIP's VRRP, and on spore
+  # Smee's proxy DHCP. The provider cannot write tagged_networkconf_ids, so the
+  # custom list names what to leave off.
+  dynamic "port_override" {
+    for_each = local.anchor_ports
+    content {
+      index                 = port_override.value
+      name                  = port_override.key
+      poe_mode              = "auto"
+      dot1x_ctrl            = "force_authorized"
+      forward               = "customize"
+      native_networkconf_id = unifi_network.lab.id
+      tagged_vlan_mgmt      = "custom"
+      excluded_networkconf_ids = [
+        unifi_network.fml.id,
+        unifi_network.k8s.id,
+        unifi_network.future.id,
+        unifi_network.iot.id,
+      ]
+    }
   }
 
   dynamic "port_override" {

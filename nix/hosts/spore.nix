@@ -39,7 +39,6 @@ in
     ../services/pxe-netboot.nix
     ../services/spire-server.nix
     ../services/spore-native-boot.nix
-    ../services/spore-talos-boot.nix
     ../services/tinkerbell.nix
     ../system/sops.nix
   ];
@@ -98,6 +97,13 @@ in
 
   # The rackpi5 target is wired in nix/lib/registry.nix, where its piBootImg is in scope.
   services.spore.enable = true;
+
+  # Paths no unit reads, about 2G that the capped root cannot spare. The Talos boot mirror keeps its
+  # releases under /var/lib/talos-boot (../services/talos-boot.nix).
+  systemd.tmpfiles.rules = [
+    "R /var/lib/spore-talos-boot"
+    "r /var/lib/prometheus-node-exporter-text-files/spore-talos-boot.prom"
+  ];
 
   sdImage.expandOnBoot = false;
 

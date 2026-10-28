@@ -91,7 +91,7 @@ jobs:
             tf=$(mktemp)
             git show "$rev:$ROOT/talos.tf" >"$tf" || return 1
             bash .github/scripts/talos-image-inputs.sh "$tf" || return 1
-            git show "$rev:clusters/folly/config/lab-topology.json" | jq -r .data.SPORE_BOOTSTRAP_IP || return 1
+            git show "$rev:clusters/folly/config/lab-topology.json" | jq -r '.data.SPORE_BOOTSTRAP_IP, .data.BOOT_VIP' || return 1
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
               nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
@@ -261,7 +261,7 @@ jobs:
       # Releases in this repository are immutable, and a tag name that an
       # immutable release used is spent for good. Each build is its own release,
       # tagged with the run id; gh uploads the assets to a draft and publishes
-      # once. The mirror on spore takes the newest release of the version.
+      # once. The mirror on each anchor takes the newest release of the version.
       - name: Publish the UKI, its iPXE script, ISO, iPXE and HookOS
         env:
           GH_TOKEN: ${{ github.token }}

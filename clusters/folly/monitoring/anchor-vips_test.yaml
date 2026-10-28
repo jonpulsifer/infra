@@ -1,0 +1,104 @@
+---
+# promtool tests for the boot VIP alerts in anchor-vips.yaml, run by `mise run k8s:check-rules`.
+rule_files:
+  - anchor-vips.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # spore holds the VIP and serves until minute 10, when its nginx dies and keepalived moves the VIP
+  # to capsule two minutes later. forge's check fails throughout.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="monitoring",service="anchor-vips",instance="ns1"}'
+        values: 1x40
+      - series: 'up{namespace="monitoring",service="anchor-vips",instance="ns2"}'
+        values: 1x40
+      - series: 'talos_boot_vip_held{instance="spore",site="folly"}'
+        values: 1x11 0x29
+      - series: 'talos_boot_serving{instance="spore",site="folly"}'
+        values: 1x9 0x31
+      - series: 'talos_boot_vip_held{instance="capsule",site="folly"}'
+        values: 0x11 1x29
+      - series: 'talos_boot_serving{instance="capsule",site="folly"}'
+        values: 1x40
+      - series: 'talos_boot_vip_held{instance="forge",site="folly"}'
+        values: 0x40
+      - series: 'talos_boot_serving{instance="forge",site="folly"}'
+        values: 0x40
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: AnchorBootVipDown
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: AnchorBootNotServing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: forge
+              site: folly
+            exp_annotations:
+              message: Anchor forge does not serve the Talos boot files
+              description: "dnsmasq is down, nginx does not serve the UKI script at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
+          - exp_labels:
+              severity: warning
+              instance: spore
+              site: folly
+            exp_annotations:
+              message: Anchor spore does not serve the Talos boot files
+              description: "dnsmasq is down, nginx does not serve the UKI script at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
+
+  # The holder's check fails and no other anchor passes, so the VIP serves nothing.
+  - interval: 1m
+    input_series:
+      - series: 'talos_boot_vip_held{instance="spore",site="folly"}'
+        values: 1x20
+      - series: 'talos_boot_serving{instance="spore",site="folly"}'
+        values: 1x4 0x16
+      - series: 'talos_boot_vip_held{instance="capsule",site="folly"}'
+        values: 0x20
+      - series: 'talos_boot_serving{instance="capsule",site="folly"}'
+        values: 0x20
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AnchorBootVipDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: No anchor serves the Talos boot files at the boot VIP
+              description: "No anchor holds the boot VIP while dnsmasq runs and nginx serves the UKI script, so firmware on the bootstrap VLAN cannot load the signed iPXE. Check keepalived, dnsmasq and nginx on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/talos-boot.nix)."
+
+  # forge has never mirrored a release and serves a different one from spore's.
+  - interval: 1m
+    input_series:
+      - series: 'talos_boot_mirror_last_success_timestamp_seconds{instance="spore",site="folly"}'
+        values: 0+60x400
+      - series: 'talos_boot_mirror_last_success_timestamp_seconds{instance="forge",site="folly"}'
+        values: 0x400
+      - series: 'talos_boot_uki_info{instance="spore",site="folly",slot="current",version="v1.14.4",release="a"}'
+        values: 1x400
+      - series: 'talos_boot_uki_info{instance="forge",site="folly",slot="current",version="v1.14.4",release="b"}'
+        values: 1x400
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: AnchorBootReleasesDiffer
+        exp_alerts: []
+      - eval_time: 380m
+        alertname: AnchorBootMirrorStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: forge
+              site: folly
+            exp_annotations:
+              message: The Talos boot mirror on forge has not verified a release for 6 hours
+              description: "talos-boot-mirror.service fails, or has never succeeded. The anchor serves its last verified release. A Talos version bump fails the mirror until that version's release exists."
+      - eval_time: 380m
+        alertname: AnchorBootReleasesDiffer
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: The anchors serve different Talos boot releases
+              description: "The anchors' current boot files differ, so a boot VIP failover changes the UKI, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."

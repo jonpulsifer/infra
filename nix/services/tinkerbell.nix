@@ -1,6 +1,6 @@
 # Tinkerbell on spore: the embedded binary runs kube-apiserver, etcd, Smee, Tink and Rufio for folly's
 # Talos reprovisioning. Smee answers PXE as a proxy DHCP server on the bootstrap VLAN only and names
-# the signed iPXE that dnsmasq serves over TFTP (./pxe-netboot.nix).
+# the signed iPXE that dnsmasq serves over TFTP (./talos-boot.nix).
 {
   config,
   lib,
@@ -10,7 +10,7 @@
 let
   lab = import ../lib/lab.nix;
   iface = "bootstrap";
-  bootstrapIp = lab.bootstrap.spore;
+  bootstrapIp = lab.bootstrap.hosts.spore;
 
   # renovate: datasource=github-releases depName=tinkerbell/tinkerbell
   version = "v0.25.0";
@@ -19,6 +19,10 @@ let
 
   # Under dnsmasq's TFTP root; Smee names it in its offer to UEFI x86-64 PXE clients (arch 7).
   ipxeFile = "talos/folly/ipxe-amd64-secureboot.efi";
+  # Some firmware (riptide's) takes Smee's ProxyDHCP offer over UniFi's. With allowPXE off, Smee
+  # names /<mac>/netboot-not-allowed on spore's TFTP, so that path serves the same signed iPXE, which
+  # falls back to the Talos UKI when Smee has no script.
+  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/folly/apps/talos-enroll/node-macs.json);
   # nginx's base for the signed HookOS UKI. Smee's default HookOS script reads it; a Hardware
   # object's netboot.ipxe.url replaces that script, so Secure Boot nodes never use it.
   osieUrl = "http://${bootstrapIp}/talos/folly";
@@ -234,9 +238,14 @@ in
     }
     {
       assertion = config.networking.vlans ? ${iface};
-      message = "tinkerbell.nix binds Smee to the ${iface} VLAN, which spore-talos-boot.nix declares.";
+      message = "tinkerbell.nix binds Smee to the ${iface} VLAN, which talos-boot.nix declares.";
     }
   ];
+
+  systemd.tmpfiles.rules = lib.concatMap (mac: [
+    "d /var/lib/tftpboot/${mac} 0755 root root -"
+    "L+ /var/lib/tftpboot/${mac}/netboot-not-allowed - - - - /var/lib/tftpboot/${ipxeFile}"
+  ]) nodeMacs;
 
   sops.secrets = lib.genAttrs (map (name: "tinkerbell/${name}") secrets) (_: {
     restartUnits = [ "tinkerbell.service" ];

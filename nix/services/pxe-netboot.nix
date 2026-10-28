@@ -1,31 +1,12 @@
-# dnsmasq serves TFTP only (port=0): the signed iPXE that the bootstrap network names, linked into
-# /var/lib/tftpboot by ./spore-talos-boot.nix. nginx serves the boot files over HTTP, since TFTP is
-# too slow for them. ./spore-talos-boot.nix opens both on the bootstrap VLAN; elsewhere only HTTP is
-# open, and only to Lab Net (forge's rackpi5 fallback) and the future network, never the Kubernetes
-# network.
+# spore's nginx default server, `spore-pxe`: /var/lib/tftpboot and the signed native-boot files
+# (./spore-native-boot.nix) over HTTP, open only to Lab Net (forge's rackpi5 fallback) and the future
+# network, never the Kubernetes network. ./talos-boot.nix, on every anchor, runs dnsmasq's TFTP and
+# serves the Talos boot files on the bootstrap VLAN.
 { lib, ... }:
 let
   lab = import ../lib/lab.nix;
 in
 {
-  systemd.tmpfiles.rules = [
-    "d /var/lib/tftpboot 0755 root root -"
-  ];
-
-  services.dnsmasq = {
-    enable = true;
-    resolveLocalQueries = false;
-    settings = {
-      port = 0;
-      enable-tftp = true;
-      tftp-root = "/var/lib/tftpboot";
-      tftp-max = 100;
-      # TFTP data leaves UDP/69 on a server-chosen port; bound it so the firewall admits it
-      # without a conntrack helper.
-      tftp-port-range = "30000,30099";
-    };
-  };
-
   services.nginx = {
     enable = true;
     virtualHosts."spore-pxe" = {

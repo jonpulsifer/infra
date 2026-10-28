@@ -139,6 +139,86 @@ in
     in
     require "spore-reliability" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
+  # Every anchor serves TFTP on the bootstrap VLAN. A DHCP answer from any of them would race UniFi's
+  # and Smee's offers, and a boot VIP on another interface would never reach a booting machine. The
+  # VLAN holds unenrolled machines, so its chain must refuse ssh, NFS, Garage, the exporters and the
+  # Tinkerbell API, which the global allowed ports open on every other interface.
+  anchor-boot =
+    let
+      anchors = lib.filterAttrs (_: c: c.services.keepalived.vrrpInstances ? boot) configs;
+      refused = [
+        22
+        111
+        2049
+        3900
+        3901
+        4000
+        4001
+        4002
+        6443
+        8081
+        9100
+        9113
+        9253
+        9988
+      ];
+      firewallBroken =
+        c:
+        let
+          fw = c.networking.firewall;
+          lines = map lib.trim (lib.splitString "\n" fw.extraCommands);
+          rules = tool: lib.filter (lib.hasPrefix "${tool} -w -A nixos-fw-bootstrap ") lines;
+          jump =
+            tool:
+            "${tool} -w -I nixos-fw ${
+              toString (lib.length fw.trustedInterfaces + 2)
+            } -i bootstrap -j nixos-fw-bootstrap";
+          admits =
+            port: rule:
+            let
+              range = builtins.match ".*--dport ([0-9]+):([0-9]+) .*" rule;
+            in
+            lib.hasInfix "--dport ${toString port} " rule
+            || (range != null && lib.toInt (lib.head range) <= port && port <= lib.toInt (lib.last range));
+        in
+        lib.any
+          (
+            tool:
+            !(lib.elem (jump tool) lines) || lib.last (rules tool) != "${tool} -w -A nixos-fw-bootstrap -j DROP"
+          )
+          [
+            "iptables"
+            "ip6tables"
+          ]
+        || lib.any (rule: lib.any (port: admits port rule) refused) (rules "iptables")
+        || lib.any (
+          rule: !(lib.hasInfix "-p icmpv6" rule) && rule != "ip6tables -w -A nixos-fw-bootstrap -j DROP"
+        ) (rules "ip6tables");
+      broken = namesWhere (
+        c:
+        let
+          dnsmasq = c.services.dnsmasq.settings;
+        in
+        dnsmasq ? "dhcp-range"
+        || dnsmasq.port != [ 0 ]
+        || c.services.keepalived.vrrpInstances.boot.interface != "bootstrap"
+        || !(lib.any (
+          range: range.from == 30000 && range.to == 30099
+        ) c.networking.firewall.interfaces.bootstrap.allowedUDPPortRanges)
+        || firewallBroken c
+      ) anchors;
+    in
+    require "anchor-boot"
+      (
+        lib.attrNames anchors == [
+          "capsule"
+          "forge"
+          "spore"
+        ]
+        && broken == [ ]
+      )
+      "anchors with the boot VIP: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
+
   # Two normal users sharing a uid silently breaks file ownership on the NFS
   # exports every cluster host mounts.
   fleet-unique-uids =

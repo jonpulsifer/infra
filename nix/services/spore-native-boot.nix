@@ -104,7 +104,6 @@ in
   config = mkIf cfg.enable {
     systemd.tmpfiles.rules = [
       "d ${stateDir} 0755 root root -"
-      "d ${metricsDir} 0755 root root -"
     ];
 
     systemd.services =
@@ -274,10 +273,12 @@ in
       };
     };
 
-    services.prometheus.exporters.node = {
-      enabledCollectors = [ "textfile" ];
-      extraFlags = [ "--collector.textfile.directory=${metricsDir}" ];
-    };
+    assertions = [
+      {
+        assertion = lib.elem "--collector.textfile.directory=${metricsDir}" config.services.prometheus.exporters.node.extraFlags;
+        message = "spore-native-boot.nix writes its artifact gauge to ${metricsDir}, which node-exporter does not read.";
+      }
+    ];
 
     services.nginx.virtualHosts."spore-pxe".locations = targetLocations;
   };

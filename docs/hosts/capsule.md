@@ -19,6 +19,7 @@ capsule is a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly
 
 - CoreDNS from `nix/services/coredns-sinkhole.nix` and chrony from `nix/services/ntp-server.nix`, both through `nix/profiles/anchor.nix`
 - A node of folly's [Garage cluster](../platform/backups.md#garage-cluster), with data in `/var/lib/garage` (`nix/services/garage.nix`)
+- [Talos boot](../platform/nixos/talos-boot.md) on the bootstrap VLAN, also through the anchor profile
 
 `clusters/folly/monitoring/capsule.yaml` declares the alerts `CapsuleCoreDnsDown` and `CapsuleChronyDown`.
 
