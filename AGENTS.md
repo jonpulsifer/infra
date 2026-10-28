@@ -92,11 +92,13 @@ Read these values from their file. Do not copy them.
 | --- | --- |
 | Cluster addresses and CIDRs, API server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
 | Anchor CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/anchor-topology.json` |
-| folly node hardware: MAC, switch port, install disk, TPM, model, serial, BIOS, Secure Boot | `clusters/folly/inventory/machines.yaml` |
+| folly node hardware: MAC, switch port, install disk, TPM, model, serial, BIOS, Secure Boot | NetBox at `https://capsule.<tailnet>` |
 
 Each topology file is a Flux ConfigMap whose `data` values are all strings, so
 a list or a number is written as a string. [Topology](docs/reference/topology.md)
-says what reads each file. The inventory is plain YAML, and
+says what reads each file. `clusters/folly/inventory/machines.yaml` is NetBox's
+export, which Terraform, Talos and the render scripts read. Never edit it by
+hand: change the device in NetBox, then run `mise run netbox:export`.
 [Hardware inventory](docs/reference/inventory.md) says what reads it.
 
 ## Where to read more
