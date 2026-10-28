@@ -26,9 +26,11 @@ describe('Atlantic schedule', () => {
   test('the assignment allows GitOps repairs and guarded merges', () => {
     const prompt = custodianPrompt('2026-07-03');
     expect(prompt).toContain('Fix clear issues through the repository');
+    expect(prompt).toContain('merge safe updates whose required checks pass');
     expect(prompt).toContain(
-      'merge only changes you understand whose required checks pass',
+      'including dependency updates: review their diffs',
     );
+    expect(prompt).toContain('report breaking updates or failed checks');
     expect(prompt).toContain('never make live infrastructure changes by hand');
     expect(prompt).toContain(
       "never bypass protections or apply an Atlantis plan without the owner's approval",
