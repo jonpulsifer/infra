@@ -40,6 +40,14 @@ locals {
       }
       filesystem = { type = "xfs" }
     }),
+    # Time from the anchors' VIPs, never the internet.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "TimeSyncConfig"
+      ntp = {
+        servers = [module.lab_topology.data.NS1_IP, module.lab_topology.data.NS2_IP]
+      }
+    }),
     # The ports of Vector's loopback socket sources. machine.logging has no
     # 1.14 document, so it stays a v1alpha1 fragment.
     join("\n---\n", [

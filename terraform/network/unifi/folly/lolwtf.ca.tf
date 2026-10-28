@@ -4,26 +4,27 @@ locals {
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
   lab_clients = merge(local.clients.lab, local.clients.rpis)
+  # The anchors' VIPs (nix/services/anchor-vips.nix), never one Pi.
   dns_servers = [
-    local.lab.hosts.capsule,
-    local.lab.hosts.spore,
+    local.lab_topology.NS1_IP,
+    local.lab_topology.NS2_IP,
   ]
   lab_service_records = {
-    dns-capsule = {
+    dns-ns1 = {
       name    = "dns"
-      content = local.lab.hosts.capsule
+      content = local.lab_topology.NS1_IP
     }
-    dns-spore = {
+    dns-ns2 = {
       name    = "dns"
-      content = local.lab.hosts.spore
+      content = local.lab_topology.NS2_IP
     }
-    time-capsule = {
+    time-ns1 = {
       name    = "time"
-      content = local.lab.hosts.capsule
+      content = local.lab_topology.NS1_IP
     }
-    time-spore = {
+    time-ns2 = {
       name    = "time"
-      content = local.lab.hosts.spore
+      content = local.lab_topology.NS2_IP
     }
     ns1 = {
       name    = "ns1"
@@ -60,6 +61,26 @@ resource "cloudflare_dns_record" "lab_remote_dns" {
 moved {
   from = cloudflare_dns_record.lab_remote_dns["dns"]
   to   = cloudflare_dns_record.lab_service_dns["dns-capsule"]
+}
+
+moved {
+  from = cloudflare_dns_record.lab_service_dns["dns-capsule"]
+  to   = cloudflare_dns_record.lab_service_dns["dns-ns1"]
+}
+
+moved {
+  from = cloudflare_dns_record.lab_service_dns["dns-spore"]
+  to   = cloudflare_dns_record.lab_service_dns["dns-ns2"]
+}
+
+moved {
+  from = cloudflare_dns_record.lab_service_dns["time-capsule"]
+  to   = cloudflare_dns_record.lab_service_dns["time-ns1"]
+}
+
+moved {
+  from = cloudflare_dns_record.lab_service_dns["time-spore"]
+  to   = cloudflare_dns_record.lab_service_dns["time-ns2"]
 }
 
 resource "cloudflare_dns_record" "lab_service_dns" {
