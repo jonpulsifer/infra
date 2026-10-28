@@ -60,8 +60,10 @@ func (s *Server) Admin() http.Handler {
 
 type loginKey struct{}
 
-// requireApprover trusts Tailscale-User-Login because the NetworkPolicy admits
-// only the tailnet Ingress proxy, which overwrites any copy a client sends.
+// requireApprover trusts Tailscale-User-Login because only a tailnet proxy
+// reaches the admin listener, and it overwrites any copy a client sends: the
+// NetworkPolicy admits only the tailnet Ingress, and on an anchor the admin
+// socket admits only root, which runs tailscaled.
 func (s *Server) requireApprover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		login := r.Header.Get("Tailscale-User-Login")
