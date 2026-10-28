@@ -35,6 +35,11 @@ resource "unifi_network" "k8s" {
     stop        = cidrhost(local.node_cidr, 62)
     dns_enabled = true
     dns_servers = local.dns_servers
+    # Nodes netboot only on the bootstrap VLAN. Without the block the provider
+    # keeps the controller's last boot option.
+    boot = {
+      enabled = false
+    }
   }
 
 }
