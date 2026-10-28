@@ -7,7 +7,8 @@
     "platforms": "linux/amd64",
     "watch": [
       "images/tink-attest",
-      "apps/talos-attest"
+      "apps/talos-attest",
+      "packages/pkcs11signer"
     ]
   }
 ]

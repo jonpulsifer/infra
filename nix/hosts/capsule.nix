@@ -18,6 +18,9 @@
     bootstrap = false;
   };
 
+  # The YubiKey 4c that holds one of the two hardware DevID CA keys.
+  homelab.devidCa.yubikey.enable = true;
+
   sops.defaultSopsFile = ../secrets/capsule.sops.yaml;
 
   # The NVMe carries these labels; the per-name default (NIXOS_CAPSULE) would not find

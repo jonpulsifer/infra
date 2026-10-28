@@ -42,3 +42,5 @@ jobs:
         run: mise run check
       - name: Test the ElevenLabs reconciler
         run: bash .github/scripts/elevenlabs-reconcile_test.sh
+      - name: Test the DevID CA YubiKey script
+        run: bash scripts/devid-ca-yubikey_test.sh

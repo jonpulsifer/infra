@@ -20,7 +20,7 @@ talos-attest checks which TPM a machine has and what it booted, before the machi
 
 - Each anchor keeps the attestations it ran in `/var/lib/talos-attest`. A lookup asks the other anchors, and the newest verdict wins.
 - A first intake needs the owner's approval on the anchor that ran it, unless `machines.yaml` or NetBox's `ek_hash` pins the EK.
-- `policy.yaml` pins no Authenticode hashes. The DevID CA key is a software key from `terraform/pki`.
+- `policy.yaml` pins no Authenticode hashes. The DevID CA key is a software key from `terraform/pki`, until an anchor sets `homelab.talosAttest.caKey = "pkcs11"` and signs with its YubiKey.
 - A TPM with no RSA EK certificate attests here, but SPIRE's `tpm_devid` cannot use it. `rsa_ek_cert` in the answers says which.
 
 ## How it works
@@ -42,5 +42,6 @@ The action sends the machine's serial, MAC and EK certificates, and a new AK. Th
 - Anchors: `nix/services/talos-attest.nix`
 - Template: `clusters/folly/tinkerbell/template-attest.yaml`
 - Alerts: `clusters/folly/monitoring/anchor-vips.yaml`
-- DevID CA: `terraform/pki/devid.tf`
+- DevID CAs: `terraform/pki/devid.tf` and `terraform/pki/devid-ca.tf`
+- Token signer: `packages/pkcs11signer`
 - Image: `ghcr.io/jonpulsifer/tink-attest`

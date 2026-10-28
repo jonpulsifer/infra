@@ -292,6 +292,22 @@ FML_DERIVE_RS="$PWD/apps/fml-derive-rs/target/release/fml-derive" \
 description = "Check a ceremony transcript: canonical form, hash chain, share structure, certificate chain (set TRANSCRIPT)"
 run = "go -C apps/fml-attest run . ${TRANSCRIPT:-../fml-ceremony/testdata/transcript.example.json}"
 
+[tasks."devid:yubikey:init"]
+description = "Make an anchor's YubiKey a DevID CA: new PIV secrets in SOPS and 1Password, an RSA-2048 key generated on the card, and its CSR in terraform/pki/csr (arg: <host>)"
+run = "bash scripts/devid-ca-yubikey.sh init"
+
+[tasks."devid:yubikey:install"]
+description = "Write the DevID CA certificate that terraform/pki issued into the anchor's YubiKey and sign through ykcs11 (arg: <host>)"
+run = "bash scripts/devid-ca-yubikey.sh install"
+
+[tasks."devid:bundle"]
+description = "Write terraform/pki/certs/folly-devid-ca.pem from every issuing DevID CA certificate beside it"
+run = "bash scripts/devid-ca-yubikey.sh bundle"
+
+[tasks."devid:test"]
+description = "Test the DevID CA script's firmware policy, ykman parsing, secrets and bundle"
+run = "bash scripts/devid-ca-yubikey_test.sh"
+
 [tasks."docs:check"]
 description = "Docs contract: renderer validation, referenced paths exist, no archaeology, references into the wiki resolve"
 run = "bash .github/scripts/docs-contract.sh"

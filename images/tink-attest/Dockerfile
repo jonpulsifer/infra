@@ -3,7 +3,9 @@
 # context is the repository root (build.json). The containers workflow's delivery pins the image by
 # digest in the Template.
 FROM docker.io/library/golang:1.27-alpine AS build
-WORKDIR /src
+# go.mod replaces pkcs11signer with ../../packages/pkcs11signer, so the tree keeps its layout.
+WORKDIR /src/apps/talos-attest
+COPY packages/pkcs11signer/ /src/packages/pkcs11signer/
 COPY apps/talos-attest/go.mod apps/talos-attest/go.sum ./
 RUN go mod download
 COPY apps/talos-attest/ ./

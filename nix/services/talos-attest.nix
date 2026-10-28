@@ -1,7 +1,7 @@
 # talos-attest (apps/talos-attest) on every anchor: the device flow at the boot VIP's nginx under
 # /attest/, the DevID and verdict lookups on TCP 8444 of the anchor network, and the admin API on
-# the tailnet. It turns on once scripts/pki/devid-ca.sh has sealed the DevID CA key and committed
-# its chain, because sops-nix fails an activation that names a secret its file lacks.
+# the tailnet. It signs with the software DevID CA key once scripts/pki/devid-ca.sh has sealed it
+# and committed its chain, or with this anchor's YubiKey over PKCS#11 (./devid-ca-yubikey.nix).
 {
   config,
   lib,
@@ -18,8 +18,18 @@ let
   secrets = "\n" + (if builtins.pathExists sopsFile then builtins.readFile sopsFile else "");
   # sops leaves key names in the clear, so evaluation can see which secrets the file holds.
   sealed = key: lib.hasInfix "\ntalos-attest:\n" secrets && lib.hasInfix "\n    ${key}:" secrets;
-  caChain = ../../terraform/pki/certs/folly-devid-ca-chain.pem;
-  ready = sealed "devid-ca-key" && builtins.pathExists caChain;
+  certs = ../../terraform/pki/certs;
+  softwareChain = certs + "/folly-devid-ca-software-chain.pem";
+  # This anchor's hardware DevID CA, which scripts/devid-ca-yubikey.sh commits after its apply.
+  hardwareCert = certs + "/folly-devid-ca-${name}.pem";
+  yubikey = config.homelab.devidCa.yubikey;
+  cfg = config.homelab.talosAttest;
+  pkcs11 = cfg.caKey == "pkcs11";
+  ready =
+    if pkcs11 then
+      yubikey.enable && yubikey.serial != null && builtins.pathExists hardwareCert
+    else
+      sealed "devid-ca-key" && builtins.pathExists softwareChain;
   netbox = sealed "netbox-token";
 
   devidPort = 8444;
@@ -49,25 +59,53 @@ in
     enable = lib.mkOption {
       type = lib.types.bool;
       default = ready;
-      defaultText = "whether the anchor's sops file holds talos-attest/devid-ca-key and terraform/pki/certs/folly-devid-ca-chain.pem exists";
+      defaultText = "software: the anchor's sops file holds talos-attest/devid-ca-key and terraform/pki/certs/folly-devid-ca-software-chain.pem exists; pkcs11: the anchor's YubiKey has a serial and terraform/pki/certs/folly-devid-ca-<host>.pem exists";
       description = "Run talos-attest. It refuses to start without the DevID CA's key.";
+    };
+    caKey = lib.mkOption {
+      type = lib.types.enum [
+        "software"
+        "pkcs11"
+      ];
+      default = "software";
+      description = ''
+        Where the DevID CA key lives: "software" is terraform/pki's key, sealed in this anchor's sops
+        file; "pkcs11" is this anchor's YubiKey, homelab.devidCa.yubikey.
+      '';
     };
     caChain = lib.mkOption {
       type = lib.types.path;
-      default = caChain;
+      default =
+        if pkcs11 then
+          pkgs.concatText "folly-devid-ca-${name}-chain.pem" [
+            hardwareCert
+            (certs + "/fml-intermediate.pem")
+            (certs + "/fml-root.pem")
+          ]
+        else
+          softwareChain;
+      defaultText = "terraform/pki/certs/folly-devid-ca-software-chain.pem, or this anchor's hardware CA up to the FML root";
       description = "The DevID CA first, then the FML intermediate and root.";
     };
   };
 
-  config = lib.mkIf config.homelab.talosAttest.enable {
-    sops.secrets = {
-      # The DevID CA's private key, terraform/pki's devid_ca_private_key output.
-      "talos-attest/devid-ca-key" = { };
-    }
-    // lib.optionalAttrs netbox {
-      # A NetBox API token that may read and change dcim devices and add journal entries.
-      "talos-attest/netbox-token" = { };
-    };
+  config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = pkcs11 -> yubikey.enable && yubikey.serial != null;
+        message = "homelab.talosAttest.caKey = \"pkcs11\" needs homelab.devidCa.yubikey.enable and its serial";
+      }
+    ];
+
+    sops.secrets =
+      lib.optionalAttrs (!pkcs11) {
+        # The DevID CA's private key, terraform/pki's devid_ca_private_key output.
+        "talos-attest/devid-ca-key" = { };
+      }
+      // lib.optionalAttrs netbox {
+        # A NetBox API token that may read and change dcim devices and add journal entries.
+        "talos-attest/netbox-token" = { };
+      };
 
     users.users.talos-attest = {
       isSystemUser = true;
@@ -87,8 +125,7 @@ in
         ATTEST_ADMIN_ADDR = "unix:${adminSocket}";
         ATTEST_DEVID_ADDR = ":${toString devidPort}";
         ATTEST_APPROVERS = "jonathan@pulsifer.ca";
-        ATTEST_CA_KEY = "%d/devid-ca-key";
-        ATTEST_CA_CHAIN = "${config.homelab.talosAttest.caChain}";
+        ATTEST_CA_CHAIN = "${cfg.caChain}";
         ATTEST_EK_ROOTS = "${../../apps/talos-attest/roots}";
         ATTEST_POLICY = "${../../apps/talos-attest/policy.yaml}";
         ATTEST_INVENTORY = "${../../clusters/folly/inventory/machines.yaml}";
@@ -96,6 +133,18 @@ in
         ATTEST_PEERS = lib.concatStringsSep "," peers;
         ATTEST_METRICS_FILE = "${metricsDir}/talos-attest.prom";
       }
+      // (
+        if pkcs11 then
+          {
+            # The pkcs11signer contract (packages/pkcs11signer): the chain's first certificate picks the key.
+            ATTEST_CA_PKCS11_MODULE = yubikey.pkcs11Module;
+            ATTEST_CA_PKCS11_TOKEN = yubikey.tokenLabel;
+            ATTEST_CA_PKCS11_PIN_FILE = "%d/devid-ca-pin";
+            ATTEST_CA_CERT = "${cfg.caChain}";
+          }
+        else
+          { ATTEST_CA_KEY = "%d/devid-ca-key"; }
+      )
       // lib.optionalAttrs netbox {
         ATTEST_NETBOX_URL = "https://capsule.${fleet.tailnet}";
         ATTEST_NETBOX_TOKEN_FILE = "%d/netbox-token";
@@ -105,7 +154,12 @@ in
         User = "talos-attest";
         Group = "talos-attest";
         LoadCredential = [
-          "devid-ca-key:${config.sops.secrets."talos-attest/devid-ca-key".path}"
+          (
+            if pkcs11 then
+              "devid-ca-pin:${yubikey.pinFile}"
+            else
+              "devid-ca-key:${config.sops.secrets."talos-attest/devid-ca-key".path}"
+          )
         ]
         ++ lib.optional netbox "netbox-token:${config.sops.secrets."talos-attest/netbox-token".path}";
         StateDirectory = "talos-attest";

@@ -144,7 +144,8 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 	}
 	var clusterCAs []string
 	for _, m := range matches {
-		if !strings.HasPrefix(filepath.Base(m), "fml-") {
+		base := filepath.Base(m)
+		if !strings.HasPrefix(base, "fml-") && !strings.HasPrefix(base, devidPrefix) {
 			clusterCAs = append(clusterCAs, m)
 		}
 	}
@@ -186,6 +187,8 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 		}
 	}
 
+	problems = append(problems, checkDevIDCAs(certsDir, intermediate, root, out)...)
+
 	if len(problems) > 0 {
 		fmt.Fprintln(errOut, "\nchain does not validate:")
 		for _, p := range problems {
@@ -199,4 +202,85 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 	fmt.Fprintln(out, "\nok — every chain links and is signed through, anchors on a "+
 		"self-signed root, and its pathLen and validity admit the CAs beneath it")
 	return nil
+}
+
+// devidPrefix names the issuing DevID CAs, folly-devid-ca-<name>.pem, each with
+// an optional folly-devid-ca-<name>-chain.pem up to the root, and their bundle,
+// folly-devid-ca.pem, which verifiers such as SPIRE's tpm_devid trust.
+const devidPrefix = "folly-devid-ca"
+
+// checkDevIDCAs asserts each issuing DevID CA sits under the FML intermediate,
+// and that the bundle holds every one of them in file-name order and nothing else.
+func checkDevIDCAs(certsDir string, intermediate, root *x509.Certificate, out io.Writer) []string {
+	matches, err := filepath.Glob(filepath.Join(certsDir, devidPrefix+"-*.pem"))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	sort.Strings(matches)
+	var issuers, chains []string
+	for _, m := range matches {
+		if strings.HasSuffix(m, "-chain.pem") {
+			chains = append(chains, m)
+		} else {
+			issuers = append(issuers, m)
+		}
+	}
+	bundlePath := filepath.Join(certsDir, devidPrefix+".pem")
+	_, statErr := os.Stat(bundlePath)
+	if len(matches) == 0 && statErr != nil {
+		return nil
+	}
+
+	var problems []string
+	var want [][]byte
+	byPath := map[string]*x509.Certificate{}
+	fmt.Fprintln(out, "==> devid")
+	for _, path := range issuers {
+		base := filepath.Base(path)
+		ca, err := readCert(path)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("devid: %v", err))
+			continue
+		}
+		want = append(want, ca.Raw)
+		byPath[path] = ca
+		fmt.Fprintf(out, "      %s\n", describe(ca, base))
+		problems = append(problems, checkChain("devid", []named{
+			{ca, base},
+			{intermediate, "fml-intermediate.pem"},
+			{root, "fml-root.pem"},
+		})...)
+		if ca.KeyUsage&x509.KeyUsageCertSign == 0 {
+			problems = append(problems, fmt.Sprintf("devid: %s lacks keyCertSign, so it cannot issue an LDevID", base))
+		}
+	}
+	for _, chain := range chains {
+		ca, ok := byPath[strings.TrimSuffix(chain, "-chain.pem")+".pem"]
+		if !ok {
+			problems = append(problems, fmt.Sprintf(
+				"devid: %s names no issuing CA; name it %s-<name>-chain.pem beside %s-<name>.pem",
+				filepath.Base(chain), devidPrefix, devidPrefix))
+			continue
+		}
+		problems = append(problems, checkChainFile("devid", chain, ca)...)
+	}
+
+	const fix = "run `mise run devid:bundle`"
+	if statErr != nil {
+		return append(problems, fmt.Sprintf("devid: %s.pem is missing; %s", devidPrefix, fix))
+	}
+	bundle, err := readCerts(bundlePath)
+	if err != nil {
+		return append(problems, fmt.Sprintf("devid: %v; %s", err, fix))
+	}
+	same := len(bundle) == len(want)
+	for i := 0; same && i < len(bundle); i++ {
+		same = bytes.Equal(bundle[i].Raw, want[i])
+	}
+	if !same {
+		problems = append(problems, fmt.Sprintf(
+			"devid: %s.pem is not the %d issuing DevID CA(s) in file-name order; %s",
+			devidPrefix, len(want), fix))
+	}
+	return problems
 }

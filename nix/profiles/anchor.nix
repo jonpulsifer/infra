@@ -6,6 +6,7 @@
   imports = [
     ../services/anchor-vips.nix
     ../services/coredns-sinkhole.nix
+    ../services/devid-ca-yubikey.nix
     ../services/ntp-server.nix
     ../services/talos-boot.nix
     ../services/talos-enroll.nix

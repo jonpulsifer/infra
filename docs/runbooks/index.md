@@ -47,6 +47,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Manage SOPS secrets](manage-sops-secrets.md): restore the operator age key, edit a SOPS file, add a host, and rotate the key
 - [Initialize OpenBao](initialize-openbao.md): initialize a new OpenBao instance and store its recovery key
+- [Make a YubiKey a DevID CA](set-up-a-devid-ca-yubikey.md): generate a DevID CA key on an anchor's YubiKey, certify it with Atlantis, and write the certificate into the card
 
 ## Apps
 

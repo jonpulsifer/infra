@@ -26,6 +26,19 @@ func env(key, def string) string {
 	return def
 }
 
+// loadCA signs with the PKCS#11 token key when ATTEST_CA_PKCS11_MODULE is set, and with the
+// software key in ATTEST_CA_KEY otherwise.
+func loadCA(chainPath string, validity time.Duration) (*CA, error) {
+	if pkcs11Configured() {
+		return loadPKCS11CA(chainPath, validity)
+	}
+	keyPath := os.Getenv("ATTEST_CA_KEY")
+	if keyPath == "" {
+		return nil, errors.New("ATTEST_CA_KEY or ATTEST_CA_PKCS11_MODULE is required: the DevID CA's software key, from terraform/pki's devid_ca_private_key output, or its token")
+	}
+	return LoadCA(keyPath, chainPath, validity)
+}
+
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
@@ -39,14 +52,11 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("ATTEST_CERT_VALIDITY: %w", err)
 	}
-	keyPath := os.Getenv("ATTEST_CA_KEY")
-	if keyPath == "" {
-		return errors.New("ATTEST_CA_KEY is required: the DevID CA's private key, from terraform/pki's devid_ca_private_key output")
-	}
-	ca, err := LoadCA(keyPath, env("ATTEST_CA_CHAIN", "/etc/talos-attest/devid-ca-chain.pem"), validity)
+	ca, err := loadCA(env("ATTEST_CA_CHAIN", "/etc/talos-attest/devid-ca-chain.pem"), validity)
 	if err != nil {
 		return err
 	}
+	log.Info("DevID CA loaded", "subject", ca.Cert.Subject.String(), "pkcs11", pkcs11Configured())
 	roots, err := LoadEKRoots(env("ATTEST_EK_ROOTS", "/etc/talos-attest/roots"))
 	if err != nil {
 		return err
