@@ -16,7 +16,7 @@
   ...
 }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   fleet = import ../lib/fleet.nix;
   site = "folly";
   # The talos.config URL in the netboot UKI names this host (.github/scripts/talos-images-build.sh).
