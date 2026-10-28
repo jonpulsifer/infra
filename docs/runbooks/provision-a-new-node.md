@@ -18,23 +18,28 @@ Use this runbook to add a new machine to folly as a Talos worker. You set its fi
 ## Set the firmware
 
 1. Connect the machine to the provisioning station's port and its monitor. Power it on and press F10.
-2. Set the date and time to the current UTC time. The machine checks the enrollment server's certificate against its clock.
-3. Turn off legacy support. Turn on UEFI network boot over IPv4. Set the boot order to the NVMe disk first and IPv4 network boot second, so an empty disk falls through to PXE.
-4. Set the power-loss behaviour to power on.
-5. Turn on the TPM and set it to clear at the next boot. The clear removes an earlier owner's settings and keeps the endorsement key and its certificate.
-6. Turn Secure Boot off, and clear the Secure Boot keys. The firmware is then in Setup Mode. With Secure Boot on, HP reloads its factory keys at the next boot instead.
-7. Save, then confirm the TPM clear with F1.
-8. Press Ctrl+P at boot to open MEBx. Set the AMT password, turn on AMT and network access, and set the KVM user consent to none.
+2. If the BIOS is older than HP's latest for the model, update it from a FAT32 USB stick made with the SoftPaq's "Create Recovery USB flash drive" option, through Update System BIOS, then Update BIOS Using Local Media. The firmware's network update fails against HP's servers. An older BIOS can refuse the key enrollment below: the 800 G2's 2.37 does, and 2.63 does not.
+3. Set the date and time to the current UTC time. The machine checks the enrollment server's certificate against its clock.
+4. Turn off legacy support. Turn on UEFI network boot over IPv4. Set the boot order to the NVMe disk first and IPv4 network boot second, so an empty disk falls through to PXE.
+5. Set the power-loss behaviour to power on.
+6. Turn on the TPM and set it to clear at the next boot. The clear removes an earlier owner's settings and keeps the endorsement key and its certificate.
+7. Turn Secure Boot off, and clear the Secure Boot keys. The firmware is then in Setup Mode. With Secure Boot on, HP reloads its factory keys at the next boot instead.
+8. Save, then confirm the TPM clear with F1.
+9. Press Ctrl+P at boot to open MEBx. Set the AMT password, turn on AMT and network access, and set the KVM user consent to none.
 
 ## Enroll the Secure Boot keys
 
 1. Boot from IPv4 network boot. The signed iPXE shows the `folly netboot` menu.
 2. Select `enroll` within 10 seconds.
 
-   Result: iPXE boots the signed ISO from spore. Its systemd-boot prints `Enrolling secure boot keys from directory: \loader\keys\auto` and `Secure Boot keys successfully enrolled`, then reboots.
+   Result: iPXE boots the signed ISO from spore, and its systemd-boot menu appears.
 
-3. Open the firmware setup and turn Secure Boot on.
-4. Power off the machine.
+3. Select `Enroll Secure Boot Keys: auto`. systemd-boot enrolls on its own only in a virtual machine.
+
+   Result: systemd-boot prints `Secure Boot keys successfully enrolled`, then reboots.
+
+4. Open the firmware setup and turn Secure Boot on.
+5. Power off the machine.
 
 ## Rack and enroll
 
@@ -49,12 +54,12 @@ Use this runbook to add a new machine to folly as a Talos worker. You set its fi
    ```
 
 3. In one pull request, declare the node:
-   - its MAC under `k8s` in `terraform/network/unifi/folly/clients.yaml`
+   - its entry in `clusters/folly/inventory/machines.yaml`: the MAC and serial from the log line, its rack port as `switch_port`, its disk, `tpm: "2.0"`, `amt: true` and `secure_boot: true`. The model, SKU and BIOS come in step 8.
    - its address in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`
    - a `neighbor <address> peer-group HOMELAB` line in `terraform/network/unifi/folly/bgp-folly.conf`
-   - its entry in `nodes` in `clusters/folly/talos/talos.tf` with `enrolling = true`, and its name in `tpm_nodes`
-   - its move from `intake_ports` to `mab_ports` and `enrolled` (as `"bootstrap"`) in `bootstrap.tf`
-   - the result of `mise run render-machine-inputs`
+   - its entry in `nodes` in `clusters/folly/talos/talos.tf` with `enrolling = true`. `tpm_nodes` follows the inventory.
+   - its removal from `intake_ports`, and `enrolled.<node> = "bootstrap"`, in `bootstrap.tf`. `mab_ports` follows the inventory.
+   - the result of `mise run render-machine-inputs` and `mise run render-tinkerbell-nodes`
 
 4. Apply the pull request through Atlantis.
 5. Read the user code on the machine's screen, or on its AMT console. Approve that code as the node. If the code expired, power-cycle the machine for a new one.
@@ -65,9 +70,9 @@ Use this runbook to add a new machine to folly as a Talos worker. You set its fi
 
    Result: JSON with `"phase": "approved"` and `"mac_mismatch": false`. Talos installs and reboots through the firmware.
 
-6. Set `enrolled.<node>` to `"kubernetes"`, and apply it through Atlantis. Power-cycle the node, so that the switch applies the VLAN at link-up.
+6. Set `enrolled.<node>` to `"kubernetes"`, and apply it through Atlantis. The switch moves the port within a minute or two.
 7. In a pull request, remove `enrolling = true` and add the node to `encrypted_nodes` in `talos.tf`. Apply it through Atlantis.
-8. Make sure that the node is Ready and that Secure Boot is on.
+8. Make sure that the node is Ready and that Secure Boot is on. Then run `mise run inventory:observe <address>`, copy its model, SKU and BIOS into the node's inventory entry in a pull request, and make sure that `mise run inventory:check` passes.
 
    ```bash
    kubectl --context folly get node <node>
