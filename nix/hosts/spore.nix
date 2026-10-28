@@ -69,6 +69,7 @@ in
 
   # The YubiKey 5 that holds one of the two hardware DevID CA keys.
   homelab.devidCa.yubikey.enable = true;
+  homelab.devidCa.yubikey.serial = 9758244;
 
   # A node of the anchors' three-node cluster. The standalone store's /nfs/data/garage stays on
   # disk as the rollback (docs/runbooks/migrate-garage-to-three-nodes.md).
