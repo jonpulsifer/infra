@@ -34,6 +34,7 @@ let
           --add-flags $out/libexec/scripts/$tool.sh \
           --prefix PATH : ${
             lib.makeBinPath [
+              pkgs.bash
               pkgs.coreutils
               pkgs.curl
               pkgs.diffutils
