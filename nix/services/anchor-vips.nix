@@ -37,8 +37,9 @@ let
   # 150, 100 and 50 down the order. A failed check takes 120 off, below the lowest healthy anchor.
   priority = order: 150 - 50 * lib.lists.findFirstIndex (anchor: anchor == name) 2 order;
   # CoreDNS answers localhost from /etc/hosts through its hosts plugin, with no upstream involved.
+  # /etc/hosts lists it more than once, so match a line.
   corednsAnswers = pkgs.writeShellScript "anchor-coredns-answers" ''
-    [ "$(${pkgs.dnsutils}/bin/dig +short +time=1 +tries=1 @127.0.0.1 localhost A)" = 127.0.0.1 ]
+    ${pkgs.dnsutils}/bin/dig +short +time=1 +tries=1 @127.0.0.1 localhost A | ${pkgs.gnugrep}/bin/grep -qx 127.0.0.1
   '';
 in
 {
