@@ -51,10 +51,13 @@ in
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
+  # A node of the anchors' three-node cluster. The standalone store's /nfs/data/garage stays on
+  # disk as the rollback (docs/runbooks/migrate-garage-to-three-nodes.md).
   homelab.garage = {
     enable = true;
     site = "folly";
-    dataDir = "/nfs/data/garage";
+    dataDir = "/nfs/data/garage-ha";
+    clustered = true;
   };
 
   homelab.spire = {
