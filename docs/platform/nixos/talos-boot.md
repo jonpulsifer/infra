@@ -16,7 +16,7 @@ Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](
 | nginx `talos-boot` | Serves the UKI, its iPXE script, the previous UKI, the ISO and HookOS on port 80, at the anchor's bootstrap address and at `BOOT_VIP` | every anchor |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | every anchor |
 | `talos-boot-check` | Exports whether the anchor holds `BOOT_VIP` and passes the check, each minute | every anchor |
-| [Talos enrollment](../../apps/talos-enroll.md) | nginx serves `enroll.lolwtf.ca` on port 443 at `BOOT_VIP` in front of talos-enroll; `talos-enroll-check` exports whether it serves, each minute | every anchor |
+| [Talos enrollment](../../apps/talos-enroll.md) | nginx serves `enroll.lolwtf.ca` on port 443 at `BOOT_VIP` in front of talos-enroll; `talos-enroll-check` exports whether it serves and the server's `/metrics`, each minute; CoreDNS answers the name with `BOOT_VIP` | every anchor |
 
 The boot check passes when dnsmasq is active and nginx serves the UKI's script at the anchor's bootstrap address. The enrollment check passes when nginx serves `enroll.lolwtf.ca` on loopback with a certificate that public roots trust, and talos-enroll answers behind it. keepalived runs each every 5 seconds; two failures of either drop the anchor below every healthy one.
 

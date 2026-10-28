@@ -14,7 +14,7 @@ Use this runbook to install Talos on riptide, shale or optiplex with Secure Boot
 - The node PXE-boots on the bootstrap VLAN, and Smee has no script for its MAC: it has no `Hardware`, or its `allowPXE` is off. The signed iPXE then chains [the UKI's script](../platform/nixos/talos-boot.md#netboot-images).
 - You can see the node's screen. The user code that you approve shows only there.
 - `clusters/folly/apps/talos-enroll/machine-inputs.json` has the node. If it does not, run `mise run render-machine-inputs`, then commit and merge the result.
-- You are on the tailnet as a login in `ENROLL_APPROVERS`, and you can read the Discord prompts.
+- You are on the tailnet as a login in `ENROLL_APPROVERS`, and you can read the Discord prompts. The bootstrap VLAN resolves `enroll.lolwtf.ca` through the anchors' CoreDNS to `BOOT_VIP`, so the anchors serve the enrollment.
 - `<node>` is the host name, and `<addr>` is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`.
 
 > [!WARNING]
@@ -66,7 +66,7 @@ The node checks the server's certificate against its own clock. The bootstrap VL
 To approve from a phone, scan the console's QR code. It opens the approval page with the code filled in, and you select the node there.
 
 > [!WARNING]
-> The UUID, MAC, serial and host name are the requester's own claims. A MAC is visible to any host on its network, and any host that routes to `ENROLL_VIP` can send a device request with riptide's MAC. Only the code on the console ties an approval to the machine in front of you. A prompt you did not expect is another machine: deny its UUID.
+> The UUID, MAC, serial and host name are the requester's own claims. A MAC is visible to any host on its network, and any host on the bootstrap VLAN can send a device request with riptide's MAC. Only the code on the console ties an approval to the machine in front of you. A prompt you did not expect is another machine: deny its UUID.
 
 ## Return the node to the Kubernetes VLAN
 
@@ -98,8 +98,9 @@ To approve from a phone, scan the console's QR code. It opens the approval page 
 | A prompt appears for a machine you are not enrolling | Another host sent a device request | Run `mise run enroll:deny <uuid>` with the UUID from the prompt |
 | `TalosEnrollmentWaiting` fires | A machine has asked for codes for 30 minutes with no answer | Approve the code on its console, or deny its UUID |
 | Approval answers 400 with a list of nodes | `machine-inputs.json` lacks the node | Run `mise run render-machine-inputs`, then merge |
-| Approval answers 500 | `talosctl` failed | Read `kubectl --context folly -n talos-enroll logs deploy/talos-enroll` |
-| A denied machine gets 403 | The server refuses its UUID until it restarts | Run `kubectl --context folly -n talos-enroll rollout restart deploy/talos-enroll` |
+| Approval answers `no anchor knows that code or uuid` | The boot VIP moved, or the code expired | Read the code on the console now. A move of the VIP forgets every code, and Talos asks for a new one |
+| Approval answers 500 | `talosctl` failed | Run `journalctl -u talos-enroll` on the anchor that holds `BOOT_VIP`, over ssh |
+| A denied machine gets 403 | The server refuses its UUID until it restarts | Run `systemctl restart talos-enroll` on the anchor that holds `BOOT_VIP`, over ssh |
 
 ## Related
 

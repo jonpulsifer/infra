@@ -6,17 +6,17 @@ status: unverified
 
 talos-enroll is the enrollment server for folly's Talos nodes. A machine that network boots the signed Talos image asks it for a device code, waits for the owner's approval, and then fetches its machine config. No machine has enrolled through it yet.
 
-It runs in two places. `enroll.lolwtf.ca` resolves to the cluster's copy at `ENROLL_VIP`. Each [anchor](../platform/nixos/talos-boot.md) runs a copy behind `BOOT_VIP`, which no name points at until the anchors' copy replaces the cluster's.
+It runs in two places. Each [anchor](../platform/nixos/talos-boot.md) runs a copy behind `BOOT_VIP`, and the anchors' CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP`, so a machine on the bootstrap VLAN enrolls through the anchors. The public name still resolves to the cluster's copy at `ENROLL_VIP`, which no machine on the bootstrap VLAN asks for.
 
 ## Use it
 
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
-| Device flow | `https://enroll.lolwtf.ca`, paths `/device/code`, `/token` and `/config` | Clients that route to `ENROLL_VIP`, the bootstrap VLAN included; on the anchors, the bootstrap VLAN at `BOOT_VIP` |
+| Device flow | `https://enroll.lolwtf.ca`, paths `/device/code`, `/token` and `/config` | The bootstrap VLAN, at `BOOT_VIP` through the anchors' DNS; clients that route to `ENROLL_VIP` reach the cluster's copy |
 | Approval page and API | `https://talos-enroll.<tailnet>`; on an anchor, `https://<anchor>.<tailnet>:8443` | Tailnet logins in `ENROLL_APPROVERS` |
 | Prompts | The Discord channel of the Alertmanager webhook | Members of that channel |
 
-Each machine gets one Discord message, which the server edits as its enrollment moves on. The prompt and the console's QR code name the approval page of the server that holds the code. `mise run enroll:approve <code> <node>`, `enroll:deny <uuid>` and `enroll:pending` call the cluster's approval API. [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) is the procedure.
+Each machine gets one Discord message, which the server edits as its enrollment moves on. The prompt and the console's QR code name the approval page of the server that holds the code. `mise run enroll:approve <code> <node>`, `enroll:deny <uuid>` and `enroll:pending` call the anchors' approval API. Only the anchor that holds `BOOT_VIP` knows a code, so `scripts/enroll.sh` tries each anchor and moves on while one answers 404. `ENROLL_ADMIN_URL` names one server. [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) is the procedure.
 
 The user code shows only on the machine's console, so an approval proves that the approver read the console of the machine being enrolled.
 
@@ -42,7 +42,7 @@ Talos trusts only its bundled roots before it has a config, so the name has a Le
 | `TalosEnrolledNodeNotReady` | A node fetched its config 30 minutes ago and is not Ready |
 | `AnchorEnrollVipDown`, `AnchorEnrollNotServing` | No anchor, or one anchor, serves enrollment ([Talos boot](../platform/nixos/talos-boot.md#alerts)) |
 
-The first three read the cluster's copy; nothing scrapes the anchors' `/metrics`. After a change to `clusters/folly/talos/`, run `mise run render-machine-inputs` and commit both files in the same pull request.
+The first three read the anchors' copies. Each anchor's `talos-enroll-check` timer writes the server's `/metrics` into its node exporter's textfile collector, so the series carry the anchor's `instance`. Only the anchor that holds `BOOT_VIP` has codes, and the others read zero. After a change to `clusters/folly/talos/`, run `mise run render-machine-inputs` and commit both files in the same pull request.
 
 ## Reference
 
