@@ -9,7 +9,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| Garage | Stores the buckets `velero`, `cnpg` and `etcd` | A NixOS service on [spore](../hosts/spore.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
+| Garage | Stores the buckets `velero`, `cnpg` and `etcd` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
 | Velero | Backs up objects, and the volumes of pods with the annotation `backup.velero.io/backup-volumes` | The `velero` namespace |
 | barman-cloud plugin | Archives each database's base backups and WAL, through an `ObjectStore` named `garage` | The `cloudnative-pg` namespace |
 | `etcd-snapshot` | Snapshots the cluster's etcd through the Talos API into `etcd/<site>/` | The `backups` namespace on each site |
@@ -33,9 +33,13 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 - The etcd jobs delete snapshots older than 14 days.
 - GCS has object versioning, and keeps a deleted or replaced object 30 days.
 
+## Garage cluster
+
+folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on Lab Net, and the firewall opens it to the other anchors only. Every anchor serves S3, and clients name spore. A node with `homelab.garage.clustered` unset is the standalone store with replication factor 1, which spore stays until [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md) moves it.
+
 ## Credentials
 
-1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
+1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. The three anchors share one `garage/rpc-secret` in their own SOPS files. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
 
 ## Volumes
 
@@ -50,7 +54,7 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 
 ## Where it lives
 
-- `nix/services/garage.nix`: Garage on spore
+- `nix/services/garage.nix`: Garage on the anchors
 - `clusters/<site>/etcd-snapshot/`: the etcd snapshots
 - `clusters/offsite/garage/`: offsite's Garage
 - `clusters/base/platform/velero/`, `barman-cloud/`, `backups/`: Velero, the plugin and `backup-push`
@@ -66,5 +70,6 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 - [Recover a re-created database](../runbooks/recover-a-re-created-database.md)
 - [Restore a volume](../runbooks/restore-a-volume.md)
 - [Restore etcd on Talos](../runbooks/restore-etcd-on-talos.md)
+- [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md)
 - [Restore from the GCS copy](../runbooks/restore-from-the-gcs-copy.md)
 - [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md)

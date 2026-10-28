@@ -28,3 +28,9 @@ creation_rules:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
           # forge (ssh-to-age of its ed25519 host key)
           - age1x2zrt0atyzhc05eg6sdq7ce06y24g5tz8keqzy658jtz9n93x92qj4h0ns
+  - path_regex: nix/secrets/capsule\.sops\.ya?ml
+    key_groups:
+      - age:
+          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+          # capsule (ssh-to-age of its ed25519 host key)
+          - age15utrljq4pr0tpehs3j8pyuj7lg9w7yp8hsswcsw2958qmmumz9yqqryvxz
