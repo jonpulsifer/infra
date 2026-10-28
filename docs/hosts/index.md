@@ -58,5 +58,5 @@ Each sheet states its host's divergence. These cover more than one host, or a ho
 
 - eviropico runs Pimoroni's MicroPython firmware, and no file in git holds its code.
 - capsule and forge are on the tailnet, and `devices.tf` lists neither. forge enrols through the OAuth client in `terraform/network/tailscale/oauth_clients.tf`.
-- `devices.tf` lists nuc, with `tag:folly`, and desktop-g7i75ls, with `tag:offsite`. No sheet or NixOS configuration covers either.
+- `devices.tf` lists desktop-g7i75ls, with `tag:offsite`. No sheet or NixOS configuration covers it.
 - The Kubernetes nodes run no Tailscale client, and `devices.tf` does not list them. Their tailnet entries stay in the admin console.
