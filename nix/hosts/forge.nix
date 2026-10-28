@@ -10,6 +10,7 @@ in
     ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
     ../services/build-host.nix
+    ../services/garage.nix
     ../system/sops.nix
   ];
 
@@ -19,6 +20,14 @@ in
     binaryCache = "harmonia";
     # sops-nix's default path for sops.secrets."harmonia-cache-key" below.
     binaryCacheSigningKeyPath = "/run/secrets/harmonia-cache-key";
+  };
+
+  homelab.garage = {
+    enable = true;
+    site = "folly";
+    dataDir = "/var/lib/garage";
+    clustered = true;
+    bootstrap = false;
   };
 
   sops.defaultSopsFile = ../secrets/forge.sops.yaml;

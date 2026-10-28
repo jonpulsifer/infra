@@ -32,6 +32,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Recover a re-created database](recover-a-re-created-database.md): bring a database back when its `Cluster` is created again under the same name
 - [Restore a volume](restore-a-volume.md): restore the files of a volume from a Velero backup
 - [Restore from the GCS copy](restore-from-the-gcs-copy.md): copy a Garage bucket back from the encrypted GCS copy
+- [Migrate Garage to three nodes](migrate-garage-to-three-nodes.md): move folly's backup store from spore alone to a replication factor 3 cluster on the anchors
 - [Migrate a local-path volume](migrate-a-local-path-volume.md): move a hostPath volume to a `local` volume so that Velero can back it up
 
 ## Cloud and network

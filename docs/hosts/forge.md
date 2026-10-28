@@ -21,6 +21,7 @@ forge is the lab's native arm64 build host, a Raspberry Pi 5 on [Lab Net](../pla
 - Docker with buildx for arm64 images
 - CoreDNS and chrony through the anchor profile (`nix/profiles/anchor.nix`), which makes forge one of the three [anchors](../platform/network/ingress-and-dns.md#lab-dns-and-time) that serve lab DNS and time
 - harmonia, a Nix binary cache behind nginx on port 80, which the firewall blocks. No host trusts its key.
+- A node of folly's [Garage cluster](../platform/backups.md#garage-cluster), with data in `/var/lib/garage` (`nix/services/garage.nix`)
 
 See [Build host and cache](../platform/nixos/build-host-and-cache.md).
 

@@ -1,5 +1,8 @@
 # A site's Garage S3 store, the primary target of its backups: Velero, CNPG and the etcd snapshots
-# write into it over the LAN, and a cluster CronJob copies it off-site. One node, no replication.
+# write into it over the LAN, and a cluster CronJob copies it off-site. A node is either the
+# standalone store (replication factor 1, RPC on loopback) or a member of the anchors' cluster
+# (replication factor 3, RPC on Lab Net, open to the other anchors only).
+# docs/runbooks/migrate-garage-to-three-nodes.md moves the store from the first to the second.
 {
   config,
   lib,
@@ -9,6 +12,7 @@
 let
   cfg = config.homelab.garage;
   backups = import ../lib/backups.nix { inherit pkgs; };
+  lab = import ../lib/lab.nix;
   garage = lib.getExe config.services.garage.package;
   secret = name: config.sops.secrets.${name}.path;
 
@@ -36,8 +40,37 @@ let
       flags = "--read";
     }) buckets;
 
+  rpcPort = 3901;
+  anchors = [
+    "capsule"
+    "forge"
+    "spore"
+  ];
+  hostName = config.networking.hostName;
+  self = lab.hosts.${hostName};
+  peers = map (name: lab.hosts.${name}) (lib.filter (name: name != hostName) anchors);
+
   # The data directory sits on a nofail mount, which tmpfiles and user creation can run before.
   dataDirUnit = "garage-data-dir.service";
+
+  # The standalone store assigns its own one-node layout. The cluster's three-node layout is the
+  # owner's to assign, and writing keys and buckets needs its quorum.
+  layoutStep =
+    if cfg.clustered then
+      ''
+        if [ "$(jq '.roles | length' <<<"$layout")" -lt ${toString (lib.length anchors)} ]; then
+          echo "the layout has fewer than ${toString (lib.length anchors)} nodes; restart this unit after 'garage layout apply'" >&2
+          exit 0
+        fi
+      ''
+    else
+      ''
+        if [ "$(jq '.roles | length' <<<"$layout")" -eq 0 ]; then
+          node=$(${garage} json-api GetClusterStatus | jq -r '.nodes[0].id')
+          ${garage} layout assign -z ${cfg.site} -c ${cfg.capacity} "$node"
+          ${garage} layout apply --version "$(jq '.version + 1' <<<"$layout")"
+        fi
+      '';
 in
 {
   options.homelab.garage = {
@@ -55,6 +88,19 @@ in
       default = "100GB";
       description = "The node's layout capacity. With one node it weights nothing and enforces nothing.";
     };
+    clustered = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Join the anchors' three-node cluster at replication factor 3, with RPC on Lab Net. Every
+        anchor of the cluster sets it, on a data directory that no standalone store has used.
+      '';
+    };
+    bootstrap = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Run garage-bootstrap here: the layout (standalone only), keys, buckets and grants. One node of a cluster sets it.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -65,8 +111,8 @@ in
         metadata_dir = "${cfg.dataDir}/meta";
         data_dir = "${cfg.dataDir}/data";
         db_engine = "sqlite";
-        replication_factor = 1;
-        rpc_bind_addr = "127.0.0.1:3901";
+        replication_factor = if cfg.clustered then 3 else 1;
+        rpc_bind_addr = "${if cfg.clustered then self else "127.0.0.1"}:${toString rpcPort}";
         rpc_secret_file = secret "garage/rpc-secret";
         s3_api = {
           s3_region = "garage";
@@ -76,6 +122,9 @@ in
           api_bind_addr = "127.0.0.1:3903";
           admin_token_file = secret "garage/admin-token";
         };
+      }
+      // lib.optionalAttrs cfg.clustered {
+        rpc_public_addr = "${self}:${toString rpcPort}";
       };
     };
 
@@ -85,7 +134,14 @@ in
     };
     users.groups.garage = { };
 
-    networking.firewall.allowedTCPPorts = [ backups.s3Port ];
+    networking.firewall = {
+      allowedTCPPorts = [ backups.s3Port ];
+      extraCommands = lib.mkIf cfg.clustered (
+        lib.concatMapStrings (ip: ''
+          iptables -A nixos-fw -p tcp -s ${ip} --dport ${toString rpcPort} -j nixos-fw-accept
+        '') peers
+      );
+    };
 
     sops.secrets = {
       "garage/rpc-secret" = {
@@ -101,11 +157,13 @@ in
         restartUnits = [ "garage.service" ];
       };
     }
-    // lib.listToAttrs (
-      lib.concatMap (name: [
-        (lib.nameValuePair "garage/keys/${name}/id" { mode = "0400"; })
-        (lib.nameValuePair "garage/keys/${name}/secret" { mode = "0400"; })
-      ]) keys
+    // lib.optionalAttrs cfg.bootstrap (
+      lib.listToAttrs (
+        lib.concatMap (name: [
+          (lib.nameValuePair "garage/keys/${name}/id" { mode = "0400"; })
+          (lib.nameValuePair "garage/keys/${name}/secret" { mode = "0400"; })
+        ]) keys
+      )
     );
 
     systemd.services = {
@@ -133,7 +191,7 @@ in
       # Applies the layout once, then imports the pre-generated keys, creates the buckets and
       # applies the grants. Every step is a no-op on a bootstrapped node. Key secrets go through
       # stdin, never argv.
-      garage-bootstrap = {
+      garage-bootstrap = lib.mkIf cfg.bootstrap {
         description = "Bootstrap the ${cfg.site} Garage layout, keys, buckets and grants";
         wantedBy = [ "multi-user.target" ];
         requires = [ "garage.service" ];
@@ -156,12 +214,7 @@ in
           done
 
           layout=$(${garage} json-api GetClusterLayout)
-          if [ "$(jq '.roles | length' <<<"$layout")" -eq 0 ]; then
-            node=$(${garage} json-api GetClusterStatus | jq -r '.nodes[0].id')
-            ${garage} layout assign -z ${cfg.site} -c ${cfg.capacity} "$node"
-            ${garage} layout apply --version "$(jq '.version + 1' <<<"$layout")"
-          fi
-
+          ${layoutStep}
           existing=$(${garage} json-api ListKeys | jq -r '.[].id')
           import_key() {
             local name=$1 id secret
