@@ -204,8 +204,10 @@ in
   };
   services.keepalived.vrrpInstances.boot.trackScripts = [ "talos-enroll" ];
 
-  # Whether this anchor serves enrollment. ./talos-boot.nix turns on node-exporter's textfile
-  # collector for this directory and exports whether the anchor holds the boot VIP.
+  # Whether this anchor serves enrollment, and the server's own /metrics, which the unix socket
+  # keeps off the network. ./talos-boot.nix turns on node-exporter's textfile collector for this
+  # directory and exports whether the anchor holds the boot VIP; Prometheus reads both through the
+  # anchor's node exporter. The pending-code series are the VIP holder's; the others read zero.
   systemd.services.talos-enroll-check = {
     description = "Export whether this anchor serves Talos enrollment";
     serviceConfig = {
@@ -218,7 +220,10 @@ in
       ProtectSystem = "strict";
       ReadWritePaths = [ metricsDir ];
     };
-    path = [ pkgs.coreutils ];
+    path = [
+      pkgs.coreutils
+      pkgs.curl
+    ];
     script = ''
       set -u
       serving=0
@@ -231,6 +236,7 @@ in
         printf '# HELP talos_enroll_serving Whether nginx serves the enrollment name with a trusted certificate and talos-enroll answers behind it.\n'
         printf '# TYPE talos_enroll_serving gauge\n'
         printf 'talos_enroll_serving{site="${site}"} %s\n' "$serving"
+        curl --fail --silent --max-time 5 --unix-socket ${publicSocket} http://localhost/metrics || true
       } > "$metrics"
       chmod 0644 "$metrics"
       mv "$metrics" ${metricsDir}/talos-enroll-check.prom
