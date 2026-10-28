@@ -111,6 +111,7 @@ sections:
         items:
           - runbooks/manage-sops-secrets.md
           - runbooks/initialize-openbao.md
+          - runbooks/set-up-a-devid-ca-yubikey.md
       - group: Apps
         items:
           - runbooks/install-kthx.md

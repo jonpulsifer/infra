@@ -67,6 +67,9 @@ in
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
+  # The YubiKey 5 that holds one of the two hardware DevID CA keys.
+  homelab.devidCa.yubikey.enable = true;
+
   # A node of the anchors' three-node cluster. The standalone store's /nfs/data/garage stays on
   # disk as the rollback (docs/runbooks/migrate-garage-to-three-nodes.md).
   homelab.garage = {
@@ -80,8 +83,8 @@ in
     bundleNotifier.enable = true;
     enable = true;
     ekHashes = lib.mapAttrsToList (_: node: node.ekHash) ekNodes;
-    # Off until the DevID CA's chain is committed (terraform/pki/certs/folly-devid-ca.pem); then set
-    # devid.caChains to it and turn this on.
+    # Off until a DevID CA certificate is committed (terraform/pki/certs/folly-devid-ca-<name>.pem);
+    # then list each such file in devid.caChains and turn this on.
     devid.enable = false;
     entries =
       nodeAliases

@@ -393,3 +393,75 @@ func concat(t *testing.T, ders ...[]byte) []byte {
 	}
 	return out
 }
+
+// SPIRE trusts the bundle, so a DevID CA left out of it cannot vouch for its machines.
+func TestVerifyChecksTheDevIDBundle(t *testing.T) {
+	dir := t.TempDir()
+	far := time.Now().AddDate(50, 0, 0)
+	fiveYears := time.Now().AddDate(5, 0, 0)
+	root, rootKey := mintCA(t, "root", 2, true, far, nil, nil)
+	inter, interKey := mintCA(t, "intermediate", 1, true, far, root, rootKey)
+	capsule, _ := mintCA(t, "folly-devid-ca-capsule", 0, false, fiveYears, inter, interKey)
+	spore, _ := mintCA(t, "folly-devid-ca-spore", 0, false, fiveYears, inter, interKey)
+	write := func(name string, ders ...[]byte) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), concat(t, ders...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("fml-root.pem", root.Raw)
+	write("fml-intermediate.pem", inter.Raw)
+	write("folly-devid-ca-capsule.pem", capsule.Raw)
+	write("folly-devid-ca-spore.pem", spore.Raw)
+
+	verify := func() string {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		_ = runVerify(dir, &out, &errOut)
+		return errOut.String()
+	}
+
+	if got := verify(); !strings.Contains(got, "folly-devid-ca.pem is missing") {
+		t.Errorf("a missing bundle should fail, got %q", got)
+	}
+	write("folly-devid-ca.pem", spore.Raw, capsule.Raw)
+	if got := verify(); !strings.Contains(got, "not the 2 issuing DevID CA(s) in file-name order") {
+		t.Errorf("a misordered bundle should fail, got %q", got)
+	}
+	write("folly-devid-ca.pem", capsule.Raw)
+	if got := verify(); !strings.Contains(got, "not the 2 issuing DevID CA(s)") {
+		t.Errorf("a bundle without spore should fail, got %q", got)
+	}
+	write("folly-devid-ca.pem", capsule.Raw, spore.Raw)
+	if got := verify(); got != "" {
+		t.Errorf("a complete bundle should pass, got %q", got)
+	}
+
+	// A chain file sits beside its CA and stays out of the bundle.
+	write("folly-devid-ca-spore-chain.pem", spore.Raw, inter.Raw, root.Raw)
+	if got := verify(); got != "" {
+		t.Errorf("a CA's chain file should pass, got %q", got)
+	}
+	write("folly-devid-ca-spore-chain.pem", capsule.Raw, inter.Raw, root.Raw)
+	if got := verify(); !strings.Contains(got, "not the cluster CA it is published for") {
+		t.Errorf("a chain file that starts with another CA should fail, got %q", got)
+	}
+	if err := os.Remove(filepath.Join(dir, "folly-devid-ca-spore-chain.pem")); err != nil {
+		t.Fatal(err)
+	}
+	write("folly-devid-ca-chain.pem", spore.Raw, inter.Raw, root.Raw)
+	if got := verify(); !strings.Contains(got, "folly-devid-ca-chain.pem names no issuing CA") {
+		t.Errorf("a chain file for the bundle should fail, got %q", got)
+	}
+	if err := os.Remove(filepath.Join(dir, "folly-devid-ca-chain.pem")); err != nil {
+		t.Fatal(err)
+	}
+
+	stranger, strangerKey := mintCA(t, "stranger", 1, true, far, nil, nil)
+	rogue, _ := mintCA(t, "folly-devid-ca-rogue", 0, false, fiveYears, stranger, strangerKey)
+	write("folly-devid-ca-rogue.pem", rogue.Raw)
+	write("folly-devid-ca.pem", capsule.Raw, rogue.Raw, spore.Raw)
+	if got := verify(); !strings.Contains(got, "folly-devid-ca-rogue.pem is issued by") {
+		t.Errorf("a DevID CA outside the FML intermediate should fail, got %q", got)
+	}
+}

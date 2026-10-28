@@ -1,6 +1,6 @@
 # folly's DevID CA, one level under the FML intermediate, which allows exactly one CA below it.
 # It issues each attested machine's LDevID and LAK certificates (apps/talos-attest). Its key is a
-# software key in this state; YubiKey-held issuing CAs replace it later (docs/platform/pki.md).
+# software key in this state; the YubiKey-held issuing CAs of devid-ca.tf sit beside it.
 # scripts/pki/devid-ca.sh commits the certificate and chain and seals the key for the anchors.
 
 resource "tls_private_key" "devid_ca" {

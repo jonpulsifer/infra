@@ -32,6 +32,7 @@ on:
       - 'clusters/folly/inventory/machines.yaml'
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
+      - 'packages/pkcs11signer/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -53,6 +54,7 @@ on:
       - 'clusters/folly/inventory/machines.yaml'
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
+      - 'packages/pkcs11signer/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -83,6 +85,7 @@ jobs:
           - apps/talos-attest
           - apps/talos-enroll
           - images/spire-agent-tpm/devid-init
+          - packages/pkcs11signer
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -97,6 +100,12 @@ jobs:
       # talos-attest's software TPM (go-tpm-tools/simulator) links libcrypto.
       - if: matrix.module == 'apps/talos-attest'
         run: dpkg -s libssl-dev >/dev/null 2>&1 || (sudo apt-get update -q && sudo apt-get install -yq libssl-dev)
+      # pkcs11signer's tests sign on a SoftHSM2 token, and fail rather than skip without it.
+      - if: matrix.module == 'packages/pkcs11signer'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q softhsm2
+          echo PKCS11SIGNER_REQUIRE_SOFTHSM=1 >> "$GITHUB_ENV"
       - run: go build ./...
       - run: go vet ./...
       # -race, because bosun's pool is reached from the poll loop, every

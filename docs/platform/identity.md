@@ -30,7 +30,7 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 - Change entries and EK hashes in `tpmNodes` and `workloads` of `nix/hosts/spore.nix` only. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
 - An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no `ekHash` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
-- `homelab.spire.devid.caChains` takes the DevID CA's chain, and the server trusts only its first certificate. The fml intermediate or root in that pool would admit any certificate it signs.
+- `homelab.spire.devid.caChains` takes one file for each issuing DevID CA, `folly-devid-ca-<name>.pem` in `terraform/pki/certs/`. The server reads the first certificate of each file, so list the CA files and not the bundle `folly-devid-ca.pem`. The fml intermediate or root in that pool would admit any certificate it signs.
 - Run the CLI as root with `-socketPath /run/spire/server/private/api.sock`. Its default socket path is wrong for this server.
 - The firewall admits the agent port and the exporter only from folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR`. Cilium does not masquerade traffic to spore, so pods arrive from their own addresses.
 

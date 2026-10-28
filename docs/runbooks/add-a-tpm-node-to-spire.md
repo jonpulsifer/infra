@@ -32,7 +32,7 @@ spore builds the EK hash allow list, each node alias, and the entries under each
 
 Do this once. The server then runs `tpm_devid` beside the EK attestor, and each agent attests by LDevID when the attest service serves one for its node.
 
-1. On a branch, in `homelab.spire` of `nix/hosts/spore.nix`, set `devid.caChains` to the DevID CA's chain under `terraform/pki/certs/`.
+1. On a branch, in `homelab.spire` of `nix/hosts/spore.nix`, list each `folly-devid-ca-<name>.pem` of `terraform/pki/certs/` in `devid.caChains`.
 2. Set `devid.enable = true;`.
 3. Merge the pull request, and deploy spore.
 4. In a second pull request, set `ATTEST_URL` in the `spire-attest` ConfigMap of `clusters/folly/apps/spire/agent-config.yaml`.

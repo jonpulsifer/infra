@@ -50,12 +50,12 @@ output "fml_intermediate_cert" {
 }
 
 output "devid_ca_cert" {
-  description = "folly's DevID CA certificate (PEM). SPIRE's tpm_devid devid_ca_path trusts this certificate alone."
+  description = "folly's software DevID CA certificate (PEM). scripts/pki/devid-ca.sh writes it to certs/folly-devid-ca-software.pem."
   value       = tls_locally_signed_cert.devid_ca.cert_pem
 }
 
 output "devid_ca_chain" {
-  description = "DevID CA, FML intermediate, FML root (PEM), the DevID CA first, for apps/talos-attest's ATTEST_CA_CHAIN."
+  description = "Software DevID CA, FML intermediate, FML root (PEM), the DevID CA first, for apps/talos-attest's ATTEST_CA_CHAIN. scripts/pki/devid-ca.sh writes it to certs/folly-devid-ca-software-chain.pem."
   # Public certs, but the intermediate and root come from 1Password data
   # sources, which the provider marks sensitive.
   sensitive = true
@@ -70,4 +70,18 @@ output "devid_ca_private_key" {
   description = "folly's DevID CA private key (PKCS#8 PEM). Consumed only by scripts/pki/devid-ca.sh, which sops-encrypts it for each anchor."
   sensitive   = true
   value       = tls_private_key.devid_ca.private_key_pem_pkcs8
+}
+
+output "devid_ca_yubikey_certs" {
+  description = "Hardware DevID CA certificates (PEM), by anchor. scripts/devid-ca-yubikey.sh writes each to certs/folly-devid-ca-<host>.pem."
+  value       = { for h in local.devid_ca_yubikey_hosts : h => tls_locally_signed_cert.devid_ca_yubikey[h].cert_pem }
+}
+
+output "devid_ca_bundle" {
+  description = "Every issuing DevID CA (PEM) in file-name order: each committed certs/folly-devid-ca-<name>.pem but the -chain.pem files, with this root's software and hardware CAs at their file names. `mise run devid:bundle` writes the same bundle to certs/folly-devid-ca.pem."
+  value = join("", [for pem in values(merge(
+    { for f in fileset("${path.module}/certs", "folly-devid-ca-*.pem") : f => file("${path.module}/certs/${f}") if !endswith(f, "-chain.pem") },
+    { "folly-devid-ca-software.pem" = tls_locally_signed_cert.devid_ca.cert_pem },
+    { for h in local.devid_ca_yubikey_hosts : "folly-devid-ca-${h}.pem" => tls_locally_signed_cert.devid_ca_yubikey[h].cert_pem },
+  )) : "${trimspace(pem)}\n"])
 }
