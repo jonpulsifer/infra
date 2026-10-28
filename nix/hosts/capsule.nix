@@ -1,11 +1,9 @@
-# capsule: NVMe-rooted Pi 5 running the other half of the lab's recursive DNS
-# pair plus the lab NTP server.
+# capsule: NVMe-rooted Pi 5 and one of the three anchors that run the lab's DNS and NTP.
 { lib, ... }:
 {
   imports = [
+    ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
-    ../services/coredns-sinkhole.nix
-    ../services/ntp-server.nix
   ];
 
   # The NVMe carries these labels; the per-name default (NIXOS_CAPSULE) would not find

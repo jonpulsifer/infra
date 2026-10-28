@@ -1,0 +1,92 @@
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: forge
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: forge
+    lolwtf.ca/service: coredns
+addressType: IPv4
+ports:
+  - name: dns-metrics
+    port: 9253
+    protocol: TCP
+endpoints:
+  - addresses: ["${FORGE_IP}"]
+    nodeName: forge
+--- # trivy:ignore:avd-ksv-0108
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: coredns
+    jobLabel: coredns
+spec:
+  ports:
+    - name: dns-metrics
+      port: 9253
+      protocol: TCP
+      targetPort: 9253
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: forge
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: coredns
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  endpoints:
+    - port: dns-metrics
+      interval: 30s
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
+          targetLabel: instance
+  selector:
+    matchLabels:
+      lolwtf.ca/service: coredns
+  namespaceSelector:
+    matchNames:
+      - monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: forge
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: coredns
+    release: prom-stack
+spec:
+  groups:
+    - name: forge
+      rules:
+        - alert: PrometheusTargetMissing
+          expr: (up{endpoint="dns-metrics", namespace="monitoring", service="forge"} == 0) or absent(up{endpoint="dns-metrics", namespace="monitoring", service="forge"})
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            message: Prometheus target missing (instance {{ $labels.instance }})
+            description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+        - alert: ForgeCoreDnsDown
+          expr: (node_systemd_unit_state{instance="forge", name="coredns.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="forge", name="coredns.service", state="active"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: CoreDNS sinkhole on forge is down
+            description: "coredns.service is not active on forge. One of the three DNS anchors is unavailable."
+        - alert: ForgeChronyDown
+          expr: (node_systemd_unit_state{instance="forge", name="chronyd.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="forge", name="chronyd.service", state="active"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: NTP server on forge is down
+            description: "chronyd.service is not active on forge. Clients configured to use time.lolwtf.ca have lost one of the three NTP anchors."

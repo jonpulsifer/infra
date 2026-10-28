@@ -1,5 +1,5 @@
 # forge: NVMe-rooted aarch64 build host: Nix remote builder, native arm64 OCI builds, and a
-# harmonia cache for the Pi fleet. Its EEPROM falls back to the rackpi5 RAM image spore publishes.
+# harmonia cache for the Pi fleet, and one of the three anchors that run the lab's DNS and NTP. Its EEPROM falls back to the rackpi5 RAM image spore publishes.
 { config, ... }:
 let
   fleet = import ../lib/fleet.nix;
@@ -7,6 +7,7 @@ let
 in
 {
   imports = [
+    ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
     ../services/build-host.nix
     ../system/sops.nix
