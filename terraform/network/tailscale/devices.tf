@@ -27,10 +27,6 @@ locals {
       key_expiry_disabled = true
       tags                = ["tag:pi4"]
     }
-    "nuc" = {
-      key_expiry_disabled = true
-      tags                = ["tag:folly"]
-    }
     "tallboy" = {
       key_expiry_disabled = true
       tags                = []

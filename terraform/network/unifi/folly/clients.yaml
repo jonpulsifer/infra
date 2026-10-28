@@ -128,25 +128,6 @@ lab:
     mac: 74:83:c2:6e:80:6a
     ip: 5
     dev-id: 3687
-  nuc-wifi:
-    mac: d0:c6:37:4d:c2:fe
-    dev-id: 3592
-    skip_forget_on_destroy: false
-    hostname: nuc-wifi
-    ip: 30
-
-# Retired folly nodes. A current node's MAC is in
-# clusters/folly/inventory/machines.yaml. The offsite nodes are in
-# ../offsite/clients.yaml.
-k8s:
-  nuc:
-    mac: 1c:69:7a:01:2a:ef
-    dev-id: 3592
-    skip_forget_on_destroy: false
-  800g3-2:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: ac:e2:d3:0c:fb:b5
 
 rpis:
   pikvm:

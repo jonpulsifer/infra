@@ -27,7 +27,7 @@ A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d 
 - Add a node to the inventory before its address goes into `NODE_ADDRESSES`. The UniFi plan fails on a node with no entry.
 - Record `tpm` as the spec version the firmware reports, `"2.0"` or `"1.2"`. Only a TPM 2.0 node seals its disks and attests.
 - Record `secure_boot` as the state the node is expected to boot in. The check flags a node that boots in any other.
-- Retired nodes' MACs stay under `k8s` in `terraform/network/unifi/folly/clients.yaml`.
+- Remove a retired node from the inventory and `NODE_ADDRESSES` in the same pull request.
 
 ## Related
 
