@@ -36,7 +36,7 @@ in
       nginx = spore.systemd.services.nginx;
       grow = spore.systemd.services.grow-root-and-partition-storage;
       probe = spore.systemd.services.spore-native-boot-artifact-check;
-      tftpRanges = spore.networking.firewall.allowedUDPPortRanges;
+      tftpRanges = spore.networking.firewall.interfaces.bootstrap.allowedUDPPortRanges;
       hasTftpRange = lib.any (range: range.from == 30000 && range.to == 30099) tftpRanges;
       fetchScript = rackpi5.boot.initrd.systemd.services.fetch-nix-store.script;
       smee = "${spore.systemd.services.tinkerbell.serviceConfig.ExecStart} ";
@@ -71,7 +71,7 @@ in
           else
             "dnsmasq TFTP transfer range is not bounded"
         )
-        (if hasTftpRange then null else "firewall does not admit the bounded TFTP transfer range")
+        (if hasTftpRange then null else "bootstrap firewall does not admit the bounded TFTP transfer range")
         (
           if lib.hasInfix "find_data_partition" grow.script && !(lib.hasInfix "mkfs.ext4 -F" grow.script) then
             null
