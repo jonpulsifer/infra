@@ -48,3 +48,26 @@ output "fml_intermediate_cert" {
   value       = local.fml_intermediate_cert
   sensitive   = true
 }
+
+output "devid_ca_cert" {
+  description = "folly's DevID CA certificate (PEM). SPIRE's tpm_devid devid_ca_path trusts this certificate alone."
+  value       = tls_locally_signed_cert.devid_ca.cert_pem
+}
+
+output "devid_ca_chain" {
+  description = "DevID CA, FML intermediate, FML root (PEM), the DevID CA first, for apps/talos-attest's ATTEST_CA_CHAIN."
+  # Public certs, but the intermediate and root come from 1Password data
+  # sources, which the provider marks sensitive.
+  sensitive = true
+  value = join("", [
+    tls_locally_signed_cert.devid_ca.cert_pem,
+    local.fml_intermediate_cert,
+    local.fml_root_cert,
+  ])
+}
+
+output "devid_ca_private_key" {
+  description = "folly's DevID CA private key (PKCS#8 PEM). Consumed only by scripts/pki/devid-ca.sh, which sops-encrypts it for each anchor."
+  sensitive   = true
+  value       = tls_private_key.devid_ca.private_key_pem_pkcs8
+}
