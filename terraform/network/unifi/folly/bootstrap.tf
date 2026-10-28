@@ -68,6 +68,9 @@ resource "unifi_network" "bootstrap" {
     stop        = cidrhost(local.bootstrap_cidr, 10)
     dns_enabled = true
     dns_servers = [local.spore_boot_ip]
+    # spore's chrony, so an installing node keeps time without the internet.
+    ntp_enabled = true
+    ntp_servers = [local.spore_boot_ip]
     tftp_server = local.spore_boot_ip
     boot = {
       enabled  = true
