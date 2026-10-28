@@ -219,6 +219,104 @@ in
       )
       "anchors with the boot VIP: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
 
+  # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. Both
+  # on is the transition; each node then has one alias per attestor, since an agent matches a node
+  # entry only when it has every selector.
+  spire-devid =
+    let
+      extend = module: (nixosConfigurations.spore.extendModules { modules = [ module ]; }).config;
+      testChain = pkgs.writeText "test-devid-chain.pem" "";
+      both = extend {
+        homelab.spire.devid = {
+          enable = lib.mkForce true;
+          caChains = [ testChain ];
+        };
+      };
+      devidOnly = extend {
+        homelab.spire = {
+          ekHashes = lib.mkForce [ ];
+          devid = {
+            enable = lib.mkForce true;
+            caChains = [ testChain ];
+          };
+        };
+      };
+      attestors =
+        c:
+        lib.attrNames (
+          lib.filterAttrs (_: v: v != null) c.services.spire.server.settings.plugins.NodeAttestor
+        );
+      aliases =
+        c: name: lib.filter (e: e.spiffeID == "spiffe://lolwtf.ca/node/${name}") c.homelab.spire.entries;
+      sync = c: c.systemd.services.spire-server-entries.script;
+      devidData = both.services.spire.server.settings.plugins.NodeAttestor.tpm_devid.plugin_data;
+      failures = lib.filter (failure: failure != null) [
+        (if attestors spore == [ "tpm" ] then null else "spore runs tpm_devid while devid.enable is off")
+        (
+          if
+            attestors both == [
+              "tpm"
+              "tpm_devid"
+            ]
+          then
+            null
+          else
+            "both switches on does not run both attestors: ${toString (attestors both)}"
+        )
+        (
+          if attestors devidOnly == [ "tpm_devid" ] && !(devidOnly.environment.etc ? "spire/tpm-hashes") then
+            null
+          else
+            "an empty ekHashes leaves the EK attestor or its allow list"
+        )
+        (
+          if
+            lib.hasInfix "spire-devid-ca.pem" devidData.devid_ca_path
+            && lib.hasInfix "spire-endorsement-ca.pem" devidData.endorsement_ca_path
+          then
+            null
+          else
+            "tpm_devid does not read the DevID and endorsement CA files"
+        )
+        (
+          if
+            lib.all
+              (
+                name:
+                let
+                  selectors = c: map (e: e.selectors) (aliases c name);
+                in
+                lib.length (selectors spore) == 1
+                && lib.hasPrefix "tpm:pub_hash:" (lib.head (lib.head (selectors spore)))
+                && selectors both == selectors spore ++ [ [ "tpm_devid:subject:cn:${name}" ] ]
+              )
+              [
+                "optiplex"
+                "riptide"
+              ]
+          then
+            null
+          else
+            "a node does not have one alias by EK hash and one by LDevID subject CN"
+        )
+        (
+          let
+            lines = lib.splitString "\n" (lib.replaceStrings [ "'" ] [ "" ] (sync both));
+            ids = map (line: lib.elemAt (lib.splitString " " line) 1) (
+              lib.filter (
+                line: lib.hasPrefix "apply " line && lib.hasInfix " -spiffeID spiffe://lolwtf.ca/node/riptide " line
+              ) lines
+            );
+          in
+          if lib.length ids == 2 && lib.unique ids == ids then
+            null
+          else
+            "the entry sync does not give riptide's two aliases distinct IDs"
+        )
+      ];
+    in
+    require "spire-devid" (failures == [ ]) (lib.concatStringsSep "; " failures);
+
   # Two normal users sharing a uid silently breaks file ownership on the NFS
   # exports every cluster host mounts.
   fleet-unique-uids =

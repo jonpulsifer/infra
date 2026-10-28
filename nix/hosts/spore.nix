@@ -7,13 +7,29 @@
   ...
 }:
 let
-  # Each Talos node's TPM EK public key hash, read on the node (docs/platform/identity.md).
+  # Each Talos node with a TPM 2.0. With tpm_devid on, a node attests by the LDevID that the attest
+  # service issues it, whose subject CN is the node's name. ekHash, the EK public key hash read on
+  # the node, is the fallback for a node with no LDevID (docs/platform/identity.md).
   tpmNodes = {
-    optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
-    riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
+    optiplex.ekHash = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
+    riptide.ekHash = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
+  ekNodes = lib.filterAttrs (_: node: node ? ekHash) tpmNodes;
   trustDomain = config.homelab.spire.trustDomain;
   nodeID = name: "spiffe://${trustDomain}/node/${name}";
+  # One alias per node and attestor: an agent matches a node entry only when it has every selector.
+  nodeAliases =
+    lib.mapAttrsToList (name: node: {
+      spiffeID = nodeID name;
+      selectors = [ "tpm:pub_hash:${node.ekHash}" ];
+    }) ekNodes
+    ++ lib.optionals config.homelab.spire.devid.enable (
+      map (name: {
+        spiffeID = nodeID name;
+        key = "tpm_devid";
+        selectors = [ "tpm_devid:subject:cn:${name}" ];
+      }) (lib.attrNames tpmNodes)
+    );
   # Kubernetes service accounts that get an SVID on every TPM node.
   workloads = [
     {
@@ -63,12 +79,12 @@ in
   homelab.spire = {
     bundleNotifier.enable = true;
     enable = true;
-    ekHashes = lib.attrValues tpmNodes;
+    ekHashes = lib.mapAttrsToList (_: node: node.ekHash) ekNodes;
+    # Off until the DevID CA's chain is committed (terraform/pki/certs/folly-devid-ca.pem); then set
+    # devid.caChains to it and turn this on.
+    devid.enable = false;
     entries =
-      lib.mapAttrsToList (name: hash: {
-        spiffeID = nodeID name;
-        selectors = [ "tpm:pub_hash:${hash}" ];
-      }) tpmNodes
+      nodeAliases
       ++ lib.concatMap (
         name:
         map (w: {

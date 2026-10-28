@@ -1,16 +1,17 @@
 ---
 title: Identity
-description: SPIRE on spore gives each folly node with a TPM 2.0 an identity rooted in its TPM, gives its pods SPIFFE IDs, and lets a pod reach GCP with no key file.
+description: SPIRE on spore gives each folly node with a TPM 2.0 an identity rooted in its TPM, by LDevID or EK hash, gives its pods SPIFFE IDs, and lets a pod reach GCP with no key file.
 ---
 
-SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca`. The server runs on [spore](../hosts/spore.md). An agent on a folly node proves that it holds a TPM whose endorsement key (EK) is on the server's allow list. It then serves SVIDs, SPIFFE's X.509 and JWT credentials, to the pods on that node.
+SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca`. The server runs on [spore](../hosts/spore.md). An agent on a folly node proves that it holds a TPM: by the LDevID, a TPM-resident key with a certificate from the DevID CA, that the attest service issued it, or by its endorsement key (EK) on the server's allow list. It then serves SVIDs, SPIFFE's X.509 and JWT credentials, to the pods on that node.
 
 ## Server
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
 | `spire-server` | Attests agents and signs SVIDs with its own CA, which lasts 24 hours. Agents reach it on TCP 8081 at `spore.lolwtf.ca`. | spore, data in `/var/lib/spire` |
-| TPM node attestor | Checks an agent's EK hash against `/etc/spire/tpm-hashes`, and proves that its attestation key is in the same TPM. It reads no PCRs. | spore, the boxboat `spire-tpm-plugin` built in `nix/lib/spire.nix` |
+| `tpm` node attestor | Checks an agent's EK hash against `/etc/spire/tpm-hashes`, and proves that its attestation key is in the same TPM. It reads no PCRs. It runs while `homelab.spire.ekHashes` is not empty. | spore, the boxboat `spire-tpm-plugin` built in `nix/lib/spire.nix` |
+| `tpm_devid` node attestor | Checks the LDevID's chain against the DevID CA, the EK certificate's chain against the manufacturer CAs in `nix/services/spire/roots/`, and that the LDevID key and the EK are in one TPM. It runs when `homelab.spire.devid.enable` is true. | spore, built into SPIRE |
 | `k8sbundle` notifier | Writes the server's bundle into folly's `spire/spire-bundle` at startup and on every CA rotation, as the ServiceAccount `spire-bundle-writer` | spore, in the server, when `homelab.spire.bundleNotifier.enable` is true |
 | `spire-server-entries` | Creates, updates and prunes the registration entries to match git | spore, a oneshot after the server is healthy |
 | `spire-server-agent-count` | Writes `spire_server_attested_agents` for the node exporter every minute | spore, a timer |
@@ -19,20 +20,25 @@ The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
 
 | SPIFFE ID | Issued to | Selector |
 | --- | --- | --- |
-| `spiffe://lolwtf.ca/spire/agent/tpm/<hash>` | An agent, by the plugin | `tpm:pub_hash:<hash>` |
-| `spiffe://lolwtf.ca/node/<name>` | A node alias for one EK hash | `tpm:pub_hash:<hash>` |
+| `spiffe://lolwtf.ca/spire/agent/tpm/<hash>` | An agent, by the EK plugin | `tpm:pub_hash:<hash>` |
+| `spiffe://lolwtf.ca/spire/agent/tpm_devid/<fingerprint>` | An agent, by `tpm_devid` | `tpm_devid:subject:cn:<name>`, `tpm_devid:issuer:cn:<ca>`, `tpm_devid:ca:fingerprint:<sha1>` |
+| `spiffe://lolwtf.ca/node/<name>` | A node alias, one entry for each attestor | `tpm:pub_hash:<hash>`, or `tpm_devid:subject:cn:<name>` |
 | `spiffe://lolwtf.ca/ns/<ns>/sa/<sa>` | A pod, parented to its node's alias | `k8s:ns:<ns>`, `k8s:sa:<sa>` |
 
-The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
+The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject CN to the node's name and its serialNumber to the SMBIOS serial. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
 
 - Change entries and EK hashes in `tpmNodes` and `workloads` of `nix/hosts/spore.nix` only. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
+- An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no `ekHash` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
+- `homelab.spire.devid.caChains` takes the DevID CA's chain, and the server trusts only its first certificate. The fml intermediate or root in that pool would admit any certificate it signs.
 - Run the CLI as root with `-socketPath /run/spire/server/private/api.sock`. Its default socket path is wrong for this server.
 - The firewall admits the agent port and the exporter only from folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR`. Cilium does not masquerade traffic to spore, so pods arrive from their own addresses.
 
 ## Agents
 
-The DaemonSet `spire-agent` in the `spire` namespace runs on each folly node labelled `lolwtf.ca/tpm=true`. Its image, `ghcr.io/jonpulsifer/spire-agent-tpm`, adds the agent half of the TPM plugin to SPIRE's agent.
+The DaemonSet `spire-agent` in the `spire` namespace runs on each folly node labelled `lolwtf.ca/tpm=true`. Its image, `ghcr.io/jonpulsifer/spire-agent-tpm`, adds the agent half of the EK plugin and `spire-devid-init` to SPIRE's agent.
+
+The init container `devid-init` reads the node's SMBIOS serial and fetches `<ATTEST_URL>/devid/<serial>` from the attest service, with `ATTEST_URL` from the `spire-attest` ConfigMap. When the LDevID names this node and serial, is current and matches its key blob, it writes the files and renders the agent's config with `tpm_devid`. Otherwise, or with `ATTEST_URL` empty, it renders the EK attestor. The `tpm_devid` agent keeps its state in `/var/lib/spire-agent/tpm_devid`. The blobs are wrapped by the TPM's storage root key, which the agent derives from the TCG H-1 or H-2 template, so they load on no other TPM.
 
 The container is privileged, since the device cgroup refuses `/dev/tpmrm0` to any other container. It shares the host's PID namespace and network, so the `k8s` workload attestor can ask the kubelet for a caller's pod. Its key and SVID stay in `/var/lib/spire-agent` on the node, so a new pod resumes with no second attestation.
 
@@ -40,11 +46,11 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 - An agent's first attestation trusts the `spire-bundle` ConfigMap. spore's notifier pushes the bundle into it, and Flux declares no `data`, so its server-side apply never overwrites the push. If the ConfigMap is empty or older than the server's CA, a new agent fails.
 - The notifier reads folly's API server from `cluster-topology.json`, the CA from `clusters/folly/config/kubernetes-ca.pem`, and the token from `spire/folly-bundle-writer-token` in `nix/secrets/spore.sops.yaml`. If it cannot write the bundle at startup, the server exits and retries every 30 seconds. A push that fails at a rotation waits for the next rotation or restart.
-- Reloader restarts the agents when `spire-agent` changes, not when the bundle changes. An attested agent follows the rotations itself.
+- Reloader restarts the agents when `spire-agent` or `spire-attest` changes, not when the bundle changes. An attested agent follows the rotations itself.
 - A workload gets an SVID only after spore registers its entry under its node's alias.
 - A node pulls the agent image only while its GHCR package is public.
 
-[Runbooks](../runbooks/index.md) has Add a TPM node to SPIRE, which reads a node's EK hash, admits the node and turns on the bundle notifier.
+[Add a TPM node to SPIRE](../runbooks/add-a-tpm-node-to-spire.md) admits a node by LDevID or EK hash, turns on `tpm_devid`, and turns on the bundle notifier.
 
 ## GCP access
 
@@ -74,15 +80,16 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. The bundle notifier is off, because `nix/secrets/spore.sops.yaml` has no `spire/folly-bundle-writer-token` yet. No agent runs, so `SpireNoAttestedAgents` fires, and no pod gets an SVID. The smoke Job is suspended, since a pod that no node can schedule keeps it active until `KubeJobNotCompleted` fires.
 
-The allow list holds riptide's EK hash. optiplex's TPM is on, and its EK hash is not on the list yet.
+The allow list holds the EK hashes of riptide and optiplex. `tpm_devid` is off: `homelab.spire.devid.enable` is false until the DevID CA's chain is in the repo, and `ATTEST_URL` is empty until the attest service serves `/devid` on the Anchor network. Every agent attests by EK hash.
 
 ## Where it lives
 
-- `nix/services/spire-server.nix`: the server, the bundle notifier, the entry sync, the agent count and the firewall
+- `nix/services/spire-server.nix`: the server, both node attestors, the bundle notifier, the entry sync, the agent count and the firewall
+- `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts
 - `nix/hosts/spore.nix`: `tpmNodes`, `workloads` and the registration entries
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
-- `images/`: the agent image in `spire-agent-tpm/`
+- `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: the provider `spire` in `fml-pool`, with the test bucket and its grant in `spire-test.tf` beside it
 - `terraform/network/cloudflare/lolwtf.ca.tf`: the tunnel rule for `spire.lolwtf.ca`
 - `clusters/folly/monitoring/spore.yaml`: the scrape and the SPIRE alerts

@@ -60,6 +60,7 @@ spec:
               value: /tmp
             - name: HOME
               value: /tmp
+            # No ENROLL_ATTEST_URL, so every approval is the owner's click.
           volumeMounts:
             - name: inputs
               mountPath: /etc/talos-enroll
