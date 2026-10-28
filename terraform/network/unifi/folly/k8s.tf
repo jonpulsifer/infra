@@ -10,7 +10,7 @@ locals {
 
   static_records = merge(
     {
-      "erx" = cidrhost(local.lab_cidr, 5)
+      "erx" = cidrhost(local.anchor_cidr, 5)
       "k8s" = local.topology.API_SERVER_IP
     },
     local.node_addresses,

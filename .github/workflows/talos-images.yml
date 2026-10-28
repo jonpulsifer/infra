@@ -8,7 +8,7 @@ on:
     branches: [main]
     paths: &paths
       - clusters/folly/talos/**
-      - clusters/folly/config/lab-topology.json
+      - clusters/folly/config/anchor-topology.json
       - nix/images/ipxe-folly.nix
       - nix/images/hookos-folly.nix
       - .github/scripts/talos-image-inputs.sh
@@ -91,7 +91,7 @@ jobs:
             tf=$(mktemp)
             git show "$rev:$ROOT/talos.tf" >"$tf" || return 1
             bash .github/scripts/talos-image-inputs.sh "$tf" || return 1
-            git show "$rev:clusters/folly/config/lab-topology.json" | jq -r '.data.SPORE_BOOTSTRAP_IP, .data.BOOT_VIP' || return 1
+            git show "$rev:clusters/folly/config/anchor-topology.json" | jq -r '.data.SPORE_BOOTSTRAP_IP, .data.BOOT_VIP' || return 1
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
               nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \

@@ -2,11 +2,11 @@
   "apiVersion": "v1",
   "kind": "ConfigMap",
   "metadata": {
-    "name": "lab-topology",
+    "name": "anchor-topology",
     "namespace": "flux-system"
   },
   "data": {
-    "LAB_CIDR": "10.2.0.0/24",
+    "ANCHOR_CIDR": "10.2.0.0/24",
     "FUTURE_CIDR": "10.13.37.0/28",
     "BOOTSTRAP_CIDR": "10.9.0.0/28",
     "BOOTSTRAP_VLAN": "9",

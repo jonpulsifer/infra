@@ -10,7 +10,7 @@
   writeText,
 }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
   spore = lab.bootstrap.hosts.spore;
   # Smee's HTTP listener (--http-port, Tinkerbell's default) on spore's bootstrap address. The DHCP
   # file and next-server name dnsmasq's TFTP, not Smee.

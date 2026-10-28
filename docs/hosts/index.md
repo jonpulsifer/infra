@@ -35,11 +35,11 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 | --- | --- | --- |
 | folly nodes | `<host>.lolwtf.ca` | `static_records` in `terraform/network/unifi/folly/k8s.tf`, from `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json` |
 | offsite nodes | `<host>.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json` |
-| Hosts on [Lab Net](../platform/network.md#networks) | `<host>.lolwtf.ca` | The `lab` and `rpis` entries with an `ip` in `terraform/network/unifi/folly/clients.yaml` |
+| Hosts on [the Anchor network](../platform/network.md#networks) | `<host>.lolwtf.ca` | The `lab` and `rpis` entries with an `ip` in `terraform/network/unifi/folly/clients.yaml` |
 | offsite control plane | `offsite.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `API_SERVER_IP` in `clusters/offsite/config/cluster-topology.json` |
 | Tailnet devices | `<host>.<tailnet>` | `terraform/network/tailscale/devices.tf`. `<tailnet>` is the `tailnet` key in `terraform/network/tailscale/fleet.tf.json`. |
 
-The Kubernetes nodes run no Tailscale client. Off the LAN, the owner reaches them and Lab Net through each site's Connector. See [Remote access](../platform/network/remote-access.md).
+The Kubernetes nodes run no Tailscale client. Off the LAN, the owner reaches them and the Anchor network through each site's Connector. See [Remote access](../platform/network/remote-access.md).
 
 ## Unmanaged devices at offsite
 

@@ -91,7 +91,7 @@ Read these values from their file. Do not copy them.
 | Facts | Source |
 | --- | --- |
 | Cluster addresses and CIDRs, API server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
-| Lab CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/lab-topology.json` |
+| Anchor CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/anchor-topology.json` |
 | folly node hardware: MAC, switch port, install disk, TPM, model, serial, BIOS, Secure Boot | `clusters/folly/inventory/machines.yaml` |
 
 Each topology file is a Flux ConfigMap whose `data` values are all strings, so

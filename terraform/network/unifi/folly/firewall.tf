@@ -353,8 +353,8 @@ resource "unifi_firewall_policy" "nest_k8s_to_folly_k8s" {
   }
 }
 
-# Rowbutt's offsite sandboxes reach Lab Net hosts through capsule. The route is OFFSITE-OUT
-# in bgp-folly.conf; this is the only Vpn -> Lab Net opening, so keep it to one port.
+# Rowbutt's offsite sandboxes reach the Anchor network hosts through capsule. The route is OFFSITE-OUT
+# in bgp-folly.conf; this is the only Vpn -> Anchor network opening, so keep it to one port.
 resource "unifi_firewall_policy" "nest_k8s_to_capsule_ssh" {
   name                 = "Allow Nest k8s to Capsule SSH"
   action               = "ALLOW"
@@ -373,7 +373,7 @@ resource "unifi_firewall_policy" "nest_k8s_to_capsule_ssh" {
 
   destination = {
     matching_target    = "IP"
-    ips                = ["${local.lab.hosts.capsule}/32"]
+    ips                = ["${local.anchor.hosts.capsule}/32"]
     port               = "22"
     port_matching_type = "SPECIFIC"
     zone_id            = unifi_firewall_zone.lab.id
@@ -415,7 +415,7 @@ resource "unifi_firewall_policy" "lab_clients_to_nest_k8s" {
 
   source = {
     matching_target    = "IP"
-    ips                = [local.lab.cidr]
+    ips                = [local.anchor.cidr]
     port_matching_type = "ANY"
     zone_id            = unifi_firewall_zone.lab.id
   }

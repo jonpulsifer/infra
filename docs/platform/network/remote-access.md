@@ -15,7 +15,7 @@ Remote access is a Tailscale tailnet that the owner uses to reach both sites' pr
 | CI identity | Lets the `nixos-deploy` workflow join as `tag:ci` with a GitHub OIDC token | GitHub Actions |
 | forge OAuth client | Enrolls forge as `tag:lab-host` | forge |
 
-The Kubernetes nodes run no Tailscale client (`nix/system/tailscale-disable.nix`), so tailnet traffic reaches each site through its Connector. folly's LAN networks are Management and Lab Net, and offsite's is Default.
+The Kubernetes nodes run no Tailscale client (`nix/system/tailscale-disable.nix`), so tailnet traffic reaches each site through its Connector. folly's LAN networks are Management and the Anchor network, and offsite's is Default.
 
 OpenTofu stores the forge client's secret in 1Password. After the Atlantis apply, copy it into forge's SOPS file as `tailscale-auth-key`.
 

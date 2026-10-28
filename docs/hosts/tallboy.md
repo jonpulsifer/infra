@@ -23,7 +23,7 @@ See [Install a Windows desktop](../runbooks/install-a-windows-desktop.md) and [I
 
 ## Reach
 
-Reach it at [`tallboy.<tailnet>`](index.md#reach-a-host). `terraform/network/unifi/folly/windows-hosts.tf` reserves its address from `TALLBOY_IP` in `clusters/folly/config/lab-topology.json`.
+Reach it at [`tallboy.<tailnet>`](index.md#reach-a-host). `terraform/network/unifi/folly/windows-hosts.tf` reserves its address from `TALLBOY_IP` in `clusters/folly/config/anchor-topology.json`.
 
 ## Quirks
 

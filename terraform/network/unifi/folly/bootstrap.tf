@@ -1,14 +1,14 @@
 locals {
-  bootstrap_cidr = "${cidrhost(local.lab_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.lab_topology.BOOTSTRAP_CIDR)[1]}"
+  bootstrap_cidr = "${cidrhost(local.anchor_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.anchor_topology.BOOTSTRAP_CIDR)[1]}"
 
   # The anchors' bootstrap addresses, spore first, and the boot VIP that
   # keepalived moves between them (nix/services/anchor-vips.nix).
   anchor_boot_ips = [
-    local.lab_topology.SPORE_BOOTSTRAP_IP,
-    local.lab_topology.CAPSULE_BOOTSTRAP_IP,
-    local.lab_topology.FORGE_BOOTSTRAP_IP,
+    local.anchor_topology.SPORE_BOOTSTRAP_IP,
+    local.anchor_topology.CAPSULE_BOOTSTRAP_IP,
+    local.anchor_topology.FORGE_BOOTSTRAP_IP,
   ]
-  boot_vip = local.lab_topology.BOOT_VIP
+  boot_vip = local.anchor_topology.BOOT_VIP
 
   # The switch port of each anchor, read from the live switch.
   anchor_ports = {
@@ -63,7 +63,7 @@ locals {
 resource "unifi_network" "bootstrap" {
   name                = "bootstrap"
   subnet              = local.bootstrap_cidr
-  vlan                = tonumber(local.lab_topology.BOOTSTRAP_VLAN)
+  vlan                = tonumber(local.anchor_topology.BOOTSTRAP_VLAN)
   domain_name         = local.lab_domain
   setting_preference  = "manual"
   auto_scale          = false
@@ -106,7 +106,7 @@ resource "unifi_network" "bootstrap" {
           ip,
         )
       ]) && length(distinct(concat(local.anchor_boot_ips, [local.boot_vip]))) == 4
-      error_message = "lab-topology.json's SPORE_BOOTSTRAP_IP, CAPSULE_BOOTSTRAP_IP, FORGE_BOOTSTRAP_IP and BOOT_VIP must be four distinct addresses in BOOTSTRAP_CIDR above the DHCP pool, which ends at host 10."
+      error_message = "anchor-topology.json's SPORE_BOOTSTRAP_IP, CAPSULE_BOOTSTRAP_IP, FORGE_BOOTSTRAP_IP and BOOT_VIP must be four distinct addresses in BOOTSTRAP_CIDR above the DHCP pool, which ends at host 10."
     }
   }
 }
@@ -170,7 +170,7 @@ resource "unifi_device" "usw_24_poe" {
   forget_on_destroy = false
   allow_adoption    = false
 
-  # Each anchor keeps Lab Net untagged and its PoE, and gains the bootstrap
+  # Each anchor keeps the Anchor network untagged and its PoE, and gains the bootstrap
   # VLAN tagged for TFTP, HTTP, DNS, NTP and the boot VIP's VRRP, and on spore
   # Smee's proxy DHCP. The provider cannot write tagged_networkconf_ids, so the
   # custom list names what to leave off.

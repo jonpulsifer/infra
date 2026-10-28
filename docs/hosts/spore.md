@@ -13,7 +13,7 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-spore is a Raspberry Pi 5 that serves x86 netboot, forge's boot image, and lab DNS and time. It is on [Lab Net](../platform/network.md#networks), folly's network for lab hosts.
+spore is a Raspberry Pi 5 that serves x86 netboot, forge's boot image, and lab DNS and time. It is on [the Anchor network](../platform/network.md#networks), folly's network for lab hosts.
 
 ## What it runs
 

@@ -10,7 +10,7 @@ Netboot is the network boot service on [spore](../../hosts/spore.md). It serves 
 | Part | Job | Where it runs |
 | --- | --- | --- |
 | dnsmasq | Serves TFTP from `/var/lib/tftpboot`, with no DHCP or DNS, from `nix/services/talos-boot.nix`. It holds only what [Talos boot](talos-boot.md) and Tinkerbell link there. | every anchor |
-| nginx `spore-pxe` | Serves `/var/lib/tftpboot` and the signed boot files on HTTP port 80, to Lab Net and the `future` network only. TFTP answers on the bootstrap VLAN only. Neither is open to the Kubernetes network. | spore |
+| nginx `spore-pxe` | Serves `/var/lib/tftpboot` and the signed boot files on HTTP port 80, to the Anchor network and the `future` network only. TFTP answers on the bootstrap VLAN only. Neither is open to the Kubernetes network. | spore |
 | `spore-native-boot-rackpi5` (the publisher) | Signs and publishes the boot files | spore |
 | `spore-native-boot-artifact-check` (the artifact check) | Fetches each boot file each minute, and exports `spore_native_boot_artifact_available` | spore |
 
@@ -20,7 +20,7 @@ forge's EEPROM boots from NVMe first and falls back to [rackpi5](../../hosts/rac
 
 ```ini
 BOOT_ORDER=0xf1276
-HTTP_HOST=<SPORE_IP from clusters/folly/config/lab-topology.json>
+HTTP_HOST=<SPORE_IP from clusters/folly/config/anchor-topology.json>
 HTTP_PATH=rackpi5-ram
 ```
 
@@ -50,7 +50,7 @@ A failed publisher freezes the fallback at the last published image until spore'
 - `nix/services/spore-native-boot.nix`: the publisher and the artifact check
 - `nix/hosts/rackpi5.nix`: the fallback image
 - `nix/lib/registry.nix`: `crossHostModules` gives spore the `piBootImg` of `rackpi5`
-- `clusters/folly/config/lab-topology.json`: `SPORE_IP`
+- `clusters/folly/config/anchor-topology.json`: `SPORE_IP`
 - `clusters/folly/monitoring/spore.yaml`: the alerts
 
 ## Related

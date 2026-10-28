@@ -1,10 +1,10 @@
 # spore's nginx default server, `spore-pxe`: /var/lib/tftpboot and the signed native-boot files
-# (./spore-native-boot.nix) over HTTP, open only to Lab Net (forge's rackpi5 fallback) and the future
+# (./spore-native-boot.nix) over HTTP, open only to the Anchor network (forge's rackpi5 fallback) and the future
 # network, never the Kubernetes network. ./talos-boot.nix, on every anchor, runs dnsmasq's TFTP and
 # serves the Talos boot files on the bootstrap VLAN.
 { lib, ... }:
 let
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
 in
 {
   services.nginx = {

@@ -220,7 +220,7 @@ describe('config from the environment', () => {
     );
   });
 
-  test('Lab Net is reached through capsule unless another host is named, and only a host name', () => {
+  test('the Anchor network is reached through capsule unless another host is named, and only a host name', () => {
     expect(readSandboxConfig(minimal).labJump).toBe('capsule.lolwtf.ca');
     expect(
       readSandboxConfig({

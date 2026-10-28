@@ -71,7 +71,7 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 - `nix/services/talos-boot.nix`: the VLAN, firewall, dnsmasq, nginx paths, the check and the mirror
 - `nix/services/anchor-vips.nix`: the keepalived `boot` instance and its VRRP firewall
 - `nix/services/tinkerbell.nix`: Smee, the rest of Tinkerbell and the `netboot-not-allowed` links
-- `clusters/folly/config/lab-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP`
+- `clusters/folly/config/anchor-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP`
 - `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network's DHCP and the anchors' switch ports
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
 - `clusters/folly/talos/secureboot/uki-signing-cert.pem`, `hookos-signing-cert.pem`: the certificates the mirror checks

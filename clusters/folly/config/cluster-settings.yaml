@@ -12,7 +12,7 @@ data:
   OAUTH2_PROXY_ITEM: iy4vkwkvbfhvm4kd2g6slnxlca
 
   # The handset the PBX NetworkPolicy may ring. The apps Kustomization cannot read
-  # lab-topology.json; voip.tf fails its plan if this and clients.yaml differ.
+  # anchor-topology.json; voip.tf fails its plan if this and clients.yaml differ.
   CATHY_IP: 10.1.0.151
 
   # Pinned: the handset's SIP registration and provisioning URL hold this

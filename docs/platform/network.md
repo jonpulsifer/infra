@@ -21,7 +21,7 @@ The network connects two sites, folly (home) and offsite (remote). Each site has
 | Site | Network | Job |
 | --- | --- | --- |
 | folly | Management | Home network, WLAN `fml` |
-| folly | Lab Net | Lab hosts, WLAN `lab` (open, hidden) |
+| folly | Anchor | The anchors and other lab hosts, WLAN `lab` (open, hidden) |
 | folly | Kubernetes | folly nodes. DHCP offers iPXE netboot from spore. |
 | folly | future | IPv6 prefix delegated from the WAN. Holds the Windows desktops tallboy and atomic. |
 | folly | iot | IoT devices |
@@ -30,7 +30,7 @@ The network connects two sites, folly (home) and offsite (remote). Each site has
 
 ## Rules
 
-- Read addresses, subnets and ASNs from `cluster-topology.json` and `lab-topology.json`. Do not copy them.
+- Read addresses, subnets and ASNs from `cluster-topology.json` and `anchor-topology.json`. Do not copy them.
 - Change a subnet and every copy of it in one PR, or routes and DNS break. Find the copies with `git grep -nF '<old prefix>'`. They include the FRR files, `policy.hujson`, the Tailscale Connectors and VIPs pinned in app manifests.
 - After a change to a node subnet, `future` or offsite's Default network, edit the Site Magic subnet list in both consoles, or the other site has no route to the subnet.
 - Change a lab host address as the [Topology rules](../reference/topology.md#rules) say.
@@ -40,7 +40,7 @@ The network connects two sites, folly (home) and offsite (remote). Each site has
 - `terraform/network/unifi/<site>/`: networks and their VLAN IDs, WLANs, firewall and gateway BGP config. `terraform/network/unifi/folly/home.tf` and `terraform/network/unifi/offsite/networks.tf` hold the Management, iot and offsite Default subnets. `terraform/network/unifi/folly/aps.tf` declares folly's access points and the AP groups a WLAN is assigned to, from the `aps` map in `clients.yaml`.
 - Each console's UI: the Site Magic tunnel, its subnet lists and the console's Let's Encrypt certificate
 - `clusters/<site>/config/cluster-topology.json`: `K8S_NODE_CIDR`, `LB_RANGE`, `ROUTER_IP` and the other cluster keys. Print them with `jq .data <file>`.
-- `clusters/folly/config/lab-topology.json`: `LAB_CIDR`, `FUTURE_CIDR` and the lab host addresses
+- `clusters/folly/config/anchor-topology.json`: `ANCHOR_CIDR`, `FUTURE_CIDR` and the lab host addresses
 
 ## Related
 

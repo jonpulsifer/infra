@@ -32,7 +32,7 @@ what an agent needs beyond them.
   resolves only through the folly gateway's DNS. WSL on tallboy, the Windows
   desktop on folly's `future` network, cannot resolve it. There, set both to
   the first host address in `FUTURE_CIDR` in
-  `clusters/folly/config/lab-topology.json`. `UNIFI_HOST` takes it as
+  `clusters/folly/config/anchor-topology.json`. `UNIFI_HOST` takes it as
   `https://<address>`.
 - `ssh` and `bgp` print nothing when the SSH host is unreachable, because the
   `nix-shell` path discards errors.
