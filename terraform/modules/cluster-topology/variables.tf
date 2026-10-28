@@ -14,7 +14,7 @@ variable "config_map" {
   default     = "cluster-topology"
 
   validation {
-    condition     = contains(["cluster-topology", "anchor-topology"], var.config_map)
-    error_message = "config_map must be \"cluster-topology\" or \"anchor-topology\"."
+    condition     = contains(["cluster-topology", "lab-topology"], var.config_map)
+    error_message = "config_map must be \"cluster-topology\" or \"lab-topology\"."
   }
 }
