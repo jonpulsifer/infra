@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# After Atlantis applies terraform/pki's DevID CA: commits its certificate and chain under
-# terraform/pki/certs/ and seals its private key into each anchor's sops file, where sops-nix hands
-# it to talos-attest (nix/services/talos-attest.nix). The key never reaches stdout or argv.
+# After Atlantis applies terraform/pki's software DevID CA: writes its certificate, its chain and the
+# DevID CA bundle under terraform/pki/certs/, and seals its private key into each anchor's sops file,
+# where sops-nix hands it to talos-attest (nix/services/talos-attest.nix). The key never reaches
+# stdout or argv.
 # Run with the owner's age key: SOPS_AGE_KEY_FILE=~/.config/age/keys.txt.
 
 set -euo pipefail
@@ -23,11 +24,13 @@ fi
 echo "==> reading terraform/pki outputs" >&2
 outputs="$(tofu -chdir="$pki_dir" output -json)"
 
-# SPIRE's devid_ca_path trusts every certificate in its file, so the CA file holds the DevID CA
-# alone; the chain file holds it first, then the intermediate and the root.
-jq -er '.devid_ca_cert.value' <<<"$outputs" >"$certs_dir/folly-devid-ca.pem"
-jq -er '.devid_ca_chain.value' <<<"$outputs" >"$certs_dir/folly-devid-ca-chain.pem"
-echo "==> wrote certs/folly-devid-ca.pem and certs/folly-devid-ca-chain.pem" >&2
+# SPIRE's devid.caChains reads the first certificate of each file, so the CA file holds the DevID CA
+# alone; the chain file holds it first, then the intermediate and the root. The bundle,
+# folly-devid-ca.pem, holds every issuing DevID CA, software and hardware.
+jq -er '.devid_ca_cert.value' <<<"$outputs" >"$certs_dir/folly-devid-ca-software.pem"
+jq -er '.devid_ca_chain.value' <<<"$outputs" >"$certs_dir/folly-devid-ca-software-chain.pem"
+echo "==> wrote certs/folly-devid-ca-software.pem and certs/folly-devid-ca-software-chain.pem" >&2
+bash "$repo_root/scripts/devid-ca-yubikey.sh" bundle
 
 for anchor in "${anchors[@]}"; do
   file="$repo_root/nix/secrets/$anchor.sops.yaml"
@@ -36,4 +39,4 @@ for anchor in "${anchors[@]}"; do
   echo "==> sealed the DevID CA key into nix/secrets/$anchor.sops.yaml" >&2
 done
 
-echo "==> now: go -C apps/fml-pki run . verify, then commit certs/ and the three sops files" >&2
+echo "==> now: mise run pki:verify, then commit certs/ and the three sops files" >&2

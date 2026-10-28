@@ -35,6 +35,15 @@ func LoadCA(keyPath, chainPath string, validity time.Duration) (*CA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("DevID CA key %s: %w", keyPath, err)
 	}
+	chain, err := readChain(chainPath)
+	if err != nil {
+		return nil, err
+	}
+	return NewCA(key, chain, validity)
+}
+
+// readChain reads a PEM chain file in order, the DevID CA first.
+func readChain(chainPath string) ([]*x509.Certificate, error) {
 	cb, err := os.ReadFile(chainPath)
 	if err != nil {
 		return nil, fmt.Errorf("DevID CA chain: %w", err)
@@ -52,7 +61,7 @@ func LoadCA(keyPath, chainPath string, validity time.Duration) (*CA, error) {
 		}
 		chain = append(chain, c)
 	}
-	return NewCA(key, chain, validity)
+	return chain, nil
 }
 
 // NewCA checks that key belongs to chain[0], that chain[0] may issue, and

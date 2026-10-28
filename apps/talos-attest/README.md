@@ -11,7 +11,7 @@ wiki.
 ```bash
 go build -o talos-attest .
 ATTEST_CA_KEY=/path/to/devid-ca.key \
-ATTEST_CA_CHAIN=../../terraform/pki/certs/folly-devid-ca-chain.pem \
+ATTEST_CA_CHAIN=../../terraform/pki/certs/folly-devid-ca-software-chain.pem \
 ATTEST_EK_ROOTS=roots \
 ATTEST_POLICY=policy.yaml \
 ATTEST_INVENTORY=../../clusters/folly/inventory/machines.yaml \
@@ -25,7 +25,11 @@ ATTEST_APPROVERS=you@example.com \
 | `ATTEST_ADDR` | `:8080` | Device flow and DevID lookups. `unix:<path>` makes a socket with mode 0660. |
 | `ATTEST_DEVID_ADDR` | `:8082` | `GET /devid/` and `GET /verdict/` only, for the cluster's nodes |
 | `ATTEST_ADMIN_ADDR` | `:8081` | Admin API behind `tailscale serve`. `unix:<path>` makes a socket with mode 0600. |
-| `ATTEST_CA_KEY` | none, required | The DevID CA's private key (PEM: PKCS#8, PKCS#1 or SEC 1). The service refuses to start without it. |
+| `ATTEST_CA_KEY` | none | The DevID CA's software key (PEM: PKCS#8, PKCS#1 or SEC 1). The service needs it, or `ATTEST_CA_PKCS11_MODULE`. |
+| `ATTEST_CA_PKCS11_MODULE` | none | A PKCS#11 module, such as ykcs11. When set, the CA key is on the token, and `ATTEST_CA_KEY` is ignored. Needs a cgo build. |
+| `ATTEST_CA_PKCS11_TOKEN` | none | The token label, such as `YubiKey PIV #<serial>` |
+| `ATTEST_CA_PKCS11_PIN_FILE` | none | A file that holds the token's user PIN |
+| `ATTEST_CA_CERT` | none | A PEM file whose first certificate is the CA's; it picks the key on the token |
 | `ATTEST_CA_CHAIN` | `/etc/talos-attest/devid-ca-chain.pem` | The DevID CA first, then each issuer up to the root |
 | `ATTEST_CERT_VALIDITY` | `8760h` | LDevID and LAK lifetime, capped at the CA's |
 | `ATTEST_EK_ROOTS` | `/etc/talos-attest/roots` | Directory of pinned TPM manufacturer certificates |
