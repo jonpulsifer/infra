@@ -1,6 +1,6 @@
 ---
 title: capsule
-description: A Raspberry Pi 5 on NVMe that is one of the three lab DNS and time anchors.
+description: A Raspberry Pi 5 on NVMe that is one of the three lab DNS and time anchors, and runs NetBox.
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 5 Model B Rev 1.1 (8 GB)
@@ -20,8 +20,9 @@ capsule is a Raspberry Pi 5 on [the Anchor network](../platform/network.md#netwo
 - CoreDNS from `nix/services/coredns-sinkhole.nix` and chrony from `nix/services/ntp-server.nix`, both through `nix/profiles/anchor.nix`
 - A node of folly's [Garage cluster](../platform/backups.md#garage-cluster), with data in `/var/lib/garage` (`nix/services/garage.nix`)
 - [Talos boot](../platform/nixos/talos-boot.md) on the bootstrap VLAN, also through the anchor profile
+- [NetBox](../platform/netbox.md), with its PostgreSQL and Redis, on the tailnet only (`nix/services/netbox.nix`)
 
-`clusters/folly/monitoring/capsule.yaml` declares the alerts `CapsuleCoreDnsDown` and `CapsuleChronyDown`.
+`clusters/folly/monitoring/capsule.yaml` declares the alerts `CapsuleCoreDnsDown`, `CapsuleChronyDown` and `CapsuleNetboxDown`.
 
 ## Reach
 

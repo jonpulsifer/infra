@@ -1,10 +1,11 @@
-# capsule: NVMe-rooted Pi 5 and one of the three anchors that run the lab's DNS and NTP.
+# capsule: NVMe-rooted Pi 5, one of the three anchors that run the lab's DNS and NTP, and the NetBox host.
 { lib, ... }:
 {
   imports = [
     ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
     ../services/garage.nix
+    ../services/netbox.nix
     ../system/sops.nix
   ];
 
