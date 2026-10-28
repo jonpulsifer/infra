@@ -35,7 +35,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 ## Garage cluster
 
-folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on the Anchor network, and the firewall opens it to the other anchors only. Every anchor serves S3, and clients name spore. A node with `homelab.garage.clustered` unset is a standalone store with replication factor 1. spore keeps its old standalone store in `/nfs/data/garage` as the rollback of [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md).
+folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on the Anchor network, and the firewall opens it to the other anchors only. Every anchor serves S3, and clients name `s3.lolwtf.ca`, the S3 VIP (`S3_VIP` in `clusters/folly/config/anchor-topology.json`). keepalived from `nix/services/anchor-vips.nix` holds the VIP on capsule, then forge, then spore, and moves it off an anchor whose Garage loses its quorum or stops answering S3. `AnchorS3VipDown` fires when no anchor holds the VIP and serves. A node with `homelab.garage.clustered` unset is a standalone store with replication factor 1. spore keeps its old standalone store in `/nfs/data/garage` as the rollback of [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md).
 
 ## Credentials
 

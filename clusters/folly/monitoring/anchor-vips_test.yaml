@@ -1,11 +1,37 @@
 ---
-# promtool tests for the boot VIP alerts in anchor-vips.yaml, run by `mise run k8s:check-rules`.
+# promtool tests for the S3 and boot VIP alerts in anchor-vips.yaml, run by `mise run k8s:check-rules`.
 rule_files:
   - anchor-vips.yaml
 
 evaluation_interval: 1m
 
 tests:
+  # capsule holds the S3 VIP until minute 5, when its Garage loses quorum. keepalived moves the VIP
+  # to forge at minute 7. The alert stays quiet through the failover, then fires when forge's
+  # Garage fails at minute 20 with no other anchor serving.
+  - interval: 1m
+    input_series:
+      - series: 'garage_s3_vip_held{instance="capsule",site="folly"}'
+        values: 1x7 0x33
+      - series: 'garage_s3_serving{instance="capsule",site="folly"}'
+        values: 1x5 0x35
+      - series: 'garage_s3_vip_held{instance="forge",site="folly"}'
+        values: 0x7 1x33
+      - series: 'garage_s3_serving{instance="forge",site="folly"}'
+        values: 1x20 0x20
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AnchorS3VipDown
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: AnchorS3VipDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              message: No anchor serves Garage at the S3 VIP
+              description: "No anchor holds the S3 VIP while Garage has a quorum and answers S3, so folly's backups cannot write. Check keepalived and garage on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/garage.nix)."
+
   # spore holds the VIP and serves until minute 10, when its nginx dies and keepalived moves the VIP
   # to capsule two minutes later. forge's check fails throughout.
   - interval: 1m

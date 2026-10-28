@@ -24,6 +24,8 @@ in
     ns1 = data.NS1_IP;
     ns2 = data.NS2_IP;
   };
+  # The anchors' shared VIP for the Garage S3 API (../services/anchor-vips.nix).
+  s3Vip = data.S3_VIP;
   hosts = {
     capsule = data.CAPSULE_IP;
     spore = data.SPORE_IP;
