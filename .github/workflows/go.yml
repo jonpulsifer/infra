@@ -25,8 +25,13 @@ on:
       - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
+      - 'apps/talos-attest/**'
       - 'apps/talos-enroll/**'
       - 'images/spire-agent-tpm/devid-init/**'
+      # talos-attest's tests read these.
+      - 'clusters/folly/inventory/machines.yaml'
+      - 'clusters/folly/talos/secureboot/**'
+      - 'nix/services/spire/roots/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -41,8 +46,13 @@ on:
       - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
+      - 'apps/talos-attest/**'
       - 'apps/talos-enroll/**'
       - 'images/spire-agent-tpm/devid-init/**'
+      # talos-attest's tests read these.
+      - 'clusters/folly/inventory/machines.yaml'
+      - 'clusters/folly/talos/secureboot/**'
+      - 'nix/services/spire/roots/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -70,6 +80,7 @@ jobs:
           - apps/kthx-engine-verifier
           - apps/netbench
           - apps/smiirl
+          - apps/talos-attest
           - apps/talos-enroll
           - images/spire-agent-tpm/devid-init
     defaults:
@@ -83,6 +94,9 @@ jobs:
           # Most of these modules are stdlib-only and have no go.sum, which
           # setup-go's default cache looks for and fails without.
           cache: false
+      # talos-attest's software TPM (go-tpm-tools/simulator) links libcrypto.
+      - if: matrix.module == 'apps/talos-attest'
+        run: dpkg -s libssl-dev >/dev/null 2>&1 || (sudo apt-get update -q && sudo apt-get install -yq libssl-dev)
       - run: go build ./...
       - run: go vet ./...
       # -race, because bosun's pool is reached from the poll loop, every

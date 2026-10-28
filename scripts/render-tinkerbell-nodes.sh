@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Writes each folly node's MAC, address and install disk, and the HookOS UKI's URL and command line, to the env file
-# that clusters/folly/tinkerbell/ reads through kustomize replacements. Sources: the hardware inventory,
+# Writes each folly node's MAC, address and install disk, the HookOS UKI's URL and command line, and talos-attest's URL, to the env file
+# that clusters/folly/tinkerbell/ reads through kustomize replacements. Sources: the hardware inventory, BOOT_VIP,
 # NODE_ADDRESSES and SPORE_BOOTSTRAP_IP. With --check it fails if the committed file differs or a placeholder
 # survives the build.
 set -euo pipefail
@@ -22,14 +22,17 @@ esac
 addresses="$(jq -er '.data.NODE_ADDRESSES | fromjson' "$root/clusters/folly/config/cluster-topology.json")"
 machines="$(yq -o json '.machines' "$root/clusters/folly/inventory/machines.yaml")"
 spore="$(jq -er '.data.SPORE_BOOTSTRAP_IP' "$root/clusters/folly/config/anchor-topology.json")"
+boot_vip="$(jq -er '.data.BOOT_VIP' "$root/clusters/folly/config/anchor-topology.json")"
 agent="$(jq -er '.tink_agent_image' "$root/clusters/folly/talos/netboot.json")"
 
 rendered="$(
-  echo "# Written by mise run render-tinkerbell-nodes from the hardware inventory, NODE_ADDRESSES and"
-  echo "# SPORE_BOOTSTRAP_IP."
+  echo "# Written by mise run render-tinkerbell-nodes from the hardware inventory, NODE_ADDRESSES,"
+  echo "# SPORE_BOOTSTRAP_IP and BOOT_VIP."
   echo "HOOKOS_URL=http://$spore/talos/folly/hookos-amd64-secureboot-uki.efi"
   # The command line nix/images/hookos-folly.nix bakes into the UKI. Without Secure Boot,
   # systemd-stub takes iPXE's arguments instead, so the per-MAC script passes the same one.
+  # talos-attest on the anchors, behind the boot VIP's nginx (nix/services/talos-attest.nix).
+  echo "ATTEST_URL=http://$boot_vip/attest"
   echo "HOOKOS_CMDLINE=facility= syslog_host=$spore grpc_authority=$spore:42113 tinkerbell_tls=false tinkerbell_insecure_tls=false modules=loop,squashfs,sd-mod,usb-storage intel_iommu=on iommu=pt console=ttyS0,115200 console=tty0 tink_worker_image=$agent"
   jq -nr --argjson addresses "$addresses" --argjson machines "$machines" '
     $addresses | keys[] as $node

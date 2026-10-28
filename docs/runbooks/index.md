@@ -11,6 +11,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Install Talos on a node](install-talos-on-a-node.md): boot a NixOS node into the Talos installer with kexec, and check its volumes
 - [Enroll a Talos node](enroll-a-talos-node.md): wipe a folly node, boot it from the network, approve its enrollment, and return it to the Kubernetes VLAN
 - [Reprovision a Talos node](reprovision-a-talos-node.md): wipe a folly node that has AMT and reinstall Talos through Tinkerbell, started by a pull request
+- [Attest a node](attest-a-node.md): attest a folly node's TPM and boot chain from HookOS and give it an LDevID, with no wipe, started by a pull request
 - [Build the signed Talos images](build-the-signed-talos-images.md): build folly's Secure Boot installer, ISO, HTTP-boot UKI, iPXE and HookOS, and check what the build publishes
 - [Change the forge EEPROM](change-the-forge-eeprom.md): change forge's boot settings and keep its HTTP boot fallback
 - [Install a Windows desktop](install-a-windows-desktop.md): install and update the owner's Windows configuration

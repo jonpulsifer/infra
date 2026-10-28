@@ -145,3 +145,35 @@ spec:
           annotations:
             message: The anchors serve different Talos boot releases
             description: "The anchors' current boot files differ, so a boot VIP failover changes the UKI, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."
+        # talos-attest on each anchor (nix/services/talos-attest.nix). A machine's current record is
+        # the newest across the anchors, since each keeps the attestations it ran.
+        - alert: TalosAttestNotServing
+          expr: talos_attest_serving == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "talos-attest on {{ $labels.instance }} does not answer"
+            description: "talos-attest.service is down or refuses to start, often for a missing or unreadable DevID CA key. A machine attested through this anchor's boot VIP fails. Read journalctl -u talos-attest on the anchor."
+        - alert: TalosAttestQuarantined
+          expr: (talos_attest_machine_status{status="quarantined"} == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
+          labels:
+            severity: critical
+          annotations:
+            message: "{{ $labels.machine }} failed attestation and is quarantined"
+            description: "talos-attest refused {{ $labels.machine }} on {{ $labels.instance }}, and its LDevID is withdrawn. Read the reason in GET /machines on the anchor's admin API or in /var/lib/talos-attest/verdicts.jsonl, as docs/runbooks/attest-a-node.md says."
+        - alert: TalosAttestWaitingForApproval
+          expr: (talos_attest_machine_status{status="pending-approval"} == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }} waits for the owner to approve its EK on first intake"
+            description: "Neither machines.yaml nor NetBox pins {{ $labels.machine }}'s EK hash. Approve it on {{ $labels.instance }}'s admin API, as docs/runbooks/attest-a-node.md says."
+        - alert: TalosAttestLDevIDExpiring
+          expr: talos_attest_ldevid_expiry_timestamp_seconds - time() < 30 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }}'s LDevID expires within 30 days"
+            description: "Attest {{ $labels.machine }} again before its LDevID expires, or its SPIRE agent falls back to the EK attestor."

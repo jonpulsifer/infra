@@ -1,0 +1,13 @@
+[
+  {
+    "_comment": "The context is the repo root because the action builds apps/talos-attest's client.",
+    "image": "tink-attest",
+    "context": ".",
+    "file": "images/tink-attest/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "images/tink-attest",
+      "apps/talos-attest"
+    ]
+  }
+]
