@@ -11,11 +11,11 @@ RUN CGO_ENABLED=0 go build -o talos-enroll .
 FROM alpine:3.24.3 AS talosctl
 ARG TARGETARCH=amd64
 RUN case "$TARGETARCH" in \
-      amd64) sum=c6c9552b0e5f767352c595fa1c0af4f186f697488646872955057d23990a66c4 ;; \
-      arm64) sum=5b7119f9cc68c1e6dcd394564208a9ae417c5cc9e8e2585fa173082e53f5e6d7 ;; \
+      amd64) sum=0a69e3f9b682c5cd844b78dae305f6056ceb86c5fcc6913dcea78c527ed97cee ;; \
+      arm64) sum=a4430fad81b8dc54d99e0dc7b7ea5d0741b93645bc612cbeadf12855c4ec60bb ;; \
       *) echo "no talosctl checksum for $TARGETARCH" >&2; exit 1 ;; \
     esac \
- && wget -qO /talosctl "https://github.com/siderolabs/talos/releases/download/v1.14.2/talosctl-linux-${TARGETARCH}" \
+ && wget -qO /talosctl "https://github.com/siderolabs/talos/releases/download/v1.14.4/talosctl-linux-${TARGETARCH}" \
  && echo "${sum}  /talosctl" | sha256sum -c - \
  && chmod 0755 /talosctl
 
