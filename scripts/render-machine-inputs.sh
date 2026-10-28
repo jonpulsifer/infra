@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Writes the per-node render inputs that talos-enroll serves from: the folly
 # Talos root's machine_inputs output, read by `tofu console` with no state and
-# no 1Password, and each node's MAC from the UniFi client list as a hint.
+# no 1Password, and each node's MAC from the hardware inventory as a hint.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,6 +18,7 @@ mkdir -p "$tf"
 cp "$root"/clusters/folly/talos/*.tf "$root/clusters/folly/talos/.terraform.lock.hcl" "$tf/"
 ln -s "$root/terraform" "$work/terraform"
 ln -s "$root/clusters/folly/config" "$work/clusters/folly/config"
+ln -s "$root/clusters/folly/inventory" "$work/clusters/folly/inventory"
 printf 'terraform {\n  backend "local" {}\n}\n' >"$tf/render_override.tf"
 
 tofu -chdir="$tf" init -input=false -no-color >"$work/init.log" 2>&1 || {
@@ -52,7 +53,7 @@ for node in $(jq -r '.[]' <<<"$nodes"); do
   mv "$work/next.json" "$work/machine-inputs.json"
 done
 
-yq -o json '.k8s | map_values(.mac)' "$root/terraform/network/unifi/folly/clients.yaml" \
+yq -o json '.machines | map_values(.mac)' "$root/clusters/folly/inventory/machines.yaml" \
   | jq -S --slurpfile inputs "$work/machine-inputs.json" \
     'with_entries(select(.key as $k | $inputs[0] | has($k)))' >"$work/node-macs.json"
 

@@ -2,14 +2,10 @@ locals {
   bootstrap_cidr = "${cidrhost(local.lab_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.lab_topology.BOOTSTRAP_CIDR)[1]}"
   spore_boot_ip  = local.lab_topology.SPORE_BOOTSTRAP_IP
 
-  # The switch ports that run MAC auth, and each node's enrolled state: the
-  # network its RADIUS user puts it on. A reinstall flips a node to bootstrap,
-  # and the install reboot's link flap moves it.
-  mab_ports = {
-    shale    = 6
-    riptide  = 8
-    optiplex = 10
-  }
+  # The switch ports that run MAC auth, from the inventory, and each node's
+  # enrolled state: the network its RADIUS user puts it on. A reinstall flips a
+  # node to bootstrap, and the install reboot's link flap moves it.
+  mab_ports = { for node, m in local.machines : node => m.switch_port }
   enrolled = {
     shale    = "kubernetes"
     riptide  = "kubernetes"
@@ -35,8 +31,8 @@ locals {
   boot_native = toset([])
 
   # Ports with the bootstrap VLAN untagged and no 802.1X, for machines that
-  # are not yet in clients.yaml. The rack ports hold new workers until their
-  # MACs are known, when they move to mab_ports; the provisioning station
+  # are not yet in the inventory. The rack ports hold new workers until their
+  # MACs are known, when they join the inventory; the provisioning station
   # stays here.
   intake_ports = {
     swell        = 4
@@ -129,8 +125,8 @@ resource "unifi_port_profile" "mab" {
 resource "unifi_radius_user" "node" {
   for_each = local.mab_ports
 
-  name               = upper(replace(local.clients.k8s[each.key].mac, ":", ""))
-  password           = upper(replace(local.clients.k8s[each.key].mac, ":", ""))
+  name               = upper(replace(local.machines[each.key].mac, ":", ""))
+  password           = upper(replace(local.machines[each.key].mac, ":", ""))
   tunnel_type        = 13
   tunnel_medium_type = 6
   tunnel_config_type = "802.1x"

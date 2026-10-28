@@ -1,0 +1,47 @@
+# folly's Kubernetes nodes as hardware: the single source of each node's MAC,
+# switch port, install disk and TPM, and the facts `mise run inventory:check`
+# compares with what each node reports. A node's address is NODE_ADDRESSES in
+# ../config/cluster-topology.json. `mise run inventory:observe <address>`
+# prints a node's model, sku, serial, bios and mac to paste here.
+#
+# Read by terraform/network/unifi/folly (reservations, MAB users, mab_ports),
+# clusters/folly/talos (install disk, tpm_nodes) and the render scripts. Like
+# clients.yaml, a change here alone gets no Atlantis autoplan: comment
+# `atlantis plan -d <root>` for each root above.
+#
+# tpm is the TPM spec version, or null; only 2.0 seals disks and attests.
+# secure_boot is the firmware state the node is expected to boot in.
+machines:
+  optiplex:
+    model: OptiPlex 3050
+    sku: 07A3
+    serial: 66BT7M2
+    bios: 1.27.0
+    mac: 14:b3:1f:2b:57:85
+    switch_port: 10
+    disk: /dev/sda
+    tpm: "2.0"
+    amt: false
+    secure_boot: false
+  shale:
+    model: HP EliteDesk 800 G2 DM 35W
+    sku: V0B22UP#ABA
+    serial: MXL6372537
+    bios: N21 Ver. 02.63
+    mac: ec:8e:b5:72:35:24
+    switch_port: 6
+    disk: /dev/sda
+    tpm: "1.2"
+    amt: true
+    secure_boot: true
+  riptide:
+    model: HP EliteDesk 800 G5 Desktop Mini
+    sku: 9GB06UC#ABA
+    serial: MXL0172Q6L
+    bios: R21 Ver. 02.20.00
+    mac: 38:22:e2:2d:96:44
+    switch_port: 8
+    disk: /dev/nvme0n1
+    tpm: "2.0"
+    amt: true
+    secure_boot: true

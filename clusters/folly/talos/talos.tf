@@ -37,6 +37,7 @@ locals {
   op_vault_homelab = "ib23znjeikv74p37f6mbfk7uya"
 
   node_addresses = jsondecode(module.topology.data.NODE_ADDRESSES)
+  machines       = yamldecode(file("${path.module}/../inventory/machines.yaml")).machines
 
   # renovate: datasource=github-releases depName=siderolabs/talos
   talos_version = "v1.14.4"
@@ -45,36 +46,33 @@ locals {
   # image build publishes one per Talos version, tagged with the version.
   secureboot_installer = "ghcr.io/jonpulsifer/talos-installer-folly:${local.talos_version}"
 
-  # install is a CEL disk selector. ephemeral caps EPHEMERAL so that the
+  # The install disk is the inventory's. ephemeral caps EPHEMERAL so that the
   # data user volume takes the rest of the one disk. A node with installer
   # boots the signed UKI; its generation changes when it is reinstalled from
   # new media.
   nodes = {
     optiplex = {
       role       = "controlplane"
-      install    = "disk.dev_path == \"/dev/sda\""
       ephemeral  = "100GiB"
       installer  = local.secureboot_installer
       generation = "secureboot-1"
     }
     riptide = {
       role       = "worker"
-      install    = "disk.dev_path == \"/dev/nvme0n1\""
       ephemeral  = "80GiB"
       installer  = local.secureboot_installer
       generation = "secureboot-1"
     }
     shale = {
       role       = "worker"
-      install    = "disk.dev_path == \"/dev/sda\""
       ephemeral  = "128GiB"
       installer  = local.secureboot_installer
       generation = "secureboot-1"
     }
   }
 
-  # TPM 2.0 nodes: riptide's Infineon and optiplex's Nuvoton, both discrete.
-  tpm_nodes = ["optiplex", "riptide"]
+  # The inventory's TPM 2.0 nodes, which seal disks and attest.
+  tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
 
   # Nodes whose running STATE and EPHEMERAL are encrypted. A node joins only
   # after a reinstall formats them encrypted. optiplex still runs plain volumes.
@@ -106,7 +104,7 @@ module "talos" {
   nodes = { for name, n in local.nodes : name => {
     role               = n.role
     address            = local.node_addresses[name]
-    install            = n.install
+    install            = "disk.dev_path == \"${local.machines[name].disk}\""
     patches            = [local.ephemeral_patch[name]]
     installer_image    = try(n.installer, null)
     install_generation = try(n.generation, null)

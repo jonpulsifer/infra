@@ -4,8 +4,9 @@ locals {
   lb_cidr   = local.topology.LB_RANGE
 
   # Hostname to address for every node, from the topology ConfigMap. Each node
-  # also needs its MAC under `k8s` in clients.yaml.
+  # also needs an entry in the hardware inventory.
   node_addresses = jsondecode(local.topology.NODE_ADDRESSES)
+  machines       = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/machines.yaml")).machines
 
   static_records = merge(
     {
@@ -47,8 +48,8 @@ resource "unifi_network" "k8s" {
 
 # A node keeps its address across a reinstall because the reservation is on
 # its MAC. Reserved inside the DHCP pool; the controller excludes reserved
-# addresses from it. A node in NODE_ADDRESSES with no `k8s` entry in
-# clients.yaml fails the plan on the index below.
+# addresses from it. A node in NODE_ADDRESSES with no inventory entry fails the
+# plan on the index below.
 resource "unifi_client" "k8s_nodes" {
   for_each = local.node_addresses
 
@@ -57,7 +58,7 @@ resource "unifi_client" "k8s_nodes" {
   # the Kubernetes VLAN whatever its port or RADIUS assigns, so a reinstall
   # could never reach the bootstrap VLAN. The node ports carry the Kubernetes
   # VLAN untagged already.
-  mac      = local.clients.k8s[each.key].mac
+  mac      = local.machines[each.key].mac
   name     = each.key
   fixed_ip = each.value
   note     = "terraform managed - folly Kubernetes node"

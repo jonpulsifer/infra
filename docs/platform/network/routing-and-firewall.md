@@ -25,7 +25,7 @@ The network is alone in the `Bootstrap` zone. Its policies admit DHCP to the gat
 
 Each of riptide and optiplex has a RADIUS user on the gateway's built-in RADIUS server, whose VLAN is the node's enrolled state, set in `enrolled` in `terraform/network/unifi/folly/bootstrap.tf`. `mab_enforced` in the same file names the nodes whose port runs MAC auth: riptide today, so switch-wide 802.1X is on, port 8 is on the `MAC auth` port profile, which authenticates each MAC (MAB) against RADIUS, and port 10 stays an open Kubernetes trunk until optiplex is added. The gateway's RADIUS server must listen first. With MAC auth on, RADIUS rejects an unknown MAC and the port is expected to pass none of its traffic. The switch asks RADIUS at link-up, so a change to a user is expected to take effect at the node's next link flap. Neither behaviour has a hardware test on this switch yet.
 
-`intake_ports` in the same file carry the bootstrap VLAN untagged with no 802.1X, for machines that are not in `terraform/network/unifi/folly/clients.yaml` yet: the provisioning station, and the rack ports of new nodes until their MACs are known.
+`intake_ports` in the same file carry the bootstrap VLAN untagged with no 802.1X, for machines that are not in the [hardware inventory](../../reference/inventory.md) yet: the provisioning station, and the rack ports of new nodes until their MACs are known.
 
 A MAC can be copied, so MAC auth sorts machines and does not authenticate them. Secure Boot and the TPM-sealed disks are the lock. The gate keeps an unknown or unenrolled machine off the Kubernetes VLAN, Lab Net and the LAN.
 
