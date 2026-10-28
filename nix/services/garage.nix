@@ -20,12 +20,14 @@ let
     "velero"
     "cnpg"
     "etcd"
+    "netbox"
     "push"
   ];
   buckets = [
     "velero"
     "cnpg"
     "etcd"
+    "netbox"
   ];
   # Each key owns its own bucket; the push key only reads them all.
   grants =
