@@ -24,7 +24,7 @@ locals {
   mab_ports = { for node, m in local.machines : node => m.switch_port }
   enrolled = {
     shale    = "kubernetes"
-    riptide  = "kubernetes"
+    riptide  = "bootstrap"
     optiplex = "kubernetes"
   }
   mab_networks = {
