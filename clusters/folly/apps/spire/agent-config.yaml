@@ -76,4 +76,4 @@ metadata:
     app.kubernetes.io/name: spire-agent
     app.kubernetes.io/part-of: spire
 data:
-  ATTEST_URL: ""
+  ATTEST_URL: "http://${NS1_IP}:8444"

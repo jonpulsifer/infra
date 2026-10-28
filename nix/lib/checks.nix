@@ -226,6 +226,8 @@ in
     let
       extend = module: (nixosConfigurations.spore.extendModules { modules = [ module ]; }).config;
       testChain = pkgs.writeText "test-devid-chain.pem" "";
+      # spore runs both attestors today; the EK-only shape is derived.
+      ekOnly = extend { homelab.spire.devid.enable = lib.mkForce false; };
       both = extend {
         homelab.spire.devid = {
           enable = lib.mkForce true;
@@ -251,7 +253,7 @@ in
       sync = c: c.systemd.services.spire-server-entries.script;
       devidData = both.services.spire.server.settings.plugins.NodeAttestor.tpm_devid.plugin_data;
       failures = lib.filter (failure: failure != null) [
-        (if attestors spore == [ "tpm" ] then null else "spore runs tpm_devid while devid.enable is off")
+        (if attestors ekOnly == [ "tpm" ] then null else "devid.enable off still runs tpm_devid")
         (
           if
             attestors both == [
@@ -286,9 +288,9 @@ in
                 let
                   selectors = c: map (e: e.selectors) (aliases c name);
                 in
-                lib.length (selectors spore) == 1
-                && lib.hasPrefix "tpm:pub_hash:" (lib.head (lib.head (selectors spore)))
-                && selectors both == selectors spore ++ [ [ "tpm_devid:subject:cn:${name}" ] ]
+                lib.length (selectors ekOnly) == 1
+                && lib.hasPrefix "tpm:pub_hash:" (lib.head (lib.head (selectors ekOnly)))
+                && selectors both == selectors ekOnly ++ [ [ "tpm_devid:subject:cn:${name}" ] ]
               )
               [
                 "optiplex"

@@ -84,9 +84,10 @@ in
     bundleNotifier.enable = true;
     enable = true;
     ekHashes = lib.mapAttrsToList (_: node: node.ekHash) ekNodes;
-    # Off until a DevID CA certificate is committed (terraform/pki/certs/folly-devid-ca-<name>.pem);
-    # then list each such file in devid.caChains and turn this on.
-    devid.enable = false;
+    # Each issuing DevID CA's own certificate file, never the bundle: the server trusts the first
+    # certificate of each file.
+    devid.enable = true;
+    devid.caChains = [ ../../terraform/pki/certs/folly-devid-ca-software.pem ];
     entries =
       nodeAliases
       ++ lib.concatMap (
