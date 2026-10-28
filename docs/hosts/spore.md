@@ -33,6 +33,5 @@ Reach it at `spore.lolwtf.ca` or [`spore.<tailnet>`](index.md#reach-a-host).
 
 ## Quirks
 
-- Nix does not build the PXE files in `/var/lib/tftpboot`, and git declares no backup. `nix build .#netboot` rebuilds a rescue kernel and initrd.
 - If NFS stops, pods that mount it hang and still read Ready.
 - `nix.gc` keeps 7 days and the system profile keeps the current generation and 3 before it, because each generation adds a boot image to the 32 GB root. The rackpi5 publisher keeps the newest 4 releases.
