@@ -178,6 +178,10 @@ run = "bash scripts/enroll.sh pending"
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
 run = "bash .github/scripts/render-cluster-apps.sh"
 
+[tasks."backup:coverage"]
+description = "List how each PVC on a cluster is backed up and fail on an uncovered one (arg: [context], default folly)"
+run = "bash scripts/backup-coverage.sh"
+
 [tasks."k8s:check-rules"]
 description = "Lint every rendered PrometheusRule and run the alert unit tests"
 run = "bash .github/scripts/check-prometheus-rules.sh"
