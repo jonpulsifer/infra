@@ -9,7 +9,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| Garage | Stores the buckets `velero`, `cnpg` and `etcd` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
+| Garage | Stores the buckets `velero`, `cnpg` and `etcd`, and folly's `netbox` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
 | Velero | Backs up objects, and the volumes of pods with the annotation `backup.velero.io/backup-volumes` | The `velero` namespace |
 | barman-cloud plugin | Archives each database's base backups and WAL, through an `ObjectStore` named `garage` | The `cloudnative-pg` namespace |
 | `etcd-snapshot` | Snapshots the cluster's etcd through the Talos API into `etcd/<site>/` | The `backups` namespace on each site |
