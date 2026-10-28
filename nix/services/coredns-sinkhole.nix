@@ -62,6 +62,12 @@ in
         }
         prometheus 0.0.0.0:9253
       }
+      # Tailscale DNS is off on these hosts, so tailnet names go to tailscaled's own resolver at
+      # its fixed address. The anchors reach NetBox and each other's admin pages by those names.
+      ${fleet.tailnet} {
+        errors
+        forward . 100.100.100.100
+      }
     '';
   };
 
