@@ -1,19 +1,19 @@
 ---
 title: Talos enrollment
-description: A Go service that answers the OAuth device flow of a Talos machine booted from the network, and releases the machine's config once the owner approves it. It runs on the folly cluster and on the three anchors.
+description: A Go service that answers the OAuth device flow of a Talos machine booted from the network, and releases the machine's config once the owner approves it. It runs on the three anchors.
 status: unverified
 ---
 
 talos-enroll is the enrollment server for folly's Talos nodes. A machine that network boots the signed Talos image asks it for a device code, waits for the owner's approval, and then fetches its machine config. No machine has enrolled through it yet.
 
-It runs in two places. Each [anchor](../platform/nixos/talos-boot.md) runs a copy behind `BOOT_VIP`, and the anchors' CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP`, so a machine on the bootstrap VLAN enrolls through the anchors. The public name still resolves to the cluster's copy at `ENROLL_VIP`, which no machine on the bootstrap VLAN asks for.
+It runs on each [anchor](../platform/nixos/talos-boot.md) behind `BOOT_VIP`, so enrolling a node never depends on the cluster that it joins. The anchors' CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP`. The name has no public record, because `BOOT_VIP` is a private address on the isolated bootstrap VLAN, and the Let's Encrypt challenge is a DNS-01 TXT record.
 
 ## Use it
 
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
-| Device flow | `https://enroll.lolwtf.ca`, paths `/device/code`, `/token` and `/config` | The bootstrap VLAN, at `BOOT_VIP` through the anchors' DNS; clients that route to `ENROLL_VIP` reach the cluster's copy |
-| Approval page and API | `https://talos-enroll.<tailnet>`; on an anchor, `https://<anchor>.<tailnet>:8443` | Tailnet logins in `ENROLL_APPROVERS` |
+| Device flow | `https://enroll.lolwtf.ca`, paths `/device/code`, `/token` and `/config` | The bootstrap VLAN, at `BOOT_VIP` through the anchors' DNS |
+| Approval page and API | `https://<anchor>.<tailnet>:8443` | Tailnet logins in `ENROLL_APPROVERS` |
 | Prompts | The Discord channel of the Alertmanager webhook | Members of that channel |
 
 Each machine gets one Discord message, which the server edits as its enrollment moves on. The prompt and the console's QR code name the approval page of the server that holds the code. `mise run enroll:approve <code> <node>`, `enroll:deny <uuid>` and `enroll:pending` call the anchors' approval API. Only the anchor that holds `BOOT_VIP` knows a code, so `scripts/enroll.sh` tries each anchor and moves on while one answers 404. `ENROLL_ADMIN_URL` names one server. [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) is the procedure.
@@ -31,7 +31,7 @@ The user code shows only on the machine's console, so an approval proves that th
 
 The netboot UKI carries `talos.config` and the `talos.config.oauth.*` arguments for `enroll.lolwtf.ca`, with client `talos-enroll`. On approval, the server renders the node's config with `talosctl gen config --with-secrets`, the 1Password note `talos-folly-secrets` and the node's entry in `clusters/folly/apps/talos-enroll/machine-inputs.json`, as the `clusters/folly/talos/` root does. `mise run render-machine-inputs` writes that file.
 
-Talos trusts only its bundled roots before it has a config, so the name has a Let's Encrypt certificate. On the cluster, a Gateway serves it and the approval listener's NetworkPolicy admits only the tailnet Ingress. On each anchor, `nix/services/talos-enroll.nix` gets the certificate over DNS-01, nginx serves the three routes at `BOOT_VIP`, and `tailscale serve` passes the approval page to a socket that only root can open. Both proxies set `Tailscale-User-Login`, which the approver check trusts. sops-nix holds the bundle, the webhook and the DNS token in each anchor's `nix/secrets/<anchor>.sops.yaml`.
+Talos trusts only its bundled roots before it has a config, so the name has a Let's Encrypt certificate. `nix/services/talos-enroll.nix` gets the certificate over DNS-01, nginx serves the three routes at `BOOT_VIP`, and `tailscale serve` passes the approval page to a socket that only root can open. `tailscale serve` sets `Tailscale-User-Login`, which the approver check trusts. sops-nix holds the bundle, the webhook and the DNS token in each anchor's `nix/secrets/<anchor>.sops.yaml`.
 
 ## Operate
 
@@ -47,7 +47,7 @@ The first three read the anchors' copies. Each anchor's `talos-enroll-check` tim
 ## Reference
 
 - Source, HTTP contract and Nix package: `apps/talos-enroll/`
-- Manifests: `clusters/folly/apps/talos-enroll/`
+- Render inputs: `clusters/folly/apps/talos-enroll/machine-inputs.json` and `node-macs.json`, which the anchors read at build time
 - Anchors: `nix/services/talos-enroll.nix`
 - Alerts: `clusters/folly/monitoring/talos-enroll-rules.yaml`, `clusters/folly/monitoring/anchor-vips.yaml`
-- Image: `ghcr.io/jonpulsifer/talos-enroll`
+- Dockerfile: no image is published; `apps/talos-enroll/talosctl.nix` reads the pinned talosctl release from it

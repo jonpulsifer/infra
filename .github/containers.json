@@ -17,7 +17,6 @@
     "kthx-engine",
     "kthx-engine-verifier",
     "switchboard",
-    "talos-enroll",
     "tally",
     "tally-ocr",
     "tink-agent-autoid",
@@ -69,9 +68,6 @@
       "clusters/folly/apps/pbx/switchboard.yaml",
       "clusters/offsite/apps/elevenlabs/switchboard.yaml"
     ],
-    "talos-enroll": [
-      "clusters/folly/apps/talos-enroll/02-deployment.yaml"
-    ],
     "tally": [
       "clusters/folly/apps/tally/deployment.yaml"
     ],
@@ -92,6 +88,7 @@
     "bashcurljq",
     "clankerbanker",
     "kthx-engine-demo",
-    "slingshot"
+    "slingshot",
+    "talos-enroll"
   ]
 }

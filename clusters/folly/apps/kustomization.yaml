@@ -17,7 +17,6 @@ resources:
   - pbx
   - smiirl
   - spire
-  - talos-enroll
   - tally
   - spire-oidc
   - spire-test
