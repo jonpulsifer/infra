@@ -41,7 +41,7 @@ spec:
         # ATTEST_URL is empty or the LDevID is missing or does not check out.
         - name: devid-init
           # One literal with the agent's image, which CD rewrites.
-          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:43f737b3e805033b4024cdf060500306a0a9111cdbcea82ab16626c7f0b9d526
+          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:322391528aaa403e47a71112c8162e2e99176a08b3f3ebb5083d01a807afad1a
           imagePullPolicy: IfNotPresent
           command: ["/opt/spire/bin/spire-devid-init"]
           env:
@@ -85,7 +85,7 @@ spec:
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/spire-agent-tpm…@sha256:` string, so keep it one
           # literal. The zero digest stands until main builds the first image.
-          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:43f737b3e805033b4024cdf060500306a0a9111cdbcea82ab16626c7f0b9d526
+          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:322391528aaa403e47a71112c8162e2e99176a08b3f3ebb5083d01a807afad1a
           imagePullPolicy: IfNotPresent
           args: ["-config", "/run/spire/agent/agent.conf"]
           env:
