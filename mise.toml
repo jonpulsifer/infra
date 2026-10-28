@@ -147,11 +147,19 @@ description = "Firing Alertmanager alerts on every cluster (optional substring f
 run = "bash scripts/alerts.sh"
 
 [tasks.render-machine-inputs]
-description = "Write talos-enroll's per-node render inputs from the folly Talos root, with no state, and the nodes' MACs from the UniFi client list"
+description = "Write talos-enroll's per-node render inputs from the folly Talos root, with no state, and the nodes' MACs from the hardware inventory"
 run = "bash scripts/render-machine-inputs.sh"
 
+[tasks."inventory:check"]
+description = "Compare folly's hardware inventory with what each node reports over the Talos API; exits 1 on drift"
+run = "bash scripts/inventory.sh check"
+
+[tasks."inventory:observe"]
+description = "Print a folly node's observed inventory entry (args: [--insecure] <address>)"
+run = "bash scripts/inventory.sh observe"
+
 [tasks.render-tinkerbell-nodes]
-description = "Write each folly node's MAC, address and install disk, and the HookOS URL, for the Tinkerbell objects in clusters/folly/tinkerbell/ (--check compares)"
+description = "Write each folly node's MAC, address and install disk from the inventory, and the HookOS URL, for the Tinkerbell objects in clusters/folly/tinkerbell/ (--check compares)"
 run = "bash scripts/render-tinkerbell-nodes.sh"
 
 [tasks."enroll:approve"]

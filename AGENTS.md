@@ -92,10 +92,12 @@ Read these values from their file. Do not copy them.
 | --- | --- |
 | Cluster addresses and CIDRs, API server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
 | Lab CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/lab-topology.json` |
+| folly node hardware: MAC, switch port, install disk, TPM, model, serial, BIOS, Secure Boot | `clusters/folly/inventory/machines.yaml` |
 
-Each file is a Flux ConfigMap whose `data` values are all strings, so a list or
-a number is written as a string. [Topology](docs/reference/topology.md) says
-what reads each file.
+Each topology file is a Flux ConfigMap whose `data` values are all strings, so
+a list or a number is written as a string. [Topology](docs/reference/topology.md)
+says what reads each file. The inventory is plain YAML, and
+[Hardware inventory](docs/reference/inventory.md) says what reads it.
 
 ## Where to read more
 

@@ -36,7 +36,7 @@ On folly, only the `monitoring` and `storage` Flux Kustomizations substitute fro
 | --- | --- | --- |
 | Topology contract | Each `cluster-topology.json` is the `flux-system/cluster-topology` ConfigMap, has flat string data and every required key, holds valid addresses, CIDRs, port and ASNs, and does not overlap the other cluster. `NODE_ADDRESSES` is a JSON object of hostname to address, each address is in `K8S_NODE_CIDR` and belongs to one node, and `API_SERVER_IP` is a node's address. | `.github/workflows/topology-contract.yml`, with the conftest policy `.github/policy/cluster-topology.rego` |
 | Lab address preconditions | Each lab host address in `lab-topology.json` matches its reservation in `terraform/network/unifi/folly/clients.yaml` | The plan of `terraform/network/unifi/folly` |
-| Node reservations | Each node in `NODE_ADDRESSES` has a MAC under `k8s` in `terraform/network/unifi/<site>/clients.yaml`, which `k8s.tf` reserves at that address | The plan of `terraform/network/unifi/<site>` |
+| Node reservations | Each node in `NODE_ADDRESSES` has a MAC, which `k8s.tf` reserves at that address. On folly the MAC is in the [hardware inventory](inventory.md); on offsite it is under `k8s` in `terraform/network/unifi/offsite/clients.yaml`. | The plan of `terraform/network/unifi/<site>` |
 | Nix evaluation | Every host still evaluates with the new values | `nix-ci.yaml`, on a change to any topology file |
 
 The topology contract does not check `lab-topology.json`.
@@ -46,13 +46,14 @@ The topology contract does not check `lab-topology.json`.
 - Keep every `data` value a string. Kubernetes rejects a ConfigMap with any other value, and Flux substitutes only strings.
 - A change to a topology file gets no Atlantis autoplan, because `ATLANTIS_AUTOPLAN_FILE_LIST` matches no `.json` file. Plan and apply each root that reads the file, as [OpenTofu and Atlantis](../platform/opentofu.md#rules) describes.
 - Change a lab host address in `lab-topology.json` and `clients.yaml` in the same pull request, or the precondition fails the plan.
-- A node's address is in `NODE_ADDRESSES` only. Its MAC is in `terraform/network/unifi/<site>/clients.yaml`, its DNS record and reservation follow the key, and the roots that read it are `terraform/network/unifi/<site>` and `terraform/network/cloudflare`.
+- A node's address is in `NODE_ADDRESSES` only. Its MAC is in `clusters/folly/inventory/machines.yaml` on folly and `terraform/network/unifi/offsite/clients.yaml` on offsite, its DNS record and reservation follow the key, and the roots that read it are `terraform/network/unifi/<site>` and `terraform/network/cloudflare`.
 - Some files hold a literal copy of a topology value: the FRR files, whose `neighbor` lines are the `NODE_ADDRESSES` values, `policy.hujson` and the addresses pinned in app manifests. Change them in the same pull request, as the [Network rules](../platform/network.md#rules) describe.
 - Put a setting that is not a network fact, such as a time zone or a DNS zone for Apps, in `cluster-settings`: `clusters/base/cluster-settings.yaml`, patched by `clusters/<site>/config/cluster-settings.yaml`.
 - `CATHY_IP` and `PBX_SIP_VIP` are addresses in folly's `cluster-settings`, for the [PBX](../apps/pbx.md). `CATHY_IP` is the office phone on Management, which neither topology file covers, and the folly `apps` Flux Kustomization does not substitute from `lab-topology`. `terraform/network/unifi/folly/voip.tf` checks `CATHY_IP` against `clients.yaml`.
 
 ## Related
 
+- [Hardware inventory](inventory.md)
 - [Network](../platform/network.md)
 - [Kubernetes](../platform/kubernetes.md)
 - [NixOS](../platform/nixos.md)

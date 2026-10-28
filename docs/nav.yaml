@@ -132,4 +132,5 @@ sections:
     items:
       - reference/glossary.md
       - reference/topology.md
+      - reference/inventory.md
       - reference/style-guide.md
