@@ -1,6 +1,7 @@
-# ns1 and ns2, the anchors' shared addresses for DNS and NTP. keepalived on every anchor runs
-# unicast VRRP for both. Each VIP prefers its own order of anchors, and an anchor whose CoreDNS
-# stops answering drops below every healthy one, so the VIP follows a working resolver.
+# The anchors' shared addresses. ns1 and ns2 carry DNS and NTP on Lab Net; boot carries the Talos
+# boot files on the bootstrap VLAN (./talos-boot.nix). keepalived on every anchor runs unicast VRRP
+# for each. Each VIP prefers its own order of anchors, and an anchor whose service stops answering
+# drops below every healthy one, so the VIP follows a working server.
 {
   lib,
   pkgs,
@@ -14,11 +15,27 @@ let
     "forge"
     "spore"
   ];
-  peers = map (anchor: lab.hosts.${anchor}) (lib.remove name anchors);
-  prefix = lib.last (lib.splitString "/" lab.cidr);
+  others = lib.remove name anchors;
+  prefixOf = cidr: lib.last (lib.splitString "/" cidr);
+  networks = {
+    lab = {
+      interface = "end0";
+      hosts = lab.hosts;
+      prefix = prefixOf lab.cidr;
+    };
+    bootstrap = {
+      interface = "bootstrap";
+      hosts = lab.bootstrap.hosts;
+      prefix = prefixOf lab.bootstrap.cidr;
+    };
+  };
+  peersOn = network: map (anchor: network.hosts.${anchor}) others;
   vips = {
     ns1 = {
       routerId = 53;
+      network = networks.lab;
+      addr = lab.ns.ns1;
+      track = "coredns";
       order = [
         "capsule"
         "forge"
@@ -27,10 +44,25 @@ let
     };
     ns2 = {
       routerId = 54;
+      network = networks.lab;
+      addr = lab.ns.ns2;
+      track = "coredns";
       order = [
         "forge"
         "spore"
         "capsule"
+      ];
+    };
+    # spore first, beside Smee, which the netboot iPXE chains at spore's own address.
+    boot = {
+      routerId = 69;
+      network = networks.bootstrap;
+      addr = lab.bootstrap.vip;
+      track = "talos-boot";
+      order = [
+        "spore"
+        "capsule"
+        "forge"
       ];
     };
   };
@@ -55,21 +87,24 @@ in
       user = "nobody";
     };
     vrrpInstances = lib.mapAttrs (vip: v: {
-      interface = "end0";
+      inherit (v.network) interface;
       state = "BACKUP";
       virtualRouterId = v.routerId;
       priority = priority v.order;
-      unicastSrcIp = lab.hosts.${name};
-      unicastPeers = peers;
-      virtualIps = [ { addr = "${lab.ns.${vip}}/${prefix}"; } ];
-      trackScripts = [ "coredns" ];
+      unicastSrcIp = v.network.hosts.${name};
+      unicastPeers = peersOn v.network;
+      virtualIps = [ { addr = "${v.addr}/${v.network.prefix}"; } ];
+      trackScripts = [ v.track ];
     }) vips;
   };
 
-  # VRRP (IP protocol 112) only from the other anchors.
-  networking.firewall.extraCommands = lib.concatMapStrings (peer: ''
-    iptables -A nixos-fw -p 112 -s ${peer} -j nixos-fw-accept
-  '') peers;
+  # VRRP (IP protocol 112) only from the other anchors, each on its own network's interface.
+  networking.firewall.extraCommands = lib.concatMapStrings (
+    network:
+    lib.concatMapStrings (peer: ''
+      iptables -A nixos-fw -i ${network.interface} -p 112 -s ${peer} -j nixos-fw-accept
+    '') (peersOn network)
+  ) (lib.attrValues networks);
 
   assertions = [
     {

@@ -1,19 +1,21 @@
-# Talos boot server for folly's bootstrap VLAN. A timer mirrors the signed UKI and the iPXE script
-# that boots it, SecureBoot ISO, netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed
-# image against its committed signing cert, and keeps the previous release as prev. Smee
-# (./tinkerbell.nix) answers PXE on the VLAN and names the iPXE under dnsmasq's TFTP root; nginx
-# serves the UKI, its script, ISO and HookOS.
+# Talos boot server for folly's bootstrap VLAN, on every anchor. A timer mirrors the signed UKI and
+# the iPXE script that boots it, SecureBoot ISO, netboot iPXE and HookOS UKI from the
+# talos-folly/<version> GitHub release, checks each signed image against its committed signing cert,
+# and keeps the previous release as prev. dnsmasq serves the iPXE over TFTP and nginx serves the
+# rest, at the anchor's own bootstrap address and at the boot VIP, which ./anchor-vips.nix moves to
+# an anchor that passes the check below. Smee (./tinkerbell.nix, spore only) answers PXE on the VLAN.
 {
-  config,
   lib,
   pkgs,
+  name,
   ...
 }:
 let
   lab = import ../lib/lab.nix;
   iface = "bootstrap";
   site = "folly";
-  stateDir = "/var/lib/spore-talos-boot";
+  address = lab.bootstrap.hosts.${name};
+  stateDir = "/var/lib/talos-boot";
   siteDir = "${stateDir}/${site}";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   tftpDir = "/var/lib/tftpboot/talos/${site}";
@@ -21,14 +23,11 @@ let
   # iPXE chains this when Smee has no script for the MAC; it boots the UKI with its own command line.
   ukiScript = "metal-amd64-secureboot-uki.ipxe";
   iso = "metal-amd64-secureboot.iso";
-  # Signed with the UKI key; Smee's offer names talos/folly/<this> under dnsmasq's TFTP root.
+  # Signed with the UKI key; the bootstrap network's DHCP names talos/folly/<this> under dnsmasq's
+  # TFTP root.
   ipxe = "ipxe-amd64-secureboot.efi";
   # Signed with the HookOS key; iPXE fetches it over HTTP.
   hookos = "hookos-amd64-secureboot-uki.efi";
-  # Some firmware (riptide's) takes Smee's ProxyDHCP offer over UniFi's. With allowPXE off, Smee
-  # names /<mac>/netboot-not-allowed, so that path serves the same signed iPXE, which falls back
-  # to the Talos UKI when Smee has no script.
-  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/folly/apps/talos-enroll/node-macs.json);
   signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
   hookosCert = ../../clusters/folly/talos/secureboot/hookos-signing-cert.pem;
   # The pipeline's check: exactly one signature, and sbverify against the committed certificate.
@@ -64,14 +63,26 @@ let
       autoindex off;
     '';
   };
+
+  # keepalived's track script for the boot VIP, and the probe below: dnsmasq runs, and nginx serves
+  # the UKI's script at this anchor's own bootstrap address.
+  serves = pkgs.writeShellScript "talos-boot-serves" ''
+    ${pkgs.systemd}/bin/systemctl is-active --quiet dnsmasq.service
+    ${pkgs.curl}/bin/curl --fail --silent --output /dev/null --max-time 2 http://${address}/talos/${site}/${ukiScript}
+  '';
 in
 {
   assertions = [
     {
-      assertion = lib.elem "--collector.textfile.directory=${metricsDir}" config.services.prometheus.exporters.node.extraFlags;
-      message = "spore-talos-boot writes its metrics to ${metricsDir}, which node-exporter does not read.";
+      assertion = lab.bootstrap.hosts ? ${name};
+      message = "talos-boot.nix may only be imported by an anchor with a bootstrap address: ${lib.concatStringsSep ", " (lib.attrNames lab.bootstrap.hosts)}";
     }
   ];
+
+  services.prometheus.exporters.node = {
+    enabledCollectors = [ "textfile" ];
+    extraFlags = [ "--collector.textfile.directory=${metricsDir}" ];
+  };
 
   networking.vlans.${iface} = {
     id = lab.bootstrap.vlan;
@@ -81,11 +92,14 @@ in
     useDHCP = false;
     ipv4.addresses = [
       {
-        address = lab.bootstrap.spore;
+        inherit address;
         prefixLength = bootstrapPrefix;
       }
     ];
   };
+
+  # nginx listens on the boot VIP whether or not this anchor holds it.
+  boot.kernel.sysctl."net.ipv4.ip_nonlocal_bind" = 1;
 
   networking.firewall.interfaces.${iface} = {
     allowedTCPPorts = [ 80 ];
@@ -98,27 +112,121 @@ in
     ];
   };
 
-  services.nginx.virtualHosts."spore-pxe".locations = {
-    "= /talos/${site}/${uki}" = readOnlyLocation "${siteDir}/current/${uki}";
-    "= /talos/${site}/prev/${uki}" = readOnlyLocation "${siteDir}/prev/${uki}";
-    "= /talos/${site}/${ukiScript}" = readOnlyLocation "${siteDir}/current/${ukiScript}";
-    "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
-    "= /talos/${site}/${hookos}" = readOnlyLocation "${siteDir}/current/${hookos}";
+  # TFTP only (port=0): no DHCP and no DNS.
+  services.dnsmasq = {
+    enable = true;
+    resolveLocalQueries = false;
+    settings = {
+      port = 0;
+      enable-tftp = true;
+      tftp-root = "/var/lib/tftpboot";
+      tftp-max = 100;
+      # TFTP data leaves UDP/69 on a server-chosen port; bound it so the firewall admits it
+      # without a conntrack helper.
+      tftp-port-range = "30000,30099";
+    };
+  };
+
+  services.nginx = {
+    enable = true;
+    virtualHosts.talos-boot = {
+      listen =
+        map
+          (addr: {
+            inherit addr;
+            port = 80;
+          })
+          [
+            address
+            lab.bootstrap.vip
+          ];
+      locations = {
+        "/".return = "404";
+        "= /talos/${site}/${uki}" = readOnlyLocation "${siteDir}/current/${uki}";
+        "= /talos/${site}/prev/${uki}" = readOnlyLocation "${siteDir}/prev/${uki}";
+        "= /talos/${site}/${ukiScript}" = readOnlyLocation "${siteDir}/current/${ukiScript}";
+        "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
+        "= /talos/${site}/${hookos}" = readOnlyLocation "${siteDir}/current/${hookos}";
+      };
+    };
   };
 
   systemd.tmpfiles.rules = [
+    "d ${metricsDir} 0755 root root -"
     "d ${stateDir} 0755 root root -"
     "d ${siteDir} 0755 root root -"
+    "d /var/lib/tftpboot 0755 root root -"
     "d /var/lib/tftpboot/talos 0755 root root -"
     "d ${tftpDir} 0755 root root -"
     "L+ ${tftpDir}/${ipxe} - - - - ${siteDir}/current/${ipxe}"
-  ]
-  ++ lib.concatMap (mac: [
-    "d /var/lib/tftpboot/${mac} 0755 root root -"
-    "L+ /var/lib/tftpboot/${mac}/netboot-not-allowed - - - - ${siteDir}/current/${ipxe}"
-  ]) nodeMacs;
+  ];
 
-  systemd.services.spore-talos-boot-mirror = {
+  services.keepalived.vrrpScripts.talos-boot = {
+    script = toString serves;
+    interval = 5;
+    fall = 2;
+    rise = 2;
+    weight = -120;
+    user = "nobody";
+  };
+
+  # Whether this anchor holds the boot VIP and passes the check. The cluster cannot reach the
+  # bootstrap VLAN, so node-exporter carries both.
+  systemd.services.talos-boot-check = {
+    description = "Export whether this anchor holds the boot VIP and serves the Talos boot files";
+    path = with pkgs; [
+      coreutils
+      gnugrep
+      iproute2
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      UMask = "0022";
+      NoNewPrivileges = true;
+      PrivateDevices = true;
+      PrivateTmp = true;
+      ProtectHome = true;
+      ProtectSystem = "strict";
+      ReadWritePaths = [ metricsDir ];
+    };
+    script = ''
+      set -u
+      held=0
+      if ip -4 -o addr show dev ${iface} | grep -qF ' ${lab.bootstrap.vip}/'; then
+        held=1
+      fi
+      serving=0
+      if ${serves}; then
+        serving=1
+      fi
+      metrics=$(mktemp ${metricsDir}/.talos-boot-check.XXXXXX)
+      trap 'rm -f "$metrics"' EXIT
+      {
+        printf '# HELP talos_boot_vip_held Whether this anchor holds the boot VIP.\n'
+        printf '# TYPE talos_boot_vip_held gauge\n'
+        printf 'talos_boot_vip_held{site="${site}"} %s\n' "$held"
+        printf '# HELP talos_boot_serving Whether dnsmasq runs and nginx serves the UKI script at this anchor.\n'
+        printf '# TYPE talos_boot_serving gauge\n'
+        printf 'talos_boot_serving{site="${site}"} %s\n' "$serving"
+      } > "$metrics"
+      # node_exporter reads the textfile directory as its own user.
+      chmod 0644 "$metrics"
+      mv "$metrics" ${metricsDir}/talos-boot-check.prom
+      trap - EXIT
+    '';
+  };
+
+  systemd.timers.talos-boot-check = {
+    description = "Periodically export the boot VIP and Talos boot file state";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2m";
+      OnUnitActiveSec = "1m";
+      Unit = "talos-boot-check.service";
+    };
+  };
+
+  systemd.services.talos-boot-mirror = {
     description = "Mirror the signed Talos boot assets for ${site}";
     wants = [ "network-online.target" ];
     after = [ "network-online.target" ];
@@ -171,28 +279,29 @@ in
       stage=""
 
       write_metrics() {
-        local metrics slot version
-        metrics=$(mktemp ${metricsDir}/.spore-talos-boot.XXXXXX)
+        local metrics slot version release
+        metrics=$(mktemp ${metricsDir}/.talos-boot-mirror.XXXXXX)
         {
-          printf '# HELP spore_talos_boot_mirror_success Whether the last mirror run verified and published the release.\n'
-          printf '# TYPE spore_talos_boot_mirror_success gauge\n'
-          printf 'spore_talos_boot_mirror_success{site="${site}",wanted_version="${talosVersion}"} %s\n' "$success"
-          printf '# HELP spore_talos_boot_mirror_last_success_timestamp_seconds When the mirror last verified the release.\n'
-          printf '# TYPE spore_talos_boot_mirror_last_success_timestamp_seconds gauge\n'
-          printf 'spore_talos_boot_mirror_last_success_timestamp_seconds{site="${site}"} %s\n' \
+          printf '# HELP talos_boot_mirror_success Whether the last mirror run verified and published the release.\n'
+          printf '# TYPE talos_boot_mirror_success gauge\n'
+          printf 'talos_boot_mirror_success{site="${site}",wanted_version="${talosVersion}"} %s\n' "$success"
+          printf '# HELP talos_boot_mirror_last_success_timestamp_seconds When the mirror last verified the release.\n'
+          printf '# TYPE talos_boot_mirror_last_success_timestamp_seconds gauge\n'
+          printf 'talos_boot_mirror_last_success_timestamp_seconds{site="${site}"} %s\n' \
             "$(cat "$site_dir/last-success" 2>/dev/null || echo 0)"
-          printf '# HELP spore_talos_boot_uki_info The Talos version of each served UKI.\n'
-          printf '# TYPE spore_talos_boot_uki_info gauge\n'
+          printf '# HELP talos_boot_uki_info The Talos version and release (the digest of its boot files) of each served UKI.\n'
+          printf '# TYPE talos_boot_uki_info gauge\n'
           for slot in current prev; do
             version=$(cat "$site_dir/$slot/version" 2>/dev/null || true)
+            release=$(basename "$(readlink "$site_dir/$slot" || true)")
             if [ -n "$version" ]; then
-              printf 'spore_talos_boot_uki_info{site="${site}",slot="%s",version="%s"} 1\n' "$slot" "$version"
+              printf 'talos_boot_uki_info{site="${site}",slot="%s",version="%s",release="%s"} 1\n' "$slot" "$version" "$release"
             fi
           done
         } > "$metrics"
         # node_exporter reads the textfile directory as its own user.
         chmod 0644 "$metrics"
-        mv "$metrics" ${metricsDir}/spore-talos-boot.prom
+        mv "$metrics" ${metricsDir}/talos-boot-mirror.prom
       }
 
       cleanup() {
@@ -285,14 +394,14 @@ in
     '';
   };
 
-  systemd.timers.spore-talos-boot-mirror = {
+  systemd.timers.talos-boot-mirror = {
     description = "Periodically mirror the signed Talos boot assets";
     wantedBy = [ "timers.target" ];
     timerConfig = {
       OnBootSec = "5m";
       OnUnitActiveSec = "1h";
       RandomizedDelaySec = "5m";
-      Unit = "spore-talos-boot-mirror.service";
+      Unit = "talos-boot-mirror.service";
     };
   };
 }

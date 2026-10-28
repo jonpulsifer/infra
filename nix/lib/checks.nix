@@ -139,6 +139,35 @@ in
     in
     require "spore-reliability" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
+  # Every anchor serves TFTP on the bootstrap VLAN. A DHCP answer from any of them would race UniFi's
+  # and Smee's offers, and a boot VIP on another interface would never reach a booting machine.
+  anchor-boot =
+    let
+      anchors = lib.filterAttrs (_: c: c.services.keepalived.vrrpInstances ? boot) configs;
+      broken = namesWhere (
+        c:
+        let
+          dnsmasq = c.services.dnsmasq.settings;
+        in
+        dnsmasq ? "dhcp-range"
+        || dnsmasq.port != [ 0 ]
+        || c.services.keepalived.vrrpInstances.boot.interface != "bootstrap"
+        || !(lib.any (
+          range: range.from == 30000 && range.to == 30099
+        ) c.networking.firewall.interfaces.bootstrap.allowedUDPPortRanges)
+      ) anchors;
+    in
+    require "anchor-boot"
+      (
+        lib.attrNames anchors == [
+          "capsule"
+          "forge"
+          "spore"
+        ]
+        && broken == [ ]
+      )
+      "anchors with the boot VIP: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
+
   # Two normal users sharing a uid silently breaks file ownership on the NFS
   # exports every cluster host mounts.
   fleet-unique-uids =
