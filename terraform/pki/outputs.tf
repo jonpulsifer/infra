@@ -59,11 +59,13 @@ output "devid_ca_chain" {
   # Public certs, but the intermediate and root come from 1Password data
   # sources, which the provider marks sensitive.
   sensitive = true
-  value = join("", [
-    tls_locally_signed_cert.devid_ca.cert_pem,
-    local.fml_intermediate_cert,
-    local.fml_root_cert,
-  ])
+  # The 1Password certs end without a newline; trimspace and a "\n" join keep
+  # each PEM block on its own lines.
+  value = "${join("\n", [
+    trimspace(tls_locally_signed_cert.devid_ca.cert_pem),
+    trimspace(local.fml_intermediate_cert),
+    trimspace(local.fml_root_cert),
+  ])}\n"
 }
 
 output "devid_ca_private_key" {
