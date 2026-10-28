@@ -98,13 +98,11 @@ in
     }) vips;
   };
 
-  # VRRP (IP protocol 112) only from the other anchors, each on its own network's interface.
-  networking.firewall.extraCommands = lib.concatMapStrings (
-    network:
-    lib.concatMapStrings (peer: ''
-      iptables -A nixos-fw -i ${network.interface} -p 112 -s ${peer} -j nixos-fw-accept
-    '') (peersOn network)
-  ) (lib.attrValues networks);
+  # VRRP (IP protocol 112) only from the other anchors. ./talos-boot.nix admits the boot VIP's VRRP
+  # in its bootstrap chain.
+  networking.firewall.extraCommands = lib.concatMapStrings (peer: ''
+    iptables -A nixos-fw -i ${networks.lab.interface} -p 112 -s ${peer} -j nixos-fw-accept
+  '') (peersOn networks.lab);
 
   assertions = [
     {

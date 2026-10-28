@@ -5,6 +5,7 @@
 # rest, at the anchor's own bootstrap address and at the boot VIP, which ./anchor-vips.nix moves to
 # an anchor that passes the check below. Smee (./tinkerbell.nix, spore only) answers PXE on the VLAN.
 {
+  config,
   lib,
   pkgs,
   name,
@@ -13,6 +14,9 @@
 let
   lab = import ../lib/lab.nix;
   iface = "bootstrap";
+  peers = map (anchor: lab.bootstrap.hosts.${anchor}) (
+    lib.remove name (lib.attrNames lab.bootstrap.hosts)
+  );
   site = "folly";
   address = lab.bootstrap.hosts.${name};
   stateDir = "/var/lib/talos-boot";
@@ -64,6 +68,34 @@ let
     '';
   };
 
+  # The bootstrap VLAN holds unenrolled machines, so its interface admits only what they use: the
+  # ports declared for it (here and in ./tinkerbell.nix), the DNS and NTP that its DHCP names, ping,
+  # and the boot VIP's VRRP from the other anchors. The global allowed ports apply on every
+  # interface, so the chain runs before them, after nixos-fw's trusted-interface and
+  # established-connection accepts. NixOS deletes and recreates nixos-fw-accept and
+  # nixos-fw-log-refuse on every reload, which fails while another chain refers to them, so this
+  # chain ends in the built-in ACCEPT and DROP.
+  bootstrapChain = "nixos-fw-bootstrap";
+  bootstrapPosition = lib.length config.networking.firewall.trustedInterfaces + 2;
+  bootstrapRules =
+    let
+      allowed = config.networking.firewall.interfaces.${iface};
+      dports =
+        proto: ports: ranges:
+        map (port: "-p ${proto} --dport ${toString port}") (lib.unique ports)
+        ++ map (range: "-p ${proto} --dport ${toString range.from}:${toString range.to}") ranges;
+    in
+    dports "tcp" (allowed.allowedTCPPorts ++ [ 53 ]) allowed.allowedTCPPortRanges
+    ++ dports "udp" (
+      allowed.allowedUDPPorts
+      ++ [
+        53
+        123
+      ]
+    ) allowed.allowedUDPPortRanges
+    ++ [ "-p icmp --icmp-type echo-request" ]
+    ++ map (peer: "-p 112 -s ${peer}") peers;
+
   # keepalived's track script for the boot VIP, and the probe below: dnsmasq runs, and nginx serves
   # the UKI's script at this anchor's own bootstrap address.
   serves = pkgs.writeShellScript "talos-boot-serves" ''
@@ -111,6 +143,25 @@ in
       }
     ];
   };
+
+  # IPv6 on the VLAN is link-local only, so it gets neighbour discovery and nothing else.
+  networking.firewall.extraCommands = ''
+    iptables -w -N ${bootstrapChain} 2>/dev/null || true
+    iptables -w -F ${bootstrapChain}
+    ${lib.concatMapStrings (rule: ''
+      iptables -w -A ${bootstrapChain} ${rule} -j ACCEPT
+    '') bootstrapRules}
+    iptables -w -A ${bootstrapChain} -j DROP
+    iptables -w -I nixos-fw ${toString bootstrapPosition} -i ${iface} -j ${bootstrapChain}
+
+    ip6tables -w -N ${bootstrapChain} 2>/dev/null || true
+    ip6tables -w -F ${bootstrapChain}
+    ip6tables -w -A ${bootstrapChain} -p icmpv6 --icmpv6-type redirect -j DROP
+    ip6tables -w -A ${bootstrapChain} -p icmpv6 --icmpv6-type 139 -j DROP
+    ip6tables -w -A ${bootstrapChain} -p icmpv6 -j ACCEPT
+    ip6tables -w -A ${bootstrapChain} -j DROP
+    ip6tables -w -I nixos-fw ${toString bootstrapPosition} -i ${iface} -j ${bootstrapChain}
+  '';
 
   # TFTP only (port=0): no DHCP and no DNS.
   services.dnsmasq = {

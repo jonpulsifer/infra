@@ -63,7 +63,7 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 - Each anchor's switch port must carry the bootstrap VLAN tagged. spore's Smee answers DHCP broadcasts, and VRRP between the anchors runs on the VLAN.
 - spore serves the boot files at its own bootstrap address as well as at `BOOT_VIP`. The netboot iPXE falls back to that address when no anchor holds the VIP.
 - `talos-uki-verify.sh` runs `sbverify --cert` and also requires exactly one signature. sbverify alone passes a file with several signatures when any one of them verifies.
-- Each anchor's ports that the firewall opens on every interface, such as DNS, NTP, the Garage S3 API, ssh and node-exporter, also answer at its bootstrap address. A machine on the bootstrap VLAN reaches the anchors directly, so the UniFi firewall cannot filter it.
+- A machine on the bootstrap VLAN reaches the anchors directly, where the UniFi firewall cannot filter it. Each anchor's `nixos-fw-bootstrap` chain, from `talos-boot.nix`, runs before the ports the NixOS firewall opens on every interface. Over IPv4 it admits the ports declared for `bootstrap` (TFTP and HTTP, and on spore Smee and the Tink server), DNS, NTP, ping and VRRP from the other anchors' bootstrap addresses, and drops the rest. Over IPv6 it admits only ICMPv6. Declare a new bootstrap service in `networking.firewall.interfaces.bootstrap`, or the chain drops it. The `anchor-boot` check fails if the chain admits ssh, NFS, Garage, an exporter or the Tinkerbell API.
 - The `anchor-boot` and `spore-reliability` checks in `nix/lib/checks.nix` fail if dnsmasq could lease addresses or answer DHCP.
 
 ## Where it lives
