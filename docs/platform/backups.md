@@ -9,7 +9,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| Garage | Stores the buckets `velero`, `cnpg` and `etcd` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
+| Garage | Stores the buckets `velero`, `cnpg` and `etcd`, and folly's `netbox` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
 | Velero | Backs up objects, and the volumes of pods with the annotation `backup.velero.io/backup-volumes` | The `velero` namespace |
 | barman-cloud plugin | Archives each database's base backups and WAL, through an `ObjectStore` named `garage` | The `cloudnative-pg` namespace |
 | `etcd-snapshot` | Snapshots the cluster's etcd through the Talos API into `etcd/<site>/` | The `backups` namespace on each site |
@@ -35,7 +35,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 ## Garage cluster
 
-folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on Lab Net, and the firewall opens it to the other anchors only. Every anchor serves S3, and clients name spore. A node with `homelab.garage.clustered` unset is a standalone store with replication factor 1. spore keeps its old standalone store in `/nfs/data/garage` as the rollback of [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md).
+folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on the Anchor network, and the firewall opens it to the other anchors only. Every anchor serves S3, and clients name spore. A node with `homelab.garage.clustered` unset is a standalone store with replication factor 1. spore keeps its old standalone store in `/nfs/data/garage` as the rollback of [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md).
 
 ## Credentials
 

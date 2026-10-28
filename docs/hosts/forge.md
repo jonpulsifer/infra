@@ -13,13 +13,13 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-forge is the lab's native arm64 build host, a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. `nix/hosts/forge.nix` configures it.
+forge is the lab's native arm64 build host, a Raspberry Pi 5 on [the Anchor network](../platform/network.md#networks), folly's network for lab hosts. `nix/hosts/forge.nix` configures it.
 
 ## What it runs
 
 - The build host role, which runs Nix builds for other machines over SSH, including the armv6l cross-builds
 - Docker with buildx for arm64 images
-- CoreDNS and chrony through the anchor profile (`nix/profiles/anchor.nix`), which makes forge one of the three [anchors](../platform/network/ingress-and-dns.md#lab-dns-and-time) that serve lab DNS and time, and [Talos boot](../platform/nixos/talos-boot.md) on the bootstrap VLAN
+- CoreDNS and chrony through the anchor profile (`nix/profiles/anchor.nix`), which makes forge one of the three [anchors](../platform/network/ingress-and-dns.md#lab-dns-and-time) that serve lab DNS and time, and [Talos boot](../platform/nixos/talos-boot.md) and [Talos enrollment](../apps/talos-enroll.md) on the bootstrap VLAN
 - harmonia, a Nix binary cache behind nginx on port 80, which the firewall blocks. No host trusts its key.
 - A node of folly's [Garage cluster](../platform/backups.md#garage-cluster), with data in `/var/lib/garage` (`nix/services/garage.nix`)
 

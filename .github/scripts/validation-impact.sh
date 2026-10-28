@@ -31,7 +31,7 @@ targets() {
     path=${path%\\}
     [[ -n "$path" ]] || continue
     case "$path" in
-      flake.nix | flake.lock | nix/* | apps/ddnsd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/lab-topology.json | .github/workflows/nix-ci.yaml)
+      flake.nix | flake.lock | nix/* | apps/ddnsd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/anchor-topology.json | .github/workflows/nix-ci.yaml)
         target_set["nix:flake-check"]=1
         ;;
       # spore mirrors the Talos release that talos.tf names and checks it against the committed certs,
@@ -47,7 +47,7 @@ targets() {
           target_set["terraform:$root"]=1
         done < <(terraform_roots)
         ;;
-      clusters/folly/config/lab-topology.json | terraform/network/unifi/folly/clients.yaml)
+      clusters/folly/config/anchor-topology.json | terraform/network/unifi/folly/clients.yaml)
         target_set["terraform:terraform/network/unifi/folly"]=1
         ;;
       clusters/*/config/cluster-topology.json)

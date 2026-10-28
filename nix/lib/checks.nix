@@ -127,7 +127,7 @@ in
           then
             null
           else
-            "the Tinkerbell API is open beyond Lab Net and the tailnet"
+            "the Tinkerbell API is open beyond the Anchor network and the tailnet"
         )
         (
           if lib.hasInfix "spore_native_boot_artifact_available" probe.script then

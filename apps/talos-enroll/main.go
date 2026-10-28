@@ -6,7 +6,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -83,14 +86,27 @@ func run(log *slog.Logger) error {
 		Now:       time.Now,
 	}
 
-	servers := []*http.Server{
-		{Addr: env("ENROLL_ADDR", ":8080"), Handler: srv.Public(), ReadHeaderTimeout: 10 * time.Second},
-		{Addr: env("ENROLL_ADMIN_ADDR", ":8081"), Handler: srv.Admin(), ReadHeaderTimeout: 10 * time.Second},
+	// A unix socket's mode decides who may connect: the public one admits the
+	// service's group (a TLS proxy), the admin one only its owner and root (tailscaled).
+	listeners := []struct {
+		addr    string
+		mode    fs.FileMode
+		handler http.Handler
+	}{
+		{env("ENROLL_ADDR", ":8080"), 0o660, srv.Public()},
+		{env("ENROLL_ADMIN_ADDR", ":8081"), 0o600, srv.Admin()},
 	}
-	errc := make(chan error, len(servers))
-	for _, s := range servers {
-		log.Info("listening", "addr", s.Addr)
-		go func() { errc <- s.ListenAndServe() }()
+	servers := make([]*http.Server, 0, len(listeners))
+	errc := make(chan error, len(listeners))
+	for _, l := range listeners {
+		ln, err := listen(l.addr, l.mode)
+		if err != nil {
+			return err
+		}
+		s := &http.Server{Handler: l.handler, ReadHeaderTimeout: 10 * time.Second}
+		servers = append(servers, s)
+		log.Info("listening", "addr", l.addr)
+		go func() { errc <- s.Serve(ln) }()
 	}
 	log.Info("talos-enroll started", "nodes", render.Nodes(), "approvers", len(approvers))
 
@@ -105,4 +121,24 @@ func run(log *slog.Logger) error {
 		_ = s.Shutdown(shutdown)
 	}
 	return nil
+}
+
+// listen opens a TCP address, or a unix socket given as unix:<path> with mode.
+func listen(addr string, mode fs.FileMode) (net.Listener, error) {
+	path, ok := strings.CutPrefix(addr, "unix:")
+	if !ok {
+		return net.Listen("tcp", addr)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("chmod %s: %w", path, err)
+	}
+	return ln, nil
 }

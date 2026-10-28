@@ -11,7 +11,7 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 - You need a full checkout on a Linux machine, such as the WSL distro, and SSH access to a lab host, such as [spore](../hosts/spore.md).
 - The desktop must be on a network in the [Internal firewall zone](../platform/network/routing-and-firewall.md), such as Management or `future`.
 
-`<host>` is the desktop name. `<HOST>` is `<host>` in upper case, and `<HOST>_IP` is its key in `clusters/folly/config/lab-topology.json`.
+`<host>` is the desktop name. `<HOST>` is `<host>` in upper case, and `<HOST>_IP` is its key in `clusters/folly/config/anchor-topology.json`.
 
 | Agent | Port | Supplies | Runs as |
 | --- | --- | --- | --- |
@@ -22,7 +22,7 @@ Use this runbook to make a Windows desktop report to folly's Prometheus and Vict
 ## Add a desktop to Prometheus
 
 1. Under `desktops` in `terraform/network/unifi/folly/clients.yaml`, add `<host>` with its `mac` and its `ip`, the host part of its address.
-2. Add `<HOST>_IP` to `clusters/folly/config/lab-topology.json`.
+2. Add `<HOST>_IP` to `clusters/folly/config/anchor-topology.json`.
 3. Add `<host>` to `local.windows_hosts` in `terraform/network/unifi/folly/windows-hosts.tf`. If the desktop is on `future`, copy the `tallboy` entry. If it is on Management, copy the `atomic` entry.
 4. Add an endpoint with `${<HOST>_IP}` and `nodeName: <host>` to the EndpointSlice in `clusters/folly/monitoring/windows-exporters.yaml`.
 5. Apply the change through a pull request. See [Apply an OpenTofu change](apply-an-opentofu-change.md).
@@ -103,7 +103,7 @@ Lookout replaces step 4 of [Install or update the agents](#install-or-update-the
 1. In the full checkout, read the desktop address, `<ip>`.
 
    ```bash
-   jq -r .data.<HOST>_IP clusters/folly/config/lab-topology.json
+   jq -r .data.<HOST>_IP clusters/folly/config/anchor-topology.json
    ```
 
    Result: The desktop address.

@@ -47,7 +47,7 @@ assert_targets 'the DHCP reservation source validates its Terraform root' \
   'terraform:terraform/network/unifi/folly'
 
 assert_targets 'the lab topology ConfigMap validates Terraform and Nix consumers' \
-  'clusters/folly/config/lab-topology.json' \
+  'clusters/folly/config/anchor-topology.json' \
   $'nix:flake-check\nterraform:terraform/network/unifi/folly'
 
 assert_targets 'the removed Terraform JSON has no stale route' \

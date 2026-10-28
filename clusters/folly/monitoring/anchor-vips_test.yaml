@@ -102,3 +102,62 @@ tests:
             exp_annotations:
               message: The anchors serve different Talos boot releases
               description: "The anchors' current boot files differ, so a boot VIP failover changes the UKI, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."
+
+  # spore holds the boot VIP and serves enrollment until minute 10, when its certificate lapses and
+  # keepalived moves the VIP to capsule two minutes later. forge has no certificate throughout.
+  - interval: 1m
+    input_series:
+      - series: 'talos_boot_vip_held{instance="spore",site="folly"}'
+        values: 1x11 0x29
+      - series: 'talos_enroll_serving{instance="spore",site="folly"}'
+        values: 1x9 0x31
+      - series: 'talos_boot_vip_held{instance="capsule",site="folly"}'
+        values: 0x11 1x29
+      - series: 'talos_enroll_serving{instance="capsule",site="folly"}'
+        values: 1x40
+      - series: 'talos_boot_vip_held{instance="forge",site="folly"}'
+        values: 0x40
+      - series: 'talos_enroll_serving{instance="forge",site="folly"}'
+        values: 0x40
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: AnchorEnrollVipDown
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: AnchorEnrollNotServing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: forge
+              site: folly
+            exp_annotations:
+              message: Anchor forge does not serve Talos enrollment
+              description: "nginx has no trusted certificate for the enrollment name, talos-enroll does not answer behind it, or the anchor exports no talos-enroll-check metrics. The boot VIP skips this anchor."
+          - exp_labels:
+              severity: warning
+              instance: spore
+              site: folly
+            exp_annotations:
+              message: Anchor spore does not serve Talos enrollment
+              description: "nginx has no trusted certificate for the enrollment name, talos-enroll does not answer behind it, or the anchor exports no talos-enroll-check metrics. The boot VIP skips this anchor."
+
+  # The VIP's holder stops serving enrollment and no other anchor serves it.
+  - interval: 1m
+    input_series:
+      - series: 'talos_boot_vip_held{instance="spore",site="folly"}'
+        values: 1x20
+      - series: 'talos_enroll_serving{instance="spore",site="folly"}'
+        values: 1x4 0x16
+      - series: 'talos_boot_vip_held{instance="capsule",site="folly"}'
+        values: 0x20
+      - series: 'talos_enroll_serving{instance="capsule",site="folly"}'
+        values: 0x20
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AnchorEnrollVipDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: No anchor serves Talos enrollment at the boot VIP
+              description: "No anchor holds the boot VIP while nginx serves the enrollment name with a trusted certificate and talos-enroll answers behind it. Check keepalived, nginx, the ACME renewal and talos-enroll on capsule, forge and spore (nix/services/talos-enroll.nix)."

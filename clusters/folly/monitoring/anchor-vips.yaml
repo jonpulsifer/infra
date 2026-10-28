@@ -98,6 +98,25 @@ spec:
           annotations:
             message: "Anchor {{ $labels.instance }} does not serve the Talos boot files"
             description: "dnsmasq is down, nginx does not serve the UKI script at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
+        # The boot VIP's second check: nginx serves the enrollment name with a
+        # certificate Talos trusts, and talos-enroll answers behind it
+        # (nix/services/talos-enroll.nix).
+        - alert: AnchorEnrollVipDown
+          expr: (count((talos_boot_vip_held == 1) and on (instance) (talos_enroll_serving == 1)) or vector(0)) < 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: No anchor serves Talos enrollment at the boot VIP
+            description: "No anchor holds the boot VIP while nginx serves the enrollment name with a trusted certificate and talos-enroll answers behind it. Check keepalived, nginx, the ACME renewal and talos-enroll on capsule, forge and spore (nix/services/talos-enroll.nix)."
+        - alert: AnchorEnrollNotServing
+          expr: (talos_enroll_serving == 0) or absent(talos_enroll_serving{instance="capsule"}) or absent(talos_enroll_serving{instance="forge"}) or absent(talos_enroll_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "Anchor {{ $labels.instance }} does not serve Talos enrollment"
+            description: "nginx has no trusted certificate for the enrollment name, talos-enroll does not answer behind it, or the anchor exports no talos-enroll-check metrics. The boot VIP skips this anchor."
         - alert: AnchorBootMirrorStale
           expr: time() - talos_boot_mirror_last_success_timestamp_seconds > 6 * 3600
           for: 15m

@@ -1,11 +1,12 @@
-# Lab network facts shared by NixOS, Flux and OpenTofu. The source file is also the Flux
+# Anchor network facts shared by NixOS, Flux and OpenTofu. The source file is also the Flux
 # ConfigMap: keep its data flat and string-only for post-build substitution.
 let
-  data = (builtins.fromJSON (builtins.readFile ../../clusters/folly/config/lab-topology.json)).data;
+  data =
+    (builtins.fromJSON (builtins.readFile ../../clusters/folly/config/anchor-topology.json)).data;
 in
 {
   inherit data;
-  cidr = data.LAB_CIDR;
+  cidr = data.ANCHOR_CIDR;
   futureCidr = data.FUTURE_CIDR;
   bootstrap = {
     cidr = data.BOOTSTRAP_CIDR;

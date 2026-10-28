@@ -45,7 +45,7 @@ locals {
       apiVersion = "v1alpha1"
       kind       = "TimeSyncConfig"
       ntp = {
-        servers = [module.lab_topology.data.NS1_IP, module.lab_topology.data.NS2_IP]
+        servers = [module.anchor_topology.data.NS1_IP, module.anchor_topology.data.NS2_IP]
       }
     }),
     # The ports of Vector's loopback socket sources. machine.logging has no

@@ -3,8 +3,8 @@ module "topology" {
   site   = "folly"
 }
 
-module "lab_topology" {
+module "anchor_topology" {
   source     = "../../../terraform/modules/cluster-topology"
   site       = "folly"
-  config_map = "lab-topology"
+  config_map = "anchor-topology"
 }

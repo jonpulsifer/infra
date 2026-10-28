@@ -14,7 +14,7 @@ The API commands only read. `ssh` runs any command as `root` on the gateway. Cha
 - For `bgp` and `ssh`, you need `sshpass`, or `nix-shell` to fetch it.
 - Run the commands from the repository root.
 
-`<udm>` is the first host address in `FUTURE_CIDR` in `clusters/folly/config/lab-topology.json`.
+`<udm>` is the first host address in `FUTURE_CIDR` in `clusters/folly/config/anchor-topology.json`.
 
 ## Read the folly console
 

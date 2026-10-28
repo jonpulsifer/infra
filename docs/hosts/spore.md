@@ -13,7 +13,7 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-spore is a Raspberry Pi 5 that serves x86 netboot, forge's boot image, and lab DNS and time. It is on [Lab Net](../platform/network.md#networks), folly's network for lab hosts.
+spore is a Raspberry Pi 5 that serves x86 netboot, forge's boot image, and lab DNS and time. It is on [the Anchor network](../platform/network.md#networks), folly's network for lab hosts.
 
 ## What it runs
 
@@ -22,7 +22,7 @@ spore is a Raspberry Pi 5 that serves x86 netboot, forge's boot image, and lab D
 - The `/nfs/data` filesystem, which holds Garage, the rackpi5 boot images and an export to the Lab future network (`nfs-server.nix`). No Kubernetes volume lives on it.
 - [Netboot](../platform/nixos/netboot.md) for x86 PXE and [rackpi5](rackpi5.md) (`pxe-netboot.nix`, `spore-native-boot.nix`)
 - [Tinkerbell](../platform/nixos/tinkerbell.md), which answers PXE on the bootstrap VLAN and reprovisions folly's Talos nodes (`tinkerbell.nix`)
-- [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time) and [Talos boot](../platform/nixos/talos-boot.md) on the bootstrap VLAN (`nix/profiles/anchor.nix`, which imports `coredns-sinkhole.nix`, `ntp-server.nix` and `talos-boot.nix`)
+- [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time), [Talos boot](../platform/nixos/talos-boot.md) and [Talos enrollment](../apps/talos-enroll.md) on the bootstrap VLAN (`nix/profiles/anchor.nix`, which imports `coredns-sinkhole.nix`, `ntp-server.nix`, `talos-boot.nix` and `talos-enroll.nix`)
 - folly's [backup](../platform/backups.md) Garage store, with data in `/nfs/data/garage-ha` (`garage.nix`), as a node of the [Garage cluster](../platform/backups.md#garage-cluster). The old standalone store in `/nfs/data/garage` is the rollback.
 - The [SPIRE server](../platform/identity.md) that attests Talos nodes by TPM (`spire-server.nix`)
 

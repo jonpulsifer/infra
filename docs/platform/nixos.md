@@ -42,7 +42,7 @@ A host with auto-upgrade rebuilds from `main` at 03:37 local time, up to an hour
 ## Rules
 
 - If you deploy a host change from a branch, merge it before the next auto-upgrade, or the upgrade removes it.
-- Read addresses and names through `nix/lib/networks.nix`, `nix/lib/lab.nix` and `nix/lib/fleet.nix`, which project the [topology files](../reference/topology.md). A copied value goes stale when the topology file changes.
+- Read addresses and names through `nix/lib/networks.nix`, `nix/lib/anchor.nix` and `nix/lib/fleet.nix`, which project the [topology files](../reference/topology.md). A copied value goes stale when the topology file changes.
 - A new host cannot decrypt its SOPS file until its SSH host key is a recipient, as [Manage SOPS secrets](../runbooks/manage-sops-secrets.md) describes.
 - Run `mise run nix:check` before a PR. It evaluates each configuration and runs the fleet assertions in `nix/lib/checks.nix`, and a failure fails `nix-ci`.
 

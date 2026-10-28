@@ -44,7 +44,7 @@ const SSH_CONFIG_PATH = `${SSH_DIR}/config`;
 // Where the kthx CLI keeps its site tokens under the image's XDG_CONFIG_HOME.
 const SITES_PATH = '.config/kthx/sites.json';
 
-// folly's Lab Net has no route from offsite, so its hosts are reached through
+// folly's Anchor network has no route from offsite, so its hosts are reached through
 // a jump host that offsite routes to and the folly firewall admits on 22:
 // MATE_SANDBOX_LAB_JUMP. optiplex, folly's only control plane, is never it.
 const LAB_NET_HOSTS = ['spore', 'capsule', 'forge', 'cloudpi4', 'homepi4'];
@@ -54,7 +54,7 @@ const LAB_DOMAIN = 'lolwtf.ca';
 // or not. accept-new: home is a fresh emptyDir with no known hosts, so `yes`
 // refuses every host, and `no` would accept a changed key.
 export function sshClientConfig(home: string, jump: string): string {
-  // A jump host on Lab Net is reached directly, or ssh would jump through it
+  // A jump host on the Anchor network is reached directly, or ssh would jump through it
   // to reach itself.
   const proxied = LAB_NET_HOSTS.map((host) => `${host}.${LAB_DOMAIN}`).filter(
     (host) => host !== jump && host !== `${jump}.${LAB_DOMAIN}`,

@@ -4,7 +4,7 @@ OpenTofu root for the folly UniFi gateway. See [Network](https://wiki.lolwtf.ca/
 
 It declares the networks and VLANs, WLANs, WAN, client QoS, DHCP reservations, DNS records, the `Lab` firewall zone and its policies, and the gateway's BGP config.
 
-`topology.tf` reads both sites' `cluster-topology.json` and folly's `lab-topology.json`. `clients.yaml` holds the DHCP reservations, and a plan fails if its host addresses disagree with `lab-topology.json`. `k8s.tf` reserves each node's `NODE_ADDRESSES` value on the MAC that `clients.yaml` holds for it under `k8s`, and publishes the node's DNS record. `bootstrap.tf` declares the bootstrap VLAN, the MAC-auth RADIUS users with each node's enrolled state, and the switch port overrides. `bgp-folly.conf` is the FRR config for the gateway. Read the comment above `locals` in `firewall.tf` before you change a cross-site policy.
+`topology.tf` reads both sites' `cluster-topology.json` and folly's `anchor-topology.json`. `clients.yaml` holds the DHCP reservations, and a plan fails if its host addresses disagree with `anchor-topology.json`. `k8s.tf` reserves each node's `NODE_ADDRESSES` value on the MAC that `clients.yaml` holds for it under `k8s`, and publishes the node's DNS record. `bootstrap.tf` declares the bootstrap VLAN, the MAC-auth RADIUS users with each node's enrolled state, and the switch port overrides. `bgp-folly.conf` is the FRR config for the gateway. Read the comment above `locals` in `firewall.tf` before you change a cross-site policy.
 
 ## Develop
 
@@ -41,7 +41,7 @@ Atlantis plans this root on a pull request that changes a `.tf` or `.conf` file 
 
 | Name | Source | Version |
 | ---- | ------ | ------- |
-| <a name="module_lab_topology"></a> [lab\_topology](#module\_lab\_topology) | ../../../modules/cluster-topology | n/a |
+| <a name="module_anchor_topology"></a> [anchor\_topology](#module\_anchor\_topology) | ../../../modules/cluster-topology | n/a |
 | <a name="module_offsite_topology"></a> [offsite\_topology](#module\_offsite\_topology) | ../../../modules/cluster-topology | n/a |
 | <a name="module_topology"></a> [topology](#module\_topology) | ../../../modules/cluster-topology | n/a |
 

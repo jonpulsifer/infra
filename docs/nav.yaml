@@ -40,6 +40,7 @@ sections:
           - platform/network/remote-access.md
       - platform/secrets.md
       - platform/backups.md
+      - platform/netbox.md
       - platform/pki.md
       - platform/identity.md
       - platform/opentofu.md

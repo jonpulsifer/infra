@@ -24,6 +24,6 @@ spec:
       - kind: ConfigMap
         name: cluster-topology
       - kind: ConfigMap
-        name: lab-topology
+        name: anchor-topology
       - kind: Secret
         name: cluster-secrets

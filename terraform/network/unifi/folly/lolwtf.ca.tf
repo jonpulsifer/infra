@@ -1,38 +1,38 @@
 locals {
-  # Gateway-host (.1) form of the lab-topology ConfigMap's CIDR.
-  lab_cidr    = "${cidrhost(local.lab.cidr, 1)}/${split("/", local.lab.cidr)[1]}"
+  # Gateway-host (.1) form of the anchor-topology ConfigMap's CIDR.
+  anchor_cidr = "${cidrhost(local.anchor.cidr, 1)}/${split("/", local.anchor.cidr)[1]}"
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
   lab_clients = merge(local.clients.lab, local.clients.rpis)
   # The anchors' VIPs (nix/services/anchor-vips.nix), never one Pi.
   dns_servers = [
-    local.lab_topology.NS1_IP,
-    local.lab_topology.NS2_IP,
+    local.anchor_topology.NS1_IP,
+    local.anchor_topology.NS2_IP,
   ]
   lab_service_records = {
     dns-ns1 = {
       name    = "dns"
-      content = local.lab_topology.NS1_IP
+      content = local.anchor_topology.NS1_IP
     }
     dns-ns2 = {
       name    = "dns"
-      content = local.lab_topology.NS2_IP
+      content = local.anchor_topology.NS2_IP
     }
     time-ns1 = {
       name    = "time"
-      content = local.lab_topology.NS1_IP
+      content = local.anchor_topology.NS1_IP
     }
     time-ns2 = {
       name    = "time"
-      content = local.lab_topology.NS2_IP
+      content = local.anchor_topology.NS2_IP
     }
     ns1 = {
       name    = "ns1"
-      content = local.lab_topology.NS1_IP
+      content = local.anchor_topology.NS1_IP
     }
     ns2 = {
       name    = "ns2"
-      content = local.lab_topology.NS2_IP
+      content = local.anchor_topology.NS2_IP
     }
   }
 }
@@ -51,7 +51,7 @@ resource "cloudflare_dns_record" "lab_remote_dns" {
   }
   zone_id = data.cloudflare_zone.lab.zone_id
   name    = "${each.key}.${local.lab_domain}"
-  content = cidrhost(local.lab_cidr, each.value.ip)
+  content = cidrhost(local.anchor_cidr, each.value.ip)
   type    = "A"
   ttl     = 1
   comment = "terraform managed"
@@ -96,8 +96,8 @@ resource "cloudflare_dns_record" "lab_service_dns" {
 }
 
 resource "unifi_network" "lab" {
-  name               = "Lab Net"
-  subnet             = local.lab_cidr
+  name               = "Anchor"
+  subnet             = local.anchor_cidr
   vlan               = 2
   domain_name        = local.lab_domain
   setting_preference = "manual"
@@ -109,24 +109,24 @@ resource "unifi_network" "lab" {
   dhcp_server = {
     enabled   = true
     leasetime = local.one_week
-    start     = cidrhost(local.lab_cidr, 200)
-    stop      = cidrhost(local.lab_cidr, 254)
+    start     = cidrhost(local.anchor_cidr, 200)
+    stop      = cidrhost(local.anchor_cidr, 254)
     boot = {
       enabled = false
     }
   }
 
-  # lab-topology.json and clients.yaml both hold these host addresses; keep them equal.
+  # anchor-topology.json and clients.yaml both hold these host addresses; keep them equal.
   lifecycle {
     precondition {
       condition = alltrue([
-        local.lab.hosts.capsule == cidrhost(local.lab_cidr, local.clients.rpis.capsule.ip),
-        local.lab.hosts.spore == cidrhost(local.lab_cidr, local.clients.rpis.spore.ip),
-        local.lab.hosts.forge == cidrhost(local.lab_cidr, local.clients.rpis.forge.ip),
-        local.lab_topology.CLOUDPI4_IP == cidrhost(local.lab_cidr, local.clients.rpis.cloudpi4.ip),
-        local.lab_topology.RADIOPI0_IP == cidrhost(local.lab_cidr, local.clients.rpis.radiopi0.ip),
+        local.anchor.hosts.capsule == cidrhost(local.anchor_cidr, local.clients.rpis.capsule.ip),
+        local.anchor.hosts.spore == cidrhost(local.anchor_cidr, local.clients.rpis.spore.ip),
+        local.anchor.hosts.forge == cidrhost(local.anchor_cidr, local.clients.rpis.forge.ip),
+        local.anchor_topology.CLOUDPI4_IP == cidrhost(local.anchor_cidr, local.clients.rpis.cloudpi4.ip),
+        local.anchor_topology.RADIOPI0_IP == cidrhost(local.anchor_cidr, local.clients.rpis.radiopi0.ip),
       ])
-      error_message = "Host IPs in lab-topology.json disagree with the clients.yaml octets."
+      error_message = "Host IPs in anchor-topology.json disagree with the clients.yaml octets."
     }
   }
 }

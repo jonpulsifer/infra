@@ -21,7 +21,7 @@ esac
 
 addresses="$(jq -er '.data.NODE_ADDRESSES | fromjson' "$root/clusters/folly/config/cluster-topology.json")"
 machines="$(yq -o json '.machines' "$root/clusters/folly/inventory/machines.yaml")"
-spore="$(jq -er '.data.SPORE_BOOTSTRAP_IP' "$root/clusters/folly/config/lab-topology.json")"
+spore="$(jq -er '.data.SPORE_BOOTSTRAP_IP' "$root/clusters/folly/config/anchor-topology.json")"
 agent="$(jq -er '.tink_agent_image' "$root/clusters/folly/talos/netboot.json")"
 
 rendered="$(
