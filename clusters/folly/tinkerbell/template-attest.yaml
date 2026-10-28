@@ -25,7 +25,7 @@ spec:
           MAC: '{{ (index .Hardware.Interfaces 0).DHCP.MAC }}'
         actions:
           - name: attest
-            image: ghcr.io/jonpulsifer/tink-attest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            image: ghcr.io/jonpulsifer/tink-attest@sha256:c595f4ffff44fc22838975491cda4a9bb7d6dcb5b2607b398e026acad4cd4699
             timeout: 600
             command:
               - /bin/sh
