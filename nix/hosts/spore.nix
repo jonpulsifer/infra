@@ -70,6 +70,8 @@ in
   # The YubiKey 5 that holds one of the two hardware DevID CA keys.
   homelab.devidCa.yubikey.enable = true;
   homelab.devidCa.yubikey.serial = 9758244;
+  # The attest service signs LDevIDs with this anchor's YubiKey CA.
+  homelab.talosAttest.caKey = "pkcs11";
 
   # A node of the anchors' three-node cluster. The standalone store's /nfs/data/garage stays on
   # disk as the rollback (docs/runbooks/migrate-garage-to-three-nodes.md).
@@ -87,7 +89,11 @@ in
     # Each issuing DevID CA's own certificate file, never the bundle: the server trusts the first
     # certificate of each file.
     devid.enable = true;
-    devid.caChains = [ ../../terraform/pki/certs/folly-devid-ca-software.pem ];
+    devid.caChains = [
+      ../../terraform/pki/certs/folly-devid-ca-software.pem
+      ../../terraform/pki/certs/folly-devid-ca-spore.pem
+      ../../terraform/pki/certs/folly-devid-ca-capsule.pem
+    ];
     entries =
       nodeAliases
       ++ lib.concatMap (

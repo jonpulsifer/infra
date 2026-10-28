@@ -21,6 +21,8 @@
   # The YubiKey 4c that holds one of the two hardware DevID CA keys.
   homelab.devidCa.yubikey.enable = true;
   homelab.devidCa.yubikey.serial = 7126381;
+  # The attest service signs LDevIDs with this anchor's YubiKey CA.
+  homelab.talosAttest.caKey = "pkcs11";
 
   sops.defaultSopsFile = ../secrets/capsule.sops.yaml;
 
