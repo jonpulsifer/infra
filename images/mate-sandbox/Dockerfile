@@ -5,7 +5,7 @@
 # HOME is an emptyDir, so a tool the agent installs goes with the sandbox. The
 # build context is the repo root, so the image can compile packages/mate-hands;
 # the root .dockerignore lets in the files copied from this directory.
-FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 AS base
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS base
 
 FROM base AS toolset
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.1
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.3
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.10.18
+ARG MISE_VERSION=2026.10.19
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
