@@ -31,7 +31,7 @@ let
   tailscale = lib.getExe config.services.tailscale.package;
   # The attest service's base URL for ENROLL_ATTEST_URL. Null keeps every approval on the owner's
   # click (apps/talos-enroll/README.md).
-  attestURL = null;
+  attestURL = "http://127.0.0.1:8444";
 
   routes = [
     "/device/code"
