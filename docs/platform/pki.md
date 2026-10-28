@@ -21,8 +21,12 @@ The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the pri
 | FML Intermediate CA | FML Root CA | 1Password |
 | Kubernetes CA of `<cluster>` | Itself | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
 | `<cluster>` ServiceAccount token signer | FML K8s `<cluster>` CA | The Talos secrets bundle, imported from the signer key |
+| `FML DevID folly CA` | FML Intermediate CA | `terraform/pki` state, and each anchor's sops file for [talos-attest](../apps/talos-attest.md) |
+| A node's LDevID and LAK | `FML DevID folly CA` | The node's TPM |
 
-`terraform/pki` issues the signers, and its state holds every private key it generates or reads. The root and intermediate do not expire. Signers last one year. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
+`terraform/pki` issues the signers and the DevID CA, and its state holds every private key it generates or reads. The root and intermediate do not expire. Signers last one year, and the DevID CA five years. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
+
+The DevID CA's key is ECDSA P-256 and lives in the state. `certs/folly-devid-ca.pem` holds the CA alone, the only certificate SPIRE's `devid_ca_path` may trust. `certs/folly-devid-ca-chain.pem` holds it first, then the intermediate and the root. Two issuing CAs, each with its key generated on one of the owner's YubiKeys in a PIV slot and used over PKCS#11, replace the software key.
 
 Both clusters run the self-signed Kubernetes CA from their secrets bundle, so nodes and pods trust that CA and no cluster CA file is committed under `terraform/pki/certs/`. `apps/fml-pki` checks the chain with `mise run pki:verify` and writes the OIDC documents. The other `apps/fml-*` directories hold an offline root ceremony. No real ceremony transcript is committed.
 
@@ -58,6 +62,7 @@ The UKI and HookOS signing keys are RSA-2048. HP's EliteDesk 800 G2 and G5 firmw
 
 - Never trust the FML Root as a client CA of a cluster, or its API server would accept every client certificate under the FML Root.
 - After Atlantis applies a new signer, follow the rotation steps in `terraform/pki/README.md`.
+- After Atlantis applies or replaces the DevID CA, run `scripts/pki/devid-ca.sh` and commit what it writes. A new CA leaves every LDevID untrusted until its node attests again.
 - For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
 - On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one.
 

@@ -23,6 +23,8 @@ Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace
 3. The `reprovision-talos` Template wipes the `Hardware`'s disk, makes the IPv4 network boot entry the next boot, and reboots. Its actions run `images/tink-reprovision-tools`, which carries the disk, EFI and Docker tools, so the boot VLAN needs no package mirror.
 4. The controller turns `allowPXE` off, so Smee has no script for the MAC. iPXE chains the [signed Talos UKI's script](talos-boot.md#netboot-images), and [Talos enrollment](../../apps/talos-enroll.md) releases the config.
 
+A `Workflow` labelled `tinkerbell.lolwtf.ca/template=attest` runs the `attest-to-disk` Template in step 3 instead: it [attests the node](../../runbooks/attest-a-node.md) with `images/tink-attest`, makes the disk the next boot, and reboots with nothing wiped.
+
 A node with no `Hardware` or no running `Workflow` takes step 4 directly when it PXE-boots on the bootstrap VLAN.
 
 The firmware verifies each image against `db`. Between runs, `allowPXE` is unset or off on spore. The repo leaves it out, so that Flux never turns it off during a run.

@@ -31,8 +31,8 @@ echo "==> wrote certs/folly-devid-ca.pem and certs/folly-devid-ca-chain.pem" >&2
 
 for anchor in "${anchors[@]}"; do
   file="$repo_root/nix/secrets/$anchor.sops.yaml"
-  jq -e '.devid_ca_private_key.value | tostring' <<<"$outputs" |
-    sops set --value-stdin "$file" '["talos-attest"]["devid-ca-key"]'
+  jq -e '.devid_ca_private_key.value | tostring' <<<"$outputs" \
+    | sops set --value-stdin "$file" '["talos-attest"]["devid-ca-key"]'
   echo "==> sealed the DevID CA key into nix/secrets/$anchor.sops.yaml" >&2
 done
 

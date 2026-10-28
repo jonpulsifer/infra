@@ -1,10 +1,10 @@
 # pki
 
-OpenTofu root that issues each cluster's FML Kubernetes CA and ServiceAccount token signer from the FML intermediate CA, whose key it reads from 1Password. See [PKI](https://wiki.lolwtf.ca/platform/pki/) on the wiki.
+OpenTofu root that issues each cluster's FML Kubernetes CA and ServiceAccount token signer, and folly's DevID CA, from the FML intermediate CA, whose key it reads from 1Password. See [PKI](https://wiki.lolwtf.ca/platform/pki/) on the wiki.
 
 This root needs OpenTofu, because only the OpenTofu registry publishes the `opentofu/tls` provider fork that sets `max_path_length`.
 
-- `certs/` holds the public certificates. `<cluster>-ca-bundle.pem` is the current and previous CA, for `caFile`. `<cluster>-ca-chain.pem` is the CA up to the FML root, for `--root-ca-file`.
+- `certs/` holds the public certificates. `<cluster>-ca-bundle.pem` is the current and previous CA, for `caFile`. `<cluster>-ca-chain.pem` is the CA up to the FML root, for `--root-ca-file`. `folly-devid-ca.pem` is the DevID CA alone, for SPIRE's `devid_ca_path`, and `folly-devid-ca-chain.pem` is the DevID CA up to the FML root, for talos-attest.
 - `oidc/<cluster>/` holds each cluster's OIDC discovery documents, served at `https://oidc.lolwtf.ca/<cluster>`.
 - `apps/fml-pki/` is the Go tool that handles the certificates and derives the OIDC documents.
 - `scripts/pki/` holds the post-apply and trust-anchor scripts.
@@ -31,6 +31,8 @@ mise run pki:verify
 Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/pki`.
 
 After an apply that issues a signer, run `scripts/pki/post-rotate.sh offsite` and commit what it writes. It updates the signer certificates in `certs/` and `oidc/<cluster>/`. Both clusters run the self-signed Kubernetes CA from their Talos secrets bundle, so no cluster CA file is committed. `.github/workflows/oidc.yml` publishes the OIDC documents on merge.
+
+After an apply that issues or replaces the DevID CA, run `SOPS_AGE_KEY_FILE=~/.config/age/keys.txt scripts/pki/devid-ca.sh` and commit what it writes: the two `folly-devid-ca*.pem` files and `talos-attest/devid-ca-key` in each anchor's `nix/secrets/<anchor>.sops.yaml`. `mise run pki:verify` checks the chain file. The key is a software key in this state. Two issuing CAs, each on one of the owner's YubiKeys over PKCS#11, replace it.
 
 <!-- BEGIN_TF_DOCS -->
 <!-- END_TF_DOCS -->

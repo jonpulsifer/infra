@@ -34,6 +34,21 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 - Run the CLI as root with `-socketPath /run/spire/server/private/api.sock`. Its default socket path is wrong for this server.
 - The firewall admits the agent port and the exporter only from folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR`. Cilium does not masquerade traffic to spore, so pods arrive from their own addresses.
 
+## The chain
+
+A node's identity starts before Talos runs. Each step relies on the one before it.
+
+| Step | Proves | Where it runs |
+| --- | --- | --- |
+| EK certificate | The TPM is a genuine Infineon or Nuvoton part | The TPM maker's CA, pinned in `apps/talos-attest/roots/` |
+| Credential activation | The attestation key (AK) is in that TPM | [talos-attest](../apps/talos-attest.md), from HookOS |
+| Quote and event log | The machine booted with Secure Boot on, under the lab's PK, through the signed iPXE and HookOS | talos-attest, against `apps/talos-attest/policy.yaml` |
+| TPM2_Certify | The LDevID key is in that TPM and cannot leave it | talos-attest |
+| LDevID and LAK certificates | The DevID CA vouches for the key and the AK | `FML DevID folly CA`, in [PKI](pki.md#chain) |
+| `tpm_devid` | The agent holds the LDevID key in a TPM with a genuine EK | spore's SPIRE server |
+
+[Attest a node](../runbooks/attest-a-node.md) runs the first five steps.
+
 ## Agents
 
 The DaemonSet `spire-agent` in the `spire` namespace runs on each folly node labelled `lolwtf.ca/tpm=true`. Its image, `ghcr.io/jonpulsifer/spire-agent-tpm`, adds the agent half of the EK plugin and `spire-devid-init` to SPIRE's agent.
@@ -80,12 +95,13 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. The bundle notifier is off, because `nix/secrets/spore.sops.yaml` has no `spire/folly-bundle-writer-token` yet. No agent runs, so `SpireNoAttestedAgents` fires, and no pod gets an SVID. The smoke Job is suspended, since a pod that no node can schedule keeps it active until `KubeJobNotCompleted` fires.
 
-The allow list holds the EK hashes of riptide and optiplex. `tpm_devid` is off: `homelab.spire.devid.enable` is false until the DevID CA's chain is in the repo, and `ATTEST_URL` is empty until the attest service serves `/devid` on the Anchor network. Every agent attests by EK hash.
+The allow list holds the EK hashes of riptide and optiplex. `tpm_devid` is off: `homelab.spire.devid.enable` is false until the DevID CA's chain is in the repo, and `ATTEST_URL` is empty. talos-attest runs on no anchor until the DevID CA is applied and its key sealed. Every agent attests by EK hash.
 
 ## Where it lives
 
 - `nix/services/spire-server.nix`: the server, both node attestors, the bundle notifier, the entry sync, the agent count and the firewall
-- `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts
+- `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/talos-attest/roots/`
+- `apps/talos-attest/` and `nix/services/talos-attest.nix`: the attest service and its anchor deployment
 - `nix/hosts/spore.nix`: `tpmNodes`, `workloads` and the registration entries
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`

@@ -32,6 +32,10 @@ func (v *Verifier) Metrics() (string, error) {
 			fmt.Fprintf(&b, "talos_attest_machine_status{machine=%q,status=%q} %d\n", r.Machine, st, val)
 		}
 	}
+	head("talos_attest_record_updated_timestamp_seconds", "gauge", "When each machine's record last changed on this anchor; the newest across anchors is current.")
+	for _, r := range recs {
+		fmt.Fprintf(&b, "talos_attest_record_updated_timestamp_seconds{machine=%q} %d\n", r.Machine, r.UpdatedAt.Unix())
+	}
 	head("talos_attest_last_attested_timestamp_seconds", "gauge", "When each machine last passed attestation.")
 	for _, r := range recs {
 		if !r.AttestedAt.IsZero() {

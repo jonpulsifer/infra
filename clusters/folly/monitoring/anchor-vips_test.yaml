@@ -187,3 +187,32 @@ tests:
             exp_annotations:
               message: No anchor serves Talos enrollment at the boot VIP
               description: "No anchor holds the boot VIP while nginx serves the enrollment name with a trusted certificate and talos-enroll answers behind it. Check keepalived, nginx, the ACME renewal and talos-enroll on capsule, forge and spore (nix/services/talos-enroll.nix)."
+
+  # spore quarantined riptide, then capsule passed it later: the newer pass is current, so no alert.
+  # optiplex's only record, on forge, is a quarantine, so it fires.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_machine_status{instance="spore",machine="riptide",status="quarantined"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 1000x10
+      - series: 'talos_attest_machine_status{instance="capsule",machine="riptide",status="quarantined"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 2000x10
+      - series: 'talos_attest_machine_status{instance="forge",machine="optiplex",status="quarantined"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 1500x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestQuarantined
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: forge
+              machine: optiplex
+              status: quarantined
+            exp_annotations:
+              message: "optiplex failed attestation and is quarantined"
+              description: "talos-attest refused optiplex on forge, and its LDevID is withdrawn. Read the reason in GET /machines on the anchor's admin API or in /var/lib/talos-attest/verdicts.jsonl, as docs/runbooks/attest-a-node.md says."

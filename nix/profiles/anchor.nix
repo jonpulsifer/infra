@@ -9,5 +9,6 @@
     ../services/ntp-server.nix
     ../services/talos-boot.nix
     ../services/talos-enroll.nix
+    ../services/talos-attest.nix
   ];
 }
