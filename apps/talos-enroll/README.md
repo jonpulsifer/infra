@@ -30,6 +30,28 @@ ENROLL_ADMIN_URL=http://localhost:8081 \
 | `ENROLL_APPROVERS` | none, required | Comma-separated tailnet logins that may approve and deny |
 | `ENROLL_ADMIN_URL` | none, required | The admin listener's public URL, for prompts and `verification_uri` |
 | `ENROLL_TALOSCTL` | `talosctl` | The talosctl binary. It must match the Talos root's `talos_version`. |
+| `ENROLL_ATTEST_URL` | none | The attest service's base URL. Set, it turns on auto-approval. |
+| `ENROLL_AUTO_APPROVE_WINDOW` | `30m` | How recent an attestation must be to approve a request without a click |
+
+## Auto-approval
+
+With `ENROLL_ATTEST_URL` set, each device request asks the attest service for
+`GET /verdict/<serial>`, which answers
+`{"status": "attested"|"quarantined"|"unknown", "attested_at": "<RFC 3339>"}`,
+and optionally `node` and `uuid`. A 404 is `unknown`. The server approves the
+request as the node whose MAC it claims in `ENROLL_NODE_MACS`, with no click,
+when all of these hold:
+
+- the status is `attested`, and `attested_at` is within the window
+- the request's MAC is a node's MAC
+- `node` and `uuid`, when the verdict has them, match that node and the request
+- this attestation has approved no other request since the server started
+
+The Discord note then says the machine was auto-approved after attestation.
+Otherwise the request waits for a click as before, and its prompt says why it
+was not approved automatically. Every fact in a request is the requester's
+claim, so for the window a host that knows a just-attested machine's serial and
+MAC can claim its config.
 
 ## Public routes
 

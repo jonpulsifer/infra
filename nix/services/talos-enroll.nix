@@ -29,6 +29,9 @@ let
   talos-enroll = pkgs.callPackage ../../apps/talos-enroll/package.nix { };
   talosctl = pkgs.callPackage ../../apps/talos-enroll/talosctl.nix { };
   tailscale = lib.getExe config.services.tailscale.package;
+  # The attest service's base URL for ENROLL_ATTEST_URL. Null keeps every approval on the owner's
+  # click (apps/talos-enroll/README.md).
+  attestURL = null;
 
   routes = [
     "/device/code"
@@ -89,7 +92,8 @@ in
       ENROLL_TALOSCTL = lib.getExe talosctl;
       # talosctl writes its patch files and nothing else here.
       HOME = "/tmp";
-    };
+    }
+    // lib.optionalAttrs (attestURL != null) { ENROLL_ATTEST_URL = attestURL; };
     serviceConfig = {
       ExecStart = lib.getExe talos-enroll;
       User = "talos-enroll";

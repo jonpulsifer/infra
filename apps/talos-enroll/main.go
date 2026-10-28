@@ -74,6 +74,19 @@ func run(log *slog.Logger) error {
 	}, log)
 	go out.Run(ctx)
 
+	var auto *AutoApproval
+	if attestURL := strings.TrimSuffix(os.Getenv("ENROLL_ATTEST_URL"), "/"); attestURL != "" {
+		window, err := time.ParseDuration(env("ENROLL_AUTO_APPROVE_WINDOW", "30m"))
+		if err != nil || window <= 0 {
+			return fmt.Errorf("ENROLL_AUTO_APPROVE_WINDOW must be a positive duration: %q", os.Getenv("ENROLL_AUTO_APPROVE_WINDOW"))
+		}
+		auto = &AutoApproval{
+			Attest: &AttestClient{BaseURL: attestURL, Client: &http.Client{Timeout: 5 * time.Second}},
+			Window: window,
+		}
+		log.Info("attested machines are approved without a click", "attest_url", attestURL, "window", window.String())
+	}
+
 	srv := &Server{
 		Store:     NewStore(time.Now),
 		Render:    render,
@@ -84,6 +97,7 @@ func run(log *slog.Logger) error {
 		AdminURL:  adminURL,
 		MACs:      macs,
 		Now:       time.Now,
+		Auto:      auto,
 	}
 
 	// A unix socket's mode decides who may connect: the public one admits the

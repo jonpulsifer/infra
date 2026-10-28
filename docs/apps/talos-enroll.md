@@ -20,11 +20,14 @@ Each machine gets one Discord message, which the server edits as its enrollment 
 
 The user code shows only on the machine's console, so an approval proves that the approver read the console of the machine being enrolled.
 
+With `ENROLL_ATTEST_URL` set, the server asks the attest service for the request's serial. A machine that passed attestation within `ENROLL_AUTO_APPROVE_WINDOW`, 30 minutes by default, and claims a node's MAC in `clusters/folly/apps/talos-enroll/node-macs.json` is approved as that node with no click. Its Discord note says it was auto-approved after attestation, and one attestation approves one request. Any other request waits for a click, and its prompt says why. Neither copy sets `ENROLL_ATTEST_URL`, so every approval is a click. `apps/talos-enroll/README.md` has the verdict contract.
+
 ## Limits
 
 - A device code lasts 15 minutes and a token 30 minutes. A token releases one config.
 - State is in memory. A restart, or a move of `BOOT_VIP` to another anchor, forgets every enrollment and denial, and Talos starts a new device flow.
 - The machine's UUID, MAC, serial and hostname are unverified claims. The token is bound to the UUID, and the console's user code is the only check against a request in another machine's name.
+- Auto-approval trusts the request's serial and MAC. For its window, a host that knows a just-attested machine's serial and MAC can claim that machine's config.
 - A node whose installer image comes from the Image Factory resource is unknown without state, so `machine-inputs.json` leaves it out.
 
 ## How it works

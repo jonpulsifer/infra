@@ -37,6 +37,9 @@ type Server struct {
 	AdminURL  string
 	MACs      map[string]string
 	Now       func() time.Time
+	// Auto approves an attested machine without a click. Nil keeps every
+	// approval on the owner.
+	Auto *AutoApproval
 }
 
 func (s *Server) Public() http.Handler {
@@ -172,7 +175,15 @@ func (s *Server) deviceCode(w http.ResponseWriter, r *http.Request) {
 	suggested := s.suggest(d.MAC)
 	s.Log.Info("device code issued", "uuid", d.UUID, "mac", d.MAC,
 		"serial", d.Serial, "hostname", d.Hostname, "suggested_node", suggested, "client", client(r))
-	s.Out.Send(normUUID(d.UUID), s.pendingMessage(e, suggested))
+	if msg, why := s.autoApprove(r.Context(), e, suggested); msg != "" {
+		s.Out.Send(normUUID(d.UUID), msg)
+	} else {
+		msg = s.pendingMessage(e, suggested)
+		if why != "" {
+			msg += "\nNot approved automatically: " + discordSafe(why) + "."
+		}
+		s.Out.Send(normUUID(d.UUID), msg)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"device_code":               deviceCode,
@@ -267,6 +278,36 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	s.Log.Info("config served", "node", e.Node, "uuid", uuid, "bytes", n, "client", client(r))
 	s.Out.Send(normUUID(e.Device.UUID), fmt.Sprintf("**Talos enrollment** uuid `%s`: **%s** fetched its config <t:%d:R>. Talos installs and reboots next.",
 		discordSafe(e.Device.UUID), e.Node, s.Now().Unix()))
+}
+
+// autoApprove approves e as node, the node its MAC claims, when its machine
+// passed attestation within the window. It returns the Discord note of the
+// approval, or why it did not approve.
+func (s *Server) autoApprove(ctx context.Context, e Enrollment, node string) (msg, why string) {
+	if s.Auto == nil {
+		return "", ""
+	}
+	d := e.Device
+	at, err := s.Auto.claim(ctx, d, node, s.Now())
+	if err != nil {
+		s.Log.Info("not approved automatically", "uuid", d.UUID, "serial", d.Serial, "mac", d.MAC, "reason", err.Error())
+		return "", err.Error()
+	}
+	cfg, err := s.Render.Render(ctx, node)
+	if err != nil {
+		s.Auto.release(d.Serial, at)
+		s.Store.refuse("render_failed")
+		s.Log.Error("render failed, the enrollment stays pending", "node", node, "uuid", d.UUID, "err", err)
+		return "", "its config did not render"
+	}
+	if _, _, err := s.Store.Approve(e.UserCode, node, autoApprover, cfg); err != nil {
+		s.Auto.release(d.Serial, at)
+		return "", err.Error()
+	}
+	s.Log.Info("enrollment approved", "node", node, "uuid", d.UUID, "mac", d.MAC,
+		"serial", d.Serial, "attested_at", at, "approver", autoApprover)
+	return fmt.Sprintf("**Talos enrollment** uuid `%s` auto-approved after attestation as **%s**: serial `%s` attested <t:%d:R>, and its MAC is %s's. Waiting for the node to fetch its config.",
+		discordSafe(d.UUID), node, discordSafe(d.Serial), at.Unix(), node), ""
 }
 
 func (s *Server) suggest(mac string) string {
