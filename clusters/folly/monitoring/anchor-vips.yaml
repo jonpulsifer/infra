@@ -1,0 +1,80 @@
+# Scrapes CoreDNS's metrics through ns1 and ns2. A target that answers proves the VIP has a holder
+# and its CoreDNS runs; AnchorVipDown fires when neither is true.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: anchor-vips
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: anchor-vips
+    lolwtf.ca/service: anchor-vips
+addressType: IPv4
+ports:
+  - name: dns-metrics
+    port: 9253
+    protocol: TCP
+endpoints:
+  - addresses: ["${NS1_IP}"]
+    nodeName: ns1
+  - addresses: ["${NS2_IP}"]
+    nodeName: ns2
+--- # trivy:ignore:avd-ksv-0108
+apiVersion: v1
+kind: Service
+metadata:
+  name: anchor-vips
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: anchor-vips
+    jobLabel: anchor-vips
+spec:
+  ports:
+    - name: dns-metrics
+      port: 9253
+      protocol: TCP
+      targetPort: 9253
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: anchor-vips
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: anchor-vips
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  endpoints:
+    - port: dns-metrics
+      interval: 30s
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
+          targetLabel: instance
+  selector:
+    matchLabels:
+      lolwtf.ca/service: anchor-vips
+  namespaceSelector:
+    matchNames:
+      - monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: anchor-vips
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: anchor-vips
+    release: prom-stack
+spec:
+  groups:
+    - name: anchor-vips
+      rules:
+        - alert: AnchorVipDown
+          expr: (up{namespace="monitoring", service="anchor-vips"} == 0) or absent(up{namespace="monitoring", service="anchor-vips", instance="ns1"}) or absent(up{namespace="monitoring", service="anchor-vips", instance="ns2"})
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            message: "Anchor VIP {{ $labels.instance }} does not answer"
+            description: "No anchor holds the VIP, or the holder's CoreDNS is down. Check keepalived and coredns on capsule, forge and spore (nix/services/anchor-vips.nix)."

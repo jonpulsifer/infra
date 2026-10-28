@@ -27,7 +27,9 @@ Each cluster that serves kthx Apps has an Apps Gateway with its own VIP. An App 
 
 [capsule](../../hosts/capsule.md), [spore](../../hosts/spore.md) and [forge](../../hosts/forge.md) are the three anchors. Each runs CoreDNS and chrony through `nix/profiles/anchor.nix`.
 
-Clients use only capsule and spore today. DHCP on the Kubernetes, future and iot networks hands out those two as resolvers, and `dns.lolwtf.ca` and `time.lolwtf.ca` point at them. forge answers queries, but no client asks it, because the shared addresses that would make the three one service do not exist yet.
+Two shared addresses, `ns1.lolwtf.ca` and `ns2.lolwtf.ca` (`NS1_IP` and `NS2_IP` in `clusters/folly/config/lab-topology.json`), make the three one service. keepalived on every anchor runs unicast VRRP for both, from `nix/services/anchor-vips.nix`. ns1 prefers capsule, then forge, then spore; ns2 prefers forge, then spore, then capsule. An anchor whose CoreDNS stops answering drops below every healthy anchor, so the address moves to one that answers. `AnchorVipDown` fires when an address has no holder or its CoreDNS is down.
+
+Clients use only capsule and spore today. DHCP on the Kubernetes, future and iot networks hands out those two as resolvers, and `dns.lolwtf.ca` and `time.lolwtf.ca` point at them. Moving them to ns1 and ns2 is the next change.
 
 CoreDNS blocks the StevenBlack hosts list and forwards other queries over TLS to Cloudflare's malware-blocking resolvers. It answers `api.smiirl.com` with folly's smiirl Gateway address for the [Smiirl counter](../../apps/smiirl.md). [cloudpi4](../../hosts/cloudpi4.md) runs the same config as a test resolver.
 

@@ -11,6 +11,7 @@ resources:
   - capsule.yaml
   - spore.yaml
   - forge.yaml
+  - anchor-vips.yaml
   - tempo.yaml
   - flameboss.yaml
   - flameboss-rules.yaml
