@@ -150,21 +150,37 @@ func SkipsAttest(d Device) bool {
 	return d.TPM == "1.2" || d.Class == "worker-g2"
 }
 
+// Installer is the Talos installer image a provision of the device runs
+// from HookOS, or "" when the run installs nothing. Only a provision that
+// attests installs: the attest step is where the machine gets the code its
+// first boot fetches the config with. Installs holds only the classes the
+// controller renders, so a control plane, or a controller without a
+// renderer, leaves the install to the old path.
+func (c Config) Installer(d Device, action string) string {
+	if action != "provision" || SkipsAttest(d) {
+		return ""
+	}
+	return c.Installs[d.Class]
+}
+
 // Workflow runs the provision Template for one action. A device that boots
 // by hand (ManualBoot) gets no boot mode: Tinkerbell still toggles allowPXE
 // for the run, and somebody powers the machine on.
 func (c Config) Workflow(d Device, action string, now time.Time) Object {
 	a := Actions[action]
 	attest := a.Attest && !SkipsAttest(d)
+	installer := c.Installer(d, action)
 	spec := map[string]any{
 		"templateRef": c.Template,
 		"hardwareRef": d.Name,
 		"hardwareMap": map[string]any{
-			"wipe":       fmt.Sprint(a.Wipe),
-			"attest":     fmt.Sprint(attest),
-			"retire":     fmt.Sprint(a.Retire),
-			"attest_url": c.AttestURL,
-			"ntp_server": c.NTPServer,
+			"wipe":            fmt.Sprint(a.Wipe),
+			"attest":          fmt.Sprint(attest),
+			"retire":          fmt.Sprint(a.Retire),
+			"install":         fmt.Sprint(installer != ""),
+			"installer_image": installer,
+			"attest_url":      c.AttestURL,
+			"ntp_server":      c.NTPServer,
 		},
 	}
 	boot := map[string]any{"toggleAllowNetboot": true}

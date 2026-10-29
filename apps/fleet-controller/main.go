@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -58,6 +59,9 @@ type Config struct {
 	RedfishPort     int
 	RedfishInsecure bool
 	AMTPort         int
+	// Installs maps each class the controller renders to its Talos
+	// installer image, from the class inputs.
+	Installs map[string]string
 }
 
 func loadConfig() (Config, error) {
@@ -149,11 +153,17 @@ func run() error {
 		secret = []byte(s)
 	}
 
-	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: NewMetrics(), Now: time.Now}
+	metrics := NewMetrics()
+	installer, err := loadInstaller(&cfg, netbox, kube, metrics)
+	if err != nil {
+		return err
+	}
+	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now}
 	trigger := make(chan string, 1)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /webhook", &Webhook{Secret: secret, Trigger: trigger, Metrics: r.Metrics})
+	mux.Handle("POST /render", installer)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		if ok, why := r.Healthy(3 * cfg.Interval); !ok {
 			http.Error(w, why, http.StatusServiceUnavailable)
@@ -178,6 +188,9 @@ func run() error {
 		}
 	}()
 	go r.Loop(ctx, trigger)
+	if installer.Renderer != nil {
+		go installer.Run(ctx, installer.TailInterval, 15)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -187,4 +200,61 @@ func run() error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)
+}
+
+// loadInstaller reads the render's environment. The renderer runs only with
+// all three of FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL;
+// without them, or without FLEET_ATTEST_SECRET_FILE, /render answers 503,
+// and without them no Workflow installs.
+func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*Installer, error) {
+	stateDir := env("FLEET_STATE_DIR", "/var/lib/fleet-controller")
+	in := &Installer{
+		Site:   cfg.Site,
+		NetBox: netbox,
+		Kube:   kube,
+		Store:  &Store{Dir: filepath.Join(stateDir, "talos")},
+		Tail: &Tail{
+			Path:   env("FLEET_CONFIG_LOG", "/var/log/nginx/talos-config.log"),
+			Offset: filepath.Join(stateDir, "talos-config.offset"),
+		},
+		Metrics:      metrics,
+		Now:          time.Now,
+		TailInterval: 2 * time.Second,
+	}
+	var err error
+	if in.TTL, err = time.ParseDuration(env("FLEET_CONFIG_TTL", "2h")); err != nil || in.TTL <= 0 {
+		return nil, fmt.Errorf("FLEET_CONFIG_TTL must be a positive duration")
+	}
+	if f := os.Getenv("FLEET_ATTEST_SECRET_FILE"); f != "" {
+		s, err := readSecret(f)
+		if err != nil {
+			return nil, fmt.Errorf("attest secret: %w", err)
+		}
+		in.Secret = []byte(s)
+	}
+	classes, workers, bin := os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_WORKER_SECRETS"), os.Getenv("FLEET_TALOSCTL")
+	if classes == "" && workers == "" && bin == "" {
+		return in, nil
+	}
+	if classes == "" || workers == "" || bin == "" {
+		return nil, fmt.Errorf("FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL go together")
+	}
+	inputs, err := LoadClassInputs(classes)
+	if err != nil {
+		return nil, err
+	}
+	worker, err := LoadWorkerSecrets(workers)
+	if err != nil {
+		return nil, err
+	}
+	// talos-attest gives up on /render after 30 seconds.
+	t := &Talosctl{Bin: bin, Worker: worker, Inputs: inputs, Timeout: 20 * time.Second}
+	in.Renderer, in.Prepare = t, t.Init
+	cfg.Installs = map[string]string{}
+	for class, ci := range inputs {
+		if ci.MachineType == "worker" {
+			cfg.Installs[class] = ci.InstallerImage
+		}
+	}
+	return in, nil
 }

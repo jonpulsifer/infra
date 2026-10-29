@@ -1,6 +1,7 @@
 # fleet-controller
 
-Turns a NetBox site's `kubernetes-node` devices into Tinkerbell objects.
+Turns a NetBox site's `kubernetes-node` devices into Tinkerbell objects, and
+renders the Talos config an install fetches.
 `docs/apps/fleet-controller.md` says what it does; this file says how to run it.
 
 ## Run
@@ -11,7 +12,7 @@ FLEET_NETBOX_TOKEN_FILE=/run/credentials/fleet-controller.service/netbox-token \
 FLEET_KUBE_CA_FILE=ca.crt FLEET_KUBE_CERT_FILE=admin.crt FLEET_KUBE_KEY_FILE=admin.key \
 FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi \
 FLEET_HOOKOS_CMDLINE='facility= ...' \
-FLEET_ATTEST_URL=http://10.9.0.14/attest FLEET_NTP_SERVER=10.9.0.14 \
+FLEET_ATTEST_URL=https://enroll.lolwtf.ca/attest FLEET_NTP_SERVER=10.9.0.14 \
 go run .
 ```
 
@@ -27,10 +28,15 @@ go run .
 | `FLEET_ATTEST_URL`, `FLEET_NTP_SERVER` | required | talos-attest's device flow and the NTP server, both in each Workflow's `hardwareMap` |
 | `FLEET_BMC_SECRETS` | `amt=bmc-amt,redfish=bmc-redfish` | The Secret per `bmc_type` that a Machine's `authSecretRef` names |
 | `FLEET_REDFISH_PORT`, `FLEET_REDFISH_INSECURE_TLS` | `443`, `false` | Redfish connection options |
-| `FLEET_WEBHOOK_ADDR` | `:8446` | The listener for `/webhook`, `/healthz` and `/metrics` |
+| `FLEET_WEBHOOK_ADDR` | `:8446` | The listener for `/webhook`, `/render`, `/healthz` and `/metrics` |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and the controller only polls |
 | `FLEET_INTERVAL` | `2m` | Time between passes |
 | `FLEET_WORKFLOW_TTL` | `168h` | Age at which the controller deletes its Workflows |
+| `FLEET_ATTEST_SECRET_FILE` | none | talos-attest's render secret; without it `/render` answers 503 |
+| `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them `/render` answers 503 and no Workflow installs |
+| `FLEET_STATE_DIR` | `/var/lib/fleet-controller` | Where rendered configs go, as `talos/<uuid>/<code>.yaml`, and the log offset |
+| `FLEET_CONFIG_LOG` | `/var/log/nginx/talos-config.log` | nginx's log of `/talos/config`, in the `fleet` format `$time_iso8601 $arg_uuid $arg_code $status` |
+| `FLEET_CONFIG_TTL` | `2h` | Age at which an unfetched config is deleted |
 
 ## NetBox contract
 
@@ -51,6 +57,22 @@ an AMT address derived from a Kubernetes address it does not hold yet is
 wrong. The Machine and Rufio come once the status leaves `planned`. A retirement is the `retire` run, which
 powers the node off; the controller starts it on status `decommissioning`,
 never from `desired_action`.
+
+`smbios_uuid` is read to journal a fetch with a wrong code on its device.
+`attest_consumed_at` and `status` (`active`) are written when nginx serves a
+device's config.
+
+## Render contract
+
+`POST /render` with `{"serial", "uuid", "node", "class", "code"}`, signed with
+`X-Fleet-Signature`, HMAC-SHA512 hex of the body with the attest secret. The
+`uuid` is the SMBIOS UUID in lower case and the `code` 43 characters of
+base64url; anything else is 400 before a path is built. 401 is a bad
+signature. 409 is a device that is unknown, not `planned` or `staged`, without
+an unfinished `provision` run in `last_workflow`, of another node or class
+than the body names, or a control plane. 503 is a render the controller cannot
+do now. 201 means the file is written. Every answer is `{"reason": "..."}`,
+which never repeats the request.
 
 The webhook is `POST /webhook` with NetBox's `X-Hook-Signature`, HMAC-SHA512
 hex of the body with the rule's secret. The body is not read for content: a

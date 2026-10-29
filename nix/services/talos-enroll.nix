@@ -18,6 +18,8 @@
 let
   lab = import ../lib/anchor.nix;
   fleet = import ../lib/fleet.nix;
+  talosConfig = import ../lib/talos-config.nix;
+  configServer = "http://${lab.hosts.${talosConfig.server}}:${toString talosConfig.port}";
   site = config.homelab.site;
   # The talos.config URL in the netboot UKI names this host (.github/scripts/talos-images-build.sh).
   host = "enroll.${fleet.dnsZone}";
@@ -252,7 +254,20 @@ in
           deny all;
         '';
       }
-      // lib.genAttrs (map (route: "= ${route}") routes) (_: toServer "");
+      // lib.genAttrs (map (route: "= ${route}") routes) (_: toServer "")
+      // lib.optionalAttrs (name != talosConfig.server) {
+        # The installed node's first config lives on one anchor, which serves this location itself
+        # (./fleet-controller.nix); the others pass it to that anchor's Anchor address.
+        "= /talos/config" = {
+          proxyPass = "${configServer}/talos/config$is_args$args";
+          extraConfig = ''
+            limit_except GET {
+              deny all;
+            }
+            proxy_connect_timeout 5s;
+          '';
+        };
+      };
     };
   };
 

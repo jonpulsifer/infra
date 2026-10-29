@@ -57,7 +57,7 @@ A `planned` device has no RADIUS user, so the machine and its AMT start on the b
    ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tinkerbell get workflows -w
    ```
 
-   Result: `RUNNING` through `set-clock`, `attest`, `wipe-disk`, `next-boot` and `reboot`, then `SUCCESS`.
+   Result: `RUNNING` through `set-clock`, `attest`, `wipe-disk`, `install`, `next-boot` and `reboot`, then `SUCCESS`.
 
 2. Watch the console and NetBox.
 

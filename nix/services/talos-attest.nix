@@ -252,15 +252,25 @@ in
       };
     };
 
-    # The bootstrap VLAN reaches the device flow through ./talos-boot.nix's port 80, at the boot VIP
-    # and at this anchor's own bootstrap address.
-    services.nginx.virtualHosts.talos-boot.locations."/attest/" = {
-      proxyPass = "http://unix:${publicSocket}:/";
-      extraConfig = ''
-        proxy_set_header X-Forwarded-For $remote_addr;
-        client_max_body_size 1m;
-      '';
-    };
+    # The bootstrap VLAN reaches the device flow over TLS on the enrollment name's HTTPS server at
+    # the boot VIP (./talos-enroll.nix), whose public certificate HookOS's CA bundle trusts, and
+    # over plain HTTP on ./talos-boot.nix's port 80, at the boot VIP and at this anchor's own
+    # bootstrap address.
+    services.nginx.virtualHosts =
+      lib.genAttrs
+        [
+          "talos-boot"
+          "enroll.${fleet.dnsZone}"
+        ]
+        (_: {
+          locations."/attest/" = {
+            proxyPass = "http://unix:${publicSocket}:/";
+            extraConfig = ''
+              proxy_set_header X-Forwarded-For $remote_addr;
+              client_max_body_size 1m;
+            '';
+          };
+        });
 
     # Only folly's nodes and pods reach the DevID lookups, and only on the anchor network.
     networking.firewall.extraCommands = lib.concatMapStrings (cidr: ''
