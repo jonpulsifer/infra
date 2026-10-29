@@ -44,7 +44,7 @@ On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/
 
 | Output | Where | Use |
 | --- | --- | --- |
-| Installer | `ghcr.io/jonpulsifer/talos-installer-folly:<version>` | Installs and upgrades a node. Its UKI's `talos.config` is `CONFIG_URL` in the workflow: a node's first boot from disk, which has no STATE, fetches its config by the install code in META `0x0b`, and every later boot loads the config from STATE. It carries no OAuth arguments. |
+| Installer | `ghcr.io/jonpulsifer/talos-installer-folly:<version>` | Installs and upgrades a node. Its UKI's `talos.config` is `CONFIG_URL` in the workflow: a node's first boot from disk, which has no STATE, fetches its config by the install code in META `0x0b`, and every later boot loads the config from STATE. sd-boot's "Reset to maintenance mode" entry wipes STATE but not META, so that boot polls the URL with a burned code instead of entering maintenance mode. It carries no OAuth arguments. |
 | ISO | `metal-amd64-secureboot.iso` on the release `talos-folly/<version>` | Enrolls the Secure Boot keys at the machine, and rescues a node |
 | iPXE | `ipxe-amd64-secureboot.efi` on the same release | Chains Smee's script for the booting MAC, or boots HookOS from its own menu. [Talos boot](nixos/talos-boot.md#netboot-images) has the details. |
 | HookOS UKI | `hookos-amd64-secureboot-uki.efi` on the same release | Runs the Tinkerbell agent, which wipes a disk before a reinstall |

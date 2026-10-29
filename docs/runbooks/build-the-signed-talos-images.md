@@ -7,7 +7,7 @@ Use this runbook to build folly's signed Talos boot assets on demand, or to chec
 
 ## Before you start
 
-- You need `gh` signed in to `jonpulsifer/infra`, a checkout of the repo, `yq` from the repo's `mise.toml`, and `crane`, `objcopy`, `openssl` and `sbsigntool`.
+- You need `gh` signed in to `jonpulsifer/infra`, a checkout of the repo, `yq` from the repo's `mise.toml`, and `crane`, `objdump`, `openssl` and `sbsigntool`.
 - You need a 1Password service account that can read the item `talos-secureboot` in the `homelab` vault.
 - `<version>` is `talos_version` in `clusters/folly/talos/talos.tf`.
 - `tink_agent_image` in `clusters/folly/talos/netboot.json` must pin a digest. While it pins the all-zero digest, the workflow builds nothing.
@@ -73,7 +73,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
      /tmp/talos-folly/installer.tar "$(yq -r .env.CONFIG_URL .github/workflows/talos-images.yml)"
    ```
 
-   Result: `one signature, verified against subject=...`, then `/tmp/talos-folly/installer.tar: command line: ...` ending in the `talos.config` URL.
+   Result: `one signature, verified against subject=...`, then `/tmp/talos-folly/installer.tar: command line: ...` ending in the `talos.config` URL, and a `reset-maintenance command line` that is the same plus `talos.experimental.wipe=system:EPHEMERAL,STATE`.
 
 6. Make sure iPXE and HookOS verify against the committed certificates.
 
