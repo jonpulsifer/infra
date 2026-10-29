@@ -47,10 +47,10 @@ func validIntakePolicy(p string) bool {
 }
 
 // Until is the time the file names, zero when there is no file, clamped to
-// maxIntakeWindow after the file was written; clamped reports the file's own
-// value when it was. A file that does not read as RFC3339 is an error, and
-// the window is closed.
-func (w *IntakeWindow) Until() (until time.Time, clamped string, err error) {
+// maxIntakeWindow after the file was written, or after now when its mtime is
+// in the future; clamped reports the file's own value when it was. A file
+// that does not read as RFC3339 is an error, and the window is closed.
+func (w *IntakeWindow) Until(now time.Time) (until time.Time, clamped string, err error) {
 	if w == nil || w.Path == "" {
 		return time.Time{}, "", nil
 	}
@@ -73,7 +73,11 @@ func (w *IntakeWindow) Until() (until time.Time, clamped string, err error) {
 	if err != nil {
 		return time.Time{}, "", err
 	}
-	if limit := fi.ModTime().Add(maxIntakeWindow); t.After(limit) {
+	written := fi.ModTime()
+	if written.After(now) {
+		written = now
+	}
+	if limit := written.Add(maxIntakeWindow); t.After(limit) {
 		return limit, s, nil
 	}
 	return t, "", nil
@@ -125,7 +129,7 @@ func (v *Verifier) intakeState(now time.Time) IntakeState {
 		return IntakeState{}
 	}
 	st := IntakeState{Policy: v.Intake.Policy, RequireWindow: v.Intake.RequireWindow}
-	until, clamped, err := v.Intake.Until()
+	until, clamped, err := v.Intake.Until(now)
 	if err != nil {
 		v.Log.Warn("intake window unreadable; closed", "err", err)
 		return st

@@ -88,9 +88,12 @@ type session struct {
 	akBlobs protocol.Blobs
 	ldBlobs protocol.Blobs
 	// intakeUntil is when the window that admitted an unknown serial under
-	// the open policy closes; bind is a declared stub the pass binds to.
+	// the open policy closes; bind is a declared stub the pass binds to;
+	// planned is a planned device that passes on its EK certificates alone,
+	// looked up again before anything is issued.
 	intakeUntil time.Time
 	bind        bool
+	planned     bool
 	// created is whether this session's first sight made the device;
 	// macWritten whether its binding wrote the stub's MAC.
 	created    bool
@@ -189,6 +192,7 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 
 		intakeUntil: intakeUntil,
 		bind:        bind,
+		planned:     ok && m.FromNetBox && m.NetBoxID != 0 && strings.EqualFold(m.Status, statusPlanned) && len(m.Pins) == 0,
 	}
 	resp := protocol.StartResponse{Nonce: s.nonce, Expires: s.expires}
 	for _, ek := range eks {
@@ -370,8 +374,10 @@ func (v *Verifier) admitPins(ctx context.Context, m Machine, claim protocol.Mach
 // lifecycle, its MAC and its pins, with no window, since the window never
 // speaks for a known device.
 func (v *Verifier) recheck(ctx context.Context, m Machine, claim protocol.Machine, eks []VerifiedEK) error {
-	if m.blocked() {
-		return v.reject(&m, claim, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", m.Name, m.Status))
+	// First sight issues only to a device in intake: an active node is
+	// never re-issued because its serial appeared during a session.
+	if st := strings.ToLower(m.Status); st != statusPlanned && st != statusStaged {
+		return v.reject(&m, claim, fail(reasonStatus, "%s is %s, which first sight never issues to; attest it again", m.Name, m.Status))
 	}
 	if m.MAC != "" && normalMAC(claim.MAC) != normalMAC(m.MAC) {
 		return v.reject(&m, claim, fail(reasonMACMismatch, "MAC %q is not %s's", claim.MAC, m.Name))
@@ -511,10 +517,11 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	if !bytes.Equal(req.AKBlobs.Public, s.akPublic) || len(req.AKBlobs.Private) == 0 {
 		return refuse(fail(reasonLDevID, "the AK blobs are not the activated AK"))
 	}
-	// A declared stub is bound before anything is issued, and only while it
-	// is still the stub the start admitted.
-	if s.bind {
-		m, err := v.bindStub(ctx, s)
+	// A planned device is looked up again before anything is issued, and a
+	// declared stub bound, only while it is still the device the start
+	// admitted.
+	if s.bind || s.planned {
+		m, err := v.confirmPlanned(ctx, s)
 		if err != nil {
 			return protocol.Verdict{}, v.reject(&s.machine, s.claim, err)
 		}
@@ -582,12 +589,13 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	return protocol.Verdict{Verdict: protocol.VerdictPass, LDevIDCert: ldevidCert.Raw, LAKCert: lakCert.Raw, Chain: chain}, nil
 }
 
-// bindStub looks the declared stub up again and binds the box to it. It is
-// refused when the device is no longer planned, when stubs need the window
-// and it closed, when a MAC on file is not the claim's, when pins on file are
-// not these EKs, or when the MAC cannot be written; across anchors, the first
-// box to bind a stub holds it.
-func (v *Verifier) bindStub(ctx context.Context, s *session) (Machine, error) {
+// confirmPlanned looks the planned device up again and, under the declared
+// policy, binds the box to it. It is refused when the device is no longer
+// planned, when it has no pins and stubs need the window and it closed, when
+// a MAC on file is not the claim's, when pins on file are not these EKs, or
+// when the MAC cannot be written; across anchors, the first box to bind a
+// stub holds it.
+func (v *Verifier) confirmPlanned(ctx context.Context, s *session) (Machine, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 	m, ok, err := v.lookupMachine(ctx, s.claim.Serial)
@@ -597,7 +605,7 @@ func (v *Verifier) bindStub(ctx context.Context, s *session) (Machine, error) {
 	if !ok || m.NetBoxID != s.machine.NetBoxID || !strings.EqualFold(m.Status, statusPlanned) {
 		return Machine{}, fail(reasonStatus, "%s is no longer the planned stub this session started for; attest again", s.machine.Name)
 	}
-	if v.stubWaitsForWindow(v.Now()) {
+	if len(m.Pins) == 0 && v.stubWaitsForWindow(v.Now()) {
 		return Machine{}, fail(reasonStatus, "the intake window closed during the session; open it and attest again")
 	}
 	if m.MAC != "" && normalMAC(m.MAC) != normalMAC(s.claim.MAC) {
@@ -607,6 +615,9 @@ func (v *Verifier) bindStub(ctx context.Context, s *session) (Machine, error) {
 		if err := matchPins(m, s.eks); err != nil {
 			return Machine{}, err
 		}
+	}
+	if !s.bind {
+		return m, nil
 	}
 	wrote, err := v.NetBox.Bind(ctx, m.NetBoxID, s.claim)
 	if errors.Is(err, errMACTaken) {

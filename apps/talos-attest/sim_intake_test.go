@@ -430,3 +430,56 @@ func TestOpenWindowRefusesAMalformedMAC(t *testing.T) {
 		t.Fatal("a malformed MAC created a device")
 	}
 }
+
+// Under open, a planned device known at the start is looked up again before
+// anything is issued, and nothing is written to it but the verdict.
+func TestOpenPolicyRechecksAPlannedDevice(t *testing.T) {
+	for _, c := range []struct {
+		name, reason string
+		change       func(*fakeNetBox, *fakeDevice)
+	}{
+		{"bound to another MAC", reasonMACMismatch, func(f *fakeNetBox, d *fakeDevice) {
+			for _, i := range f.interfaces {
+				if i.DeviceID == d.ID {
+					f.next++
+					i.MAC, i.MACID = "aa:bb:cc:dd:ee:ff", f.next
+				}
+			}
+		}},
+		{"pinned to another EK", reasonEKHash, func(_ *fakeNetBox, d *fakeDevice) { d.CustomFields["ek_hash"] = strings.Repeat("ab", 32) }},
+		{"no longer planned", reasonStatus, func(_ *fakeNetBox, d *fakeDevice) { d.Status = "active" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeNetBox(t)
+			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+			h.window(t, intakePolicyOpen, time.Now().Add(time.Hour))
+			d := f.add("swell", "SIM-STUB", statusPlanned, "", nil)
+			h.tamper = func(*protocol.EvidenceRequest) {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				c.change(f, d)
+			}
+			if r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }()); r.Verdict.Reason != c.reason || r.Verdict.Verdict != protocol.VerdictRefused {
+				t.Fatalf("%+v", r.Verdict)
+			}
+			if after := f.bySerial("SIM-STUB"); after.Patches != 0 || after.CustomFields["ek_hash"] == h.hashes["rsa"] {
+				t.Fatalf("a refused pass wrote: %+v", after)
+			}
+		})
+	}
+}
+
+// First sight never issues to an active node whose serial NetBox learned
+// during the session.
+func TestOpenWindowRefusesAnActiveDeviceNetBoxLearned(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	h.window(t, intakePolicyOpen, time.Now().Add(time.Hour))
+	h.tamper = func(*protocol.EvidenceRequest) { f.add("riptide", simSerial, "active", simMAC, nil) }
+	if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Reason != reasonStatus || r.Verdict.Verdict != protocol.VerdictRefused {
+		t.Fatalf("%+v", r.Verdict)
+	}
+	if d := f.bySerial(simSerial); d.Patches != 0 || d.CustomFields["ek_hash"] != nil {
+		t.Fatalf("the refusal wrote: %+v", d)
+	}
+}

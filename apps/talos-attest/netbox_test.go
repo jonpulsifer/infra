@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -54,6 +55,9 @@ type fakeInterface struct {
 	Name     string
 	MAC      string
 	MACID    int
+	// Extra are MACs assigned to the interface besides its primary, as
+	// another anchor's write that has not set its primary yet leaves.
+	Extra []string
 }
 
 func newFakeNetBox(t *testing.T) *fakeNetBox {
@@ -263,6 +267,16 @@ func (f *fakeNetBox) serve(w http.ResponseWriter, r *http.Request) {
 		i.MACID = f.next
 		i.MAC = strings.ToLower(body["mac_address"].(string))
 		writeJSON(w, http.StatusCreated, map[string]any{"id": i.MACID})
+	case r.Method == http.MethodGet && path == "/api/dcim/mac-addresses":
+		var out []any
+		if i := f.interfaces[func() int { n, _ := strconv.Atoi(q.Get("assigned_object_id")); return n }()]; i != nil {
+			for _, mac := range append([]string{i.MAC}, i.Extra...) {
+				if mac != "" {
+					out = append(out, map[string]any{"mac_address": strings.ToUpper(mac)})
+				}
+			}
+		}
+		page(w, out)
 	case r.Method == http.MethodGet && path == "/api/dcim/device-types":
 		var out []any
 		for id, model := range f.types {
@@ -584,5 +598,30 @@ func TestValidMAC(t *testing.T) {
 		if got := validMAC(mac); got != want {
 			t.Errorf("validMAC(%q) = %v, want %v", mac, got, want)
 		}
+	}
+}
+
+// A MAC write stands only when the interface ends up holding that one MAC
+// as its primary: two anchors binding one stub cannot both win.
+func TestSetMACRefusesASharedInterface(t *testing.T) {
+	f := newFakeNetBox(t)
+	nb := f.client()
+	d := f.add("swell", "SW-1", "planned", "", nil)
+	if wrote, err := nb.setMAC(context.Background(), d.ID, "02:00:00:00:00:01"); err != nil || !wrote {
+		t.Fatalf("a sole MAC: %v %v", wrote, err)
+	}
+	if wrote, err := nb.setMAC(context.Background(), d.ID, "02:00:00:00:00:01"); err != nil || wrote {
+		t.Fatalf("the same MAC again: %v %v", wrote, err)
+	}
+	other := f.add("drift", "SW-2", "planned", "", nil)
+	f.mu.Lock()
+	for _, i := range f.interfaces {
+		if i.DeviceID == other.ID {
+			i.Extra = []string{"02:00:00:00:00:99"}
+		}
+	}
+	f.mu.Unlock()
+	if _, err := nb.setMAC(context.Background(), other.ID, "02:00:00:00:00:02"); !errors.Is(err, errMACTaken) {
+		t.Fatalf("an interface another anchor wrote: %v", err)
 	}
 }

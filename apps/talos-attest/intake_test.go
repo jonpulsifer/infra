@@ -88,3 +88,21 @@ func TestIntakeWindowIsCappedAtADay(t *testing.T) {
 		t.Fatalf("journal after two clamps: %v\n%s", err, journal)
 	}
 }
+
+// A file whose mtime is in the future is clamped from now: a touched file
+// cannot hold the window open for longer than a day.
+func TestIntakeWindowClampsAFutureMtimeFromNow(t *testing.T) {
+	w := &IntakeWindow{Path: filepath.Join(t.TempDir(), "intake-open"), Policy: intakePolicyOpen}
+	v := &Verifier{Intake: w, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	now := time.Now()
+	if err := os.WriteFile(w.Path, []byte(now.Add(40*24*time.Hour).UTC().Format(time.RFC3339)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	future := now.Add(30 * 24 * time.Hour)
+	if err := os.Chtimes(w.Path, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if st := v.intakeState(now); !st.Open || st.OpenUntil.After(now.Add(maxIntakeWindow)) {
+		t.Fatalf("a window with a future mtime: %+v", st)
+	}
+}

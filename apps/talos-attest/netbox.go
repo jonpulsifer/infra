@@ -382,7 +382,38 @@ func (n *NetBox) setMAC(ctx context.Context, deviceID int, mac string) (bool, er
 	if err := n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/interfaces/%d/", i.ID), map[string]any{"primary_mac_address": m.ID}, nil); err != nil {
 		return false, err
 	}
+	// Two anchors binding at once can both get this far: the write stands
+	// only when the interface holds one MAC, this one, as its primary.
+	if err := n.soleMAC(ctx, deviceID, i.ID, mac); err != nil {
+		return false, err
+	}
 	return true, nil
+}
+
+// soleMAC checks that the device's first MAC interface is ifaceID, that its
+// primary MAC is mac, and that no other MAC is assigned to it.
+func (n *NetBox) soleMAC(ctx context.Context, deviceID, ifaceID int, mac string) error {
+	i, hasMAC, err := n.nic(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if !hasMAC || i.ID != ifaceID || normalMAC(i.PrimaryMACAddress.MACAddress) != mac {
+		return fmt.Errorf("interface %d does not hold MAC %s as its primary after the write: %w", ifaceID, mac, errMACTaken)
+	}
+	var page netboxPage[struct {
+		MACAddress string `json:"mac_address"`
+	}]
+	if err := n.do(ctx, http.MethodGet, fmt.Sprintf("/api/dcim/mac-addresses/?limit=10&assigned_object_type=dcim.interface&assigned_object_id=%d", ifaceID), nil, &page); err != nil {
+		return err
+	}
+	macs, err := page.items()
+	if err != nil {
+		return err
+	}
+	if len(macs) != 1 || normalMAC(macs[0].MACAddress) != mac {
+		return fmt.Errorf("interface %s holds %d MACs after the write: %w", i.Name, len(macs), errMACTaken)
+	}
+	return nil
 }
 
 // deviceType finds the type whose model the claim names, or makes it under

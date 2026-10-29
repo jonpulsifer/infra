@@ -107,8 +107,9 @@ passes only while the window is open. The pass binds the stub to the box.
 Before anything is issued the service looks the stub up again, and refuses
 when it has left `planned`, when a MAC on file is not the claim's, or
 when pins on file are not these EKs. It then puts the claimed MAC on the
-stub's first interface, and refuses when the interface holds another; the
-stub keeps its name. Across anchors the first box to bind a stub holds it.
+stub's first interface, and refuses unless the interface then holds that one
+MAC as its primary; the stub keeps its name. Every planned device needs a
+claimed MAC that reads as one. Across anchors the first box to bind a stub holds it.
 A serial NetBox does not know stays pending, window or not.
 
 Under `open`, the opt-in, within the window a start for a serial neither
@@ -118,22 +119,24 @@ refused as always), it needs no approval. Activation, the quote, the policy
 and the LDevID run as usual, and the pass creates the device at `staged`,
 named `intake-<serial slug>` whatever hostname the claim names, with the
 first-sight facts and the EK hashes as its pins. Outside the window the
-claim is pending. A planned stub passes by the planned rule and is not
-bound.
+claim is pending. A planned device passes by the planned rule and is not
+bound, but one with no pins is looked up again before anything is issued,
+as under `declared`.
 
 Under either policy, an EK without a pinned maker's certificate leaves the
 claim pending, a claimed MAC that a pass may write must read as six hex
 bytes, and the window never changes the outcome for a serial NetBox knows: a
 pin mismatch, a `failed` device and a known device with no pin decide as
 without it. When NetBox learns the serial between the start and the
-evidence, the start's rules decide for that device: its lifecycle, its MAC
-and its pins, with no window. A pass never replaces a pin on file; only an
+evidence, the start's rules decide for that device: it must be `planned` or
+`staged`, then its MAC and its pins decide, with no window. A pass never replaces a pin on file; only an
 empty `ek_hash` or `ek_hash_ecc` is written. Each intake pass, a declared
 stub's binding or the open window's, writes one `attest.intake` audit line.
 
 The window stays open at most 24 hours: a later close time in the file is
-clamped to 24 hours after the file was written, and `POST /intake` to 24
-hours from now, and each clamp is journaled.
+clamped to 24 hours after the file was written, or after now when its mtime
+is in the future, and `POST /intake` to 24 hours from now, and each clamp is
+journaled.
 
 ### Risks
 
