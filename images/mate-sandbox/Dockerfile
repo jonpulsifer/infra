@@ -38,11 +38,11 @@ ARG DELTA_VERSION=0.20.1
 # renovate: datasource=github-releases depName=eza-community/eza
 ARG EZA_VERSION=0.23.5
 # renovate: datasource=github-releases depName=fluxcd/flux2
-ARG FLUX_VERSION=2.9.6
+ARG FLUX_VERSION=2.10.0
 # renovate: datasource=github-releases depName=junegunn/fzf
 ARG FZF_VERSION=0.74.5
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.103.2
+ARG GH_VERSION=2.103.3
 # renovate: datasource=github-releases depName=helm/helm
 ARG HELM_VERSION=4.3.1
 # renovate: datasource=github-releases depName=cilium/hubble
@@ -69,7 +69,7 @@ ARG SHFMT_VERSION=3.14.1
 ARG SOPS_VERSION=3.13.3
 # The clusters' Talos API client; keep it on their Talos minor.
 # renovate: datasource=github-releases depName=siderolabs/talos
-ARG TALOSCTL_VERSION=1.14.4
+ARG TALOSCTL_VERSION=1.14.5
 # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
 ARG TERRAFORM_DOCS_VERSION=0.24.0
 # Must equal opentofu in the root mise.toml: the repo's tasks run this binary
