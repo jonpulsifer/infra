@@ -273,7 +273,6 @@ func (i *Installer) Follow(ctx context.Context) (bool, error) {
 			p, ok, err := i.Store.Served(f.UUID, f.Code, f.Sent, f.At)
 			if err != nil {
 				log.Printf("burn %s: %v", f.UUID, err)
-				continue
 			}
 			if !ok {
 				if p.Code != "" && p.Fetched.IsZero() {
@@ -350,6 +349,10 @@ func (i *Installer) Sweep(ctx context.Context) {
 	now := i.Now()
 	for _, p := range records {
 		switch {
+		case !p.Released.IsZero():
+			if err := i.Store.Drop(p, now); err != nil {
+				log.Printf("drop %s's released config: %v", p.Node, err)
+			}
 		case !p.Fetched.IsZero():
 			if err := i.release(ctx, p); err != nil {
 				i.releaseFailed(ctx, p, err)
@@ -367,7 +370,9 @@ func (i *Installer) Sweep(ctx context.Context) {
 }
 
 // release sets a device active once its config was served. A device the
-// owner moved out of planned or staged meanwhile keeps its status.
+// owner moved out of planned or staged meanwhile keeps its status. The
+// release is marked in the record as soon as NetBox has it, so a Drop that
+// fails is retried alone, without a second update or journal entry.
 func (i *Installer) release(ctx context.Context, p Pending) error {
 	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
 	if err != nil {
@@ -383,9 +388,7 @@ func (i *Installer) release(ctx context.Context, p Pending) error {
 	if err := i.NetBox.Update(ctx, d, status, fields, "success", comment); err != nil {
 		return err
 	}
-	if err := i.Store.Drop(p, i.Now()); err != nil {
-		return err
-	}
+	now := i.Now()
 	i.mu.Lock()
 	delete(i.unreleased, p.Code)
 	i.mu.Unlock()
@@ -394,6 +397,13 @@ func (i *Installer) release(ctx context.Context, p Pending) error {
 		d.Status = status
 	}
 	Audit("fleet.release", i.Site, d, p.Workflow, "config fetched")
+	if _, err := i.Store.Released(p, now); err != nil {
+		log.Printf("mark %s released: %v", p.Node, err)
+		return nil
+	}
+	if err := i.Store.Drop(p, now); err != nil {
+		log.Printf("drop %s's released config: %v", p.Node, err)
+	}
 	return nil
 }
 
@@ -447,6 +457,9 @@ func (i *Installer) pending() {
 	var unread, unreleased int
 	var oldestUnread, oldestUnreleased time.Time
 	for _, p := range records {
+		if !p.Released.IsZero() {
+			continue
+		}
 		if p.Fetched.IsZero() {
 			unread++
 			if oldestUnread.IsZero() || p.Rendered.Before(oldestUnread) {

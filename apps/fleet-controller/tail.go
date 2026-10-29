@@ -64,7 +64,10 @@ func (f Fetch) Delivered() bool {
 // the offset was truncated, and is read from its start. When the path names
 // a new inode, a rotation, the old file is read to its end, then once more on
 // the next call for what nginx wrote before it reopened its log, and the new
-// file is read from its start. Only whole lines are returned.
+// file is read from its start. A rotation while the controller was stopped
+// leaves the saved inode at the path with the suffix ".1"; the first call
+// drains it from the saved offset before it reads the new file. Only whole
+// lines are returned.
 type Tail struct {
 	Path   string
 	Offset string
@@ -110,6 +113,18 @@ func readFrom(f *os.File, pos int64) ([]string, int64, error) {
 	return strings.Split(string(b[:end]), "\n"), pos + int64(end+1), nil
 }
 
+// drain reads f's whole lines after pos to its end, in readFrom's chunks.
+func drain(f *os.File, pos int64) ([]string, error) {
+	var lines []string
+	for {
+		l, next, err := readFrom(f, pos)
+		if err != nil || next == pos {
+			return lines, err
+		}
+		lines, pos = append(lines, l...), next
+	}
+}
+
 func (t *Tail) open() error {
 	f, err := os.Open(t.Path)
 	if err != nil {
@@ -127,20 +142,41 @@ func (t *Tail) open() error {
 	return nil
 }
 
+// load reads the saved position and finds the file it names: the log, or
+// the log rotated while the controller was stopped.
+func (t *Tail) load() {
+	t.loaded = true
+	b, err := os.ReadFile(t.Offset)
+	if err != nil {
+		return
+	}
+	var st tailState
+	if json.Unmarshal(b, &st) != nil || st.Inode == 0 {
+		return
+	}
+	t.inode, t.pos = st.Inode, st.Pos
+	if fi, err := os.Stat(t.Path); err == nil && inodeOf(fi) == st.Inode {
+		return
+	}
+	f, err := os.Open(t.Path + ".1")
+	if err != nil {
+		return
+	}
+	if fi, err := f.Stat(); err == nil && inodeOf(fi) == st.Inode {
+		t.old, t.oldPos = f, st.Pos
+		return
+	}
+	f.Close()
+}
+
 // Read returns the lines written since the last call.
 func (t *Tail) Read() ([]string, error) {
 	if !t.loaded {
-		t.loaded = true
-		if b, err := os.ReadFile(t.Offset); err == nil {
-			var st tailState
-			if json.Unmarshal(b, &st) == nil {
-				t.inode, t.pos = st.Inode, st.Pos
-			}
-		}
+		t.load()
 	}
 	var lines []string
 	if t.old != nil {
-		l, _, err := readFrom(t.old, t.oldPos)
+		l, err := drain(t.old, t.oldPos)
 		t.old.Close()
 		t.old = nil
 		if err != nil {
