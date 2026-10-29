@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/netip"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Model is what the model map says of one SMBIOS model: the class, BMC and
@@ -185,7 +187,14 @@ func (b *binding) note(format string, a ...any) { b.notes = append(b.notes, fmt.
 // Workflows, which ends the binding.
 func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, p *bindPass) error {
 	wf := in.newest[hw.Name()]
-	if wf == nil || !Finished(wf.State()) {
+	if wf == nil {
+		// An intake whose Workflow never came, or went, is nothing to wait for.
+		if created := hw.Created(); !created.IsZero() && r.Now().Sub(created) > 10*time.Minute {
+			return r.dropIntake(ctx, in, hw)
+		}
+		return nil
+	}
+	if !Finished(wf.State()) {
 		return nil
 	}
 	if d.Status != "staged" || d.Verdict != "attested" {
@@ -251,9 +260,6 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	if disk == "" {
 		disk = model.Disk
 	}
-	if disk == "" {
-		disk = hardwareDisk(hw)
-	}
 	fields := map[string]any{}
 	if class != "" && class != d.Class {
 		fields["talos_class"] = class
@@ -314,13 +320,13 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	switch {
 	case atIntake && expected != 0:
 		b.note("at the prep station on port %d", port)
-		if err := r.cable(ctx, d, sw, expected, &b); err != nil {
+		if err := r.cable(ctx, d, sw, expected, false, &b); err != nil {
 			return err
 		}
 	case atIntake:
 		b.note("at the prep station on port %d; no cable until UniFi sees it on a rack port", port)
 	case sw != nil:
-		if err := r.cable(ctx, d, sw, port, &b); err != nil {
+		if err := r.cable(ctx, d, sw, port, true, &b); err != nil {
 			return err
 		}
 	default:
@@ -391,6 +397,9 @@ func (r *Reconciler) address(ctx context.Context, d Device, name string, p *bind
 	if r.Config.NodePrefix == "" {
 		return "", "no address: FLEET_NODE_PREFIX is unset", nil
 	}
+	if r.UniFi != nil && p.stationsErr != nil {
+		return "", "", fmt.Errorf("UniFi did not answer, so no free address is checked against its clients: %w", p.stationsErr)
+	}
 	free, err := r.NetBox.AvailableIPs(ctx, r.Config.NodePrefix)
 	if err != nil {
 		return "", "", err
@@ -442,8 +451,9 @@ func (c Config) allocatable(a string) bool {
 	return n != first && n != last
 }
 
-// cable runs the device's cable to the switch port UniFi reports.
-func (r *Reconciler) cable(ctx context.Context, d Device, sw *Switch, port int, b *binding) error {
+// cable runs the device's cable to a switch port: the one UniFi reports, which
+// replaces a stale cable (steal), or the one a stub expects, which does not.
+func (r *Reconciler) cable(ctx context.Context, d Device, sw *Switch, port int, steal bool, b *binding) error {
 	swPort, err := r.NetBox.SwitchPort(ctx, sw.ID, port)
 	if err != nil {
 		return fmt.Errorf("switch port: %w", err)
@@ -451,7 +461,11 @@ func (r *Reconciler) cable(ctx context.Context, d Device, sw *Switch, port int, 
 	if swPort == 0 {
 		return r.journalOnce(ctx, "bind-noport/"+d.MAC, d, "warning", fmt.Sprintf("fleet-controller: UniFi sees the device on port %d of %s, which NetBox lacks; no cable", port, sw.Name))
 	}
-	made, replaced, err := r.NetBox.Cable(ctx, d.NIC, swPort)
+	made, replaced, err := r.NetBox.Cable(ctx, d.NIC, swPort, steal)
+	if errors.Is(err, ErrPortTaken) {
+		b.note("no cable: %s Port %d has another", sw.Name, port)
+		return r.journalOnce(ctx, fmt.Sprintf("bind-taken/%s/%d", d.MAC, port), d, "warning", fmt.Sprintf("fleet-controller: %s Port %d, the port the device expects, is cabled to another device in NetBox; no cable", sw.Name, port))
+	}
 	if err != nil {
 		return fmt.Errorf("cable: %w", err)
 	}

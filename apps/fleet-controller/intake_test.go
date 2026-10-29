@@ -15,6 +15,19 @@ const (
 	hwBase     = "/apis/tinkerbell.org/v1alpha1/namespaces/tinkerbell/hardware/"
 )
 
+// hardwareDisk is the first disk of a Hardware.
+func hardwareDisk(o Object) string {
+	spec, _ := o["spec"].(map[string]any)
+	disks, _ := spec["disks"].([]any)
+	for _, d := range disks {
+		dm, _ := d.(map[string]any)
+		if s, _ := dm["device"].(string); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // intakeBody is the agent image's phone-home, in the shape it posts.
 func intakeBody(mac string) string {
 	b, _ := json.Marshal(map[string]any{
@@ -264,20 +277,22 @@ func TestExpireIntakes(t *testing.T) {
 			"spec": map[string]any{"interfaces": []any{map[string]any{"dhcp": map[string]any{"mac": mac}}}},
 		}
 	}
-	intakeWF := func(name, slug, created string) Object {
-		o := workflowObject(name, slug, ActionIntake, created, "STATE_FAILED")
-		o.Labels()
+	intakeWF := func(name, slug, created, state string) Object {
+		o := workflowObject(name, slug, ActionIntake, created, state)
 		o.metadata()["labels"].(map[string]any)[IntakeLabel] = "true"
 		return o
 	}
 	kube := &fakeKube{objects: map[string]Object{
 		hwBase + "aa-00-00-00-00-01":          hw("aa-00-00-00-00-01", "aa:00:00:00:00:01", old),
-		wfBase + "intake-aa-00-00-00-00-01-1": intakeWF("intake-aa-00-00-00-00-01-1", "aa-00-00-00-00-01", old),
+		wfBase + "intake-aa-00-00-00-00-01-1": intakeWF("intake-aa-00-00-00-00-01-1", "aa-00-00-00-00-01", old, "STATE_FAILED"),
 		hwBase + "aa-00-00-00-00-02":          hw("aa-00-00-00-00-02", "aa:00:00:00:00:02", fresh),
 		hwBase + "38-22-e2-2d-96-44":          hw("38-22-e2-2d-96-44", "38:22:e2:2d:96:44", old),
+		wfBase + "intake-38-22-e2-2d-96-44-1": intakeWF("intake-38-22-e2-2d-96-44-1", "38-22-e2-2d-96-44", old, "STATE_RUNNING"),
+		// An orphan: its Hardware is gone.
+		wfBase + "intake-aa-00-00-00-00-09-1": intakeWF("intake-aa-00-00-00-00-09-1", "aa-00-00-00-00-09", old, "STATE_SUCCESS"),
 	}}
-	// riptide holds the third MAC: its intake stays until it binds.
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	// staged riptide holds the third MAC: its intake stays until it binds.
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "staged", "none", nil)}, ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	if err := r.Reconcile(t.Context()); err != nil {
@@ -294,5 +309,19 @@ func TestExpireIntakes(t *testing.T) {
 	}
 	if kube.get(hwPath) != nil {
 		t.Error("riptide's own Hardware was applied while its intake holds the MAC")
+	}
+	if kube.get(wfBase+"intake-aa-00-00-00-00-09-1") != nil {
+		t.Error("an orphaned intake Workflow survived")
+	}
+
+	// riptide goes active with the intake finished: the stale intake goes,
+	// and riptide gets its own objects.
+	kube.setState("intake-38-22-e2-2d-96-44-1", "STATE_SUCCESS")
+	nb.set("status", map[string]any{"value": "active"})
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if kube.get(hwBase+"38-22-e2-2d-96-44") != nil || kube.get(hwPath) == nil {
+		t.Error("an active device's stale intake kept its own Hardware away")
 	}
 }

@@ -115,11 +115,11 @@ description `fleet-controller: binds stub <name>` carries the name across a
 pass that stops between deleting the stub and the rename. Off
 `FLEET_INTAKE_PORT`, an `expected_port` other than UniFi's port refuses the
 binding: nothing is written and the journal says `on port N, expected M`.
-Written, each only when it differs: `talos_class`, `bmc_type`, `install_disk`,
+Written, each only when it differs: `talos_class`, `bmc_type`, `install_disk` (the model map's, never the claim's),
 `expected_port`, `last_workflow` (the intake run), the interface and MAC when
 the device has none, `primary_ip4` (the unassigned IP address whose DNS name is
 the device's new name, else the lowest free address of `FLEET_NODE_PREFIX`
-outside `FLEET_NODE_RESERVED` and UniFi's client addresses), the name, a cable
+outside `FLEET_NODE_RESERVED` and UniFi's client addresses; with UniFi set and not answering, the pass fails and retries), the name, a cable
 to the switch port (on the intake port, to `expected_port` only), and
 `desired_action` `provision`. The intake's objects are deleted last. A device
 whose `last_workflow` is an intake run gets no `Machine` and a `Workflow`

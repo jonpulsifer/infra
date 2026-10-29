@@ -271,8 +271,10 @@ func TestBindUnknownModelGetsNoAutoProvision(t *testing.T) {
 	if len(bt.nb.deleted) != 0 {
 		t.Errorf("an unknown model took a class stub: %v", bt.nb.deleted)
 	}
-	if bt.cf("install_disk") != "/dev/sda" {
-		t.Errorf("install_disk %v, want the intake's", bt.cf("install_disk"))
+	// The intake's disk is a claim, and a provision wipes it: it waits for
+	// the owner.
+	if bt.cf("install_disk") != nil {
+		t.Errorf("install_disk %v from the claim", bt.cf("install_disk"))
 	}
 	if !bt.journal(`the model "OptiPlex 7090" is not in FLEET_MODEL_MAP`) {
 		t.Errorf("journals %v", bt.nb.journals)
@@ -317,6 +319,41 @@ func TestBindAtThePrepStationCablesTheExpectedPort(t *testing.T) {
 	}
 	if !bt.journal("at the prep station on port 24") {
 		t.Errorf("journals %v", bt.nb.journals)
+	}
+}
+
+func TestBindAtThePrepStationLeavesATakenPortAlone(t *testing.T) {
+	other := nic(60, 61, "eth0", "38:22:e2:00:00:61")
+	bt, done := newBindTest(t, prepMAC,
+		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 7)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC), other})
+	defer done()
+	port7 := bt.nb.ifaceByID(switchPortID(7))
+	port7["cable"] = map[string]any{"id": 77}
+	port7["link_peers"] = []any{map[string]any{"id": 60, "name": "eth0", "device": map[string]any{"name": "shale"}}}
+	bt.reconcile(t)
+	if len(bt.nb.cables) != 0 || len(bt.nb.deleted) != 1 {
+		t.Errorf("a declared port took another node's cable: cables %v deleted %v", bt.nb.cables, bt.nb.deleted)
+	}
+	if !bt.journal("is cabled to another device in NetBox") || bt.node()["name"] != "swell" {
+		t.Errorf("journals %v", bt.nb.journals)
+	}
+}
+
+func TestBindAllocatesNothingWhileUniFiIsDown(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC, []map[string]any{intakeDevice(g5, nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.r.UniFi.Key = "wrong"
+	if err := bt.r.Reconcile(t.Context()); err == nil {
+		t.Fatal("a pass that could not check addresses reported no error")
+	}
+	if len(bt.nb.ips) != 0 || bt.intakeGone(rackMAC) {
+		t.Errorf("ips %v objects %v", bt.nb.ips, bt.kube.objects)
+	}
+	bt.r.UniFi.Key = "k3y"
+	bt.reconcile(t)
+	if len(bt.nb.ips) != 1 || !bt.intakeGone(rackMAC) {
+		t.Errorf("after UniFi came back: ips %v", bt.nb.ips)
 	}
 }
 

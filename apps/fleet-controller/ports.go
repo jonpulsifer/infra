@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -45,6 +46,27 @@ func (n *NetBox) EnsureMAC(ctx context.Context, deviceID int, mac string) (int, 
 	var m struct {
 		ID int `json:"id"`
 	}
+	// A pass that stopped after the MAC and before the primary keeps its MAC
+	// object, and the next one reuses it.
+	var macs []json.RawMessage
+	if err := n.list(ctx, "/api/dcim/mac-addresses/?mac_address="+url.QueryEscape(strings.ToUpper(mac)), &macs); err != nil {
+		return 0, err
+	}
+	for _, raw := range macs {
+		var have struct {
+			ID         int  `json:"id"`
+			AssignedID *int `json:"assigned_object_id"`
+		}
+		if err := json.Unmarshal(raw, &have); err != nil {
+			return 0, err
+		}
+		if have.AssignedID != nil && *have.AssignedID == nic {
+			m.ID = have.ID
+		}
+	}
+	if m.ID != 0 {
+		return nic, n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/interfaces/%d/", nic), map[string]any{"primary_mac_address": m.ID}, nil)
+	}
 	if err := n.do(ctx, http.MethodPost, "/api/dcim/mac-addresses/", map[string]any{
 		"mac_address":          strings.ToUpper(mac),
 		"assigned_object_type": "dcim.interface",
@@ -67,7 +89,7 @@ func (r *Reconciler) fillPort(ctx context.Context, d Device, p *bindPass) error 
 		return nil
 	}
 	var b binding
-	if err := r.cable(ctx, d, sw, port, &b); err != nil {
+	if err := r.cable(ctx, d, sw, port, true, &b); err != nil {
 		return err
 	}
 	if len(b.notes) == 0 {

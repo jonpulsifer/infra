@@ -140,11 +140,23 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		if d.MAC == "" {
 			hw, ok = r.intakeBySerial(ctx, d, in)
 		}
-		if ok {
+		if ok && (d.Status == "staged" || d.Status == "planned") {
 			if err := r.bind(ctx, d, hw, in, pass); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 			}
 			continue
+		}
+		// Any other status is no intake to bind: an intake that has stopped
+		// running is stale, and goes before the device's own objects.
+		if ok {
+			if wf := in.newest[hw.Name()]; wf != nil && !Finished(wf.State()) {
+				continue
+			}
+			if err := r.dropIntake(ctx, in, hw); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
+				continue
+			}
+			Audit("fleet.intake", r.Config.Site, d, "", "dropped: the device is "+d.Status)
 		}
 		if err := r.device(ctx, d); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
@@ -154,6 +166,9 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		}
 	}
 	if err := r.expireIntakes(ctx, devices, in); err != nil {
+		errs = append(errs, err)
+	}
+	if err := r.dropOrphans(ctx, in); err != nil {
 		errs = append(errs, err)
 	}
 	// A device NetBox no longer exports, offline or deleted, keeps no objects.

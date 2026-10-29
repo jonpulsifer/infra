@@ -288,19 +288,6 @@ func hardwareMAC(o Object) string {
 	return ""
 }
 
-// hardwareDisk is the first disk of a Hardware.
-func hardwareDisk(o Object) string {
-	spec, _ := o["spec"].(map[string]any)
-	disks, _ := spec["disks"].([]any)
-	for _, d := range disks {
-		dm, _ := d.(map[string]any)
-		if s, _ := dm["device"].(string); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
 func (o Object) annotation(key string) string {
 	a, _ := o.metadata()["annotations"].(map[string]any)
 	s, _ := a[key].(string)
@@ -359,15 +346,17 @@ type intakes struct {
 	byMAC  map[string]Object
 	newest map[string]Object
 	all    map[string][]Object
+	names  map[string]bool
 }
 
 func (r *Reconciler) intakes(ctx context.Context) (intakes, error) {
-	in := intakes{byMAC: map[string]Object{}, newest: map[string]Object{}, all: map[string][]Object{}}
+	in := intakes{byMAC: map[string]Object{}, newest: map[string]Object{}, all: map[string][]Object{}, names: map[string]bool{}}
 	hws, err := r.Kube.List(ctx, HardwareResource, IntakeLabel+"=true")
 	if err != nil {
 		return in, fmt.Errorf("list intake Hardware: %w", err)
 	}
 	for _, h := range hws {
+		in.names[h.Name()] = true
 		if mac := hardwareMAC(h); mac != "" {
 			in.byMAC[mac] = h
 		}
@@ -411,16 +400,34 @@ func (in intakes) forSerial(serial, uuid string) (Object, int) {
 }
 
 // dropIntake deletes an intake's Workflows and its Hardware.
+// The Hardware goes first: it is what holds the MAC, and a Workflow left
+// behind is an orphan the next pass deletes.
 func (r *Reconciler) dropIntake(ctx context.Context, in intakes, hw Object) error {
+	if err := r.Kube.Delete(ctx, HardwareResource, hw.Name()); err != nil {
+		return fmt.Errorf("delete Hardware %s: %w", hw.Name(), err)
+	}
 	for _, wf := range in.all[hw.Name()] {
 		if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
 			return fmt.Errorf("delete %s: %w", wf.Name(), err)
 		}
 	}
-	if err := r.Kube.Delete(ctx, HardwareResource, hw.Name()); err != nil {
-		return fmt.Errorf("delete Hardware %s: %w", hw.Name(), err)
-	}
 	return nil
+}
+
+// dropOrphans deletes the intake Workflows whose Hardware is gone.
+func (r *Reconciler) dropOrphans(ctx context.Context, in intakes) error {
+	var errs []error
+	for name, wfs := range in.all {
+		if in.names[name] {
+			continue
+		}
+		for _, wf := range wfs {
+			if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
+				errs = append(errs, fmt.Errorf("delete orphan %s: %w", wf.Name(), err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // expireIntakes deletes the intakes older than the TTL whose MAC no device

@@ -183,7 +183,8 @@ declare_stub() {
   existing="$(nb GET "dcim/devices/?site=folly&name=$(uri "$name")" | jq -c '.results[0] // null')"
   want="$(jq -cn --arg n "$name" --arg s "$serial" --arg t "$type" --arg c "$class" --arg p "$port" --argjson cur "$existing" '{
       name: $n, role: {slug: "kubernetes-node"}, device_type: {slug: $t}, platform: {slug: "talos"}, serial: $s,
-      custom_fields: ({talos_class: $c, expected_port: (if $p == "" then null else ($p | tonumber) end)}
+      custom_fields: ({talos_class: $c}
+        + (if $p == "" then {} else {expected_port: ($p | tonumber)} end)
         + (if $cur == null then {desired_action: "none"} else {} end))}
     + (if $cur == null then {status: "planned"} else {} end)')"
   id="$(device "$want")"

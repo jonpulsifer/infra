@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -241,10 +242,15 @@ func (n *NetBox) SwitchPort(ctx context.Context, switchID, port int) (int, error
 	return 0, nil
 }
 
+// ErrPortTaken is a cable a declaration asked for to a switch port that
+// another cable holds.
+var ErrPortTaken = errors.New("the switch port has another cable")
+
 // Cable makes one cable between the two interfaces, replacing any cable
-// either has to somewhere else. It says whether it made one, and which
-// links it replaced.
-func (n *NetBox) Cable(ctx context.Context, a, b int) (bool, []string, error) {
+// either has to somewhere else, when steal says that what UniFi sees beats
+// what NetBox holds; without it, a taken switch port is ErrPortTaken. It
+// says whether it made one, and which links it replaced.
+func (n *NetBox) Cable(ctx context.Context, a, b int, steal bool) (bool, []string, error) {
 	ai, err := n.iface(ctx, a)
 	if err != nil {
 		return false, nil, err
@@ -259,6 +265,9 @@ func (n *NetBox) Cable(ctx context.Context, a, b int) (bool, []string, error) {
 	bi, err := n.iface(ctx, b)
 	if err != nil {
 		return false, nil, err
+	}
+	if bi.Cable != nil && !steal {
+		return false, nil, ErrPortTaken
 	}
 	var replaced []string
 	seen := map[int]bool{}
