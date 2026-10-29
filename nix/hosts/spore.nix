@@ -73,6 +73,10 @@ in
     ../system/sops.nix
   ];
 
+  # A worker provision installs Talos from HookOS; /render serves the config. On once the
+  # installer release and the tink-attest digest that writes the code are live.
+  homelab.fleetController.installs = true;
+
   # This board and drive run stable at Gen 3, above nvme-hat.nix's Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
     enable = true;
