@@ -296,6 +296,8 @@ in
           else
             "a node does not have one alias by EK hash and one by LDevID subject CN"
         )
+        # The LDevID aliases follow machines.yaml, and shale's TPM 1.2 attests nothing.
+        (if aliases both "shale" == [ ] then null else "shale, with a TPM 1.2, has a SPIRE node alias")
         (
           let
             lines = lib.splitString "\n" (lib.replaceStrings [ "'" ] [ "" ] (sync both));

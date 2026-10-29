@@ -7,28 +7,41 @@
   ...
 }:
 let
-  # Each Talos node with a TPM 2.0. With tpm_devid on, a node attests by the LDevID that the attest
-  # service issues it, whose subject CN is the node's name. ekHash, the EK public key hash read on
-  # the node, is the fallback for a node with no LDevID (docs/platform/identity.md).
-  tpmNodes = {
-    optiplex.ekHash = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
-    riptide.ekHash = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
+  # The EK public key hash read on each node that attests by EK, the fallback for a node with no
+  # LDevID (docs/platform/identity.md).
+  ekHashes = {
+    optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
+    riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
-  ekNodes = lib.filterAttrs (_: node: node ? ekHash) tpmNodes;
+  # With tpm_devid on, a node attests by the LDevID that the attest service issues it, whose subject
+  # CN is the node's name. SPIRE 1.15.5's tpm_devid gives selectors for the subject's CN only, not
+  # its OU (the class) or O (the site), so each machine in the inventory with a TPM 2.0 that NetBox
+  # has staged or active gets its own alias, and a new machine needs a spore deploy.
+  devidNodes = lib.attrNames (
+    lib.filterAttrs (
+      _: m:
+      m.tpm or null == "2.0"
+      && lib.elem (m.status or "active") [
+        "staged"
+        "active"
+      ]
+    ) (import ../lib/inventory.nix { inherit lib; })
+  );
+  tpmNodes = lib.sort lib.lessThan (lib.unique (lib.attrNames ekHashes ++ devidNodes));
   trustDomain = config.homelab.spire.trustDomain;
   nodeID = name: "spiffe://${trustDomain}/node/${name}";
   # One alias per node and attestor: an agent matches a node entry only when it has every selector.
   nodeAliases =
-    lib.mapAttrsToList (name: node: {
+    lib.mapAttrsToList (name: hash: {
       spiffeID = nodeID name;
-      selectors = [ "tpm:pub_hash:${node.ekHash}" ];
-    }) ekNodes
+      selectors = [ "tpm:pub_hash:${hash}" ];
+    }) ekHashes
     ++ lib.optionals config.homelab.spire.devid.enable (
       map (name: {
         spiffeID = nodeID name;
         key = "tpm_devid";
         selectors = [ "tpm_devid:subject:cn:${name}" ];
-      }) (lib.attrNames tpmNodes)
+      }) devidNodes
     );
   # Kubernetes service accounts that get an SVID on every TPM node.
   workloads = [
@@ -86,7 +99,7 @@ in
   homelab.spire = {
     bundleNotifier.enable = true;
     enable = true;
-    ekHashes = lib.mapAttrsToList (_: node: node.ekHash) ekNodes;
+    ekHashes = lib.attrValues ekHashes;
     # Each issuing DevID CA's own certificate file, never the bundle: the server trusts the first
     # certificate of each file.
     devid.enable = true;
@@ -107,7 +120,7 @@ in
             "k8s:sa:${w.sa}"
           ];
         }) workloads
-      ) (lib.attrNames tpmNodes);
+      ) tpmNodes;
   };
 
   sops.defaultSopsFile = ../secrets/spore.sops.yaml;
