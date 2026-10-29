@@ -4,6 +4,13 @@
 // Machine; a device whose desired_action is set gets a Workflow; a device in
 // decommissioning gets a wipe and ends offline. It reconciles on a timer and
 // when NetBox's webhook rings, and every pass is a pure "make it so".
+//
+// A machine NetBox does not know phones home to POST /intake from HookOS and
+// gets an attest-only Workflow; once talos-attest has made it a staged,
+// attested device, the pass binds it to a stub's name and address, the
+// model's class and the switch port UniFi reports, and provisions it.
+//
+// A device whose interface has no cable gets one to the rack port UniFi reports.
 package main
 
 import (
@@ -12,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -62,6 +70,21 @@ type Config struct {
 	// Installs maps each class the controller renders to its Talos
 	// installer image, from the class inputs.
 	Installs map[string]string
+	// AutoProvision lets a bound intake with a class and an address start
+	// its provision without the owner.
+	AutoProvision bool
+	// Models maps an SMBIOS model to the class, BMC and disk of its intake.
+	Models map[string]Model
+	// NodePrefix is the prefix an intake's address comes from, and
+	// NodeReserved the addresses in it that never go to a node.
+	NodePrefix   string
+	NodeReserved map[string]bool
+	// IntakeTTL is the age at which an intake no device holds is deleted.
+	IntakeTTL time.Duration
+	// IntakePort is the switch port of the prep station, where every
+	// machine intakes; UniFi seeing a machine there says nothing of its
+	// rack port.
+	IntakePort int
 }
 
 func loadConfig() (Config, error) {
@@ -105,7 +128,51 @@ func loadConfig() (Config, error) {
 		}
 	}
 	c.RedfishInsecure = env("FLEET_REDFISH_INSECURE_TLS", "false") == "true"
+	c.AutoProvision = env("FLEET_AUTO_PROVISION", "false") == "true"
+	if c.Models, err = ParseModels(os.Getenv("FLEET_MODEL_MAP")); err != nil {
+		return c, err
+	}
+	if c.IntakeTTL, err = time.ParseDuration(env("FLEET_INTAKE_TTL", "24h")); err != nil || c.IntakeTTL <= 0 {
+		return c, fmt.Errorf("FLEET_INTAKE_TTL must be a positive duration")
+	}
+	if c.IntakePort, err = strconv.Atoi(env("FLEET_INTAKE_PORT", "24")); err != nil || c.IntakePort < 0 {
+		return c, fmt.Errorf("FLEET_INTAKE_PORT must be a port number, or 0 for none")
+	}
+	c.NodePrefix = os.Getenv("FLEET_NODE_PREFIX")
+	if c.NodePrefix != "" {
+		p, err := netip.ParsePrefix(c.NodePrefix)
+		if err != nil || !p.Addr().Is4() || p != p.Masked() {
+			return c, fmt.Errorf("FLEET_NODE_PREFIX %q is not an IPv4 network prefix", c.NodePrefix)
+		}
+	}
+	c.NodeReserved = map[string]bool{}
+	for _, a := range strings.Split(os.Getenv("FLEET_NODE_RESERVED"), ",") {
+		if a = strings.TrimSpace(a); a == "" {
+			continue
+		}
+		if _, err := netip.ParseAddr(a); err != nil {
+			return c, fmt.Errorf("FLEET_NODE_RESERVED: %w", err)
+		}
+		c.NodeReserved[a] = true
+	}
 	return c, nil
+}
+
+// loadUniFi reads the optional UniFi client: FLEET_UNIFI_URL and
+// FLEET_UNIFI_API_KEY_FILE go together.
+func loadUniFi() (*UniFi, error) {
+	u, keyFile := os.Getenv("FLEET_UNIFI_URL"), os.Getenv("FLEET_UNIFI_API_KEY_FILE")
+	if u == "" && keyFile == "" {
+		return nil, nil
+	}
+	if u == "" || keyFile == "" {
+		return nil, fmt.Errorf("FLEET_UNIFI_URL and FLEET_UNIFI_API_KEY_FILE go together")
+	}
+	key, err := readSecret(keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("UniFi API key: %w", err)
+	}
+	return &UniFi{URL: u, Key: key, Site: env("FLEET_UNIFI_SITE", "default"), Client: &http.Client{Timeout: 15 * time.Second}}, nil
 }
 
 func main() {
@@ -158,12 +225,21 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now}
+	unifi, err := loadUniFi()
+	if err != nil {
+		return err
+	}
+	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: metrics, UniFi: unifi, Now: time.Now}
+	intake := &Intake{
+		Config: &r.Config, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now,
+		PerMAC: 10 * time.Minute, PerSource: 10, Global: 20, Window: time.Hour,
+	}
 	trigger := make(chan string, 1)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /webhook", &Webhook{Secret: secret, Trigger: trigger, Metrics: r.Metrics})
 	mux.Handle("POST /render", installer)
+	mux.Handle("POST /intake", intake)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		if ok, why := r.Healthy(3 * cfg.Interval); !ok {
 			http.Error(w, why, http.StatusServiceUnavailable)
@@ -176,6 +252,10 @@ func run() error {
 		Addr:              env("FLEET_WEBHOOK_ADDR", ":8446"),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		// A render waits on talosctl for up to 20 seconds.
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  2 * time.Minute,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

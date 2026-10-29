@@ -1,6 +1,6 @@
 # fleet-controller
 
-Turns a NetBox site's `kubernetes-node` devices into Tinkerbell objects, and
+Turns a NetBox site's `kubernetes-node` devices into Tinkerbell objects, takes a new machine's intake, and
 renders the Talos config an install fetches.
 `docs/apps/fleet-controller.md` says what it does; this file says how to run it.
 
@@ -28,7 +28,7 @@ go run .
 | `FLEET_ATTEST_URL`, `FLEET_NTP_SERVER` | required | talos-attest's device flow and the NTP server, both in each Workflow's `hardwareMap` |
 | `FLEET_BMC_SECRETS` | `amt=bmc-amt,redfish=bmc-redfish` | The Secret per `bmc_type` that a Machine's `authSecretRef` names |
 | `FLEET_REDFISH_PORT`, `FLEET_REDFISH_INSECURE_TLS` | `443`, `false` | Redfish connection options |
-| `FLEET_WEBHOOK_ADDR` | `:8446` | The listener for `/webhook`, `/render`, `/healthz` and `/metrics` |
+| `FLEET_WEBHOOK_ADDR` | `:8446` | The listener for `/webhook`, `/render`, `/intake`, `/healthz` and `/metrics` |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and the controller only polls |
 | `FLEET_INTERVAL` | `2m` | Time between passes |
 | `FLEET_WORKFLOW_TTL` | `168h` | Age at which the controller deletes its Workflows |
@@ -38,6 +38,13 @@ go run .
 | `FLEET_CONFIG_LOG` | `/var/log/nginx/fleet/talos-config.log` | nginx's log of `/talos/config`, in the `fleet` format `$time_iso8601 $arg_uuid $arg_code $status $request_method $request_completion $body_bytes_sent` |
 | `FLEET_INSTALLS` | `false` | Whether a worker's provision Workflow installs; off, `/render` refuses every call, since no run asks for one |
 | `FLEET_CONFIG_TTL` | `2h` | Age at which an unfetched config is deleted |
+| `FLEET_AUTO_PROVISION` | `false` | Whether a bound intake with a class and an address gets `desired_action` `provision`; the Nix module sets `true` |
+| `FLEET_MODEL_MAP` | the G5 mini as `worker-g5`, `amt`, `/dev/nvme0n1` | JSON `{"<SMBIOS model>": {"class", "bmc", "disk"}}` for an intake |
+| `FLEET_NODE_PREFIX`, `FLEET_NODE_RESERVED` | none | The prefix an intake's address comes from, `K8S_NODE_CIDR`, and a comma list of addresses in it that never go to a node; without the prefix an intake gets no free address |
+| `FLEET_INTAKE_PORT` | `24` | The provisioning station's switch port; `0` for none |
+| `FLEET_INTAKE_TTL` | `24h` | Age at which an intake no device holds is deleted |
+| `FLEET_UNIFI_URL`, `FLEET_UNIFI_API_KEY_FILE` | none | The UniFi console and a read-only API key; both or neither. Without them an intake gets no switch port, and a stub's `expected_port` refuses its binding off the intake port |
+| `FLEET_UNIFI_SITE` | `default` | The UniFi site of `stat/sta` |
 
 ## NetBox contract
 
@@ -79,6 +86,49 @@ which never repeats the request.
 A whole GET (`200`, `GET`, `OK`, the file's size in bytes) burns the file. A
 served, expired or replaced code is kept as a hash for 24 hours in
 `talos-burned.json`, and a render for it is refused.
+
+## Intake contract
+
+`POST /intake`, unauthenticated, at most 16 KiB of JSON: `{"mac", "serial",
+"uuid", "model", "sku", "bios", "disks": [{"name", "size", "tran"}]}`, with
+`size` in bytes. 400 is a MAC that is not unicast `aa:bb:cc:dd:ee:ff`, a serial
+that is not 1 to 64 printable ASCII characters, a UUID of another shape, or a
+disk that is not a kernel name. 429 is a second call for a MAC within ten
+minutes, an 11th call in an hour from one `X-Forwarded-For` address, or a 21st
+intake made in an hour; a call that made nothing gives its MAC's slot back. 200 `{"state":"known"}` is a MAC that a NetBox interface or a `Hardware`
+holds. 201 `{"state":"intake","workflow":"intake-<mac>-<unix seconds>"}` made
+`Hardware <mac>` (labels `lolwtf.ca/intake=true` and the managed and node
+labels; annotations `lolwtf.ca/intake-serial`, `-uuid`, `-model`; the first
+NVMe disk, else the first non-USB one, else the model's) and the `Workflow`
+with `attest=true`, `wipe=false`, `install=false` and no `bootMode`. 503 is a
+NetBox or Tinkerbell failure. Audit line `fleet.intake`.
+
+## Binding contract
+
+A pass binds a device that is `staged` with `attest_verdict` `attested` once
+the newest `Workflow` of the intake holding its MAC has finished. Only a MAC
+talos-attest wrote binds: an attested device with none is journaled once and
+waits, and an intake's claimed MAC is never written to NetBox. A device of any
+other status drops an intake that has stopped running. A failed intake goes
+after an hour, and one no device holds after `FLEET_INTAKE_TTL`. A stub is a
+`planned` device with no MAC; one that a bind marker names is promised. An `intake-*` device takes the stub
+with its serial, else the oldest (lowest id) serial-less stub whose
+`talos_class` is the model's, then the stub's name and `expected_port`; the
+description `fleet-controller: binds stub <name>` carries the name across a
+pass that stops between deleting the stub and the rename. Off
+`FLEET_INTAKE_PORT`, an `expected_port` other than UniFi's port refuses the
+binding: nothing is written and the journal says `on port N, expected M`.
+Written, each only when it differs: `talos_class`, `bmc_type`, `install_disk` (the model map's, never the claim's),
+`expected_port`, `last_workflow` (the intake run), `primary_ip4` (the unassigned IP address whose DNS name is
+the device's new name, else the lowest free address of `FLEET_NODE_PREFIX`
+outside `FLEET_NODE_RESERVED` and UniFi's client addresses; with UniFi set and not answering, the pass fails and retries), the name, a cable
+to the switch port (on the intake port, to `expected_port` only), and
+`desired_action` `provision`. The intake's objects are deleted last. A device
+whose `last_workflow` is an intake run gets no `Machine` and a `Workflow`
+without `bootMode`. Audit lines `fleet.bind` and `fleet.autoprovision`. A
+`staged` or `active` device whose interface has no cable is cabled to the port
+UniFi reports, unless that is the intake port, and one seen off its
+`expected_port` is journaled once.
 
 The webhook is `POST /webhook` with NetBox's `X-Hook-Signature`, HMAC-SHA512
 hex of the body with the rule's secret. The body is not read for content: a

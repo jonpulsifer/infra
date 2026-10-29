@@ -26,6 +26,13 @@ type Metrics struct {
 	RenderRejected   atomic.Int64
 	Released         atomic.Int64
 	Expired          atomic.Int64
+	IntakeCreated    atomic.Int64
+	IntakeKnown      atomic.Int64
+	IntakeLimited    atomic.Int64
+	IntakeInvalid    atomic.Int64
+	IntakeFailed     atomic.Int64
+	Bound            atomic.Int64
+	AutoProvisioned  atomic.Int64
 
 	mu               sync.Mutex
 	devices          map[string]int
@@ -94,6 +101,13 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	counter("fleet_install_renders_rejected_total", "Render requests with a bad signature.", m.RenderRejected.Load())
 	counter("fleet_install_released_total", "Devices set active after nginx served their config.", m.Released.Load())
 	counter("fleet_install_expired_total", "Configs deleted unread after the TTL.", m.Expired.Load())
+	counter("fleet_intake_created_total", "Intakes that made a Hardware and an attest Workflow.", m.IntakeCreated.Load())
+	counter("fleet_intake_known_total", "Intakes for a MAC NetBox or Tinkerbell already knows.", m.IntakeKnown.Load())
+	counter("fleet_intake_limited_total", "Intakes refused by a rate limit (429).", m.IntakeLimited.Load())
+	counter("fleet_intake_invalid_total", "Intakes refused as malformed (400).", m.IntakeInvalid.Load())
+	counter("fleet_intake_failed_total", "Intakes the controller could not serve (503).", m.IntakeFailed.Load())
+	counter("fleet_intake_bound_total", "Attested intakes bound to a name, a class and an address.", m.Bound.Load())
+	counter("fleet_intake_autoprovisioned_total", "Bound intakes the controller set to provision.", m.AutoProvisioned.Load())
 	fmt.Fprintf(w, "# HELP fleet_install_files_pending Rendered Talos configs nginx has not served yet.\n# TYPE fleet_install_files_pending gauge\nfleet_install_files_pending %d\n", m.pending)
 	age := func(t time.Time) float64 {
 		if t.IsZero() {

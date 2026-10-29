@@ -18,7 +18,9 @@ type Reconciler struct {
 	NetBox  *NetBox
 	Kube    *Kube
 	Metrics *Metrics
-	Now     func() time.Time
+	// UniFi finds an intake's switch port; nil leaves the port empty.
+	UniFi *UniFi
+	Now   func() time.Time
 
 	mu       sync.Mutex
 	reported map[string]bool
@@ -122,13 +124,59 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 	r.Metrics.SetDevices(counts)
 
+	in, err := r.intakes(ctx)
+	if err != nil {
+		return err
+	}
 	var errs []error
 	keep := map[string]bool{}
+	pass := newBindPass(devices)
 	for _, d := range devices {
 		keep[d.Name] = true
+		// While an intake's Hardware holds the MAC, the device's own objects
+		// wait: two Hardware with one MAC confuse Tinkerbell. The binding
+		// ends the intake.
+		// Only talos-attest writes a MAC it proved; an intake's claimed MAC
+		// never reaches NetBox, so an attested device without one waits.
+		if d.MAC == "" && d.Status == "staged" && d.Verdict == "attested" {
+			why := "fleet-controller: the device is attested and has no MAC in NetBox; it binds and provisions once talos-attest writes the MAC it proved"
+			if err := r.journalOnce(ctx, fmt.Sprintf("no-mac/%d", d.ID), d, "warning", why); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
+			}
+		}
+		hw, ok := in.byMAC[d.MAC]
+		ok = ok && d.MAC != ""
+		if ok && d.Status == "staged" {
+			if err := r.bind(ctx, d, hw, in, pass); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
+			}
+			continue
+		}
+		// Any other status, a planned device declared by hand included, is no
+		// intake to bind: an intake that has stopped running is stale, and goes
+		// before the device's own objects.
+		if ok {
+			if wf := in.newest[hw.Name()]; wf != nil && !Finished(wf.State()) {
+				continue
+			}
+			if err := r.dropIntake(ctx, in, hw); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
+				continue
+			}
+			Audit("fleet.intake", r.Config.Site, d, "", "dropped: the device is "+d.Status)
+		}
 		if err := r.device(ctx, d); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 		}
+		if err := r.fillPort(ctx, d, pass); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
+		}
+	}
+	if err := r.expireIntakes(ctx, devices, in); err != nil {
+		errs = append(errs, err)
+	}
+	if err := r.dropOrphans(ctx, in); err != nil {
+		errs = append(errs, err)
 	}
 	// A device NetBox no longer exports, offline or deleted, keeps no objects.
 	// An empty list is left alone: it is a NetBox with no nodes, or a filter
@@ -141,7 +189,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 				continue
 			}
 			for _, o := range objs {
-				if !keep[o.Name()] {
+				if !keep[o.Name()] && o.Labels()[IntakeLabel] != "true" {
 					if err := r.Kube.Delete(ctx, res, o.Name()); err != nil {
 						errs = append(errs, fmt.Errorf("delete %s %s: %w", res.Kind, o.Name(), err))
 					}
@@ -283,7 +331,10 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 	}
 	fields := map[string]any{"desired_action": "none", "last_workflow": name}
 	comment := fmt.Sprintf("fleet-controller: started Workflow %s (%s)", name, action)
-	if manual {
+	switch {
+	case manual && d.FromIntake():
+		comment += "; no BMC drives this run: the machine waits in HookOS from its intake and takes it"
+	case manual:
 		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
 	}
 	if running != "" {

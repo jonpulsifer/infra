@@ -42,6 +42,18 @@ type Device struct {
 	// SMBIOSUUID is the machine's attested SMBIOS UUID, which talos-attest
 	// writes on a pass.
 	SMBIOSUUID string
+	// Model is the device type's model, which talos-attest names after the
+	// SMBIOS product name of a device it creates.
+	Model       string
+	Verdict     string
+	Description string
+	// ExpectedPort is the switch port a stub expects its machine on, 0 for
+	// any.
+	ExpectedPort int
+	// NIC is the id of the interface that holds MAC.
+	NIC int
+	// Cabled says whether that interface has a cable.
+	Cabled bool
 }
 
 // Role is the NetBox device role of a node. Every status here is a device the
@@ -143,10 +155,14 @@ func selectValue(raw json.RawMessage) string {
 }
 
 type rawDevice struct {
-	ID         int             `json:"id"`
-	Name       string          `json:"name"`
-	Serial     string          `json:"serial"`
-	Status     json.RawMessage `json:"status"`
+	ID          int             `json:"id"`
+	Name        string          `json:"name"`
+	Serial      string          `json:"serial"`
+	Status      json.RawMessage `json:"status"`
+	Description string          `json:"description"`
+	DeviceType  *struct {
+		Model string `json:"model"`
+	} `json:"device_type"`
 	PrimaryIP4 *struct {
 		Address string `json:"address"`
 	} `json:"primary_ip4"`
@@ -154,6 +170,15 @@ type rawDevice struct {
 		Address string `json:"address"`
 	} `json:"oob_ip"`
 	CustomFields map[string]json.RawMessage `json:"custom_fields"`
+}
+
+// intValue reads an integer custom field, 0 when it is unset.
+func intValue(raw json.RawMessage) int {
+	var n *int
+	if json.Unmarshal(raw, &n) != nil || n == nil {
+		return 0
+	}
+	return *n
 }
 
 func stripPrefix(cidr string) string {
@@ -179,6 +204,12 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 		DesiredAction: cf("desired_action"),
 		LastWorkflow:  cf("last_workflow"),
 		SMBIOSUUID:    strings.ToLower(cf("smbios_uuid")),
+		Verdict:       cf("attest_verdict"),
+		Description:   r.Description,
+		ExpectedPort:  intValue(r.CustomFields["expected_port"]),
+	}
+	if r.DeviceType != nil {
+		d.Model = r.DeviceType.Model
 	}
 	if d.BMCType == "" {
 		d.BMCType = "none"
@@ -246,6 +277,9 @@ func (n *NetBox) Devices(ctx context.Context, site string) ([]Device, error) {
 		PrimaryMAC *struct {
 			MAC string `json:"mac_address"`
 		} `json:"primary_mac_address"`
+		Cable *struct {
+			ID int `json:"id"`
+		} `json:"cable"`
 	}
 	var ifaces []iface
 	for _, raw := range iraws {
@@ -262,6 +296,8 @@ func (n *NetBox) Devices(ctx context.Context, site string) ([]Device, error) {
 		idx, ok := byID[i.Device.ID]
 		if ok && devices[idx].MAC == "" {
 			devices[idx].MAC = strings.ToLower(i.PrimaryMAC.MAC)
+			devices[idx].NIC = i.ID
+			devices[idx].Cabled = i.Cable != nil
 		}
 	}
 	sort.Slice(devices, func(a, b int) bool { return devices[a].Name < devices[b].Name })

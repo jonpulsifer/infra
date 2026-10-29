@@ -39,19 +39,21 @@ var Actions = map[string]Action{
 // RADIUS user yet, so it and its AMT sit on the bootstrap fallback with a
 // lease there, and an AMT address derived from the Kubernetes address it
 // does not hold yet is wrong; only an explicit oob_ip counts until the status
-// leaves planned.
+// leaves planned. A device fresh from its intake is in the same place: its
+// export has not been applied, and its agent waits in HookOS.
 func (d Device) HasBMC() bool {
 	if d.BMCType == "none" || d.BMCAddress == "" {
 		return false
 	}
-	return d.Status != "planned" || d.OOBAddress != ""
+	return d.Status != "planned" && !d.FromIntake() || d.OOBAddress != ""
 }
 
-// ManualBoot says whether somebody powers the device on by hand for a run:
-// a device without a Machine, and any planned device, whose BMC Rufio
-// cannot reach at a Kubernetes address it does not hold yet.
+// ManualBoot says whether Rufio stays out of a run: a device without a
+// Machine, any planned device, whose BMC Rufio cannot reach at a Kubernetes
+// address it does not hold yet, and a device fresh from its intake, which
+// is already in HookOS.
 func (d Device) ManualBoot() bool {
-	return d.Status == "planned" || !d.HasBMC()
+	return d.Status == "planned" || d.FromIntake() || !d.HasBMC()
 }
 
 func labels(d Device, extra map[string]string) map[string]any {

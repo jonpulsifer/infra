@@ -159,7 +159,7 @@ description = "Import folly's site, device types, custom fields, nodes, anchors,
 run = "bash scripts/netbox-seed.sh"
 
 [tasks."netbox:declare"]
-description = "Declare a new planned Kubernetes node in NetBox, then render the export (args: <name> <serial> <mac> <switch port> <address> [--class C] [--bmc B] [--disk D] [--type T] [--ek-hash H])"
+description = "Declare a new planned Kubernetes node in NetBox, then render the export (args: <name> <serial> <mac> <switch port> <address> [--class C] [--bmc B] [--disk D] [--type T] [--ek-hash H]), or a stub for intake (args: --stub <name> --class C [--serial S] [--port N] [--address A])"
 run = "bash scripts/netbox-declare.sh"
 
 [tasks."netbox:export"]
