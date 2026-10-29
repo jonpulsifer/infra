@@ -215,7 +215,7 @@ tests:
               status: quarantined
             exp_annotations:
               message: "optiplex failed attestation and is quarantined"
-              description: "talos-attest refused optiplex on forge, and its LDevID is withdrawn. Read the reason in GET /machines on the anchor's admin API or in /var/lib/talos-attest/verdicts.jsonl, as docs/runbooks/attest-a-node.md says."
+              description: "talos-attest refused optiplex on forge, and its LDevID is withdrawn. Read the reason in GET /machines on the anchor's admin API or in /var/lib/talos-attest/verdicts.jsonl, as docs/runbooks/provision-a-node.md says."
 
   # spore issued riptide's first LDevID, which nears its expiry, and capsule served the renewal: the
   # newest expiry counts, so no alert. optiplex's only LDevID, on forge, expires within 23 days.

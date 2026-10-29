@@ -161,14 +161,14 @@ spec:
             severity: critical
           annotations:
             message: "{{ $labels.machine }} failed attestation and is quarantined"
-            description: "talos-attest refused {{ $labels.machine }} on {{ $labels.instance }}, and its LDevID is withdrawn. Read the reason in GET /machines on the anchor's admin API or in /var/lib/talos-attest/verdicts.jsonl, as docs/runbooks/attest-a-node.md says."
+            description: "talos-attest refused {{ $labels.machine }} on {{ $labels.instance }}, and its LDevID is withdrawn. Read the reason in GET /machines on the anchor's admin API or in /var/lib/talos-attest/verdicts.jsonl, as docs/runbooks/provision-a-node.md says."
         - alert: TalosAttestWaitingForApproval
           expr: (talos_attest_machine_status{status="pending-approval"} == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
           labels:
             severity: warning
           annotations:
             message: "{{ $labels.machine }} waits for the owner to approve its EK on first intake"
-            description: "Neither machines.yaml nor NetBox pins {{ $labels.machine }}'s EK hash. Approve it on {{ $labels.instance }}'s admin API, as docs/runbooks/attest-a-node.md says."
+            description: "Neither machines.yaml nor NetBox pins {{ $labels.machine }}'s EK hash. Approve it on {{ $labels.instance }}'s admin API, as docs/runbooks/provision-a-node.md says."
         # tpm-reattest renews an LDevID from 30 days before its expiry, once a day, so
         # this fires only after a week of failed renewals. One anchor serves a renewal
         # and the others keep the old record, so the newest expiry counts.

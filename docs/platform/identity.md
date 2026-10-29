@@ -50,7 +50,22 @@ A node's identity starts before Talos runs. Each step relies on the one before i
 | LDevID and LAK certificates | The DevID CA vouches for the key and the AK | `FML DevID folly CA`, in [PKI](pki.md#chain) |
 | `tpm_devid` | The agent holds the LDevID key in a TPM with a genuine EK | spore's SPIRE server |
 
-[Attest a node](../runbooks/attest-a-node.md) runs the first five steps.
+[Provision a node](../runbooks/provision-a-node.md) runs the first five steps.
+
+## Lifecycle
+
+A folly node's identity follows its device's `status` in [NetBox](netbox.md). talos-attest, talos-enroll, fleet-controller, the switch and SPIRE each read it.
+
+| Status | Meaning | Written by |
+| --- | --- | --- |
+| `planned` | Ordered, with its serial known. It may carry `ek_hash` pins. | The owner |
+| `staged` | Intake, attestation or install in progress | talos-attest, on a verdict for a `planned` device or a new serial; fleet-controller, on a `provision` or `wipe` of an installed node; or the owner |
+| `active` | Its config is released, and it is expected Ready | talos-enroll, when it releases the config |
+| `failed` | Quarantined by attestation | talos-attest |
+| `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |
+| `offline` | Retired, and kept for history | fleet-controller, after the retirement run succeeds |
+
+Only the owner moves a device out of `failed` or into `decommissioning`. A `failed` node's RADIUS user puts it on the bootstrap network, and talos-attest refuses it. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
 
 ## Agents
 
@@ -109,9 +124,7 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 ## Live state
 
-No folly node carries the `lolwtf.ca/tpm=true` label, and `spire-bundle` is empty. The bundle notifier is off, because `nix/secrets/spore.sops.yaml` has no `spire/folly-bundle-writer-token` yet. No agent runs, so `SpireNoAttestedAgents` fires, and no pod gets an SVID. The smoke Job is suspended, since a pod that no node can schedule keeps it active until `KubeJobNotCompleted` fires.
-
-The allow list holds the EK hashes of riptide and optiplex. `tpm_devid` is off: `homelab.spire.devid.enable` is false until the DevID CA's chain is in the repo, and `ATTEST_URL` is empty. talos-attest runs on no anchor until the DevID CA is applied and its key sealed. Every agent attests by EK hash.
+riptide and optiplex carry the `lolwtf.ca/tpm=true` label and run agents. riptide's agent attests by its LDevID, and optiplex's by EK hash. The allow list holds the EK hashes of both. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
 
 ## Where it lives
 

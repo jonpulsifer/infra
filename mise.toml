@@ -198,6 +198,14 @@ run = "bash scripts/metal-dev/seed.sh"
 description = "Create a virtual node on metal-dev, enroll the lab's Secure Boot keys, declare it in the host's NetBox and follow it to active (args: [name])"
 run = "bash scripts/metal-dev/intake.sh"
 
+[tasks."attest:approve"]
+description = "Show the first intake that waits for a serial on the anchors' talos-attest, and approve its EK hashes once you confirm them, over the tailnet (args: <serial>)"
+run = "bash scripts/attest.sh approve"
+
+[tasks."attest:pending"]
+description = "List the first intakes that wait for approval on each anchor's talos-attest"
+run = "bash scripts/attest.sh pending"
+
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
 run = "bash .github/scripts/render-cluster-apps.sh"

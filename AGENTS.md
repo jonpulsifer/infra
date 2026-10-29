@@ -16,8 +16,11 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
 ## Hard rules
 
 - Change live infrastructure only through git. Author the desired state here,
-  and Flux, Atlantis and the host rebuilds apply it. Change live state by hand
-  only when the owner asks, even when a runbook has the steps.
+  and Flux, Atlantis and the host rebuilds apply it. A folly node's lifecycle
+  is in NetBox: only the owner sets a device's `desired_action` or its
+  `decommissioning` status, and fleet-controller acts on it as Flux acts on
+  git. Change live state by hand only when the owner asks, even when a runbook
+  has the steps.
 - Flux owns the kthx engine's namespace and prerequisites. The engine owns each
   built app's `app-<name>` namespace and DNS records. It also owns the app's
   releases in `spindrift-apps`, its Argo `Application` objects in `argo` on
@@ -52,6 +55,7 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
 | Kubernetes | Flux | After a merge to `main` |
 | NixOS | `nixos-rebuild` | On a deploy, and at the daily auto-upgrade from `main` on hosts that have one |
 | Wiki | `.github/workflows/wiki.yml` to Cloudflare Pages | After a merge to `main` |
+| folly node lifecycle | fleet-controller on spore, from NetBox | When the owner sets a device's `desired_action` or `decommissioning` status |
 
 [How changes ship](docs/platform/how-changes-ship.md) has each path and its
 exceptions.
@@ -92,13 +96,13 @@ Read these values from their file. Do not copy them.
 | --- | --- |
 | Cluster addresses and CIDRs, API server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
 | Anchor CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/anchor-topology.json` |
-| folly node hardware: MAC, switch port, install disk, TPM, model, serial, BIOS, Secure Boot | NetBox at `https://capsule.<tailnet>` |
+| folly machines and their lifecycle: hardware, class, BMC, status, `desired_action` | NetBox at `https://capsule.<tailnet>`; `clusters/folly/inventory/machines.yaml` is its export |
 
 Each topology file is a Flux ConfigMap whose `data` values are all strings, so
 a list or a number is written as a string. [Topology](docs/reference/topology.md)
-says what reads each file. `clusters/folly/inventory/machines.yaml` is NetBox's
-export, which Terraform, Talos and the render scripts read. Never edit it by
-hand: change the device in NetBox, then run `mise run netbox:export`.
+says what reads each file. Terraform, Talos and the render scripts read
+NetBox's export. Never edit it by hand: change the device in NetBox, then run
+`mise run netbox:export`.
 [Hardware inventory](docs/reference/inventory.md) says what reads it.
 
 ## Where to read more

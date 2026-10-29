@@ -33,7 +33,7 @@ tests:
               instance: forge
             exp_annotations:
               message: A Talos machine has waited 30 minutes for enrollment approval
-              description: "A machine has asked talos-enroll for device codes for 30 minutes with no approval or denial, and it retries until one comes. Approve the code on its console with `mise run enroll:approve`, or find its uuid with `mise run enroll:pending` and deny it. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"
+              description: "A machine has asked talos-enroll for device codes for 30 minutes with no approval or denial, and it retries until one comes. Approve the code on its console with `mise run enroll:approve`, or find its uuid with `mise run enroll:pending` and deny it. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
       - eval_time: 45m
         alertname: TalosEnrollmentWaiting
         exp_alerts: []
@@ -45,7 +45,7 @@ tests:
               instance: forge
             exp_annotations:
               message: An approved Talos machine has not fetched its config
-              description: "talos-enroll approved a machine 10 minutes ago and has served it no config. Talos picks up the token within one poll, so the GET of /config fails before it reaches the server: check the machine's console for a TLS or clock error. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"
+              description: "talos-enroll approved a machine 10 minutes ago and has served it no config. Talos picks up the token within one poll, so the GET of /config fails before it reaches the server: check the machine's console for a TLS or clock error. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
 
   # riptide fetched its config at 1m and never became Ready; optiplex did.
   - interval: 1m
@@ -72,7 +72,7 @@ tests:
               node: riptide
             exp_annotations:
               message: "riptide fetched its Talos config 30 minutes ago and is not a Ready node"
-              description: "The install and reboot take a few minutes. A node that is still not Ready did not install, or cannot reach the Kubernetes VLAN: check its RADIUS user and the machine's console. https://wiki.lolwtf.ca/runbooks/enroll-a-talos-node/"
+              description: "The install and reboot take a few minutes. A node that is still not Ready did not install, or cannot reach the Kubernetes VLAN: check its RADIUS user and the machine's console. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
       # Six hours after the fetch the alert ends, so it cannot fire forever.
       - eval_time: 370m
         alertname: TalosEnrolledNodeNotReady
