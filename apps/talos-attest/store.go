@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,15 +25,31 @@ type Record struct {
 	Detail    []string          `json:"detail,omitempty"`
 	EKHashes  map[string]string `json:"ek_hashes,omitempty"`
 	EKIssuers []string          `json:"ek_issuers,omitempty"`
+	// Class is the machine's talos_class, the LDevID's OU.
+	Class string `json:"class,omitempty"`
+	// The SMBIOS facts the machine claimed, for NetBox.
+	Model string `json:"model,omitempty"`
+	SKU   string `json:"sku,omitempty"`
+	BIOS  string `json:"bios,omitempty"`
+	// Renewed marks a pass that a renewal from the running node produced.
+	Renewed bool `json:"renewed,omitempty"`
+	// EKProven marks a pass whose session activated a credential on the EKs
+	// in EKHashes: the only hashes that become pins. A renewal or a record
+	// adopted from a peer carries hashes it did not prove.
+	EKProven bool `json:"ek_proven,omitempty"`
 	// RSAEKCert is whether the TPM holds an RSA EK certificate, the only
 	// one SPIRE's tpm_devid agent reads.
 	RSAEKCert      bool      `json:"rsa_ek_cert"`
 	LDevIDSerial   string    `json:"ldevid_serial,omitempty"`
 	LDevIDNotAfter time.Time `json:"ldevid_not_after,omitzero"`
-	LAKSerial      string    `json:"lak_serial,omitempty"`
-	AttestedAt     time.Time `json:"attested_at,omitzero"`
-	Confirmed      bool      `json:"confirmed,omitempty"`
-	NVIndexes      []uint32  `json:"nv_indexes,omitempty"`
+	// LDevIDNotBefore is the certificate's CA-signed issue time: what orders
+	// one attestation of a serial against another, since a peer's clock is
+	// not trusted.
+	LDevIDNotBefore time.Time `json:"ldevid_not_before,omitzero"`
+	LAKSerial       string    `json:"lak_serial,omitempty"`
+	AttestedAt      time.Time `json:"attested_at,omitzero"`
+	Confirmed       bool      `json:"confirmed,omitempty"`
+	NVIndexes       []uint32  `json:"nv_indexes,omitempty"`
 	// BootApplications are the Authenticode digests PCR 4 recorded after
 	// its separator, for pinning in the policy.
 	BootApplications []string  `json:"boot_applications,omitempty"`
@@ -55,6 +72,9 @@ func (r Record) Issued() bool { return r.Status == StatusAttested }
 type Store struct {
 	dir string
 	mu  sync.Mutex
+	// PendingMax caps the claims that wait for approval; the oldest give way.
+	// 50 when zero.
+	PendingMax int
 }
 
 // Files a machine directory holds after a pass.
@@ -78,7 +98,14 @@ func OpenStore(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
-func (s *Store) machineDir(name string) string { return filepath.Join(s.dir, "machines", name) }
+// machineDir is a machine's directory. A name is one path element: a
+// claimed hostname or serial never reaches the filesystem as a path.
+func (s *Store) machineDir(name string) (string, error) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return "", fmt.Errorf("machine name %q is not one path element", name)
+	}
+	return filepath.Join(s.dir, "machines", name), nil
+}
 
 func writeAtomic(path string, b []byte, mode fs.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
@@ -112,7 +139,11 @@ func (s *Store) Record(name string) (Record, bool, error) {
 }
 
 func (s *Store) record(name string) (Record, bool, error) {
-	b, err := os.ReadFile(filepath.Join(s.machineDir(name), "record.json"))
+	dir, err := s.machineDir(name)
+	if err != nil {
+		return Record{}, false, err
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "record.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return Record{}, false, nil
 	}
@@ -127,11 +158,15 @@ func (s *Store) record(name string) (Record, bool, error) {
 }
 
 // Save writes a record and its files together; files are written first, so
-// a record never names files that are missing.
+// a record never names files that are missing. Only an authenticated
+// session, or a peer's verified pass, reaches it.
 func (s *Store) Save(r Record, files map[string][]byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	dir := s.machineDir(r.Machine)
+	dir, err := s.machineDir(r.Machine)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
@@ -155,18 +190,215 @@ func (s *Store) Save(r Record, files map[string][]byte) error {
 	return writeAtomic(filepath.Join(dir, "record.json"), append(b, '\n'), 0o640)
 }
 
+// Issued is when the record's LDevID was issued, by its certificate, or
+// the attestation time for a record from before that was kept.
+func (r Record) IssuedAt() time.Time {
+	if !r.LDevIDNotBefore.IsZero() {
+		return r.LDevIDNotBefore
+	}
+	return r.AttestedAt
+}
+
+// NewestIssueFor is the latest LDevID issue time among every record of
+// serial, and false when this anchor holds none.
+func (s *Store) NewestIssueFor(serial string) (time.Time, bool, error) {
+	recs, err := s.Records()
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	var newest time.Time
+	found := false
+	for _, r := range recs {
+		if serialKey(r.Serial) == serialKey(serial) && (!found || r.IssuedAt().After(newest)) {
+			newest, found = r.IssuedAt(), true
+		}
+	}
+	return newest, found, nil
+}
+
+// RetireOthers removes every other machine directory that holds serial: the
+// machine was renamed, in NetBox or from its intake name, and one serial has
+// one record. Only a pass calls it, since the pass proved the serial's TPM.
+func (s *Store) RetireOthers(serial, keep string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recs, err := s.records()
+	if err != nil {
+		return err
+	}
+	for _, old := range recs {
+		if old.Machine == keep || serialKey(old.Serial) != serialKey(serial) {
+			continue
+		}
+		oldDir, err := s.machineDir(old.Machine)
+		if err != nil {
+			return err
+		}
+		if err := os.RemoveAll(oldDir); err != nil {
+			return fmt.Errorf("retire %s's old record: %w", old.Machine, err)
+		}
+	}
+	return nil
+}
+
+// Pending is a first intake that waits for the owner: the EK hashes a
+// machine claimed for a serial, before anything proved them. It lives apart
+// from the machine records, keyed by serial, so a claim never touches an
+// identity.
+type Pending struct {
+	Serial    string            `json:"serial"`
+	Machine   string            `json:"machine,omitempty"`
+	MAC       string            `json:"mac,omitempty"`
+	UUID      string            `json:"uuid,omitempty"`
+	EKHashes  map[string]string `json:"ek_hashes"`
+	EKIssuers []string          `json:"ek_issuers,omitempty"`
+	Detail    string            `json:"detail,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+func (s *Store) pendingPath(serial string) string {
+	return filepath.Join(s.dir, "pending", serialSlug(serial)+".json")
+}
+
+// SavePending writes the claim that waits for approval.
+func (s *Store) SavePending(p Pending) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(filepath.Join(s.dir, "pending"), 0o750); err != nil {
+		return err
+	}
+	p.Serial = serialKey(p.Serial)
+	// The store holds at most PendingMax claims: anyone can make one, so the
+	// oldest give way to the newest, and this serial's own file is the one
+	// it replaces.
+	limit := s.PendingMax
+	if limit <= 0 {
+		limit = 50
+	}
+	existing, err := s.pendings()
+	if err != nil {
+		return err
+	}
+	others := existing[:0]
+	for _, e := range existing {
+		if serialKey(e.Serial) != p.Serial {
+			others = append(others, e)
+		}
+	}
+	sort.Slice(others, func(i, j int) bool { return others[i].UpdatedAt.Before(others[j].UpdatedAt) })
+	for len(others) >= limit {
+		if err := os.Remove(s.pendingPath(others[0].Serial)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		others = others[1:]
+	}
+	b, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(s.pendingPath(p.Serial), append(b, '\n'), 0o640)
+}
+
+// Pending returns the claim that waits for serial, and false when none does.
+// Two serials can share a slug, so the file's own serial must match.
+func (s *Store) Pending(serial string) (Pending, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := os.ReadFile(s.pendingPath(serial))
+	if errors.Is(err, fs.ErrNotExist) {
+		return Pending{}, false, nil
+	}
+	if err != nil {
+		return Pending{}, false, err
+	}
+	var p Pending
+	if err := json.Unmarshal(b, &p); err != nil {
+		return Pending{}, false, fmt.Errorf("pending %s: %w", serial, err)
+	}
+	if serialKey(p.Serial) != serialKey(serial) {
+		return Pending{}, false, nil
+	}
+	return p, true, nil
+}
+
+// Pendings lists every claim that waits.
+func (s *Store) Pendings() ([]Pending, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pendings()
+}
+
+func (s *Store) pendings() ([]Pending, error) {
+	entries, err := os.ReadDir(filepath.Join(s.dir, "pending"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []Pending
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(s.dir, "pending", e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		var p Pending
+		if err := json.Unmarshal(b, &p); err != nil {
+			return nil, fmt.Errorf("pending %s: %w", e.Name(), err)
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Serial < out[j].Serial })
+	return out, nil
+}
+
+// ClearPending forgets the claim for serial, after a pass or an approval.
+func (s *Store) ClearPending(serial string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.Remove(s.pendingPath(serial)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // File returns one of a machine's served files.
 func (s *Store) File(name, file string) ([]byte, error) {
 	if !slices.Contains(ServedFiles, file) {
 		return nil, fs.ErrNotExist
 	}
-	return os.ReadFile(filepath.Join(s.machineDir(name), file))
+	dir, err := s.machineDir(name)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(dir, file))
+}
+
+// RecordBySerial finds the newest record whose machine has serial, and
+// false when this anchor holds none.
+func (s *Store) RecordBySerial(serial string) (Record, bool, error) {
+	recs, err := s.Records()
+	if err != nil {
+		return Record{}, false, err
+	}
+	var out Record
+	found := false
+	for _, r := range recs {
+		if serialKey(r.Serial) == serialKey(serial) && (!found || r.UpdatedAt.After(out.UpdatedAt)) {
+			out, found = r, true
+		}
+	}
+	return out, found, nil
 }
 
 // Records returns every machine's record.
 func (s *Store) Records() ([]Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.records()
+}
+
+func (s *Store) records() ([]Record, error) {
 	entries, err := os.ReadDir(filepath.Join(s.dir, "machines"))
 	if err != nil {
 		return nil, err

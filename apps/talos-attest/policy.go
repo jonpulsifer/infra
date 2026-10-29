@@ -39,6 +39,10 @@ type Policy struct {
 	// RequiredAuthorities must each have verified a boot application: the
 	// one that signs HookOS proves the attest ran in HookOS.
 	RequiredAuthorities []string `yaml:"required_authorities"`
+	// RenewRequiredAuthorities replaces RequiredAuthorities for a renewal
+	// from the running node, whose boot application is the Talos UKI, not
+	// HookOS. Empty requires none; Authorities still bounds them.
+	RenewRequiredAuthorities []string `yaml:"renew_required_authorities"`
 	// BootApplications, when set, lists the Authenticode SHA-256 of every
 	// boot application PCR 4 may record after the separator.
 	BootApplications []string `yaml:"boot_applications"`
@@ -84,6 +88,16 @@ func (p *Policy) name(fp string) string {
 // Evaluate returns every way the verified events break the policy. The
 // events must come from EventLog.Verify against quoted PCRs.
 func (p *Policy) Evaluate(events []attest.Event) []string {
+	return p.evaluate(events, p.RequiredAuthorities)
+}
+
+// EvaluateRenewal is Evaluate for a running node's boot, which
+// RenewRequiredAuthorities governs instead of RequiredAuthorities.
+func (p *Policy) EvaluateRenewal(events []attest.Event) []string {
+	return p.evaluate(events, p.RenewRequiredAuthorities)
+}
+
+func (p *Policy) evaluate(events []attest.Event, requiredAuthorities []string) []string {
 	var v []string
 	sb, err := attest.ParseSecurebootState(events)
 	if err != nil {
@@ -133,7 +147,7 @@ func (p *Policy) Evaluate(events []attest.Event) []string {
 	only("A pre-separator authority", fps(sb.PreSeparatorAuthority), append(slices.Clone(p.PreSeparatorAuthorities), p.Authorities...))
 	post := fps(sb.PostSeparatorAuthority)
 	only("A boot authority", post, p.Authorities)
-	need("The boot path", post, p.RequiredAuthorities)
+	need("The boot path", post, requiredAuthorities)
 
 	if len(p.BootApplications) > 0 {
 		for _, d := range bootApplications(events) {

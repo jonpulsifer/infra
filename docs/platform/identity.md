@@ -25,7 +25,7 @@ The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
 | `spiffe://lolwtf.ca/node/<name>` | A node alias, one entry for each attestor | `tpm:pub_hash:<hash>`, or `tpm_devid:subject:cn:<name>` |
 | `spiffe://lolwtf.ca/ns/<ns>/sa/<sa>` | A pod, parented to its node's alias | `k8s:ns:<ns>`, `k8s:sa:<sa>` |
 
-The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject CN to the node's name and its serialNumber to the SMBIOS serial. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
+The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject to `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`: the node's name, its SMBIOS serial, NetBox's `talos_class` and the site. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
 
 - Change entries and EK hashes in `tpmNodes` and `workloads` of `nix/hosts/spore.nix` only. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
 - An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no `ekHash` attests only by LDevID.

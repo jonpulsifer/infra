@@ -34,6 +34,9 @@ authorities:
   - de56de1333f9760816058fbc5d02d9ae4295321dbc26341eb266ee35cb6cccc0
 required_authorities:
   - de56de1333f9760816058fbc5d02d9ae4295321dbc26341eb266ee35cb6cccc0
+# A renewal comes from the running node, whose boot application is the Talos UKI, so no authority
+# is required beyond the authorities list above. Name the UKI key here to pin it.
+renew_required_authorities: []
 # Pin the signed iPXE and HookOS UKI by Authenticode SHA-256 once the first HookOS attest shows
 # them (the verdict journal lists each PCR 4 boot application). Empty means not checked.
 boot_applications: []

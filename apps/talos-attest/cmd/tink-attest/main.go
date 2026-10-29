@@ -60,7 +60,18 @@ func main() {
 	timeout := flag.Duration("timeout", 10*time.Minute, "give up after this long")
 	flag.Parse()
 
-	if err := run(*url, *device, *eventLog, protocol.Machine{Serial: *serial, UUID: *uuid, MAC: *mac, Hostname: readTrim("/proc/sys/kernel/hostname")}, *storeNV, *timeout); err != nil {
+	// The SMBIOS facts fill the NetBox device the service creates on first sight.
+	m := protocol.Machine{
+		Serial:       *serial,
+		UUID:         *uuid,
+		MAC:          *mac,
+		Hostname:     readTrim("/proc/sys/kernel/hostname"),
+		Manufacturer: readTrim("/sys/class/dmi/id/sys_vendor"),
+		Model:        readTrim("/sys/class/dmi/id/product_name"),
+		SKU:          readTrim("/sys/class/dmi/id/product_sku"),
+		BIOS:         readTrim("/sys/class/dmi/id/bios_version"),
+	}
+	if err := run(*url, *device, *eventLog, m, *storeNV, *timeout); err != nil {
 		logf("FAILED: %v", err)
 		os.Exit(1)
 	}

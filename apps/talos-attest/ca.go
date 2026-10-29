@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -21,7 +22,16 @@ type CA struct {
 	Chain    []*x509.Certificate
 	key      crypto.Signer
 	Validity time.Duration
-	Org      string
+	// Site is the subject's O of every leaf.
+	Site string
+}
+
+// Subject is what a leaf names: the IEEE 802.1AR DevID subject, with the
+// lifecycle's class as OU and the site as O, so SPIRE can select on either.
+type Subject struct {
+	Machine string
+	Serial  string
+	Class   string
 }
 
 // LoadCA reads the CA's private key and its chain. The chain file holds the
@@ -89,7 +99,7 @@ func NewCA(key crypto.Signer, chain []*x509.Certificate, validity time.Duration)
 	if validity <= 0 {
 		return nil, errors.New("certificate validity must be positive")
 	}
-	return &CA{Cert: ca, Chain: chain, key: key, Validity: validity, Org: "Folly Mountain Laboratories"}, nil
+	return &CA{Cert: ca, Chain: chain, key: key, Validity: validity, Site: "folly"}, nil
 }
 
 func parseKey(b []byte) (crypto.Signer, error) {
@@ -117,10 +127,11 @@ func parseKey(b []byte) (crypto.Signer, error) {
 	return s, nil
 }
 
-// Issue signs a leaf for a TPM-resident key. role is "LDevID" or "LAK"; it
-// becomes the subject's OU. The subject carries the machine's name and its
-// SMBIOS serial, as IEEE 802.1AR names a DevID.
-func (c *CA) Issue(pub crypto.PublicKey, machine, serial, role string, now time.Time) (*x509.Certificate, error) {
+// Issue signs a leaf for a TPM-resident key. role is "LDevID" or "LAK": the
+// LDevID gets the client-auth EKU, the LAK none. The subject is
+// CN=<machine>, serialNumber=<serial>, OU=<class>, O=<site>; OU is left out
+// when the machine has no class yet.
+func (c *CA) Issue(pub crypto.PublicKey, s Subject, role string, now time.Time) (*x509.Certificate, error) {
 	sn, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
 	if err != nil {
 		return nil, err
@@ -129,14 +140,17 @@ func (c *CA) Issue(pub crypto.PublicKey, machine, serial, role string, now time.
 	if notAfter.After(c.Cert.NotAfter) {
 		notAfter = c.Cert.NotAfter
 	}
+	name := pkix.Name{
+		CommonName:   s.Machine,
+		SerialNumber: s.Serial,
+		Organization: []string{c.Site},
+	}
+	if s.Class != "" {
+		name.OrganizationalUnit = []string{s.Class}
+	}
 	tmpl := &x509.Certificate{
-		SerialNumber: sn,
-		Subject: pkix.Name{
-			CommonName:         machine,
-			SerialNumber:       serial,
-			Organization:       []string{c.Org},
-			OrganizationalUnit: []string{role},
-		},
+		SerialNumber:          sn,
+		Subject:               name,
 		NotBefore:             now.Add(-5 * time.Minute),
 		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
@@ -150,6 +164,35 @@ func (c *CA) Issue(pub crypto.PublicKey, machine, serial, role string, now time.
 		return nil, err
 	}
 	return x509.ParseCertificate(der)
+}
+
+// VerifyLeaf parses the first certificate of a PEM chain and checks that
+// this CA issued it, that it chains to the root and is valid at now, and
+// that it names machine and serial.
+func (c *CA) VerifyLeaf(pemChain, machine, serial string, now time.Time) (*x509.Certificate, error) {
+	blk, _ := pem.Decode([]byte(pemChain))
+	if blk == nil || blk.Type != "CERTIFICATE" {
+		return nil, errors.New("no PEM certificate")
+	}
+	leaf, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	roots, intermediates := x509.NewCertPool(), x509.NewCertPool()
+	roots.AddCert(c.Chain[len(c.Chain)-1])
+	for _, cert := range c.Chain[:len(c.Chain)-1] {
+		intermediates.AddCert(cert)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}, CurrentTime: now}); err != nil {
+		return nil, err
+	}
+	if err := leaf.CheckSignatureFrom(c.Cert); err != nil {
+		return nil, fmt.Errorf("not issued by %s: %w", c.Cert.Subject.CommonName, err)
+	}
+	if leaf.Subject.CommonName != machine || !strings.EqualFold(strings.TrimSpace(leaf.Subject.SerialNumber), strings.TrimSpace(serial)) {
+		return nil, fmt.Errorf("names %s %s, not %s %s", leaf.Subject.CommonName, leaf.Subject.SerialNumber, machine, serial)
+	}
+	return leaf, nil
 }
 
 // ChainPEM is the DevID CA up to the root.

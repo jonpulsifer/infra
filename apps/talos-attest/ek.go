@@ -164,10 +164,13 @@ func (r *EKRoots) Verify(ek protocol.EK, now time.Time) (VerifiedEK, error) {
 	return v, nil
 }
 
-// Failure is a refusal with a stable reason, recorded in a verdict.
+// Failure is a refusal with a stable reason. Unauthenticated marks one that
+// nothing the machine's TPM signed led to; it is answered as a refusal and
+// recorded against no machine.
 type Failure struct {
-	Reason string
-	Detail string
+	Reason          string
+	Detail          string
+	Unauthenticated bool
 }
 
 func (f *Failure) Error() string { return f.Reason + ": " + f.Detail }
@@ -202,6 +205,12 @@ const (
 	reasonEventLog       = "event-log"
 	reasonPolicy         = "policy"
 	reasonLDevID         = "ldevid"
+	reasonStatus         = "status"
+	reasonPeer           = "peer-verdict"
+	reasonNetBox         = "netbox-unavailable"
+	reasonSerial         = "invalid-serial"
+	reasonIntakeRate     = "intake-rate"
+	reasonApproval       = "approval"
 	reasonInternal       = "internal"
 )
 
