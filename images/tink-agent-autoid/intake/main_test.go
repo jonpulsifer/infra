@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -170,7 +171,41 @@ func server(t *testing.T, statuses ...int) (*httptest.Server, *atomic.Int32, cha
 }
 
 func testPoster(log io.Writer) poster {
-	return poster{client: &http.Client{Timeout: time.Second}, backoff: time.Millisecond, log: log}
+	return newPoster(time.Second, time.Millisecond, log)
+}
+
+func TestSendNeverFollowsARedirect(t *testing.T) {
+	for _, code := range []int{http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		elsewhere, elsewhereCalls, _ := server(t, http.StatusCreated)
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			http.Redirect(w, r, elsewhere.URL, code)
+		}))
+		t.Cleanup(srv.Close)
+		var log bytes.Buffer
+		if testPoster(&log).send(srv.URL, []byte("{}")) {
+			t.Errorf("send reported success on a %d", code)
+		}
+		if calls.Load() != 1 || elsewhereCalls.Load() != 0 {
+			t.Errorf("on a %d: %d requests, %d to the redirect target; want 1 and 0", code, calls.Load(), elsewhereCalls.Load())
+		}
+		if !strings.Contains(log.String(), "HTTP "+strconv.Itoa(code)) {
+			t.Errorf("log lacks the %d:\n%s", code, log.String())
+		}
+	}
+}
+
+func TestSendRefusesAURLThatMakesNoRequest(t *testing.T) {
+	for _, url := range []string{"ftp://enroll.example.test/fleet/intake", "enroll.example.test/fleet/intake", "http://[::1"} {
+		var log bytes.Buffer
+		if testPoster(&log).send(url, []byte("{}")) {
+			t.Errorf("send(%q) reported success", url)
+		}
+		if strings.Contains(log.String(), "attempt") {
+			t.Errorf("send(%q) made an attempt:\n%s", url, log.String())
+		}
+	}
 }
 
 func TestSendRetriesAServerErrorAndLogsOnlyStatuses(t *testing.T) {

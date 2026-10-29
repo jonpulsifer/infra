@@ -12,6 +12,7 @@ if [ -z "$ID" ]; then
     $B sleep 2
   done
   if [ -z "$dev" ]; then
+    # hook-bootkit starts the container once and never again, so this boot runs no agent.
     echo "autoid: no default route after 30 seconds" >&2
     exit 1
   fi

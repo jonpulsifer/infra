@@ -62,8 +62,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "fleet-intake: posting %s's facts to %s\n", facts.MAC, url)
-	p := poster{client: &http.Client{Timeout: timeout}, backoff: time.Second, log: os.Stderr}
-	if !p.send(url, body) {
+	if !newPoster(timeout, time.Second, os.Stderr).send(url, body) {
 		os.Exit(1)
 	}
 }
@@ -174,9 +173,26 @@ type poster struct {
 	log     io.Writer
 }
 
+// newPoster follows no redirect, so a 307 or 308 never sends the facts to another host or over
+// plain HTTP; the 3xx is the answer.
+func newPoster(timeout, backoff time.Duration, log io.Writer) poster {
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	return poster{client: client, backoff: backoff, log: log}
+}
+
 // send posts once and retries a transport error or a 5xx, doubling the wait each time. Any other
-// answer is final: a 4xx says the controller will not take this machine now.
+// answer is final: a 3xx is never followed, and a 4xx says the controller will not take this
+// machine now. A URL that cannot make a request is final before the first attempt.
 func (p poster) send(url string, body []byte) bool {
+	if _, err := request(url, body); err != nil {
+		fmt.Fprintf(p.log, "fleet-intake: %v\n", err)
+		return false
+	}
 	wait := p.backoff
 	for attempt := 1; ; attempt++ {
 		status, err := p.post(url, body)
@@ -196,12 +212,23 @@ func (p poster) send(url string, body []byte) bool {
 	}
 }
 
+func request(rawURL string, body []byte) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodPost, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.Host == "" {
+		return nil, fmt.Errorf("%q is not an http or https URL", rawURL)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
+
 func (p poster) post(url string, body []byte) (int, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := request(url, body)
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return 0, err
