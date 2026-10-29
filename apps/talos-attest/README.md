@@ -76,7 +76,7 @@ costs nothing.
 | --- | --- |
 | `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname and SMBIOS manufacturer, model, SKU and BIOS, its EKs (DER public key and the NV certificate) and a new AK with its creation proof. Finds the machine in NetBox, else in the inventory; a serial NetBox never saw gets its device once activation succeeds. Refuses a `failed`, `decommissioning` or `offline` device. Checks each EK certificate against `roots/`, refuses a ROCA-weak RSA EK, matches the MAC and the EK pins, and answers a session, a 32-byte nonce and one credential challenge per EK. A `planned` device with no pin passes the pin check when every EK has a manufacturer certificate. |
 | `POST /v1/attest/{session}/evidence` | Takes each activated secret, a quote over PCRs 0 to 7 qualified by the nonce, the PCR values, the event log, the LDevID key certified by the AK with the nonce, and both keys' blobs. Checks them, replays the log, applies `policy.yaml`, and issues the LDevID and LAK certificates with the subject `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. |
-| `POST /v1/attest/{session}/confirm` | Records that the machine stored the certificates and the NV indexes it used, and answers `{status, install_code}`; `install_code` is present only as [Install code](#install-code) says |
+| `POST /v1/attest/{session}/confirm` | Takes the NV indexes the machine used and `signature`, the session's AK signing SHA-256 over the nonce and `confirm` (a TPMT_SIGNATURE, ECDSA). A missing or wrong signature is 403 `refused` and leaves the session open. Records the confirm and answers `{status}`, with the install code wrapped to the TPM as [Install code](#install-code) says |
 | `GET /devid/{serial}` | The LDevID of the newest verdict, if it is a pass: `node`, `serial`, `ldevid_cert_pem` (leaf then DevID CA), `lak_cert_pem`, `chain_pem`, `ldevid_pub_blob_b64` (TPMT_PUBLIC), `ldevid_priv_blob_b64` (TPM2B_PRIVATE without its size), `ak_pub_blob_b64`, `ak_priv_blob_b64`, `srk`, `ek_hashes`, `rsa_ek_cert`, `attested_at`, `confirmed`. 404 otherwise. |
 | `GET /devid/{serial}/{file}` | One of `ldevid.crt`, `lak.crt`, `chain.pem`, `ldevid.pub`, `ldevid.priv`, `ak.pub`, `ak.priv`, raw |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at}` with status `attested` or `quarantined`; 404 with status `unknown` for no verdict or a pending first intake. With NetBox, the device's `attest_verdict`, `last_attested`, `talos_class` and `attest_consumed_at` answer, and the anchors' record of the same attestation fills in `uuid` and `rsa_ek_cert`. |
@@ -95,22 +95,27 @@ It is 404 with no LDevID on file and 403 when the device's status forbids it.
 
 ## Install code
 
-With `FLEET_RENDER_URL` set, the confirm of an intake pass, never of a
-renewal, mints 32 random bytes as base64url without padding and posts
-`{serial, uuid, node, class, code}` to the controller, with
-`X-Fleet-Signature` set to HMAC-SHA512 hex over the body. `uuid` is the
-session's SMBIOS UUID, lower-cased; a session with none renders nothing.
-On 201 the answer carries the code as `install_code`. On any other answer,
-or none, the answer has no code and one `attest.install` audit line says
-why; the pass stands either way. The code is never logged.
+With `FLEET_RENDER_URL` set, the signed confirm of an intake pass, never of
+a renewal, mints 32 random bytes; the code is their base64url without
+padding. The service posts `{serial, uuid, node, class, code}` to the
+controller with `X-Fleet-Signature` set to HMAC-SHA512 hex over the body,
+and follows no redirect. `uuid` is the session's SMBIOS UUID, lower-cased,
+and must read as 8-4-4-4-12 hex, or nothing is rendered. On 201 the answer
+carries the code wrapped to the session's TPM, never in the clear:
+`install_code_ek_hash`, `install_code_credential` and `install_code_secret`
+are TPM2_MakeCredential output for that EK, bound to the session's AK, with
+the 32 bytes as the credential. On any other answer, or none, the answer has
+no code and one `attest.install` audit line gives the status; the pass
+stands either way. The code is never logged.
 
-`tink-attest` writes a code it receives to `-install-code` (`INSTALL_CODE_FILE`,
-default `/tmp/fleet/install_code`), mode 0600 in a directory of mode 0700,
-for the install action that follows, and logs that it did without the value.
-With no code it removes a code an earlier run left there.
+`tink-attest` recovers the bytes with TPM2_ActivateCredential under the same
+AK and writes the code to `-install-code` (`INSTALL_CODE_FILE`, default
+`/tmp/fleet/install_code`), mode 0600, for the install action that follows;
+a directory it creates gets mode 0700. It logs that it wrote the code,
+without the value, and with no code it removes a code an earlier run left.
 
-An intake pass also writes the session's SMBIOS UUID to the device's `smbios_uuid`,
-once NetBox defines that field (`scripts/netbox-seed.sh`).
+An intake pass also writes the validated SMBIOS UUID to the device's
+`smbios_uuid`, once NetBox defines that field (`scripts/netbox-seed.sh`).
 
 ## Audit
 

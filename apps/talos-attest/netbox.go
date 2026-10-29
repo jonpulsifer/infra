@@ -484,8 +484,8 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 			// fleet-controller keys the config file by this UUID. NetBox
 			// refuses a custom field it does not define, so the verdict
 			// never waits for scripts/netbox-seed.sh to add it.
-			if r.UUID != "" && d.CustomFields.SMBIOSUUID != nil {
-				fields["smbios_uuid"] = strings.ToLower(r.UUID)
+			if u, ok := smbiosUUID(r.UUID); ok && d.CustomFields.SMBIOSUUID != nil {
+				fields["smbios_uuid"] = u
 			}
 		}
 		if d.Status.Value == statusPlanned {

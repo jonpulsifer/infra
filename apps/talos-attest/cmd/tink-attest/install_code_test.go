@@ -10,9 +10,6 @@ import (
 
 func TestWriteInstallCode(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "fleet")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join(dir, "install_code")
 	for _, code := range []string{"first-code", "second-code"} {
 		if err := writeInstallCode(path, code); err != nil {
@@ -39,5 +36,23 @@ func TestWriteInstallCode(t *testing.T) {
 	}
 	if err := removeInstallCode(path); err != nil {
 		t.Fatalf("removing no code: %v", err)
+	}
+}
+
+// A directory that exists, such as a mount, keeps its mode.
+func TestWriteInstallCodeKeepsAnExistingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "install_code")
+	if err := writeInstallCode(path, "code"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(dir); st.Mode().Perm() != 0o750 {
+		t.Fatalf("the existing directory became %v", st.Mode().Perm())
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+		t.Fatalf("the code is %v", st.Mode().Perm())
 	}
 }

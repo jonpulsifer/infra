@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/x509"
@@ -326,6 +327,18 @@ func ekSummary(eks []VerifiedEK) string {
 	return strings.Join(parts, " ")
 }
 
+// peekSession finds a session without taking it, so a request that fails its
+// checks leaves the session for the machine that owns it.
+func (v *Verifier) peekSession(id string, passed bool) (*session, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	s, ok := v.sessions[id]
+	if !ok || v.Now().After(s.expires) || s.passed != passed {
+		return nil, false
+	}
+	return s, true
+}
+
 // takeSession removes a session so no two requests use it at once; a pass
 // puts it back for the confirm.
 func (v *Verifier) takeSession(id string, passed bool) (*session, bool) {
@@ -630,12 +643,20 @@ func (v *Verifier) checkLDevID(s *session, certified protocol.Certified, blobs p
 	return key, nil
 }
 
-// Confirm records that the host stored its certificates. After an intake
-// pass, with Fleet set, the answer carries an install code once
-// fleet-controller has rendered the config; without one the pass stands.
+// Confirm records that the host stored its certificates. The session's AK
+// must sign the confirm: a request without that proof is refused and leaves
+// the session open. After an intake pass, with Fleet set, the answer carries
+// the install code wrapped to the TPM once fleet-controller has rendered the
+// config; without one the pass stands.
 func (v *Verifier) Confirm(ctx context.Context, id string, req protocol.ConfirmRequest) (protocol.ConfirmResponse, error) {
-	s, ok := v.takeSession(id, true)
+	s, ok := v.peekSession(id, true)
 	if !ok {
+		return protocol.ConfirmResponse{}, fail(reasonSession, "no passed session %q", id)
+	}
+	if err := confirmSigned(s, req.Signature); err != nil {
+		return protocol.ConfirmResponse{}, v.reject(&s.machine, s.claim, err)
+	}
+	if s, ok = v.takeSession(id, true); !ok {
 		return protocol.ConfirmResponse{}, fail(reasonSession, "no passed session %q", id)
 	}
 	rec, found, err := v.Store.Record(s.machine.Name)
@@ -656,9 +677,28 @@ func (v *Verifier) Confirm(ctx context.Context, id string, req protocol.ConfirmR
 	v.changed()
 	resp := protocol.ConfirmResponse{Status: "confirmed"}
 	if v.Fleet != nil && s.renew == nil && rec.EKProven {
-		resp.InstallCode = v.installCode(ctx, rec)
+		if c, ok := v.installCode(ctx, rec, s); ok {
+			resp.InstallCodeEKHash, resp.InstallCodeCredential, resp.InstallCodeSecret = c.EKHash, c.Credential, c.Secret
+		}
 	}
 	return resp, nil
+}
+
+// confirmSigned checks that the session's AK signed ConfirmDigest of its
+// nonce with ECDSA over SHA-256, as AKTemplate prescribes.
+func confirmSigned(s *session, raw []byte) error {
+	if len(raw) == 0 {
+		return fail(reasonConfirm, "the confirm carries no AK signature")
+	}
+	sig, err := tpm2.DecodeSignature(bytes.NewBuffer(raw))
+	if err != nil || sig.Alg != tpm2.AlgECDSA || sig.ECC == nil || sig.ECC.HashAlg != tpm2.AlgSHA256 {
+		return fail(reasonConfirm, "the confirm's signature is not ECDSA over SHA-256")
+	}
+	pub, ok := s.ak.Public.(*ecdsa.PublicKey)
+	if !ok || !ecdsa.Verify(pub, protocol.ConfirmDigest(s.nonce), sig.ECC.R, sig.ECC.S) {
+		return fail(reasonConfirm, "the confirm is not signed by the session's AK")
+	}
+	return nil
 }
 
 // RenewStart opens a renewal: a quote nonce for the machine whose LAK is on

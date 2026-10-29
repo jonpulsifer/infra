@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -181,6 +182,8 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 	if err != nil {
 		return nil, fmt.Errorf("certify LDevID key: %w", err)
 	}
+	// The AK and an EK are all the confirm needs loaded.
+	flush(ld)
 	evidence.LDevID = protocol.Certified{Public: ldPub, Attestation: certAttest, Signature: certSig}
 	evidence.LDevIDBlobs = protocol.Blobs{Public: ldPub, Private: ldPriv}
 	evidence.AKBlobs = protocol.Blobs{Public: akPub, Private: akPriv}
@@ -204,12 +207,39 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		}
 		logf("certificates stored at NV %#x and %#x", protocol.NVLDevIDCert, protocol.NVLAKCert)
 	}
-	confirm := protocol.ConfirmRequest{NVIndexes: res.NVIndexes}
+	// The device flow is plain HTTP: the AK's signature is what lets this
+	// machine, and no one who saw the session, confirm it.
+	digest, ticket, err := tpm2.Hash(rw, tpm2.AlgSHA256, append(append([]byte{}, started.Nonce...), protocol.ConfirmLabel...), tpm2.HandleOwner)
+	if err != nil {
+		return res, fmt.Errorf("hash the confirm: %w", err)
+	}
+	confirmSig, err := tpm2.Sign(rw, ak, "", digest, ticket, &scheme)
+	if err != nil {
+		return res, fmt.Errorf("sign the confirm: %w", err)
+	}
+	rawConfirmSig, err := confirmSig.Encode()
+	if err != nil {
+		return res, err
+	}
+	confirm := protocol.ConfirmRequest{NVIndexes: res.NVIndexes, Signature: rawConfirmSig}
 	var confirmed protocol.ConfirmResponse
 	if err := post(ctx, cfg, strings.Replace(protocol.PathConfirm, "{session}", started.Session, 1), confirm, &confirmed); err != nil {
 		return res, err
 	}
-	res.InstallCode = confirmed.InstallCode
+	if len(confirmed.InstallCodeCredential) == 0 {
+		return res, nil
+	}
+	// The install code comes wrapped to this TPM; only the AK here opens it.
+	i := indexOf(eks, confirmed.InstallCodeEKHash)
+	if i < 0 {
+		return res, fmt.Errorf("the install code is wrapped to an EK this TPM did not send: %s", confirmed.InstallCodeEKHash)
+	}
+	code, err := activate(rw, ak, eks[i].template, protocol.Challenge{Credential: confirmed.InstallCodeCredential, Secret: confirmed.InstallCodeSecret})
+	if err != nil {
+		return res, fmt.Errorf("unwrap the install code: %w", err)
+	}
+	res.InstallCode = base64.RawURLEncoding.EncodeToString(code)
+	logf("install code unwrapped with the %s EK", eks[i].alg)
 	return res, nil
 }
 

@@ -135,7 +135,7 @@ func run(log *slog.Logger) error {
 		if secret = []byte(strings.TrimSpace(string(secret))); len(secret) == 0 {
 			return errors.New("FLEET_RENDER_URL is set but the fleet secret is empty")
 		}
-		v.Fleet = &FleetRender{URL: u, Secret: secret, Client: &http.Client{Timeout: renderTimeout}}
+		v.Fleet = NewFleetRender(u, secret)
 		log.Info("intake passes get an install code from fleet-controller", "url", u)
 	}
 	if path := os.Getenv("ATTEST_METRICS_FILE"); path != "" {

@@ -34,10 +34,19 @@ let
     else
       sealed "devid-ca-key" && builtins.pathExists softwareChain;
   netbox = sealed "netbox-token";
+  # Whether key is in the top-level block of this anchor's sops file; the block ends at the first
+  # line that is not indented.
+  sealedIn =
+    block: key:
+    let
+      after = lib.splitString "\n${block}:\n" secrets;
+      body =
+        if lib.length after < 2 then "" else lib.head (builtins.split "\n[^ ]" ("\n" + lib.elemAt after 1));
+    in
+    lib.hasInfix "\n    ${key}:" body;
   # The HMAC key that signs an intake pass's render request to fleet-controller on spore, which
-  # renders the config the install code fetches. The coordinator seals it on every anchor.
-  fleetRender =
-    lib.hasInfix "\nfleet-controller:\n" secrets && lib.hasInfix "\n    attest-secret:" secrets;
+  # renders the config the install code fetches. Nothing is wired until the sops file holds it.
+  fleetRender = sealedIn "fleet-controller" "attest-secret";
   # ./fleet-controller.nix's webhookPort on spore, which also serves /render.
   fleetControllerPort = 8446;
 

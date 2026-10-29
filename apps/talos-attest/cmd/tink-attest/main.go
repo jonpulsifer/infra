@@ -137,15 +137,20 @@ func run(url, device, eventLog string, m protocol.Machine, storeNV bool, install
 	return nil
 }
 
-// writeInstallCode leaves code in path, mode 0600, in a directory of mode
-// 0700, for the install action that follows. The rename keeps a reader from
+// writeInstallCode leaves code in path, mode 0600, for the install action
+// that follows. A directory it creates gets mode 0700; one that exists, such
+// as the Template's mount, keeps its own. The rename keeps a reader from
 // seeing half a code.
 func writeInstallCode(path, code string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	} else if err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(dir, ".install_code-*")
