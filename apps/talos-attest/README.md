@@ -96,6 +96,28 @@ Every decision is one JSON line on stdout, beside the structured log:
 `{event, site, node, serial, class, status, approver, reason, ts}`
 with `event` one of `attest.verdict`, `attest.issue` and `attest.renew`.
 
+## Renewal
+
+`tink-attest renew` runs on a running node, in the `tpm-reattest` DaemonSet
+of `clusters/folly/apps/spire/`. It reads the LDevID and LAK certificates from
+NV, and exits 0 while the LDevID expires in more than `-renew-before`
+(default `720h`), or when NV holds neither certificate. NV that holds the LAK
+and no LDevID, or an index that holds no certificate, counts as due; any
+other TPM error fails the run. Otherwise it loads the LAK and
+LDevID blobs that `GET /devid/{serial}` serves, and drives the renewal routes
+on `ATTEST_URL`, the DevID listener: `POST /v1/renew` with `{serial}`, then
+`POST /v1/renew/{session}/evidence` with `{quote, pcrs, event_log, ldevid}`,
+a LAK quote over PCRs 0 to 7 and the LDevID key certified by the LAK, both
+qualified by the nonce.
+
+Each certificate in the answer must chain to a CA in `-ca-bundle`, certify
+the key NV and the blobs name, and carry the machine's name and serial; the
+routes are plain HTTP. It writes the LAK certificate to NV first, then the
+LDevID, and with `-restart-selector` deletes the pods the selector picks in
+`-restart-namespace` on `NODE_NAME`, failing when none matches. `-every`
+repeats it, and `-retry` sets the wait after a failed run. `protocol.go` holds
+the types.
+
 ## Admin routes
 
 Every route requires `Tailscale-User-Login` in `ATTEST_APPROVERS`.
@@ -116,5 +138,7 @@ CGO_ENABLED=1 go test -race ./...   # with gcc and libssl-dev: the software-TPM 
 go-tpm-tools' simulator, with its PCRs replaying `testdata/riptide-eventlog.bin`,
 and covers a pass and each refusal. `sim_fleet_test.go` covers a planned
 machine, NetBox as the system of record and a renewal, and `netbox_test.go`
-holds the in-memory NetBox they use. `testdata/` holds riptide's and optiplex's
+holds the in-memory NetBox they use. `renew_sim_test.go` drives
+`client.Renew` on the same simulator against a stand-in for the renewal routes
+that checks the LAK quote and the certification. `testdata/` holds riptide's and optiplex's
 event logs and EK certificates as read from the machines.

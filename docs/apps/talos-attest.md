@@ -42,6 +42,8 @@ From the running node, a renewal asks `POST /v1/renew` for a nonce, quotes with 
 
 Every decision is one JSON line on stdout with `event` set to `attest.verdict`, `attest.issue` or `attest.renew`, and the site, node, serial, class, status, approver and reason.
 
+On a running node, `tink-attest renew` in the DaemonSet `tpm-reattest` renews the LDevID from 30 days before its expiry, with a quote that the LAK signs, through `POST /v1/renew` and `POST /v1/renew/{session}/evidence` on the DevID listener. [Identity](../platform/identity.md#renewal) has the steps.
+
 ## Operate
 
 | Alert | Meaning | Runbook |
@@ -49,13 +51,14 @@ Every decision is one JSON line on stdout with `event` set to `attest.verdict`, 
 | `TalosAttestQuarantined` | A machine's newest verdict is a refusal | [Attest a node](../runbooks/attest-a-node.md) |
 | `TalosAttestWaitingForApproval` | A first intake waits for the owner | [Attest a node](../runbooks/attest-a-node.md) |
 | `TalosAttestNotServing` | An anchor's talos-attest does not answer | [Attest a node](../runbooks/attest-a-node.md) |
-| `TalosAttestLDevIDExpiring` | An LDevID expires within 30 days | [Attest a node](../runbooks/attest-a-node.md) |
+| `TalosAttestLDevIDExpiring` | An LDevID expires within 23 days, after a week of failed renewals | [Add a TPM node to SPIRE](../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
 
 ## Reference
 
 - Source, HTTP contract and Nix package: `apps/talos-attest/`
 - Anchors: `nix/services/talos-attest.nix`
 - Template: the `attest` action of `clusters/folly/tinkerbell/template.yaml`
+- Renewal: `clusters/folly/apps/spire/tpm-reattest.yaml`
 - Alerts: `clusters/folly/monitoring/anchor-vips.yaml`
 - DevID CAs: `terraform/pki/devid.tf` and `terraform/pki/devid-ca.tf`
 - Token signer: `packages/pkcs11signer`

@@ -216,3 +216,24 @@ tests:
             exp_annotations:
               message: "optiplex failed attestation and is quarantined"
               description: "talos-attest refused optiplex on forge, and its LDevID is withdrawn. Read the reason in GET /machines on the anchor's admin API or in /var/lib/talos-attest/verdicts.jsonl, as docs/runbooks/attest-a-node.md says."
+
+  # spore issued riptide's first LDevID, which nears its expiry, and capsule served the renewal: the
+  # newest expiry counts, so no alert. optiplex's only LDevID, on forge, expires within 23 days.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_ldevid_expiry_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 86400x80
+      - series: 'talos_attest_ldevid_expiry_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 7776000x80
+      - series: 'talos_attest_ldevid_expiry_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 86400x80
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TalosAttestLDevIDExpiring
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              machine: optiplex
+            exp_annotations:
+              message: "optiplex's LDevID expires within 23 days"
+              description: "tpm-reattest has not renewed optiplex's LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."

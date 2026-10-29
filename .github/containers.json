@@ -85,6 +85,7 @@
       "clusters/folly/talos/netboot.json"
     ],
     "tink-attest": [
+      "clusters/folly/apps/spire/tpm-reattest.yaml",
       "clusters/folly/tinkerbell/template.yaml"
     ],
     "tink-reprovision-tools": [

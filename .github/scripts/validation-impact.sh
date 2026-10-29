@@ -39,6 +39,10 @@ targets() {
       clusters/folly/talos/talos.tf | clusters/folly/talos/netboot.json | clusters/folly/talos/secureboot/* | .github/scripts/talos-uki-verify.sh)
         target_set["nix:flake-check"]=1
         ;;
+      # spore's SPIRE node aliases and the anchors' talos-attest read NetBox's export.
+      clusters/folly/inventory/machines.yaml)
+        target_set["nix:flake-check"]=1
+        ;;
     esac
 
     case "$path" in

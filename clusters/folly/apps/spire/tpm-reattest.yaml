@@ -1,0 +1,189 @@
+---
+# Renews each TPM node's LDevID before it expires. A CronJob cannot pin one pod
+# to each node, so a DaemonSet runs `tink-attest renew -every 24h`: when the
+# LDevID in NV 0x01c90000 expires within 30 days, it signs a quote over PCRs 0
+# to 7 and the event log with the LAK, has the attest service certify the
+# LDevID key again on its DevID listener, stores the new certificate in NV, and
+# deletes the node's spire-agent pod, whose devid-init then fetches the new
+# certificate. The answer must chain to a DevID CA in spire-devid-ca
+# (devid-ca.yaml). TalosAttestLDevIDExpiring is the backstop.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tpm-reattest
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: tpm-reattest
+    app.kubernetes.io/part-of: spire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tpm-reattest
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: tpm-reattest
+    app.kubernetes.io/part-of: spire
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tpm-reattest
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: tpm-reattest
+    app.kubernetes.io/part-of: spire
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tpm-reattest
+subjects:
+  - kind: ServiceAccount
+    name: tpm-reattest
+    namespace: spire
+---
+# RBAC cannot name a DaemonSet's pods, so this narrows the Role's delete to the
+# spire-agent pod on the caller's own node. A pod's bound token names its node
+# in the authentication.kubernetes.io/node-name extra.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tpm-reattest
+  labels:
+    app.kubernetes.io/name: tpm-reattest
+    app.kubernetes.io/part-of: spire
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: tpm-reattest
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:spire:tpm-reattest"
+  validations:
+    - expression: >-
+        has(oldObject.metadata.labels) &&
+        'app.kubernetes.io/name' in oldObject.metadata.labels &&
+        oldObject.metadata.labels['app.kubernetes.io/name'] == 'spire-agent'
+      reason: Forbidden
+      message: tpm-reattest may delete only spire-agent pods.
+    - expression: >-
+        has(request.userInfo.extra) &&
+        'authentication.kubernetes.io/node-name' in request.userInfo.extra &&
+        has(oldObject.spec.nodeName) &&
+        oldObject.spec.nodeName in request.userInfo.extra['authentication.kubernetes.io/node-name']
+      reason: Forbidden
+      message: tpm-reattest may delete only the pod on its own node.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tpm-reattest
+  labels:
+    app.kubernetes.io/name: tpm-reattest
+    app.kubernetes.io/part-of: spire
+spec:
+  policyName: tpm-reattest
+  validationActions: [Deny]
+  matchResources: {}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tpm-reattest
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: tpm-reattest
+    app.kubernetes.io/part-of: spire
+  annotations:
+    configmap.reloader.stakater.com/reload: spire-attest
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tpm-reattest
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tpm-reattest
+        app.kubernetes.io/part-of: spire
+    spec:
+      serviceAccountName: tpm-reattest
+      # The nodes the spire-agent DaemonSet runs on.
+      nodeSelector:
+        lolwtf.ca/tpm: "true"
+      containers:
+        - name: renew
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # whole `ghcr.io/…/tink-attest@sha256:` string, so keep it one literal.
+          image: ghcr.io/jonpulsifer/tink-attest@sha256:c595f4ffff44fc22838975491cda4a9bb7d6dcb5b2607b398e026acad4cd4699
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/tink-attest"]
+          # Each run reads the CA bundle again, so a rotated CA needs no restart.
+          args:
+            - renew
+            - -every=24h
+            - -retry=1h
+            - -renew-before=720h
+            - -ca-bundle=/etc/devid-ca/devid-ca.pem
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # The anchors' DevID listener, which the agents' devid-init reads.
+            - name: ATTEST_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: spire-attest
+                  key: ATTEST_URL
+            - name: RESTART_NAMESPACE
+              value: spire
+            - name: RESTART_SELECTOR
+              value: app.kubernetes.io/name=spire-agent
+          # The device cgroup refuses /dev/tpmrm0 to anything less than
+          # privileged, and the node, the NV indexes and product_serial are
+          # root's.
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: tpmrm0
+              mountPath: /dev/tpmrm0
+            # The TCG event log of this boot, for the quote's replay.
+            - name: securityfs
+              mountPath: /sys/kernel/security
+              readOnly: true
+            # The issuing DevID CAs, which a renewed certificate must chain to.
+            - name: devid-ca
+              mountPath: /etc/devid-ca
+              readOnly: true
+      volumes:
+        - name: devid-ca
+          configMap:
+            name: spire-devid-ca
+        - name: tpmrm0
+          hostPath:
+            path: /dev/tpmrm0
+            type: CharDevice
+        - name: securityfs
+          hostPath:
+            path: /sys/kernel/security
+            type: Directory
