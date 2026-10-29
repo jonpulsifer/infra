@@ -45,6 +45,7 @@ type harness struct {
 	eventLog []byte
 	hashes   map[string]string
 	tamper   func(*protocol.EvidenceRequest)
+	audit    strings.Builder
 }
 
 type harnessOpts struct {
@@ -52,11 +53,16 @@ type harnessOpts struct {
 	policy     func(*Policy)
 	inventory  func(rsa, ecc string) string
 	foreignMfr bool
+	// netbox makes the fake NetBox the system of record.
+	netbox *fakeNetBox
 }
 
 func defaultInventory(rsa, ecc string) string {
-	return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n    tpm: \"2.0\"\n    ek_hash: %s\n    ek_hash_ecc: %s\n", simSerial, simMAC, rsa, ecc)
+	return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n    tpm: \"2.0\"\n    class: worker-g5\n    ek_hash: %s\n    ek_hash_ecc: %s\n", simSerial, simMAC, rsa, ecc)
 }
+
+// simClaim is what the simulated machine says about itself.
+var simClaim = protocol.Machine{Serial: simSerial, UUID: "4c4c4544-0000-0000-0000-000000000000", MAC: simMAC, Hostname: "testbox", Manufacturer: "Test", Model: "Test Box", SKU: "TB-1", BIOS: "1.0"}
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
 	t.Helper()
@@ -129,7 +135,13 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	}
 	h.v = &Verifier{
 		Inventory: inv, Roots: roots, Policy: policy, CA: devIDCA(t), Store: store,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, SessionTTL: time.Minute,
+		Audit: &Audit{W: &h.audit, Site: "folly"},
+		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, SessionTTL: time.Minute,
+	}
+	if o.netbox != nil {
+		nb := o.netbox.client()
+		h.v.NetBox = nb
+		h.v.Recorders = append(h.v.Recorders, nb)
 	}
 	h.srv = &Server{V: h.v, Log: h.v.Log, Approvers: map[string]bool{"owner@example.com": true}, Client: http.DefaultClient}
 	h.ts = httptest.NewServer(h.tamperEvidence(h.srv.Public()))
@@ -168,9 +180,11 @@ func (h *harness) tamperEvidence(next http.Handler) http.Handler {
 }
 
 func (h *harness) run(serial, mac string) (*client.Result, error) {
+	claim := simClaim
+	claim.Serial, claim.MAC = serial, mac
 	return client.Run(context.Background(), h.sim, client.Config{
 		BaseURL:  h.ts.URL,
-		Machine:  protocol.Machine{Serial: serial, UUID: "4c4c4544-0000-0000-0000-000000000000", MAC: mac},
+		Machine:  claim,
 		EventLog: h.eventLog,
 		StoreNV:  true,
 	})
@@ -199,8 +213,13 @@ func TestAttestPassesAndServesTheDevID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ldevid.Subject.CommonName != "testbox" || ldevid.Subject.SerialNumber != simSerial {
+	// The subject contract: CN=<node>, serialNumber=<serial>, OU=<class>, O=<site>.
+	if ldevid.Subject.CommonName != "testbox" || ldevid.Subject.SerialNumber != simSerial ||
+		strings.Join(ldevid.Subject.OrganizationalUnit, ",") != "worker-g5" || strings.Join(ldevid.Subject.Organization, ",") != "folly" {
 		t.Fatalf("LDevID subject %s", ldevid.Subject)
+	}
+	if !strings.Contains(h.audit.String(), `"event":"attest.issue"`) || !strings.Contains(h.audit.String(), `"event":"attest.verdict","site":"folly","node":"testbox","serial":"SIM-0001","class":"worker-g5","status":"pass"`) {
+		t.Fatalf("audit lines:\n%s", h.audit.String())
 	}
 
 	rec, ok, err := h.v.Store.Record("testbox")
@@ -273,16 +292,20 @@ func TestAttestPassesAndServesTheDevID(t *testing.T) {
 	peer := httptest.NewServer(h.srv.DevIDHandler())
 	defer peer.Close()
 	emptyStore, _ := OpenStore(t.TempDir())
-	other := &Server{V: &Verifier{Inventory: h.v.Inventory, Store: emptyStore, Log: h.v.Log}, Log: h.v.Log, Peers: []string{peer.URL}, Client: http.DefaultClient}
+	other := &Server{V: &Verifier{Inventory: h.v.Inventory, Store: emptyStore, CA: h.v.CA, Now: time.Now, Log: h.v.Log}, Log: h.v.Log, Peers: []string{peer.URL}, Client: http.DefaultClient}
 	rr := httptest.NewRecorder()
+	other.DevIDHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/devid/"+simSerial+"?local=1", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("a local-only lookup asked its peers: %d", rr.Code)
+	}
+	rr = httptest.NewRecorder()
 	other.DevIDHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/devid/"+simSerial, nil))
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "testbox") {
 		t.Fatalf("peer lookup: %d %s", rr.Code, rr.Body.String())
 	}
-	rr = httptest.NewRecorder()
-	other.DevIDHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/devid/"+simSerial+"?local=1", nil))
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("a local-only lookup asked its peers: %d", rr.Code)
+	// The peer's pass verified against the CA, so this anchor keeps it as its own.
+	if kept, ok, _ := emptyStore.Record("testbox"); !ok || kept.LDevIDSerial != rec.LDevIDSerial {
+		t.Fatalf("the verified peer pass was not adopted: %+v %v", kept, ok)
 	}
 
 	metrics, err := h.v.Metrics()
@@ -299,21 +322,23 @@ func TestAttestPassesAndServesTheDevID(t *testing.T) {
 func TestAttestRefusals(t *testing.T) {
 	flip := func(b []byte) { b[len(b)-1] ^= 0xff }
 	cases := []struct {
-		name    string
-		opts    harnessOpts
-		serial  string
-		mac     string
-		tamper  func(*protocol.EvidenceRequest)
-		reason  string
-		noStore bool
+		name   string
+		opts   harnessOpts
+		serial string
+		mac    string
+		tamper func(*protocol.EvidenceRequest)
+		reason string
+		// refused marks a check that nothing the TPM signed led to: the
+		// answer is a refusal, and no record is written.
+		refused bool
 	}{
-		{name: "unknown serial", serial: "NOT-IN-INVENTORY", reason: reasonUnknownMachine, noStore: true},
-		{name: "MAC is not the inventory's", mac: "02:00:00:00:00:99", reason: reasonMACMismatch},
+		{name: "unknown serial", serial: "NOT-IN-INVENTORY", reason: reasonUnknownMachine, refused: true},
+		{name: "MAC is not the inventory's", mac: "02:00:00:00:00:99", reason: reasonMACMismatch, refused: true},
 		{name: "EK hash differs from the inventory", opts: harnessOpts{inventory: func(_, ecc string) string {
 			return defaultInventory(strings.Repeat("0", 64), ecc)
-		}}, reason: reasonEKHash},
-		{name: "EK certificate from an unpinned maker", opts: harnessOpts{foreignMfr: true}, reason: reasonEKChain},
-		{name: "credential not activated", tamper: func(r *protocol.EvidenceRequest) { r.Activated[0].Secret = make([]byte, 32) }, reason: reasonActivation},
+		}}, reason: reasonEKHash, refused: true},
+		{name: "EK certificate from an unpinned maker", opts: harnessOpts{foreignMfr: true}, reason: reasonEKChain, refused: true},
+		{name: "credential not activated", tamper: func(r *protocol.EvidenceRequest) { r.Activated[0].Secret = make([]byte, 32) }, reason: reasonActivation, refused: true},
 		{name: "quote signature forged", tamper: func(r *protocol.EvidenceRequest) { flip(r.Quote.Signature) }, reason: reasonQuote},
 		{name: "PCR value is not the quoted one", tamper: func(r *protocol.EvidenceRequest) { flip(r.PCRs[4].Digest) }, reason: reasonQuote},
 		{name: "event log from another boot", tamper: func(r *protocol.EvidenceRequest) {
@@ -341,16 +366,26 @@ func TestAttestRefusals(t *testing.T) {
 			if !errors.As(err, &refused) {
 				t.Fatalf("got %v, want a refusal", err)
 			}
-			if refused.Status != http.StatusForbidden || refused.Verdict.Verdict != protocol.VerdictQuarantine || refused.Verdict.Reason != c.reason {
-				t.Fatalf("refusal %d %+v, want %s", refused.Status, refused.Verdict, c.reason)
+			want := protocol.VerdictQuarantine
+			if c.refused {
+				want = protocol.VerdictRefused
+			}
+			if refused.Status != http.StatusForbidden || refused.Verdict.Verdict != want || refused.Verdict.Reason != c.reason {
+				t.Fatalf("refusal %d %+v, want %s %s", refused.Status, refused.Verdict, want, c.reason)
 			}
 			rec, ok, err := h.v.Store.Record("testbox")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.noStore {
+			if c.refused {
 				if ok {
-					t.Fatalf("an unknown machine got a record: %+v", rec)
+					t.Fatalf("an unauthenticated refusal wrote a record: %+v", rec)
+				}
+				if code, _ := h.get("/verdict/" + simSerial); code != http.StatusNotFound {
+					t.Fatalf("an unauthenticated refusal made a verdict: %d", code)
+				}
+				if !strings.Contains(h.audit.String(), `"status":"refused"`) {
+					t.Fatalf("no audit line for the refusal:\n%s", h.audit.String())
 				}
 				return
 			}
@@ -367,21 +402,21 @@ func TestAttestRefusals(t *testing.T) {
 	}
 }
 
-type fixedPin string
-
-func (p fixedPin) EKHash(context.Context, string) (string, error) { return string(p), nil }
-
-// With no hash in git, NetBox's ek_hash pins the RSA EK.
+// With no hash in git, NetBox's ek_hash pins the RSA EK, and the inventory's
+// ECC pin still applies beside it.
 func TestNetBoxPinsTheEK(t *testing.T) {
-	bare := func(_, _ string) string {
-		return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n", simSerial, simMAC)
+	bare := func(_, ecc string) string {
+		return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n    ek_hash_ecc: %s\n", simSerial, simMAC, ecc)
 	}
-	h := newHarness(t, harnessOpts{inventory: bare})
-	h.v.Pins = fixedPin(h.hashes["rsa"])
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: bare, netbox: f})
+	f.add("testbox", simSerial, "staged", simMAC, map[string]any{"ek_hash": h.hashes["rsa"]})
 	if res, err := h.run(simSerial, simMAC); err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 		t.Fatalf("pinned by NetBox: %v", err)
 	}
-	h.v.Pins = fixedPin(strings.Repeat("ab", 32))
+	// The pass's recorder writes the pins back; let it land before the owner's edit.
+	f.settled(t, simSerial, 2)
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["ek_hash"] = strings.Repeat("ab", 32) })
 	_, err := h.run(simSerial, simMAC)
 	var refused *client.RefusedError
 	if !errors.As(err, &refused) || refused.Verdict.Reason != reasonEKHash {
@@ -398,9 +433,16 @@ func TestFirstIntakeWaitsForApproval(t *testing.T) {
 	if !errors.As(err, &refused) || refused.Verdict.Verdict != protocol.VerdictPending {
 		t.Fatalf("first intake: %v", err)
 	}
-	rec, _, _ := h.v.Store.Record("testbox")
-	if rec.Status != StatusPending || rec.EKHashes["rsa"] != h.hashes["rsa"] {
-		t.Fatalf("pending record %+v", rec)
+	// The claim waits apart from the machine records: nothing is written for testbox.
+	if _, ok, _ := h.v.Store.Record("testbox"); ok {
+		t.Fatal("a first intake's claim wrote a machine record")
+	}
+	p, ok, _ := h.v.Store.Pending(simSerial)
+	if !ok || p.EKHashes["rsa"] != h.hashes["rsa"] || p.Machine != "testbox" {
+		t.Fatalf("pending claim %+v %v", p, ok)
+	}
+	if metrics, _ := h.v.Metrics(); !strings.Contains(metrics, `talos_attest_machine_status{machine="testbox",status="pending-approval"} 1`) {
+		t.Fatalf("metrics without the pending claim:\n%s", metrics)
 	}
 
 	// The owner approves over the tailnet admin API.
@@ -411,14 +453,28 @@ func TestFirstIntakeWaitsForApproval(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("an approval without a tailnet login answered %d", rr.Code)
 	}
+	// The owner names the hashes: a pending record is a claim, and another
+	// machine may have replaced it since the owner read GET /machines.
+	for _, body := range []string{`{"serial":"` + simSerial + `"}`, `{"serial":"` + simSerial + `","ek_hashes":["` + strings.Repeat("ab", 32) + `"]}`} {
+		rr = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(body))
+		req.Header.Set("Tailscale-User-Login", "Owner@example.com")
+		admin.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("an approval that does not name the pending hashes answered %d %s", rr.Code, rr.Body.String())
+		}
+	}
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(`{"serial":"`+simSerial+`"}`))
+	req = httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(`{"serial":"`+simSerial+`","ek_hashes":["`+h.hashes["rsa"]+`","`+h.hashes["ecc"]+`"]}`))
 	req.Header.Set("Tailscale-User-Login", "Owner@example.com")
 	admin.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("approve: %d %s", rr.Code, rr.Body.String())
 	}
 
+	if _, ok, _ := h.v.Store.Pending(simSerial); ok {
+		t.Fatal("the claim still waits after approval")
+	}
 	res, err := h.run(simSerial, simMAC)
 	if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 		t.Fatalf("after approval: %v", err)

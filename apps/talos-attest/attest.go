@@ -6,7 +6,9 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -28,37 +30,40 @@ type Recorder interface {
 	Record(ctx context.Context, r Record) error
 }
 
-// PinSource knows a machine's RSA EK hash outside git, as NetBox's ek_hash
-// does. A failure to ask it counts as no pin, so the machine waits for the
-// owner's approval rather than passing.
-type PinSource interface {
-	EKHash(ctx context.Context, serial string) (string, error)
-}
-
 // Verifier runs the attestation: EK chain and inventory at start, then
 // credential activation, quote, event-log policy and the LDevID's
-// certification at evidence, then issue.
+// certification at evidence, then issue. A renewal from the running node
+// repeats the quote and the policy against the LAK on file.
 type Verifier struct {
-	Inventory  *Inventory
+	// Inventory is machines.yaml: the only source without NetBox, and the
+	// source of a pin or a class NetBox lacks with it.
+	Inventory *Inventory
+	// NetBox, when set, is the system of record: it names the machine, its
+	// class and its lifecycle, and gets a device for a serial it never saw.
+	NetBox     *NetBox
 	Roots      *EKRoots
 	Policy     *Policy
 	CA         *CA
 	Store      *Store
 	Recorders  []Recorder
-	Pins       PinSource
+	Audit      *Audit
 	Log        *slog.Logger
 	Now        func() time.Time
 	SessionTTL time.Duration
+	// IntakePerHour caps the NetBox devices created on first sight; 10 when zero.
+	IntakePerHour int
 	// OnChange runs after any record changes, to refresh the metrics file.
 	OnChange func()
 
 	mu       sync.Mutex
 	sessions map[string]*session
 	verdicts map[[2]string]uint64
+	intakes  map[string]time.Time
+	creating map[string]*sync.Mutex
 }
 
 type session struct {
-	machine  InventoryMachine
+	machine  Machine
 	claim    protocol.Machine
 	eks      []VerifiedEK
 	akPublic []byte
@@ -67,6 +72,11 @@ type session struct {
 	secrets  map[string][]byte
 	expires  time.Time
 	passed   bool
+	// A renewal's session carries the record it renews and the blobs on
+	// file, which it keeps serving, instead of EKs and secrets.
+	renew   *Record
+	akBlobs protocol.Blobs
+	ldBlobs protocol.Blobs
 }
 
 func (v *Verifier) random(n int) []byte {
@@ -81,34 +91,56 @@ func (v *Verifier) random(n int) []byte {
 // credential challenge per EK and the quote nonce.
 func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protocol.StartResponse, error) {
 	now := v.Now()
-	m, ok := v.Inventory.BySerial(req.Machine.Serial)
+	if !validSerial(req.Machine.Serial) {
+		return protocol.StartResponse{}, v.reject(nil, req.Machine, fail(reasonSerial, "the serial must be 1 to 64 printable ASCII characters"))
+	}
+	req.Machine.Serial = serialKey(req.Machine.Serial)
+	m, ok, err := v.lookupMachine(ctx, req.Machine.Serial)
+	if err != nil {
+		return protocol.StartResponse{}, v.reject(nil, req.Machine, err)
+	}
 	if !ok {
-		return protocol.StartResponse{}, v.refuse(ctx, nil, req.Machine, nil, fail(reasonUnknownMachine, "no inventory machine has serial %q", req.Machine.Serial))
+		if v.NetBox == nil {
+			return protocol.StartResponse{}, v.reject(nil, req.Machine, fail(reasonUnknownMachine, "no inventory machine has serial %q", req.Machine.Serial))
+		}
+		// NetBox answered that it has no such device. Nothing is created
+		// for a claim: the device comes into being once the machine's TPM
+		// activates a credential, in Evidence.
+		m = Machine{Name: intakeName(req.Machine), Serial: req.Machine.Serial, FromNetBox: true}
+	}
+	if m.blocked() {
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", m.Name, m.Status))
 	}
 	if m.MAC != "" && normalMAC(req.Machine.MAC) != normalMAC(m.MAC) {
-		return protocol.StartResponse{}, v.refuse(ctx, &m, req.Machine, nil, fail(reasonMACMismatch, "MAC %q is not %s's", req.Machine.MAC, m.Name))
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonMACMismatch, "MAC %q is not %s's", req.Machine.MAC, m.Name))
 	}
 	if len(req.EKs) == 0 || len(req.EKs) > 2 {
-		return protocol.StartResponse{}, v.refuse(ctx, &m, req.Machine, nil, fail(reasonEKMissing, "%d EKs; send the RSA EK, the ECC EK or both", len(req.EKs)))
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonEKMissing, "%d EKs; send the RSA EK, the ECC EK or both", len(req.EKs)))
 	}
 	var eks []VerifiedEK
 	for _, e := range req.EKs {
 		ek, err := v.Roots.Verify(e, now)
 		if err != nil {
-			return protocol.StartResponse{}, v.refuse(ctx, &m, req.Machine, eks, err)
+			return protocol.StartResponse{}, v.reject(&m, req.Machine, err)
 		}
 		if slices.ContainsFunc(eks, func(o VerifiedEK) bool { return o.Alg == ek.Alg }) {
-			return protocol.StartResponse{}, v.refuse(ctx, &m, req.Machine, eks, fail(reasonEKMissing, "two %s EKs", ek.Alg))
+			return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonEKMissing, "two %s EKs", ek.Alg))
 		}
 		eks = append(eks, ek)
 	}
-	if err := v.checkPinned(ctx, m, eks); err != nil {
-		return protocol.StartResponse{}, v.refuse(ctx, &m, req.Machine, eks, err)
+	if err := v.checkPinned(m, eks); err != nil {
+		// A first intake's wait is kept apart from the machine records, as
+		// the claim it is, for the owner to approve. Nothing proved any of
+		// these refusals came from the machine, so none touches a record.
+		if reasonOf(err) == reasonEKPending {
+			return protocol.StartResponse{}, v.pend(ctx, m, req.Machine, eks, err)
+		}
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, err)
 	}
 
 	akPub, err := attest.ParseAKPublic(req.AK.Public)
 	if err != nil {
-		return protocol.StartResponse{}, v.refuse(ctx, &m, req.Machine, eks, fail(reasonAK, "AK public: %v", err))
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonAK, "AK public: %v", err))
 	}
 	s := &session{
 		machine:  m,
@@ -133,53 +165,135 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 		}
 		secret, ec, err := ap.Generate()
 		if err != nil {
-			return protocol.StartResponse{}, v.refuse(ctx, &m, req.Machine, eks, fail(reasonAK, "%v", err))
+			return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonAK, "%v", err))
 		}
 		s.secrets[ek.Hash] = secret
 		resp.Challenges = append(resp.Challenges, protocol.Challenge{EKHash: ek.Hash, Credential: ec.Credential, Secret: ec.Secret})
 	}
-	resp.Session = hex.EncodeToString(v.random(16))
+	resp.Session = v.open(s)
+	v.Log.Info("attestation started", "machine", m.Name, "class", m.Class, "status", m.Status, "eks", ekSummary(eks), "uuid", req.Machine.UUID)
+	return resp, nil
+}
 
+// admitIntake counts a first-sight device creation against IntakePerHour,
+// by the EK that activated a credential, and reports whether this one may
+// go ahead. A TPM that retries within the hour spends nothing more; a
+// request that never activated spends nothing at all.
+func (v *Verifier) admitIntake(now time.Time, ekHash string) bool {
+	limit := v.IntakePerHour
+	if limit <= 0 {
+		limit = 10
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.intakes == nil {
+		v.intakes = map[string]time.Time{}
+	}
+	for h, t := range v.intakes {
+		if now.Sub(t) >= time.Hour {
+			delete(v.intakes, h)
+		}
+	}
+	if _, seen := v.intakes[ekHash]; seen {
+		return true
+	}
+	if len(v.intakes) >= limit {
+		return false
+	}
+	v.intakes[ekHash] = now
+	return true
+}
+
+// pend keeps a first intake's claim for the owner to approve, apart from
+// the machine records: a claim proved nothing, so it never writes or
+// replaces an identity. NetBox is told only when the device has no pass.
+func (v *Verifier) pend(ctx context.Context, m Machine, claim protocol.Machine, eks []VerifiedEK, err error) error {
+	var f *Failure
+	if !errors.As(err, &f) {
+		return err
+	}
+	p := Pending{Serial: m.Serial, Machine: m.Name, MAC: normalMAC(claim.MAC), UUID: claim.UUID, EKHashes: map[string]string{}, Detail: f.Detail, UpdatedAt: v.Now()}
+	for _, e := range eks {
+		p.EKHashes[e.Alg] = e.Hash
+		if e.Issuer != "" && !slices.Contains(p.EKIssuers, e.Issuer) {
+			p.EKIssuers = append(p.EKIssuers, e.Issuer)
+		}
+	}
+	if serr := v.Store.SavePending(p); serr != nil {
+		v.Log.Error("record pending claim", "serial", m.Serial, "err", serr)
+	}
+	v.Log.Warn("first intake waits for approval", "machine", m.Name, "serial", m.Serial, "eks", ekSummary(eks))
+	v.count(protocol.VerdictPending, f.Reason)
+	v.Audit.Emit(AuditEntry{Event: auditVerdict, Node: m.Name, Serial: m.Serial, Class: m.Class, Status: protocol.VerdictPending, Reason: f.Error()})
+	if jerr := v.Store.Journal(map[string]any{"time": v.Now(), "machine": m.Name, "serial": m.Serial, "mac": claim.MAC, "verdict": protocol.VerdictPending, "reason": f.Reason, "detail": f.Detail, "ek_hashes": p.EKHashes}); jerr != nil {
+		v.Log.Error("journal", "err", jerr)
+	}
+	if v.NetBox != nil && m.NetBoxID != 0 {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		if nerr := v.NetBox.MarkPending(ctx, m.Serial, f.Detail); nerr != nil {
+			v.Log.Warn("NetBox pending note", "serial", m.Serial, "err", nerr)
+		}
+		cancel()
+	}
+	v.changed()
+	return f
+}
+
+// open registers a session under a fresh id, dropping expired ones and any
+// older session of the same machine.
+func (v *Verifier) open(s *session) string {
+	id := hex.EncodeToString(v.random(16))
+	now := v.Now()
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sessions == nil {
 		v.sessions = map[string]*session{}
 	}
-	for id, old := range v.sessions {
-		if now.After(old.expires) || old.machine.Name == m.Name {
-			delete(v.sessions, id)
+	for old, o := range v.sessions {
+		if now.After(o.expires) || o.machine.Name == s.machine.Name {
+			delete(v.sessions, old)
 		}
 	}
-	v.sessions[resp.Session] = s
-	v.Log.Info("attestation started", "machine", m.Name, "eks", ekSummary(eks), "uuid", req.Machine.UUID)
-	return resp, nil
+	v.sessions[id] = s
+	return id
 }
 
-// checkPinned matches the EKs against the hashes git or NetBox pins, or
-// against the owner's approval on first intake. Every EK still has to pass
+// checkPinned matches the EKs against the hashes NetBox or git pins, or
+// against the owner's approval on first intake. A planned machine, one the
+// owner ordered and entered before it arrived, needs no approval when every
+// EK carries a manufacturer certificate: the supply chain vouches for it,
+// and the pass writes its hashes as the pins. Every EK still has to pass
 // activation.
-func (v *Verifier) checkPinned(ctx context.Context, m InventoryMachine, eks []VerifiedEK) error {
-	pinned := m.Pinned()
-	if pinned["rsa"] == "" && v.Pins != nil {
-		h, err := v.Pins.EKHash(ctx, m.Serial)
-		if err != nil {
-			v.Log.Warn("EK pin lookup", "machine", m.Name, "err", err)
-		} else if h != "" {
-			pinned["rsa"] = h
-		}
+func (v *Verifier) checkPinned(m Machine, eks []VerifiedEK) error {
+	pinned := maps.Clone(m.Pins)
+	if pinned == nil {
+		pinned = map[string]string{}
 	}
-	approved := map[string]bool{}
 	if len(pinned) == 0 {
 		a, err := v.Store.Approvals()
 		if err != nil {
 			return fmt.Errorf("approvals: %w", err)
 		}
+		approved := map[string]bool{}
 		for _, h := range a[serialKey(m.Serial)] {
 			approved[h] = true
 		}
+		if len(approved) == 0 && m.FromNetBox && strings.EqualFold(m.Status, statusPlanned) {
+			for _, ek := range eks {
+				if ek.Issuer == "" {
+					return fail(reasonEKPending, "%s is planned, but its %s EK has no manufacturer certificate; approve %s on first intake", m.Name, ek.Alg, ekSummary(eks))
+				}
+			}
+			v.Log.Info("planned machine admitted by its EK certificates", "machine", m.Name, "eks", ekSummary(eks))
+			return nil
+		}
+		if len(approved) == 0 {
+			return fail(reasonEKPending, "%s has no EK hash on record; approve %s on first intake", m.Name, ekSummary(eks))
+		}
+		// Approved hashes are pins: another EK is a mismatch, not a new claim.
 		for _, ek := range eks {
 			if !approved[ek.Hash] {
-				return fail(reasonEKPending, "%s has no EK hash in the inventory; approve %s on first intake", m.Name, ekSummary(eks))
+				return fail(reasonEKHash, "%s EK %s is not among %s's approved hashes", ek.Alg, ek.Hash, m.Name)
 			}
 		}
 		return nil
@@ -187,7 +301,7 @@ func (v *Verifier) checkPinned(ctx context.Context, m InventoryMachine, eks []Ve
 	for alg, want := range pinned {
 		i := slices.IndexFunc(eks, func(e VerifiedEK) bool { return e.Alg == alg })
 		if i < 0 {
-			return fail(reasonEKMissing, "the inventory pins %s's %s EK, which was not sent", m.Name, alg)
+			return fail(reasonEKMissing, "the record pins %s's %s EK, which was not sent", m.Name, alg)
 		}
 		if eks[i].Hash != want {
 			return fail(reasonEKHash, "%s EK %s is not %s's pinned %s", alg, eks[i].Hash, m.Name, want)
@@ -226,54 +340,69 @@ func (v *Verifier) takeSession(id string, passed bool) (*session, bool) {
 // the policy and the LDevID's certification, then issues both certificates.
 func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.EvidenceRequest) (protocol.Verdict, error) {
 	s, ok := v.takeSession(id, false)
-	if !ok {
+	if !ok || s.renew != nil {
 		return protocol.Verdict{}, fail(reasonSession, "no open session %q", id)
 	}
 	refuse := func(err error) (protocol.Verdict, error) {
 		return protocol.Verdict{}, v.refuse(ctx, &s.machine, s.claim, s.eks, err)
 	}
 
+	// Activation is the proof that the AK is in the TPM with the pinned EK.
+	// Before it, nothing is authenticated, and a failure records nothing.
 	for hash, want := range s.secrets {
 		i := slices.IndexFunc(req.Activated, func(a protocol.Activated) bool { return a.EKHash == hash })
 		if i < 0 || subtle.ConstantTimeCompare(req.Activated[i].Secret, want) != 1 {
-			return refuse(fail(reasonActivation, "the credential for EK %s was not activated", hash))
+			return protocol.Verdict{}, v.reject(&s.machine, s.claim, fail(reasonActivation, "the credential for EK %s was not activated", hash))
 		}
 	}
 
-	pcrs, err := v.quotedPCRs(s, req)
-	if err != nil {
-		return refuse(err)
-	}
-	log, err := attest.ParseEventLog(req.EventLog)
-	if err != nil {
-		return refuse(fail(reasonEventLog, "%v", err))
-	}
-	events, err := log.Verify(pcrs)
-	if err != nil {
-		return refuse(fail(reasonEventLog, "the event log does not replay to the quoted PCRs: %v", err))
-	}
-	if violations := v.Policy.Evaluate(events); len(violations) > 0 {
-		return refuse(&Failure{Reason: reasonPolicy, Detail: strings.Join(violations, "; ")})
+	// A machine NetBox never saw gets its device now, on the strength of
+	// the activation, within the hour's cap of new EKs.
+	if v.NetBox != nil && s.machine.NetBoxID == 0 && s.machine.FromNetBox {
+		if !v.admitIntake(v.Now(), s.eks[0].Hash) {
+			return protocol.Verdict{}, v.reject(&s.machine, s.claim, fail(reasonIntakeRate, "too many first-sight devices this hour; try later"))
+		}
+		created, err := v.firstSight(ctx, s.claim)
+		if err != nil {
+			v.Log.Error("NetBox device creation", "serial", s.claim.Serial, "err", err)
+			return protocol.Verdict{}, v.reject(&s.machine, s.claim, fail(reasonNetBox, "the device for serial %q could not be created in NetBox: %v", s.claim.Serial, err))
+		}
+		created.Pins = s.machine.Pins
+		s.machine = created
 	}
 
-	ldevid, err := v.checkLDevID(s, req)
+	pcrs, err := v.quotedPCRs(s, req.Quote, req.PCRs)
+	if err != nil {
+		// A machine with no pin yet, planned or on first sight, is not the
+		// TPM's to quarantine until its quote verifies.
+		if len(s.machine.Pins) == 0 && !v.approvedBefore(s.machine.Serial) {
+			return protocol.Verdict{}, v.reject(&s.machine, s.claim, err)
+		}
+		return refuse(err)
+	}
+	events, err := v.replayBoot(pcrs, req.EventLog, v.Policy.Evaluate)
 	if err != nil {
 		return refuse(err)
+	}
+	ldevid, err := v.checkLDevID(s, req.LDevID, req.LDevIDBlobs)
+	if err != nil {
+		return refuse(err)
+	}
+	if !bytes.Equal(req.AKBlobs.Public, s.akPublic) || len(req.AKBlobs.Private) == 0 {
+		return refuse(fail(reasonLDevID, "the AK blobs are not the activated AK"))
 	}
 
 	now := v.Now()
-	ldevidCert, err := v.CA.Issue(ldevid, s.machine.Name, s.machine.Serial, "LDevID", now)
+	ldevidCert, lakCert, err := v.issue(ldevid, s.ak.Public, s.machine, now)
 	if err != nil {
-		return protocol.Verdict{}, fmt.Errorf("issue LDevID: %w", err)
-	}
-	lakCert, err := v.CA.Issue(s.ak.Public, s.machine.Name, s.machine.Serial, "LAK", now)
-	if err != nil {
-		return protocol.Verdict{}, fmt.Errorf("issue LAK: %w", err)
+		return protocol.Verdict{}, err
 	}
 	rec := v.baseRecord(s.machine, s.claim, s.eks)
 	rec.Status = StatusAttested
+	rec.EKProven = true
 	rec.LDevIDSerial = serialHex(ldevidCert)
 	rec.LDevIDNotAfter = ldevidCert.NotAfter
+	rec.LDevIDNotBefore = ldevidCert.NotBefore
 	rec.LAKSerial = serialHex(lakCert)
 	rec.AttestedAt = now
 	rec.BootApplications = bootApplications(events)
@@ -289,12 +418,30 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	if err := v.Store.Save(rec, files); err != nil {
 		return protocol.Verdict{}, fmt.Errorf("save %s: %w", s.machine.Name, err)
 	}
+	// The pass proved the serial's TPM: one serial has one record, and no
+	// claim waits for it any longer.
+	if err := v.Store.RetireOthers(s.machine.Serial, s.machine.Name); err != nil {
+		v.Log.Warn("retire old records", "machine", s.machine.Name, "err", err)
+	}
+	if err := v.Store.ClearPending(s.machine.Serial); err != nil {
+		v.Log.Warn("clear pending claim", "machine", s.machine.Name, "err", err)
+	}
+	if len(s.machine.Pins) == 0 {
+		// A planned machine's first pass pins it, so the pass stands even
+		// when NetBox's write is late.
+		hashes := make([]string, 0, len(rec.EKHashes))
+		for _, h := range rec.EKHashes {
+			hashes = append(hashes, h)
+		}
+		if err := v.Store.Approve(s.machine.Serial, hashes); err != nil {
+			v.Log.Warn("record pins", "machine", s.machine.Name, "err", err)
+		}
+	}
 	v.mu.Lock()
 	s.passed = true
 	v.sessions[id] = s
 	v.mu.Unlock()
 	v.finish(ctx, rec, protocol.VerdictPass, "", nil)
-
 	chain := make([][]byte, 0, len(v.CA.Chain))
 	for _, c := range v.CA.Chain {
 		chain = append(chain, c.Raw)
@@ -302,17 +449,87 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	return protocol.Verdict{Verdict: protocol.VerdictPass, LDevIDCert: ldevidCert.Raw, LAKCert: lakCert.Raw, Chain: chain}, nil
 }
 
-func (v *Verifier) quotedPCRs(s *session, req protocol.EvidenceRequest) ([]attest.PCR, error) {
+// firstSight creates the NetBox device for a serial NetBox never saw, once
+// per serial at a time: two sessions for one machine, or two anchors' worth
+// of retries landing here, look NetBox up again under the serial's lock and
+// take the device the other made.
+func (v *Verifier) firstSight(ctx context.Context, claim protocol.Machine) (Machine, error) {
+	key := serialKey(claim.Serial)
+	v.mu.Lock()
+	if v.creating == nil {
+		v.creating = map[string]*sync.Mutex{}
+	}
+	mu := v.creating[key]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		v.creating[key] = mu
+	}
+	v.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
+	if m, ok, err := v.NetBox.Lookup(ctx, claim.Serial); err != nil {
+		return Machine{}, err
+	} else if ok {
+		return m, nil
+	}
+	created, err := v.NetBox.Create(ctx, claim)
+	if err != nil {
+		return Machine{}, err
+	}
+	v.Log.Info("NetBox device created on first sight", "machine", created.Name, "serial", created.Serial, "mac", created.MAC)
+	return created, nil
+}
+
+// approvedBefore is whether the owner, or a pass, has pinned the serial's EKs here.
+func (v *Verifier) approvedBefore(serial string) bool {
+	a, err := v.Store.Approvals()
+	return err == nil && len(a[serialKey(serial)]) > 0
+}
+
+// issue signs the LDevID and the LAK for a machine.
+func (v *Verifier) issue(ldevid, ak crypto.PublicKey, m Machine, now time.Time) (*x509.Certificate, *x509.Certificate, error) {
+	subject := Subject{Machine: m.Name, Serial: m.Serial, Class: m.Class}
+	ldevidCert, err := v.CA.Issue(ldevid, subject, "LDevID", now)
+	if err != nil {
+		return nil, nil, fmt.Errorf("issue LDevID: %w", err)
+	}
+	lakCert, err := v.CA.Issue(ak, subject, "LAK", now)
+	if err != nil {
+		return nil, nil, fmt.Errorf("issue LAK: %w", err)
+	}
+	v.Audit.Emit(AuditEntry{Event: auditIssue, Node: m.Name, Serial: m.Serial, Class: m.Class, Status: "issued", Reason: "ldevid " + serialHex(ldevidCert) + " lak " + serialHex(lakCert)})
+	return ldevidCert, lakCert, nil
+}
+
+// replayBoot replays the event log to the quoted PCRs and applies the policy
+// through evaluate. The PCRs come from quotedPCRs, so the log is the TPM's
+// own statement about the boot.
+func (v *Verifier) replayBoot(pcrs []attest.PCR, eventLog []byte, evaluate func([]attest.Event) []string) ([]attest.Event, error) {
+	log, err := attest.ParseEventLog(eventLog)
+	if err != nil {
+		return nil, fail(reasonEventLog, "%v", err)
+	}
+	events, err := log.Verify(pcrs)
+	if err != nil {
+		return nil, fail(reasonEventLog, "the event log does not replay to the quoted PCRs: %v", err)
+	}
+	if violations := evaluate(events); len(violations) > 0 {
+		return nil, &Failure{Reason: reasonPolicy, Detail: strings.Join(violations, "; ")}
+	}
+	return events, nil
+}
+
+func (v *Verifier) quotedPCRs(s *session, quote protocol.Quote, values []protocol.PCR) ([]attest.PCR, error) {
 	var pcrs []attest.PCR
 	seen := map[int]bool{}
-	for _, p := range req.PCRs {
+	for _, p := range values {
 		if seen[p.Index] || len(p.Digest) != crypto.SHA256.Size() {
 			return nil, fail(reasonQuote, "PCR %d is repeated or not SHA-256", p.Index)
 		}
 		seen[p.Index] = true
 		pcrs = append(pcrs, attest.PCR{Index: p.Index, Digest: p.Digest, DigestAlg: crypto.SHA256})
 	}
-	if err := s.ak.Verify(attest.Quote{Quote: req.Quote.Quote, Signature: req.Quote.Signature}, pcrs, s.nonce); err != nil {
+	if err := s.ak.Verify(attest.Quote{Quote: quote.Quote, Signature: quote.Signature}, pcrs, s.nonce); err != nil {
 		return nil, fail(reasonQuote, "%v", err)
 	}
 	for _, want := range v.Policy.PCRs {
@@ -325,25 +542,25 @@ func (v *Verifier) quotedPCRs(s *session, req protocol.EvidenceRequest) ([]attes
 }
 
 // checkLDevID proves the LDevID key is a TPM-made, non-exportable signing
-// key in the same TPM as the AK, certified for this session, and that the
-// blobs the host will keep are the keys it proved.
-func (v *Verifier) checkLDevID(s *session, req protocol.EvidenceRequest) (crypto.PublicKey, error) {
+// key in the same TPM as the session's AK, certified for this session, and
+// that the blobs the host will keep are the key it proved.
+func (v *Verifier) checkLDevID(s *session, certified protocol.Certified, blobs protocol.Blobs) (crypto.PublicKey, error) {
 	cp := attest.CertificationParameters{
-		Public:            req.LDevID.Public,
-		CreateAttestation: req.LDevID.Attestation,
-		CreateSignature:   req.LDevID.Signature,
+		Public:            certified.Public,
+		CreateAttestation: certified.Attestation,
+		CreateSignature:   certified.Signature,
 	}
 	if err := cp.Verify(attest.VerifyOpts{Public: s.ak.Public, Hash: s.ak.Hash}); err != nil {
 		return nil, fail(reasonLDevID, "%v", err)
 	}
-	att, err := tpm2.DecodeAttestationData(req.LDevID.Attestation)
+	att, err := tpm2.DecodeAttestationData(certified.Attestation)
 	if err != nil {
 		return nil, fail(reasonLDevID, "%v", err)
 	}
 	if !bytes.Equal(att.ExtraData, s.nonce) {
 		return nil, fail(reasonLDevID, "the certification is not qualified by this session's nonce")
 	}
-	pub, err := tpm2.DecodePublic(req.LDevID.Public)
+	pub, err := tpm2.DecodePublic(certified.Public)
 	if err != nil {
 		return nil, fail(reasonLDevID, "%v", err)
 	}
@@ -357,11 +574,8 @@ func (v *Verifier) checkLDevID(s *session, req protocol.EvidenceRequest) (crypto
 	if err != nil {
 		return nil, fail(reasonLDevID, "%v", err)
 	}
-	if !bytes.Equal(req.LDevIDBlobs.Public, req.LDevID.Public) || len(req.LDevIDBlobs.Private) == 0 {
+	if !bytes.Equal(blobs.Public, certified.Public) || len(blobs.Private) == 0 {
 		return nil, fail(reasonLDevID, "the LDevID blobs are not the certified key")
-	}
-	if !bytes.Equal(req.AKBlobs.Public, s.akPublic) || len(req.AKBlobs.Private) == 0 {
-		return nil, fail(reasonLDevID, "the AK blobs are not the activated AK")
 	}
 	return key, nil
 }
@@ -391,8 +605,228 @@ func (v *Verifier) Confirm(ctx context.Context, id string, req protocol.ConfirmR
 	return nil
 }
 
-func (v *Verifier) baseRecord(m InventoryMachine, claim protocol.Machine, eks []VerifiedEK) Record {
-	r := Record{Machine: m.Name, Serial: m.Serial, UUID: claim.UUID, MAC: normalMAC(claim.MAC), UpdatedAt: v.Now()}
+// RenewStart opens a renewal: a quote nonce for the machine whose LAK is on
+// file. The caller resolves the DevID, from this anchor or a peer, since the
+// files live where the intake ran.
+func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.DevID) (protocol.RenewStart, error) {
+	m, ok, err := v.lookupMachine(ctx, serial)
+	if err != nil {
+		return protocol.RenewStart{}, v.reject(nil, protocol.Machine{Serial: serial}, err)
+	}
+	if !ok {
+		return protocol.RenewStart{}, fail(reasonUnknownMachine, "no machine has serial %q", serial)
+	}
+	if m.blocked() {
+		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.Status))
+	}
+	// The DevID may have come from a peer over plain HTTP: nothing in it is
+	// trusted until its certificates chain to this CA and name the machine,
+	// and its key blobs are the keys those certificates certify.
+	checked, err := v.VerifyDevID(d, m.Name, m.Serial)
+	if err != nil {
+		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, err)
+	}
+	rec, found, err := v.Store.Record(m.Name)
+	if err != nil {
+		return protocol.RenewStart{}, err
+	}
+	if !found {
+		// This anchor did not run the intake; start a record from the DevID.
+		// Its hashes were proven elsewhere and never become pins from here.
+		rec = Record{Machine: m.Name, Serial: m.Serial, RSAEKCert: d.RSAEKCert, Confirmed: d.Confirmed, EKHashes: hashesByAlg(d)}
+	}
+	rec.EKProven = false
+	now := v.Now()
+	s := &session{
+		machine:  m,
+		claim:    protocol.Machine{Serial: m.Serial, MAC: m.MAC, UUID: rec.UUID},
+		akPublic: d.AKPublic,
+		ak:       checked.AK,
+		nonce:    v.random(32),
+		expires:  now.Add(v.SessionTTL),
+		renew:    &rec,
+		akBlobs:  protocol.Blobs{Public: d.AKPublic, Private: d.AKPrivate},
+		ldBlobs:  protocol.Blobs{Public: d.LDevIDPublic, Private: d.LDevIDPrivate},
+	}
+	id := v.open(s)
+	v.Log.Info("renewal started", "machine", m.Name, "class", m.Class)
+	return protocol.RenewStart{Session: id, Nonce: s.nonce}, nil
+}
+
+// CheckedDevID is what VerifyDevID vouches for.
+type CheckedDevID struct {
+	LDevID *x509.Certificate
+	LAK    *x509.Certificate
+	AK     *attest.AKPublic
+}
+
+// VerifyDevID checks a DevID answer against this CA: both leaves chain to
+// it and are valid now, name the machine and the serial, and keep their
+// roles, the LDevID with the client-auth EKU and the LAK without; the LAK
+// certifies the key in the AK blob, a restricted signing key, and the
+// LDevID certifies the key in the LDevID blob, an unrestricted signing key.
+func (v *Verifier) VerifyDevID(d protocol.DevID, machine, serial string) (CheckedDevID, error) {
+	if d.Machine != machine || serialKey(d.Serial) != serialKey(serial) {
+		return CheckedDevID{}, fail(reasonPeer, "the DevID on file names %s %s, not %s %s", d.Machine, d.Serial, machine, serial)
+	}
+	now := v.Now()
+	ldevid, err := v.CA.VerifyLeaf(d.LDevIDCert, machine, serial, now)
+	if err != nil {
+		return CheckedDevID{}, fail(reasonPeer, "LDevID on file: %v", err)
+	}
+	if !slices.Contains(ldevid.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
+		return CheckedDevID{}, fail(reasonPeer, "the LDevID on file lacks the client-auth key usage; it is not an LDevID")
+	}
+	lak, err := v.CA.VerifyLeaf(d.LAKCert, machine, serial, now)
+	if err != nil {
+		return CheckedDevID{}, fail(reasonPeer, "LAK on file: %v", err)
+	}
+	if len(lak.ExtKeyUsage) != 0 || len(lak.UnknownExtKeyUsage) != 0 {
+		return CheckedDevID{}, fail(reasonPeer, "the LAK on file carries an extended key usage; it is not a LAK")
+	}
+	akPub, err := tpm2.DecodePublic(d.AKPublic)
+	if err != nil {
+		return CheckedDevID{}, fail(reasonPeer, "AK blob on file: %v", err)
+	}
+	if akPub.Attributes&tpm2.FlagRestricted == 0 || akPub.Attributes&tpm2.FlagSign == 0 || akPub.Attributes&tpm2.FlagDecrypt != 0 {
+		return CheckedDevID{}, fail(reasonPeer, "the AK blob on file is not a restricted signing key")
+	}
+	ak, err := attest.ParseAKPublic(d.AKPublic)
+	if err != nil {
+		return CheckedDevID{}, fail(reasonPeer, "AK blob on file: %v", err)
+	}
+	if !sameKey(ak.Public, lak.PublicKey) {
+		return CheckedDevID{}, fail(reasonPeer, "the AK blob on file is not the key the LAK certifies")
+	}
+	ldPub, err := tpm2.DecodePublic(d.LDevIDPublic)
+	if err != nil {
+		return CheckedDevID{}, fail(reasonPeer, "LDevID blob on file: %v", err)
+	}
+	if ldPub.Attributes&tpm2.FlagSign == 0 || ldPub.Attributes&tpm2.FlagRestricted != 0 || ldPub.Attributes&tpm2.FlagDecrypt != 0 {
+		return CheckedDevID{}, fail(reasonPeer, "the LDevID blob on file is not an unrestricted signing key")
+	}
+	ldKey, err := ldPub.Key()
+	if err != nil || !sameKey(ldKey, ldevid.PublicKey) {
+		return CheckedDevID{}, fail(reasonPeer, "the LDevID blob on file is not the key the LDevID certifies")
+	}
+	return CheckedDevID{LDevID: ldevid, LAK: lak, AK: ak}, nil
+}
+
+// RenewAllowed is whether a renewal may be opened for serial at all: the
+// machine must be known and not failed, retired or decommissioning. It is
+// answered before any DevID is looked up, so a blocked machine gets 403.
+func (v *Verifier) RenewAllowed(ctx context.Context, serial string) error {
+	if !validSerial(serial) {
+		return v.reject(nil, protocol.Machine{Serial: serial}, fail(reasonSerial, "the serial must be 1 to 64 printable ASCII characters"))
+	}
+	m, ok, err := v.lookupMachine(ctx, serial)
+	if err != nil {
+		return v.reject(nil, protocol.Machine{Serial: serial}, err)
+	}
+	if ok && m.blocked() {
+		return v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.Status))
+	}
+	return nil
+}
+
+func sameKey(a, b crypto.PublicKey) bool {
+	da, err := x509.MarshalPKIXPublicKey(a)
+	if err != nil {
+		return false
+	}
+	db, err := x509.MarshalPKIXPublicKey(b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(da, db)
+}
+
+// hashesByAlg reads a DevID's EK hashes by algorithm: the keyed field when
+// the peer sent one, else the list in the order localDevID writes it.
+func hashesByAlg(d protocol.DevID) map[string]string {
+	if len(d.EKHashesByAlg) > 0 {
+		return maps.Clone(d.EKHashesByAlg)
+	}
+	if len(d.EKHashes) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	switch {
+	case len(d.EKHashes) == 2:
+		out["rsa"], out["ecc"] = d.EKHashes[0], d.EKHashes[1]
+	case d.RSAEKCert:
+		out["rsa"] = d.EKHashes[0]
+	default:
+		out["ecc"] = d.EKHashes[0]
+	}
+	return out
+}
+
+// RenewEvidence checks a quote signed by the LAK on file and the running
+// boot's event log against the renewal policy, checks that the LAK certified
+// the LDevID key on file, and issues fresh LDevID and LAK certificates for
+// the same keys.
+func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.RenewEvidence) (protocol.Renewed, error) {
+	s, ok := v.takeSession(id, false)
+	if !ok || s.renew == nil {
+		return protocol.Renewed{}, fail(reasonSession, "no open renewal %q", id)
+	}
+	refuse := func(err error) (protocol.Renewed, error) {
+		return protocol.Renewed{}, v.refuse(ctx, &s.machine, s.claim, nil, err)
+	}
+	// Serials are public. Until the LAK's signature over this session's nonce
+	// verifies, nothing says the request came from the machine, and a failure
+	// records nothing: nobody withdraws a node's identity with junk evidence.
+	pcrs, err := v.quotedPCRs(s, req.Quote, req.PCRs)
+	if err != nil {
+		return protocol.Renewed{}, v.reject(&s.machine, s.claim, err)
+	}
+	events, err := v.replayBoot(pcrs, req.EventLog, v.Policy.EvaluateRenewal)
+	if err != nil {
+		return refuse(err)
+	}
+	if !bytes.Equal(req.LDevID.Public, s.ldBlobs.Public) {
+		return refuse(fail(reasonLDevID, "a renewal certifies the LDevID key on file again, not another key; attest from HookOS for a new key"))
+	}
+	ldevid, err := v.checkLDevID(s, req.LDevID, s.ldBlobs)
+	if err != nil {
+		return refuse(err)
+	}
+	now := v.Now()
+	ldevidCert, lakCert, err := v.issue(ldevid, s.ak.Public, s.machine, now)
+	if err != nil {
+		return protocol.Renewed{}, err
+	}
+	rec := *s.renew
+	rec.Status = StatusAttested
+	rec.Reason, rec.Detail = "", nil
+	rec.Class = s.machine.Class
+	rec.LDevIDSerial = serialHex(ldevidCert)
+	rec.LDevIDNotAfter = ldevidCert.NotAfter
+	rec.LDevIDNotBefore = ldevidCert.NotBefore
+	rec.LAKSerial = serialHex(lakCert)
+	rec.AttestedAt = now
+	rec.UpdatedAt = now
+	rec.Renewed = true
+	rec.BootApplications = bootApplications(events)
+	files := map[string][]byte{
+		fileLDevIDCert: v.CA.LeafPEM(ldevidCert),
+		fileLAKCert:    v.CA.LeafPEM(lakCert),
+		fileChain:      v.CA.ChainPEM(),
+		fileLDevIDPub:  s.ldBlobs.Public,
+		fileLDevIDPriv: s.ldBlobs.Private,
+		fileAKPub:      s.akBlobs.Public,
+		fileAKPriv:     s.akBlobs.Private,
+	}
+	if err := v.Store.Save(rec, files); err != nil {
+		return protocol.Renewed{}, fmt.Errorf("save %s: %w", s.machine.Name, err)
+	}
+	v.finish(ctx, rec, protocol.VerdictPass, "", nil)
+	return protocol.Renewed{LDevIDCert: string(v.CA.LeafPEM(ldevidCert)), LAKCert: string(v.CA.LeafPEM(lakCert))}, nil
+}
+
+func (v *Verifier) baseRecord(m Machine, claim protocol.Machine, eks []VerifiedEK) Record {
+	r := Record{Machine: m.Name, Serial: m.Serial, UUID: claim.UUID, MAC: normalMAC(claim.MAC), Class: m.Class, Model: claim.Model, SKU: claim.SKU, BIOS: claim.BIOS, UpdatedAt: v.Now()}
 	if len(eks) > 0 {
 		r.EKHashes = map[string]string{}
 		for _, e := range eks {
@@ -408,31 +842,46 @@ func (v *Verifier) baseRecord(m InventoryMachine, claim protocol.Machine, eks []
 	return r
 }
 
-// refuse records a failed check against the machine, when it is known, and
-// returns err for the caller to send.
-func (v *Verifier) refuse(ctx context.Context, m *InventoryMachine, claim protocol.Machine, eks []VerifiedEK, err error) error {
+// reject refuses a request that proved nothing yet: it is logged, counted,
+// audited and journaled, and it changes no record, so nobody who merely
+// knows a serial withdraws a machine's identity or fails it in NetBox. The
+// answer is a refusal, not a quarantine.
+func (v *Verifier) reject(m *Machine, claim protocol.Machine, err error) error {
+	var f *Failure
+	if !errors.As(err, &f) {
+		return err
+	}
+	f.Unauthenticated = true
+	entry := map[string]any{"time": v.Now(), "serial": claim.Serial, "mac": claim.MAC, "verdict": protocol.VerdictRefused, "reason": f.Reason, "detail": f.Detail}
+	audit := AuditEntry{Event: auditVerdict, Serial: claim.Serial, Status: protocol.VerdictRefused, Reason: f.Error()}
+	if m != nil {
+		entry["machine"] = m.Name
+		audit.Node, audit.Class = m.Name, m.Class
+	}
+	v.Log.Warn("request refused", "machine", audit.Node, "serial", claim.Serial, "mac", claim.MAC, "reason", f.Reason, "err", f.Detail)
+	v.count(protocol.VerdictRefused, f.Reason)
+	v.Audit.Emit(audit)
+	if jerr := v.Store.Journal(entry); jerr != nil {
+		v.Log.Error("journal", "err", jerr)
+	}
+	v.changed()
+	return f
+}
+
+// refuse records a failed check against the machine as its quarantine, and
+// returns err for the caller to send. Only a check the machine's own TPM
+// signed for reaches it.
+func (v *Verifier) refuse(ctx context.Context, m *Machine, claim protocol.Machine, eks []VerifiedEK, err error) error {
 	reason := reasonOf(err)
 	if reason == reasonInternal || reason == reasonSession {
 		return err
 	}
 	verdict := protocol.VerdictQuarantine
-	if reason == reasonEKPending {
-		verdict = protocol.VerdictPending
-	}
-	if m == nil {
-		v.Log.Warn("attestation refused", "serial", claim.Serial, "mac", claim.MAC, "reason", reason, "err", err)
-		v.count(verdict, reason)
-		_ = v.Store.Journal(map[string]any{"time": v.Now(), "serial": claim.Serial, "mac": claim.MAC, "verdict": verdict, "reason": reason, "detail": err.Error()})
-		return err
-	}
 	rec := v.baseRecord(*m, claim, eks)
 	if prev, ok, _ := v.Store.Record(m.Name); ok {
 		rec.AttestedAt = prev.AttestedAt
 	}
 	rec.Status = StatusQuarantined
-	if verdict == protocol.VerdictPending {
-		rec.Status = StatusPending
-	}
 	rec.Reason = reason
 	rec.Detail = []string{err.Error()}
 	if serr := v.Store.Save(rec, nil); serr != nil {
@@ -444,33 +893,41 @@ func (v *Verifier) refuse(ctx context.Context, m *InventoryMachine, claim protoc
 
 func (v *Verifier) finish(ctx context.Context, rec Record, verdict, reason string, err error) {
 	entry := map[string]any{"time": v.Now(), "machine": rec.Machine, "serial": rec.Serial, "verdict": verdict, "ek_hashes": rec.EKHashes}
+	audit := AuditEntry{Event: auditVerdict, Node: rec.Machine, Serial: rec.Serial, Class: rec.Class, Status: verdict}
+	if rec.Renewed {
+		audit.Event = auditRenew
+	}
 	if err != nil {
 		entry["reason"] = reason
 		entry["detail"] = err.Error()
+		audit.Reason = err.Error()
 		v.Log.Warn("attestation refused", "machine", rec.Machine, "verdict", verdict, "reason", reason, "err", err)
 	} else {
 		entry["ldevid_serial"] = rec.LDevIDSerial
 		entry["lak_serial"] = rec.LAKSerial
 		entry["boot_applications"] = rec.BootApplications
-		v.Log.Info("attestation passed", "machine", rec.Machine, "ldevid_serial", rec.LDevIDSerial, "lak_serial", rec.LAKSerial)
+		v.Log.Info("attestation passed", "machine", rec.Machine, "renewed", rec.Renewed, "ldevid_serial", rec.LDevIDSerial, "lak_serial", rec.LAKSerial)
 	}
 	if jerr := v.Store.Journal(entry); jerr != nil {
 		v.Log.Error("journal", "err", jerr)
 	}
+	v.Audit.Emit(audit)
 	v.count(verdict, reason)
 	v.record(ctx, rec)
 	v.changed()
 }
 
+// record writes the verdict to each recorder before the machine gets its
+// answer, so NetBox and the anchors agree in order. A failure is logged;
+// the anchors' own newest verdict then stands, and a quarantine among them
+// beats a stale pass in NetBox.
 func (v *Verifier) record(ctx context.Context, rec Record) {
 	for _, r := range v.Recorders {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-			defer cancel()
-			if err := r.Record(ctx, rec); err != nil {
-				v.Log.Warn("recorder failed", "machine", rec.Machine, "err", err)
-			}
-		}()
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		if err := r.Record(ctx, rec); err != nil {
+			v.Log.Warn("recorder failed", "machine", rec.Machine, "status", rec.Status, "err", err)
+		}
+		cancel()
 	}
 }
 
@@ -496,27 +953,43 @@ func (v *Verifier) Verdicts() map[[2]string]uint64 {
 	return maps.Clone(v.verdicts)
 }
 
-// Approve accepts a pending machine's EK hashes on first intake.
-func (v *Verifier) Approve(serial string) ([]string, error) {
-	m, ok := v.Inventory.BySerial(serial)
-	if !ok {
-		return nil, fail(reasonUnknownMachine, "no inventory machine has serial %q", serial)
+// Approve accepts the EK hashes the owner names for a pending machine on
+// first intake. The owner names them, rather than "whatever is pending",
+// because a pending record is an unauthenticated claim: another machine
+// could have replaced it since the owner read it.
+func (v *Verifier) Approve(ctx context.Context, serial string, hashes []string, approver string) ([]string, error) {
+	if !validSerial(serial) {
+		return nil, fail(reasonSerial, "the serial must be 1 to 64 printable ASCII characters")
 	}
-	rec, found, err := v.Store.Record(m.Name)
+	p, found, err := v.Store.Pending(serial)
 	if err != nil {
 		return nil, err
 	}
-	if !found || rec.Status != StatusPending || len(rec.EKHashes) == 0 {
-		return nil, fail(reasonEKPending, "%s is not waiting for approval", m.Name)
+	if !found || len(p.EKHashes) == 0 || serialKey(p.Serial) != serialKey(serial) {
+		return nil, fail(reasonEKPending, "no first intake waits for serial %s", serial)
 	}
-	hashes := make([]string, 0, len(rec.EKHashes))
-	for _, h := range rec.EKHashes {
-		hashes = append(hashes, h)
+	if len(hashes) == 0 {
+		return nil, fail(reasonApproval, "name the EK hashes to approve, as GET /machines shows them for %s", serial)
+	}
+	pending := map[string]bool{}
+	for _, h := range p.EKHashes {
+		pending[h] = true
+	}
+	for i, h := range hashes {
+		hashes[i] = strings.ToLower(strings.TrimSpace(h))
+		if !pending[hashes[i]] {
+			return nil, fail(reasonApproval, "%s is not among the EK hashes waiting for %s; read GET /machines again", hashes[i], serial)
+		}
 	}
 	sort.Strings(hashes)
-	if err := v.Store.Approve(m.Serial, hashes); err != nil {
+	if err := v.Store.Approve(p.Serial, hashes); err != nil {
 		return nil, err
 	}
-	v.Log.Info("first intake approved", "machine", m.Name, "ek_hashes", hashes)
+	if err := v.Store.ClearPending(p.Serial); err != nil {
+		v.Log.Warn("clear pending claim", "serial", p.Serial, "err", err)
+	}
+	v.Log.Info("first intake approved", "machine", p.Machine, "serial", p.Serial, "ek_hashes", hashes, "approver", approver)
+	v.Audit.Emit(AuditEntry{Event: auditVerdict, Node: p.Machine, Serial: p.Serial, Status: "approved", Approver: approver, Reason: strings.Join(hashes, " ")})
+	v.changed()
 	return hashes, nil
 }

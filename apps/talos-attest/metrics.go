@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var recordStatuses = []string{StatusAttested, StatusQuarantined, StatusPending}
+var recordStatuses = []string{StatusAttested, StatusQuarantined}
 
 // Metrics renders the Prometheus text exposition.
 func (v *Verifier) Metrics() (string, error) {
@@ -22,6 +22,20 @@ func (v *Verifier) Metrics() (string, error) {
 	head := func(name, kind, help string) {
 		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s %s\n", name, help, name, kind)
 	}
+	pendings, err := v.Store.Pendings()
+	if err != nil {
+		return "", err
+	}
+	// A claim that waits for approval is not a machine record; it is
+	// reported under the name the machine claimed, or its serial.
+	pendingNames := map[string]bool{}
+	for _, p := range pendings {
+		name := p.Machine
+		if name == "" {
+			name = p.Serial
+		}
+		pendingNames[name] = true
+	}
 	head("talos_attest_machine_status", "gauge", "1 for each machine's current attestation status.")
 	for _, r := range recs {
 		for _, st := range recordStatuses {
@@ -31,10 +45,28 @@ func (v *Verifier) Metrics() (string, error) {
 			}
 			fmt.Fprintf(&b, "talos_attest_machine_status{machine=%q,status=%q} %d\n", r.Machine, st, val)
 		}
+		delete(pendingNames, r.Machine)
+	}
+	pendingSorted := make([]string, 0, len(pendingNames))
+	for name := range pendingNames {
+		pendingSorted = append(pendingSorted, name)
+	}
+	sort.Strings(pendingSorted)
+	for _, name := range pendingSorted {
+		fmt.Fprintf(&b, "talos_attest_machine_status{machine=%q,status=%q} 1\n", name, StatusPending)
 	}
 	head("talos_attest_record_updated_timestamp_seconds", "gauge", "When each machine's record last changed on this anchor; the newest across anchors is current.")
 	for _, r := range recs {
 		fmt.Fprintf(&b, "talos_attest_record_updated_timestamp_seconds{machine=%q} %d\n", r.Machine, r.UpdatedAt.Unix())
+	}
+	for _, p := range pendings {
+		name := p.Machine
+		if name == "" {
+			name = p.Serial
+		}
+		if pendingNames[name] {
+			fmt.Fprintf(&b, "talos_attest_record_updated_timestamp_seconds{machine=%q} %d\n", name, p.UpdatedAt.Unix())
+		}
 	}
 	head("talos_attest_last_attested_timestamp_seconds", "gauge", "When each machine last passed attestation.")
 	for _, r := range recs {

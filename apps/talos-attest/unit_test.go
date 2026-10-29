@@ -306,12 +306,25 @@ func TestInventoryReadsMachinesYAML(t *testing.T) {
 func TestCAIssuesDevIDs(t *testing.T) {
 	ca := devIDCA(t)
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	cert, err := ca.Issue(key.Public(), "riptide", "MXL0172Q6L", "LDevID", time.Now())
+	ca.Site = "folly"
+	cert, err := ca.Issue(key.Public(), Subject{Machine: "riptide", Serial: "MXL0172Q6L", Class: "worker-g5"}, "LDevID", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cert.Subject.CommonName != "riptide" || cert.Subject.SerialNumber != "MXL0172Q6L" || cert.IsCA {
+	// The contract SPIRE selects on: CN=<node>, serialNumber=<serial>, OU=<class>, O=<site>.
+	if cert.Subject.CommonName != "riptide" || cert.Subject.SerialNumber != "MXL0172Q6L" || cert.IsCA ||
+		strings.Join(cert.Subject.OrganizationalUnit, ",") != "worker-g5" || strings.Join(cert.Subject.Organization, ",") != "folly" {
 		t.Fatalf("subject %s", cert.Subject)
+	}
+	if len(cert.ExtKeyUsage) != 1 || cert.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth {
+		t.Fatalf("LDevID EKU %v", cert.ExtKeyUsage)
+	}
+	lak, err := ca.Issue(key.Public(), Subject{Machine: "riptide", Serial: "MXL0172Q6L"}, "LAK", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lak.Subject.OrganizationalUnit) != 0 || len(lak.ExtKeyUsage) != 0 {
+		t.Fatalf("a LAK for a machine with no class: %s %v", lak.Subject, lak.ExtKeyUsage)
 	}
 	roots, inters := x509.NewCertPool(), x509.NewCertPool()
 	roots.AddCert(ca.Chain[len(ca.Chain)-1])

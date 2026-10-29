@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -48,7 +49,10 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "8760h"))
+	site := env("ATTEST_SITE", "folly")
+	// 90 days: the running node renews from 30 days out, and a machine
+	// that stops renewing loses its identity, which is the revocation.
+	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "2160h"))
 	if err != nil {
 		return fmt.Errorf("ATTEST_CERT_VALIDITY: %w", err)
 	}
@@ -56,7 +60,8 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	log.Info("DevID CA loaded", "subject", ca.Cert.Subject.String(), "pkcs11", pkcs11Configured())
+	ca.Site = site
+	log.Info("DevID CA loaded", "subject", ca.Cert.Subject.String(), "pkcs11", pkcs11Configured(), "site", site)
 	roots, err := LoadEKRoots(env("ATTEST_EK_ROOTS", "/etc/talos-attest/roots"))
 	if err != nil {
 		return err
@@ -90,6 +95,7 @@ func run(log *slog.Logger) error {
 		Policy:     policy,
 		CA:         ca,
 		Store:      store,
+		Audit:      &Audit{W: os.Stdout, Site: site},
 		Log:        log,
 		Now:        time.Now,
 		SessionTTL: 5 * time.Minute,
@@ -99,10 +105,16 @@ func run(log *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("ATTEST_NETBOX_URL is set but the token is unreadable: %w", err)
 		}
-		nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: client, PassStatus: env("ATTEST_NETBOX_PASS_STATUS", "active")}
+		nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: client, Site: site, Role: env("ATTEST_NETBOX_ROLE", "kubernetes-node"), Log: log}
+		if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
+			return fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
+		}
+		if v.IntakePerHour, err = strconv.Atoi(env("ATTEST_INTAKE_PER_HOUR", "10")); err != nil {
+			return fmt.Errorf("ATTEST_INTAKE_PER_HOUR: %w", err)
+		}
+		v.NetBox = nb
 		v.Recorders = append(v.Recorders, nb)
-		v.Pins = nb
-		log.Info("NetBox writes on", "url", u)
+		log.Info("NetBox is the system of record", "url", u, "site", site)
 	}
 	if path := os.Getenv("ATTEST_METRICS_FILE"); path != "" {
 		v.OnChange = func() {
@@ -123,6 +135,16 @@ func run(log *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Each anchor keeps what it issued; the sync brings a renewal or a
+	// quarantine served elsewhere here, so the metrics are the fleet's.
+	sync, err := time.ParseDuration(env("ATTEST_PEER_SYNC", "10m"))
+	if err != nil {
+		return fmt.Errorf("ATTEST_PEER_SYNC: %w", err)
+	}
+	if sync > 0 && len(peers) > 0 {
+		go srv.RunPeerSync(ctx, sync)
+	}
 
 	listeners := []struct {
 		addr    string

@@ -129,6 +129,8 @@ in
         ATTEST_ADDR = "unix:${publicSocket}";
         ATTEST_ADMIN_ADDR = "unix:${adminSocket}";
         ATTEST_DEVID_ADDR = ":${toString devidPort}";
+        # The O of every LDevID, and the NetBox site a first-sight device joins.
+        ATTEST_SITE = site;
         ATTEST_APPROVERS = "jonathan@pulsifer.ca";
         ATTEST_CA_CHAIN = "${cfg.caChain}";
         ATTEST_EK_ROOTS = "${../../apps/talos-attest/roots}";

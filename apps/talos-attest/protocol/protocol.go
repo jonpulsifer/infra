@@ -14,21 +14,31 @@ const (
 	PathConfirm  = "/v1/attest/{session}/confirm"
 	PathDevID    = "/devid/{serial}"
 	PathVerdict  = "/verdict/{serial}"
+	// The renewal routes, which a running node reaches on the DevID listener.
+	PathRenew         = "/v1/renew"
+	PathRenewEvidence = "/v1/renew/{session}/evidence"
 )
 
-// Verdicts.
+// Verdicts. A refusal is an answer to a request that proved nothing yet; it
+// changes no machine's record.
 const (
 	VerdictPass       = "pass"
 	VerdictQuarantine = "quarantine"
 	VerdictPending    = "pending-approval"
+	VerdictRefused    = "refused"
 )
 
-// Machine is what the host says about itself, from SMBIOS and its NIC.
+// Machine is what the host says about itself, from SMBIOS and its NIC. The
+// hardware facts fill the NetBox device the service creates on first sight.
 type Machine struct {
-	Serial   string `json:"serial"`
-	UUID     string `json:"uuid"`
-	MAC      string `json:"mac"`
-	Hostname string `json:"hostname,omitempty"`
+	Serial       string `json:"serial"`
+	UUID         string `json:"uuid"`
+	MAC          string `json:"mac"`
+	Hostname     string `json:"hostname,omitempty"`
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	SKU          string `json:"sku,omitempty"`
+	BIOS         string `json:"bios,omitempty"`
 }
 
 // EK is one endorsement key: its DER SubjectPublicKeyInfo and, when the TPM
@@ -128,6 +138,39 @@ type Verdict struct {
 	Chain      [][]byte `json:"chain,omitempty"`
 }
 
+// RenewRequest opens a renewal for the machine with this SMBIOS serial. The
+// service answers 404 when it holds no LAK for the serial, and 403 when the
+// machine's status forbids a renewal.
+type RenewRequest struct {
+	Serial string `json:"serial"`
+}
+
+// RenewStart carries the renewal's session and its quote nonce.
+type RenewStart struct {
+	Session string `json:"session"`
+	Nonce   []byte `json:"nonce"`
+}
+
+// RenewEvidence is a running node's boot evidence, signed by the LAK the
+// service has on file: a quote over PCRs 0 to 7 qualified by the nonce, the
+// PCR values, the event log, and the LDevID key certified by the LAK with the
+// nonce. The service replays the log as at intake and certifies the key
+// again, which may be the key it certified before.
+type RenewEvidence struct {
+	Quote    Quote     `json:"quote"`
+	PCRs     []PCR     `json:"pcrs"`
+	EventLog []byte    `json:"event_log"`
+	LDevID   Certified `json:"ldevid"`
+}
+
+// Renewed is a renewal's answer. Each PEM holds the leaf, then the DevID CA.
+// LAKCert is optional: a service that issues only the LDevID again leaves it
+// out.
+type Renewed struct {
+	LDevIDCert string `json:"ldevid_cert_pem"`
+	LAKCert    string `json:"lak_cert_pem,omitempty"`
+}
+
 // ConfirmRequest reports that the host stored its certificates.
 type ConfirmRequest struct {
 	NVIndexes []uint32 `json:"nv_indexes,omitempty"`
@@ -153,6 +196,8 @@ type DevID struct {
 	AKPrivate     []byte   `json:"ak_priv_blob_b64"`
 	SRK           string   `json:"srk"`
 	EKHashes      []string `json:"ek_hashes"`
+	// EKHashesByAlg is the same hashes keyed rsa and ecc.
+	EKHashesByAlg map[string]string `json:"ek_hashes_by_alg,omitempty"`
 	// RSAEKCert is whether the TPM holds an RSA EK certificate at 0x01c00002,
 	// the only EK certificate SPIRE's tpm_devid agent reads.
 	RSAEKCert  bool      `json:"rsa_ek_cert"`
@@ -162,7 +207,9 @@ type DevID struct {
 
 // Status is GET /verdict/<serial>, which talos-enroll's auto-approve reads.
 // A machine with no verdict, or one waiting for first-intake approval,
-// answers 404.
+// answers 404. NetBox is the source when the service has one: class, site
+// and consumed_at mirror its device, and consumed_at is when talos-enroll
+// last released a config on the strength of attested_at.
 type Status struct {
 	Status     string    `json:"status"`
 	AttestedAt time.Time `json:"attested_at"`
@@ -170,6 +217,9 @@ type Status struct {
 	UUID       string    `json:"uuid,omitempty"`
 	RSAEKCert  bool      `json:"rsa_ek_cert"`
 	UpdatedAt  time.Time `json:"updated_at"`
+	Class      string    `json:"class,omitempty"`
+	Site       string    `json:"site,omitempty"`
+	ConsumedAt time.Time `json:"consumed_at,omitzero"`
 }
 
 // Values of Status.Status.
