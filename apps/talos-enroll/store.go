@@ -82,7 +82,6 @@ var (
 	ErrUnknownCode = errors.New("no enrollment has that user code")
 	ErrUnknownUUID = errors.New("no machine with that uuid is waiting")
 	ErrNotPending  = errors.New("the enrollment is no longer waiting for approval")
-	ErrUnknownNode = errors.New("no machine inputs name that node")
 	ErrBadToken    = errors.New("the token is unknown, used or expired")
 	ErrWrongUUID   = errors.New("the token is bound to another uuid")
 )

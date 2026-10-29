@@ -34,20 +34,153 @@ type fakeRender struct {
 	mu    sync.Mutex
 	fail  error
 	calls int
+	large bool
 }
 
-func (f *fakeRender) Nodes() []string { return []string{"optiplex", "riptide"} }
-func (f *fakeRender) Render(_ context.Context, node string) ([]byte, error) {
+func (f *fakeRender) Classes() []string { return []string{"controlplane", "worker-g5"} }
+func (f *fakeRender) MachineType(class string) string {
+	switch class {
+	case "controlplane":
+		return "controlplane"
+	case "worker-g5":
+		return "worker"
+	}
+	return ""
+}
+func (f *fakeRender) Render(_ context.Context, n Node) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
 	if f.fail != nil {
 		return nil, f.fail
 	}
-	if node != "optiplex" && node != "riptide" {
-		return nil, ErrUnknownNode
+	if n.Class != "controlplane" && n.Class != "worker-g5" {
+		return nil, ErrNoClass
 	}
-	return []byte("version: v1alpha1\n# " + node + "\n"), nil
+	body := "version: v1alpha1\n# " + n.Name + "\n"
+	if f.large {
+		body += "# " + strings.Repeat("x", 9000) + "\n"
+	}
+	return []byte(body), nil
+}
+
+// fakeDirectory is NetBox, or the inventory, in memory.
+type fakeDirectory struct {
+	mu          sync.Mutex
+	nodes       map[string]Node
+	fail        error
+	spendFail   error
+	releaseFail error
+	spends      []release
+	releases    []release
+}
+
+type release struct {
+	node string
+	at   time.Time
+}
+
+func newFakeDirectory() *fakeDirectory {
+	return &fakeDirectory{nodes: map[string]Node{
+		"riptide":  {Name: "riptide", Serial: testSerial, MAC: "38:22:e2:2d:96:44", Class: "worker-g5", Disk: "/dev/nvme0n1", TPM: "2.0", Status: "active", Source: "inventory"},
+		"optiplex": {Name: "optiplex", Serial: "66BT7M2", MAC: "14:b3:1f:2b:57:85", Class: "controlplane", Disk: "/dev/sda", TPM: "2.0", Status: "active", Source: "inventory"},
+	}}
+}
+
+func (f *fakeDirectory) set(name string, mutate func(*Node)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.nodes[name]
+	mutate(&n)
+	f.nodes[name] = n
+}
+
+func (f *fakeDirectory) BySerial(_ context.Context, serial string) (Node, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail != nil {
+		return Node{}, f.fail
+	}
+	for _, n := range f.nodes {
+		if strings.EqualFold(n.Serial, serial) {
+			return n, nil
+		}
+	}
+	return Node{}, ErrUnknownNode
+}
+
+func (f *fakeDirectory) ByName(_ context.Context, name string) (Node, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail != nil {
+		return Node{}, f.fail
+	}
+	n, ok := f.nodes[name]
+	if !ok {
+		return Node{}, ErrUnknownNode
+	}
+	if retired(n.Status) {
+		return Node{}, ErrRetired
+	}
+	return n, nil
+}
+
+func (f *fakeDirectory) Names(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	return []string{"optiplex", "riptide"}, nil
+}
+
+// Spend and Released refuse a context that is already done, as a real client
+// would, so that a test can prove the release outlives the request.
+func (f *fakeDirectory) Spend(ctx context.Context, n Node, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if f.spendFail != nil {
+		return f.spendFail
+	}
+	f.spends = append(f.spends, release{n.Name, at})
+	node := f.nodes[n.Name]
+	node.ConsumedAt = at
+	f.nodes[n.Name] = node
+	return nil
+}
+
+func (f *fakeDirectory) Released(ctx context.Context, n Node, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if f.releaseFail != nil {
+		return f.releaseFail
+	}
+	f.releases = append(f.releases, release{n.Name, at})
+	node := f.nodes[n.Name]
+	if node.Status == "planned" || node.Status == "staged" {
+		node.Status = "active"
+	}
+	node.ConsumedAt = at
+	f.nodes[n.Name] = node
+	return nil
+}
+
+func (f *fakeDirectory) released() []release {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]release{}, f.releases...)
+}
+
+func (f *fakeDirectory) spent() []release {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]release{}, f.spends...)
 }
 
 type fakeNotifier struct {
@@ -82,6 +215,7 @@ type harness struct {
 	t      *testing.T
 	clock  *clock
 	render *fakeRender
+	dir    *fakeDirectory
 	notes  *fakeNotifier
 	public http.Handler
 	admin  http.Handler
@@ -98,18 +232,20 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(cancel)
 	go out.Run(ctx)
 	r := &fakeRender{}
+	d := newFakeDirectory()
 	s := &Server{
 		Store:     NewStore(c.Now),
 		Render:    r,
+		Dir:       d,
 		Out:       out,
 		Log:       log,
+		Site:      "folly",
 		ClientID:  "talos-enroll",
 		Approvers: map[string]bool{"owner@example.com": true},
 		AdminURL:  "https://talos-enroll.example.ts.net",
-		MACs:      map[string]string{"riptide": "38:22:e2:2d:96:44"},
 		Now:       c.Now,
 	}
-	return &harness{t: t, clock: c, render: r, notes: notes, public: s.Public(), admin: s.Admin(), srv: s}
+	return &harness{t: t, clock: c, render: r, dir: d, notes: notes, public: s.Public(), admin: s.Admin(), srv: s}
 }
 
 func (h *harness) do(handler http.Handler, req *http.Request) (int, map[string]any, string) {
@@ -451,10 +587,129 @@ func TestRenderFailureKeepsTheEnrollmentPending(t *testing.T) {
 
 func TestMACMismatchIsReported(t *testing.T) {
 	h := newHarness(t)
+	h.dir.set("riptide", func(n *Node) { n.MAC = "aa:aa:aa:aa:aa:aa" })
 	_, uc := h.startDevice(testUUID)
-	h.srv.MACs["riptide"] = "aa:aa:aa:aa:aa:aa"
+	if msg := h.notes.last(t, testUUID, 1); !strings.Contains(msg, "but its MAC is not") || strings.Contains(msg, "<console code> riptide") {
+		t.Fatalf("a serial match with another MAC must not suggest the node:\n%s", msg)
+	}
 	if code, m := h.approve(uc, "riptide"); code != 200 || m["mac_mismatch"] != true {
 		t.Fatalf("approve: %d %v", code, m)
+	}
+	if rel := h.dir.released(); len(rel) != 0 {
+		t.Fatalf("nothing is released before the config is fetched: %v", rel)
+	}
+}
+
+func TestDirectoryOutageKeepsTheClickPath(t *testing.T) {
+	h := newHarness(t)
+	h.dir.fail = errors.New("netbox down")
+	_, uc := h.startDevice(testUUID)
+	if msg := h.notes.last(t, testUUID, 1); !strings.Contains(msg, "matches no device") {
+		t.Fatalf("an outage must read as an unknown machine, not crash:\n%s", msg)
+	}
+	if code, _ := h.approve(uc, "riptide"); code != 502 {
+		t.Fatalf("approve during an outage: %d", code)
+	}
+	h.dir.fail = nil
+	if code, _ := h.approve(uc, "riptide"); code != 200 {
+		t.Fatalf("approve after the outage: %d", code)
+	}
+}
+
+func TestServedConfigIsReleasedToTheDirectory(t *testing.T) {
+	h := newHarness(t)
+	dc, uc := h.startDevice(testUUID)
+	h.approve(uc, "riptide")
+	_, m := h.poll(dc, testUUID)
+	if code, _, _ := h.do(h.public, getConfig(m["access_token"].(string), configQuery(testUUID))); code != 200 {
+		t.Fatalf("config: %d", code)
+	}
+	rel := h.dir.released()
+	if len(rel) != 1 || rel[0].node != "riptide" || !rel[0].at.Equal(h.clock.Now()) {
+		t.Fatalf("a click release names the node and the release time: %v", rel)
+	}
+	if n, _ := h.dir.ByName(context.Background(), "riptide"); n.Status != "active" || !n.ConsumedAt.Equal(h.clock.Now()) {
+		t.Fatalf("after the release the device is active and any earlier pass is spent: %+v", n)
+	}
+}
+
+func TestReleaseFailureStillServesTheConfig(t *testing.T) {
+	h := newHarness(t)
+	dc, uc := h.startDevice(testUUID)
+	h.approve(uc, "riptide")
+	_, m := h.poll(dc, testUUID)
+	h.dir.releaseFail = errors.New("netbox 503")
+	code, _, body := h.do(h.public, getConfig(m["access_token"].(string), configQuery(testUUID)))
+	if code != 200 || !strings.HasPrefix(body, "version: v1alpha1") {
+		t.Fatalf("the config must be served whatever NetBox says: %d", code)
+	}
+	if code, _, _ := h.do(h.public, getConfig(m["access_token"].(string), configQuery(testUUID))); code != 401 {
+		t.Fatal("the token must be spent even when the release was not recorded")
+	}
+	if !strings.Contains(h.notes.last(t, testUUID, 3), "fetched its config") {
+		t.Fatal("the served config was not announced")
+	}
+}
+
+// The proxy closes the upstream once the body is out, and Go cancels the
+// request's context; the release must still reach the directory.
+func TestReleaseOutlivesTheRequestContext(t *testing.T) {
+	h := newHarness(t)
+	dc, uc := h.startDevice(testUUID)
+	h.approve(uc, "riptide")
+	_, m := h.poll(dc, testUUID)
+	req := getConfig(m["access_token"].(string), configQuery(testUUID))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	code, _, _ := h.do(h.public, req.WithContext(ctx))
+	if code != 200 {
+		t.Fatalf("config: %d", code)
+	}
+	if rel := h.dir.released(); len(rel) != 1 {
+		t.Fatalf("the release did not survive a cancelled request context: %v", rel)
+	}
+}
+
+// A real listener, a 9 KB config, and a client that closes the connection
+// as soon as the body is in.
+func TestReleaseAfterAClientThatClosesOnTheBody(t *testing.T) {
+	h := newHarness(t)
+	h.render.large = true
+	dc, uc := h.startDevice(testUUID)
+	h.approve(uc, "riptide")
+	_, m := h.poll(dc, testUUID)
+
+	srv := httptest.NewServer(h.public)
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/config?"+configQuery(testUUID), nil)
+	req.Header.Set("Authorization", "Bearer "+m["access_token"].(string))
+	req.Close = true
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	srv.Client().CloseIdleConnections()
+	if resp.StatusCode != 200 || len(body) < 9000 {
+		t.Fatalf("config: %d, %d bytes", resp.StatusCode, len(body))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if rel := h.dir.released(); len(rel) == 1 && rel[0].node == "riptide" {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the release never reached the directory")
+}
+
+func TestRetiredNodeIsNotApprovable(t *testing.T) {
+	h := newHarness(t)
+	h.dir.set("optiplex", func(n *Node) { n.Status = "offline" })
+	_, uc := h.startDevice(testUUID)
+	if code, m := h.approve(uc, "optiplex"); code != 409 || !strings.Contains(m["error"].(string), "retired") {
+		t.Fatalf("approving a retired device: %d %v", code, m)
 	}
 }
 

@@ -10,12 +10,12 @@
     root = ./.;
     fileset = lib.fileset.unions [
       ./go.mod
+      ./go.sum
       ./index.html
       (lib.fileset.fileFilter (file: file.hasExt "go") ./.)
     ];
   };
-  # No dependencies outside the standard library.
-  vendorHash = null;
+  vendorHash = "sha256-g+yaVIx4jxpAQ/+WrGKxhVeliYx7nLQe/zsGpxV4Fn4=";
   env.CGO_ENABLED = "0";
 
   meta = {

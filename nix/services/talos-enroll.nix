@@ -29,9 +29,42 @@ let
   talos-enroll = pkgs.callPackage ../../apps/talos-enroll/package.nix { };
   talosctl = pkgs.callPackage ../../apps/talos-enroll/talosctl.nix { };
   tailscale = lib.getExe config.services.tailscale.package;
-  # The attest service's base URL for ENROLL_ATTEST_URL. Null keeps every approval on the owner's
-  # click (apps/talos-enroll/README.md).
+  sopsFile = ../secrets/${name}.sops.yaml;
+  secretLines =
+    if builtins.pathExists sopsFile then lib.splitString "\n" (builtins.readFile sopsFile) else [ ];
+  # sops leaves key names in the clear, so evaluation can see which secrets the file holds. A
+  # key counts only inside its own section: the indented lines right after "<section>:".
+  sealed =
+    section: key:
+    let
+      step =
+        acc: line:
+        if acc.found then
+          acc
+        else if acc.inSection then
+          if !lib.hasPrefix " " line then
+            acc // { inSection = false; }
+          else
+            acc // { found = lib.hasPrefix "    ${key}:" line; }
+        else
+          acc // { inSection = line == "${section}:"; };
+    in
+    (lib.foldl step {
+      inSection = false;
+      found = false;
+    } secretLines).found;
+  # talos-attest's DevID listener on this anchor: the verdict that binds an attestation to the
+  # request's UUID and node, required beside NetBox's state for an approval without a click.
   attestURL = "http://127.0.0.1:8444";
+  # The worker subset of the secrets bundle renders every worker; the full bundle, which holds
+  # every cluster CA key, renders a control plane too. scripts/talos-worker-secrets.sh seals the
+  # subset and then drops the bundle, so an anchor holds no CA key.
+  workerSecrets = sealed "talos-enroll" "worker-secrets";
+  bundle = sealed "talos-enroll" "bundle";
+  # NetBox on capsule (./netbox.nix) is the directory of machines and their lifecycle, read at
+  # each device request over the Anchor network with talos-attest's token. The inventory export
+  # answers while NetBox does not, with no attestation, so every such approval is a click.
+  netbox = sealed "talos-attest" "netbox-token";
 
   routes = [
     "/device/code"
@@ -55,14 +88,31 @@ let
   '';
 in
 {
+  assertions = [
+    {
+      assertion = workerSecrets || bundle;
+      message = "talos-enroll on ${name} needs talos-enroll/worker-secrets or talos-enroll/bundle in ${toString sopsFile}";
+    }
+  ];
+
   sops.secrets = {
-    # folly's `talosctl gen secrets` bundle, the 1Password note talos-folly-secrets. It holds every
-    # cluster CA key.
-    "talos-enroll/bundle" = { };
     # The webhook of the Alertmanager Discord receiver.
     "talos-enroll/discord-webhook" = { };
     # cert-manager's DNS-01 token (clusters/folly/networking/cert-manager/cloudflare-secret.sops.yaml).
     "acme/cloudflare-token" = { };
+  }
+  // lib.optionalAttrs workerSecrets {
+    # The worker subset of folly's secrets bundle (scripts/talos-worker-secrets.sh).
+    "talos-enroll/worker-secrets" = { };
+  }
+  // lib.optionalAttrs bundle {
+    # folly's `talosctl gen secrets` bundle, the 1Password note talos-folly-secrets. It holds every
+    # cluster CA key.
+    "talos-enroll/bundle" = { };
+  }
+  // lib.optionalAttrs netbox {
+    # The NetBox API token talos-attest.nix also loads; both services read and change devices.
+    "talos-attest/netbox-token" = { };
   };
 
   users.users.talos-enroll = {
@@ -84,24 +134,36 @@ in
       ENROLL_ADMIN_URL = "https://${name}.${fleet.tailnet}:${toString adminPort}";
       # Tailnet logins that may approve and deny.
       ENROLL_APPROVERS = "jonathan@pulsifer.ca";
-      # Written by `mise run render-machine-inputs` from the Talos root.
-      ENROLL_MACHINE_INPUTS = "${../../clusters/${site}/apps/talos-enroll/machine-inputs.json}";
-      ENROLL_NODE_MACS = "${../../clusters/${site}/apps/talos-enroll/node-macs.json}";
-      ENROLL_SECRETS_BUNDLE = "%d/bundle";
+      ENROLL_SITE = site;
+      # Written by `mise run render-class-inputs` from the Talos root. A new node changes it not
+      # at all: the node's facts come from the directory at request time.
+      ENROLL_CLASS_INPUTS = "${../../clusters/${site}/apps/talos-enroll/class-inputs.json}";
+      # NetBox's export, the directory while NetBox does not answer.
+      ENROLL_INVENTORY = "${../../clusters/${site}/inventory/machines.yaml}";
+      ENROLL_WORKER_SECRETS = if workerSecrets then "%d/worker-secrets" else "%d/bundle";
       ENROLL_DISCORD_WEBHOOK_FILE = "%d/discord-webhook";
       ENROLL_TALOSCTL = lib.getExe talosctl;
       # talosctl writes its patch files and nothing else here.
       HOME = "/tmp";
     }
-    // lib.optionalAttrs (attestURL != null) { ENROLL_ATTEST_URL = attestURL; };
+    // lib.optionalAttrs bundle { ENROLL_SECRETS_BUNDLE = "%d/bundle"; }
+    // lib.optionalAttrs netbox {
+      ENROLL_NETBOX_URL = "http://${lab.hosts.capsule}:8080";
+      ENROLL_NETBOX_TOKEN_FILE = "%d/netbox-token";
+      ENROLL_ATTEST_URL = attestURL;
+    };
     serviceConfig = {
       ExecStart = lib.getExe talos-enroll;
       User = "talos-enroll";
       Group = "talos-enroll";
       LoadCredential = [
-        "bundle:${config.sops.secrets."talos-enroll/bundle".path}"
         "discord-webhook:${config.sops.secrets."talos-enroll/discord-webhook".path}"
-      ];
+      ]
+      ++ lib.optional workerSecrets "worker-secrets:${
+        config.sops.secrets."talos-enroll/worker-secrets".path
+      }"
+      ++ lib.optional bundle "bundle:${config.sops.secrets."talos-enroll/bundle".path}"
+      ++ lib.optional netbox "netbox-token:${config.sops.secrets."talos-attest/netbox-token".path}";
       RuntimeDirectory = "talos-enroll";
       RuntimeDirectoryMode = "0750";
       UMask = "0077";

@@ -11,13 +11,14 @@ resources:
   - 06-network-policy.yaml
   - 07-service-monitor.yaml
 configMapGenerator:
-  # `mise run render-machine-inputs` writes both files. The name's hash
-  # changes with them, which rolls the Deployment.
+  # `mise run render-class-inputs` writes the file. The name's hash changes
+  # with it, which rolls the Deployment. This copy has no directory: it can
+  # reach neither NetBox nor the inventory export, so it renders nothing, and
+  # the anchors' copies are the enrollment path.
   - name: talos-enroll-inputs
     namespace: talos-enroll
     files:
-      - machine-inputs.json
-      - node-macs.json
+      - class-inputs.json
     # Talos patches may hold ${...}, which Flux substitution would rewrite.
     options:
       annotations:

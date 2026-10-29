@@ -34,14 +34,15 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	inputs, err := LoadMachineInputs(env("ENROLL_MACHINE_INPUTS", "/etc/talos-enroll/machine-inputs.json"))
+	inputs, err := LoadClassInputs(env("ENROLL_CLASS_INPUTS", "/etc/talos-enroll/class-inputs.json"))
 	if err != nil {
 		return err
 	}
-	macs, err := LoadNodeMACs(env("ENROLL_NODE_MACS", "/etc/talos-enroll/node-macs.json"))
+	worker, err := LoadWorkerSecrets(env("ENROLL_WORKER_SECRETS", "/var/run/secrets/talos-enroll/worker-secrets/worker-secrets.yaml"))
 	if err != nil {
-		return err
+		return fmt.Errorf("ENROLL_WORKER_SECRETS: %w", err)
 	}
+	site := env("ENROLL_SITE", "folly")
 	approvers := map[string]bool{}
 	for _, a := range strings.Split(os.Getenv("ENROLL_APPROVERS"), ",") {
 		if a = strings.ToLower(strings.TrimSpace(a)); a != "" {
@@ -56,17 +57,64 @@ func run(log *slog.Logger) error {
 		return errors.New("ENROLL_ADMIN_URL is required")
 	}
 
-	render := &Talosctl{
-		Bin:        env("ENROLL_TALOSCTL", "talosctl"),
-		BundlePath: env("ENROLL_SECRETS_BUNDLE", "/var/run/secrets/talos-enroll/bundle/secrets.yaml"),
-		Inputs:     inputs,
-	}
-	if len(inputs) == 0 {
-		log.Warn("the machine inputs name no node, so every approval fails")
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// The full bundle is optional: only a control-plane render needs it.
+	render := &Talosctl{
+		Bin:        env("ENROLL_TALOSCTL", "talosctl"),
+		BundlePath: os.Getenv("ENROLL_SECRETS_BUNDLE"),
+		Worker:     worker,
+		Inputs:     inputs,
+	}
+	if err := render.Init(ctx); err != nil {
+		return err
+	}
+	if len(inputs) == 0 {
+		log.Warn("the class inputs name no class, so every approval fails")
+	}
+
+	// NetBox is the directory, and the inventory export answers when it does
+	// not. Without NetBox every approval is a click.
+	inventory, err := LoadInventory(os.Getenv("ENROLL_INVENTORY"))
+	if err != nil {
+		return fmt.Errorf("ENROLL_INVENTORY: %w", err)
+	}
+	var dir Directory = inventory
+	netboxURL := strings.TrimSuffix(os.Getenv("ENROLL_NETBOX_URL"), "/")
+	if netboxURL != "" {
+		tok, err := os.ReadFile(env("ENROLL_NETBOX_TOKEN_FILE", "/run/credentials/talos-enroll.service/netbox-token"))
+		if err != nil {
+			return fmt.Errorf("ENROLL_NETBOX_URL is set but the token is unreadable: %w", err)
+		}
+		nb := &NetBox{URL: netboxURL, Token: strings.TrimSpace(string(tok)), Site: site, Client: &http.Client{Timeout: 10 * time.Second}, Log: log}
+		dir = &Fallback{Primary: nb, Secondary: inventory, Log: log}
+		log.Info("NetBox is the directory", "netbox_url", netboxURL, "site", site)
+	} else {
+		log.Info("no NetBox, so the inventory file is the directory")
+	}
+
+	// Auto-approval needs both: NetBox for the lifecycle and the spend, the
+	// attest service for the binding of the attestation to the request.
+	var auto *AutoApproval
+	attestURL := strings.TrimSuffix(os.Getenv("ENROLL_ATTEST_URL"), "/")
+	switch {
+	case netboxURL != "" && attestURL != "":
+		window, err := time.ParseDuration(env("ENROLL_AUTO_APPROVE_WINDOW", "2h"))
+		if err != nil || window <= 0 {
+			return fmt.Errorf("ENROLL_AUTO_APPROVE_WINDOW must be a positive duration: %q", os.Getenv("ENROLL_AUTO_APPROVE_WINDOW"))
+		}
+		auto = &AutoApproval{
+			Attest: &AttestClient{BaseURL: attestURL, Client: &http.Client{Timeout: 5 * time.Second}},
+			Dir:    dir,
+			Window: window,
+		}
+		log.Info("a staged worker with an unspent attestation is approved without a click", "attest_url", attestURL, "window", window.String())
+	case attestURL != "":
+		log.Warn("ENROLL_ATTEST_URL without ENROLL_NETBOX_URL approves nothing: every approval is a click")
+	default:
+		log.Info("every approval is a click")
+	}
 
 	out := NewOutbox(&Discord{
 		URLFile: env("ENROLL_DISCORD_WEBHOOK_FILE", "/var/run/secrets/talos-enroll/discord/webhook-url"),
@@ -74,28 +122,16 @@ func run(log *slog.Logger) error {
 	}, log)
 	go out.Run(ctx)
 
-	var auto *AutoApproval
-	if attestURL := strings.TrimSuffix(os.Getenv("ENROLL_ATTEST_URL"), "/"); attestURL != "" {
-		window, err := time.ParseDuration(env("ENROLL_AUTO_APPROVE_WINDOW", "30m"))
-		if err != nil || window <= 0 {
-			return fmt.Errorf("ENROLL_AUTO_APPROVE_WINDOW must be a positive duration: %q", os.Getenv("ENROLL_AUTO_APPROVE_WINDOW"))
-		}
-		auto = &AutoApproval{
-			Attest: &AttestClient{BaseURL: attestURL, Client: &http.Client{Timeout: 5 * time.Second}},
-			Window: window,
-		}
-		log.Info("attested machines are approved without a click", "attest_url", attestURL, "window", window.String())
-	}
-
 	srv := &Server{
 		Store:     NewStore(time.Now),
 		Render:    render,
+		Dir:       dir,
 		Out:       out,
 		Log:       log,
+		Site:      site,
 		ClientID:  env("ENROLL_CLIENT_ID", "talos-enroll"),
 		Approvers: approvers,
 		AdminURL:  adminURL,
-		MACs:      macs,
 		Now:       time.Now,
 		Auto:      auto,
 	}
@@ -122,7 +158,7 @@ func run(log *slog.Logger) error {
 		log.Info("listening", "addr", l.addr)
 		go func() { errc <- s.Serve(ln) }()
 	}
-	log.Info("talos-enroll started", "nodes", render.Nodes(), "approvers", len(approvers))
+	log.Info("talos-enroll started", "classes", render.Classes(), "approvers", len(approvers))
 
 	select {
 	case err := <-errc:

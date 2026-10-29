@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -30,16 +29,50 @@ var indexTmpl = template.Must(template.New("index").Funcs(template.FuncMap{
 type Server struct {
 	Store     *Store
 	Render    Renderer
+	Dir       Directory
 	Out       *Outbox
 	Log       *slog.Logger
+	Site      string
 	ClientID  string
 	Approvers map[string]bool
 	AdminURL  string
-	MACs      map[string]string
 	Now       func() time.Time
 	// Auto approves an attested machine without a click. Nil keeps every
 	// approval on the owner.
 	Auto *AutoApproval
+}
+
+// audit writes one JSON line per decision, with the keys every service of
+// the boot plane shares, on top of the ordinary log.
+func (s *Server) audit(event string, n Node, d Device, kv ...any) {
+	attrs := []any{"event", event, "site", s.Site, "node", n.Name, "serial", d.Serial, "class", n.Class, "status", n.Status, "uuid", d.UUID, "mac", d.MAC}
+	s.Log.Info(event, append(attrs, kv...)...)
+}
+
+// lookup finds the node a device request's serial names. An unknown serial
+// is an empty node; a directory failure is logged and treated the same.
+func (s *Server) lookup(ctx context.Context, d Device) Node {
+	if d.Serial == "" {
+		return Node{}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	n, err := s.Dir.BySerial(ctx, d.Serial)
+	if err != nil && !errors.Is(err, ErrUnknownNode) {
+		s.Log.Warn("the directory did not answer", "serial", d.Serial, "err", err)
+	}
+	return n
+}
+
+func (s *Server) nodeNames(ctx context.Context) []string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	names, err := s.Dir.Names(ctx)
+	if err != nil {
+		s.Log.Warn("the directory lists no nodes", "err", err)
+		return []string{}
+	}
+	return names
 }
 
 func (s *Server) Public() http.Handler {
@@ -172,13 +205,12 @@ func (s *Server) deviceCode(w http.ResponseWriter, r *http.Request) {
 	}
 	// The user code goes only to the machine, which shows it on its console.
 	// Approval proves the owner read it there, so no log or prompt carries it.
-	suggested := s.suggest(d.MAC)
-	s.Log.Info("device code issued", "uuid", d.UUID, "mac", d.MAC,
-		"serial", d.Serial, "hostname", d.Hostname, "suggested_node", suggested, "client", client(r))
-	if msg, why := s.autoApprove(r.Context(), e, suggested); msg != "" {
+	n := s.lookup(r.Context(), d)
+	s.audit("enroll.request", n, d, "hostname", d.Hostname, "source", n.Source, "client", client(r))
+	if msg, why := s.autoApprove(r.Context(), e, n); msg != "" {
 		s.Out.Send(normUUID(d.UUID), msg)
 	} else {
-		msg = s.pendingMessage(e, suggested)
+		msg = s.pendingMessage(e, n)
 		if why != "" {
 			msg += "\nNot approved automatically: " + discordSafe(why) + "."
 		}
@@ -275,57 +307,69 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Consume(token)
+	s.released(r.Context(), e)
 	s.Log.Info("config served", "node", e.Node, "uuid", uuid, "bytes", n, "client", client(r))
 	s.Out.Send(normUUID(e.Device.UUID), fmt.Sprintf("**Talos enrollment** uuid `%s`: **%s** fetched its config <t:%d:R>. Talos installs and reboots next.",
 		discordSafe(e.Device.UUID), e.Node, s.Now().Unix()))
 }
 
-// autoApprove approves e as node, the node its MAC claims, when its machine
-// passed attestation within the window. It returns the Discord note of the
-// approval, or why it did not approve.
-func (s *Server) autoApprove(ctx context.Context, e Enrollment, node string) (msg, why string) {
+// released tells the directory that the node's config left the server, which
+// spends any attestation before now, click or not. The request's context is
+// done once the body is out, since the proxy closes the upstream, so the
+// write runs on its own deadline. A directory that does not answer is
+// logged: the node installs either way.
+func (s *Server) released(ctx context.Context, e Enrollment) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	now := s.Now()
+	n, err := s.Dir.ByName(ctx, e.Node)
+	if err != nil {
+		s.Log.Warn("the release was not recorded", "node", e.Node, "err", err)
+		return
+	}
+	if err := s.Dir.Released(ctx, n, now); err != nil {
+		s.Log.Warn("the release was not recorded", "node", e.Node, "err", err)
+	}
+	s.audit("enroll.release", n, e.Device, "approver", e.Approver, "released_at", now)
+}
+
+// autoApprove approves e as n, the node NetBox holds under its serial, when
+// that node has an unspent attestation that the attest service binds to this
+// request, and the request claims its MAC. The spend reaches NetBox before
+// the token exists. It returns the Discord note of the approval, or why it
+// did not approve.
+func (s *Server) autoApprove(ctx context.Context, e Enrollment, n Node) (msg, why string) {
 	if s.Auto == nil {
 		return "", ""
 	}
 	d := e.Device
-	at, err := s.Auto.claim(ctx, d, node, s.Now())
+	now := s.Now()
+	controlplane := s.Render.MachineType(n.Class) == "controlplane"
+	at, err := s.Auto.claim(ctx, d, n, controlplane, now)
 	if err != nil {
 		s.Log.Info("not approved automatically", "uuid", d.UUID, "serial", d.Serial, "mac", d.MAC, "reason", err.Error())
 		return "", err.Error()
 	}
-	cfg, err := s.Render.Render(ctx, node)
+	cfg, err := s.Render.Render(ctx, n)
 	if err != nil {
-		s.Auto.release(d.Serial, at)
+		s.Auto.release(n.Serial, at)
 		s.Store.refuse("render_failed")
-		s.Log.Error("render failed, the enrollment stays pending", "node", node, "uuid", d.UUID, "err", err)
+		s.Log.Error("render failed, the enrollment stays pending", "node", n.Name, "uuid", d.UUID, "err", err)
 		return "", "its config did not render"
 	}
-	if _, _, err := s.Store.Approve(e.UserCode, node, autoApprover, cfg); err != nil {
-		s.Auto.release(d.Serial, at)
+	if err := s.Auto.spend(ctx, n, now); err != nil {
+		s.Auto.release(n.Serial, at)
+		s.Store.refuse("spend_failed")
+		s.Log.Error("the spend was not recorded, the enrollment stays pending", "node", n.Name, "uuid", d.UUID, "err", err)
 		return "", err.Error()
 	}
-	s.Log.Info("enrollment approved", "node", node, "uuid", d.UUID, "mac", d.MAC,
-		"serial", d.Serial, "attested_at", at, "approver", autoApprover)
-	return fmt.Sprintf("**Talos enrollment** uuid `%s` auto-approved after attestation as **%s**: serial `%s` attested <t:%d:R>, and its MAC is %s's. Waiting for the node to fetch its config.",
-		discordSafe(d.UUID), node, discordSafe(d.Serial), at.Unix(), node), ""
-}
-
-func (s *Server) suggest(mac string) string {
-	mac = strings.ToLower(mac)
-	if mac == "" {
-		return ""
+	if _, _, err := s.Store.Approve(e.UserCode, n.Name, autoApprover, cfg); err != nil {
+		s.Auto.release(n.Serial, at)
+		return "", err.Error()
 	}
-	nodes := make([]string, 0, len(s.MACs))
-	for node := range s.MACs {
-		nodes = append(nodes, node)
-	}
-	sort.Strings(nodes)
-	for _, node := range nodes {
-		if s.MACs[node] == mac {
-			return node
-		}
-	}
-	return ""
+	s.audit("enroll.approve", n, d, "attested_at", at, "approver", autoApprover)
+	return fmt.Sprintf("**Talos enrollment** uuid `%s` auto-approved after attestation as **%s**: serial `%s` attested <t:%d:R>, and its MAC is %s's in NetBox. Waiting for the node to fetch its config.",
+		discordSafe(d.UUID), n.Name, discordSafe(d.Serial), at.Unix(), n.Name), ""
 }
 
 // discordSafe keeps a self-asserted value inside its inline code span.
@@ -339,18 +383,22 @@ func discordSafe(v string) string {
 // pendingMessage leaves out the user code. Every fact in it is the requester's
 // own claim, so only the code on the machine's console ties an approval to
 // the machine the owner stands at.
-func (s *Server) pendingMessage(e Enrollment, suggested string) string {
+func (s *Server) pendingMessage(e Enrollment, n Node) string {
 	d := e.Device
 	var b strings.Builder
 	b.WriteString("**Talos enrollment**: a machine is waiting for approval.\n")
 	fmt.Fprintf(&b, "uuid `%s` · mac `%s` · serial `%s` · hostname `%s`\n",
 		discordSafe(d.UUID), discordSafe(d.MAC), discordSafe(d.Serial), discordSafe(d.Hostname))
-	node := suggested
-	if suggested != "" {
-		fmt.Fprintf(&b, "It claims **%s**'s MAC from the UniFi client list. Any host that reaches the server can claim it.\n", suggested)
-	} else {
-		node = "<node>"
-		b.WriteString("Its MAC matches no node in the UniFi client list.\n")
+	node := "<node>"
+	switch {
+	case n.Name == "":
+		b.WriteString("Its serial matches no device in NetBox.\n")
+	case !strings.EqualFold(n.MAC, d.MAC):
+		fmt.Fprintf(&b, "Its serial is **%s**'s in NetBox, but its MAC is not. Any host that reaches the server can claim a serial.\n", n.Name)
+	default:
+		node = n.Name
+		fmt.Fprintf(&b, "It claims **%s**'s serial and MAC from NetBox (%s, class %s). Any host that reaches the server can claim them.\n",
+			n.Name, discordSafe(n.Status), discordSafe(n.Class))
 	}
 	fmt.Fprintf(&b, "Approve only the code on the machine's own console: `mise run enroll:approve <console code> %s`, or scan the console's QR code.\n", node)
 	fmt.Fprintf(&b, "Deny: `mise run enroll:deny %s`\n", discordSafe(d.UUID))
@@ -391,12 +439,26 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if node == "" {
-		reply(w, r, http.StatusBadRequest, map[string]any{"error": "name the node to enroll as", "nodes": s.Render.Nodes()})
+		reply(w, r, http.StatusBadRequest, map[string]any{"error": "name the node to enroll as", "nodes": s.nodeNames(r.Context())})
 		return
 	}
-	cfg, err := s.Render.Render(r.Context(), node)
+	n, err := s.Dir.ByName(r.Context(), node)
 	if errors.Is(err, ErrUnknownNode) {
-		reply(w, r, http.StatusBadRequest, map[string]any{"error": err.Error(), "nodes": s.Render.Nodes()})
+		reply(w, r, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("%s: %s", ErrUnknownNode, node), "nodes": s.nodeNames(r.Context())})
+		return
+	}
+	if errors.Is(err, ErrRetired) {
+		reply(w, r, http.StatusConflict, map[string]any{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		s.Log.Error("the directory did not answer", "node", node, "err", err)
+		reply(w, r, http.StatusBadGateway, map[string]any{"error": "the directory did not answer; see the server log"})
+		return
+	}
+	cfg, err := s.Render.Render(r.Context(), n)
+	if errors.Is(err, ErrNoClass) || errors.Is(err, ErrNoBundle) {
+		reply(w, r, http.StatusConflict, map[string]any{"error": err.Error(), "classes": s.Render.Classes()})
 		return
 	}
 	if err != nil {
@@ -410,14 +472,12 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		reply(w, r, http.StatusConflict, map[string]any{"error": err.Error(), "phase": e.Phase})
 		return
 	}
-	known := s.MACs[node]
-	mismatch := known != "" && !strings.EqualFold(known, e.Device.MAC)
-	s.Log.Info("enrollment approved", "user_code", e.UserCode, "node", node, "uuid", e.Device.UUID,
-		"mac", e.Device.MAC, "mac_mismatch", mismatch, "approver", who)
+	mismatch := n.MAC != "" && !strings.EqualFold(n.MAC, e.Device.MAC)
+	s.audit("enroll.approve", n, e.Device, "user_code", e.UserCode, "mac_mismatch", mismatch, "approver", who)
 	msg := fmt.Sprintf("**Talos enrollment** uuid `%s` approved as **%s** by %s. Waiting for the node to fetch its config.",
 		discordSafe(e.Device.UUID), node, who)
 	if mismatch {
-		msg += fmt.Sprintf("\nThe device's MAC `%s` is not %s's MAC in the UniFi client list.", discordSafe(e.Device.MAC), node)
+		msg += fmt.Sprintf("\nThe device's MAC `%s` is not %s's MAC in NetBox.", discordSafe(e.Device.MAC), node)
 	}
 	s.Out.Send(normUUID(e.Device.UUID), msg)
 	reply(w, r, http.StatusOK, map[string]any{"user_code": e.UserCode, "node": node, "phase": e.Phase,
@@ -432,21 +492,25 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request) {
 		reply(w, r, http.StatusNotFound, map[string]any{"error": err.Error()})
 		return
 	}
-	s.Log.Info("enrollment denied", "uuid", e.Device.UUID, "mac", e.Device.MAC, "approver", who)
+	s.audit("enroll.deny", Node{}, e.Device, "approver", who)
 	s.Out.Send(normUUID(e.Device.UUID), fmt.Sprintf("**Talos enrollment** uuid `%s` denied by %s. The server refuses it until it restarts.",
 		discordSafe(e.Device.UUID), who))
 	reply(w, r, http.StatusOK, map[string]any{"uuid": e.Device.UUID, "phase": e.Phase})
 }
 
-func (s *Server) withSuggestions(list []Enrollment) []Enrollment {
+// withSuggestions names, for each enrollment, the node whose serial and MAC
+// it claims, as a hint for the approval page.
+func (s *Server) withSuggestions(ctx context.Context, list []Enrollment) []Enrollment {
 	for i := range list {
-		list[i].Suggested = s.suggest(list[i].Device.MAC)
+		if n := s.lookup(ctx, list[i].Device); n.Name != "" && strings.EqualFold(n.MAC, list[i].Device.MAC) {
+			list[i].Suggested = n.Name
+		}
 	}
 	return list
 }
 
-func (s *Server) pending(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"enrollments": s.withSuggestions(s.Store.List()), "nodes": s.Render.Nodes()})
+func (s *Server) pending(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"enrollments": s.withSuggestions(r.Context(), s.Store.List()), "nodes": s.nodeNames(r.Context())})
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
@@ -457,16 +521,20 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	// mark that machine and preselect its suggested node.
 	code := r.URL.Query().Get("code")
 	var focus Enrollment
+	var suggested string
 	if code != "" {
 		focus, _ = s.Store.Lookup(code)
 		code = normUserCode(code)
+		if n := s.lookup(r.Context(), focus.Device); n.Name != "" && strings.EqualFold(n.MAC, focus.Device.MAC) {
+			suggested = n.Name
+		}
 	}
 	_ = indexTmpl.Execute(w, map[string]any{
-		"Enrollments": s.withSuggestions(s.Store.List()),
-		"Nodes":       s.Render.Nodes(),
+		"Enrollments": s.withSuggestions(r.Context(), s.Store.List()),
+		"Nodes":       s.nodeNames(r.Context()),
 		"Code":        code,
 		"Focus":       focus.Device.UUID,
-		"Suggested":   s.suggest(focus.Device.MAC),
+		"Suggested":   suggested,
 		"Login":       login(r),
 	})
 }

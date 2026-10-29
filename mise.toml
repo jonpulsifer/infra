@@ -146,9 +146,9 @@ run = [
 description = "Firing Alertmanager alerts on every cluster (optional substring filter)"
 run = "bash scripts/alerts.sh"
 
-[tasks.render-machine-inputs]
-description = "Write talos-enroll's per-node render inputs from the folly Talos root, with no state, and the nodes' MACs from the hardware inventory"
-run = "bash scripts/render-machine-inputs.sh"
+[tasks.render-class-inputs]
+description = "Write talos-enroll's per-class render inputs from the folly Talos root, with no state, and the inventory's MACs for spore's netboot links"
+run = "bash scripts/render-class-inputs.sh"
 
 [tasks."inventory:check"]
 description = "Compare each folly node's NetBox device with what the node reports over the Talos API; exits 1 on drift"

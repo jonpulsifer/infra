@@ -13,7 +13,7 @@ Use this runbook to install Talos on riptide, shale or optiplex with Secure Boot
 - Our Secure Boot keys are enrolled on the node, and its TPM or PTT is on. Its boot order has the system disk first and PXE after it, so a wiped disk falls through to PXE and the installed disk boots after the install.
 - The node PXE-boots on the bootstrap VLAN, and Smee has no script for its MAC: it has no `Hardware`, or its `allowPXE` is off. The signed iPXE then chains [the UKI's script](../platform/nixos/talos-boot.md#netboot-images).
 - You can see the node's screen. The user code that you approve shows only there.
-- `clusters/folly/apps/talos-enroll/machine-inputs.json` has the node. If it does not, run `mise run render-machine-inputs`, then commit and merge the result.
+- The node's NetBox device has a `talos_class`, and `clusters/folly/apps/talos-enroll/class-inputs.json` has that class. If it does not, run `mise run render-class-inputs`, then commit and merge the result.
 - You are on the tailnet as a login in `ENROLL_APPROVERS`, and you can read the Discord prompts. The bootstrap VLAN resolves `enroll.lolwtf.ca` through the anchors' CoreDNS to `BOOT_VIP`, so the anchors serve the enrollment.
 - `<node>` is the host name, and `<addr>` is its entry in `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`.
 
@@ -97,7 +97,8 @@ To approve from a phone, scan the console's QR code. It opens the approval page 
 | A new code appears every 15 minutes | Each code lasts 15 minutes | Approve the code that the console shows now |
 | A prompt appears for a machine you are not enrolling | Another host sent a device request | Run `mise run enroll:deny <uuid>` with the UUID from the prompt |
 | `TalosEnrollmentWaiting` fires | A machine has asked for codes for 30 minutes with no answer | Approve the code on its console, or deny its UUID |
-| Approval answers 400 with a list of nodes | `machine-inputs.json` lacks the node | Run `mise run render-machine-inputs`, then merge |
+| Approval answers 400 with a list of nodes | NetBox has no device of that name with a `talos_class` | Set the device's class in NetBox |
+| Approval answers 409 with a list of classes | `class-inputs.json` lacks the node's class | Run `mise run render-class-inputs`, then merge |
 | Approval answers `no anchor knows that code or uuid` | The boot VIP moved, or the code expired | Read the code on the console now. A move of the VIP forgets every code, and Talos asks for a new one |
 | Approval answers 500 | `talosctl` failed | Run `journalctl -u talos-enroll` on the anchor that holds `BOOT_VIP`, over ssh |
 | A denied machine gets 403 | The server refuses its UUID until it restarts | Run `systemctl restart talos-enroll` on the anchor that holds `BOOT_VIP`, over ssh |

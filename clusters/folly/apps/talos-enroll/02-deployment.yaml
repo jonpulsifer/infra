@@ -41,10 +41,11 @@ spec:
               containerPort: 8081
               protocol: TCP
           env:
-            - name: ENROLL_MACHINE_INPUTS
-              value: /etc/talos-enroll/machine-inputs.json
-            - name: ENROLL_NODE_MACS
-              value: /etc/talos-enroll/node-macs.json
+            - name: ENROLL_CLASS_INPUTS
+              value: /etc/talos-enroll/class-inputs.json
+            # The full bundle is a valid superset of the worker secrets.
+            - name: ENROLL_WORKER_SECRETS
+              value: /var/run/secrets/talos-enroll/bundle/secrets.yaml
             - name: ENROLL_SECRETS_BUNDLE
               value: /var/run/secrets/talos-enroll/bundle/secrets.yaml
             - name: ENROLL_DISCORD_WEBHOOK_FILE
@@ -60,7 +61,8 @@ spec:
               value: /tmp
             - name: HOME
               value: /tmp
-            # No ENROLL_ATTEST_URL, so every approval is the owner's click.
+            # No ENROLL_NETBOX_URL and no ENROLL_INVENTORY: this copy knows no
+            # node, so it renders no config. The anchors' copies enroll.
           volumeMounts:
             - name: inputs
               mountPath: /etc/talos-enroll

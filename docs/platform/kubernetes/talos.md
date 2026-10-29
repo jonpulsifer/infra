@@ -25,12 +25,12 @@ optiplex, riptide and shale boot Image Factory systemd-boot UKI installs, with S
 - Tag the signed installer with the Talos version alone, with no digest. Any other form makes Create reinstall the node.
 - Change a node's `installer` together with its `generation`. A new generation replaces its `talos_machine`, whose Create applies the config and upgrades only for a new version tag. An `image` change alone upgrades the node at once.
 - Add a node to `encrypted_nodes` only after a reinstall has formatted its volumes encrypted. A running node whose config calls a plain volume encrypted fails its next boot: `EPHEMERAL` reports `block dev type mismatch: xfs != luks` and the kubelet never starts.
-- `tpm_nodes` changes only the label and the install render that `machine_inputs` and the enrollment server use. It is safe on a running node.
+- `tpm_nodes` changes only the label and the install render that `install_inputs` and the enrollment server use. It is safe on a running node.
 - Run `talosctl apply-config --dry-run` with the render before a `VolumeConfig` change reaches a running node.
 
 ## Where it lives
 
-- `terraform/modules/talos-cluster/`: the module. `patches.tf` holds the encryption patch, and the `machine_inputs` output gives each node's `talosctl gen config` inputs.
+- `terraform/modules/talos-cluster/`: the module. `patches.tf` holds the encryption patch, the `install_inputs` output gives each node's `talosctl gen config` inputs, and `render_inputs` gives the enrollment server its per-class pieces.
 - `clusters/<site>/talos/talos.tf`: the version pins, the extensions, the node map, `tpm_nodes` and `encrypted_nodes`
 - `.github/scripts/talos-render-parity.sh`: the parity check
 
