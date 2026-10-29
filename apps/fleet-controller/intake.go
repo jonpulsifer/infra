@@ -358,10 +358,13 @@ func (o Object) annotation(key string) string {
 
 // IntakeHardware is the Hardware of a machine that phoned home: named for
 // its MAC, labelled as an intake, with the claim's serial, UUID and model as
-// annotations, and the same HookOS chain as a device's.
+// annotations, and the same HookOS chain as a device's. Its netboot flags are
+// on for as long as it exists: the intake run needs them, and after it the
+// machine netboots back into HookOS to take its provision. The binding
+// deletes it.
 func (c Config) IntakeHardware(req IntakeRequest, disk string) Object {
 	name := MACSlug(req.MAC)
-	hw := c.Hardware(Device{Name: name, MAC: req.MAC, Disk: disk, BMCType: "none"})
+	hw := c.Hardware(Device{Name: name, MAC: req.MAC, Disk: disk, BMCType: "none"}, true)
 	meta := hw.metadata()
 	meta["labels"].(map[string]any)[IntakeLabel] = "true"
 	meta["annotations"] = map[string]any{
@@ -397,7 +400,7 @@ func (c Config) IntakeWorkflow(hardware string, now time.Time) Object {
 				"attest_url":      c.AttestURL,
 				"ntp_server":      c.NTPServer,
 			},
-			"bootOptions": map[string]any{"toggleAllowNetboot": true},
+			"bootOptions": map[string]any{"toggleAllowNetboot": false},
 		},
 	}
 }

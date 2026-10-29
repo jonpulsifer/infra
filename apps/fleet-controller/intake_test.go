@@ -133,7 +133,7 @@ func TestIntakeCreatesHardwareAndAttestOnlyWorkflow(t *testing.T) {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	boot := ws["bootOptions"].(map[string]any)
-	if _, has := boot["bootMode"]; has || boot["toggleAllowNetboot"] != true {
+	if _, has := boot["bootMode"]; has || boot["toggleAllowNetboot"] != false {
 		t.Errorf("an intake boots by Rufio: %v", boot)
 	}
 	if wl := wf.Labels(); wl[IntakeLabel] != "true" || wl[ActionLabel] != ActionIntake || wl[NodeLabel] != intakeSlug {
