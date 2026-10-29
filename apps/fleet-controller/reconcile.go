@@ -255,10 +255,7 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 		}
 		r.Metrics.WorkflowsCreated.Add(1)
 	}
-	status := Actions[action].Status
-	if status == d.Status {
-		status = ""
-	}
+	status := NextStatus(action, d.Status)
 	if d.DesiredAction == "none" && d.LastWorkflow == name && status == "" {
 		return nil
 	}
