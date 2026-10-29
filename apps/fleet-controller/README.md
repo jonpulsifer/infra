@@ -34,8 +34,9 @@ go run .
 | `FLEET_WORKFLOW_TTL` | `168h` | Age at which the controller deletes its Workflows |
 | `FLEET_ATTEST_SECRET_FILE` | none | talos-attest's render secret; without it `/render` answers 503 |
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them `/render` answers 503 and no Workflow installs |
-| `FLEET_STATE_DIR` | `/var/lib/fleet-controller` | Where rendered configs go, as `talos/<uuid>/<code>.yaml`, and the log offset |
-| `FLEET_CONFIG_LOG` | `/var/log/nginx/talos-config.log` | nginx's log of `/talos/config`, in the `fleet` format `$time_iso8601 $arg_uuid $arg_code $status` |
+| `FLEET_STATE_DIR` | `/var/lib/fleet-controller` | Where rendered configs go, as `talos/<uuid>/<code>.yaml`, with the log offset and the spent codes |
+| `FLEET_CONFIG_LOG` | `/var/log/nginx/fleet/talos-config.log` | nginx's log of `/talos/config`, in the `fleet` format `$time_iso8601 $arg_uuid $arg_code $status $request_method $request_completion $body_bytes_sent` |
+| `FLEET_INSTALLS` | `false` | Whether a worker's provision Workflow installs; off, `/render` refuses every call, since no run asks for one |
 | `FLEET_CONFIG_TTL` | `2h` | Age at which an unfetched config is deleted |
 
 ## NetBox contract
@@ -69,10 +70,15 @@ device's config.
 `uuid` is the SMBIOS UUID in lower case and the `code` 43 characters of
 base64url; anything else is 400 before a path is built. 401 is a bad
 signature. 409 is a device that is unknown, not `planned` or `staged`, without
-an unfinished `provision` run in `last_workflow`, of another node or class
-than the body names, or a control plane. 503 is a render the controller cannot
-do now. 201 means the file is written. Every answer is `{"reason": "..."}`,
+an unfinished `provision` run with `install=true` in `last_workflow`, of
+another node, class or `smbios_uuid` than the body names, or a code already
+spent. 503 is a render the controller cannot do now, with the detail in its
+log. 201 means the file is written. Every answer is `{"reason": "..."}`,
 which never repeats the request.
+
+A whole GET (`200`, `GET`, `OK`, the file's size in bytes) burns the file. A
+served, expired or replaced code is kept as a hash for 24 hours in
+`talos-burned.json`, and a render for it is refused.
 
 The webhook is `POST /webhook` with NetBox's `X-Hook-Signature`, HMAC-SHA512
 hex of the body with the rule's secret. The body is not read for content: a

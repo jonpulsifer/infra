@@ -56,9 +56,9 @@ func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest
 	}
 	cf["smbios_uuid"] = testUUID
 	nb := &fakeNetBox{devices: []map[string]any{device("riptide", status, "none", cf)}, ifaces: riptideIfaces()}
-	kube := &fakeKube{objects: map[string]Object{
-		wfBase + provWF: workflowObject(provWF, "riptide", "provision", "2023-11-14T22:13:20Z", "STATE_RUNNING"),
-	}}
+	wf := workflowObject(provWF, "riptide", "provision", "2023-11-14T22:13:20Z", "STATE_RUNNING")
+	wf["spec"] = map[string]any{"hardwareMap": map[string]any{"install": "true"}}
+	kube := &fakeKube{objects: map[string]Object{wfBase + provWF: wf}}
 	nbs := httptest.NewServer(nb.handler())
 	ks := httptest.NewServer(kube.handler())
 	t.Cleanup(func() { nbs.Close(); ks.Close() })
@@ -71,7 +71,7 @@ func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest
 		NetBox:   &NetBox{URL: nbs.URL, Token: "nbt_x.y", Client: nbs.Client()},
 		Kube:     &Kube{Server: ks.URL, Namespace: "tinkerbell", Client: ks.Client()},
 		Renderer: it.rend,
-		Store:    &Store{Dir: filepath.Join(dir, "talos")},
+		Store:    &Store{Dir: filepath.Join(dir, "talos"), Burned: filepath.Join(dir, "burned.json")},
 		Tail:     &Tail{Path: it.log, Offset: filepath.Join(dir, "talos-config.offset")},
 		TTL:      2 * time.Hour,
 		Metrics:  NewMetrics(),
@@ -170,6 +170,11 @@ func TestRenderGates(t *testing.T) {
 		{name: "node mismatch", status: "staged", req: func(r *RenderRequest) { r.Node = "swell" }, want: 409},
 		{name: "class mismatch", status: "staged", req: func(r *RenderRequest) { r.Class = "worker-g2" }, want: 409},
 		{name: "class without inputs", status: "staged", cf: map[string]any{"talos_class": "worker-g9"}, req: func(r *RenderRequest) { r.Class = "worker-g9" }, want: 503},
+		{name: "another SMBIOS UUID", status: "staged", req: func(r *RenderRequest) { r.UUID = "00000000-0000-0000-0000-000000000000" }, want: 409},
+		{name: "a run that installs nothing", status: "staged", kube: func(k *fakeKube) {
+			k.objects[wfBase+provWF]["spec"] = map[string]any{"hardwareMap": map[string]any{"install": "false"}}
+		}, want: 409},
+		{name: "a run from an older controller", status: "staged", kube: func(k *fakeKube) { delete(k.objects[wfBase+provWF], "spec") }, want: 409},
 		{name: "staged", status: "staged", want: 201},
 		{name: "planned", status: "planned", want: 201},
 	}
@@ -193,6 +198,9 @@ func TestRenderGates(t *testing.T) {
 			}
 			if c.want != 201 && reason == "" {
 				t.Fatal("a refusal without a reason")
+			}
+			if c.want == 503 && strings.Contains(reason, "worker-g9") {
+				t.Fatalf("a 503 carries detail: %s", reason)
 			}
 			for _, echoed := range []string{"NOPE", "swell", "worker-g2", testCode} {
 				if c.req != nil && strings.Contains(reason, echoed) {
@@ -262,14 +270,29 @@ func journalCount(nb *fakeNetBox, kind string) int {
 	return n
 }
 
+// line is one talos-config log line in the fleet format.
+func line(at, uuid, code string, status int, method, completion string, sent int64) string {
+	return fmt.Sprintf("%s %s %s %d %s %s %d", at, uuid, code, status, method, completion, sent)
+}
+
+func (it *installTest) size(t *testing.T, code string) int64 {
+	t.Helper()
+	fi, err := os.Stat(it.cfgPath(code))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi.Size()
+}
+
 func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
 	it := newInstallTest(t, "staged", nil)
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
 	ctx := context.Background()
+	n := it.size(t, testCode)
 	// A partial line waits for its end.
-	it.appendLog(t, "2023-11-14T22:20:00+00:00 "+testUUID+" "+testCode+" 200")
+	it.appendLog(t, line("2023-11-14T22:20:00+00:00", testUUID, testCode, 200, "GET", "OK", n))
 	f, _ := os.OpenFile(it.log, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString("2023-11-14T22:21:00+00:00 " + testUUID)
 	f.Close()
@@ -281,12 +304,6 @@ func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
 	if _, err := os.Stat(it.cfgPath(testCode)); !os.IsNotExist(err) {
 		t.Fatal("a served config was not burned")
 	}
-	it.nb.failPatch = true
-	it.in.Sweep(ctx)
-	if recs, _ := it.in.Store.Records(); len(recs) != 1 || recs[0].Fetched.IsZero() {
-		t.Fatalf("a release NetBox refused was not kept for a retry: %+v", recs)
-	}
-	it.nb.failPatch = false
 	it.in.Sweep(ctx)
 	p := lastPatch(it.nb)
 	if p == nil || p["status"] != "active" || p["custom_fields"].(map[string]any)["attest_consumed_at"] != "2023-11-14T22:20:00Z" {
@@ -299,27 +316,151 @@ func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
 		t.Fatal("the release was not journaled once")
 	}
 
-	// The node fetches again: the code is spent, nginx says 404, and that
-	// is journaled once however often it repeats.
-	it.appendLog(t, " "+testCode+" 404",
-		"2023-11-14T22:22:00+00:00 "+testUUID+" "+testCode+" 404",
-		"2023-11-14T22:22:05+00:00 "+testUUID+" "+testCode+" 404")
-	if _, err := it.in.Follow(ctx); err != nil {
-		t.Fatal(err)
+	// A replay of the render call cannot bring the file back.
+	it.nb.set("status", map[string]any{"value": "staged"})
+	if code, reason := it.post(t, goodRequest(), testSecret); code != http.StatusConflict {
+		t.Fatalf("a replayed render: %d %s", code, reason)
 	}
-	if n := journalCount(it.nb, "warning"); n != 1 {
-		t.Fatalf("%d 404 journal entries, want 1", n)
+	if _, err := os.Stat(it.cfgPath(testCode)); !os.IsNotExist(err) {
+		t.Fatal("a replayed render recreated the file")
+	}
+	// The burned set survives a restart.
+	it.in.Store = &Store{Dir: it.in.Store.Dir, Burned: it.in.Store.Burned}
+	if code, _ := it.post(t, goodRequest(), testSecret); code != http.StatusConflict {
+		t.Fatal("a restart forgot the burned code")
 	}
 
 	// A new Tail resumes from the saved offset: nothing is handled twice.
 	before := len(it.nb.patches)
 	it.in.Tail = &Tail{Path: it.in.Tail.Path, Offset: it.in.Tail.Offset}
-	it.in.seen404 = nil
 	if _, err := it.in.Follow(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(it.nb.patches) != before || journalCount(it.nb, "warning") != 1 {
+	if len(it.nb.patches) != before {
 		t.Fatal("a restart handled old lines again")
+	}
+}
+
+func TestOnlyAWholeGetBurns(t *testing.T) {
+	it := newInstallTest(t, "staged", nil)
+	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
+		t.Fatal(code)
+	}
+	ctx := context.Background()
+	n := it.size(t, testCode)
+	at := "2023-11-14T22:20:00+00:00"
+	it.appendLog(t,
+		line(at, testUUID, testCode, 206, "GET", "OK", n),
+		line(at, testUUID, testCode, 200, "HEAD", "OK", 0),
+		line(at, testUUID, testCode, 200, "GET", "", n/2),
+		line(at, testUUID, testCode, 200, "GET", "OK", n-1),
+		line(at, testUUID, testCode, 405, "POST", "OK", 0),
+		"not a fetch line",
+	)
+	if served, err := it.in.Follow(ctx); err != nil || served {
+		t.Fatalf("a range, a HEAD, an aborted or short GET burned the file: %v %v", served, err)
+	}
+	if _, err := os.Stat(it.cfgPath(testCode)); err != nil {
+		t.Fatal("the file is gone")
+	}
+	it.appendLog(t, line(at, testUUID, testCode, 200, "GET", "OK", n))
+	if served, _ := it.in.Follow(ctx); !served {
+		t.Fatal("a whole GET did not burn")
+	}
+}
+
+func TestFailedReleaseIsKeptAndJournaledOnce(t *testing.T) {
+	it := newInstallTest(t, "staged", nil)
+	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
+		t.Fatal(code)
+	}
+	ctx := context.Background()
+	it.appendLog(t, line("2023-11-14T22:20:00+00:00", testUUID, testCode, 200, "GET", "OK", it.size(t, testCode)))
+	it.in.Follow(ctx)
+	it.nb.failPatch = true
+	for k := 0; k < 3; k++ {
+		it.now = it.now.Add(3 * time.Hour)
+		it.in.Sweep(ctx)
+	}
+	if recs, _ := it.in.Store.Records(); len(recs) != 1 || recs[0].Fetched.IsZero() {
+		t.Fatalf("a release NetBox refused was dropped: %+v", recs)
+	}
+	if n := journalCount(it.nb, "danger"); n != 1 {
+		t.Fatalf("%d failure journal entries, want 1", n)
+	}
+	if it.in.Metrics.unreleased != 1 || it.in.Metrics.pending != 0 {
+		t.Fatalf("unreleased %d, pending %d", it.in.Metrics.unreleased, it.in.Metrics.pending)
+	}
+	it.nb.failPatch = false
+	it.in.Sweep(ctx)
+	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
+		t.Fatalf("the retried release: %v", p)
+	}
+	if it.in.Metrics.unreleased != 0 {
+		t.Fatal("the gauge kept a released config")
+	}
+}
+
+func TestNotFoundIsJournaledOnlyForAHeldMachineAndRateLimited(t *testing.T) {
+	it := newInstallTest(t, "staged", nil)
+	ctx := context.Background()
+	other := "00000000-0000-0000-0000-000000000000"
+	wrong := strings.Repeat("W", 43)
+	at := "2023-11-14T22:20:00+00:00"
+	// Nothing is held: a 404 reaches neither NetBox nor the journal.
+	pages := it.nb.pages
+	it.appendLog(t, line(at, testUUID, wrong, 404, "GET", "OK", 0), line(at, "-", "-", 404, "GET", "OK", 0))
+	it.in.Follow(ctx)
+	if it.nb.pages != pages || journalCount(it.nb, "warning") != 0 {
+		t.Fatal("a 404 for a machine the store holds nothing for reached NetBox")
+	}
+	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
+		t.Fatal(code)
+	}
+	it.appendLog(t,
+		line(at, testUUID, wrong, 404, "GET", "OK", 0),
+		line(at, testUUID, strings.Repeat("V", 43), 404, "GET", "OK", 0),
+		line(at, other, wrong, 404, "GET", "OK", 0))
+	it.in.Follow(ctx)
+	if n := journalCount(it.nb, "warning"); n != 1 {
+		t.Fatalf("%d 404 journal entries, want 1", n)
+	}
+	it.now = it.now.Add(notFoundEvery)
+	it.appendLog(t, line(at, testUUID, wrong, 404, "GET", "OK", 0))
+	it.in.Follow(ctx)
+	if n := journalCount(it.nb, "warning"); n != 2 {
+		t.Fatalf("%d 404 journal entries after the window, want 2", n)
+	}
+	if len(it.in.journaled) != 1 {
+		t.Fatalf("the rate limit kept %d entries", len(it.in.journaled))
+	}
+}
+
+// TestParseFetchReadsNginxLines holds the parser to lines nginx 1.30 wrote
+// in the fleet format: a whole GET, a GET the client aborted, whose
+// $request_completion is empty, a refused HEAD, and a request without the
+// arguments.
+func TestParseFetchReadsNginxLines(t *testing.T) {
+	const ts = "2026-10-29T13:31:24+00:00 "
+	whole, ok := parseFetch(ts + testUUID + " " + testCode + " 200 GET OK 3000000")
+	if !ok || !whole.Delivered() || whole.Sent != 3000000 || whole.UUID != testUUID || whole.Code != testCode {
+		t.Fatalf("a whole GET: %+v %v", whole, ok)
+	}
+	aborted, ok := parseFetch(ts + testUUID + " " + testCode + " 200 GET  211041")
+	if !ok || aborted.Delivered() || aborted.Sent != 211041 {
+		t.Fatalf("an aborted GET: %+v %v", aborted, ok)
+	}
+	head, ok := parseFetch(ts + testUUID + " " + testCode + " 405 HEAD OK 0")
+	if !ok || head.Delivered() || head.Status != 405 {
+		t.Fatalf("a HEAD: %+v %v", head, ok)
+	}
+	if bare, ok := parseFetch(ts + "- - 404 GET OK 153"); !ok || bare.Status != 404 || uuidPattern.MatchString(bare.UUID) {
+		t.Fatalf("no arguments: %+v %v", bare, ok)
+	}
+	for _, bad := range []string{"", "x", ts + testUUID + " " + testCode + " 200"} {
+		if _, ok := parseFetch(bad); ok {
+			t.Errorf("%q parsed", bad)
+		}
 	}
 }
 
@@ -334,10 +475,18 @@ func TestTailFollowsARotation(t *testing.T) {
 	if lines, _ := tail.Read(); strings.Join(lines, ",") != "a,b" {
 		t.Fatalf("first read: %v", lines)
 	}
+	// logrotate renames the file, nginx writes once more before it reopens.
 	os.Rename(path, path+".1")
+	old, _ := os.OpenFile(path+".1", os.O_APPEND|os.O_WRONLY, 0)
+	old.WriteString("b2\n")
 	os.WriteFile(path, []byte("c\n"), 0o600)
-	if lines, _ := tail.Read(); strings.Join(lines, ",") != "c" {
+	if lines, _ := tail.Read(); strings.Join(lines, ",") != "b2,c" {
 		t.Fatalf("after rotation: %v", lines)
+	}
+	old.WriteString("b3\n")
+	old.Close()
+	if lines, _ := tail.Read(); strings.Join(lines, ",") != "b3" {
+		t.Fatalf("the old file's last lines: %v", lines)
 	}
 	os.WriteFile(path, []byte(""), 0o600)
 	if lines, _ := tail.Read(); lines != nil {
@@ -355,6 +504,7 @@ func TestUnreadConfigExpires(t *testing.T) {
 		t.Fatal(code)
 	}
 	ctx := context.Background()
+	n := it.size(t, testCode)
 	it.now = testNow.Add(time.Hour)
 	it.in.Sweep(ctx)
 	if _, err := os.Stat(it.cfgPath(testCode)); err != nil {
@@ -377,10 +527,14 @@ func TestUnreadConfigExpires(t *testing.T) {
 	if entries, _ := os.ReadDir(filepath.Join(it.dir, "talos")); len(entries) != 0 {
 		t.Fatalf("the machine's directory stayed: %v", entries)
 	}
-	// A served line for the expired code burns nothing and releases nothing.
-	it.appendLog(t, "2023-11-15T01:00:00+00:00 "+testUUID+" "+testCode+" 200")
+	// A served line for the expired code burns nothing and releases nothing,
+	// and the expired code cannot be rendered again.
+	it.appendLog(t, line("2023-11-15T01:00:00+00:00", testUUID, testCode, 200, "GET", "OK", n))
 	if served, _ := it.in.Follow(ctx); served {
 		t.Fatal("an expired code was released")
+	}
+	if code, _ := it.post(t, goodRequest(), testSecret); code != http.StatusConflict {
+		t.Fatal("an expired code rendered again")
 	}
 }
 
@@ -390,7 +544,7 @@ func TestReleaseLeavesAStatusTheOwnerChanged(t *testing.T) {
 		t.Fatal(code)
 	}
 	it.nb.set("status", map[string]any{"value": "decommissioning"})
-	it.appendLog(t, "2023-11-14T22:20:00+00:00 "+testUUID+" "+testCode+" 200")
+	it.appendLog(t, line("2023-11-14T22:20:00+00:00", testUUID, testCode, 200, "GET", "OK", it.size(t, testCode)))
 	ctx := context.Background()
 	it.in.Follow(ctx)
 	it.in.Sweep(ctx)

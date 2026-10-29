@@ -27,20 +27,24 @@ type Metrics struct {
 	Released         atomic.Int64
 	Expired          atomic.Int64
 
-	mu            sync.Mutex
-	devices       map[string]int
-	lastOK        time.Time
-	lastSeen      time.Time
-	pending       int
-	pendingOldest time.Time
+	mu               sync.Mutex
+	devices          map[string]int
+	lastOK           time.Time
+	lastSeen         time.Time
+	pending          int
+	pendingOldest    time.Time
+	unreleased       int
+	unreleasedOldest time.Time
 }
 
-// SetPending records the configs nginx has not served yet and the render
-// time of the oldest.
-func (m *Metrics) SetPending(n int, oldest time.Time) {
+// SetPending records the configs nginx has not served yet with the render
+// time of the oldest, and the served ones NetBox has no release for with the
+// fetch time of the oldest.
+func (m *Metrics) SetPending(n int, oldest time.Time, unreleased int, oldestUnreleased time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pending, m.pendingOldest = n, oldest
+	m.unreleased, m.unreleasedOldest = unreleased, oldestUnreleased
 }
 
 // NewMetrics makes an empty set.
@@ -91,11 +95,15 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	counter("fleet_install_released_total", "Devices set active after nginx served their config.", m.Released.Load())
 	counter("fleet_install_expired_total", "Configs deleted unread after the TTL.", m.Expired.Load())
 	fmt.Fprintf(w, "# HELP fleet_install_files_pending Rendered Talos configs nginx has not served yet.\n# TYPE fleet_install_files_pending gauge\nfleet_install_files_pending %d\n", m.pending)
-	age := 0.0
-	if !m.pendingOldest.IsZero() {
-		age = time.Since(m.pendingOldest).Seconds()
+	age := func(t time.Time) float64 {
+		if t.IsZero() {
+			return 0
+		}
+		return time.Since(t).Seconds()
 	}
-	fmt.Fprintf(w, "# HELP fleet_install_files_oldest_age_seconds Age of the oldest unserved config, 0 with none.\n# TYPE fleet_install_files_oldest_age_seconds gauge\nfleet_install_files_oldest_age_seconds %.0f\n", age)
+	fmt.Fprintf(w, "# HELP fleet_install_files_oldest_age_seconds Age of the oldest unserved config, 0 with none.\n# TYPE fleet_install_files_oldest_age_seconds gauge\nfleet_install_files_oldest_age_seconds %.0f\n", age(m.pendingOldest))
+	fmt.Fprintf(w, "# HELP fleet_install_unreleased Served configs whose release NetBox has not taken yet.\n# TYPE fleet_install_unreleased gauge\nfleet_install_unreleased %d\n", m.unreleased)
+	fmt.Fprintf(w, "# HELP fleet_install_unreleased_oldest_age_seconds Time since the oldest unreleased config was served, 0 with none.\n# TYPE fleet_install_unreleased_oldest_age_seconds gauge\nfleet_install_unreleased_oldest_age_seconds %.0f\n", age(m.unreleasedOldest))
 	fmt.Fprintf(w, "# HELP fleet_devices NetBox devices by status.\n# TYPE fleet_devices gauge\n")
 	statuses := make([]string, 0, len(m.devices))
 	for s := range m.devices {

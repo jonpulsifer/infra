@@ -204,15 +204,19 @@ func run() error {
 
 // loadInstaller reads the render's environment. The renderer runs only with
 // all three of FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL;
-// without them, or without FLEET_ATTEST_SECRET_FILE, /render answers 503,
-// and without them no Workflow installs.
+// without them, or without FLEET_ATTEST_SECRET_FILE, /render answers 503.
+// A Workflow installs only with the renderer and FLEET_INSTALLS=true.
 func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*Installer, error) {
 	stateDir := env("FLEET_STATE_DIR", "/var/lib/fleet-controller")
 	in := &Installer{
 		Site:   cfg.Site,
 		NetBox: netbox,
 		Kube:   kube,
-		Store:  &Store{Dir: filepath.Join(stateDir, "talos")},
+		Store: &Store{
+			Dir:     filepath.Join(stateDir, "talos"),
+			Burned:  filepath.Join(stateDir, "talos-burned.json"),
+			BurnFor: 24 * time.Hour,
+		},
 		Tail: &Tail{
 			Path:   env("FLEET_CONFIG_LOG", "/var/log/nginx/talos-config.log"),
 			Offset: filepath.Join(stateDir, "talos-config.offset"),
@@ -250,6 +254,11 @@ func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	// talos-attest gives up on /render after 30 seconds.
 	t := &Talosctl{Bin: bin, Worker: worker, Inputs: inputs, Timeout: 20 * time.Second}
 	in.Renderer, in.Prepare = t, t.Init
+	// FLEET_INSTALLS is the switch for the install itself: off, no Workflow
+	// installs, and /render refuses every call, since no run asks for one.
+	if env("FLEET_INSTALLS", "false") != "true" {
+		return in, nil
+	}
 	cfg.Installs = map[string]string{}
 	for class, ci := range inputs {
 		if ci.MachineType == "worker" {

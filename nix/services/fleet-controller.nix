@@ -62,18 +62,23 @@ let
   # A UUID and a code that match their shapes name a file; anything else names none, so nginx
   # never builds a path from a raw query argument.
   configMap = ''
-    log_format fleet '$time_iso8601 $arg_uuid $arg_code $status';
+    log_format fleet '$time_iso8601 $arg_uuid $arg_code $status $request_method $request_completion $body_bytes_sent';
     map "$arg_uuid/$arg_code" $fleet_talos_config {
       "~^(?<fleet_uuid>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/(?<fleet_code>[A-Za-z0-9_-]{43})$" /talos/$fleet_uuid/$fleet_code.yaml;
       default /talos/-;
     }
   '';
+  # The controller burns a file only on a whole GET of all its bytes, so a HEAD, a range or a
+  # conditional request, which would serve less, is refused or served whole.
   serveConfig = {
     root = talosConfig.stateDir;
     extraConfig = ''
-      limit_except GET {
-        deny all;
+      if ($request_method != GET) {
+        return 405;
       }
+      max_ranges 0;
+      etag off;
+      if_modified_since off;
       types { }
       default_type text/yaml;
       add_header Cache-Control no-store always;
@@ -94,6 +99,11 @@ in
       type = lib.types.str;
       default = "folly";
       description = "The NetBox site whose kubernetes-node devices the controller manages.";
+    };
+    installs = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Let a worker's provision Workflow install Talos from HookOS, with the config /render writes. Off, no Workflow installs and /render refuses every call.";
     };
     webhookPort = lib.mkOption {
       type = lib.types.port;
@@ -151,12 +161,27 @@ in
       };
     };
 
-    # nginx keeps its logs 0750 and 0640; the controller reads the talos-config log through an
-    # ACL, which new files inherit from the directory's default ACL.
+    # nginx keeps its logs 0750 and 0640. The controller reads the talos-config log through ACLs:
+    # it may pass through nginx's directory and read the log's own, whose new files inherit the
+    # read from its default ACL.
+    systemd.services.nginx.serviceConfig.LogsDirectory = lib.mkForce [
+      "nginx"
+      (lib.removePrefix "/var/log/" talosConfig.logDir)
+    ];
     systemd.tmpfiles.rules = [
-      "a+ /var/log/nginx - - - - group:fleet-controller:r-x,default:group:fleet-controller:r--"
+      "d ${talosConfig.logDir} 0750 ${config.services.nginx.user} ${config.services.nginx.group} -"
+      "a+ /var/log/nginx - - - - group:fleet-controller:--x"
+      "a+ ${talosConfig.logDir} - - - - group:fleet-controller:r-x,default:group:fleet-controller:r--"
       "a+ ${talosConfig.log} - - - - group:fleet-controller:r--"
     ];
+    # The log carries install codes; three days of it is plenty to debug a boot.
+    services.logrotate.settings.talos-config = {
+      files = talosConfig.log;
+      frequency = "daily";
+      rotate = 3;
+      su = "${config.services.nginx.user} ${config.services.nginx.group}";
+      postrotate = "[ ! -f /var/run/nginx/nginx.pid ] || kill -USR1 `cat /var/run/nginx/nginx.pid`";
+    };
 
     systemd.services.fleet-controller = {
       description = "NetBox to Tinkerbell fleet controller";
@@ -195,6 +220,7 @@ in
         FLEET_STATE_DIR = talosConfig.stateDir;
         FLEET_CONFIG_LOG = talosConfig.log;
         FLEET_CONFIG_TTL = "2h";
+        FLEET_INSTALLS = lib.boolToString cfg.installs;
         # talosctl writes its patch files and nothing else here.
         HOME = "/tmp";
       }

@@ -260,10 +260,12 @@ in
         # (./fleet-controller.nix); the others pass it to that anchor's Anchor address.
         "= /talos/config" = {
           proxyPass = "${configServer}/talos/config$is_args$args";
+          # The query carries the install code, which stays out of this anchor's access log.
           extraConfig = ''
-            limit_except GET {
-              deny all;
+            if ($request_method != GET) {
+              return 405;
             }
+            access_log off;
             proxy_connect_timeout 5s;
           '';
         };

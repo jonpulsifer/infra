@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,10 +40,67 @@ type Pending struct {
 // <dir>/<uuid>/<code>.yaml. A config is mode 0640 in directories of 0750, all
 // in the service's group, which nginx is a member of. Its record,
 // <code>.json, is mode 0600, so nginx serves the config and nothing else.
+//
+// A code whose config is gone, served, expired or replaced, is burned: the
+// file Burned keeps a hash of it for BurnFor (24h unset), and Put refuses it, so a
+// replayed render call cannot bring the file back.
 type Store struct {
-	Dir string
+	Dir     string
+	Burned  string
+	BurnFor time.Duration
 
-	mu sync.Mutex
+	mu     sync.Mutex
+	burned map[string]time.Time
+}
+
+// ErrBurned is a render for a code whose config is already gone.
+var ErrBurned = errors.New("the code is spent")
+
+func burnKey(uuid, code string) string {
+	h := sha256.Sum256([]byte(uuid + "/" + code))
+	return hex.EncodeToString(h[:])
+}
+
+func (s *Store) loadBurned() {
+	if s.burned != nil {
+		return
+	}
+	s.burned = map[string]time.Time{}
+	if s.Burned == "" {
+		return
+	}
+	if b, err := os.ReadFile(s.Burned); err == nil {
+		_ = json.Unmarshal(b, &s.burned)
+	}
+}
+
+func (s *Store) isBurned(uuid, code string) bool {
+	s.loadBurned()
+	_, ok := s.burned[burnKey(uuid, code)]
+	return ok
+}
+
+// burn records a spent code and forgets the ones older than BurnFor.
+func (s *Store) burn(uuid, code string, at time.Time) error {
+	s.loadBurned()
+	s.burned[burnKey(uuid, code)] = at
+	keep := s.BurnFor
+	if keep <= 0 {
+		keep = 24 * time.Hour
+	}
+	for k, t := range s.burned {
+		if at.Sub(t) > keep {
+			delete(s.burned, k)
+		}
+	}
+	if s.Burned == "" {
+		return nil
+	}
+	b, err := json.Marshal(s.burned)
+	if err != nil {
+		return err
+	}
+	return writeFile(s.Burned, b, 0o600)
 }
 
 func (s *Store) paths(uuid, code string) (cfg, record string) {
@@ -88,6 +147,9 @@ func (s *Store) Put(p Pending, cfg []byte) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.isBurned(p.UUID, p.Code) {
+		return ErrBurned
+	}
 	if err := mkdir(s.Dir); err != nil {
 		return err
 	}
@@ -108,6 +170,9 @@ func (s *Store) Put(p Pending, cfg []byte) error {
 		}
 		if o.Fetched.IsZero() {
 			if err := os.Remove(recPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			if err := s.burn(o.UUID, o.Code, p.Rendered); err != nil {
 				return err
 			}
 		}
@@ -152,6 +217,32 @@ func (s *Store) records(uuid string) ([]Pending, error) {
 	return out, nil
 }
 
+// Spent says whether the code is burned.
+func (s *Store) Spent(uuid, code string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isBurned(uuid, code)
+}
+
+// Holds says whether the store has an unserved config for the machine.
+func (s *Store) Holds(uuid string) (Pending, bool) {
+	if !uuidPattern.MatchString(uuid) {
+		return Pending{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	records, err := s.records(uuid)
+	if err != nil {
+		return Pending{}, false
+	}
+	for _, p := range records {
+		if p.Fetched.IsZero() {
+			return p, true
+		}
+	}
+	return Pending{}, false
+}
+
 // Records lists every record, oldest first.
 func (s *Store) Records() ([]Pending, error) {
 	s.mu.Lock()
@@ -159,10 +250,12 @@ func (s *Store) Records() ([]Pending, error) {
 	return s.records("")
 }
 
-// Served burns a config nginx just served: the file goes, and the record
-// keeps the time until the release is in NetBox. ok is false for a code the
-// store does not hold, or one already served.
-func (s *Store) Served(uuid, code string, at time.Time) (Pending, bool, error) {
+// Served burns a config nginx just served whole: the file goes, and the
+// record keeps the time until the release is in NetBox. ok is false for a
+// code the store does not hold, one already served, or a fetch that sent
+// fewer or more bytes than the file holds, which leaves the file for the
+// node's next try.
+func (s *Store) Served(uuid, code string, sent int64, at time.Time) (Pending, bool, error) {
 	if !uuidPattern.MatchString(uuid) || !codePattern.MatchString(code) {
 		return Pending{}, false, nil
 	}
@@ -180,11 +273,18 @@ func (s *Store) Served(uuid, code string, at time.Time) (Pending, bool, error) {
 	if err := json.Unmarshal(b, &p); err != nil {
 		return Pending{}, false, err
 	}
+	if !p.Fetched.IsZero() {
+		return p, false, nil
+	}
+	fi, err := os.Stat(cfgPath)
+	if err != nil || fi.Size() != sent {
+		return p, false, nil
+	}
 	if err := os.Remove(cfgPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Pending{}, false, err
 	}
-	if !p.Fetched.IsZero() {
-		return p, false, nil
+	if err := s.burn(uuid, code, at); err != nil {
+		return Pending{}, false, err
 	}
 	p.Fetched = at
 	rec, err := json.Marshal(p)
@@ -195,10 +295,13 @@ func (s *Store) Served(uuid, code string, at time.Time) (Pending, bool, error) {
 }
 
 // Drop deletes a config and its record, and the machine's directory once it
-// is empty.
-func (s *Store) Drop(p Pending) error {
+// is empty. The code is burned.
+func (s *Store) Drop(p Pending, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.burn(p.UUID, p.Code, at); err != nil {
+		return err
+	}
 	cfgPath, recPath := s.paths(p.UUID, p.Code)
 	for _, f := range []string{cfgPath, recPath} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {

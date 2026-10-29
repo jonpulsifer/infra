@@ -7,5 +7,7 @@
   server = "spore";
   port = 8447;
   stateDir = "/var/lib/fleet-controller";
-  log = "/var/log/nginx/talos-config.log";
+  # Its own directory under nginx's, so the controller's read access covers this log alone.
+  logDir = "/var/log/nginx/fleet";
+  log = "/var/log/nginx/fleet/talos-config.log";
 }

@@ -44,10 +44,14 @@ type Installer struct {
 	Metrics      *Metrics
 	Now          func() time.Time
 
-	mu       sync.Mutex
-	prepared bool
-	seen404  map[string]bool
+	mu         sync.Mutex
+	prepared   bool
+	journaled  map[string]time.Time
+	unreleased map[string]bool
 }
+
+// notFoundEvery is how often a machine's 404s may reach its journal.
+const notFoundEvery = 10 * time.Minute
 
 // RenderRequest is talos-attest's call, signed with X-Fleet-Signature.
 type RenderRequest struct {
@@ -127,11 +131,16 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			d = Device{Serial: req.Serial, Name: req.Node, Class: req.Class}
 		}
 		Audit("fleet.render", i.Site, d, d.LastWorkflow, "refused: "+ref.reason)
-		reply(w, ref.status, ref.reason)
+		if ref.status == http.StatusConflict {
+			reply(w, ref.status, ref.reason)
+			return
+		}
+		log.Printf("render %s: %s", d.Name, ref.reason)
+		reply(w, ref.status, "the controller cannot render now; its log says why")
 	default:
 		i.Metrics.RenderFailed.Add(1)
 		log.Printf("render %s: %v", req.Serial, err)
-		reply(w, http.StatusServiceUnavailable, "the render failed; the controller's journal says why")
+		reply(w, http.StatusServiceUnavailable, "the controller cannot render now; its log says why")
 	}
 }
 
@@ -150,6 +159,9 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	if req.Class != "" && req.Class != d.Class {
 		return d, conflict("the node is of another class in NetBox")
 	}
+	if d.SMBIOSUUID != "" && d.SMBIOSUUID != req.UUID {
+		return d, conflict("NetBox holds another SMBIOS UUID for the node")
+	}
 	if d.Status != "planned" && d.Status != "staged" {
 		return d, conflict("%s is %s; only a planned or staged device installs", d.Name, d.Status)
 	}
@@ -165,6 +177,13 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	}
 	if Finished(wf.State()) {
 		return d, conflict("the Workflow %s has finished (%s)", d.LastWorkflow, wf.State())
+	}
+	spec, _ := wf["spec"].(map[string]any)
+	if hm, _ := spec["hardwareMap"].(map[string]any); hm["install"] != "true" {
+		return d, conflict("the Workflow %s installs nothing", d.LastWorkflow)
+	}
+	if i.Store.Spent(req.UUID, req.Code) {
+		return d, conflict("the code is spent")
 	}
 	switch i.Renderer.MachineType(d.Class) {
 	case "":
@@ -183,7 +202,9 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 		UUID: req.UUID, Code: req.Code, Serial: d.Serial, Node: d.Name, Class: d.Class,
 		Workflow: d.LastWorkflow, Rendered: i.Now(),
 	}
-	if err := i.Store.Put(p, cfg); err != nil {
+	if err := i.Store.Put(p, cfg); errors.Is(err, ErrBurned) {
+		return d, conflict("the code is spent")
+	} else if err != nil {
 		return d, unavailable("write the config: %v", err)
 	}
 	i.pending()
@@ -247,19 +268,24 @@ func (i *Installer) Follow(ctx context.Context) (bool, error) {
 		if !ok {
 			continue
 		}
-		switch f.Status {
-		case http.StatusOK:
-			p, ok, err := i.Store.Served(f.UUID, f.Code, f.At)
+		switch {
+		case f.Delivered():
+			p, ok, err := i.Store.Served(f.UUID, f.Code, f.Sent, f.At)
 			if err != nil {
 				log.Printf("burn %s: %v", f.UUID, err)
 				continue
 			}
 			if !ok {
+				if p.Code != "" && p.Fetched.IsZero() {
+					log.Printf("talos-config: %s's fetch sent %d bytes, not the file's; the file stays", p.Node, f.Sent)
+				}
 				continue
 			}
 			served = true
 			log.Printf("nginx served %s's config at %s; the file is deleted", p.Node, timestamp(f.At))
-		case http.StatusNotFound:
+		case f.Status == http.StatusOK || f.Status == http.StatusPartialContent:
+			log.Printf("talos-config: an incomplete %s for uuid %q (%d, %d bytes); nothing is burned", f.Method, f.UUID, f.Status, f.Sent)
+		case f.Status == http.StatusNotFound:
 			i.notFound(ctx, f)
 		default:
 			log.Printf("talos-config: %d for uuid %q", f.Status, f.UUID)
@@ -271,34 +297,44 @@ func (i *Installer) Follow(ctx context.Context) (bool, error) {
 	return served, i.Tail.Save()
 }
 
-// notFound journals a 404 once per code on the device the UUID names: a
-// wrong code, an expired one, or one already spent.
+// notFound journals a 404 on the device whose config the store holds: the
+// machine asked with a code other than the one rendered for it. A machine
+// gets at most one such entry per notFoundEvery; a 404 for a UUID the store
+// holds nothing for is only logged, so a flood of guesses reaches neither
+// NetBox nor the journal.
 func (i *Installer) notFound(ctx context.Context, f Fetch) {
-	key := f.UUID + "/" + f.Code
+	p, ok := i.Store.Holds(f.UUID)
+	if !ok {
+		log.Printf("talos-config: 404 for uuid %q", f.UUID)
+		return
+	}
+	now := i.Now()
 	i.mu.Lock()
-	if i.seen404 == nil || len(i.seen404) > 1000 {
-		i.seen404 = map[string]bool{}
+	if i.journaled == nil {
+		i.journaled = map[string]time.Time{}
 	}
-	seen := i.seen404[key]
-	i.seen404[key] = true
+	for k, t := range i.journaled {
+		if now.Sub(t) >= notFoundEvery {
+			delete(i.journaled, k)
+		}
+	}
+	_, recent := i.journaled[f.UUID]
+	if !recent {
+		i.journaled[f.UUID] = now
+	}
 	i.mu.Unlock()
-	if seen {
+	if recent {
 		return
 	}
-	if !uuidPattern.MatchString(f.UUID) {
-		log.Printf("talos-config: 404 for a malformed uuid %q", f.UUID)
-		return
+	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
+	if err == nil {
+		comment := fmt.Sprintf("fleet-controller: at %s the node asked for its Talos config with a code other than the one rendered for it; nginx answered 404", timestamp(f.At))
+		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
 	}
-	d, err := i.NetBox.BySMBIOSUUID(ctx, i.Site, f.UUID)
 	if err != nil {
-		log.Printf("talos-config: 404 for uuid %s, which names no device: %v", f.UUID, err)
-		return
-	}
-	comment := fmt.Sprintf("fleet-controller: at %s the node asked for its Talos config with an install code the controller does not hold (wrong, expired or already used); nginx answered 404", timestamp(f.At))
-	if err := i.NetBox.Update(ctx, d, "", nil, "warning", comment); err != nil {
-		log.Printf("journal the 404 of %s: %v", d.Name, err)
+		log.Printf("journal the 404 of %s: %v", p.Node, err)
 		i.mu.Lock()
-		delete(i.seen404, key)
+		delete(i.journaled, f.UUID)
 		i.mu.Unlock()
 	}
 }
@@ -316,11 +352,7 @@ func (i *Installer) Sweep(ctx context.Context) {
 		switch {
 		case !p.Fetched.IsZero():
 			if err := i.release(ctx, p); err != nil {
-				log.Printf("release %s: %v", p.Node, err)
-				if now.Sub(p.Fetched) > i.TTL {
-					log.Printf("%s's release is older than %s; its record is dropped", p.Node, i.TTL)
-					_ = i.Store.Drop(p)
-				}
+				i.releaseFailed(ctx, p, err)
 			}
 		case now.Sub(p.Rendered) > i.TTL:
 			if err := i.expire(ctx, p); err != nil {
@@ -351,9 +383,12 @@ func (i *Installer) release(ctx context.Context, p Pending) error {
 	if err := i.NetBox.Update(ctx, d, status, fields, "success", comment); err != nil {
 		return err
 	}
-	if err := i.Store.Drop(p); err != nil {
+	if err := i.Store.Drop(p, i.Now()); err != nil {
 		return err
 	}
+	i.mu.Lock()
+	delete(i.unreleased, p.Code)
+	i.mu.Unlock()
 	i.Metrics.Released.Add(1)
 	if status != "" {
 		d.Status = status
@@ -362,8 +397,33 @@ func (i *Installer) release(ctx context.Context, p Pending) error {
 	return nil
 }
 
+// releaseFailed keeps a served config's record for the next sweep, which
+// tries again, and journals the failure once.
+func (i *Installer) releaseFailed(ctx context.Context, p Pending, err error) {
+	log.Printf("release %s: %v", p.Node, err)
+	i.mu.Lock()
+	if i.unreleased == nil {
+		i.unreleased = map[string]bool{}
+	}
+	told := i.unreleased[p.Code]
+	i.mu.Unlock()
+	if told {
+		return
+	}
+	d, lookup := i.NetBox.BySerial(ctx, i.Site, p.Serial)
+	if lookup != nil {
+		return
+	}
+	comment := fmt.Sprintf("fleet-controller: the node fetched its Talos config at %s, and NetBox refused its release; the controller retries: %v", timestamp(p.Fetched), err)
+	if i.NetBox.Update(ctx, d, "", nil, "danger", comment) == nil {
+		i.mu.Lock()
+		i.unreleased[p.Code] = true
+		i.mu.Unlock()
+	}
+}
+
 func (i *Installer) expire(ctx context.Context, p Pending) error {
-	if err := i.Store.Drop(p); err != nil {
+	if err := i.Store.Drop(p, i.Now()); err != nil {
 		return err
 	}
 	i.Metrics.Expired.Add(1)
@@ -377,22 +437,27 @@ func (i *Installer) expire(ctx context.Context, p Pending) error {
 	return i.NetBox.Update(ctx, found, "", nil, "warning", comment)
 }
 
-// pending refreshes the count and the oldest render time of unread configs.
+// pending refreshes the counts and oldest times of the unread configs and
+// of the served ones NetBox has no release for.
 func (i *Installer) pending() {
 	records, err := i.Store.Records()
 	if err != nil {
 		return
 	}
-	n := 0
-	var oldest time.Time
+	var unread, unreleased int
+	var oldestUnread, oldestUnreleased time.Time
 	for _, p := range records {
-		if !p.Fetched.IsZero() {
+		if p.Fetched.IsZero() {
+			unread++
+			if oldestUnread.IsZero() || p.Rendered.Before(oldestUnread) {
+				oldestUnread = p.Rendered
+			}
 			continue
 		}
-		n++
-		if oldest.IsZero() || p.Rendered.Before(oldest) {
-			oldest = p.Rendered
+		unreleased++
+		if oldestUnreleased.IsZero() || p.Fetched.Before(oldestUnreleased) {
+			oldestUnreleased = p.Fetched
 		}
 	}
-	i.Metrics.SetPending(n, oldest)
+	i.Metrics.SetPending(unread, oldestUnread, unreleased, oldestUnreleased)
 }
