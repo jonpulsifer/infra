@@ -221,7 +221,8 @@ func TestWindowIsReadOnEveryStart(t *testing.T) {
 // Under the declared policy the planned stub the owner declared is the
 // authorization, window or not: the box that attests as its serial passes
 // on its EK certificates and binds to it. A serial with no stub stays
-// pending even while the window is open.
+// pending even while the window is open, and the window, which gates
+// nothing here, reports closed.
 func TestDeclaredStubBindsWithoutAWindow(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
@@ -238,7 +239,7 @@ func TestDeclaredStubBindsWithoutAWindow(t *testing.T) {
 	if mac := f.macOf("SIM-STUB"); mac != simMAC {
 		t.Fatalf("stub MAC %q", mac)
 	}
-	if !h.intakeAudited("SIM-STUB") || !strings.Contains(h.audit.String(), "bound to the declared stub; policy declared") {
+	if !h.intakeAudited("SIM-STUB") || !strings.Contains(h.audit.String(), "bound to the declared stub; MAC written; policy declared") {
 		t.Fatalf("no attest.intake line for the binding:\n%s", h.audit.String())
 	}
 
@@ -247,10 +248,10 @@ func TestDeclaredStubBindsWithoutAWindow(t *testing.T) {
 	if f.count() != 1 || h.intakeAudited(simSerial) {
 		t.Fatal("the declared policy admitted a serial with no stub")
 	}
-	if code, st := h.admin(t, http.MethodGet, "/intake", ""); code != http.StatusOK || !st.Open || st.Policy != intakePolicyDeclared {
+	if code, st := h.admin(t, http.MethodGet, "/intake", ""); code != http.StatusOK || !st.Open || st.Policy != intakePolicyDeclared || st.RequireWindow {
 		t.Fatalf("GET /intake: %d %+v", code, st)
 	}
-	if m, _ := h.v.Metrics(); !strings.Contains(m, `talos_attest_intake_open{policy="declared"} 1`) {
+	if m, _ := h.v.Metrics(); !strings.Contains(m, `talos_attest_intake_open{policy="declared"} 0`) {
 		t.Fatalf("metrics:\n%s", m)
 	}
 }
@@ -264,5 +265,168 @@ func TestDeclaredStubKeepsAnUncertifiedEKPending(t *testing.T) {
 	h.pending(t, "SIM-STUB")
 	if h.intakeAudited("SIM-STUB") || f.macOf("SIM-STUB") != "" {
 		t.Fatal("an uncertified EK bound the stub")
+	}
+}
+
+// A stub with a MAC on file binds only the box with that MAC.
+func TestDeclaredStubWithAMAC(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	h.window(t, intakePolicyDeclared, time.Time{})
+	f.add("other", "SIM-OTHER", statusPlanned, "aa:bb:cc:dd:ee:ff", nil)
+	if r := refusal(t, func() error { _, err := h.run("SIM-OTHER", simMAC); return err }()); r.Verdict.Reason != reasonMACMismatch || r.Verdict.Verdict != protocol.VerdictRefused {
+		t.Fatalf("stub with another MAC: %+v", r.Verdict)
+	}
+	if d := f.bySerial("SIM-OTHER"); d.Patches != 0 || f.macOf("SIM-OTHER") != "aa:bb:cc:dd:ee:ff" {
+		t.Fatalf("a refused stub changed: %+v", d)
+	}
+	f.add("swell", "SIM-STUB", statusPlanned, simMAC, nil)
+	if _, err := h.run("SIM-STUB", simMAC); err != nil {
+		t.Fatalf("stub with this MAC: %v", err)
+	}
+	if !strings.Contains(h.audit.String(), "bound to the declared stub; MAC already on file") {
+		t.Fatalf("no attest.intake line for the binding:\n%s", h.audit.String())
+	}
+	if r := refusal(t, func() error { _, err := h.run("SIM-STUB", "not-a-mac"); return err }()); r.Verdict.Reason != reasonMACMismatch {
+		t.Fatalf("a claim that is no MAC: %+v", r.Verdict)
+	}
+}
+
+// The declared stub is looked up again before anything is issued: a stub
+// another box bound, pinned or staged meanwhile refuses this one, and its
+// pins stay.
+func TestDeclaredStubIsRecheckedBeforeIssue(t *testing.T) {
+	for _, c := range []struct {
+		name, reason string
+		change       func(*fakeNetBox, *fakeDevice)
+	}{
+		{"bound to another MAC", reasonMACMismatch, func(f *fakeNetBox, d *fakeDevice) {
+			for _, i := range f.interfaces {
+				if i.DeviceID == d.ID {
+					f.next++
+					i.MAC, i.MACID = "aa:bb:cc:dd:ee:ff", f.next
+				}
+			}
+		}},
+		{"pinned to another EK", reasonEKHash, func(_ *fakeNetBox, d *fakeDevice) { d.CustomFields["ek_hash"] = strings.Repeat("ab", 32) }},
+		{"no longer planned", reasonStatus, func(_ *fakeNetBox, d *fakeDevice) { d.Status = statusStaged }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeNetBox(t)
+			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+			h.window(t, intakePolicyDeclared, time.Time{})
+			d := f.add("swell", "SIM-STUB", statusPlanned, "", nil)
+			h.tamper = func(*protocol.EvidenceRequest) {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				c.change(f, d)
+			}
+			r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }())
+			if r.Verdict.Reason != c.reason || r.Verdict.Verdict != protocol.VerdictRefused {
+				t.Fatalf("%+v", r.Verdict)
+			}
+			after := f.bySerial("SIM-STUB")
+			if after.Patches != 0 || after.CustomFields["ek_hash"] == h.hashes["rsa"] || h.intakeAudited("SIM-STUB") {
+				t.Fatalf("a refused binding wrote: %+v", after)
+			}
+			if _, ok, _ := h.v.Store.Record("swell"); ok {
+				t.Fatal("a refused binding wrote a record")
+			}
+		})
+	}
+}
+
+// With ATTEST_INTAKE_REQUIRE_WINDOW, the data-centre setting, a declared
+// stub passes only while the window is open, and the window reports open.
+func TestDeclaredStubRequiresTheWindow(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	h.window(t, intakePolicyDeclared, time.Time{})
+	h.v.Intake.RequireWindow = true
+	f.add("swell", "SIM-STUB", statusPlanned, "", nil)
+	h.pending(t, "SIM-STUB")
+	if f.macOf("SIM-STUB") != "" {
+		t.Fatal("a closed window bound the stub")
+	}
+	h.writeWindow(t, time.Now().Add(time.Hour))
+	if _, err := h.run("SIM-STUB", simMAC); err != nil {
+		t.Fatalf("with the window open: %v", err)
+	}
+	if f.macOf("SIM-STUB") != simMAC || !h.intakeAudited("SIM-STUB") {
+		t.Fatal("the stub was not bound")
+	}
+	if code, st := h.admin(t, http.MethodGet, "/intake", ""); code != http.StatusOK || !st.Open || !st.RequireWindow {
+		t.Fatalf("GET /intake: %d %+v", code, st)
+	}
+	if m, _ := h.v.Metrics(); !strings.Contains(m, `talos_attest_intake_open{policy="declared"} 1`) {
+		t.Fatalf("metrics:\n%s", m)
+	}
+}
+
+// Under open, a planned stub passes by the planned rule and is not bound.
+func TestOpenPolicyDoesNotBindAStub(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	h.window(t, intakePolicyOpen, time.Now().Add(time.Hour))
+	f.add("swell", "SIM-STUB", statusPlanned, "", nil)
+	if _, err := h.run("SIM-STUB", simMAC); err != nil {
+		t.Fatalf("planned stub under open: %v", err)
+	}
+	if f.macOf("SIM-STUB") != "" || h.intakeAudited("SIM-STUB") || f.count() != 1 {
+		t.Fatal("the open policy bound a stub")
+	}
+}
+
+// When NetBox learns the serial between the start and the evidence, the
+// start's rules decide for that device, and the window pass is audited.
+func TestOpenWindowRechecksADeviceNetBoxLearned(t *testing.T) {
+	for _, c := range []struct {
+		name, status, mac, verdict, reason string
+	}{
+		{"planned with another MAC", statusPlanned, "aa:bb:cc:dd:ee:ff", protocol.VerdictRefused, reasonMACMismatch},
+		{"staged with no pin", statusStaged, simMAC, protocol.VerdictPending, reasonEKPending},
+		{"planned with this MAC", statusPlanned, simMAC, protocol.VerdictPass, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeNetBox(t)
+			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+			h.window(t, intakePolicyOpen, time.Now().Add(time.Hour))
+			h.tamper = func(*protocol.EvidenceRequest) { f.add("realbox", simSerial, c.status, c.mac, nil) }
+			res, err := h.run(simSerial, simMAC)
+			if c.verdict == protocol.VerdictPass {
+				if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
+					t.Fatalf("%v", err)
+				}
+				if d := f.settled(t, simSerial, 2); d.Name != "realbox" || d.Status != statusStaged || f.count() != 1 {
+					t.Fatalf("device after the pass: %+v (%d devices)", d, f.count())
+				}
+				if !h.intakeAudited(simSerial) || !strings.Contains(h.audit.String(), "NetBox learned the serial during the session") {
+					t.Fatalf("no attest.intake line:\n%s", h.audit.String())
+				}
+				return
+			}
+			if r := refusal(t, err); r.Verdict.Verdict != c.verdict || r.Verdict.Reason != c.reason {
+				t.Fatalf("%+v", r.Verdict)
+			}
+			if d := f.bySerial(simSerial); d.CustomFields["ek_hash"] != nil || d.Name != "realbox" || f.count() != 1 {
+				t.Fatalf("the refusal wrote: %+v (%d devices)", d, f.count())
+			}
+			if h.intakeAudited(simSerial) {
+				t.Fatal("a refusal was audited as a window pass")
+			}
+		})
+	}
+}
+
+// A claim that may become a NetBox device carries a MAC that reads as one.
+func TestOpenWindowRefusesAMalformedMAC(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	h.window(t, intakePolicyOpen, time.Now().Add(time.Hour))
+	if r := refusal(t, func() error { _, err := h.run(simSerial, "zz:zz"); return err }()); r.Verdict.Reason != reasonMACInvalid {
+		t.Fatalf("%+v", r.Verdict)
+	}
+	if f.count() != 0 {
+		t.Fatal("a malformed MAC created a device")
 	}
 }

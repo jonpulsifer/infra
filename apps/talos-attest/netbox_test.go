@@ -562,3 +562,27 @@ func TestIntakeName(t *testing.T) {
 		}
 	}
 }
+
+// A pass never replaces a pin on file: only an empty pin is written, so a
+// second TPM claiming a stub's serial on another anchor cannot re-key it.
+func TestNetBoxRecordKeepsAPinOnFile(t *testing.T) {
+	f := newFakeNetBox(t)
+	nb := f.client()
+	f.add("swell", "SW-1", "planned", "", map[string]any{"ek_hash": strings.Repeat("a", 64)})
+	pass := Record{Machine: "swell", Serial: "SW-1", Status: StatusAttested, EKProven: true, AttestedAt: time.Now(),
+		EKHashes: map[string]string{"rsa": strings.Repeat("1", 64), "ecc": strings.Repeat("2", 64)}}
+	if err := nb.Record(context.Background(), pass); err != nil {
+		t.Fatal(err)
+	}
+	if cf := f.bySerial("SW-1").CustomFields; cf["ek_hash"] != strings.Repeat("a", 64) || cf["ek_hash_ecc"] != strings.Repeat("2", 64) {
+		t.Fatalf("pins after the pass: %+v", cf)
+	}
+}
+
+func TestValidMAC(t *testing.T) {
+	for mac, want := range map[string]bool{"38:22:E2:2D:96:44": true, "38-22-e2-2d-96-44": true, "": false, "not-a-mac": false, "38:22:e2:2d:96": false, "3822.e22d.9644": false, "38:22:e2:2d:96:44\n": true} {
+		if got := validMAC(mac); got != want {
+			t.Errorf("validMAC(%q) = %v, want %v", mac, got, want)
+		}
+	}
+}

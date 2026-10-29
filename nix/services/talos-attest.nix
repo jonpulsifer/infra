@@ -122,6 +122,15 @@ in
         intake-<serial>.
       '';
     };
+    intakeRequireWindow = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Under the declared policy, pass a declared stub only while the owner's intake window is
+        open. The data-centre setting, with stubs that name their expected_port: the stub alone is
+        not a statement that the owner is at the rack.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -177,6 +186,7 @@ in
         # on every start.
         ATTEST_INTAKE_WINDOW_FILE = "/var/lib/talos-attest/intake-open";
         ATTEST_INTAKE_POLICY = cfg.intakePolicy;
+        ATTEST_INTAKE_REQUIRE_WINDOW = lib.boolToString cfg.intakeRequireWindow;
       }
       // lib.optionalAttrs (builtins.pathExists bundle) { ATTEST_CA_BUNDLE = "${bundle}"; }
       // (

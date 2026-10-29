@@ -10,7 +10,7 @@ anchors=(spore capsule forge)
 window_file=/var/lib/talos-attest/intake-open
 
 usage() {
-  echo "usage: fleet-intake.sh open <duration, such as 2h or 1h30m> | close | status" >&2
+  echo "usage: fleet-intake.sh open <duration up to 24h, such as 2h or 1h30m> | close | status" >&2
   exit 64
 }
 
@@ -52,6 +52,10 @@ case "${1:-}" in
     [[ $# -eq 2 ]] || usage
     secs="$(seconds "$2")" || usage
     ((secs > 0)) || usage
+    ((secs <= 86400)) || {
+      echo "the window stays open at most 24h; talos-attest clamps a later close time" >&2
+      exit 64
+    }
     until="$(rfc3339 $(($(date +%s) + secs)))"
     echo "opening the intake window until $until" >&2
     on_each "sudo install -m 0640 -o talos-attest -g talos-attest /dev/stdin $window_file" <<<"$until"

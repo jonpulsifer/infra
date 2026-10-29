@@ -306,7 +306,7 @@ func (n *NetBox) Create(ctx context.Context, claim protocol.Machine, name string
 	}
 	mac := normalMAC(claim.MAC)
 	if mac != "" {
-		if err := n.setMAC(ctx, d.ID, mac); err != nil {
+		if _, err := n.setMAC(ctx, d.ID, mac); err != nil {
 			return Machine{}, fmt.Errorf("device %d created, MAC not set: %w", d.ID, err)
 		}
 	}
@@ -319,15 +319,32 @@ func (n *NetBox) Create(ctx context.Context, claim protocol.Machine, name string
 }
 
 // Bind puts a box's MAC on the declared stub it attested as, the planned
-// device the owner entered with no interface or MAC, and journals it. The
-// stub keeps its name; the verdict stages it.
-func (n *NetBox) Bind(ctx context.Context, deviceID int, claim protocol.Machine) error {
+// device the owner entered, and journals a MAC it wrote. The stub keeps its
+// name; the verdict stages it. It reports whether it wrote the MAC; a MAC
+// already on file that is the claim's is no write, and another is
+// errMACTaken.
+func (n *NetBox) Bind(ctx context.Context, deviceID int, claim protocol.Machine) (bool, error) {
 	mac := normalMAC(claim.MAC)
-	if err := n.setMAC(ctx, deviceID, mac); err != nil {
-		return err
+	if !validMAC(mac) {
+		return false, fmt.Errorf("MAC %q does not read as one", claim.MAC)
 	}
-	n.journalLater(ctx, deviceID, "info", plain(fmt.Sprintf("talos-attest: bound to the box that attested in the intake window (serial %s, MAC %s, %s %s)", claim.Serial, mac, claim.Manufacturer, claim.Model)), claim.Serial)
-	return nil
+	wrote, err := n.setMAC(ctx, deviceID, mac)
+	if err != nil || !wrote {
+		return false, err
+	}
+	n.journalLater(ctx, deviceID, "info", plain(fmt.Sprintf("talos-attest: bound to the box that attested as its serial (serial %s, MAC %s, %s %s)", claim.Serial, mac, claim.Manufacturer, claim.Model)), claim.Serial)
+	return true, nil
+}
+
+// errMACTaken is a device interface that holds another MAC.
+var errMACTaken = errors.New("the interface holds another MAC")
+
+var macRE = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
+
+// validMAC is whether a claimed MAC reads as six hex bytes, colon- or
+// hyphen-separated, before it is written anywhere.
+func validMAC(mac string) bool {
+	return macRE.MatchString(normalMAC(mac))
 }
 
 func asNetboxError(err error, target **netboxError) bool {
@@ -335,21 +352,23 @@ func asNetboxError(err error, target **netboxError) bool {
 }
 
 // setMAC puts mac on the device's first interface as its primary MAC, making
-// an interface when the device type's templates made none.
-func (n *NetBox) setMAC(ctx context.Context, deviceID int, mac string) error {
+// an interface when the device type's templates made none, and reports
+// whether it wrote. The same MAC on file is no write; another is
+// errMACTaken.
+func (n *NetBox) setMAC(ctx context.Context, deviceID int, mac string) (bool, error) {
 	i, hasMAC, err := n.nic(ctx, deviceID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if hasMAC {
 		if normalMAC(i.PrimaryMACAddress.MACAddress) == mac {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("interface %s already has MAC %s", i.Name, i.PrimaryMACAddress.MACAddress)
+		return false, fmt.Errorf("interface %s already has MAC %s: %w", i.Name, i.PrimaryMACAddress.MACAddress, errMACTaken)
 	}
 	if i.ID == 0 {
 		if err := n.do(ctx, http.MethodPost, "/api/dcim/interfaces/", map[string]any{"device": deviceID, "name": "eth0", "type": "1000base-t"}, &i); err != nil {
-			return err
+			return false, err
 		}
 	}
 	var m netboxRef
@@ -358,9 +377,12 @@ func (n *NetBox) setMAC(ctx context.Context, deviceID int, mac string) error {
 		"assigned_object_type": "dcim.interface",
 		"assigned_object_id":   i.ID,
 	}, &m); err != nil {
-		return err
+		return false, err
 	}
-	return n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/interfaces/%d/", i.ID), map[string]any{"primary_mac_address": m.ID}, nil)
+	if err := n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/interfaces/%d/", i.ID), map[string]any{"primary_mac_address": m.ID}, nil); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // deviceType finds the type whose model the claim names, or makes it under
@@ -488,11 +510,20 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 			fields["bios_version"] = r.BIOS
 		}
 		if r.EKProven {
-			if h := r.EKHashes["rsa"]; h != "" {
-				fields["ek_hash"] = h
-			}
-			if h := r.EKHashes["ecc"]; h != "" {
-				fields["ek_hash_ecc"] = h
+			// A pin on file is never replaced: only an empty one is written.
+			for _, pin := range []struct{ field, alg, cur string }{{"ek_hash", "rsa", d.CustomFields.EKHash}, {"ek_hash_ecc", "ecc", d.CustomFields.EKHashECC}} {
+				h := r.EKHashes[pin.alg]
+				switch {
+				case h == "" || strings.EqualFold(pin.cur, h):
+				case pin.cur == "":
+					fields[pin.field] = h
+				default:
+					comment := fmt.Sprintf("talos-attest: kept %s %s; the pass proved %s", pin.field, strings.ToLower(pin.cur), h)
+					if n.Log != nil {
+						n.Log.Warn("NetBox pin kept", "serial", r.Serial, "field", pin.field, "on_file", pin.cur, "proved", h)
+					}
+					n.journalLater(ctx, d.ID, "warning", comment, r.Serial)
+				}
 			}
 			if len(r.EKIssuers) > 0 {
 				fields["ek_issuer"] = strings.Join(r.EKIssuers, ", ")

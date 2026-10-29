@@ -91,6 +91,10 @@ type session struct {
 	// the open policy closes; bind is a declared stub the pass binds to.
 	intakeUntil time.Time
 	bind        bool
+	// created is whether this session's first sight made the device;
+	// macWritten whether its binding wrote the stub's MAC.
+	created    bool
+	macWritten bool
 }
 
 func (v *Verifier) random(n int) []byte {
@@ -114,14 +118,14 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 		return protocol.StartResponse{}, v.reject(nil, req.Machine, err)
 	}
 	// The open window speaks only for a serial no source knows; for a known
-	// one it changes no outcome. Under the declared policy the window does
-	// nothing: the planned stub the owner declared is the authorization, and
-	// the pass binds the box to a stub that has no MAC yet.
+	// one it changes no outcome. Under the declared policy the planned stub
+	// the owner declared is the authorization, and the pass binds the box's
+	// MAC to it.
 	var intakeUntil time.Time
 	window, bind := false, false
 	if !ok && v.NetBox != nil {
 		intakeUntil, window = v.intakeOpen(now, intakePolicyOpen)
-	} else if ok && v.Intake != nil && v.Intake.Policy == intakePolicyDeclared && m.FromNetBox && m.NetBoxID != 0 && strings.EqualFold(m.Status, statusPlanned) && m.MAC == "" {
+	} else if ok && v.Intake != nil && v.Intake.Policy == intakePolicyDeclared && m.FromNetBox && m.NetBoxID != 0 && strings.EqualFold(m.Status, statusPlanned) {
 		bind = true
 	}
 	if !ok {
@@ -139,6 +143,11 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 	if m.MAC != "" && normalMAC(req.Machine.MAC) != normalMAC(m.MAC) {
 		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonMACMismatch, "MAC %q is not %s's", req.Machine.MAC, m.Name))
 	}
+	// A session that may write the claimed MAC to NetBox, on first sight or
+	// a stub's binding, needs one that reads as a MAC; a binding needs one.
+	if mac := req.Machine.MAC; ((!ok && v.NetBox != nil) && mac != "" || bind) && !validMAC(mac) {
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonMACInvalid, "MAC %q does not read as six colon-separated hex bytes", mac))
+	}
 	if len(req.EKs) == 0 || len(req.EKs) > 2 {
 		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonEKMissing, "%d EKs; send the RSA EK, the ECC EK or both", len(req.EKs)))
 	}
@@ -153,15 +162,9 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 		}
 		eks = append(eks, ek)
 	}
-	admitted, err := v.checkPinned(m, eks, window)
+	admitted, err := v.admitPins(ctx, m, req.Machine, eks, window)
 	if err != nil {
-		// A first intake's wait is kept apart from the machine records, as
-		// the claim it is, for the owner to approve. Nothing proved any of
-		// these refusals came from the machine, so none touches a record.
-		if reasonOf(err) == reasonEKPending {
-			return protocol.StartResponse{}, v.pend(ctx, m, req.Machine, eks, err)
-		}
-		return protocol.StartResponse{}, v.reject(&m, req.Machine, err)
+		return protocol.StartResponse{}, err
 	}
 	if admitted {
 		// The controller binds a window's device by this name.
@@ -320,6 +323,9 @@ func (v *Verifier) checkPinned(m Machine, eks []VerifiedEK, window bool) (bool, 
 		approved[h] = true
 	}
 	planned := m.FromNetBox && strings.EqualFold(m.Status, statusPlanned)
+	if len(approved) == 0 && planned && v.stubWaitsForWindow(v.Now()) {
+		return false, fail(reasonEKPending, "%s is planned, but declared stubs pass only while the intake window is open; open it with mise run fleet:intake open, or approve %s", m.Name, ekSummary(eks))
+	}
 	if len(approved) == 0 && (planned || window) {
 		why := "is planned"
 		if !planned {
@@ -343,6 +349,35 @@ func (v *Verifier) checkPinned(m Machine, eks []VerifiedEK, window bool) (bool, 
 		}
 	}
 	return false, nil
+}
+
+// admitPins applies checkPinned, keeping a first intake's wait apart from
+// the machine records, as the claim it is, for the owner to approve. Nothing
+// proved any of these refusals came from the machine, so none touches a
+// record.
+func (v *Verifier) admitPins(ctx context.Context, m Machine, claim protocol.Machine, eks []VerifiedEK, window bool) (bool, error) {
+	admitted, err := v.checkPinned(m, eks, window)
+	if err == nil {
+		return admitted, nil
+	}
+	if reasonOf(err) == reasonEKPending {
+		return false, v.pend(ctx, m, claim, eks, err)
+	}
+	return false, v.reject(&m, claim, err)
+}
+
+// recheck applies the start's rules to a device NetBox holds now: its
+// lifecycle, its MAC and its pins, with no window, since the window never
+// speaks for a known device.
+func (v *Verifier) recheck(ctx context.Context, m Machine, claim protocol.Machine, eks []VerifiedEK) error {
+	if m.blocked() {
+		return v.reject(&m, claim, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", m.Name, m.Status))
+	}
+	if m.MAC != "" && normalMAC(claim.MAC) != normalMAC(m.MAC) {
+		return v.reject(&m, claim, fail(reasonMACMismatch, "MAC %q is not %s's", claim.MAC, m.Name))
+	}
+	_, err := v.admitPins(ctx, m, claim, eks, false)
+	return err
 }
 
 // matchPins checks the EKs against the hashes the record pins: each pinned
@@ -442,22 +477,17 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 			v.Log.Error("NetBox device creation", "serial", s.claim.Serial, "err", err)
 			return protocol.Verdict{}, v.reject(&s.machine, s.claim, fail(reasonNetBox, "the device for serial %q could not be created in NetBox: %v", s.claim.Serial, err))
 		}
-		if !fresh && !s.intakeUntil.IsZero() {
+		if !fresh {
 			// NetBox learned the serial since the start, from the owner or
-			// another anchor: the window never speaks for a known device, so
-			// its own lifecycle and pins decide.
-			if created.blocked() {
-				return protocol.Verdict{}, v.reject(&created, s.claim, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", created.Name, created.Status))
+			// another anchor. The window never speaks for a known device:
+			// the start's rules decide for the device NetBox holds now.
+			if err := v.recheck(ctx, created, s.claim, s.eks); err != nil {
+				return protocol.Verdict{}, err
 			}
-			if len(created.Pins) > 0 {
-				if err := matchPins(created, s.eks); err != nil {
-					return protocol.Verdict{}, v.reject(&created, s.claim, err)
-				}
-			}
-			s.intakeUntil = time.Time{}
 		} else {
 			created.Pins = s.machine.Pins
 		}
+		s.created = fresh
 		s.machine = created
 	}
 
@@ -480,6 +510,15 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	}
 	if !bytes.Equal(req.AKBlobs.Public, s.akPublic) || len(req.AKBlobs.Private) == 0 {
 		return refuse(fail(reasonLDevID, "the AK blobs are not the activated AK"))
+	}
+	// A declared stub is bound before anything is issued, and only while it
+	// is still the stub the start admitted.
+	if s.bind {
+		m, err := v.bindStub(ctx, s)
+		if err != nil {
+			return protocol.Verdict{}, v.reject(&s.machine, s.claim, err)
+		}
+		s.machine = m
 	}
 
 	now := v.Now()
@@ -528,7 +567,7 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 		}
 	}
 	if !s.intakeUntil.IsZero() || s.bind {
-		v.intakePass(ctx, s)
+		v.intakePass(s)
 	}
 	v.mu.Lock()
 	s.passed = true
@@ -543,26 +582,61 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	return protocol.Verdict{Verdict: protocol.VerdictPass, LDevIDCert: ldevidCert.Raw, LAKCert: lakCert.Raw, Chain: chain}, nil
 }
 
-// intakePass audits an intake pass: one the open window granted, or a
-// declared stub's. A declared stub binds to the box first: the claimed MAC
-// goes on the stub's interface, and its name stays. A failed write is
-// logged and the pass stands, as for any other fact NetBox misses.
-func (v *Verifier) intakePass(ctx context.Context, s *session) {
-	policy, reason := intakePolicyOpen, "created at staged, window open until "+s.intakeUntil.UTC().Format(time.RFC3339)
-	if s.bind {
-		policy, reason = intakePolicyDeclared, "bound to the declared stub"
-		if normalMAC(s.claim.MAC) != "" {
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-			if err := v.NetBox.Bind(ctx, s.machine.NetBoxID, s.claim); err != nil {
-				v.Log.Warn("bind the declared stub", "machine", s.machine.Name, "serial", s.machine.Serial, "err", err)
-				reason = "bound to the declared stub; MAC not set: " + err.Error()
-			}
-			cancel()
+// bindStub looks the declared stub up again and binds the box to it. It is
+// refused when the device is no longer planned, when stubs need the window
+// and it closed, when a MAC on file is not the claim's, when pins on file are
+// not these EKs, or when the MAC cannot be written; across anchors, the first
+// box to bind a stub holds it.
+func (v *Verifier) bindStub(ctx context.Context, s *session) (Machine, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	m, ok, err := v.lookupMachine(ctx, s.claim.Serial)
+	if err != nil {
+		return Machine{}, err
+	}
+	if !ok || m.NetBoxID != s.machine.NetBoxID || !strings.EqualFold(m.Status, statusPlanned) {
+		return Machine{}, fail(reasonStatus, "%s is no longer the planned stub this session started for; attest again", s.machine.Name)
+	}
+	if v.stubWaitsForWindow(v.Now()) {
+		return Machine{}, fail(reasonStatus, "the intake window closed during the session; open it and attest again")
+	}
+	if m.MAC != "" && normalMAC(m.MAC) != normalMAC(s.claim.MAC) {
+		return Machine{}, fail(reasonMACMismatch, "%s is bound to MAC %s, not %q", m.Name, m.MAC, s.claim.MAC)
+	}
+	if len(m.Pins) > 0 {
+		if err := matchPins(m, s.eks); err != nil {
+			return Machine{}, err
 		}
 	}
+	wrote, err := v.NetBox.Bind(ctx, m.NetBoxID, s.claim)
+	if errors.Is(err, errMACTaken) {
+		return Machine{}, fail(reasonMACMismatch, "%s: %v", m.Name, err)
+	}
+	if err != nil {
+		return Machine{}, fail(reasonNetBox, "bind %s to MAC %s: %v", m.Name, normalMAC(s.claim.MAC), err)
+	}
+	s.macWritten = wrote
+	return m, nil
+}
+
+// intakePass audits an intake pass: a declared stub's binding, or a pass
+// the open window granted, including one for a device NetBox learned of
+// during the session.
+func (v *Verifier) intakePass(s *session) {
+	policy, reason := intakePolicyOpen, "created at staged"
+	switch {
+	case s.bind && s.macWritten:
+		policy, reason = intakePolicyDeclared, "bound to the declared stub; MAC written"
+	case s.bind:
+		policy, reason = intakePolicyDeclared, "bound to the declared stub; MAC already on file"
+	case !s.created:
+		reason = "NetBox learned the serial during the session; passed by " + s.machine.Name + "'s own rules"
+	}
+	if !s.intakeUntil.IsZero() {
+		reason += ", window open until " + s.intakeUntil.UTC().Format(time.RFC3339)
+	}
 	v.Log.Info("intake pass", "machine", s.machine.Name, "serial", s.machine.Serial, "policy", policy, "reason", reason)
-	v.Audit.Emit(AuditEntry{Event: auditIntake, Node: s.machine.Name, Serial: s.machine.Serial, Class: s.machine.Class, Status: protocol.VerdictPass,
-		Reason: reason + "; policy " + policy})
+	v.Audit.Emit(AuditEntry{Event: auditIntake, Node: s.machine.Name, Serial: s.machine.Serial, Class: s.machine.Class, Status: protocol.VerdictPass, Reason: reason + "; policy " + policy})
 }
 
 // firstSight creates the NetBox device for a serial NetBox never saw, once

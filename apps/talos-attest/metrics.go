@@ -95,13 +95,14 @@ func (v *Verifier) Metrics() (string, error) {
 	if v.Intake != nil {
 		st := v.intakeState(v.Now())
 		open, until := 0, int64(0)
-		if st.Open {
+		// Under declared, the window gates nothing unless stubs require it.
+		if st.Open && st.gates() {
 			open = 1
 		}
 		if st.OpenUntil != nil {
 			until = st.OpenUntil.Unix()
 		}
-		head("talos_attest_intake_open", "gauge", "1 while the owner's intake window is open on this anchor.")
+		head("talos_attest_intake_open", "gauge", "1 while the owner's intake window is open on this anchor and the policy consults it.")
 		fmt.Fprintf(&b, "talos_attest_intake_open{policy=%q} %d\n", st.Policy, open)
 		head("talos_attest_intake_open_until_seconds", "gauge", "When the intake window closes, as its file names it; 0 with no file.")
 		fmt.Fprintf(&b, "talos_attest_intake_open_until_seconds{policy=%q} %d\n", st.Policy, until)

@@ -142,7 +142,10 @@ func run(log *slog.Logger) error {
 	if !validIntakePolicy(v.Intake.Policy) {
 		return fmt.Errorf("ATTEST_INTAKE_POLICY is %q; it is %s or %s", v.Intake.Policy, intakePolicyOpen, intakePolicyDeclared)
 	}
-	log.Info("intake window", "file", v.Intake.Path, "policy", v.Intake.Policy)
+	if v.Intake.RequireWindow, err = strconv.ParseBool(env("ATTEST_INTAKE_REQUIRE_WINDOW", "false")); err != nil {
+		return fmt.Errorf("ATTEST_INTAKE_REQUIRE_WINDOW: %w", err)
+	}
+	log.Info("intake window", "file", v.Intake.Path, "policy", v.Intake.Policy, "require_window", v.Intake.RequireWindow)
 	metricsFile := os.Getenv("ATTEST_METRICS_FILE")
 	if metricsFile != "" {
 		v.OnChange = func() {
