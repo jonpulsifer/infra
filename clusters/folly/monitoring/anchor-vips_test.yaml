@@ -65,14 +65,14 @@ tests:
               site: folly
             exp_annotations:
               message: Anchor forge does not serve the Talos boot files
-              description: "dnsmasq is down, nginx does not serve the UKI script at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
+              description: "dnsmasq is down, nginx does not serve HookOS at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
           - exp_labels:
               severity: warning
               instance: spore
               site: folly
             exp_annotations:
               message: Anchor spore does not serve the Talos boot files
-              description: "dnsmasq is down, nginx does not serve the UKI script at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
+              description: "dnsmasq is down, nginx does not serve HookOS at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
 
   # The holder's check fails and no other anchor passes, so the VIP serves nothing.
   - interval: 1m
@@ -93,7 +93,7 @@ tests:
               severity: warning
             exp_annotations:
               message: No anchor serves the Talos boot files at the boot VIP
-              description: "No anchor holds the boot VIP while dnsmasq runs and nginx serves the UKI script, so firmware on the bootstrap VLAN cannot load the signed iPXE. Check keepalived, dnsmasq and nginx on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/talos-boot.nix)."
+              description: "No anchor holds the boot VIP while dnsmasq runs and nginx serves HookOS, so firmware on the bootstrap VLAN cannot load the signed iPXE. Check keepalived, dnsmasq and nginx on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/talos-boot.nix)."
 
   # forge has never mirrored a release and serves a different one from spore's.
   - interval: 1m
@@ -127,7 +127,7 @@ tests:
               severity: warning
             exp_annotations:
               message: The anchors serve different Talos boot releases
-              description: "The anchors' current boot files differ, so a boot VIP failover changes the UKI, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."
+              description: "The anchors' current boot files differ, so a boot VIP failover changes the ISO, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."
 
   # spore holds the boot VIP and serves enrollment until minute 10, when its certificate lapses and
   # keepalived moves the VIP to capsule two minutes later. forge has no certificate throughout.

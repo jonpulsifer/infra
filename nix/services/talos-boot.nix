@@ -1,9 +1,9 @@
-# Talos boot server for folly's bootstrap VLAN, on every anchor. A timer mirrors the signed UKI and
-# the iPXE script that boots it, SecureBoot ISO, netboot iPXE and HookOS UKI from the
-# talos-folly/<version> GitHub release, checks each signed image against its committed signing cert,
-# and keeps the previous release as prev. dnsmasq serves the iPXE over TFTP and nginx serves the
-# rest, at the anchor's own bootstrap address and at the boot VIP, which ./anchor-vips.nix moves to
-# an anchor that passes the check below. Smee (./tinkerbell.nix, spore only) answers PXE on the VLAN.
+# Talos boot server for folly's bootstrap VLAN, on every anchor. A timer mirrors the SecureBoot ISO,
+# netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed image
+# against its committed signing cert, and keeps the previous release as prev. dnsmasq serves the
+# iPXE over TFTP and nginx serves the rest, at the anchor's own bootstrap address and at the boot
+# VIP, which ./anchor-vips.nix moves to an anchor that passes the check below. Smee
+# (./tinkerbell.nix, spore only) answers PXE on the VLAN.
 {
   config,
   lib,
@@ -23,14 +23,11 @@ let
   siteDir = "${stateDir}/${site}";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   tftpDir = "/var/lib/tftpboot/talos/${site}";
-  uki = "metal-amd64-secureboot-uki.efi";
-  # iPXE chains this when Smee has no script for the MAC; it boots the UKI with its own command line.
-  ukiScript = "metal-amd64-secureboot-uki.ipxe";
   iso = "metal-amd64-secureboot.iso";
   # Signed with the UKI key; the bootstrap network's DHCP names talos/folly/<this> under dnsmasq's
   # TFTP root.
   ipxe = "ipxe-amd64-secureboot.efi";
-  # Signed with the HookOS key; iPXE fetches it over HTTP.
+  # Signed with the HookOS key; iPXE fetches it over HTTP, from Smee's script or its own menu.
   hookos = "hookos-amd64-secureboot-uki.efi";
   signingCert = ../../clusters/${site}/talos/secureboot/uki-signing-cert.pem;
   hookosCert = ../../clusters/${site}/talos/secureboot/hookos-signing-cert.pem;
@@ -106,10 +103,10 @@ let
     ++ map (peer: "-p 112 -s ${peer}") peers;
 
   # keepalived's track script for the boot VIP, and the probe below: dnsmasq runs, and nginx serves
-  # the UKI's script at this anchor's own bootstrap address.
+  # HookOS at this anchor's own bootstrap address.
   serves = pkgs.writeShellScript "talos-boot-serves" ''
     ${pkgs.systemd}/bin/systemctl is-active --quiet dnsmasq.service
-    ${pkgs.curl}/bin/curl --fail --silent --output /dev/null --max-time 2 http://${address}/talos/${site}/${ukiScript}
+    ${pkgs.curl}/bin/curl --fail --silent --head --output /dev/null --max-time 2 http://${address}/talos/${site}/${hookos}
   '';
 in
 {
@@ -225,9 +222,6 @@ in
           ];
       locations = {
         "/".return = "404";
-        "= /talos/${site}/${uki}" = readOnlyLocation "${siteDir}/current/${uki}";
-        "= /talos/${site}/prev/${uki}" = readOnlyLocation "${siteDir}/prev/${uki}";
-        "= /talos/${site}/${ukiScript}" = readOnlyLocation "${siteDir}/current/${ukiScript}";
         "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
         "= /talos/${site}/${hookos}" = readOnlyLocation "${siteDir}/current/${hookos}";
       };
@@ -288,7 +282,7 @@ in
         printf '# HELP talos_boot_vip_held Whether this anchor holds the boot VIP.\n'
         printf '# TYPE talos_boot_vip_held gauge\n'
         printf 'talos_boot_vip_held{site="${site}"} %s\n' "$held"
-        printf '# HELP talos_boot_serving Whether dnsmasq runs and nginx serves the UKI script at this anchor.\n'
+        printf '# HELP talos_boot_serving Whether dnsmasq runs and nginx serves HookOS at this anchor.\n'
         printf '# TYPE talos_boot_serving gauge\n'
         printf 'talos_boot_serving{site="${site}"} %s\n' "$serving"
       } > "$metrics"
@@ -372,7 +366,7 @@ in
           printf '# TYPE talos_boot_mirror_last_success_timestamp_seconds gauge\n'
           printf 'talos_boot_mirror_last_success_timestamp_seconds{site="${site}"} %s\n' \
             "$(cat "$site_dir/last-success" 2>/dev/null || echo 0)"
-          printf '# HELP talos_boot_uki_info The Talos version and release (the digest of its boot files) of each served UKI.\n'
+          printf '# HELP talos_boot_uki_info The Talos version and release (the digest of its boot files) of each served slot.\n'
           printf '# TYPE talos_boot_uki_info gauge\n'
           for slot in current prev; do
             version=$(cat "$site_dir/$slot/version" 2>/dev/null || true)
@@ -416,22 +410,10 @@ in
       fi
       release_url="https://github.com/jonpulsifer/infra/releases/download/''${tag//\//%2F}"
 
-      # Each release has a new UKI asset, so an unchanged UKI ETag means an unchanged release.
-      etag_args=()
-      if [ -s "$site_dir/current/uki.etag" ] && [ -s "$site_dir/current/${iso}" ] \
-        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ] \
-        && [ -s "$site_dir/current/${ukiScript}" ]; then
-        etag_args=(--etag-compare "$site_dir/current/uki.etag")
-      fi
-      code=$(fetch "''${etag_args[@]}" --etag-save "$stage/uki.etag" \
-        --output "$stage/${uki}" --write-out '%{http_code}' "$release_url/${uki}")
-
-      if [ "$code" = 304 ]; then
-        echo "current UKI is unchanged"
+      if [ "$(cat "$site_dir/current/tag" 2>/dev/null || true)" = "$tag" ] && [ -s "$site_dir/current/${iso}" ] \
+        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ]; then
+        echo "current release $tag is unchanged"
       else
-        ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${uki}"
-        fetch --output "$stage/${ukiScript}" "$release_url/${ukiScript}"
-        grep -q '^chain --autofree ${uki} ' "$stage/${ukiScript}"
         fetch --output "$stage/${ipxe}" "$release_url/${ipxe}"
         ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${ipxe}"
         fetch --output "$stage/${hookos}" "$release_url/${hookos}"
@@ -439,12 +421,13 @@ in
         fetch --output "$stage/${iso}" "$release_url/${iso}"
         test -s "$stage/${iso}"
         printf '%s\n' ${talosVersion} > "$stage/version"
+        printf '%s\n' "$tag" > "$stage/tag"
 
-        # A build can change iPXE, HookOS or the script and leave the UKI as it was.
-        id=$(cd "$stage" && sha256sum ${uki} ${ukiScript} ${ipxe} ${hookos} | sha256sum | cut -d ' ' -f 1)
+        # Two builds of the same inputs can publish the same files.
+        id=$(cd "$stage" && sha256sum ${iso} ${ipxe} ${hookos} | sha256sum | cut -d ' ' -f 1)
         release="$releases/$id"
         if [ -e "$release" ]; then
-          install -m 0644 "$stage/uki.etag" "$release/uki.etag"
+          install -m 0644 "$stage/tag" "$release/tag"
         else
           mv "$stage" "$release"
           stage=""
@@ -458,7 +441,7 @@ in
           fi
           ln -sfn "releases/$id" "$site_dir/.current.new"
           mv -Tf "$site_dir/.current.new" "$site_dir/current"
-          echo "published ${talosVersion} UKI $id"
+          echo "published ${talosVersion} release $id"
         fi
 
         keep_current=$(readlink "$site_dir/current" || true)

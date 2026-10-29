@@ -1,13 +1,13 @@
 ---
 title: Build the signed Talos images
-description: Run the Talos image pipeline for folly, and check the signed installer, ISO, HTTP-boot UKI, iPXE and HookOS that it publishes.
+description: Run the Talos image pipeline for folly, and check the signed installer, ISO, iPXE and HookOS that it publishes.
 ---
 
-Use this runbook to build folly's signed Talos boot assets on demand, or to check a build that a push to `main` started. `.github/workflows/talos-images.yml` runs the siderolabs imager and Nix with the Secure Boot keys from 1Password. It pushes the installer to GHCR and attaches the ISO, the UKI, iPXE and HookOS to a GitHub release. [Kubernetes](../platform/kubernetes.md#signed-talos-images) says what each output is for.
+Use this runbook to build folly's signed Talos boot assets on demand, or to check a build that a push to `main` started. `.github/workflows/talos-images.yml` runs the siderolabs imager and Nix with the Secure Boot keys from 1Password. It pushes the installer to GHCR and attaches the ISO, iPXE and HookOS to a GitHub release. The installer's UKI carries `talos.config` set to `CONFIG_URL` in the workflow, so a node's first boot from disk fetches its config by the install code in META. [Kubernetes](../platform/kubernetes.md#signed-talos-images) says what each output is for.
 
 ## Before you start
 
-- You need `gh` signed in to `jonpulsifer/infra`, a checkout of the repo, and `openssl` and `sbsigntool`.
+- You need `gh` signed in to `jonpulsifer/infra`, a checkout of the repo, `yq` from the repo's `mise.toml`, and `crane`, `objdump`, `openssl` and `sbsigntool`.
 - You need a 1Password service account that can read the item `talos-secureboot` in the `homelab` vault.
 - `<version>` is `talos_version` in `clusters/folly/talos/talos.tf`.
 - `tink_agent_image` in `clusters/folly/talos/netboot.json` must pin a digest. While it pins the all-zero digest, the workflow builds nothing.
@@ -42,7 +42,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
      "$(gh run list --repo jonpulsifer/infra --workflow talos-images.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
    ```
 
-   Result: The jobs `inputs` and `build` finish with success. The run summary shows the UKI and HookOS command lines and the installer digest.
+   Result: The jobs `inputs` and `build` finish with success. The run summary shows the installer UKI and HookOS command lines and the installer digest.
 
 ## Check the outputs
 
@@ -65,13 +65,15 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
    gh release download "$tag" --repo jonpulsifer/infra --dir /tmp/talos-folly
    ```
 
-5. From the root of the checkout, make sure the UKI verifies against the committed certificate. This is the check that the workflow runs before it publishes.
+5. From the root of the checkout, pull the installer and make sure its UKI verifies against the committed certificate and fetches its config from `CONFIG_URL` alone. This is the check that the workflow runs before it pushes.
 
    ```bash
-   bash .github/scripts/talos-uki-verify.sh clusters/folly/talos/secureboot/uki-signing-cert.pem /tmp/talos-folly/metal-amd64-secureboot-uki.efi
+   crane pull ghcr.io/jonpulsifer/talos-installer-folly:<version> /tmp/talos-folly/installer.tar
+   bash .github/scripts/talos-installer-verify.sh clusters/folly/talos/secureboot/uki-signing-cert.pem \
+     /tmp/talos-folly/installer.tar "$(yq -r .env.CONFIG_URL .github/workflows/talos-images.yml)"
    ```
 
-   Result: `/tmp/talos-folly/metal-amd64-secureboot-uki.efi: one signature, verified against subject=...`.
+   Result: `one signature, verified against subject=...`, then `/tmp/talos-folly/installer.tar: command line: ...` ending in the `talos.config` URL, and a `reset-maintenance command line` that is the same plus `talos.experimental.wipe=system:EPHEMERAL,STATE`.
 
 6. Make sure iPXE and HookOS verify against the committed certificates.
 
@@ -90,7 +92,7 @@ Do this once. Without the secret, the workflow builds nothing and logs a warning
 | The run fails with `the 1Password uki-signing-cert is not the committed one`, or the same for `hookos-signing-cert`. | The item and `clusters/folly/talos/secureboot/` hold different keys. | Find which side changed. Commit the item's public halves only if its keys are the intended ones. |
 | The run fails with `want one image in ghcr.io/siderolabs/extensions`. | Talos builds no extension of that name for this version. | Correct the name in `extensions` in `talos.tf`. |
 | The run warns that `netboot.json pins no agent image yet`. | The agent image has no delivered digest. | Wait for the containers workflow's digest PR to merge. |
-| `talos-uki-verify.sh` fails on the downloaded UKI. | The workflow verifies each UKI before it uploads it, so the asset is not what the newest `main` run built, or the checkout's certificate differs from that build's. | Compare the commit in the release notes with your checkout and with the run that last uploaded the asset. Do not run the build again until you know which side changed. |
+| `talos-installer-verify.sh` fails on the pulled installer. | The workflow checks the installer before it pushes it, so the tag holds another build than the newest `main` run's, or the checkout's certificate or `CONFIG_URL` differs from that build's. | Compare the commit in the release notes with your checkout and with the run that last uploaded the asset. Do not run the build again until you know which side changed. |
 
 ## Related
 

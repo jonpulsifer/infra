@@ -101,7 +101,7 @@ spec:
             severity: warning
           annotations:
             message: No anchor serves the Talos boot files at the boot VIP
-            description: "No anchor holds the boot VIP while dnsmasq runs and nginx serves the UKI script, so firmware on the bootstrap VLAN cannot load the signed iPXE. Check keepalived, dnsmasq and nginx on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/talos-boot.nix)."
+            description: "No anchor holds the boot VIP while dnsmasq runs and nginx serves HookOS, so firmware on the bootstrap VLAN cannot load the signed iPXE. Check keepalived, dnsmasq and nginx on capsule, forge and spore (nix/services/anchor-vips.nix, nix/services/talos-boot.nix)."
         - alert: AnchorBootNotServing
           expr: (talos_boot_serving == 0) or absent(talos_boot_serving{instance="capsule"}) or absent(talos_boot_serving{instance="forge"}) or absent(talos_boot_serving{instance="spore"})
           for: 15m
@@ -109,7 +109,7 @@ spec:
             severity: warning
           annotations:
             message: "Anchor {{ $labels.instance }} does not serve the Talos boot files"
-            description: "dnsmasq is down, nginx does not serve the UKI script at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
+            description: "dnsmasq is down, nginx does not serve HookOS at the anchor's bootstrap address, or the anchor exports no talos-boot-check metrics. The boot VIP skips this anchor."
         # The boot VIP's second check: nginx serves the enrollment name with a
         # certificate Talos trusts, and talos-enroll answers behind it
         # (nix/services/talos-enroll.nix).
@@ -144,7 +144,7 @@ spec:
             severity: warning
           annotations:
             message: The anchors serve different Talos boot releases
-            description: "The anchors' current boot files differ, so a boot VIP failover changes the UKI, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."
+            description: "The anchors' current boot files differ, so a boot VIP failover changes the ISO, iPXE or HookOS a machine boots. Read talos_boot_uki_info and each anchor's talos-boot-mirror.service journal."
         # talos-attest on each anchor (nix/services/talos-attest.nix). A machine's current record is
         # the newest across the anchors, since each keeps the attestations it ran.
         - alert: TalosAttestNotServing

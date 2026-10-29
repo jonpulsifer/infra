@@ -3,7 +3,7 @@ title: Netboot
 description: The network boot service on spore, with TFTP and HTTP for folly's boot files and a signed RAM-boot image that forge falls back to.
 ---
 
-Netboot is the network boot service on [spore](../../hosts/spore.md). It serves boot files over TFTP and HTTP, and publishes a signed RAM-boot image for [forge](../../hosts/forge.md), a headless Raspberry Pi 5. [Talos boot](talos-boot.md) serves the signed Talos UKI on the bootstrap VLAN.
+Netboot is the network boot service on [spore](../../hosts/spore.md). It serves boot files over TFTP and HTTP, and publishes a signed RAM-boot image for [forge](../../hosts/forge.md), a headless Raspberry Pi 5. [Talos boot](talos-boot.md) serves the signed iPXE, HookOS and Talos ISO on the bootstrap VLAN.
 
 ## Parts
 

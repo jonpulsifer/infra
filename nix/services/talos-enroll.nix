@@ -21,7 +21,7 @@ let
   talosConfig = import ../lib/talos-config.nix;
   configServer = "http://${lab.hosts.${talosConfig.server}}:${toString talosConfig.port}";
   site = config.homelab.site;
-  # The talos.config URL in the netboot UKI names this host (.github/scripts/talos-images-build.sh).
+  # The talos.config URL in the installer's UKI names this host (.github/workflows/talos-images.yml).
   host = "enroll.${fleet.dnsZone}";
   adminPort = 8443;
   runDir = "/run/talos-enroll";
