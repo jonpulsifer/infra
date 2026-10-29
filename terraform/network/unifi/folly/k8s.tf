@@ -48,9 +48,9 @@ resource "unifi_network" "k8s" {
 # A node keeps its address across a reinstall because the reservation is on
 # its MAC. Reserved inside the DHCP pool; the controller excludes reserved
 # addresses from it. A node in NODE_ADDRESSES with no inventory entry fails the
-# plan on the index below.
+# plan on the index below; a planned machine with no MAC yet gets no reservation.
 resource "unifi_client" "k8s_nodes" {
-  for_each = local.node_addresses
+  for_each = { for node, ip in local.node_addresses : node => ip if try(local.machines[node].mac, "") != null }
 
   # No network_id: the provider sends it as a Virtual Network Override, which
   # the switch enforces as a MAC-based VLAN on every port, whatever RADIUS

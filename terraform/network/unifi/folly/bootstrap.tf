@@ -27,8 +27,13 @@ locals {
 
   # The switch ports of the inventory's nodes. Every node's RADIUS user puts it
   # on the Kubernetes network, where it also netboots. A MAC RADIUS does not
-  # know lands on the switch-wide fallback, bootstrap.
-  mab_ports = { for node, m in local.machines : node => m.switch_port }
+  # know lands on the switch-wide fallback, bootstrap. A planned machine may
+  # have no MAC or port yet, so only staged, active and failed ones with both
+  # get a user; an export without status counts as active.
+  mab_ports = {
+    for node, m in local.machines : node => m.switch_port
+    if contains(["staged", "active", "failed"], try(m.status, "active")) && try(m.mac, null) != null && try(m.switch_port, null) != null
+  }
 
   # The nodes whose switch port runs MAC auth. Any name turns switch-wide
   # 802.1X on. Add a node only after the gateway's RADIUS server listens:
