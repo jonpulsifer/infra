@@ -1,6 +1,6 @@
 # <namespace>/<claim><TAB><reason> for each folly claim that no backup covers on purpose.
 default/hajimari-config	empty; Hajimari reads its settings from a ConfigMap
-dump/dump-data-dump-nfs-0	scratch space for file drops
+dump/dump-data-dump-0	scratch space for file drops
 kthx-datastores/valkey-applol-cache-0-0-data	cache; the kthx engine owns the Datastore
 monitoring/prometheus-prom-stack-kube-prometheus-db-prometheus-prom-stack-kube-prometheus-0	metrics history; rules and dashboards come from git
 monitoring/server-volume-victoria-logs-server-0	log history; rebuilds from new logs
