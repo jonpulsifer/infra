@@ -43,10 +43,10 @@ nb() {
     args+=(-H "Host: $NETBOX_HOST")
   fi
   if [[ -n "$body" ]]; then
-    args+=(--data-binary "$body")
+    args+=(--data-binary @-)
   fi
   if ! out="$(curl "${args[@]}" -K <(printf 'header = "Authorization: Bearer %s"\n' "$token") \
-    "$NETBOX_URL/api/${path#/}")"; then
+    "$NETBOX_URL/api/${path#/}" <<<"$body")"; then
     echo "NetBox $method /api/${path#/} failed: $out" >&2
     return 1
   fi
