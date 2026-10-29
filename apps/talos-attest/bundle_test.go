@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -177,6 +178,10 @@ func TestAddIssuersAdmitsOnlyCAsUnderTheChainRoot(t *testing.T) {
 // The site's real bundle loads over the software CA's real chain.
 func TestTerraformBundleChainsToTheSoftwareChainRoot(t *testing.T) {
 	certs := filepath.Join("..", "..", "terraform", "pki", "certs")
+	if _, err := os.Stat(filepath.Join(certs, "folly-devid-ca.pem")); err != nil {
+		// The Nix build sees only the app directory; the repo checkout runs it.
+		t.Skip("terraform/pki/certs is not in this build's source")
+	}
 	chain, err := readChain(filepath.Join(certs, "folly-devid-ca-software-chain.pem"))
 	if err != nil {
 		t.Fatal(err)
