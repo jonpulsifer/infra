@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # One image, two processes: `web` is the default command and the chart starts
 # `reconciler` with its own. The client ships as prebuilt files in dist/.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:17861bca64b10f95f6b39ac65908acd36e40988e75d4ec2421d1e1e9a646fb74 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:06ec4316c47dee00fbd9c0270cae73fddff2ac84f010467c89ce252c3883379c AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
