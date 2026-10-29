@@ -133,6 +133,9 @@ in
         ATTEST_SITE = site;
         ATTEST_APPROVERS = "jonathan@pulsifer.ca";
         ATTEST_CA_CHAIN = "${cfg.caChain}";
+        # Every issuing CA of the site: a machine attested on another anchor carries that
+        # anchor's leaf, which must verify here.
+        ATTEST_CA_BUNDLE = "${certs + "/${site}-devid-ca.pem"}";
         ATTEST_EK_ROOTS = "${../../apps/talos-attest/roots}";
         ATTEST_POLICY = "${../../apps/talos-attest/policy.yaml}";
         ATTEST_INVENTORY = "${../../clusters/${site}/inventory/machines.yaml}";

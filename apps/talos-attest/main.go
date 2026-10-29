@@ -61,7 +61,18 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	ca.Site = site
-	log.Info("DevID CA loaded", "subject", ca.Cert.Subject.String(), "pkcs11", pkcs11Configured(), "site", site)
+	// The other anchors issue too: their leaves must verify here. The bundle
+	// holds every issuing CA of the site.
+	if bundle := os.Getenv("ATTEST_CA_BUNDLE"); bundle != "" {
+		issuers, err := readChain(bundle)
+		if err != nil {
+			return fmt.Errorf("ATTEST_CA_BUNDLE: %w", err)
+		}
+		if err := ca.AddIssuers(issuers); err != nil {
+			return fmt.Errorf("ATTEST_CA_BUNDLE: %w", err)
+		}
+	}
+	log.Info("DevID CA loaded", "subject", ca.Cert.Subject.String(), "pkcs11", pkcs11Configured(), "site", site, "issuers", ca.issuerNames())
 	roots, err := LoadEKRoots(env("ATTEST_EK_ROOTS", "/etc/talos-attest/roots"))
 	if err != nil {
 		return err
@@ -142,7 +153,11 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("ATTEST_PEER_SYNC: %w", err)
 	}
-	if sync > 0 && len(peers) > 0 {
+	// A pass this anchor issued before NetBox held the verdict fields is
+	// written there now, and again on each sync, so NetBox's empty verdict
+	// never hides it.
+	v.BackfillNetBox(ctx)
+	if sync > 0 && (len(peers) > 0 || v.NetBox != nil) {
 		go srv.RunPeerSync(ctx, sync)
 	}
 

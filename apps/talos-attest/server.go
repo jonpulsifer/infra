@@ -473,6 +473,7 @@ func (s *Server) RunPeerSync(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			s.V.BackfillNetBox(ctx)
 			s.SyncPeers(ctx)
 		}
 	}
