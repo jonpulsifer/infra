@@ -7,7 +7,7 @@ description: NetBox's record of each folly Kubernetes node as hardware, the file
 
 ## Export
 
-`clusters/folly/inventory/machines.yaml` is NetBox's export: every folly device with the role `kubernetes-node` and the status `planned`, `staged`, `active` or `failed`, keyed by name and ordered by address. A device in `decommissioning` or `offline` is not exported. Beside the hardware keys, each node has `class` (the `talos_class` field: `controlplane`, `worker-g5` or `worker-g2`), `status`, `address`, `bmc` and `ek_hash_ecc`. `bmc.type` is the `bmc_type` field (`none`, `amt` or `redfish`); `bmc.address` is the device's out-of-band address, or the node's own address for AMT when NetBox holds none. Never edit it by hand. Change the device in NetBox, then:
+`clusters/folly/inventory/machines.yaml` is NetBox's export: every folly device with the role `kubernetes-node` and the status `planned`, `staged`, `active` or `failed`, keyed by name and ordered by address. A device in `decommissioning` or `offline` is not exported. Beside the hardware keys, each node has `class` (the `talos_class` field: `controlplane`, `worker-g5` or `worker-g2`), `status`, `address`, `bmc`, `ek_hash` and `ek_hash_ecc`. `bmc.type` is the `bmc_type` field (`none`, `amt` or `redfish`); `bmc.address` is the device's out-of-band address, or the node's own address for AMT when NetBox holds none. Never edit it by hand. Change the device in NetBox, then:
 
 ```sh
 mise run netbox:export

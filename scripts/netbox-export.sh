@@ -18,7 +18,7 @@ readonly root
 source "$root/scripts/lib/netbox.sh"
 
 inventory="$root/clusters/folly/inventory/machines.yaml"
-readonly cluster="$root/clusters/folly/config/cluster-topology.json"
+readonly cluster="${INVENTORY_TOPOLOGY:-$root/clusters/folly/config/cluster-topology.json}"
 
 usage() {
   echo "usage: $0 [--check [file] | --json]" >&2
@@ -60,6 +60,7 @@ machines_json() {
           bmc: ({type: ($d.custom_fields.bmc_type | choice)} as $b
             | $b + {address: (($d.oob_ip.address // null | if . then split("/")[0] else . end)
               // (if $b.type == "amt" then ($d.primary_ip4.address // null | if . then split("/")[0] else . end) else null end))}),
+          ek_hash: $d.custom_fields.ek_hash,
           ek_hash_ecc: $d.custom_fields.ek_hash_ecc
         }})
     | from_entries'
@@ -86,22 +87,25 @@ render() {
 #
 # tpm is the TPM spec version, or null; only 2.0 seals disks and attests.
 # secure_boot is the firmware state the node is expected to boot in.
-# ek_hash_ecc is the pinned ECC endorsement key hash, or null.
+# ek_hash and ek_hash_ecc are the pinned RSA and ECC endorsement key hashes, or null.
 EOF
-  machines_json | jq '{machines: .}' | yq -P -p json
+  jq '{machines: .}' <<<"$1" | yq -P -p json
 }
 
 # addresses_agree: NODE_ADDRESSES names exactly the nodes that are staged, active or failed and
 # have an address, with the same addresses; planned nodes may have an address NODE_ADDRESSES lacks.
-addresses_agree() {
+addresses_agree() { # <machines json>
   local problems
-  problems="$(jq -rn --argjson export "$(machines_json)" --slurpfile topology "$cluster" '
+  problems="$(jq -rn --argjson export "$1" --slurpfile topology "$cluster" '
     ($topology[0].data.NODE_ADDRESSES | fromjson) as $want
     | ($export | to_entries | map(select(.value.status != "planned" and .value.address != null)
         | {(.key): .value.address}) | add // {}) as $have
     | ([$want | keys[] | select($have[.] == null) | "\(.): in NODE_ADDRESSES, not exported with an address"]
       + [$have | keys[] | select($want[.] == null) | "\(.): exported at \($have[.]), not in NODE_ADDRESSES"]
-      + [$want | keys[] | select($have[.] != null and $have[.] != $want[.]) | "\(.): NODE_ADDRESSES has \($want[.]), NetBox has \($have[.])"])[]')"
+      + [$want | keys[] | select($have[.] != null and $have[.] != $want[.]) | "\(.): NODE_ADDRESSES has \($want[.]), NetBox has \($have[.])"])[]')" || {
+    echo "cannot compare NODE_ADDRESSES in ${cluster#"$root"/} with NetBox" >&2
+    return 2
+  }
   if [[ -n "$problems" ]]; then
     printf '%s\n' "$problems" >&2
     echo "NODE_ADDRESSES in ${cluster#"$root"/} disagrees with NetBox" >&2
@@ -113,20 +117,22 @@ nb_init
 case "${1:-}" in
   "")
     [[ $# -eq 0 ]] || usage
-    rendered="$(render)"
+    machines="$(machines_json)"
+    rendered="$(render "$machines")"
     printf '%s\n' "$rendered" >"$inventory"
     echo "wrote ${inventory#"$root"/}"
     ;;
   --check)
     [[ $# -le 2 ]] || usage
     file="${2:-$inventory}"
-    rendered="$(render)"
+    machines="$(machines_json)"
+    rendered="$(render "$machines")"
     failed=0
     if ! diff -u --label "${file#"$root"/}" --label NetBox "$file" - <<<"$rendered"; then
       echo "${file#"$root"/} differs from NetBox; run mise run netbox:export" >&2
       failed=1
     fi
-    addresses_agree || failed=1
+    addresses_agree "$machines" || failed=1
     exit "$failed"
     ;;
   --json)

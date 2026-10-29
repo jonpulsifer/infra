@@ -136,11 +136,11 @@ seed_custom_fields() {
 # so the rule cannot filter on a status change; the controller ignores updates that need nothing.
 seed_webhook() {
   local webhook_id spore
-  : "${NETBOX_WEBHOOK_SECRET:?export NETBOX_WEBHOOK_SECRET, the secret the fleet controller verifies}"
   spore="$(jq -er '.data.SPORE_IP' "$anchors_json")"
-  webhook_id="$(nb_ensure extras/webhooks "name=fleet-controller" "$(with_tags "$(jq -cn --arg u "http://$spore:8446/webhook" --arg s "$NETBOX_WEBHOOK_SECRET" '{
-    name: "fleet-controller", payload_url: $u, http_method: "POST", http_content_type: "application/json", secret: $s, ssl_verification: false,
+  webhook_id="$(nb_ensure extras/webhooks "name=fleet-controller" "$(with_tags "$(jq -cn --arg u "http://$spore:8446/webhook" '{
+    name: "fleet-controller", payload_url: $u, http_method: "POST", http_content_type: "application/json", ssl_verification: false,
     description: "Wakes the fleet controller on spore"}')")")"
+  nb PATCH "extras/webhooks/$webhook_id/" "$(jq -cn '{secret: $ENV.NETBOX_WEBHOOK_SECRET}')" >/dev/null
   nb_ensure extras/event-rules "name=fleet-controller-device-update" "$(with_tags "$(jq -cn --argjson w "$webhook_id" '{
     name: "fleet-controller-device-update", object_types: ["dcim.device"], event_types: ["object_updated"], enabled: true,
     action_type: "webhook", action_object_type: "extras.webhook", action_object_id: $w,
@@ -189,6 +189,11 @@ switch_port() {
   nb GET "dcim/interfaces/?device_id=$switch_id&name=$(uri "Port $1")" | jq -e '.results[0].id'
 }
 
+[[ -n "${NETBOX_WEBHOOK_SECRET:-}" ]] || {
+  echo "export NETBOX_WEBHOOK_SECRET, the secret the fleet controller verifies, before seeding" >&2
+  exit 1
+}
+export NETBOX_WEBHOOK_SECRET
 nb_init
 seed_catalog
 seed_custom_fields
@@ -219,13 +224,14 @@ for node in $(yq -r '.machines | keys | .[]' "$inventory"); do
     echo "$node: no talos_class and bmc_type in node_fleet" >&2
     exit 1
   }
-  known="$(nb GET "dcim/devices/?site=folly&name=$(uri "$node")" | jq '.count')"
-  id="$(device "$(jq -cn --arg n "$node" --argjson m "$m" --argjson t "$type" --argjson f "$fleet" --argjson known "$known" '{
+  current="$(nb GET "dcim/devices/?site=folly&name=$(uri "$node")" | jq -c '.results[0] // null')"
+  id="$(device "$(jq -cn --arg n "$node" --argjson m "$m" --argjson t "$type" --argjson f "$fleet" --argjson cur "$current" '{
     name: $n, role: {slug: "kubernetes-node"}, device_type: {slug: $t.slug}, platform: {slug: "talos"},
     serial: $m.serial,
     custom_fields: ({bios_version: $m.bios, sku: $m.sku, install_disk: $m.disk, amt: $m.amt,
-      secure_boot_expected: $m.secure_boot, tpm_version: $m.tpm} + $f)
-  } + (if $known == 0 then {status: "active"} else {} end)')")"
+      secure_boot_expected: $m.secure_boot, tpm_version: $m.tpm}
+      + ($f | with_entries(select($cur == null or ($cur.custom_fields[.key] | . == null or . == "" or . == {})))))
+  } + (if $cur == null then {status: "active"} else {} end)')")"
   nic="$(interface "$id" "$(jq -r '.interfaces[0].name' <<<"$type")" "$(jq -r '.mac' <<<"$m")")"
   nb_cable "$nic" "$(switch_port "$(jq -r '.switch_port' <<<"$m")")" "$tags"
   ip="$(jq -er --arg n "$node" '.[$n]' <<<"$addresses")"

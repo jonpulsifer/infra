@@ -17,7 +17,7 @@
 #
 # tpm is the TPM spec version, or null; only 2.0 seals disks and attests.
 # secure_boot is the firmware state the node is expected to boot in.
-# ek_hash_ecc is the pinned ECC endorsement key hash, or null.
+# ek_hash and ek_hash_ecc are the pinned RSA and ECC endorsement key hashes, or null.
 machines:
   optiplex:
     model: OptiPlex 3050
@@ -36,6 +36,7 @@ machines:
     bmc:
       type: none
       address: null
+    ek_hash: null
     ek_hash_ecc: null
   shale:
     model: HP EliteDesk 800 G2 DM 35W
@@ -54,6 +55,7 @@ machines:
     bmc:
       type: amt
       address: 10.3.0.11
+    ek_hash: null
     ek_hash_ecc: null
   riptide:
     model: HP EliteDesk 800 G5 Desktop Mini
@@ -72,4 +74,5 @@ machines:
     bmc:
       type: amt
       address: 10.3.0.12
+    ek_hash: null
     ek_hash_ecc: null

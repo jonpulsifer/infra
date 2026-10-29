@@ -26,7 +26,7 @@ Open `https://capsule.<tailnet>`, which the [tailnet grants](network/remote-acce
 
 ## Data
 
-`mise run netbox:seed` imports folly's devices, cables, prefixes, custom fields and choice sets from the repo, sets each node's `talos_class` and `bmc_type`, and tags what it writes `managed-by: git-seed`. It sets a node's status only when it creates the device. It also seeds the event rule `fleet-controller-device-update`, which posts every device update to the fleet controller's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The operator exports `NETBOX_WEBHOOK_SECRET`, the secret the controller verifies, before the run. A second run changes nothing. [Hardware inventory](../reference/inventory.md) covers the export and the drift check.
+`mise run netbox:seed` imports folly's devices, cables, prefixes, custom fields and choice sets from the repo, sets each node's `talos_class` and `bmc_type`, and tags what it writes `managed-by: git-seed`. It sets a node's status only when it creates the device, and its class and BMC type only when the device is new or the field is empty. It also seeds the event rule `fleet-controller-device-update`, which posts every device update to the fleet controller's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The operator exports `NETBOX_WEBHOOK_SECRET`, the secret the controller verifies, before the run. A second run changes nothing. [Hardware inventory](../reference/inventory.md) covers the export and the drift check.
 
 ## Backups
 
