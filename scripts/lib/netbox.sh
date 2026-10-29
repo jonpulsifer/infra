@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NetBox REST client for the seed, the export and the drift check. Source it.
+# NetBox REST client for the seed, the declare, the export and the drift check. Source it.
 #
 #   NETBOX_URL         the API's origin; default https://capsule.pirate-musical.ts.net
 #   NETBOX_HOST        a Host header to send, for a loopback or ssh-forwarded URL that
@@ -66,6 +66,14 @@ nb_list() {
   done
   printf '%s\n' "$all"
 }
+
+readonly tag='{"slug": "managed-by-git-seed"}'
+readonly tags="[$tag]"
+
+uri() { jq -rn --arg v "$1" '$v | @uri'; }
+
+# with_tags <json>: the object with the git tag.
+with_tags() { jq -c --argjson tags "$tags" '. + {tags: $tags}' <<<"$1"; }
 
 nb_changed() {
   echo "$1" >&2
@@ -139,4 +147,37 @@ nb_cable() {
     tags: $tags
   }')" >/dev/null
   nb_changed "created dcim/cables $(jq -r '"\(.device.name) \(.name)"' <<<"$ai") to $(jq -r '"\(.device.name) \(.name)"' <<<"$bi")"
+}
+
+# device <json>: ensure the device; prints its id.
+device() {
+  local want="$1"
+  nb_ensure dcim/devices "site=folly&name=$(uri "$(jq -r '.name' <<<"$want")")" \
+    "$(with_tags "$(jq -c '. + {site: {slug: "folly"}}' <<<"$want")")"
+}
+
+# interface <device id> <name> <mac> [type]: ensure the interface and its primary MAC; prints its id.
+interface() {
+  local device_id="$1" name="$2" mac="${3^^}" type="${4:-1000base-t}" id mac_id
+  id="$(nb_ensure dcim/interfaces "device_id=$device_id&name=$(uri "$name")" \
+    "$(with_tags "$(jq -cn --argjson d "$device_id" --arg n "$name" --arg t "$type" '{device: $d, name: $n, type: $t}')")")"
+  mac_id="$(nb_ensure dcim/mac-addresses "mac_address=$(uri "$mac")" \
+    "$(with_tags "$(jq -cn --arg m "$mac" --argjson i "$id" '{mac_address: $m, assigned_object_type: "dcim.interface", assigned_object_id: $i}')")")"
+  nb_ensure dcim/interfaces "device_id=$device_id&name=$(uri "$name")" "{\"primary_mac_address\": $mac_id}" >/dev/null
+  printf '%s\n' "$id"
+}
+
+# address <device id> <interface id> <address/len>: ensure the address on the interface and make
+# it the device's primary IPv4.
+address() {
+  local device_id="$1" interface_id="$2" cidr="$3" id
+  id="$(nb_ensure ipam/ip-addresses "address=$(uri "$cidr")" \
+    "$(with_tags "$(jq -cn --arg a "$cidr" --argjson i "$interface_id" '{address: $a, status: "active", assigned_object_type: "dcim.interface", assigned_object_id: $i}')")")"
+  nb_ensure dcim/devices "id=$device_id" "{\"primary_ip4\": $id}" >/dev/null
+}
+
+# switch_port <n>: the id of the switch's interface Port <n>; switch_id names the switch.
+# shellcheck disable=SC2154 # the caller assigns switch_id.
+switch_port() {
+  nb GET "dcim/interfaces/?device_id=$switch_id&name=$(uri "Port $1")" | jq -e '.results[0].id'
 }

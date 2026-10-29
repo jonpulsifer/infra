@@ -158,6 +158,10 @@ run = "bash scripts/inventory.sh check"
 description = "Import folly's site, device types, custom fields, nodes, anchors, switch, cables and prefixes from git into NetBox; a second run changes nothing"
 run = "bash scripts/netbox-seed.sh"
 
+[tasks."netbox:declare"]
+description = "Declare a new planned Kubernetes node in NetBox, then render the export (args: <name> <serial> <mac> <switch port> <address> [--class C] [--bmc B] [--disk D] [--type T] [--ek-hash H])"
+run = "bash scripts/netbox-declare.sh"
+
 [tasks."netbox:export"]
 description = "Write clusters/folly/inventory/machines.yaml from NetBox's active and staged kubernetes-node devices"
 run = "bash scripts/netbox-export.sh"
