@@ -58,6 +58,7 @@ let
       n = entry.n;
       line = entry.line;
       topMachines = builtins.match "machines:${comment}" line;
+      noMachines = builtins.match "machines:[[:space:]]*\\{}${comment}" line;
       machine = builtins.match "  (${keyRe}):${comment}" line;
       key = builtins.match "    (${keyRe}):(.*)" line;
       deeper = builtins.match "      .*" line;
@@ -71,6 +72,16 @@ let
         state
         // {
           inMachines = true;
+          seen = true;
+        }
+    # The export of an empty fleet.
+    else if noMachines != null then
+      if state.seen then
+        fail n line
+      else
+        state
+        // {
+          inMachines = false;
           seen = true;
         }
     else if builtins.match "[^[:space:]].*" line != null then

@@ -104,13 +104,11 @@ NV, and exits 0 while the LDevID expires in more than `-renew-before`
 (default `720h`), or when NV holds neither certificate. NV that holds the LAK
 and no LDevID, or an index that holds no certificate, counts as due; any
 other TPM error fails the run. Otherwise it loads the LAK and
-LDevID blobs that `GET /devid/{serial}` serves, and drives these routes on
-`ATTEST_URL`, the DevID listener:
-
-| Route | Body | Answer |
-| --- | --- | --- |
-| `POST /v1/renew` | `{serial}` | `{session, nonce}`; 404 with no LAK on file, 403 when the machine's status forbids a renewal |
-| `POST /v1/renew/{session}/evidence` | `{quote, pcrs, event_log, ldevid}`: a LAK quote over PCRs 0 to 7 and the LDevID key certified by the LAK, both qualified by the nonce | `{ldevid_cert_pem, lak_cert_pem?}`, each the leaf then the DevID CA |
+LDevID blobs that `GET /devid/{serial}` serves, and drives the renewal routes
+on `ATTEST_URL`, the DevID listener: `POST /v1/renew` with `{serial}`, then
+`POST /v1/renew/{session}/evidence` with `{quote, pcrs, event_log, ldevid}`,
+a LAK quote over PCRs 0 to 7 and the LDevID key certified by the LAK, both
+qualified by the nonce.
 
 Each certificate in the answer must chain to a CA in `-ca-bundle`, certify
 the key NV and the blobs name, and carry the machine's name and serial; the

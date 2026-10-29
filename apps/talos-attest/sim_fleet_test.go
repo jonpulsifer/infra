@@ -64,12 +64,17 @@ func (h *harness) devID(t *testing.T, serial string) protocol.DevID {
 }
 
 // renew drives the renewal client as the tpm-reattest DaemonSet does, with
-// the LDevID in NV due for renewal.
+// the LDevID in NV due for renewal, trusting the DevID CA and keeping the
+// service's clock, so a certificate it issues is valid to the client.
 func (h *harness) renew(serial string) (*client.RenewResult, error) {
+	roots := x509.NewCertPool()
+	roots.AddCert(h.v.CA.Cert)
 	return client.Renew(context.Background(), h.sim, client.RenewConfig{
 		BaseURL:     h.ts.URL,
 		Serial:      serial,
 		EventLog:    h.eventLog,
+		Roots:       roots,
+		Now:         h.v.Now,
 		RenewBefore: 10 * 365 * 24 * time.Hour,
 	})
 }

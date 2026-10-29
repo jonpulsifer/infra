@@ -119,13 +119,14 @@ func (r *renewalService) check(ev protocol.RenewEvidence) (protocol.Renewed, err
 	// A minute on: a later expiry than the intake's, while CA.Issue's
 	// NotBefore stays in the past.
 	later := time.Now().Add(time.Minute)
-	ldevid, err := ca.Issue(key, name, simSerial, "LDevID", later)
+	subject := Subject{Machine: name, Serial: simSerial}
+	ldevid, err := ca.Issue(key, subject, "LDevID", later)
 	if err != nil {
 		return protocol.Renewed{}, err
 	}
 	out := protocol.Renewed{LDevIDCert: string(ca.LeafPEM(ldevid))}
 	if r.withLAK {
-		lak, err := ca.Issue(ak.Public, name, simSerial, "LAK", later)
+		lak, err := ca.Issue(ak.Public, subject, "LAK", later)
 		if err != nil {
 			return protocol.Renewed{}, err
 		}
@@ -147,7 +148,7 @@ func (h *harness) nvCert(index uint32) *x509.Certificate {
 	return c
 }
 
-func (h *harness) renew(svc *renewalService, before time.Duration) (*client.RenewResult, error) {
+func (h *harness) renewVia(svc *renewalService, before time.Duration) (*client.RenewResult, error) {
 	ts := httptest.NewServer(svc.handler())
 	h.t.Cleanup(ts.Close)
 	roots := x509.NewCertPool()
@@ -167,7 +168,7 @@ func TestRenewWaitsUntilDue(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &renewalService{h: h}
-	res, err := h.renew(svc, 30*24*time.Hour)
+	res, err := h.renewVia(svc, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +189,7 @@ func testRenewStores(t *testing.T, withLAK bool) {
 		t.Fatal(err)
 	}
 	old, oldLAK := h.nvCert(protocol.NVLDevIDCert), h.nvCert(protocol.NVLAKCert)
-	res, err := h.renew(&renewalService{h: h, withLAK: withLAK}, 400*24*time.Hour)
+	res, err := h.renewVia(&renewalService{h: h, withLAK: withLAK}, 400*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +213,7 @@ func TestRenewRefusalLeavesNV(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := h.nvCert(protocol.NVLDevIDCert)
-	_, err := h.renew(&renewalService{h: h, refuse: http.StatusForbidden}, 400*24*time.Hour)
+	_, err := h.renewVia(&renewalService{h: h, refuse: http.StatusForbidden}, 400*24*time.Hour)
 	var refused *client.RefusedError
 	if !errors.As(err, &refused) || refused.Status != http.StatusForbidden {
 		t.Fatalf("got %v, want a 403 refusal", err)
@@ -224,7 +225,7 @@ func TestRenewRefusalLeavesNV(t *testing.T) {
 
 func TestRenewWithoutAnLDevID(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
-	_, err := h.renew(&renewalService{h: h}, 30*24*time.Hour)
+	_, err := h.renewVia(&renewalService{h: h}, 30*24*time.Hour)
 	if !errors.Is(err, client.ErrNoLDevID) {
 		t.Fatalf("got %v, want ErrNoLDevID", err)
 	}
@@ -244,7 +245,7 @@ func TestRenewRefusesAnUnpinnedOrMisnamedCertificate(t *testing.T) {
 				t.Fatal(err)
 			}
 			old, oldLAK := h.nvCert(protocol.NVLDevIDCert), h.nvCert(protocol.NVLAKCert)
-			if _, err := h.renew(svc(h), 400*24*time.Hour); err == nil {
+			if _, err := h.renewVia(svc(h), 400*24*time.Hour); err == nil {
 				t.Fatal("the renewal was accepted")
 			}
 			if !bytes.Equal(h.nvCert(protocol.NVLDevIDCert).Raw, old.Raw) || !bytes.Equal(h.nvCert(protocol.NVLAKCert).Raw, oldLAK.Raw) {
@@ -277,7 +278,7 @@ func TestRenewRecoversAnEmptyLDevIDIndex(t *testing.T) {
 				t.Fatal(err)
 			}
 			damage(h)
-			res, err := h.renew(&renewalService{h: h}, 30*24*time.Hour)
+			res, err := h.renewVia(&renewalService{h: h}, 30*24*time.Hour)
 			if err != nil || !res.Renewed {
 				t.Fatalf("got %+v, %v; want a renewal", res, err)
 			}

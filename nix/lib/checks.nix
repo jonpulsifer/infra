@@ -369,6 +369,7 @@ in
         ++ lib.optional (
           read "machines:\r\n  a:\r\n    tpm: \"2.0\"\r\n" != { a.tpm = "2.0"; }
         ) "CRLF line ends change the result"
+        ++ lib.optional (read "machines: {}\n" != { }) "an empty fleet does not read as no machines"
         ++ lib.mapAttrsToList (what: _: "${what} is accepted") (lib.filterAttrs (_: reads) refused);
     in
     require "inventory-reader" (failures == [ ]) (lib.concatStringsSep "; " failures);
