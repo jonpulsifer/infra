@@ -188,7 +188,7 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 			return fmt.Errorf("apply Hardware: %w", err)
 		}
 	}
-	if d.BMCType != "none" && d.BMCAddress != "" {
+	if d.HasBMC() {
 		m, err := r.Config.Machine(d)
 		if err != nil {
 			return err
@@ -234,6 +234,7 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 // agent with the first finished Workflow it finds for its ID.
 func (r *Reconciler) start(ctx context.Context, d Device, action string, workflows []Object) error {
 	var name, running string
+	manual := false
 	for _, wf := range workflows {
 		if Finished(wf.State()) {
 			if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
@@ -254,6 +255,7 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 			return fmt.Errorf("create Workflow %s: %w", name, err)
 		}
 		r.Metrics.WorkflowsCreated.Add(1)
+		manual = d.ManualBoot()
 	}
 	status := NextStatus(action, d.Status)
 	if d.DesiredAction == "none" && d.LastWorkflow == name && status == "" {
@@ -261,6 +263,9 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 	}
 	fields := map[string]any{"desired_action": "none", "last_workflow": name}
 	comment := fmt.Sprintf("fleet-controller: started Workflow %s (%s)", name, action)
+	if manual {
+		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
+	}
 	if running != "" {
 		comment = fmt.Sprintf("fleet-controller: Workflow %s is still running; %s waits for it", name, action)
 	}
