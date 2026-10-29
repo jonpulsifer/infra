@@ -20,7 +20,7 @@ ARG AGE_VERSION=1.3.2
 # renovate: datasource=github-releases depName=sharkdp/bat
 ARG BAT_VERSION=0.26.1
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.3
+ARG BUN_VERSION=1.4.4
 # renovate: datasource=github-releases depName=cilium/cilium-cli
 ARG CILIUM_CLI_VERSION=0.20.1
 # Must equal the operator's version, the appVersion of the chart that
