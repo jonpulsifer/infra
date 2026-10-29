@@ -48,7 +48,6 @@ let
   signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
   hookosCert = ../../clusters/folly/talos/secureboot/hookos-signing-cert.pem;
   verifyUki = ../../.github/scripts/talos-uki-verify.sh;
-  netbootPins = lib.importJSON ../../clusters/folly/talos/netboot.json;
 
   # The release tag follows the Talos version the folly root installs (nix/services/talos-boot.nix),
   # and the dev cluster runs the root's Kubernetes version.
@@ -182,20 +181,8 @@ let
     "--ipxe-http-script-osie-url=http://${spore}/talos/${site}"
   ];
 
-  # The HookOS command line the Hardware objects carry, as nodes.env does for folly.
-  hookosCmdline = lib.concatStringsSep " " [
-    "facility="
-    "syslog_host=${spore}"
-    "grpc_authority=${spore}:${toString tinkServerPort}"
-    "tinkerbell_tls=false"
-    "tinkerbell_insecure_tls=false"
-    "modules=loop,squashfs,sd-mod,usb-storage"
-    "intel_iommu=on"
-    "iommu=pt"
-    "console=ttyS0,115200"
-    "console=tty0"
-    "tink_worker_image=${netbootPins.tink_agent_image}"
-  ];
+  # The HookOS command line the Hardware objects carry, the one folly's signed UKI bakes in.
+  hookosCmdline = (pkgs.callPackage ../images/hookos-folly.nix { }).cmdline;
 
   # The dev cluster's render inputs: one controlplane class, and the same content under the node's
   # name for the per-node contract talos-enroll reads today. Patches: install the signed installer

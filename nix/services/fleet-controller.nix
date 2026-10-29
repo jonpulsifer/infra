@@ -2,7 +2,8 @@
 # from NetBox on capsule and owns the Hardware, Machine and Workflow objects in Tinkerbell's
 # namespace (./tinkerbell.nix). A device's desired_action starts a provision Workflow; a device in
 # decommissioning is wiped and set offline. It reconciles every two minutes and when NetBox's
-# event-rule webhook posts to port 8446 on the Anchor network.
+# event-rule webhook posts to port 8446 on the Anchor network. HookOS's agent posts each machine's
+# facts to /intake on that port, through every anchor's enrollment server (./talos-enroll.nix).
 #
 # It also renders the config a worker's first boot from disk fetches: talos-attest posts /render
 # on the same port at the end of a full intake, and the controller writes
@@ -28,26 +29,11 @@ let
   sealed = key: lib.hasInfix "\nfleet-controller:\n" secrets && lib.hasInfix "\n    ${key}:" secrets;
   webhook = sealed "webhook-secret";
 
-  netboot = lib.importJSON ../../clusters/folly/talos/netboot.json;
   spore = lab.bootstrap.hosts.spore;
   vip = lab.bootstrap.vip;
-  # Tinkerbell's gRPC port, ./tinkerbell.nix's tinkServerPort.
-  tinkServerPort = 42113;
   # The command line nix/images/hookos-folly.nix bakes into the UKI. Without Secure Boot,
   # systemd-stub takes iPXE's arguments instead, so the per-MAC script passes the same one.
-  hookosCmdline = lib.concatStringsSep " " [
-    "facility="
-    "syslog_host=${spore}"
-    "grpc_authority=${spore}:${toString tinkServerPort}"
-    "tinkerbell_tls=false"
-    "tinkerbell_insecure_tls=false"
-    "modules=loop,squashfs,sd-mod,usb-storage"
-    "intel_iommu=on"
-    "iommu=pt"
-    "console=ttyS0,115200"
-    "console=tty0"
-    "tink_worker_image=${netboot.tink_agent_image}"
-  ];
+  hookosCmdline = (pkgs.callPackage ../images/hookos-folly.nix { }).cmdline;
   kubeCredentials = [
     "ca-crt"
     "admin-crt"
@@ -113,8 +99,8 @@ in
     };
     webhookPort = lib.mkOption {
       type = lib.types.port;
-      default = 8446;
-      description = "The port NetBox's event-rule webhook and talos-attest's render call post to, on the Anchor network.";
+      default = talosConfig.controllerPort;
+      description = "The port NetBox's event-rule webhook, talos-attest's render call and every anchor's intake proxy post to, on the Anchor network.";
     };
   };
 
@@ -136,8 +122,9 @@ in
       "fleet-controller/webhook-secret" = { };
     };
 
-    # NetBox on capsule posts the webhook, and every anchor's talos-attest the render call, from
-    # the Anchor network; the other anchors' nginx fetches /talos/config from it too.
+    # NetBox on capsule posts the webhook, every anchor's talos-attest the render call and every
+    # anchor's nginx the agent's intake (./talos-enroll.nix), from the Anchor network; the other
+    # anchors' nginx fetches /talos/config from it too.
     networking.firewall.extraCommands = ''
       iptables -A nixos-fw -i end0 -p tcp -s ${lab.cidr} --dport ${toString cfg.webhookPort} -j nixos-fw-accept
       iptables -A nixos-fw -i end0 -p tcp -s ${lab.cidr} --dport ${toString talosConfig.port} -j nixos-fw-accept

@@ -11,6 +11,9 @@ on:
       - clusters/folly/config/anchor-topology.json
       - nix/images/ipxe-folly.nix
       - nix/images/hookos-folly.nix
+      # HookOS's fleet_intake_url reads these.
+      - nix/lib/talos-config.nix
+      - terraform/network/tailscale/fleet.tf.json
       - .github/scripts/talos-image-inputs.sh
       - .github/scripts/talos-image-inputs_test.sh
       - .github/scripts/talos-images-build.sh
@@ -97,6 +100,7 @@ jobs:
             git show "$rev:clusters/folly/config/anchor-topology.json" | jq -r '.data.SPORE_BOOTSTRAP_IP, .data.BOOT_VIP' || return 1
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
               nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
+              nix/lib/talos-config.nix terraform/network/tailscale/fleet.tf.json \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
               .github/workflows/talos-images.yml
           }
