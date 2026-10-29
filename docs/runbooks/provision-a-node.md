@@ -17,11 +17,17 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
 ## Declare the device
 
-1. In NetBox, add a device at the site `folly` with the role `kubernetes-node` and the status `planned`.
-2. Set its name, serial, device type, `talos_class`, `bmc_type`, `install_disk`, `tpm_version`, `amt` and `secure_boot_expected`.
-3. Give its first interface the MAC as its primary MAC, and cable it to the node's switch port.
-4. Set its primary IPv4 to `<addr>`. If `bmc_type` is `redfish`, set its out-of-band IP.
-5. If you know the EK hashes, set `ek_hash` and `ek_hash_ecc`.
+Read the serial and the MAC from the HP label, and the port from the rack. On a branch, run:
+
+```sh
+mise run netbox:declare <node> <serial> <mac> <switch port> <addr>
+```
+
+The command refuses a name that is not a hostname, a malformed MAC, a port the switch lacks, and an address outside `K8S_NODE_CIDR`, in `NODE_ADDRESSES` or on another device. It declares the device as `planned` with the role `kubernetes-node` and the platform `talos`. Its first interface gets the MAC as its primary MAC, a cable runs to the port, and `<addr>` is its primary IPv4. The defaults are the G5 mini: `--class worker-g5`, `--bmc amt`, `--disk /dev/nvme0n1` and `--type hp-elitedesk-800-g5-desktop-mini`. A second run with the same facts changes nothing, and a different serial or MAC for an existing name is refused.
+
+Then it runs `mise run netbox:export` and prints the diff of `clusters/folly/inventory/machines.yaml`. Commit that file and open the export pull request.
+
+If you know the EK hash, add `--ek-hash <hex>`; set `ek_hash_ecc` in NetBox. If `bmc_type` is `redfish`, set the out-of-band IP in NetBox.
 
 ## Provision a new node
 
