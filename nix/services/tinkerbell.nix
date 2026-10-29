@@ -9,6 +9,7 @@
 }:
 let
   lab = import ../lib/anchor.nix;
+  site = config.homelab.site;
   iface = "bootstrap";
   bootstrapIp = lab.bootstrap.hosts.spore;
 
@@ -18,14 +19,14 @@ let
   sha256 = "e76cac8bd46a5a4123c5ac87dae18e68b72f60b4eaa6e73247f1364c92382b16";
 
   # Under dnsmasq's TFTP root; Smee names it in its offer to UEFI x86-64 PXE clients (arch 7).
-  ipxeFile = "talos/folly/ipxe-amd64-secureboot.efi";
+  ipxeFile = "talos/${site}/ipxe-amd64-secureboot.efi";
   # Some firmware (riptide's) takes Smee's ProxyDHCP offer over UniFi's. With allowPXE off, Smee
   # names /<mac>/netboot-not-allowed on spore's TFTP, so that path serves the same signed iPXE, which
   # falls back to the Talos UKI when Smee has no script.
-  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/folly/apps/talos-enroll/node-macs.json);
+  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/${site}/apps/talos-enroll/node-macs.json);
   # nginx's base for the signed HookOS UKI. Smee's default HookOS script reads it; a Hardware
   # object's netboot.ipxe.url replaces that script, so Secure Boot nodes never use it.
-  osieUrl = "http://${bootstrapIp}/talos/folly";
+  osieUrl = "http://${bootstrapIp}/talos/${site}";
 
   apiPort = 6443;
   httpPort = 7080;
