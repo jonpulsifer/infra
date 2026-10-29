@@ -61,4 +61,5 @@ ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tink
 - [Talos boot](talos-boot.md)
 - [fleet-controller](../../apps/fleet-controller.md)
 - [Provision a node](../../runbooks/provision-a-node.md)
+- [Reprovision a node](../../runbooks/reprovision-a-node.md)
 - [Retire a node](../../runbooks/retire-a-node.md)

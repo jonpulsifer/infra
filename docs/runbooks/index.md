@@ -9,7 +9,9 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host's configuration or restore its previous generation
 - [Install Talos on a node](install-talos-on-a-node.md): boot a NixOS node into the Talos installer with kexec, and check its volumes
-- [Provision a node](provision-a-node.md): set a new folly machine's firmware, declare it in NetBox, and provision, reprovision, attest or wipe it by its `desired_action`
+- [Prepare a machine](prepare-a-machine.md): set a new folly machine's firmware and enroll the lab's Secure Boot keys over PXE
+- [Provision a node](provision-a-node.md): declare a new folly machine in NetBox and install it as a Talos worker through its `desired_action`
+- [Reprovision a node](reprovision-a-node.md): reinstall, attest again or wipe an installed folly node by its `desired_action`
 - [Retire a node](retire-a-node.md): drain a folly worker, set its NetBox device to `decommissioning`, and drop it from the exports
 - [Build the signed Talos images](build-the-signed-talos-images.md): build folly's Secure Boot installer, ISO, HTTP-boot UKI, iPXE and HookOS, and check what the build publishes
 - [Change the forge EEPROM](change-the-forge-eeprom.md): change forge's boot settings and keep its HTTP boot fallback
