@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -9,6 +8,7 @@ import (
 	"crypto/x509"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
