@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: talos-enroll
-          image: ghcr.io/jonpulsifer/talos-enroll:latest@sha256:55caa4c375099099d2d23c713bb1ba6ac445099e0d962b81536342c3391b0c80
+          image: ghcr.io/jonpulsifer/talos-enroll:latest@sha256:98c8bb218a66f3228baec9b3074bd3ae653bc7f0279c09a3cf93bc2953c82883
           imagePullPolicy: Always
           ports:
             - name: http
