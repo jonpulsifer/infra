@@ -1,10 +1,10 @@
 ---
 title: Talos enrollment
 description: A Go service that answers the OAuth device flow of a Talos machine booted from the network, and releases the machine's config once the owner approves it. It runs on the folly cluster and on the three anchors.
-status: unverified
+status: live
 ---
 
-talos-enroll is the enrollment server for folly's Talos nodes. A machine that network boots the signed Talos image asks it for a device code, waits for the owner's approval, and then fetches its machine config. No machine has enrolled through it yet.
+talos-enroll is the enrollment server for folly's Talos nodes. A machine that network boots the signed Talos image asks it for a device code, waits for the owner's approval, and then fetches its machine config.
 
 It runs in two places. Each [anchor](../platform/nixos/talos-boot.md) runs a copy behind `BOOT_VIP`, and the anchors' CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP`, so a machine on the bootstrap VLAN enrolls through the anchors. The public name still resolves to the cluster's copy at `ENROLL_VIP`, which no machine on the bootstrap VLAN asks for.
 
@@ -16,7 +16,7 @@ It runs in two places. Each [anchor](../platform/nixos/talos-boot.md) runs a cop
 | Approval page and API | `https://talos-enroll.<tailnet>`; on an anchor, `https://<anchor>.<tailnet>:8443` | Tailnet logins in `ENROLL_APPROVERS` |
 | Prompts | The Discord channel of the Alertmanager webhook | Members of that channel |
 
-Each machine gets one Discord message, which the server edits as its enrollment moves on. The prompt and the console's QR code name the approval page of the server that holds the code. `mise run enroll:approve <code> <node>`, `enroll:deny <uuid>` and `enroll:pending` call the anchors' approval API. Only the anchor that holds `BOOT_VIP` knows a code, so `scripts/enroll.sh` tries each anchor and moves on while one answers 404. `ENROLL_ADMIN_URL` names one server. [Enroll a Talos node](../runbooks/enroll-a-talos-node.md) is the procedure.
+Each machine gets one Discord message, which the server edits as its enrollment moves on. The prompt and the console's QR code name the approval page of the server that holds the code. `mise run enroll:approve <code> <node>`, `enroll:deny <uuid>` and `enroll:pending` call the anchors' approval API. Only the anchor that holds `BOOT_VIP` knows a code, so `scripts/enroll.sh` tries each anchor and moves on while one answers 404. `ENROLL_ADMIN_URL` names one server. [Provision a node](../runbooks/provision-a-node.md) is the procedure.
 
 The user code shows only on the machine's console, so an approval proves that the approver read the console of the machine being enrolled.
 

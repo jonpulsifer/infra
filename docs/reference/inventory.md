@@ -47,5 +47,6 @@ A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d 
 
 - [NetBox](../platform/netbox.md)
 - [Topology](topology.md)
-- [Enroll a Talos node](../runbooks/enroll-a-talos-node.md)
+- [Provision a node](../runbooks/provision-a-node.md)
+- [Retire a node](../runbooks/retire-a-node.md)
 - [Routing and firewall](../platform/network/routing-and-firewall.md)

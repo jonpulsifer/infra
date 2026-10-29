@@ -3,7 +3,7 @@ title: Install Talos on a node
 description: Boot a running NixOS node into the Talos installer with kexec, check it in maintenance mode, and check its volumes after the install.
 ---
 
-Use this runbook to boot a NixOS node into the Talos Linux installer without a USB drive or a site visit. kexec loads the Image Factory kernel for the cluster's schematic from the running system. Talos then waits in maintenance mode, with the disk untouched, until the `clusters/<site>/talos/` root applies its machine config and installs it. [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md) says when to run it for each node. To install riptide or optiplex with Secure Boot, use [Enroll a Talos node](enroll-a-talos-node.md) instead.
+Use this runbook to boot a NixOS node into the Talos Linux installer without a USB drive or a site visit. kexec loads the Image Factory kernel for the cluster's schematic from the running system. Talos then waits in maintenance mode, with the disk untouched, until the `clusters/<site>/talos/` root applies its machine config and installs it. [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md) says when to run it for each node. To install a folly node with Secure Boot, use [Provision a node](provision-a-node.md) instead.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because the node runs no Talos API until it boots the installer.
@@ -143,7 +143,7 @@ The `clusters/<site>/talos/` apply installs Talos and reboots the node. Then do 
 
 ## Related
 
-- [Enroll a Talos node](enroll-a-talos-node.md)
+- [Provision a node](provision-a-node.md)
 - [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md)
 - [Verify a Talos cluster](verify-a-talos-cluster.md)
 - [Issue a talosconfig](issue-a-talosconfig.md)

@@ -96,5 +96,5 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 - [Tinkerbell](tinkerbell.md)
 - [Netboot](netboot.md)
 - [Lab DNS and time](../network/ingress-and-dns.md#lab-dns-and-time)
-- [Enroll a Talos node](../../runbooks/enroll-a-talos-node.md)
+- [Provision a node](../../runbooks/provision-a-node.md)
 - [Topology](../../reference/topology.md)

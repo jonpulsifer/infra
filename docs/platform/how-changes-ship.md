@@ -15,6 +15,7 @@ Every change to the lab ships from git. A pull request (PR) declares the change,
 | A NixOS host under `nix/` | The host's auto-upgrade, or `nixos-rebuild` | At the next daily [auto-upgrade](nixos.md#auto-upgrade) after the merge |
 | A first-party image | `containers.yml`, then Flux | After the merge, the workflow builds the image and opens a PR that pins its digest. See [Build and release](build-and-release.md). |
 | A wiki page under `docs/` | `wiki.yml` | On merge, to Cloudflare Pages. See [Wiki](../apps/wiki.md). |
+| A folly node's lifecycle: its NetBox device's `desired_action` or `decommissioning` status | [fleet-controller](../apps/fleet-controller.md), through Tinkerbell | When the owner sets the field in NetBox, within two minutes. See [Provision a node](../runbooks/provision-a-node.md). |
 
 ## Kubernetes
 

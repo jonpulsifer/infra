@@ -1,7 +1,7 @@
 ---
 title: talos-attest
 description: A Go service on the anchors that attests a folly machine's TPM and boot chain from HookOS, and issues the TPM an LDevID and a LAK certificate from the DevID CA.
-status: unverified
+status: live
 ---
 
 talos-attest checks which TPM a machine has and what it booted, before the machine gets a Talos config. A machine that passes gets an LDevID, a signing key that stays in its TPM with a certificate from the DevID CA, and a LAK, the attestation key's certificate. SPIRE's `tpm_devid` attestor and talos-enroll's auto-approve read the result. The Tinkerbell action `tink-attest` drives it from HookOS. NetBox is its system of record: the device with the machine's serial names it, gives it its class and lifecycle status, and holds every verdict.
@@ -14,7 +14,7 @@ talos-attest checks which TPM a machine has and what it booted, before the machi
 | LDevID and verdict lookups, and renewal | `http://<anchor>:8444/devid/<serial>`, `/verdict/<serial>`, `POST /v1/renew` | folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR`, on the anchor network |
 | Admin API | `https://<anchor>.<tailnet>:8445`, `GET /machines` and `POST /approve` | Tailnet logins in `ATTEST_APPROVERS` |
 
-`BOOT_VIP` is in `clusters/folly/config/anchor-topology.json`. [Attest a node](../runbooks/attest-a-node.md) is the procedure.
+`BOOT_VIP` is in `clusters/folly/config/anchor-topology.json`. [Provision a node](../runbooks/provision-a-node.md) is the procedure, and `mise run attest:approve <serial>` approves a first intake.
 
 ## Limits
 
@@ -48,9 +48,9 @@ On a running node, `tink-attest renew` in the DaemonSet `tpm-reattest` renews th
 
 | Alert | Meaning | Runbook |
 | --- | --- | --- |
-| `TalosAttestQuarantined` | A machine's newest verdict is a refusal | [Attest a node](../runbooks/attest-a-node.md) |
-| `TalosAttestWaitingForApproval` | A first intake waits for the owner | [Attest a node](../runbooks/attest-a-node.md) |
-| `TalosAttestNotServing` | An anchor's talos-attest does not answer | [Attest a node](../runbooks/attest-a-node.md) |
+| `TalosAttestQuarantined` | A machine's newest verdict is a refusal | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
+| `TalosAttestWaitingForApproval` | A first intake waits for the owner | [Provision a node](../runbooks/provision-a-node.md#approve-a-first-intake) |
+| `TalosAttestNotServing` | An anchor's talos-attest does not answer | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestLDevIDExpiring` | An LDevID expires within 23 days, after a week of failed renewals | [Add a TPM node to SPIRE](../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
 
 ## Reference
