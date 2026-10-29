@@ -136,18 +136,25 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		// While an intake's Hardware holds the MAC, the device's own objects
 		// wait: two Hardware with one MAC confuse Tinkerbell. The binding
 		// ends the intake.
-		hw, ok := in.byMAC[d.MAC]
-		if d.MAC == "" {
-			hw, ok = r.intakeBySerial(ctx, d, in)
+		// Only talos-attest writes a MAC it proved; an intake's claimed MAC
+		// never reaches NetBox, so an attested device without one waits.
+		if d.MAC == "" && d.Status == "staged" && d.Verdict == "attested" {
+			why := "fleet-controller: the device is attested and has no MAC in NetBox; it binds and provisions once talos-attest writes the MAC it proved"
+			if err := r.journalOnce(ctx, fmt.Sprintf("no-mac/%d", d.ID), d, "warning", why); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
+			}
 		}
-		if ok && (d.Status == "staged" || d.Status == "planned") {
+		hw, ok := in.byMAC[d.MAC]
+		ok = ok && d.MAC != ""
+		if ok && d.Status == "staged" {
 			if err := r.bind(ctx, d, hw, in, pass); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 			}
 			continue
 		}
-		// Any other status is no intake to bind: an intake that has stopped
-		// running is stale, and goes before the device's own objects.
+		// Any other status, a planned device declared by hand included, is no
+		// intake to bind: an intake that has stopped running is stale, and goes
+		// before the device's own objects.
 		if ok {
 			if wf := in.newest[hw.Name()]; wf != nil && !Finished(wf.State()) {
 				continue
@@ -194,23 +201,6 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
-}
-
-// intakeBySerial finds the intake of a staged device with no MAC in NetBox:
-// a stub that talos-attest took over, which may carry no interface yet.
-func (r *Reconciler) intakeBySerial(ctx context.Context, d Device, in intakes) (Object, bool) {
-	if d.Status != "staged" || d.Serial == "" {
-		return nil, false
-	}
-	hw, n := in.forSerial(d.Serial, d.SMBIOSUUID)
-	if n > 1 {
-		why := fmt.Sprintf("fleet-controller: %d intakes claim serial %s and passed attestation; nothing binds until all but one are deleted", n, d.Serial)
-		if err := r.journalOnce(ctx, fmt.Sprintf("bind-ambiguous/%d/%d", d.ID, n), d, "danger", why); err != nil {
-			log.Printf("%s: %v", d.Name, err)
-		}
-		return nil, false
-	}
-	return hw, n == 1
 }
 
 // deleteManaged deletes an object by name only when the controller made it.

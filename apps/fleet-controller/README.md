@@ -94,8 +94,8 @@ served, expired or replaced code is kept as a hash for 24 hours in
 `size` in bytes. 400 is a MAC that is not unicast `aa:bb:cc:dd:ee:ff`, a serial
 that is not 1 to 64 printable ASCII characters, a UUID of another shape, or a
 disk that is not a kernel name. 429 is a second call for a MAC within ten
-minutes, or the 21st in an hour; a call the controller fails gives its slot
-back. 200 `{"state":"known"}` is a MAC that a NetBox interface or a `Hardware`
+minutes, an 11th call in an hour from one `X-Forwarded-For` address, or a 21st
+intake made in an hour; a call that made nothing gives its MAC's slot back. 200 `{"state":"known"}` is a MAC that a NetBox interface or a `Hardware`
 holds. 201 `{"state":"intake","workflow":"intake-<mac>-<unix seconds>"}` made
 `Hardware <mac>` (labels `lolwtf.ca/intake=true` and the managed and node
 labels; annotations `lolwtf.ca/intake-serial`, `-uuid`, `-model`; the first
@@ -106,9 +106,12 @@ NetBox or Tinkerbell failure. Audit line `fleet.intake`.
 ## Binding contract
 
 A pass binds a device that is `staged` with `attest_verdict` `attested` once
-the newest `Workflow` of the intake holding its MAC has finished; a device with
-no MAC in NetBox matches the one intake that claimed its serial and succeeded.
-A stub is a `planned` device with no MAC. An `intake-*` device takes the stub
+the newest `Workflow` of the intake holding its MAC has finished. Only a MAC
+talos-attest wrote binds: an attested device with none is journaled once and
+waits, and an intake's claimed MAC is never written to NetBox. A device of any
+other status drops an intake that has stopped running. A failed intake goes
+after an hour, and one no device holds after `FLEET_INTAKE_TTL`. A stub is a
+`planned` device with no MAC; one that a bind marker names is promised. An `intake-*` device takes the stub
 with its serial, else the oldest (lowest id) serial-less stub whose
 `talos_class` is the model's, then the stub's name and `expected_port`; the
 description `fleet-controller: binds stub <name>` carries the name across a
@@ -116,8 +119,7 @@ pass that stops between deleting the stub and the rename. Off
 `FLEET_INTAKE_PORT`, an `expected_port` other than UniFi's port refuses the
 binding: nothing is written and the journal says `on port N, expected M`.
 Written, each only when it differs: `talos_class`, `bmc_type`, `install_disk` (the model map's, never the claim's),
-`expected_port`, `last_workflow` (the intake run), the interface and MAC when
-the device has none, `primary_ip4` (the unassigned IP address whose DNS name is
+`expected_port`, `last_workflow` (the intake run), `primary_ip4` (the unassigned IP address whose DNS name is
 the device's new name, else the lowest free address of `FLEET_NODE_PREFIX`
 outside `FLEET_NODE_RESERVED` and UniFi's client addresses; with UniFi set and not answering, the pass fails and retries), the name, a cable
 to the switch port (on the intake port, to `expected_port` only), and
@@ -125,7 +127,8 @@ to the switch port (on the intake port, to `expected_port` only), and
 whose `last_workflow` is an intake run gets no `Machine` and a `Workflow`
 without `bootMode`. Audit lines `fleet.bind` and `fleet.autoprovision`. A
 `staged` or `active` device whose interface has no cable is cabled to the port
-UniFi reports, unless that is the intake port.
+UniFi reports, unless that is the intake port, and one seen off its
+`expected_port` is journaled once.
 
 The webhook is `POST /webhook` with NetBox's `X-Hook-Signature`, HMAC-SHA512
 hex of the body with the rule's secret. The body is not read for content: a

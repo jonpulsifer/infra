@@ -34,7 +34,7 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
    Result: the stub, or a new `intake-<serial>` device, is `staged` and `attested`.
 
-5. Watch the device's journal in NetBox.
+5. Watch the device's NetBox journal.
 
    Result: `bound the intake`, with its name, class and address, and `desired_action` `provision`. HookOS takes the run.
 
@@ -76,7 +76,7 @@ It refuses a malformed name or MAC, a missing port, and an address outside `K8S_
    ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tinkerbell get workflows -w
    ```
 
-   Result: `RUNNING`, then `SUCCESS`.
+   Result: `SUCCESS`.
 
 2. Watch the console and NetBox.
 
@@ -89,9 +89,9 @@ With no pin, the console shows `attest: FAILED` with `pending-approval`.
 > [!CAUTION]
 > A waiting claim proves nothing, because another machine can send one with this serial. Approve only hashes that you read on the console.
 
-1. Read the EK hashes on the console, as `rsa:<hash>` and `ecc:<hash>`.
-2. Run `mise run attest:approve <serial>`. If the hashes match, answer `y`.
-3. For an intake, delete its `Hardware <mac>` and power-cycle the machine. For a declared device, set `desired_action` to `provision` again.
+1. Read the EK hashes, `rsa:<hash>` and `ecc:<hash>`, on the console.
+2. Run `mise run attest:approve <serial>`, and answer `y` if the hashes match.
+3. For an intake, delete its `Hardware <mac>`, or wait an hour, and power-cycle the machine. For a declared device, set `desired_action` to `provision` again.
 
 ## If something goes wrong
 

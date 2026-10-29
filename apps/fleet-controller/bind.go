@@ -67,11 +67,17 @@ type bindPass struct {
 	switchesErr    error
 	switchesRead   bool
 	allocatedAddrs map[string]bool
+	// promised names the stubs a device's bind marker already claims, which
+	// no other machine may take.
+	promised map[string]bool
 }
 
 func newBindPass(devices []Device) *bindPass {
-	p := &bindPass{allocatedAddrs: map[string]bool{}}
+	p := &bindPass{allocatedAddrs: map[string]bool{}, promised: map[string]bool{}}
 	for _, d := range devices {
+		if name, ok := strings.CutPrefix(d.Description, bindMarker); ok && name != "" {
+			p.promised[name] = true
+		}
 		if d.Stub() {
 			p.stubs = append(p.stubs, d)
 		}
@@ -100,7 +106,7 @@ func (p *bindPass) pick(d Device, class string, port int, check bool) (*Device, 
 	}
 	fits := func(s Device) bool { return !check || s.ExpectedPort == 0 || s.ExpectedPort == port }
 	for i, s := range p.stubs {
-		if s.Serial != "" && strings.EqualFold(s.Serial, d.Serial) {
+		if s.Serial != "" && strings.EqualFold(s.Serial, d.Serial) && !p.promised[s.Name] {
 			if !fits(s) {
 				return nil, portMismatch(port, s.ExpectedPort, "stub "+s.Name)
 			}
@@ -112,7 +118,7 @@ func (p *bindPass) pick(d Device, class string, port int, check bool) (*Device, 
 	}
 	refused := ""
 	for i, s := range p.stubs {
-		if s.Serial != "" || s.Class != class {
+		if s.Serial != "" || s.Class != class || p.promised[s.Name] {
 			continue
 		}
 		if fits(s) {
@@ -202,11 +208,7 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 		return r.journalOnce(ctx, fmt.Sprintf("bind-wait/%d/%s/%s", d.ID, d.Status, d.Verdict), d, "warning", why)
 	}
 	model, known := r.Config.Models[d.Model]
-	mac := d.MAC
-	if mac == "" {
-		mac = hardwareMAC(hw)
-	}
-	sw, port, portWhy := r.where(ctx, p, mac)
+	sw, port, portWhy := r.where(ctx, p, d.MAC)
 	// On the intake port the machine is at the prep station: its rack port
 	// is yet to come, so no port check applies and no cable follows from it.
 	atIntake := port != 0 && port == r.Config.IntakePort
@@ -237,14 +239,6 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	}
 
 	var b binding
-	if d.MAC == "" {
-		nic, err := r.NetBox.EnsureMAC(ctx, d.ID, mac)
-		if err != nil {
-			return fmt.Errorf("bind MAC: %w", err)
-		}
-		d.MAC, d.NIC = mac, nic
-		b.note("put the attested MAC %s on its interface", mac)
-	}
 	class := d.Class
 	if stub != nil && stub.Class != "" {
 		class = stub.Class

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Renders clusters/folly/inventory/machines.yaml from NetBox: every folly device with the role
-# kubernetes-node and the status planned, staged, active or failed, ordered by address. A stub,
-# a planned device with no serial or no MAC (netbox-declare.sh --stub), is left out: it names a
-# machine fleet-controller has not bound yet, and Terraform has nothing to give it.
+# kubernetes-node and the status planned, staged, active or failed, ordered by address. A device
+# with no serial, no MAC or no talos_class is left out, whatever its status: a stub
+# (netbox-declare.sh --stub), or an attested intake fleet-controller has not bound, which the
+# Talos root and the UniFi root have nothing to give.
 #
 #   netbox-export.sh                 write the file
 #   netbox-export.sh --check [file]  exit 1 and print the diff if the file (default: the
@@ -42,8 +43,8 @@ machines_json() {
     def choice: if type == "object" then .value else . end;
     def octets: if . == null then [256] else split("/")[0] | split(".") | map(tonumber) end;
     $devices
-    | map(select(. as $d | $d.status.value != "planned"
-        or ($d.serial != "" and any($interfaces[]; .device.id == $d.id and .primary_mac_address != null))))
+    | map(select(. as $d | $d.serial != "" and ($d.custom_fields.talos_class | choice) != null
+        and any($interfaces[]; .device.id == $d.id and .primary_mac_address != null)))
     | sort_by((.primary_ip4.address | octets), .name)
     | map(. as $d
       | ([$interfaces[] | select(.device.id == $d.id and .primary_mac_address != null)] | sort_by(.id) | first) as $nic

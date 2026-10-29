@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,7 +71,7 @@ func newIntakeTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*intakeTest, f
 	it.in = &Intake{
 		Config: &r.Config, NetBox: r.NetBox, Kube: r.Kube, Metrics: r.Metrics,
 		Now:    func() time.Time { return it.now },
-		PerMAC: 10 * time.Minute, Global: 20, Window: time.Hour,
+		PerMAC: 10 * time.Minute, PerSource: 20, Global: 20, Window: time.Hour,
 	}
 	return it, done
 }
@@ -193,9 +194,10 @@ func TestIntakeRateLimits(t *testing.T) {
 		t.Fatalf("after ten minutes: %d %v", code, out)
 	}
 
-	it.in.Global = 3
+	// Only the intakes made count toward the global limit, not the known one.
+	it.in.Global = 2
 	if code, _ := it.post(intakeBody("38:22:e2:aa:bb:03")); code != http.StatusCreated {
-		t.Fatalf("third in the hour: %d", code)
+		t.Fatalf("second made in the hour: %d", code)
 	}
 	if code, _ := it.post(intakeBody("38:22:e2:aa:bb:04")); code != http.StatusTooManyRequests {
 		t.Fatalf("over the global limit: %d", code)
@@ -206,6 +208,27 @@ func TestIntakeRateLimits(t *testing.T) {
 	}
 	if n := it.in.Metrics.IntakeLimited.Load(); n != 2 {
 		t.Errorf("limited %d", n)
+	}
+}
+
+func TestIntakeLimitsEachSource(t *testing.T) {
+	it, done := newIntakeTest(t, &fakeNetBox{}, &fakeKube{})
+	defer done()
+	it.in.PerSource = 2
+	post := func(mac, from string) int {
+		req := httptest.NewRequest(http.MethodPost, "/intake", strings.NewReader(intakeBody(mac)))
+		req.Header.Set("X-Forwarded-For", from)
+		rec := httptest.NewRecorder()
+		it.in.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for i, want := range []int{http.StatusCreated, http.StatusCreated, http.StatusTooManyRequests} {
+		if code := post(fmt.Sprintf("38:22:e2:aa:cc:%02x", i), "10.9.0.150"); code != want {
+			t.Errorf("call %d from one source: %d, want %d", i, code, want)
+		}
+	}
+	if code := post("38:22:e2:aa:cc:10", "10.9.0.151"); code != http.StatusCreated {
+		t.Errorf("another source: %d", code)
 	}
 }
 
@@ -268,7 +291,7 @@ func TestInstallDisk(t *testing.T) {
 
 func TestExpireIntakes(t *testing.T) {
 	old := testNow.Add(-25 * time.Hour).UTC().Format(time.RFC3339)
-	fresh := testNow.Add(-time.Hour).UTC().Format(time.RFC3339)
+	fresh := testNow.Add(-30 * time.Minute).UTC().Format(time.RFC3339)
 	hw := func(slug, mac, created string) Object {
 		return Object{
 			"metadata": map[string]any{"name": slug, "creationTimestamp": created, "labels": map[string]any{

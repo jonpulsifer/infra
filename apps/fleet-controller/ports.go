@@ -2,90 +2,33 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 )
 
-// EnsureMAC puts the MAC on the device's first physical interface as its
-// primary MAC, making an interface eth0 when the device has none, and says
-// which interface. A device born of a stub may have no interface, or only
-// the MAC-less one its device type's template made.
-func (n *NetBox) EnsureMAC(ctx context.Context, deviceID int, mac string) (int, error) {
-	var raws []json.RawMessage
-	if err := n.list(ctx, fmt.Sprintf("/api/dcim/interfaces/?device_id=%d&type__n=virtual", deviceID), &raws); err != nil {
-		return 0, err
-	}
-	nic := 0
-	for _, raw := range raws {
-		var i rawInterface
-		if err := json.Unmarshal(raw, &i); err != nil {
-			return 0, err
-		}
-		if i.PrimaryMAC != nil && i.PrimaryMAC.MAC != "" {
-			if strings.EqualFold(i.PrimaryMAC.MAC, mac) {
-				return i.ID, nil
-			}
-			continue
-		}
-		if nic == 0 || i.ID < nic {
-			nic = i.ID
-		}
-	}
-	if nic == 0 {
-		var created struct {
-			ID int `json:"id"`
-		}
-		if err := n.do(ctx, http.MethodPost, "/api/dcim/interfaces/", map[string]any{"device": deviceID, "name": "eth0", "type": "1000base-t"}, &created); err != nil {
-			return 0, err
-		}
-		nic = created.ID
-	}
-	var m struct {
-		ID int `json:"id"`
-	}
-	// A pass that stopped after the MAC and before the primary keeps its MAC
-	// object, and the next one reuses it.
-	var macs []json.RawMessage
-	if err := n.list(ctx, "/api/dcim/mac-addresses/?mac_address="+url.QueryEscape(strings.ToUpper(mac)), &macs); err != nil {
-		return 0, err
-	}
-	for _, raw := range macs {
-		var have struct {
-			ID         int  `json:"id"`
-			AssignedID *int `json:"assigned_object_id"`
-		}
-		if err := json.Unmarshal(raw, &have); err != nil {
-			return 0, err
-		}
-		if have.AssignedID != nil && *have.AssignedID == nic {
-			m.ID = have.ID
-		}
-	}
-	if m.ID != 0 {
-		return nic, n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/interfaces/%d/", nic), map[string]any{"primary_mac_address": m.ID}, nil)
-	}
-	if err := n.do(ctx, http.MethodPost, "/api/dcim/mac-addresses/", map[string]any{
-		"mac_address":          strings.ToUpper(mac),
-		"assigned_object_type": "dcim.interface",
-		"assigned_object_id":   nic,
-	}, &m); err != nil {
-		return 0, err
-	}
-	return nic, n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/interfaces/%d/", nic), map[string]any{"primary_mac_address": m.ID}, nil)
-}
-
-// fillPort cables a staged or active node whose interface has no cable to
-// the rack port UniFi sees it on, once it has left the intake port, and
-// journals the move.
+// fillPort follows a staged or active node to its rack port once it has left
+// the intake port. A node whose interface has no cable is cabled to the port
+// UniFi sees it on, and the move is journaled. A node on another port than
+// its expected_port is journaled once: the port check binds a machine, and
+// a move after it is the owner's to judge.
 func (r *Reconciler) fillPort(ctx context.Context, d Device, p *bindPass) error {
-	if r.UniFi == nil || d.MAC == "" || d.NIC == 0 || d.Cabled || (d.Status != "staged" && d.Status != "active") {
+	if r.UniFi == nil || d.MAC == "" || d.NIC == 0 || (d.Status != "staged" && d.Status != "active") {
+		return nil
+	}
+	if d.Cabled && d.ExpectedPort == 0 {
 		return nil
 	}
 	sw, port, _ := r.where(ctx, p, d.MAC)
 	if sw == nil || port == r.Config.IntakePort {
+		return nil
+	}
+	if d.ExpectedPort != 0 && port != d.ExpectedPort {
+		why := "fleet-controller: UniFi sees the node " + portMismatch(port, d.ExpectedPort, "its expected_port")
+		if err := r.journalOnce(ctx, fmt.Sprintf("port-moved/%d/%d", d.ID, port), d, "warning", why); err != nil {
+			return err
+		}
+	}
+	if d.Cabled {
 		return nil
 	}
 	var b binding

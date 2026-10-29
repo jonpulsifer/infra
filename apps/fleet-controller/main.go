@@ -232,7 +232,7 @@ func run() error {
 	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: metrics, UniFi: unifi, Now: time.Now}
 	intake := &Intake{
 		Config: &r.Config, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now,
-		PerMAC: 10 * time.Minute, Global: 20, Window: time.Hour,
+		PerMAC: 10 * time.Minute, PerSource: 10, Global: 20, Window: time.Hour,
 	}
 	trigger := make(chan string, 1)
 
@@ -252,6 +252,10 @@ func run() error {
 		Addr:              env("FLEET_WEBHOOK_ADDR", ":8446"),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		// A render waits on talosctl for up to 20 seconds.
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  2 * time.Minute,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

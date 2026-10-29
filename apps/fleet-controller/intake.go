@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -20,23 +21,32 @@ import (
 // Hardware and an attest-only Workflow, so the machine attests without
 // anybody typing its facts. The call is unauthenticated and a claim: it makes
 // only Tinkerbell objects, never a NetBox device, and talos-attest's verdict
-// is the gate. Rate limits bound it per MAC and overall.
+// is the gate. Rate limits bound it per MAC, per source address and in the
+// intakes it creates.
 type Intake struct {
 	Config  *Config
 	NetBox  *NetBox
 	Kube    *Kube
 	Metrics *Metrics
 	Now     func() time.Time
-	// PerMAC is the least time between two intakes of one MAC, and Global
-	// the most intakes per Window.
-	PerMAC time.Duration
-	Global int
-	Window time.Duration
+	// PerMAC is the least time between two calls for one MAC, PerSource the
+	// most calls from one address per Window, and Global the most intakes
+	// created per Window. The source is nginx's X-Forwarded-For, which a
+	// caller on the Anchor network can set itself, so the per-MAC and global
+	// limits are the bound.
+	PerMAC    time.Duration
+	PerSource int
+	Global    int
+	Window    time.Duration
 
-	mu     sync.Mutex
-	byMAC  map[string]time.Time
-	recent []time.Time
+	mu       sync.Mutex
+	byMAC    map[string]time.Time
+	bySource map[string][]time.Time
+	created  []time.Time
 }
+
+// errIntakesFull is a new intake past the global limit.
+var errIntakesFull = errors.New("too many intakes this hour")
 
 // Labels and annotations on an intake's Hardware and Workflow.
 const (
@@ -148,50 +158,90 @@ func intakeReply(w http.ResponseWriter, status int, body map[string]string) {
 	}
 }
 
-// reserve takes a slot under both limits, or says no; the release func
-// gives the slot back for a call the controller failed.
-func (in *Intake) reserve(mac string) (bool, func()) {
+func within(ts []time.Time, now time.Time, window time.Duration) []time.Time {
+	kept := ts[:0]
+	for _, t := range ts {
+		if now.Sub(t) < window {
+			kept = append(kept, t)
+		}
+	}
+	return kept
+}
+
+// admit takes a call's slots under the per-MAC and per-source limits, or
+// says no; the release func gives the MAC's slot back for a call that made
+// nothing.
+func (in *Intake) admit(mac, source string) (bool, func()) {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	now := in.Now()
 	if in.byMAC == nil {
-		in.byMAC = map[string]time.Time{}
+		in.byMAC, in.bySource = map[string]time.Time{}, map[string][]time.Time{}
 	}
 	for k, t := range in.byMAC {
 		if now.Sub(t) >= in.PerMAC {
 			delete(in.byMAC, k)
 		}
 	}
-	kept := in.recent[:0]
-	for _, t := range in.recent {
-		if now.Sub(t) < in.Window {
-			kept = append(kept, t)
+	for k, ts := range in.bySource {
+		if in.bySource[k] = within(ts, now, in.Window); len(in.bySource[k]) == 0 {
+			delete(in.bySource, k)
 		}
 	}
-	in.recent = kept
-	if _, ok := in.byMAC[mac]; ok || len(in.recent) >= in.Global {
+	if _, ok := in.byMAC[mac]; ok || len(in.bySource[source]) >= in.PerSource {
 		return false, func() {}
 	}
 	in.byMAC[mac] = now
-	in.recent = append(in.recent, now)
+	in.bySource[source] = append(in.bySource[source], now)
 	return true, func() {
 		in.mu.Lock()
 		defer in.mu.Unlock()
 		if in.byMAC[mac].Equal(now) {
 			delete(in.byMAC, mac)
 		}
-		for i, t := range in.recent {
+	}
+}
+
+// create takes a slot under the global limit, which counts only the intakes
+// made, or says no; the release func gives it back when the making failed.
+func (in *Intake) create() (bool, func()) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	now := in.Now()
+	in.created = within(in.created, now, in.Window)
+	if len(in.created) >= in.Global {
+		return false, func() {}
+	}
+	in.created = append(in.created, now)
+	return true, func() {
+		in.mu.Lock()
+		defer in.mu.Unlock()
+		for i, t := range in.created {
 			if t.Equal(now) {
-				in.recent = append(in.recent[:i], in.recent[i+1:]...)
-				break
+				in.created = append(in.created[:i], in.created[i+1:]...)
+				return
 			}
 		}
 	}
 }
 
+// source is the caller's address: the first X-Forwarded-For entry nginx
+// set, else the connection's.
+func source(r *http.Request) string {
+	if f := r.Header.Get("X-Forwarded-For"); f != "" {
+		first, _, _ := strings.Cut(f, ",")
+		return strings.TrimSpace(first)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func (in *Intake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 16<<10+1))
-	if err != nil || len(body) > 16<<10 {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
+	if err != nil {
 		in.Metrics.IntakeInvalid.Add(1)
 		intakeReply(w, http.StatusBadRequest, map[string]string{"reason": "the body is unreadable or over 16 KiB"})
 		return
@@ -207,7 +257,7 @@ func (in *Intake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		intakeReply(w, http.StatusBadRequest, map[string]string{"reason": why})
 		return
 	}
-	ok, release := in.reserve(req.MAC)
+	ok, release := in.admit(req.MAC, source(r))
 	if !ok {
 		in.Metrics.IntakeLimited.Add(1)
 		intakeReply(w, http.StatusTooManyRequests, map[string]string{"reason": "too many intakes; try again later"})
@@ -215,6 +265,12 @@ func (in *Intake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	d := Device{Name: MACSlug(req.MAC), Serial: req.Serial, MAC: req.MAC}
 	state, workflow, err := in.intake(r.Context(), req)
+	if errors.Is(err, errIntakesFull) {
+		release()
+		in.Metrics.IntakeLimited.Add(1)
+		intakeReply(w, http.StatusTooManyRequests, map[string]string{"reason": "too many intakes; try again later"})
+		return
+	}
 	if err != nil {
 		release()
 		in.Metrics.IntakeFailed.Add(1)
@@ -257,12 +313,18 @@ func (in *Intake) intake(ctx context.Context, req IntakeRequest) (string, string
 	if disk == "" {
 		disk = "/dev/sda"
 	}
+	ok, release := in.create()
+	if !ok {
+		return "", "", errIntakesFull
+	}
 	hw := in.Config.IntakeHardware(req, disk)
 	if err := in.Kube.Apply(ctx, HardwareResource, hw); err != nil {
+		release()
 		return "", "", fmt.Errorf("apply Hardware: %w", err)
 	}
 	wf := in.Config.IntakeWorkflow(hw.Name(), in.Now())
 	if err := in.Kube.Create(ctx, WorkflowResource, wf); err != nil {
+		release()
 		// Without its Workflow the Hardware would answer the next call
 		// "known" for a day.
 		if derr := in.Kube.Delete(ctx, HardwareResource, hw.Name()); derr != nil {
@@ -376,29 +438,6 @@ func (r *Reconciler) intakes(ctx context.Context) (intakes, error) {
 	return in, nil
 }
 
-// forSerial finds the intake of a device NetBox holds no MAC for: the one
-// intake that claimed the serial, and the device's attested SMBIOS UUID when
-// it has one, and whose attest run succeeded. Each of those is a claim, since
-// an agent reports its own run, so the match is only taken when exactly one
-// intake qualifies: a second claimant makes it ambiguous, and nothing binds.
-// It says how many qualify.
-func (in intakes) forSerial(serial, uuid string) (Object, int) {
-	var found Object
-	n := 0
-	for _, hw := range in.byMAC {
-		wf := in.newest[hw.Name()]
-		if wf == nil || !Succeeded(wf.State()) || !strings.EqualFold(hw.annotation(SerialAnnotation), serial) {
-			continue
-		}
-		if uuid != "" && !strings.EqualFold(hw.annotation(UUIDAnnotation), uuid) {
-			continue
-		}
-		found = hw
-		n++
-	}
-	return found, n
-}
-
 // dropIntake deletes an intake's Workflows and its Hardware.
 // The Hardware goes first: it is what holds the MAC, and a Workflow left
 // behind is an orphan the next pass deletes.
@@ -430,31 +469,44 @@ func (r *Reconciler) dropOrphans(ctx context.Context, in intakes) error {
 	return errors.Join(errs...)
 }
 
-// expireIntakes deletes the intakes older than the TTL whose MAC no device
-// holds: a machine that never attested, or whose claim nobody approved. It
-// may phone home again afterwards.
+// FailedIntakeTTL is the age at which an intake whose run failed, or never
+// came, is deleted, so that the machine may phone home again.
+const FailedIntakeTTL = time.Hour
+
+// expireIntakes deletes stale intakes. One whose run failed goes after an
+// hour, whoever holds its MAC: the machine phones home again on its next
+// boot. One that runs or succeeded goes after the TTL when no device holds
+// its MAC: a machine that never attested, or whose claim nobody approved.
 func (r *Reconciler) expireIntakes(ctx context.Context, devices []Device, in intakes) error {
 	held := map[string]bool{}
-	serials := map[string]bool{}
 	for _, d := range devices {
 		if d.MAC != "" {
 			held[d.MAC] = true
-		} else if d.Serial != "" {
-			serials[strings.ToLower(d.Serial)] = true
 		}
 	}
-	cutoff := r.Now().Add(-r.Config.IntakeTTL)
+	now := r.Now()
 	var errs []error
 	for mac, hw := range in.byMAC {
 		created := hw.Created()
-		if held[mac] || serials[strings.ToLower(hw.annotation(SerialAnnotation))] || created.IsZero() || !created.Before(cutoff) {
+		if created.IsZero() {
+			continue
+		}
+		wf := in.newest[hw.Name()]
+		failed := wf == nil || Finished(wf.State()) && !Succeeded(wf.State())
+		why := ""
+		switch {
+		case failed && now.Sub(created) > FailedIntakeTTL:
+			why = "expired: its run failed"
+		case !failed && !held[mac] && now.Sub(created) > r.Config.IntakeTTL:
+			why = "expired: no device after " + r.Config.IntakeTTL.String()
+		default:
 			continue
 		}
 		if err := r.dropIntake(ctx, in, hw); err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		Audit("fleet.intake", r.Config.Site, Device{Name: hw.Name(), Serial: hw.annotation(SerialAnnotation), MAC: mac}, "", "expired: no device after "+r.Config.IntakeTTL.String())
+		Audit("fleet.intake", r.Config.Site, Device{Name: hw.Name(), Serial: hw.annotation(SerialAnnotation), MAC: mac}, "", why)
 	}
 	return errors.Join(errs...)
 }

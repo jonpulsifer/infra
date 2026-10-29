@@ -380,51 +380,82 @@ func TestBindSerialStubWinsOverAnOlderClassStub(t *testing.T) {
 	}
 }
 
-func TestBindStubBornDeviceWithoutAnInterface(t *testing.T) {
-	// talos-attest took over the stub swell under the declared policy: the
-	// device keeps the stub's name and has no interface.
+func TestBindStubBornDeviceKeepsItsName(t *testing.T) {
+	// talos-attest took over the stub swell under the declared policy and
+	// wrote the MAC it proved: the device keeps the stub's name.
 	d := nbDevice(nodeID, "swell", "staged", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested", "expected_port": 5})
-	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, nil)
+	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	defer done()
 	bt.nb.ips = []map[string]any{reservedIP(500, "swell", "10.3.0.13/26")}
 	bt.reconcile(t)
-
-	var made map[string]any
-	for _, i := range bt.nb.ifaces {
-		if i["device"].(map[string]any)["id"] == float64(nodeID) {
-			made = i
-		}
-	}
-	if made == nil || made["name"] != "eth0" {
-		t.Fatalf("no interface made: %v", bt.nb.ifaces)
-	}
-	if pm, _ := made["primary_mac_address"].(map[string]any); pm == nil || pm["mac_address"] != strings.ToUpper(rackMAC) {
-		t.Errorf("interface %v", made)
-	}
-	if ip := bt.nb.ips[0]; fmt.Sprint(ip["assigned_object_id"]) != fmt.Sprint(made["id"]) {
-		t.Errorf("the reserved address %v", ip)
-	}
 	if ip, _ := bt.node()["primary_ip4"].(map[string]any); ip == nil || ip["address"] != "10.3.0.13/26" {
 		t.Errorf("primary_ip4 %v", bt.node()["primary_ip4"])
 	}
-	if bt.node()["name"] != "swell" || bt.cf("desired_action") != "provision" || !bt.intakeGone(rackMAC) {
+	if bt.node()["name"] != "swell" || bt.cf("desired_action") != "provision" || !bt.intakeGone(rackMAC) || !bt.cabledTo(5) {
 		t.Errorf("name %v desired_action %v objects %v", bt.node()["name"], bt.cf("desired_action"), bt.kube.objects)
 	}
-	if !bt.journal("cabled to usw-24-poe Port 5") {
+}
+
+// The claimed MAC of an intake never reaches NetBox. A forged intake for the
+// serial whose fake agent reported SUCCESS binds nothing: the device waits
+// for talos-attest to write the MAC its pass proved.
+func TestBindNeverWritesAClaimedMAC(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "staged", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested"})
+	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, nil)
+	defer done()
+	for p, o := range intakeObjects(prepMAC, "STATE_RUNNING") {
+		bt.kube.objects[p] = o
+	}
+	bt.reconcile(t)
+	bt.reconcile(t)
+	if len(bt.nb.macs) != 0 || len(bt.nb.patches) != 0 || bt.cf("desired_action") != "none" {
+		t.Errorf("macs %v patches %v", bt.nb.macs, bt.nb.patches)
+	}
+	if n := len(bt.nb.journals); n != 1 || !bt.journal("binds and provisions once talos-attest writes the MAC it proved") {
 		t.Errorf("journals %v", bt.nb.journals)
 	}
 }
 
-func TestBindRefusesTwoClaimsOfOneSerial(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "staged", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested"})
+// A machine that phoned home before the owner declared it by hand: its
+// failed intake goes, and the planned device's provision runs.
+func TestPlannedDeviceDeclaredAfterAFailedIntakeProvisions(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "planned", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "install_disk": "/dev/nvme0n1", "desired_action": "provision"})
+	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.kube.setState("intake-38-22-e2-aa-bb-05-1", "STATE_FAILED")
+	bt.reconcile(t)
+	if bt.kube.get(hwBase+MACSlug(rackMAC)) != nil {
+		t.Fatalf("the failed intake survived: %v", bt.kube.objects)
+	}
+	names := bt.kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
+		t.Errorf("workflows %v", names)
+	}
+}
+
+// A serial stub declared after the machine's intake failed does not keep
+// that intake: it expires after an hour, and the machine phones home again.
+func TestFailedIntakeExpiresDespiteASerialStub(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "planned", boxSerial, g5, map[string]any{"talos_class": "worker-g5"})
 	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, nil)
 	defer done()
-	for p, o := range intakeObjects(prepMAC, "STATE_SUCCESS") {
-		bt.kube.objects[p] = o
-	}
+	bt.kube.setState("intake-38-22-e2-aa-bb-05-1", "STATE_FAILED")
 	bt.reconcile(t)
-	if len(bt.nb.patches) != 0 || len(bt.nb.macs) != 0 || !bt.journal("2 intakes claim serial "+boxSerial) {
-		t.Errorf("patches %v macs %v journals %v", bt.nb.patches, bt.nb.macs, bt.nb.journals)
+	if bt.kube.get(hwBase+MACSlug(rackMAC)) != nil {
+		t.Error("a failed intake an hour old survived")
+	}
+}
+
+func TestBindLeavesAStubAnotherDeviceIsTakingOver(t *testing.T) {
+	other := nbDevice(50, "intake-other", "staged", "OTHER1", g5, map[string]any{"talos_class": "worker-g5"})
+	other["description"] = bindMarker + "swell"
+	bt, done := newBindTest(t, rackMAC,
+		[]map[string]any{intakeDevice(g5, nil), other, stubDevice(20, "swell", "", "worker-g5", nil)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.reconcile(t)
+	if bt.node()["name"] != "intake-mxl0172q7x" || len(bt.nb.deleted) != 0 {
+		t.Errorf("took a promised stub: name %v deleted %v", bt.node()["name"], bt.nb.deleted)
 	}
 }
 
@@ -478,6 +509,20 @@ func TestFillPortCablesANodeOnItsRackPort(t *testing.T) {
 	bt.reconcile(t)
 	if len(bt.nb.cables) != 1 || bt.hits != 1 {
 		t.Errorf("a cabled node was cabled again: %v, UniFi read %d times", bt.nb.cables, bt.hits)
+	}
+}
+
+func TestFillPortJournalsANodeOffItsExpectedPort(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
+	cabled := nic(nodeNIC, nodeID, "eth0", rackMAC)
+	cabled["cable"] = map[string]any{"id": 77}
+	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{cabled})
+	defer done()
+	bt.kube.objects = map[string]Object{}
+	bt.reconcile(t)
+	bt.reconcile(t)
+	if len(bt.nb.journals) != 1 || !bt.journal("on port 5, expected 7") || len(bt.nb.cables) != 0 {
+		t.Errorf("journals %v cables %v", bt.nb.journals, bt.nb.cables)
 	}
 }
 
