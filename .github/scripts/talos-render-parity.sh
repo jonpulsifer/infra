@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Renders each node of a Talos root twice from one throwaway secrets bundle:
-# with the talos provider's talos_machine_configuration data source, as
-# Atlantis does, and with talosctl gen config, as the enrollment server does.
-# Fails on any byte difference. A node whose inputs tofu console cannot know
-# without state, such as one installed from the Image Factory schematic, is
-# skipped.
+# Renders each node of a Talos root three ways from one throwaway secrets
+# bundle and fails on any byte difference:
+#   1. the talos provider's talos_machine_configuration data source, as
+#      Atlantis does, from the module's install_inputs;
+#   2. talosctl gen config from the same inputs;
+#   3. the enrollment server's class render (apps/talos-enroll: class inputs
+#      plus the node document it writes from the node's facts), through its
+#      TestRenderParity, which also proves the throwaway-bundle worker render.
+# It also fails when the committed class-inputs.json is stale against the
+# root. A node whose inputs tofu console cannot know without state is skipped.
 #
 # usage: talos-render-parity.sh [root]   (default clusters/folly/talos)
 
 set -euo pipefail
 
 root=${1:-clusters/folly/talos}
+site=$(basename "$(dirname "$root")")
 work=$(mktemp -d)
 override="$root/zz_render_parity_override.tf"
 trap 'rm -rf "$work"; rm -f "$override"' EXIT
@@ -25,20 +30,44 @@ console() {
   printf '%s\n' "$1" | tofu -chdir="$root" console
 }
 
+decode() {
+  tr -d '"' | base64 -d
+}
+
 inputs="$work/inputs.json"
 echo '{}' >"$inputs"
-nodes=$(console 'base64encode(jsonencode(keys(module.talos.machine_inputs)))' | tr -d '"' | base64 -d | jq -r '.[]')
+nodes=$(console 'base64encode(jsonencode(keys(module.talos.install_inputs)))' | decode | jq -r '.[]')
 for node in $nodes; do
-  value=$(console "base64encode(jsonencode(module.talos.machine_inputs[\"$node\"]))")
+  value=$(console "base64encode(jsonencode(module.talos.install_inputs[\"$node\"]))")
   if [[ "$value" != \"*\" ]]; then
     echo "skip $node: its inputs are unknown without state"
     continue
   fi
-  tr -d '"' <<<"$value" | base64 -d | jq --arg node "$node" --slurpfile all "$inputs" -n '$all[0] + {($node): input}' >"$work/next.json"
+  decode <<<"$value" | jq --arg node "$node" --slurpfile all "$inputs" -n '$all[0] + {($node): input}' >"$work/next.json"
   mv "$work/next.json" "$inputs"
 done
 if [[ $(jq 'length' "$inputs") -eq 0 ]]; then
   echo "no node of $root has known inputs" >&2
+  exit 1
+fi
+
+# The committed class inputs must be what the root renders now.
+class_inputs="clusters/$site/apps/talos-enroll/class-inputs.json"
+console 'base64encode(jsonencode(local.class_inputs))' | decode | jq -S . >"$work/class-inputs.json"
+if ! cmp -s "$work/class-inputs.json" "$class_inputs"; then
+  echo "STALE $class_inputs: run mise run render-class-inputs and commit" >&2
+  diff -u "$class_inputs" "$work/class-inputs.json" | head -n 40 >&2 || true
+  exit 1
+fi
+echo "ok $class_inputs is current"
+
+# The node facts the enrollment server reads from the directory, from the
+# inventory export as the root decodes it, beside the module's inputs for the
+# same node.
+console 'base64encode(jsonencode({ for n, m in local.machines : n => { class = m.class, disk = m.disk, tpm = m.tpm } }))' \
+  | decode | jq --slurpfile all "$inputs" 'with_entries(select(.key as $k | $all[0] | has($k)))' >"$work/nodes.json"
+if [[ $(jq '[.[] | select(.class == null)] | length' "$work/nodes.json") -ne 0 ]]; then
+  echo "a node of $root has no class in clusters/$site/inventory/machines.yaml" >&2
   exit 1
 fi
 
@@ -143,12 +172,17 @@ for node in $(jq -r 'keys[]' "$inputs"); do
   }
 
   if cmp -s "$work/$node.provider.yaml" "$work/$node.talosctl.yaml"; then
-    echo "ok $node: $(wc -c <"$work/$node.provider.yaml") bytes"
+    echo "ok $node: provider and talosctl agree, $(wc -c <"$work/$node.provider.yaml") bytes"
   else
     echo "MISMATCH $node: the provider and talosctl renders differ" >&2
     diff -u "$work/$node.provider.yaml" "$work/$node.talosctl.yaml" | head -n 80 >&2 || true
     failed=1
   fi
 done
+
+# The enrollment server's render of each node, against the module's.
+ENROLL_PARITY_INPUTS="$inputs" ENROLL_PARITY_NODES="$work/nodes.json" \
+  ENROLL_CLASS_INPUTS="$PWD/$class_inputs" ENROLL_PARITY_BUNDLE="$work/secrets.yaml" \
+  go test -C apps/talos-enroll -count=1 -run 'TestRenderParity|TestTalosctlRender' -v ./... || failed=1
 
 exit "$failed"

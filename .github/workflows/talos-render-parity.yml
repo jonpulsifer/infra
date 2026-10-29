@@ -1,8 +1,10 @@
 name: talos render parity
 
 # Atlantis renders folly's machine configs with the talos provider, and the
-# enrollment server renders them with talosctl gen config. This fails when the
-# two disagree by a byte, such as after a provider or talosctl bump.
+# enrollment server renders them from its class inputs and the node's facts
+# with talosctl gen config. This fails when any two disagree by a byte, such
+# as after a provider or talosctl bump, a module change the server's node
+# document does not follow, or a stale class-inputs.json.
 
 on:
   push:
@@ -13,6 +15,9 @@ on:
       - 'terraform/network/tailscale/fleet.tf.json'
       - 'clusters/folly/talos/**'
       - 'clusters/folly/config/cluster-topology.json'
+      - 'clusters/folly/inventory/machines.yaml'
+      - 'clusters/folly/apps/talos-enroll/class-inputs.json'
+      - 'apps/talos-enroll/**'
       - 'mise.toml'
       - '.github/scripts/talos-render-parity.sh'
       - '.github/workflows/talos-render-parity.yml'
@@ -33,6 +38,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
         with:
-          install_args: opentofu talosctl
-      - name: Render folly with the provider and with talosctl
+          install_args: opentofu talosctl go jq
+      - name: Render folly with the provider, with talosctl and through the enrollment server
         run: bash .github/scripts/talos-render-parity.sh clusters/folly/talos

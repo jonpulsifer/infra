@@ -46,37 +46,71 @@ locals {
   # image build publishes one per Talos version, tagged with the version.
   secureboot_installer = "ghcr.io/jonpulsifer/talos-installer-folly:${local.talos_version}"
 
-  # The install disk is the inventory's. ephemeral caps EPHEMERAL so that the
-  # data user volume takes the rest of the one disk. A node with installer
-  # boots the signed UKI; its generation changes when it is reinstalled from
-  # new media.
-  nodes = {
-    optiplex = {
-      role       = "controlplane"
-      ephemeral  = "100GiB"
-      installer  = local.secureboot_installer
-      generation = "secureboot-1"
+  # Git declares classes; NetBox declares which machine is of which class, in
+  # the inventory export's class key. ephemeral caps EPHEMERAL so that the
+  # data user volume takes the rest of the one disk. Every class boots the
+  # signed UKI; the generation changes when a class is reinstalled from new
+  # media. The enrollment server renders a node of a class from the
+  # class_inputs output below.
+  classes = {
+    controlplane = {
+      role      = "controlplane"
+      ephemeral = "100GiB"
     }
-    riptide = {
-      role       = "worker"
-      ephemeral  = "80GiB"
-      installer  = local.secureboot_installer
-      generation = "secureboot-1"
+    worker-g5 = {
+      role      = "worker"
+      ephemeral = "80GiB"
     }
-    shale = {
-      role       = "worker"
-      ephemeral  = "128GiB"
-      installer  = local.secureboot_installer
-      generation = "secureboot-1"
+    worker-g2 = {
+      role      = "worker"
+      ephemeral = "128GiB"
     }
   }
+  install_generation = "secureboot-1"
+
+  # The nodes are the export's active, staged and failed machines: a failed
+  # one is quarantined, not gone, and stays managed. A staged worker is
+  # enrolling: the server renders its config and the root applies none until
+  # NetBox holds it active, so its talos_machine is planned away and back
+  # across a reinstall, by design. The one control plane is never enrolling,
+  # or the root would have no control plane to bootstrap and apply through.
+  # The install disk is the inventory's.
+  nodes = { for name, m in local.machines : name => {
+    class     = m.class
+    role      = local.classes[m.class].role
+    enrolling = m.status == "staged" && local.classes[m.class].role != "controlplane"
+  } if contains(["active", "staged", "failed"], m.status) }
 
   # The inventory's TPM 2.0 nodes, which seal disks and attest.
   tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
 
-  # Nodes whose running STATE and EPHEMERAL are encrypted. A node joins only
-  # after a reinstall formats them encrypted. optiplex still runs plain volumes.
-  encrypted_nodes = ["riptide"]
+  # A TPM node's running STATE and EPHEMERAL are encrypted, except these, which
+  # were installed with plain volumes and keep them until a reinstall. Talos
+  # refuses to mount a plain volume that its config calls encrypted.
+  plain_nodes     = ["optiplex"]
+  encrypted_nodes = [for name in local.tpm_nodes : name if !contains(local.plain_nodes, name)]
+
+  # What the enrollment server renders a fresh install from, per class: the
+  # module's patch lists in order, the node document rendered by the server
+  # between them, then the class's own. mise run render-class-inputs writes
+  # it to clusters/folly/apps/talos-enroll/class-inputs.json.
+  class_inputs = { for class, c in local.classes : class => {
+    machine_type       = c.role
+    cluster_name       = module.talos.render_inputs.cluster_name
+    cluster_endpoint   = module.talos.render_inputs.cluster_endpoint
+    talos_contract     = module.talos.render_inputs.talos_contract
+    kubernetes_version = module.talos.render_inputs.kubernetes_version
+    installer_image    = local.secureboot_installer
+    dns_zone           = module.talos.render_inputs.dns_zone
+    config_patches = concat(
+      module.talos.render_inputs.cluster_patches,
+      c.role == "controlplane" ? module.talos.render_inputs.controlplane_patches : [],
+    )
+    tpm_patches   = module.talos.render_inputs.tpm_patches
+    class_patches = [local.ephemeral_patch[class]]
+    labels        = {}
+    tpm_labels    = module.talos.render_inputs.tpm_labels
+  } }
 }
 
 module "talos" {
@@ -105,10 +139,10 @@ module "talos" {
     role               = n.role
     address            = local.node_addresses[name]
     install            = "disk.dev_path == \"${local.machines[name].disk}\""
-    patches            = [local.ephemeral_patch[name]]
-    installer_image    = try(n.installer, null)
-    install_generation = try(n.generation, null)
-    enrolling          = try(n.enrolling, false)
+    patches            = [local.ephemeral_patch[n.class]]
+    installer_image    = local.secureboot_installer
+    install_generation = local.install_generation
+    enrolling          = n.enrolling
   } }
   tpm_nodes       = local.tpm_nodes
   encrypted_nodes = local.encrypted_nodes
@@ -127,9 +161,9 @@ output "installer_image" {
   value       = module.talos.node_installer_images
 }
 
-output "machine_inputs" {
-  description = "Per node, the inputs of talosctl gen config other than the secrets bundle. The enrollment server renders a node's config from them."
-  value       = module.talos.machine_inputs
+output "class_inputs" {
+  description = "Per class, the inputs of talosctl gen config other than the node's own documents and the secrets. The enrollment server renders a node's config from its class's entry and NetBox's facts about the node."
+  value       = local.class_inputs
 }
 
 output "nodes" {

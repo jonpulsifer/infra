@@ -28,7 +28,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	gauge("talos_enroll_approved_unfetched", "Approved enrollments whose node has not fetched its config.", g.Approved)
 	gauge("talos_enroll_waiting_machines", "Machines not yet approved or denied, counted across their device codes.", g.Waiting)
 	gauge("talos_enroll_longest_wait_seconds", "How long the longest-waiting machine has waited for approval, across its device codes.", int64(g.LongestWait.Seconds()))
-	gauge("talos_enroll_nodes", "Nodes in the machine inputs file.", len(s.Render.Nodes()))
+	gauge("talos_enroll_classes", "Classes in the class inputs file.", len(s.Render.Classes()))
 	counter("talos_enroll_device_codes_total", "Device codes issued.", st.DeviceCodes)
 	counter("talos_enroll_approvals_total", "Enrollments approved.", st.Approvals)
 	counter("talos_enroll_denials_total", "Enrollments denied.", st.Denials)

@@ -23,7 +23,7 @@ capsule's hourly drift job compares NetBox's export with the file on `main` and 
 | --- | --- | --- |
 | UniFi | `mac` for the node's DHCP reservation and its MAC auth RADIUS user, `switch_port` for `mab_ports` | `terraform/network/unifi/folly/k8s.tf`, `bootstrap.tf` |
 | Talos | `disk` for the install selector, `tpm` for `tpm_nodes` | `clusters/folly/talos/talos.tf` |
-| Talos enrollment | `mac` in `node-macs.json` | `scripts/render-machine-inputs.sh` |
+| Talos enrollment | `serial`, `mac`, `class`, `status`, `disk` and `tpm`, the directory while NetBox does not answer; `mac` in `node-macs.json` for spore's netboot links | `nix/services/talos-enroll.nix`, `scripts/render-class-inputs.sh` |
 | Tinkerbell | nothing from this file: [fleet-controller](../apps/fleet-controller.md) reads the MAC, install disk and BMC of each device from NetBox itself | `apps/fleet-controller` |
 
 A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos` on the pull request, and run both render tasks.

@@ -7,7 +7,7 @@ Use this runbook to reinstall Talos on a folly node that has Intel AMT. A pull r
 
 ## Before you start
 
-- The node is riptide or shale, and it has an entry in `clusters/folly/apps/talos-enroll/machine-inputs.json`.
+- The node is riptide or shale, and its NetBox device has a `talos_class`.
 - Its Rufio `Machine` is contactable:
 
   ```bash

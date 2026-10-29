@@ -20,19 +20,19 @@ Each machine gets one Discord message, which the server edits as its enrollment 
 
 The user code shows only on the machine's console, so an approval proves that the approver read the console of the machine being enrolled.
 
-With `ENROLL_ATTEST_URL` set, the server asks the attest service for the request's serial. A machine that passed attestation within `ENROLL_AUTO_APPROVE_WINDOW`, 30 minutes by default, and claims a node's MAC in `clusters/folly/apps/talos-enroll/node-macs.json` is approved as that node with no click. Its Discord note says it was auto-approved after attestation, and one attestation approves one request. Any other request waits for a click, and its prompt says why. Neither copy sets `ENROLL_ATTEST_URL`, so every approval is a click. `apps/talos-enroll/README.md` has the verdict contract.
+NetBox is the directory of nodes. Each anchor's copy looks a device request up by the serial it claims, in the site's `kubernetes-node` devices, and reads the device's class, install disk, address, TPM and lifecycle. A staged worker whose `attest_verdict` is `attested`, whose `attest_consumed_at` is unset or earlier than `last_attested`, and whose `last_attested` is within `ENROLL_AUTO_APPROVE_WINDOW`, is approved as that device with no click when the request's MAC is the device's and [talos-attest](talos-attest.md)'s verdict names the request's UUID and the device. The server writes `attest_consumed_at` to NetBox before it issues the token, so one attestation approves one request, on any anchor; a write that fails refuses the approval. A control plane is approved only by a click. Its Discord note says it was auto-approved after attestation. Any other request waits for a click, and its prompt says why. A config release, click or not, spends any earlier attestation and marks a `planned` or `staged` device `active`; it never resurrects a retired one, and a click on a `decommissioning` or `offline` device is refused. While NetBox does not answer, the inventory export `clusters/folly/inventory/machines.yaml` is the directory, with no attestation, so every approval is a click. The cluster's copy has no directory and renders nothing. `apps/talos-enroll/README.md` has the field contract.
 
 ## Limits
 
 - A device code lasts 15 minutes and a token 30 minutes. A token releases one config.
 - State is in memory. A restart, or a move of `BOOT_VIP` to another anchor, forgets every enrollment and denial, and Talos starts a new device flow.
 - The machine's UUID, MAC, serial and hostname are unverified claims. The token is bound to the UUID, and the console's user code is the only check against a request in another machine's name.
-- Auto-approval trusts the request's serial and MAC. For its window, a host that knows a just-attested machine's serial and MAC can claim that machine's config.
-- A node whose installer image comes from the Image Factory resource is unknown without state, so `machine-inputs.json` leaves it out.
+- Auto-approval trusts the request's serial and MAC. Until the release spends the attestation in NetBox, a host that knows a just-attested machine's serial and MAC can claim that machine's config.
+- The anchors hold the worker subset of the secrets bundle once `scripts/talos-worker-secrets.sh` has sealed it and dropped the bundle. A control-plane approval then answers 409: the control plane is installed through the `clusters/folly/talos/` root.
 
 ## How it works
 
-The netboot UKI carries `talos.config` and the `talos.config.oauth.*` arguments for `enroll.lolwtf.ca`, with client `talos-enroll`. On approval, the server renders the node's config with `talosctl gen config --with-secrets`, the 1Password note `talos-folly-secrets` and the node's entry in `clusters/folly/apps/talos-enroll/machine-inputs.json`, as the `clusters/folly/talos/` root does. `mise run render-machine-inputs` writes that file.
+The netboot UKI carries `talos.config` and the `talos.config.oauth.*` arguments for `enroll.lolwtf.ca`, with client `talos-enroll`. On approval, the server renders the node's config with `talosctl gen config --with-secrets` from its class's entry in `clusters/folly/apps/talos-enroll/class-inputs.json`, the node's own facts from the directory, and the worker subset of the 1Password note `talos-folly-secrets`, as the `clusters/folly/talos/` root does for a node of that class. `mise run render-class-inputs` writes the class file from the root's `classes`; a new node changes it not at all. A worker is rendered from a throwaway bundle and its six secrets are swapped in afterwards, so the anchors hold no cluster CA key.
 
 Talos trusts only its bundled roots before it has a config, so the name has a Let's Encrypt certificate. On the cluster, a Gateway serves it and the approval listener's NetworkPolicy admits only the tailnet Ingress. On each anchor, `nix/services/talos-enroll.nix` gets the certificate over DNS-01, nginx serves the three routes at `BOOT_VIP`, and `tailscale serve` passes the approval page to a socket that only root can open. Both proxies set `Tailscale-User-Login`, which the approver check trusts. sops-nix holds the bundle, the webhook and the DNS token in each anchor's `nix/secrets/<anchor>.sops.yaml`.
 
@@ -45,7 +45,7 @@ Talos trusts only its bundled roots before it has a config, so the name has a Le
 | `TalosEnrolledNodeNotReady` | A node fetched its config 30 minutes ago and is not Ready |
 | `AnchorEnrollVipDown`, `AnchorEnrollNotServing` | No anchor, or one anchor, serves enrollment ([Talos boot](../platform/nixos/talos-boot.md#alerts)) |
 
-The first three read the anchors' copies. Each anchor's `talos-enroll-check` timer writes the server's `/metrics` into its node exporter's textfile collector, so the series carry the anchor's `instance`. Only the anchor that holds `BOOT_VIP` has codes, and the others read zero. After a change to `clusters/folly/talos/`, run `mise run render-machine-inputs` and commit both files in the same pull request.
+The first three read the anchors' copies. Each anchor's `talos-enroll-check` timer writes the server's `/metrics` into its node exporter's textfile collector, so the series carry the anchor's `instance`. Only the anchor that holds `BOOT_VIP` has codes, and the others read zero. After a change to `clusters/folly/talos/`, run `mise run render-class-inputs` and commit the class file in the same pull request. Every decision is one JSON log line with an `event` of `enroll.request`, `enroll.approve`, `enroll.release` or `enroll.deny`.
 
 ## Reference
 

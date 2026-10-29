@@ -145,10 +145,10 @@ locals {
   ]
 
   # EPHEMERAL's cap differs per node; the data volume takes what is left.
-  ephemeral_patch = { for name, n in local.nodes : name => yamlencode({
+  ephemeral_patch = { for class, c in local.classes : class => yamlencode({
     apiVersion   = "v1alpha1"
     kind         = "VolumeConfig"
     name         = "EPHEMERAL"
-    provisioning = { maxSize = n.ephemeral }
+    provisioning = { maxSize = c.ephemeral }
   }) }
 }
