@@ -1,7 +1,7 @@
 variable "on" {
   type        = bool
   description = "Declare the VM and its disk. Off, the root keeps only the network, the service account and the image, which cost nothing."
-  default     = false
+  default     = true
 }
 
 variable "machine_type" {
