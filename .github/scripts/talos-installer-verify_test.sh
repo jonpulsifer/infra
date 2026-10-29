@@ -97,7 +97,7 @@ profiles good "$good"
 expect_pass good
 expect_fail good other
 
-profiles oauth "$good talos.config.oauth.client_id=talos-enroll"
+profiles oauth "$good talos.config.oauth.client_id=example"
 expect_fail oauth
 profiles halt "$good talos.halt_if_installed=1"
 expect_fail halt
@@ -112,7 +112,7 @@ expect_fail old
 profiles none "$base"
 expect_fail none
 
-profiles reset-oauth "$good" "$good talos.config.oauth.client_id=talos-enroll $wipe"
+profiles reset-oauth "$good" "$good talos.config.oauth.client_id=example $wipe"
 expect_fail reset-oauth
 profiles reset-nowipe "$good" "$good"
 expect_fail reset-nowipe

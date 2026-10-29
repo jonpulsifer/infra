@@ -112,7 +112,7 @@ seed_custom_fields() {
     {"name": "last_attested", "label": "Last attested", "type": "datetime", "group_name": "Identity", "weight": 260, "description": "When the node last passed attestation"},
     {"name": "ek_hash_ecc", "label": "EK hash (ECC)", "type": "text", "group_name": "Identity", "weight": 215, "validation_regex": "^[0-9a-f]{64}$", "description": "SHA-256 of the ECC TPM endorsement key public area"},
     {"name": "attest_verdict", "label": "Attest verdict", "type": "text", "group_name": "Identity", "weight": 270, "description": "attested, quarantined: <reason>, or pending-approval"},
-    {"name": "attest_consumed_at", "label": "Attest consumed at", "type": "datetime", "group_name": "Identity", "weight": 280, "description": "When talos-enroll released a config on the strength of last_attested"},
+    {"name": "attest_consumed_at", "label": "Attest consumed at", "type": "datetime", "group_name": "Identity", "weight": 280, "description": "When the node fetched the install config fleet-controller rendered for its last attestation"},
     {"name": "expected_port", "label": "Expected port", "type": "integer", "group_name": "Fleet", "weight": 340, "validation_minimum": 1, "description": "The switch port a stub expects its machine on; fleet-controller binds a machine off the intake port only on this port"}
   ]')
   while read -r field; do

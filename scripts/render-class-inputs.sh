@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Writes the per-class render inputs that talos-enroll serves from: the folly
+# Writes the per-class render inputs fleet-controller renders from: the folly
 # Talos root's class_inputs output, read by `tofu console` with no state and
-# no 1Password. A node adds nothing here: the server reads the node's facts
-# from NetBox, or from the inventory export, at request time.
+# no 1Password. A node adds nothing here: the controller reads the node's facts
+# from NetBox at render time.
 #
 # It also writes node-macs.json, the inventory's MACs, which spore's
 # nix/services/tinkerbell.nix reads for its netboot-not-allowed links.
@@ -10,7 +10,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly root
-readonly out="$root/clusters/folly/apps/talos-enroll"
+readonly out="$root/clusters/folly/fleet"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

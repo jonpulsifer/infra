@@ -1,8 +1,7 @@
 package main
 
-// The renderer is apps/talos-enroll/render.go's, line for line, so that both
-// servers render a node the same way while both run.
-// .github/scripts/talos-render-parity.sh checks each against the Talos root.
+// .github/scripts/talos-render-parity.sh checks the renderer against the Talos
+// root.
 
 import (
 	"bytes"

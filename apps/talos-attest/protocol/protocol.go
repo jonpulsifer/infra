@@ -238,11 +238,11 @@ type DevID struct {
 	Confirmed  bool      `json:"confirmed"`
 }
 
-// Status is GET /verdict/<serial>, which talos-enroll's auto-approve reads.
-// A machine with no verdict, or one waiting for first-intake approval,
-// answers 404. NetBox is the source when the service has one: class, site
-// and consumed_at mirror its device, and consumed_at is when talos-enroll
-// last released a config on the strength of attested_at.
+// Status is GET /verdict/<serial>, which the other anchors read to refresh
+// their record of a machine. A machine with no verdict, or one waiting for
+// first-intake approval, answers 404. NetBox is the source when the service
+// has one: class, site and consumed_at mirror its device, and consumed_at is
+// when the node fetched the install config fleet-controller rendered for it.
 type Status struct {
 	Status     string    `json:"status"`
 	AttestedAt time.Time `json:"attested_at"`

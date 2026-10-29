@@ -1,11 +1,11 @@
 ---
 title: Talos boot
-description: The boot server on the three anchors that serves folly's signed iPXE, HookOS and SecureBoot ISO on the bootstrap VLAN behind the boot VIP.
+description: The boot server on the three anchors that serves folly's signed iPXE, HookOS and SecureBoot ISO, and the enrollment name's HTTPS server, on the bootstrap VLAN behind the boot VIP.
 ---
 
-Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](../../hosts/capsule.md) and [forge](../../hosts/forge.md), that serves folly's signed iPXE, HookOS UKI and SecureBoot ISO to machines on the `bootstrap` VLAN and the Kubernetes network. [Tinkerbell](tinkerbell.md), on spore, decides which machine boots what.
+Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](../../hosts/capsule.md) and [forge](../../hosts/forge.md), that serves folly's signed iPXE, HookOS UKI and SecureBoot ISO to machines on the `bootstrap` VLAN and the Kubernetes network, and the HTTPS server that HookOS and a node's first boot reach. [Tinkerbell](tinkerbell.md), on spore, decides which machine boots what.
 
-The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.nix` and set to `folly`. The boot, enrollment and attestation services take their state paths, metric labels, release tag and committed per-site files from it, so the paths in this page read `<site>` where they say `folly`.
+The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.nix` and set to `folly`. The boot and attestation services take their state paths, metric labels, release tag and committed per-site files from it, so the paths in this page read `<site>` where they say `folly`.
 
 ## Parts
 
@@ -14,13 +14,13 @@ The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.ni
 | `bootstrap` VLAN interface | Gives each anchor its `<HOST>_BOOTSTRAP_IP`, tagged on `end0` | every anchor |
 | keepalived `boot` instance | Holds `BOOT_VIP` on the anchor that passes the checks below. It prefers spore, then capsule, then forge, and uses unicast VRRP from the other anchors' bootstrap addresses only. | every anchor |
 | dnsmasq TFTP | Serves the signed iPXE, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | every anchor |
-| `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC in `node-macs.json`, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not) | spore |
+| `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC in `clusters/folly/fleet/node-macs.json`, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not) | spore |
 | nginx `talos-boot` | Serves the ISO and HookOS on port 80, at the anchor's bootstrap address and at `BOOT_VIP` | every anchor |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | every anchor |
-| `talos-boot-check` | Exports whether the anchor holds `BOOT_VIP` and passes the check, each minute | every anchor |
-| [Talos enrollment](../../apps/talos-enroll.md) | nginx serves `enroll.lolwtf.ca` on port 443 at `BOOT_VIP` in front of talos-enroll; `talos-enroll-check` exports whether it serves and the server's `/metrics`, each minute; CoreDNS answers the name with `BOOT_VIP` | every anchor |
+| nginx `enroll.lolwtf.ca` | Serves the name on port 443 at `BOOT_VIP` with a Let's Encrypt certificate from DNS-01: HookOS's intake at `/fleet/intake` and a node's first config at `/talos/config`, both for [fleet-controller](../../apps/fleet-controller.md) on spore, and [talos-attest](../../apps/talos-attest.md) under `/attest/`. CoreDNS answers the name with `BOOT_VIP`. | every anchor |
+| `talos-boot-check` | Exports whether the anchor holds `BOOT_VIP` and passes each check, each minute | every anchor |
 
-The boot check passes when dnsmasq is active and nginx serves HookOS at the anchor's bootstrap address. The enrollment check passes when nginx serves `enroll.lolwtf.ca` on loopback with a certificate that public roots trust, and talos-enroll answers behind it. keepalived runs each every 5 seconds; two failures of either drop the anchor below every healthy one.
+The boot check passes when dnsmasq is active and nginx serves HookOS at the anchor's bootstrap address. The HTTPS check passes when nginx answers `/healthz` for `enroll.lolwtf.ca` on loopback with a certificate that public roots trust. keepalived runs each every 5 seconds; two failures of either drop the anchor below every healthy one.
 
 ## Boot path
 
@@ -47,7 +47,7 @@ A Talos version bump fails the mirror until that version's release exists. The a
 
 ## Alerts
 
-The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carries `talos_boot_vip_held`, `talos_boot_serving`, `talos_enroll_serving`, `talos_boot_mirror_success`, `talos_boot_mirror_last_success_timestamp_seconds` and `talos_boot_uki_info`, which names each slot's version and release. `clusters/folly/monitoring/anchor-vips.yaml` declares the alerts.
+The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carries `talos_boot_vip_held`, `talos_boot_serving`, `talos_boot_https_serving`, `talos_boot_mirror_success`, `talos_boot_mirror_last_success_timestamp_seconds` and `talos_boot_uki_info`, which names each slot's version and release. `clusters/folly/monitoring/anchor-vips.yaml` declares the alerts.
 
 | Alert | Meaning |
 | --- | --- |
@@ -55,8 +55,8 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 | `AnchorBootNotServing` | One anchor fails the check or exports no metrics |
 | `AnchorBootMirrorStale` | One anchor's mirror has not verified a release for 6 hours |
 | `AnchorBootReleasesDiffer` | The anchors serve different releases for 3 hours |
-| `AnchorEnrollVipDown` | No anchor holds `BOOT_VIP` and passes the enrollment check |
-| `AnchorEnrollNotServing` | One anchor fails the enrollment check or exports no metrics |
+| `AnchorBootHttpsVipDown` | No anchor holds `BOOT_VIP` and passes the HTTPS check |
+| `AnchorBootHttpsNotServing` | One anchor fails the HTTPS check or exports no metrics |
 
 ## Rules
 
@@ -71,9 +71,8 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 
 ## Where it lives
 
-- `nix/services/talos-boot.nix`: the VLAN, firewall, dnsmasq, nginx paths, the check and the mirror
+- `nix/services/talos-boot.nix`: the VLAN, firewall, dnsmasq, nginx paths, the enrollment name's server and certificate, the checks and the mirror
 - `nix/services/anchor-vips.nix`: the keepalived `boot` instance and its VRRP firewall
-- `nix/services/talos-enroll.nix`: the enrollment server, its certificate and its check
 - `nix/services/tinkerbell.nix`: Smee, the rest of Tinkerbell and the `netboot-not-allowed` links
 - `clusters/folly/config/anchor-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP`
 - `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network's DHCP, the boot option and the anchors' switch ports

@@ -25,10 +25,9 @@ A machine NetBox does not know starts the same path itself: HookOS phones home, 
 | NetBox | Class, status, `desired_action`, verdicts | capsule |
 | fleet-controller | `Hardware`, `Machine`, `Workflow`, the rendered config, retirement | spore |
 | talos-attest | Attestation, the LDevID and LAK, install codes, renewal | every anchor |
-| [Boot plane](nixos/talos-boot.md) | dnsmasq, nginx, the signed iPXE and HookOS, behind `BOOT_VIP` | every anchor |
+| [Boot plane](nixos/talos-boot.md) | dnsmasq, nginx, the signed iPXE and HookOS, and the `enroll.lolwtf.ca` HTTPS server, behind `BOOT_VIP` | every anchor |
 | Tinkerbell | Smee, the Tink server and Rufio, which run each `Workflow` | spore |
 | [SPIRE](identity.md) | The server, the agents, and `tpm-reattest` | server on spore, agents on the folly nodes |
-| [talos-enroll](../apps/talos-enroll.md) | The device flow, which no served image starts, and the `enroll.lolwtf.ca` server | every anchor, and folly |
 | [UniFi network](network/routing-and-firewall.md#bootstrap-vlan-and-mac-auth) | MAC auth, and RADIUS users that put a `failed` node on the bootstrap VLAN | `terraform/network/unifi/folly/bootstrap.tf` |
 
 ## Trust

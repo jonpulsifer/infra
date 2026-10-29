@@ -4,11 +4,10 @@
 #   1. the talos provider's talos_machine_configuration data source, as
 #      Atlantis does, from the module's install_inputs;
 #   2. talosctl gen config from the same inputs;
-#   3. the enrollment server's class render (apps/talos-enroll: class inputs
-#      plus the node document it writes from the node's facts), through its
-#      TestRenderParity, which also proves the throwaway-bundle worker render;
-#   4. the same render in fleet-controller (apps/fleet-controller), which
-#      writes the config an install fetches, through its own TestRenderParity.
+#   3. fleet-controller's class render (apps/fleet-controller: class inputs
+#      plus the node document it writes from the node's facts), which writes
+#      the config an install fetches, through its TestRenderParity, which also
+#      proves the throwaway-bundle worker render.
 # It also fails when the committed class-inputs.json is stale against the
 # root. A node whose inputs tofu console cannot know without state is skipped.
 #
@@ -54,7 +53,7 @@ if [[ $(jq 'length' "$inputs") -eq 0 ]]; then
 fi
 
 # The committed class inputs must be what the root renders now.
-class_inputs="clusters/$site/apps/talos-enroll/class-inputs.json"
+class_inputs="clusters/$site/fleet/class-inputs.json"
 console 'base64encode(jsonencode(local.class_inputs))' | decode | jq -S . >"$work/class-inputs.json"
 if ! cmp -s "$work/class-inputs.json" "$class_inputs"; then
   echo "STALE $class_inputs: run mise run render-class-inputs and commit" >&2
@@ -63,9 +62,8 @@ if ! cmp -s "$work/class-inputs.json" "$class_inputs"; then
 fi
 echo "ok $class_inputs is current"
 
-# The node facts the enrollment server reads from the directory, from the
-# inventory export as the root decodes it, beside the module's inputs for the
-# same node.
+# The node facts the controller reads from NetBox, from the inventory export
+# as the root decodes it, beside the module's inputs for the same node.
 console 'base64encode(jsonencode({ for n, m in local.machines : n => { class = m.class, disk = m.disk, tpm = m.tpm } }))' \
   | decode | jq --slurpfile all "$inputs" 'with_entries(select(.key as $k | $all[0] | has($k)))' >"$work/nodes.json"
 if [[ $(jq '[.[] | select(.class == null)] | length' "$work/nodes.json") -ne 0 ]]; then
@@ -181,11 +179,6 @@ for node in $(jq -r 'keys[]' "$inputs"); do
     failed=1
   fi
 done
-
-# The enrollment server's render of each node, against the module's.
-ENROLL_PARITY_INPUTS="$inputs" ENROLL_PARITY_NODES="$work/nodes.json" \
-  ENROLL_CLASS_INPUTS="$PWD/$class_inputs" ENROLL_PARITY_BUNDLE="$work/secrets.yaml" \
-  go test -C apps/talos-enroll -count=1 -run 'TestRenderParity|TestTalosctlRender' -v ./... || failed=1
 
 # fleet-controller's render of each node, against the module's.
 FLEET_PARITY_INPUTS="$inputs" FLEET_PARITY_NODES="$work/nodes.json" \

@@ -20,7 +20,7 @@ const ActionRetire = "retire"
 // Action says what one run asks the provision Template to do, and the NetBox
 // status an active or failed device takes while it runs (NextStatus). An
 // attest leaves an active node active: staged would mark it enrolling in the
-// Talos root and re-arm the enrollment server's auto-approval.
+// Talos root, which then applies no config to it.
 type Action struct {
 	Attest, Wipe, Retire bool
 	Status               string

@@ -49,8 +49,7 @@ let
   hookosCert = ../../clusters/folly/talos/secureboot/hookos-signing-cert.pem;
   verifyUki = ../../.github/scripts/talos-uki-verify.sh;
 
-  # The release tag follows the Talos version the folly root installs (nix/services/talos-boot.nix),
-  # and the dev cluster runs the root's Kubernetes version.
+  # The release tag follows the Talos version the folly root installs (nix/services/talos-boot.nix).
   rootValue =
     key:
     let
@@ -67,14 +66,9 @@ let
     else
       throw "clusters/folly/talos/talos.tf must set ${key} exactly once";
   talosVersion = rootValue "talos_version";
-  kubernetesVersion = rootValue "kubernetes_version";
   tagPrefix = "talos-${site}/${talosVersion}-";
-  installer = "ghcr.io/jonpulsifer/talos-installer-folly:${talosVersion}";
 
   # Ports on loopback behind nginx and tailscale serve.
-  enrollPort = 8090;
-  enrollAdminPort = 8091;
-  enrollAdminServePort = 8443;
   attestPort = 8081;
   attestDevidPort = 8444;
   attestAdminPort = 8082;
@@ -89,13 +83,12 @@ let
   # Images the boot plane runs. talos-attest and fleet-controller are built by the containers
   # workflow once their tickets land; until then podman reports the pull failure and the rest runs.
   images = {
-    talos-enroll = "ghcr.io/jonpulsifer/talos-enroll:latest";
     talos-attest = "ghcr.io/jonpulsifer/talos-attest:latest";
     fleet-controller = "ghcr.io/jonpulsifer/fleet-controller:latest";
     sushy = "quay.io/metal3-io/sushy-tools:latest";
   };
 
-  talosctl = pkgs.callPackage ../../apps/talos-enroll/talosctl.nix { };
+  talosctl = pkgs.callPackage ../../apps/fleet-controller/talosctl.nix { };
   # QEMU ships the Secure Boot capable edk2 firmware that libvirt's firmware autoselection and sushy name.
   ovmfCode = "${pkgs.qemu_kvm}/share/qemu/edk2-x86_64-secure-code.fd";
 
@@ -184,39 +177,6 @@ let
   # The HookOS command line the Hardware objects carry, the one folly's signed UKI bakes in.
   hookosCmdline = (pkgs.callPackage ../images/hookos-folly.nix { }).cmdline;
 
-  # The dev cluster's render inputs: one controlplane class, and the same content under the node's
-  # name for the per-node contract talos-enroll reads today. Patches: install the signed installer
-  # to the virtual disk, name the node, and keep the cluster small.
-  devPatches = [
-    (builtins.toJSON {
-      apiVersion = "v1alpha1";
-      kind = "UnattendedInstallConfig";
-      installer.image = installer;
-      provisioning = {
-        diskSelector.match = "disk.dev_path == \"/dev/vda\"";
-        wipe = true;
-      };
-    })
-    (builtins.toJSON {
-      apiVersion = "v1alpha1";
-      kind = "HostnameConfig";
-      auto = "off";
-      hostname = "vnode1";
-    })
-    (builtins.toJSON { cluster.allowSchedulingOnControlPlanes = true; })
-  ];
-  classInputs = {
-    cluster_name = "metal-dev";
-    cluster_endpoint = "https://${nodeAddress}:6443";
-    machine_type = "controlplane";
-    talos_contract = lib.concatStringsSep "." (lib.take 2 (lib.splitString "." talosVersion));
-    kubernetes_version = kubernetesVersion;
-    config_patches = devPatches;
-  };
-  classInputsFile = pkgs.writeText "metal-dev-class-inputs.json" (
-    builtins.toJSON { controlplane = classInputs; }
-  );
-
   sushyConfig = pkgs.writeText "sushy.conf" ''
     SUSHY_EMULATOR_LISTEN_IP = '${gateway}'
     SUSHY_EMULATOR_LISTEN_PORT = ${toString sushyPort}
@@ -251,15 +211,14 @@ let
       chmod 755 ${stateDir} ${stateDir}/attest ${stateDir}/attest/roots ${stateDir}/enroll ${stateDir}/tinkerbell ${stateDir}/sushy
       cd ${stateDir}
 
-      # The dev cluster's secrets bundle and a talosconfig for the operator, the class inputs, and
-      # the inventory of virtual nodes that metal-dev-intake adds, which talos-attest reads too.
+      # The dev cluster's secrets bundle and a talosconfig for the operator, and the inventory of
+      # virtual nodes that metal-dev-intake adds, which talos-attest reads.
       if [ ! -s enroll/secrets.yaml ]; then
         talosctl gen secrets -o enroll/secrets.yaml
         talosctl gen config --with-secrets enroll/secrets.yaml --output-types talosconfig \
           -o enroll/talosconfig metal-dev "https://${nodeAddress}:6443" >/dev/null
         chmod 600 enroll/secrets.yaml enroll/talosconfig
       fi
-      install -m 644 ${classInputsFile} enroll/class-inputs.json
       [ -s enroll/machines.yaml ] || printf 'machines: {}\n' >enroll/machines.yaml
       chmod 644 enroll/machines.yaml
       ln -sfn ../enroll/machines.yaml attest/machines.yaml
@@ -488,10 +447,9 @@ let
       printf "SUSHY_EMULATOR_ALLOWED_INSTANCES = ['%s']\n" "$uuid" >${stateDir}/sushy/instances.py
       systemctl restart podman-sushy.service
 
-      # The inventory talos-enroll and talos-attest read, and the controller's BMC login in the
-      # Tinkerbell API.
+      # The inventory talos-attest reads, and the controller's BMC login in the Tinkerbell API.
       yq -i ".machines.$name = {\"model\": \"metal-dev\", \"serial\": \"$serial\", \"mac\": \"${nodeMac}\", \"disk\": \"/dev/vda\", \"tpm\": \"2.0\", \"amt\": false, \"secure_boot\": true, \"class\": \"controlplane\", \"status\": \"staged\", \"address\": \"${nodeAddress}\", \"bmc\": {\"type\": \"redfish\", \"address\": \"${gateway}\"}}" ${stateDir}/enroll/machines.yaml
-      systemctl try-restart podman-talos-attest.service podman-talos-enroll.service
+      systemctl try-restart podman-talos-attest.service
       mapfile -t bmc <${stateDir}/sushy/credentials
       kubectl --kubeconfig ${tinkKubeconfig} -n tinkerbell create secret generic bmc-redfish \
         --from-literal=username="''${bmc[0]}" --from-literal=password="''${bmc[1]}" \
@@ -648,30 +606,6 @@ in
       containers = {
         # Each container gets whole host directories, mounted once: a file bind-mounted inside a
         # read-only directory mount fails with EROFS when its path is not already there.
-        talos-enroll =
-          hardenedContainer [
-            "--volume=${stateDir}/enroll:/etc/talos-enroll:ro"
-            "--volume=${stateDir}/netbox:/run/netbox:ro"
-          ]
-          // {
-            image = images.talos-enroll;
-            # apps/talos-enroll/README.md on the fleet talos-enroll branch is the contract.
-            environment = {
-              ENROLL_ADDR = "127.0.0.1:${toString enrollPort}";
-              ENROLL_ADMIN_ADDR = "127.0.0.1:${toString enrollAdminPort}";
-              ENROLL_ADMIN_URL = "https://${tailnetName}:${toString enrollAdminServePort}";
-              ENROLL_APPROVERS = approvers;
-              ENROLL_SITE = "dev";
-              ENROLL_CLASS_INPUTS = "/etc/talos-enroll/class-inputs.json";
-              ENROLL_INVENTORY = "/etc/talos-enroll/machines.yaml";
-              ENROLL_SECRETS_BUNDLE = "/etc/talos-enroll/secrets.yaml";
-              ENROLL_WORKER_SECRETS = "/etc/talos-enroll/secrets.yaml";
-              ENROLL_DISCORD_WEBHOOK_FILE = "/dev/null";
-              ENROLL_NETBOX_URL = "http://127.0.0.1:${toString netboxNginxPort}";
-              ENROLL_NETBOX_TOKEN_FILE = "/run/netbox/api-token";
-              HOME = "/tmp";
-            };
-          };
         talos-attest =
           hardenedContainer [
             "--volume=${stateDir}/attest:/etc/talos-attest:ro"
@@ -845,21 +779,10 @@ in
             ssl = true;
           }
         ];
-        locations = {
-          "/".return = "404";
-        }
-        //
-          lib.genAttrs
-            [
-              "= /device/code"
-              "= /token"
-              "= /config"
-              "= /healthz"
-            ]
-            (_: {
-              proxyPass = "http://127.0.0.1:${toString enrollPort}";
-              extraConfig = "proxy_set_header X-Forwarded-For $remote_addr;";
-            });
+        # An installed node fetches /talos/config on this name. The controller here renders no
+        # config: it has no class inputs or secrets, and the dev class is a control plane, which
+        # the controller refuses. So the name answers nothing yet.
+        locations."/".return = "404";
       };
       netbox = {
         listen = [
@@ -913,7 +836,6 @@ in
       before = [
         "netbox.service"
         "metal-dev-tinkerbell.service"
-        "podman-talos-enroll.service"
         "podman-talos-attest.service"
         "podman-fleet-controller.service"
         "podman-sushy.service"
@@ -952,7 +874,6 @@ in
         "nginx.service"
       ];
       before = [
-        "podman-talos-enroll.service"
         "podman-talos-attest.service"
         "podman-fleet-controller.service"
       ];
@@ -1038,7 +959,7 @@ in
       };
     };
     metal-dev-tailscale-serve = {
-      description = "Serve the enrollment and attestation admin APIs on this host's tailnet name";
+      description = "Serve the attestation admin API on this host's tailnet name";
       wantedBy = [ "multi-user.target" ];
       wants = [
         "tailscaled.service"
@@ -1057,11 +978,9 @@ in
           Type = "oneshot";
           RemainAfterExit = true;
           ExecStart = [
-            "${ts} serve --bg --https=${toString enrollAdminServePort} http://127.0.0.1:${toString enrollAdminPort}"
             "${ts} serve --bg --https=${toString attestAdminServePort} http://127.0.0.1:${toString attestAdminPort}"
           ];
           ExecStop = [
-            "${ts} serve --https=${toString enrollAdminServePort} off"
             "${ts} serve --https=${toString attestAdminServePort} off"
           ];
           Restart = "on-failure";

@@ -95,11 +95,11 @@ func TestNodeDocument(t *testing.T) {
 	}
 }
 
-// TestNodeDocumentMatchesTalosEnroll holds the node document to the one
-// apps/talos-enroll writes for riptide from the same fixture as its
-// TestTalosctlRender: testdata/riptide-node-document.yaml is that server's
-// output. The rest of a render is the same talosctl call on the same patches.
-func TestNodeDocumentMatchesTalosEnroll(t *testing.T) {
+// TestNodeDocumentGolden holds the node document for riptide, from the
+// fixture TestTalosctlRender uses, to testdata/riptide-node-document.yaml. A
+// change to it changes every worker's first config, which the parity check
+// against the Talos root also sees.
+func TestNodeDocumentGolden(t *testing.T) {
 	want, err := os.ReadFile("testdata/riptide-node-document.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -107,13 +107,13 @@ func TestNodeDocumentMatchesTalosEnroll(t *testing.T) {
 	in := riptideInputs()["worker-g5"]
 	got := nodeDocument(in, riptide)
 	if got != string(want) {
-		t.Fatalf("the node document differs from talos-enroll's:\n%s\n--- talos-enroll\n%s", got, want)
+		t.Fatalf("the node document differs from the golden file:\n%s\n--- golden\n%s", got, want)
 	}
 }
 
 var riptide = Node{Name: "riptide", Class: "worker-g5", Disk: "/dev/nvme0n1", TPM: "2.0"}
 
-// riptideInputs is talos-enroll's TestTalosctlRender fixture.
+// riptideInputs is TestTalosctlRender's fixture.
 func riptideInputs() map[string]ClassInputs {
 	return map[string]ClassInputs{
 		"worker-g5": {

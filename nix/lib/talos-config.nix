@@ -1,9 +1,9 @@
 # Where an installed Talos node fetches its first config, and where HookOS posts a machine's facts.
 # fleet-controller (apps/fleet-controller) runs on the anchor named here. It renders the config
 # under its state directory, and nginx serves it at /talos/config on the enrollment name's HTTPS
-# server (../services/talos-enroll.nix). The other anchors pass that location to this anchor's
+# server (../services/talos-boot.nix). The other anchors pass that location to this anchor's
 # plain-HTTP port on the Anchor network (../services/fleet-controller.nix). Every anchor's
-# enrollment server passes intakePath to controllerPort on this anchor's Anchor address.
+# enrollment name server passes intakePath to controllerPort on this anchor's Anchor address.
 {
   server = "spore";
   port = 8447;
