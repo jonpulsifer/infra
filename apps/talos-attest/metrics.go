@@ -92,6 +92,21 @@ func (v *Verifier) Metrics() (string, error) {
 	}
 	head("talos_attest_ca_expiry_timestamp_seconds", "gauge", "When the DevID CA certificate expires.")
 	fmt.Fprintf(&b, "talos_attest_ca_expiry_timestamp_seconds %d\n", v.CA.Cert.NotAfter.Unix())
+	if v.Intake != nil {
+		st := v.intakeState(v.Now())
+		open, until := 0, int64(0)
+		// Under declared, the window gates nothing unless stubs require it.
+		if st.Open && st.gates() {
+			open = 1
+		}
+		if st.OpenUntil != nil {
+			until = st.OpenUntil.Unix()
+		}
+		head("talos_attest_intake_open", "gauge", "1 while the owner's intake window is open on this anchor and the policy consults it.")
+		fmt.Fprintf(&b, "talos_attest_intake_open{policy=%q} %d\n", st.Policy, open)
+		head("talos_attest_intake_open_until_seconds", "gauge", "When the intake window closes, as its file names it; 0 with no file.")
+		fmt.Fprintf(&b, "talos_attest_intake_open_until_seconds{policy=%q} %d\n", st.Policy, until)
+	}
 	return b.String(), nil
 }
 

@@ -138,9 +138,18 @@ func run(log *slog.Logger) error {
 		v.Fleet = NewFleetRender(u, secret)
 		log.Info("intake passes get an install code from fleet-controller", "url", u)
 	}
-	if path := os.Getenv("ATTEST_METRICS_FILE"); path != "" {
+	v.Intake = &IntakeWindow{Path: env("ATTEST_INTAKE_WINDOW_FILE", "/var/lib/talos-attest/intake-open"), Policy: env("ATTEST_INTAKE_POLICY", intakePolicyDeclared)}
+	if !validIntakePolicy(v.Intake.Policy) {
+		return fmt.Errorf("ATTEST_INTAKE_POLICY is %q; it is %s or %s", v.Intake.Policy, intakePolicyOpen, intakePolicyDeclared)
+	}
+	if v.Intake.RequireWindow, err = strconv.ParseBool(env("ATTEST_INTAKE_REQUIRE_WINDOW", "false")); err != nil {
+		return fmt.Errorf("ATTEST_INTAKE_REQUIRE_WINDOW: %w", err)
+	}
+	log.Info("intake window", "file", v.Intake.Path, "policy", v.Intake.Policy, "require_window", v.Intake.RequireWindow)
+	metricsFile := os.Getenv("ATTEST_METRICS_FILE")
+	if metricsFile != "" {
 		v.OnChange = func() {
-			if err := v.WriteMetricsFile(path); err != nil {
+			if err := v.WriteMetricsFile(metricsFile); err != nil {
 				log.Error("metrics file", "err", err)
 			}
 		}
@@ -192,6 +201,11 @@ func run(log *slog.Logger) error {
 		go srv.RunPeerSync(ctx, sync)
 	} else {
 		go v.BackfillNetBox(ctx)
+	}
+	if metricsFile != "" {
+		// The owner writes the window's file over ssh, and the window closes
+		// with the clock: neither is a change the service sees.
+		go v.WatchIntake(ctx, 30*time.Second)
 	}
 	log.Info("talos-attest started", "machines", inv.Names(), "ek_roots", roots.Count, "ca", ca.Cert.Subject.String(), "peers", peers)
 

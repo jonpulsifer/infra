@@ -53,6 +53,8 @@ type harnessOpts struct {
 	policy     func(*Policy)
 	inventory  func(rsa, ecc string) string
 	foreignMfr bool
+	// noEKCerts leaves the maker's certificates out of NV: the TPM sends its RSA EK alone, uncertified.
+	noEKCerts bool
 	// netbox makes the fake NetBox the system of record.
 	netbox *fakeNetBox
 }
@@ -109,7 +111,9 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		if h.hashes[c.alg], err = EKHash(pub); err != nil {
 			t.Fatal(err)
 		}
-		writeSimNV(t, sim, c.nv, mfr.issueEK(t, pub))
+		if !o.noEKCerts {
+			writeSimNV(t, sim, c.nv, mfr.issueEK(t, pub))
+		}
 	}
 
 	roots := &EKRoots{roots: x509.NewCertPool(), intermediates: x509.NewCertPool()}

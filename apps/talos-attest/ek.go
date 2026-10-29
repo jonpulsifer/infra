@@ -190,6 +190,7 @@ func reasonOf(err error) string {
 const (
 	reasonUnknownMachine = "unknown-machine"
 	reasonMACMismatch    = "mac-mismatch"
+	reasonMACInvalid     = "invalid-mac"
 	reasonEKMissing      = "ek-missing"
 	reasonEKWeak         = "ek-weak"
 	reasonEKROCA         = "ek-roca"

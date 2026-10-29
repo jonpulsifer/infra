@@ -237,3 +237,26 @@ tests:
             exp_annotations:
               message: "optiplex's LDevID expires within 23 days"
               description: "tpm-reattest has not renewed optiplex's LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."
+
+  # spore's intake window stays open for 7 hours and fires at 6; capsule's opens for 2 hours and
+  # closes, so it stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_intake_open{instance="spore",policy="open"}'
+        values: 1x420
+      - series: 'talos_attest_intake_open{instance="capsule",policy="open"}'
+        values: 1x120 0x300
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: TalosAttestIntakeOpen
+        exp_alerts: []
+      - eval_time: 6h5m
+        alertname: TalosAttestIntakeOpen
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              policy: open
+            exp_annotations:
+              message: "The intake window on spore has been open for 6 hours"
+              description: "talos-attest on spore admits boxes under the open intake policy. Close the window with mise run fleet:intake close when racking is done."

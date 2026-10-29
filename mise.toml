@@ -210,6 +210,10 @@ run = "bash scripts/attest.sh approve"
 description = "List the first intakes that wait for approval on each anchor's talos-attest"
 run = "bash scripts/attest.sh pending"
 
+[tasks."fleet:intake"]
+description = "Open, close or show the intake window on every anchor's talos-attest, over ssh as the owner (args: open <duration> | close | status)"
+run = "bash scripts/fleet-intake.sh"
+
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
 run = "bash .github/scripts/render-cluster-apps.sh"

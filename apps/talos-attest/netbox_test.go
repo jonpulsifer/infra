@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -54,6 +55,9 @@ type fakeInterface struct {
 	Name     string
 	MAC      string
 	MACID    int
+	// Extra are MACs assigned to the interface besides its primary, as
+	// another anchor's write that has not set its primary yet leaves.
+	Extra []string
 }
 
 func newFakeNetBox(t *testing.T) *fakeNetBox {
@@ -263,6 +267,16 @@ func (f *fakeNetBox) serve(w http.ResponseWriter, r *http.Request) {
 		i.MACID = f.next
 		i.MAC = strings.ToLower(body["mac_address"].(string))
 		writeJSON(w, http.StatusCreated, map[string]any{"id": i.MACID})
+	case r.Method == http.MethodGet && path == "/api/dcim/mac-addresses":
+		var out []any
+		if i := f.interfaces[func() int { n, _ := strconv.Atoi(q.Get("assigned_object_id")); return n }()]; i != nil {
+			for _, mac := range append([]string{i.MAC}, i.Extra...) {
+				if mac != "" {
+					out = append(out, map[string]any{"mac_address": strings.ToUpper(mac)})
+				}
+			}
+		}
+		page(w, out)
 	case r.Method == http.MethodGet && path == "/api/dcim/device-types":
 		var out []any
 		for id, model := range f.types {
@@ -360,7 +374,7 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 	f := newFakeNetBox(t)
 	nb := f.client()
 	claim := protocol.Machine{Serial: "mxl9999999", MAC: "AA:BB:CC:DD:EE:01", Hostname: "shoal", Manufacturer: "HP", Model: "HP EliteDesk 800 G5 Desktop Mini", SKU: "9GB06UC#ABA", BIOS: "R21 Ver. 02.20.00"}
-	m, err := nb.Create(context.Background(), claim)
+	m, err := nb.Create(context.Background(), claim, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +394,7 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 
 	// A generic hostname, an unknown model and a taken name.
 	claim2 := protocol.Machine{Serial: "SIM-NEW", MAC: "aa:bb:cc:dd:ee:02", Hostname: "hookos", Manufacturer: "Dell Inc.", Model: "OptiPlex 7010"}
-	m2, err := nb.Create(context.Background(), claim2)
+	m2, err := nb.Create(context.Background(), claim2, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,11 +406,11 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 		t.Fatalf("device type %q", f.types[d2.TypeID])
 	}
 	claim3 := protocol.Machine{Serial: "SIM-DUP", MAC: "aa:bb:cc:dd:ee:03", Hostname: "shoal", Model: "OptiPlex 7010"}
-	m3, err := nb.Create(context.Background(), claim3)
+	m3, err := nb.Create(context.Background(), claim3, "")
 	if err != nil || m3.Name != "intake-sim-dup" {
 		t.Fatalf("taken hostname: %+v %v", m3, err)
 	}
-	if _, err := nb.Create(context.Background(), protocol.Machine{Serial: "SIM-NOMODEL", MAC: "aa:bb:cc:dd:ee:04"}); err == nil {
+	if _, err := nb.Create(context.Background(), protocol.Machine{Serial: "SIM-NOMODEL", MAC: "aa:bb:cc:dd:ee:04"}, ""); err == nil {
 		t.Fatal("a claim with no model made a device")
 	}
 }
@@ -512,7 +526,7 @@ func TestFirstSightCreatesOneDevicePerSerial(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			m, err := v.firstSight(context.Background(), claim)
+			m, _, err := v.firstSight(context.Background(), claim, "")
 			ids[i], errs[i] = m.NetBoxID, err
 		}(i)
 	}
@@ -560,5 +574,54 @@ func TestIntakeName(t *testing.T) {
 		if got := intakeName(claim); got != want {
 			t.Errorf("intakeName(%+v) = %q, want %q", claim, got, want)
 		}
+	}
+}
+
+// A pass never replaces a pin on file: only an empty pin is written, so a
+// second TPM claiming a stub's serial on another anchor cannot re-key it.
+func TestNetBoxRecordKeepsAPinOnFile(t *testing.T) {
+	f := newFakeNetBox(t)
+	nb := f.client()
+	f.add("swell", "SW-1", "planned", "", map[string]any{"ek_hash": strings.Repeat("a", 64)})
+	pass := Record{Machine: "swell", Serial: "SW-1", Status: StatusAttested, EKProven: true, AttestedAt: time.Now(),
+		EKHashes: map[string]string{"rsa": strings.Repeat("1", 64), "ecc": strings.Repeat("2", 64)}}
+	if err := nb.Record(context.Background(), pass); err != nil {
+		t.Fatal(err)
+	}
+	if cf := f.bySerial("SW-1").CustomFields; cf["ek_hash"] != strings.Repeat("a", 64) || cf["ek_hash_ecc"] != strings.Repeat("2", 64) {
+		t.Fatalf("pins after the pass: %+v", cf)
+	}
+}
+
+func TestValidMAC(t *testing.T) {
+	for mac, want := range map[string]bool{"38:22:E2:2D:96:44": true, "38-22-e2-2d-96-44": true, "": false, "not-a-mac": false, "38:22:e2:2d:96": false, "3822.e22d.9644": false, "38:22:e2:2d:96:44\n": true} {
+		if got := validMAC(mac); got != want {
+			t.Errorf("validMAC(%q) = %v, want %v", mac, got, want)
+		}
+	}
+}
+
+// A MAC write stands only when the interface ends up holding that one MAC
+// as its primary: two anchors binding one stub cannot both win.
+func TestSetMACRefusesASharedInterface(t *testing.T) {
+	f := newFakeNetBox(t)
+	nb := f.client()
+	d := f.add("swell", "SW-1", "planned", "", nil)
+	if wrote, err := nb.setMAC(context.Background(), d.ID, "02:00:00:00:00:01"); err != nil || !wrote {
+		t.Fatalf("a sole MAC: %v %v", wrote, err)
+	}
+	if wrote, err := nb.setMAC(context.Background(), d.ID, "02:00:00:00:00:01"); err != nil || wrote {
+		t.Fatalf("the same MAC again: %v %v", wrote, err)
+	}
+	other := f.add("drift", "SW-2", "planned", "", nil)
+	f.mu.Lock()
+	for _, i := range f.interfaces {
+		if i.DeviceID == other.ID {
+			i.Extra = []string{"02:00:00:00:00:99"}
+		}
+	}
+	f.mu.Unlock()
+	if _, err := nb.setMAC(context.Background(), other.ID, "02:00:00:00:00:02"); !errors.Is(err, errMACTaken) {
+		t.Fatalf("an interface another anchor wrote: %v", err)
 	}
 }
