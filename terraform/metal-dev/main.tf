@@ -123,9 +123,14 @@ resource "google_compute_instance" "metal_dev" {
     scopes = ["cloud-platform"]
   }
 
-  metadata = {
-    enable-oslogin = "FALSE"
-  }
+  # metal-dev-tailscale-up in nix/hosts/metal-dev.nix reads the tailnet identity from these.
+  metadata = merge(
+    { enable-oslogin = "FALSE" },
+    var.tailscale_client_id == null ? {} : {
+      tailscale-client-id = var.tailscale_client_id
+      tailscale-audience  = var.tailscale_audience
+    },
+  )
 
   lifecycle {
     ignore_changes = [desired_status]

@@ -550,6 +550,55 @@ let
     '';
   };
 
+  # Joins the tailnet as the VM's service account. With --audience, tailscale fetches the
+  # account's identity token from the metadata server (format=full), trades it at the token
+  # exchange for an API token, and mints a single-use, ephemeral, preauthorized tag:gcp auth key,
+  # as nixos-deploy.yaml does. The federated identity is terraform/network/tailscale/metal_dev.tf;
+  # terraform/metal-dev sets its client id and audience as metadata attributes.
+  tailscaleUp = pkgs.writeShellApplication {
+    name = "metal-dev-tailscale-up";
+    runtimeInputs = [
+      pkgs.curl
+      pkgs.jq
+      config.services.tailscale.package
+    ];
+    text = ''
+      state=""
+      for _ in $(seq 30); do
+        state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState') || state=""
+        case "$state" in
+          "" | NoState | Starting) sleep 2 ;;
+          *) break ;;
+        esac
+      done
+      case "$state" in
+        Running | Stopped)
+          echo "tailscale is $state; nothing to join"
+          exit 0
+          ;;
+        NeedsLogin) ;;
+        *)
+          echo "tailscale is ''${state:-unreachable}" >&2
+          exit 1
+          ;;
+      esac
+
+      attr() {
+        curl -sSf --max-time 10 -H 'Metadata-Flavor: Google' \
+          "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1"
+      }
+      if ! client_id=$(attr tailscale-client-id) || ! audience=$(attr tailscale-audience); then
+        echo "no tailscale-client-id or tailscale-audience metadata: set them in terraform/metal-dev" >&2
+        exit 1
+      fi
+      tailscale up \
+        --client-id="$client_id?ephemeral=true&preauthorized=true" \
+        --audience="$audience" \
+        ${lib.escapeShellArgs config.services.tailscale.extraUpFlags} \
+        --accept-routes=false
+    '';
+  };
+
   hardenedContainer = extra: {
     autoStart = true;
     pull = "newer";
@@ -983,13 +1032,34 @@ in
         RestartSec = "30s";
       };
     };
+    metal-dev-tailscale-up = {
+      description = "Join the tailnet with this VM's Google service account identity";
+      wantedBy = [ "multi-user.target" ];
+      requires = [ "tailscaled.service" ];
+      wants = [ "network-online.target" ];
+      after = [
+        "network-online.target"
+        "tailscaled.service"
+      ];
+      startLimitIntervalSec = 0;
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = lib.getExe tailscaleUp;
+        Restart = "on-failure";
+        RestartSec = "30s";
+      };
+    };
     metal-dev-tailscale-serve = {
       description = "Serve the enrollment and attestation admin APIs on this host's tailnet name";
       wantedBy = [ "multi-user.target" ];
-      wants = [ "tailscaled.service" ];
+      wants = [
+        "tailscaled.service"
+        "metal-dev-tailscale-up.service"
+      ];
       after = [
         "tailscaled.service"
-        "tailscaled-autoconnect.service"
+        "metal-dev-tailscale-up.service"
       ];
       startLimitIntervalSec = 0;
       serviceConfig =

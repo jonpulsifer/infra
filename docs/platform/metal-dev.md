@@ -22,7 +22,9 @@ The metal dev env is one spot VM in the `homelab-ng` project, `metal-dev`, that 
 
 ## Rules
 
-- Run `mise run metal-dev:up` after every start. It joins the tailnet and places the DNS-01 token, which is not in the image and persists on the disk at `/var/lib/metal-dev/cloudflare-token`. The token is a zone-scoped one made for this VM, in the 1Password item `cloudflare-dns01-metal-dev`, never cert-manager's.
+- Run `mise run metal-dev:up` after every start. It waits for the tailnet join and places the DNS-01 token, which is not in the image and persists on the disk at `/var/lib/metal-dev/cloudflare-token`. The token is a zone-scoped one made for this VM, in the 1Password item `cloudflare-dns01-metal-dev`, never cert-manager's.
+- The VM joins the tailnet at boot as `tag:gcp`, and no tailnet key is stored anywhere. `metal-dev-tailscale-up` trades the `metal-dev` service account's Google identity token for a single-use, ephemeral auth key through the federated identity in `terraform/network/tailscale/metal_dev.tf`, as the `nixos-deploy` workflow does. `tag:gcp` reaches nothing on the tailnet; the owner reaches the VM.
+- The VM reads the federated identity's client ID and audience from its `tailscale-client-id` and `tailscale-audience` metadata attributes. After an apply of `terraform/network/tailscale` that creates or replaces the identity, set its `metal_dev_client_id` and `metal_dev_audience` outputs as the `tailscale_client_id` and `tailscale_audience` defaults in `terraform/metal-dev/variables.tf`, and apply that root. While they are null the VM stays off the tailnet.
 - Seed the VM's NetBox with `mise run metal-dev:seed` before an intake, never with the bare seed script, whose defaults are the lab's NetBox. Intake stops with that message when the fleet fields are missing.
 - One virtual node, `vnode1`, with a fixed address and MAC. The BMC exposes one libvirt domain, and the dev cluster's endpoint is the node.
 - The enrollment certificate is a real one for the lab's enrollment name, issued to this VM. Talos trusts only public roots, so a dev name would need a dev image build. Let's Encrypt issues at most five duplicates per name per week, so a VM rebuilt in a loop runs out; `terraform/metal-dev/README.md` has the rebuild steps.
@@ -33,6 +35,7 @@ The metal dev env is one spot VM in the `homelab-ng` project, `metal-dev`, that 
 
 - `nix/hosts/metal-dev.nix`: the host, its bridge, services, containers and the `metal-dev-intake` command
 - `terraform/metal-dev/`: the VPC, service account, image and VM, with `on` off by default
+- `terraform/network/tailscale/metal_dev.tf`: the VM's tailnet identity
 - `scripts/metal-dev/`: `up.sh`, `down.sh`, `seed.sh` and `intake.sh`
 - `.github/workflows/nix-image-builder.yaml`: the `metal-dev` image, uploaded under the bucket's `metal-dev/` prefix
 - `clusters/folly/config/anchor-topology.json`: `BOOTSTRAP_CIDR`, `SPORE_BOOTSTRAP_IP`, `BOOT_VIP`

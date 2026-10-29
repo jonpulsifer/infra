@@ -6,6 +6,10 @@ terraform {
   }
 
   required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 8.8.0"
+    }
     onepassword = {
       source  = "1password/onepassword"
       version = "~> 3.0"
@@ -28,6 +32,11 @@ ephemeral "onepassword_item" "tailscale_oauth_client" {
 }
 
 provider "onepassword" {}
+
+provider "google" {
+  impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
+  project                     = "homelab-ng"
+}
 
 provider "tailscale" {
   oauth_client_id     = ephemeral.onepassword_item.tailscale_oauth_client.username

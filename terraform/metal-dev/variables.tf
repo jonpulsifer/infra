@@ -20,3 +20,20 @@ variable "disk_gb" {
   description = "Boot disk size. The mirrored release images and each virtual node's disk live on it."
   default     = 100
 }
+
+variable "tailscale_client_id" {
+  type        = string
+  description = "The metal_dev_client_id output of terraform/network/tailscale. The VM joins the tailnet with it; null leaves the VM off the tailnet."
+  default     = null
+}
+
+variable "tailscale_audience" {
+  type        = string
+  description = "The metal_dev_audience output of terraform/network/tailscale: the audience of the identity token the VM trades for an auth key."
+  default     = null
+
+  validation {
+    condition     = (var.tailscale_audience == null) == (var.tailscale_client_id == null)
+    error_message = "Set tailscale_client_id and tailscale_audience together."
+  }
+}

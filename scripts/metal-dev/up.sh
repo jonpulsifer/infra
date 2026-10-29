@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Starts the metal-dev VM, puts it on the tailnet, and gives it the DNS-01 token that the
-# enrollment name's certificate needs. Both secrets come from 1Password and travel over stdin.
-# The token stays on the VM's disk at /var/lib/metal-dev/cloudflare-token.
+# Starts the metal-dev VM, waits for it to join the tailnet, and gives it the DNS-01 token that
+# the enrollment name's certificate needs. The VM joins by itself at boot with its service
+# account's identity (metal-dev-tailscale-up), so no tailnet key exists to hand it. The token
+# comes from 1Password over stdin and stays on the VM's disk at /var/lib/metal-dev/cloudflare-token.
 #
-#   METAL_DEV_TAILSCALE_KEY_REF   op:// reference of a reusable tailnet auth key tagged tag:gcp,
-#                                 default op://homelab/tailscale-metal-dev/credential
 #   METAL_DEV_CLOUDFLARE_REF      op:// reference of a Cloudflare token scoped to DNS edits on the
 #                                 lab's zone, made for this VM, never cert-manager's,
 #                                 default op://homelab/cloudflare-dns01-metal-dev/credential
@@ -12,7 +11,6 @@ set -euo pipefail
 
 # shellcheck source=scripts/metal-dev/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-: "${METAL_DEV_TAILSCALE_KEY_REF:=op://homelab/tailscale-metal-dev/credential}"
 : "${METAL_DEV_CLOUDFLARE_REF:=op://homelab/cloudflare-dns01-metal-dev/credential}"
 
 # An auth or API error surfaces as is; only a missing VM is the message below.
@@ -59,10 +57,12 @@ for _ in $(seq 36); do
 done
 iap_ssh true
 
-if ! iap_ssh 'tailscale status >/dev/null 2>&1'; then
-  echo "joining the tailnet"
-  op read "$METAL_DEV_TAILSCALE_KEY_REF" \
-    | iap_ssh 'umask 077; cat >/tmp/ts.key && sudo tailscale up --auth-key "file:/tmp/ts.key" --advertise-tags=tag:gcp --accept-routes=false; rm -f /tmp/ts.key'
+echo "waiting for the tailnet join"
+# shellcheck disable=SC2016 # the loop runs on the VM
+if ! iap_ssh 'for _ in $(seq 24); do tailscale status >/dev/null 2>&1 && exit 0; sleep 5; done; exit 1'; then
+  echo "$instance is not on the tailnet; its journal says why:" >&2
+  iap_ssh 'sudo journalctl -u metal-dev-tailscale-up.service -n 20 --no-pager' >&2 || true
+  exit 1
 fi
 
 echo "placing the DNS-01 token"

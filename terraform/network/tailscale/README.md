@@ -1,6 +1,6 @@
 # tailscale
 
-OpenTofu root for the Tailscale tailnet: its settings, DNS, access policy, device authorization and tags, the GitHub Actions identity, and OAuth clients. See [Remote access](https://wiki.lolwtf.ca/platform/network/remote-access/) on the wiki.
+OpenTofu root for the Tailscale tailnet: its settings, DNS, access policy, device authorization and tags, the GitHub Actions and metal-dev identities, and OAuth clients. See [Remote access](https://wiki.lolwtf.ca/platform/network/remote-access/) on the wiki.
 
 `fleet.tf.json` names the tailnet and the public DNS zone, and `nix/lib/fleet.nix` reads the same file. `policy.hujson` is the access policy.
 
@@ -12,7 +12,7 @@ tofu -chdir=terraform/network/tailscale validate
 TF_DIR=terraform/network/tailscale mise run tf:plan
 ```
 
-A local plan needs Google credentials for the state bucket and `OP_SERVICE_ACCOUNT_TOKEN`, which the Tailscale provider uses to read its OAuth client from 1Password. `mise run tf:docs` regenerates the tables below.
+A local plan needs Google credentials for the state bucket, Service Account Token Creator on `terraform@homelab-ng.iam.gserviceaccount.com`, which the Google provider impersonates to read the metal-dev service account, and `OP_SERVICE_ACCOUNT_TOKEN`, which the Tailscale provider uses to read its OAuth client from 1Password. `mise run tf:docs` regenerates the tables below.
 
 ## Deploy
 
@@ -25,6 +25,7 @@ A change to `policy.hujson` alone also autoplans, because the Atlantis autoplan 
 
 | Name | Version |
 | ---- | ------- |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 8.8.0 |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
 | <a name="requirement_tailscale"></a> [tailscale](#requirement\_tailscale) | ~> 0.29 |
 
@@ -32,7 +33,8 @@ A change to `policy.hujson` alone also autoplans, because the Atlantis autoplan 
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.3.1 |
+| <a name="provider_google"></a> [google](#provider\_google) | 8.8.1 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.4.1 |
 | <a name="provider_tailscale"></a> [tailscale](#provider\_tailscale) | 0.29.2 |
 
 ## Modules
@@ -51,8 +53,10 @@ No modules.
 | [tailscale_device_tags.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
 | [tailscale_dns_configuration.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/dns_configuration) | resource |
 | [tailscale_federated_identity.github_actions_nixos_deploy](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/federated_identity) | resource |
+| [tailscale_federated_identity.metal_dev](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/federated_identity) | resource |
 | [tailscale_oauth_client.forge_enrollment](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/oauth_client) | resource |
 | [tailscale_tailnet_settings.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/tailnet_settings) | resource |
+| [google_service_account.metal_dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/service_account) | data source |
 | [tailscale_device.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/data-sources/device) | data source |
 
 ## Inputs
@@ -65,4 +69,6 @@ No inputs.
 | ---- | ----------- |
 | <a name="output_github_actions_nixos_deploy_audience"></a> [github\_actions\_nixos\_deploy\_audience](#output\_github\_actions\_nixos\_deploy\_audience) | Set as the TS\_OIDC\_AUDIENCE repository variable. |
 | <a name="output_github_actions_nixos_deploy_client_id"></a> [github\_actions\_nixos\_deploy\_client\_id](#output\_github\_actions\_nixos\_deploy\_client\_id) | Set as the TS\_OIDC\_CLIENT\_ID repository variable (not a secret — access is gated by the OIDC issuer/subject check, not by knowledge of this id). |
+| <a name="output_metal_dev_audience"></a> [metal\_dev\_audience](#output\_metal\_dev\_audience) | Set as tailscale\_audience in terraform/metal-dev/variables.tf. |
+| <a name="output_metal_dev_client_id"></a> [metal\_dev\_client\_id](#output\_metal\_dev\_client\_id) | Set as tailscale\_client\_id in terraform/metal-dev/variables.tf (not a secret: the issuer, subject and email claim gate the exchange). |
 <!-- END_TF_DOCS -->
