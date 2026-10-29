@@ -20,11 +20,31 @@ type Metrics struct {
 	Retired          atomic.Int64
 	WebhookAccepted  atomic.Int64
 	WebhookRejected  atomic.Int64
+	Rendered         atomic.Int64
+	RenderRefused    atomic.Int64
+	RenderFailed     atomic.Int64
+	RenderRejected   atomic.Int64
+	Released         atomic.Int64
+	Expired          atomic.Int64
 
-	mu       sync.Mutex
-	devices  map[string]int
-	lastOK   time.Time
-	lastSeen time.Time
+	mu               sync.Mutex
+	devices          map[string]int
+	lastOK           time.Time
+	lastSeen         time.Time
+	pending          int
+	pendingOldest    time.Time
+	unreleased       int
+	unreleasedOldest time.Time
+}
+
+// SetPending records the configs nginx has not served yet with the render
+// time of the oldest, and the served ones NetBox has no release for with the
+// fetch time of the oldest.
+func (m *Metrics) SetPending(n int, oldest time.Time, unreleased int, oldestUnreleased time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending, m.pendingOldest = n, oldest
+	m.unreleased, m.unreleasedOldest = unreleased, oldestUnreleased
 }
 
 // NewMetrics makes an empty set.
@@ -68,6 +88,22 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	counter("fleet_devices_retired_total", "Devices the controller moved to offline.", m.Retired.Load())
 	counter("fleet_webhook_accepted_total", "Webhook calls with a good signature.", m.WebhookAccepted.Load())
 	counter("fleet_webhook_rejected_total", "Webhook calls with a bad signature.", m.WebhookRejected.Load())
+	counter("fleet_install_renders_total", "Talos configs rendered for an install.", m.Rendered.Load())
+	counter("fleet_install_renders_refused_total", "Render requests the device's state refused (409).", m.RenderRefused.Load())
+	counter("fleet_install_renders_failed_total", "Render requests the controller could not serve (503).", m.RenderFailed.Load())
+	counter("fleet_install_renders_rejected_total", "Render requests with a bad signature.", m.RenderRejected.Load())
+	counter("fleet_install_released_total", "Devices set active after nginx served their config.", m.Released.Load())
+	counter("fleet_install_expired_total", "Configs deleted unread after the TTL.", m.Expired.Load())
+	fmt.Fprintf(w, "# HELP fleet_install_files_pending Rendered Talos configs nginx has not served yet.\n# TYPE fleet_install_files_pending gauge\nfleet_install_files_pending %d\n", m.pending)
+	age := func(t time.Time) float64 {
+		if t.IsZero() {
+			return 0
+		}
+		return time.Since(t).Seconds()
+	}
+	fmt.Fprintf(w, "# HELP fleet_install_files_oldest_age_seconds Age of the oldest unserved config, 0 with none.\n# TYPE fleet_install_files_oldest_age_seconds gauge\nfleet_install_files_oldest_age_seconds %.0f\n", age(m.pendingOldest))
+	fmt.Fprintf(w, "# HELP fleet_install_unreleased Served configs whose release NetBox has not taken yet.\n# TYPE fleet_install_unreleased gauge\nfleet_install_unreleased %d\n", m.unreleased)
+	fmt.Fprintf(w, "# HELP fleet_install_unreleased_oldest_age_seconds Time since the oldest unreleased config was served, 0 with none.\n# TYPE fleet_install_unreleased_oldest_age_seconds gauge\nfleet_install_unreleased_oldest_age_seconds %.0f\n", age(m.unreleasedOldest))
 	fmt.Fprintf(w, "# HELP fleet_devices NetBox devices by status.\n# TYPE fleet_devices gauge\n")
 	statuses := make([]string, 0, len(m.devices))
 	for s := range m.devices {

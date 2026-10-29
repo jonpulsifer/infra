@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,9 @@ type Device struct {
 	OOBAddress    string
 	DesiredAction string
 	LastWorkflow  string
+	// SMBIOSUUID is the machine's attested SMBIOS UUID, which talos-attest
+	// writes on a pass.
+	SMBIOSUUID string
 }
 
 // Role is the NetBox device role of a node. Every status here is a device the
@@ -174,6 +178,7 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 		BMCType:       cf("bmc_type"),
 		DesiredAction: cf("desired_action"),
 		LastWorkflow:  cf("last_workflow"),
+		SMBIOSUUID:    strings.ToLower(cf("smbios_uuid")),
 	}
 	if d.BMCType == "" {
 		d.BMCType = "none"
@@ -261,6 +266,60 @@ func (n *NetBox) Devices(ctx context.Context, site string) ([]Device, error) {
 	}
 	sort.Slice(devices, func(a, b int) bool { return devices[a].Name < devices[b].Name })
 	return devices, nil
+}
+
+// Find lists the site's nodes, in any status, whose filter field matches the
+// value: serial, or a custom field as cf_<name>. NetBox may match loosely, so
+// the callers compare the field themselves.
+func (n *NetBox) Find(ctx context.Context, site, filter, value string) ([]Device, error) {
+	q := url.Values{}
+	q.Set("site", site)
+	q.Set("role", Role)
+	q.Set(filter, value)
+	var raws []json.RawMessage
+	if err := n.list(ctx, "/api/dcim/devices/?"+q.Encode(), &raws); err != nil {
+		return nil, err
+	}
+	devices := make([]Device, 0, len(raws))
+	for _, raw := range raws {
+		d, err := parseDevice(raw)
+		if err != nil {
+			return nil, err
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
+// ErrNoDevice is a lookup that found no node.
+var ErrNoDevice = errors.New("NetBox has no such node")
+
+// BySerial is the site's node with this serial.
+func (n *NetBox) BySerial(ctx context.Context, site, serial string) (Device, error) {
+	devices, err := n.Find(ctx, site, "serial", serial)
+	if err != nil {
+		return Device{}, err
+	}
+	for _, d := range devices {
+		if strings.EqualFold(d.Serial, serial) {
+			return d, nil
+		}
+	}
+	return Device{}, ErrNoDevice
+}
+
+// BySMBIOSUUID is the site's node whose smbios_uuid is this UUID.
+func (n *NetBox) BySMBIOSUUID(ctx context.Context, site, uuid string) (Device, error) {
+	devices, err := n.Find(ctx, site, "cf_smbios_uuid", uuid)
+	if err != nil {
+		return Device{}, err
+	}
+	for _, d := range devices {
+		if d.SMBIOSUUID == strings.ToLower(uuid) {
+			return d, nil
+		}
+	}
+	return Device{}, ErrNoDevice
 }
 
 // Update patches a device's status and custom fields, and adds a journal

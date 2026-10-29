@@ -3,7 +3,7 @@
 # (build.json).
 FROM docker.io/library/golang:1.27-alpine AS build
 WORKDIR /src/apps/fleet-controller
-COPY apps/fleet-controller/go.mod ./
+COPY apps/fleet-controller/go.mod apps/fleet-controller/go.sum ./
 RUN go mod download
 COPY apps/fleet-controller/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/fleet-controller .

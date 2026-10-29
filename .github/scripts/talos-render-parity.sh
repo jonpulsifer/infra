@@ -6,7 +6,9 @@
 #   2. talosctl gen config from the same inputs;
 #   3. the enrollment server's class render (apps/talos-enroll: class inputs
 #      plus the node document it writes from the node's facts), through its
-#      TestRenderParity, which also proves the throwaway-bundle worker render.
+#      TestRenderParity, which also proves the throwaway-bundle worker render;
+#   4. the same render in fleet-controller (apps/fleet-controller), which
+#      writes the config an install fetches, through its own TestRenderParity.
 # It also fails when the committed class-inputs.json is stale against the
 # root. A node whose inputs tofu console cannot know without state is skipped.
 #
@@ -184,5 +186,10 @@ done
 ENROLL_PARITY_INPUTS="$inputs" ENROLL_PARITY_NODES="$work/nodes.json" \
   ENROLL_CLASS_INPUTS="$PWD/$class_inputs" ENROLL_PARITY_BUNDLE="$work/secrets.yaml" \
   go test -C apps/talos-enroll -count=1 -run 'TestRenderParity|TestTalosctlRender' -v ./... || failed=1
+
+# fleet-controller's render of each node, against the module's.
+FLEET_PARITY_INPUTS="$inputs" FLEET_PARITY_NODES="$work/nodes.json" \
+  FLEET_CLASS_INPUTS="$PWD/$class_inputs" FLEET_PARITY_BUNDLE="$work/secrets.yaml" \
+  go test -C apps/fleet-controller -count=1 -run 'TestRenderParity|TestTalosctlRender' -v ./... || failed=1
 
 exit "$failed"
