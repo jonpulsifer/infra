@@ -48,13 +48,19 @@ locals {
   mab_enforced = toset(["riptide", "swell"])
 
   # Ports with no inventory node, on the MAC auth profile: the rack ports of
-  # new nodes and the provisioning station. An unknown MAC lands on the
-  # fallback, bootstrap, and a node's RADIUS user moves it to Kubernetes. A
-  # port that the inventory names takes that node's override instead.
+  # new nodes. An unknown MAC lands on the fallback, bootstrap, and a node's
+  # RADIUS user moves it to Kubernetes. A port that the inventory names takes
+  # that node's override instead.
   spare_ports = {
-    swell        = 4
-    surge        = 12
-    shoal        = 20
+    swell = 4
+    surge = 12
+    shoal = 20
+  }
+
+  # The prep station always sits on the bootstrap VLAN, declared or not, so
+  # intake runs there end to end and the move to the rack port is the VLAN
+  # change.
+  quarantine_ports = {
     provisioning = 24
   }
 
@@ -217,6 +223,18 @@ resource "unifi_device" "usw_24_poe" {
       index           = port_override.value
       name            = port_override.key
       port_profile_id = unifi_port_profile.mab.id
+    }
+  }
+
+  dynamic "port_override" {
+    for_each = local.quarantine_ports
+    content {
+      index                 = port_override.value
+      name                  = port_override.key
+      forward               = "customize"
+      native_networkconf_id = unifi_network.bootstrap.id
+      tagged_vlan_mgmt      = "auto"
+      dot1x_ctrl            = "force_authorized"
     }
   }
 
