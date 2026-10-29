@@ -22,7 +22,7 @@ Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace
 1. The controller creates a `Workflow` for the device. Tinkerbell turns the `Hardware`'s `allowPXE` on, and Rufio powers the node off, sets a one-time PXE boot and powers it on.
 2. UniFi's offer names the signed iPXE at the boot VIP, which dnsmasq serves on whichever anchor holds it. iPXE chains Smee's script for its MAC, and the script chains the signed HookOS UKI from nginx.
 3. The `provision` Template sets the clock from the boot VIP's NTP, [attests the node](../../apps/talos-attest.md) with `images/tink-attest` when the run asks for it, wipes the `Hardware`'s disk when the run asks for it, sets the next boot, and reboots. Its other actions run `images/tink-reprovision-tools`, which carries the NTP, disk, EFI and Docker tools, so the boot VLAN needs no package mirror.
-4. Tinkerbell turns `allowPXE` off, so Smee has no script for the MAC. A wiped node netboots the [signed Talos UKI's script](talos-boot.md#netboot-images), and [Talos enrollment](../../apps/talos-enroll.md) releases the config. An attested node boots its installed disk.
+4. Tinkerbell turns `allowPXE` off, so Smee has no script for the MAC. A wiped node netboots [iPXE's menu](talos-boot.md#netboot-images), whose default boots HookOS, and the agent waits for the next Workflow. An attested node boots its installed disk.
 
 A node with no `Hardware` or no running `Workflow` takes step 4 directly when it PXE-boots on the bootstrap VLAN.
 
@@ -31,7 +31,7 @@ The firmware verifies each image against `db`. Between runs, `allowPXE` is unset
 ## Rules
 
 - Keep Smee's TFTP off. It collides with dnsmasq's TFTP, and Smee then answers nothing.
-- Keep Smee in `proxy` mode. HP's PXE ignores proxy offers, so UniFi's bootstrap network names the iPXE itself (`terraform/network/unifi/folly/bootstrap.tf`), and any MAC on that VLAN that PXE-boots reaches the Talos UKI.
+- Keep Smee in `proxy` mode. HP's PXE ignores proxy offers, so UniFi's bootstrap network names the iPXE itself (`terraform/network/unifi/folly/bootstrap.tf`), and any MAC on that VLAN that PXE-boots reaches iPXE's menu.
 - Keep namespaces out of `clusters/folly/tinkerbell/`. The API runs no namespace controller, so a deleted namespace stays `Terminating`.
 - Keep `Hardware`, `Machine` and `Workflow` objects out of the repo. fleet-controller owns them, and deletes an object when NetBox stops exporting its device.
 - Name a BMC Secret `bmc-<bmc_type>`, the NetBox field's value.

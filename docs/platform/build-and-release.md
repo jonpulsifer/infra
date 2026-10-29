@@ -13,7 +13,7 @@ First-party code lives in `apps/` (services), `packages/` (shared code and chart
 | Image list | Lists each Dockerfile's image under `build` or `ignore`, and under `deploy` the manifests that pin it | `.github/containers.json` |
 | Build entry | An image's watch paths, context, aliases and build options, and the turbo `workspace` of an image built from `turbo prune` | `<dir>/build.json` |
 | Image build | Builds each `build` image and pushes `ghcr.io/jonpulsifer/<image>` from `main` | `.github/workflows/containers.yml` |
-| Talos images | Builds folly's signed Talos installer, ISO, HTTP-boot UKI, iPXE and HookOS. See [Kubernetes](kubernetes.md#signed-talos-images). | `.github/workflows/talos-images.yml` |
+| Talos images | Builds folly's signed Talos installer, ISO, iPXE and HookOS. See [Kubernetes](kubernetes.md#signed-talos-images). | `.github/workflows/talos-images.yml` |
 | Charts | Helm charts that Flux installs | `packages/charts/` |
 | Renovate | The dependency-update bot. Its `packageRules` set which updates merge unreviewed and how long each waits. | `.github/renovate.json5` |
 | Runners | GitHub-hosted, and the ARC (Actions Runner Controller) pools `infra-folly` and `infra-offsite` for manual dispatches | `clusters/base/apps/arc/` |

@@ -13,7 +13,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Provision a node](provision-a-node.md): declare a new folly machine in NetBox and install it as a Talos worker through its `desired_action`
 - [Reprovision a node](reprovision-a-node.md): reinstall, attest again or wipe an installed folly node by its `desired_action`
 - [Retire a node](retire-a-node.md): drain a folly worker, set its NetBox device to `decommissioning`, and drop it from the exports
-- [Build the signed Talos images](build-the-signed-talos-images.md): build folly's Secure Boot installer, ISO, HTTP-boot UKI, iPXE and HookOS, and check what the build publishes
+- [Build the signed Talos images](build-the-signed-talos-images.md): build folly's Secure Boot installer, ISO, iPXE and HookOS, and check what the build publishes
 - [Change the forge EEPROM](change-the-forge-eeprom.md): change forge's boot settings and keep its HTTP boot fallback
 - [Install a Windows desktop](install-a-windows-desktop.md): install and update the owner's Windows configuration
 - [Install Windows monitoring](install-windows-monitoring.md): add a desktop to folly's Prometheus and repair its agents

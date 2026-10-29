@@ -1,6 +1,6 @@
 # metal-dev: a Compute Engine VM with nested virtualization that stands in for folly's bootstrap
 # VLAN, its anchors and a rack of machines. A libvirt bridge carries the lab's BOOTSTRAP_CIDR, and
-# this host owns the boot VIP and spore's bootstrap address on it, so the signed iPXE, Talos UKI,
+# this host owns the boot VIP and spore's bootstrap address on it, so the signed iPXE,
 # ISO and HookOS from the talos-folly releases boot unchanged. Virtual nodes get a swtpm TPM 2.0,
 # OVMF in Setup Mode (the signed ISO enrolls the lab's keys), and a Redfish BMC from sushy-tools.
 #
@@ -42,8 +42,6 @@ let
   tftpRoot = "/var/lib/tftpboot";
   tftpDir = "${tftpRoot}/talos/${site}";
 
-  uki = "metal-amd64-secureboot-uki.efi";
-  ukiScript = "metal-amd64-secureboot-uki.ipxe";
   iso = "metal-amd64-secureboot.iso";
   ipxe = "ipxe-amd64-secureboot.efi";
   hookos = "hookos-amd64-secureboot-uki.efi";
@@ -420,12 +418,11 @@ let
         exit 0
       fi
       next=$(mktemp -d ${mirrorDir}/.next.XXXXXX)
-      for asset in ${uki} ${ukiScript} ${iso} ${ipxe} ${hookos}; do
+      for asset in ${iso} ${ipxe} ${hookos}; do
         url=$(jq -r --arg t "$tag" --arg a "$asset" '.[] | select(.tag_name == $t) | .assets[] | select(.name == $a) | .browser_download_url' <<<"$releases")
         [ -n "$url" ] || { echo "$tag has no asset $asset"; rm -rf "$next"; exit 1; }
         curl -fsSL -o "$next/$asset" "$url"
       done
-      bash ${verifyUki} ${signingCert} "$next/${uki}"
       bash ${verifyUki} ${signingCert} "$next/${ipxe}"
       bash ${verifyUki} ${hookosCert} "$next/${hookos}"
       echo "$tag" >"$next/.tag"

@@ -13,7 +13,7 @@ Each Linux host in the lab runs NixOS, a Linux distribution that builds each sys
 | Fleet baseline | The modules each deployable host gets, in `nix/profiles/fleet.nix` | Each `host` entry |
 | sops-nix | Decrypts host secrets with the SSH host key | Hosts that import `nix/system/sops.nix` |
 | [Netboot](nixos/netboot.md) | Serves x86 PXE boot and forge's signed RAM-boot image | spore |
-| [Talos boot](nixos/talos-boot.md) | Serves folly's signed Talos UKI on the bootstrap VLAN | spore |
+| [Talos boot](nixos/talos-boot.md) | Serves folly's signed iPXE, HookOS and Talos ISO on the bootstrap VLAN | spore |
 | [Tinkerbell](nixos/tinkerbell.md) | Answers PXE on the bootstrap VLAN and runs folly's reprovisioning workflows | spore |
 | [Build host and cache](nixos/build-host-and-cache.md) | CI builds and the Nix caches | GitHub Actions, Cachix and forge |
 

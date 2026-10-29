@@ -1,9 +1,9 @@
 ---
 title: Talos boot
-description: The boot server on the three anchors that gives folly's Talos nodes the signed UKI on the bootstrap VLAN behind the boot VIP, and serves the signed iPXE and HookOS that the netboot path loads.
+description: The boot server on the three anchors that serves folly's signed iPXE, HookOS and SecureBoot ISO on the bootstrap VLAN behind the boot VIP.
 ---
 
-Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](../../hosts/capsule.md) and [forge](../../hosts/forge.md), that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN and the Kubernetes network, with the signed iPXE and HookOS UKI that the netboot path loads. [Tinkerbell](tinkerbell.md), on spore, decides which machine boots what.
+Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](../../hosts/capsule.md) and [forge](../../hosts/forge.md), that serves folly's signed iPXE, HookOS UKI and SecureBoot ISO to machines on the `bootstrap` VLAN and the Kubernetes network. [Tinkerbell](tinkerbell.md), on spore, decides which machine boots what.
 
 The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.nix` and set to `folly`. The boot, enrollment and attestation services take their state paths, metric labels, release tag and committed per-site files from it, so the paths in this page read `<site>` where they say `folly`.
 
@@ -15,40 +15,35 @@ The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.ni
 | keepalived `boot` instance | Holds `BOOT_VIP` on the anchor that passes the checks below. It prefers spore, then capsule, then forge, and uses unicast VRRP from the other anchors' bootstrap addresses only. | every anchor |
 | dnsmasq TFTP | Serves the signed iPXE, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | every anchor |
 | `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC in `node-macs.json`, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not) | spore |
-| nginx `talos-boot` | Serves the UKI, its iPXE script, the previous UKI, the ISO and HookOS on port 80, at the anchor's bootstrap address and at `BOOT_VIP` | every anchor |
+| nginx `talos-boot` | Serves the ISO and HookOS on port 80, at the anchor's bootstrap address and at `BOOT_VIP` | every anchor |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | every anchor |
 | `talos-boot-check` | Exports whether the anchor holds `BOOT_VIP` and passes the check, each minute | every anchor |
 | [Talos enrollment](../../apps/talos-enroll.md) | nginx serves `enroll.lolwtf.ca` on port 443 at `BOOT_VIP` in front of talos-enroll; `talos-enroll-check` exports whether it serves and the server's `/metrics`, each minute; CoreDNS answers the name with `BOOT_VIP` | every anchor |
 
-The boot check passes when dnsmasq is active and nginx serves the UKI's script at the anchor's bootstrap address. The enrollment check passes when nginx serves `enroll.lolwtf.ca` on loopback with a certificate that public roots trust, and talos-enroll answers behind it. keepalived runs each every 5 seconds; two failures of either drop the anchor below every healthy one.
+The boot check passes when dnsmasq is active and nginx serves HookOS at the anchor's bootstrap address. The enrollment check passes when nginx serves `enroll.lolwtf.ca` on loopback with a certificate that public roots trust, and talos-enroll answers behind it. keepalived runs each every 5 seconds; two failures of either drop the anchor below every healthy one.
 
 ## Boot path
 
-UniFi's DHCP on the bootstrap network and on the Kubernetes network names `BOOT_VIP` as the TFTP and boot server, so a known node netboots on the Kubernetes network and an unknown machine on the bootstrap fallback. Firmware PXE loads the signed iPXE from it, and iPXE fetches the node's script from Smee at `SPORE_BOOTSTRAP_IP`. The script chains HookOS from nginx. When Smee has no script for the MAC, iPXE chains the UKI's script from `BOOT_VIP`, and that boots the UKI. [Tinkerbell](tinkerbell.md#boot-path) has the details. The UKI is about 280 MB, too large for TFTP, so it goes over HTTP.
+UniFi's DHCP on the bootstrap network and on the Kubernetes network names `BOOT_VIP` as the TFTP and boot server, so a known node netboots on the Kubernetes network and an unknown machine on the bootstrap fallback. Firmware PXE loads the signed iPXE from it, and iPXE fetches the node's script from Smee at `SPORE_BOOTSTRAP_IP`. The script chains HookOS from nginx. When Smee has no script for the MAC, iPXE shows its own menu, whose default chains the same HookOS from `BOOT_VIP`, and the agent waits for a Workflow. [Tinkerbell](tinkerbell.md#boot-path) has the details. HookOS is about 200 MB, too large for TFTP, so it goes over HTTP.
 
 The bootstrap network's DHCP names every anchor's bootstrap address as a resolver and `BOOT_VIP` as the NTP server. The Kubernetes network's DHCP names the anchors' DNS addresses, and folly's Talos nodes take time from them. CoreDNS and chrony answer on every interface of each anchor, and CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP` on each.
 
 ## Netboot images
 
-iPXE, about 1.2 MB, carries an embedded script that runs `dhcp`, sets `boot-url` to `http://<BOOT_VIP>/talos/folly`, and chains `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/${net0/mac}/auto.ipxe`, Smee's script for the booting MAC. If that fails, it chains `${boot-url}/metal-amd64-secureboot-uki.ipxe`. If no anchor holds `BOOT_VIP`, it sets `boot-url` to spore's own bootstrap address and chains the script from there. If that fails too, iPXE exits to the firmware.
-
-The image build writes the UKI's script with `.github/scripts/talos-uki-ipxe.sh` from the UKI's own `.cmdline` section. The script is a menu with a 10-second timeout. Its default, `install`, boots the UKI. `enroll` sanboots the signed ISO. On firmware in Setup Mode, its systemd-boot menu offers "Enroll Secure Boot Keys: auto", which enrolls `PK`, `KEK` and `db` from `clusters/folly/talos/secureboot/` and reboots. Select it: systemd-boot enrolls on its own only in a virtual machine. On HP firmware, clear the keys with Secure Boot off, enroll, then turn Secure Boot on, because HP reloads its factory keys when Secure Boot is turned on with no keys. An 800 G2 on BIOS N21 2.37 refuses the `PK` write; 2.63 accepts it. `exit` returns to the firmware. sanboot takes no relative URL, which is why the embedded script sets `boot-url`. On the `install` path, the script frees itself with `imgfree`, because systemd-stub refuses to start while iPXE serves another image's initrd, and passes the command line as arguments, because without Secure Boot systemd-stub takes iPXE's arguments in place of its signed command line. iPXE fills in `${uuid}`, `${mac}` and `${serial}`.
+iPXE, about 1.2 MB, carries an embedded script that runs `dhcp`, sets `boot-url` to `http://<BOOT_VIP>/talos/folly`, and chains `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/${net0/mac}/auto.ipxe`, Smee's script for the booting MAC. If that fails, it shows a menu with a 10-second timeout. Its default, `hookos`, chains `${boot-url}/hookos-amd64-secureboot-uki.efi` with the command line from `nix/images/hookos-folly.nix`, which a `Hardware`'s script passes too. `enroll` sanboots the signed ISO. On firmware in Setup Mode, its systemd-boot menu offers "Enroll Secure Boot Keys: auto", which enrolls `PK`, `KEK` and `db` from `clusters/folly/talos/secureboot/` and reboots. Select it: systemd-boot enrolls on its own only in a virtual machine. On HP firmware, clear the keys with Secure Boot off, enroll, then turn Secure Boot on, because HP reloads its factory keys when Secure Boot is turned on with no keys. An 800 G2 on BIOS N21 2.37 refuses the `PK` write; 2.63 accepts it. `exit` returns to the firmware. When an item cannot load from `BOOT_VIP`, the script sets `boot-url` to spore's own bootstrap address and tries the item again. If that fails too, iPXE exits to the firmware. sanboot takes no relative URL, which is why the script sets `boot-url`. Before HookOS, the script frees every other image with `imgfree`, because systemd-stub refuses to start while iPXE serves another image's initrd, and passes the command line as arguments, because without Secure Boot systemd-stub takes iPXE's arguments in place of its signed command line.
 
 HookOS is one UKI for every node, signed with the HookOS key. Its signed command line names no worker, and pins the agent image `ghcr.io/jonpulsifer/tink-agent-autoid` by digest. That image sets the agent ID to the MAC of the NIC that holds the default route. The firmware checks iPXE, HookOS and each image iPXE chains against `db`, and [PKI](../pki.md#talos-secure-boot-keys) says which key signs what.
 
 | URL path | File under `/var/lib/talos-boot/folly/` |
 | --- | --- |
-| `/talos/folly/metal-amd64-secureboot-uki.efi` | `current/metal-amd64-secureboot-uki.efi` |
-| `/talos/folly/metal-amd64-secureboot-uki.ipxe` | `current/metal-amd64-secureboot-uki.ipxe` |
-| `/talos/folly/prev/metal-amd64-secureboot-uki.efi` | `prev/metal-amd64-secureboot-uki.efi` |
 | `/talos/folly/metal-amd64-secureboot.iso` | `current/metal-amd64-secureboot.iso` |
 | `/talos/folly/hookos-amd64-secureboot-uki.efi` | `current/hookos-amd64-secureboot-uki.efi` |
 
 ## The mirror
 
-Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. Each anchor's mirror asks the releases API for the newest one of the version and downloads its five files. It skips the download while the UKI's ETag is unchanged. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed certificate's key made over the image's own hash: the UKI signing certificate for the UKI and iPXE, and the HookOS certificate for HookOS. A new release moves `current` to `prev`. A failed run changes neither.
+Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. Each anchor's mirror asks the releases API for the newest one of the version and downloads its ISO, iPXE and HookOS. It skips the download while it already serves that release's tag. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed certificate's key made over the image's own hash: the UKI signing certificate for iPXE, and the HookOS certificate for HookOS. A new release moves `current` to `prev`. A failed run changes neither.
 
-A Talos version bump fails the mirror until that version's release exists. The anchor serves the old UKI until then. A release without the UKI's script, iPXE or HookOS also fails it.
+A Talos version bump fails the mirror until that version's release exists. The anchor serves the old release until then. A release without the ISO, iPXE or HookOS also fails it.
 
 ## Alerts
 
@@ -87,7 +82,7 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
 - `clusters/folly/talos/secureboot/uki-signing-cert.pem`, `hookos-signing-cert.pem`: the certificates the mirror checks
 - `clusters/folly/talos/netboot.json`: the HookOS release and the agent image digest
-- `nix/images/ipxe-folly.nix`, `nix/images/hookos-folly.nix`: the unsigned iPXE and HookOS
+- `nix/images/ipxe-folly.nix`, `nix/images/hookos-folly.nix`: the unsigned iPXE, with its menu, and HookOS
 - `images/tink-agent-autoid/`: the agent image
 - `.github/scripts/talos-uki-verify.sh`: the signature check, shared with the image pipeline
 
