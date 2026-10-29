@@ -40,8 +40,10 @@ Devices with role `kubernetes-node` and status `planned`, `staged`, `active`,
 and the custom fields `install_disk`, `talos_class`, `tpm_version`,
 `bmc_type`, `desired_action`, `last_workflow`. A select field may be a string
 or a `{value, label}` object. Written: `desired_action` (back to `none`),
-`last_workflow`, `status` (`staged` on a run, `offline` after a retirement
-wipe) and journal entries.
+`last_workflow`, `status` (`staged` on a provision or wipe, `offline` after a
+retirement) and journal entries. A retirement is the `retire` run, which
+powers the node off; the controller starts it on status `decommissioning`,
+never from `desired_action`.
 
 The webhook is `POST /webhook` with NetBox's `X-Hook-Signature`, HMAC-SHA512
 hex of the body with the rule's secret. The body is not read for content: a

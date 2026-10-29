@@ -2,20 +2,41 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
 
-// Actions are the desired_action values that start a Workflow, and what each
-// one asks the provision Template to do.
-var Actions = map[string]struct{ Attest, Wipe bool }{
-	"provision": {Attest: true, Wipe: true},
-	"attest":    {Attest: true, Wipe: false},
-	"wipe":      {Attest: false, Wipe: true},
+// Labels on every Workflow: the device and the action.
+const (
+	NodeLabel   = "lolwtf.ca/node"
+	ActionLabel = "lolwtf.ca/action"
+)
+
+// ActionRetire is the Workflow the controller runs for a decommissioning
+// device. It is no desired_action: the status asks for it.
+const ActionRetire = "retire"
+
+// Action says what one run asks the provision Template to do, and the NetBox
+// status the device takes while it runs. An attest leaves an active node
+// active: staged would mark it enrolling in the Talos root and re-arm the
+// enrollment server's auto-approval.
+type Action struct {
+	Attest, Wipe, Retire bool
+	Status               string
+}
+
+// Actions are the runs the controller starts, by desired_action and by
+// ActionRetire.
+var Actions = map[string]Action{
+	"provision":  {Attest: true, Wipe: true, Status: "staged"},
+	"attest":     {Attest: true},
+	"wipe":       {Wipe: true, Status: "staged"},
+	ActionRetire: {Wipe: true, Retire: true},
 }
 
 func labels(d Device, extra map[string]string) map[string]any {
-	l := map[string]any{ManagedLabel: FieldManager, "lolwtf.ca/node": d.Name}
+	l := map[string]any{ManagedLabel: FieldManager, NodeLabel: d.Name}
 	for k, v := range extra {
 		l[k] = v
 	}
@@ -99,18 +120,29 @@ func WorkflowName(action, node string, now time.Time) string {
 	return fmt.Sprintf("%s-%s-%d", action, node, now.Unix())
 }
 
-// Workflow runs the provision Template for one action. A TPM 1.2 node skips
-// the attest step: it has no EK certificate chain to attest with. A device
-// without a BMC gets no boot options; somebody PXE-boots it by hand.
+func isRetireWorkflow(name, node string) bool {
+	return strings.HasPrefix(name, ActionRetire+"-"+node+"-")
+}
+
+// SkipsAttest says whether a device has no TPM 2.0 to attest with: an
+// explicit TPM 1.2, or the worker-g2 class, which is one. An unset version is
+// not a reason to skip.
+func SkipsAttest(d Device) bool {
+	return d.TPM == "1.2" || d.Class == "worker-g2"
+}
+
+// Workflow runs the provision Template for one action. A device without a
+// BMC gets no boot mode; somebody PXE-boots it by hand.
 func (c Config) Workflow(d Device, action string, now time.Time) Object {
 	a := Actions[action]
-	attest := a.Attest && d.TPM == "2.0"
+	attest := a.Attest && !SkipsAttest(d)
 	spec := map[string]any{
 		"templateRef": c.Template,
 		"hardwareRef": d.Name,
 		"hardwareMap": map[string]any{
 			"wipe":       fmt.Sprint(a.Wipe),
 			"attest":     fmt.Sprint(attest),
+			"retire":     fmt.Sprint(a.Retire),
 			"attest_url": c.AttestURL,
 			"ntp_server": c.NTPServer,
 		},
@@ -125,7 +157,7 @@ func (c Config) Workflow(d Device, action string, now time.Time) Object {
 		"kind":       WorkflowResource.Kind,
 		"metadata": map[string]any{
 			"name":   WorkflowName(action, d.Name, now),
-			"labels": labels(d, map[string]string{"lolwtf.ca/action": action}),
+			"labels": labels(d, map[string]string{ActionLabel: action}),
 		},
 		"spec": spec,
 	}
@@ -142,3 +174,7 @@ func Finished(state string) bool {
 
 // Succeeded says whether a Workflow state is the success.
 func Succeeded(state string) bool { return strings.TrimPrefix(state, "STATE_") == "SUCCESS" }
+
+func sortByCreatedDesc(objs []Object) {
+	sort.SliceStable(objs, func(a, b int) bool { return objs[a].Created().After(objs[b].Created()) })
+}

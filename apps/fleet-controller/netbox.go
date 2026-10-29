@@ -84,27 +84,36 @@ func (n *NetBox) do(ctx context.Context, method, path string, body, out any) err
 	return nil
 }
 
-// list pages a list endpoint by offset: the API's next link names whatever
-// host the request claimed to be.
+// list follows a list endpoint's next links. The link names whatever host the
+// request claimed to be, so only its path and query are used.
 func (n *NetBox) list(ctx context.Context, path string, out *[]json.RawMessage) error {
-	const limit = 100
 	sep := "?"
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	for offset := 0; ; offset += limit {
+	next := path + sep + "limit=100"
+	for i := 0; next != ""; i++ {
+		if i > 1000 {
+			return fmt.Errorf("%s: more than 1000 pages", path)
+		}
 		var page struct {
-			Count   int               `json:"count"`
+			Next    *string           `json:"next"`
 			Results []json.RawMessage `json:"results"`
 		}
-		if err := n.do(ctx, http.MethodGet, fmt.Sprintf("%s%slimit=%d&offset=%d", path, sep, limit, offset), nil, &page); err != nil {
+		if err := n.do(ctx, http.MethodGet, next, nil, &page); err != nil {
 			return err
 		}
 		*out = append(*out, page.Results...)
-		if len(page.Results) < limit || len(*out) >= page.Count {
-			return nil
+		next = ""
+		if page.Next != nil && *page.Next != "" {
+			u, err := url.Parse(*page.Next)
+			if err != nil {
+				return fmt.Errorf("next link %q: %w", *page.Next, err)
+			}
+			next = u.RequestURI()
 		}
 	}
+	return nil
 }
 
 // selectValue reads a NetBox value that is a plain string in one API shape and

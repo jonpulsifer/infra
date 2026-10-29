@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 )
@@ -89,19 +88,26 @@ func (r *Reconciler) Healthy(within time.Duration) (bool, string) {
 	return true, ""
 }
 
-// once returns true the first time a key is seen, so a condition the pass
-// finds again and again gets one journal entry.
-func (r *Reconciler) once(key string) bool {
+// journalOnce adds a journal entry the first time a key is seen, so a
+// condition the pass finds again and again is written once. The key is
+// marked only after the write succeeds.
+func (r *Reconciler) journalOnce(ctx context.Context, key string, d Device, kind, comment string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	seen := r.reported[key]
+	r.mu.Unlock()
+	if seen {
+		return nil
+	}
+	if err := r.NetBox.Update(ctx, d, "", nil, kind, comment); err != nil {
+		return err
+	}
+	r.mu.Lock()
 	if r.reported == nil {
 		r.reported = map[string]bool{}
 	}
-	if r.reported[key] {
-		return false
-	}
 	r.reported[key] = true
-	return true
+	r.mu.Unlock()
+	return nil
 }
 
 // Reconcile is one pass.
@@ -149,6 +155,32 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// deleteManaged deletes an object by name only when the controller made it.
+func (r *Reconciler) deleteManaged(ctx context.Context, res Resource, name string) error {
+	o, err := r.Kube.Get(ctx, res, name)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if o.Labels()[ManagedLabel] != FieldManager {
+		log.Printf("%s %s is not the controller's; left alone", res.Kind, name)
+		return nil
+	}
+	return r.Kube.Delete(ctx, res, name)
+}
+
+// nodeWorkflows lists the controller's Workflows for one device, newest first.
+func (r *Reconciler) nodeWorkflows(ctx context.Context, d Device) ([]Object, error) {
+	objs, err := r.Kube.List(ctx, WorkflowResource, ManagedLabel+"="+FieldManager+","+NodeLabel+"="+d.Name)
+	if err != nil {
+		return nil, fmt.Errorf("list Workflows: %w", err)
+	}
+	sortByCreatedDesc(objs)
+	return objs, nil
+}
+
 func (r *Reconciler) device(ctx context.Context, d Device) error {
 	hardware := d.MAC != "" && d.Disk != ""
 	if hardware {
@@ -164,41 +196,77 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		if err := r.Kube.Apply(ctx, MachineResource, m); err != nil {
 			return fmt.Errorf("apply Machine: %w", err)
 		}
-	} else if err := r.Kube.Delete(ctx, MachineResource, d.Name); err != nil {
+	} else if err := r.deleteManaged(ctx, MachineResource, d.Name); err != nil {
 		return fmt.Errorf("delete Machine: %w", err)
 	}
 
-	if d.Status == "decommissioning" {
-		return r.retire(ctx, d, hardware)
+	workflows, err := r.nodeWorkflows(ctx, d)
+	if err != nil {
+		return err
 	}
-	if _, ok := Actions[d.DesiredAction]; !ok {
+	if d.Status == "decommissioning" {
+		return r.retire(ctx, d, hardware, workflows)
+	}
+	// The owner took the device out of decommissioning: a retirement that has
+	// not finished is abandoned before it powers the node off.
+	for _, wf := range workflows {
+		if wf.Labels()[ActionLabel] == ActionRetire && !Finished(wf.State()) {
+			if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
+				return fmt.Errorf("abandon %s: %w", wf.Name(), err)
+			}
+			Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "abandoned: the device left decommissioning")
+		}
+	}
+	if _, ok := Actions[d.DesiredAction]; !ok || d.DesiredAction == ActionRetire {
 		return nil
 	}
 	if !hardware {
-		if r.once("no-hardware/" + d.Name + "/" + d.DesiredAction) {
-			why := "fleet-controller: " + d.DesiredAction + " waits: the device needs a primary MAC on an interface and install_disk"
-			if err := r.NetBox.Update(ctx, d, "", nil, "warning", why); err != nil {
-				return err
-			}
-		}
-		return nil
+		why := "fleet-controller: " + d.DesiredAction + " waits: the device needs a primary MAC on an interface and install_disk"
+		return r.journalOnce(ctx, "no-hardware/"+d.Name+"/"+d.DesiredAction, d, "warning", why)
 	}
-	return r.start(ctx, d, d.DesiredAction, "staged")
+	return r.start(ctx, d, d.DesiredAction, workflows)
 }
 
-// start creates the Workflow for an action and records it on the device.
-func (r *Reconciler) start(ctx context.Context, d Device, action, status string) error {
-	wf := r.Config.Workflow(d, action, r.Now())
-	name := wf.Name()
-	if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
-		return fmt.Errorf("create Workflow %s: %w", name, err)
+// start makes sure one Workflow runs for the device and that NetBox names it.
+// A run that is still going is adopted, never doubled: a second netboot
+// Workflow would power-cycle the node mid-wipe. The device's finished
+// Workflows are deleted first, because Tinkerbell's server may answer the
+// agent with the first finished Workflow it finds for its ID.
+func (r *Reconciler) start(ctx context.Context, d Device, action string, workflows []Object) error {
+	var name, running string
+	for _, wf := range workflows {
+		if Finished(wf.State()) {
+			if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
+				return fmt.Errorf("delete finished %s: %w", wf.Name(), err)
+			}
+			continue
+		}
+		if running == "" {
+			running = wf.Name()
+		}
 	}
-	r.Metrics.WorkflowsCreated.Add(1)
-	fields := map[string]any{"desired_action": "none", "last_workflow": name}
+	if running != "" {
+		name = running
+	} else {
+		wf := r.Config.Workflow(d, action, r.Now())
+		name = wf.Name()
+		if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
+			return fmt.Errorf("create Workflow %s: %w", name, err)
+		}
+		r.Metrics.WorkflowsCreated.Add(1)
+	}
+	status := Actions[action].Status
 	if status == d.Status {
 		status = ""
 	}
+	if d.DesiredAction == "none" && d.LastWorkflow == name && status == "" {
+		return nil
+	}
+	fields := map[string]any{"desired_action": "none", "last_workflow": name}
 	comment := fmt.Sprintf("fleet-controller: started Workflow %s (%s)", name, action)
+	if running != "" {
+		comment = fmt.Sprintf("fleet-controller: Workflow %s is still running; %s waits for it", name, action)
+	}
 	if err := r.NetBox.Update(ctx, d, status, fields, "info", comment); err != nil {
 		return fmt.Errorf("record Workflow %s: %w", name, err)
 	}
@@ -206,25 +274,22 @@ func (r *Reconciler) start(ctx context.Context, d Device, action, status string)
 	return nil
 }
 
-// retire wipes a decommissioning device once and, when the wipe succeeds,
-// deletes its objects and sets it offline. A failed wipe is journaled once
-// and left for the owner: a new desired_action is not read in this status,
-// so the owner sets status back to active, or offline by hand.
-func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool) error {
-	if !strings.HasPrefix(d.LastWorkflow, "wipe-"+d.Name+"-") {
+// retire runs one retire Workflow for a decommissioning device and, when the
+// Workflow named in last_workflow succeeds, deletes the device's objects and
+// sets it offline. A failed retirement is journaled once and left for the
+// owner, who moves the status on by hand.
+func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workflows []Object) error {
+	if !isRetireWorkflow(d.LastWorkflow, d.Name) {
 		if !hardware {
-			if r.once("no-hardware/" + d.Name + "/wipe") {
-				why := "fleet-controller: the retirement wipe waits: the device needs a primary MAC on an interface and install_disk"
-				return r.NetBox.Update(ctx, d, "", nil, "warning", why)
-			}
-			return nil
+			why := "fleet-controller: the retirement waits: the device needs a primary MAC on an interface and install_disk"
+			return r.journalOnce(ctx, "no-hardware/"+d.Name+"/"+ActionRetire, d, "warning", why)
 		}
-		return r.start(ctx, d, "wipe", "")
+		return r.start(ctx, d, ActionRetire, workflows)
 	}
 	wf, err := r.Kube.Get(ctx, WorkflowResource, d.LastWorkflow)
 	if errors.Is(err, ErrNotFound) {
-		// Pruned or lost before it finished: run the wipe again.
-		return r.start(ctx, d, "wipe", "")
+		// Pruned or lost before it finished: run the retirement again.
+		return r.start(ctx, d, ActionRetire, workflows)
 	}
 	if err != nil {
 		return fmt.Errorf("get Workflow %s: %w", d.LastWorkflow, err)
@@ -233,23 +298,20 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool) error 
 	switch {
 	case Succeeded(state):
 		for _, res := range []Resource{HardwareResource, MachineResource} {
-			if err := r.Kube.Delete(ctx, res, d.Name); err != nil {
+			if err := r.deleteManaged(ctx, res, d.Name); err != nil {
 				return fmt.Errorf("delete %s: %w", res.Kind, err)
 			}
 		}
-		comment := fmt.Sprintf("fleet-controller: Workflow %s wiped the disk; the device is offline and its Tinkerbell objects are gone", d.LastWorkflow)
+		comment := fmt.Sprintf("fleet-controller: Workflow %s wiped the disk and powered the node off; the device is offline and its Tinkerbell objects are gone", d.LastWorkflow)
 		if err := r.NetBox.Update(ctx, d, "offline", nil, "success", comment); err != nil {
 			return err
 		}
 		r.Metrics.Retired.Add(1)
 		Audit("fleet.retire", r.Config.Site, d, d.LastWorkflow, "wiped")
 	case Finished(state):
-		if r.once("wipe-failed/" + d.LastWorkflow) {
-			comment := fmt.Sprintf("fleet-controller: the retirement Workflow %s ended %s; the device stays decommissioning", d.LastWorkflow, state)
-			if err := r.NetBox.Update(ctx, d, "", nil, "danger", comment); err != nil {
-				return err
-			}
-			Audit("fleet.retire", r.Config.Site, d, d.LastWorkflow, strings.ToLower(state))
+		comment := fmt.Sprintf("fleet-controller: the retirement Workflow %s ended %s; the device stays decommissioning", d.LastWorkflow, state)
+		if err := r.journalOnce(ctx, "retire-failed/"+d.LastWorkflow, d, "danger", comment); err != nil {
+			return err
 		}
 	}
 	return nil

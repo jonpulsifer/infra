@@ -1,7 +1,8 @@
 # The one Template every fleet-controller Workflow runs in HookOS. Its hardwareMap says what the
-# run does: attest (true/false), wipe (true/false), attest_url and ntp_server. A provision attests,
-# wipes and netboots the signed Talos UKI; an attest leaves the disk and boots it; a wipe, the
-# retirement, wipes and netboots. Nothing in git starts a run: the controller on spore
+# run does: attest (true/false), wipe (true/false), retire (true/false), attest_url and ntp_server.
+# A provision attests, wipes and netboots the signed Talos UKI; an attest leaves the disk and boots
+# it; a wipe wipes and netboots; a retirement wipes and powers the node off. Nothing in git starts a
+# run: the controller on spore
 # (apps/fleet-controller) creates a Workflow when a NetBox device's desired_action is set, and
 # netboot goes off when the run succeeds, so Smee has no script for the MAC on the next boot and
 # the signed iPXE boots the signed Talos UKI (nix/images/ipxe-folly.nix).
@@ -30,6 +31,7 @@ spec:
           MAC: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
           ATTEST: "{{ .attest }}"
           WIPE: "{{ .wipe }}"
+          RETIRE: "{{ .retire }}"
           ATTEST_URL: "{{ .attest_url }}"
           NTP_SERVER: "{{ .ntp_server }}"
         actions:
@@ -106,6 +108,10 @@ spec:
               - |
                 set -eu
                 log() { echo "next-boot: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "next-boot: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$RETIRE" = true ]; then
+                  log "a retired node powers off; no next boot"
+                  exit 0
+                fi
                 mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars
                 if [ "$WIPE" = true ]; then
                   n=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
@@ -120,6 +126,7 @@ spec:
                 fi
                 efibootmgr -q -n "$n"
                 log "Boot$n ($what) is the next boot"
+          # A retired node powers off instead, and stays off until somebody turns it on.
           - name: reboot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
             timeout: 120
@@ -130,8 +137,10 @@ spec:
               - -c
               - |
                 set -eu
-                # A detached container reboots the node after this action reports success.
+                key=b; what="rebooting"
+                if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
+                # A detached container reboots or powers off the node after this action reports success.
                 docker run -d --privileged --name provision-reboot \
                   ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827 \
-                  sh -c 'sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo b >/proc/sysrq-trigger'
-                for t in /dev/tty0 /dev/ttyS0; do echo "provision: rebooting in 10 seconds" >"$t" 2>/dev/null || true; done
+                  sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
+                for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done

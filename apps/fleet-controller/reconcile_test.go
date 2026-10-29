@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,13 +18,17 @@ import (
 )
 
 // fakeNetBox serves a device list and records the patches and journal
-// entries it receives.
+// entries it receives. pageSize > 0 pages the device list with next links
+// that name a foreign host, as NetBox's do.
 type fakeNetBox struct {
-	mu       sync.Mutex
-	devices  []map[string]any
-	ifaces   []map[string]any
-	patches  []map[string]any
-	journals []map[string]any
+	mu        sync.Mutex
+	devices   []map[string]any
+	ifaces    []map[string]any
+	patches   []map[string]any
+	journals  []map[string]any
+	failPatch bool
+	pageSize  int
+	pages     int
 }
 
 func (f *fakeNetBox) handler() http.Handler {
@@ -31,18 +36,38 @@ func (f *fakeNetBox) handler() http.Handler {
 	mux.HandleFunc("GET /api/dcim/devices/", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"count": len(f.devices), "results": f.devices})
+		f.pages++
+		results := f.devices
+		var next any
+		if f.pageSize > 0 {
+			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+			end := offset + f.pageSize
+			if end > len(f.devices) {
+				end = len(f.devices)
+			}
+			results = f.devices[offset:end]
+			if end < len(f.devices) {
+				q := r.URL.Query()
+				q.Set("offset", strconv.Itoa(end))
+				next = "https://netbox.example/api/dcim/devices/?" + q.Encode()
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"count": len(f.devices), "next": next, "results": results})
 	})
 	mux.HandleFunc("GET /api/dcim/interfaces/", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"count": len(f.ifaces), "results": f.ifaces})
+		json.NewEncoder(w).Encode(map[string]any{"count": len(f.ifaces), "next": nil, "results": f.ifaces})
 	})
 	mux.HandleFunc("PATCH /api/dcim/devices/{id}/", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.failPatch {
+			http.Error(w, `{"detail":"down"}`, http.StatusBadGateway)
+			return
+		}
 		var p map[string]any
 		json.NewDecoder(r.Body).Decode(&p)
 		p["id"] = r.PathValue("id")
-		f.mu.Lock()
 		f.patches = append(f.patches, p)
-		f.mu.Unlock()
 		w.Write([]byte("{}"))
 	})
 	mux.HandleFunc("POST /api/extras/journal-entries/", func(w http.ResponseWriter, r *http.Request) {
@@ -57,11 +82,25 @@ func (f *fakeNetBox) handler() http.Handler {
 	return mux
 }
 
-// fakeKube stores objects by path.
+// fakeKube stores objects by path and filters lists by label selector.
 type fakeKube struct {
 	mu      sync.Mutex
 	objects map[string]Object
 	log     []string
+}
+
+func matches(o Object, selector string) bool {
+	if selector == "" {
+		return true
+	}
+	l := o.Labels()
+	for _, pair := range strings.Split(selector, ",") {
+		k, v, _ := strings.Cut(pair, "=")
+		if l[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func (f *fakeKube) handler() http.Handler {
@@ -97,13 +136,14 @@ func (f *fakeKube) handler() http.Handler {
 				json.NewEncoder(w).Encode(o)
 				return
 			}
-			var items []Object
+			items := []Object{}
 			for p, o := range f.objects {
-				if strings.HasPrefix(p, r.URL.Path+"/") {
+				if strings.HasPrefix(p, r.URL.Path+"/") && matches(o, r.URL.Query().Get("labelSelector")) {
 					items = append(items, o)
 				}
 			}
-			if items == nil && !strings.HasSuffix(r.URL.Path, "s") && !strings.HasSuffix(r.URL.Path, "hardware") {
+			// group/version/namespaces/<ns>/<plural> is a list; one more segment names an object.
+			if len(items) == 0 && strings.Count(strings.TrimPrefix(r.URL.Path, "/apis/"), "/") > 4 {
 				http.NotFound(w, r)
 				return
 			}
@@ -123,6 +163,35 @@ func (f *fakeKube) get(path string) Object {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.objects[path]
+}
+
+func (f *fakeKube) workflows() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var names []string
+	for p := range f.objects {
+		if strings.HasPrefix(p, wfBase) {
+			names = append(names, strings.TrimPrefix(p, wfBase))
+		}
+	}
+	return names
+}
+
+func (f *fakeKube) setState(name, state string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.objects[wfBase+name]["status"] = map[string]any{"state": state}
+}
+
+func workflowObject(name, node, action, created, state string) Object {
+	o := Object{"metadata": map[string]any{
+		"name": name, "creationTimestamp": created,
+		"labels": map[string]any{ManagedLabel: FieldManager, NodeLabel: node, ActionLabel: action},
+	}}
+	if state != "" {
+		o["status"] = map[string]any{"state": state}
+	}
+	return o
 }
 
 func device(name, status, action string, cf map[string]any) map[string]any {
@@ -148,6 +217,25 @@ func device(name, status, action string, cf map[string]any) map[string]any {
 	}
 }
 
+func riptideIfaces() []map[string]any {
+	return []map[string]any{{
+		"id": 3, "device": map[string]any{"id": 7},
+		"primary_mac_address": map[string]any{"mac_address": "38:22:E2:2D:96:44"},
+	}}
+}
+
+func (f *fakeNetBox) set(field string, value any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if field == "status" {
+		f.devices[0]["status"] = value
+		return
+	}
+	f.devices[0]["custom_fields"].(map[string]any)[field] = value
+}
+
+var testNow = time.Unix(1_700_000_000, 0)
+
 func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func()) {
 	t.Helper()
 	if kube.objects == nil {
@@ -163,12 +251,13 @@ func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func())
 		BMCSecrets:  map[string]string{"amt": "bmc-amt", "redfish": "bmc-redfish"},
 		RedfishPort: 443, AMTPort: 16992,
 	}
+	now := testNow
 	r := &Reconciler{
 		Config:  cfg,
 		NetBox:  &NetBox{URL: nbs.URL, Token: "nbt_x.y", Client: nbs.Client()},
 		Kube:    &Kube{Server: ks.URL, Namespace: "tinkerbell", Client: ks.Client()},
 		Metrics: NewMetrics(),
-		Now:     func() time.Time { return time.Unix(1_700_000_000, 0) },
+		Now:     func() time.Time { now = now.Add(time.Second); return now },
 	}
 	return r, func() { nbs.Close(); ks.Close() }
 }
@@ -217,14 +306,43 @@ func TestParseDeviceBMCAddress(t *testing.T) {
 	}
 }
 
-func TestProvisionStartsOneWorkflow(t *testing.T) {
-	nb := &fakeNetBox{
-		devices: []map[string]any{device("riptide", "active", "provision", nil)},
-		ifaces: []map[string]any{{
-			"id": 3, "device": map[string]any{"id": 7},
-			"primary_mac_address": map[string]any{"mac_address": "38:22:E2:2D:96:44"},
-		}},
+func TestSkipsAttest(t *testing.T) {
+	for _, c := range []struct {
+		d    Device
+		want bool
+	}{
+		{Device{TPM: "2.0"}, false},
+		{Device{TPM: ""}, false},
+		{Device{TPM: "1.2"}, true},
+		{Device{TPM: "", Class: "worker-g2"}, true},
+	} {
+		if got := SkipsAttest(c.d); got != c.want {
+			t.Errorf("SkipsAttest(%+v) = %v", c.d, got)
+		}
 	}
+}
+
+func TestPagingFollowsNext(t *testing.T) {
+	devices := []map[string]any{}
+	for i := 0; i < 5; i++ {
+		d := device(fmt.Sprintf("node%d", i), "active", "none", nil)
+		d["id"] = 100 + i
+		devices = append(devices, d)
+	}
+	nb := &fakeNetBox{devices: devices, pageSize: 2}
+	r, done := newTest(t, nb, &fakeKube{})
+	defer done()
+	got, err := r.NetBox.Devices(context.Background(), "folly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 || nb.pages != 3 {
+		t.Fatalf("%d devices over %d pages", len(got), nb.pages)
+	}
+}
+
+func TestProvisionStartsOneWorkflow(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -256,13 +374,14 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if conn["host"] != "10.3.0.12" || conn["authSecretRef"].(map[string]any)["name"] != "bmc-amt" {
 		t.Errorf("connection %v", conn)
 	}
-	wfName := "provision-riptide-1700000000"
-	wf := kube.get(wfBase + wfName)
-	if wf == nil {
-		t.Fatal("no Workflow created")
+	names := kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-riptide-") {
+		t.Fatalf("workflows %v", names)
 	}
+	wfName := names[0]
+	wf := kube.get(wfBase + wfName)
 	hm := wf["spec"].(map[string]any)["hardwareMap"].(map[string]any)
-	if hm["wipe"] != "true" || hm["attest"] != "true" || hm["attest_url"] != "http://10.9.0.14/attest" || hm["ntp_server"] != "10.9.0.14" {
+	if hm["wipe"] != "true" || hm["attest"] != "true" || hm["retire"] != "false" || hm["attest_url"] != "http://10.9.0.14/attest" || hm["ntp_server"] != "10.9.0.14" {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	boot := wf["spec"].(map[string]any)["bootOptions"].(map[string]any)
@@ -282,25 +401,78 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	}
 
 	// The webhook rings on the controller's own write. NetBox now shows the reset field.
-	nb.mu.Lock()
-	nb.devices[0]["custom_fields"].(map[string]any)["desired_action"] = "none"
-	nb.devices[0]["custom_fields"].(map[string]any)["last_workflow"] = wfName
-	nb.devices[0]["status"] = "staged"
-	nb.mu.Unlock()
+	nb.set("desired_action", "none")
+	nb.set("last_workflow", wfName)
+	nb.set("status", "staged")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(nb.patches) != 1 {
 		t.Fatalf("a second pass wrote again: %v", nb.patches)
 	}
-	var workflows int
-	for p := range kube.objects {
-		if strings.HasPrefix(p, wfBase) {
-			workflows++
+	if n := kube.workflows(); len(n) != 1 {
+		t.Fatalf("%v after two passes", n)
+	}
+
+	// The owner sets desired_action again mid-run: no second run.
+	nb.set("desired_action", "attest")
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := kube.workflows(); len(n) != 1 || n[0] != wfName {
+		t.Fatalf("a second run started mid-run: %v", n)
+	}
+	last := nb.patches[len(nb.patches)-1]
+	if last["custom_fields"].(map[string]any)["desired_action"] != "none" || last["custom_fields"].(map[string]any)["last_workflow"] != wfName {
+		t.Errorf("mid-run patch %v", last)
+	}
+
+	// The run finishes; a new action deletes the finished run and starts one.
+	nb.set("desired_action", "attest")
+	nb.set("status", "active")
+	kube.setState(wfName, "SUCCESS")
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	n := kube.workflows()
+	if len(n) != 1 || !strings.HasPrefix(n[0], "attest-riptide-") {
+		t.Fatalf("after the finished run: %v", n)
+	}
+	last = nb.patches[len(nb.patches)-1]
+	if _, has := last["status"]; has {
+		t.Errorf("attest changed the status: %v", last)
+	}
+}
+
+func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces(), failPatch: true}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+
+	for i := 0; i < 3; i++ {
+		if err := r.Reconcile(context.Background()); err == nil {
+			t.Fatal("a failed PATCH was not reported")
 		}
 	}
-	if workflows != 1 {
-		t.Fatalf("%d workflows after two passes", workflows)
+	names := kube.workflows()
+	if len(names) != 1 {
+		t.Fatalf("workflows after three failing passes: %v", names)
+	}
+	nb.mu.Lock()
+	nb.failPatch = false
+	nb.mu.Unlock()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := kube.workflows(); len(n) != 1 || n[0] != names[0] {
+		t.Fatalf("the recovery pass changed the run: %v", n)
+	}
+	if len(nb.patches) != 1 || nb.patches[0]["custom_fields"].(map[string]any)["last_workflow"] != names[0] {
+		t.Fatalf("recovery patch %v", nb.patches)
+	}
+	if r.Metrics.WorkflowsCreated.Load() != 1 {
+		t.Errorf("created %d", r.Metrics.WorkflowsCreated.Load())
 	}
 }
 
@@ -309,16 +481,18 @@ func TestWipeSkipsAttestOnTPM12AndManualBootWithoutBMC(t *testing.T) {
 	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: []map[string]any{{
 		"id": 1, "device": map[string]any{"id": 7}, "primary_mac_address": map[string]any{"mac_address": "ec:8e:b5:72:35:24"},
 	}}}
-	kube := &fakeKube{}
+	foreign := Object{"metadata": map[string]any{"name": "shale", "labels": map[string]any{"kustomize.toolkit.fluxcd.io/name": "tinkerbell"}}}
+	kube := &fakeKube{objects: map[string]Object{strings.Replace(mPath, "riptide", "shale", 1): foreign}}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	wf := kube.get(wfBase + "wipe-shale-1700000000")
-	if wf == nil {
-		t.Fatal("no Workflow")
+	names := kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "wipe-shale-") {
+		t.Fatalf("workflows %v", names)
 	}
+	wf := kube.get(wfBase + names[0])
 	hm := wf["spec"].(map[string]any)["hardwareMap"].(map[string]any)
 	if hm["attest"] != "false" || hm["wipe"] != "true" {
 		t.Errorf("hardwareMap %v", hm)
@@ -326,39 +500,40 @@ func TestWipeSkipsAttestOnTPM12AndManualBootWithoutBMC(t *testing.T) {
 	if _, has := wf["spec"].(map[string]any)["bootOptions"].(map[string]any)["bootMode"]; has {
 		t.Error("a device without a BMC got a bootMode")
 	}
-	if kube.get(strings.Replace(mPath, "riptide", "shale", 1)) != nil {
-		t.Error("a device without a BMC got a Machine")
+	if kube.get(strings.Replace(mPath, "riptide", "shale", 1)) == nil {
+		t.Error("a Machine the controller does not own was deleted")
 	}
 }
 
 func TestRetirement(t *testing.T) {
-	d := device("riptide", "decommissioning", "none", nil)
-	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: []map[string]any{{
-		"id": 1, "device": map[string]any{"id": 7}, "primary_mac_address": map[string]any{"mac_address": "38:22:e2:2d:96:44"},
-	}}}
-	kube := &fakeKube{}
+	old := testNow.Add(-2 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	d := device("riptide", "decommissioning", "none", map[string]any{"last_workflow": "wipe-riptide-1"})
+	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	// An earlier owner-asked wipe succeeded within the TTL. It is no retirement.
+	kube := &fakeKube{objects: map[string]Object{wfBase + "wipe-riptide-1": workflowObject("wipe-riptide-1", "riptide", "wipe", old, "SUCCESS")}}
 	r, done := newTest(t, nb, kube)
 	defer done()
 
-	// First pass: a wipe starts, status stays.
+	// First pass: a retire run starts, status stays, the finished wipe is deleted.
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	wfName := "wipe-riptide-1700000000"
-	if kube.get(wfBase+wfName) == nil {
-		t.Fatal("no wipe Workflow")
+	names := kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "retire-riptide-") {
+		t.Fatalf("workflows %v", names)
+	}
+	wfName := names[0]
+	hm := kube.get(wfBase + wfName)["spec"].(map[string]any)["hardwareMap"].(map[string]any)
+	if hm["retire"] != "true" || hm["wipe"] != "true" || hm["attest"] != "false" {
+		t.Errorf("hardwareMap %v", hm)
 	}
 	if _, has := nb.patches[0]["status"]; has {
-		t.Errorf("status changed on the wipe start: %v", nb.patches[0])
+		t.Errorf("status changed on the retire start: %v", nb.patches[0])
 	}
 
-	// Second pass: the wipe runs; nothing happens.
-	nb.mu.Lock()
-	nb.devices[0]["custom_fields"].(map[string]any)["last_workflow"] = wfName
-	nb.mu.Unlock()
-	kube.mu.Lock()
-	kube.objects[wfBase+wfName]["status"] = map[string]any{"state": "RUNNING"}
-	kube.mu.Unlock()
+	// Second pass: the run goes; nothing happens.
+	nb.set("last_workflow", wfName)
+	kube.setState(wfName, "RUNNING")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -367,9 +542,7 @@ func TestRetirement(t *testing.T) {
 	}
 
 	// Third pass: success → offline, objects gone.
-	kube.mu.Lock()
-	kube.objects[wfBase+wfName]["status"] = map[string]any{"state": "SUCCESS"}
-	kube.mu.Unlock()
+	kube.setState(wfName, "SUCCESS")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -382,10 +555,47 @@ func TestRetirement(t *testing.T) {
 	}
 }
 
+func TestLeavingDecommissioningAbandonsTheRetirement(t *testing.T) {
+	d := device("riptide", "decommissioning", "none", nil)
+	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	wfName := kube.workflows()[0]
+	nb.set("last_workflow", wfName)
+	nb.set("status", "active")
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := kube.workflows(); len(n) != 0 {
+		t.Fatalf("the retirement survived the status change: %v", n)
+	}
+}
+
+func TestFailedRetirementJournalsOnce(t *testing.T) {
+	d := device("riptide", "decommissioning", "none", map[string]any{"last_workflow": "retire-riptide-5"})
+	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{wfBase + "retire-riptide-5": workflowObject("retire-riptide-5", "riptide", "retire", testNow.UTC().Format(time.RFC3339), "FAILED")}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	for i := 0; i < 3; i++ {
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(nb.journals) != 1 || len(nb.patches) != 0 {
+		t.Fatalf("journals %d patches %d", len(nb.journals), len(nb.patches))
+	}
+	if n := kube.workflows(); len(n) != 1 {
+		t.Fatalf("a failed retirement was rerun: %v", n)
+	}
+}
+
 func TestOfflineDevicesLoseTheirObjects(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: []map[string]any{{
-		"id": 1, "device": map[string]any{"id": 7}, "primary_mac_address": map[string]any{"mac_address": "38:22:e2:2d:96:44"},
-	}}}
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{
 		strings.Replace(hwPath, "riptide", "gone", 1): {
 			"metadata": map[string]any{"name": "gone", "labels": map[string]any{ManagedLabel: FieldManager}},
@@ -403,11 +613,11 @@ func TestOfflineDevicesLoseTheirObjects(t *testing.T) {
 
 func TestPrune(t *testing.T) {
 	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}}
-	old := time.Unix(1_700_000_000, 0).Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	fresh := time.Unix(1_700_000_000, 0).Add(-time.Hour).UTC().Format(time.RFC3339)
+	old := testNow.Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	fresh := testNow.Add(-time.Hour).UTC().Format(time.RFC3339)
 	kube := &fakeKube{objects: map[string]Object{
-		wfBase + "old":   {"metadata": map[string]any{"name": "old", "creationTimestamp": old, "labels": map[string]any{ManagedLabel: FieldManager}}},
-		wfBase + "fresh": {"metadata": map[string]any{"name": "fresh", "creationTimestamp": fresh, "labels": map[string]any{ManagedLabel: FieldManager}}},
+		wfBase + "old":   workflowObject("old", "other", "attest", old, "SUCCESS"),
+		wfBase + "fresh": workflowObject("fresh", "other", "attest", fresh, "SUCCESS"),
 	}}
 	r, done := newTest(t, nb, kube)
 	defer done()
