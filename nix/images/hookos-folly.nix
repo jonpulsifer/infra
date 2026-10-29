@@ -29,6 +29,9 @@ let
     "iommu=pt"
     "console=ttyS0,115200"
     "console=tty0"
+    # The Talos installer reads talos.platform from the host's /proc/cmdline before it touches the
+    # disk, and dereferences a nil pointer when the argument is absent. HookOS ignores it.
+    "talos.platform=metal"
     "tink_worker_image=${pins.tink_agent_image}"
     "fleet_intake_url=https://enroll.${fleet.dnsZone}${talosConfig.intakePath}"
   ];
