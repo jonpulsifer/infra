@@ -58,7 +58,7 @@ spec:
                   log "$NTP_SERVER did not answer; the clock stays $(date -u)"
                 fi
           - name: attest
-            image: ghcr.io/jonpulsifer/tink-attest@sha256:d8527e8657c881226bfa1c0bcf8ad40b5fc3540af5b2a793113491eec7c45695
+            image: ghcr.io/jonpulsifer/tink-attest@sha256:87576f709201acf7e2217d9b44fe3df0411daee95ad5e0b4c9ea373b2b865689
             timeout: 600
             command:
               - /bin/sh
