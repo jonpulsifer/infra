@@ -360,7 +360,7 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 	f := newFakeNetBox(t)
 	nb := f.client()
 	claim := protocol.Machine{Serial: "mxl9999999", MAC: "AA:BB:CC:DD:EE:01", Hostname: "shoal", Manufacturer: "HP", Model: "HP EliteDesk 800 G5 Desktop Mini", SKU: "9GB06UC#ABA", BIOS: "R21 Ver. 02.20.00"}
-	m, err := nb.Create(context.Background(), claim)
+	m, err := nb.Create(context.Background(), claim, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 
 	// A generic hostname, an unknown model and a taken name.
 	claim2 := protocol.Machine{Serial: "SIM-NEW", MAC: "aa:bb:cc:dd:ee:02", Hostname: "hookos", Manufacturer: "Dell Inc.", Model: "OptiPlex 7010"}
-	m2, err := nb.Create(context.Background(), claim2)
+	m2, err := nb.Create(context.Background(), claim2, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,11 +392,11 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 		t.Fatalf("device type %q", f.types[d2.TypeID])
 	}
 	claim3 := protocol.Machine{Serial: "SIM-DUP", MAC: "aa:bb:cc:dd:ee:03", Hostname: "shoal", Model: "OptiPlex 7010"}
-	m3, err := nb.Create(context.Background(), claim3)
+	m3, err := nb.Create(context.Background(), claim3, "")
 	if err != nil || m3.Name != "intake-sim-dup" {
 		t.Fatalf("taken hostname: %+v %v", m3, err)
 	}
-	if _, err := nb.Create(context.Background(), protocol.Machine{Serial: "SIM-NOMODEL", MAC: "aa:bb:cc:dd:ee:04"}); err == nil {
+	if _, err := nb.Create(context.Background(), protocol.Machine{Serial: "SIM-NOMODEL", MAC: "aa:bb:cc:dd:ee:04"}, ""); err == nil {
 		t.Fatal("a claim with no model made a device")
 	}
 }
@@ -512,7 +512,7 @@ func TestFirstSightCreatesOneDevicePerSerial(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			m, err := v.firstSight(context.Background(), claim)
+			m, _, err := v.firstSight(context.Background(), claim, "")
 			ids[i], errs[i] = m.NetBoxID, err
 		}(i)
 	}

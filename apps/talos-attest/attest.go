@@ -58,6 +58,11 @@ type Verifier struct {
 	// Fleet, when set, renders an intake pass's Talos config under an
 	// install code that the confirm answers.
 	Fleet *FleetRender
+	// Intake, when set, is the intake policy and the owner's window. Under
+	// declared, a planned stub with no MAC binds to the box that attests as
+	// its serial; under open, within the window, a serial NetBox does not
+	// know passes as a planned device does.
+	Intake *IntakeWindow
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -82,6 +87,10 @@ type session struct {
 	renew   *Record
 	akBlobs protocol.Blobs
 	ldBlobs protocol.Blobs
+	// intakeUntil is when the window that admitted an unknown serial under
+	// the open policy closes; bind is a declared stub the pass binds to.
+	intakeUntil time.Time
+	bind        bool
 }
 
 func (v *Verifier) random(n int) []byte {
@@ -103,6 +112,17 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 	m, ok, err := v.lookupMachine(ctx, req.Machine.Serial)
 	if err != nil {
 		return protocol.StartResponse{}, v.reject(nil, req.Machine, err)
+	}
+	// The open window speaks only for a serial no source knows; for a known
+	// one it changes no outcome. Under the declared policy the window does
+	// nothing: the planned stub the owner declared is the authorization, and
+	// the pass binds the box to a stub that has no MAC yet.
+	var intakeUntil time.Time
+	window, bind := false, false
+	if !ok && v.NetBox != nil {
+		intakeUntil, window = v.intakeOpen(now, intakePolicyOpen)
+	} else if ok && v.Intake != nil && v.Intake.Policy == intakePolicyDeclared && m.FromNetBox && m.NetBoxID != 0 && strings.EqualFold(m.Status, statusPlanned) && m.MAC == "" {
+		bind = true
 	}
 	if !ok {
 		if v.NetBox == nil {
@@ -133,7 +153,8 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 		}
 		eks = append(eks, ek)
 	}
-	if err := v.checkPinned(m, eks); err != nil {
+	admitted, err := v.checkPinned(m, eks, window)
+	if err != nil {
 		// A first intake's wait is kept apart from the machine records, as
 		// the claim it is, for the owner to approve. Nothing proved any of
 		// these refusals came from the machine, so none touches a record.
@@ -141,6 +162,12 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 			return protocol.StartResponse{}, v.pend(ctx, m, req.Machine, eks, err)
 		}
 		return protocol.StartResponse{}, v.reject(&m, req.Machine, err)
+	}
+	if admitted {
+		// The controller binds a window's device by this name.
+		m.Name = "intake-" + serialSlug(req.Machine.Serial)
+	} else {
+		intakeUntil = time.Time{}
 	}
 
 	akPub, err := attest.ParseAKPublic(req.AK.Public)
@@ -156,6 +183,9 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 		nonce:    v.random(32),
 		secrets:  map[string][]byte{},
 		expires:  now.Add(v.SessionTTL),
+
+		intakeUntil: intakeUntil,
+		bind:        bind,
 	}
 	resp := protocol.StartResponse{Nonce: s.nonce, Expires: s.expires}
 	for _, ek := range eks {
@@ -274,41 +304,51 @@ func (v *Verifier) open(s *session) string {
 // owner ordered and entered before it arrived, needs no approval when every
 // EK carries a manufacturer certificate: the supply chain vouches for it,
 // and the pass writes its hashes as the pins. Every EK still has to pass
-// activation.
-func (v *Verifier) checkPinned(m Machine, eks []VerifiedEK) error {
-	pinned := maps.Clone(m.Pins)
-	if pinned == nil {
-		pinned = map[string]string{}
+// activation. Within an open window, window says the serial is one no
+// source knows, which the supply chain then vouches for as for a planned
+// machine; the answer says whether the window admitted it.
+func (v *Verifier) checkPinned(m Machine, eks []VerifiedEK, window bool) (bool, error) {
+	if len(m.Pins) > 0 {
+		return false, matchPins(m, eks)
 	}
-	if len(pinned) == 0 {
-		a, err := v.Store.Approvals()
-		if err != nil {
-			return fmt.Errorf("approvals: %w", err)
+	a, err := v.Store.Approvals()
+	if err != nil {
+		return false, fmt.Errorf("approvals: %w", err)
+	}
+	approved := map[string]bool{}
+	for _, h := range a[serialKey(m.Serial)] {
+		approved[h] = true
+	}
+	planned := m.FromNetBox && strings.EqualFold(m.Status, statusPlanned)
+	if len(approved) == 0 && (planned || window) {
+		why := "is planned"
+		if !planned {
+			why = "is unknown to NetBox in the open intake window"
 		}
-		approved := map[string]bool{}
-		for _, h := range a[serialKey(m.Serial)] {
-			approved[h] = true
-		}
-		if len(approved) == 0 && m.FromNetBox && strings.EqualFold(m.Status, statusPlanned) {
-			for _, ek := range eks {
-				if ek.Issuer == "" {
-					return fail(reasonEKPending, "%s is planned, but its %s EK has no manufacturer certificate; approve %s on first intake", m.Name, ek.Alg, ekSummary(eks))
-				}
-			}
-			v.Log.Info("planned machine admitted by its EK certificates", "machine", m.Name, "eks", ekSummary(eks))
-			return nil
-		}
-		if len(approved) == 0 {
-			return fail(reasonEKPending, "%s has no EK hash on record; approve %s on first intake", m.Name, ekSummary(eks))
-		}
-		// Approved hashes are pins: another EK is a mismatch, not a new claim.
 		for _, ek := range eks {
-			if !approved[ek.Hash] {
-				return fail(reasonEKHash, "%s EK %s is not among %s's approved hashes", ek.Alg, ek.Hash, m.Name)
+			if ek.Issuer == "" {
+				return false, fail(reasonEKPending, "%s %s, but its %s EK has no manufacturer certificate; approve %s on first intake", m.Name, why, ek.Alg, ekSummary(eks))
 			}
 		}
-		return nil
+		v.Log.Info("machine admitted by its EK certificates", "machine", m.Name, "planned", planned, "window", !planned, "eks", ekSummary(eks))
+		return !planned, nil
 	}
+	if len(approved) == 0 {
+		return false, fail(reasonEKPending, "%s has no EK hash on record; approve %s on first intake", m.Name, ekSummary(eks))
+	}
+	// Approved hashes are pins: another EK is a mismatch, not a new claim.
+	for _, ek := range eks {
+		if !approved[ek.Hash] {
+			return false, fail(reasonEKHash, "%s EK %s is not among %s's approved hashes", ek.Alg, ek.Hash, m.Name)
+		}
+	}
+	return false, nil
+}
+
+// matchPins checks the EKs against the hashes the record pins: each pinned
+// algorithm sent with its hash, and no other EK without a certificate.
+func matchPins(m Machine, eks []VerifiedEK) error {
+	pinned := m.Pins
 	for alg, want := range pinned {
 		i := slices.IndexFunc(eks, func(e VerifiedEK) bool { return e.Alg == alg })
 		if i < 0 {
@@ -393,12 +433,31 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 		if !v.admitIntake(v.Now(), s.eks[0].Hash) {
 			return protocol.Verdict{}, v.reject(&s.machine, s.claim, fail(reasonIntakeRate, "too many first-sight devices this hour; try later"))
 		}
-		created, err := v.firstSight(ctx, s.claim)
+		name := ""
+		if !s.intakeUntil.IsZero() {
+			name = s.machine.Name
+		}
+		created, fresh, err := v.firstSight(ctx, s.claim, name)
 		if err != nil {
 			v.Log.Error("NetBox device creation", "serial", s.claim.Serial, "err", err)
 			return protocol.Verdict{}, v.reject(&s.machine, s.claim, fail(reasonNetBox, "the device for serial %q could not be created in NetBox: %v", s.claim.Serial, err))
 		}
-		created.Pins = s.machine.Pins
+		if !fresh && !s.intakeUntil.IsZero() {
+			// NetBox learned the serial since the start, from the owner or
+			// another anchor: the window never speaks for a known device, so
+			// its own lifecycle and pins decide.
+			if created.blocked() {
+				return protocol.Verdict{}, v.reject(&created, s.claim, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", created.Name, created.Status))
+			}
+			if len(created.Pins) > 0 {
+				if err := matchPins(created, s.eks); err != nil {
+					return protocol.Verdict{}, v.reject(&created, s.claim, err)
+				}
+			}
+			s.intakeUntil = time.Time{}
+		} else {
+			created.Pins = s.machine.Pins
+		}
 		s.machine = created
 	}
 
@@ -468,6 +527,9 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 			v.Log.Warn("record pins", "machine", s.machine.Name, "err", err)
 		}
 	}
+	if !s.intakeUntil.IsZero() || s.bind {
+		v.intakePass(ctx, s)
+	}
 	v.mu.Lock()
 	s.passed = true
 	s.passedAt = v.Now()
@@ -481,11 +543,34 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	return protocol.Verdict{Verdict: protocol.VerdictPass, LDevIDCert: ldevidCert.Raw, LAKCert: lakCert.Raw, Chain: chain}, nil
 }
 
+// intakePass audits an intake pass: one the open window granted, or a
+// declared stub's. A declared stub binds to the box first: the claimed MAC
+// goes on the stub's interface, and its name stays. A failed write is
+// logged and the pass stands, as for any other fact NetBox misses.
+func (v *Verifier) intakePass(ctx context.Context, s *session) {
+	policy, reason := intakePolicyOpen, "created at staged, window open until "+s.intakeUntil.UTC().Format(time.RFC3339)
+	if s.bind {
+		policy, reason = intakePolicyDeclared, "bound to the declared stub"
+		if normalMAC(s.claim.MAC) != "" {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			if err := v.NetBox.Bind(ctx, s.machine.NetBoxID, s.claim); err != nil {
+				v.Log.Warn("bind the declared stub", "machine", s.machine.Name, "serial", s.machine.Serial, "err", err)
+				reason = "bound to the declared stub; MAC not set: " + err.Error()
+			}
+			cancel()
+		}
+	}
+	v.Log.Info("intake pass", "machine", s.machine.Name, "serial", s.machine.Serial, "policy", policy, "reason", reason)
+	v.Audit.Emit(AuditEntry{Event: auditIntake, Node: s.machine.Name, Serial: s.machine.Serial, Class: s.machine.Class, Status: protocol.VerdictPass,
+		Reason: reason + "; policy " + policy})
+}
+
 // firstSight creates the NetBox device for a serial NetBox never saw, once
 // per serial at a time: two sessions for one machine, or two anchors' worth
 // of retries landing here, look NetBox up again under the serial's lock and
-// take the device the other made.
-func (v *Verifier) firstSight(ctx context.Context, claim protocol.Machine) (Machine, error) {
+// take the device the other made, which fresh reports. An empty name lets
+// Create name the device.
+func (v *Verifier) firstSight(ctx context.Context, claim protocol.Machine, name string) (m Machine, fresh bool, err error) {
 	key := serialKey(claim.Serial)
 	v.mu.Lock()
 	if v.creating == nil {
@@ -500,16 +585,16 @@ func (v *Verifier) firstSight(ctx context.Context, claim protocol.Machine) (Mach
 	mu.Lock()
 	defer mu.Unlock()
 	if m, ok, err := v.NetBox.Lookup(ctx, claim.Serial); err != nil {
-		return Machine{}, err
+		return Machine{}, false, err
 	} else if ok {
-		return m, nil
+		return m, false, nil
 	}
-	created, err := v.NetBox.Create(ctx, claim)
+	created, err := v.NetBox.Create(ctx, claim, name)
 	if err != nil {
-		return Machine{}, err
+		return Machine{}, false, err
 	}
 	v.Log.Info("NetBox device created on first sight", "machine", created.Name, "serial", created.Serial, "mac", created.MAC)
-	return created, nil
+	return created, true, nil
 }
 
 // BackfillNetBox writes every pass this anchor's own intake produced to a

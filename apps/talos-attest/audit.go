@@ -39,6 +39,9 @@ const (
 	auditRenew   = "attest.renew"
 	// auditInstall says whether an intake pass got an install code.
 	auditInstall = "attest.install"
+	// auditIntake is a pass the open intake window granted, and the window
+	// opening or closing through the admin API.
+	auditIntake = "attest.intake"
 )
 
 // Emit writes e with the site and the time filled in. A nil Audit is quiet.

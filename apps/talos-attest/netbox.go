@@ -257,8 +257,12 @@ func intakeName(claim protocol.Machine) string {
 
 // Create adds a device at staged for a serial NetBox has never seen, with
 // the device type the SMBIOS model names, made under its manufacturer when
-// NetBox lacks it, and the NIC's MAC on its first interface.
-func (n *NetBox) Create(ctx context.Context, claim protocol.Machine) (Machine, error) {
+// NetBox lacks it, and the NIC's MAC on its first interface. It is named
+// name, or by intakeName when name is empty.
+func (n *NetBox) Create(ctx context.Context, claim protocol.Machine, name string) (Machine, error) {
+	if name == "" {
+		name = intakeName(claim)
+	}
 	siteID, err := n.idBy(ctx, "/api/dcim/sites/", "slug", n.Site)
 	if err != nil {
 		return Machine{}, err
@@ -279,7 +283,7 @@ func (n *NetBox) Create(ctx context.Context, claim protocol.Machine) (Machine, e
 		fields["bios_version"] = claim.BIOS
 	}
 	body := map[string]any{
-		"name":          intakeName(claim),
+		"name":          name,
 		"device_type":   typeID,
 		"role":          roleID,
 		"site":          siteID,
@@ -312,6 +316,18 @@ func (n *NetBox) Create(ctx context.Context, claim protocol.Machine) (Machine, e
 	d.Status.Value = statusStaged
 	d.Serial = serialKey(claim.Serial)
 	return d.machine(mac), nil
+}
+
+// Bind puts a box's MAC on the declared stub it attested as, the planned
+// device the owner entered with no interface or MAC, and journals it. The
+// stub keeps its name; the verdict stages it.
+func (n *NetBox) Bind(ctx context.Context, deviceID int, claim protocol.Machine) error {
+	mac := normalMAC(claim.MAC)
+	if err := n.setMAC(ctx, deviceID, mac); err != nil {
+		return err
+	}
+	n.journalLater(ctx, deviceID, "info", plain(fmt.Sprintf("talos-attest: bound to the box that attested in the intake window (serial %s, MAC %s, %s %s)", claim.Serial, mac, claim.Manufacturer, claim.Model)), claim.Serial)
+	return nil
 }
 
 func asNetboxError(err error, target **netboxError) bool {

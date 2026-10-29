@@ -107,6 +107,21 @@ in
       defaultText = "terraform/pki/certs/folly-devid-ca-software-chain.pem, or this anchor's hardware CA up to the FML root";
       description = "The DevID CA first, then the FML intermediate and root.";
     };
+    intakePolicy = lib.mkOption {
+      type = lib.types.enum [
+        "open"
+        "declared"
+      ];
+      default = "declared";
+      description = ''
+        How a box with no pins on record gets its identity. "declared": a planned device the owner
+        declared in NetBox with its serial passes on its pinned maker's EK certificates, window or
+        not, and the box's MAC binds to it; a serial NetBox does not know waits for approval.
+        "open", the opt-in: within the owner's intake window (scripts/fleet-intake.sh), a serial
+        NetBox does not know passes on its pinned maker's EK certificates and gets a device named
+        intake-<serial>.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -158,6 +173,10 @@ in
         ATTEST_STATE_DIR = "/var/lib/talos-attest";
         ATTEST_PEERS = lib.concatStringsSep "," peers;
         ATTEST_METRICS_FILE = "${metricsDir}/talos-attest.prom";
+        # scripts/fleet-intake.sh writes the window's close time here over ssh; the service reads it
+        # on every start.
+        ATTEST_INTAKE_WINDOW_FILE = "/var/lib/talos-attest/intake-open";
+        ATTEST_INTAKE_POLICY = cfg.intakePolicy;
       }
       // lib.optionalAttrs (builtins.pathExists bundle) { ATTEST_CA_BUNDLE = "${bundle}"; }
       // (
