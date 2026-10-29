@@ -35,6 +35,7 @@ type Device struct {
 	TPM           string
 	BMCType       string
 	BMCAddress    string
+	OOBAddress    string
 	DesiredAction string
 	LastWorkflow  string
 }
@@ -182,6 +183,9 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 	}
 	if r.PrimaryIP4 != nil {
 		d.Address = stripPrefix(r.PrimaryIP4.Address)
+	}
+	if r.OOBIP != nil {
+		d.OOBAddress = stripPrefix(r.OOBIP.Address)
 	}
 	// The export's rule: oob_ip, or the node's address for AMT, which shares the node's NIC.
 	switch {

@@ -35,6 +35,25 @@ var Actions = map[string]Action{
 	ActionRetire: {Wipe: true, Retire: true},
 }
 
+// HasBMC says whether the device gets a Machine now. A planned device has no
+// RADIUS user yet, so it and its AMT sit on the bootstrap fallback with a
+// lease there, and an AMT address derived from the Kubernetes address it
+// does not hold yet is wrong; only an explicit oob_ip counts until the status
+// leaves planned.
+func (d Device) HasBMC() bool {
+	if d.BMCType == "none" || d.BMCAddress == "" {
+		return false
+	}
+	return d.Status != "planned" || d.OOBAddress != ""
+}
+
+// ManualBoot says whether somebody powers the device on by hand for a run:
+// a device without a Machine, and any planned device, whose BMC Rufio
+// cannot reach at a Kubernetes address it does not hold yet.
+func (d Device) ManualBoot() bool {
+	return d.Status == "planned" || !d.HasBMC()
+}
+
 func labels(d Device, extra map[string]string) map[string]any {
 	l := map[string]any{ManagedLabel: FieldManager, NodeLabel: d.Name}
 	for k, v := range extra {
@@ -67,7 +86,7 @@ func (c Config) Hardware(d Device) Object {
 			},
 		}},
 	}
-	if d.BMCType != "none" && d.BMCAddress != "" {
+	if d.HasBMC() {
 		spec["bmcRef"] = map[string]any{"apiGroup": "bmc.tinkerbell.org", "kind": "Machine", "name": d.Name}
 	}
 	return Object{
@@ -131,8 +150,9 @@ func SkipsAttest(d Device) bool {
 	return d.TPM == "1.2" || d.Class == "worker-g2"
 }
 
-// Workflow runs the provision Template for one action. A device without a
-// BMC gets no boot mode; somebody PXE-boots it by hand.
+// Workflow runs the provision Template for one action. A device that boots
+// by hand (ManualBoot) gets no boot mode: Tinkerbell still toggles allowPXE
+// for the run, and somebody powers the machine on.
 func (c Config) Workflow(d Device, action string, now time.Time) Object {
 	a := Actions[action]
 	attest := a.Attest && !SkipsAttest(d)
@@ -148,7 +168,7 @@ func (c Config) Workflow(d Device, action string, now time.Time) Object {
 		},
 	}
 	boot := map[string]any{"toggleAllowNetboot": true}
-	if d.BMCType != "none" && d.BMCAddress != "" {
+	if !d.ManualBoot() {
 		boot["bootMode"] = "netboot"
 	}
 	spec["bootOptions"] = boot

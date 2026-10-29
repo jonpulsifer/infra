@@ -351,6 +351,82 @@ func TestPlannedDeviceStaysPlannedThroughProvision(t *testing.T) {
 	}
 }
 
+func TestPlannedDeviceBootsByHandAndGetsNoDerivedMachine(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "provision", nil)}, ifaces: riptideIfaces()}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	swellMachine := strings.Replace(mPath, "riptide", "swell", 1)
+	swellHardware := strings.Replace(hwPath, "riptide", "swell", 1)
+	if kube.get(swellMachine) != nil {
+		t.Error("a planned AMT device without oob_ip got a Machine")
+	}
+	if _, has := kube.get(swellHardware)["spec"].(map[string]any)["bmcRef"]; has {
+		t.Error("a planned device's Hardware names a Machine it does not have")
+	}
+	wfName := kube.workflows()[0]
+	boot := kube.get(wfBase + wfName)["spec"].(map[string]any)["bootOptions"].(map[string]any)
+	if _, has := boot["bootMode"]; has || boot["toggleAllowNetboot"] != true {
+		t.Errorf("a planned device's bootOptions %v", boot)
+	}
+	if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), "power the machine on by hand") {
+		t.Errorf("journals %v", nb.journals)
+	}
+
+	// The device leaves planned: the Machine arrives and the next run is Rufio's.
+	nb.set("status", "staged")
+	nb.set("last_workflow", wfName)
+	kube.setState(wfName, "SUCCESS")
+	nb.set("desired_action", "attest")
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m := kube.get(swellMachine)
+	if m == nil {
+		t.Fatal("no Machine once the device left planned")
+	}
+	if host := m["spec"].(map[string]any)["connection"].(map[string]any)["host"]; host != "10.3.0.12" {
+		t.Errorf("Machine host %v", host)
+	}
+	if _, has := kube.get(swellHardware)["spec"].(map[string]any)["bmcRef"]; !has {
+		t.Error("the Hardware has no bmcRef after the Machine arrived")
+	}
+	names := kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "attest-swell-") {
+		t.Fatalf("workflows %v", names)
+	}
+	boot = kube.get(wfBase + names[0])["spec"].(map[string]any)["bootOptions"].(map[string]any)
+	if boot["bootMode"] != "netboot" {
+		t.Errorf("a staged device's bootOptions %v", boot)
+	}
+}
+
+func TestPlannedDeviceWithOOBIPGetsAMachineButStillBootsByHand(t *testing.T) {
+	d := device("surge", "planned", "provision", map[string]any{"bmc_type": "redfish"})
+	d["oob_ip"] = map[string]any{"address": "10.4.0.6/24"}
+	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m := kube.get(strings.Replace(mPath, "riptide", "surge", 1))
+	if m == nil {
+		t.Fatal("a planned device with oob_ip got no Machine")
+	}
+	if host := m["spec"].(map[string]any)["connection"].(map[string]any)["host"]; host != "10.4.0.6" {
+		t.Errorf("Machine host %v", host)
+	}
+	boot := kube.get(wfBase + kube.workflows()[0])["spec"].(map[string]any)["bootOptions"].(map[string]any)
+	if _, has := boot["bootMode"]; has {
+		t.Errorf("a planned device got Rufio's boot: %v", boot)
+	}
+}
+
 func TestSkipsAttest(t *testing.T) {
 	for _, c := range []struct {
 		d    Device

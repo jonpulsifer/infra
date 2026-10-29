@@ -44,7 +44,11 @@ or a `{value, label}` object. Written: `desired_action` (back to `none`),
 `active` or `failed` device, `offline` after a retirement) and journal
 entries. A `planned` device stays `planned` through its first provision:
 talos-attest grants the no-click first intake only in that status and moves
-the device to `staged` itself on the verdict. A retirement is the `retire` run, which
+the device to `staged` itself on the verdict. A `planned` device also boots
+by hand: its Workflow carries no `bootMode`, its journal entry says to power
+the machine on, and it gets a Machine only with an explicit `oob_ip`, since
+an AMT address derived from a Kubernetes address it does not hold yet is
+wrong. The Machine and Rufio come once the status leaves `planned`. A retirement is the `retire` run, which
 powers the node off; the controller starts it on status `decommissioning`,
 never from `desired_action`.
 
