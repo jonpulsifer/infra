@@ -43,6 +43,7 @@ sections:
       - platform/netbox.md
       - platform/pki.md
       - platform/identity.md
+      - platform/node-lifecycle.md
       - platform/opentofu.md
       - platform/build-and-release.md
       - platform/cloud.md
