@@ -63,12 +63,15 @@ func labels(d Device, extra map[string]string) map[string]any {
 }
 
 // Hardware is the device's Tinkerbell Hardware: its MAC, install disk and the
-// iPXE script that chains the signed HookOS UKI. allowPXE stays out: the
-// Workflow controller toggles it for a run, and an apply that carried it would
-// turn it off mid-run. The script frees every iPXE image before the chain,
-// because iPXE claims the Linux initrd device whenever another image is
-// loaded, and systemd-stub then fails to register the UKI's initrd.
-func (c Config) Hardware(d Device) Object {
+// iPXE script that chains the signed HookOS UKI. The controller owns both
+// netboot flags: allowPXE and allowWorkflow are netboot, true while the device
+// has an unfinished Workflow and false otherwise. The interfaces list is
+// atomic, so each apply replaces what another writer set there, a hand-set
+// allowPXE included, and an apply that left a flag out would unset it. The
+// script frees every iPXE image before the chain, because iPXE claims the
+// Linux initrd device whenever another image is loaded, and systemd-stub then
+// fails to register the UKI's initrd.
+func (c Config) Hardware(d Device, netboot bool) Object {
 	spec := map[string]any{
 		"disks": []any{map[string]any{"device": d.Disk}},
 		"interfaces": []any{map[string]any{
@@ -79,7 +82,8 @@ func (c Config) Hardware(d Device) Object {
 				"uefi":     true,
 			},
 			"netboot": map[string]any{
-				"allowWorkflow": false,
+				"allowPXE":      netboot,
+				"allowWorkflow": netboot,
 				"ipxe": map[string]any{
 					"contents": fmt.Sprintf("#!ipxe\nimgfree\nchain --autofree %s %s\n", c.HookOSURL, c.HookOSCmdline),
 				},
@@ -164,8 +168,10 @@ func (c Config) Installer(d Device, action string) string {
 }
 
 // Workflow runs the provision Template for one action. A device that boots
-// by hand (ManualBoot) gets no boot mode: Tinkerbell still toggles allowPXE
-// for the run, and somebody powers the machine on.
+// by hand (ManualBoot) gets no boot mode, and somebody powers the machine on.
+// toggleAllowNetboot is off: the controller sets the Hardware's flags before
+// the Workflow exists, and Tinkerbell's toggle would be a second writer of the
+// same atomic list, racing the controller's apply.
 func (c Config) Workflow(d Device, action string, now time.Time) Object {
 	a := Actions[action]
 	attest := a.Attest && !SkipsAttest(d)
@@ -183,7 +189,7 @@ func (c Config) Workflow(d Device, action string, now time.Time) Object {
 			"ntp_server":      c.NTPServer,
 		},
 	}
-	boot := map[string]any{"toggleAllowNetboot": true}
+	boot := map[string]any{"toggleAllowNetboot": false}
 	if !d.ManualBoot() {
 		boot["bootMode"] = "netboot"
 	}
@@ -221,6 +227,17 @@ func Finished(state string) bool {
 	switch strings.TrimPrefix(state, "STATE_") {
 	case "SUCCESS", "FAILED", "TIMEOUT":
 		return true
+	}
+	return false
+}
+
+// Unfinished says whether any of the Workflows has not reached a terminal
+// state. One Tinkerbell has not picked up yet has no state, and counts.
+func Unfinished(workflows []Object) bool {
+	for _, wf := range workflows {
+		if !Finished(wf.State()) {
+			return true
+		}
 	}
 	return false
 }
