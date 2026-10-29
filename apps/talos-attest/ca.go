@@ -31,14 +31,18 @@ type CA struct {
 }
 
 // AddIssuers admits more issuing CAs, from a bundle such as
-// terraform/pki/certs/folly-devid-ca.pem. Each must chain to this CA's
-// root through its chain or the bundle itself.
+// terraform/pki/certs/folly-devid-ca.pem. Each must chain to the root of
+// this CA's chain through its intermediates or the bundle; a self-signed
+// certificate is never admitted. On any failure none is.
 func (c *CA) AddIssuers(certs []*x509.Certificate) error {
 	candidate := *c
 	candidate.Issuers = slices.Clone(c.Issuers)
 	for _, cert := range certs {
 		if !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 {
 			return fmt.Errorf("%s may not sign certificates", cert.Subject)
+		}
+		if bytes.Equal(cert.RawSubject, cert.RawIssuer) || selfSigned(cert) {
+			return fmt.Errorf("issuing CA %s is self-signed; the only root is %s", cert.Subject.CommonName, c.root().Subject.CommonName)
 		}
 		if slices.ContainsFunc(candidate.Issuers, func(have *x509.Certificate) bool { return bytes.Equal(have.Raw, cert.Raw) }) {
 			continue
@@ -55,20 +59,21 @@ func (c *CA) AddIssuers(certs []*x509.Certificate) error {
 	return nil
 }
 
-// pools are the trust anchors and the intermediates for verifying a leaf:
-// every self-signed certificate of the chain and the bundle is a root, and
-// every other one, the issuing CAs among them, an intermediate.
+// pools are the trust anchor and the intermediates for verifying a leaf:
+// the chain's last certificate is the only root, and the rest of the chain
+// and every issuing CA are intermediates.
 func (c *CA) pools() (roots, intermediates *x509.CertPool) {
 	roots, intermediates = x509.NewCertPool(), x509.NewCertPool()
-	for _, cert := range append(slices.Clone(c.Chain), c.Issuers...) {
-		if bytes.Equal(cert.RawSubject, cert.RawIssuer) && cert.CheckSignatureFrom(cert) == nil {
-			roots.AddCert(cert)
-		} else {
-			intermediates.AddCert(cert)
-		}
+	roots.AddCert(c.root())
+	for _, cert := range append(slices.Clone(c.Chain[:len(c.Chain)-1]), c.Issuers...) {
+		intermediates.AddCert(cert)
 	}
 	return roots, intermediates
 }
+
+func (c *CA) root() *x509.Certificate { return c.Chain[len(c.Chain)-1] }
+
+func selfSigned(cert *x509.Certificate) bool { return cert.CheckSignatureFrom(cert) == nil }
 
 // Subject is what a leaf names: the IEEE 802.1AR DevID subject, with the
 // lifecycle's class as OU and the site as O, so SPIRE can select on either.
@@ -118,8 +123,9 @@ func readChain(chainPath string) ([]*x509.Certificate, error) {
 	return chain, nil
 }
 
-// NewCA checks that key belongs to chain[0], that chain[0] may issue, and
-// that each certificate in the chain is signed by the next.
+// NewCA checks that key belongs to chain[0], that chain[0] may issue, that
+// each certificate in the chain is signed by the next, and that the last is
+// a self-signed root.
 func NewCA(key crypto.Signer, chain []*x509.Certificate, validity time.Duration) (*CA, error) {
 	if len(chain) == 0 {
 		return nil, errors.New("the DevID CA chain is empty")
@@ -139,6 +145,9 @@ func NewCA(key crypto.Signer, chain []*x509.Certificate, validity time.Duration)
 		if err := chain[i].CheckSignatureFrom(chain[i+1]); err != nil {
 			return nil, fmt.Errorf("%s is not signed by %s: %w", chain[i].Subject, chain[i+1].Subject, err)
 		}
+	}
+	if root := chain[len(chain)-1]; !bytes.Equal(root.RawSubject, root.RawIssuer) || !selfSigned(root) {
+		return nil, fmt.Errorf("the DevID CA chain ends at %s, which is not a self-signed root", root.Subject)
 	}
 	if validity <= 0 {
 		return nil, errors.New("certificate validity must be positive")

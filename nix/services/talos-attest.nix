@@ -22,6 +22,9 @@ let
   softwareChain = certs + "/${site}-devid-ca-software-chain.pem";
   # This anchor's hardware DevID CA, which scripts/devid-ca-yubikey.sh commits after its apply.
   hardwareCert = certs + "/${site}-devid-ca-${name}.pem";
+  # Every issuing CA of the site: a machine attested on another anchor carries that anchor's
+  # leaf, which must verify here.
+  bundle = certs + "/${site}-devid-ca.pem";
   yubikey = config.homelab.devidCa.yubikey;
   cfg = config.homelab.talosAttest;
   pkcs11 = cfg.caKey == "pkcs11";
@@ -133,9 +136,6 @@ in
         ATTEST_SITE = site;
         ATTEST_APPROVERS = "jonathan@pulsifer.ca";
         ATTEST_CA_CHAIN = "${cfg.caChain}";
-        # Every issuing CA of the site: a machine attested on another anchor carries that
-        # anchor's leaf, which must verify here.
-        ATTEST_CA_BUNDLE = "${certs + "/${site}-devid-ca.pem"}";
         ATTEST_EK_ROOTS = "${../../apps/talos-attest/roots}";
         ATTEST_POLICY = "${../../apps/talos-attest/policy.yaml}";
         ATTEST_INVENTORY = "${../../clusters/${site}/inventory/machines.yaml}";
@@ -143,6 +143,7 @@ in
         ATTEST_PEERS = lib.concatStringsSep "," peers;
         ATTEST_METRICS_FILE = "${metricsDir}/talos-attest.prom";
       }
+      // lib.optionalAttrs (builtins.pathExists bundle) { ATTEST_CA_BUNDLE = "${bundle}"; }
       // (
         if pkcs11 then
           {

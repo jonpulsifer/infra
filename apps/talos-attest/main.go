@@ -153,14 +153,6 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("ATTEST_PEER_SYNC: %w", err)
 	}
-	// A pass this anchor issued before NetBox held the verdict fields is
-	// written there now, and again on each sync, so NetBox's empty verdict
-	// never hides it.
-	v.BackfillNetBox(ctx)
-	if sync > 0 && (len(peers) > 0 || v.NetBox != nil) {
-		go srv.RunPeerSync(ctx, sync)
-	}
-
 	listeners := []struct {
 		addr    string
 		mode    fs.FileMode
@@ -181,6 +173,14 @@ func run(log *slog.Logger) error {
 		servers = append(servers, s)
 		log.Info("listening", "addr", l.addr)
 		go func() { errc <- s.Serve(ln) }()
+	}
+	// A pass this anchor issued before NetBox held the verdict fields is
+	// written there once the listeners serve, and again on each sync, so
+	// NetBox's empty verdict never hides it.
+	if sync > 0 && (len(peers) > 0 || v.NetBox != nil) {
+		go srv.RunPeerSync(ctx, sync)
+	} else {
+		go v.BackfillNetBox(ctx)
 	}
 	log.Info("talos-attest started", "machines", inv.Names(), "ek_roots", roots.Count, "ca", ca.Cert.Subject.String(), "peers", peers)
 

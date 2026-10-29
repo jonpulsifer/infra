@@ -494,6 +494,9 @@ func (v *Verifier) BackfillNetBox(ctx context.Context) {
 		return
 	}
 	for _, rec := range recs {
+		if ctx.Err() != nil {
+			return
+		}
 		if rec.Status != StatusAttested || !v.ownIntake(rec) {
 			continue
 		}

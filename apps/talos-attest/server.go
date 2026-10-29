@@ -464,8 +464,10 @@ func (s *Server) SyncPeers(ctx context.Context) {
 	}
 }
 
-// RunPeerSync calls SyncPeers every interval until ctx ends.
+// RunPeerSync backfills NetBox at once, then backfills and calls SyncPeers
+// every interval until ctx ends.
 func (s *Server) RunPeerSync(ctx context.Context, interval time.Duration) {
+	s.V.BackfillNetBox(ctx)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {

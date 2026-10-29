@@ -516,13 +516,14 @@ func (n *NetBox) journalLater(ctx context.Context, deviceID int, kind, comment, 
 
 // Backfill writes a pass this anchor holds to a device whose verdict is
 // empty, as after the verdict fields were created in NetBox. A non-empty
-// verdict is never touched. It reports whether it wrote.
+// verdict, and a device being decommissioned or offline, are never touched.
+// It reports whether it wrote.
 func (n *NetBox) Backfill(ctx context.Context, r Record) (bool, error) {
 	d, ok, err := n.device(ctx, r.Serial)
 	if err != nil || !ok {
 		return false, err
 	}
-	if d.CustomFields.Verdict != "" {
+	if d.CustomFields.Verdict != "" || d.Status.Value == statusDecommissioning || d.Status.Value == statusOffline {
 		return false, nil
 	}
 	fields := map[string]any{
@@ -530,6 +531,9 @@ func (n *NetBox) Backfill(ctx context.Context, r Record) (bool, error) {
 		"last_attested":  r.AttestedAt.UTC().Format(time.RFC3339),
 		"ldevid_serial":  r.LDevIDSerial,
 		"lak_serial":     r.LAKSerial,
+	}
+	if !r.LDevIDNotAfter.IsZero() {
+		fields["ldevid_not_after"] = r.LDevIDNotAfter.UTC().Format(time.DateOnly)
 	}
 	if err := n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/devices/%d/", d.ID), map[string]any{"custom_fields": fields}, nil); err != nil {
 		return false, err
