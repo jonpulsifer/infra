@@ -93,7 +93,6 @@ func smbiosUUID(claim string) (string, bool) {
 // the wrapped code only on the controller's 201; otherwise it audits why and
 // returns false. The pass stands either way, and the code is never logged.
 func (v *Verifier) installCode(ctx context.Context, rec Record, s *session) (protocol.Challenge, bool) {
-	entry := AuditEntry{Event: auditInstall, Node: rec.Machine, Serial: rec.Serial, Class: rec.Class}
 	raw := v.random(32)
 	wrapped, err := wrapToTPM(s, raw)
 	uuid, ok := smbiosUUID(rec.UUID)
@@ -107,15 +106,18 @@ func (v *Verifier) installCode(ctx context.Context, rec Record, s *session) (pro
 		cancel()
 	}
 	if err != nil {
-		entry.Status, entry.Reason = "withheld", err.Error()
-		v.Log.Warn("install code withheld", "machine", rec.Machine, "serial", rec.Serial, "err", err)
-		v.Audit.Emit(entry)
+		v.withholdCode(rec, err)
 		return protocol.Challenge{}, false
 	}
-	entry.Status = "issued"
 	v.Log.Info("install code issued", "machine", rec.Machine, "serial", rec.Serial, "uuid", uuid)
-	v.Audit.Emit(entry)
+	v.Audit.Emit(AuditEntry{Event: auditInstall, Node: rec.Machine, Serial: rec.Serial, Class: rec.Class, Status: "issued"})
 	return wrapped, true
+}
+
+// withholdCode logs and audits why an intake pass got no install code.
+func (v *Verifier) withholdCode(rec Record, why error) {
+	v.Log.Warn("install code withheld", "machine", rec.Machine, "serial", rec.Serial, "err", why)
+	v.Audit.Emit(AuditEntry{Event: auditInstall, Node: rec.Machine, Serial: rec.Serial, Class: rec.Class, Status: "withheld", Reason: why.Error()})
 }
 
 // wrapToTPM is TPM2_MakeCredential of secret for the session's first EK,

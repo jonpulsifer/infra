@@ -176,7 +176,9 @@ type Renewed struct {
 
 // ConfirmRequest reports that the host stored its certificates.
 // Signature is the session's AK signing ConfirmDigest, a TPMT_SIGNATURE: the
-// device flow is plain HTTP, so only the TPM that passed may confirm.
+// device flow is plain HTTP, so only a confirm the TPM that passed signed
+// gets an install code. A wrong signature is refused; an unsigned confirm,
+// from a client that predates it, confirms without a code.
 type ConfirmRequest struct {
 	NVIndexes []uint32 `json:"nv_indexes,omitempty"`
 	Signature []byte   `json:"signature"`

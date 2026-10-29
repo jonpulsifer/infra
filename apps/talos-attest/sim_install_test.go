@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,10 +19,15 @@ import (
 	"github.com/jonpulsifer/infra/apps/talos-attest/protocol"
 )
 
-// confirmWire sits between the client and the service on the confirm: it
-// keeps the answer's body, and first replays the confirm as a stranger who
-// saw the session would, without the AK's signature and with a forged one.
+// confirmWire sits between the client and the service on the confirm. It
+// keeps the answer's body. With strangers set it first does what a host that
+// saw the session id could: post empty evidence for it on the intake and the
+// renewal routes, and confirm with a forged signature. With unsigned set it
+// sends the machine's confirm without its signature, as an older client does.
 type confirmWire struct {
+	strangers bool
+	unsigned  bool
+
 	mu       sync.Mutex
 	answer   []byte
 	stranger []int
@@ -35,34 +39,43 @@ func (cw *confirmWire) seen() ([]byte, []int) {
 	return cw.answer, cw.stranger
 }
 
-func (h *harness) watchConfirm(t *testing.T) *confirmWire {
+func (h *harness) watchConfirm(t *testing.T, cw *confirmWire) *confirmWire {
 	t.Helper()
-	cw := &confirmWire{}
 	next := h.ts.Config.Handler
+	serve := func(path string, body any) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(body)
+		rr := httptest.NewRecorder()
+		next.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b)))
+		return rr
+	}
 	h.ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/confirm") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
 		var req protocol.ConfirmRequest
-		if err := json.Unmarshal(body, &req); err != nil || len(req.Signature) == 0 {
-			t.Errorf("confirm body %s: %v", body, err)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Signature) == 0 {
+			t.Errorf("confirm body: %v", err)
 			return
 		}
-		forged := append([]byte(nil), req.Signature...)
-		forged[len(forged)-1] ^= 0xff
-		for _, sig := range [][]byte{nil, forged} {
-			b, _ := json.Marshal(protocol.ConfirmRequest{NVIndexes: req.NVIndexes, Signature: sig})
-			rr := httptest.NewRecorder()
-			next.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, r.URL.Path, bytes.NewReader(b)))
-			cw.mu.Lock()
-			cw.stranger = append(cw.stranger, rr.Code)
-			cw.mu.Unlock()
+		if cw.strangers {
+			sid := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/attest/"), "/confirm")
+			forged := append([]byte(nil), req.Signature...)
+			forged[len(forged)-1] ^= 0xff
+			for _, rr := range []*httptest.ResponseRecorder{
+				serve("/v1/attest/"+sid+"/evidence", struct{}{}),
+				serve("/v1/renew/"+sid+"/evidence", struct{}{}),
+				serve(r.URL.Path, protocol.ConfirmRequest{NVIndexes: req.NVIndexes, Signature: forged}),
+			} {
+				cw.mu.Lock()
+				cw.stranger = append(cw.stranger, rr.Code)
+				cw.mu.Unlock()
+			}
 		}
-		rr := httptest.NewRecorder()
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		next.ServeHTTP(rr, r)
+		if cw.unsigned {
+			req.Signature = nil
+		}
+		rr := serve(r.URL.Path, req)
 		cw.mu.Lock()
 		cw.answer = rr.Body.Bytes()
 		cw.mu.Unlock()
@@ -81,7 +94,7 @@ func TestIntakePassGetsAnInstallCode(t *testing.T) {
 	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5", "smbios_uuid": nil})
 	c, fleet := newFakeController(t, http.StatusCreated)
 	h.v.Fleet = fleet
-	wire := h.watchConfirm(t)
+	wire := h.watchConfirm(t, &confirmWire{})
 
 	res, err := h.run(simSerial, simMAC)
 	if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
@@ -113,20 +126,22 @@ func TestIntakePassGetsAnInstallCode(t *testing.T) {
 	}
 }
 
-// A confirm the session's AK did not sign is refused and leaves the session
-// for the machine: a stranger who saw the session id takes nothing.
-func TestConfirmNeedsTheAKSignature(t *testing.T) {
+// A host that saw the session id cannot end a passed session, by posting
+// evidence for it or a confirm with a forged signature, and gets no code: the
+// machine's own confirm still lands and gets its code.
+func TestStrangersCannotTakeAPassedSession(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
 	c, fleet := newFakeController(t, http.StatusCreated)
 	h.v.Fleet = fleet
-	wire := h.watchConfirm(t)
+	wire := h.watchConfirm(t, &confirmWire{strangers: true})
 
 	res, err := h.run(simSerial, simMAC)
 	if err != nil || res.InstallCode == "" {
-		t.Fatalf("intake after the strangers' confirms: %+v %v", res, err)
+		t.Fatalf("intake after the strangers' requests: %+v %v", res, err)
 	}
-	if _, stranger := wire.seen(); len(stranger) != 2 || stranger[0] != http.StatusForbidden || stranger[1] != http.StatusForbidden {
-		t.Fatalf("the strangers' confirms answered %v, want two 403s", stranger)
+	want := []int{http.StatusNotFound, http.StatusNotFound, http.StatusForbidden}
+	if _, stranger := wire.seen(); len(stranger) != len(want) || stranger[0] != want[0] || stranger[1] != want[1] || stranger[2] != want[2] {
+		t.Fatalf("the strangers' requests answered %v, want %v", stranger, want)
 	}
 	if n := len(c.requests()); n != 1 {
 		t.Fatalf("%d render requests, want the machine's alone", n)
@@ -134,8 +149,33 @@ func TestConfirmNeedsTheAKSignature(t *testing.T) {
 	if rec, ok, _ := h.v.Store.Record("testbox"); !ok || !rec.Confirmed {
 		t.Fatalf("the machine's confirm was not recorded: %+v", rec)
 	}
-	if !strings.Contains(h.audit.String(), `"status":"refused","reason":"confirm-signature: the confirm carries no AK signature"`) ||
-		!strings.Contains(h.audit.String(), `"reason":"confirm-signature: the confirm is not signed by the session's AK"`) {
+	if !strings.Contains(h.audit.String(), `"status":"refused","reason":"confirm-signature: the confirm is not signed by the session's AK"`) {
+		t.Fatalf("audit lines:\n%s", h.audit.String())
+	}
+}
+
+// A tink-attest that predates the signature still confirms its pass, and
+// gets no code.
+func TestUnsignedConfirmPassesWithoutACode(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	c, fleet := newFakeController(t, http.StatusCreated)
+	h.v.Fleet = fleet
+	wire := h.watchConfirm(t, &confirmWire{unsigned: true})
+
+	res, err := h.run(simSerial, simMAC)
+	if err != nil || res.Verdict.Verdict != protocol.VerdictPass || res.InstallCode != "" {
+		t.Fatalf("unsigned confirm: %+v %v", res, err)
+	}
+	if answer, _ := wire.seen(); bytes.Contains(answer, []byte("install_code")) {
+		t.Fatalf("an unsigned confirm got a code: %s", answer)
+	}
+	if n := len(c.requests()); n != 0 {
+		t.Fatalf("%d render requests for an unsigned confirm", n)
+	}
+	if rec, ok, _ := h.v.Store.Record("testbox"); !ok || rec.Status != StatusAttested || !rec.Confirmed {
+		t.Fatalf("the pass was not confirmed: %+v", rec)
+	}
+	if !strings.Contains(h.audit.String(), `"event":"attest.install","site":"folly","node":"testbox","serial":"SIM-0001","class":"worker-g5","status":"withheld","reason":"unsigned-confirm"`) {
 		t.Fatalf("audit lines:\n%s", h.audit.String())
 	}
 }
