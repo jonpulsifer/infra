@@ -39,6 +39,17 @@ locals {
   # every port on its open Kubernetes trunk, and is also the revert.
   mab_enforced = toset(["riptide"])
 
+  # Ports with no inventory node, on the MAC auth profile: the rack ports of
+  # new nodes and the provisioning station. An unknown MAC lands on the
+  # fallback, bootstrap, and a node's RADIUS user moves it to Kubernetes. A
+  # port that the inventory names takes that node's override instead.
+  spare_ports = {
+    swell        = 4
+    surge        = 12
+    shoal        = 20
+    provisioning = 24
+  }
+
   switch = local.clients.switches["USW 24 PoE"]
 }
 
@@ -189,6 +200,15 @@ resource "unifi_device" "usw_24_poe" {
       native_networkconf_id = unifi_network.k8s.id
       tagged_vlan_mgmt      = "auto"
       dot1x_ctrl            = "force_authorized"
+    }
+  }
+
+  dynamic "port_override" {
+    for_each = { for name, port in local.spare_ports : name => port if !contains(values(local.mab_ports), port) }
+    content {
+      index           = port_override.value
+      name            = port_override.key
+      port_profile_id = unifi_port_profile.mab.id
     }
   }
 

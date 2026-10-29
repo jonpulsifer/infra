@@ -690,15 +690,18 @@ resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
   }
 }
 
-# A node netboots on the Kubernetes network, so Lab reaches the anchors' boot
-# services on their bootstrap addresses and the boot VIP: TFTP and NTP, and HTTP
-# and HTTPS for the iPXE scripts, the UKI and enroll.lolwtf.ca. Lab and Bootstrap
-# are custom zones, so the controller creates each reply rule; the gateway's
-# TFTP conntrack helper relates the data transfer to the request.
+# A node netboots and runs its Tinkerbell Workflows on the Kubernetes network,
+# so Lab reaches the anchors' boot services on their bootstrap addresses and the
+# boot VIP. TCP: 80 for nginx's iPXE scripts, UKI and HookOS, 443 for
+# enroll.lolwtf.ca, 7080 for Smee's per-MAC iPXE script and 42113 for the Tink
+# server that HookOS's agent polls (both on spore). UDP: 69 for the signed iPXE
+# over TFTP, 123 for chrony, and 514 for HookOS's syslog to spore. Lab and
+# Bootstrap are custom zones, so the controller creates each reply rule; the
+# gateway's TFTP conntrack helper relates the data transfer to the request.
 resource "unifi_firewall_policy" "kubernetes_to_boot" {
   for_each = {
-    tcp = "80,443"
-    udp = "69,123"
+    tcp = "80,443,7080,42113"
+    udp = "69,123,514"
   }
 
   name                 = "Allow Kubernetes to Boot ${upper(each.key)}"
