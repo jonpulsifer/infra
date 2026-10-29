@@ -31,7 +31,7 @@ The publisher signs `boot.img` with `/var/lib/pi-boot-sign/private.pem`, outside
 - The fallback is forge's only recovery path. Change forge's EEPROM only as [Change the forge EEPROM](../../runbooks/change-the-forge-eeprom.md) says. Without `HTTP_HOST`, `HTTP_PATH` and the HTTP digit 7 in `BOOT_ORDER`, the fallback fails.
 - The `BOOT_ORDER` comment in `nix/hardware/pi5/nvme-hat.nix` is capsule's value, not forge's.
 - A stock EEPROM update erases the enrolled public key, and HTTP boot then fails.
-- If you change the TFTP port range, the digest URL or the nginx unit order, change the `spore-reliability` check in `nix/lib/checks.nix` in the same PR, or `mise run nix:check` fails.
+- If you change dnsmasq's single-port TFTP, the digest URL or the nginx unit order, change the `spore-reliability` check in `nix/lib/checks.nix` in the same PR, or `mise run nix:check` fails.
 
 ## Alerts
 

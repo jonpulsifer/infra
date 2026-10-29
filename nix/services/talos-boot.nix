@@ -173,12 +173,6 @@ in
   networking.firewall.interfaces.${iface} = {
     allowedTCPPorts = [ 80 ];
     allowedUDPPorts = [ 69 ];
-    allowedUDPPortRanges = [
-      {
-        from = 30000;
-        to = 30099;
-      }
-    ];
   };
 
   # IPv6 on the VLAN is link-local only, so it gets neighbour discovery and nothing else.
@@ -209,9 +203,10 @@ in
       enable-tftp = true;
       tftp-root = "/var/lib/tftpboot";
       tftp-max = 100;
-      # TFTP data leaves UDP/69 on a server-chosen port; bound it so the firewall admits it
-      # without a conntrack helper.
-      tftp-port-range = "30000,30099";
+      # TFTP data leaves UDP/69 too, so a transfer is one flow. The gateway's reply rule for the
+      # Kubernetes network (kubernetes_to_boot) matches only the request's port, and this chain
+      # admits only port 69.
+      tftp-single-port = true;
     };
   };
 
