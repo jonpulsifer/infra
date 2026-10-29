@@ -37,6 +37,8 @@ const (
 	auditVerdict = "attest.verdict"
 	auditIssue   = "attest.issue"
 	auditRenew   = "attest.renew"
+	// auditInstall says whether an intake pass got an install code.
+	auditInstall = "attest.install"
 )
 
 // Emit writes e with the site and the time filled in. A nil Audit is quiet.

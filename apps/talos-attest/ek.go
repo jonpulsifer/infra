@@ -200,6 +200,7 @@ const (
 	reasonEKPending      = "ek-pending-approval"
 	reasonAK             = "ak-invalid"
 	reasonSession        = "session"
+	reasonConfirm        = "confirm-signature"
 	reasonActivation     = "activation"
 	reasonQuote          = "quote"
 	reasonEventLog       = "event-log"

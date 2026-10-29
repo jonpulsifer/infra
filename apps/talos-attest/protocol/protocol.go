@@ -5,7 +5,10 @@
 // TPMT_SIGNATURE, the forms go-tpm's legacy tpm2.CreateKey and tpm2.Load use.
 package protocol
 
-import "time"
+import (
+	"crypto/sha256"
+	"time"
+)
 
 // Paths of the device-facing routes.
 const (
@@ -172,8 +175,38 @@ type Renewed struct {
 }
 
 // ConfirmRequest reports that the host stored its certificates.
+// Signature is the session's AK signing ConfirmDigest, a TPMT_SIGNATURE: the
+// device flow is plain HTTP, so only a confirm the TPM that passed signed
+// gets an install code. A wrong signature is refused; an unsigned confirm,
+// from a client that predates it, confirms without a code.
 type ConfirmRequest struct {
 	NVIndexes []uint32 `json:"nv_indexes,omitempty"`
+	Signature []byte   `json:"signature"`
+}
+
+// ConfirmLabel follows the session's nonce in what the AK signs to confirm.
+const ConfirmLabel = "confirm"
+
+// ConfirmDigest is SHA-256 over the session's nonce and ConfirmLabel.
+func ConfirmDigest(nonce []byte) []byte {
+	h := sha256.New()
+	h.Write(nonce)
+	h.Write([]byte(ConfirmLabel))
+	return h.Sum(nil)
+}
+
+// ConfirmResponse is the confirm's answer. After an intake pass whose Talos
+// config fleet-controller has rendered, it carries the install code wrapped
+// to the session's TPM: TPM2_MakeCredential output for the EK with
+// InstallCodeEKHash, bound to the session's AK, with the code's 32 raw bytes
+// as the credential. TPM2_ActivateCredential recovers them, and the code is
+// their base64url without padding, the value the installer writes to META
+// 0x0b. Credential and Secret keep their TPM2B size prefix.
+type ConfirmResponse struct {
+	Status                string `json:"status"`
+	InstallCodeEKHash     string `json:"install_code_ek_hash,omitempty"`
+	InstallCodeCredential []byte `json:"install_code_credential,omitempty"`
+	InstallCodeSecret     []byte `json:"install_code_secret,omitempty"`
 }
 
 // DevID is GET /devid/<serial>: everything public about a machine's LDevID,

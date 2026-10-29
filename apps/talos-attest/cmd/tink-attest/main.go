@@ -2,7 +2,8 @@
 // talos-attest from inside HookOS: it reads the machine's SMBIOS identity and
 // event log, drives the flow with the TPM, and stores the issued
 // certificates in NV. It exits non-zero on any refusal, so the Workflow
-// fails and the machine stays where it is.
+// fails and the machine stays where it is. An install code in the confirm's
+// answer goes to -install-code for the install action; it is never logged.
 //
 // `tink-attest renew` runs on a running node instead. When the LDevID in NV
 // expires within -renew-before, it has the service certify the LDevID key
@@ -16,8 +17,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -70,6 +73,7 @@ func main() {
 	serial := flag.String("serial", env("SERIAL", readTrim("/sys/class/dmi/id/product_serial")), "SMBIOS serial")
 	uuid := flag.String("uuid", env("UUID", readTrim("/sys/class/dmi/id/product_uuid")), "SMBIOS UUID")
 	storeNV := flag.Bool("store-nv", env("STORE_NV", "true") == "true", "store the certificates in TPM NV")
+	installCode := flag.String("install-code", env("INSTALL_CODE_FILE", "/tmp/fleet/install_code"), "where to write the install code the service answers")
 	timeout := flag.Duration("timeout", 10*time.Minute, "give up after this long")
 	flag.Parse()
 
@@ -84,13 +88,13 @@ func main() {
 		SKU:          readTrim("/sys/class/dmi/id/product_sku"),
 		BIOS:         readTrim("/sys/class/dmi/id/bios_version"),
 	}
-	if err := run(*url, *device, *eventLog, m, *storeNV, *timeout); err != nil {
+	if err := run(*url, *device, *eventLog, m, *storeNV, *installCode, *timeout); err != nil {
 		logf("FAILED: %v", err)
 		os.Exit(1)
 	}
 }
 
-func run(url, device, eventLog string, m protocol.Machine, storeNV bool, timeout time.Duration) error {
+func run(url, device, eventLog string, m protocol.Machine, storeNV bool, installCode string, timeout time.Duration) error {
 	if url == "" {
 		return errors.New("ATTEST_URL is required")
 	}
@@ -122,5 +126,53 @@ func run(url, device, eventLog string, m protocol.Machine, storeNV bool, timeout
 		return err
 	}
 	logf("PASSED: LDevID and LAK issued; NV %x", res.NVIndexes)
+	if res.InstallCode == "" {
+		logf("no install code in the answer")
+		return removeInstallCode(installCode)
+	}
+	if err := writeInstallCode(installCode, res.InstallCode); err != nil {
+		return fmt.Errorf("write the install code: %w", err)
+	}
+	logf("install code written to %s", installCode)
+	return nil
+}
+
+// writeInstallCode leaves code in path, mode 0600, for the install action
+// that follows. A directory it creates gets mode 0700; one that exists, such
+// as the Template's mount, keeps its own. The rename keeps a reader from
+// seeing half a code.
+func writeInstallCode(path, code string) error {
+	dir := filepath.Dir(path)
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".install_code-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.WriteString(code); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// removeInstallCode drops a code an earlier run left, so an install never
+// runs with a code no config waits behind.
+func removeInstallCode(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove the stale install code: %w", err)
+	}
 	return nil
 }

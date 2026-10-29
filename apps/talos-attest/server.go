@@ -162,11 +162,12 @@ func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if err := s.V.Confirm(r.Context(), r.PathValue("session"), req); err != nil {
+	resp, err := s.V.Confirm(r.Context(), r.PathValue("session"), req)
+	if err != nil {
 		s.writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // localDevID builds the lookup answer from this anchor's store.

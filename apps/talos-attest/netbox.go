@@ -102,6 +102,8 @@ type netboxDevice struct {
 		LAKSerial    string   `json:"lak_serial"`
 		SKU          string   `json:"sku"`
 		BIOSVersion  string   `json:"bios_version"`
+		// SMBIOSUUID is nil when NetBox defines no smbios_uuid field.
+		SMBIOSUUID json.RawMessage `json:"smbios_uuid"`
 	} `json:"custom_fields"`
 }
 
@@ -478,6 +480,12 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 			}
 			if len(r.EKIssuers) > 0 {
 				fields["ek_issuer"] = strings.Join(r.EKIssuers, ", ")
+			}
+			// fleet-controller keys the config file by this UUID. NetBox
+			// refuses a custom field it does not define, so the verdict
+			// never waits for scripts/netbox-seed.sh to add it.
+			if u, ok := smbiosUUID(r.UUID); ok && d.CustomFields.SMBIOSUUID != nil {
+				fields["smbios_uuid"] = u
 			}
 		}
 		if d.Status.Value == statusPlanned {
