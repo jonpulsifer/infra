@@ -3,8 +3,12 @@
 # a pull request with the result. `mise run netbox:check` fails on a difference.
 #
 # folly's Kubernetes nodes as hardware: every NetBox device with the role
-# kubernetes-node and the status active or staged. A node's address is
-# NODE_ADDRESSES in ../config/cluster-topology.json.
+# kubernetes-node and the status planned, staged, active or failed. status is
+# the node's lifecycle state and class its Talos class. address is the primary
+# IPv4; `mise run netbox:check` fails when it differs from NODE_ADDRESSES in
+# ../config/cluster-topology.json. bmc is the out-of-band management: its
+# type, and its address, which is the node's own for AMT unless NetBox holds an
+# OOB address.
 #
 # Read by terraform/network/unifi/folly (reservations, MAB users, mab_ports),
 # clusters/folly/talos (install disk, tpm_nodes) and the render scripts. Like
@@ -13,6 +17,7 @@
 #
 # tpm is the TPM spec version, or null; only 2.0 seals disks and attests.
 # secure_boot is the firmware state the node is expected to boot in.
+# ek_hash_ecc is the pinned ECC endorsement key hash, or null.
 machines:
   optiplex:
     model: OptiPlex 3050
@@ -25,6 +30,13 @@ machines:
     tpm: "2.0"
     amt: false
     secure_boot: false
+    class: controlplane
+    status: active
+    address: 10.3.0.10
+    bmc:
+      type: none
+      address: null
+    ek_hash_ecc: null
   shale:
     model: HP EliteDesk 800 G2 DM 35W
     sku: V0B22UP#ABA
@@ -36,6 +48,13 @@ machines:
     tpm: "1.2"
     amt: true
     secure_boot: true
+    class: worker-g2
+    status: active
+    address: 10.3.0.11
+    bmc:
+      type: amt
+      address: 10.3.0.11
+    ek_hash_ecc: null
   riptide:
     model: HP EliteDesk 800 G5 Desktop Mini
     sku: 9GB06UC#ABA
@@ -47,3 +66,10 @@ machines:
     tpm: "2.0"
     amt: true
     secure_boot: true
+    class: worker-g5
+    status: active
+    address: 10.3.0.12
+    bmc:
+      type: amt
+      address: 10.3.0.12
+    ek_hash_ecc: null

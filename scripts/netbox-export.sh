@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Renders clusters/folly/inventory/machines.yaml from NetBox: every folly device with the role
-# kubernetes-node and the status active or staged, ordered by address.
+# kubernetes-node and the status planned, staged, active or failed, ordered by address.
 #
 #   netbox-export.sh                 write the file
 #   netbox-export.sh --check [file]  exit 1 and print the diff if the file (default: the
-#                                    committed one) differs from NetBox
+#                                    committed one) differs from NetBox, or if NODE_ADDRESSES
+#                                    in the cluster topology disagrees with NetBox's addresses
 #   netbox-export.sh --json          the same machines as JSON, each with its primary address
 #
 # NetBox access is scripts/lib/netbox.sh's environment.
@@ -17,6 +18,7 @@ readonly root
 source "$root/scripts/lib/netbox.sh"
 
 inventory="$root/clusters/folly/inventory/machines.yaml"
+readonly cluster="$root/clusters/folly/config/cluster-topology.json"
 
 usage() {
   echo "usage: $0 [--check [file] | --json]" >&2
@@ -24,17 +26,18 @@ usage() {
 }
 
 # Each machine in the inventory's field names, keyed by name, with `address` from NetBox's
-# primary IPv4. The node's NIC is its first physical interface with a primary MAC, and its
+# primary IPv4 and its BMC from the OOB address. The node's NIC is its first physical interface with a primary MAC, and its
 # switch port is the number of the switch interface its cable reaches.
 machines_json() {
   local devices interfaces
-  devices="$(nb_list "dcim/devices/?site=folly&role=kubernetes-node&status=active&status=staged")"
+  devices="$(nb_list "dcim/devices/?site=folly&role=kubernetes-node&status=planned&status=staged&status=active&status=failed")"
   if [[ "$(jq 'length' <<<"$devices")" -eq 0 ]]; then
     echo '{}'
     return
   fi
   interfaces="$(nb_list "dcim/interfaces/?type__n=virtual&$(jq -r 'map("device_id=\(.id)") | join("&")' <<<"$devices")")"
   jq -n --argjson devices "$devices" --argjson interfaces "$interfaces" '
+    def choice: if type == "object" then .value else . end;
     def octets: if . == null then [256] else split("/")[0] | split(".") | map(tonumber) end;
     $devices
     | sort_by((.primary_ip4.address | octets), .name)
@@ -51,7 +54,13 @@ machines_json() {
           tpm: $d.custom_fields.tpm_version,
           amt: $d.custom_fields.amt,
           secure_boot: $d.custom_fields.secure_boot_expected,
-          address: ($d.primary_ip4.address // null | if . then split("/")[0] else . end)
+          class: ($d.custom_fields.talos_class | choice),
+          status: $d.status.value,
+          address: ($d.primary_ip4.address // null | if . then split("/")[0] else . end),
+          bmc: ({type: ($d.custom_fields.bmc_type | choice)} as $b
+            | $b + {address: (($d.oob_ip.address // null | if . then split("/")[0] else . end)
+              // (if $b.type == "amt" then ($d.primary_ip4.address // null | if . then split("/")[0] else . end) else null end))}),
+          ek_hash_ecc: $d.custom_fields.ek_hash_ecc
         }})
     | from_entries'
 }
@@ -63,8 +72,12 @@ render() {
 # a pull request with the result. `mise run netbox:check` fails on a difference.
 #
 # folly's Kubernetes nodes as hardware: every NetBox device with the role
-# kubernetes-node and the status active or staged. A node's address is
-# NODE_ADDRESSES in ../config/cluster-topology.json.
+# kubernetes-node and the status planned, staged, active or failed. status is
+# the node's lifecycle state and class its Talos class. address is the primary
+# IPv4; `mise run netbox:check` fails when it differs from NODE_ADDRESSES in
+# ../config/cluster-topology.json. bmc is the out-of-band management: its
+# type, and its address, which is the node's own for AMT unless NetBox holds an
+# OOB address.
 #
 # Read by terraform/network/unifi/folly (reservations, MAB users, mab_ports),
 # clusters/folly/talos (install disk, tpm_nodes) and the render scripts. Like
@@ -73,8 +86,27 @@ render() {
 #
 # tpm is the TPM spec version, or null; only 2.0 seals disks and attests.
 # secure_boot is the firmware state the node is expected to boot in.
+# ek_hash_ecc is the pinned ECC endorsement key hash, or null.
 EOF
-  machines_json | jq '{machines: map_values(del(.address))}' | yq -P -p json
+  machines_json | jq '{machines: .}' | yq -P -p json
+}
+
+# addresses_agree: NODE_ADDRESSES names exactly the nodes that are staged, active or failed and
+# have an address, with the same addresses; planned nodes may have an address NODE_ADDRESSES lacks.
+addresses_agree() {
+  local problems
+  problems="$(jq -rn --argjson export "$(machines_json)" --slurpfile topology "$cluster" '
+    ($topology[0].data.NODE_ADDRESSES | fromjson) as $want
+    | ($export | to_entries | map(select(.value.status != "planned" and .value.address != null)
+        | {(.key): .value.address}) | add // {}) as $have
+    | ([$want | keys[] | select($have[.] == null) | "\(.): in NODE_ADDRESSES, not exported with an address"]
+      + [$have | keys[] | select($want[.] == null) | "\(.): exported at \($have[.]), not in NODE_ADDRESSES"]
+      + [$want | keys[] | select($have[.] != null and $have[.] != $want[.]) | "\(.): NODE_ADDRESSES has \($want[.]), NetBox has \($have[.])"])[]')"
+  if [[ -n "$problems" ]]; then
+    printf '%s\n' "$problems" >&2
+    echo "NODE_ADDRESSES in ${cluster#"$root"/} disagrees with NetBox" >&2
+    return 1
+  fi
 }
 
 nb_init
@@ -89,10 +121,13 @@ case "${1:-}" in
     [[ $# -le 2 ]] || usage
     file="${2:-$inventory}"
     rendered="$(render)"
+    failed=0
     if ! diff -u --label "${file#"$root"/}" --label NetBox "$file" - <<<"$rendered"; then
       echo "${file#"$root"/} differs from NetBox; run mise run netbox:export" >&2
-      exit 1
+      failed=1
     fi
+    addresses_agree || failed=1
+    exit "$failed"
     ;;
   --json)
     [[ $# -eq 1 ]] || usage
