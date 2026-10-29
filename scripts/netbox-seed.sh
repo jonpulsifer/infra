@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Imports folly into NetBox from git: the site, the device types and roles, the custom fields,
 # the Kubernetes nodes from the hardware inventory, the anchors and the switch, their interfaces,
-# MACs, cables and addresses, and the prefixes of both topology files. It finds each object by
+# MACs, cables and addresses, and the prefixes of both topology files, and the event rule that
+# webhooks device changes to the fleet controller on spore. It finds each object by
 # its natural key, creates what is missing and patches what differs, so a second run changes
 # nothing. Every object it writes carries the tag `managed-by: git-seed`.
 #
-# NetBox access is scripts/lib/netbox.sh's environment.
+# NetBox access is scripts/lib/netbox.sh's environment. NETBOX_WEBHOOK_SECRET, which the operator
+# exports, signs the webhook; the controller holds the same value.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -84,8 +86,20 @@ seed_catalog() {
   nb_ensure dcim/platforms "slug=nixos" "$(with_tags '{"name": "NixOS", "slug": "nixos"}')" >/dev/null
 }
 
+# choice_set <name> <value>...: ensure a custom field choice set whose labels are its values;
+# prints its id.
+choice_set() {
+  local name="$1"
+  shift
+  nb_ensure extras/custom-field-choice-sets "name=$name" \
+    "$(jq -cn --arg n "$name" '$ARGS.positional | {name: $n, extra_choices: map([., .])}' --args "$@")"
+}
+
 seed_custom_fields() {
-  local field
+  local field talos_class bmc_type desired_action
+  talos_class="$(choice_set talos-class controlplane worker-g5 worker-g2)"
+  bmc_type="$(choice_set bmc-type none amt redfish)"
+  desired_action="$(choice_set desired-action none provision attest wipe)"
   while read -r field; do
     nb_ensure extras/custom-fields "name=$(jq -r '.name' <<<"$field")" \
       "$(jq -c '. + {object_types: ["dcim.device"], required: false}' <<<"$field")" >/dev/null
@@ -101,8 +115,36 @@ seed_custom_fields() {
     {"name": "ldevid_serial", "label": "LDevID serial", "type": "text", "group_name": "Identity", "weight": 230, "description": "Serial of the LDevID certificate"},
     {"name": "ldevid_not_after", "label": "LDevID not after", "type": "date", "group_name": "Identity", "weight": 240, "description": "Expiry of the LDevID certificate"},
     {"name": "lak_serial", "label": "LAK serial", "type": "text", "group_name": "Identity", "weight": 250, "description": "Serial of the LAK certificate"},
-    {"name": "last_attested", "label": "Last attested", "type": "datetime", "group_name": "Identity", "weight": 260, "description": "When the node last passed attestation"}
+    {"name": "last_attested", "label": "Last attested", "type": "datetime", "group_name": "Identity", "weight": 260, "description": "When the node last passed attestation"},
+    {"name": "ek_hash_ecc", "label": "EK hash (ECC)", "type": "text", "group_name": "Identity", "weight": 215, "validation_regex": "^[0-9a-f]{64}$", "description": "SHA-256 of the ECC TPM endorsement key public area"},
+    {"name": "attest_verdict", "label": "Attest verdict", "type": "text", "group_name": "Identity", "weight": 270, "description": "attested, quarantined: <reason>, or pending-approval"},
+    {"name": "attest_consumed_at", "label": "Attest consumed at", "type": "datetime", "group_name": "Identity", "weight": 280, "description": "When talos-enroll released a config on the strength of last_attested"}
   ]')
+  while read -r field; do
+    nb_ensure extras/custom-fields "name=$(jq -r '.name' <<<"$field")" \
+      "$(jq -c '. + {object_types: ["dcim.device"], required: false}' <<<"$field")" >/dev/null
+  done < <(jq -nc --argjson c "$talos_class" --argjson b "$bmc_type" --argjson a "$desired_action" '[
+    {name: "talos_class", label: "Talos class", type: "select", choice_set: $c, group_name: "Fleet", weight: 300, description: "The class git declares for the node: its role and patches"},
+    {name: "bmc_type", label: "BMC type", type: "select", choice_set: $b, group_name: "Fleet", weight: 310, description: "The out-of-band management the node has"},
+    {name: "desired_action", label: "Desired action", type: "select", choice_set: $a, default: "none", group_name: "Fleet", weight: 320, description: "What the fleet controller does next: provision (attest, wipe, install), attest, or wipe"},
+    {name: "last_workflow", label: "Last workflow", type: "text", group_name: "Fleet", weight: 330, description: "The newest Workflow the fleet controller made"}
+  ] | .[]')
+}
+
+# seed_webhook: the webhook to the fleet controller on spore's anchor address, and the event rule
+# that sends every device update to it. NetBox conditions see only the new state, not the change,
+# so the rule cannot filter on a status change; the controller ignores updates that need nothing.
+seed_webhook() {
+  local webhook_id spore
+  : "${NETBOX_WEBHOOK_SECRET:?export NETBOX_WEBHOOK_SECRET, the secret the fleet controller verifies}"
+  spore="$(jq -er '.data.SPORE_IP' "$anchors_json")"
+  webhook_id="$(nb_ensure extras/webhooks "name=fleet-controller" "$(with_tags "$(jq -cn --arg u "http://$spore:8446/webhook" --arg s "$NETBOX_WEBHOOK_SECRET" '{
+    name: "fleet-controller", payload_url: $u, http_method: "POST", http_content_type: "application/json", secret: $s, ssl_verification: false,
+    description: "Wakes the fleet controller on spore"}')")")"
+  nb_ensure extras/event-rules "name=fleet-controller-device-update" "$(with_tags "$(jq -cn --argjson w "$webhook_id" '{
+    name: "fleet-controller-device-update", object_types: ["dcim.device"], event_types: ["object_updated"], enabled: true,
+    action_type: "webhook", action_object_type: "extras.webhook", action_object_id: $w,
+    description: "A device changed; the controller reconciles on desired_action and status"}')")" >/dev/null
 }
 
 seed_prefixes() {
@@ -150,6 +192,7 @@ switch_port() {
 nb_init
 seed_catalog
 seed_custom_fields
+seed_webhook
 site_id="$(nb GET "dcim/sites/?slug=folly" | jq -e '.results[0].id')"
 seed_prefixes "$site_id"
 
@@ -160,6 +203,11 @@ interface "$switch_id" mgmt "$switch_mac" virtual >/dev/null
 
 node_len="$(jq -er '.data.K8S_NODE_CIDR | split("/")[1]' "$cluster")"
 addresses="$(jq -er '.data.NODE_ADDRESSES | fromjson' "$cluster")"
+readonly node_fleet='{
+  "optiplex": {"talos_class": "controlplane", "bmc_type": "none"},
+  "shale": {"talos_class": "worker-g2", "bmc_type": "amt"},
+  "riptide": {"talos_class": "worker-g5", "bmc_type": "amt"}
+}'
 for node in $(yq -r '.machines | keys | .[]' "$inventory"); do
   m="$(yq -o json -I0 ".machines.$node" "$inventory")"
   type="$(jq -c --argjson m "$m" '.[] | select(.model == $m.model)' <<<"$device_types")"
@@ -167,12 +215,17 @@ for node in $(yq -r '.machines | keys | .[]' "$inventory"); do
     echo "$node: no device type for model $(jq -r '.model' <<<"$m")" >&2
     exit 1
   }
-  id="$(device "$(jq -cn --arg n "$node" --argjson m "$m" --argjson t "$type" '{
+  fleet="$(jq -ec --arg n "$node" '.[$n]' <<<"$node_fleet")" || {
+    echo "$node: no talos_class and bmc_type in node_fleet" >&2
+    exit 1
+  }
+  known="$(nb GET "dcim/devices/?site=folly&name=$(uri "$node")" | jq '.count')"
+  id="$(device "$(jq -cn --arg n "$node" --argjson m "$m" --argjson t "$type" --argjson f "$fleet" --argjson known "$known" '{
     name: $n, role: {slug: "kubernetes-node"}, device_type: {slug: $t.slug}, platform: {slug: "talos"},
-    status: "active", serial: $m.serial,
-    custom_fields: {bios_version: $m.bios, sku: $m.sku, install_disk: $m.disk, amt: $m.amt,
-      secure_boot_expected: $m.secure_boot, tpm_version: $m.tpm}
-  }')")"
+    serial: $m.serial,
+    custom_fields: ({bios_version: $m.bios, sku: $m.sku, install_disk: $m.disk, amt: $m.amt,
+      secure_boot_expected: $m.secure_boot, tpm_version: $m.tpm} + $f)
+  } + (if $known == 0 then {status: "active"} else {} end)')")"
   nic="$(interface "$id" "$(jq -r '.interfaces[0].name' <<<"$type")" "$(jq -r '.mac' <<<"$m")")"
   nb_cable "$nic" "$(switch_port "$(jq -r '.switch_port' <<<"$m")")" "$tags"
   ip="$(jq -er --arg n "$node" '.[$n]' <<<"$addresses")"
