@@ -3,7 +3,7 @@ title: Provision a node
 description: Declare a prepared folly machine in NetBox and install it as a Talos worker through its desired_action.
 ---
 
-Use this runbook to install a new folly node through [NetBox](../platform/netbox.md). The device's `desired_action` starts a run: [fleet-controller](../apps/fleet-controller.md) makes the `Workflow`, [talos-attest](../apps/talos-attest.md) attests the machine, and [Talos enrollment](../apps/talos-enroll.md) releases its config. [Identity](../platform/identity.md#lifecycle) lists the statuses.
+Use this runbook to install a new folly node through [NetBox](../platform/netbox.md). Its `desired_action` starts a [fleet-controller](../apps/fleet-controller.md) run; [talos-attest](../apps/talos-attest.md) attests it, and [Talos enrollment](../apps/talos-enroll.md) releases its config. [Identity](../platform/identity.md#lifecycle) lists the statuses.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.
@@ -25,12 +25,12 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
 ## Provision a new node
 
-A `planned` device has no RADIUS user, so the machine starts on the bootstrap network. `mise run netbox:check` fails unless `NODE_ADDRESSES` names every staged, active and failed node that has a primary IPv4, at that address, and no other node. So `NODE_ADDRESSES` cannot name a `planned` device.
+A `planned` device has no RADIUS user, so the machine and its AMT start on the bootstrap network, and you power it on by hand. `mise run netbox:check` fails unless `NODE_ADDRESSES` names every staged, active and failed node that has a primary IPv4, at that address, and no other node. So `NODE_ADDRESSES` cannot name a `planned` device.
 
 1. Connect the machine to its switch port.
 2. In NetBox, set the device's `desired_action` to `provision`.
 
-   Result: within two minutes, `last_workflow` names `provision-<node>-<unix seconds>`. The status stays `planned`.
+   Result: within two minutes, `last_workflow` names `provision-<node>-<unix seconds>`. The status stays `planned`, and the journal says to power the machine on.
 
 3. Power on the machine. Its empty disk falls through to IPv4 network boot, and iPXE chains HookOS.
 4. [Watch the run](#watch-the-run). If every EK has a certificate from a pinned maker, no approval is needed. Otherwise, pin the EK or [approve the first intake](#approve-a-first-intake).
@@ -43,7 +43,7 @@ A `planned` device has no RADIUS user, so the machine starts on the bootstrap ne
 
    Result: the node has a RADIUS user, a DHCP reservation and a DNS record.
 
-8. If the node installed on the bootstrap network, power-cycle it, so that the switch runs MAC auth again.
+8. If the node installed on the bootstrap network, power-cycle it, so that the switch runs MAC auth again. AMT then answers at `<addr>`, and Rufio drives later runs.
 9. Comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 10. [Deploy spore](deploy-a-nixos-host.md) from `main`. spore then has a SPIRE alias for the node's LDevID.
 11. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
@@ -79,7 +79,7 @@ With no pin, the console shows `attest: FAILED` with `pending-approval`, and the
 1. Read the EK hashes on the console, as `rsa:<hash>` and `ecc:<hash>`.
 2. Run `mise run attest:approve <serial>`.
 
-   Result: the claim's machine, MAC, UUID and EK hashes, and a question.
+   Result: the claim and a question.
 
 3. If the hashes match the console, answer `y`.
 4. Set `desired_action` to `provision` again. The pass writes the hashes to `ek_hash` and `ek_hash_ecc`.
@@ -91,7 +91,6 @@ With no pin, the console shows `attest: FAILED` with `pending-approval`, and the
 | `desired_action` stays set | fleet-controller is down, or the device lacks a MAC or `install_disk` | Read the device's journal and `journalctl -u fleet-controller` on spore |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions |
 | `attest: FAILED` with `quarantine` | The boot breaks `apps/talos-attest/policy.yaml`, and NetBox shows `failed` | Fix the boot chain, then set the status to `staged` |
-| `attest: FAILED` with `ek-hash-mismatch` | A pin names another TPM | Compare `mise run attest:pending` with `ek_hash` |
 | Approval answers 400 or 409 | The device lacks `talos_class`, or `class-inputs.json` lacks the class | Set the class, or run `mise run render-class-inputs` |
 
 ## Related

@@ -80,6 +80,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | The console shows `Talos is already installed to disk but booted from another media` | META is on the disk | Set `desired_action` to `wipe` |
 | `TalosEnrolledNodeNotReady` fires, and the node has a bootstrap address | NetBox shows it `failed`, so its RADIUS user puts it on bootstrap | Read the device's status and its quarantine reason |
 | A `failed` node stays on the Kubernetes network | A Virtual Network Override on its UniFi client comes before RADIUS | Clear the override in the UniFi controller |
+| `attest: FAILED` with `ek-hash-mismatch` | A pin names another TPM, such as after a board swap | Compare `mise run attest:pending` with `ek_hash` in NetBox |
 | Talos stops at `failed to read pcr signing public key` | Talos booted by kexec | Power-cycle the node |
 | Another symptom of a run | See [Provision a node](provision-a-node.md#if-something-goes-wrong) | Follow its table |
 
