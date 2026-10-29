@@ -24,13 +24,13 @@ variable "disk_gb" {
 variable "tailscale_client_id" {
   type        = string
   description = "The metal_dev_client_id output of terraform/network/tailscale. The VM joins the tailnet with it; null leaves the VM off the tailnet."
-  default     = null
+  default     = "TBENabvcXN71CNTRL-keafUurUy521CNTRL"
 }
 
 variable "tailscale_audience" {
   type        = string
   description = "The metal_dev_audience output of terraform/network/tailscale: the audience of the identity token the VM trades for an auth key."
-  default     = null
+  default     = "api.tailscale.com/TBENabvcXN71CNTRL-keafUurUy521CNTRL"
 
   validation {
     condition     = (var.tailscale_audience == null) == (var.tailscale_client_id == null)
