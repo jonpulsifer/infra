@@ -61,13 +61,13 @@ iap_ssh true
 
 if ! iap_ssh 'tailscale status >/dev/null 2>&1'; then
   echo "joining the tailnet"
-  op read "$METAL_DEV_TAILSCALE_KEY_REF" |
-    iap_ssh 'umask 077; cat >/tmp/ts.key && sudo tailscale up --auth-key "file:/tmp/ts.key" --advertise-tags=tag:gcp --accept-routes=false; rm -f /tmp/ts.key'
+  op read "$METAL_DEV_TAILSCALE_KEY_REF" \
+    | iap_ssh 'umask 077; cat >/tmp/ts.key && sudo tailscale up --auth-key "file:/tmp/ts.key" --advertise-tags=tag:gcp --accept-routes=false; rm -f /tmp/ts.key'
 fi
 
 echo "placing the DNS-01 token"
-op read "$METAL_DEV_CLOUDFLARE_REF" |
-  iap_ssh 'sudo install -m 600 -o root -g root /dev/stdin /var/lib/metal-dev/cloudflare-token && sudo systemctl restart "acme-enroll.*.service" 2>/dev/null || true'
+op read "$METAL_DEV_CLOUDFLARE_REF" \
+  | iap_ssh 'sudo install -m 600 -o root -g root /dev/stdin /var/lib/metal-dev/cloudflare-token && sudo systemctl restart "acme-enroll.*.service" 2>/dev/null || true'
 
 echo "mirroring the newest signed release"
 iap_ssh 'sudo systemctl start metal-dev-talos-mirror.service && systemctl is-active netbox.service metal-dev-tinkerbell.service podman-sushy.service podman-talos-enroll.service podman-talos-attest.service podman-fleet-controller.service || true'
