@@ -25,8 +25,8 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
    Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows.
 
-2. If talos-attest admits serials no stub names, `--serial` is optional: a class-only stub names the next machine of its class. Open the window if it needs one: `mise run fleet:intake open 2h`.
-3. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, and power it on. It stays there through its first boot.
+2. If talos-attest admits serials no stub names, `--serial` is optional: a class-only stub names the next machine. Open its window if needed: `mise run fleet:intake open 2h`.
+3. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, and power it on. It stays there until step 9.
 
    Result: the controller creates `Hardware <mac>` and an attest-only `Workflow intake-<mac>-<unix seconds>`.
 
@@ -44,7 +44,7 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
    Result: the node has a RADIUS user, a DHCP reservation and a DNS record.
 
-9. Move the node to its rack port, which runs MAC auth, and power-cycle it. Without `--port`, the controller cables it when UniFi sees it there.
+9. Move the node to its rack port, which runs MAC auth, and power-cycle it. Without `--port`, the controller cables it from UniFi.
 10. Comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 11. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
 12. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
