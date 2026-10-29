@@ -11,7 +11,7 @@ Use this runbook once for each new machine, before [Provision a node](provision-
 ## Before you start
 
 - The machine has a TPM 2.0 and Intel AMT. The steps are for the HP EliteDesk 800 G5, the model of riptide.
-- You have the provisioning station's monitor and keyboard. Its port is `provisioning` in `spare_ports` of `terraform/network/unifi/folly/bootstrap.tf`, which puts an unknown MAC on the bootstrap network.
+- You have the provisioning station's monitor and keyboard. Its port is `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, which is always on the bootstrap network. The machine stays there for the whole intake, through [Provision a node](provision-a-node.md), before it moves to its rack port.
 - The AMT password is in the 1Password item `AMT MEBx credentials`.
 
 ## Set the firmware

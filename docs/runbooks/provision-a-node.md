@@ -33,7 +33,7 @@ If you know the EK hash, add `--ek-hash <hex>`; set `ek_hash_ecc` in NetBox. If 
 
 A `planned` device with a MAC and a switch port gets a RADIUS user on the Kubernetes network and a DHCP reservation from its export once that export is applied; until then it sits on the bootstrap fallback, so you power it on by hand. `mise run netbox:check` fails unless `NODE_ADDRESSES` names every staged, active and failed node that has a primary IPv4, at that address, and no other node. So `NODE_ADDRESSES` cannot name a `planned` device.
 
-1. Connect the machine to its switch port.
+1. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports`. That port is always on the bootstrap network, so the whole intake (key enrollment, attest, install and first boot) runs there. The move to its switch port comes after, at step 8.
 2. In NetBox, set the device's `desired_action` to `provision`.
 
    Result: within two minutes, `last_workflow` names `provision-<node>-<unix seconds>`. The status stays `planned`.
@@ -49,7 +49,7 @@ A `planned` device with a MAC and a switch port gets a RADIUS user on the Kubern
 
    Result: the node has a RADIUS user, a DHCP reservation and a DNS record.
 
-8. If the node installed on the bootstrap network, power-cycle it, so that the switch runs MAC auth again. AMT then answers at `<addr>`, and Rufio drives later runs.
+8. Move the node to its rack port, which runs MAC auth, and power-cycle it. AMT then answers at `<addr>`, and Rufio drives later runs.
 9. Comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 10. [Deploy spore](deploy-a-nixos-host.md) from `main`. spore then has a SPIRE alias for the node's LDevID.
 11. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
