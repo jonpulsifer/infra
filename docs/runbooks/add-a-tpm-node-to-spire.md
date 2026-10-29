@@ -20,13 +20,13 @@ A node that passed attestation has an LDevID from the attest service, and its ag
 
 ## Admit the node
 
-spore builds the EK hash allow list, each node alias, and the entries under each alias from `tpmNodes` and `workloads` in `nix/hosts/spore.nix`.
+spore builds the EK hash allow list and the EK aliases from `ekHashes` in `nix/hosts/spore.nix`, and the LDevID aliases from `clusters/folly/inventory/machines.yaml`. It registers the entries in `workloads` under each alias.
 
-1. On a branch, add `<name> = { };` to `tpmNodes` in `nix/hosts/spore.nix`.
-2. If the node has no LDevID, read its EK hash, and set `<name>.ekHash = "<hash>";`.
+1. Make sure that `machines.yaml` on `main` lists the node with `tpm: "2.0"` and the status `staged` or `active`. NetBox's export writes it.
+2. If the node has no LDevID, read its EK hash, and on a branch add `<name> = "<hash>";` to `ekHashes`.
 3. In `clusters/folly/talos/talos.tf`, give the node the label `lolwtf.ca/tpm` with the value `true`.
 4. Open a pull request, and apply it with Atlantis.
-5. Deploy spore, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
+5. Deploy spore from `main`, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
 
 ## Turn on LDevID attestation
 
@@ -50,7 +50,7 @@ Do this once. The server then runs `tpm_devid` beside the EK attestor, and each 
 > [!CAUTION]
 > With no EK hash left, the server has no EK attestor. An agent whose LDevID fetch fails then cannot attest.
 
-7. When every node attests by LDevID, delete each `ekHash` from `tpmNodes`, and deploy spore.
+7. When every node attests by LDevID, delete each entry of `ekHashes`, and deploy spore.
 
 ## Read the EK hash
 
@@ -176,12 +176,13 @@ Do this once, before the first agent attests. spore's `k8sbundle` notifier then 
 | The agent fails to start with a trust bundle error | `spire-bundle` is empty, because the notifier is off | Turn on the bundle notifier. |
 | The first attestation fails with `x509: certificate signed by unknown authority` | The notifier missed a rotation while folly's API server was down | On spore, run `systemctl restart spire-server`. The notifier writes the bundle at startup. |
 | `spire-server` restarts every 30 seconds, and its journal shows `Notifier failed to handle event` | The server cannot write the bundle at startup, and it exits | If the error is `401`, the Secret is new: store its token again. Otherwise, make sure that spore reaches folly's API server. |
-| The server rejects the attestation | The hash is not in `tpmNodes` of `nix/hosts/spore.nix`, or spore runs an older configuration | Add the hash, and deploy spore. |
+| The server rejects the attestation | The hash is not in `ekHashes` of `nix/hosts/spore.nix`, or spore runs an older configuration | Add the hash, and deploy spore. |
 | `devid-init` logs `no usable LDevID` | The attest service is unreachable, holds no LDevID for the serial, or serves one for another node, serial or key | Read the reason in the log. Attest the node again, or fix `ATTEST_URL`. |
 | The agent logs `tpm2.Load failed` | The attest service wrapped the LDevID key under another parent than the TCG H-1 or H-2 storage root key | Attest the node again after the attest service creates the key under that parent. |
 | The server logs `cannot verify EK signature` | The CA that signed the node's EK certificate is not in `nix/services/spire/roots/` | Add the CA from the EK certificate's AIA URL, and deploy spore. |
 | The agent logs `unable to get endorsement certificate` | The TPM has no RSA EK certificate in NV, which `tpm_devid` reads | Admit the node by EK hash. |
-| The agent attests by LDevID, and workloads get no SVID | No alias selects the LDevID's subject CN | Make sure that `<name>` is in `tpmNodes` and that `devid.enable` is on. |
+| The agent attests by LDevID, and workloads get no SVID | No alias selects the LDevID's subject CN | Make sure that `machines.yaml` lists `<name>` with `tpm: "2.0"` and the status `staged` or `active`, that `devid.enable` is on, and that spore runs that commit. |
+| `TalosAttestLDevIDExpiring` fires | `tpm-reattest` on the node cannot renew the LDevID | Read `kubectl --context folly -n spire logs daemonset/tpm-reattest`, or the pod on `<name>`. A `404` refusal means the service has no LAK for the serial, and a `403` means the machine's status forbids a renewal. Otherwise, attest the node again. |
 | The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM, and boot the node. |
 | The smoke Job runs no pod | The Job is suspended | Remove `suspend: true` from `clusters/folly/apps/spire/smoke.yaml`. |
 | The smoke Job prints `no identity issued` | No entry for `spire-smoke/smoke` has the node's alias as parent | Add the pair to `workloads` in `nix/hosts/spore.nix`, and deploy spore. |

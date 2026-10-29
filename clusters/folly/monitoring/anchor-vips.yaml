@@ -169,11 +169,13 @@ spec:
           annotations:
             message: "{{ $labels.machine }} waits for the owner to approve its EK on first intake"
             description: "Neither machines.yaml nor NetBox pins {{ $labels.machine }}'s EK hash. Approve it on {{ $labels.instance }}'s admin API, as docs/runbooks/attest-a-node.md says."
+        # tpm-reattest renews an LDevID from 30 days before its expiry, once a day, so
+        # this fires only after a week of failed renewals.
         - alert: TalosAttestLDevIDExpiring
-          expr: talos_attest_ldevid_expiry_timestamp_seconds - time() < 30 * 86400
+          expr: talos_attest_ldevid_expiry_timestamp_seconds - time() < 23 * 86400
           for: 1h
           labels:
             severity: warning
           annotations:
-            message: "{{ $labels.machine }}'s LDevID expires within 30 days"
-            description: "Attest {{ $labels.machine }} again before its LDevID expires, or its SPIRE agent falls back to the EK attestor."
+            message: "{{ $labels.machine }}'s LDevID expires within 23 days"
+            description: "tpm-reattest has not renewed {{ $labels.machine }}'s LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."

@@ -9,3 +9,4 @@ resources:
   - bundle-writer.yaml
   - daemonset.yaml
   - smoke.yaml
+  - tpm-reattest.yaml

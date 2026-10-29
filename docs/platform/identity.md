@@ -27,8 +27,11 @@ The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
 
 The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject to `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`: the node's name, its SMBIOS serial, NetBox's `talos_class` and the site. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
 
-- Change entries and EK hashes in `tpmNodes` and `workloads` of `nix/hosts/spore.nix` only. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
-- An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no `ekHash` attests only by LDevID.
+SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
+
+- The LDevID aliases follow `clusters/folly/inventory/machines.yaml`. Each machine with `tpm: "2.0"` and the status `staged` or `active` gets one, and a machine whose export has no `status` counts as `active`. `nix/lib/inventory.nix` reads the export at evaluation, so a new machine's alias needs a spore deploy.
+- Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
+- An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
 - `homelab.spire.devid.caChains` takes one file for each issuing DevID CA, `folly-devid-ca-<name>.pem` in `terraform/pki/certs/`. The server reads the first certificate of each file, so list the CA files and not the bundle `folly-devid-ca.pem`. The fml intermediate or root in that pool would admit any certificate it signs.
 - Run the CLI as root with `-socketPath /run/spire/server/private/api.sock`. Its default socket path is wrong for this server.
@@ -67,6 +70,18 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 [Add a TPM node to SPIRE](../runbooks/add-a-tpm-node-to-spire.md) admits a node by LDevID or EK hash, turns on `tpm_devid`, and turns on the bundle notifier.
 
+## Renewal
+
+The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, it renews it on the attest service's DevID listener, at the same `ATTEST_URL` as `devid-init`.
+
+1. It fetches `/devid/<serial>` and checks that the key blobs are the keys the certificates in NV name.
+2. `POST /v1/renew` with the serial answers a session and a nonce.
+3. It loads the LAK and the LDevID key under the H-2 storage root key. With the LAK it quotes PCRs 0 to 7 and certifies the LDevID key, both qualified by the nonce.
+4. `POST /v1/renew/<session>/evidence` carries the quote, the PCR values, the event log from securityfs, and the certification. The service replays the log as at intake and answers a new certificate for the same key.
+5. It writes the certificate to NV, and deletes the `spire-agent` pod on its node. The new pod's `devid-init` fetches the new certificate.
+
+A run that fails runs again an hour later. A node with no LDevID in NV has nothing to renew. The ServiceAccount `tpm-reattest` may list and delete pods in `spire`. The ValidatingAdmissionPolicy `tpm-reattest` allows it to delete only a `spire-agent` pod on the node that its token names. `TalosAttestLDevIDExpiring` fires when an LDevID expires within 23 days, which is a week of failed renewals.
+
 ## GCP access
 
 | Part | Job | Where it runs |
@@ -102,9 +117,10 @@ The allow list holds the EK hashes of riptide and optiplex. `tpm_devid` is off: 
 - `nix/services/spire-server.nix`: the server, both node attestors, the bundle notifier, the entry sync, the agent count and the firewall
 - `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/talos-attest/roots/`
 - `apps/talos-attest/` and `nix/services/talos-attest.nix`: the attest service and its anchor deployment
-- `nix/hosts/spore.nix`: `tpmNodes`, `workloads` and the registration entries
+- `nix/hosts/spore.nix`: `ekHashes`, `workloads` and the registration entries
+- `nix/lib/inventory.nix`: `machines.yaml` as Nix, for the LDevID aliases
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
-- `clusters/folly/apps/`: the agent, its bundle, the bundle writer and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
+- `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: the provider `spire` in `fml-pool`, with the test bucket and its grant in `spire-test.tf` beside it
 - `terraform/network/cloudflare/lolwtf.ca.tf`: the tunnel rule for `spire.lolwtf.ca`
