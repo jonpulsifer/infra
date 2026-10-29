@@ -31,6 +31,7 @@ let
   apiPort = 6443;
   httpPort = 7080;
   tinkServerPort = 42113;
+  syslogPort = 514;
 
   tinkerbell =
     pkgs.runCommand "tinkerbell-embedded-${version}"
@@ -219,7 +220,10 @@ let
     "--http-port=${toString httpPort}"
     "--tink-server-bind-addr=${bootstrapIp}"
     "--tink-server-bind-port=${toString tinkServerPort}"
-    "--syslog-enabled=false"
+    # HookOS sends its syslog to syslog_host= on its command line; Smee writes it to the journal.
+    "--syslog-enabled=true"
+    "--syslog-bind-addr=${bootstrapIp}"
+    "--syslog-bind-port=${toString syslogPort}"
 
     # proxy answers only MACs that have a Hardware object; UniFi leases the address.
     "--dhcp-mode=proxy"
@@ -261,7 +265,10 @@ in
         httpPort
         tinkServerPort
       ];
-      allowedUDPPorts = [ 67 ];
+      allowedUDPPorts = [
+        67
+        syslogPort
+      ];
     };
     end0.allowedTCPPorts = [ apiPort ];
     tailscale0.allowedTCPPorts = [ apiPort ];
