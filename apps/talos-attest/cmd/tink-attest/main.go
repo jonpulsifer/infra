@@ -3,6 +3,12 @@
 // event log, drives the flow with the TPM, and stores the issued
 // certificates in NV. It exits non-zero on any refusal, so the Workflow
 // fails and the machine stays where it is.
+//
+// `tink-attest renew` runs on a running node instead. When the LDevID in NV
+// expires within -renew-before, it has the service certify the LDevID key
+// again on the strength of a LAK-signed quote, stores the new certificate in
+// NV and restarts the pods -restart-selector picks on the node. It exits 0
+// when no renewal is due or the node has no LDevID.
 package main
 
 import (
@@ -50,6 +56,13 @@ func logf(format string, args ...any) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "renew" {
+		if err := renew(os.Args[2:]); err != nil {
+			printf("RENEWAL FAILED: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 	url := flag.String("url", env("ATTEST_URL", ""), "talos-attest base URL")
 	device := flag.String("tpm", env("TPM_DEVICE", "/dev/tpmrm0"), "TPM resource manager device")
 	eventLog := flag.String("event-log", env("EVENT_LOG", "/sys/kernel/security/tpm0/binary_bios_measurements"), "TCG event log")
