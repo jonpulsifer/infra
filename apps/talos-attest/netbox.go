@@ -514,6 +514,34 @@ func (n *NetBox) journalLater(ctx context.Context, deviceID int, kind, comment, 
 	}()
 }
 
+// Backfill writes a pass this anchor holds to a device whose verdict is
+// empty, as after the verdict fields were created in NetBox. A non-empty
+// verdict, and a device being decommissioned or offline, are never touched.
+// It reports whether it wrote.
+func (n *NetBox) Backfill(ctx context.Context, r Record) (bool, error) {
+	d, ok, err := n.device(ctx, r.Serial)
+	if err != nil || !ok {
+		return false, err
+	}
+	if d.CustomFields.Verdict != "" || d.Status.Value == statusDecommissioning || d.Status.Value == statusOffline {
+		return false, nil
+	}
+	fields := map[string]any{
+		"attest_verdict": StatusAttested,
+		"last_attested":  r.AttestedAt.UTC().Format(time.RFC3339),
+		"ldevid_serial":  r.LDevIDSerial,
+		"lak_serial":     r.LAKSerial,
+	}
+	if !r.LDevIDNotAfter.IsZero() {
+		fields["ldevid_not_after"] = r.LDevIDNotAfter.UTC().Format(time.DateOnly)
+	}
+	if err := n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/devices/%d/", d.ID), map[string]any{"custom_fields": fields}, nil); err != nil {
+		return false, err
+	}
+	n.journalLater(ctx, d.ID, "info", fmt.Sprintf("talos-attest: verdict backfilled from the anchor's record; LDevID %s, LAK %s, attested %s", r.LDevIDSerial, r.LAKSerial, r.AttestedAt.UTC().Format(time.RFC3339)), r.Serial)
+	return true, nil
+}
+
 // MarkPending notes on the device that a first intake waits for the owner.
 // A claim proved nothing, so it writes neither status nor pins, and never
 // over a pass on file: the device's verdict stays attested.

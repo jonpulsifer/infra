@@ -61,7 +61,18 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	ca.Site = site
-	log.Info("DevID CA loaded", "subject", ca.Cert.Subject.String(), "pkcs11", pkcs11Configured(), "site", site)
+	// The other anchors issue too: their leaves must verify here. The bundle
+	// holds every issuing CA of the site.
+	if bundle := os.Getenv("ATTEST_CA_BUNDLE"); bundle != "" {
+		issuers, err := readChain(bundle)
+		if err != nil {
+			return fmt.Errorf("ATTEST_CA_BUNDLE: %w", err)
+		}
+		if err := ca.AddIssuers(issuers); err != nil {
+			return fmt.Errorf("ATTEST_CA_BUNDLE: %w", err)
+		}
+	}
+	log.Info("DevID CA loaded", "subject", ca.Cert.Subject.String(), "pkcs11", pkcs11Configured(), "site", site, "issuers", ca.issuerNames())
 	roots, err := LoadEKRoots(env("ATTEST_EK_ROOTS", "/etc/talos-attest/roots"))
 	if err != nil {
 		return err
@@ -142,10 +153,6 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("ATTEST_PEER_SYNC: %w", err)
 	}
-	if sync > 0 && len(peers) > 0 {
-		go srv.RunPeerSync(ctx, sync)
-	}
-
 	listeners := []struct {
 		addr    string
 		mode    fs.FileMode
@@ -166,6 +173,14 @@ func run(log *slog.Logger) error {
 		servers = append(servers, s)
 		log.Info("listening", "addr", l.addr)
 		go func() { errc <- s.Serve(ln) }()
+	}
+	// A pass this anchor issued before NetBox held the verdict fields is
+	// written there once the listeners serve, and again on each sync, so
+	// NetBox's empty verdict never hides it.
+	if sync > 0 && (len(peers) > 0 || v.NetBox != nil) {
+		go srv.RunPeerSync(ctx, sync)
+	} else {
+		go v.BackfillNetBox(ctx)
 	}
 	log.Info("talos-attest started", "machines", inv.Names(), "ek_roots", roots.Count, "ca", ca.Cert.Subject.String(), "peers", peers)
 

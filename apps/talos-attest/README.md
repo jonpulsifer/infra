@@ -30,7 +30,8 @@ ATTEST_APPROVERS=you@example.com \
 | `ATTEST_CA_PKCS11_TOKEN` | none | The token label, such as `YubiKey PIV #<serial>` |
 | `ATTEST_CA_PKCS11_PIN_FILE` | none | A file that holds the token's user PIN |
 | `ATTEST_CA_CERT` | none | A PEM file whose first certificate is the CA's; it picks the key on the token |
-| `ATTEST_CA_CHAIN` | `/etc/talos-attest/devid-ca-chain.pem` | The DevID CA first, then each issuer up to the root |
+| `ATTEST_CA_CHAIN` | `/etc/talos-attest/devid-ca-chain.pem` | The DevID CA first, then each issuer up to the self-signed root |
+| `ATTEST_CA_BUNDLE` | none | Every issuing CA of the site, such as `terraform/pki/certs/folly-devid-ca.pem`; a leaf another anchor issued verifies here only when its CA is in it. The last certificate of `ATTEST_CA_CHAIN` is the only root: each CA in the bundle must chain to it, and a bundle that holds a self-signed certificate is refused whole. |
 | `ATTEST_SITE` | `folly` | The O of every certificate, and the NetBox site a first-sight device joins |
 | `ATTEST_CERT_VALIDITY` | `2160h` | LDevID and LAK lifetime, capped at the CA's. The running node renews from 30 days out. |
 | `ATTEST_EK_ROOTS` | `/etc/talos-attest/roots` | Directory of pinned TPM manufacturer certificates |

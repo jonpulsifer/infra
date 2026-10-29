@@ -374,6 +374,17 @@ func (s *Store) File(name, file string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(dir, file))
 }
 
+// HasFiles is whether every served file of a machine is here: the mark of
+// an intake this anchor ran.
+func (s *Store) HasFiles(name string) bool {
+	for _, f := range ServedFiles {
+		if _, err := s.File(name, f); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // RecordBySerial finds the newest record whose machine has serial, and
 // false when this anchor holds none.
 func (s *Store) RecordBySerial(serial string) (Record, bool, error) {

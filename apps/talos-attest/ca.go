@@ -12,19 +12,68 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
 
 // CA is the DevID CA: its key, and its chain from itself up to the FML root.
+// Issuers are every CA whose leaves this anchor accepts: its own, and the
+// other anchors' from the bundle, since a machine attested on any anchor.
 type CA struct {
 	Cert     *x509.Certificate
 	Chain    []*x509.Certificate
+	Issuers  []*x509.Certificate
 	key      crypto.Signer
 	Validity time.Duration
 	// Site is the subject's O of every leaf.
 	Site string
 }
+
+// AddIssuers admits more issuing CAs, from a bundle such as
+// terraform/pki/certs/folly-devid-ca.pem. Each must chain to the root of
+// this CA's chain through its intermediates or the bundle; a self-signed
+// certificate is never admitted. On any failure none is.
+func (c *CA) AddIssuers(certs []*x509.Certificate) error {
+	candidate := *c
+	candidate.Issuers = slices.Clone(c.Issuers)
+	for _, cert := range certs {
+		if !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+			return fmt.Errorf("%s may not sign certificates", cert.Subject)
+		}
+		if bytes.Equal(cert.RawSubject, cert.RawIssuer) || selfSigned(cert) {
+			return fmt.Errorf("issuing CA %s is self-signed; the only root is %s", cert.Subject.CommonName, c.root().Subject.CommonName)
+		}
+		if slices.ContainsFunc(candidate.Issuers, func(have *x509.Certificate) bool { return bytes.Equal(have.Raw, cert.Raw) }) {
+			continue
+		}
+		candidate.Issuers = append(candidate.Issuers, cert)
+	}
+	roots, intermediates := candidate.pools()
+	for _, cert := range candidate.Issuers {
+		if _, err := cert.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}, CurrentTime: cert.NotBefore}); err != nil {
+			return fmt.Errorf("issuing CA %s does not chain to this CA's root: %w", cert.Subject.CommonName, err)
+		}
+	}
+	c.Issuers = candidate.Issuers
+	return nil
+}
+
+// pools are the trust anchor and the intermediates for verifying a leaf:
+// the chain's last certificate is the only root, and the rest of the chain
+// and every issuing CA are intermediates.
+func (c *CA) pools() (roots, intermediates *x509.CertPool) {
+	roots, intermediates = x509.NewCertPool(), x509.NewCertPool()
+	roots.AddCert(c.root())
+	for _, cert := range append(slices.Clone(c.Chain[:len(c.Chain)-1]), c.Issuers...) {
+		intermediates.AddCert(cert)
+	}
+	return roots, intermediates
+}
+
+func (c *CA) root() *x509.Certificate { return c.Chain[len(c.Chain)-1] }
+
+func selfSigned(cert *x509.Certificate) bool { return cert.CheckSignatureFrom(cert) == nil }
 
 // Subject is what a leaf names: the IEEE 802.1AR DevID subject, with the
 // lifecycle's class as OU and the site as O, so SPIRE can select on either.
@@ -74,8 +123,9 @@ func readChain(chainPath string) ([]*x509.Certificate, error) {
 	return chain, nil
 }
 
-// NewCA checks that key belongs to chain[0], that chain[0] may issue, and
-// that each certificate in the chain is signed by the next.
+// NewCA checks that key belongs to chain[0], that chain[0] may issue, that
+// each certificate in the chain is signed by the next, and that the last is
+// a self-signed root.
 func NewCA(key crypto.Signer, chain []*x509.Certificate, validity time.Duration) (*CA, error) {
 	if len(chain) == 0 {
 		return nil, errors.New("the DevID CA chain is empty")
@@ -96,10 +146,13 @@ func NewCA(key crypto.Signer, chain []*x509.Certificate, validity time.Duration)
 			return nil, fmt.Errorf("%s is not signed by %s: %w", chain[i].Subject, chain[i+1].Subject, err)
 		}
 	}
+	if root := chain[len(chain)-1]; !bytes.Equal(root.RawSubject, root.RawIssuer) || !selfSigned(root) {
+		return nil, fmt.Errorf("the DevID CA chain ends at %s, which is not a self-signed root", root.Subject)
+	}
 	if validity <= 0 {
 		return nil, errors.New("certificate validity must be positive")
 	}
-	return &CA{Cert: ca, Chain: chain, key: key, Validity: validity, Site: "folly"}, nil
+	return &CA{Cert: ca, Chain: chain, Issuers: []*x509.Certificate{ca}, key: key, Validity: validity, Site: "folly"}, nil
 }
 
 func parseKey(b []byte) (crypto.Signer, error) {
@@ -166,9 +219,9 @@ func (c *CA) Issue(pub crypto.PublicKey, s Subject, role string, now time.Time) 
 	return x509.ParseCertificate(der)
 }
 
-// VerifyLeaf parses the first certificate of a PEM chain and checks that
-// this CA issued it, that it chains to the root and is valid at now, and
-// that it names machine and serial.
+// VerifyLeaf parses the first certificate of a PEM chain and checks that an
+// issuing CA this anchor accepts issued it, that it chains to the root and
+// is valid at now, and that it names machine and serial.
 func (c *CA) VerifyLeaf(pemChain, machine, serial string, now time.Time) (*x509.Certificate, error) {
 	blk, _ := pem.Decode([]byte(pemChain))
 	if blk == nil || blk.Type != "CERTIFICATE" {
@@ -178,21 +231,25 @@ func (c *CA) VerifyLeaf(pemChain, machine, serial string, now time.Time) (*x509.
 	if err != nil {
 		return nil, err
 	}
-	roots, intermediates := x509.NewCertPool(), x509.NewCertPool()
-	roots.AddCert(c.Chain[len(c.Chain)-1])
-	for _, cert := range c.Chain[:len(c.Chain)-1] {
-		intermediates.AddCert(cert)
-	}
+	roots, intermediates := c.pools()
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}, CurrentTime: now}); err != nil {
 		return nil, err
 	}
-	if err := leaf.CheckSignatureFrom(c.Cert); err != nil {
-		return nil, fmt.Errorf("not issued by %s: %w", c.Cert.Subject.CommonName, err)
+	if !slices.ContainsFunc(c.Issuers, func(issuer *x509.Certificate) bool { return leaf.CheckSignatureFrom(issuer) == nil }) {
+		return nil, fmt.Errorf("not issued by %s", c.issuerNames())
 	}
 	if leaf.Subject.CommonName != machine || !strings.EqualFold(strings.TrimSpace(leaf.Subject.SerialNumber), strings.TrimSpace(serial)) {
 		return nil, fmt.Errorf("names %s %s, not %s %s", leaf.Subject.CommonName, leaf.Subject.SerialNumber, machine, serial)
 	}
 	return leaf, nil
+}
+
+func (c *CA) issuerNames() string {
+	names := make([]string, 0, len(c.Issuers))
+	for _, issuer := range c.Issuers {
+		names = append(names, issuer.Subject.CommonName)
+	}
+	return strings.Join(names, ", ")
 }
 
 // ChainPEM is the DevID CA up to the root.

@@ -480,6 +480,53 @@ func (v *Verifier) firstSight(ctx context.Context, claim protocol.Machine) (Mach
 	return created, nil
 }
 
+// BackfillNetBox writes every pass this anchor's own intake produced to a
+// NetBox device whose verdict is empty, as after the verdict fields were
+// created. A record from before EKProven was kept counts as this anchor's
+// own when the intake's files are here; an adopted record never is.
+func (v *Verifier) BackfillNetBox(ctx context.Context) {
+	if v.NetBox == nil {
+		return
+	}
+	recs, err := v.Store.Records()
+	if err != nil {
+		v.Log.Warn("NetBox backfill", "err", err)
+		return
+	}
+	for _, rec := range recs {
+		if ctx.Err() != nil {
+			return
+		}
+		if rec.Status != StatusAttested || !v.ownIntake(rec) {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		written, err := v.NetBox.Backfill(ctx, rec)
+		cancel()
+		if err != nil {
+			v.Log.Warn("NetBox backfill", "machine", rec.Machine, "serial", rec.Serial, "err", err)
+			continue
+		}
+		if written {
+			v.Log.Info("NetBox verdict backfilled from this anchor's record", "machine", rec.Machine, "serial", rec.Serial, "ldevid_serial", rec.LDevIDSerial, "attested_at", rec.AttestedAt)
+			v.Audit.Emit(AuditEntry{Event: auditVerdict, Node: rec.Machine, Serial: rec.Serial, Class: rec.Class, Status: "backfilled", Reason: "ldevid " + rec.LDevIDSerial})
+		}
+	}
+}
+
+// ownIntake is whether this anchor's own intake path wrote the record: it
+// proved the EKs, or it predates that mark and holds the intake's files,
+// which an adopted record, stamped with its issue time, never does.
+func (v *Verifier) ownIntake(rec Record) bool {
+	if rec.EKProven {
+		return true
+	}
+	if !rec.LDevIDNotBefore.IsZero() || rec.Renewed {
+		return false
+	}
+	return v.Store.HasFiles(rec.Machine)
+}
+
 // approvedBefore is whether the owner, or a pass, has pinned the serial's EKs here.
 func (v *Verifier) approvedBefore(serial string) bool {
 	a, err := v.Store.Approvals()
