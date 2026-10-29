@@ -18,15 +18,16 @@ locals {
 }
 
 resource "unifi_network" "k8s" {
-  name               = "Kubernetes"
-  subnet             = local.node_cidr
-  vlan               = 8
-  domain_name        = local.lab_domain
-  setting_preference = "manual"
-  auto_scale         = false
-  lte_lan            = false
-  network_isolation  = true
-  multicast_dns      = false
+  name                = "Kubernetes"
+  subnet              = local.node_cidr
+  vlan                = 8
+  domain_name         = local.lab_domain
+  setting_preference  = "manual"
+  auto_scale          = false
+  lte_lan             = false
+  network_isolation   = true
+  multicast_dns       = false
+  ipv6_interface_type = "none"
 
   dhcp_server = {
     enabled     = true
@@ -35,11 +36,11 @@ resource "unifi_network" "k8s" {
     stop        = cidrhost(local.node_cidr, 62)
     dns_enabled = true
     dns_servers = local.dns_servers
-    # Nodes netboot only on the bootstrap VLAN. Without the block the provider
-    # keeps the controller's last boot option.
-    boot = {
-      enabled = false
-    }
+    # A known node netboots here, from the anchors on their bootstrap addresses
+    # through the policy kubernetes_to_boot in firewall.tf. The resolvers above
+    # are the anchors' CoreDNS, which answers enroll.lolwtf.ca with the boot VIP.
+    tftp_server = local.boot_vip
+    boot        = local.boot_option
   }
 
 }
@@ -52,10 +53,8 @@ resource "unifi_client" "k8s_nodes" {
   for_each = local.node_addresses
 
   # No network_id: the provider sends it as a Virtual Network Override, which
-  # the switch enforces as a MAC-based VLAN on every port. That pins a node to
-  # the Kubernetes VLAN whatever its port or RADIUS assigns, so a reinstall
-  # could never reach the bootstrap VLAN. The node ports carry the Kubernetes
-  # VLAN untagged already.
+  # the switch enforces as a MAC-based VLAN on every port, whatever RADIUS
+  # assigns. RADIUS and the node ports put a node on the Kubernetes VLAN.
   mac      = local.machines[each.key].mac
   name     = each.key
   fixed_ip = each.value

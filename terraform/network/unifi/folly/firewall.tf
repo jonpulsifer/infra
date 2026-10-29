@@ -689,3 +689,38 @@ resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
     zone_id            = unifi_firewall_zone.bootstrap.id
   }
 }
+
+# A node netboots on the Kubernetes network, so Lab reaches the anchors' boot
+# services on their bootstrap addresses and the boot VIP: TFTP and NTP, and HTTP
+# and HTTPS for the iPXE scripts, the UKI and enroll.lolwtf.ca. Lab and Bootstrap
+# are custom zones, so the controller creates each reply rule; the gateway's
+# TFTP conntrack helper relates the data transfer to the request.
+resource "unifi_firewall_policy" "kubernetes_to_boot" {
+  for_each = {
+    tcp = "80,443"
+    udp = "69,123"
+  }
+
+  name                 = "Allow Kubernetes to Boot ${upper(each.key)}"
+  action               = "ALLOW"
+  protocol             = each.key
+  ip_version           = "IPV4"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "NETWORK"
+    network_ids        = [unifi_network.k8s.id]
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = [for ip in concat(local.anchor_boot_ips, [local.boot_vip]) : "${ip}/32"]
+    port               = each.value
+    port_matching_type = "SPECIFIC"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+}

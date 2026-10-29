@@ -10,6 +10,14 @@ locals {
   ]
   boot_vip = local.anchor_topology.BOOT_VIP
 
+  # The DHCP boot option of the bootstrap and Kubernetes networks: the signed
+  # iPXE that dnsmasq serves over TFTP at the boot VIP.
+  boot_option = {
+    enabled  = true
+    server   = local.boot_vip
+    filename = "talos/folly/ipxe-amd64-secureboot.efi"
+  }
+
   # The switch port of each anchor, read from the live switch.
   anchor_ports = {
     capsule = 5
@@ -17,20 +25,10 @@ locals {
     forge   = 9
   }
 
-  # The switch ports that run MAC auth, from the inventory, and each node's
-  # enrolled state: the network its RADIUS user puts it on. A reinstall flips a
-  # node to bootstrap, and the switch's re-authentication moves the port within
-  # a minute or two, with no link flap.
+  # The switch ports of the inventory's nodes. Every node's RADIUS user puts it
+  # on the Kubernetes network, where it also netboots. A MAC RADIUS does not
+  # know lands on the switch-wide fallback, bootstrap.
   mab_ports = { for node, m in local.machines : node => m.switch_port }
-  enrolled = {
-    shale    = "kubernetes"
-    riptide  = "kubernetes"
-    optiplex = "kubernetes"
-  }
-  mab_networks = {
-    kubernetes = unifi_network.k8s
-    bootstrap  = unifi_network.bootstrap
-  }
 
   # The nodes whose switch port runs MAC auth. Any name turns switch-wide
   # 802.1X on. Add a node only after the gateway's RADIUS server listens:
@@ -40,22 +38,6 @@ locals {
   # flap. riptide goes first; optiplex is the control plane. An empty set keeps
   # every port on its open Kubernetes trunk, and is also the revert.
   mab_enforced = toset(["riptide"])
-
-  # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
-  # reinstall. With tagged VLAN management "block_all", the switch (USL24P,
-  # 7.5.15) forwarded none of the node's untagged frames.
-  boot_native = toset([])
-
-  # Ports with the bootstrap VLAN untagged and no 802.1X, for machines that
-  # are not yet in the inventory. The rack ports hold new workers until their
-  # MACs are known, when they join the inventory; the provisioning station
-  # stays here.
-  intake_ports = {
-    swell        = 4
-    surge        = 12
-    shoal        = 20
-    provisioning = 24
-  }
 
   switch = local.clients.switches["USW 24 PoE"]
 }
@@ -91,11 +73,7 @@ resource "unifi_network" "bootstrap" {
     ntp_enabled = true
     ntp_servers = [local.boot_vip]
     tftp_server = local.boot_vip
-    boot = {
-      enabled  = true
-      server   = local.boot_vip
-      filename = "talos/folly/ipxe-amd64-secureboot.efi"
-    }
+    boot        = local.boot_option
   }
 
   lifecycle {
@@ -154,8 +132,8 @@ resource "unifi_radius_user" "node" {
   tunnel_type        = 13
   tunnel_medium_type = 6
   tunnel_config_type = "802.1x"
-  network_id         = local.mab_networks[local.enrolled[each.key]].id
-  vlan               = local.mab_networks[local.enrolled[each.key]].vlan
+  network_id         = unifi_network.k8s.id
+  vlan               = unifi_network.k8s.vlan
 }
 
 import {
@@ -203,36 +181,12 @@ resource "unifi_device" "usw_24_poe" {
   }
 
   dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) && !contains(local.boot_native, node) }
+    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) }
     content {
       index                 = port_override.value
       name                  = port_override.key
       forward               = "customize"
       native_networkconf_id = unifi_network.k8s.id
-      tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
-    }
-  }
-
-  dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if contains(local.boot_native, node) }
-    content {
-      index                 = port_override.value
-      name                  = port_override.key
-      forward               = "customize"
-      native_networkconf_id = unifi_network.bootstrap.id
-      tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
-    }
-  }
-
-  dynamic "port_override" {
-    for_each = local.intake_ports
-    content {
-      index                 = port_override.value
-      name                  = port_override.key
-      forward               = "customize"
-      native_networkconf_id = unifi_network.bootstrap.id
       tagged_vlan_mgmt      = "auto"
       dot1x_ctrl            = "force_authorized"
     }
