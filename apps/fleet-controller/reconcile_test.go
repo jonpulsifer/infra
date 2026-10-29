@@ -306,6 +306,51 @@ func TestParseDeviceBMCAddress(t *testing.T) {
 	}
 }
 
+func TestNextStatus(t *testing.T) {
+	for _, c := range []struct {
+		action, current, want string
+	}{
+		{"provision", "active", "staged"},
+		{"provision", "failed", "staged"},
+		{"provision", "planned", ""},
+		{"provision", "staged", ""},
+		{"wipe", "active", "staged"},
+		{"wipe", "planned", ""},
+		{"attest", "active", ""},
+		{"attest", "planned", ""},
+		{ActionRetire, "decommissioning", ""},
+	} {
+		if got := NextStatus(c.action, c.current); got != c.want {
+			t.Errorf("NextStatus(%s, %s) = %q, want %q", c.action, c.current, got, c.want)
+		}
+	}
+}
+
+func TestPlannedDeviceStaysPlannedThroughProvision(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "provision", nil)}, ifaces: riptideIfaces()}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	names := kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
+		t.Fatalf("workflows %v", names)
+	}
+	if len(nb.patches) != 1 {
+		t.Fatalf("patches %v", nb.patches)
+	}
+	p := nb.patches[0]
+	if _, has := p["status"]; has {
+		t.Errorf("a planned device's status was written: %v", p)
+	}
+	cf := p["custom_fields"].(map[string]any)
+	if cf["desired_action"] != "none" || cf["last_workflow"] != names[0] {
+		t.Errorf("patch %v", p)
+	}
+}
+
 func TestSkipsAttest(t *testing.T) {
 	for _, c := range []struct {
 		d    Device

@@ -18,9 +18,9 @@ const (
 const ActionRetire = "retire"
 
 // Action says what one run asks the provision Template to do, and the NetBox
-// status the device takes while it runs. An attest leaves an active node
-// active: staged would mark it enrolling in the Talos root and re-arm the
-// enrollment server's auto-approval.
+// status an active or failed device takes while it runs (NextStatus). An
+// attest leaves an active node active: staged would mark it enrolling in the
+// Talos root and re-arm the enrollment server's auto-approval.
 type Action struct {
 	Attest, Wipe, Retire bool
 	Status               string
@@ -161,6 +161,23 @@ func (c Config) Workflow(d Device, action string, now time.Time) Object {
 		},
 		"spec": spec,
 	}
+}
+
+// NextStatus is the NetBox status a device takes when an action starts, or
+// "" to leave it. A provision or wipe marks an active or failed device
+// staged. A planned device stays planned: talos-attest grants a first intake
+// the no-click pass only while the device is planned, and moves it to staged
+// itself on the verdict.
+func NextStatus(action, current string) string {
+	next := Actions[action].Status
+	if next == "" || next == current {
+		return ""
+	}
+	switch current {
+	case "active", "failed":
+		return next
+	}
+	return ""
 }
 
 // Finished says whether a Workflow state is terminal.

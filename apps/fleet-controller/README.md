@@ -40,8 +40,11 @@ Devices with role `kubernetes-node` and status `planned`, `staged`, `active`,
 and the custom fields `install_disk`, `talos_class`, `tpm_version`,
 `bmc_type`, `desired_action`, `last_workflow`. A select field may be a string
 or a `{value, label}` object. Written: `desired_action` (back to `none`),
-`last_workflow`, `status` (`staged` on a provision or wipe, `offline` after a
-retirement) and journal entries. A retirement is the `retire` run, which
+`last_workflow`, `status` (`staged` when a provision or wipe starts on an
+`active` or `failed` device, `offline` after a retirement) and journal
+entries. A `planned` device stays `planned` through its first provision:
+talos-attest grants the no-click first intake only in that status and moves
+the device to `staged` itself on the verdict. A retirement is the `retire` run, which
 powers the node off; the controller starts it on status `decommissioning`,
 never from `desired_action`.
 
