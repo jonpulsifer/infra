@@ -181,11 +181,39 @@ func (r *Reconciler) nodeWorkflows(ctx context.Context, d Device) ([]Object, err
 	return objs, nil
 }
 
+// applyHardware applies the device's Hardware with its netboot flags.
+func (r *Reconciler) applyHardware(ctx context.Context, d Device, netboot bool) error {
+	if err := r.Kube.Apply(ctx, HardwareResource, r.Config.Hardware(d, netboot)); err != nil {
+		return fmt.Errorf("apply Hardware: %w", err)
+	}
+	return nil
+}
+
 func (r *Reconciler) device(ctx context.Context, d Device) error {
+	workflows, err := r.nodeWorkflows(ctx, d)
+	if err != nil {
+		return err
+	}
+	// The owner took the device out of decommissioning: a retirement that has
+	// not finished is abandoned before it powers the node off.
+	if d.Status != "decommissioning" {
+		var kept []Object
+		for _, wf := range workflows {
+			if wf.Labels()[ActionLabel] == ActionRetire && !Finished(wf.State()) {
+				if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
+					return fmt.Errorf("abandon %s: %w", wf.Name(), err)
+				}
+				Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "abandoned: the device left decommissioning")
+				continue
+			}
+			kept = append(kept, wf)
+		}
+		workflows = kept
+	}
 	hardware := d.MAC != "" && d.Disk != ""
 	if hardware {
-		if err := r.Kube.Apply(ctx, HardwareResource, r.Config.Hardware(d)); err != nil {
-			return fmt.Errorf("apply Hardware: %w", err)
+		if err := r.applyHardware(ctx, d, Unfinished(workflows)); err != nil {
+			return err
 		}
 	}
 	if d.HasBMC() {
@@ -200,22 +228,8 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		return fmt.Errorf("delete Machine: %w", err)
 	}
 
-	workflows, err := r.nodeWorkflows(ctx, d)
-	if err != nil {
-		return err
-	}
 	if d.Status == "decommissioning" {
 		return r.retire(ctx, d, hardware, workflows)
-	}
-	// The owner took the device out of decommissioning: a retirement that has
-	// not finished is abandoned before it powers the node off.
-	for _, wf := range workflows {
-		if wf.Labels()[ActionLabel] == ActionRetire && !Finished(wf.State()) {
-			if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
-				return fmt.Errorf("abandon %s: %w", wf.Name(), err)
-			}
-			Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "abandoned: the device left decommissioning")
-		}
 	}
 	if _, ok := Actions[d.DesiredAction]; !ok || d.DesiredAction == ActionRetire {
 		return nil
@@ -231,7 +245,10 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 // A run that is still going is adopted, never doubled: a second netboot
 // Workflow would power-cycle the node mid-wipe. The device's finished
 // Workflows are deleted first, because Tinkerbell's server may answer the
-// agent with the first finished Workflow it finds for its ID.
+// agent with the first finished Workflow it finds for its ID. A new run's
+// Hardware allows netboot before the Workflow exists, so Smee answers the
+// firmware as soon as Rufio power-cycles it; a create that fails leaves the
+// flags on until the next pass turns them off.
 func (r *Reconciler) start(ctx context.Context, d Device, action string, workflows []Object) error {
 	var name, running string
 	manual := false
@@ -251,6 +268,9 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 	} else {
 		wf := r.Config.Workflow(d, action, r.Now())
 		name = wf.Name()
+		if err := r.applyHardware(ctx, d, true); err != nil {
+			return err
+		}
 		if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
 			return fmt.Errorf("create Workflow %s: %w", name, err)
 		}

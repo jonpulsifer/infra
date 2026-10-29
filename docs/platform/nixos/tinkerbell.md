@@ -19,16 +19,16 @@ Tinkerbell is the provisioning stack on [spore](../../hosts/spore.md) that attes
 
 Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace: the `provision` Template and the BMC credential Secrets. fleet-controller keeps one `Hardware` per NetBox device and one `Machine` per device with a BMC. Setting a device's `desired_action` in NetBox starts a run:
 
-1. The controller creates a `Workflow` for the device. Tinkerbell turns the `Hardware`'s `allowPXE` on, and Rufio powers the node off, sets a one-time PXE boot and powers it on.
+1. The controller turns the `Hardware`'s `allowPXE` on and creates a `Workflow` for the device, and Rufio powers the node off, sets a one-time PXE boot and powers it on.
 2. UniFi's offer names the signed iPXE at the boot VIP, which dnsmasq serves on whichever anchor holds it. iPXE chains Smee's script for its MAC, and the script chains the signed HookOS UKI from nginx.
 3. The `provision` Template sets the clock from the boot VIP's NTP, [attests the node](../../apps/talos-attest.md) with `images/tink-attest` when the run asks for it, wipes the `Hardware`'s disk when the run asks for it, sets the next boot, and reboots. Its other actions run `images/tink-reprovision-tools`, which carries the NTP, disk, EFI and Docker tools, so the boot VLAN needs no package mirror.
-4. Tinkerbell turns `allowPXE` off, so Smee has no script for the MAC. A wiped node netboots [iPXE's menu](talos-boot.md#netboot-images), whose default boots HookOS, and the agent waits for the next Workflow. An attested node boots its installed disk.
+4. The run finishes, and the controller's next pass turns `allowPXE` off, so Smee has no script for the MAC. A wiped node netboots [iPXE's menu](talos-boot.md#netboot-images), whose default boots HookOS, and the agent waits for the next Workflow. An attested node boots its installed disk.
 
 A node with no `Hardware` or no running `Workflow` takes step 4 directly when it PXE-boots on the bootstrap VLAN.
 
 Every HookOS boot phones home before the agent waits for work. `images/tink-agent-autoid` runs `fleet-intake` (its `intake/` directory), which posts the machine's MAC, DMI serial, UUID, model, SKU, BIOS version and disks as JSON to the HookOS command line's `fleet_intake_url`. The UKI, iPXE's menu and each `Hardware`'s script take that command line from `nix/images/hookos-folly.nix`. The client tries six times with backoff and a 10-second timeout each, logs each HTTP status but no body, and starts tink-agent whatever the answer. Each anchor's enrollment server passes `/fleet/intake`, POST only and up to 16 KiB, to fleet-controller's port 8446 on spore's Anchor address, and logs no access (`nix/services/talos-enroll.nix`). The controller has no `/intake` handler yet, so the post gets a 404 and the boot goes on.
 
-The firmware verifies each image against `db`. Between runs, `allowPXE` is unset or off on spore. The controller's `Hardware` leaves it out, so that an apply never turns it off during a run.
+The firmware verifies each image against `db`. Between runs, `allowPXE` is off on spore. The controller is its only writer: its `Workflow`s leave `toggleAllowNetboot` off, and each pass sets the flag from whether the device has an unfinished `Workflow`.
 
 ## Rules
 

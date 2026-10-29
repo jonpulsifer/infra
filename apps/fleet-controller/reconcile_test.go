@@ -369,7 +369,7 @@ func TestPlannedDeviceBootsByHandAndGetsNoDerivedMachine(t *testing.T) {
 	}
 	wfName := kube.workflows()[0]
 	boot := kube.get(wfBase + wfName)["spec"].(map[string]any)["bootOptions"].(map[string]any)
-	if _, has := boot["bootMode"]; has || boot["toggleAllowNetboot"] != true {
+	if _, has := boot["bootMode"]; has || boot["toggleAllowNetboot"] != false {
 		t.Errorf("a planned device's bootOptions %v", boot)
 	}
 	if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), "power the machine on by hand") {
@@ -506,7 +506,7 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	boot := wf["spec"].(map[string]any)["bootOptions"].(map[string]any)
-	if boot["bootMode"] != "netboot" || boot["toggleAllowNetboot"] != true {
+	if boot["bootMode"] != "netboot" || boot["toggleAllowNetboot"] != false {
 		t.Errorf("bootOptions %v", boot)
 	}
 	if len(nb.patches) != 1 {
@@ -563,6 +563,93 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if _, has := last["status"]; has {
 		t.Errorf("attest changed the status: %v", last)
 	}
+}
+
+func hardwareInterface(t *testing.T, kube *fakeKube) map[string]any {
+	t.Helper()
+	hw := kube.get(hwPath)
+	if hw == nil {
+		t.Fatal("no Hardware applied")
+	}
+	return hw["spec"].(map[string]any)["interfaces"].([]any)[0].(map[string]any)
+}
+
+func assertNetboot(t *testing.T, kube *fakeKube, want bool, when string) {
+	t.Helper()
+	nb := hardwareInterface(t, kube)["netboot"].(map[string]any)
+	if nb["allowPXE"] != want || nb["allowWorkflow"] != want {
+		t.Errorf("%s: allowPXE %v, allowWorkflow %v, want both %v", when, nb["allowPXE"], nb["allowWorkflow"], want)
+	}
+	if _, has := nb["ipxe"].(map[string]any)["contents"]; !has {
+		t.Errorf("%s: the netboot block lost its iPXE script: %v", when, nb)
+	}
+}
+
+func handSetAllowPXE(kube *fakeKube, v bool) {
+	kube.mu.Lock()
+	defer kube.mu.Unlock()
+	iface := kube.objects[hwPath]["spec"].(map[string]any)["interfaces"].([]any)[0].(map[string]any)
+	iface["netboot"].(map[string]any)["allowPXE"] = v
+}
+
+// The controller is the only writer of the netboot flags: they follow the
+// device's unfinished Workflow, and every pass overwrites a hand-set value.
+func TestHardwareNetbootFlagsFollowTheWorkflow(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	pass := func() {
+		t.Helper()
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pass()
+	assertNetboot(t, kube, false, "no run")
+	dhcp := hardwareInterface(t, kube)["dhcp"].(map[string]any)
+	if dhcp["arch"] != "x86_64" || dhcp["uefi"] != true {
+		t.Errorf("dhcp %v", dhcp)
+	}
+
+	nb.set("desired_action", "provision")
+	pass()
+	wfName := kube.workflows()[0]
+	assertNetboot(t, kube, true, "a run just created")
+	kube.mu.Lock()
+	created := -1
+	for i, l := range kube.log {
+		if l == "POST "+strings.TrimSuffix(wfBase, "/") {
+			created = i
+		}
+	}
+	before := ""
+	if created > 0 {
+		before = kube.log[created-1]
+	}
+	kube.mu.Unlock()
+	if before != "PATCH "+hwPath {
+		t.Errorf("the Workflow was created before the Hardware allowed netboot: %q precedes it", before)
+	}
+
+	nb.set("desired_action", "none")
+	nb.set("last_workflow", wfName)
+	nb.set("status", "staged")
+	for _, state := range []string{"STATE_PREPARING", "STATE_PENDING", "STATE_RUNNING", "STATE_POST"} {
+		kube.setState(wfName, state)
+		handSetAllowPXE(kube, false)
+		pass()
+		assertNetboot(t, kube, true, state)
+	}
+
+	kube.setState(wfName, "STATE_SUCCESS")
+	pass()
+	assertNetboot(t, kube, false, "after SUCCESS")
+
+	handSetAllowPXE(kube, true)
+	pass()
+	assertNetboot(t, kube, false, "a hand-set allowPXE with no run")
 }
 
 func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
@@ -686,6 +773,7 @@ func TestLeavingDecommissioningAbandonsTheRetirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	wfName := kube.workflows()[0]
+	assertNetboot(t, kube, true, "a retirement running")
 	nb.set("last_workflow", wfName)
 	nb.set("status", "active")
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -694,6 +782,7 @@ func TestLeavingDecommissioningAbandonsTheRetirement(t *testing.T) {
 	if n := kube.workflows(); len(n) != 0 {
 		t.Fatalf("the retirement survived the status change: %v", n)
 	}
+	assertNetboot(t, kube, false, "the retirement abandoned")
 }
 
 func TestFailedRetirementJournalsOnce(t *testing.T) {
