@@ -13,15 +13,15 @@ let
   lab = import ../lib/anchor.nix;
   fleet = import ../lib/fleet.nix;
   folly = (import ../lib/networks.nix).folly;
-  site = "folly";
+  site = config.homelab.site;
   sopsFile = ../secrets/${name}.sops.yaml;
   secrets = "\n" + (if builtins.pathExists sopsFile then builtins.readFile sopsFile else "");
   # sops leaves key names in the clear, so evaluation can see which secrets the file holds.
   sealed = key: lib.hasInfix "\ntalos-attest:\n" secrets && lib.hasInfix "\n    ${key}:" secrets;
   certs = ../../terraform/pki/certs;
-  softwareChain = certs + "/folly-devid-ca-software-chain.pem";
+  softwareChain = certs + "/${site}-devid-ca-software-chain.pem";
   # This anchor's hardware DevID CA, which scripts/devid-ca-yubikey.sh commits after its apply.
-  hardwareCert = certs + "/folly-devid-ca-${name}.pem";
+  hardwareCert = certs + "/${site}-devid-ca-${name}.pem";
   yubikey = config.homelab.devidCa.yubikey;
   cfg = config.homelab.talosAttest;
   pkcs11 = cfg.caKey == "pkcs11";
@@ -79,7 +79,7 @@ in
       type = lib.types.path;
       default =
         if pkcs11 then
-          pkgs.concatText "folly-devid-ca-${name}-chain.pem" [
+          pkgs.concatText "${site}-devid-ca-${name}-chain.pem" [
             hardwareCert
             (certs + "/fml-intermediate.pem")
             (certs + "/fml-root.pem")
@@ -133,7 +133,7 @@ in
         ATTEST_CA_CHAIN = "${cfg.caChain}";
         ATTEST_EK_ROOTS = "${../../apps/talos-attest/roots}";
         ATTEST_POLICY = "${../../apps/talos-attest/policy.yaml}";
-        ATTEST_INVENTORY = "${../../clusters/folly/inventory/machines.yaml}";
+        ATTEST_INVENTORY = "${../../clusters/${site}/inventory/machines.yaml}";
         ATTEST_STATE_DIR = "/var/lib/talos-attest";
         ATTEST_PEERS = lib.concatStringsSep "," peers;
         ATTEST_METRICS_FILE = "${metricsDir}/talos-attest.prom";

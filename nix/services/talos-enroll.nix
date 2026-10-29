@@ -18,7 +18,7 @@
 let
   lab = import ../lib/anchor.nix;
   fleet = import ../lib/fleet.nix;
-  site = "folly";
+  site = config.homelab.site;
   # The talos.config URL in the netboot UKI names this host (.github/scripts/talos-images-build.sh).
   host = "enroll.${fleet.dnsZone}";
   adminPort = 8443;
@@ -85,8 +85,8 @@ in
       # Tailnet logins that may approve and deny.
       ENROLL_APPROVERS = "jonathan@pulsifer.ca";
       # Written by `mise run render-machine-inputs` from the Talos root.
-      ENROLL_MACHINE_INPUTS = "${../../clusters/folly/apps/talos-enroll/machine-inputs.json}";
-      ENROLL_NODE_MACS = "${../../clusters/folly/apps/talos-enroll/node-macs.json}";
+      ENROLL_MACHINE_INPUTS = "${../../clusters/${site}/apps/talos-enroll/machine-inputs.json}";
+      ENROLL_NODE_MACS = "${../../clusters/${site}/apps/talos-enroll/node-macs.json}";
       ENROLL_SECRETS_BUNDLE = "%d/bundle";
       ENROLL_DISCORD_WEBHOOK_FILE = "%d/discord-webhook";
       ENROLL_TALOSCTL = lib.getExe talosctl;
