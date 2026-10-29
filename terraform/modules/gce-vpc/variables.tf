@@ -32,6 +32,12 @@ variable "private_api_access" {
   default     = true
 }
 
+variable "ssh_firewall_name" {
+  type        = string
+  description = "Name of the SSH firewall rule. Firewall names are unique per project, so a second network in the same project needs its own."
+  default     = "terraform-auto-ssh-firewall"
+}
+
 variable "external_ssh" {
   type        = bool
   description = "Enable the IAP ssh firewall rules, if true, allow all inbound SSH"

@@ -6,9 +6,10 @@ module "network" {
     google      = google
     google-beta = google-beta
   }
-  name          = "metal-dev"
-  subnet_name   = "metal-dev"
-  ip_cidr_range = "10.13.38.0/28"
+  name              = "metal-dev"
+  subnet_name       = "metal-dev"
+  ip_cidr_range     = "10.13.38.0/28"
+  ssh_firewall_name = "metal-dev-ssh"
 }
 
 resource "google_service_account" "vm" {
