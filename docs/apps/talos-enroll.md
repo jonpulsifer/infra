@@ -1,10 +1,12 @@
 ---
 title: Talos enrollment
-description: A Go service that answers the OAuth device flow of a Talos machine booted from the network, and releases the machine's config once the owner approves it. It runs on the folly cluster and on the three anchors.
+description: A Go service that answers the OAuth device flow of a Talos machine and releases its config once the owner approves it. No served image starts that flow now. It runs on the folly cluster and on the three anchors.
 status: live
 ---
 
-talos-enroll is the enrollment server for folly's Talos nodes. A machine that network boots the signed Talos image asks it for a device code, waits for the owner's approval, and then fetches its machine config.
+talos-enroll is the enrollment server for folly's Talos nodes. A machine that starts the OAuth device flow asks it for a device code, waits for the owner's approval, and then fetches its machine config.
+
+No served image starts that flow. The release (`.github/scripts/talos-images-build.sh`) builds no netboot UKI, `talos-installer-verify.sh` refuses `talos.config.oauth.*` arguments in the installer, and the iPXE menu in `nix/images/ipxe-folly.nix` has no install item. [fleet-controller](fleet-controller.md) installs and releases each node's config. The service still runs, and its `enroll.lolwtf.ca` server also carries `/talos/config`, which nginx passes to fleet-controller on spore (`nix/services/fleet-controller.nix`, `nix/services/talos-enroll.nix`).
 
 It runs in two places. Each [anchor](../platform/nixos/talos-boot.md) runs a copy behind `BOOT_VIP`, and the anchors' CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP`, so a machine on the bootstrap VLAN enrolls through the anchors. The public name still resolves to the cluster's copy at `ENROLL_VIP`, which no machine on the bootstrap VLAN asks for.
 
@@ -32,7 +34,7 @@ NetBox is the directory of nodes. Each anchor's copy looks a device request up b
 
 ## How it works
 
-The netboot UKI carries `talos.config` and the `talos.config.oauth.*` arguments for `enroll.lolwtf.ca`, with client `talos-enroll`. On approval, the server renders the node's config with `talosctl gen config --with-secrets` from its class's entry in `clusters/folly/apps/talos-enroll/class-inputs.json`, the node's own facts from the directory, and the worker subset of the 1Password note `talos-folly-secrets`, as the `clusters/folly/talos/` root does for a node of that class. `mise run render-class-inputs` writes the class file from the root's `classes`; a new node changes it not at all. A worker is rendered from a throwaway bundle and its six secrets are swapped in afterwards, so the anchors hold no cluster CA key.
+A machine that starts the flow uses client `talos-enroll` at `enroll.lolwtf.ca`. On approval, the server renders the node's config with `talosctl gen config --with-secrets` from its class's entry in `clusters/folly/apps/talos-enroll/class-inputs.json`, the node's own facts from the directory, and the worker subset of the 1Password note `talos-folly-secrets`, as the `clusters/folly/talos/` root does for a node of that class. `mise run render-class-inputs` writes the class file from the root's `classes`; a new node changes it not at all. A worker is rendered from a throwaway bundle and its six secrets are swapped in afterwards, so the anchors hold no cluster CA key.
 
 Talos trusts only its bundled roots before it has a config, so the name has a Let's Encrypt certificate. On the cluster, a Gateway serves it and the approval listener's NetworkPolicy admits only the tailnet Ingress. On each anchor, `nix/services/talos-enroll.nix` gets the certificate over DNS-01, nginx serves the three routes at `BOOT_VIP`, and `tailscale serve` passes the approval page to a socket that only root can open. Both proxies set `Tailscale-User-Login`, which the approver check trusts. sops-nix holds the bundle, the webhook and the DNS token in each anchor's `nix/secrets/<anchor>.sops.yaml`.
 

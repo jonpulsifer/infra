@@ -2,8 +2,9 @@
 # run does: attest, wipe, retire and install (each true/false), installer_image, attest_url and
 # ntp_server. With the controller's installs on, a provision of a worker class attests, wipes,
 # installs Talos and boots the disk; a provision the controller does not install (installs off, a
-# control plane, a TPM 1.2 node) attests, wipes and netboots the signed Talos UKI; an attest leaves the disk alone; a wipe wipes and netboots; a
-# retirement wipes and powers the node off. Nothing in git starts a run: the controller on spore
+# control plane, a TPM 1.2 node) attests and wipes, and the node boots the network into HookOS
+# (the iPXE default item) until a Workflow runs; an attest leaves the disk alone; a wipe wipes and
+# netboots into HookOS; a retirement wipes and powers the node off. Nothing in git starts a run: the controller on spore
 # (apps/fleet-controller) creates a Workflow when a NetBox device's desired_action is set, and
 # netboot goes off when the run succeeds, so Smee has no script for the MAC on the next boot.
 #

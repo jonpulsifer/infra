@@ -4,7 +4,7 @@ description: A Go service on spore that turns NetBox's kubernetes-node devices i
 status: unverified
 ---
 
-fleet-controller makes [Tinkerbell](../platform/nixos/tinkerbell.md) follow NetBox. Git holds the `provision` Template and the BMC credential Secrets. The controller holds everything that names a machine: one `Hardware` per device, one Rufio `Machine` per device with a BMC, and a `Workflow` for each run the owner asks for in NetBox. Nothing about a machine is written in the repo, and no pull request starts a run. No device has gone through it yet.
+fleet-controller makes [Tinkerbell](../platform/nixos/tinkerbell.md) follow NetBox. Git holds the `provision` Template and the BMC credential Secrets. The controller holds everything that names a machine: one `Hardware` per device, one Rufio `Machine` per device with a BMC, and a `Workflow` for each run the owner asks for in NetBox. Nothing about a machine is written in the repo, and no pull request starts a run.
 
 ## Use it
 
@@ -20,9 +20,9 @@ To run a machine, set its `desired_action` in NetBox:
 
 | `desired_action` | The run |
 | --- | --- |
-| `provision` | Attest, wipe the system disk, install Talos from HookOS and boot the disk; with installs off, or for a class the controller does not render, netboot the signed Talos UKI, which enrolls |
+| `provision` | Attest, wipe the system disk, install Talos from HookOS and boot the disk; with installs off, or for a class the controller does not render, wipe the disk and leave the node in HookOS |
 | `attest` | Attest, and boot the installed disk; nothing is wiped |
-| `wipe` | Wipe the system disk and netboot; no attestation |
+| `wipe` | Wipe the system disk and leave the node in HookOS; no attestation |
 
 The controller creates `Workflow <action>-<name>-<unix seconds>`, sets `desired_action` back to `none`, writes the name to `last_workflow`, and adds a journal entry. `provision` and `wipe` move an `active` or `failed` device to `staged`; a `planned` device stays `planned`, because [talos-attest](talos-attest.md) grants a first intake its no-click pass only in that status and moves the device to `staged` itself on the verdict. `attest` leaves the status alone, so an active node stays active. To retire a machine, set its status to `decommissioning`: the controller runs `retire-<name>-<unix seconds>`, which wipes the disk and powers the node off, and when that run succeeds it deletes the machine's objects and sets the status to `offline`. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
 
@@ -39,13 +39,13 @@ The controller creates `Workflow <action>-<name>-<unix seconds>`, sets `desired_
 
 ## Install
 
-Installs are off until spore's `homelab.fleetController.installs` is on. Then a `provision` of a class whose class inputs say `worker` carries `install=true` and the class's `installer_image` in its `hardwareMap`, when the attest step runs. At the end of the intake talos-attest posts `{serial, uuid, node, class, code}` to `/render`, signed as HMAC-SHA512 hex of the body in `X-Fleet-Signature`. The controller answers 409 unless the device is `planned` or `staged`, its `last_workflow` is an unfinished `provision` run with `install=true`, its `smbios_uuid` is unset or the request's, and the code is unspent. It renders the config as [Talos enrollment](talos-enroll.md) does, writes `talos/<uuid>/<code>.yaml` under `/var/lib/fleet-controller`, and answers 201. The `install` action runs the installer with the code in META, and the node's first boot fetches the file by it.
+Installs are on: `nix/hosts/spore.nix` sets `homelab.fleetController.installs`. With the option off, no `Workflow` installs and `/render` refuses every call. A `provision` of a class whose class inputs say `worker` carries `install=true` and the class's `installer_image` in its `hardwareMap`, when the attest step runs. At the end of the intake talos-attest posts `{serial, uuid, node, class, code}` to `/render`, signed as HMAC-SHA512 hex of the body in `X-Fleet-Signature`. The controller answers 409 unless the device is `planned` or `staged`, its `last_workflow` is an unfinished `provision` run with `install=true`, its `smbios_uuid` is unset or the request's, and the code is unspent. It renders the config from the class inputs as [Talos enrollment](talos-enroll.md) does, writes `talos/<uuid>/<code>.yaml` under `/var/lib/fleet-controller`, and answers 201. The `install` action runs the installer with the code in META, and the node's first boot fetches the file by it.
 
 nginx serves `/talos/config` on spore, and capsule and forge pass it to spore's Anchor address on port 8447 (`nix/lib/talos-config.nix`). Both Anchor-network legs, the render call and the proxied fetch, are plain HTTP. The controller reads nginx's log of the location every two seconds. A whole GET of the file's bytes deletes it and sets the device `active` with `attest_consumed_at`; a range, a HEAD or an aborted fetch deletes nothing. A served, expired or replaced code stays spent for a day, so a replayed render call is refused. A 404 for a machine with a waiting file is journaled at most every ten minutes. A file nobody fetched is deleted after two hours. Each step is an audit line, `fleet.render`, `fleet.release` or `fleet.expire`.
 
 ## How it works
 
-Every two minutes, and two seconds after the webhook rings, the controller lists the site's devices with the role `kubernetes-node` and the status `planned`, `staged`, `active`, `failed` or `decommissioning`, with each device's first physical interface that has a primary MAC. It server-side-applies a `Hardware` whose iPXE script chains the signed HookOS UKI with the command line the UKI bakes in, and a `Machine` at the device's `oob_ip`, or its own address for AMT, with the Secret `bmc-<bmc_type>`. The `Workflow` carries `wipe`, `attest`, `retire`, `install`, `installer_image`, `attest_url` and `ntp_server` in its `hardwareMap`, which the Template's actions read. Each decision is one JSON audit line on stdout with `event` `fleet.workflow` or `fleet.retire`. [talos-attest](talos-attest.md) does the attestation inside the run. The controller releases an installed worker's config; [Talos enrollment](talos-enroll.md) releases the config of a node that netboots the Talos UKI.
+Every two minutes, and two seconds after the webhook rings, the controller lists the site's devices with the role `kubernetes-node` and the status `planned`, `staged`, `active`, `failed` or `decommissioning`, with each device's first physical interface that has a primary MAC. It server-side-applies a `Hardware` whose iPXE script chains the signed HookOS UKI with the command line the UKI bakes in, and a `Machine` at the device's `oob_ip`, or its own address for AMT, with the Secret `bmc-<bmc_type>`. The `Workflow` carries `wipe`, `attest`, `retire`, `install`, `installer_image`, `attest_url` and `ntp_server` in its `hardwareMap`, which the Template's actions read. Each decision is one JSON audit line on stdout with `event` `fleet.workflow` or `fleet.retire`. [talos-attest](talos-attest.md) does the attestation inside the run. The controller releases an installed worker's config.
 
 ## Operate
 
