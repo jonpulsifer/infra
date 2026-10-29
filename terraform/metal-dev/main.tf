@@ -18,6 +18,7 @@ resource "google_service_account" "vm" {
 
 # The nix-image-builder workflow uploads the metal-dev image under this prefix. Build names sort
 # oldest first, so the newest image is the last name; with no upload yet there is no image and no VM.
+# Nothing prunes the prefix: each upload is a multi-GB object, so delete old ones by hand.
 data "google_storage_bucket_objects" "images" {
   bucket = "homelab-ng-free"
   prefix = "metal-dev/"
@@ -31,10 +32,19 @@ locals {
   have_image = local.image_object != null
 }
 
+data "google_storage_bucket_object" "image" {
+  count = local.have_image ? 1 : 0
+
+  bucket = "homelab-ng-free"
+  name   = local.image_object
+}
+
+# Named by the object's content, so a rebuild that changes the object gets a new image and one
+# that lands under a new name with the same content does not.
 resource "google_compute_image" "nixos" {
   count = local.have_image ? 1 : 0
 
-  name              = "metal-dev-${substr(sha1(local.image_object), 0, 8)}"
+  name              = "metal-dev-${substr(sha1(data.google_storage_bucket_object.image[0].md5hash), 0, 8)}"
   family            = "metal-dev"
   storage_locations = [local.region]
   raw_disk {
@@ -48,6 +58,9 @@ resource "google_compute_image" "nixos" {
   }
 }
 
+# The disk holds every secret, the NetBox database and the virtual nodes. A new image never
+# replaces it: the running system upgrades itself from main, as every host does. To start over,
+# snapshot it, remove prevent_destroy, and apply; the README has the steps.
 resource "google_compute_disk" "boot" {
   count = var.on && local.have_image ? 1 : 0
 
@@ -57,10 +70,8 @@ resource "google_compute_disk" "boot" {
   type  = "pd-balanced"
 
   lifecycle {
-    precondition {
-      condition     = local.have_image
-      error_message = "No metal-dev image in gs://homelab-ng-free/metal-dev/. Run the nix-image-builder workflow with image=metal-dev first."
-    }
+    ignore_changes  = [image]
+    prevent_destroy = true
   }
 }
 

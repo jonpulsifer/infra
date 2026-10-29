@@ -190,6 +190,10 @@ run = "bash scripts/metal-dev/up.sh"
 description = "Stop the metal-dev VM; its disk and virtual nodes stay"
 run = "bash scripts/metal-dev/down.sh"
 
+[tasks."metal-dev:seed"]
+description = "Seed the metal-dev VM's own NetBox from git, with the URL pinned to the VM and its token; never the lab's NetBox"
+run = "bash scripts/metal-dev/seed.sh"
+
 [tasks."metal-dev:intake"]
 description = "Create a virtual node on metal-dev, enroll the lab's Secure Boot keys, declare it in the host's NetBox and follow it to active (args: [name])"
 run = "bash scripts/metal-dev/intake.sh"

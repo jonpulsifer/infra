@@ -231,10 +231,6 @@ let
   classInputsFile = pkgs.writeText "metal-dev-class-inputs.json" (
     builtins.toJSON { controlplane = classInputs; }
   );
-  machineInputsFile = pkgs.writeText "metal-dev-machine-inputs.json" (
-    builtins.toJSON { vnode1 = classInputs; }
-  );
-  nodeMacsFile = pkgs.writeText "metal-dev-node-macs.json" (builtins.toJSON { vnode1 = nodeMac; });
 
   sushyConfig = pkgs.writeText "sushy.conf" ''
     SUSHY_EMULATOR_LISTEN_IP = '${gateway}'
@@ -266,17 +262,23 @@ let
     ];
     text = ''
       umask 077
-      mkdir -p ${stateDir}/{enroll,attest/roots,netbox,tinkerbell,sushy,nodes}
-      chmod 755 ${stateDir} ${stateDir}/attest ${stateDir}/attest/roots ${stateDir}/nodes
+      mkdir -p ${stateDir}/{enroll,attest/roots,attest-state,netbox,tinkerbell,sushy}
+      chmod 755 ${stateDir} ${stateDir}/attest ${stateDir}/attest/roots ${stateDir}/enroll ${stateDir}/tinkerbell ${stateDir}/sushy
       cd ${stateDir}
 
-      # The dev cluster's secrets bundle and a talosconfig for the operator.
+      # The dev cluster's secrets bundle and a talosconfig for the operator, the class inputs, and
+      # the inventory of virtual nodes that metal-dev-intake adds, which talos-attest reads too.
       if [ ! -s enroll/secrets.yaml ]; then
         talosctl gen secrets -o enroll/secrets.yaml
         talosctl gen config --with-secrets enroll/secrets.yaml --output-types talosconfig \
           -o enroll/talosconfig metal-dev "https://${nodeAddress}:6443" >/dev/null
         chmod 600 enroll/secrets.yaml enroll/talosconfig
       fi
+      install -m 644 ${classInputsFile} enroll/class-inputs.json
+      [ -s enroll/machines.yaml ] || printf 'machines: {}\n' >enroll/machines.yaml
+      chmod 644 enroll/machines.yaml
+      ln -sfn ../enroll/machines.yaml attest/machines.yaml
+      install -m 644 ${../../apps/talos-attest/policy.yaml} attest/policy.yaml
 
       # A software DevID CA. Nothing outside this VM trusts it.
       if [ ! -s attest/devid-ca.key ]; then
@@ -290,17 +292,26 @@ let
       fi
 
       # swtpm's local CA signs each virtual TPM's EK certificate; that CA is the only EK root here.
+      # An empty roots directory would make talos-attest refuse every EK, so this step fails loudly.
       if [ ! -s /var/lib/swtpm-localca/swtpm-localca-rootca-cert.pem ]; then
         scratch=$(mktemp -d)
-        swtpm_setup --tpm2 --tpmstate "$scratch" --createek --create-ek-cert --logfile /dev/null >/dev/null 2>&1 || true
+        swtpm_setup --tpm2 --tpmstate "$scratch" --createek --create-ek-cert --logfile "$scratch/setup.log" || {
+          cat "$scratch/setup.log" >&2
+          echo "swtpm_setup could not create the local EK CA" >&2
+          exit 1
+        }
         rm -rf "$scratch"
       fi
-      if [ -s /var/lib/swtpm-localca/swtpm-localca-rootca-cert.pem ]; then
-        # libvirt's swtpm_setup signs each virtual TPM's EK certificate with this CA as qemu-libvirtd.
-        chgrp -R qemu-libvirtd /var/lib/swtpm-localca
-        chmod -R g+rwX /var/lib/swtpm-localca
-        install -m 644 /var/lib/swtpm-localca/swtpm-localca-rootca-cert.pem attest/roots/swtpm-localca-rootca.pem
-        [ -s /var/lib/swtpm-localca/issuercert.pem ] && install -m 644 /var/lib/swtpm-localca/issuercert.pem attest/roots/swtpm-localca-issuer.pem
+      [ -s /var/lib/swtpm-localca/swtpm-localca-rootca-cert.pem ] || {
+        echo "swtpm_setup ran but /var/lib/swtpm-localca holds no root certificate" >&2
+        exit 1
+      }
+      # libvirt's swtpm_setup signs each virtual TPM's EK certificate with this CA as qemu-libvirtd.
+      chgrp -R qemu-libvirtd /var/lib/swtpm-localca
+      chmod -R g+rwX /var/lib/swtpm-localca
+      install -m 644 /var/lib/swtpm-localca/swtpm-localca-rootca-cert.pem attest/roots/swtpm-localca-rootca.pem
+      if [ -s /var/lib/swtpm-localca/issuercert.pem ]; then
+        install -m 644 /var/lib/swtpm-localca/issuercert.pem attest/roots/swtpm-localca-issuer.pem
       fi
 
       # NetBox's Django secret and token pepper, and the superuser's password.
@@ -327,7 +338,8 @@ let
         chmod 644 tinkerbell/ca.crt tinkerbell/server.crt tinkerbell/admin.crt
       fi
 
-      # sushy's serving certificate and its one BMC login.
+      # sushy's configuration, serving certificate and its one BMC login.
+      install -m 644 ${sushyConfig} sushy/sushy.conf
       if [ ! -s sushy/htpasswd ]; then
         openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
           -subj "/CN=metal-dev bmc" -addext "subjectAltName=IP:${gateway}" -keyout sushy/key.pem -out sushy/cert.pem
@@ -339,12 +351,10 @@ let
       fi
       [ -s sushy/instances.py ] || : >sushy/instances.py
 
-      # The controller's webhook secret, which NetBox's event rule signs with.
+      # The controller's webhook secret, which NetBox's event rule signs with. The containers mount
+      # the netbox directory read-only and root only, so the Django secrets travel with it.
       [ -s netbox/webhook-secret ] || openssl rand -hex 32 | tr -d '\n' >netbox/webhook-secret
-
-      # The attest service's inventory: the virtual nodes metal-dev-intake adds.
-      [ -s nodes/machines.yaml ] || printf 'machines: {}\n' >nodes/machines.yaml
-      chmod 644 nodes/machines.yaml
+      chmod 711 netbox
     '';
   };
 
@@ -364,10 +374,11 @@ let
         curl -fsS -o /dev/null http://127.0.0.1:${toString netboxNginxPort}/api/status/ && break
         sleep 5
       done
-      password=$(<${stateDir}/netbox/superuser-password)
-      body=$(jq -cn --arg u admin --arg p "$password" '{username: $u, password: $p, description: "metal-dev boot plane", write_enabled: true}')
-      curl -fsS -X POST -H 'Content-Type: application/json' -H 'Accept: application/json' \
-        --data "$body" http://127.0.0.1:${toString netboxNginxPort}/api/users/tokens/provision/ \
+      # The password reaches curl on stdin, never on its command line.
+      jq -cn --arg u admin --rawfile p ${stateDir}/netbox/superuser-password \
+        '{username: $u, password: ($p | rtrimstr("\n")), description: "metal-dev boot plane", write_enabled: true}' \
+        | curl -fsS -X POST -H 'Content-Type: application/json' -H 'Accept: application/json' \
+          --data @- http://127.0.0.1:${toString netboxNginxPort}/api/users/tokens/provision/ \
         | jq -er '.token // .key' | tr -d '\n' >"$token.tmp"
       mv "$token.tmp" "$token"
     '';
@@ -448,12 +459,23 @@ let
       name="''${1:-vnode1}"
       [ "$name" = vnode1 ] || { echo "metal-dev runs one virtual node, vnode1: its address and MAC are fixed in nix/hosts/metal-dev.nix"; exit 64; }
       [ -s ${mirrorDir}/current/${iso} ] || { echo "no mirrored release; run: systemctl start metal-dev-talos-mirror"; exit 1; }
-      token=$(<${stateDir}/netbox/api-token)
+      # The token reaches curl through a config file on a descriptor, never on its command line.
       nb() {
         local method="$1" path="$2" body="''${3:-}"
-        curl -fsS -X "$method" -H "Authorization: Token $token" -H 'Content-Type: application/json' -H 'Accept: application/json' \
+        curl -fsS -K <(printf 'header = "Authorization: Token %s"\n' "$(<${stateDir}/netbox/api-token)") \
+          -X "$method" -H 'Content-Type: application/json' -H 'Accept: application/json' \
           ''${body:+--data "$body"} "http://127.0.0.1:${toString netboxNginxPort}/api/$path"
       }
+      # The fleet schema first: without it the device would land with no class and no action, and
+      # the first POST would die on a bare 400.
+      missing=""
+      for field in talos_class bmc_type desired_action; do
+        nb GET "extras/custom-fields/?name=$field" | jq -e '.count > 0' >/dev/null 2>&1 || missing="$missing $field"
+      done
+      if [ -n "$missing" ]; then
+        echo "intake: this NetBox lacks the fleet custom fields:$missing. Run: mise run metal-dev:seed" >&2
+        exit 1
+      fi
       serial="MD$(printf '%08X' "$(( $(date +%s) % 4294967296 ))")"
       disk=/var/lib/libvirt/images/$name.qcow2
 
@@ -482,9 +504,10 @@ let
       printf "SUSHY_EMULATOR_ALLOWED_INSTANCES = ['%s']\n" "$uuid" >${stateDir}/sushy/instances.py
       systemctl restart podman-sushy.service
 
-      # The attest service's inventory, and the controller's BMC login in the Tinkerbell API.
-      yq -i ".machines.$name = {\"model\": \"metal-dev\", \"serial\": \"$serial\", \"mac\": \"${nodeMac}\", \"disk\": \"/dev/vda\", \"tpm\": \"2.0\", \"amt\": false, \"secure_boot\": true, \"class\": \"controlplane\", \"status\": \"staged\", \"address\": \"${nodeAddress}\", \"bmc\": {\"type\": \"redfish\", \"address\": \"${gateway}\"}}" ${stateDir}/nodes/machines.yaml
-      systemctl try-restart podman-talos-attest.service
+      # The inventory talos-enroll and talos-attest read, and the controller's BMC login in the
+      # Tinkerbell API.
+      yq -i ".machines.$name = {\"model\": \"metal-dev\", \"serial\": \"$serial\", \"mac\": \"${nodeMac}\", \"disk\": \"/dev/vda\", \"tpm\": \"2.0\", \"amt\": false, \"secure_boot\": true, \"class\": \"controlplane\", \"status\": \"staged\", \"address\": \"${nodeAddress}\", \"bmc\": {\"type\": \"redfish\", \"address\": \"${gateway}\"}}" ${stateDir}/enroll/machines.yaml
+      systemctl try-restart podman-talos-attest.service podman-talos-enroll.service
       mapfile -t bmc <${stateDir}/sushy/credentials
       kubectl --kubeconfig ${tinkKubeconfig} -n tinkerbell create secret generic bmc-redfish \
         --from-literal=username="''${bmc[0]}" --from-literal=password="''${bmc[1]}" \
@@ -512,10 +535,7 @@ let
       ip_id=$(ensure ipam/ip-addresses/ "address=${nodeAddress}/${toString prefixLen}" "{\"address\": \"${nodeAddress}/${toString prefixLen}\", \"assigned_object_type\": \"dcim.interface\", \"assigned_object_id\": $if_id}")
       bmc_ip_id=$(ensure ipam/ip-addresses/ "address=${gateway}/${toString prefixLen}" "{\"address\": \"${gateway}/${toString prefixLen}\", \"description\": \"metal-dev Redfish BMC\"}")
       nb PATCH "dcim/devices/$dev_id/" "{\"primary_ip4\": $ip_id, \"oob_ip\": $bmc_ip_id}" >/dev/null
-      # The fleet contract's fields exist once the NetBox schema ticket's seed has run against this NetBox.
-      if ! nb PATCH "dcim/devices/$dev_id/" '{"custom_fields": {"talos_class": "controlplane", "bmc_type": "redfish", "desired_action": "provision"}}' >/dev/null 2>&1; then
-        echo "intake: NetBox lacks talos_class, bmc_type or desired_action; run scripts/netbox-seed.sh against this NetBox, then set desired_action=provision on $name"
-      fi
+      nb PATCH "dcim/devices/$dev_id/" '{"custom_fields": {"talos_class": "controlplane", "bmc_type": "redfish", "desired_action": "provision"}}' >/dev/null
 
       echo "intake: $name declared (serial $serial, uuid $uuid). Watching its NetBox status; the console is: virsh console $name"
       last=""
@@ -593,43 +613,37 @@ in
     oci-containers = {
       backend = "podman";
       containers = {
+        # Each container gets whole host directories, mounted once: a file bind-mounted inside a
+        # read-only directory mount fails with EROFS when its path is not already there.
         talos-enroll =
           hardenedContainer [
-            "--volume=${stateDir}/enroll:/secrets:ro"
-            "--volume=${stateDir}/netbox/api-token:/run/netbox-token:ro"
+            "--volume=${stateDir}/enroll:/etc/talos-enroll:ro"
+            "--volume=${stateDir}/netbox:/run/netbox:ro"
           ]
           // {
             image = images.talos-enroll;
+            # apps/talos-enroll/README.md on the fleet talos-enroll branch is the contract.
             environment = {
               ENROLL_ADDR = "127.0.0.1:${toString enrollPort}";
               ENROLL_ADMIN_ADDR = "127.0.0.1:${toString enrollAdminPort}";
               ENROLL_ADMIN_URL = "https://${tailnetName}:${toString enrollAdminServePort}";
               ENROLL_APPROVERS = approvers;
-              ENROLL_MACHINE_INPUTS = "${machineInputsFile}";
-              ENROLL_NODE_MACS = "${nodeMacsFile}";
-              ENROLL_CLASS_INPUTS = "${classInputsFile}";
-              ENROLL_SECRETS_BUNDLE = "/secrets/secrets.yaml";
-              ENROLL_WORKER_SECRETS = "/secrets/secrets.yaml";
-              ENROLL_DISCORD_WEBHOOK_FILE = "/dev/null";
-              ENROLL_ATTEST_URL = "http://127.0.0.1:${toString attestDevidPort}";
-              ENROLL_NETBOX_URL = "http://127.0.0.1:${toString netboxNginxPort}";
-              ENROLL_NETBOX_TOKEN_FILE = "/run/netbox-token";
               ENROLL_SITE = "dev";
+              ENROLL_CLASS_INPUTS = "/etc/talos-enroll/class-inputs.json";
+              ENROLL_INVENTORY = "/etc/talos-enroll/machines.yaml";
+              ENROLL_SECRETS_BUNDLE = "/etc/talos-enroll/secrets.yaml";
+              ENROLL_WORKER_SECRETS = "/etc/talos-enroll/secrets.yaml";
+              ENROLL_DISCORD_WEBHOOK_FILE = "/dev/null";
+              ENROLL_NETBOX_URL = "http://127.0.0.1:${toString netboxNginxPort}";
+              ENROLL_NETBOX_TOKEN_FILE = "/run/netbox/api-token";
               HOME = "/tmp";
             };
-            volumes = [
-              "${machineInputsFile}:${machineInputsFile}:ro"
-              "${nodeMacsFile}:${nodeMacsFile}:ro"
-              "${classInputsFile}:${classInputsFile}:ro"
-            ];
           };
         talos-attest =
           hardenedContainer [
             "--volume=${stateDir}/attest:/etc/talos-attest:ro"
-            "--volume=${stateDir}/attest/state:/var/lib/talos-attest"
-            "--volume=${stateDir}/nodes/machines.yaml:/etc/talos-attest/machines.yaml:ro"
-            "--volume=${../../apps/talos-attest/policy.yaml}:/etc/talos-attest/policy.yaml:ro"
-            "--volume=${stateDir}/netbox/api-token:/run/netbox-token:ro"
+            "--volume=${stateDir}/attest-state:/var/lib/talos-attest"
+            "--volume=${stateDir}/netbox:/run/netbox:ro"
           ]
           // {
             image = images.talos-attest;
@@ -645,40 +659,44 @@ in
               ATTEST_INVENTORY = "/etc/talos-attest/machines.yaml";
               ATTEST_STATE_DIR = "/var/lib/talos-attest";
               ATTEST_NETBOX_URL = "http://127.0.0.1:${toString netboxNginxPort}";
-              ATTEST_NETBOX_TOKEN_FILE = "/run/netbox-token";
+              ATTEST_NETBOX_TOKEN_FILE = "/run/netbox/api-token";
               ATTEST_NETBOX_PASS_STATUS = "staged";
+              # Added by the fleet talos-attest ticket; harmless to an image that predates it.
               ATTEST_SITE = "dev";
             };
           };
         fleet-controller =
           hardenedContainer [
-            "--volume=${stateDir}/tinkerbell:${tinkDir}:ro"
-            "--volume=${tinkKubeconfig}:${tinkKubeconfig}:ro"
-            "--volume=${stateDir}/netbox/api-token:/run/netbox-token:ro"
-            "--volume=${stateDir}/netbox/webhook-secret:/run/webhook-secret:ro"
+            "--volume=${stateDir}/tinkerbell:/etc/tinkerbell:ro"
+            "--volume=${stateDir}/netbox:/run/netbox:ro"
           ]
           // {
             image = images.fleet-controller;
-            # Names follow .agent/plans/fleet/spec.md's ticket 04; its README is the contract once it lands.
+            # apps/fleet-controller/README.md on the fleet controller branch is the contract.
             environment = {
               FLEET_SITE = "dev";
               FLEET_NETBOX_URL = "http://127.0.0.1:${toString netboxNginxPort}";
-              FLEET_NETBOX_TOKEN_FILE = "/run/netbox-token";
-              FLEET_KUBECONFIG = "${tinkKubeconfig}";
+              FLEET_NETBOX_TOKEN_FILE = "/run/netbox/api-token";
+              FLEET_KUBE_SERVER = "https://127.0.0.1:${toString tinkApiPort}";
+              FLEET_KUBE_CA_FILE = "/etc/tinkerbell/ca.crt";
+              FLEET_KUBE_CERT_FILE = "/etc/tinkerbell/admin.crt";
+              FLEET_KUBE_KEY_FILE = "/etc/tinkerbell/admin.key";
               FLEET_NAMESPACE = "tinkerbell";
+              FLEET_TEMPLATE = "provision";
               FLEET_WEBHOOK_ADDR = "${gateway}:${toString controllerWebhookPort}";
-              FLEET_WEBHOOK_SECRET_FILE = "/run/webhook-secret";
+              FLEET_WEBHOOK_SECRET_FILE = "/run/netbox/webhook-secret";
               FLEET_ATTEST_URL = "http://${vip}/attest";
+              FLEET_NTP_SERVER = vip;
               FLEET_HOOKOS_URL = "http://${spore}/talos/${site}/${hookos}";
               FLEET_HOOKOS_CMDLINE = hookosCmdline;
-              FLEET_TEMPLATE = "provision";
+              FLEET_REDFISH_PORT = toString sushyPort;
+              FLEET_REDFISH_INSECURE_TLS = "true";
             };
           };
         sushy =
           hardenedContainer [
             "--volume=/var/run/libvirt:/var/run/libvirt"
             "--volume=${stateDir}/sushy:/etc/sushy:ro"
-            "--volume=${sushyConfig}:/etc/sushy/sushy.conf:ro"
           ]
           // {
             image = images.sushy;
@@ -847,7 +865,7 @@ in
 
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0755 root root -"
-    "d ${stateDir}/attest/state 0750 root root -"
+    "d ${stateDir}/attest-state 0750 root root -"
     "d /var/lib/swtpm-localca 0770 root qemu-libvirtd -"
     "d ${tftpRoot} 0755 root root -"
     "d ${tftpRoot}/talos 0755 root root -"

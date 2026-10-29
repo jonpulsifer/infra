@@ -4,6 +4,14 @@ OpenTofu root for the metal dev env: one spot Compute Engine VM with nested virt
 
 The root always declares the VPC, the service account and the image. `on = true` adds the disk and the VM, created stopped; `scripts/metal-dev/up.sh` and `down.sh` start and stop it, and the root ignores that state.
 
+The image is named by the bucket object's content hash, so a new upload makes a new image. The disk ignores image changes and has `prevent_destroy`: it holds the dev DevID CA, the swtpm EK CA, the NetBox database, the Talos secrets and every virtual node, and the running system upgrades itself from `main` like every host. Nothing prunes `gs://homelab-ng-free/metal-dev/`; each upload is a multi-GB object, so delete the old ones by hand after a new image lands.
+
+## Start over
+
+1. Snapshot the disk, in case the old state is wanted again: `gcloud compute disks snapshot metal-dev --zone northamerica-northeast1-a --project homelab-ng --snapshot-names metal-dev-$(date +%Y%m%d)`.
+2. In a pull request, remove `prevent_destroy` from `google_compute_disk.boot` and change its `name`, or set `on = false`; apply through Atlantis, then put it back.
+3. On the new VM, `mise run metal-dev:up` places the DNS-01 token again, and the host requests a new certificate for the enrollment name. Let's Encrypt issues at most five duplicate certificates per name per week; a rebuild loop burns that budget.
+
 ## Develop
 
 ```bash
@@ -47,6 +55,7 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | [google_compute_image.nixos](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_image) | resource |
 | [google_compute_instance.metal_dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance) | resource |
 | [google_service_account.vm](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account) | resource |
+| [google_storage_bucket_object.image](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_bucket_object) | data source |
 | [google_storage_bucket_objects.images](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_bucket_objects) | data source |
 
 ## Inputs
