@@ -7,11 +7,11 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 
 | `desired_action` | The run | After it |
 | --- | --- | --- |
-| `provision` | Attests, wipes the system disk, and netboots the Talos UKI | Talos enrollment approves the attested node with no click |
+| `provision` | HookOS attests, the install action wipes the disk and runs the installer with the code in META, and the disk boots | The node fetches its config by the code, and the controller sets `active` |
 | `attest` | Attests, and boots the installed disk | The status stays, and the node has a new LDevID |
-| `wipe` | Wipes the system disk and netboots, with no attestation | The enrollment waits for a click |
+| `wipe` | Wipes the system disk, with no attestation | The node stays in HookOS until a Workflow runs |
 
-`provision` and `wipe` move the device to `staged`, and the config release moves it back to `active`. `attest` leaves the status alone.
+`provision` and `wipe` move the device to `staged`. `attest` leaves the status alone. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.
@@ -20,7 +20,6 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 
 - You need the `folly` context with cluster admin, and the `velero` CLI.
 - You can sign in to NetBox at `https://capsule.<tailnet>`, and you can see the node's console.
-- You are a tailnet login in `ENROLL_APPROVERS`.
 - `<node>` is the host name.
 
 > [!WARNING]
@@ -58,7 +57,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
    kubectl --context folly delete node <node>
    ```
 
-5. Watch the run, as [Watch the run](provision-a-node.md#watch-the-run) describes. An `attest` run boots the installed disk after `attest: PASSED`.
+5. Watch the run, as [Watch the run](provision-a-node.md#watch-the-run) describes. An `attest` run boots the installed disk after `attest: PASSED`. A `provision` run ends when NetBox shows `active`.
 6. Make sure that the node is Ready, then uncordon it.
 
    ```bash
@@ -77,6 +76,8 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, fix the BMC, and set `desired_action` again |
 | A new `desired_action` starts nothing | A run of the device is unfinished | Wait for it. The controller records the request against the running `Workflow` |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry | Boot `IPV4 Network` from the F9 menu |
+| `install: no install code` | The attest step wrote no code, because attest withheld it | Read the `attest.install` audit line in `journalctl -u talos-attest` on the anchor, then set `desired_action` again |
+| The node polls its config URL and gets 404 | A STATE wipe on an installed node, because a served code is spent | Set `desired_action` to `provision`, which renders a new code |
 | The console shows `Talos is already installed to disk but booted from another media` | META is on the disk | Set `desired_action` to `wipe` |
 | `TalosEnrolledNodeNotReady` fires, and the node has a bootstrap address | NetBox shows it `failed`, so its RADIUS user puts it on bootstrap | Read the device's status and its quarantine reason |
 | A `failed` node stays on the Kubernetes network | A Virtual Network Override on its UniFi client comes before RADIUS | Clear the override in the UniFi controller |

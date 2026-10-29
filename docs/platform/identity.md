@@ -54,13 +54,13 @@ A node's identity starts before Talos runs. Each step relies on the one before i
 
 ## Lifecycle
 
-A folly node's identity follows its device's `status` in [NetBox](netbox.md). talos-attest, talos-enroll, fleet-controller, the switch and SPIRE each read it.
+A folly node's identity follows its device's `status` in [NetBox](netbox.md). talos-attest, fleet-controller, the switch and SPIRE each read it.
 
 | Status | Meaning | Written by |
 | --- | --- | --- |
 | `planned` | Ordered, with its serial known. It may carry `ek_hash` pins. | The owner |
 | `staged` | Intake, attestation or install in progress | talos-attest, on a verdict for a `planned` device or a new serial; fleet-controller, on a `provision` or `wipe` of an installed node; or the owner |
-| `active` | Its config is released, and it is expected Ready | talos-enroll, when it releases the config |
+| `active` | Its config is released, and it is expected Ready | fleet-controller, when the node fetches its config |
 | `failed` | Quarantined by attestation | talos-attest |
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |
 | `offline` | Retired, and kept for history | fleet-controller, after the retirement run succeeds |
