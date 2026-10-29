@@ -9,7 +9,6 @@ on:
       - 'clusters/**'
       - 'packages/charts/**'
       - 'terraform/network/unifi/folly/clients.yaml'
-      - 'scripts/render-tinkerbell-nodes.sh'
       - '.github/scripts/render-cluster-apps.sh'
       - '.github/scripts/check-prometheus-rules.sh'
       - '.github/workflows/kustomize.yml'
@@ -18,7 +17,6 @@ on:
       - 'clusters/**'
       - 'packages/charts/**'
       - 'terraform/network/unifi/folly/clients.yaml'
-      - 'scripts/render-tinkerbell-nodes.sh'
       - '.github/scripts/render-cluster-apps.sh'
       - '.github/scripts/check-prometheus-rules.sh'
       - '.github/workflows/kustomize.yml'
@@ -41,4 +39,3 @@ jobs:
           install_args: helm kubectl yq promtool
       - run: bash .github/scripts/render-cluster-apps.sh
       - run: bash .github/scripts/check-prometheus-rules.sh
-      - run: bash scripts/render-tinkerbell-nodes.sh --check

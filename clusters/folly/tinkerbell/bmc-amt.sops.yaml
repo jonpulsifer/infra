@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-    name: amt
+    name: bmc-amt
     namespace: tinkerbell
 type: kubernetes.io/basic-auth
 stringData:
@@ -19,6 +19,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-10-26T20:21:56Z"
-    mac: ENC[AES256_GCM,data:rSRyDHSdKH7r3eRUijPihurU6La9XdI35TdsHpiQeo5znzxfxiz1ysJJRbmVxr/VfZAy53q2AicojNlCUxF0ErcfsjaHlMZKC7YlF69l5uX0phlw3f2fFG0vsZepdNQ7QSVHBciIfIyXiuo32sh7mjRJMSJWXCbkmAnIVAaDifg=,iv:GIhN6WnUSrcgTKRTn+OQAw2uUWLJhPyQgzVlrmjtuT0=,tag:mVKEuUi0JBm/8803UUVlow==,type:str]
+    lastmodified: "2026-10-29T01:43:30Z"
+    mac: ENC[AES256_GCM,data:BQfp/wFjZ7Gd7oG3o4cazv9Hu+HNgkhURchQ/6LmmWnTkDmsPmlxAtUIRyZC/x6MySLVKOPoxlOfoWPHKTcsJRtEa6Q2ImXDbVIiZ3U3oVlLwv0u1UbPf/pkm93WF7hunC+7xfEdUFMrRs+1XxxcrXfuxslbnu14DNrxa+w2NqQ=,iv:0nFbYWyD/7NjE6Novt3lZ+F5wbQS9YItkQUKYyeUoSY=,tag:bVZRYG7TL0O5Um8EusTEbw==,type:str]
     version: 3.13.3
