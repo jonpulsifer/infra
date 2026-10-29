@@ -14,6 +14,7 @@ provider "registry.opentofu.org/1password/onepassword" {
     "h1:sfvN1OOuXaxSkYMT6ZMbrwSGUvaiB7Y24E2gVwIQlvU=",
     "zh:0259dece04523bcdbd558c20c0eda0f614535fae3d583fb191549d8139137b85",
     "zh:2f387a14e2cbd5c1ef4f9540b1a1aa4f84a61eb2c633b1a6bab16609afbeb8b2",
+    "zh:890df766e9b839623b1f0437355032a3c006226a6c200cd911e15ee1a9014e9f",
     "zh:9c0f5db50328ab322b8a4ab85ce89c8f386ff60671d337705f3e307b31001b7b",
     "zh:9ccbbb83dba7c8b1ce2b08c91aa58af77419f9dd04b4ca76cca7fe47d3791b3d",
     "zh:d650a08d8521d5a51f0c4929decafbdd965c9bd191c7f48004427ba310613ade",
@@ -42,6 +43,7 @@ provider "registry.opentofu.org/cloudflare/cloudflare" {
     "zh:a182f4aec86c74e9db4affa22323c5a21f5d92c1fcf91b934570753d04f4daf8",
     "zh:a39bb8624fb6c714e38bc0e632aae117a9fede5a18a248ab15dd1b60013c0324",
     "zh:bef2ffbdb68569549fe432b550592e07456759a7288f84f7c37c9d933a493f54",
+    "zh:f809ab383cca0a5f83072981c64208cbd7fa67e986a86ee02dd2c82333221e32",
   ]
 }
 
@@ -68,6 +70,7 @@ provider "registry.opentofu.org/ubiquiti-community/unifi" {
     "zh:648431dd0daadd15e6b3423a6df309362fec555df3903325e97de370d682918b",
     "zh:69302a21a932a0d326dcd563ca99f88b602721154e794adfa672100106c2670d",
     "zh:6aaadc4d0afc383d6aaa8790821e2a8540c05afe22440b881442810032f7976f",
+    "zh:890df766e9b839623b1f0437355032a3c006226a6c200cd911e15ee1a9014e9f",
     "zh:8aaab8e3ca4b6a7f9cfe67ef62b67cad3578abbb46390fa9c08f03b3f1ae0a9c",
     "zh:aa1d2bd27d38f36944cea6eebd06dee64de17ca5069f4501fa17e5fa0cf30665",
     "zh:be6abb484f2a07eaa35f598426e95b176acb8ea4dc41271276e4871430dfffd4",

@@ -8,6 +8,14 @@ locals {
   node_addresses = jsondecode(local.topology.NODE_ADDRESSES)
   machines       = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/machines.yaml")).machines
 
+  # A planned machine is not in NODE_ADDRESSES. Its reservation comes from the
+  # export's address, once it has a MAC and a switch port.
+  planned_addresses = {
+    for node, m in local.machines : node => m.address
+    if try(m.status, "active") == "planned" && try(m.mac, null) != null && try(m.switch_port, null) != null && try(m.address, null) != null
+  }
+  reservations = merge(local.planned_addresses, local.node_addresses)
+
   static_records = merge(
     {
       "erx" = cidrhost(local.anchor_cidr, 5)
@@ -48,9 +56,10 @@ resource "unifi_network" "k8s" {
 # A node keeps its address across a reinstall because the reservation is on
 # its MAC. Reserved inside the DHCP pool; the controller excludes reserved
 # addresses from it. A node in NODE_ADDRESSES with no inventory entry fails the
-# plan on the index below; a planned machine with no MAC yet gets no reservation.
+# plan on the index below. A planned machine with a MAC, a switch port and an
+# address gets one from the export; one without them gets none.
 resource "unifi_client" "k8s_nodes" {
-  for_each = { for node, ip in local.node_addresses : node => ip if try(local.machines[node].mac, "") != null }
+  for_each = { for node, ip in local.reservations : node => ip if try(local.machines[node].mac, "") != null }
 
   # No network_id: the provider sends it as a Virtual Network Override, which
   # the switch enforces as a MAC-based VLAN on every port, whatever RADIUS

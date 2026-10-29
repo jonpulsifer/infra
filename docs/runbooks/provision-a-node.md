@@ -25,7 +25,7 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
 ## Provision a new node
 
-A `planned` device has no RADIUS user, so you power it on by hand. `mise run netbox:check` fails unless `NODE_ADDRESSES` names every staged, active and failed node that has a primary IPv4, at that address, and no other node. So `NODE_ADDRESSES` cannot name a `planned` device.
+A `planned` device with a MAC and a switch port gets a RADIUS user on the Kubernetes network and a DHCP reservation from its export once that export is applied; until then it sits on the bootstrap fallback, so you power it on by hand. `mise run netbox:check` fails unless `NODE_ADDRESSES` names every staged, active and failed node that has a primary IPv4, at that address, and no other node. So `NODE_ADDRESSES` cannot name a `planned` device.
 
 1. Connect the machine to its switch port.
 2. In NetBox, set the device's `desired_action` to `provision`.
