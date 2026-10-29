@@ -134,8 +134,10 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # The service's own metrics file lives in node-exporter's root-owned textfile directory.
-    systemd.tmpfiles.rules = [ "a+ ${metricsDir} - - - - g:talos-attest:rwx" ];
+    # The service's own metrics file lives in node-exporter's root-owned textfile directory. The
+    # rule runs after talos-boot.nix's 0755 chmod of the directory, which would reset the ACL mask
+    # to r-x and leave the group's rwx ineffective.
+    systemd.tmpfiles.rules = lib.mkAfter [ "a+ ${metricsDir} - - - - g:talos-attest:rwx,m::rwx" ];
 
     assertions = [
       {
