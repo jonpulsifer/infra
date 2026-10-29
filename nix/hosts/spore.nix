@@ -21,7 +21,7 @@ let
     lib.filterAttrs (
       _: m:
       m.tpm or null == "2.0"
-      && lib.elem (m.status or "active") [
+      && lib.elem m.status [
         "staged"
         "active"
       ]

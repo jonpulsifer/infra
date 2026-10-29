@@ -43,6 +43,21 @@ func TestRestartPodsDeletesThePodsOnItsNode(t *testing.T) {
 	}
 }
 
+func TestRestartPodsFailsWhenNoPodMatches(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	defer ts.Close()
+
+	k := &kube{base: ts.URL, token: "tok", client: ts.Client()}
+	if _, err := k.restartPods(context.Background(), "spire", "app.kubernetes.io/name=spire-agent", "riptide"); err == nil || !strings.Contains(err.Error(), "no pod") {
+		t.Fatalf("got %v, want a failure for no matching pod", err)
+	}
+}
+
 func TestRestartPodsReportsAForbiddenDelete(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {

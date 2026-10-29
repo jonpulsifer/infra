@@ -316,6 +316,63 @@ in
     in
     require "spire-devid" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
+  # nix/lib/inventory.nix reads machines.yaml without a YAML parser, so it must take the export's
+  # shape exactly and throw on anything else rather than drop or merge a machine.
+  inventory-reader =
+    let
+      read =
+        text:
+        import ./inventory.nix {
+          inherit lib;
+          path = builtins.toFile "machines.yaml" text;
+        };
+      reads = text: (builtins.tryEval (builtins.deepSeq (read text) true)).success;
+      sample = read ''
+        # A comment.
+        machines:
+          riptide: # g5
+            sku: 9GB06UC#ABA
+            tpm: "2.0"  # quoted, then a comment
+            class: worker-g5          # talos_class
+            bmc:
+              type: amt
+            ek_hash_ecc: null
+            amt: true
+          "quoted":
+            tpm: '2.0'
+        other:
+          ignored: 1
+      '';
+      refused = {
+        "a tab-indented key" = "machines:\n  a:\n\ttpm: x\n";
+        "a key three spaces in" = "machines:\n  a:\n   tpm: x\n";
+        "a flow sequence" = "machines:\n  a:\n    tags: [a, b]\n";
+        "a deep line under a scalar" = "machines:\n  a:\n    tpm: x\n      y: z\n";
+        "a repeated machine" = "machines:\n  a:\n    tpm: x\n  a:\n    tpm: y\n";
+        "a repeated key" = "machines:\n  a:\n    tpm: x\n    tpm: y\n";
+        "a key before any machine" = "machines:\n    tpm: x\n";
+        "no machines key" = "other:\n  a: 1\n";
+      };
+      failures =
+        lib.optional (
+          sample != {
+            riptide = {
+              sku = "9GB06UC#ABA";
+              tpm = "2.0";
+              class = "worker-g5";
+              ek_hash_ecc = null;
+              amt = true;
+            };
+            quoted.tpm = "2.0";
+          }
+        ) "the sample reads as ${builtins.toJSON sample}"
+        ++ lib.optional (
+          read "machines:\r\n  a:\r\n    tpm: \"2.0\"\r\n" != { a.tpm = "2.0"; }
+        ) "CRLF line ends change the result"
+        ++ lib.mapAttrsToList (what: _: "${what} is accepted") (lib.filterAttrs (_: reads) refused);
+    in
+    require "inventory-reader" (failures == [ ]) (lib.concatStringsSep "; " failures);
+
   # Two normal users sharing a uid silently breaks file ownership on the NFS
   # exports every cluster host mounts.
   fleet-unique-uids =

@@ -68,6 +68,11 @@ func (k *kube) restartPods(ctx context.Context, namespace, selector, node string
 	if err := k.do(ctx, http.MethodGet, "/api/v1/namespaces/"+url.PathEscape(namespace)+"/pods?"+q.Encode(), &list); err != nil {
 		return nil, fmt.Errorf("list pods: %w", err)
 	}
+	// A renewal whose agent is not restarted keeps serving the old LDevID, so
+	// a selector that picks nothing is a failure, not a no-op.
+	if len(list.Items) == 0 {
+		return nil, fmt.Errorf("no pod in %s matches %s on %s", namespace, selector, node)
+	}
 	var deleted []string
 	for _, p := range list.Items {
 		if err := k.do(ctx, http.MethodDelete, "/api/v1/namespaces/"+url.PathEscape(namespace)+"/pods/"+url.PathEscape(p.Metadata.Name), nil); err != nil {

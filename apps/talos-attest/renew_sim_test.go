@@ -31,6 +31,9 @@ type renewalService struct {
 	refuse  int
 	calls   int
 	withLAK bool
+	// signer and name, when set, issue as another CA or for another machine.
+	signer *CA
+	name   string
 }
 
 func (r *renewalService) handler() http.Handler {
@@ -106,18 +109,27 @@ func (r *renewalService) check(ev protocol.RenewEvidence) (protocol.Renewed, err
 	if err != nil {
 		return protocol.Renewed{}, err
 	}
-	later := time.Now().Add(time.Hour)
-	ldevid, err := r.h.v.CA.Issue(key, "testbox", simSerial, "LDevID", later)
+	ca, name := r.h.v.CA, "testbox"
+	if r.signer != nil {
+		ca = r.signer
+	}
+	if r.name != "" {
+		name = r.name
+	}
+	// A minute on: a later expiry than the intake's, while CA.Issue's
+	// NotBefore stays in the past.
+	later := time.Now().Add(time.Minute)
+	ldevid, err := ca.Issue(key, name, simSerial, "LDevID", later)
 	if err != nil {
 		return protocol.Renewed{}, err
 	}
-	out := protocol.Renewed{LDevIDCert: string(r.h.v.CA.LeafPEM(ldevid))}
+	out := protocol.Renewed{LDevIDCert: string(ca.LeafPEM(ldevid))}
 	if r.withLAK {
-		lak, err := r.h.v.CA.Issue(ak.Public, "testbox", simSerial, "LAK", later)
+		lak, err := ca.Issue(ak.Public, name, simSerial, "LAK", later)
 		if err != nil {
 			return protocol.Renewed{}, err
 		}
-		out.LAKCert = string(r.h.v.CA.LeafPEM(lak))
+		out.LAKCert = string(ca.LeafPEM(lak))
 	}
 	return out, nil
 }
@@ -138,10 +150,13 @@ func (h *harness) nvCert(index uint32) *x509.Certificate {
 func (h *harness) renew(svc *renewalService, before time.Duration) (*client.RenewResult, error) {
 	ts := httptest.NewServer(svc.handler())
 	h.t.Cleanup(ts.Close)
+	roots := x509.NewCertPool()
+	roots.AddCert(h.v.CA.Cert)
 	return client.Renew(context.Background(), h.sim, client.RenewConfig{
 		BaseURL:     ts.URL,
 		Serial:      simSerial,
 		EventLog:    h.eventLog,
+		Roots:       roots,
 		RenewBefore: before,
 	})
 }
@@ -212,5 +227,63 @@ func TestRenewWithoutAnLDevID(t *testing.T) {
 	_, err := h.renew(&renewalService{h: h}, 30*24*time.Hour)
 	if !errors.Is(err, client.ErrNoLDevID) {
 		t.Fatalf("got %v, want ErrNoLDevID", err)
+	}
+}
+
+// The routes are plain HTTP, so an answer that does not chain to a pinned
+// DevID CA, or names another machine, must not reach NV.
+func TestRenewRefusesAnUnpinnedOrMisnamedCertificate(t *testing.T) {
+	for name, svc := range map[string]func(h *harness) *renewalService{
+		"another CA":      func(h *harness) *renewalService { return &renewalService{h: h, signer: devIDCA(t)} },
+		"another CA LAK":  func(h *harness) *renewalService { return &renewalService{h: h, signer: devIDCA(t), withLAK: true} },
+		"another machine": func(h *harness) *renewalService { return &renewalService{h: h, name: "otherbox"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, harnessOpts{})
+			if _, err := h.run(simSerial, simMAC); err != nil {
+				t.Fatal(err)
+			}
+			old, oldLAK := h.nvCert(protocol.NVLDevIDCert), h.nvCert(protocol.NVLAKCert)
+			if _, err := h.renew(svc(h), 400*24*time.Hour); err == nil {
+				t.Fatal("the renewal was accepted")
+			}
+			if !bytes.Equal(h.nvCert(protocol.NVLDevIDCert).Raw, old.Raw) || !bytes.Equal(h.nvCert(protocol.NVLAKCert).Raw, oldLAK.Raw) {
+				t.Fatal("a refused certificate changed NV")
+			}
+		})
+	}
+}
+
+// A run that lost the LDevID in NV, as a failed write leaves it, renews on
+// the next run while the LAK is there, and an unparseable index counts as
+// empty.
+func TestRenewRecoversAnEmptyLDevIDIndex(t *testing.T) {
+	for name, damage := range map[string]func(h *harness){
+		"undefined": func(h *harness) {
+			if err := tpm2.NVUndefineSpace(h.sim, "", tpm2.HandleOwner, tpmutil.Handle(protocol.NVLDevIDCert)); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"garbage": func(h *harness) {
+			if err := tpm2.NVUndefineSpace(h.sim, "", tpm2.HandleOwner, tpmutil.Handle(protocol.NVLDevIDCert)); err != nil {
+				t.Fatal(err)
+			}
+			writeSimNV(t, h.sim, protocol.NVLDevIDCert, bytes.Repeat([]byte{0xff}, 64))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, harnessOpts{})
+			if _, err := h.run(simSerial, simMAC); err != nil {
+				t.Fatal(err)
+			}
+			damage(h)
+			res, err := h.renew(&renewalService{h: h}, 30*24*time.Hour)
+			if err != nil || !res.Renewed {
+				t.Fatalf("got %+v, %v; want a renewal", res, err)
+			}
+			if got := h.nvCert(protocol.NVLDevIDCert); !got.NotAfter.Equal(res.NotAfter) {
+				t.Fatalf("NV holds an LDevID until %s, the result says %s", got.NotAfter, res.NotAfter)
+			}
+		})
 	}
 }

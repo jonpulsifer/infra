@@ -5,7 +5,8 @@
 # to 7 and the event log with the LAK, has the attest service certify the
 # LDevID key again on its DevID listener, stores the new certificate in NV, and
 # deletes the node's spire-agent pod, whose devid-init then fetches the new
-# certificate. TalosAttestLDevIDExpiring is the backstop.
+# certificate. The answer must chain to a DevID CA in spire-devid-ca
+# (devid-ca.yaml). TalosAttestLDevIDExpiring is the backstop.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -127,7 +128,13 @@ spec:
           image: ghcr.io/jonpulsifer/tink-attest@sha256:c595f4ffff44fc22838975491cda4a9bb7d6dcb5b2607b398e026acad4cd4699
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/tink-attest"]
-          args: ["renew", "-every", "24h", "-retry", "1h", "-renew-before", "720h"]
+          # Each run reads the CA bundle again, so a rotated CA needs no restart.
+          args:
+            - renew
+            - -every=24h
+            - -retry=1h
+            - -renew-before=720h
+            - -ca-bundle=/etc/devid-ca/devid-ca.pem
           env:
             - name: NODE_NAME
               valueFrom:
@@ -164,7 +171,14 @@ spec:
             - name: securityfs
               mountPath: /sys/kernel/security
               readOnly: true
+            # The issuing DevID CAs, which a renewed certificate must chain to.
+            - name: devid-ca
+              mountPath: /etc/devid-ca
+              readOnly: true
       volumes:
+        - name: devid-ca
+          configMap:
+            name: spire-devid-ca
         - name: tpmrm0
           hostPath:
             path: /dev/tpmrm0

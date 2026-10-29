@@ -9,4 +9,5 @@ resources:
   - bundle-writer.yaml
   - daemonset.yaml
   - smoke.yaml
+  - devid-ca.yaml
   - tpm-reattest.yaml

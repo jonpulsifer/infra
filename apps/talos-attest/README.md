@@ -101,7 +101,9 @@ with `event` one of `attest.verdict`, `attest.issue` and `attest.renew`.
 `tink-attest renew` runs on a running node, in the `tpm-reattest` DaemonSet
 of `clusters/folly/apps/spire/`. It reads the LDevID and LAK certificates from
 NV, and exits 0 while the LDevID expires in more than `-renew-before`
-(default `720h`) or when NV holds no LDevID. Otherwise it loads the LAK and
+(default `720h`), or when NV holds neither certificate. NV that holds the LAK
+and no LDevID, or an index that holds no certificate, counts as due; any
+other TPM error fails the run. Otherwise it loads the LAK and
 LDevID blobs that `GET /devid/{serial}` serves, and drives these routes on
 `ATTEST_URL`, the DevID listener:
 
@@ -110,8 +112,11 @@ LDevID blobs that `GET /devid/{serial}` serves, and drives these routes on
 | `POST /v1/renew` | `{serial}` | `{session, nonce}`; 404 with no LAK on file, 403 when the machine's status forbids a renewal |
 | `POST /v1/renew/{session}/evidence` | `{quote, pcrs, event_log, ldevid}`: a LAK quote over PCRs 0 to 7 and the LDevID key certified by the LAK, both qualified by the nonce | `{ldevid_cert_pem, lak_cert_pem?}`, each the leaf then the DevID CA |
 
-It writes the new certificates to NV and, with `-restart-selector`, deletes
-the pods the selector picks in `-restart-namespace` on `NODE_NAME`. `-every`
+Each certificate in the answer must chain to a CA in `-ca-bundle`, certify
+the key NV and the blobs name, and carry the machine's name and serial; the
+routes are plain HTTP. It writes the LAK certificate to NV first, then the
+LDevID, and with `-restart-selector` deletes the pods the selector picks in
+`-restart-namespace` on `NODE_NAME`, failing when none matches. `-every`
 repeats it, and `-retry` sets the wait after a failed run. `protocol.go` holds
 the types.
 

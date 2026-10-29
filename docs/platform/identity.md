@@ -29,7 +29,7 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
-- The LDevID aliases follow `clusters/folly/inventory/machines.yaml`. Each machine with `tpm: "2.0"` and the status `staged` or `active` gets one, and a machine whose export has no `status` counts as `active`. `nix/lib/inventory.nix` reads the export at evaluation, so a new machine's alias needs a spore deploy.
+- The LDevID aliases follow `clusters/folly/inventory/machines.yaml`. Each machine with `tpm: "2.0"` and the status `staged` or `active` gets one. `nix/lib/inventory.nix` reads the export at evaluation, so a new machine's alias needs a spore deploy. It fails the evaluation on any line outside the export's shape.
 - Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
 - An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
@@ -72,15 +72,16 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 ## Renewal
 
-The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, it renews it on the attest service's DevID listener, at the same `ATTEST_URL` as `devid-init`.
+The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on the attest service's DevID listener, at the same `ATTEST_URL` as `devid-init`.
 
 1. It fetches `/devid/<serial>` and checks that the key blobs are the keys the certificates in NV name.
 2. `POST /v1/renew` with the serial answers a session and a nonce.
 3. It loads the LAK and the LDevID key under the H-2 storage root key. With the LAK it quotes PCRs 0 to 7 and certifies the LDevID key, both qualified by the nonce.
 4. `POST /v1/renew/<session>/evidence` carries the quote, the PCR values, the event log from securityfs, and the certification. The service replays the log as at intake and answers a new certificate for the same key.
-5. It writes the certificate to NV, and deletes the `spire-agent` pod on its node. The new pod's `devid-init` fetches the new certificate.
+5. It checks that the certificate chains to a DevID CA in the ConfigMap `spire-devid-ca`, certifies the same key, and names the node and its serial. The routes are plain HTTP, so this check is what keeps a forged answer out of NV.
+6. It writes a renewed LAK certificate first, then the LDevID certificate, so a failed write leaves the renewal due for the next run. It then deletes the `spire-agent` pod on its node, and fails when no pod matches. The new pod's `devid-init` fetches the new certificate.
 
-A run that fails runs again an hour later. A node with no LDevID in NV has nothing to renew. The ServiceAccount `tpm-reattest` may list and delete pods in `spire`. The ValidatingAdmissionPolicy `tpm-reattest` allows it to delete only a `spire-agent` pod on the node that its token names. `TalosAttestLDevIDExpiring` fires when an LDevID expires within 23 days, which is a week of failed renewals.
+`scripts/render-spire-devid-ca.sh` writes `spire-devid-ca` from `terraform/pki/certs/folly-devid-ca.pem`, and the kustomize workflow fails when the two differ. A run that fails runs again an hour later. A node with no LDevID in NV has nothing to renew. The ServiceAccount `tpm-reattest` may list and delete pods in `spire`. The ValidatingAdmissionPolicy `tpm-reattest` allows it to delete only a `spire-agent` pod on the node that its token names. `TalosAttestLDevIDExpiring` fires when an LDevID expires within 23 days, which is a week of failed renewals.
 
 ## GCP access
 

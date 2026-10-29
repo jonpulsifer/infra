@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -25,6 +26,7 @@ func printf(format string, args ...any) {
 
 type renewOpts struct {
 	url, device, eventLog, serial string
+	caBundle                      string
 	before, timeout               time.Duration
 	namespace, selector, node     string
 }
@@ -35,6 +37,7 @@ func renew(args []string) error {
 	var o renewOpts
 	fs := flag.NewFlagSet("renew", flag.ContinueOnError)
 	fs.StringVar(&o.url, "url", env("ATTEST_URL", ""), "talos-attest DevID listener base URL")
+	fs.StringVar(&o.caBundle, "ca-bundle", env("CA_BUNDLE", ""), "PEM file of the issuing DevID CAs a renewed certificate must chain to")
 	fs.StringVar(&o.device, "tpm", env("TPM_DEVICE", "/dev/tpmrm0"), "TPM resource manager device")
 	fs.StringVar(&o.eventLog, "event-log", env("EVENT_LOG", "/sys/kernel/security/tpm0/binary_bios_measurements"), "TCG event log")
 	fs.StringVar(&o.serial, "serial", env("SERIAL", readTrim("/sys/class/dmi/id/product_serial")), "SMBIOS serial")
@@ -53,6 +56,9 @@ func renew(args []string) error {
 	}
 	if o.serial == "" {
 		return errors.New("no SMBIOS serial; run as root or set SERIAL")
+	}
+	if o.caBundle == "" {
+		return errors.New("-ca-bundle is required")
 	}
 	if o.selector != "" && (o.namespace == "" || o.node == "") {
 		return errors.New("-restart-selector needs -restart-namespace and NODE_NAME")
@@ -79,6 +85,15 @@ func renew(args []string) error {
 }
 
 func renewOnce(parent context.Context, o renewOpts) error {
+	// Read on every run, so a rotated CA in the mounted ConfigMap takes effect.
+	pem, err := os.ReadFile(o.caBundle)
+	if err != nil {
+		return fmt.Errorf("DevID CA bundle: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(pem) {
+		return fmt.Errorf("DevID CA bundle %s holds no certificate", o.caBundle)
+	}
 	log, err := os.ReadFile(o.eventLog)
 	if err != nil {
 		return fmt.Errorf("event log: %w", err)
@@ -96,6 +111,7 @@ func renewOnce(parent context.Context, o renewOpts) error {
 		HTTP:        &http.Client{Timeout: time.Minute},
 		Serial:      o.serial,
 		EventLog:    log,
+		Roots:       roots,
 		RenewBefore: o.before,
 		Logf:        printf,
 	})

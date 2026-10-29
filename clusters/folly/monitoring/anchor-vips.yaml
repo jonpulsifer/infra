@@ -170,9 +170,10 @@ spec:
             message: "{{ $labels.machine }} waits for the owner to approve its EK on first intake"
             description: "Neither machines.yaml nor NetBox pins {{ $labels.machine }}'s EK hash. Approve it on {{ $labels.instance }}'s admin API, as docs/runbooks/attest-a-node.md says."
         # tpm-reattest renews an LDevID from 30 days before its expiry, once a day, so
-        # this fires only after a week of failed renewals.
+        # this fires only after a week of failed renewals. One anchor serves a renewal
+        # and the others keep the old record, so the newest expiry counts.
         - alert: TalosAttestLDevIDExpiring
-          expr: talos_attest_ldevid_expiry_timestamp_seconds - time() < 23 * 86400
+          expr: max by (machine) (talos_attest_ldevid_expiry_timestamp_seconds) - time() < 23 * 86400
           for: 1h
           labels:
             severity: warning

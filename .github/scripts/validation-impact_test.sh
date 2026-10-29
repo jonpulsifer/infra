@@ -38,6 +38,10 @@ assert_targets 'the UKI check that spore runs validates Nix' \
   '.github/scripts/talos-uki-verify.sh' \
   'nix:flake-check'
 
+assert_targets 'the NetBox export that spore and the anchors read validates Nix' \
+  'clusters/folly/inventory/machines.yaml' \
+  'nix:flake-check'
+
 assert_targets 'the retired Spore application has no Nix validation route' \
   'apps/spore/lib/catalog.ts' \
   ''
