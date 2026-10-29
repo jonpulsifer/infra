@@ -36,8 +36,6 @@ in
       nginx = spore.systemd.services.nginx;
       grow = spore.systemd.services.grow-root-and-partition-storage;
       probe = spore.systemd.services.spore-native-boot-artifact-check;
-      tftpRanges = spore.networking.firewall.interfaces.bootstrap.allowedUDPPortRanges;
-      hasTftpRange = lib.any (range: range.from == 30000 && range.to == 30099) tftpRanges;
       fetchScript = rackpi5.boot.initrd.systemd.services.fetch-nix-store.script;
       smee = "${spore.systemd.services.tinkerbell.serviceConfig.ExecStart} ";
       failures = lib.filter (failure: failure != null) [
@@ -66,12 +64,11 @@ in
             "nginx does not want the native-boot publisher"
         )
         (
-          if spore.services.dnsmasq.settings."tftp-port-range" == [ "30000,30099" ] then
+          if spore.services.dnsmasq.settings."tftp-single-port" or [ ] == [ true ] then
             null
           else
-            "dnsmasq TFTP transfer range is not bounded"
+            "dnsmasq TFTP transfers leave port 69"
         )
-        (if hasTftpRange then null else "bootstrap firewall does not admit the bounded TFTP transfer range")
         (
           if lib.hasInfix "find_data_partition" grow.script && !(lib.hasInfix "mkfs.ext4 -F" grow.script) then
             null
@@ -202,9 +199,7 @@ in
         dnsmasq ? "dhcp-range"
         || dnsmasq.port != [ 0 ]
         || c.services.keepalived.vrrpInstances.boot.interface != "bootstrap"
-        || !(lib.any (
-          range: range.from == 30000 && range.to == 30099
-        ) c.networking.firewall.interfaces.bootstrap.allowedUDPPortRanges)
+        || dnsmasq."tftp-single-port" or [ ] != [ true ]
         || firewallBroken c
       ) anchors;
     in

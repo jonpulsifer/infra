@@ -57,6 +57,15 @@ let
   tagPrefix = "talos-${site}/${talosVersion}-";
 
   bootstrapPrefix = lib.toInt (lib.last (lib.splitString "/" lab.bootstrap.cidr));
+  # The gateway's address on the VLAN, the CIDR's first host, as UniFi takes it
+  # (terraform/network/unifi/folly/bootstrap.tf).
+  bootstrapGateway =
+    let
+      octets = lib.splitString "." (lib.head (lib.splitString "/" lab.bootstrap.cidr));
+    in
+    lib.concatStringsSep "." (lib.init octets ++ [ (toString (lib.toInt (lib.last octets) + 1)) ]);
+  # The routing table for traffic from the bootstrap addresses, named for the VLAN.
+  bootstrapTable = lab.bootstrap.vlan;
 
   readOnlyLocation = alias: {
     inherit alias;
@@ -130,18 +139,40 @@ in
     ];
   };
 
+  # A node on the Kubernetes network reaches the boot services through the gateway, which routes it
+  # onto the VLAN (the UniFi policies kubernetes_to_boot). The main table sends its replies out
+  # end0, and the firewall's strict reverse-path filter drops the request, so traffic from a
+  # bootstrap address, the boot VIP included, takes a table whose default is the gateway on the
+  # VLAN. The filter's reverse lookup takes the request's destination as its source, matches the
+  # rule, and finds the route back out the interface the request arrived on.
+  systemd.network.networks."40-${iface}" = {
+    routes = [
+      {
+        Destination = lab.bootstrap.cidr;
+        Scope = "link";
+        PreferredSource = address;
+        Table = bootstrapTable;
+      }
+      {
+        Gateway = bootstrapGateway;
+        Table = bootstrapTable;
+      }
+    ];
+    routingPolicyRules = [
+      {
+        From = lab.bootstrap.cidr;
+        Table = bootstrapTable;
+        Priority = 1000;
+      }
+    ];
+  };
+
   # nginx listens on the boot VIP whether or not this anchor holds it.
   boot.kernel.sysctl."net.ipv4.ip_nonlocal_bind" = 1;
 
   networking.firewall.interfaces.${iface} = {
     allowedTCPPorts = [ 80 ];
     allowedUDPPorts = [ 69 ];
-    allowedUDPPortRanges = [
-      {
-        from = 30000;
-        to = 30099;
-      }
-    ];
   };
 
   # IPv6 on the VLAN is link-local only, so it gets neighbour discovery and nothing else.
@@ -172,9 +203,10 @@ in
       enable-tftp = true;
       tftp-root = "/var/lib/tftpboot";
       tftp-max = 100;
-      # TFTP data leaves UDP/69 on a server-chosen port; bound it so the firewall admits it
-      # without a conntrack helper.
-      tftp-port-range = "30000,30099";
+      # TFTP data leaves UDP/69 too, so a transfer is one flow. The gateway's reply rule for the
+      # Kubernetes network (kubernetes_to_boot) matches only the request's port, and this chain
+      # admits only port 69.
+      tftp-single-port = true;
     };
   };
 
