@@ -39,7 +39,7 @@ spec:
           # machine off the shelf has none worth trusting. The anchors' chrony answers at the boot
           # VIP; the RTC keeps the result for the Talos boot that follows.
           - name: set-clock
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 120
             command:
               - /bin/sh
@@ -58,7 +58,7 @@ spec:
                   log "$NTP_SERVER did not answer; the clock stays $(date -u)"
                 fi
           - name: attest
-            image: ghcr.io/jonpulsifer/tink-attest@sha256:c595f4ffff44fc22838975491cda4a9bb7d6dcb5b2607b398e026acad4cd4699
+            image: ghcr.io/jonpulsifer/tink-attest@sha256:d8527e8657c881226bfa1c0bcf8ad40b5fc3540af5b2a793113491eec7c45695
             timeout: 600
             command:
               - /bin/sh
@@ -72,7 +72,7 @@ spec:
                 mountpoint -q /sys/kernel/security || mount -t securityfs securityfs /sys/kernel/security
                 exec /usr/local/bin/tink-attest
           - name: wipe-disk
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 600
             command:
               - /bin/sh
@@ -100,7 +100,7 @@ spec:
           # A wiped disk has nothing to boot, so the firmware would fall through its boot order to
           # the network anyway, and an installed disk comes first in it; BootNext makes each certain.
           - name: next-boot
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 120
             command:
               - /bin/sh
@@ -128,7 +128,7 @@ spec:
                 log "Boot$n ($what) is the next boot"
           # A retired node powers off instead, and stays off until somebody turns it on.
           - name: reboot
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 120
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
@@ -141,6 +141,6 @@ spec:
                 if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
                 # A detached container reboots or powers off the node after this action reports success.
                 docker run -d --privileged --name provision-reboot \
-                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827 \
+                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f \
                   sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
                 for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done
