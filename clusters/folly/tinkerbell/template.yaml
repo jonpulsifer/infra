@@ -179,13 +179,22 @@ spec:
                   log "a retired node powers off; no next boot"
                   exit 0
                 fi
-                mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars
+                # BootNext is a convenience: with netboot off for the node, a refused PXE falls
+                # through to the installed disk anyway, so an EFI failure here is logged, not fatal.
+                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
+                  log "efivarfs did not mount ($err); the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if ! entries=$(efibootmgr -v 2>&1); then
+                  log "efibootmgr failed ($entries); the firmware's boot order decides the next boot"
+                  exit 0
+                fi
                 if [ "$INSTALL" = true ]; then
-                  n=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*Talos.*/\1/p' | head -n 1)
-                  [ -n "$n" ] || n=$(efibootmgr -v | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*HD(.*/\1/p' | head -n 1)
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*Talos.*/\1/p' | head -n 1)
+                  [ -n "$n" ] || n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*HD(.*/\1/p' | head -n 1)
                   what="the installed disk"
                 elif [ "$WIPE" = true ]; then
-                  n=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
                   what="IPv4 network"
                 else
                   log "nothing installed or wiped; the firmware's boot order decides the next boot"
@@ -195,8 +204,11 @@ spec:
                   log "no entry for $what; the firmware's boot order decides the next boot"
                   exit 0
                 fi
-                efibootmgr -q -n "$n"
-                log "Boot$n ($what) is the next boot"
+                if err=$(efibootmgr -q -n "$n" 2>&1); then
+                  log "Boot$n ($what) is the next boot"
+                else
+                  log "BootNext refused ($err); the firmware's boot order decides the next boot"
+                fi
           # A retired node powers off instead, and stays off until somebody turns it on.
           - name: reboot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
