@@ -65,6 +65,8 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | <a name="input_disk_gb"></a> [disk\_gb](#input\_disk\_gb) | Boot disk size. The mirrored release images and each virtual node's disk live on it. | `number` | `100` | no |
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | An Intel machine type that supports nested virtualization. N2 does; E2 and shared-core types do not. | `string` | `"n2-standard-8"` | no |
 | <a name="input_on"></a> [on](#input\_on) | Declare the VM and its disk. Off, the root keeps only the network, the service account and the image, which cost nothing. | `bool` | `false` | no |
+| <a name="input_tailscale_audience"></a> [tailscale\_audience](#input\_tailscale\_audience) | The metal\_dev\_audience output of terraform/network/tailscale: the audience of the identity token the VM trades for an auth key. | `string` | `null` | no |
+| <a name="input_tailscale_client_id"></a> [tailscale\_client\_id](#input\_tailscale\_client\_id) | The metal\_dev\_client\_id output of terraform/network/tailscale. The VM joins the tailnet with it; null leaves the VM off the tailnet. | `string` | `null` | no |
 
 ## Outputs
 
