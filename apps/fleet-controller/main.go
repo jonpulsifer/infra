@@ -219,7 +219,7 @@ func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 		},
 		Tail: &Tail{
 			Path:   env("FLEET_CONFIG_LOG", "/var/log/nginx/talos-config.log"),
-			Offset: filepath.Join(stateDir, "talos-config.offset"),
+			Offset: filepath.Join(stateDir, "talos-config.tail.json"),
 		},
 		Metrics:      metrics,
 		Now:          time.Now,

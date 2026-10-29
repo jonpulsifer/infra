@@ -23,8 +23,9 @@ var (
 )
 
 // Pending is what the store keeps beside a rendered config: who it is for,
-// when it was rendered, and when nginx served it. A served config's file is
-// gone; its record stays until NetBox has the release.
+// when it was rendered, when nginx served it, and when NetBox took the
+// release. A served config's file is gone; its record stays until the
+// release is in NetBox and the store has dropped it.
 type Pending struct {
 	UUID     string    `json:"uuid"`
 	Code     string    `json:"code"`
@@ -34,6 +35,7 @@ type Pending struct {
 	Workflow string    `json:"workflow"`
 	Rendered time.Time `json:"rendered"`
 	Fetched  time.Time `json:"fetched,omitzero"`
+	Released time.Time `json:"released,omitzero"`
 }
 
 // Store holds the rendered configs that nginx serves at /talos/config, as
@@ -162,6 +164,9 @@ func (s *Store) Put(p Pending, cfg []byte) error {
 	}
 	for _, o := range others {
 		if o.Code == p.Code {
+			if !o.Fetched.IsZero() {
+				return ErrBurned
+			}
 			continue
 		}
 		cfgPath, recPath := s.paths(o.UUID, o.Code)
@@ -177,12 +182,8 @@ func (s *Store) Put(p Pending, cfg []byte) error {
 			}
 		}
 	}
-	rec, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
 	cfgPath, recPath := s.paths(p.UUID, p.Code)
-	if err := writeFile(recPath, rec, 0o600); err != nil {
+	if err := writeRecord(recPath, p); err != nil {
 		return err
 	}
 	return writeFile(cfgPath, cfg, 0o640)
@@ -250,11 +251,13 @@ func (s *Store) Records() ([]Pending, error) {
 	return s.records("")
 }
 
-// Served burns a config nginx just served whole: the file goes, and the
-// record keeps the time until the release is in NetBox. ok is false for a
-// code the store does not hold, one already served, or a fetch that sent
-// fewer or more bytes than the file holds, which leaves the file for the
-// node's next try.
+// Served burns a config nginx just served whole. The record keeps the time
+// and the code's hash is kept before the file goes, so a disk error past
+// that point leaves a served node to be released, never one forgotten. ok is
+// false for a code the store does not hold, one already served, or a fetch
+// that sent fewer or more bytes than the file holds, which leaves the file
+// for the node's next try; it is true, with an error, when only the file's
+// deletion failed, which the release's Drop tries again.
 func (s *Store) Served(uuid, code string, sent int64, at time.Time) (Pending, bool, error) {
 	if !uuidPattern.MatchString(uuid) || !codePattern.MatchString(code) {
 		return Pending{}, false, nil
@@ -262,15 +265,11 @@ func (s *Store) Served(uuid, code string, sent int64, at time.Time) (Pending, bo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfgPath, recPath := s.paths(uuid, code)
-	b, err := os.ReadFile(recPath)
+	p, err := readRecord(recPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return Pending{}, false, nil
 	}
 	if err != nil {
-		return Pending{}, false, err
-	}
-	var p Pending
-	if err := json.Unmarshal(b, &p); err != nil {
 		return Pending{}, false, err
 	}
 	if !p.Fetched.IsZero() {
@@ -280,18 +279,48 @@ func (s *Store) Served(uuid, code string, sent int64, at time.Time) (Pending, bo
 	if err != nil || fi.Size() != sent {
 		return p, false, nil
 	}
-	if err := os.Remove(cfgPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	p.Fetched = at
+	if err := writeRecord(recPath, p); err != nil {
 		return Pending{}, false, err
 	}
 	if err := s.burn(uuid, code, at); err != nil {
-		return Pending{}, false, err
+		return p, true, err
 	}
-	p.Fetched = at
+	if err := os.Remove(cfgPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return p, true, err
+	}
+	return p, true, nil
+}
+
+// Released marks a served config's release as in NetBox, so a later sweep
+// only drops it.
+func (s *Store) Released(p Pending, at time.Time) (Pending, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, recPath := s.paths(p.UUID, p.Code)
+	rec, err := readRecord(recPath)
+	if err != nil {
+		return p, err
+	}
+	rec.Released = at
+	return rec, writeRecord(recPath, rec)
+}
+
+func readRecord(path string) (Pending, error) {
+	var p Pending
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return p, err
+	}
+	return p, json.Unmarshal(b, &p)
+}
+
+func writeRecord(path string, p Pending) error {
 	rec, err := json.Marshal(p)
 	if err != nil {
-		return Pending{}, false, err
+		return err
 	}
-	return p, true, writeFile(recPath, rec, 0o600)
+	return writeFile(path, rec, 0o600)
 }
 
 // Drop deletes a config and its record, and the machine's directory once it

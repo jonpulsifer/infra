@@ -72,7 +72,7 @@ func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest
 		Kube:     &Kube{Server: ks.URL, Namespace: "tinkerbell", Client: ks.Client()},
 		Renderer: it.rend,
 		Store:    &Store{Dir: filepath.Join(dir, "talos"), Burned: filepath.Join(dir, "burned.json")},
-		Tail:     &Tail{Path: it.log, Offset: filepath.Join(dir, "talos-config.offset")},
+		Tail:     &Tail{Path: it.log, Offset: filepath.Join(dir, "talos-config.tail.json")},
 		TTL:      2 * time.Hour,
 		Metrics:  NewMetrics(),
 		Now:      func() time.Time { return it.now },
@@ -401,6 +401,83 @@ func TestFailedReleaseIsKeptAndJournaledOnce(t *testing.T) {
 	}
 }
 
+// A disk error on the file's deletion leaves the served node to be
+// released: the record and the burned hash are written first.
+func TestServedNodeIsReleasedWhenItsFileWillNotGo(t *testing.T) {
+	it := newInstallTest(t, "staged", nil)
+	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
+		t.Fatal(code)
+	}
+	ctx := context.Background()
+	// A non-empty directory in the config's place cannot be removed.
+	cfg := it.cfgPath(testCode)
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cfg, "stuck"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	it.appendLog(t, line("2023-11-14T22:20:00+00:00", testUUID, testCode, 200, "GET", "OK", it.size(t, testCode)))
+	if served, _ := it.in.Follow(ctx); !served {
+		t.Fatal("a served config whose file would not go was not reported served")
+	}
+	if recs, _ := it.in.Store.Records(); len(recs) != 1 || recs[0].Fetched.IsZero() {
+		t.Fatalf("the record does not say served: %+v", recs)
+	}
+	if !it.in.Store.Spent(testUUID, testCode) {
+		t.Fatal("the code was not burned")
+	}
+	it.in.Sweep(ctx)
+	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
+		t.Fatalf("the release patch: %v", p)
+	}
+	it.nb.set("status", map[string]any{"value": "staged"})
+	if code, _ := it.post(t, goodRequest(), testSecret); code != http.StatusConflict {
+		t.Fatal("a served code rendered again")
+	}
+}
+
+// A Drop that fails after NetBox took the release repeats neither the
+// update nor the success journal on later sweeps.
+func TestReleaseIsNotRepeatedWhenTheDropFails(t *testing.T) {
+	it := newInstallTest(t, "staged", nil)
+	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
+		t.Fatal(code)
+	}
+	ctx := context.Background()
+	it.appendLog(t, line("2023-11-14T22:20:00+00:00", testUUID, testCode, 200, "GET", "OK", it.size(t, testCode)))
+	if served, _ := it.in.Follow(ctx); !served {
+		t.Fatal("not served")
+	}
+	// Drop burns the code first; a burned file it cannot write fails it.
+	burned := it.in.Store.Burned
+	it.in.Store.Burned = filepath.Join(it.dir, "absent", "burned.json")
+	for k := 0; k < 3; k++ {
+		it.in.Sweep(ctx)
+	}
+	if n := len(it.nb.patches); n != 1 {
+		t.Fatalf("%d release patches, want 1", n)
+	}
+	if journalCount(it.nb, "success") != 1 || journalCount(it.nb, "danger") != 0 || it.in.Metrics.Released.Load() != 1 {
+		t.Fatal("the release was repeated or journaled as refused")
+	}
+	recs, _ := it.in.Store.Records()
+	if len(recs) != 1 || recs[0].Released.IsZero() {
+		t.Fatalf("the record does not say released: %+v", recs)
+	}
+	if it.in.Metrics.unreleased != 0 {
+		t.Fatal("the gauge counts a released config")
+	}
+	it.in.Store.Burned = burned
+	it.in.Sweep(ctx)
+	if recs, _ := it.in.Store.Records(); len(recs) != 0 {
+		t.Fatalf("the record outlived a working Drop: %+v", recs)
+	}
+	if len(it.nb.patches) != 1 {
+		t.Fatal("the final Drop updated NetBox")
+	}
+}
+
 func TestNotFoundIsJournaledOnlyForAHeldMachineAndRateLimited(t *testing.T) {
 	it := newInstallTest(t, "staged", nil)
 	ctx := context.Background()
@@ -495,6 +572,48 @@ func TestTailFollowsARotation(t *testing.T) {
 	os.WriteFile(path, []byte("d\n"), 0o600)
 	if lines, _ := tail.Read(); strings.Join(lines, ",") != "d" {
 		t.Fatalf("after truncation: %v", lines)
+	}
+}
+
+func TestTailDrainsARotationWhileStopped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "log")
+	offset := filepath.Join(dir, "talos-config.tail.json")
+	tail := &Tail{Path: path, Offset: offset}
+	os.WriteFile(path, []byte("a\nb\n"), 0o600)
+	if lines, _ := tail.Read(); strings.Join(lines, ",") != "a,b" {
+		t.Fatalf("first read: %v", lines)
+	}
+	if err := tail.Save(); err != nil {
+		t.Fatal(err)
+	}
+	// While the controller is stopped nginx writes more than one read's
+	// chunk, then logrotate renames the file and nginx opens a new one.
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	row := strings.Repeat("x", 99)
+	const rows = 50000
+	for k := 0; k < rows; k++ {
+		f.WriteString(row + "\n")
+	}
+	f.WriteString("c\n")
+	f.Close()
+	os.Rename(path, path+".1")
+	os.WriteFile(path, []byte("d\n"), 0o600)
+
+	tail = &Tail{Path: path, Offset: offset}
+	lines, err := tail.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != rows+2 || lines[0] != row || lines[rows] != "c" || lines[rows+1] != "d" {
+		t.Fatalf("%d lines after a rotation while stopped, want %d ending c,d", len(lines), rows+2)
+	}
+	if err := tail.Save(); err != nil {
+		t.Fatal(err)
+	}
+	tail = &Tail{Path: path, Offset: offset}
+	if lines, _ := tail.Read(); lines != nil {
+		t.Fatalf("a restart after the drain read again: %d lines", len(lines))
 	}
 }
 

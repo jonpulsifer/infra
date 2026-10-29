@@ -69,13 +69,19 @@ let
     }
   '';
   # The controller burns a file only on a whole GET of all its bytes, so a HEAD, a range or a
-  # conditional request, which would serve less, is refused or served whole.
+  # conditional request, which would serve less, is refused or served whole, and nothing is
+  # compressed, since the bytes sent are compared with the file's size. An If-None-Match is
+  # refused rather than answered 304, which serves nothing.
   serveConfig = {
     root = talosConfig.stateDir;
     extraConfig = ''
       if ($request_method != GET) {
         return 405;
       }
+      if ($http_if_none_match) {
+        return 400;
+      }
+      gzip off;
       max_ranges 0;
       etag off;
       if_modified_since off;
