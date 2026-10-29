@@ -1,0 +1,14 @@
+[
+  {
+    "_comment": "The context is the repo root because the build needs packages/pkcs11signer and the policy and roots under apps/talos-attest.",
+    "image": "talos-attest",
+    "context": ".",
+    "file": "images/talos-attest/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "images/talos-attest",
+      "apps/talos-attest",
+      "packages/pkcs11signer"
+    ]
+  }
+]

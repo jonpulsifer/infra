@@ -5,6 +5,8 @@ description: The boot server on the three anchors that gives folly's Talos nodes
 
 Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](../../hosts/capsule.md) and [forge](../../hosts/forge.md), that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN, with the signed iPXE and HookOS UKI that the netboot path loads. [Tinkerbell](tinkerbell.md), on spore, decides which machine boots what.
 
+The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.nix` and set to `folly`. The boot, enrollment and attestation services take their state paths, metric labels, release tag and committed per-site files from it, so the paths in this page read `<site>` where they say `folly`.
+
 ## Parts
 
 | Part | Job | Where it runs |

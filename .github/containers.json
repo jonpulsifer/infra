@@ -17,6 +17,7 @@
     "kthx-engine",
     "kthx-engine-verifier",
     "switchboard",
+    "talos-attest",
     "talos-enroll",
     "tally",
     "tally-ocr",

@@ -17,7 +17,7 @@ let
   peers = map (anchor: lab.bootstrap.hosts.${anchor}) (
     lib.remove name (lib.attrNames lab.bootstrap.hosts)
   );
-  site = "folly";
+  site = config.homelab.site;
   address = lab.bootstrap.hosts.${name};
   stateDir = "/var/lib/talos-boot";
   siteDir = "${stateDir}/${site}";
@@ -32,8 +32,8 @@ let
   ipxe = "ipxe-amd64-secureboot.efi";
   # Signed with the HookOS key; iPXE fetches it over HTTP.
   hookos = "hookos-amd64-secureboot-uki.efi";
-  signingCert = ../../clusters/folly/talos/secureboot/uki-signing-cert.pem;
-  hookosCert = ../../clusters/folly/talos/secureboot/hookos-signing-cert.pem;
+  signingCert = ../../clusters/${site}/talos/secureboot/uki-signing-cert.pem;
+  hookosCert = ../../clusters/${site}/talos/secureboot/hookos-signing-cert.pem;
   # The pipeline's check: exactly one signature, and sbverify against the committed certificate.
   verifyUki = ../../.github/scripts/talos-uki-verify.sh;
 
@@ -46,12 +46,12 @@ let
           m = builtins.match ''[[:space:]]*talos_version[[:space:]]*=[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*'' line;
         in
         if m == null then [ ] else m
-      ) (lib.splitString "\n" (builtins.readFile ../../clusters/folly/talos/talos.tf));
+      ) (lib.splitString "\n" (builtins.readFile ../../clusters/${site}/talos/talos.tf));
     in
     if lib.length matches == 1 then
       lib.head matches
     else
-      throw "clusters/folly/talos/talos.tf must set talos_version exactly once";
+      throw "clusters/${site}/talos/talos.tf must set talos_version exactly once";
   # Each image build is its own immutable release, tagged talos-<site>/<version>-<run id>.
   releasesApi = "https://api.github.com/repos/jonpulsifer/infra/releases?per_page=100";
   tagPrefix = "talos-${site}/${talosVersion}-";
