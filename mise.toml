@@ -182,6 +182,22 @@ run = "bash scripts/enroll.sh deny"
 description = "List the Talos enrollments that wait for approval or for their config fetch"
 run = "bash scripts/enroll.sh pending"
 
+[tasks."metal-dev:up"]
+description = "Start the metal-dev VM in GCP, join it to the tailnet and give it the DNS-01 token (terraform/metal-dev)"
+run = "bash scripts/metal-dev/up.sh"
+
+[tasks."metal-dev:down"]
+description = "Stop the metal-dev VM; its disk and virtual nodes stay"
+run = "bash scripts/metal-dev/down.sh"
+
+[tasks."metal-dev:seed"]
+description = "Seed the metal-dev VM's own NetBox from git, with the URL pinned to the VM and its token; never the lab's NetBox"
+run = "bash scripts/metal-dev/seed.sh"
+
+[tasks."metal-dev:intake"]
+description = "Create a virtual node on metal-dev, enroll the lab's Secure Boot keys, declare it in the host's NetBox and follow it to active (args: [name])"
+run = "bash scripts/metal-dev/intake.sh"
+
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
 run = "bash .github/scripts/render-cluster-apps.sh"

@@ -11,6 +11,7 @@ on:
           - gce
           - iso
           - oldboy
+          - metal-dev
           - cloudpi4
           - homepi4
           - weatherpi4
@@ -52,7 +53,7 @@ jobs:
         run: sudo ./result/bin/nixos-wsl-tarball-builder ./nixos.wsl
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' || inputs.image == 'wsl' }}
+        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' || inputs.image == 'metal-dev' || inputs.image == 'wsl' }}
         with:
           workload_identity_provider: 'projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github'
           project_id: homelab-ng
@@ -65,6 +66,17 @@ jobs:
           # nixpkgs gives every googleComputeImage tarball one name, so gce and
           # oldboy overwrite each other here. A separate image needs a prefix.
           destination: homelab-ng-free
+          parent: false
+          gzip: false
+          process_gcloudignore: false
+
+      # terraform/metal-dev reads the newest object under this prefix.
+      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3
+        if: ${{ inputs.image == 'metal-dev' }}
+        with:
+          path: result
+          glob: "*.raw.tar.gz"
+          destination: homelab-ng-free/metal-dev
           parent: false
           gzip: false
           process_gcloudignore: false
