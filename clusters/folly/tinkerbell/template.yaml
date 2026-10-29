@@ -148,13 +148,21 @@ spec:
                   exit 1
                 fi
                 log "installing $INSTALLER_IMAGE to $DISK"
-                docker run --rm --privileged --network none \
+                # The installer's output goes to the console too: Tinkerbell keeps no action log,
+                # and the console is the only record of why an install failed.
+                if docker run --rm --privileged --network none \
                   --volume /dev:/dev \
                   --mount type=volume,dst=/sys/firmware/efi/efivars,volume-driver=local,volume-opt=type=efivarfs,volume-opt=device=efivarfs,volume-nocopy=true \
                   --entrypoint /bin/installer \
                   "$INSTALLER_IMAGE" \
-                  install --platform metal --disk "$DISK" --meta "0x0b=$code"
-                log "installed Talos to $DISK"
+                  install --platform metal --disk "$DISK" --meta "0x0b=$code" >/tmp/fleet/install.log 2>&1; then
+                  tail -n 5 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
+                  log "installed Talos to $DISK"
+                else
+                  tail -n 25 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
+                  log "the installer failed; the lines above are its last output"
+                  exit 1
+                fi
           # After an install the disk boots, preferring the installer's Talos entry; after a wipe
           # with no install the network does, since a wiped disk has nothing to boot. BootNext makes
           # each certain. A run that only attests leaves the firmware's boot order alone.
