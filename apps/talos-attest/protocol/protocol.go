@@ -176,6 +176,15 @@ type ConfirmRequest struct {
 	NVIndexes []uint32 `json:"nv_indexes,omitempty"`
 }
 
+// ConfirmResponse is the confirm's answer. InstallCode is set only after an
+// intake pass whose Talos config fleet-controller has rendered: 32 random
+// bytes, base64url without padding, the value the installer writes to META
+// 0x0b. It is a bearer token until the config is fetched.
+type ConfirmResponse struct {
+	Status      string `json:"status"`
+	InstallCode string `json:"install_code,omitempty"`
+}
+
 // DevID is GET /devid/<serial>: everything public about a machine's LDevID,
 // in the shape images/spire-agent-tpm/devid-init reads. The blobs are
 // useless outside the TPM that wrapped them.

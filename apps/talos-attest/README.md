@@ -47,6 +47,8 @@ ATTEST_APPROVERS=you@example.com \
 | `ATTEST_NETBOX_URL` | none | Makes NetBox the system of record: the device with the serial names the machine, its `talos_class` and status; a serial NetBox never saw gets a device at `staged`; each verdict goes to its custom fields; `GET /verdict` reads it first |
 | `ATTEST_NETBOX_TOKEN_FILE` | `/run/credentials/talos-attest.service/netbox-token` | The NetBox API token |
 | `ATTEST_NETBOX_ROLE` | `kubernetes-node` | The device role a first-sight device gets |
+| `FLEET_RENDER_URL` | none | fleet-controller's `/render`, such as `http://<SPORE_IP>:8446/render`. When set, an intake pass's confirm answers an install code once the controller has rendered the config under it; unset, no code is minted. |
+| `ATTEST_FLEET_SECRET_FILE` | `/run/credentials/talos-attest.service/fleet-secret` | The HMAC key that signs a render request, its surrounding whitespace trimmed. Required when `FLEET_RENDER_URL` is set. |
 
 ## Device routes
 
@@ -74,7 +76,7 @@ costs nothing.
 | --- | --- |
 | `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname and SMBIOS manufacturer, model, SKU and BIOS, its EKs (DER public key and the NV certificate) and a new AK with its creation proof. Finds the machine in NetBox, else in the inventory; a serial NetBox never saw gets its device once activation succeeds. Refuses a `failed`, `decommissioning` or `offline` device. Checks each EK certificate against `roots/`, refuses a ROCA-weak RSA EK, matches the MAC and the EK pins, and answers a session, a 32-byte nonce and one credential challenge per EK. A `planned` device with no pin passes the pin check when every EK has a manufacturer certificate. |
 | `POST /v1/attest/{session}/evidence` | Takes each activated secret, a quote over PCRs 0 to 7 qualified by the nonce, the PCR values, the event log, the LDevID key certified by the AK with the nonce, and both keys' blobs. Checks them, replays the log, applies `policy.yaml`, and issues the LDevID and LAK certificates with the subject `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. |
-| `POST /v1/attest/{session}/confirm` | Records that the machine stored the certificates and the NV indexes it used |
+| `POST /v1/attest/{session}/confirm` | Records that the machine stored the certificates and the NV indexes it used, and answers `{status, install_code}`; `install_code` is present only as [Install code](#install-code) says |
 | `GET /devid/{serial}` | The LDevID of the newest verdict, if it is a pass: `node`, `serial`, `ldevid_cert_pem` (leaf then DevID CA), `lak_cert_pem`, `chain_pem`, `ldevid_pub_blob_b64` (TPMT_PUBLIC), `ldevid_priv_blob_b64` (TPM2B_PRIVATE without its size), `ak_pub_blob_b64`, `ak_priv_blob_b64`, `srk`, `ek_hashes`, `rsa_ek_cert`, `attested_at`, `confirmed`. 404 otherwise. |
 | `GET /devid/{serial}/{file}` | One of `ldevid.crt`, `lak.crt`, `chain.pem`, `ldevid.pub`, `ldevid.priv`, `ak.pub`, `ak.priv`, raw |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at}` with status `attested` or `quarantined`; 404 with status `unknown` for no verdict or a pending first intake. With NetBox, the device's `attest_verdict`, `last_attested`, `talos_class` and `attest_consumed_at` answer, and the anchors' record of the same attestation fills in `uuid` and `rsa_ek_cert`. |
@@ -91,11 +93,31 @@ again with the LAK on file, replays the running boot against the policy's
 `renew_required_authorities`, and answers `{ldevid_cert_pem, lak_cert_pem}`.
 It is 404 with no LDevID on file and 403 when the device's status forbids it.
 
+## Install code
+
+With `FLEET_RENDER_URL` set, the confirm of an intake pass, never of a
+renewal, mints 32 random bytes as base64url without padding and posts
+`{serial, uuid, node, class, code}` to the controller, with
+`X-Fleet-Signature` set to HMAC-SHA512 hex over the body. `uuid` is the
+session's SMBIOS UUID, lower-cased; a session with none renders nothing.
+On 201 the answer carries the code as `install_code`. On any other answer,
+or none, the answer has no code and one `attest.install` audit line says
+why; the pass stands either way. The code is never logged.
+
+`tink-attest` writes a code it receives to `-install-code` (`INSTALL_CODE_FILE`,
+default `/tmp/fleet/install_code`), mode 0600 in a directory of mode 0700,
+for the install action that follows, and logs that it did without the value.
+With no code it removes a code an earlier run left there.
+
+An intake pass also writes the session's SMBIOS UUID to the device's `smbios_uuid`,
+once NetBox defines that field (`scripts/netbox-seed.sh`).
+
 ## Audit
 
 Every decision is one JSON line on stdout, beside the structured log:
 `{event, site, node, serial, class, status, approver, reason, ts}`
-with `event` one of `attest.verdict`, `attest.issue` and `attest.renew`.
+with `event` one of `attest.verdict`, `attest.issue`, `attest.renew` and
+`attest.install`.
 
 ## Renewal
 

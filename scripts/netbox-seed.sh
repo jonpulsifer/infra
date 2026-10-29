@@ -109,6 +109,7 @@ seed_custom_fields() {
     {"name": "install_disk", "label": "Install disk", "type": "text", "group_name": "Hardware", "weight": 120, "validation_regex": "^/dev/", "description": "The disk Talos installs to"},
     {"name": "amt", "label": "Intel AMT", "type": "boolean", "group_name": "Hardware", "weight": 130, "description": "The node has Intel AMT"},
     {"name": "secure_boot_expected", "label": "Secure Boot expected", "type": "boolean", "group_name": "Hardware", "weight": 140, "description": "The firmware state the node is expected to boot in"},
+    {"name": "smbios_uuid", "label": "SMBIOS UUID", "type": "text", "group_name": "Hardware", "weight": 150, "description": "SMBIOS UUID of the node, written by talos-attest on an intake pass; the Talos config URL names it"},
     {"name": "tpm_version", "label": "TPM version", "type": "text", "group_name": "Identity", "weight": 200, "validation_regex": "^(1\\.2|2\\.0)$", "description": "TPM spec version; only 2.0 seals disks and attests"},
     {"name": "ek_hash", "label": "EK hash", "type": "text", "group_name": "Identity", "weight": 210, "validation_regex": "^[0-9a-f]{64}$", "description": "SHA-256 of the TPM endorsement key public area"},
     {"name": "ek_issuer", "label": "EK issuer", "type": "text", "group_name": "Identity", "weight": 220, "description": "Issuer of the TPM endorsement key certificate"},

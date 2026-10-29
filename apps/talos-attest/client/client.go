@@ -36,10 +36,12 @@ type Config struct {
 	Logf func(format string, args ...any)
 }
 
-// Result is what a pass leaves.
+// Result is what a pass leaves. InstallCode is the confirm's install code,
+// empty when the service gave none; it is a secret and is never logged.
 type Result struct {
-	Verdict   protocol.Verdict
-	NVIndexes []uint32
+	Verdict     protocol.Verdict
+	NVIndexes   []uint32
+	InstallCode string
 }
 
 // RefusedError is the service's refusal.
@@ -203,9 +205,11 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		logf("certificates stored at NV %#x and %#x", protocol.NVLDevIDCert, protocol.NVLAKCert)
 	}
 	confirm := protocol.ConfirmRequest{NVIndexes: res.NVIndexes}
-	if err := post(ctx, cfg, strings.Replace(protocol.PathConfirm, "{session}", started.Session, 1), confirm, nil); err != nil {
+	var confirmed protocol.ConfirmResponse
+	if err := post(ctx, cfg, strings.Replace(protocol.PathConfirm, "{session}", started.Session, 1), confirm, &confirmed); err != nil {
 		return res, err
 	}
+	res.InstallCode = confirmed.InstallCode
 	return res, nil
 }
 

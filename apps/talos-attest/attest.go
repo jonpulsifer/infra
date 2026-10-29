@@ -54,6 +54,9 @@ type Verifier struct {
 	IntakePerHour int
 	// OnChange runs after any record changes, to refresh the metrics file.
 	OnChange func()
+	// Fleet, when set, renders an intake pass's Talos config under an
+	// install code that the confirm answers.
+	Fleet *FleetRender
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -627,29 +630,35 @@ func (v *Verifier) checkLDevID(s *session, certified protocol.Certified, blobs p
 	return key, nil
 }
 
-// Confirm records that the host stored its certificates.
-func (v *Verifier) Confirm(ctx context.Context, id string, req protocol.ConfirmRequest) error {
+// Confirm records that the host stored its certificates. After an intake
+// pass, with Fleet set, the answer carries an install code once
+// fleet-controller has rendered the config; without one the pass stands.
+func (v *Verifier) Confirm(ctx context.Context, id string, req protocol.ConfirmRequest) (protocol.ConfirmResponse, error) {
 	s, ok := v.takeSession(id, true)
 	if !ok {
-		return fail(reasonSession, "no passed session %q", id)
+		return protocol.ConfirmResponse{}, fail(reasonSession, "no passed session %q", id)
 	}
 	rec, found, err := v.Store.Record(s.machine.Name)
 	if err != nil {
-		return err
+		return protocol.ConfirmResponse{}, err
 	}
 	if !found || !rec.Issued() {
-		return fail(reasonSession, "%s has no issued LDevID", s.machine.Name)
+		return protocol.ConfirmResponse{}, fail(reasonSession, "%s has no issued LDevID", s.machine.Name)
 	}
 	rec.Confirmed = true
 	rec.NVIndexes = req.NVIndexes
 	rec.UpdatedAt = v.Now()
 	if err := v.Store.Save(rec, nil); err != nil {
-		return err
+		return protocol.ConfirmResponse{}, err
 	}
 	v.Log.Info("attestation confirmed", "machine", rec.Machine, "nv_indexes", req.NVIndexes)
 	v.record(ctx, rec)
 	v.changed()
-	return nil
+	resp := protocol.ConfirmResponse{Status: "confirmed"}
+	if v.Fleet != nil && s.renew == nil && rec.EKProven {
+		resp.InstallCode = v.installCode(ctx, rec)
+	}
+	return resp, nil
 }
 
 // RenewStart opens a renewal: a quote nonce for the machine whose LAK is on

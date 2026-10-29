@@ -34,6 +34,12 @@ let
     else
       sealed "devid-ca-key" && builtins.pathExists softwareChain;
   netbox = sealed "netbox-token";
+  # The HMAC key that signs an intake pass's render request to fleet-controller on spore, which
+  # renders the config the install code fetches. The coordinator seals it on every anchor.
+  fleetRender =
+    lib.hasInfix "\nfleet-controller:\n" secrets && lib.hasInfix "\n    attest-secret:" secrets;
+  # ./fleet-controller.nix's webhookPort on spore, which also serves /render.
+  fleetControllerPort = 8446;
 
   devidPort = 8444;
   adminPort = 8445;
@@ -113,7 +119,8 @@ in
       // lib.optionalAttrs netbox {
         # A NetBox API token that may read and change dcim devices and add journal entries.
         "talos-attest/netbox-token" = { };
-      };
+      }
+      // lib.optionalAttrs fleetRender { "fleet-controller/attest-secret" = { }; };
 
     users.users.talos-attest = {
       isSystemUser = true;
@@ -161,6 +168,12 @@ in
         # network address; the anchors are no tailnet peers of one another.
         ATTEST_NETBOX_URL = "http://${lab.hosts.capsule}:8080";
         ATTEST_NETBOX_TOKEN_FILE = "%d/netbox-token";
+      }
+      // lib.optionalAttrs fleetRender {
+        # An intake pass's confirm answers an install code once fleet-controller, on spore's
+        # Anchor network address, has rendered the machine's config under it.
+        FLEET_RENDER_URL = "http://${lab.hosts.spore}:${toString fleetControllerPort}/render";
+        ATTEST_FLEET_SECRET_FILE = "%d/fleet-secret";
       };
       serviceConfig = {
         ExecStart = lib.getExe talos-attest;
@@ -174,7 +187,10 @@ in
               "devid-ca-key:${config.sops.secrets."talos-attest/devid-ca-key".path}"
           )
         ]
-        ++ lib.optional netbox "netbox-token:${config.sops.secrets."talos-attest/netbox-token".path}";
+        ++ lib.optional netbox "netbox-token:${config.sops.secrets."talos-attest/netbox-token".path}"
+        ++ lib.optional fleetRender "fleet-secret:${
+          config.sops.secrets."fleet-controller/attest-secret".path
+        }";
         StateDirectory = "talos-attest";
         StateDirectoryMode = "0750";
         RuntimeDirectory = "talos-attest";
