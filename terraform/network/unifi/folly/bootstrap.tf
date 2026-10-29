@@ -45,7 +45,7 @@ locals {
   # VLAN on for wired. Otherwise the node loses the network at its next link
   # flap. riptide goes first; optiplex is the control plane. An empty set keeps
   # every port on its open Kubernetes trunk, and is also the revert.
-  mab_enforced = toset(["riptide"])
+  mab_enforced = toset(["riptide", "swell"])
 
   # Ports with no inventory node, on the MAC auth profile: the rack ports of
   # new nodes and the provisioning station. An unknown MAC lands on the
