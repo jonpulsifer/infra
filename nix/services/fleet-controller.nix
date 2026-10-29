@@ -12,6 +12,10 @@
 # that the other anchors' enrollment servers pass the location to (../lib/talos-config.nix,
 # ./talos-enroll.nix). The controller follows nginx's log of the location, burns a served file and
 # sets the device active.
+#
+# For a machine NetBox does not know, /intake makes an attest-only Workflow. The controller then
+# binds the attested device to a stub, the model map's class and a free address in the node
+# prefix, cables it to the switch port a read-only UniFi key reports, and provisions it.
 {
   config,
   lib,
@@ -28,6 +32,11 @@ let
   # sops leaves key names in the clear, so evaluation can see which secrets the file holds.
   sealed = key: lib.hasInfix "\nfleet-controller:\n" secrets && lib.hasInfix "\n    ${key}:" secrets;
   webhook = sealed "webhook-secret";
+  # A read-only UniFi API key, with which the controller finds an intake's switch port.
+  unifi = cfg.unifi.url != null && sealed "unifi-api-key";
+  # An intake's address comes from the node prefix. Only these keys are read, so a new node, which
+  # changes NODE_ADDRESSES, leaves the service's environment alone.
+  topology = (lib.importJSON ../../clusters/${cfg.site}/config/cluster-topology.json).data;
 
   spore = lab.bootstrap.hosts.spore;
   vip = lab.bootstrap.vip;
@@ -102,6 +111,58 @@ in
       default = talosConfig.controllerPort;
       description = "The port NetBox's event-rule webhook, talos-attest's render call and every anchor's intake proxy post to, on the Anchor network.";
     };
+    autoProvision = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Set desired_action to provision on a bound intake that has a class and an address. Off, a bound intake waits for the owner.";
+    };
+    intakePort = lib.mkOption {
+      type = lib.types.port;
+      default = 24;
+      description = "The prep station's switch port, where every machine intakes. UniFi seeing a machine there says nothing of its rack port: no expected_port check and no cable follow from it.";
+    };
+    unifi.url = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "https://unifi.example";
+      description = "The UniFi console the controller asks for an intake's switch port, with fleet-controller/unifi-api-key from spore's sops file. Unset or unsealed, an intake gets no switch port and a stub's expected_port refuses its binding off the intake port.";
+    };
+    modelMap = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            class = lib.mkOption {
+              type = lib.types.enum [
+                "controlplane"
+                "worker-g5"
+                "worker-g2"
+              ];
+              description = "The Talos class a machine of the model gets.";
+            };
+            bmc = lib.mkOption {
+              type = lib.types.enum [
+                "none"
+                "amt"
+                "redfish"
+              ];
+              description = "The model's out-of-band management.";
+            };
+            disk = lib.mkOption {
+              type = lib.types.strMatching "/dev/.+";
+              description = "The disk Talos installs to.";
+            };
+          };
+        }
+      );
+      default = {
+        "HP EliteDesk 800 G5 Desktop Mini" = {
+          class = "worker-g5";
+          bmc = "amt";
+          disk = "/dev/nvme0n1";
+        };
+      };
+      description = "Class, BMC and install disk by SMBIOS model, for a machine that intakes. A model not here gets no class and no auto-provision.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -112,6 +173,10 @@ in
       }
     ];
 
+    warnings =
+      lib.optional (cfg.unifi.url != null && !unifi)
+        "homelab.fleetController.unifi.url is set, and spore's sops file holds no fleet-controller/unifi-api-key; intakes get no switch port.";
+
     sops.secrets = {
       "fleet-controller/netbox-token" = { };
       # talos-attest signs its render calls with it (./talos-attest.nix).
@@ -120,6 +185,9 @@ in
     // lib.optionalAttrs webhook {
       # The event rule's secret in NetBox; without it the controller only polls.
       "fleet-controller/webhook-secret" = { };
+    }
+    // lib.optionalAttrs unifi {
+      "fleet-controller/unifi-api-key" = { };
     };
 
     # NetBox on capsule posts the webhook, every anchor's talos-attest the render call and every
@@ -214,10 +282,20 @@ in
         FLEET_CONFIG_LOG = talosConfig.log;
         FLEET_CONFIG_TTL = "2h";
         FLEET_INSTALLS = lib.boolToString cfg.installs;
+        FLEET_AUTO_PROVISION = lib.boolToString cfg.autoProvision;
+        FLEET_MODEL_MAP = builtins.toJSON cfg.modelMap;
+        FLEET_INTAKE_PORT = toString cfg.intakePort;
+        FLEET_NODE_PREFIX = topology.K8S_NODE_CIDR;
+        # The gateway and the API server's address are in the prefix and never go to a new node.
+        FLEET_NODE_RESERVED = "${topology.ROUTER_IP},${topology.API_SERVER_IP}";
         # talosctl writes its patch files and nothing else here.
         HOME = "/tmp";
       }
       // lib.optionalAttrs webhook { FLEET_WEBHOOK_SECRET_FILE = "%d/webhook-secret"; }
+      // lib.optionalAttrs unifi {
+        FLEET_UNIFI_URL = cfg.unifi.url;
+        FLEET_UNIFI_API_KEY_FILE = "%d/unifi-api-key";
+      }
       // lib.optionalAttrs workerSecrets {
         # Written by `mise run render-class-inputs` from the Talos root.
         FLEET_CLASS_INPUTS = "${../../clusters/${cfg.site}/apps/talos-enroll/class-inputs.json}";
@@ -233,6 +311,7 @@ in
         ++ lib.optional webhook "webhook-secret:${
           config.sops.secrets."fleet-controller/webhook-secret".path
         }"
+        ++ lib.optional unifi "unifi-api-key:${config.sops.secrets."fleet-controller/unifi-api-key".path}"
         ++ [ "attest-secret:${config.sops.secrets."fleet-controller/attest-secret".path}" ]
         ++ lib.optional workerSecrets "worker-secrets:${
           config.sops.secrets."talos-enroll/worker-secrets".path

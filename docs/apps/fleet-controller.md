@@ -1,6 +1,6 @@
 ---
 title: fleet-controller
-description: A Go service on spore that turns NetBox's kubernetes-node devices into Tinkerbell's Hardware, Machine and Workflow objects, starts a run when a device's desired_action is set, renders the Talos config an install fetches, and retires a decommissioning device.
+description: A Go service on spore that turns NetBox's kubernetes-node devices into Tinkerbell's Hardware, Machine and Workflow objects, takes a new machine's intake and binds it to a node, starts a run when a device's desired_action is set, renders the Talos config an install fetches, and retires a decommissioning device.
 status: unverified
 ---
 
@@ -12,6 +12,7 @@ fleet-controller makes [Tinkerbell](../platform/nixos/tinkerbell.md) follow NetB
 | --- | --- | --- |
 | NetBox | The device's `desired_action` and `status` | The owner, in NetBox on capsule |
 | Webhook | `http://<SPORE_IP>:8446/webhook` | NetBox's event rule, from the Anchor network, signed with the rule's secret |
+| Intake | `http://<SPORE_IP>:8446/intake`, as `https://enroll.lolwtf.ca/fleet/intake` at the boot VIP | A new machine's HookOS, unauthenticated |
 | Render | `http://<SPORE_IP>:8446/render` | [talos-attest](talos-attest.md) on any anchor, from the Anchor network, signed with `fleet-controller/attest-secret` |
 | Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` | A node's first boot from disk, at the boot VIP |
 | Health and metrics | `http://<SPORE_IP>:8446/healthz` and `/metrics` | The Anchor network |
@@ -29,6 +30,7 @@ The controller creates `Workflow <action>-<name>-<unix seconds>`, sets `desired_
 ## Limits
 
 - A device needs a primary MAC on an interface and `install_disk` before it gets a `Hardware`, and a run waits for them with one journal entry.
+- While an intake's `Hardware` holds a device's MAC, the device gets no `Hardware` of its own, since two with one MAC confuse Tinkerbell; the binding deletes the intake's objects. A binding the port check refuses keeps them until you move the machine or correct `expected_port`.
 - One run at a time per device. While a run is unfinished, a new `desired_action` is recorded against the running `Workflow` and waits for it; the controller never starts a second run, which would power-cycle the node mid-wipe. The device's finished runs are deleted before a new one starts.
 - A device with `tpm_version` `1.2`, or of class `worker-g2`, skips the attest step. A device with `bmc_type` `none` gets no `Machine`, and its `Workflow` waits for somebody to PXE-boot it by hand.
 - A `planned` device boots by hand too, and its journal says so. It has no RADIUS user yet, so it and its AMT sit on the bootstrap fallback with a lease there, where Rufio cannot dial the Kubernetes address NetBox gives it. Its `Workflow` has no `bootMode`, and it gets a `Machine` only with an explicit `oob_ip`; the `Machine` arrives, and Rufio drives the next run, once the status leaves `planned`.
@@ -42,6 +44,14 @@ The controller creates `Workflow <action>-<name>-<unix seconds>`, sets `desired_
 Installs are on: `nix/hosts/spore.nix` sets `homelab.fleetController.installs`. With the option off, no `Workflow` installs and `/render` refuses every call. A `provision` of a class whose class inputs say `worker` carries `install=true` and the class's `installer_image` in its `hardwareMap`, when the attest step runs. At the end of the intake talos-attest posts `{serial, uuid, node, class, code}` to `/render`, signed as HMAC-SHA512 hex of the body in `X-Fleet-Signature`. The controller answers 409 unless the device is `planned` or `staged`, its `last_workflow` is an unfinished `provision` run with `install=true`, its `smbios_uuid` is unset or the request's, and the code is unspent. It renders the config from the class inputs as [Talos enrollment](talos-enroll.md) does, writes `talos/<uuid>/<code>.yaml` under `/var/lib/fleet-controller`, and answers 201. The `install` action runs the installer with the code in META, and the node's first boot fetches the file by it.
 
 nginx serves `/talos/config` on spore, and capsule and forge pass it to spore's Anchor address on port 8447 (`nix/lib/talos-config.nix`). Both Anchor-network legs, the render call and the proxied fetch, are plain HTTP. The controller reads nginx's log of the location every two seconds. A whole GET of the file's bytes deletes it and sets the device `active` with `attest_consumed_at`; a range, a HEAD or an aborted fetch deletes nothing. A served, expired or replaced code stays spent for a day, so a replayed render call is refused. A 404 for a machine with a waiting file is journaled at most every ten minutes. A file nobody fetched is deleted after two hours. Each step is an audit line, `fleet.render`, `fleet.release` or `fleet.expire`.
+
+## Intake
+
+Before HookOS's agent waits for work, it posts the machine's MAC, serial, UUID, model and disks to `/intake`. A malformed body is 400. One MAC may intake every ten minutes and twenty machines an hour; more is 429. A MAC on a NetBox interface or a `Hardware` answers 200 `known` and creates nothing. Otherwise the controller creates `Hardware <mac>`, labelled `lolwtf.ca/intake=true`, on the first NVMe disk, else the first disk that is no USB stick. It then creates `Workflow intake-<mac>-<unix seconds>`, a `provision` run with only `attest`, which boots nothing since the agent is connected, and answers 201. It never creates a NetBox device; talos-attest does, on a pass. An intake whose MAC no device holds is deleted after 24 hours.
+
+When the intake run has finished and its device is `staged` and `attested`, a pass binds it. A device named `intake-<serial>` takes the stub with its serial, else the oldest serial-less stub of its model's class, and the stub's name; the stub is deleted. A device that talos-attest made of a stub keeps its name and gets its MAC from the intake if NetBox lacks one. `homelab.fleetController.modelMap` gives the class, BMC and install disk; an unknown model gets no class. The address is the stub's reserved one, else the lowest free one of `K8S_NODE_CIDR` that is neither the gateway, the API server nor a UniFi client's. UniFi's client list gives the switch port. On the provisioning station's port, `homelab.fleetController.intakePort`, no port check applies and only a stub's `expected_port` is cabled; elsewhere, a stub's `expected_port` must match, or nothing binds and the journal says why. A class and an address set `desired_action` to `provision`, whose run waits in HookOS without Rufio. Later passes cable a node with no cable to the rack port UniFi reports. Each step is journaled, with the audit lines `fleet.intake`, `fleet.bind` and `fleet.autoprovision`.
+
+A stub's address is an IP address with the status `reserved`, the stub's name as its DNS name, and no interface, since a stub has no MAC; the binding assigns it and makes it the primary IPv4.
 
 ## How it works
 
@@ -57,6 +67,7 @@ Every two minutes, and two seconds after the webhook rings, the controller lists
 | `fleet_install_files_oldest_age_seconds` rises | A rendered config waits for its node's first boot; the install or the boot failed |
 | `fleet_install_unreleased` is above 0 | nginx served a config and NetBox refused the release; the device's journal says why, and the controller retries |
 | `fleet_install_renders_refused_total` rises | talos-attest asked for a render the device's state forbids; the controller's journal names the gate |
+| `fleet_intake_limited_total` rises | Machines intake faster than the rate limits allow; a flood of claims, or many boxes at once |
 
 ## Reference
 
