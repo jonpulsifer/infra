@@ -78,9 +78,9 @@ machines:
     ek_hash_ecc: null
   swell:
     model: HP EliteDesk 800 G5 Desktop Mini
-    sku: null
+    sku: 8MD97US#ABA
     serial: MXL0154VD6
-    bios: null
+    bios: R21 Ver. 02.10.01
     mac: e8:d8:d1:4a:38:90
     switch_port: 4
     disk: /dev/nvme0n1
@@ -88,10 +88,10 @@ machines:
     amt: true
     secure_boot: true
     class: worker-g5
-    status: planned
+    status: active
     address: 10.3.0.13
     bmc:
       type: amt
       address: 10.3.0.13
-    ek_hash: null
-    ek_hash_ecc: null
+    ek_hash: 1647444a4888e009ff0b496a4d2c7ebb5be340eeba8da9c771ce807cb0ccd1be
+    ek_hash_ecc: c96f00a01e941e1114e2008e42ee3169b2eb417540836a499641f8c0605079fc
