@@ -689,3 +689,42 @@ resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
     zone_id            = unifi_firewall_zone.bootstrap.id
   }
 }
+
+# A node netboots and runs its Tinkerbell Workflows on the Kubernetes network,
+# so Lab reaches the anchors' boot services on their bootstrap addresses and the
+# boot VIP. TCP: 80 for nginx's iPXE scripts, UKI and HookOS, 443 for
+# enroll.lolwtf.ca, 7080 for Smee's per-MAC iPXE script and 42113 for the Tink
+# server that HookOS's agent polls (both on spore). UDP: 69 for the signed iPXE
+# over TFTP, 123 for chrony, and 514 for HookOS's syslog to spore. Lab and
+# Bootstrap are custom zones, so the controller creates each reply rule. A reply
+# rule matches only these ports, so dnsmasq sends TFTP data from port 69 too
+# (tftp-single-port in nix/services/talos-boot.nix).
+resource "unifi_firewall_policy" "kubernetes_to_boot" {
+  for_each = {
+    tcp = "80,443,7080,42113"
+    udp = "69,123,514"
+  }
+
+  name                 = "Allow Kubernetes to Boot ${upper(each.key)}"
+  action               = "ALLOW"
+  protocol             = each.key
+  ip_version           = "IPV4"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "NETWORK"
+    network_ids        = [unifi_network.k8s.id]
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = [for ip in concat(local.anchor_boot_ips, [local.boot_vip]) : "${ip}/32"]
+    port               = each.value
+    port_matching_type = "SPECIFIC"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+}

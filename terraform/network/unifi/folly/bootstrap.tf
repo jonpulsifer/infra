@@ -10,6 +10,14 @@ locals {
   ]
   boot_vip = local.anchor_topology.BOOT_VIP
 
+  # The DHCP boot option of the bootstrap and Kubernetes networks: the signed
+  # iPXE that dnsmasq serves over TFTP at the boot VIP.
+  boot_option = {
+    enabled  = true
+    server   = local.boot_vip
+    filename = "talos/folly/ipxe-amd64-secureboot.efi"
+  }
+
   # The switch port of each anchor, read from the live switch.
   anchor_ports = {
     capsule = 5
@@ -17,20 +25,17 @@ locals {
     forge   = 9
   }
 
-  # The switch ports that run MAC auth, from the inventory, and each node's
-  # enrolled state: the network its RADIUS user puts it on. A reinstall flips a
-  # node to bootstrap, and the switch's re-authentication moves the port within
-  # a minute or two, with no link flap.
-  mab_ports = { for node, m in local.machines : node => m.switch_port }
-  enrolled = {
-    shale    = "kubernetes"
-    riptide  = "kubernetes"
-    optiplex = "kubernetes"
+  # The switch ports of the inventory's nodes. A node's RADIUS user puts it on
+  # the Kubernetes network, where it also netboots, or on bootstrap while
+  # NetBox has it failed: attestation's quarantine. A MAC RADIUS does not know
+  # lands on the switch-wide fallback, bootstrap. A planned machine may have no
+  # MAC or port yet, so only staged, active and failed ones with both get a
+  # user; an export without status counts as active.
+  mab_ports = {
+    for node, m in local.machines : node => m.switch_port
+    if contains(["staged", "active", "failed"], try(m.status, "active")) && try(m.mac, null) != null && try(m.switch_port, null) != null
   }
-  mab_networks = {
-    kubernetes = unifi_network.k8s
-    bootstrap  = unifi_network.bootstrap
-  }
+  quarantined = toset([for node, m in local.machines : node if try(m.status, "active") == "failed"])
 
   # The nodes whose switch port runs MAC auth. Any name turns switch-wide
   # 802.1X on. Add a node only after the gateway's RADIUS server listens:
@@ -41,16 +46,11 @@ locals {
   # every port on its open Kubernetes trunk, and is also the revert.
   mab_enforced = toset(["riptide"])
 
-  # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
-  # reinstall. With tagged VLAN management "block_all", the switch (USL24P,
-  # 7.5.15) forwarded none of the node's untagged frames.
-  boot_native = toset([])
-
-  # Ports with the bootstrap VLAN untagged and no 802.1X, for machines that
-  # are not yet in the inventory. The rack ports hold new workers until their
-  # MACs are known, when they join the inventory; the provisioning station
-  # stays here.
-  intake_ports = {
+  # Ports with no inventory node, on the MAC auth profile: the rack ports of
+  # new nodes and the provisioning station. An unknown MAC lands on the
+  # fallback, bootstrap, and a node's RADIUS user moves it to Kubernetes. A
+  # port that the inventory names takes that node's override instead.
+  spare_ports = {
     swell        = 4
     surge        = 12
     shoal        = 20
@@ -91,11 +91,7 @@ resource "unifi_network" "bootstrap" {
     ntp_enabled = true
     ntp_servers = [local.boot_vip]
     tftp_server = local.boot_vip
-    boot = {
-      enabled  = true
-      server   = local.boot_vip
-      filename = "talos/folly/ipxe-amd64-secureboot.efi"
-    }
+    boot        = local.boot_option
   }
 
   lifecycle {
@@ -154,8 +150,8 @@ resource "unifi_radius_user" "node" {
   tunnel_type        = 13
   tunnel_medium_type = 6
   tunnel_config_type = "802.1x"
-  network_id         = local.mab_networks[local.enrolled[each.key]].id
-  vlan               = local.mab_networks[local.enrolled[each.key]].vlan
+  network_id         = contains(local.quarantined, each.key) ? unifi_network.bootstrap.id : unifi_network.k8s.id
+  vlan               = contains(local.quarantined, each.key) ? unifi_network.bootstrap.vlan : unifi_network.k8s.vlan
 }
 
 import {
@@ -203,7 +199,7 @@ resource "unifi_device" "usw_24_poe" {
   }
 
   dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) && !contains(local.boot_native, node) }
+    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) }
     content {
       index                 = port_override.value
       name                  = port_override.key
@@ -215,26 +211,11 @@ resource "unifi_device" "usw_24_poe" {
   }
 
   dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if contains(local.boot_native, node) }
+    for_each = { for name, port in local.spare_ports : name => port if !contains(values(local.mab_ports), port) }
     content {
-      index                 = port_override.value
-      name                  = port_override.key
-      forward               = "customize"
-      native_networkconf_id = unifi_network.bootstrap.id
-      tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
-    }
-  }
-
-  dynamic "port_override" {
-    for_each = local.intake_ports
-    content {
-      index                 = port_override.value
-      name                  = port_override.key
-      forward               = "customize"
-      native_networkconf_id = unifi_network.bootstrap.id
-      tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
+      index           = port_override.value
+      name            = port_override.key
+      port_profile_id = unifi_port_profile.mab.id
     }
   }
 

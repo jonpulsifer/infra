@@ -3,7 +3,7 @@ title: Talos boot
 description: The boot server on the three anchors that gives folly's Talos nodes the signed UKI on the bootstrap VLAN behind the boot VIP, and serves the signed iPXE and HookOS that the netboot path loads.
 ---
 
-Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](../../hosts/capsule.md) and [forge](../../hosts/forge.md), that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN, with the signed iPXE and HookOS UKI that the netboot path loads. [Tinkerbell](tinkerbell.md), on spore, decides which machine boots what.
+Talos boot is the part of each anchor, [spore](../../hosts/spore.md), [capsule](../../hosts/capsule.md) and [forge](../../hosts/forge.md), that serves folly's signed Talos UKI and SecureBoot ISO to machines on the `bootstrap` VLAN and the Kubernetes network, with the signed iPXE and HookOS UKI that the netboot path loads. [Tinkerbell](tinkerbell.md), on spore, decides which machine boots what.
 
 The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.nix` and set to `folly`. The boot, enrollment and attestation services take their state paths, metric labels, release tag and committed per-site files from it, so the paths in this page read `<site>` where they say `folly`.
 
@@ -24,9 +24,9 @@ The boot check passes when dnsmasq is active and nginx serves the UKI's script a
 
 ## Boot path
 
-UniFi's DHCP on the bootstrap network names `BOOT_VIP` as the TFTP and boot server. Firmware PXE loads the signed iPXE from it, and iPXE fetches the node's script from Smee at `SPORE_BOOTSTRAP_IP`. The script chains HookOS from nginx. When Smee has no script for the MAC, iPXE chains the UKI's script from `BOOT_VIP`, and that boots the UKI. [Tinkerbell](tinkerbell.md#boot-path) has the details. The UKI is about 280 MB, too large for TFTP, so it goes over HTTP.
+UniFi's DHCP on the bootstrap network and on the Kubernetes network names `BOOT_VIP` as the TFTP and boot server, so a known node netboots on the Kubernetes network and an unknown machine on the bootstrap fallback. Firmware PXE loads the signed iPXE from it, and iPXE fetches the node's script from Smee at `SPORE_BOOTSTRAP_IP`. The script chains HookOS from nginx. When Smee has no script for the MAC, iPXE chains the UKI's script from `BOOT_VIP`, and that boots the UKI. [Tinkerbell](tinkerbell.md#boot-path) has the details. The UKI is about 280 MB, too large for TFTP, so it goes over HTTP.
 
-The DHCP names every anchor's bootstrap address as a resolver and `BOOT_VIP` as the NTP server. CoreDNS and chrony answer on every interface of each anchor.
+The bootstrap network's DHCP names every anchor's bootstrap address as a resolver and `BOOT_VIP` as the NTP server. The Kubernetes network's DHCP names the anchors' DNS addresses, and folly's Talos nodes take time from them. CoreDNS and chrony answer on every interface of each anchor, and CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP` on each.
 
 ## Netboot images
 
@@ -71,6 +71,7 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 - A machine on the bootstrap VLAN reaches the anchors directly, where the UniFi firewall cannot filter it. Each anchor's `nixos-fw-bootstrap` chain, from `talos-boot.nix`, runs before the ports the NixOS firewall opens on every interface. Over IPv4 it admits the ports declared for `bootstrap` (TFTP, HTTP and HTTPS, and on spore Smee and the Tink server), DNS, NTP, ping and VRRP from the other anchors' bootstrap addresses, and drops the rest. Over IPv6 it admits only ICMPv6. Declare a new bootstrap service in `networking.firewall.interfaces.bootstrap`, or the chain drops it. The `anchor-boot` check fails if the chain admits ssh, NFS, Garage, an exporter or the Tinkerbell API.
 - Traffic from a bootstrap address, `BOOT_VIP` included, takes the routing table numbered `BOOTSTRAP_VLAN`, through a policy rule that systemd-networkd sets on the `bootstrap` interface from `talos-boot.nix`. The table holds the VLAN's own route and a default via the gateway, the first host in `BOOTSTRAP_CIDR`. A request that the gateway routes onto the VLAN from another network therefore passes the NixOS firewall's strict reverse-path filter, and its reply leaves on `bootstrap`. Without the rule the filter drops the request, because the main table's route back is on `end0`.
 - dnsmasq sends each TFTP transfer's data from port 69 (`tftp-single-port`), so a transfer is one UDP flow. A gateway reply rule matches only the request's port, so a transfer from a server-chosen port would not cross the gateway, and the conntrack helper does not change that. The `anchor-boot` and `spore-reliability` checks fail without the setting.
+- A node on the Kubernetes network reaches the anchors through the gateway, whose policies `kubernetes_to_boot` admit each bootstrap address and `BOOT_VIP` on TCP 80, 443, 7080 (Smee) and 42113 (the Tink server), and UDP 69, 123 and 514 (HookOS's syslog). The anchors answer it only through the policy route on their bootstrap addresses in `talos-boot.nix`: without it, the strict NixOS reverse-path filter drops a request from the Kubernetes network that arrives on `bootstrap`.
 - The `anchor-boot` and `spore-reliability` checks in `nix/lib/checks.nix` fail if dnsmasq could lease addresses or answer DHCP.
 
 ## Where it lives
@@ -80,7 +81,9 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 - `nix/services/talos-enroll.nix`: the enrollment server, its certificate and its check
 - `nix/services/tinkerbell.nix`: Smee, the rest of Tinkerbell and the `netboot-not-allowed` links
 - `clusters/folly/config/anchor-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP`
-- `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network's DHCP and the anchors' switch ports
+- `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network's DHCP, the boot option and the anchors' switch ports
+- `terraform/network/unifi/folly/k8s.tf`: the Kubernetes network's DHCP
+- `terraform/network/unifi/folly/firewall.tf`: the policies `kubernetes_to_boot`
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
 - `clusters/folly/talos/secureboot/uki-signing-cert.pem`, `hookos-signing-cert.pem`: the certificates the mirror checks
 - `clusters/folly/talos/netboot.json`: the HookOS release and the agent image digest
