@@ -170,10 +170,6 @@ run = "bash scripts/netbox-export.sh --check"
 description = "Print a folly node's observed inventory entry (args: [--insecure] <address>)"
 run = "bash scripts/inventory.sh observe"
 
-[tasks.render-tinkerbell-nodes]
-description = "Write each folly node's MAC, address and install disk from the inventory, and the HookOS URL, for the Tinkerbell objects in clusters/folly/tinkerbell/ (--check compares)"
-run = "bash scripts/render-tinkerbell-nodes.sh"
-
 [tasks."enroll:approve"]
 description = "Approve the Talos enrollment whose code the machine's console shows, over the tailnet (args: <code> <node>)"
 run = "bash scripts/enroll.sh approve"

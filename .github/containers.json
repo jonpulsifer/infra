@@ -3,6 +3,7 @@
   "build": [
     "ddnsd",
     "flameboss",
+    "fleet-controller",
     "netbench",
     "rackstat",
     "atlantis",
@@ -84,7 +85,7 @@
       "clusters/folly/talos/netboot.json"
     ],
     "tink-attest": [
-      "clusters/folly/tinkerbell/template-attest.yaml"
+      "clusters/folly/tinkerbell/template.yaml"
     ],
     "tink-reprovision-tools": [
       "clusters/folly/tinkerbell/template.yaml"

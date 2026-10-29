@@ -50,6 +50,7 @@ in
   imports = [
     ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
+    ../services/fleet-controller.nix
     ../services/garage.nix
     ../services/nfs-server.nix
     ../services/pxe-netboot.nix

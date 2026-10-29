@@ -40,7 +40,7 @@ The action sends the machine's serial, MAC and EK certificates, and a new AK. Th
 
 - Source, HTTP contract and Nix package: `apps/talos-attest/`
 - Anchors: `nix/services/talos-attest.nix`
-- Template: `clusters/folly/tinkerbell/template-attest.yaml`
+- Template: the `attest` action of `clusters/folly/tinkerbell/template.yaml`
 - Alerts: `clusters/folly/monitoring/anchor-vips.yaml`
 - DevID CAs: `terraform/pki/devid.tf` and `terraform/pki/devid-ca.tf`
 - Token signer: `packages/pkcs11signer`

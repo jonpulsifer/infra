@@ -1,4 +1,4 @@
-# The attest action that clusters/folly/tinkerbell/template-attest.yaml runs in HookOS:
+# The attest action that clusters/folly/tinkerbell/template.yaml runs in HookOS:
 # apps/talos-attest's tink-attest client, and tpm2-tools to inspect the TPM from the console. The
 # context is the repository root (build.json). The containers workflow's delivery pins the image by
 # digest in the Template.

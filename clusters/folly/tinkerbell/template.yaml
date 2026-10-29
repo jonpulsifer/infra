@@ -1,26 +1,76 @@
-# Every reprovision Workflow runs this in HookOS: wipe the Hardware's disk, META included, make the
-# network the next boot, and reboot. Netboot goes off when this succeeds, so Smee has no script for
-# the MAC on that boot and the signed iPXE boots the signed Talos UKI (nix/images/ipxe-folly.nix).
-# Its actions run images/tink-reprovision-tools, which the containers workflow's delivery pins by
-# digest. An all-zero digest means the image has not been delivered yet and the run cannot pull it.
+# The one Template every fleet-controller Workflow runs in HookOS. Its hardwareMap says what the
+# run does: attest (true/false), wipe (true/false), retire (true/false), attest_url and ntp_server.
+# A provision attests, wipes and netboots the signed Talos UKI; an attest leaves the disk and boots
+# it; a wipe wipes and netboots; a retirement wipes and powers the node off. Nothing in git starts a
+# run: the controller on spore
+# (apps/fleet-controller) creates a Workflow when a NetBox device's desired_action is set, and
+# netboot goes off when the run succeeds, so Smee has no script for the MAC on the next boot and
+# the signed iPXE boots the signed Talos UKI (nix/images/ipxe-folly.nix).
+#
+# The actions run images/tink-reprovision-tools and images/tink-attest, which the containers
+# workflow's delivery pins by digest. An all-zero digest means the image has not been delivered yet
+# and the run cannot pull it. HookOS's 6.6 kernel builds in the TPM drivers and securityfs, and the
+# attest action mounts securityfs itself, since a container gets none.
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Template
 metadata:
-  name: reprovision-talos
+  name: provision
 spec:
   data: |
     version: "0.1"
-    name: reprovision-talos
+    name: provision
     global_timeout: 1800
     tasks:
-      - name: reprovision
+      - name: provision
         worker: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
         volumes:
           - /dev:/dev
         environment:
           DISK: "{{ index .Hardware.Disks 0 }}"
+          MAC: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
+          ATTEST: "{{ .attest }}"
+          WIPE: "{{ .wipe }}"
+          RETIRE: "{{ .retire }}"
+          ATTEST_URL: "{{ .attest_url }}"
+          NTP_SERVER: "{{ .ntp_server }}"
         actions:
+          # The attest service checks its certificate's dates against the machine's clock, and a
+          # machine off the shelf has none worth trusting. The anchors' chrony answers at the boot
+          # VIP; the RTC keeps the result for the Talos boot that follows.
+          - name: set-clock
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
+            timeout: 120
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "set-clock: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "set-clock: $*" >"$t" 2>/dev/null || true; done; }
+                if ! command -v ntpd >/dev/null; then
+                  log "no ntpd in the image; the clock stays $(date -u)"
+                  exit 0
+                fi
+                if timeout 30 ntpd -q -n -p "$NTP_SERVER"; then
+                  hwclock --systohc --utc || log "the RTC refused the write"
+                  log "set from $NTP_SERVER: $(date -u)"
+                else
+                  log "$NTP_SERVER did not answer; the clock stays $(date -u)"
+                fi
+          - name: attest
+            image: ghcr.io/jonpulsifer/tink-attest@sha256:c595f4ffff44fc22838975491cda4a9bb7d6dcb5b2607b398e026acad4cd4699
+            timeout: 600
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                if [ "$ATTEST" != true ]; then
+                  for t in /dev/tty0 /dev/ttyS0; do echo "attest: skipped for this run" >"$t" 2>/dev/null || true; done
+                  exit 0
+                fi
+                mountpoint -q /sys/kernel/security || mount -t securityfs securityfs /sys/kernel/security
+                exec /usr/local/bin/tink-attest
           - name: wipe-disk
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
             timeout: 600
@@ -29,7 +79,11 @@ spec:
               - -c
               - |
                 set -eu
-                log() { echo "reprovision: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: $*" >"$t" 2>/dev/null || true; done; }
+                log() { echo "wipe: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "wipe: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$WIPE" != true ]; then
+                  log "nothing wiped this run"
+                  exit 0
+                fi
                 [ -b "$DISK" ] || { log "$DISK is not a block device"; exit 1; }
                 log "wiping every partition of $DISK"
                 for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
@@ -43,28 +97,39 @@ spec:
                 blockdev --rereadpt "$DISK" || true
                 if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
                 log "wiped $DISK"
-          - name: netboot-next
+          # A wiped disk has nothing to boot, so the firmware would fall through its boot order to
+          # the network anyway, and an installed disk comes first in it; BootNext makes each certain.
+          - name: next-boot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
-            timeout: 300
+            timeout: 120
             command:
               - /bin/sh
               - -c
               - |
                 set -eu
-                log() { echo "reprovision: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: $*" >"$t" 2>/dev/null || true; done; }
+                log() { echo "next-boot: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "next-boot: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$RETIRE" = true ]; then
+                  log "a retired node powers off; no next boot"
+                  exit 0
+                fi
                 mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars
-                # The wiped disk has nothing to boot, so the firmware would fall through its boot
-                # order anyway; BootNext makes the network boot certain.
-                n=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                if [ "$WIPE" = true ]; then
+                  n=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                  what="IPv4 network"
+                else
+                  n=$(efibootmgr -v | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*HD(.*/\1/p' | head -n 1)
+                  what="the installed disk"
+                fi
                 if [ -z "$n" ]; then
-                  log "no IPv4 network boot entry; the firmware's boot order decides the next boot"
+                  log "no entry for $what; the firmware's boot order decides the next boot"
                   exit 0
                 fi
                 efibootmgr -q -n "$n"
-                log "Boot$n (IPv4 network) is the next boot"
+                log "Boot$n ($what) is the next boot"
+          # A retired node powers off instead, and stays off until somebody turns it on.
           - name: reboot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827
-            timeout: 300
+            timeout: 120
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
             command:
@@ -72,8 +137,10 @@ spec:
               - -c
               - |
                 set -eu
-                # A detached container reboots the node after this action reports success.
-                docker run -d --privileged --name reprovision-reboot \
+                key=b; what="rebooting"
+                if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
+                # A detached container reboots or powers off the node after this action reports success.
+                docker run -d --privileged --name provision-reboot \
                   ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:2010360c0955dc6016dbe34b79e43f8ce981952c03dc0d0a445ba6a3cf109827 \
-                  sh -c 'sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo b >/proc/sysrq-trigger'
-                for t in /dev/tty0 /dev/ttyS0; do echo "reprovision: rebooting into the Talos UKI netboot in 10 seconds" >"$t" 2>/dev/null || true; done
+                  sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
+                for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done

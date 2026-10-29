@@ -1,0 +1,13 @@
+[
+  {
+    "_comment": "The context is the repo root because the Dockerfile copies apps/fleet-controller.",
+    "image": "fleet-controller",
+    "context": ".",
+    "file": "images/fleet-controller/Dockerfile",
+    "platforms": "linux/amd64,linux/arm64",
+    "watch": [
+      "images/fleet-controller",
+      "apps/fleet-controller"
+    ]
+  }
+]
