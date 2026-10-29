@@ -696,8 +696,9 @@ resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
 # enroll.lolwtf.ca, 7080 for Smee's per-MAC iPXE script and 42113 for the Tink
 # server that HookOS's agent polls (both on spore). UDP: 69 for the signed iPXE
 # over TFTP, 123 for chrony, and 514 for HookOS's syslog to spore. Lab and
-# Bootstrap are custom zones, so the controller creates each reply rule; the
-# gateway's TFTP conntrack helper relates the data transfer to the request.
+# Bootstrap are custom zones, so the controller creates each reply rule. A reply
+# rule matches only these ports, so dnsmasq sends TFTP data from port 69 too
+# (tftp-single-port in nix/services/talos-boot.nix).
 resource "unifi_firewall_policy" "kubernetes_to_boot" {
   for_each = {
     tcp = "80,443,7080,42113"
