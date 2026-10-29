@@ -57,6 +57,15 @@ let
   tagPrefix = "talos-${site}/${talosVersion}-";
 
   bootstrapPrefix = lib.toInt (lib.last (lib.splitString "/" lab.bootstrap.cidr));
+  # The gateway's address on the VLAN, the CIDR's first host, as UniFi takes it
+  # (terraform/network/unifi/folly/bootstrap.tf).
+  bootstrapGateway =
+    let
+      octets = lib.splitString "." (lib.head (lib.splitString "/" lab.bootstrap.cidr));
+    in
+    lib.concatStringsSep "." (lib.init octets ++ [ (toString (lib.toInt (lib.last octets) + 1)) ]);
+  # The routing table for traffic from the bootstrap addresses, named for the VLAN.
+  bootstrapTable = lab.bootstrap.vlan;
 
   readOnlyLocation = alias: {
     inherit alias;
@@ -126,6 +135,34 @@ in
       {
         inherit address;
         prefixLength = bootstrapPrefix;
+      }
+    ];
+  };
+
+  # A node on the Kubernetes network reaches the boot services through the gateway, which routes it
+  # onto the VLAN (the UniFi policies kubernetes_to_boot). The main table sends its replies out
+  # end0, and the firewall's strict reverse-path filter drops the request, so traffic from a
+  # bootstrap address, the boot VIP included, takes a table whose default is the gateway on the
+  # VLAN. The filter's reverse lookup takes the request's destination as its source, matches the
+  # rule, and finds the route back out the interface the request arrived on.
+  systemd.network.networks."40-${iface}" = {
+    routes = [
+      {
+        Destination = lab.bootstrap.cidr;
+        Scope = "link";
+        PreferredSource = address;
+        Table = bootstrapTable;
+      }
+      {
+        Gateway = bootstrapGateway;
+        Table = bootstrapTable;
+      }
+    ];
+    routingPolicyRules = [
+      {
+        From = lab.bootstrap.cidr;
+        Table = bootstrapTable;
+        Priority = 1000;
       }
     ];
   };
