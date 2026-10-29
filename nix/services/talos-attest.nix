@@ -43,11 +43,13 @@ let
   peers = map (anchor: "http://${lab.hosts.${anchor}}:${toString devidPort}") (
     lib.remove name (lib.attrNames lab.bootstrap.hosts)
   );
-  # Folly's pods reach the anchors unmasqueraded, as they reach spore's SPIRE server.
+  # Folly's pods reach the anchors unmasqueraded, as they reach spore's SPIRE server. The other
+  # anchors ask this one for its newest verdict on the same port.
   devidSources = [
     folly.nodeCidr
     folly.podCidr
-  ];
+  ]
+  ++ map (anchor: lab.hosts.${anchor}) (lib.remove name (lib.attrNames lab.bootstrap.hosts));
 
   serves = pkgs.writeShellScript "talos-attest-serves" ''
     ${pkgs.curl}/bin/curl --fail --silent --output /dev/null --max-time 2 \
