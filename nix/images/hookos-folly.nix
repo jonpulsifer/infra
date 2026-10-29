@@ -1,9 +1,10 @@
 # folly's generic HookOS, packed as one unsigned UKI for every node. Its command line carries no
 # worker_id: the agent image derives the ID from the netbooted NIC's MAC, and the command line pins
-# that image by digest, so the signature covers the agent that wipes disks. Under Secure Boot the
-# stub ignores any command line iPXE passes. .github/workflows/talos-images.yml signs the UKI with
-# the HookOS key, a db certificate apart from the Talos one, so a HookOS boot never measures
-# Talos's PCR 7.
+# that image by digest, so the signature covers the agent that wipes disks. The agent posts the
+# machine's facts to fleet_intake_url before it waits for work. Under Secure Boot the stub ignores
+# any command line iPXE passes, so ../services/fleet-controller.nix and ./ipxe-folly.nix pass this
+# one. .github/workflows/talos-images.yml signs the UKI with the HookOS key, a db certificate apart
+# from the Talos one, so a HookOS boot never measures Talos's PCR 7.
 {
   lib,
   fetchurl,
@@ -12,6 +13,8 @@
 }:
 let
   lab = import ../lib/anchor.nix;
+  fleet = import ../lib/fleet.nix;
+  talosConfig = import ../lib/talos-config.nix;
   pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
   # Tink server and syslog are Tinkerbell's on spore's bootstrap address, at its default ports.
   tink = lab.bootstrap.hosts.spore;
@@ -27,6 +30,7 @@ let
     "console=ttyS0,115200"
     "console=tty0"
     "tink_worker_image=${pins.tink_agent_image}"
+    "fleet_intake_url=https://enroll.${fleet.dnsZone}${talosConfig.intakePath}"
   ];
   tarball = fetchurl {
     url = "https://github.com/tinkerbell/hook/releases/download/${pins.hookos.version}/hook_latest-lts-x86_64.tar.gz";

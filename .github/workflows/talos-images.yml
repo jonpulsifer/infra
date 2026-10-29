@@ -11,6 +11,9 @@ on:
       - clusters/folly/config/anchor-topology.json
       - nix/images/ipxe-folly.nix
       - nix/images/hookos-folly.nix
+      # HookOS's fleet_intake_url reads these.
+      - nix/lib/talos-config.nix
+      - terraform/network/tailscale/fleet.tf.json
       - .github/scripts/talos-image-inputs.sh
       - .github/scripts/talos-image-inputs_test.sh
       - .github/scripts/talos-images-build.sh

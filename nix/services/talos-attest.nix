@@ -48,7 +48,7 @@ let
   # renders the config the install code fetches. Nothing is wired until the sops file holds it.
   fleetRender = sealedIn "fleet-controller" "attest-secret";
   # ./fleet-controller.nix's webhookPort on spore, which also serves /render.
-  fleetControllerPort = 8446;
+  fleetControllerPort = (import ../lib/talos-config.nix).controllerPort;
 
   devidPort = 8444;
   adminPort = 8445;

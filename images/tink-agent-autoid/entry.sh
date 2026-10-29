@@ -20,4 +20,7 @@ if [ -z "$ID" ]; then
   export ID WORKER_ID
 fi
 echo "autoid: agent ID $ID (from ${dev:-the command line})"
+# fleet-intake (./intake) tells fleet-controller the machine is here. tink-agent starts whatever
+# the controller answers, or if it never answers.
+/autoid/fleet-intake "$ID" || echo "autoid: fleet intake failed, starting tink-agent anyway" >&2
 exec /tink-agent "$@"
