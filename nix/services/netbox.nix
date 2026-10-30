@@ -24,6 +24,14 @@ let
       inherit (lab.hosts) capsule spore forge;
     }
   );
+  # Atlantis on offsite reaches the API from its node, VIP and pod ranges, which arrive over the
+  # Site Magic tunnel unmasqueraded, as they reach capsule's ssh.
+  offsite = (lib.importJSON ../../clusters/offsite/config/cluster-topology.json).data;
+  offsiteSources = [
+    offsite.K8S_NODE_CIDR
+    offsite.LB_RANGE
+    offsite.CILIUM_POD_CIDR
+  ];
   nginxPort = 8080;
   superuser = "admin";
   retentionDays = 30;
@@ -108,7 +116,7 @@ in
   users.users.nginx.extraGroups = [ "netbox" ];
   networking.firewall.extraCommands = lib.concatMapStrings (peer: ''
     iptables -A nixos-fw -p tcp -s ${peer} --dport ${toString nginxPort} -j nixos-fw-accept
-  '') anchorPeers;
+  '') (anchorPeers ++ offsiteSources);
 
   services.nginx = {
     enable = true;

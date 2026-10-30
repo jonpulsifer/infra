@@ -24,6 +24,8 @@ Every part runs on capsule.
 
 Open `https://capsule.<tailnet>`, which the [tailnet grants](network/remote-access.md#grants) open to the owner. Sign in as `admin` with the password in the 1Password item `netbox-folly`. Scripts use the write-enabled token `netbox/api-token` in `nix/secrets/capsule.sops.yaml`, also `api-token` in that item.
 
+Atlantis on offsite reaches the API over HTTP on port 8080 at capsule's Anchor network address, which the `nest_k8s_to_capsule_netbox` policy and capsule's firewall admit from offsite's node, VIP and pod ranges.
+
 To expect a node, run `mise run netbox:declare --stub <node> --class <class>`: a `planned` stub with no MAC, which fleet-controller binds to the next machine that intakes and the export leaves out. To add a node with every fact, run `mise run netbox:declare <node> <serial> <mac> <switch port> <address>`. It declares the device as `planned`, with its interface, MAC, cable and primary address, then renders the inventory export. [Provision a node](../runbooks/provision-a-node.md) has both.
 
 ## Data

@@ -28,7 +28,7 @@ capsule is a Raspberry Pi 5 on [the Anchor network](../platform/network.md#netwo
 
 Reach it at `capsule.lolwtf.ca` or [`capsule.<tailnet>`](index.md#reach-a-host).
 
-Rowbutt's sandboxes on offsite reach the Anchor network hosts with capsule as their ssh jump host. offsite's Kubernetes ranges reach the Anchor network only on capsule's port 22. See [Routing and firewall](../platform/network/routing-and-firewall.md).
+Rowbutt's sandboxes on offsite reach the Anchor network hosts with capsule as their ssh jump host. offsite's Kubernetes ranges reach the Anchor network only on capsule's ports 22 and 8080. See [Routing and firewall](../platform/network/routing-and-firewall.md).
 
 ## Quirks
 
