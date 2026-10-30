@@ -22,6 +22,7 @@ go run .
 | `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that reads and changes `dcim.device` and adds journal entries |
 | `FLEET_KUBE_SERVER` | `https://localhost:6443` | Tinkerbell's kube-apiserver |
 | `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `/etc/tinkerbell/{ca,admin}.{crt,key}` | Its CA and a client certificate that manages `hardware`, `machines` and `workflows` |
+| `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and a ServiceAccount token that may patch `nodes`; all three or none. Without them a quarantined node is journaled for the owner to cordon |
 | `FLEET_NAMESPACE` | `tinkerbell` | The namespace the controller owns objects in |
 | `FLEET_TEMPLATE` | `provision` | The Template every Workflow runs |
 | `FLEET_HOOKOS_URL`, `FLEET_HOOKOS_CMDLINE` | required | The signed HookOS UKI and the command line its iPXE chain passes |
@@ -43,10 +44,9 @@ go run .
 | `FLEET_AUTO_PROVISION` | `false` | Whether a bound intake with a class and an address gets `desired_action` `provision`; the Nix module sets `true` |
 | `FLEET_MODEL_MAP` | the G5 mini as `worker-g5`, `amt`, `/dev/nvme0n1` | JSON `{"<SMBIOS model>": {"class", "bmc", "disk"}}` for an intake |
 | `FLEET_NODE_PREFIX`, `FLEET_NODE_RESERVED` | none | The prefix an intake's address comes from, `K8S_NODE_CIDR`, and a comma list of addresses in it that never go to a node; without the prefix an intake gets no free address |
-| `FLEET_INTAKE_PORT` | required | The provisioning station's switch port; the controller refuses to start without one. The Nix module reads `provisioning` in `quarantine_ports` of `terraform/network/unifi/<site>/bootstrap.tf` |
+| `FLEET_NODE_DHCP_PREFIX` | none | The part of the node prefix that the network's DHCP pool leases, `K8S_DHCP_CIDR`; no intake's static address comes from it |
 | `FLEET_INTAKE_TTL` | `24h` | Age at which an intake no device holds is deleted |
 | `FLEET_PROXY_ADDRESSES` | none | Comma list of the intake proxies' addresses, the anchors' Anchor addresses: a call from one names the machine's address in `X-Real-IP`. Without it every caller is the machine |
-| `FLEET_BOOTSTRAP_CIDR`, `FLEET_BOOTSTRAP_RESERVED` | none | The bootstrap network and a comma list of addresses in it that are no machine's, the anchors' and the boot VIP. Without the prefix no attested address puts a Machine on the bootstrap network |
 
 ## NetBox contract
 
@@ -56,28 +56,25 @@ or `decommissioning`. Read: `name`, `serial`, `status`,
 and the custom fields `install_disk`, `talos_class`, `tpm_version`,
 `bmc_type`, `amt`, `secure_boot_expected`, `desired_action`,
 `last_workflow`, and talos-attest's
-`attested_address`, `attested_switch`, `attested_switch_port` and
+`attested_switch`, `attested_switch_port` and
 `attested_network_at`. A select field may be a string
 or a `{value, label}` object. Written: `desired_action` (back to `none`),
 `last_workflow`, `status` (`planned` when a provision or wipe starts on an
 `active` or `failed` device, `offline` after a retirement) and journal
 entries. A `planned` device stays `planned` through its provision until its
-node fetches its config. A `planned` device whose `attest_verdict` is not
-`attested` also boots by hand: its Workflow carries no `bootMode`, its journal entry says to power
-the machine on, and it gets a Machine only with an explicit `oob_ip`, since
-an AMT address derived from a Kubernetes address it does not hold yet is
-wrong. The exception is a `planned` `amt` device without
-`oob_ip` whose `attested_address` is inside `FLEET_BOOTSTRAP_CIDR`, not in
-`FLEET_BOOTSTRAP_RESERVED`, and whose `attested_network_at` is younger than
-15 minutes: its Machine dials that address, and a new Workflow has `bootMode`
-`netboot` and the address in `lolwtf.ca/bmc-address`. While that Workflow is
-unfinished, the Machine keeps the pinned address, however old the attested
-one grows, unless a pass during the run attests another: another bootstrap
-address moves the Machine there, and any other address, such as the
-device's own once its RADIUS user moves it, ends the pin. The Machine and Rufio come for every other device once its
-`attest_verdict` is `attested` or its status leaves `planned`. A retirement is the `retire` run, which
+node fetches its config. A device's Machine dials its `oob_ip`, or for
+`amt` its own `primary_ip4`, which AMT shares with the node, from the moment
+it has one, a `planned` device's included; its Workflows have `bootMode`
+`netboot`. A device without a Machine, and one whose `last_workflow` is its
+intake, boots by hand: its Workflow carries no `bootMode`, and its journal
+entry says to power the machine on. A retirement is the `retire` run, which
 powers the node off; the controller starts it on status `decommissioning`,
 never from `desired_action`.
+
+An `attest_verdict` that starts `quarantined` cordons the node of the
+device's name through the cluster's API on every pass, and is journaled
+once; the controller never uncordons. A control plane's
+`failed-no-quarantine` is no quarantine.
 
 `smbios_uuid` is read to journal a fetch with a wrong code on its device.
 `attest_consumed_at` and `status` (`active`) are written when nginx serves a
@@ -146,22 +143,22 @@ description `fleet-controller: binds stub <name>` carries the name across a
 pass that stops between deleting the stub and the rename. The machine's
 port is the `Port <n>` its `attested_switch_port` names, recorded no earlier
 than the intake's Workflow, on the NetBox switch whose interface MAC is its
-`attested_switch`. Off `FLEET_INTAKE_PORT`, an `expected_port` other than that
+`attested_switch`. An `expected_port` other than that
 port, or no port, refuses the binding: nothing is written and the journal
 says `on port N, expected M`. A port the intake claimed that differs is noted
 in the binding's journal entry.
 Written, each only when it differs: `talos_class`, `bmc_type`, `install_disk` (the model map's, never the claim's),
 `expected_port`, `last_workflow` (the intake run), `primary_ip4` (the unassigned IP address whose DNS name is
 the device's new name, else the lowest free address of `FLEET_NODE_PREFIX`
-outside `FLEET_NODE_RESERVED`), the name, a cable
-to the switch port (on the intake port, to `expected_port` only), and
+outside `FLEET_NODE_RESERVED` and `FLEET_NODE_DHCP_PREFIX`), the name, a cable
+to the switch port, and
 `desired_action` `provision`. A cable never takes a switch port another
 device's cable holds: the other cable stays, and the journal says so. The
 intake's objects are deleted last. A device whose `last_workflow` is an
 intake run gets a `Workflow` without `bootMode`, since it waits in HookOS. Audit lines `fleet.bind` and
 `fleet.autoprovision`. An attested `planned` or an `active` device whose interface has no
 cable is cabled to the port an `attested_network_at` younger than an hour
-names, unless that is the intake port, and one attested off its
+names, and one attested off its
 `expected_port` is journaled once.
 
 The webhook is `POST /webhook` with NetBox's `X-Hook-Signature`, HMAC-SHA512

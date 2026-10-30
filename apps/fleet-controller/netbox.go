@@ -59,9 +59,6 @@ type Device struct {
 	Cabled bool
 	// Attested is the network facts of the last intake pass.
 	Attested Attested
-	// BootstrapBMC says that BMCAddress is the machine's bootstrap address
-	// (Config.bootstrapBMC).
-	BootstrapBMC bool
 }
 
 // Role is the NetBox device role of a node. Every status here is a device the
@@ -230,7 +227,7 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 	if r.DeviceType != nil {
 		d.Model = r.DeviceType.Model
 	}
-	d.Attested = Attested{Address: cf("attested_address"), Switch: strings.ToLower(cf("attested_switch")), Port: cf("attested_switch_port")}
+	d.Attested = Attested{Switch: strings.ToLower(cf("attested_switch")), Port: cf("attested_switch_port")}
 	d.Attested.At, _ = time.Parse(time.RFC3339, cf("attested_network_at"))
 	if d.BMCType == "" {
 		d.BMCType = "none"
@@ -244,7 +241,8 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 	if r.OOBIP != nil {
 		d.OOBAddress = stripPrefix(r.OOBIP.Address)
 	}
-	// The export's rule: oob_ip, or the node's address for AMT, which shares the node's NIC.
+	// oob_ip, or the node's own declared address for AMT, which shares the
+	// node's NIC and address.
 	switch {
 	case d.BMCType == "none":
 	case r.OOBIP != nil && r.OOBIP.Address != "":

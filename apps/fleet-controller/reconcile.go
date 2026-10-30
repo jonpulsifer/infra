@@ -14,9 +14,11 @@ import (
 // starts the Workflows that desired_action asks for, finishes retirements,
 // and prunes old Workflows. A pass that cannot read NetBox changes nothing.
 type Reconciler struct {
-	Config  Config
-	NetBox  *NetBox
-	Kube    *Kube
+	Config Config
+	NetBox *NetBox
+	Kube   *Kube
+	// Cluster cordons a quarantined node, or is nil without credentials.
+	Cluster *Cluster
 	Metrics *Metrics
 	Now     func() time.Time
 
@@ -131,6 +133,9 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	pass := newBindPass(devices)
 	for _, d := range devices {
 		keep[d.Name] = true
+		if err := r.cordonQuarantined(ctx, d); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
+		}
 		// While an intake's Hardware holds the MAC, the device's own objects
 		// wait: two Hardware with one MAC confuse Tinkerbell. The binding
 		// ends the intake.
@@ -256,7 +261,6 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		}
 		workflows = kept
 	}
-	d = r.Config.bootstrapBMC(d, workflows, r.Now())
 	hardware := d.MAC != "" && d.Disk != ""
 	if hardware {
 		if err := r.applyHardware(ctx, d, Unfinished(workflows)); err != nil {
@@ -342,8 +346,6 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 		comment += "; no BMC drives this run: the machine waits in HookOS from its intake and takes it"
 	case manual:
 		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
-	case running == "" && d.BootstrapBMC:
-		comment += "; Rufio powers it on through AMT at " + d.BMCAddress + ", the bootstrap address its last intake pass attested"
 	}
 	if running != "" {
 		comment = fmt.Sprintf("fleet-controller: Workflow %s is still running; %s waits for it", name, action)

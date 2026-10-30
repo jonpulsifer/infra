@@ -13,9 +13,11 @@
 //
 // Every HookOS boot phones home, and the report lands on the machine's
 // Hardware as diagnostics. What the controller acts on comes from the intake
-// pass, signed by the machine's AK: a planned AMT device's Machine
-// dials the bootstrap address it attested, and a device whose interface has
-// no cable gets one to the rack port it attested.
+// pass, signed by the machine's AK: a device whose interface has no cable
+// gets one to the switch port it attested. An AMT device's Machine dials the
+// device's own declared address.
+//
+// A node talos-attest quarantined is cordoned through the cluster's own API.
 package main
 
 import (
@@ -28,7 +30,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -88,20 +89,15 @@ type Config struct {
 	// NodeReserved the addresses in it that never go to a node.
 	NodePrefix   string
 	NodeReserved map[string]bool
+	// NodeDHCP is the part of the node prefix that the network's DHCP pool
+	// hands out to netbooting machines; no node's static address comes from
+	// it.
+	NodeDHCP netip.Prefix
 	// IntakeTTL is the age at which an intake no device holds is deleted.
 	IntakeTTL time.Duration
-	// IntakePort is the switch port of the prep station, where every
-	// machine intakes; LLDP naming it says nothing of the machine's rack
-	// port.
-	IntakePort int
 	// Proxies are the intake proxies' addresses, the anchors' nginx, whose
 	// X-Real-IP header names the machine's address.
 	Proxies map[string]bool
-	// BootstrapPrefix is the bootstrap network, and BootstrapReserved the
-	// addresses in it that are no machine's: the anchors' and the boot VIP.
-	// An attested address outside it, or reserved, is no AMT to dial.
-	BootstrapPrefix   netip.Prefix
-	BootstrapReserved map[string]bool
 }
 
 func loadConfig() (Config, error) {
@@ -145,15 +141,7 @@ func loadConfig() (Config, error) {
 	if c.IntakeTTL, err = time.ParseDuration(env("FLEET_INTAKE_TTL", "24h")); err != nil || c.IntakeTTL <= 0 {
 		return c, fmt.Errorf("FLEET_INTAKE_TTL must be a positive duration")
 	}
-	// Without the prep station's port, every machine there would be checked
-	// against its stub's expected_port and cabled to the prep port.
-	if c.IntakePort, err = strconv.Atoi(os.Getenv("FLEET_INTAKE_PORT")); err != nil || c.IntakePort < 1 || c.IntakePort > 65535 {
-		return c, fmt.Errorf("FLEET_INTAKE_PORT must be the prep station's switch port")
-	}
 	if c.Proxies, err = addressSet("FLEET_PROXY_ADDRESSES"); err != nil {
-		return c, err
-	}
-	if c.BootstrapReserved, err = addressSet("FLEET_BOOTSTRAP_RESERVED"); err != nil {
 		return c, err
 	}
 	if v := os.Getenv("FLEET_BOOTSTRAP_ADDRESS"); v != "" {
@@ -163,9 +151,9 @@ func loadConfig() (Config, error) {
 		}
 		c.Bootstrap = a.String()
 	}
-	if v := os.Getenv("FLEET_BOOTSTRAP_CIDR"); v != "" {
-		if c.BootstrapPrefix, err = netip.ParsePrefix(v); err != nil || !c.BootstrapPrefix.Addr().Is4() || c.BootstrapPrefix != c.BootstrapPrefix.Masked() {
-			return c, fmt.Errorf("FLEET_BOOTSTRAP_CIDR %q is not an IPv4 network prefix", v)
+	if v := os.Getenv("FLEET_NODE_DHCP_PREFIX"); v != "" {
+		if c.NodeDHCP, err = netip.ParsePrefix(v); err != nil || !c.NodeDHCP.Addr().Is4() || c.NodeDHCP != c.NodeDHCP.Masked() {
+			return c, fmt.Errorf("FLEET_NODE_DHCP_PREFIX %q is not an IPv4 network prefix", v)
 		}
 	}
 	c.NodePrefix = os.Getenv("FLEET_NODE_PREFIX")
@@ -239,6 +227,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("Tinkerbell API client: %w", err)
 	}
+	cluster, err := loadCluster()
+	if err != nil {
+		return err
+	}
 
 	var secret []byte
 	if f := os.Getenv("FLEET_WEBHOOK_SECRET_FILE"); f != "" {
@@ -254,7 +246,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now}
+	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Metrics: metrics, Now: time.Now}
 	intake := &Intake{
 		Config: &r.Config, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now,
 		PerMAC: 10 * time.Minute, PerSource: 10, Global: 20, Window: time.Hour,
@@ -305,6 +297,25 @@ func run() error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)
+}
+
+// loadCluster reads the site cluster's API: FLEET_CLUSTER_SERVER, its CA in
+// FLEET_CLUSTER_CA_FILE and a ServiceAccount token in FLEET_CLUSTER_TOKEN_FILE,
+// all three or none. Without them no node is cordoned, and a quarantine is
+// journaled for the owner to cordon.
+func loadCluster() (*Cluster, error) {
+	server, ca, token := os.Getenv("FLEET_CLUSTER_SERVER"), os.Getenv("FLEET_CLUSTER_CA_FILE"), os.Getenv("FLEET_CLUSTER_TOKEN_FILE")
+	if server == "" && ca == "" && token == "" {
+		return nil, nil
+	}
+	if server == "" || ca == "" || token == "" {
+		return nil, fmt.Errorf("FLEET_CLUSTER_SERVER, FLEET_CLUSTER_CA_FILE and FLEET_CLUSTER_TOKEN_FILE go together")
+	}
+	c, err := NewCluster(server, ca, token)
+	if err != nil {
+		return nil, fmt.Errorf("cluster API client: %w", err)
+	}
+	return c, nil
 }
 
 // loadInstaller reads the render's environment. The renderer runs only with
