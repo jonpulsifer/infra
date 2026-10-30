@@ -1,0 +1,444 @@
+{
+  "models": {
+    "pi4": {
+      "model": "Raspberry Pi 4 Model B",
+      "manufacturer": "raspberry-pi",
+      "existing_slug": null
+    },
+    "pi0": {
+      "model": "Raspberry Pi Zero W",
+      "manufacturer": "raspberry-pi",
+      "existing_slug": null
+    },
+    "retrofit": {
+      "model": "EliteDesk 800 G2 DM 65W",
+      "manufacturer": "hp",
+      "existing_slug": null
+    },
+    "oldschool": {
+      "model": "EliteDesk 800 G3 DM 35W",
+      "manufacturer": "hp",
+      "existing_slug": null
+    },
+    "hotrod": {
+      "model": "ProDesk 600 G6 Desktop Mini PC",
+      "manufacturer": "hp",
+      "existing_slug": null
+    },
+    "UDMPRO": {
+      "model": "UDM Pro",
+      "manufacturer": "ubiquiti",
+      "existing_slug": "ubiquiti-udm-pro"
+    },
+    "UCGMAX": {
+      "model": "Cloud Gateway Max",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "USF5P": {
+      "model": "USW Flex",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "USMINI": {
+      "model": "USW Flex Mini",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "UFLHD": {
+      "model": "FlexHD",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "UDMA69B": {
+      "model": "Express 7",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "UAP6MP": {
+      "model": "UAP6MP",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "UDMB": {
+      "model": "BeaconHD",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "U7-Pro-Wall": {
+      "model": "U7-Pro-Wall",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "U7NHD": {
+      "model": "U7NHD",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "flex-2.5": {
+      "model": "USW Flex 2.5G 8 PoE",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "USL16LP": {
+      "model": "USW Lite 16 PoE",
+      "manufacturer": "ubiquiti",
+      "existing_slug": null
+    },
+    "cisco": {
+      "model": "SG300-10PP-K9 V03",
+      "manufacturer": "cisco",
+      "existing_slug": null
+    },
+    "tallboy": {
+      "model": "ROG Strix G16CHR",
+      "manufacturer": "asus",
+      "existing_slug": null
+    },
+    "unknown": {
+      "model": "Desktop (hardware unverified)",
+      "manufacturer": "unknown",
+      "existing_slug": null
+    },
+    "jetkvm": {
+      "model": "JetKVM",
+      "manufacturer": "jetkvm",
+      "existing_slug": null
+    }
+  },
+  "devices": {
+    "cloudpi4": {
+      "site": "folly",
+      "model": "pi4",
+      "role": "server",
+      "status": "active",
+      "serial": "100000009c1080f8",
+      "platform": "NixOS",
+      "client_group": "rpis",
+      "client": "cloudpi4",
+      "network": "folly-anchor",
+      "interface": "eth0"
+    },
+    "homepi4": {
+      "site": "folly",
+      "model": "pi4",
+      "role": "server",
+      "status": "active",
+      "serial": "100000001e657842",
+      "platform": "NixOS",
+      "client_group": "rpis",
+      "client": "homepi4",
+      "network": "folly-anchor",
+      "interface": "eth0"
+    },
+    "radiopi0": {
+      "site": "folly",
+      "model": "pi0",
+      "role": "server",
+      "status": "active",
+      "serial": "0000000056f8a6ff",
+      "platform": "Raspberry Pi OS",
+      "client_group": "rpis",
+      "client": "radiopi0",
+      "network": "folly-anchor",
+      "interface": "wlan0"
+    },
+    "blinkypi0": {
+      "site": "folly",
+      "model": "pi0",
+      "role": "server",
+      "status": "offline",
+      "serial": "",
+      "platform": "Raspberry Pi OS",
+      "client_group": "rpis",
+      "client": "blinkypi0",
+      "network": "folly-anchor",
+      "interface": "wlan0"
+    },
+    "tallboy": {
+      "site": "folly",
+      "model": "tallboy",
+      "role": "desktop",
+      "status": "active",
+      "serial": "S9PFWT00L382375",
+      "platform": "Windows",
+      "client_group": "desktops",
+      "client": "tallboy",
+      "network": "folly-future",
+      "interface": "Ethernet"
+    },
+    "atomic": {
+      "site": "folly",
+      "model": "unknown",
+      "role": "desktop",
+      "status": "active",
+      "platform": "Windows",
+      "client_group": "desktops",
+      "client": "atomic",
+      "network": "folly-future",
+      "interface": "Ethernet",
+      "description": "Hardware identity needs verification"
+    },
+    "retrofit": {
+      "site": "oldschool",
+      "model": "retrofit",
+      "role": "kubernetes-node",
+      "status": "active",
+      "serial": "MXL7211HNN",
+      "platform": "Talos Linux",
+      "client_group": "k8s",
+      "client": "retrofit",
+      "network": "oldschool-kubernetes",
+      "interface": "lan"
+    },
+    "oldschool": {
+      "site": "oldschool",
+      "model": "oldschool",
+      "role": "kubernetes-node",
+      "status": "active",
+      "serial": "8CG74769HJ",
+      "platform": "Talos Linux",
+      "client_group": "k8s",
+      "client": "oldschool",
+      "network": "oldschool-kubernetes",
+      "interface": "lan"
+    },
+    "hotrod": {
+      "site": "oldschool",
+      "model": "hotrod",
+      "role": "kubernetes-node",
+      "status": "active",
+      "serial": "MXL3122Y9Y",
+      "platform": "Talos Linux",
+      "client_group": "k8s",
+      "client": "hotrod",
+      "network": "oldschool-kubernetes",
+      "interface": "lan"
+    },
+    "weatherpi4": {
+      "site": "oldschool",
+      "model": "pi4",
+      "role": "server",
+      "status": "active",
+      "serial": "10000000cfbd3890",
+      "platform": "NixOS",
+      "mac": "e4:5f:01:17:61:69",
+      "interface": "wlan0",
+      "description": "DHCP on the Goggly WLAN"
+    },
+    "oldschool-jetkvm": {
+      "site": "oldschool",
+      "model": "jetkvm",
+      "role": "console",
+      "status": "active",
+      "mac": "44:b7:d0:e6:4b:39",
+      "interface": "lan"
+    },
+    "folly-gym-0cd9": {
+      "site": "folly",
+      "model": "UFLHD",
+      "role": "access-point",
+      "status": "active",
+      "mac": "68:d7:9a:44:0c:d9",
+      "interface": "management",
+      "description": "UniFi Gym"
+    },
+    "folly-wall-unit-9a0e": {
+      "site": "folly",
+      "model": "UDMA69B",
+      "role": "access-point",
+      "status": "active",
+      "mac": "8c:30:66:9a:9a:0e",
+      "interface": "management",
+      "description": "UniFi Wall Unit"
+    },
+    "folly-lab-e295": {
+      "site": "folly",
+      "model": "UAP6MP",
+      "role": "access-point",
+      "status": "active",
+      "mac": "70:a7:41:9e:e2:95",
+      "interface": "management",
+      "description": "UniFi Lab"
+    },
+    "folly-wart-8dce": {
+      "site": "folly",
+      "model": "UDMB",
+      "role": "access-point",
+      "status": "offline",
+      "mac": "68:d7:9a:6a:8d:ce",
+      "interface": "management",
+      "description": "UniFi Wart"
+    },
+    "folly-express-7-e706": {
+      "site": "folly",
+      "model": "UDMA69B",
+      "role": "access-point",
+      "status": "active",
+      "mac": "8c:30:66:9e:e7:06",
+      "interface": "management",
+      "description": "UniFi Express 7"
+    },
+    "folly-gym-57ce": {
+      "site": "folly",
+      "model": "USF5P",
+      "role": "switch",
+      "status": "active",
+      "mac": "ac:8b:a9:bf:57:ce",
+      "interface": "management",
+      "description": "UniFi Gym"
+    },
+    "folly-fml.pulsifer.ca-a5e7": {
+      "site": "folly",
+      "model": "UDMPRO",
+      "role": "gateway",
+      "status": "active",
+      "mac": "74:ac:b9:13:a5:e7",
+      "interface": "management",
+      "description": "UniFi fml.pulsifer.ca"
+    },
+    "folly-usw-flex-mini-fbe3": {
+      "site": "folly",
+      "model": "USMINI",
+      "role": "switch",
+      "status": "active",
+      "mac": "74:83:c2:f8:fb:e3",
+      "interface": "management",
+      "description": "UniFi USW Flex Mini"
+    },
+    "folly-studio-9d78": {
+      "site": "folly",
+      "model": "USF5P",
+      "role": "switch",
+      "status": "offline",
+      "mac": "74:ac:b9:ad:9d:78",
+      "interface": "management",
+      "description": "UniFi Studio"
+    },
+    "folly-usw-flex-mini-87c7": {
+      "site": "folly",
+      "model": "USMINI",
+      "role": "switch",
+      "status": "offline",
+      "mac": "74:ac:b9:a8:87:c7",
+      "interface": "management",
+      "description": "UniFi USW Flex Mini"
+    },
+    "folly-driveway-9a59": {
+      "site": "folly",
+      "model": "UFLHD",
+      "role": "access-point",
+      "status": "active",
+      "mac": "e0:63:da:85:9a:59",
+      "interface": "management",
+      "description": "UniFi Driveway"
+    },
+    "folly-wall-unit-626c": {
+      "site": "folly",
+      "model": "USMINI",
+      "role": "switch",
+      "status": "active",
+      "mac": "74:83:c2:08:62:6c",
+      "interface": "management",
+      "description": "UniFi Wall Unit"
+    },
+    "folly-chicken-coop-04e1": {
+      "site": "folly",
+      "model": "UFLHD",
+      "role": "access-point",
+      "status": "active",
+      "mac": "68:d7:9a:44:04:e1",
+      "interface": "management",
+      "description": "UniFi Chicken Coop"
+    },
+    "oldschool-gateway": {
+      "site": "oldschool",
+      "model": "UCGMAX",
+      "role": "gateway",
+      "status": "active",
+      "mac": "0c:ea:14:ea:a2:56",
+      "interface": "management"
+    },
+    "oldschool-main-switch": {
+      "site": "oldschool",
+      "model": "flex-2.5",
+      "role": "switch",
+      "status": "active",
+      "mac": "8c:ed:e1:72:1d:03",
+      "interface": "management"
+    },
+    "oldschool-u7-pro-wall": {
+      "site": "oldschool",
+      "model": "U7-Pro-Wall",
+      "role": "access-point",
+      "status": "active",
+      "mac": "6c:63:f8:e8:e1:94",
+      "interface": "management"
+    },
+    "oldschool-gazebo": {
+      "site": "oldschool",
+      "model": "UFLHD",
+      "role": "access-point",
+      "status": "active",
+      "mac": "68:d7:9a:44:1b:59",
+      "interface": "management"
+    },
+    "oldschool-shop": {
+      "site": "oldschool",
+      "model": "UFLHD",
+      "role": "access-point",
+      "status": "active",
+      "mac": "68:d7:9a:44:12:d5",
+      "interface": "management"
+    },
+    "oldschool-downstairs-addition": {
+      "site": "oldschool",
+      "model": "U7NHD",
+      "role": "access-point",
+      "status": "active",
+      "mac": "68:d7:9a:3b:ef:30",
+      "interface": "management"
+    },
+    "oldschool-media-cabinet": {
+      "site": "oldschool",
+      "model": "USF5P",
+      "role": "switch",
+      "status": "active",
+      "mac": "28:70:4e:c2:0f:bd",
+      "interface": "management"
+    },
+    "oldschool-office-desk-switch": {
+      "site": "oldschool",
+      "model": "USMINI",
+      "role": "switch",
+      "status": "active",
+      "mac": "74:ac:b9:a8:88:43",
+      "interface": "management"
+    },
+    "oldschool-downstairs-poe-switch": {
+      "site": "oldschool",
+      "model": "USL16LP",
+      "role": "switch",
+      "status": "offline",
+      "mac": "f4:92:bf:93:68:de",
+      "interface": "management"
+    },
+    "oldschool-beacon-hd": {
+      "site": "oldschool",
+      "model": "UDMB",
+      "role": "access-point",
+      "status": "offline",
+      "mac": "68:d7:9a:5a:db:bb",
+      "interface": "management"
+    },
+    "folly-wall-unit-poe-switch": {
+      "site": "folly",
+      "model": "cisco",
+      "role": "switch",
+      "status": "active",
+      "client_group": "unmanaged-infra",
+      "client": "Wall Unit PoE Switch",
+      "interface": "management"
+    }
+  }
+}

@@ -1,10 +1,14 @@
-# folly NetBox
+# Lab NetBox
 
-OpenTofu root that applies folly's nodes file, `clusters/folly/inventory/nodes.yaml`, into NetBox on capsule. See [Hardware inventory](https://wiki.lolwtf.ca/reference/inventory/) on the wiki.
+OpenTofu root for the lab at folly and oldschool (the `offsite` cluster). It applies folly's nodes file, `clusters/folly/inventory/nodes.yaml`, into NetBox on capsule. See [Hardware inventory](https://wiki.lolwtf.ca/reference/inventory/) on the wiki.
 
 For each node it declares the device with its site, role, platform, device type and serial, the address as an IP address on the interface the device type's template makes, that address as the primary IPv4, the cable to the declared switch port, and the declared custom fields. It also declares the node models' device types and interface templates, every custom field on `dcim.device` with its choice sets, and the fleet-controller webhook and its event rule. `nodes.tf` reads the file and `catalog.tf` checks it before the plan reads NetBox, among other things that no two nodes share a serial or approve the same EK and that every approved EK hash is 64 lowercase hex characters. `tofu test` runs `inventory.tftest.hcl`, which plans the fixtures in `testdata/` against mocked providers.
 
 Terraform creates a device as `planned` and never updates it in place, so the status, `desired_action` and the fields talos-attest and fleet-controller write stay theirs. `restapi_object.declared` sends a node's serial, model, primary IPv4 and declared custom fields as a PATCH of those keys alone, when the node is created or its entry changes. Its approved EK binding goes to `approved_ek_hash` and `approved_ek_hash_ecc`, null when the entry has none; fleetd alone writes the observed `ek_hash` and `ek_hash_ecc`. Removing an entry deletes the device, its address and its cable.
+
+`lab-inventory.json` declares the additional physical hosts and network equipment. MACs and reserved addresses reference UniFi clients and the topology files where those sources exist. Controller-only equipment records its observed base MAC on a management interface; DHCP addresses, wireless links, rack positions and unverified cables stay unset. `cabling.tf` records the three oldschool node links that the switch confirms. Status is set on creation and then belongs to the owner. Declared metadata updates use PATCH without custom fields or rack placement.
+
+`sites.tf` declares the oldschool site and both racks. `networks.tf` reads each UniFi `network-catalog.json` and the topology files for VLANs and missing prefixes. Existing folly seed objects remain in NetBox.
 
 ## Develop
 
@@ -44,6 +48,7 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | Name | Source | Version |
 | ---- | ------ | ------- |
 | <a name="module_anchor_topology"></a> [anchor\_topology](#module\_anchor\_topology) | ../../modules/cluster-topology | n/a |
+| <a name="module_oldschool_topology"></a> [oldschool\_topology](#module\_oldschool\_topology) | ../../modules/cluster-topology | n/a |
 | <a name="module_topology"></a> [topology](#module\_topology) | ../../modules/cluster-topology | n/a |
 
 ## Resources
@@ -51,32 +56,52 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | Name | Type |
 | ---- | ---- |
 | [netbox_cable.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/cable) | resource |
+| [netbox_cable.oldschool_node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/cable) | resource |
 | [netbox_custom_field.device](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/custom_field) | resource |
 | [netbox_custom_field_choice_set.fleet](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/custom_field_choice_set) | resource |
+| [netbox_device.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device) | resource |
 | [netbox_device.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device) | resource |
+| [netbox_device_interface.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
+| [netbox_device_interface.oldschool_node_port](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
+| [netbox_device_primary_ip.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_primary_ip) | resource |
+| [netbox_device_role.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_role) | resource |
+| [netbox_device_type.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_type) | resource |
 | [netbox_device_type.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_type) | resource |
 | [netbox_event_rule.fleet_controller](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/event_rule) | resource |
 | [netbox_interface_template.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/interface_template) | resource |
+| [netbox_ip_address.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/ip_address) | resource |
 | [netbox_ip_address.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/ip_address) | resource |
+| [netbox_mac_address.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/mac_address) | resource |
+| [netbox_manufacturer.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/manufacturer) | resource |
 | [netbox_permission.fleetd_add](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
 | [netbox_permission.fleetd_change](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
 | [netbox_permission.fleetd_read](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
 | [netbox_permission.terraform_manage](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
 | [netbox_permission.terraform_read](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
+| [netbox_platform.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/platform) | resource |
+| [netbox_prefix.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/prefix) | resource |
+| [netbox_rack.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/rack) | resource |
+| [netbox_site.oldschool](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/site) | resource |
 | [netbox_user.fleetd](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/user) | resource |
 | [netbox_user.terraform](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/user) | resource |
+| [netbox_vlan.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/vlan) | resource |
 | [netbox_webhook.fleet_controller](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/webhook) | resource |
 | [random_password.netbox_user](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [restapi_object.datetime_field](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.declared](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
+| [restapi_object.lab_declared](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [netbox_device_interfaces.created](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
 | [netbox_device_interfaces.existing](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
 | [netbox_device_interfaces.switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
+| [netbox_device_role.gateway](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_role) | data source |
 | [netbox_device_role.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_role) | data source |
 | [netbox_device_role.switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_role) | data source |
+| [netbox_device_type.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_type) | data source |
 | [netbox_devices.nodes](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/devices) | data source |
 | [netbox_devices.switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/devices) | data source |
+| [netbox_manufacturers.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/manufacturers) | data source |
 | [netbox_manufacturers.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/manufacturers) | data source |
+| [netbox_platform.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/platform) | data source |
 | [netbox_platform.talos](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/platform) | data source |
 | [netbox_site.folly](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/site) | data source |
 

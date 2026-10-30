@@ -1,0 +1,26 @@
+{
+  "management": {
+    "name": "Management",
+    "subnet": "10.1.0.1/24"
+  },
+  "anchor": {
+    "name": "Anchor",
+    "vlan": 2
+  },
+  "kubernetes": {
+    "name": "Kubernetes",
+    "vlan": 8
+  },
+  "future": {
+    "name": "future",
+    "vlan": 1337
+  },
+  "iot": {
+    "name": "iot",
+    "subnet": "10.66.6.1/26",
+    "vlan": 666
+  },
+  "bootstrap": {
+    "name": "bootstrap"
+  }
+}

@@ -16,6 +16,7 @@ module "anchor_topology" {
 }
 
 locals {
+  network_catalog  = jsondecode(file("${path.module}/network-catalog.json"))
   topology         = module.topology.data
   offsite_topology = module.offsite_topology.data
   anchor_topology  = module.anchor_topology.data

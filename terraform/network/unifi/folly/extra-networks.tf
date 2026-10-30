@@ -1,7 +1,7 @@
 resource "unifi_network" "future" {
-  name               = "future"
+  name               = local.network_catalog.future.name
   subnet             = local.future_cidr
-  vlan               = 1337
+  vlan               = local.network_catalog.future.vlan
   setting_preference = "manual"
   auto_scale         = true
   lte_lan            = true
@@ -33,9 +33,9 @@ resource "unifi_network" "future" {
 }
 
 resource "unifi_network" "iot" {
-  name               = "iot"
+  name               = local.network_catalog.iot.name
   subnet             = local.iot_cidr
-  vlan               = 666
+  vlan               = local.network_catalog.iot.vlan
   domain_name        = local.iot_domain
   setting_preference = "manual"
   auto_scale         = false

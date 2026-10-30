@@ -18,9 +18,9 @@ locals {
 }
 
 resource "unifi_network" "k8s" {
-  name               = "Kubernetes"
+  name               = local.network_catalog.kubernetes.name
   subnet             = local.node_cidr
-  vlan               = 8
+  vlan               = local.network_catalog.kubernetes.vlan
   domain_name        = local.lab_domain
   setting_preference = "manual"
   auto_scale         = false

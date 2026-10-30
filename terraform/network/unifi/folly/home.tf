@@ -1,8 +1,8 @@
 locals {
-  fml_cidr   = "10.1.0.1/24"
+  fml_cidr   = local.network_catalog.management.subnet
   fml_domain = "fml.pulsifer.ca"
   fml_wlan   = "fml"
-  iot_cidr   = "10.66.6.1/26"
+  iot_cidr   = local.network_catalog.iot.subnet
   iot_domain = "iot.fml.pulsifer.ca"
   clients    = yamldecode(file("./clients.yaml"))
   one_day    = "24h0m0s"
@@ -10,7 +10,7 @@ locals {
 }
 
 resource "unifi_network" "fml" {
-  name               = "Management"
+  name               = local.network_catalog.management.name
   subnet             = local.fml_cidr
   domain_name        = local.fml_domain
   setting_preference = "manual"

@@ -1,6 +1,12 @@
 # The nodes file's checks, against fixtures in testdata/ on documentation
 # addresses, with every provider mocked.
 mock_provider "netbox" {
+  mock_resource "netbox_manufacturer" { defaults = { id = "1" } }
+  mock_resource "netbox_device_role" { defaults = { id = "1" } }
+  mock_resource "netbox_platform" { defaults = { id = "1" } }
+  mock_resource "netbox_site" { defaults = { id = "1" } }
+  mock_resource "netbox_device_interface" { defaults = { id = "1" } }
+  mock_data "netbox_device_type" { defaults = { id = "1" } }
   mock_resource "netbox_custom_field_choice_set" {
     defaults = { id = "1" }
   }
@@ -46,7 +52,7 @@ override_module {
 override_module {
   target = module.anchor_topology
   outputs = {
-    data = { CAPSULE_IP = "198.51.100.1", SPORE_IP = "198.51.100.2" }
+    data = { CAPSULE_IP = "198.51.100.1", SPORE_IP = "198.51.100.2", ANCHOR_CIDR = "198.51.100.0/24", FUTURE_CIDR = "203.0.113.0/24", BOOTSTRAP_CIDR = "198.18.0.0/24", BOOTSTRAP_VLAN = "9" }
   }
 }
 
@@ -201,4 +207,24 @@ run "rejects_a_disk_serial_on_a_model" {
   }
 
   expect_failures = [data.netbox_site.folly]
+}
+
+run "lab_preserves_lifecycle_and_records_both_racks" {
+  command = plan
+  plan_options {
+    target = [restapi_object.lab_declared, netbox_rack.lab, netbox_ip_address.lab]
+  }
+  variables { nodes_file = "testdata/valid.yaml" }
+  assert {
+    condition     = alltrue([for d in restapi_object.lab_declared : !contains(keys(jsondecode(d.data)), "status") && !contains(keys(jsondecode(d.data)), "custom_fields") && !contains(keys(jsondecode(d.data)), "rack")])
+    error_message = "Inventory updates must preserve lifecycle, custom fields and rack placement."
+  }
+  assert {
+    condition     = netbox_rack.lab["folly"].u_height == 12 && netbox_rack.lab["folly"].width == 19 && netbox_rack.lab["oldschool"].u_height == 8 && netbox_rack.lab["oldschool"].width == 10
+    error_message = "Each site must hold the owner's specified rack."
+  }
+  assert {
+    condition     = netbox_ip_address.lab["retrofit"].ip_address == "${jsondecode(module.oldschool_topology.data.NODE_ADDRESSES).retrofit}/${split("/", module.oldschool_topology.data.K8S_NODE_CIDR)[1]}"
+    error_message = "Oldschool node addresses must come from the offsite topology."
+  }
 }
