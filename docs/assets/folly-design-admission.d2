@@ -1,0 +1,17 @@
+vars: {d2-config: {theme-id: 0; pad: 24}}
+shape: sequence_diagram
+node: HookOS
+fleet: fleetd
+netbox: NetBox
+tink: Tinkerbell
+node -> fleet: "1. Claimed identity, EK and AK"
+fleet -> netbox: "2. Read declaration and EK pins"
+fleet -> node: "3. Nonce and activation challenge"
+node -> fleet: "4. TPM evidence and certified key"
+fleet -> fleet: "5. Check quote, log and policy"
+fleet -> node: "6. LDevID and LAK certificates"
+node -> fleet: "7. Signed confirmation"
+fleet -> netbox: "8. Check admission and port report"
+fleet -> tink: "9. Reuse or create authorized provision"
+fleet -> fleet: "10. Render eligible config"
+**.style.font-size: 24

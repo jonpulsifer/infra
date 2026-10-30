@@ -1,21 +1,22 @@
 vars: {d2-config: {theme-id: 0; pad: 24}}
 shape: sequence_diagram
-node: "Node and SPIRE agent"
+node: "Node agent"
 fleet: fleetd
 netbox: NetBox
-applier: "SPIRE registration applier"
-spire: "SPIRE server"
+applier: "Entry applier"
+spire: SPIRE
 pod: Workload
-fleet -> netbox: "1. Read lifecycle and attestation verdict"
+fleet -> netbox: "1. Read status and verdict"
 fleet -> applier: "2. Export eligible nodes"
-applier -> spire: "3. Reconcile fleet-owned registrations"
-node -> spire: "4. LDevID TPM proof or configured EK proof"
+applier -> spire: "3. Reconcile fleet entries"
+node -> spire: "4. LDevID or EK proof"
 spire -> node: "5. Agent identity"
 pod -> node: "6. Request workload identity"
 node -> pod: "7. SVID when selectors match"
-node -> fleet: "8. Daily LAK-signed boot evidence"
-fleet -> netbox: "9. Record authenticated verdict"
-netbox -> fleet: "10. Retirement or ineligible verdict on next read"
+node -> fleet: "8. Daily boot evidence"
+fleet -> netbox: "9. Record verdict"
+netbox -> fleet: "10. Node becomes ineligible"
 fleet -> applier: "11. Export without this node"
-applier -> spire: "12. Remove fleet entries; evict agent where unreferenced"
-spire -> spire: "13. Other owners and existing credentials remain separate"
+applier -> spire: "12. Remove entries; conditional eviction"
+spire -> spire: "13. Other access paths remain separate"
+**.style.font-size: 24

@@ -1,39 +1,12 @@
 vars: {d2-config: {layout-engine: elk; theme-id: 0; pad: 24}}
-direction: down
-declarations: "Declaration authority" {
-  owner: Owner
-  git: "Git and Atlantis"
-  netbox: "NetBox on capsule" {shape: cylinder}
-  owner -> git: declares machines
-  git -> netbox: applies device facts
-  owner -> netbox: requests lifecycle action
-}
-spore: "Management boundary: spore" {
-  boot: "Boot services"
-  fleet: fleetd
-  key: "YubiKey DevID CA" {shape: hexagon}
-  tink: "Tinkerbell and Rufio"
-  spire: "SPIRE server and registration applier"
-  fleet -> key: requests certificates
-  fleet -> tink: creates workflows
-  fleet -> spire: exports eligible nodes
-}
-node: "Node boundary" {
-  firmware: "Firmware and TPM"
-  hook: HookOS
-  talos: Talos
-  agent: "SPIRE agent"
-  pod: Workload
-  firmware -> hook: checks signed boot
-  hook -> talos: installs and reboots
-  talos -> agent: hosts
-  agent -> pod: issues matching SVID
-}
-resource: "Resource authorization\nGCP IAM or service policy"
-declarations.netbox -> spore.fleet: desired state and observations
-spore.boot -> node.firmware: signed images
-node.hook -> spore.fleet: TPM evidence and confirmation
-spore.tink -> node.hook: disk actions
-spore.fleet -> node.talos: HTTPS config with one-time code
-node.agent -> spore.spire: node proof
-node.pod -> resource: presents credential
+direction: right
+facts: "Owner + Git\nNetBox on capsule\nDeclarations and actions"
+control: "Management on spore\nfleetd + YubiKey\nBoot services + Tinkerbell"
+node: "Node boundary\nFirmware + TPM\nHookOS then Talos"
+identity: "Identity boundary\nSPIRE on spore\nAgent and workload on node"
+resource: "Resource boundary\nGCP IAM or\nservice policy"
+facts -> control: desired state
+control -> node: authorized install
+node -> identity: node proof
+identity -> resource: workload credential
+**.style.font-size: 24

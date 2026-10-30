@@ -56,7 +56,7 @@ The DevID CA and the SPIRE CA have different jobs. The DevID CA certifies device
 
 ## 3. Boot and installation sequence
 
-![Node admission and installation sequence](../assets/folly-design-install.svg)
+![Node attestation and admission sequence](../assets/folly-design-admission.svg)
 
 ### Declaration and boot
 
@@ -77,6 +77,8 @@ The AK certifies the LDevID key. fleetd checks the certification and key attribu
 Admission requires the declared fields and a recent signed network report that matches `expected_port`. LLDP describes the reported switch connection. Its signature protects the report in transit; LLDP does not authenticate the switch.
 
 ### Installation and config release
+
+![Installation and first-boot config sequence](../assets/folly-design-install.svg)
 
 Admission requires a planned device. It can reuse an unfinished provision or act on the owner's explicit provision request. Enabled auto-provision can also start a worker's first workflow. It does not automatically provision a control plane.
 
