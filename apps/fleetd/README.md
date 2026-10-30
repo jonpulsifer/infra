@@ -12,7 +12,7 @@ on the wiki.
 ```sh
 go build -o fleetd .
 ATTEST_CA_KEY=/path/to/devid-ca.key ATTEST_CA_CHAIN=chain.pem ATTEST_EK_ROOTS=attest/roots \
-ATTEST_POLICY=attest/policy.yaml \
+ATTEST_POLICY=attest/policy FLEET_CLASSES=../../clusters/folly/fleet/classes.json \
 ATTEST_STATE_DIR=/tmp/fleetd ATTEST_APPROVERS=you@example.com \
 FLEET_NETBOX_URL=http://capsule:8080 FLEET_NETBOX_TOKEN_FILE=token \
 FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FLEET_HOOKOS_CMDLINE='console=tty0' \
@@ -38,7 +38,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_CA_BUNDLE` | none | Every issuing CA of the site. A leaf another CA issued verifies only when its CA is here, and each must chain to the chain's root |
 | `ATTEST_SITE` | `folly` | The O of every certificate, and the NetBox site |
 | `ATTEST_CERT_VALIDITY` | `2160h` | LDevID and LAK lifetime, capped at the CA's |
-| `ATTEST_EK_ROOTS`, `ATTEST_POLICY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates and the event-log policy |
+| `ATTEST_EK_ROOTS`, `ATTEST_POLICY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates and the directory of event-log policy profiles, one `<name>.yaml` each |
 | `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, approvals and `verdicts.jsonl` |
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
 | `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE`, `ATTEST_NETBOX_ROLE` | required, `/run/credentials/fleetd.service/netbox-token`, `kubernetes-node` | NetBox, the only source of machines. A serial it lacks waits for the owner's approval, and a NetBox that does not answer refuses every request |
@@ -49,7 +49,8 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FLEET_SITE`, `FLEET_NAMESPACE`, `FLEET_TEMPLATE` | `folly`, `tinkerbell`, `provision` | The NetBox site, Tinkerbell's namespace and the Template every Workflow runs |
+| `FLEET_SITE`, `FLEET_NAMESPACE` | `folly`, `tinkerbell` | The NetBox site and Tinkerbell's namespace |
+| `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind |
 | `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices and adds journal entries |
 | `FLEET_KUBE_SERVER`, `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `https://localhost:6443`, `/etc/tinkerbell/…` | Tinkerbell's API and a client certificate that manages `hardware`, `machines` and `workflows` |
 | `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the cordon account's token; all three or none |
@@ -82,7 +83,7 @@ and not answering, every request is 503 `refused`.
 | Route | Does |
 | --- | --- |
 | `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the EK pins, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no pin passes when every EK has a manufacturer certificate |
-| `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against `policy.yaml` and issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
+| `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class and issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes and the AK's signature over the nonce. A wrong signature is refused and leaves the session open. An intake pass's signed confirm answers the install code |
 | `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at, ldevid_serial}`, NetBox's when it answers |

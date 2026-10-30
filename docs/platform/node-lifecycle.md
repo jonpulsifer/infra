@@ -32,7 +32,7 @@ An installed node reinstalls when the owner sets `desired_action` to `provision`
 
 ## Trust
 
-- Firmware checks images against its Secure Boot database, which also contains Microsoft certificates. After the event-log separator, `apps/fleetd/attest/policy.yaml` accepts only the lab's signing authorities. Intake requires HookOS. The policy pins no exact image digest.
+- Firmware checks images against its Secure Boot database, which also contains Microsoft certificates. After the event-log separator, the node's class picks a policy profile in `apps/fleetd/attest/policy/`: `talos` accepts only the lab's signing authorities, and `ubuntu` also accepts Microsoft's UEFI CA and Canonical's Master CA. Intake requires HookOS. No profile pins an exact image digest.
 - The LDevID key stays in the TPM. fleetd signs every LDevID with spore's YubiKey CA, and the bundle keeps the LDevIDs capsule's and the software CA issued trusted until they renew.
 - A provision's wipe waits for the boot's pass and the install code, so a refused machine keeps its disk.
 - The running node renews its LDevID with a quote that its LAK signs. A `decommissioning` or `offline` device gets no renewal.
