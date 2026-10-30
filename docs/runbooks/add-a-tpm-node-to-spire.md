@@ -20,9 +20,9 @@ A node that passed attestation has an LDevID from the attest service, and its ag
 
 ## Admit the node
 
-spore builds the EK hash allow list and the EK aliases from `ekHashes` in `nix/hosts/spore.nix`, and the LDevID aliases from `clusters/folly/inventory/machines.yaml`. It registers the entries in `workloads` under each alias.
+spore builds the EK hash allow list and the EK aliases from `ekHashes` in `nix/hosts/spore.nix`, and the LDevID aliases from `clusters/folly/inventory/nodes.yaml`. It registers the entries in `workloads` under each alias.
 
-1. Make sure that `machines.yaml` on `main` lists the node with `tpm: "2.0"` and the status `planned` or `active`. NetBox's export writes it.
+1. Make sure that `nodes.yaml` on `main` lists the node, and that its `tpm`, its own or its model's, is `2.0`.
 2. If the node has no LDevID, read its EK hash, and on a branch add `<name> = "<hash>";` to `ekHashes`.
 3. In `clusters/folly/talos/talos.tf`, give the node the label `lolwtf.ca/tpm` with the value `true`.
 4. Open a pull request, and apply it with Atlantis.
@@ -181,7 +181,7 @@ Do this once, before the first agent attests. spore's `k8sbundle` notifier then 
 | The agent logs `tpm2.Load failed` | The attest service wrapped the LDevID key under another parent than the TCG H-1 or H-2 storage root key | Attest the node again after the attest service creates the key under that parent. |
 | The server logs `cannot verify EK signature` | The CA that signed the node's EK certificate is not in `nix/services/spire/roots/` | Add the CA from the EK certificate's AIA URL, and deploy spore. |
 | The agent logs `unable to get endorsement certificate` | The TPM has no RSA EK certificate in NV, which `tpm_devid` reads | Admit the node by EK hash. |
-| The agent attests by LDevID, and workloads get no SVID | No alias selects the LDevID's subject CN | Make sure that `machines.yaml` lists `<name>` with `tpm: "2.0"` and the status `planned` or `active`, that `devid.enable` is on, and that spore runs that commit. |
+| The agent attests by LDevID, and workloads get no SVID | No alias selects the LDevID's subject CN | Make sure that `nodes.yaml` lists `<name>` with `tpm` `2.0`, that `devid.enable` is on, and that spore runs that commit. |
 | `TalosAttestLDevIDExpiring` fires | `tpm-reattest` on the node cannot renew the LDevID | Read `kubectl --context folly -n spire logs daemonset/tpm-reattest`, or the pod on `<name>`. A `404` refusal means the service has no LDevID on file for the serial, and a `403` means the machine's status forbids a renewal. Otherwise, attest the node again. |
 | `TalosAttestNotChecked` fires | No passing quote from the node in 26 hours | Read the `tpm-reattest` pod on `<name>`. A pod stuck in `ContainerCreating`, or `NO TPM` in its log, is a TPM that is off: turn it on in the firmware. `RENEWAL FAILED` gives the transport error or the refusal; a `403` with the verdict `quarantine` is a quarantine, which `TalosAttestQuarantined` reports. |
 | The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM, and boot the node. |

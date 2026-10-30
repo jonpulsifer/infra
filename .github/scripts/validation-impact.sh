@@ -39,8 +39,8 @@ targets() {
       clusters/folly/talos/talos.tf | clusters/folly/talos/netboot.json | clusters/folly/talos/secureboot/* | .github/scripts/talos-uki-verify.sh)
         target_set["nix:flake-check"]=1
         ;;
-      # spore's SPIRE node aliases and the anchors' talos-attest read NetBox's export.
-      clusters/folly/inventory/machines.yaml)
+      # spore's SPIRE node aliases and the anchors' talos-attest read the nodes file.
+      clusters/folly/inventory/nodes.yaml)
         target_set["nix:flake-check"]=1
         ;;
     esac
@@ -60,6 +60,8 @@ targets() {
         ;;
       clusters/folly/inventory/nodes.yaml)
         target_set["terraform:terraform/netbox/folly"]=1
+        target_set["terraform:terraform/network/unifi/folly"]=1
+        target_set["terraform:clusters/folly/talos"]=1
         ;;
       clusters/*/config/cluster-topology.json)
         # The site's Talos root reads this file, once that root exists.

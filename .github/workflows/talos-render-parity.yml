@@ -15,7 +15,7 @@ on:
       - 'terraform/network/tailscale/fleet.tf.json'
       - 'clusters/folly/talos/**'
       - 'clusters/folly/config/cluster-topology.json'
-      - 'clusters/folly/inventory/machines.yaml'
+      - 'clusters/folly/inventory/nodes.yaml'
       - 'clusters/folly/fleet/class-inputs.json'
       - 'apps/fleet-controller/**'
       - 'mise.toml'

@@ -75,6 +75,34 @@ record() {
   fi
 }
 
+# What NetBox records of each folly kubernetes-node device that is planned, active or failed,
+# keyed by name, in the observed entry's field names, with its status and primary address. The
+# NIC is the device's first interface with a primary MAC.
+netbox_nodes() {
+  local devices interfaces
+  devices="$(nb_list "dcim/devices/?site=folly&role=kubernetes-node&status=planned&status=active&status=failed")"
+  if [[ "$(jq 'length' <<<"$devices")" -eq 0 ]]; then
+    echo '{}'
+    return
+  fi
+  interfaces="$(nb_list "dcim/interfaces/?type__n=virtual&$(jq -r 'map("device_id=\(.id)") | join("&")' <<<"$devices")")"
+  jq -n --argjson devices "$devices" --argjson interfaces "$interfaces" '
+    $devices
+    | map(. as $d
+      | ([$interfaces[] | select(.device.id == $d.id and .primary_mac_address != null)] | sort_by(.id) | first) as $nic
+      | {key: $d.name, value: {
+          model: $d.device_type.model,
+          sku: $d.custom_fields.sku,
+          serial: (if $d.serial == "" then null else $d.serial end),
+          bios: $d.custom_fields.bios_version,
+          mac: ($nic.primary_mac_address.mac_address // null | if . then ascii_downcase else . end),
+          secure_boot: $d.custom_fields.secure_boot_expected,
+          status: $d.status.value,
+          address: ($d.primary_ip4.address // null | if . then split("/")[0] else . end)
+        }})
+    | from_entries'
+}
+
 check() {
   local record=false metrics=""
   while [[ $# -gt 0 ]]; do
@@ -93,7 +121,7 @@ check() {
   local addresses machines drift=0 node address seen diffs
   local -a series=()
   nb_init
-  machines="$(bash "$root/scripts/netbox-export.sh" --json)"
+  machines="$(netbox_nodes)"
   addresses="$(jq -c 'with_entries(select(.value.status != "planned" and .value.address != null) | .value |= .address)' <<<"$machines")"
   for node in $(jq -r 'keys[]' <<<"$addresses"); do
     address="$(jq -r --arg n "$node" '.[$n]' <<<"$addresses")"

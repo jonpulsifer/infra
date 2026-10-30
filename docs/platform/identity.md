@@ -29,7 +29,7 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
-- The LDevID aliases follow `clusters/folly/inventory/machines.yaml`. Each machine with `tpm: "2.0"` and the status `planned` or `active` gets one. `nix/lib/inventory.nix` reads the export at evaluation, so a new machine's alias needs a spore deploy. It fails the evaluation on any line outside the export's shape.
+- The LDevID aliases follow `clusters/folly/inventory/nodes.yaml`. Each node with `tpm` `2.0`, its own or its model's, gets one. `nix/lib/inventory.nix` reads the nodes file at evaluation, so a new node's alias needs a spore deploy. It fails the evaluation on any line outside the file's shape.
 - Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
 - An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
@@ -137,7 +137,7 @@ riptide and optiplex carry the `lolwtf.ca/tpm=true` label and run agents. riptid
 - `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/talos-attest/roots/`
 - `apps/talos-attest/` and `nix/services/talos-attest.nix`: the attest service and its anchor deployment
 - `nix/hosts/spore.nix`: `ekHashes`, `workloads` and the registration entries
-- `nix/lib/inventory.nix`: `machines.yaml` as Nix, for the LDevID aliases
+- `nix/lib/inventory.nix`: the nodes file as Nix, for the LDevID aliases and talos-attest's inventory
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`

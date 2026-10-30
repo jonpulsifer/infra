@@ -38,10 +38,6 @@ assert_targets 'the UKI check that spore runs validates Nix' \
   '.github/scripts/talos-uki-verify.sh' \
   'nix:flake-check'
 
-assert_targets 'the NetBox export that spore and the anchors read validates Nix' \
-  'clusters/folly/inventory/machines.yaml' \
-  'nix:flake-check'
-
 assert_targets 'the retired Spore application has no Nix validation route' \
   'apps/spore/lib/catalog.ts' \
   ''
@@ -54,9 +50,9 @@ assert_targets 'the lab topology ConfigMap validates Terraform and Nix consumers
   'clusters/folly/config/anchor-topology.json' \
   $'nix:flake-check\nterraform:terraform/netbox/folly\nterraform:terraform/network/unifi/folly'
 
-assert_targets 'the nodes file validates the NetBox root that applies it' \
+assert_targets 'the nodes file validates Nix and every root that reads it' \
   'clusters/folly/inventory/nodes.yaml' \
-  'terraform:terraform/netbox/folly'
+  $'nix:flake-check\nterraform:clusters/folly/talos\nterraform:terraform/netbox/folly\nterraform:terraform/network/unifi/folly'
 
 assert_targets 'the removed Terraform JSON has no stale route' \
   'terraform/network/unifi/folly/lab.tf.json' \

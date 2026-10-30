@@ -1,6 +1,6 @@
 ---
 title: Hardware inventory
-description: The nodes file that declares each folly Kubernetes node, the OpenTofu root that applies it into NetBox, the export NetBox writes for the code that reads it, and the check that compares it with the machines.
+description: The nodes file that declares each folly Kubernetes node, the code that reads it, the OpenTofu root that applies it into NetBox, and the check that compares NetBox with the machines.
 ---
 
 Git declares folly's Kubernetes nodes in `clusters/folly/inventory/nodes.yaml`, the nodes file, and `terraform/netbox/folly` applies it into [NetBox](../platform/netbox.md). Each node is a device with the role `kubernetes-node`. NetBox adds what the services and the owner write: the MAC, the EK hashes, attestation results, SMBIOS facts, the status and `desired_action`.
@@ -9,7 +9,7 @@ Git declares folly's Kubernetes nodes in `clusters/folly/inventory/nodes.yaml`, 
 
 `models` holds what every machine of a model shares, keyed by its NetBox device type slug: the SMBIOS model name, the manufacturer, the NIC its template names, the install disk, the TPM version, Intel AMT and the expected Secure Boot state. `nodes` holds one entry per node, keyed by its name, with its model, serial, Talos class, switch port, address and BMC type. A node may override its model's disk, TPM, AMT or Secure Boot. The comment at the top of the file defines each key, and every value is a scalar on its own line.
 
-To add a node, add its entry in a pull request and comment `atlantis plan -d terraform/netbox/folly`, since a change to the file alone gets no autoplan. Then comment `atlantis apply`. The plan fails on an unknown model or class, an address outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json` as [Topology](topology.md) describes, a shared address, switch port or serial, or when `API_SERVER_IP` there is no node's address.
+To add a node, add its entry in a pull request and comment the plans that [Readers](#readers) names, since a change to the file alone gets no autoplan. Then comment `atlantis apply`. The plan fails on an unknown model or class, an address outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json` as [Topology](topology.md) describes, a shared address, switch port or serial, or when `API_SERVER_IP` there is no node's address.
 
 ## Terraform
 
@@ -24,43 +24,33 @@ The root creates each device as `planned`, with its serial, device type, site, r
 
 Terraform never updates a device in place. A change to an entry's serial, model, address or declared fields goes out as a PATCH of those keys alone. Removing an entry deletes the device, its address and its cable, so retire the node first. The root's `README.md` has the rest.
 
-## Export
-
-`clusters/folly/inventory/machines.yaml` is NetBox's export, which the readers below take: every folly device with the role `kubernetes-node` and the status `planned`, `active` or `failed`, keyed by name and ordered by address. A device in `decommissioning` or `offline` is not exported, nor is a stub, a `planned` device with no serial or no MAC that fleet-controller has not bound to a machine. Beside the hardware keys, each node has `class` (the `talos_class` field: `controlplane`, `worker-g5` or `worker-g2`), `status`, `address`, `bmc`, `ek_hash` and `ek_hash_ecc`. `bmc.type` is the `bmc_type` field (`none`, `amt` or `redfish`); `bmc.address` is the device's out-of-band address, or the node's own address for AMT when NetBox holds none. Never edit it by hand. After an apply of `terraform/netbox/folly`, or a change the services record in NetBox, run:
-
-```sh
-mise run netbox:export
-```
-
-Commit the file in a pull request. `mise run netbox:check` fails when the committed file differs from NetBox, and when the export's active and failed nodes fail the address checks. Both reach NetBox over the tailnet and read the API token from the 1Password item `netbox-folly`, or from `NETBOX_TOKEN`; `scripts/lib/netbox.sh` lists the variables. Off the tailnet, forward capsule's `127.0.0.1:8080` over ssh and set `NETBOX_URL` to the forwarded port and `NETBOX_HOST` to capsule's tailnet name.
-
-capsule's hourly drift job compares NetBox's export with the file on `main` and raises `NetboxExportDiffers` after two hours of difference. The export stays a manual step because no anchor holds a GitHub credential that can open a pull request.
-
 ## Readers
 
 | Reader | What it takes | Where |
 | --- | --- | --- |
+| NetBox | Every declared fact, applied as the node's device | `terraform/netbox/folly` |
 | UniFi | `address` for the node's DNS record, `switch_port` for its node port | `terraform/network/unifi/folly/k8s.tf`, `bootstrap.tf` |
-| Talos | `address` for the node's static address, `disk` for the install selector, `tpm` for `tpm_nodes` | `clusters/folly/talos/talos.tf` |
-| spore's netboot links | `mac`, written to `clusters/folly/fleet/node-macs.json` | `scripts/render-class-inputs.sh`, `nix/services/tinkerbell.nix` |
-| Tinkerbell | nothing from this file: [fleet-controller](../apps/fleet-controller.md) reads the MAC, install disk and BMC of each device from NetBox itself | `apps/fleet-controller` |
+| Talos | `address` for the node's static address, `class`, `disk` for the install selector, `tpm` for `tpm_nodes`, for each node NetBox holds `active` or `failed` | `clusters/folly/talos/nodes.tf`, `talos.tf` |
+| spore's SPIRE | each node with `tpm` `2.0`, for its LDevID alias | `nix/lib/inventory.nix`, `nix/hosts/spore.nix` |
+| talos-attest | `serial`, `class`, `tpm` and `secure_boot`, as its inventory | `nix/services/talos-attest.nix` |
+| fleet-controller | nothing from this file: it reads each device from NetBox | `apps/fleet-controller` |
 
-A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos` on the pull request, and run both render tasks.
+The Talos root reads each node's status from NetBox at plan time, and `mise run render-class-inputs` reads it too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The same task writes `clusters/folly/fleet/node-macs.json` from the MACs NetBox holds, which spore's netboot links read.
+
+A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d terraform/netbox/folly`, `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos` on the pull request, and deploy spore for a new TPM 2.0 node's alias.
 
 ## Drift
 
-`mise run inventory:check` reads each active and failed node's address from NetBox, and then the node over the Talos API, from its SystemInformation, SecurityState and Ethernet link, and compares `model`, `sku`, `serial`, `bios`, `mac`, `secure_boot` and the address with NetBox. It prints each difference and exits 1 on any. A firmware update or a board swap is drift until NetBox records it.
-
-`netbox-drift.service` on capsule runs the same check every hour with `--record`. It mints a one-hour `os:reader` Talos certificate from folly's secrets bundle, writes a journal entry on the device when its findings change, keeps the `drift` tag on a drifting device, and exports `netbox_drift{device}` for `NetboxNodeDrift`. `nix/services/netbox-drift.nix` declares it.
+`mise run inventory:check` reads each planned, active and failed node from NetBox, and then each active and failed node over the Talos API, from its SystemInformation, SecurityState and Ethernet link, and compares `model`, `sku`, `serial`, `bios`, `mac`, `secure_boot` and the address with NetBox. It prints each difference and exits 1 on any. A firmware update or a board swap is drift until NetBox records it. With `--record` it writes a journal entry on the device when its findings change and keeps the `drift` tag on a drifting device.
 
 `mise run inventory:observe <address>` prints the same fields for one node. Add `--insecure` for a node in maintenance mode, which has no Talos config yet.
 
 ## Rules
 
-- A node's address is its `address` in the nodes file, which Terraform makes its NetBox primary IPv4 and its Talos config sets statically. It lies outside `K8S_DHCP_CIDR`, or the UniFi plan fails. A `planned` node with an address, and an `active` or `failed` node, gets a DNS record.
+- A node's address is its `address` in the nodes file, which Terraform makes its NetBox primary IPv4 and its Talos config sets statically. It lies outside `K8S_DHCP_CIDR`, or the UniFi plan fails. Every declared node gets a DNS record.
 - Declare `tpm` as the spec version the firmware reports, `2.0` or `1.2`. Only a TPM 2.0 node seals its disks and attests.
 - Declare `secure_boot` as the state the node is expected to boot in. The check flags a node that boots in any other.
-- Retire a node by moving its device to `decommissioning` or `offline` and merging the export that drops it. Remove its entry from the nodes file once it is `offline`.
+- Retire a node by moving its device to `decommissioning`. Remove its entry from the nodes file once it is `offline`.
 
 ## Related
 

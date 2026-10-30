@@ -14,7 +14,7 @@ Use this runbook to boot a NixOS node into the Talos Linux installer without a U
 - You need a path to the node's port 50000 that does not depend on the node's own cluster.
 - Get the schematic ID from `tofu -chdir=clusters/<site>/talos output -raw schematic_id`, and the version from `talos_version` in `clusters/<site>/talos/talos.tf`.
 
-`<node>` is the host name, and `<addr>` is its address: on folly its `address` in `clusters/folly/inventory/machines.yaml`, the export of [NetBox](../platform/netbox.md), and on offsite its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`.
+`<node>` is the host name, and `<addr>` is its address: on folly its `address` in `clusters/folly/inventory/nodes.yaml`, the [nodes file](../reference/inventory.md), and on offsite its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`.
 
 ## Load the installer
 

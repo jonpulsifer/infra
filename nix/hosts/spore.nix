@@ -15,17 +15,11 @@ let
   };
   # With tpm_devid on, a node attests by the LDevID that the attest service issues it, whose subject
   # CN is the node's name. SPIRE 1.15.5's tpm_devid gives selectors for the subject's CN only, not
-  # its OU (the class) or O (the site), so each machine in the inventory with a TPM 2.0 that NetBox
-  # has planned or active gets its own alias, and a new machine needs a spore deploy.
+  # its OU (the class) or O (the site), so each node in the nodes file with a TPM 2.0 gets its own
+  # alias, and a new node needs a spore deploy. A failed or retired node keeps its alias until its
+  # entry goes, and talos-attest refuses it an LDevID.
   devidNodes = lib.attrNames (
-    lib.filterAttrs (
-      _: m:
-      m.tpm or null == "2.0"
-      && lib.elem m.status [
-        "planned"
-        "active"
-      ]
-    ) (import ../lib/inventory.nix { inherit lib; })
+    lib.filterAttrs (_: n: n.tpm or null == "2.0") (import ../lib/inventory.nix { inherit lib; })
   );
   tpmNodes = lib.sort lib.lessThan (lib.unique (lib.attrNames ekHashes ++ devidNodes));
   trustDomain = config.homelab.spire.trustDomain;

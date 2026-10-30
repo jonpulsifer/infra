@@ -1,16 +1,32 @@
 #!/usr/bin/env bash
 # Writes the per-class render inputs fleet-controller renders from: the folly
 # Talos root's class_inputs output, read by `tofu console` with no state and
-# no 1Password. A node adds nothing here: the controller reads the node's facts
-# from NetBox at render time.
+# no 1Password. The control planes among them, which the API server's SANs
+# name, are the declared ones NetBox holds active or failed, so this reads
+# each node's status from NetBox, as the root does at plan time. A node adds
+# nothing else here: the controller reads the node's facts from NetBox at
+# render time.
 #
-# It also writes node-macs.json, the inventory's MACs, which spore's
-# nix/services/tinkerbell.nix reads for its netboot-not-allowed links.
+# It also writes node-macs.json, the MACs NetBox holds for the declared nodes,
+# which spore's nix/services/tinkerbell.nix reads for its netboot-not-allowed
+# links.
+#
+# NetBox access is scripts/lib/netbox.sh's environment.
 set -euo pipefail
+shopt -s inherit_errexit
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly root
-readonly out="$root/clusters/folly/fleet"
+# shellcheck source=scripts/lib/netbox.sh
+source "$root/scripts/lib/netbox.sh"
+readonly fleet_dir="$root/clusters/folly/fleet"
+readonly nodes_file="$root/clusters/folly/inventory/nodes.yaml"
+
+nb_init
+devices="$(nb_list "dcim/devices/?site=folly&role=kubernetes-node")"
+interfaces="$(nb_list "dcim/interfaces/?type__n=virtual&$(jq -r 'map("device_id=\(.id)") | join("&")' <<<"$devices")")"
+declared="$(yq -o json '.nodes | keys' "$nodes_file")"
+statuses="$(jq -c 'map({key: .name, value: .status.value}) | from_entries' <<<"$devices")"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -23,7 +39,19 @@ cp "$root"/clusters/folly/talos/*.tf "$root/clusters/folly/talos/.terraform.lock
 ln -s "$root/terraform" "$work/terraform"
 ln -s "$root/clusters/folly/config" "$work/clusters/folly/config"
 ln -s "$root/clusters/folly/inventory" "$work/clusters/folly/inventory"
-printf 'terraform {\n  backend "local" {}\n}\n' >"$tf/render_override.tf"
+# The override's locals take each node's status from NetBox's answer above, so
+# init and console never configure the NetBox provider.
+cat >"$tf/render_override.tf" <<EOF
+terraform {
+  backend "local" {}
+}
+
+locals {
+  machines = { for name, m in local.declared : name => merge(m, {
+    status = lookup(jsondecode($(jq -R . <<<"$statuses")), name, "planned")
+  }) }
+}
+EOF
 
 tofu -chdir="$tf" init -input=false -no-color >"$work/init.log" 2>&1 || {
   cat "$work/init.log" >&2
@@ -40,9 +68,15 @@ value="${value%\"}"
 }
 base64 -d <<<"$value" | jq -S . >"$work/class-inputs.json"
 
-yq -o json '.machines | map_values(.mac)' "$root/clusters/folly/inventory/machines.yaml" \
-  | jq -S . >"$work/node-macs.json"
+# Each declared node's MAC: its device's first interface with a primary MAC.
+jq -S -n --argjson devices "$devices" --argjson interfaces "$interfaces" --argjson declared "$declared" '
+  $devices
+  | map(select(.name as $n | $declared | index($n)) | . as $d
+    | ([$interfaces[] | select(.device.id == $d.id and .primary_mac_address != null)] | sort_by(.id) | first) as $nic
+    | select($nic != null)
+    | {key: $d.name, value: ($nic.primary_mac_address.mac_address | ascii_downcase)})
+  | from_entries' >"$work/node-macs.json"
 
-mv "$work/class-inputs.json" "$out/class-inputs.json"
-mv "$work/node-macs.json" "$out/node-macs.json"
-printf 'Wrote %s/class-inputs.json for: %s\n' "${out#"$root"/}" "$(jq -r 'keys | join(", ")' "$out/class-inputs.json")"
+mv "$work/class-inputs.json" "$fleet_dir/class-inputs.json"
+mv "$work/node-macs.json" "$fleet_dir/node-macs.json"
+printf 'Wrote %s/class-inputs.json for: %s\n' "${fleet_dir#"$root"/}" "$(jq -r 'keys | join(", ")' "$fleet_dir/class-inputs.json")"

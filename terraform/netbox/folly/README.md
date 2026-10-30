@@ -6,8 +6,6 @@ For each node it declares the device with its site, role, platform, device type 
 
 Terraform creates a device as `planned` and never updates it in place, so the status, `desired_action` and the fields talos-attest and fleet-controller write stay theirs. `restapi_object.declared` sends a node's serial, model, primary IPv4 and declared custom fields as a PATCH of those keys alone, when the node is created or its entry changes. Removing an entry deletes the device, its address and its cable.
 
-`imports.tf` adopts the objects NetBox held before this root.
-
 ## Develop
 
 ```bash

@@ -296,7 +296,7 @@ in
           else
             "a node does not have one alias by EK hash and one by LDevID subject CN"
         )
-        # The LDevID aliases follow machines.yaml, and shale's TPM 1.2 attests nothing.
+        # The LDevID aliases follow the nodes file, and shale's TPM 1.2 attests nothing.
         (if aliases both "shale" == [ ] then null else "shale, with a TPM 1.2, has a SPIRE node alias")
         (
           let
@@ -316,7 +316,7 @@ in
     in
     require "spire-devid" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
-  # nix/lib/inventory.nix reads machines.yaml without a YAML parser, so it must take the export's
+  # nix/lib/inventory.nix reads the nodes file without a YAML parser, so it must take the file's
   # shape exactly and throw on anything else rather than drop or merge a machine.
   inventory-reader =
     let
@@ -324,52 +324,78 @@ in
         text:
         import ./inventory.nix {
           inherit lib;
-          path = builtins.toFile "machines.yaml" text;
+          path = builtins.toFile "nodes.yaml" text;
         };
       reads = text: (builtins.tryEval (builtins.deepSeq (read text) true)).success;
+      models = "models:\n  m:\n    disk: /dev/sda\n    tpm: \"2.0\"\n    name: M\n";
       sample = read ''
         # A comment.
-        machines:
-          riptide: # g5
-            sku: 9GB06UC#ABA
+        models:
+          g5: # a model
+            name: HP EliteDesk 800 G5 Desktop Mini
+            disk: /dev/nvme0n1
             tpm: "2.0"  # quoted, then a comment
-            class: worker-g5          # talos_class
-            bmc:
-              type: amt
-            ek_hash_ecc: null
             amt: true
+            secure_boot: true
+        nodes:
+          riptide: # g5
+            model: g5
+            serial: MXL0172Q6L
+            class: worker-g5          # talos_class
+            nested:
+              type: amt
+            address: 10.0.0.12
           "quoted":
-            tpm: '2.0'
+            model: g5
+            tpm: '1.2'
+            amt: false
         other:
           ignored: 1
       '';
       refused = {
-        "a tab-indented key" = "machines:\n  a:\n\ttpm: x\n";
-        "a key three spaces in" = "machines:\n  a:\n   tpm: x\n";
-        "a flow sequence" = "machines:\n  a:\n    tags: [a, b]\n";
-        "a deep line under a scalar" = "machines:\n  a:\n    tpm: x\n      y: z\n";
-        "a repeated machine" = "machines:\n  a:\n    tpm: x\n  a:\n    tpm: y\n";
-        "a repeated key" = "machines:\n  a:\n    tpm: x\n    tpm: y\n";
-        "a key before any machine" = "machines:\n    tpm: x\n";
-        "no machines key" = "other:\n  a: 1\n";
+        "a tab-indented key" = models + "nodes:\n  a:\n\tmodel: m\n";
+        "a key three spaces in" = models + "nodes:\n  a:\n   model: m\n";
+        "a flow sequence" = models + "nodes:\n  a:\n    model: m\n    tags: [a, b]\n";
+        "a deep line under a scalar" = models + "nodes:\n  a:\n    model: m\n      y: z\n";
+        "a repeated node" = models + "nodes:\n  a:\n    model: m\n  a:\n    model: m\n";
+        "a repeated key" = models + "nodes:\n  a:\n    model: m\n    model: m\n";
+        "a key before any node" = models + "nodes:\n    model: m\n";
+        "an unknown model" = models + "nodes:\n  a:\n    model: other\n";
+        "no models key" = "nodes:\n  a:\n    model: m\n";
+        "no nodes key" = models;
       };
       failures =
         lib.optional (
           sample != {
             riptide = {
-              sku = "9GB06UC#ABA";
-              tpm = "2.0";
+              model = "g5";
+              serial = "MXL0172Q6L";
               class = "worker-g5";
-              ek_hash_ecc = null;
+              address = "10.0.0.12";
+              disk = "/dev/nvme0n1";
+              tpm = "2.0";
               amt = true;
+              secure_boot = true;
             };
-            quoted.tpm = "2.0";
+            quoted = {
+              model = "g5";
+              disk = "/dev/nvme0n1";
+              tpm = "1.2";
+              amt = false;
+              secure_boot = true;
+            };
           }
         ) "the sample reads as ${builtins.toJSON sample}"
         ++ lib.optional (
-          read "machines:\r\n  a:\r\n    tpm: \"2.0\"\r\n" != { a.tpm = "2.0"; }
+          read (lib.replaceStrings [ "\n" ] [ "\r\n" ] (models + "nodes:\n  a:\n    model: m\n")) != {
+            a = {
+              model = "m";
+              disk = "/dev/sda";
+              tpm = "2.0";
+            };
+          }
         ) "CRLF line ends change the result"
-        ++ lib.optional (read "machines: {}\n" != { }) "an empty fleet does not read as no machines"
+        ++ lib.optional (read (models + "nodes: {}\n") != { }) "an empty fleet does not read as no nodes"
         ++ lib.mapAttrsToList (what: _: "${what} is accepted") (lib.filterAttrs (_: reads) refused);
     in
     require "inventory-reader" (failures == [ ]) (lib.concatStringsSep "; " failures);

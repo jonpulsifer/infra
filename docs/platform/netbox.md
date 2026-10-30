@@ -18,7 +18,6 @@ Every part runs on capsule.
 | nginx | Serves `/static/` and proxies gunicorn at `127.0.0.1:8080` |
 | `netbox-serve` | Tailscale serve: TLS on capsule's tailnet address, proxied to nginx |
 | `netbox-backup` | Nightly database dump and media archive to Garage, 03:15 Halifax |
-| `netbox-drift` | Hourly check of folly's nodes against NetBox |
 
 ## Use it
 
@@ -30,7 +29,7 @@ To add a node, add its entry to `clusters/folly/inventory/nodes.yaml` in a pull 
 
 ## Data
 
-`terraform/netbox/folly` applies the nodes file: each node's device, address, cable and declared custom fields, the node models' device types, every custom field and choice set on `dcim.device`, and the event rule `fleet-controller-device-update`, which posts every device update to the fleet controller's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The webhook's secret, the value the controller verifies, is set in NetBox by hand. `mise run netbox:seed` imports the site, the prefixes, the anchors and the switch from the repo, and tags what it writes `managed-by: git-seed`. It also writes the nodes, custom fields and webhook this root declares, from the export. [Hardware inventory](../reference/inventory.md) covers the nodes file, the export and the drift check.
+`terraform/netbox/folly` applies the nodes file: each node's device, address, cable and declared custom fields, the node models' device types, every custom field and choice set on `dcim.device`, and the event rule `fleet-controller-device-update`, which posts every device update to the fleet controller's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The webhook's secret, the value the controller verifies, is set in NetBox by hand. The site, the roles, the platforms, the prefixes, the anchors and the switch are set in NetBox by hand, and their objects carry the tag `managed-by: git-seed`. [Hardware inventory](../reference/inventory.md) covers the nodes file and the drift check.
 
 ## Backups
 
@@ -52,14 +51,11 @@ To restore, stop `netbox.service`, run `pg_restore --clean --if-exists -d netbox
 | --- | --- |
 | `CapsuleNetboxDown` | NetBox, its worker, PostgreSQL, Redis or the Tailscale serve unit is not active |
 | `HostBackupStale` with `source="netbox"` | No backup has succeeded for a day and two hours |
-| `NetboxNodeDrift`, `NetboxExportDiffers`, `NetboxDriftCheckStale` | See [Drift](../reference/inventory.md#drift) |
 
 ## Where it lives
 
 - `nix/services/netbox.nix`: NetBox, nginx, Tailscale serve, the superuser bootstrap and the backup
-- `nix/services/netbox-drift.nix`: the drift check
 - `terraform/netbox/folly`: the nodes, the custom fields and the webhook
-- `scripts/netbox-seed.sh` and `scripts/netbox-export.sh`: the seed and the export
 - `nix/secrets/capsule.sops.yaml`: `netbox/` and `garage/keys/netbox/`
 - `nix/services/garage.nix`: the `netbox` bucket and key, which spore's SOPS file holds for the bootstrap
 - `clusters/folly/monitoring/capsule.yaml`: the alerts

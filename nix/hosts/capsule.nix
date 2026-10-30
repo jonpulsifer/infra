@@ -6,7 +6,6 @@
     ../profiles/pi5-nvme.nix
     ../services/garage.nix
     ../services/netbox.nix
-    ../services/netbox-drift.nix
     ../system/sops.nix
   ];
 
