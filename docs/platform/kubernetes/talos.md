@@ -29,7 +29,7 @@ optiplex, riptide and shale boot Image Factory systemd-boot UKI installs, with S
 - `tpm_nodes` changes only the label and the install render that `install_inputs` and fleet-controller use. It is safe on a running node.
 - Run `talosctl apply-config --dry-run` with the render before a `VolumeConfig` change reaches a running node.
 - A network document change applies to a running node without a reboot: `talos_machine` applies its config in Talos's `AUTO` mode, which Talos 1.14 runs as `NO_REBOOT`, and reboots a node only for a new installer image.
-- After a static address reaches a node, `talosctl --nodes <addr> get linkaliasspecs` names `net0` on its NIC and `talosctl --nodes <addr> get addresses` shows the address from the `configuration` layer. A box with two physical NICs gets no alias and keeps DHCP; give it a narrower selector before its DHCP reservation goes.
+- Before a static address reaches a node, run `talosctl --nodes <addr> get links` and make sure it lists one physical link: type `ether` with an empty kind, since a bond, VLAN or bridge has one. After it reaches the node, `talosctl --nodes <addr> get linkaliasspecs` names `net0` on its NIC and `talosctl --nodes <addr> get addresses` shows the address from the `configuration` layer. A box with two physical NICs gets no alias and keeps DHCP; give it a narrower selector before its DHCP reservation goes.
 
 ## Where it lives
 
