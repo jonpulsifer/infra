@@ -11,8 +11,9 @@ resource "netbox_custom_field_choice_set" "fleet" {
 
 locals {
   # Every custom field on dcim.device. Git declares talos_class, bmc_type,
-  # install_disk, tpm_version, amt and secure_boot_expected (devices.tf); the
-  # owner sets desired_action; talos-attest and fleet-controller write the rest.
+  # install_disk, tpm_version, amt, secure_boot_expected and the approved EK
+  # binding (devices.tf); the owner sets desired_action; talos-attest and
+  # fleet-controller write the rest.
   custom_fields = {
     bios_version         = { type = "text", label = "BIOS version", group = "Hardware", weight = 100, description = "SMBIOS BIOS version the node reports" }
     sku                  = { type = "text", label = "SKU", group = "Hardware", weight = 110, description = "SMBIOS SKU number" }
@@ -21,6 +22,8 @@ locals {
     secure_boot_expected = { type = "boolean", label = "Secure Boot expected", group = "Hardware", weight = 140, description = "The firmware state the node is expected to boot in" }
     smbios_uuid          = { type = "text", label = "SMBIOS UUID", group = "Hardware", weight = 150, description = "SMBIOS UUID of the node, written by talos-attest on an intake pass; the Talos config URL names it" }
     tpm_version          = { type = "text", label = "TPM version", group = "Identity", weight = 200, regex = "^(1\\.2|2\\.0)$", description = "TPM spec version; only 2.0 seals disks and attests" }
+    approved_ek_hash     = { type = "text", label = "Approved EK hash", group = "Identity", weight = 205, regex = "^[0-9a-f]{64}$", description = "The RSA EK the nodes file approves for the node, as fleetd's EK hash: SHA-256 of its DER SubjectPublicKeyInfo. Git declares it; fleetd admits an intake only against it" }
+    approved_ek_hash_ecc = { type = "text", label = "Approved EK hash (ECC)", group = "Identity", weight = 206, regex = "^[0-9a-f]{64}$", description = "The ECC EK the nodes file approves for the node, as fleetd's EK hash: SHA-256 of its DER SubjectPublicKeyInfo. Git declares it; fleetd admits an intake only against it" }
     ek_hash              = { type = "text", label = "EK hash", group = "Identity", weight = 210, regex = "^[0-9a-f]{64}$", description = "SHA-256 of the TPM endorsement key public area" }
     ek_hash_ecc          = { type = "text", label = "EK hash (ECC)", group = "Identity", weight = 215, regex = "^[0-9a-f]{64}$", description = "SHA-256 of the ECC TPM endorsement key public area" }
     ek_issuer            = { type = "text", label = "EK issuer", group = "Identity", weight = 220, description = "Issuer of the TPM endorsement key certificate" }

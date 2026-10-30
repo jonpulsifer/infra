@@ -42,6 +42,18 @@ data "netbox_site" "folly" {
       error_message = "No two nodes may share a serial."
     }
     precondition {
+      condition     = alltrue([for n in values(local.nodes) : alltrue([for k in keys(n) : contains(local.approved_ek_keys, k) if startswith(k, "approved_")])])
+      error_message = "A node's approved EK binding takes only approved_ek_rsa2048 and approved_ek_eccp256."
+    }
+    precondition {
+      condition     = alltrue([for h in local.approved_eks : can(regex("^[0-9a-f]{64}$", h))])
+      error_message = "An approved EK hash must be 64 lowercase hex characters, fleetd's EK hash: the SHA-256 of the EK's DER SubjectPublicKeyInfo."
+    }
+    precondition {
+      condition     = length(distinct(local.approved_eks)) == length(local.approved_eks)
+      error_message = "No two nodes may approve the same EK."
+    }
+    precondition {
       condition     = alltrue([for name in keys(local.nodes) : can(regex("^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", name)) && !startswith(name, "intake-")])
       error_message = "A node's name must be a hostname that does not start with intake-, which marks a machine NetBox has not bound."
     }

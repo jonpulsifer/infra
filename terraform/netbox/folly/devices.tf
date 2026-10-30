@@ -109,7 +109,8 @@ resource "netbox_cable" "node" {
 }
 
 # What git declares of a device after it exists: its serial, model, primary
-# IPv4 and declared custom fields. A PATCH sends only these keys, so the fields
+# IPv4 and declared custom fields, the approved EK binding among them, which
+# a node without one sends as null. A PATCH sends only these keys, so the fields
 # the services write are never part of a request. Terraform writes them when a
 # node is created or its entry changes, and does not read them back.
 resource "restapi_object" "declared" {
@@ -138,6 +139,10 @@ resource "restapi_object" "declared" {
       amt                  = each.value.amt
       secure_boot_expected = each.value.secure_boot
       expected_port        = tonumber(each.value.switch_port)
+      approved_ek_hash     = lookup(each.value, "approved_ek_rsa2048", null)
+      approved_ek_hash_ecc = lookup(each.value, "approved_ek_eccp256", null)
     }
   })
+
+  depends_on = [netbox_custom_field.device]
 }

@@ -1,0 +1,26 @@
+# A nodes file fixture for inventory.tftest.hcl.
+models:
+  box:
+    name: Test Box
+    manufacturer: test
+    interface: eth0
+    disk: /dev/sda
+    tpm: "2.0"
+    amt: false
+    secure_boot: true
+nodes:
+  one:
+    model: box
+    serial: SER-1
+    class: worker-g5
+    switch_port: 1
+    address: 192.0.2.10
+    bmc: none
+    approved_ek_rsa: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  two:
+    model: box
+    serial: SER-2
+    class: worker-g5
+    switch_port: 2
+    address: 192.0.2.11
+    bmc: none

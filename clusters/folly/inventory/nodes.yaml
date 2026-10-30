@@ -16,9 +16,18 @@
 # address its IPv4 address inside K8S_NODE_CIDR in ../config/cluster-topology.json,
 # and bmc its out-of-band management (amt or none).
 #
-# Runtime facts stay out of this file: MACs, EK hashes, attestation results,
-# BIOS versions, the lifecycle status and desired_action live in NetBox, where
-# the services and the owner write them.
+# approved_ek_rsa2048 and approved_ek_eccp256, each optional, are the node's
+# approved EK binding: the hash of the TPM's RSA and ECC endorsement key, as
+# fleetd hashes an EK (lowercase hex SHA-256 of its DER SubjectPublicKeyInfo).
+# fleetd admits a planned node only when its TPM proves every approved EK, so
+# a node without one waits. Take the hashes from independent evidence of the
+# chassis, a receiving scan or the supplier's record, never from the claim
+# fleetd shows alone; `mise run attest:approve <serial>` prints the lines to
+# compare. No two nodes may approve the same EK.
+#
+# Runtime facts stay out of this file: MACs, the EK hashes fleetd observes,
+# attestation results, BIOS versions, the lifecycle status and desired_action
+# live in NetBox, where the services and the owner write them.
 #
 # Keep every value a scalar on its own line, two spaces in for a key and four
 # for a field, with no flow collections or nested blocks.
