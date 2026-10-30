@@ -1,8 +1,8 @@
-# folly's netboot iPXE, unsigned. Firmware PXE loads it from an anchor over TFTP, and its embedded
+# folly's netboot iPXE, unsigned. Firmware PXE loads it from spore over TFTP, and its embedded
 # script chains Smee's script for the booting MAC. Smee has none unless a Workflow allows the MAC to
 # netboot, so a node with no Workflow, or one whose Workflow has finished, gets the menu below, from
-# the boot VIP or, when no anchor holds it, from spore's own address. Its default boots HookOS as a
-# Hardware's script does (apps/fleet-controller), and the agent waits for a Workflow.
+# spore's bootstrap address. Its default boots HookOS as a Hardware's script does (apps/fleetd),
+# which attests and waits for a Workflow.
 # .github/workflows/talos-images.yml signs iPXE with the Talos UKI key. The firmware verifies every
 # image iPXE loads.
 {
@@ -25,28 +25,23 @@ let
   script = writeText "folly-netboot.ipxe" ''
     #!ipxe
     dhcp || goto failed
-    set boot-url http://${lab.bootstrap.vip}/talos/folly
-    set spore-url http://${spore}/talos/folly
+    set boot-url http://${spore}/talos/folly
     chain http://${spore}:7080/ipxe/script/''${net0/mac}/auto.ipxe || goto menu
     :menu
     menu folly netboot
-    item hookos Boot HookOS and wait for a Workflow
+    item hookos Boot HookOS, attest and wait for a Workflow
     item enroll Enroll the lab's Secure Boot keys (firmware in Setup Mode)
     item exit Back to the firmware
     choose --timeout 10000 --default hookos target || set target hookos
     goto ''${target}
     :hookos
     imgfree
-    chain --autofree ''${boot-url}/hookos-amd64-secureboot-uki.efi ${hookos.cmdline} || goto spore
+    chain --autofree ''${boot-url}/hookos-amd64-secureboot-uki.efi ${hookos.cmdline} || goto failed
     exit 1
     :enroll
-    sanboot --no-describe ''${boot-url}/metal-amd64-secureboot.iso || goto spore
+    sanboot --no-describe ''${boot-url}/metal-amd64-secureboot.iso || goto failed
     :exit
     exit 1
-    :spore
-    iseq ''${boot-url} ''${spore-url} && goto failed ||
-    set boot-url ''${spore-url}
-    goto ''${target}
     :failed
     echo folly netboot failed (''${errno}), back to the firmware
     exit 1

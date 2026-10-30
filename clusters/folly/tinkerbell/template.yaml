@@ -1,25 +1,25 @@
-# The one Template every fleet-controller Workflow runs in HookOS. Its hardwareMap says what the
-# run does: attest, wipe, retire and install (each true/false), installer_image, attest_url and
-# ntp_server. With the controller's installs on, a provision of a worker class attests, wipes,
-# installs Talos and boots the disk; a provision the controller does not install (installs off, a
-# control plane, a TPM 1.2 node) attests and wipes, and the node boots the network into HookOS
-# (the iPXE default item) until a Workflow runs; an attest leaves the disk alone; a wipe wipes and
-# netboots into HookOS; a retirement wipes and powers the node off. Nothing in git starts a run: the controller on spore
-# (apps/fleet-controller) creates a Workflow when a NetBox device's desired_action is set, and
-# netboot goes off when the run succeeds, so Smee has no script for the MAC on the next boot.
+# The one Template every fleetd Workflow runs in HookOS. Its hardwareMap says what the run does:
+# wipe, retire and install (each true/false) and installer_image. HookOS attests on every boot,
+# before tink-agent waits for work (images/tink-agent-autoid), so no action attests: an intake
+# pass's confirm is where fleetd starts the provision and answers the install code. With fleetd's
+# installs on, a provision of a worker class wipes, installs Talos and boots the disk; a provision
+# fleetd does not install (installs off, a control plane, a TPM 1.2 node) wipes, and the node boots
+# the network into HookOS (the iPXE default item) until a Workflow runs; an attest only netboots
+# HookOS, which attests; a wipe wipes and netboots into HookOS; a retirement wipes and powers the
+# node off. Nothing in git starts a run: fleetd on spore (apps/fleetd) creates a Workflow when a
+# NetBox device's desired_action is set or an intake pass admits it, and netboot goes off when the
+# run succeeds, so Smee has no script for the MAC on the next boot.
 #
-# The actions run images/tink-reprovision-tools and images/tink-attest, which the containers
-# workflow's delivery pins by digest. An all-zero digest means the image has not been delivered yet
-# and the run cannot pull it. HookOS's 6.6 kernel builds in the TPM drivers and securityfs, and the
-# attest action mounts securityfs itself, since a container gets none.
+# The actions run images/tink-reprovision-tools, which the containers workflow's delivery pins by
+# digest. An all-zero digest means the image has not been delivered yet and the run cannot pull it.
 #
 # tink-agent passes an action's command to Docker as the container's arguments and keeps the
 # image's entrypoint, and it substitutes nothing at run time: the Template is rendered once, from
-# the Hardware and the hardwareMap, when the Workflow starts. The install code exists only after the
-# attest action, as /tmp/fleet/install_code on HookOS, so the install action is a shell in
-# tink-reprovision-tools that reads it and runs the installer image through HookOS's Docker. Each
-# action gets a fresh /sys, so an action that needs efivarfs mounts it for itself; the installer,
-# which has no shell, gets it as a volume of the local driver.
+# the Hardware and the hardwareMap, when the Workflow starts. The install code exists only after
+# the boot's attestation, as /worker/fleet/install_code on HookOS, so the install action is a shell
+# in tink-reprovision-tools that reads it and runs the installer image through HookOS's Docker.
+# Each action gets a fresh /sys, so an action that needs efivarfs mounts it for itself; the
+# installer, which has no shell, gets it as a volume of the local driver.
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Template
@@ -38,61 +38,14 @@ spec:
         environment:
           DISK: "{{ index .Hardware.Disks 0 }}"
           MAC: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
-          ATTEST: "{{ .attest }}"
           WIPE: "{{ .wipe }}"
           RETIRE: "{{ .retire }}"
           # Tinkerbell renders with missingkey=error, so a Workflow from a controller that sets no
           # install keys reads them as no install.
           INSTALL: '{{ or (index . "install") "false" }}'
           INSTALLER_IMAGE: '{{ or (index . "installer_image") "" }}'
-          ATTEST_URL: "{{ .attest_url }}"
-          NTP_SERVER: "{{ .ntp_server }}"
           INSTALL_CODE_FILE: /tmp/fleet/install_code
         actions:
-          # The attest service checks its certificate's dates against the machine's clock, and a
-          # machine off the shelf has none worth trusting. The anchors' chrony answers at the boot
-          # VIP; the RTC keeps the result for the Talos boot that follows.
-          - name: set-clock
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
-            timeout: 120
-            command:
-              - /bin/sh
-              - -c
-              - |
-                set -eu
-                log() { echo "set-clock: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "set-clock: $*" >"$t" 2>/dev/null || true; done; }
-                if ! command -v ntpd >/dev/null; then
-                  log "no ntpd in the image; the clock stays $(date -u)"
-                  exit 0
-                fi
-                if timeout 30 ntpd -q -n -p "$NTP_SERVER"; then
-                  hwclock --systohc --utc || log "the RTC refused the write"
-                  log "set from $NTP_SERVER: $(date -u)"
-                else
-                  log "$NTP_SERVER did not answer; the clock stays $(date -u)"
-                fi
-          # At the end of a full intake talos-attest answers the install code, which tink-attest
-          # writes to /tmp/fleet/install_code for the install action.
-          # The host's network namespace lets it read the boot NIC's address and the switch's LLDP
-          # frame, which it reports signed by the session's AK.
-          - name: attest
-            namespaces:
-              network: host
-            image: ghcr.io/jonpulsifer/tink-attest@sha256:f1f76b5c49d5d1e72d5e423ef54b7841df7a5acfec4f110d04da891640e254ca
-            timeout: 600
-            volumes:
-              - /tmp/fleet:/tmp/fleet
-            command:
-              - /bin/sh
-              - -c
-              - |
-                set -eu
-                if [ "$ATTEST" != true ]; then
-                  for t in /dev/tty0 /dev/ttyS0; do echo "attest: skipped for this run" >"$t" 2>/dev/null || true; done
-                  exit 0
-                fi
-                mountpoint -q /sys/kernel/security || mount -t securityfs securityfs /sys/kernel/security
-                exec /usr/local/bin/tink-attest
           - name: wipe-disk
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 600
@@ -128,7 +81,7 @@ spec:
             timeout: 900
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
-              - /tmp/fleet:/tmp/fleet
+              - /worker/fleet:/tmp/fleet
             command:
               - /bin/sh
               - -c
@@ -140,7 +93,7 @@ spec:
                   exit 0
                 fi
                 if [ ! -s "$INSTALL_CODE_FILE" ]; then
-                  log "no install code: the attest step wrote none (no full intake, or the controller refused the render)"
+                  log "no install code: the boot's attestation got none (no intake pass, or fleetd refused the render)"
                   exit 1
                 fi
                 code=$(cat "$INSTALL_CODE_FILE")
