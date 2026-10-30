@@ -17,6 +17,12 @@
 // due, with -check (the default), it runs the daily check: the same LAK-signed
 // quote and event log, which the service judges and records, and no new
 // certificate. It exits 0 when the node has no LDevID.
+//
+// `tink-attest inspect` prints the platform's model and firmware, the TPM's
+// maker, vendor string and firmware version, and for each EK profile the
+// certificate, EK Template and EK Nonce indexes and the EK discovery makes
+// from them. It contacts no service, writes no NV and makes no persistent
+// object.
 package main
 
 import (
@@ -67,6 +73,13 @@ func logf(format string, args ...any) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "inspect" {
+		if err := inspect(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "inspect: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "renew" {
 		if err := renew(os.Args[2:]); err != nil {
 			printf("RENEWAL FAILED: %v", err)

@@ -88,6 +88,16 @@ and not answering, every request is 503 `refused`.
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at, ldevid_serial}`, NetBox's when it answers |
 | `POST /v1/renew`, `POST /v1/renew/{session}/evidence` | The renewal, and with `"check": true` the daily check, from the running node |
 
+The client sends the ECC NIST P256 and RSA 2048 EKs whose certificates the TPM holds in the TCG EK
+Credential Profile's Low Range (version 2.7, 2.2.2.4), or its default RSA EK alone when it holds
+none. It builds each EK from the profile's default template, or from the EK Template and EK Nonce in
+NV (2.2.2.6), checks that the certificate names the key it made, and recreates the key from that
+template for each activation. Only an index that is not defined falls back to the default; an
+unreadable or malformed index, a certificate for another key, an unsupported template and a TPM
+with certificates only in the High Range each fail the run before it reaches fleetd.
+`tink-attest inspect` prints the platform, the TPM's maker and firmware, and what discovery finds
+for each profile, and changes nothing on the TPM.
+
 A planned stub binds to the first box whose pass names its serial: fleetd puts the claimed MAC on
 the stub's interface and never replaces a pin on file. A serial NetBox does not know waits for the
 owner's approval, then gets a `planned` device once its TPM activates a credential.
