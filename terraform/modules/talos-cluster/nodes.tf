@@ -1,7 +1,7 @@
 # Each patch is one talosctl --config-patch-<type> file, in this order.
 # config_patches is what a running node gets; install_patches is the render
 # for a fresh install, which the install_inputs output and the parity check
-# use; the enrollment server renders the same from render_inputs.
+# use; fleet-controller renders the same from render_inputs.
 locals {
   config_patches = { for name, n in var.nodes : name => concat(
     [local.cluster_patch],

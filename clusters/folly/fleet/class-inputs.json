@@ -20,7 +20,7 @@
       "\"cluster\":\n  \"etcd\":\n    \"extraArgs\":\n      \"listen-metrics-urls\": \"http://0.0.0.0:2381\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"extraArgs\":\n  \"bind-address\": \"0.0.0.0\"\n\"kind\": \"KubeControllerManagerConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"extraArgs\":\n  \"bind-address\": \"0.0.0.0\"\n\"kind\": \"KubeSchedulerConfig\"\n"
     ],
     "dns_zone": "lolwtf.ca",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.5",
     "kubernetes_version": "v1.36.3",
     "labels": {},
     "machine_type": "controlplane",
@@ -49,7 +49,7 @@
       "\"machine\":\n  \"logging\":\n    \"destinations\":\n    - \"endpoint\": \"tcp://127.0.0.1:6050/\"\n      \"format\": \"json_lines\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KmsgLogConfig\"\n\"name\": \"vector\"\n\"url\": \"tcp://127.0.0.1:6051/\"\n"
     ],
     "dns_zone": "lolwtf.ca",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.5",
     "kubernetes_version": "v1.36.3",
     "labels": {},
     "machine_type": "worker",
@@ -78,7 +78,7 @@
       "\"machine\":\n  \"logging\":\n    \"destinations\":\n    - \"endpoint\": \"tcp://127.0.0.1:6050/\"\n      \"format\": \"json_lines\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KmsgLogConfig\"\n\"name\": \"vector\"\n\"url\": \"tcp://127.0.0.1:6051/\"\n"
     ],
     "dns_zone": "lolwtf.ca",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.5",
     "kubernetes_version": "v1.36.3",
     "labels": {},
     "machine_type": "worker",

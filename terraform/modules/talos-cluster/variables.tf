@@ -70,7 +70,7 @@ variable "nodes" {
     installer_image = optional(string)
     # A change replaces the node's talos_machine (see nodes.tf).
     install_generation = optional(string)
-    # talos-enroll is installing the node: the root applies no config to it
+    # fleet-controller is installing the node: the root applies no config to it
     # until it has joined and this is unset.
     enrolling = optional(bool, false)
   }))

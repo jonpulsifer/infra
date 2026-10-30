@@ -37,7 +37,7 @@ output "install_inputs" {
 }
 
 # What a fresh install's config is rendered from, short of the node's own
-# documents and the secrets: the enrollment server renders a node of a class
+# documents and the secrets: fleet-controller renders a node of a class
 # from these, in this order, with the node document between the cluster
 # patches and the class's own. The node document it renders (hostname,
 # install target, certSANs, labels) mirrors node_docs in patches.tf, and the
