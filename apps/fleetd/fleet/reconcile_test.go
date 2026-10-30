@@ -1232,3 +1232,63 @@ func TestInstallingTakesEveryAttestedVerdict(t *testing.T) {
 		}
 	}
 }
+
+func overdueWorkflow(name, stop, state, action string) Object {
+	wf := workflowObject(name, "riptide", "provision", testNow.UTC().Format(time.RFC3339), state)
+	st, _ := wf["status"].(map[string]any)
+	if st == nil {
+		st = map[string]any{}
+		wf["status"] = st
+	}
+	if stop != "" {
+		st["globalExecutionStop"] = stop
+	}
+	if action != "" {
+		st["currentState"] = map[string]any{"actionName": action}
+	}
+	return wf
+}
+
+// A Workflow more than a pass past its global timeout is annotated so that
+// Tinkerbell's controller ends it, and journaled once. One inside the pass,
+// a finished one and one with no usable deadline are left alone.
+func TestOverdueWorkflowsAreNudged(t *testing.T) {
+	at := func(d time.Duration) string { return testNow.Add(d).UTC().Format(time.RFC3339) }
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{
+		wfBase + "late":     overdueWorkflow("late", at(-10*time.Minute), "STATE_RUNNING", "reboot"),
+		wfBase + "recent":   overdueWorkflow("recent", at(-30*time.Second), "STATE_RUNNING", "install"),
+		wfBase + "done":     overdueWorkflow("done", at(-10*time.Minute), "STATE_SUCCESS", "reboot"),
+		wfBase + "nodeadln": overdueWorkflow("nodeadln", "", "STATE_RUNNING", "install"),
+		wfBase + "garbled":  overdueWorkflow("garbled", "soon", "STATE_RUNNING", "install"),
+	}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	for range 2 {
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"late", "recent", "done", "nodeadln", "garbled"} {
+		wf := kube.get(wfBase + name)
+		if wf == nil {
+			t.Fatalf("%s was deleted", name)
+		}
+		a, _ := wf.metadata()["annotations"].(map[string]any)
+		_, got := a[OverdueAnnotation]
+		if want := name == "late"; got != want {
+			t.Errorf("%s annotated = %v, want %v", name, got, want)
+		}
+	}
+	if len(nb.journals) != 1 {
+		t.Fatalf("journals %v", nb.journals)
+	}
+	c := nb.journals[0]["comments"].(string)
+	if !strings.Contains(c, "late") || !strings.Contains(c, "reboot's report was lost") {
+		t.Errorf("journal %q", c)
+	}
+	late := kube.get(wfBase + "late")
+	if _, ok := late["spec"]; ok || late.State() != "STATE_RUNNING" {
+		t.Errorf("the patch touched more than metadata: %v", late)
+	}
+}
