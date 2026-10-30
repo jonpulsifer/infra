@@ -96,3 +96,22 @@ machines:
       address: 10.3.0.13
     ek_hash: 1647444a4888e009ff0b496a4d2c7ebb5be340eeba8da9c771ce807cb0ccd1be
     ek_hash_ecc: c96f00a01e941e1114e2008e42ee3169b2eb417540836a499641f8c0605079fc
+  surge:
+    model: HP EliteDesk 800 G5 Desktop Mini
+    sku: 8MD97US#ABA
+    serial: MXL0443HPB
+    bios: R21 Ver. 02.25.00
+    mac: 38:22:e2:19:26:b5
+    switch_port: 12
+    disk: /dev/nvme0n1
+    tpm: "2.0"
+    amt: true
+    secure_boot: true
+    class: worker-g5
+    status: active
+    address: 10.3.0.14
+    bmc:
+      type: amt
+      address: 10.3.0.14
+    ek_hash: 364b905a1e446a03d1d29209c90970e7209fc8cb539f30a863bf76c4d090672e
+    ek_hash_ecc: dc5083485a884f4383cfd6f40e73b65897dedded3652b779ab46b81fcb19260b
