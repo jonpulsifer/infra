@@ -287,7 +287,7 @@ tests:
               verdict: refused
             exp_annotations:
               message: "riptide's daily check ended in refused"
-              description: "quarantine: the TPM quoted a boot that misses talos-attest's renewal policy, and NetBox has the device failed. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u talos-attest on the anchors."
+              description: "quarantine: the TPM quoted a boot that misses talos-attest's renewal policy: NetBox's attest_verdict reads quarantined, the anchors serve no LDevID for it, and fleet-controller cordons it. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u talos-attest on the anchors."
       - eval_time: 80m
         alertname: TalosAttestCheckFailed
         exp_alerts: []
