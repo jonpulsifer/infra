@@ -78,6 +78,8 @@ nodes:
     switch_port: 8
     address: 10.3.0.12
     bmc: amt
+    approved_ek_rsa2048: a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1
+    approved_ek_eccp256: 9dbf73ddfd2f91eb92b0d7b2027344c6fe1dea0ea3ed2b4997dd5268de3eb7ba
   swell:
     model: hp-elitedesk-800-g5-desktop-mini
     serial: MXL0154VD6
@@ -92,3 +94,5 @@ nodes:
     switch_port: 12
     address: 10.3.0.14
     bmc: amt
+    approved_ek_rsa2048: 364b905a1e446a03d1d29209c90970e7209fc8cb539f30a863bf76c4d090672e
+    approved_ek_eccp256: dc5083485a884f4383cfd6f40e73b65897dedded3652b779ab46b81fcb19260b
