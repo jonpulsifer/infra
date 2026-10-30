@@ -3,7 +3,7 @@ title: Retire a node
 description: Drain a folly worker, back up its volumes, and set its NetBox device to decommissioning, so that fleet-controller wipes it and the exports drop it.
 ---
 
-Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleet-controller](../apps/fleet-controller.md) then wipes the system disk and powers the node off, and sets the device to `offline`, which NetBox keeps for history. A pull request then drops the node from the inventory export and from `NODE_ADDRESSES`.
+Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleet-controller](../apps/fleet-controller.md) then wipes the system disk and powers the node off, and sets the device to `offline`, which NetBox keeps for history. A pull request then drops the node from the inventory export, which carries its address.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle, and the drain and the `Node` deletion act on the cluster.
@@ -75,10 +75,9 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
    Result: `wrote clusters/folly/inventory/machines.yaml`, with no entry for `<node>`.
 
-2. Remove `<node>` from `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json`.
-3. If `nix/hosts/spore.nix` pins an EK hash for `<node>`, remove it.
-4. To keep MAC auth on the node's switch port, add the port to `spare_ports` in `terraform/network/unifi/folly/bootstrap.tf`. A port that no list names keeps its last override, an open Kubernetes port.
-5. Make sure that the inventory and the addresses agree.
+2. If `nix/hosts/spore.nix` pins an EK hash for `<node>`, remove it.
+3. To keep MAC auth on the node's switch port, add the port to `spare_ports` in `terraform/network/unifi/folly/bootstrap.tf`. A port that no list names keeps its last override, an open Kubernetes port.
+4. Make sure that the export and the topology agree.
 
    ```bash
    mise run netbox:check
@@ -86,12 +85,12 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
    Result: no output.
 
-6. Open a pull request. Comment `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos`.
+5. Open a pull request. Comment `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos`.
 
    Result: the plans delete the node's RADIUS user, its DNS record and its `talos_machine`.
 
-7. Comment `atlantis apply`.
-8. Deploy spore from `main`, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
+6. Comment `atlantis apply`.
+7. Deploy spore from `main`, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
 
 ## What each system does
 
@@ -110,7 +109,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | No `retire-` `Workflow` | The device has no primary MAC or `install_disk`, or fleet-controller is down | Read the device's journal, and `journalctl -u fleet-controller` on spore |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, and fix the BMC |
 | The device stays `decommissioning` after a failed run | The controller journals a failed retirement once and stops | Read the `Workflow`'s message. Wipe the disk at the machine, then set the status to `offline` |
-| `netbox:check` prints `in NODE_ADDRESSES, not exported with an address` | `NODE_ADDRESSES` still names the node | Remove it |
+| `netbox:check` prints `API_SERVER_IP ... is not a node address` | The retired node held the API server address | Keep the control plane; retire a worker |
 | `NetboxExportDiffers` fires | The export pull request has not merged for two hours | Merge it |
 
 ## Related

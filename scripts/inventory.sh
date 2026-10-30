@@ -3,14 +3,13 @@
 # prints one node's observed entry.
 #
 #   inventory.sh check [--record] [--metrics <file>]
-#                       every node in NODE_ADDRESSES; exits 1 on drift. --record writes a NetBox
-#                       journal entry when a node's findings change and keeps the `drift` tag on
+#                       every staged, active or failed node in NetBox; exits 1 on drift.
+#                       --record writes a NetBox journal entry when a node's findings change and keeps the `drift` tag on
 #                       the drifting devices; --metrics writes netbox_drift for node-exporter.
 #   inventory.sh observe [--insecure] <address>
 #                       one node's entry; --insecure for a node in maintenance mode
 #
-# NetBox access is scripts/lib/netbox.sh's environment. INVENTORY_TOPOLOGY overrides the path of
-# clusters/folly/config/cluster-topology.json.
+# NetBox access is scripts/lib/netbox.sh's environment.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -91,12 +90,11 @@ check() {
     shift
   done
 
-  local topology="${INVENTORY_TOPOLOGY:-$root/clusters/folly/config/cluster-topology.json}"
   local addresses machines drift=0 node address seen diffs
   local -a series=()
-  addresses="$(jq -er '.data.NODE_ADDRESSES | fromjson' "$topology")"
   nb_init
   machines="$(bash "$root/scripts/netbox-export.sh" --json)"
+  addresses="$(jq -c 'with_entries(select(.value.status != "planned" and .value.address != null) | .value |= .address)' <<<"$machines")"
   for node in $(jq -r 'keys[]' <<<"$addresses"); do
     address="$(jq -r --arg n "$node" '.[$n]' <<<"$addresses")"
     if ! jq -e --arg n "$node" 'has($n)' <<<"$machines" >/dev/null; then

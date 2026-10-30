@@ -38,7 +38,7 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
    Result: `bound the intake`, with its name, class and address, and `desired_action` `provision`. HookOS takes the run.
 
-6. On a branch, run `mise run netbox:export`. Add `"<node>": "<addr>"` to `NODE_ADDRESSES`.
+6. On a branch, run `mise run netbox:export`. The export's `address` is the node's address everywhere.
 7. Make sure that `mise run netbox:check` prints nothing. Open a pull request.
 8. Comment `atlantis apply -d terraform/network/unifi/folly`.
 
@@ -58,7 +58,7 @@ Use this instead to name every fact yourself, from the HP label and the rack:
 mise run netbox:declare <node> <serial> <mac> <switch port> <addr>
 ```
 
-It refuses a malformed name or MAC, a missing port, and an address outside `K8S_NODE_CIDR`, in `NODE_ADDRESSES`, or held by another device or stub. The `planned` device gets the MAC, a cable and `<addr>`; run it with no arguments for the options, whose defaults are the G5 mini's. Commit the export diff it prints in a pull request.
+It refuses a malformed name or MAC, a missing port, and an address outside `K8S_NODE_CIDR`, or held by another device or stub. The `planned` device gets the MAC, a cable and `<addr>`; run it with no arguments for the options, whose defaults are the G5 mini's. Commit the export diff it prints in a pull request.
 
 1. Connect the machine to the prep station's port.
 2. In NetBox, set `desired_action` to `provision`.

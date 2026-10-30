@@ -36,8 +36,7 @@ locals {
   # The vault the Atlantis 1Password service account reads.
   op_vault_homelab = "ib23znjeikv74p37f6mbfk7uya"
 
-  node_addresses = jsondecode(module.topology.data.NODE_ADDRESSES)
-  machines       = yamldecode(file("${path.module}/../inventory/machines.yaml")).machines
+  machines = yamldecode(file("${path.module}/../inventory/machines.yaml")).machines
 
   # renovate: datasource=github-releases depName=siderolabs/talos
   talos_version = "v1.14.5"
@@ -139,7 +138,7 @@ module "talos" {
 
   nodes = { for name, n in local.nodes : name => {
     role               = n.role
-    address            = local.node_addresses[name]
+    address            = local.machines[name].address
     install            = "disk.dev_path == \"${local.machines[name].disk}\""
     patches            = [local.ephemeral_patch[n.class]]
     installer_image    = local.secureboot_installer

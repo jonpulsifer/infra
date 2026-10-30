@@ -5,8 +5,9 @@
 # folly's Kubernetes nodes as hardware: every NetBox device with the role
 # kubernetes-node and the status planned, staged, active or failed. status is
 # the node's lifecycle state and class its Talos class. address is the primary
-# IPv4; `mise run netbox:check` fails when it differs from NODE_ADDRESSES in
-# ../config/cluster-topology.json. bmc is the out-of-band management: its
+# IPv4, and the node's address everywhere; `mise run netbox:check` fails when a
+# node's is outside K8S_NODE_CIDR in ../config/cluster-topology.json or is
+# shared, or when API_SERVER_IP there is no node's. bmc is the out-of-band management: its
 # type, and its address, which is the node's own for AMT unless NetBox holds an
 # OOB address.
 #

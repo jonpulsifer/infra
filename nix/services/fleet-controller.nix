@@ -35,7 +35,7 @@ let
   # A read-only UniFi API key, with which the controller finds an intake's switch port.
   unifi = cfg.unifi.url != null && sealed "unifi-api-key";
   # An intake's address comes from the node prefix. Only these keys are read, so a new node, which
-  # changes NODE_ADDRESSES, leaves the service's environment alone.
+  # changes the inventory export, leaves the service's environment alone.
   topology = (lib.importJSON ../../clusters/${cfg.site}/config/cluster-topology.json).data;
 
   spore = lab.bootstrap.hosts.spore;

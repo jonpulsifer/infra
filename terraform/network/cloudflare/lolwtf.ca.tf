@@ -76,7 +76,7 @@ resource "cloudflare_dns_record" "offsite_lolwtf_ca" {
 }
 
 # offsite's nodes, by hostname. folly's are next to their DHCP reservations in
-# terraform/network/unifi/folly/k8s.tf, from the same topology key.
+# terraform/network/unifi/folly/k8s.tf, from the inventory export.
 resource "cloudflare_dns_record" "offsite_nodes" {
   for_each = jsondecode(local.topology.offsite.NODE_ADDRESSES)
 

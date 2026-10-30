@@ -170,7 +170,6 @@ switch_id="$(device "$(jq -cn --arg n "$switch_name" '{name: $n, role: {slug: "s
 interface "$switch_id" mgmt "$switch_mac" virtual >/dev/null
 
 node_len="$(jq -er '.data.K8S_NODE_CIDR | split("/")[1]' "$cluster")"
-addresses="$(jq -er '.data.NODE_ADDRESSES | fromjson' "$cluster")"
 readonly node_fleet='{
   "optiplex": {"talos_class": "controlplane", "bmc_type": "none"},
   "shale": {"talos_class": "worker-g2", "bmc_type": "amt"},
@@ -197,7 +196,7 @@ for node in $(yq -r '.machines | keys | .[]' "$inventory"); do
   } + (if $cur == null then {status: "active"} else {} end)')")"
   nic="$(interface "$id" "$(jq -r '.interfaces[0].name' <<<"$type")" "$(jq -r '.mac' <<<"$m")")"
   nb_cable "$nic" "$(switch_port "$(jq -r '.switch_port' <<<"$m")")" "$tags"
-  ip="$(jq -er --arg n "$node" '.[$n]' <<<"$addresses")"
+  ip="$(jq -er '.address' <<<"$m")"
   address "$id" "$nic" "$ip/$node_len"
 done
 
