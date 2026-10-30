@@ -85,7 +85,6 @@ func main() {
 	timeout := flag.Duration("timeout", 10*time.Minute, "give up after this long")
 	flag.Parse()
 
-	// The SMBIOS facts fill the NetBox device the service creates on first sight.
 	m := protocol.Machine{
 		Serial:       *serial,
 		UUID:         *uuid,

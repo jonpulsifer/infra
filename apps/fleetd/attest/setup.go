@@ -102,12 +102,9 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the NetBox token is unreadable: %w", err)
 	}
-	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Site: site, Role: env("ATTEST_NETBOX_ROLE", "kubernetes-node"), Log: log}
+	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Log: log}
 	if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
 		return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
-	}
-	if v.IntakePerHour, err = strconv.Atoi(env("ATTEST_INTAKE_PER_HOUR", "10")); err != nil {
-		return nil, fmt.Errorf("ATTEST_INTAKE_PER_HOUR: %w", err)
 	}
 	v.NetBox = nb
 	v.Recorders = append(v.Recorders, nb)

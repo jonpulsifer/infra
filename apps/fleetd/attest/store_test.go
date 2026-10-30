@@ -42,8 +42,8 @@ func TestStoreRefusesPathsAsNames(t *testing.T) {
 	}
 }
 
-// The intake name of a device created on first sight is a safe slug of
-// the claimed serial, never a path.
+// The intake name a claim for a serial NetBox lacks waits under is a safe
+// slug of the claimed serial, never a path.
 func TestIntakeNameNeverIsAPath(t *testing.T) {
 	for serial, want := range map[string]string{
 		"MXL0172Q6L":           "intake-mxl0172q6l",

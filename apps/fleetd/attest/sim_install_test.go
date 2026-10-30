@@ -92,7 +92,7 @@ func (h *harness) watchConfirm(t *testing.T, cw *confirmWire) *confirmWire {
 func TestIntakePassGetsAnInstallCode(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5", "smbios_uuid": nil})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5", "smbios_uuid": nil}))
 	c := newFakeInstaller(nil)
 	h.v.Installer = c
 	wire := h.watchConfirm(t, &confirmWire{})
@@ -132,6 +132,7 @@ func TestIntakePassGetsAnInstallCode(t *testing.T) {
 // machine's own confirm still lands and gets its code.
 func TestStrangersCannotTakeAPassedSession(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
+	h.bind()
 	c := newFakeInstaller(nil)
 	h.v.Installer = c
 	wire := h.watchConfirm(t, &confirmWire{strangers: true})
@@ -185,7 +186,7 @@ func TestUnsignedConfirmPassesWithoutACode(t *testing.T) {
 func TestSMBIOSUUIDWaitsForTheField(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func TestPassRecordsTPMVersionOnlyWhenEmpty(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeNetBox(t)
 			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-			f.add("testbox", simSerial, "planned", simMAC, c.fields)
+			f.add("testbox", simSerial, "planned", simMAC, h.bound(c.fields))
 			if _, err := h.run(simSerial, simMAC); err != nil {
 				t.Fatal(err)
 			}
@@ -224,6 +225,7 @@ func TestPassRecordsTPMVersionOnlyWhenEmpty(t *testing.T) {
 
 func TestRefusedRenderWithholdsTheCode(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
+	h.bind()
 	c := newFakeInstaller(errors.New("no provision asked"))
 	h.v.Installer = c
 
@@ -241,6 +243,7 @@ func TestRefusedRenderWithholdsTheCode(t *testing.T) {
 
 func TestRenewalRendersNothing(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
+	h.bind()
 	c := newFakeInstaller(nil)
 	h.v.Installer = c
 	if _, err := h.run(simSerial, simMAC); err != nil {

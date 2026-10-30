@@ -159,11 +159,11 @@ description = "Print a folly node's observed inventory entry (args: [--insecure]
 run = "bash scripts/inventory.sh observe"
 
 [tasks."attest:approve"]
-description = "Show the first intake that waits for a serial on fleetd, and approve its EK hashes once you confirm them, over the tailnet (args: <serial>)"
+description = "Print the nodes-file lines that would approve the EK hashes a waiting claim on fleetd names, for review against independent evidence; approves nothing (args: <serial>)"
 run = "bash scripts/attest.sh approve"
 
 [tasks."attest:pending"]
-description = "List the first intakes that wait for approval on fleetd"
+description = "List the intakes that wait on fleetd for an approved EK binding"
 run = "bash scripts/attest.sh pending"
 
 [tasks."k8s:render-apps"]

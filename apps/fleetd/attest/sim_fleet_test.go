@@ -1,7 +1,7 @@
 //go:build cgo
 
-// The fleet flows on the software TPM: a planned machine admitted by its EK
-// certificates, NetBox as the system of record from first sight to
+// The fleet flows on the software TPM: a planned machine admitted by its
+// approved binding, NetBox as the system of record from a waiting claim to
 // quarantine, and a renewal from the running node.
 package attest
 
@@ -86,36 +86,44 @@ func refusal(t *testing.T, err error) *client.RefusedError {
 	return refused
 }
 
-// A planned machine, entered before it arrived, needs no click when its EKs
-// carry manufacturer certificates; its first pass pins it.
-func TestPlannedMachineIsAdmittedByItsEKCertificates(t *testing.T) {
+// A planned machine, entered before it arrived, passes on the binding its
+// node entry approves, and its first pass pins the EKs it proved. Its EK
+// certificates alone admit nothing.
+func TestPlannedMachineNeedsAnApprovedBinding(t *testing.T) {
 	// One software TPM at a time: each subtest's harness closes before the next opens.
 	t.Run("pinned by the pass", func(t *testing.T) {
 		f := newFakeNetBox(t)
 		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-		f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+		f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
 		res, err := h.run(simSerial, simMAC)
 		if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 			t.Fatalf("planned machine: %v", err)
 		}
-		a, _ := h.v.Store.Approvals()
-		if len(a[simSerial]) != 2 {
-			t.Fatalf("the pass did not pin the EKs: %v", a)
-		}
+		f.settled(t, simSerial, 2)
 		if d := f.bySerial(simSerial); d.Status != "planned" || d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] {
 			t.Fatalf("NetBox after the pass: %s %+v", d.Status, d.CustomFields)
+		}
+	})
+	// Certificates from a trusted maker do not name the machine: without a binding it waits.
+	t.Run("certified but unbound", func(t *testing.T) {
+		f := newFakeNetBox(t)
+		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+		f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+		h.pending(t, simSerial)
+		if d := f.bySerial(simSerial); d.CustomFields["ek_hash"] != nil || h.issued() {
+			t.Fatalf("an unbound planned machine was admitted: %+v", d.CustomFields)
 		}
 	})
 	// From an unpinned maker the supply chain says nothing, and the chain check refuses.
 	t.Run("unpinned maker", func(t *testing.T) {
 		f := newFakeNetBox(t)
 		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f, foreignMfr: true})
-		f.add("testbox", simSerial, "planned", simMAC, nil)
+		f.add("testbox", simSerial, "planned", simMAC, h.bound(nil))
 		if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Reason != reasonEKChain {
 			t.Fatalf("planned with an unpinned maker: %+v", r.Verdict)
 		}
 	})
-	// A NetBox that lacks the machine grants nothing: the claim waits for approval.
+	// A NetBox that lacks the machine grants nothing: the claim waits for a node entry.
 	t.Run("absent from NetBox waits for approval", func(t *testing.T) {
 		f := newFakeNetBox(t)
 		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
@@ -146,7 +154,7 @@ func TestNetBoxOutageFailsClosed(t *testing.T) {
 	}
 	// Once NetBox holds the machine and fails again, the answer is the same.
 	f.setFailing(false, false)
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]}))
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatalf("after the outage: %v", err)
 	}
@@ -164,7 +172,7 @@ func TestNetBoxOutageFailsClosed(t *testing.T) {
 func TestFailedNetBoxWriteFailsClosed(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]}))
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -184,15 +192,16 @@ func TestFailedNetBoxWriteFailsClosed(t *testing.T) {
 	}
 }
 
-// NetBox is the system of record: first sight creates the device, the owner
-// approves, the pass writes the pins and the verdict, the verdict route reads
-// NetBox, a quarantine fails the device, and a retired device gets nothing.
+// NetBox is the system of record: a claim NetBox lacks waits and creates
+// nothing, the device and its binding come from git, the pass writes the
+// pins and the verdict, the verdict route reads NetBox, a quarantine fails
+// the device, and a retired device gets nothing.
 func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
 
-	// First sight: NetBox has no device, and a claim creates none. The claim
-	// waits apart from the records for the owner.
+	// NetBox has no device, and a claim creates none. The claim waits apart
+	// from the records for the owner.
 	r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }())
 	if r.Verdict.Verdict != protocol.VerdictPending {
 		t.Fatalf("first sight: %+v", r.Verdict)
@@ -207,22 +216,11 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 		t.Fatalf("a pending device's verdict answered %d", code)
 	}
 
-	// The owner approves on the admin API.
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(`{"serial":"`+simSerial+`","ek_hashes":["`+h.hashes["rsa"]+`","`+h.hashes["ecc"]+`"]}`))
-	req.Header.Set("Tailscale-User-Login", "owner@example.com")
-	h.srv.Admin().ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "NetBox") {
-		t.Fatalf("approve: %d %s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(h.audit.String(), `"status":"approved","approver":"owner@example.com"`) {
-		t.Fatalf("no audit line for the approval:\n%s", h.audit.String())
-	}
-	// The approved machine activates its credential, and only then does its
-	// device come into being, from the SMBIOS facts it sent; the pass follows.
+	// The owner's node entry, with its binding, becomes the planned device.
+	f.add("testbox", simSerial, "planned", "", h.bound(nil))
 	res, err := h.run(simSerial, simMAC)
 	if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
-		t.Fatalf("after approval: %v", err)
+		t.Fatalf("after the binding: %v", err)
 	}
 	if _, ok, _ := h.v.Store.Pending(simSerial); ok {
 		t.Fatal("the claim still waits after the pass")
@@ -254,16 +252,16 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 		t.Fatalf("GET /devid after a NetBox-recorded pass: %d", code)
 	}
 
-	// NetBox's pins now gate the next attest: a changed pin refuses, and
+	// NetBox's binding gates the next attest: a changed binding refuses, and
 	// since nothing the TPM signed led there, NetBox is untouched.
-	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["ek_hash"] = strings.Repeat("ab", 32) })
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["approved_ek_hash"] = strings.Repeat("ab", 32) })
 	if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Reason != reasonEKHash || r.Verdict.Verdict != protocol.VerdictRefused {
-		t.Fatalf("NetBox pin mismatch: %+v", r.Verdict)
+		t.Fatalf("NetBox binding mismatch: %+v", r.Verdict)
 	}
 	if d := f.bySerial(simSerial); d.Patches != 4 || d.Status != "planned" || d.CustomFields["attest_verdict"] != StatusAttested {
 		t.Fatalf("a refusal wrote to NetBox: %d writes, %s %+v", d.Patches, d.Status, d.CustomFields)
 	}
-	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["ek_hash"] = h.hashes["rsa"] })
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["approved_ek_hash"] = h.hashes["rsa"] })
 
 	// A boot the TPM vouches for that breaks the policy quarantines: NetBox records
 	// the verdict, the status stays, and the anchors serve no LDevID.
@@ -286,7 +284,7 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 	if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Reason != reasonStatus || r.Verdict.Verdict != protocol.VerdictRefused {
 		t.Fatalf("attest while quarantined: %+v", r.Verdict)
 	}
-	rr = httptest.NewRecorder()
+	rr := httptest.NewRecorder()
 	h.srv.DevIDHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, protocol.PathRenew, strings.NewReader(`{"serial":"`+simSerial+`"}`)))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("renewal while quarantined: %d %s", rr.Code, rr.Body.String())
@@ -317,13 +315,11 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 		t.Fatalf("a status refusal wrote to NetBox: %s after %d writes", d.Status, d.Patches)
 	}
 
-	// A planned device NetBox already holds passes with no click.
-	f.add("swell", "SW-PLANNED", "planned", "02:00:00:00:00:02", map[string]any{"talos_class": "worker-g5"})
-	if _, err := h.run("SW-PLANNED", "02:00:00:00:00:02"); err != nil {
-		t.Fatalf("planned device in NetBox: %v", err)
-	}
-	if d := f.settled(t, "SW-PLANNED", 2); d.Status != "planned" || d.CustomFields["ek_hash"] != h.hashes["rsa"] {
-		t.Fatalf("planned device after its pass: %s %+v", d.Status, d.CustomFields)
+	// A planned device NetBox holds without a binding waits.
+	f.add("swell", "SW-PLANNED", "planned", "", map[string]any{"talos_class": "worker-g5"})
+	h.pending(t, "SW-PLANNED")
+	if d := f.bySerial("SW-PLANNED"); d.CustomFields["ek_hash"] != nil {
+		t.Fatalf("an unbound planned device was pinned: %+v", d.CustomFields)
 	}
 }
 

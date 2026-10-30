@@ -201,6 +201,7 @@ const (
 	reasonEKUnpinned     = "ek-unpinned"
 	reasonEKHash         = "ek-hash-mismatch"
 	reasonEKPending      = "ek-pending-approval"
+	reasonBinding        = "ek-binding-changed"
 	reasonAK             = "ak-invalid"
 	reasonSession        = "session"
 	reasonConfirm        = "confirm-signature"
@@ -214,8 +215,6 @@ const (
 	reasonUnattended     = "unattended-boot"
 	reasonNetBox         = "netbox-unavailable"
 	reasonSerial         = "invalid-serial"
-	reasonIntakeRate     = "intake-rate"
-	reasonApproval       = "approval"
 	reasonInternal       = "internal"
 )
 

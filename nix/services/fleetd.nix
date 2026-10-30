@@ -227,7 +227,7 @@ in
 
         ATTEST_DEVID_ADDR = ":${toString devidPort}";
         ATTEST_ADMIN_ADDR = "unix:${adminSocket}";
-        # The O of every LDevID, and the NetBox site a first-sight device joins.
+        # The O of every LDevID, and the site each audit line names.
         ATTEST_SITE = site;
         ATTEST_APPROVERS = "jonathan@pulsifer.ca";
         ATTEST_CA_CHAIN = "${caChain}";

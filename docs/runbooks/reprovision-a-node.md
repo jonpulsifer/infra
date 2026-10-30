@@ -11,7 +11,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | `attest` | Attests, and boots the installed disk | The status stays, and the node has a new LDevID |
 | `wipe` | Wipes the system disk, with no attestation | The node stays in HookOS until a Workflow runs |
 
-`provision` and `wipe` move the device back to `planned`, which the Talos root applies no config to, until the node fetches its config. `attest` leaves the status alone. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
+`provision` and `wipe` move the device back to `planned`, which the Talos root applies no config to, until the node fetches its config. A `planned` device attests only against the approved EK binding in its nodes-file entry, so a `provision` of a node without one waits in HookOS; [Approve a machine's EKs](provision-a-node.md#approve-a-machines-eks) adds it. `attest` leaves the status alone, and an `active` node without a binding attests against its `ek_hash` pins. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.
@@ -80,7 +80,8 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | The node polls its config URL and gets 404 | A STATE wipe on an installed node, because a served code is spent | Set `desired_action` to `provision`, which renders a new code |
 | The console shows `Talos is already installed to disk but booted from another media` | META is on the disk | Set `desired_action` to `wipe` |
 | The node fetched its config and is cordoned | Its `attest_verdict` is `quarantined: <reason>`, so fleetd cordons it | Read the reason, and clear the verdict once it is explained. The next daily check that passes restores the node's LDevID; then uncordon the node |
-| `attest: FAILED` with `ek-hash-mismatch` | A pin names another TPM, such as after a board swap | Compare `mise run attest:pending` with `ek_hash` in NetBox |
+| `attest: FAILED` with `ek-hash-mismatch` | The approved binding or a pin names another TPM, such as after a board swap | Read the refused EK hash in the `attest.verdict` audit line in `journalctl -u fleetd`, and compare it with your evidence and with `approved_ek_hash` and `ek_hash`. A replaced TPM needs a binding change in the nodes file |
+| `attest: FAILED` with `pending-approval` | A `planned` device whose entry approves no EK | [Approve its EKs](provision-a-node.md#approve-a-machines-eks) |
 | Talos stops at `failed to read pcr signing public key` | Talos booted by kexec | Power-cycle the node |
 | Another symptom of a run | See [Provision a node](provision-a-node.md#if-something-goes-wrong) | Follow its table |
 

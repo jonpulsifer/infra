@@ -19,18 +19,15 @@ import (
 )
 
 // NetBox is the system of record for machines and their lifecycle. The
-// service reads a machine's class, status and EK pins from the device with
-// its serial, creates a planned device for a serial NetBox has never seen,
-// and writes each verdict to the device's custom fields. The local state
+// service reads a machine's class, status, approved binding and EK pins from
+// the device with its serial, and writes each verdict to the device's custom
+// fields. It never writes the approved binding, which git declares. The local state
 // directory stays the cache of what fleetd issued.
 type NetBox struct {
 	URL    string
 	Token  string
 	Client *http.Client
-	// Site and Role are the slugs a created device gets.
-	Site string
-	Role string
-	Log  *slog.Logger
+	Log    *slog.Logger
 }
 
 func (n *NetBox) do(ctx context.Context, method, path string, body, out any) error {
@@ -92,16 +89,19 @@ type netboxDevice struct {
 	} `json:"site"`
 	LastUpdated  time.Time `json:"last_updated"`
 	CustomFields struct {
-		EKHash       string   `json:"ek_hash"`
-		EKHashECC    string   `json:"ek_hash_ecc"`
-		Class        nbSelect `json:"talos_class"`
-		Verdict      string   `json:"attest_verdict"`
-		LastAttested string   `json:"last_attested"`
-		ConsumedAt   string   `json:"attest_consumed_at"`
-		LDevIDSerial string   `json:"ldevid_serial"`
-		LAKSerial    string   `json:"lak_serial"`
-		SKU          string   `json:"sku"`
-		BIOSVersion  string   `json:"bios_version"`
+		EKHash    string `json:"ek_hash"`
+		EKHashECC string `json:"ek_hash_ecc"`
+		// The approved binding, which Terraform projects from the nodes file.
+		ApprovedEKHash    string   `json:"approved_ek_hash"`
+		ApprovedEKHashECC string   `json:"approved_ek_hash_ecc"`
+		Class             nbSelect `json:"talos_class"`
+		Verdict           string   `json:"attest_verdict"`
+		LastAttested      string   `json:"last_attested"`
+		ConsumedAt        string   `json:"attest_consumed_at"`
+		LDevIDSerial      string   `json:"ldevid_serial"`
+		LAKSerial         string   `json:"lak_serial"`
+		SKU               string   `json:"sku"`
+		BIOSVersion       string   `json:"bios_version"`
 		// SMBIOSUUID is nil when NetBox defines no smbios_uuid field.
 		SMBIOSUUID json.RawMessage `json:"smbios_uuid"`
 		// TPMVersion is nil when NetBox defines no tpm_version field.
@@ -243,15 +243,23 @@ func (n *NetBox) nic(ctx context.Context, deviceID int) (netboxInterface, bool, 
 }
 
 func (d netboxDevice) machine(mac string) Machine {
-	m := Machine{Name: d.Name, Serial: d.Serial, MAC: normalMAC(mac), Class: string(d.CustomFields.Class), Status: d.Status.Value, NetBoxID: d.ID, FromNetBox: true, Pins: map[string]string{},
+	m := Machine{Name: d.Name, Serial: d.Serial, MAC: normalMAC(mac), Class: string(d.CustomFields.Class), Status: d.Status.Value, NetBoxID: d.ID, FromNetBox: true,
+		Pins:        byAlg(d.CustomFields.EKHash, d.CustomFields.EKHashECC),
+		Approved:    byAlg(d.CustomFields.ApprovedEKHash, d.CustomFields.ApprovedEKHashECC),
 		Quarantined: strings.HasPrefix(d.CustomFields.Verdict, StatusQuarantined)}
-	if h := strings.ToLower(d.CustomFields.EKHash); h != "" {
-		m.Pins["rsa"] = h
-	}
-	if h := strings.ToLower(d.CustomFields.EKHashECC); h != "" {
-		m.Pins["ecc"] = h
-	}
 	return m
+}
+
+// byAlg keys an RSA and an ECC EK hash by algorithm, leaving out an empty one.
+func byAlg(rsa, ecc string) map[string]string {
+	out := map[string]string{}
+	if h := strings.ToLower(strings.TrimSpace(rsa)); h != "" {
+		out["rsa"] = h
+	}
+	if h := strings.ToLower(strings.TrimSpace(ecc)); h != "" {
+		out["ecc"] = h
+	}
+	return out
 }
 
 // Lookup implements MachineSource.
@@ -289,8 +297,9 @@ func serialSlug(serial string) string {
 	return b.String()
 }
 
-// intakeName is the name a device created on first sight gets: the claimed
-// hostname when it reads as one the owner set, else intake-<serial slug>.
+// intakeName is the name a claim for a serial NetBox lacks waits under: the
+// claimed hostname when it reads as one the owner set, else
+// intake-<serial slug>.
 func intakeName(claim protocol.Machine) string {
 	h := strings.ToLower(strings.TrimSpace(claim.Hostname))
 	switch h {
@@ -301,67 +310,6 @@ func intakeName(claim protocol.Machine) string {
 		return "intake-" + serialSlug(claim.Serial)
 	}
 	return h
-}
-
-// Create adds a planned device for a serial NetBox has never seen, with
-// the device type the SMBIOS model names, made under its manufacturer when
-// NetBox lacks it, and the NIC's MAC on its first interface. intakeName
-// names it.
-func (n *NetBox) Create(ctx context.Context, claim protocol.Machine) (Machine, error) {
-	name := intakeName(claim)
-	siteID, err := n.idBy(ctx, "/api/dcim/sites/", "slug", n.Site)
-	if err != nil {
-		return Machine{}, err
-	}
-	roleID, err := n.idBy(ctx, "/api/dcim/device-roles/", "slug", n.Role)
-	if err != nil {
-		return Machine{}, err
-	}
-	typeID, err := n.deviceType(ctx, claim)
-	if err != nil {
-		return Machine{}, err
-	}
-	fields := map[string]any{}
-	if claim.SKU != "" {
-		fields["sku"] = claim.SKU
-	}
-	if claim.BIOS != "" {
-		fields["bios_version"] = claim.BIOS
-	}
-	body := map[string]any{
-		"name":          name,
-		"device_type":   typeID,
-		"role":          roleID,
-		"site":          siteID,
-		"status":        statusPlanned,
-		"serial":        serialKey(claim.Serial),
-		"custom_fields": fields,
-		"comments":      "Created by fleetd on first sight, after its TPM activated a credential.",
-	}
-	var d netboxDevice
-	if err := n.do(ctx, http.MethodPost, "/api/dcim/devices/", body, &d); err != nil {
-		var ne *netboxError
-		if !asNetboxError(err, &ne) || ne.Status != http.StatusBadRequest || body["name"] == "intake-"+serialSlug(claim.Serial) {
-			return Machine{}, err
-		}
-		// The claimed hostname is taken; fall back to the serial.
-		body["name"] = "intake-" + serialSlug(claim.Serial)
-		if err := n.do(ctx, http.MethodPost, "/api/dcim/devices/", body, &d); err != nil {
-			return Machine{}, err
-		}
-	}
-	mac := normalMAC(claim.MAC)
-	if mac != "" {
-		if _, err := n.setMAC(ctx, d.ID, mac); err != nil {
-			return Machine{}, fmt.Errorf("device %d created, MAC not set: %w", d.ID, err)
-		}
-	}
-	if err := n.journal(ctx, d.ID, "info", plain(fmt.Sprintf("fleetd: created on first sight from HookOS, after credential activation (serial %s, MAC %s, %s %s)", claim.Serial, mac, claim.Manufacturer, claim.Model))); err != nil {
-		return Machine{}, err
-	}
-	d.Status.Value = statusPlanned
-	d.Serial = serialKey(claim.Serial)
-	return d.machine(mac), nil
 }
 
 // Bind puts a box's MAC on the declared stub it attested as, the planned
@@ -462,81 +410,6 @@ func (n *NetBox) soleMAC(ctx context.Context, deviceID, ifaceID int, mac string)
 	return nil
 }
 
-// deviceType finds the type whose model the claim names, or makes it under
-// its manufacturer. With no model in the claim it is an error: a device
-// needs a type.
-func (n *NetBox) deviceType(ctx context.Context, claim protocol.Machine) (int, error) {
-	model := strings.TrimSpace(claim.Model)
-	if model == "" {
-		return 0, fmt.Errorf("the claim names no SMBIOS model, which a new NetBox device needs")
-	}
-	var page netboxPage[netboxRef]
-	if err := n.do(ctx, http.MethodGet, "/api/dcim/device-types/?limit=2&model="+url.QueryEscape(model), nil, &page); err != nil {
-		return 0, err
-	}
-	types, err := page.items()
-	if err != nil {
-		return 0, err
-	}
-	if len(types) > 0 {
-		return types[0].ID, nil
-	}
-	mfr := strings.TrimSpace(claim.Manufacturer)
-	if mfr == "" {
-		mfr = "Unknown"
-	}
-	mfrID, err := n.ensure(ctx, "/api/dcim/manufacturers/", "name", mfr, map[string]any{"name": mfr, "slug": slugify(mfr)})
-	if err != nil {
-		return 0, err
-	}
-	body := map[string]any{"manufacturer": mfrID, "model": model, "slug": slugify(model)}
-	if claim.SKU != "" {
-		body["part_number"] = claim.SKU
-	}
-	var t netboxRef
-	if err := n.do(ctx, http.MethodPost, "/api/dcim/device-types/", body, &t); err != nil {
-		return 0, err
-	}
-	return t.ID, nil
-}
-
-func (n *NetBox) idBy(ctx context.Context, path, field, value string) (int, error) {
-	var page netboxPage[netboxRef]
-	if err := n.do(ctx, http.MethodGet, path+"?limit=2&"+field+"="+url.QueryEscape(value), nil, &page); err != nil {
-		return 0, err
-	}
-	results, err := page.items()
-	if err != nil {
-		return 0, err
-	}
-	if len(results) == 0 {
-		return 0, &netboxError{Status: http.StatusNotFound, Msg: fmt.Sprintf("NetBox has no %s with %s %q", strings.Trim(strings.TrimPrefix(path, "/api/dcim/"), "/"), field, value)}
-	}
-	return results[0].ID, nil
-}
-
-func (n *NetBox) ensure(ctx context.Context, path, field, value string, body map[string]any) (int, error) {
-	id, err := n.idBy(ctx, path, field, value)
-	if err == nil {
-		return id, nil
-	}
-	var ne *netboxError
-	if !asNetboxError(err, &ne) || ne.Status != http.StatusNotFound {
-		return 0, err
-	}
-	var r netboxRef
-	if err := n.do(ctx, http.MethodPost, path, body, &r); err != nil {
-		return 0, err
-	}
-	return r.ID, nil
-}
-
-var slugRE = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slugify(s string) string {
-	return strings.Trim(slugRE.ReplaceAllString(strings.ToLower(s), "-"), "-")
-}
-
 func (n *NetBox) journal(ctx context.Context, deviceID int, kind, comment string) error {
 	return n.do(ctx, http.MethodPost, "/api/extras/journal-entries/", map[string]any{
 		"assigned_object_type": "dcim.device",
@@ -559,7 +432,8 @@ func plain(s string) string {
 
 // Record implements Recorder: the verdict and the issued serials go to the
 // device's custom fields before the machine gets its answer. Only a pass
-// whose session proved the EKs writes the pins, and only a pass refreshes
+// whose session proved the EKs writes the pins, an empty one or one its
+// approved binding replaced, and only a pass refreshes
 // sku and bios_version. A daily check's pass writes only the verdict, its
 // time and what the quote showed for PCR 0. A quarantine writes only its
 // verdict, which revokes the identity and which fleetd cordons the
@@ -605,12 +479,13 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 			fields["bios_version"] = r.BIOS
 		}
 		if r.EKProven {
-			// A pin on file is never replaced: only an empty one is written.
+			// A pin on file is replaced only by the approved binding the
+			// pass matched; otherwise only an empty one is written.
 			for _, pin := range []struct{ field, alg, cur string }{{"ek_hash", "rsa", d.CustomFields.EKHash}, {"ek_hash_ecc", "ecc", d.CustomFields.EKHashECC}} {
 				h := r.EKHashes[pin.alg]
 				switch {
 				case h == "" || strings.EqualFold(pin.cur, h):
-				case pin.cur == "":
+				case pin.cur == "" || r.approved[pin.alg] == h:
 					fields[pin.field] = h
 				default:
 					comment := fmt.Sprintf("fleetd: kept %s %s; the pass proved %s", pin.field, strings.ToLower(pin.cur), h)
@@ -781,7 +656,7 @@ func (n *NetBox) Backfill(ctx context.Context, r Record) (bool, error) {
 	return true, nil
 }
 
-// MarkPending notes on the device that a first intake waits for the owner.
+// MarkPending notes on the device that an intake waits for its approved binding.
 // A claim proved nothing, so it writes neither status nor pins, and never
 // over a pass on file: the device's verdict stays attested.
 func (n *NetBox) MarkPending(ctx context.Context, serial, detail string) error {
@@ -798,7 +673,7 @@ func (n *NetBox) MarkPending(ctx context.Context, serial, detail string) error {
 			return err
 		}
 	}
-	n.journalLater(ctx, d.ID, "warning", "fleetd: first intake waits for the owner's approval: "+plain(detail), serial)
+	n.journalLater(ctx, d.ID, "warning", "fleetd: an intake waits for an approved EK binding in the nodes file: "+plain(detail), serial)
 	return nil
 }
 

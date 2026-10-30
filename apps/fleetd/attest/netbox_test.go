@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -70,7 +68,7 @@ func newFakeNetBox(t *testing.T) *fakeNetBox {
 }
 
 func (f *fakeNetBox) client() *NetBox {
-	return &NetBox{URL: f.srv.URL, Token: "nbt_test", Client: f.srv.Client(), Site: "folly", Role: "kubernetes-node"}
+	return &NetBox{URL: f.srv.URL, Token: "nbt_test", Client: f.srv.Client()}
 }
 
 // add seeds a device with a MAC on eth0.
@@ -330,14 +328,15 @@ func TestNetBoxLookupReadsTheDevice(t *testing.T) {
 	f := newFakeNetBox(t)
 	f.add("riptide", "MXL0172Q6L", "active", "38:22:E2:2D:96:44", map[string]any{
 		"talos_class": "worker-g5", "ek_hash": strings.Repeat("A", 64), "ek_hash_ecc": strings.Repeat("b", 64),
-		"attest_verdict": "attested", "last_attested": "2026-10-29T01:02:03Z", "attest_consumed_at": "2026-10-29T01:10:00Z",
+		"approved_ek_hash": strings.Repeat("c", 64), "approved_ek_hash_ecc": nil, "attest_verdict": "attested", "last_attested": "2026-10-29T01:02:03Z", "attest_consumed_at": "2026-10-29T01:10:00Z",
 	})
 	nb := f.client()
 	m, ok, err := nb.Lookup(context.Background(), "mxl0172q6l")
 	if err != nil || !ok {
 		t.Fatalf("lookup: %v %v", ok, err)
 	}
-	if m.Name != "riptide" || m.Class != "worker-g5" || m.Status != "active" || m.MAC != "38:22:e2:2d:96:44" || m.Pins["rsa"] != strings.Repeat("a", 64) || m.Pins["ecc"] != strings.Repeat("b", 64) || m.NetBoxID == 0 {
+	if m.Name != "riptide" || m.Class != "worker-g5" || m.Status != "active" || m.MAC != "38:22:e2:2d:96:44" || m.Pins["rsa"] != strings.Repeat("a", 64) || m.Pins["ecc"] != strings.Repeat("b", 64) || m.NetBoxID == 0 ||
+		len(m.Approved) != 1 || m.Approved["rsa"] != strings.Repeat("c", 64) {
 		t.Fatalf("machine %+v", m)
 	}
 	if _, ok, err := nb.Lookup(context.Background(), "NOPE"); ok || err != nil {
@@ -364,54 +363,9 @@ func TestNetBoxLookupReadsTheDevice(t *testing.T) {
 	// A 200 with no page is not an answer.
 	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, map[string]any{}) }))
 	defer empty.Close()
-	hollow := &NetBox{URL: empty.URL, Token: "nbt_x", Client: empty.Client(), Site: "folly", Role: "kubernetes-node"}
+	hollow := &NetBox{URL: empty.URL, Token: "nbt_x", Client: empty.Client()}
 	if _, ok, err := hollow.Lookup(context.Background(), "ANY"); err == nil || ok {
 		t.Fatalf("an empty page read as no such device: %v %v", ok, err)
-	}
-}
-
-func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
-	f := newFakeNetBox(t)
-	nb := f.client()
-	claim := protocol.Machine{Serial: "mxl9999999", MAC: "AA:BB:CC:DD:EE:01", Hostname: "shoal", Manufacturer: "HP", Model: "HP EliteDesk 800 G5 Desktop Mini", SKU: "9GB06UC#ABA", BIOS: "R21 Ver. 02.20.00"}
-	m, err := nb.Create(context.Background(), claim)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := f.bySerial("MXL9999999")
-	if d == nil || d.Name != "shoal" || d.Status != "planned" || d.TypeID != 1 || d.CustomFields["sku"] != "9GB06UC#ABA" || d.CustomFields["bios_version"] != "R21 Ver. 02.20.00" {
-		t.Fatalf("created device %+v", d)
-	}
-	if m.Name != "shoal" || m.Status != "planned" || m.MAC != "aa:bb:cc:dd:ee:01" || m.NetBoxID != d.ID {
-		t.Fatalf("machine %+v", m)
-	}
-	if got, ok, _ := nb.Lookup(context.Background(), "MXL9999999"); !ok || got.MAC != "aa:bb:cc:dd:ee:01" {
-		t.Fatalf("the MAC did not land on the interface: %+v", got)
-	}
-	if len(f.journal) != 1 || !strings.Contains(f.journal[0], "first sight") {
-		t.Fatalf("journal %q", f.journal)
-	}
-
-	// A generic hostname, an unknown model and a taken name.
-	claim2 := protocol.Machine{Serial: "SIM-NEW", MAC: "aa:bb:cc:dd:ee:02", Hostname: "hookos", Manufacturer: "Dell Inc.", Model: "OptiPlex 7010"}
-	m2, err := nb.Create(context.Background(), claim2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m2.Name != "intake-sim-new" {
-		t.Fatalf("name %q", m2.Name)
-	}
-	d2 := f.bySerial("SIM-NEW")
-	if f.types[d2.TypeID] != "OptiPlex 7010" {
-		t.Fatalf("device type %q", f.types[d2.TypeID])
-	}
-	claim3 := protocol.Machine{Serial: "SIM-DUP", MAC: "aa:bb:cc:dd:ee:03", Hostname: "shoal", Model: "OptiPlex 7010"}
-	m3, err := nb.Create(context.Background(), claim3)
-	if err != nil || m3.Name != "intake-sim-dup" {
-		t.Fatalf("taken hostname: %+v %v", m3, err)
-	}
-	if _, err := nb.Create(context.Background(), protocol.Machine{Serial: "SIM-NOMODEL", MAC: "aa:bb:cc:dd:ee:04"}); err == nil {
-		t.Fatal("a claim with no model made a device")
 	}
 }
 
@@ -514,33 +468,6 @@ func TestNetBoxRecordWritesTheVerdict(t *testing.T) {
 	}
 }
 
-// Overlapping first sights of one serial make one device.
-func TestFirstSightCreatesOneDevicePerSerial(t *testing.T) {
-	f := newFakeNetBox(t)
-	v := &Verifier{NetBox: f.client(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now}
-	claim := protocol.Machine{Serial: "RACE-1", MAC: "aa:bb:cc:dd:ee:09", Hostname: "swell", Model: "HP EliteDesk 800 G5 Desktop Mini"}
-	var wg sync.WaitGroup
-	ids := make([]int, 6)
-	errs := make([]error, 6)
-	for i := range ids {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			m, _, err := v.firstSight(context.Background(), claim)
-			ids[i], errs[i] = m.NetBoxID, err
-		}(i)
-	}
-	wg.Wait()
-	for i := range ids {
-		if errs[i] != nil || ids[i] == 0 || ids[i] != ids[0] {
-			t.Fatalf("first sight %d: id %d err %v (first %d)", i, ids[i], errs[i], ids[0])
-		}
-	}
-	if f.count() != 1 {
-		t.Fatalf("%d devices for one serial", f.count())
-	}
-}
-
 func TestNetBoxSelectDecodesBothShapes(t *testing.T) {
 	for raw, want := range map[string]string{`"worker-g5"`: "worker-g5", `{"value":"controlplane","label":"Control plane"}`: "controlplane", `null`: "", `7`: ""} {
 		var s nbSelect
@@ -577,8 +504,9 @@ func TestIntakeName(t *testing.T) {
 	}
 }
 
-// A pass never replaces a pin on file: only an empty pin is written, so a
-// second TPM claiming a stub's serial on another anchor cannot re-key it.
+// A pass replaces a pin on file only with the approved binding it matched;
+// otherwise only an empty pin is written, so a second TPM claiming a stub's
+// serial on another anchor cannot re-key it.
 func TestNetBoxRecordKeepsAPinOnFile(t *testing.T) {
 	f := newFakeNetBox(t)
 	nb := f.client()
@@ -590,6 +518,13 @@ func TestNetBoxRecordKeepsAPinOnFile(t *testing.T) {
 	}
 	if cf := f.bySerial("SW-1").CustomFields; cf["ek_hash"] != strings.Repeat("a", 64) || cf["ek_hash_ecc"] != strings.Repeat("2", 64) {
 		t.Fatalf("pins after the pass: %+v", cf)
+	}
+	pass.approved = map[string]string{"rsa": strings.Repeat("1", 64)}
+	if err := nb.Record(context.Background(), pass); err != nil {
+		t.Fatal(err)
+	}
+	if cf := f.bySerial("SW-1").CustomFields; cf["ek_hash"] != strings.Repeat("1", 64) || cf["approved_ek_hash"] != nil {
+		t.Fatalf("pins after a pass that matched its approved binding: %+v", cf)
 	}
 }
 

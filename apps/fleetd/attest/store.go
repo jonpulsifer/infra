@@ -74,6 +74,9 @@ type Record struct {
 	// quote showed for PCR 0. Neither is kept on disk.
 	check bool
 	pcr0  *pcr0Seen
+	// approved is the binding an intake pass matched, whose hashes replace
+	// the pins on file.
+	approved map[string]string
 	// Network is where the machine was plugged in at an intake pass, as
 	// its AK signed it: its address and its switch port.
 	Network *protocol.Network `json:"network,omitempty"`
@@ -89,13 +92,13 @@ const (
 // Issued reports whether the record's LDevID may be served.
 func (r Record) Issued() bool { return r.Status == StatusAttested }
 
-// Store keeps each machine's record and files under dir, the approvals of
-// first-intake EK hashes, and an append-only verdict journal. Writes go
+// Store keeps each machine's record and files under dir, the claims that
+// wait for an approved binding, and an append-only verdict journal. Writes go
 // through a temporary file and a rename.
 type Store struct {
 	dir string
 	mu  sync.Mutex
-	// PendingMax caps the claims that wait for approval; the oldest give way.
+	// PendingMax caps the claims that wait; the oldest give way.
 	// 50 when zero.
 	PendingMax int
 }
@@ -453,49 +456,4 @@ func (s *Store) Journal(entry any) error {
 		return err
 	}
 	return f.Close()
-}
-
-// Approvals maps a serial to the EK hashes the owner approved on first intake.
-type Approvals map[string][]string
-
-func (s *Store) approvalsPath() string { return filepath.Join(s.dir, "approvals.json") }
-
-// Approvals reads the approvals file.
-func (s *Store) Approvals() (Approvals, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.approvals()
-}
-
-func (s *Store) approvals() (Approvals, error) {
-	a := Approvals{}
-	b, err := os.ReadFile(s.approvalsPath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return a, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return a, json.Unmarshal(b, &a)
-}
-
-// Approve records hashes as approved for a serial.
-func (s *Store) Approve(serial string, hashes []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	a, err := s.approvals()
-	if err != nil {
-		return err
-	}
-	key := serialKey(serial)
-	for _, h := range hashes {
-		if !slices.Contains(a[key], h) {
-			a[key] = append(a[key], h)
-		}
-	}
-	b, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeAtomic(s.approvalsPath(), append(b, '\n'), 0o640)
 }

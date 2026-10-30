@@ -80,8 +80,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            message: "{{ $labels.machine }} waits for the owner to approve its EK on first intake"
-            description: "NetBox pins no EK hash for {{ $labels.machine }}. Approve it on fleetd's admin API on spore, as docs/runbooks/provision-a-node.md says."
+            message: "{{ $labels.machine }} waits for an approved EK binding"
+            description: "The nodes file approves no EK for {{ $labels.machine }}, or names no node with its serial. Add the binding from independent evidence, as docs/runbooks/provision-a-node.md says."
         # tpm-reattest renews an LDevID from 30 days before its expiry, once a day, so
         # this fires only after a week of failed renewals. The newest expiry counts.
         - alert: TalosAttestLDevIDExpiring
