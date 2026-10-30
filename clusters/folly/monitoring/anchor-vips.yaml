@@ -200,9 +200,9 @@ spec:
             severity: warning
           annotations:
             message: "{{ $labels.machine }}'s daily check ended in {{ $labels.verdict }}"
-            description: "quarantine: the TPM quoted a boot that misses talos-attest's renewal policy, and NetBox has the device failed. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u talos-attest on the anchors."
-        # A control-plane node whose proven boot misses the policy is never quarantined, since failing
-        # it moves the cluster's API to the bootstrap VLAN. Its newest record, on whichever anchor holds
+            description: "quarantine: the TPM quoted a boot that misses talos-attest's renewal policy: NetBox's attest_verdict reads quarantined, the anchors serve no LDevID for it, and fleet-controller cordons it. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u talos-attest on the anchors."
+        # A control-plane node whose proven boot misses the policy is never quarantined, since that
+        # revokes the identity of the node that serves the cluster's API. Its newest record, on whichever anchor holds
         # it, keeps this firing until a passing quote clears it.
         - alert: TalosAttestCheckFailed
           expr: (talos_attest_failed_no_quarantine == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
