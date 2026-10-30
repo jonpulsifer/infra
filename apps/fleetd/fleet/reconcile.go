@@ -348,7 +348,14 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 	if running != "" {
 		name = running
 	} else {
-		wf := r.Config.Workflow(d, action, r.Now(), hookos)
+		wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
+		if err != nil {
+			Audit("fleet.workflow", r.Config.Site, d, d.LastWorkflow, "refused: "+err.Error())
+			if jerr := r.journalOnce(ctx, "no-class/"+d.Name+"/"+d.Class, d, "warning", "fleetd: "+action+" refused: "+err.Error()); jerr != nil {
+				return "", jerr
+			}
+			return "", err
+		}
 		name = wf.Name()
 		if err := r.applyHardware(ctx, d, true); err != nil {
 			return "", err

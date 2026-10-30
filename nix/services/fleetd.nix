@@ -244,7 +244,8 @@ in
         ATTEST_CA_PKCS11_PIN_FILE = "%d/devid-ca-pin";
         ATTEST_CA_CERT = "${caChain}";
         ATTEST_EK_ROOTS = "${../../apps/fleetd/attest/roots}";
-        ATTEST_POLICY = "${../../apps/fleetd/attest/policy.yaml}";
+        ATTEST_POLICY = "${../../apps/fleetd/attest/policy}";
+        FLEET_CLASSES = "${../../clusters/${site}/fleet/classes.json}";
         ATTEST_STATE_DIR = "${stateDir}/attest";
         ATTEST_METRICS_FILE = "${metricsDir}/fleetd-attest.prom";
         # NetBox runs on capsule (./netbox.nix) and serves the anchors on its Anchor network
@@ -255,7 +256,6 @@ in
 
         FLEET_SITE = site;
         FLEET_NAMESPACE = "tinkerbell";
-        FLEET_TEMPLATE = "provision";
         FLEET_NETBOX_URL = "http://${lab.hosts.capsule}:8080";
         FLEET_NETBOX_TOKEN_FILE = "%d/netbox-token";
         FLEET_KUBE_SERVER = "https://localhost:6443";

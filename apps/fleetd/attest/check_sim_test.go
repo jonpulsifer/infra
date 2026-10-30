@@ -181,7 +181,7 @@ func TestDailyCheckQuarantinesAPolicyMiss(t *testing.T) {
 	t.Run("policy", func(t *testing.T) {
 		h, f := activeNode(t)
 		// The HookOS key, which a disk boot of Talos never shows.
-		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }())
 		if r.Status != http.StatusForbidden || r.Verdict.Verdict != protocol.VerdictQuarantine || r.Verdict.Reason != reasonPolicy {
 			t.Fatalf("policy miss: %+v", r)
@@ -209,13 +209,13 @@ func TestDailyCheckQuarantinesAPolicyMiss(t *testing.T) {
 func TestOwnerLiftsAQuarantineOnAnActiveNode(t *testing.T) {
 	h, f := activeNode(t)
 	before := nvLDevID(t, h)
-	policy := h.v.Policy.RenewRequiredAuthorities
-	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	policy := h.v.Policies["talos"].RenewRequiredAuthorities
+	h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("policy miss: %+v", r)
 	}
 	quarantined(t, h, f, reasonPolicy)
-	h.v.Policy.RenewRequiredAuthorities = policy
+	h.v.Policies["talos"].RenewRequiredAuthorities = policy
 
 	// A good boot changes nothing while the verdict stands.
 	if _, err := h.check(h.ts.URL, "1.0"); err == nil {
@@ -252,7 +252,7 @@ func TestOwnerLiftsAQuarantineOnAnActiveNode(t *testing.T) {
 	}
 
 	// The lift restores the identity, not a free pass: a miss quarantines again.
-	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("a miss after the lift: %+v", r)
 	}
@@ -265,12 +265,12 @@ func TestOwnerLiftsAQuarantineOnAnActiveNode(t *testing.T) {
 // the lifted serial is refused and leaves the anchor's quarantine in place.
 func TestALiftedQuarantineStillNeedsTheProof(t *testing.T) {
 	h, f := activeNode(t)
-	policy := h.v.Policy.RenewRequiredAuthorities
-	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	policy := h.v.Policies["talos"].RenewRequiredAuthorities
+	h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("policy miss: %+v", r)
 	}
-	h.v.Policy.RenewRequiredAuthorities = policy
+	h.v.Policies["talos"].RenewRequiredAuthorities = policy
 	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["attest_verdict"] = "" })
 	h.tamperRenew = func(_ string, e *protocol.RenewEvidence) {
 		e.Quote.Signature = append([]byte{}, e.Quote.Signature[:len(e.Quote.Signature)-1]...)
@@ -293,7 +293,7 @@ func TestControlPlaneFailsInPlace(t *testing.T) {
 	t.Run("daily check", func(t *testing.T) {
 		h, f := activeNode(t)
 		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
-		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }())
 		if r.Status != http.StatusForbidden || r.Verdict.Verdict != protocol.VerdictFailedNoQuarantine || r.Verdict.Reason != reasonPolicy {
 			t.Fatalf("control-plane policy miss: %+v", r)
@@ -307,7 +307,7 @@ func TestControlPlaneFailsInPlace(t *testing.T) {
 		}
 
 		// The next passing check clears it.
-		h.v.Policy.RenewRequiredAuthorities = nil
+		h.v.Policies["talos"].RenewRequiredAuthorities = nil
 		if _, err := h.check(h.ts.URL, "1.0"); err != nil {
 			t.Fatalf("check after the boot is fixed: %v", err)
 		}
@@ -322,7 +322,7 @@ func TestControlPlaneFailsInPlace(t *testing.T) {
 		h, f := activeNode(t)
 		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
 		first := nvLDevID(t, h)
-		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.renew(simSerial); return err }())
 		if r.Verdict.Verdict != protocol.VerdictFailedNoQuarantine || r.Verdict.Reason != reasonPolicy {
 			t.Fatalf("control-plane renewal policy miss: %+v", r)

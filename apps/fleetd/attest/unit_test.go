@@ -154,7 +154,7 @@ func TestEKRefusals(t *testing.T) {
 
 func loadPolicy(t *testing.T) *Policy {
 	t.Helper()
-	p, err := LoadPolicy("policy.yaml")
+	p, err := LoadPolicy("policy/talos.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestPolicyNamesTheCommittedSecureBootCerts(t *testing.T) {
 		sum := sha256.Sum256(readFile(t, filepath.Join(dir, file)))
 		fp := hex.EncodeToString(sum[:])
 		if p.Names[fp] != name {
-			t.Errorf("%s (%s) is not named %q in policy.yaml", file, fp, name)
+			t.Errorf("%s (%s) is not named %q in policy/talos.yaml", file, fp, name)
 		}
 		if !slices.Contains(p.Authorities, fp) || !slices.Contains(p.DB.Required, fp) {
 			t.Errorf("%s must be a required db entry and an allowed authority", file)

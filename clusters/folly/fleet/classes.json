@@ -1,0 +1,38 @@
+{
+  "controlplane": {
+    "description": "A Talos control plane. Its installer image comes from class-inputs.json. Boots only the lab's signed UKI.",
+    "os": "talos",
+    "template": "provision",
+    "policy_profile": "talos",
+    "secure_boot": true,
+    "payload_kind": "talos-machineconfig",
+    "reattest": true
+  },
+  "worker-g5": {
+    "description": "A Talos worker on a G5 desktop. Its installer image comes from class-inputs.json. Boots only the lab's signed UKI.",
+    "os": "talos",
+    "template": "provision",
+    "policy_profile": "talos",
+    "secure_boot": true,
+    "payload_kind": "talos-machineconfig",
+    "reattest": true
+  },
+  "worker-g2": {
+    "description": "A Talos worker on a G2 desktop, which has a TPM 1.2 and attests nothing. Its installer image comes from class-inputs.json.",
+    "os": "talos",
+    "template": "provision",
+    "policy_profile": "talos",
+    "secure_boot": true,
+    "payload_kind": "talos-machineconfig",
+    "reattest": false
+  },
+  "ubuntu": {
+    "description": "Ubuntu Server from Canonical's cloud image. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Canonical's Master CA at the CA level, with no shim or GRUB digest pins. dbx and SBAT are read at attestation and alert on a change. The installer image is set once CI builds it.",
+    "os": "ubuntu",
+    "template": "provision-ubuntu",
+    "policy_profile": "ubuntu",
+    "secure_boot": true,
+    "payload_kind": "cloud-init-nocloud",
+    "reattest": false
+  }
+}

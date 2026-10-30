@@ -60,6 +60,10 @@ type harnessOpts struct {
 	foreignMfr bool
 	// noEKCerts leaves the maker's certificates out of NV: the TPM sends its RSA EK alone, uncertified.
 	noEKCerts bool
+	// ekTemplates, by algorithm, make the EKs the maker certifies in place
+	// of the defaults, and ekNV holds the maker's other EK indexes.
+	ekTemplates map[string]tpm2.Public
+	ekNV        map[uint32][]byte
 	// netbox is the fake NetBox; without one the harness makes it from inventory.
 	netbox *fakeNetBox
 }
@@ -102,13 +106,19 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}
 	}
 
+	for index, data := range o.ekNV {
+		writeSimNV(t, sim, index, data)
+	}
 	mfr := newTestCA(t, "Test TPM Maker", nil, 1)
 	h.mfr = mfr
 	for _, c := range []struct {
 		alg  string
 		nv   uint32
 		tmpl tpm2.Public
-	}{{"rsa", 0x01c00002, client.EKTemplateRSA}, {"ecc", 0x01c0000a, client.EKTemplateECC}} {
+	}{{"rsa", 0x01c00002, client.DefaultEKTemplateRSA()}, {"ecc", 0x01c0000a, client.DefaultEKTemplateECC()}} {
+		if tmpl, ok := o.ekTemplates[c.alg]; ok {
+			c.tmpl = tmpl
+		}
 		hnd, pub, err := tpm2.CreatePrimary(sim, tpm2.HandleEndorsement, tpm2.PCRSelection{}, "", "", c.tmpl)
 		if err != nil {
 			t.Fatal(err)
@@ -149,7 +159,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h.v = &Verifier{
-		Roots: roots, Policy: policy, CA: devIDCA(t), Store: store,
+		Roots: roots, Policies: map[string]*Policy{"talos": policy}, Classes: testClasses, CA: devIDCA(t), Store: store,
 		Audit: &Audit{W: &h.audit, Site: "folly"},
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, SessionTTL: time.Minute,
 		BindingAuthor: fakeTerraform,

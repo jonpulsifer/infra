@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 func env(key, def string) string {
@@ -66,8 +68,15 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	policy, err := LoadPolicy(env("ATTEST_POLICY", "/etc/fleetd/policy.yaml"))
+	policies, err := LoadPolicies(env("ATTEST_POLICY", "/etc/fleetd/policy"))
 	if err != nil {
+		return nil, err
+	}
+	table, err := classes.Load(env("FLEET_CLASSES", "/etc/fleetd/classes.json"))
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckClasses(table, policies); err != nil {
 		return nil, err
 	}
 	store, err := OpenStore(env("ATTEST_STATE_DIR", "/var/lib/fleetd/attest"))
@@ -86,7 +95,8 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 
 	v := &Verifier{
 		Roots:      roots,
-		Policy:     policy,
+		Policies:   policies,
+		Classes:    table,
 		CA:         ca,
 		Store:      store,
 		Audit:      &Audit{W: os.Stdout, Site: site},

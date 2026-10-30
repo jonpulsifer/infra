@@ -186,17 +186,21 @@ func (c Config) IsControlPlane(class string) bool {
 	return class == ControlPlaneClass || c.ControlPlaneClasses[class]
 }
 
-// Workflow runs the provision Template for one action. A device that boots
-// by hand (ManualBoot), or one whose machine already waits in HookOS
-// (hookos), gets no boot mode.
+// Workflow runs the class's Template for one action, and refuses a device
+// whose class the table lacks. A device that boots by hand (ManualBoot), or
+// one whose machine already waits in HookOS (hookos), gets no boot mode.
 // toggleAllowNetboot is off: the fleet sets the Hardware's flags before the
 // Workflow exists, and Tinkerbell's toggle would be a second writer of the
 // same atomic list, racing the fleet's apply.
-func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) Object {
+func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (Object, error) {
+	class, ok := c.Classes[d.Class]
+	if !ok {
+		return nil, fmt.Errorf("%s's class %q is not in the class table", d.Name, d.Class)
+	}
 	a := Actions[action]
 	installer := c.Installer(d, action)
 	spec := map[string]any{
-		"templateRef": c.Template,
+		"templateRef": class.Template,
 		"hardwareRef": d.Name,
 		"hardwareMap": map[string]any{
 			"attest":          fmt.Sprint(a.Attest && !SkipsAttest(d)),
@@ -220,7 +224,7 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) Ob
 		"kind":       WorkflowResource.Kind,
 		"metadata":   meta,
 		"spec":       spec,
-	}
+	}, nil
 }
 
 // NextStatus is the NetBox status a device takes when an action starts, or

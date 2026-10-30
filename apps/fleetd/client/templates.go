@@ -1,9 +1,13 @@
 package client
 
-import "github.com/google/go-tpm/legacy/tpm2"
+import (
+	"bytes"
 
-// The TCG EK credential profile's low-range EK templates (L-1 RSA 2048 and
-// L-2 ECC NIST P-256), which the manufacturer's EK certificates certify.
+	"github.com/google/go-tpm/legacy/tpm2"
+)
+
+// The TCG EK credential profile's PolicyA, PolicySecret(TPM_RH_ENDORSEMENT),
+// and the attributes of its Low Range templates L-1 and L-2 (5.3).
 var (
 	ekPolicyA = []byte{
 		0x83, 0x71, 0x97, 0x67, 0x44, 0x84, 0xB3, 0xF8, 0x1A, 0x90, 0xCC, 0x8D,
@@ -12,30 +16,41 @@ var (
 	}
 	ekAttributes = tpm2.FlagFixedTPM | tpm2.FlagFixedParent | tpm2.FlagSensitiveDataOrigin |
 		tpm2.FlagAdminWithPolicy | tpm2.FlagRestricted | tpm2.FlagDecrypt
+)
 
-	EKTemplateRSA = tpm2.Public{
+// DefaultEKTemplateRSA is template L-1 (RSA 2048), which a manufacturer's
+// low-range RSA EK certificate certifies unless NV holds an EK Template.
+// Each call answers buffers of its own.
+func DefaultEKTemplateRSA() tpm2.Public {
+	return tpm2.Public{
 		Type:       tpm2.AlgRSA,
 		NameAlg:    tpm2.AlgSHA256,
 		Attributes: ekAttributes,
-		AuthPolicy: ekPolicyA,
+		AuthPolicy: bytes.Clone(ekPolicyA),
 		RSAParameters: &tpm2.RSAParams{
 			Symmetric:  &tpm2.SymScheme{Alg: tpm2.AlgAES, KeyBits: 128, Mode: tpm2.AlgCFB},
 			KeyBits:    2048,
 			ModulusRaw: make([]byte, 256),
 		},
 	}
-	EKTemplateECC = tpm2.Public{
+}
+
+// DefaultEKTemplateECC is template L-2 (ECC NIST P256).
+func DefaultEKTemplateECC() tpm2.Public {
+	return tpm2.Public{
 		Type:       tpm2.AlgECC,
 		NameAlg:    tpm2.AlgSHA256,
 		Attributes: ekAttributes,
-		AuthPolicy: ekPolicyA,
+		AuthPolicy: bytes.Clone(ekPolicyA),
 		ECCParameters: &tpm2.ECCParams{
 			Symmetric: &tpm2.SymScheme{Alg: tpm2.AlgAES, KeyBits: 128, Mode: tpm2.AlgCFB},
 			CurveID:   tpm2.CurveNISTP256,
 			Point:     tpm2.ECPoint{XRaw: make([]byte, 32), YRaw: make([]byte, 32)},
 		},
 	}
+}
 
+var (
 	// SRKTemplate is the parent of the AK and the LDevID: the H-2 template
 	// (ECC NIST P-256 storage key, empty unique), the one SPIRE's tpm_devid
 	// agent recreates to load an ECC DevID. A TPM derives the same key from
@@ -76,10 +91,4 @@ var (
 			CurveID: tpm2.CurveNISTP256,
 		},
 	}
-)
-
-// EK certificate NV indexes, from the TCG registry of reserved handles.
-const (
-	nvEKCertRSA = 0x01c00002
-	nvEKCertECC = 0x01c0000a
 )
