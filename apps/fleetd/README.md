@@ -90,13 +90,15 @@ and not answering, every request is 503 `refused`.
 
 The client sends the ECC NIST P256 and RSA 2048 EKs whose certificates the TPM holds in the TCG EK
 Credential Profile's Low Range (version 2.7, 2.2.2.4), or its default RSA EK alone when it holds
-none. It builds each EK from the profile's default template, or from the EK Template and EK Nonce in
-NV (2.2.2.6), checks that the certificate names the key it made, and recreates the key from that
+none there; High Range certificates are not used, and a run that finds only those says so. It
+builds each EK from the profile's default template, or from the EK Template and EK Nonce in NV
+(2.2.2.6), checks that the certificate names the key it made, and recreates the key from that
 template for each activation. Only an index that is not defined falls back to the default; an
-unreadable or malformed index, a certificate for another key, an unsupported template and a TPM
-with certificates only in the High Range each fail the run before it reaches fleetd.
-`tink-attest inspect` prints the platform, the TPM's maker and firmware, and what discovery finds
-for each profile, and changes nothing on the TPM.
+unreadable or malformed index, a certificate for another key and an unsupported template each fail
+the run before it reaches fleetd. It never guesses an index's own authorization unless the index
+sets `noDA`, so discovery cannot count toward the TPM's lockout. `tink-attest inspect` prints the
+platform, the TPM's maker and firmware, the EKs an intake would send or why it would fail, and what
+discovery finds for each profile, and changes nothing on the TPM.
 
 A planned stub binds to the first box whose pass names its serial: fleetd puts the claimed MAC on
 the stub's interface and never replaces a pin on file. A serial NetBox does not know waits for the

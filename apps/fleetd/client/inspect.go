@@ -10,11 +10,17 @@ import (
 	"github.com/google/go-tpm/tpm2/transport"
 )
 
-// TPMReport is what Inspect found: the TPM's identity and, for each Low
-// Range profile, its NV indexes and the EK discovery makes from them.
+// TPMReport is what Inspect found: the TPM's identity, the EKs an intake
+// sends or the reason it would fail, and for each Low Range profile its NV
+// indexes and the EK discovery makes from them.
 type TPMReport struct {
 	Manufacturer, Vendor, Firmware, Spec string
-	Profiles                             []ProfileReport
+	// Intake and IntakeErr are what DiscoverEKs answers, and IntakeNote
+	// what an intake logs about High Range certificates.
+	Intake     []*EK
+	IntakeErr  error
+	IntakeNote string
+	Profiles   []ProfileReport
 	// HighRange holds the High Range EK certificate indexes, which this
 	// client does not use.
 	HighRange    []uint32
@@ -45,6 +51,10 @@ func Inspect(rw io.ReadWriter) (*TPMReport, error) {
 	r, err := tpmIdentity(rw)
 	if err != nil {
 		return nil, err
+	}
+	r.Intake, r.IntakeErr = DiscoverEKs(rw)
+	if r.IntakeErr == nil {
+		r.IntakeNote = HighRangeNote(rw, r.Intake)
 	}
 	tpm := transport.FromReadWriter(rw)
 	for _, p := range ekProfiles {

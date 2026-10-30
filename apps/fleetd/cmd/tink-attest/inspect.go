@@ -46,6 +46,22 @@ func writeReport(w io.Writer, p platform, r *client.TPMReport) {
 	fmt.Fprintf(w, "model: %s %s (SKU %s)\n", p.vendor, p.model, p.sku)
 	fmt.Fprintf(w, "firmware: %s %s (%s)\n", p.biosVendor, p.biosVersion, p.biosDate)
 	fmt.Fprintf(w, "tpm: %s %q firmware %s, %s\n", r.Manufacturer, r.Vendor, r.Firmware, r.Spec)
+	if r.IntakeErr != nil {
+		fmt.Fprintf(w, "intake: FAILED: %v\n", r.IntakeErr)
+	} else {
+		sent := make([]string, len(r.Intake))
+		for i, e := range r.Intake {
+			c := "certified"
+			if e.Cert == nil {
+				c = "uncertified, admitted only by an approved pin"
+			}
+			sent[i] = fmt.Sprintf("%s %s (%s)", e.Alg, e.Hash, c)
+		}
+		fmt.Fprintf(w, "intake: sends %s\n", strings.Join(sent, ", "))
+	}
+	if r.IntakeNote != "" {
+		fmt.Fprintf(w, "intake: %s\n", r.IntakeNote)
+	}
 	for _, pr := range r.Profiles {
 		fmt.Fprintf(w, "ek %s (%s): certificate %s, template %s, nonce %s; ", pr.Alg, pr.Name, nvState(pr.Cert), nvState(pr.Template), nvState(pr.Nonce))
 		switch {
@@ -67,7 +83,7 @@ func writeReport(w io.Writer, p platform, r *client.TPMReport) {
 		for i, h := range r.HighRange {
 			idx[i] = fmt.Sprintf("%#x", h)
 		}
-		fmt.Fprintf(w, "high range EK certificates: %s (unsupported)\n", strings.Join(idx, ", "))
+		fmt.Fprintf(w, "high range EK certificates: %s (not used)\n", strings.Join(idx, ", "))
 	}
 }
 
