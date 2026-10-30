@@ -42,6 +42,8 @@ The signed confirm of an intake pass admits the device in the same process. flee
 
 On a running node, `tpm-reattest` sends a LAK-signed quote daily: a renewal from 30 days before expiry, else the daily check. A boot that misses `renew_required_authorities` quarantines a worker, which revokes its LDevID and cordons it as `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`'s account. A control plane only raises an alert. PCR 0 is kept per BIOS version in `pcr0_by_bios`, and a network fact counts only when the session's AK signed it. [Identity](../platform/identity.md#renewal) has the renewal and the owner's quarantine lift.
 
+Each pass also writes `/var/lib/fleetd/spire-nodes.json`, the nodes that spore's SPIRE server registers: each `active` device with a passing verdict, with its name and its `ek_hash` and `ek_hash_ecc` pins. A device that is decommissioning, failed, quarantined, offline or gone from NetBox is absent. fleetd holds no SPIRE credential and never calls the server. A root unit on spore, `spire-server-fleet-entries`, reads the file and owns the registration entries whose IDs start with `fleet-`; it deletes a node's entries and evicts its agent when the node leaves the file, and it changes nothing when the file is malformed. [Identity](../platform/identity.md#fleetd-entries) has the boundary with the entries that Nix declares.
+
 ## Operate
 
 | Alert | Meaning | Runbook |

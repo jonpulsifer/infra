@@ -34,6 +34,8 @@ type Device struct {
 	Disk    string
 	Class   string
 	TPM     string
+	// EKHash and EKHashECC pin the TPM's endorsement keys.
+	EKHash, EKHashECC string
 	// AMT and SecureBootExpected are nil while the custom field is empty.
 	AMT                *bool
 	SecureBootExpected *bool
@@ -210,6 +212,8 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 		Disk:               cf("install_disk"),
 		Class:              cf("talos_class"),
 		TPM:                cf("tpm_version"),
+		EKHash:             cf("ek_hash"),
+		EKHashECC:          cf("ek_hash_ecc"),
 		BMCType:            cf("bmc_type"),
 		DesiredAction:      cf("desired_action"),
 		LastWorkflow:       cf("last_workflow"),

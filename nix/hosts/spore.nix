@@ -99,6 +99,10 @@ in
     # Each issuing DevID CA's own certificate file, never the bundle: the server trusts the first
     # certificate of each file.
     devid.enable = true;
+    fleetEntries = {
+      enable = true;
+      inherit workloads;
+    };
     devid.caChains = [
       ../../terraform/pki/certs/folly-devid-ca-software.pem
       ../../terraform/pki/certs/folly-devid-ca-spore.pem
