@@ -27,6 +27,12 @@ devices="$(nb_list "dcim/devices/?site=folly&role=kubernetes-node")"
 interfaces="$(nb_list "dcim/interfaces/?type__n=virtual&$(jq -r 'map("device_id=\(.id)") | join("&")' <<<"$devices")")"
 declared="$(yq -o json '.nodes | keys' "$nodes_file")"
 statuses="$(jq -c 'map({key: .name, value: .status.value}) | from_entries' <<<"$devices")"
+# As the Talos root's plan does, refuse a declared node NetBox has no device for.
+missing="$(jq -rn --argjson s "$statuses" --argjson d "$declared" '$d - ($s | keys) | join(", ")')"
+if [[ -n "$missing" ]]; then
+  echo "no NetBox device for $missing in ${nodes_file#"$root"/}; apply terraform/netbox/folly first" >&2
+  exit 1
+fi
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -48,7 +54,7 @@ terraform {
 
 locals {
   machines = { for name, m in local.declared : name => merge(m, {
-    status = lookup(jsondecode($(jq -R . <<<"$statuses")), name, "planned")
+    status = jsondecode($(jq -R . <<<"$statuses"))[name]
   }) }
 }
 EOF

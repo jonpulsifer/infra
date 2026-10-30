@@ -35,7 +35,7 @@ Terraform never updates a device in place. A change to an entry's serial, model,
 | talos-attest | `serial`, `class`, `tpm` and `secure_boot`, as its inventory | `nix/services/talos-attest.nix` |
 | fleet-controller | nothing from this file: it reads each device from NetBox | `apps/fleet-controller` |
 
-The Talos root reads each node's status from NetBox at plan time, and `mise run render-class-inputs` reads it too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The same task writes `clusters/folly/fleet/node-macs.json` from the MACs NetBox holds, which spore's netboot links read.
+The Talos root reads each node's status from NetBox at plan time, and its plan fails when NetBox holds no device for a declared node, so a new node's device comes from an apply of `terraform/netbox/folly` first. `mise run render-class-inputs` refuses the same case, and reads each status too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The same task writes `clusters/folly/fleet/node-macs.json` from the MACs NetBox holds, which spore's netboot links read.
 
 A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d terraform/netbox/folly`, `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos` on the pull request, and deploy spore for a new TPM 2.0 node's alias.
 

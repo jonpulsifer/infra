@@ -129,13 +129,15 @@ resource "unifi_device" "usw_24_poe" {
     }
   }
 
-  # A node port carries the Kubernetes network untagged and nothing else.
+  # A node port carries the Kubernetes network untagged and nothing else. The
+  # controller stores a native network with every tagged VLAN blocked as
+  # forward native.
   dynamic "port_override" {
     for_each = local.node_ports
     content {
       index                 = tonumber(port_override.key)
       name                  = port_override.value
-      forward               = "customize"
+      forward               = "native"
       native_networkconf_id = unifi_network.k8s.id
       tagged_vlan_mgmt      = "block_all"
       dot1x = {

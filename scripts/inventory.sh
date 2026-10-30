@@ -2,10 +2,10 @@
 # Compares each folly node's NetBox device with what the node reports over the Talos API, or
 # prints one node's observed entry.
 #
-#   inventory.sh check [--record] [--metrics <file>]
+#   inventory.sh check [--record]
 #                       every active or failed node in NetBox; exits 1 on drift.
 #                       --record writes a NetBox journal entry when a node's findings change and keeps the `drift` tag on
-#                       the drifting devices; --metrics writes netbox_drift for node-exporter.
+#                       the drifting devices.
 #   inventory.sh observe [--insecure] <address>
 #                       one node's entry; --insecure for a node in maintenance mode
 #
@@ -19,7 +19,7 @@ readonly root
 source "$root/scripts/lib/netbox.sh"
 
 usage() {
-  echo "usage: $0 check [--record] [--metrics <file>] | observe [--insecure] <address>" >&2
+  echo "usage: $0 check [--record] | observe [--insecure] <address>" >&2
   exit 64
 }
 
@@ -104,22 +104,16 @@ netbox_nodes() {
 }
 
 check() {
-  local record=false metrics=""
+  local record=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --record) record=true ;;
-      --metrics)
-        [[ $# -ge 2 ]] || usage
-        metrics="$2"
-        shift
-        ;;
       *) usage ;;
     esac
     shift
   done
 
   local addresses machines drift=0 node address seen diffs
-  local -a series=()
   nb_init
   machines="$(netbox_nodes)"
   addresses="$(jq -c 'with_entries(select(.value.status != "planned" and .value.address != null) | .value |= .address)' <<<"$machines")"
@@ -127,17 +121,14 @@ check() {
     address="$(jq -r --arg n "$node" '.[$n]' <<<"$addresses")"
     if ! jq -e --arg n "$node" 'has($n)' <<<"$machines" >/dev/null; then
       echo "$node: no active or failed kubernetes-node device in NetBox"
-      series+=("netbox_drift{device=\"$node\"} 1")
       drift=1
       continue
     fi
     if ! seen="$(observe "$address")"; then
       echo "$node: no answer from $address"
-      series+=("netbox_drift_reachable{device=\"$node\"} 0")
       drift=1
       continue
     fi
-    series+=("netbox_drift_reachable{device=\"$node\"} 1")
     diffs="$(jq -r --arg n "$node" --arg address "$address" --argjson seen "$seen" '
       .[$n] as $want
       | $seen + {address: $address} | to_entries[]
@@ -146,27 +137,15 @@ check() {
     ' <<<"$machines")"
     if [[ -n "$diffs" ]]; then
       echo "$diffs"
-      series+=("netbox_drift{device=\"$node\"} 1")
       drift=1
     else
       echo "$node: ok"
-      series+=("netbox_drift{device=\"$node\"} 0")
     fi
     if [[ "$record" == true ]]; then
       record "$node" "$diffs"
     fi
   done
 
-  if [[ -n "$metrics" ]]; then
-    {
-      echo "# HELP netbox_drift Whether the node reports hardware facts that differ from its NetBox device, or has none."
-      echo "# TYPE netbox_drift gauge"
-      printf '%s\n' "${series[@]}" | grep '^netbox_drift{' || true
-      echo "# HELP netbox_drift_reachable Whether the drift check reached the node over the Talos API."
-      echo "# TYPE netbox_drift_reachable gauge"
-      printf '%s\n' "${series[@]}" | grep '^netbox_drift_reachable{' || true
-    } >"$metrics"
-  fi
   return "$drift"
 }
 

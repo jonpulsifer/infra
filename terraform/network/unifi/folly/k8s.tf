@@ -59,6 +59,16 @@ resource "unifi_network" "k8s" {
       ])
       error_message = "A node's address in clusters/folly/inventory/nodes.yaml is inside K8S_DHCP_CIDR, the Kubernetes network's DHCP pool."
     }
+    # node_ports keys by switch port, so a shared port would drop a node silently,
+    # and a shared address would publish two names for one host.
+    precondition {
+      condition     = length(distinct([for m in values(local.nodes) : m.address])) == length(local.nodes)
+      error_message = "Two nodes in clusters/folly/inventory/nodes.yaml share an address."
+    }
+    precondition {
+      condition     = length(distinct([for m in values(local.nodes) : m.switch_port])) == length(local.nodes)
+      error_message = "Two nodes in clusters/folly/inventory/nodes.yaml share a switch port."
+    }
   }
 }
 
