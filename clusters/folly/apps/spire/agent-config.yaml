@@ -65,7 +65,7 @@ data:
       }
     }
 ---
-# The attest service's base URL for GET /devid/<serial>. Empty keeps every
+# fleetd's DevID listener on spore, for GET /devid/<serial> and the renewal. Empty keeps every
 # agent on the EK attestor.
 apiVersion: v1
 kind: ConfigMap
@@ -76,4 +76,4 @@ metadata:
     app.kubernetes.io/name: spire-agent
     app.kubernetes.io/part-of: spire
 data:
-  ATTEST_URL: "http://${NS1_IP}:8444"
+  ATTEST_URL: "http://${SPORE_IP}:8444"

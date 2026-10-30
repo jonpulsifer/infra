@@ -17,7 +17,7 @@ resources:
   - flameboss-rules.yaml
   - mate-sandbox-reader.yaml
   - pbx-rules.yaml
-  - fleet-controller-rules.yaml
+  - fleetd-rules.yaml
   - ../../base/monitoring
   - secret.sops.yaml
  # - unpoller
