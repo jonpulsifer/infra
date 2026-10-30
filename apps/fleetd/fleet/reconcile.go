@@ -283,6 +283,9 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		}
 		workflows = kept
 	}
+	if err := r.nudgeOverdue(ctx, d, workflows); err != nil {
+		return err
+	}
 	hardware := d.MAC != "" && d.Disk != ""
 	if hardware {
 		if err := r.applyHardware(ctx, d, Unfinished(workflows)); err != nil {
@@ -320,6 +323,38 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 	}
 	_, err = r.start(ctx, d, d.DesiredAction, workflows, false)
 	return err
+}
+
+// nudgeOverdue annotates each unfinished Workflow that is more than one pass
+// past its global timeout. Tinkerbell's controller checks the timeout only
+// when it reconciles a Workflow, and a silent agent writes nothing, so the
+// Workflow stays RUNNING, keeps netboot on and takes every new request. The
+// annotation is the write that makes the controller reconcile and set
+// TIMEOUT. A Workflow with no parseable deadline is left alone.
+func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Object) error {
+	now := r.Now()
+	for _, wf := range workflows {
+		stop, ok := wf.GlobalExecutionStop()
+		if Finished(wf.State()) || !ok || now.Sub(stop) <= r.Config.Interval {
+			continue
+		}
+		err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{OverdueAnnotation: now.UTC().Format(time.RFC3339)})
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("annotate overdue %s: %w", wf.Name(), err)
+		}
+		action := wf.CurrentAction()
+		why := fmt.Sprintf("fleetd: Workflow %s passed its global timeout at %s while %q was current, and fleetd asked Tinkerbell to end it", wf.Name(), stop.UTC().Format(time.RFC3339), action)
+		if action == "reboot" {
+			why += "; the install and next-boot reported success and the reboot's report was lost, so the disk holds the install"
+		}
+		if err := r.journalOnce(ctx, "overdue/"+wf.Name(), d, "warning", why); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // start makes sure one Workflow runs for the device and that NetBox names it,

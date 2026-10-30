@@ -13,6 +13,10 @@ const (
 	ActionLabel = "lolwtf.ca/action"
 )
 
+// OverdueAnnotation is the write fleetd makes to a Workflow that is past its
+// global timeout, so that Tinkerbell's controller reconciles it.
+const OverdueAnnotation = "lolwtf.ca/overdue-at"
+
 // ActionRetire is the Workflow the fleet runs for a decommissioning
 // device. It is no desired_action: the status asks for it.
 const ActionRetire = "retire"

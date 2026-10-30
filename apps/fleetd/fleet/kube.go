@@ -151,6 +151,36 @@ func (o Object) State() string {
 	return s
 }
 
+// GlobalExecutionStop is status.globalExecutionStop, the deadline Tinkerbell
+// sets for a Workflow. It is false when the field is missing or unparseable.
+func (o Object) GlobalExecutionStop() (time.Time, bool) {
+	st, _ := o["status"].(map[string]any)
+	s, _ := st["globalExecutionStop"].(string)
+	t, err := time.Parse(time.RFC3339, s)
+	return t, err == nil && !t.IsZero()
+}
+
+// CurrentAction is status.currentState.actionName, the action a Workflow's
+// agent last reported on.
+func (o Object) CurrentAction() string {
+	st, _ := o["status"].(map[string]any)
+	cs, _ := st["currentState"].(map[string]any)
+	s, _ := cs["actionName"].(string)
+	return s
+}
+
+// Annotate sets annotations on an existing object with a merge patch that
+// carries metadata.annotations alone, so no other field and no other
+// writer's annotation is touched. A missing object is ErrNotFound.
+func (k *Kube) Annotate(ctx context.Context, r Resource, name string, annotations map[string]string) error {
+	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
+	if err != nil {
+		return err
+	}
+	q := url.Values{"fieldManager": {FieldManager}}
+	return k.do(ctx, http.MethodPatch, k.path(r, name)+"?"+q.Encode(), "application/merge-patch+json", body, nil)
+}
+
 // Apply is a server-side apply that takes ownership of conflicting fields.
 func (k *Kube) Apply(ctx context.Context, r Resource, obj Object) error {
 	body, err := json.Marshal(obj)

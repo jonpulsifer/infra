@@ -175,6 +175,17 @@ observed EK hashes, the SMBIOS facts, `pcr0_by_bios`, `desired_action` back to `
 cluster's API on every pass; a control plane's `failed-no-quarantine` is no quarantine, and fleetd
 never uncordons.
 
+## Overdue Workflows
+
+Tinkerbell's controller checks a Workflow's global timeout only when it reconciles that Workflow,
+and a silent agent writes nothing. Each pass, fleetd writes the annotation `lolwtf.ca/overdue-at` to
+every unfinished Workflow whose `status.globalExecutionStop` is more than `FLEET_INTERVAL` in the
+past, and the write makes the controller set `TIMEOUT`. The write is a merge patch on
+`metadata.annotations` alone, so `spec` and `status` stay with their owners. A Workflow with no
+deadline, or one that does not parse, is left alone. The journal says once per Workflow which action
+was current; for `reboot` it says the install and next-boot reported success and the reboot's report
+was lost.
+
 ## Audit
 
 Every decision is one JSON line on stdout: `attest.verdict`, `attest.issue`, `attest.renew`,
