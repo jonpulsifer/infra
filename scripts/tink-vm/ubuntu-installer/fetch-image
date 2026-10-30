@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Downloads Ubuntu 24.04's cloud image, pinned by release serial and SHA-256, into DIR, which should
+# be new and empty: nothing in it is ever run. SHA256SUMS must carry a good signature from Ubuntu's
+# cloud image signing key (pinned by fingerprint, fetched into a throwaway keyring), and both the
+# listed hash and the file's own must equal the pin. Prints the image's path.
+#
+# To move the pin: pick a serial from https://cloud-images.ubuntu.com/releases/noble/, verify its
+# SHA256SUMS the same way and put the new serial and hash here.
+set -euo pipefail
+
+dir=${1:?fetch-image needs a download directory}
+serial=20261017
+file=ubuntu-24.04-server-cloudimg-amd64.img
+sha256=04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
+fpr=D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81
+base=https://cloud-images.ubuntu.com/releases/noble/release-$serial
+
+mkdir -p "$dir"
+export GNUPGHOME=$dir/gnupg
+mkdir -p "$GNUPGHOME"
+chmod 0700 "$GNUPGHOME"
+
+curl -fsSL -o "$dir/SHA256SUMS" "$base/SHA256SUMS"
+curl -fsSL -o "$dir/SHA256SUMS.gpg" "$base/SHA256SUMS.gpg"
+gpg --batch --quiet --keyserver hkps://keyserver.ubuntu.com --recv-keys "$fpr"
+status=$(gpg --batch --status-fd 1 --verify "$dir/SHA256SUMS.gpg" "$dir/SHA256SUMS" 2>/dev/null)
+printf '%s\n' "$status" | grep -q "^\[GNUPG:\] VALIDSIG $fpr " || {
+  echo "SHA256SUMS is not signed by $fpr" >&2
+  exit 1
+}
+listed=$(awk -v f="*$file" '$2 == f { print $1 }' "$dir/SHA256SUMS")
+[ "$listed" = "$sha256" ] || {
+  echo "SHA256SUMS lists $file as ${listed:-nothing}, not the pinned $sha256" >&2
+  exit 1
+}
+
+if ! [ -f "$dir/$file" ] || [ "$(sha256sum "$dir/$file" | cut -d' ' -f1)" != "$sha256" ]; then
+  curl -fsSL -o "$dir/$file" "$base/$file"
+fi
+[ "$(sha256sum "$dir/$file" | cut -d' ' -f1)" = "$sha256" ] || {
+  echo "$file does not match the pinned $sha256" >&2
+  exit 1
+}
+echo "$dir/$file"

@@ -1,0 +1,12 @@
+vars: {d2-config: {layout-engine: elk; theme-id: 0; pad: 24}}
+direction: right
+facts: "Owner + Git\nNetBox on capsule\nDeclarations and actions"
+control: "Management on spore\nfleetd + YubiKey\nBoot services + Tinkerbell"
+node: "Node boundary\nFirmware + TPM\nHookOS then Talos"
+identity: "Identity boundary\nSPIRE on spore\nAgent and workload on node"
+resource: "Resource boundary\nGCP IAM or\nservice policy"
+facts -> control: desired state {style.font-size: 24}
+control -> node: authorized install {style.font-size: 24}
+node -> identity: node proof {style.font-size: 24}
+identity -> resource: workload credential {style.font-size: 24}
+**.style.font-size: 24

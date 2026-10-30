@@ -136,6 +136,7 @@ sections:
   - title: Reference
     index: reference/index.md
     items:
+      - reference/folly-design.md
       - reference/glossary.md
       - reference/topology.md
       - reference/inventory.md

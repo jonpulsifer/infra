@@ -55,6 +55,8 @@ SPIRE rejects an entry that repeats another's parent, SPIFFE ID and selectors. T
 
 A node's identity starts before Talos runs. Each step relies on the one before it.
 
+[Technical design](../reference/folly-design.md) separates these proofs from installation authority and lists the threats that remain. A claimed serial and signed LLDP report do not prove chassis identity or physical location.
+
 | Step | Proves | Where it runs |
 | --- | --- | --- |
 | EK certificate | The TPM is a genuine Infineon or Nuvoton part | The TPM maker's CA, pinned in `apps/fleetd/attest/roots/` |
@@ -78,7 +80,7 @@ A folly node's identity follows its device's `status` in [NetBox](netbox.md). fl
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |
 | `offline` | Retired, and kept for history | fleetd, after the retirement run succeeds |
 
-Only the owner moves a device out of `failed` or into `decommissioning`, and fleetd refuses a `failed` device. A quarantine is a verdict, and the status stays: a quote that misses the policy sets `attest_verdict` to `quarantined: <reason>`, fleetd answers the node's `/devid` with 403 and cordons the node. fleetd refuses it a new identity until the owner clears the verdict. After that the node's next daily check or renewal, which proves its LAK and LDevID key and passes the policy, restores its record and its LDevID files, and the owner uncordons the node. A control plane's failed quote reads `failed-no-quarantine: <reason>` and only alerts. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
+Only the owner moves a device out of `failed` or into `decommissioning`, and fleetd refuses a `failed` device. A quarantine is a verdict, and the status stays: a quote that misses the policy sets `attest_verdict` to `quarantined: <reason>`, fleetd answers the node's `/devid` with 403 and cordons the node. fleetd refuses it a new identity until the owner clears the verdict. After that the node's next daily check or renewal, which proves its LAK and LDevID key and passes the policy, restores its record and its LDevID files, and the owner uncordons the node. A control plane's failed quote reads `failed-no-quarantine: <reason>` and alerts without a cordon. That verdict can also remove fleet-owned SPIRE registration eligibility. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
 
 ## Agents
 

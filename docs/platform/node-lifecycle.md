@@ -32,13 +32,14 @@ An installed node reinstalls when the owner sets `desired_action` to `provision`
 
 ## Trust
 
-- The firmware boots only images signed under the lab's Secure Boot keys, and `apps/fleetd/attest/policy.yaml` refuses any other boot.
+- Firmware checks images against its Secure Boot database, which also contains Microsoft certificates. After the event-log separator, `apps/fleetd/attest/policy.yaml` accepts only the lab's signing authorities. Intake requires HookOS. The policy pins no exact image digest.
 - The LDevID key stays in the TPM. fleetd signs every LDevID with spore's YubiKey CA, and the bundle keeps the LDevIDs capsule's and the software CA issued trusted until they renew.
 - A provision's wipe waits for the boot's pass and the install code, so a refused machine keeps its disk.
 - The running node renews its LDevID with a quote that its LAK signs. A `decommissioning` or `offline` device gets no renewal.
-- A quote that misses the policy quarantines a worker: fleetd revokes its identity and cordons it. A control plane is only alerted on. [Identity](identity.md) has the rules.
+- An authenticated quote that misses the policy quarantines a worker: fleetd refuses renewal and cordons it. SPIRE registration removal and existing credential expiry are separate. A control-plane failure records a failed verdict and alerts without a cordon; fleet-owned registration eligibility can change. [Identity](identity.md) has the rules.
 
 ## Where to go next
 
+- [Technical design](../reference/folly-design.md): component relationships, sequence diagrams, tradeoffs, evidence and threats.
 - [Prepare a machine](../runbooks/prepare-a-machine.md), [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md), [Retire a node](../runbooks/retire-a-node.md)
 - [Identity](identity.md), [fleetd](../apps/fleetd.md), [Tinkerbell](nixos/tinkerbell.md), [NetBox](netbox.md)
