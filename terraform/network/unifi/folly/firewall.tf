@@ -552,7 +552,7 @@ resource "unifi_firewall_policy" "folly_pbx_to_handset" {
   }
 }
 
-# The bootstrap network holds only the anchors' boot addresses and the boot VIP.
+# The bootstrap network holds only spore's boot address.
 # From there it reaches the anchors on its own subnet, which the switch carries
 # and the gateway never filters, and the internet; nothing else on the LAN or
 # in the cluster's VIP range.
@@ -604,11 +604,11 @@ resource "unifi_firewall_policy" "bootstrap_block_lb" {
 }
 
 # A node netboots and runs its Tinkerbell Workflows on the Kubernetes network,
-# so Lab reaches the anchors' boot services on their bootstrap addresses and the
-# boot VIP. TCP: 80 for nginx's iPXE scripts, UKI and HookOS, 443 for
-# enroll.lolwtf.ca, 7080 for Smee's per-MAC iPXE script and 42113 for the Tink
-# server that HookOS's agent polls (both on spore). UDP: 69 for the signed iPXE
-# over TFTP, 123 for chrony, and 514 for HookOS's syslog to spore. Lab and
+# so Lab reaches spore's boot services on its bootstrap address. TCP: 80 for
+# nginx's UKI and HookOS, 443 for fleetd's enroll.lolwtf.ca, 7080 for Smee's
+# per-MAC iPXE script and 42113 for the Tink server that HookOS's agent polls.
+# UDP: 69 for the signed iPXE over TFTP, 123 for chrony, and 514 for HookOS's
+# syslog. Lab and
 # Bootstrap are custom zones, so the controller creates each reply rule. A reply
 # rule matches only these ports, so dnsmasq sends TFTP data from port 69 too
 # (tftp-single-port in nix/services/talos-boot.nix).
@@ -635,7 +635,7 @@ resource "unifi_firewall_policy" "kubernetes_to_boot" {
 
   destination = {
     matching_target    = "IP"
-    ips                = [for ip in concat(local.anchor_boot_ips, [local.boot_vip]) : "${ip}/32"]
+    ips                = ["${local.boot_server}/32"]
     port               = each.value
     port_matching_type = "SPECIFIC"
     zone_id            = unifi_firewall_zone.bootstrap.id
