@@ -19,8 +19,11 @@ required_keys := {
 	"LB_RANGE",
 	"BGP_GATEWAY_ASN",
 	"BGP_CILIUM_ASN",
-	"NODE_ADDRESSES",
 }
+
+# folly's node addresses are the NetBox export's, so its ConfigMap carries no
+# NODE_ADDRESSES. offsite has no NetBox and must carry it.
+folly_cluster := "folly"
 
 cidr_keys := {"K8S_NODE_CIDR", "CILIUM_POD_CIDR", "SERVICE_CIDR", "CILIUM_NATIVE_ROUTING_CIDR", "LB_RANGE"}
 
@@ -275,9 +278,28 @@ deny contains msg if {
 	msg := sprintf("%s: CILIUM_NATIVE_ROUTING_CIDR must contain %s", [doc_path(i), key])
 }
 
+has_node_addresses(i) if is_string(doc_data(i).NODE_ADDRESSES)
+
 deny contains msg if {
 	some i, _ in docs
 	all_facts_present(i)
+	doc_data(i).CLUSTER_NAME != folly_cluster
+	not fact_ok(doc_data(i), "NODE_ADDRESSES")
+	msg := sprintf("%s: NODE_ADDRESSES is required", [doc_path(i)])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	doc_data(i).CLUSTER_NAME == folly_cluster
+	has_node_addresses(i)
+	msg := sprintf("%s: NODE_ADDRESSES must not be set on folly; its node addresses come from the NetBox export", [doc_path(i)])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	has_node_addresses(i)
 	not node_addresses(doc_data(i))
 	msg := sprintf("%s: NODE_ADDRESSES must be a JSON object of hostname to IPv4 address", [doc_path(i)])
 }
@@ -285,6 +307,7 @@ deny contains msg if {
 deny contains msg if {
 	some i, _ in docs
 	all_facts_present(i)
+	has_node_addresses(i)
 	count(node_addresses(doc_data(i))) == 0
 	msg := sprintf("%s: NODE_ADDRESSES must name at least one node", [doc_path(i)])
 }
@@ -292,6 +315,7 @@ deny contains msg if {
 deny contains msg if {
 	some i, _ in docs
 	all_facts_present(i)
+	has_node_addresses(i)
 	some name, _ in node_addresses(doc_data(i))
 	not regex.match(hostname_pattern, name)
 	msg := sprintf("%s: NODE_ADDRESSES key %q must be a hostname", [doc_path(i), name])
@@ -300,6 +324,7 @@ deny contains msg if {
 deny contains msg if {
 	some i, _ in docs
 	all_facts_present(i)
+	has_node_addresses(i)
 	some name, address in node_addresses(doc_data(i))
 	not ipv4_to_int(address)
 	msg := sprintf("%s: NODE_ADDRESSES value for %s must be an IPv4 address", [doc_path(i), name])
@@ -308,6 +333,7 @@ deny contains msg if {
 deny contains msg if {
 	some i, _ in docs
 	all_facts_present(i)
+	has_node_addresses(i)
 	facts := doc_data(i)
 	is_canonical_cidr(facts.K8S_NODE_CIDR)
 	some name, address in node_addresses(facts)
@@ -319,6 +345,7 @@ deny contains msg if {
 deny contains msg if {
 	some i, _ in docs
 	all_facts_present(i)
+	has_node_addresses(i)
 	nodes := node_addresses(doc_data(i))
 	some first, second in nodes
 	some other, _ in nodes
@@ -331,6 +358,7 @@ deny contains msg if {
 deny contains msg if {
 	some i, _ in docs
 	all_facts_present(i)
+	has_node_addresses(i)
 	facts := doc_data(i)
 	nodes := node_addresses(facts)
 	addresses := {address | some _, address in nodes}

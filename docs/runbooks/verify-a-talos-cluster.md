@@ -12,7 +12,7 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 
 - Get `kubectl` access, and the cluster's context in `~/.talos/config`, as [Get cluster admin access](get-cluster-admin-access.md) describes.
 
-`<site>` is `folly` or `offsite`, and `<addr>` is a node's entry in `NODE_ADDRESSES` in `clusters/<site>/config/cluster-topology.json`.
+`<site>` is `folly` or `offsite`, and `<addr>` is a node's address: on folly its `address` in `clusters/folly/inventory/machines.yaml`, the export of [NetBox](../platform/netbox.md), and on offsite its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`.
 
 ## Check the nodes
 

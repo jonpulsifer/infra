@@ -7,8 +7,9 @@
 #
 #   netbox-export.sh                 write the file
 #   netbox-export.sh --check [file]  exit 1 and print the diff if the file (default: the
-#                                    committed one) differs from NetBox, or if NODE_ADDRESSES
-#                                    in the cluster topology disagrees with NetBox's addresses
+#                                    committed one) differs from NetBox, or if NetBox's node
+#                                    addresses are outside K8S_NODE_CIDR, shared, or leave
+#                                    API_SERVER_IP in the cluster topology without a node
 #   netbox-export.sh --json          the same machines as JSON, each with its primary address
 #
 # NetBox access is scripts/lib/netbox.sh's environment.
@@ -80,8 +81,9 @@ render() {
 # folly's Kubernetes nodes as hardware: every NetBox device with the role
 # kubernetes-node and the status planned, staged, active or failed. status is
 # the node's lifecycle state and class its Talos class. address is the primary
-# IPv4; `mise run netbox:check` fails when it differs from NODE_ADDRESSES in
-# ../config/cluster-topology.json. bmc is the out-of-band management: its
+# IPv4, and the node's address everywhere; `mise run netbox:check` fails when a
+# node's is outside K8S_NODE_CIDR in ../config/cluster-topology.json or is
+# shared, or when API_SERVER_IP there is no node's. bmc is the out-of-band management: its
 # type, and its address, which is the node's own for AMT unless NetBox holds an
 # OOB address.
 #
@@ -97,23 +99,29 @@ EOF
   jq '{machines: .}' <<<"$1" | yq -P -p json
 }
 
-# addresses_agree: NODE_ADDRESSES names exactly the nodes that are staged, active or failed and
-# have an address, with the same addresses; planned nodes may have an address NODE_ADDRESSES lacks.
-addresses_agree() { # <machines json>
+# addresses_valid: a node (staged, active or failed) has an address in K8S_NODE_CIDR, no two
+# nodes share one, and API_SERVER_IP is a node's. Planned nodes are not checked.
+addresses_valid() { # <machines json>
   local problems
   problems="$(jq -rn --argjson export "$1" --slurpfile topology "$cluster" '
-    ($topology[0].data.NODE_ADDRESSES | fromjson) as $want
-    | ($export | to_entries | map(select(.value.status != "planned" and .value.address != null)
-        | {(.key): .value.address}) | add // {}) as $have
-    | ([$want | keys[] | select($have[.] == null) | "\(.): in NODE_ADDRESSES, not exported with an address"]
-      + [$have | keys[] | select($want[.] == null) | "\(.): exported at \($have[.]), not in NODE_ADDRESSES"]
-      + [$want | keys[] | select($have[.] != null and $have[.] != $want[.]) | "\(.): NODE_ADDRESSES has \($want[.]), NetBox has \($have[.])"])[]')" || {
-    echo "cannot compare NODE_ADDRESSES in ${cluster#"$root"/} with NetBox" >&2
+    def ip: split(".") | map(tonumber) | reduce .[] as $o (0; . * 256 + $o);
+    $topology[0].data as $t
+    | ($t.K8S_NODE_CIDR | split("/")) as [$net, $len]
+    | pow(2; 32 - ($len | tonumber)) as $size
+    | ($export | to_entries | map(select(.value.status != "planned"))) as $nodes
+    | ([$nodes[] | select(.value.address == null) | "\(.key): no address in NetBox"]
+      + [$nodes[] | select(.value.address != null
+          and ((((.value.address | ip) / $size) | floor) != ((($net | ip) / $size) | floor)))
+          | "\(.key): \(.value.address) is outside K8S_NODE_CIDR \($t.K8S_NODE_CIDR)"]
+      + [$nodes | group_by(.value.address)[] | select(length > 1 and .[0].value.address != null)
+          | "\(map(.key) | join(" and ")) share \(.[0].value.address)"]
+      + (if ($nodes | any(.value.address == $t.API_SERVER_IP)) then [] else ["API_SERVER_IP \($t.API_SERVER_IP) is not a node address"] end))[]')" || {
+    echo "cannot check node addresses in ${cluster#"$root"/} against NetBox" >&2
     return 2
   }
   if [[ -n "$problems" ]]; then
     printf '%s\n' "$problems" >&2
-    echo "NODE_ADDRESSES in ${cluster#"$root"/} disagrees with NetBox" >&2
+    echo "node addresses in NetBox disagree with ${cluster#"$root"/}" >&2
     return 1
   fi
 }
@@ -137,7 +145,7 @@ case "${1:-}" in
       echo "${file#"$root"/} differs from NetBox; run mise run netbox:export" >&2
       failed=1
     fi
-    addresses_agree "$machines" || failed=1
+    addresses_valid "$machines" || failed=1
     exit "$failed"
     ;;
   --json)

@@ -94,9 +94,9 @@ Read these values from their file. Do not copy them.
 
 | Facts | Source |
 | --- | --- |
-| Cluster addresses and CIDRs, API server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
+| Cluster addresses and CIDRs, API server endpoints, BGP ASNs, and offsite's node addresses | `clusters/<site>/config/cluster-topology.json` |
 | Anchor CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/anchor-topology.json` |
-| folly machines and their lifecycle: hardware, class, BMC, status, `desired_action` | NetBox at `https://capsule.<tailnet>`; `clusters/folly/inventory/machines.yaml` is its export |
+| folly's node addresses, and its machines and their lifecycle: hardware, class, BMC, status, `desired_action` | NetBox at `https://capsule.<tailnet>`; `clusters/folly/inventory/machines.yaml` is its export |
 
 Each topology file is a Flux ConfigMap whose `data` values are all strings, so
 a list or a number is written as a string. [Topology](docs/reference/topology.md)

@@ -3,12 +3,16 @@ locals {
   node_cidr = "${cidrhost(local.topology.K8S_NODE_CIDR, 1)}/${split("/", local.topology.K8S_NODE_CIDR)[1]}"
   lb_cidr   = local.topology.LB_RANGE
 
-  # Hostname to address for every node, from the topology ConfigMap. Each node
-  # also needs an entry in the hardware inventory.
-  node_addresses = jsondecode(local.topology.NODE_ADDRESSES)
-  machines       = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/machines.yaml")).machines
+  machines = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/machines.yaml")).machines
 
-  # A planned machine is not in NODE_ADDRESSES. Its reservation comes from the
+  # Hostname to address for every node: the export's active, staged and failed
+  # machines, which clusters/folly/talos treats as nodes.
+  node_addresses = {
+    for node, m in local.machines : node => m.address
+    if contains(["active", "staged", "failed"], try(m.status, "active")) && try(m.address, null) != null
+  }
+
+  # A planned machine is not a node yet. Its reservation comes from the
   # export's address, once it has a MAC and a switch port.
   planned_addresses = {
     for node, m in local.machines : node => m.address
@@ -55,7 +59,7 @@ resource "unifi_network" "k8s" {
 
 # A node keeps its address across a reinstall because the reservation is on
 # its MAC. Reserved inside the DHCP pool; the controller excludes reserved
-# addresses from it. A node in NODE_ADDRESSES with no inventory entry fails the
+# addresses from it. A node whose export entry has no MAC fails the
 # plan on the index below. A planned machine with a MAC, a switch port and an
 # address gets one from the export; one without them gets none.
 resource "unifi_client" "k8s_nodes" {

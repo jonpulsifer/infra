@@ -93,8 +93,8 @@ validate_address() {
     | pow(2; 32 - ($len | tonumber)) as $size
     | ((($a | ip) / $size) | floor) == ((($net | ip) / $size) | floor)' >/dev/null \
     || die "address $addr is outside K8S_NODE_CIDR $cidr"
-  jq -e --arg a "$addr" '.data.NODE_ADDRESSES | fromjson | any(.[]; . == $a) | not' "$cluster" >/dev/null \
-    || die "address $addr is already in NODE_ADDRESSES"
+  [[ "$(ADDR="$addr" NAME="$name" yq '.machines | to_entries | map(select(.value.address == strenv(ADDR) and .key != strenv(NAME))) | length' "$inventory")" == 0 ]] \
+    || die "address $addr is already in the inventory export"
 }
 
 validate_args() {
