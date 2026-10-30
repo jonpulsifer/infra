@@ -5,7 +5,7 @@
 # the binary and a CA bundle, so busybox runs entry.sh and the intake client is
 # a static binary. The UKI pins this image by digest, from
 # clusters/folly/talos/netboot.json.
-FROM busybox:1.38.0-musl@sha256:fec1a451896b46904ea70824d256d46cb992530a731daf78259d1967e9828523 AS busybox
+FROM busybox:1.38.0-musl@sha256:80e38f9a1b39188b8bdb28879178edb322a4402b081a9aedda1924609decd6f6 AS busybox
 
 FROM docker.io/library/golang:1.27-alpine AS intake
 WORKDIR /src
