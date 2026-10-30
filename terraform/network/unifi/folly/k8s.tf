@@ -2,6 +2,7 @@ locals {
   # UniFi subnets take the gateway-host (.1) form; cidrhost() ignores host bits.
   node_cidr = "${cidrhost(local.topology.K8S_NODE_CIDR, 1)}/${split("/", local.topology.K8S_NODE_CIDR)[1]}"
   lb_cidr   = local.topology.LB_RANGE
+  dhcp_cidr = local.topology.K8S_DHCP_CIDR
 
   machines = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/machines.yaml")).machines
 
@@ -12,14 +13,12 @@ locals {
     if contains(["active", "failed"], try(m.status, "active")) && try(m.address, null) != null
   }
 
-  # A planned machine is not a node yet, or reinstalls. Its reservation and
-  # DNS record come from the export's address, once it has a MAC and a
-  # switch port, so a reprovisioned node keeps its name.
+  # A planned machine is not a node yet, or reinstalls. Its DNS record comes
+  # from the export's address, so a reprovisioned node keeps its name.
   planned_addresses = {
     for node, m in local.machines : node => m.address
-    if try(m.status, "active") == "planned" && try(m.mac, null) != null && try(m.switch_port, null) != null && try(m.address, null) != null
+    if try(m.status, "active") == "planned" && try(m.address, null) != null
   }
-  reservations = merge(local.planned_addresses, local.node_addresses)
 
   static_records = merge(
     {
@@ -45,43 +44,47 @@ resource "unifi_network" "k8s" {
     interface_type = "none"
   }
 
+  # Each node's Talos config carries its address statically, so the pool
+  # serves only machines that netboot: firmware PXE, HookOS, and a fresh
+  # install's first boot before it applies its config. It is K8S_DHCP_CIDR,
+  # which holds no node's address.
   dhcp_server = {
     enabled   = true
     leasetime = local.one_day
-    start     = cidrhost(local.node_cidr, 2)
-    stop      = cidrhost(local.node_cidr, 62)
+    start     = cidrhost(local.dhcp_cidr, 1)
+    stop      = cidrhost(local.dhcp_cidr, -2)
     dns = {
       enabled = true
       servers = local.dns_servers
     }
-    # A known node netboots here, from the anchors on their bootstrap addresses
-    # through the policy kubernetes_to_boot in firewall.tf. The resolvers above
-    # are the anchors' CoreDNS, which answers enroll.lolwtf.ca with the boot VIP.
+    # A machine netboots here, from the anchors on their bootstrap addresses
+    # through the policy kubernetes_to_boot in firewall.tf: the offer names
+    # the boot VIP and the signed iPXE's filename. The resolvers above are the
+    # anchors' CoreDNS, which answers enroll.lolwtf.ca with the boot VIP.
     tftp_server = local.boot_vip
     boot        = local.boot_option
   }
 
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        for node, m in local.machines : cidrhost("${m.address}/${split("/", local.dhcp_cidr)[1]}", 0) != cidrhost(local.dhcp_cidr, 0)
+        if try(m.address, null) != null
+      ])
+      error_message = "A machine's address in clusters/folly/inventory/machines.yaml is inside K8S_DHCP_CIDR, the Kubernetes network's DHCP pool."
+    }
+  }
 }
 
-# A node keeps its address across a reinstall because the reservation is on
-# its MAC. Reserved inside the DHCP pool; the controller excludes reserved
-# addresses from it. A node whose export entry has no MAC fails the
-# plan on the index below. A planned machine with a MAC, a switch port and an
-# address gets one from the export; one without them gets none.
-resource "unifi_client" "k8s_nodes" {
-  for_each = { for node, ip in local.reservations : node => ip if try(local.machines[node].mac, "") != null }
+# The nodes' DHCP reservations leave state and stay on the controller, as
+# skip_forget_on_destroy kept them: an AMT in DHCP mode shares its node's MAC
+# and still leases the node's address there. Talos needs none of them.
+removed {
+  from = unifi_client.k8s_nodes
 
-  # No network_id: the provider sends it as a Virtual Network Override, which
-  # the switch enforces as a MAC-based VLAN on every port, whatever RADIUS
-  # assigns. RADIUS and the node ports put a node on the Kubernetes VLAN.
-  mac      = local.machines[each.key].mac
-  name     = each.key
-  fixed_ip = each.value
-  note     = "terraform managed - folly Kubernetes node"
-
-  # The controller already knows these MACs.
-  allow_existing         = true
-  skip_forget_on_destroy = true
+  lifecycle {
+    destroy = false
+  }
 }
 
 resource "cloudflare_dns_record" "k8s_remote_dns" {
