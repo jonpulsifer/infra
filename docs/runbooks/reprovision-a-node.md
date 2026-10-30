@@ -3,7 +3,7 @@ title: Reprovision a node
 description: Reinstall, attest again or wipe an installed folly node by setting its NetBox device's desired_action.
 ---
 
-Use this runbook to run an installed folly node through [Provision a node](provision-a-node.md)'s path again. You set the device's `desired_action` in [NetBox](../platform/netbox.md), and [fleet-controller](../apps/fleet-controller.md) starts the run.
+Use this runbook to run an installed folly node through [Provision a node](provision-a-node.md)'s path again. You set the device's `desired_action` in [NetBox](../platform/netbox.md), and [fleetd](../apps/fleetd.md) starts the run.
 
 | `desired_action` | The run | After it |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
    kubectl --context folly delete node <node>
    ```
 
-5. Watch the run, as [Watch the run](provision-a-node.md#watch-the-run) describes. An `attest` run boots the installed disk after `attest: PASSED`. A `provision` run ends when NetBox shows `active`.
+5. Watch the run, as [Watch the run](provision-a-node.md#watch-the-run) describes. An `attest` run boots HookOS, which shows `attest: PASSED`, then the installed disk. A `provision` run ends when NetBox shows `active`.
 6. Make sure that the node is Ready, then uncordon it.
 
    ```bash
@@ -74,12 +74,12 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, fix the BMC, and set `desired_action` again |
-| A new `desired_action` starts nothing | A run of the device is unfinished | Wait for it. The controller records the request against the running `Workflow` |
+| A new `desired_action` starts nothing | A run of the device is unfinished | Wait for it. fleetd records the request against the running `Workflow` |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry | Boot `IPV4 Network` from the F9 menu |
-| `install: no install code` | The attest step wrote no code, because attest withheld it | Read the `attest.install` audit line in `journalctl -u talos-attest` on the anchor, then set `desired_action` again |
+| `install: no install code` | The boot's attestation got no code | Read the `attest.install` audit line in `journalctl -u fleetd` on spore, then set `desired_action` again |
 | The node polls its config URL and gets 404 | A STATE wipe on an installed node, because a served code is spent | Set `desired_action` to `provision`, which renders a new code |
 | The console shows `Talos is already installed to disk but booted from another media` | META is on the disk | Set `desired_action` to `wipe` |
-| The node fetched its config and is cordoned | Its `attest_verdict` is `quarantined: <reason>`, so fleet-controller cordons it | Read the reason, and clear the verdict once it is explained. The next daily check that passes restores the node's LDevID; then uncordon the node |
+| The node fetched its config and is cordoned | Its `attest_verdict` is `quarantined: <reason>`, so fleetd cordons it | Read the reason, and clear the verdict once it is explained. The next daily check that passes restores the node's LDevID; then uncordon the node |
 | `attest: FAILED` with `ek-hash-mismatch` | A pin names another TPM, such as after a board swap | Compare `mise run attest:pending` with `ek_hash` in NetBox |
 | Talos stops at `failed to read pcr signing public key` | Talos booted by kexec | Power-cycle the node |
 | Another symptom of a run | See [Provision a node](provision-a-node.md#if-something-goes-wrong) | Follow its table |
@@ -88,5 +88,5 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 
 - [Provision a node](provision-a-node.md)
 - [Retire a node](retire-a-node.md)
-- [fleet-controller](../apps/fleet-controller.md)
+- [fleetd](../apps/fleetd.md)
 - [Restore a volume](restore-a-volume.md)

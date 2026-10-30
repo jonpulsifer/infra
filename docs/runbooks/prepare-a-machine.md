@@ -51,7 +51,7 @@ Use this runbook once for each new machine, before [Provision a node](provision-
 
 ## Set AMT's address
 
-AMT shares the node's NIC, and fleet-controller's Rufio `Machine` dials it at the node's own address. Talos sets that address statically, so AMT holds it statically too. Do this once the node has an address in NetBox: the stub's `--address`, or the one its binding allocates.
+AMT shares the node's NIC, and fleetd's Rufio `Machine` dials it at the node's own address. Talos sets that address statically, so AMT holds it statically too. Do this once the node has an address in NetBox: the stub's `--address`, or the one its binding allocates.
 
 1. In MEBx, or in MeshCommander from the future network, turn off DHCP for AMT's wired IPv4.
 2. Set the address to the node's NetBox address, shared with the host, with the prefix length of `K8S_NODE_CIDR` and the gateway `ROUTER_IP` from `clusters/folly/config/cluster-topology.json`.

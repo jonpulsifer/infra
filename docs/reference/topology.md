@@ -10,7 +10,7 @@ Two JSON files are the single source of truth for the lab's network facts: addre
 | File | Holds | Keys |
 | --- | --- | --- |
 | `clusters/<site>/config/cluster-topology.json` | One cluster: its node, pod, service and load-balancer ranges, API server, gateway router and BGP ASNs. On offsite it also holds the address of each node | `CLUSTER_NAME`, `API_SERVER_*`, `ROUTER_IP`, `*_CIDR`, `LB_RANGE`, `CLUSTER_DNS`, `BGP_*_ASN`, on folly `K8S_DHCP_CIDR`, the Kubernetes network's DHCP pool inside `K8S_NODE_CIDR`, and on offsite `NODE_ADDRESSES` |
-| `clusters/folly/config/anchor-topology.json` | The folly lab: the Anchor network, `future` and bootstrap ranges, the bootstrap VLAN ID, and the addresses of lab hosts and Windows desktops | `ANCHOR_CIDR`, `FUTURE_CIDR`, `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_IP`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP` |
+| `clusters/folly/config/anchor-topology.json` | The folly lab: the Anchor network, `future` and bootstrap ranges, the bootstrap VLAN ID, and the addresses of lab hosts and Windows desktops | `ANCHOR_CIDR`, `FUTURE_CIDR`, `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_IP`, `SPORE_BOOTSTRAP_IP` |
 
 Print the keys and values of a file with `jq .data <file>`.
 

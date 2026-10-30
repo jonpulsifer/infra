@@ -21,7 +21,7 @@ The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the pri
 | FML Intermediate CA | FML Root CA | 1Password |
 | Kubernetes CA of `<cluster>` | Itself | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
 | `<cluster>` ServiceAccount token signer | FML K8s `<cluster>` CA | The Talos secrets bundle, imported from the signer key |
-| `FML DevID folly CA` | FML Intermediate CA | `terraform/pki` state, and each anchor's sops file for [talos-attest](../apps/talos-attest.md) |
+| `FML DevID folly CA` | FML Intermediate CA | `terraform/pki` state; no service signs with it, and the bundle keeps the LDevIDs it issued trusted |
 | `folly-devid-ca-<host>` | FML Intermediate CA | The YubiKey on the anchor `<host>` |
 | A node's LDevID and LAK | A DevID CA | The node's TPM |
 
@@ -74,8 +74,8 @@ A key never leaves its card. Its PIN policy is once and its touch policy is neve
 - `terraform/pki/devid-ca.tf` gives each committed CSR a 5-year CA certificate, `folly-devid-ca-<host>.pem` in the same directory.
 - `folly-devid-ca.pem` in the same directory bundles every issuing DevID CA, for a verifier that takes one trust file. A `folly-devid-ca-<name>-chain.pem` beside a CA is its chain up to the FML root, and stays out of the bundle. spore's SPIRE server lists each CA file in `homelab.spire.devid.caChains`, as [Identity](identity.md) says.
 - `mise run pki:verify` fails when the bundle misses a CA, or a CA or chain file does not chain to the FML intermediate.
-- `nix/services/devid-ca-yubikey.nix` runs pcscd and the ykcs11 PKCS#11 module on an anchor that sets `homelab.devidCa.yubikey.enable`. Members of the `talos-attest` group may use the card and read its PIN.
-- `packages/pkcs11signer` is the Go `crypto.Signer` that signs on the card. It finds the key whose public key matches the CA certificate. talos-attest uses it when `homelab.talosAttest.caKey` is `pkcs11`, and the software key otherwise.
+- `nix/services/devid-ca-yubikey.nix` runs pcscd and the ykcs11 PKCS#11 module on an anchor that sets `homelab.devidCa.yubikey.enable`. Members of the `devid-ca` group, fleetd on spore, may use the card and read its PIN.
+- `packages/pkcs11signer` is the Go `crypto.Signer` that signs on the card. It finds the key whose public key matches the CA certificate. [fleetd](../apps/fleetd.md) signs every LDevID with it on spore's YubiKey.
 
 | Variable | Value |
 | --- | --- |

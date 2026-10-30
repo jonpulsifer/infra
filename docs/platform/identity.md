@@ -43,10 +43,10 @@ A node's identity starts before Talos runs. Each step relies on the one before i
 
 | Step | Proves | Where it runs |
 | --- | --- | --- |
-| EK certificate | The TPM is a genuine Infineon or Nuvoton part | The TPM maker's CA, pinned in `apps/talos-attest/roots/` |
-| Credential activation | The attestation key (AK) is in that TPM | [talos-attest](../apps/talos-attest.md), from HookOS |
-| Quote and event log | The machine booted with Secure Boot on, under the lab's PK, through the signed iPXE and HookOS | talos-attest, against `apps/talos-attest/policy.yaml` |
-| TPM2_Certify | The LDevID key is in that TPM and cannot leave it | talos-attest |
+| EK certificate | The TPM is a genuine Infineon or Nuvoton part | The TPM maker's CA, pinned in `apps/fleetd/attest/roots/` |
+| Credential activation | The attestation key (AK) is in that TPM | [fleetd](../apps/fleetd.md), from HookOS |
+| Quote and event log | The machine booted with Secure Boot on, under the lab's PK, through the signed iPXE and HookOS | fleetd, against `apps/fleetd/attest/policy.yaml` |
+| TPM2_Certify | The LDevID key is in that TPM and cannot leave it | fleetd |
 | LDevID and LAK certificates | The DevID CA vouches for the key and the AK | `FML DevID folly CA`, in [PKI](pki.md#chain) |
 | `tpm_devid` | The agent holds the LDevID key in a TPM with a genuine EK | spore's SPIRE server |
 
@@ -54,23 +54,23 @@ A node's identity starts before Talos runs. Each step relies on the one before i
 
 ## Lifecycle
 
-A folly node's identity follows its device's `status` in [NetBox](netbox.md). talos-attest, fleet-controller, the switch and SPIRE each read it.
+A folly node's identity follows its device's `status` in [NetBox](netbox.md). fleetd and SPIRE read it.
 
 | Status | Meaning | Written by |
 | --- | --- | --- |
-| `planned` | Ordered, with its serial known, or in intake, attestation or install. It may carry `ek_hash` pins. | The owner; talos-attest, on a pass for a serial NetBox did not know; fleet-controller, on a `provision` or `wipe` of an installed node |
-| `active` | Its config is released, and it is expected Ready | fleet-controller, when the node fetches its config |
+| `planned` | Ordered, with its serial known, or in attestation or install. It may carry `ek_hash` pins. | The owner; fleetd, on an approved pass for a serial NetBox did not know, and on a `provision` or `wipe` of an installed node |
+| `active` | Its config is released, and it is expected Ready | fleetd, when the node fetches its config |
 | `failed` | Held out by the owner | The owner |
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |
-| `offline` | Retired, and kept for history | fleet-controller, after the retirement run succeeds |
+| `offline` | Retired, and kept for history | fleetd, after the retirement run succeeds |
 
-Only the owner moves a device out of `failed` or into `decommissioning`, and talos-attest refuses a `failed` device. A quarantine is a verdict, and the status stays: a quote that misses the policy sets `attest_verdict` to `quarantined: <reason>`, every anchor answers the node's `/devid` with 403, and fleet-controller cordons the node. talos-attest refuses it a new identity until the owner clears the verdict. After that the node's next daily check or renewal, which proves its LAK and LDevID key and passes the policy, restores its record and its LDevID files, and the owner uncordons the node. A control plane's failed quote reads `failed-no-quarantine: <reason>` and only alerts. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
+Only the owner moves a device out of `failed` or into `decommissioning`, and fleetd refuses a `failed` device. A quarantine is a verdict, and the status stays: a quote that misses the policy sets `attest_verdict` to `quarantined: <reason>`, fleetd answers the node's `/devid` with 403 and cordons the node. fleetd refuses it a new identity until the owner clears the verdict. After that the node's next daily check or renewal, which proves its LAK and LDevID key and passes the policy, restores its record and its LDevID files, and the owner uncordons the node. A control plane's failed quote reads `failed-no-quarantine: <reason>` and only alerts. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
 
 ## Agents
 
 The DaemonSet `spire-agent` in the `spire` namespace runs on each folly node labelled `lolwtf.ca/tpm=true`. Its image, `ghcr.io/jonpulsifer/spire-agent-tpm`, adds the agent half of the EK plugin and `spire-devid-init` to SPIRE's agent.
 
-The init container `devid-init` reads the node's SMBIOS serial and fetches `<ATTEST_URL>/devid/<serial>` from the attest service, with `ATTEST_URL` from the `spire-attest` ConfigMap. When the LDevID names this node and serial, is current and matches its key blob, it writes the files and renders the agent's config with `tpm_devid`. Otherwise, or with `ATTEST_URL` empty, it renders the EK attestor. The `tpm_devid` agent keeps its state in `/var/lib/spire-agent/tpm_devid`. The blobs are wrapped by the TPM's storage root key, which the agent derives from the TCG H-1 or H-2 template, so they load on no other TPM.
+The init container `devid-init` reads the node's SMBIOS serial and fetches `<ATTEST_URL>/devid/<serial>` from fleetd's DevID listener on spore, with `ATTEST_URL` from the `spire-attest` ConfigMap. When the LDevID names this node and serial, is current and matches its key blob, it writes the files and renders the agent's config with `tpm_devid`. Otherwise, or with `ATTEST_URL` empty, it renders the EK attestor. The `tpm_devid` agent keeps its state in `/var/lib/spire-agent/tpm_devid`. The blobs are wrapped by the TPM's storage root key, which the agent derives from the TCG H-1 or H-2 template, so they load on no other TPM.
 
 The container is privileged, since the device cgroup refuses `/dev/tpmrm0` to any other container. It shares the host's PID namespace and network, so the `k8s` workload attestor can ask the kubelet for a caller's pod. Its key and SVID stay in `/var/lib/spire-agent` on the node, so a new pod resumes with no second attestation.
 
@@ -86,7 +86,7 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 ## Renewal
 
-The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on the attest service's DevID listener, at the same `ATTEST_URL` as `devid-init`. Otherwise it runs the daily check, which the next section describes.
+The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on fleetd's DevID listener, at the same `ATTEST_URL` as `devid-init`. fleetd issues the renewal from spore's YubiKey CA, whatever CA issued the LDevID on file. Otherwise it runs the daily check, which the next section describes.
 
 1. It fetches `/devid/<serial>` and checks that the key blobs are the keys the certificates in NV name.
 2. `POST /v1/renew` with the serial answers a session and a nonce.
@@ -99,9 +99,9 @@ The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -e
 
 ### Daily check
 
-On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are. A boot that misses the policy after the LAK's proof sets the device `failed`, and its RADIUS user puts it on the bootstrap network. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [talos-attest](../apps/talos-attest.md) has the rules.
+On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are. A boot that misses the policy after the LAK's proof quarantines a worker: its `attest_verdict` reads `quarantined: <reason>`, and fleetd serves it no LDevID and cordons it. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [fleetd](../apps/fleetd.md) has the rules.
 
-A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when no anchor has recorded a passing quote from a node for 26 hours.
+A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when fleetd has recorded no passing quote from a node for 26 hours.
 
 ## GCP access
 
@@ -134,8 +134,8 @@ riptide and optiplex carry the `lolwtf.ca/tpm=true` label and run agents. riptid
 ## Where it lives
 
 - `nix/services/spire-server.nix`: the server, both node attestors, the bundle notifier, the entry sync, the agent count and the firewall
-- `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/talos-attest/roots/`
-- `apps/talos-attest/` and `nix/services/talos-attest.nix`: the attest service and its anchor deployment
+- `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/fleetd/attest/roots/`
+- `apps/fleetd/` and `nix/services/fleetd.nix`: fleetd and its deployment on spore
 - `nix/hosts/spore.nix`: `ekHashes`, `workloads` and the registration entries
 - `nix/lib/inventory.nix`: the nodes file as Nix, for the LDevID aliases and talos-attest's inventory
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`

@@ -29,7 +29,7 @@ To add a node, add its entry to `clusters/folly/inventory/nodes.yaml` in a pull 
 
 ## Data
 
-`terraform/netbox/folly` applies the nodes file: each node's device, address, cable and declared custom fields, the node models' device types, every custom field and choice set on `dcim.device`, and the event rule `fleet-controller-device-update`, which posts every device update to the fleet controller's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The webhook's secret, the value the controller verifies, is set in NetBox by hand. The site, the roles, the platforms, the prefixes, the anchors and the switch are set in NetBox by hand, and their objects carry the tag `managed-by: git-seed`. [Hardware inventory](../reference/inventory.md) covers the nodes file and the drift check.
+`terraform/netbox/folly` applies the nodes file: each node's device, address, cable and declared custom fields, the node models' device types, every custom field and choice set on `dcim.device`, and the event rule `fleet-controller-device-update`, which posts every device update to fleetd's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The webhook's secret, the value fleetd verifies, is set in NetBox by hand. The site, the roles, the platforms, the prefixes, the anchors and the switch are set in NetBox by hand, and their objects carry the tag `managed-by: git-seed`. [Hardware inventory](../reference/inventory.md) covers the nodes file and the drift check.
 
 ## Backups
 

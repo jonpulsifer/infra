@@ -13,14 +13,14 @@ To add a node, add its entry in a pull request and comment the plans that [Reade
 
 ## Terraform
 
-The root creates each device as `planned`, with its serial, device type, site, role and platform, the address on the interface its device type's template makes, that address as the primary IPv4, a cable to the switch port, and the custom fields `talos_class`, `bmc_type`, `install_disk`, `tpm_version`, `amt` and `secure_boot_expected`. No MAC is needed: talos-attest writes it when the machine attests.
+The root creates each device as `planned`, with its serial, device type, site, role and platform, the address on the interface its device type's template makes, that address as the primary IPv4, a cable to the switch port, and the custom fields `talos_class`, `bmc_type`, `install_disk`, `tpm_version`, `amt` and `secure_boot_expected`. No MAC is needed: fleetd writes it when the machine attests.
 
 | Field or object | Written by |
 | --- | --- |
-| The device's status after it is created, `desired_action` | The owner and [fleet-controller](../apps/fleet-controller.md) |
-| MAC, EK hashes, verdicts, LDevID and LAK serials, `smbios_uuid`, `pcr0_by_bios`, SMBIOS facts, the attested network fields | [talos-attest](../apps/talos-attest.md) |
-| `last_workflow` | fleet-controller |
-| The rest of the device, the node models' device types, every custom field definition and choice set, and the fleet-controller webhook and event rule | `terraform/netbox/folly` |
+| The device's status after it is created, `desired_action` | The owner and [fleetd](../apps/fleetd.md) |
+| MAC, EK hashes, verdicts, LDevID and LAK serials, `smbios_uuid`, `pcr0_by_bios`, SMBIOS facts, the attested network fields | fleetd |
+| `last_workflow` | fleetd |
+| The rest of the device, the node models' device types, every custom field definition and choice set, and fleetd's webhook and event rule | `terraform/netbox/folly` |
 
 Terraform never updates a device in place. A change to an entry's serial, model, address or declared fields goes out as a PATCH of those keys alone. Removing an entry deletes the device, its address and its cable, so retire the node first. The root's `README.md` has the rest.
 
@@ -32,8 +32,7 @@ Terraform never updates a device in place. A change to an entry's serial, model,
 | UniFi | `address` for the node's DNS record, `switch_port` for its node port | `terraform/network/unifi/folly/k8s.tf`, `bootstrap.tf` |
 | Talos | `address` for the node's static address, `class`, `disk` for the install selector, `tpm` for `tpm_nodes`, for each node NetBox holds `active` or `failed` | `clusters/folly/talos/nodes.tf`, `talos.tf` |
 | spore's SPIRE | each node with `tpm` `2.0`, for its LDevID alias | `nix/lib/inventory.nix`, `nix/hosts/spore.nix` |
-| talos-attest | `serial`, `class`, `tpm` and `secure_boot`, as its inventory | `nix/services/talos-attest.nix` |
-| fleet-controller | nothing from this file: it reads each device from NetBox | `apps/fleet-controller` |
+| [fleetd](../apps/fleetd.md) | `serial`, `class`, `tpm` and `secure_boot`, as its verifier's inventory; it reads everything else of each device from NetBox | `nix/services/fleetd.nix` |
 
 The Talos root reads each node's status from NetBox at plan time, and its plan fails when NetBox holds no device for a declared node, so a new node's device comes from an apply of `terraform/netbox/folly` first. `mise run render-class-inputs` refuses the same case, and reads each status too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The same task writes `clusters/folly/fleet/node-macs.json` from the MACs NetBox holds, which spore's netboot links read.
 

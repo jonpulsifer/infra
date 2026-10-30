@@ -51,7 +51,7 @@ Use this runbook to make the YubiKey on spore or capsule a hardware DevID CA, as
    Result: a plan that adds `tls_locally_signed_cert.devid_ca_yubikey["<host>"]` and changes nothing else.
 
 2. Comment `atlantis apply`. Atlantis applies the plan and merges the pull request.
-3. Deploy `<host>`, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes. sops-nix then writes the PIN for the `talos-attest` group.
+3. Deploy `<host>`, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes. sops-nix then writes the PIN for the `devid-ca` group.
 
 ## Install the certificate
 
