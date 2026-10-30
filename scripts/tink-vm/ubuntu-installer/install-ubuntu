@@ -1,0 +1,78 @@
+#!/bin/sh
+# Writes this image's Ubuntu cloud image to DISK as it is (its GPT, its ESP with shim and GRUB, its
+# ext4 root), moves the GPT's backup header to the disk's end, makes the NoCloud seed in the root
+# from NODE_HOSTNAME (meta-data) and PAYLOAD (a tarball of the node's files, user-data among them),
+# and adds a firmware boot entry named Ubuntu for shim. cloud-init grows the root to the disk on
+# first boot. It runs with /dev and efivarfs from HookOS and no network.
+set -eu
+log() {
+  echo "install-ubuntu: $*"
+  for t in /dev/tty0 /dev/ttyS0; do echo "install-ubuntu: $*" >"$t" 2>/dev/null || true; done
+}
+
+: "${DISK:?DISK names the disk to install to}"
+: "${PAYLOAD:?PAYLOAD names the node payload tarball}"
+: "${NODE_HOSTNAME:?NODE_HOSTNAME is the hostname of the Hardware}"
+case $NODE_HOSTNAME in
+  *[!a-z0-9-]*)
+    log "the hostname $NODE_HOSTNAME is malformed"
+    exit 1
+    ;;
+esac
+[ -b "$DISK" ] || {
+  log "$DISK is not a block device"
+  exit 1
+}
+[ -s "$PAYLOAD" ] || {
+  log "no payload at $PAYLOAD"
+  exit 1
+}
+case $DISK in
+  *[0-9]) part=${DISK}p ;;
+  *) part=$DISK ;;
+esac
+
+log "writing the image to $DISK"
+qemu-img convert -n -f qcow2 -O raw -t none /ubuntu-cloudimg.img "$DISK"
+sgdisk -e "$DISK" >/dev/null
+blockdev --rereadpt "$DISK" || partx -u "$DISK" || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -b "${part}15" ] && [ -b "${part}1" ] && break
+  sleep 1
+done
+[ -b "${part}15" ] || {
+  log "${part}15, the image's ESP, did not appear"
+  exit 1
+}
+
+mnt=$(mktemp -d)
+esp=$(mktemp -d)
+mount "${part}1" "$mnt"
+trap 'umount "$esp" 2>/dev/null || true; umount "$mnt" 2>/dev/null || true' EXIT
+log "writing the cloud-init seed"
+tar -C "$mnt" -xzpf "$PAYLOAD" --no-overwrite-dir
+seed=$mnt/var/lib/cloud/seed/nocloud
+mkdir -p "$seed"
+printf 'instance-id: %s-1\nlocal-hostname: %s\n' "$NODE_HOSTNAME" "$NODE_HOSTNAME" >"$seed/meta-data"
+[ -s "$seed/user-data" ] || {
+  log "the payload has no var/lib/cloud/seed/nocloud/user-data"
+  exit 1
+}
+release=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$mnt/etc/os-release")
+mount "${part}15" "$esp"
+[ -f "$esp/EFI/ubuntu/shimx64.efi" ] || {
+  log "the image's ESP has no EFI/ubuntu/shimx64.efi"
+  exit 1
+}
+sync
+umount "$esp" "$mnt"
+trap - EXIT
+
+if ! mountpoint -q /sys/firmware/efi/efivars; then
+  mount -t efivarfs efivarfs /sys/firmware/efi/efivars
+fi
+for n in $(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} Ubuntu\([[:space:]].*\)\{0,1\}$/\1/p'); do
+  efibootmgr -q -b "$n" -B
+done
+efibootmgr -q -c -d "$DISK" -p 15 -L Ubuntu -l '\EFI\ubuntu\shimx64.efi'
+log "installed Ubuntu $release to $DISK"

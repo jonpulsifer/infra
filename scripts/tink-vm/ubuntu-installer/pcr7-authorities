@@ -1,0 +1,32 @@
+#!/usr/bin/python3 -I
+"""Print the certificate behind each EV_EFI_VARIABLE_AUTHORITY event in this boot's TPM event log.
+
+Runs in the installed Ubuntu (tpm2-tools and openssl are there). Each event names the variable that
+held the certificate that verified a boot component: db for the firmware's check of shim, MokListRT
+for shim's check of GRUB and the kernel.
+"""
+
+import hashlib
+import re
+import subprocess
+
+LOG = "/sys/kernel/security/tpm0/binary_bios_measurements"
+
+
+def main() -> None:
+    yaml = subprocess.run(["tpm2_eventlog", LOG], capture_output=True, check=True, text=True).stdout
+    for event in re.split(r"\n- EventNum: ", yaml):
+        if "EV_EFI_VARIABLE_AUTHORITY" not in event:
+            continue
+        name = re.search(r"UnicodeName: (\S+)", event).group(1)
+        data = bytes.fromhex(re.search(r'VariableData: "([0-9a-f]+)"', event).group(1))
+        cert = subprocess.run(
+            ["openssl", "x509", "-inform", "DER", "-noout", "-subject"],
+            input=data[16:],
+            capture_output=True,
+        )
+        subject = cert.stdout.decode().strip() or "(not a certificate)"
+        print("PCR 7 authority", name, hashlib.sha256(data[16:]).hexdigest(), subject)
+
+
+main()
