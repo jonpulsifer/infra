@@ -1,0 +1,55 @@
+---
+# fleet-controller on spore cordons a node that talos-attest quarantined as
+# this account, which may patch nodes and do nothing else. Its token is
+# `fleet-controller/folly-cordon-token` in nix/secrets/spore.sops.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fleet-controller-cordon
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleet-controller
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleet-controller
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleet-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fleet-controller-cordon
+subjects:
+  - kind: ServiceAccount
+    name: fleet-controller-cordon
+    namespace: kube-system
+---
+# The token controller fills this Secret with a token that does not expire.
+# spore runs outside the cluster, so it cannot mount a bound token.
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/service-account-token
+metadata:
+  name: fleet-controller-cordon-token
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleet-controller
+  annotations:
+    kubernetes.io/service-account.name: fleet-controller-cordon
