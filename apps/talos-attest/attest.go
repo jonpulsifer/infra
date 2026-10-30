@@ -86,10 +86,13 @@ type session struct {
 	// check is a renewal session opened for the daily check, which issues
 	// nothing; ldevidIssued is the LDevID on file's CA-signed issue time;
 	// devidFiles are the verified DevID's files, set when this anchor holds
-	// no record under the machine's name.
+	// no record under the machine's name or holds it quarantined; lifted is
+	// the update time of a quarantined record the owner lifted in NetBox,
+	// which a passing check replaces only if it is unchanged.
 	check        bool
 	ldevidIssued time.Time
 	devidFiles   map[string][]byte
+	lifted       time.Time
 	// bind is a declared stub the pass binds to; planned is a planned
 	// device that passes on its EK certificates alone, looked up again
 	// before anything is issued; macWritten is whether the binding wrote
@@ -873,12 +876,26 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 		return protocol.RenewStart{}, err
 	}
 	var devidFiles map[string][]byte
-	if !found {
-		// This anchor did not run the intake, or NetBox renamed the machine;
-		// start a record from the DevID. Its hashes were proven elsewhere and
-		// never become pins from here. A check issues nothing, so it keeps the
-		// verified DevID's certificates and blobs as the record's files.
+	// A record this anchor quarantined reaches a session only once NetBox
+	// holds the quarantine lifted (Server.liftedDevID). The session then
+	// starts a pass's record from the verified DevID, and only a check or
+	// renewal that proves everything replaces the quarantine with it.
+	var lifted time.Time
+	if found && rec.Status == StatusQuarantined {
+		if v.NetBox == nil || !m.FromNetBox {
+			return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is quarantined on this anchor, and only the owner lifts that in NetBox", m.Name))
+		}
+		lifted = rec.UpdatedAt
+	}
+	if !found || !lifted.IsZero() {
+		// This anchor did not run the intake, NetBox renamed the machine, or
+		// the owner lifted its quarantine; start a record from the DevID. Its
+		// hashes were proven elsewhere and never become pins from here. A check
+		// issues nothing, so it keeps the verified DevID's certificates and
+		// blobs as the record's files.
+		uuid := rec.UUID
 		rec = Record{
+			UUID:    uuid,
 			Machine: m.Name, Serial: m.Serial, RSAEKCert: d.RSAEKCert, Confirmed: d.Confirmed, EKHashes: hashesByAlg(d),
 			Status: StatusAttested, Class: m.Class, AttestedAt: d.AttestedAt,
 			LDevIDSerial: serialHex(checked.LDevID), LDevIDNotAfter: checked.LDevID.NotAfter, LDevIDNotBefore: checked.LDevID.NotBefore, LAKSerial: serialHex(checked.LAK),
@@ -903,6 +920,7 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 		check:        check,
 		ldevidIssued: checked.LDevID.NotBefore,
 		devidFiles:   devidFiles,
+		lifted:       lifted,
 	}
 	id := v.open(s)
 	v.Log.Info("renewal started", "machine", m.Name, "class", m.Class, "check", check)
@@ -1151,6 +1169,11 @@ func (v *Verifier) quarantine(ctx context.Context, m *Machine, claim protocol.Ma
 	rec := v.baseRecord(*m, claim, eks)
 	if prev, ok, _ := v.Store.Record(m.Name); ok {
 		rec.AttestedAt = prev.AttestedAt
+		if len(eks) == 0 {
+			// A running node's quarantine keeps what its last pass proved, so
+			// the record a lifted quarantine restores carries it.
+			rec.UUID, rec.EKHashes, rec.EKIssuers, rec.RSAEKCert, rec.Confirmed = prev.UUID, prev.EKHashes, prev.EKIssuers, prev.RSAEKCert, prev.Confirmed
+		}
 	}
 	rec.Status = StatusQuarantined
 	rec.Reason = reason

@@ -178,6 +178,37 @@ func (s *Server) localDevID(serial string) (protocol.DevID, bool, error) {
 	if err != nil || !found || !rec.Issued() {
 		return protocol.DevID{}, false, err
 	}
+	return s.devIDOf(rec)
+}
+
+// liftedDevID is the DevID this anchor keeps for a machine it quarantined,
+// once NetBox answers that the owner cleared the quarantine: the device is
+// known, blocked by no status, and its attest_verdict is no quarantine. It
+// gives the node its key blobs and opens a renewal or a daily check, whose
+// LAK signature, LDevID certification and boot policy decide before anything
+// is written; the anchor's record stays quarantined until such a check
+// passes. Without NetBox no owner lifts a quarantine, so there is none.
+func (s *Server) liftedDevID(ctx context.Context, serial string) (protocol.DevID, bool, error) {
+	if s.V.NetBox == nil {
+		return protocol.DevID{}, false, nil
+	}
+	rec, found, err := s.V.Store.RecordBySerial(serial)
+	if err != nil || !found || rec.Status != StatusQuarantined {
+		return protocol.DevID{}, false, err
+	}
+	m, ok, err := s.V.NetBox.Lookup(ctx, serial)
+	if err != nil {
+		s.Log.Warn("NetBox lookup for a lifted quarantine", "serial", serial, "err", err)
+		return protocol.DevID{}, false, nil
+	}
+	if !ok || m.blocked() {
+		return protocol.DevID{}, false, nil
+	}
+	return s.devIDOf(rec)
+}
+
+// devIDOf reads a record's files into a DevID answer.
+func (s *Server) devIDOf(rec Record) (protocol.DevID, bool, error) {
 	files := map[string][]byte{}
 	for _, f := range ServedFiles {
 		b, err := s.V.Store.File(rec.Machine, f)
@@ -547,8 +578,16 @@ func (s *Server) verdict(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+// devID answers the DevID of the newest pass. Once the owner lifts a
+// quarantine, it also answers the quarantined node's DevID, whose TPM-bound
+// blobs the node needs to prove itself in the next check; the raw files that
+// SPIRE's agent reads (devIDFile) come back only when that check passes.
 func (s *Server) devID(w http.ResponseWriter, r *http.Request) {
-	d, ok, err := s.lookup(r.Context(), r.PathValue("serial"), r.URL.Query().Has("local"))
+	local := r.URL.Query().Has("local")
+	d, ok, err := s.lookup(r.Context(), r.PathValue("serial"), local)
+	if err == nil && !ok && !local {
+		d, ok, err = s.liftedDevID(r.Context(), r.PathValue("serial"))
+	}
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -645,6 +684,11 @@ func (s *Server) renewStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, ok, err := s.lookup(r.Context(), req.Serial, false)
+	if err == nil && !ok {
+		// A quarantine the owner lifted in NetBox: the DevID on file opens a
+		// session that proves everything again.
+		d, ok, err = s.liftedDevID(r.Context(), req.Serial)
+	}
 	if err != nil {
 		s.writeError(w, err)
 		return
