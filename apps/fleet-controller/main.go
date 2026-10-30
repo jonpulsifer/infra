@@ -8,9 +8,14 @@
 // A machine NetBox does not know phones home to POST /intake from HookOS and
 // gets an attest-only Workflow; once talos-attest has made it a staged,
 // attested device, the pass binds it to a stub's name and address, the
-// model's class and the switch port UniFi reports, and provisions it.
+// model's class and the switch port its intake pass attested, and provisions
+// it.
 //
-// A device whose interface has no cable gets one to the rack port UniFi reports.
+// Every HookOS boot phones home, and the report lands on the machine's
+// Hardware as diagnostics. What the controller acts on comes from the intake
+// pass, signed by the machine's AK: a planned or staged AMT device's Machine
+// dials the bootstrap address it attested, and a device whose interface has
+// no cable gets one to the rack port it attested.
 package main
 
 import (
@@ -88,9 +93,17 @@ type Config struct {
 	// IntakeTTL is the age at which an intake no device holds is deleted.
 	IntakeTTL time.Duration
 	// IntakePort is the switch port of the prep station, where every
-	// machine intakes; UniFi seeing a machine there says nothing of its
-	// rack port.
+	// machine intakes; LLDP naming it says nothing of the machine's rack
+	// port.
 	IntakePort int
+	// Proxies are the intake proxies' addresses, the anchors' nginx, whose
+	// X-Real-IP header names the machine's address.
+	Proxies map[string]bool
+	// BootstrapPrefix is the bootstrap network, and BootstrapReserved the
+	// addresses in it that are no machine's: the anchors' and the boot VIP.
+	// An attested address outside it, or reserved, is no AMT to dial.
+	BootstrapPrefix   netip.Prefix
+	BootstrapReserved map[string]bool
 }
 
 func loadConfig() (Config, error) {
@@ -141,8 +154,21 @@ func loadConfig() (Config, error) {
 	if c.IntakeTTL, err = time.ParseDuration(env("FLEET_INTAKE_TTL", "24h")); err != nil || c.IntakeTTL <= 0 {
 		return c, fmt.Errorf("FLEET_INTAKE_TTL must be a positive duration")
 	}
-	if c.IntakePort, err = strconv.Atoi(env("FLEET_INTAKE_PORT", "24")); err != nil || c.IntakePort < 0 {
-		return c, fmt.Errorf("FLEET_INTAKE_PORT must be a port number, or 0 for none")
+	// Without the prep station's port, every machine there would be checked
+	// against its stub's expected_port and cabled to the prep port.
+	if c.IntakePort, err = strconv.Atoi(os.Getenv("FLEET_INTAKE_PORT")); err != nil || c.IntakePort < 1 || c.IntakePort > 65535 {
+		return c, fmt.Errorf("FLEET_INTAKE_PORT must be the prep station's switch port")
+	}
+	if c.Proxies, err = addressSet("FLEET_PROXY_ADDRESSES"); err != nil {
+		return c, err
+	}
+	if c.BootstrapReserved, err = addressSet("FLEET_BOOTSTRAP_RESERVED"); err != nil {
+		return c, err
+	}
+	if v := os.Getenv("FLEET_BOOTSTRAP_CIDR"); v != "" {
+		if c.BootstrapPrefix, err = netip.ParsePrefix(v); err != nil || !c.BootstrapPrefix.Addr().Is4() || c.BootstrapPrefix != c.BootstrapPrefix.Masked() {
+			return c, fmt.Errorf("FLEET_BOOTSTRAP_CIDR %q is not an IPv4 network prefix", v)
+		}
 	}
 	c.NodePrefix = os.Getenv("FLEET_NODE_PREFIX")
 	if c.NodePrefix != "" {
@@ -164,21 +190,20 @@ func loadConfig() (Config, error) {
 	return c, nil
 }
 
-// loadUniFi reads the optional UniFi client: FLEET_UNIFI_URL and
-// FLEET_UNIFI_API_KEY_FILE go together.
-func loadUniFi() (*UniFi, error) {
-	u, keyFile := os.Getenv("FLEET_UNIFI_URL"), os.Getenv("FLEET_UNIFI_API_KEY_FILE")
-	if u == "" && keyFile == "" {
-		return nil, nil
+// addressSet reads a comma list of IP addresses from the environment.
+func addressSet(key string) (map[string]bool, error) {
+	set := map[string]bool{}
+	for _, a := range strings.Split(os.Getenv(key), ",") {
+		if a = strings.TrimSpace(a); a == "" {
+			continue
+		}
+		addr, err := netip.ParseAddr(a)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", key, err)
+		}
+		set[addr.String()] = true
 	}
-	if u == "" || keyFile == "" {
-		return nil, fmt.Errorf("FLEET_UNIFI_URL and FLEET_UNIFI_API_KEY_FILE go together")
-	}
-	key, err := readSecret(keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("UniFi API key: %w", err)
-	}
-	return &UniFi{URL: u, Key: key, Site: env("FLEET_UNIFI_SITE", "default"), Client: &http.Client{Timeout: 15 * time.Second}}, nil
+	return set, nil
 }
 
 func main() {
@@ -231,11 +256,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	unifi, err := loadUniFi()
-	if err != nil {
-		return err
-	}
-	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: metrics, UniFi: unifi, Now: time.Now}
+	r := &Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now}
 	intake := &Intake{
 		Config: &r.Config, NetBox: netbox, Kube: kube, Metrics: metrics, Now: time.Now,
 		PerMAC: 10 * time.Minute, PerSource: 10, Global: 20, Window: time.Hour,

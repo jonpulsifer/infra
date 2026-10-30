@@ -18,9 +18,7 @@ type Reconciler struct {
 	NetBox  *NetBox
 	Kube    *Kube
 	Metrics *Metrics
-	// UniFi finds an intake's switch port; nil leaves the port empty.
-	UniFi *UniFi
-	Now   func() time.Time
+	Now     func() time.Time
 
 	mu       sync.Mutex
 	reported map[string]bool
@@ -258,6 +256,7 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		}
 		workflows = kept
 	}
+	d = r.Config.bootstrapBMC(d, workflows, r.Now())
 	hardware := d.MAC != "" && d.Disk != ""
 	if hardware {
 		if err := r.applyHardware(ctx, d, Unfinished(workflows)); err != nil {
@@ -336,6 +335,8 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 		comment += "; no BMC drives this run: the machine waits in HookOS from its intake and takes it"
 	case manual:
 		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
+	case running == "" && d.BootstrapBMC:
+		comment += "; Rufio powers it on through AMT at " + d.BMCAddress + ", the bootstrap address its last intake pass attested"
 	}
 	if running != "" {
 		comment = fmt.Sprintf("fleet-controller: Workflow %s is still running; %s waits for it", name, action)

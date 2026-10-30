@@ -44,10 +44,10 @@ go run .
 | `FLEET_AUTO_PROVISION` | `false` | Whether a bound intake with a class and an address gets `desired_action` `provision`; the Nix module sets `true` |
 | `FLEET_MODEL_MAP` | the G5 mini as `worker-g5`, `amt`, `/dev/nvme0n1` | JSON `{"<SMBIOS model>": {"class", "bmc", "disk"}}` for an intake |
 | `FLEET_NODE_PREFIX`, `FLEET_NODE_RESERVED` | none | The prefix an intake's address comes from, `K8S_NODE_CIDR`, and a comma list of addresses in it that never go to a node; without the prefix an intake gets no free address |
-| `FLEET_INTAKE_PORT` | `24` | The provisioning station's switch port; `0` for none |
+| `FLEET_INTAKE_PORT` | required | The provisioning station's switch port; the controller refuses to start without one. The Nix module reads `provisioning` in `quarantine_ports` of `terraform/network/unifi/<site>/bootstrap.tf` |
 | `FLEET_INTAKE_TTL` | `24h` | Age at which an intake no device holds is deleted |
-| `FLEET_UNIFI_URL`, `FLEET_UNIFI_API_KEY_FILE` | none | The UniFi console and a read-only API key; both or neither. Without them an intake gets no switch port, and a stub's `expected_port` refuses its binding off the intake port |
-| `FLEET_UNIFI_SITE` | `default` | The UniFi site of `stat/sta` |
+| `FLEET_PROXY_ADDRESSES` | none | Comma list of the intake proxies' addresses, the anchors' Anchor addresses: a call from one names the machine's address in `X-Real-IP`. Without it every caller is the machine |
+| `FLEET_BOOTSTRAP_CIDR`, `FLEET_BOOTSTRAP_RESERVED` | none | The bootstrap network and a comma list of addresses in it that are no machine's, the anchors' and the boot VIP. Without the prefix no attested address puts a Machine on the bootstrap network |
 
 ## NetBox contract
 
@@ -55,7 +55,9 @@ Devices with role `kubernetes-node` and status `planned`, `staged`, `active`,
 `failed` or `decommissioning`. Read: `name`, `serial`, `status`,
 `primary_ip4`, `oob_ip`, the first physical interface's `primary_mac_address`,
 and the custom fields `install_disk`, `talos_class`, `tpm_version`,
-`bmc_type`, `desired_action`, `last_workflow`. A select field may be a string
+`bmc_type`, `desired_action`, `last_workflow`, and talos-attest's
+`attested_address`, `attested_switch`, `attested_switch_port` and
+`attested_network_at`. A select field may be a string
 or a `{value, label}` object. Written: `desired_action` (back to `none`),
 `last_workflow`, `status` (`staged` when a provision or wipe starts on an
 `active` or `failed` device, `offline` after a retirement) and journal
@@ -65,7 +67,16 @@ the device to `staged` itself on the verdict. A `planned` device also boots
 by hand: its Workflow carries no `bootMode`, its journal entry says to power
 the machine on, and it gets a Machine only with an explicit `oob_ip`, since
 an AMT address derived from a Kubernetes address it does not hold yet is
-wrong. The Machine and Rufio come once the status leaves `planned`. A retirement is the `retire` run, which
+wrong. The exception is a `planned` or `staged` `amt` device without
+`oob_ip` whose `attested_address` is inside `FLEET_BOOTSTRAP_CIDR`, not in
+`FLEET_BOOTSTRAP_RESERVED`, and whose `attested_network_at` is younger than
+15 minutes: its Machine dials that address, and a new Workflow has `bootMode`
+`netboot` and the address in `lolwtf.ca/bmc-address`. While that Workflow is
+unfinished, the Machine keeps the pinned address, however old the attested
+one grows, unless a pass during the run attests another: another bootstrap
+address moves the Machine there, and any other address, such as the
+device's own once its RADIUS user moves it, ends the pin. The Machine and Rufio come for every other device once the status
+leaves `planned`. A retirement is the `retire` run, which
 powers the node off; the controller starts it on status `decommissioning`,
 never from `desired_action`.
 
@@ -94,18 +105,32 @@ served, expired or replaced code is kept as a hash for 24 hours in
 ## Intake contract
 
 `POST /intake`, unauthenticated, at most 16 KiB of JSON: `{"mac", "serial",
-"uuid", "model", "sku", "bios", "disks": [{"name", "size", "tran"}]}`, with
-`size` in bytes. 400 is a MAC that is not unicast `aa:bb:cc:dd:ee:ff`, a serial
-that is not 1 to 64 printable ASCII characters, a UUID of another shape, or a
-disk that is not a kernel name. 429 is a second call for a MAC within ten
-minutes, an 11th call in an hour from one `X-Forwarded-For` address, or a 21st
-intake made in an hour; a call that made nothing gives its MAC's slot back. 200 `{"state":"known"}` is a MAC that a NetBox interface or a `Hardware`
-holds. 201 `{"state":"intake","workflow":"intake-<mac>-<unix seconds>"}` made
+"uuid", "model", "sku", "bios", "disks": [{"name", "size", "tran"}], "lldp":
+{"chassis_id", "port_id", "port_description", "system_name"}}`, with `size`
+in bytes and `lldp` optional. 400 is a MAC that is not unicast
+`aa:bb:cc:dd:ee:ff`, a serial that is not 1 to 64 printable ASCII characters,
+a UUID of another shape, or a disk that is not a kernel name. An `lldp`
+without a chassis ID and a port ID, or with more than 255 printable ASCII
+characters in a field, is dropped and the call goes on. The machine's
+address is `X-Real-IP` when the peer is in `FLEET_PROXY_ADDRESSES`, else the
+peer; a proxy call without the header has none. 429 is a second call for a
+MAC within ten minutes, an 11th call in an hour from one address, or a 21st
+intake made in an hour; a call that made nothing, a known MAC's included,
+gives its MAC's slot back.
+
+Each call's report is a claim, kept for diagnostics: no Machine, cable or
+port check follows from it. It is annotations on each of the controller's
+`Hardware` with the MAC, merge-patched by the field manager
+`fleet-controller-intake` so the controller's own apply leaves them: `lolwtf.ca/intake-at` (RFC 3339), `lolwtf.ca/intake-address`,
+`lolwtf.ca/intake-serial`, and `lolwtf.ca/lldp-chassis-id`, `-port-id`,
+`-port-description`, `-system-name`. A report without an address or LLDP
+removes the older one. 200 `{"state":"known"}` is a MAC that a NetBox
+interface or a `Hardware` holds. 201 `{"state":"intake","workflow":"intake-<mac>-<unix seconds>"}` made
 `Hardware <mac>` (labels `lolwtf.ca/intake=true` and the managed and node
-labels; annotations `lolwtf.ca/intake-serial`, `-uuid`, `-model`; the first
-NVMe disk, else the first non-USB one, else the model's) and the `Workflow`
-with `attest=true`, `wipe=false`, `install=false` and no `bootMode`. 503 is a
-NetBox or Tinkerbell failure. Audit line `fleet.intake`.
+labels; the report and `lolwtf.ca/intake-uuid` and `-model`; the first NVMe
+disk, else the first non-USB one, else the model's) and the `Workflow` with
+`attest=true`, `wipe=false`, `install=false` and no `bootMode`. 503 is a
+NetBox or Tinkerbell failure. Audit line `fleet.intake`, with the report.
 
 ## Binding contract
 
@@ -119,19 +144,25 @@ after an hour, and one no device holds after `FLEET_INTAKE_TTL`. A stub is a
 with its serial, else the oldest (lowest id) serial-less stub whose
 `talos_class` is the model's, then the stub's name and `expected_port`; the
 description `fleet-controller: binds stub <name>` carries the name across a
-pass that stops between deleting the stub and the rename. Off
-`FLEET_INTAKE_PORT`, an `expected_port` other than UniFi's port refuses the
-binding: nothing is written and the journal says `on port N, expected M`.
+pass that stops between deleting the stub and the rename. The machine's
+port is the `Port <n>` its `attested_switch_port` names, recorded no earlier
+than the intake's Workflow, on the NetBox switch whose interface MAC is its
+`attested_switch`. Off `FLEET_INTAKE_PORT`, an `expected_port` other than that
+port, or no port, refuses the binding: nothing is written and the journal
+says `on port N, expected M`. A port the intake claimed that differs is noted
+in the binding's journal entry.
 Written, each only when it differs: `talos_class`, `bmc_type`, `install_disk` (the model map's, never the claim's),
 `expected_port`, `last_workflow` (the intake run), `primary_ip4` (the unassigned IP address whose DNS name is
 the device's new name, else the lowest free address of `FLEET_NODE_PREFIX`
-outside `FLEET_NODE_RESERVED` and UniFi's client addresses; with UniFi set and not answering, the pass fails and retries), the name, a cable
+outside `FLEET_NODE_RESERVED`), the name, a cable
 to the switch port (on the intake port, to `expected_port` only), and
-`desired_action` `provision`. The intake's objects are deleted last. A device
-whose `last_workflow` is an intake run gets no `Machine` and a `Workflow`
-without `bootMode`. Audit lines `fleet.bind` and `fleet.autoprovision`. A
-`staged` or `active` device whose interface has no cable is cabled to the port
-UniFi reports, unless that is the intake port, and one seen off its
+`desired_action` `provision`. A cable never takes a switch port another
+device's cable holds: the other cable stays, and the journal says so. The
+intake's objects are deleted last. A device whose `last_workflow` is an
+intake run gets a `Workflow` without `bootMode`, since it waits in HookOS. Audit lines `fleet.bind` and
+`fleet.autoprovision`. A `staged` or `active` device whose interface has no
+cable is cabled to the port an `attested_network_at` younger than an hour
+names, unless that is the intake port, and one attested off its
 `expected_port` is journaled once.
 
 The webhook is `POST /webhook` with NetBox's `X-Hook-Signature`, HMAC-SHA512

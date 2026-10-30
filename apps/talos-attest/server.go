@@ -153,7 +153,7 @@ func (s *Server) evidence(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	verdict, err := s.V.Evidence(r.Context(), r.PathValue("session"), req)
+	verdict, err := s.V.Evidence(withClient(r.Context(), clientAddress(r)), r.PathValue("session"), req)
 	if err != nil {
 		s.writeError(w, err)
 		return

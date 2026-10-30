@@ -1,7 +1,10 @@
 // tink-attest is the Tinkerbell action that attests a machine against
 // talos-attest from inside HookOS: it reads the machine's SMBIOS identity and
 // event log, drives the flow with the TPM, and stores the issued
-// certificates in NV. It exits non-zero on any refusal, so the Workflow
+// certificates in NV. With the host's network namespace it also reports the
+// boot NIC's IPv4 address and the switch port its LLDP frame names, signed
+// by the session's AK; the LLDP wait, at most 35 seconds, runs beside the
+// TPM work. It exits non-zero on any refusal, so the Workflow
 // fails and the machine stays where it is. An install code in the confirm's
 // answer goes to -install-code for the install action; it is never logged.
 //
@@ -29,6 +32,7 @@ import (
 	"github.com/google/go-tpm/legacy/tpm2"
 
 	"github.com/jonpulsifer/infra/apps/talos-attest/client"
+	"github.com/jonpulsifer/infra/apps/talos-attest/lldp"
 	"github.com/jonpulsifer/infra/apps/talos-attest/protocol"
 )
 
@@ -90,13 +94,41 @@ func main() {
 		SKU:          readTrim("/sys/class/dmi/id/product_sku"),
 		BIOS:         readTrim("/sys/class/dmi/id/bios_version"),
 	}
-	if err := run(*url, *device, *eventLog, m, *storeNV, *installCode, *timeout); err != nil {
+	if err := run(*url, *device, *eventLog, m, *storeNV, *installCode, *timeout, network(m.MAC)); err != nil {
 		logf("FAILED: %v", err)
 		os.Exit(1)
 	}
 }
 
-func run(url, device, eventLog string, m protocol.Machine, storeNV bool, installCode string, timeout time.Duration) error {
+// network starts listening on the NIC with the MAC and answers what it
+// found when asked: the NIC's address, and the switch's LLDP neighbour when
+// a frame arrived. A NIC the action cannot see, as without the host's
+// network namespace, gives nothing.
+func network(mac string) func() *protocol.Network {
+	ifname := lldp.Interface("/sys", mac)
+	if ifname == "" {
+		logf("no NIC has the MAC %q; no network facts", mac)
+		return func() *protocol.Network { return nil }
+	}
+	heard := make(chan *protocol.LLDP, 1)
+	go func() {
+		l, err := lldp.Listen(ifname, lldp.Wait)
+		if err != nil {
+			logf("no LLDP: %v", err)
+			heard <- nil
+			return
+		}
+		logf("LLDP on %s: %s port %q (%s)", ifname, l.ChassisID, l.PortID, l.SystemName)
+		heard <- &l
+	}()
+	return func() *protocol.Network {
+		n := &protocol.Network{LLDP: <-heard, Address: lldp.Address(ifname)}
+		logf("network: %s address %q", ifname, n.Address)
+		return n
+	}
+}
+
+func run(url, device, eventLog string, m protocol.Machine, storeNV bool, installCode string, timeout time.Duration, net func() *protocol.Network) error {
 	if url == "" {
 		return errors.New("ATTEST_URL is required")
 	}
@@ -123,6 +155,7 @@ func run(url, device, eventLog string, m protocol.Machine, storeNV bool, install
 		EventLog: log,
 		StoreNV:  storeNV,
 		Logf:     logf,
+		Network:  net,
 	})
 	if err != nil {
 		return err

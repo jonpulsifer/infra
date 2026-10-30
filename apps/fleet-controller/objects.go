@@ -38,22 +38,24 @@ var Actions = map[string]Action{
 // HasBMC says whether the device gets a Machine now. A planned device has no
 // RADIUS user yet, so it and its AMT sit on the bootstrap fallback with a
 // lease there, and an AMT address derived from the Kubernetes address it
-// does not hold yet is wrong; only an explicit oob_ip counts until the status
-// leaves planned. A device fresh from its intake is in the same place: its
-// export has not been applied, and its agent waits in HookOS.
+// does not hold yet is wrong; until the status leaves planned, only an
+// explicit oob_ip counts, or the bootstrap address its last intake pass
+// attested (Config.bootstrapBMC). A device fresh from its intake is in the
+// same place: its export has not been applied, and its agent waits in
+// HookOS.
 func (d Device) HasBMC() bool {
 	if d.BMCType == "none" || d.BMCAddress == "" {
 		return false
 	}
-	return d.Status != "planned" && !d.FromIntake() || d.OOBAddress != ""
+	return d.Status != "planned" && !d.FromIntake() || d.OOBAddress != "" || d.BootstrapBMC
 }
 
 // ManualBoot says whether Rufio stays out of a run: a device without a
-// Machine, any planned device, whose BMC Rufio cannot reach at a Kubernetes
-// address it does not hold yet, and a device fresh from its intake, which
-// is already in HookOS.
+// Machine, a planned device, whose BMC Rufio cannot reach at a Kubernetes
+// address it does not hold yet, unless its AMT is at its attested bootstrap
+// address, and a device fresh from its intake, which is already in HookOS.
 func (d Device) ManualBoot() bool {
-	return d.Status == "planned" || d.FromIntake() || !d.HasBMC()
+	return d.Status == "planned" && !d.BootstrapBMC || d.FromIntake() || !d.HasBMC()
 }
 
 func labels(d Device, extra map[string]string) map[string]any {
@@ -189,7 +191,9 @@ func (c Config) IsControlPlane(class string) bool {
 }
 
 // Workflow runs the provision Template for one action. A device that boots
-// by hand (ManualBoot) gets no boot mode, and somebody powers the machine on.
+// by hand (ManualBoot) gets no boot mode: it waits in HookOS, or somebody
+// powers the machine on. A Machine at a bootstrap address is pinned on the
+// Workflow, which keeps it for the run.
 // toggleAllowNetboot is off: the controller sets the Hardware's flags before
 // the Workflow exists, and Tinkerbell's toggle would be a second writer of the
 // same atomic list, racing the controller's apply.
@@ -215,14 +219,18 @@ func (c Config) Workflow(d Device, action string, now time.Time) Object {
 		boot["bootMode"] = "netboot"
 	}
 	spec["bootOptions"] = boot
+	meta := map[string]any{
+		"name":   WorkflowName(action, d.Name, now),
+		"labels": labels(d, map[string]string{ActionLabel: action}),
+	}
+	if d.BootstrapBMC {
+		meta["annotations"] = map[string]any{BMCAddressAnnotation: d.BMCAddress}
+	}
 	return Object{
 		"apiVersion": WorkflowResource.apiVersion(),
 		"kind":       WorkflowResource.Kind,
-		"metadata": map[string]any{
-			"name":   WorkflowName(action, d.Name, now),
-			"labels": labels(d, map[string]string{ActionLabel: action}),
-		},
-		"spec": spec,
+		"metadata":   meta,
+		"spec":       spec,
 	}
 }
 

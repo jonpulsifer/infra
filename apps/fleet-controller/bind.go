@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/netip"
 	"sort"
 	"strings"
@@ -55,14 +54,10 @@ func (d Device) Stub() bool { return d.Status == "planned" && d.MAC == "" }
 func (d Device) FromIntake() bool { return strings.HasPrefix(d.LastWorkflow, ActionIntake+"-") }
 
 // bindPass is one pass's state for binding: the stubs not taken yet, and
-// UniFi's clients and NetBox's switches, each read once and only when a
-// binding needs them.
+// NetBox's switches, read once and only when a binding needs them.
 type bindPass struct {
 	stubs []Device
 
-	stations       []Station
-	stationsErr    error
-	stationsRead   bool
 	switches       []Switch
 	switchesErr    error
 	switchesRead   bool
@@ -88,14 +83,14 @@ func newBindPass(devices []Device) *bindPass {
 
 func portMismatch(port int, want int, stub string) string {
 	if port == 0 {
-		return fmt.Sprintf("UniFi reports no switch port for it, and %s expects port %d", stub, want)
+		return fmt.Sprintf("its intake pass attested no switch port, and %s expects port %d", stub, want)
 	}
 	return fmt.Sprintf("on port %d, expected %d (%s)", port, want, stub)
 }
 
 // pick takes the stub a device binds to: the stub with its serial, else the
 // oldest serial-less stub of its class whose expected port, if any, is the
-// port UniFi reports. refused names a stub whose port check failed when no
+// port its intake pass attested. refused names a stub whose port check failed when no
 // stub fits. check false skips the port check: the machine is on the intake
 // port at the prep station, not on its rack port yet.
 func (p *bindPass) pick(d Device, class string, port int, check bool) (*Device, string) {
@@ -142,25 +137,21 @@ func (p *bindPass) named(name string) *Device {
 	return nil
 }
 
-// where is the NetBox switch and port UniFi reports the MAC wired to, or
-// why it cannot say.
-func (r *Reconciler) where(ctx context.Context, p *bindPass, mac string) (*Switch, int, string) {
-	if r.UniFi == nil {
-		return nil, 0, "no UniFi is configured (FLEET_UNIFI_URL)"
+// where is the switch port the device's attested LLDP neighbour names, from
+// a pass at or after since: the NetBox switch whose MAC is the chassis ID and
+// the port number, or why it cannot say. An intake's own claim of a port
+// never counts: anybody on the bootstrap network can post one.
+func (r *Reconciler) where(ctx context.Context, p *bindPass, d Device, since time.Time) (*Switch, int, string) {
+	a := d.Attested
+	switch {
+	case a.At.IsZero() || a.Switch == "" || a.Port == "":
+		return nil, 0, "talos-attest recorded no attested switch port"
+	case a.At.Before(since):
+		return nil, 0, fmt.Sprintf("the attested switch port is from %s, before %s", a.At.UTC().Format(time.RFC3339), since.UTC().Format(time.RFC3339))
 	}
-	if !p.stationsRead {
-		p.stations, p.stationsErr = r.UniFi.Stations(ctx)
-		p.stationsRead = true
-		if p.stationsErr != nil {
-			log.Printf("UniFi: %v", p.stationsErr)
-		}
-	}
-	if p.stationsErr != nil {
-		return nil, 0, "UniFi did not answer: " + p.stationsErr.Error()
-	}
-	swMAC, port, ok := Port(p.stations, mac)
+	port, ok := portNumber(a.Port)
 	if !ok {
-		return nil, 0, "UniFi does not see it wired to a switch"
+		return nil, 0, fmt.Sprintf("the attested port %s of %s is no Port <n>", plain(a.Port), plain(a.Switch))
 	}
 	if !p.switchesRead {
 		p.switches, p.switchesErr = r.NetBox.Switches(ctx, r.Config.Site)
@@ -170,11 +161,11 @@ func (r *Reconciler) where(ctx context.Context, p *bindPass, mac string) (*Switc
 		return nil, 0, "NetBox's switches: " + p.switchesErr.Error()
 	}
 	for i := range p.switches {
-		if p.switches[i].MACs[swMAC] {
+		if p.switches[i].MACs[a.Switch] {
 			return &p.switches[i], port, ""
 		}
 	}
-	return nil, 0, fmt.Sprintf("UniFi sees it on port %d of %s, which no NetBox switch has", port, swMAC)
+	return nil, 0, fmt.Sprintf("the attested port %d is on %s, which no NetBox switch has", port, plain(a.Switch))
 }
 
 // binding is what a bind decided, for its journal entry and audit line.
@@ -186,7 +177,8 @@ func (b *binding) note(format string, a ...any) { b.notes = append(b.notes, fmt.
 
 // bind makes an attested intake a node. The device talos-attest created for
 // the machine's serial, or the stub it reused, takes a stub's name and
-// address, the model's class, BMC and disk, the switch port UniFi reports,
+// address, the model's class, BMC and disk, the switch port its intake pass
+// attested,
 // and a free address when it has none, and then desired_action provision.
 // Every step writes only what differs, so a pass that stops anywhere is
 // finished by the next; the last step deletes the intake's Hardware and
@@ -208,7 +200,7 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 		return r.journalOnce(ctx, fmt.Sprintf("bind-wait/%d/%s/%s", d.ID, d.Status, d.Verdict), d, "warning", why)
 	}
 	model, known := r.Config.Models[d.Model]
-	sw, port, portWhy := r.where(ctx, p, d.MAC)
+	sw, port, portWhy := r.where(ctx, p, d, wf.Created())
 	// On the intake port the machine is at the prep station: its rack port
 	// is yet to come, so no port check applies and no cable follows from it.
 	atIntake := port != 0 && port == r.Config.IntakePort
@@ -239,6 +231,9 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	}
 
 	var b binding
+	if claim := reportOf(hw).LLDP; claim != nil && !strings.EqualFold(claim.PortID, d.Attested.Port) {
+		b.note("the intake claimed port %s, and the pass attested %s", plain(claim.PortID), orNone(plain(d.Attested.Port)))
+	}
 	class := d.Class
 	if stub != nil && stub.Class != "" {
 		class = stub.Class
@@ -314,13 +309,13 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	switch {
 	case atIntake && expected != 0:
 		b.note("at the prep station on port %d", port)
-		if err := r.cable(ctx, d, sw, expected, false, &b); err != nil {
+		if _, err := r.cable(ctx, d, sw, expected, &b); err != nil {
 			return err
 		}
 	case atIntake:
-		b.note("at the prep station on port %d; no cable until UniFi sees it on a rack port", port)
+		b.note("at the prep station on port %d; no cable until an intake pass on a rack port attests it", port)
 	case sw != nil:
-		if err := r.cable(ctx, d, sw, port, true, &b); err != nil {
+		if _, err := r.cable(ctx, d, sw, port, &b); err != nil {
 			return err
 		}
 	default:
@@ -367,7 +362,7 @@ func (r *Reconciler) refuse(ctx context.Context, d Device, workflow, why string)
 
 // address gives the device its primary IPv4: the address a stub reserved
 // under the device's new name, else the lowest free address of the node
-// prefix that no reservation, gateway or UniFi client holds.
+// prefix that no reservation or gateway holds.
 func (r *Reconciler) address(ctx context.Context, d Device, name string, p *bindPass) (string, string, error) {
 	ips, err := r.NetBox.IPsNamed(ctx, name)
 	if err != nil {
@@ -391,22 +386,13 @@ func (r *Reconciler) address(ctx context.Context, d Device, name string, p *bind
 	if r.Config.NodePrefix == "" {
 		return "", "no address: FLEET_NODE_PREFIX is unset", nil
 	}
-	if r.UniFi != nil && p.stationsErr != nil {
-		return "", "", fmt.Errorf("UniFi did not answer, so no free address is checked against its clients: %w", p.stationsErr)
-	}
 	free, err := r.NetBox.AvailableIPs(ctx, r.Config.NodePrefix)
 	if err != nil {
 		return "", "", err
 	}
-	inUse := map[string]bool{}
-	for _, s := range p.stations {
-		if s.IP != "" && s.MAC != d.MAC {
-			inUse[s.IP] = true
-		}
-	}
 	for _, cidr := range free {
 		a := stripPrefix(cidr)
-		if !r.Config.allocatable(a) || inUse[a] || p.allocatedAddrs[a] {
+		if !r.Config.allocatable(a) || p.allocatedAddrs[a] {
 			continue
 		}
 		id, err := r.NetBox.AssignIP(ctx, 0, cidr, d.NIC, name)
@@ -434,6 +420,12 @@ func (c Config) allocatable(a string) bool {
 	if err != nil || !pfx.Contains(addr) || c.NodeReserved[a] {
 		return false
 	}
+	return hostAddress(pfx, addr)
+}
+
+// hostAddress says whether an address of the prefix is neither its network
+// nor its broadcast address. A prefix longer than /30 has neither.
+func hostAddress(pfx netip.Prefix, addr netip.Addr) bool {
 	if !addr.Is4() || pfx.Bits() > 30 {
 		return pfx.Bits() > 30
 	}
@@ -445,23 +437,25 @@ func (c Config) allocatable(a string) bool {
 	return n != first && n != last
 }
 
-// cable runs the device's cable to a switch port: the one UniFi reports, which
-// replaces a stale cable (steal), or the one a stub expects, which does not.
-func (r *Reconciler) cable(ctx context.Context, d Device, sw *Switch, port int, steal bool, b *binding) error {
+// cable runs the device's cable to a switch port: the attested one, or the
+// one a stub expects, and says whether it made one. It never takes a port
+// another device's cable holds: NetBox's cable stays, and the conflict is
+// journaled for the owner.
+func (r *Reconciler) cable(ctx context.Context, d Device, sw *Switch, port int, b *binding) (bool, error) {
 	swPort, err := r.NetBox.SwitchPort(ctx, sw.ID, port)
 	if err != nil {
-		return fmt.Errorf("switch port: %w", err)
+		return false, fmt.Errorf("switch port: %w", err)
 	}
 	if swPort == 0 {
-		return r.journalOnce(ctx, "bind-noport/"+d.MAC, d, "warning", fmt.Sprintf("fleet-controller: UniFi sees the device on port %d of %s, which NetBox lacks; no cable", port, sw.Name))
+		return false, r.journalOnce(ctx, "bind-noport/"+d.MAC, d, "warning", fmt.Sprintf("fleet-controller: the device is on port %d of %s, which NetBox lacks; no cable", port, sw.Name))
 	}
-	made, replaced, err := r.NetBox.Cable(ctx, d.NIC, swPort, steal)
+	made, replaced, err := r.NetBox.Cable(ctx, d.NIC, swPort, false)
 	if errors.Is(err, ErrPortTaken) {
 		b.note("no cable: %s Port %d has another", sw.Name, port)
-		return r.journalOnce(ctx, fmt.Sprintf("bind-taken/%s/%d", d.MAC, port), d, "warning", fmt.Sprintf("fleet-controller: %s Port %d, the port the device expects, is cabled to another device in NetBox; no cable", sw.Name, port))
+		return false, r.journalOnce(ctx, fmt.Sprintf("bind-taken/%s/%d", d.MAC, port), d, "warning", fmt.Sprintf("fleet-controller: %s Port %d, the device's port, is cabled to another device in NetBox; no cable, and the other cable stays", sw.Name, port))
 	}
 	if err != nil {
-		return fmt.Errorf("cable: %w", err)
+		return false, fmt.Errorf("cable: %w", err)
 	}
 	if made {
 		b.note("cabled to %s Port %d", sw.Name, port)
@@ -469,7 +463,7 @@ func (r *Reconciler) cable(ctx context.Context, d Device, sw *Switch, port int, 
 	if len(replaced) > 0 {
 		b.note("replaced the cable %s", strings.Join(replaced, ", "))
 	}
-	return nil
+	return made, nil
 }
 
 // autoProvision sets desired_action provision once on a bound device with a

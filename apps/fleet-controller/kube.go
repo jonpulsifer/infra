@@ -159,6 +159,21 @@ func (k *Kube) Apply(ctx context.Context, r Resource, obj Object) error {
 	return k.do(ctx, http.MethodPatch, k.path(r, obj.Name())+"?"+q.Encode(), "application/apply-patch+yaml", body, nil)
 }
 
+// IntakeFieldManager owns the annotations an intake writes on a Hardware,
+// which the controller's own apply never sets and so never removes.
+const IntakeFieldManager = "fleet-controller-intake"
+
+// Annotate merge-patches an existing object's annotations; a nil value
+// removes one. A missing object is ErrNotFound: a merge patch creates nothing.
+func (k *Kube) Annotate(ctx context.Context, r Resource, name string, annotations map[string]any) error {
+	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
+	if err != nil {
+		return err
+	}
+	q := url.Values{"fieldManager": {IntakeFieldManager}}
+	return k.do(ctx, http.MethodPatch, k.path(r, name)+"?"+q.Encode(), "application/merge-patch+json", body, nil)
+}
+
 // Create posts a new object.
 func (k *Kube) Create(ctx context.Context, r Resource, obj Object) error {
 	body, err := json.Marshal(obj)

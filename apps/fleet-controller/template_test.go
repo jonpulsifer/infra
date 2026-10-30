@@ -15,10 +15,13 @@ import (
 const templatePath = "../../clusters/folly/tinkerbell/template.yaml"
 
 type tinkAction struct {
-	Name    string   `yaml:"name"`
-	Image   string   `yaml:"image"`
-	Volumes []string `yaml:"volumes"`
-	Command []string `yaml:"command"`
+	Name       string   `yaml:"name"`
+	Image      string   `yaml:"image"`
+	Volumes    []string `yaml:"volumes"`
+	Command    []string `yaml:"command"`
+	Namespaces struct {
+		Network string `yaml:"network"`
+	} `yaml:"namespaces"`
 }
 
 type tinkWorkflow struct {
@@ -94,6 +97,13 @@ func TestTemplateRendersTheInstall(t *testing.T) {
 	for _, name := range []string{"attest", "install"} {
 		if !contains(actions[name].Volumes, "/tmp/fleet:/tmp/fleet") {
 			t.Errorf("%s does not mount /tmp/fleet: %v", name, actions[name].Volumes)
+		}
+	}
+	// The attest action reads the boot NIC's address and LLDP frame, which
+	// only the host's network namespace shows it.
+	for name, a := range actions {
+		if want := map[bool]string{true: "host"}[name == "attest"]; a.Namespaces.Network != want {
+			t.Errorf("%s runs in network namespace %q, want %q", name, a.Namespaces.Network, want)
 		}
 	}
 }

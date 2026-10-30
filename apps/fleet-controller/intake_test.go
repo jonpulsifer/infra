@@ -30,15 +30,24 @@ func hardwareDisk(o Object) string {
 }
 
 // intakeBody is the agent image's phone-home, in the shape it posts.
-func intakeBody(mac string) string {
-	b, _ := json.Marshal(map[string]any{
+func intakeBody(mac string) string { return intakeBodyWith(mac, nil) }
+
+// uswLLDP is the agent's LLDP report from a USW-24-PoE's port 24.
+var uswLLDP = map[string]any{"chassis_id": "F4:E2:C6:00:00:01", "port_id": "Port 24", "port_description": "provisioning", "system_name": "USW-24-PoE"}
+
+func intakeBodyWith(mac string, lldp map[string]any) string {
+	body := map[string]any{
 		"mac": mac, "serial": "MXL0172Q7X", "uuid": "4c4c4544-0042-3510-8051-b4c04f565433",
 		"model": "HP EliteDesk 800 G5 Desktop Mini", "sku": "7PF35AV", "bios": "R21 Ver. 02.19.00",
 		"disks": []map[string]any{
 			{"name": "sda", "size": 31024349184, "tran": "usb"},
 			{"name": "nvme0n1", "size": 512110190592, "tran": "nvme"},
 		},
-	})
+	}
+	if lldp != nil {
+		body["lldp"] = lldp
+	}
+	b, _ := json.Marshal(body)
 	return string(b)
 }
 
@@ -67,6 +76,8 @@ func newIntakeTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*intakeTest, f
 	t.Helper()
 	r, done := newTest(t, nb, kube)
 	r.Config.Models = DefaultModels
+	// httptest's requests come from 192.0.2.1: an anchor's nginx.
+	r.Config.Proxies = map[string]bool{"192.0.2.1": true}
 	it := &intakeTest{nb: nb, kube: kube, now: testNow}
 	it.in = &Intake{
 		Config: &r.Config, NetBox: r.NetBox, Kube: r.Kube, Metrics: r.Metrics,
@@ -77,7 +88,14 @@ func newIntakeTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*intakeTest, f
 }
 
 func (it *intakeTest) post(body string) (int, map[string]string) {
+	return it.postFrom(body, "10.9.0.150")
+}
+
+// postFrom posts through the anchors' nginx, which names the machine's
+// address in X-Real-IP.
+func (it *intakeTest) postFrom(body, machine string) (int, map[string]string) {
 	req := httptest.NewRequest(http.MethodPost, "/intake", strings.NewReader(body))
+	req.Header.Set("X-Real-IP", machine)
 	rec := httptest.NewRecorder()
 	it.in.ServeHTTP(rec, req)
 	var out map[string]string
@@ -216,11 +234,8 @@ func TestIntakeLimitsEachSource(t *testing.T) {
 	defer done()
 	it.in.PerSource = 2
 	post := func(mac, from string) int {
-		req := httptest.NewRequest(http.MethodPost, "/intake", strings.NewReader(intakeBody(mac)))
-		req.Header.Set("X-Forwarded-For", from)
-		rec := httptest.NewRecorder()
-		it.in.ServeHTTP(rec, req)
-		return rec.Code
+		code, _ := it.postFrom(intakeBody(mac), from)
+		return code
 	}
 	for i, want := range []int{http.StatusCreated, http.StatusCreated, http.StatusTooManyRequests} {
 		if code := post(fmt.Sprintf("38:22:e2:aa:cc:%02x", i), "10.9.0.150"); code != want {
@@ -346,5 +361,143 @@ func TestExpireIntakes(t *testing.T) {
 	}
 	if kube.get(hwBase+"38-22-e2-2d-96-44") != nil || kube.get(hwPath) == nil {
 		t.Error("an active device's stale intake kept its own Hardware away")
+	}
+}
+
+func TestIntakeClientTrustsOnlyTheProxies(t *testing.T) {
+	in := &Intake{Config: &Config{Proxies: map[string]bool{"10.8.0.11": true, "10.8.0.12": true}}}
+	for _, c := range []struct {
+		peer, real, want string
+		machine          bool
+	}{
+		{"10.8.0.11:40000", "10.9.0.150", "10.9.0.150", true},
+		{"10.8.0.12:40000", "10.9.0.150", "10.9.0.150", true},
+		{"10.8.0.11:40000", "", "10.8.0.11", false},
+		{"10.8.0.11:40000", "bogus", "10.8.0.11", false},
+		// Another host on the Anchor network is no proxy: its header is a lie.
+		{"10.8.0.40:40000", "10.9.0.150", "10.8.0.40", true},
+		{"10.9.0.150:40000", "10.9.0.7", "10.9.0.150", true},
+		{"[::ffff:10.8.0.11]:40000", "10.9.0.151", "10.9.0.151", true},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/intake", nil)
+		req.RemoteAddr = c.peer
+		if c.real != "" {
+			req.Header.Set("X-Real-IP", c.real)
+		}
+		if got, machine := in.client(req); got != c.want || machine != c.machine {
+			t.Errorf("peer %s, X-Real-IP %q: %s %v, want %s %v", c.peer, c.real, got, machine, c.want, c.machine)
+		}
+	}
+	// Without proxies, every peer is the machine.
+	in.Config.Proxies = nil
+	req := httptest.NewRequest(http.MethodPost, "/intake", nil)
+	req.RemoteAddr = "10.8.0.11:40000"
+	req.Header.Set("X-Real-IP", "10.9.0.150")
+	if got, machine := in.client(req); got != "10.8.0.11" || !machine {
+		t.Errorf("no proxy prefix: %s %v", got, machine)
+	}
+}
+
+func TestIntakeRecordsTheReportOnANewHardware(t *testing.T) {
+	it, done := newIntakeTest(t, &fakeNetBox{}, &fakeKube{})
+	defer done()
+	if code, out := it.post(intakeBodyWith(intakeMAC, uswLLDP)); code != http.StatusCreated {
+		t.Fatalf("%d %v", code, out)
+	}
+	rep := reportOf(it.kube.get(hwBase + intakeSlug))
+	want := LLDP{ChassisID: "f4:e2:c6:00:00:01", PortID: "Port 24", PortDescription: "provisioning", SystemName: "USW-24-PoE"}
+	if rep.Address != "10.9.0.150" || !rep.At.Equal(testNow) || rep.Serial != "MXL0172Q7X" || rep.LLDP == nil || *rep.LLDP != want {
+		t.Errorf("report %+v %+v", rep, rep.LLDP)
+	}
+}
+
+func TestIntakeRecordsTheReportOnAKnownHardware(t *testing.T) {
+	nb := &fakeNetBox{macs: []map[string]any{{
+		"mac_address": strings.ToUpper(intakeMAC), "assigned_object_type": "dcim.interface",
+		"assigned_object": map[string]any{"id": 3, "device": map[string]any{"name": "swell"}},
+	}}}
+	kube := &fakeKube{objects: map[string]Object{hwBase + "swell": {
+		"metadata": map[string]any{"name": "swell", "annotations": map[string]any{"keep": "me"}, "labels": map[string]any{ManagedLabel: FieldManager}},
+		"spec":     map[string]any{"interfaces": []any{map[string]any{"dhcp": map[string]any{"mac": intakeMAC}}}},
+	}}}
+	it, done := newIntakeTest(t, nb, kube)
+	defer done()
+	if code, out := it.postFrom(intakeBodyWith(intakeMAC, uswLLDP), "10.9.0.152"); code != http.StatusOK || out["state"] != "known" {
+		t.Fatalf("%d %v", code, out)
+	}
+	hw := kube.get(hwBase + "swell")
+	rep := reportOf(hw)
+	if rep.Address != "10.9.0.152" || rep.LLDP == nil || rep.LLDP.PortID != "Port 24" || hw.annotation("keep") != "me" {
+		t.Errorf("annotations %v", hw.metadata()["annotations"])
+	}
+	if len(kube.workflows()) != 0 || len(kube.objects) != 1 {
+		t.Errorf("objects for a known MAC: %v", kube.objects)
+	}
+
+	// The next boot hears no LLDP: the older port goes with it.
+	it.now = it.now.Add(10 * time.Minute)
+	if code, _ := it.postFrom(intakeBody(intakeMAC), "10.9.0.153"); code != http.StatusOK {
+		t.Fatalf("second report: %d", code)
+	}
+	rep = reportOf(kube.get(hwBase + "swell"))
+	if rep.Address != "10.9.0.153" || rep.LLDP != nil || !rep.At.Equal(it.now) {
+		t.Errorf("second report %+v", rep)
+	}
+	if a := kube.get(hwBase + "swell").metadata()["annotations"].(map[string]any); a[LLDPPortAnnotation] != nil {
+		t.Errorf("a stale port survived: %v", a)
+	}
+}
+
+// A host on the bootstrap network posts a known machine's MAC and serial,
+// both in the public inventory, from its own address. Its claim is no more
+// than a diagnostic, and it holds no slot that locks the machine's own post
+// out.
+func TestIntakeForgedKnownMACLocksNothingOut(t *testing.T) {
+	nb := &fakeNetBox{macs: []map[string]any{{
+		"mac_address": strings.ToUpper(intakeMAC), "assigned_object_type": "dcim.interface",
+		"assigned_object": map[string]any{"id": 3, "device": map[string]any{"name": "swell"}},
+	}}}
+	kube := &fakeKube{objects: map[string]Object{hwBase + "swell": {
+		"metadata": map[string]any{"name": "swell", "labels": map[string]any{ManagedLabel: FieldManager}},
+		"spec":     map[string]any{"interfaces": []any{map[string]any{"dhcp": map[string]any{"mac": intakeMAC}}}},
+	}}}
+	it, done := newIntakeTest(t, nb, kube)
+	defer done()
+	if code, _ := it.postFrom(intakeBody(intakeMAC), "10.9.0.66"); code != http.StatusOK {
+		t.Fatalf("the forged post: %d", code)
+	}
+	if code, _ := it.postFrom(intakeBodyWith(intakeMAC, uswLLDP), "10.9.0.150"); code != http.StatusOK {
+		t.Fatalf("the machine's own post after a forged one: %d", code)
+	}
+	if rep := reportOf(kube.get(hwBase + "swell")); rep.Address != "10.9.0.150" {
+		t.Errorf("report %+v", rep)
+	}
+}
+
+// The report goes only on the controller's own Hardware.
+func TestIntakeLeavesUnmanagedHardwareAlone(t *testing.T) {
+	kube := &fakeKube{objects: map[string]Object{hwBase + "hand-made": {
+		"metadata": map[string]any{"name": "hand-made"},
+		"spec":     map[string]any{"interfaces": []any{map[string]any{"dhcp": map[string]any{"mac": intakeMAC}}}},
+	}}}
+	it, done := newIntakeTest(t, &fakeNetBox{}, kube)
+	defer done()
+	if code, out := it.post(intakeBodyWith(intakeMAC, uswLLDP)); code != http.StatusOK || out["state"] != "known" {
+		t.Fatalf("%d %v", code, out)
+	}
+	if a := kube.get(hwBase + "hand-made").metadata()["annotations"]; a != nil {
+		t.Errorf("an unmanaged Hardware got annotations %v", a)
+	}
+}
+
+func TestIntakeDropsAnUnusableLLDPReport(t *testing.T) {
+	it, done := newIntakeTest(t, &fakeNetBox{}, &fakeKube{})
+	defer done()
+	bad := map[string]any{"chassis_id": "f4:e2:c6:00:00:01", "port_id": "Port\u00e924"}
+	if code, out := it.post(intakeBodyWith(intakeMAC, bad)); code != http.StatusCreated {
+		t.Fatalf("%d %v", code, out)
+	}
+	if rep := reportOf(it.kube.get(hwBase + intakeSlug)); rep.LLDP != nil || rep.Address != "10.9.0.150" {
+		t.Errorf("report %+v", rep)
 	}
 }
