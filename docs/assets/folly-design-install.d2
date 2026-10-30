@@ -1,0 +1,26 @@
+vars: {d2-config: {theme-id: 0; pad: 24}}
+shape: sequence_diagram
+boot: "Boot services"
+node: "Firmware / HookOS"
+fleet: fleetd
+netbox: NetBox
+tink: Tinkerbell
+talos: "Installed Talos"
+boot -> node: "1. Signed iPXE and HookOS"
+node -> fleet: "2. Claimed identity, EK and AK"
+fleet -> netbox: "3. Read declaration and EK pins"
+fleet -> node: "4. Nonce and credential challenge"
+node -> fleet: "5. Activation proof, quote, log and certified key"
+fleet -> fleet: "6. Check evidence and policy"
+fleet -> node: "7. LDevID and LAK certificates"
+node -> fleet: "8. Signed confirmation"
+fleet -> netbox: "9. Check admission fields and port report"
+fleet -> tink: "10. Reuse provision or create authorized workflow"
+fleet -> fleet: "11. Render config"
+fleet -> node: "12. TPM-wrapped install code"
+tink -> node: "13. Require pass and code; wipe and install"
+node -> talos: "14. Boot disk with code in META"
+talos -> fleet: "15. HTTPS GET with UUID and bearer code"
+fleet -> talos: "16. Complete config response"
+fleet -> fleet: "17. Burn code"
+fleet -> netbox: "18. Request active; retry failed write"
