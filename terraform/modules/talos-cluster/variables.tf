@@ -82,6 +82,18 @@ variable "nodes" {
   }
 }
 
+variable "static_addresses" {
+  type        = bool
+  description = "Configure every node's address statically: its address in K8S_NODE_CIDR's prefix on its one physical NIC, the default route through ROUTER_IP, and the resolvers below, with no DHCP. Off, Talos runs its default DHCP on every physical link."
+  default     = false
+}
+
+variable "nameservers" {
+  type        = list(string)
+  description = "The resolvers of a node with a static address."
+  default     = []
+}
+
 variable "workload_isolation" {
   type        = bool
   description = "SecurityProfileConfig.workloadIsolation (sandboxd). Talos 1.14 defaults new clusters to true."

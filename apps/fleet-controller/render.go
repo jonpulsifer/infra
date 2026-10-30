@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,6 +43,17 @@ type ClassInputs struct {
 	// Labels are the class's node labels; TPMLabels join them on a TPM node.
 	Labels    map[string]string `json:"labels"`
 	TPMLabels map[string]string `json:"tpm_labels"`
+	// NodeNetwork is how the node document gives a node its static address,
+	// or nil for a cluster whose nodes take theirs by DHCP.
+	NodeNetwork *NodeNetwork `json:"node_network"`
+}
+
+// NodeNetwork is the link, prefix length and gateway of a node's static
+// address; the address itself is the node's own.
+type NodeNetwork struct {
+	Link         string `json:"link"`
+	PrefixLength int    `json:"prefix_length"`
+	Gateway      string `json:"gateway"`
 }
 
 func (c ClassInputs) validate() error {
@@ -55,6 +67,12 @@ func (c ClassInputs) validate() error {
 	} {
 		if v == "" {
 			return fmt.Errorf("%s is empty", name)
+		}
+	}
+	if n := c.NodeNetwork; n != nil {
+		gw, err := netip.ParseAddr(n.Gateway)
+		if n.Link == "" || n.PrefixLength < 1 || n.PrefixLength > 30 || err != nil || !gw.Is4() {
+			return fmt.Errorf("node_network %+v needs a link, an IPv4 prefix length of 1 to 30 and an IPv4 gateway", *n)
 		}
 	}
 	return nil
@@ -196,12 +214,14 @@ func LoadBundle(path string, worker WorkerSecrets) error {
 }
 
 // Node is what a render takes from a NetBox device: its name, class,
-// install disk and TPM spec version ("2.0" for a node that seals its disks).
+// install disk, TPM spec version ("2.0" for a node that seals its disks) and
+// primary IPv4 address.
 type Node struct {
-	Name  string
-	Class string
-	Disk  string
-	TPM   string
+	Name    string
+	Class   string
+	Disk    string
+	TPM     string
+	Address string
 }
 
 // Renderer turns a node into its machine config.
@@ -272,6 +292,9 @@ func (t *Talosctl) Render(ctx context.Context, n Node) ([]byte, error) {
 	}
 	if n.Name == "" || !diskPattern.MatchString(n.Disk) {
 		return nil, fmt.Errorf("node %q has no usable name or install disk %q", n.Name, n.Disk)
+	}
+	if a, err := netip.ParseAddr(n.Address); in.NodeNetwork != nil && (err != nil || !a.Is4()) {
+		return nil, fmt.Errorf("node %q has no IPv4 address for its static network: %q", n.Name, n.Address)
 	}
 	patches := append([]string{}, in.ConfigPatches...)
 	patches = append(patches, nodeDocument(in, n))
@@ -469,6 +492,16 @@ func nodeDocument(in ClassInputs, n Node) string {
 		},
 		map[string]any{"machine": map[string]any{"certSANs": []string{n.Name + "." + in.DNSZone}}},
 		kubeNode,
+	}
+	if nn := in.NodeNetwork; nn != nil {
+		docs = append(docs, map[string]any{
+			"apiVersion": "v1alpha1",
+			"kind":       "LinkConfig",
+			"name":       nn.Link,
+			"up":         true,
+			"addresses":  []any{map[string]any{"address": fmt.Sprintf("%s/%d", n.Address, nn.PrefixLength)}},
+			"routes":     []any{map[string]any{"gateway": nn.Gateway}},
+		})
 	}
 	parts := make([]string, 0, len(docs))
 	for _, d := range docs {

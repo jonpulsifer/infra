@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,6 +95,44 @@ func TestNodeDocument(t *testing.T) {
 	cp := nodeDocument(in, Node{Name: "optiplex", Disk: "/dev/sda", TPM: "2.0"})
 	if !strings.Contains(cp, "node-role.kubernetes.io/control-plane") || !strings.Contains(cp, "exclude-from-external-load-balancers") {
 		t.Errorf("the control-plane document lacks its deletions:\n%s", cp)
+	}
+}
+
+func TestNodeDocumentStaticAddress(t *testing.T) {
+	in := riptideInputs()["worker-g5"]
+	if strings.Contains(nodeDocument(in, riptide), "LinkConfig") {
+		t.Fatal("a class without node_network got a LinkConfig")
+	}
+	in.NodeNetwork = &NodeNetwork{Link: "net0", PrefixLength: 26, Gateway: "192.0.2.1"}
+	n := riptide
+	n.Address = "192.0.2.12"
+	doc := nodeDocument(in, n)
+	for _, want := range []string{"kind: LinkConfig", "name: net0", "up: true", "- address: 192.0.2.12/26", "- gateway: 192.0.2.1"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("the node document lacks %q:\n%s", want, doc)
+		}
+	}
+	r := &Talosctl{Inputs: map[string]ClassInputs{"worker-g5": in}, decoy: []byte("x")}
+	for _, addr := range []string{"", "2001:db8::1", "not-an-address"} {
+		n.Address = addr
+		if _, err := r.Render(context.Background(), n); err == nil || !strings.Contains(err.Error(), "static network") {
+			t.Errorf("a render with address %q was not refused: %v", addr, err)
+		}
+	}
+}
+
+func TestClassInputsRefuseABadNodeNetwork(t *testing.T) {
+	base := riptideInputs()["worker-g5"]
+	for _, nn := range []NodeNetwork{{PrefixLength: 26, Gateway: "192.0.2.1"}, {Link: "net0", Gateway: "192.0.2.1"}, {Link: "net0", PrefixLength: 26, Gateway: "2001:db8::1"}} {
+		in := base
+		in.NodeNetwork = &nn
+		if err := in.validate(); err == nil {
+			t.Errorf("node_network %+v validated", nn)
+		}
+	}
+	base.NodeNetwork = &NodeNetwork{Link: "net0", PrefixLength: 26, Gateway: "192.0.2.1"}
+	if err := base.validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -258,9 +297,10 @@ func TestRenderParity(t *testing.T) {
 		ConfigPatches     []string `json:"config_patches"`
 	}
 	var facts map[string]struct {
-		Class string `json:"class"`
-		Disk  string `json:"disk"`
-		TPM   string `json:"tpm"`
+		Class   string `json:"class"`
+		Disk    string `json:"disk"`
+		TPM     string `json:"tpm"`
+		Address string `json:"address"`
 	}
 	for path, into := range map[string]any{inputsPath: &moduleInputs, nodesPath: &facts} {
 		raw, err := os.ReadFile(path)
@@ -295,7 +335,7 @@ func TestRenderParity(t *testing.T) {
 			t.Errorf("%s: the inventory has no facts for it", name)
 			continue
 		}
-		got, err := controller.Render(ctx, Node{Name: name, Class: fact.Class, Disk: fact.Disk, TPM: fact.TPM})
+		got, err := controller.Render(ctx, Node{Name: name, Class: fact.Class, Disk: fact.Disk, TPM: fact.TPM, Address: fact.Address})
 		if err != nil {
 			t.Errorf("%s: the controller's render: %v", name, err)
 			continue
@@ -308,6 +348,9 @@ func TestRenderParity(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s: the controller's render differs from the module's:\n--- controller\n%s\n--- module\n%s", name, got, want)
 			continue
+		}
+		if nn := classes[fact.Class].NodeNetwork; nn != nil && !bytes.Contains(got, []byte(fmt.Sprintf("- address: %s/%d\n", fact.Address, nn.PrefixLength))) {
+			t.Errorf("%s: both renders lack its static address %s", name, fact.Address)
 		}
 		if in.MachineType == "controlplane" {
 			controlPlanes++

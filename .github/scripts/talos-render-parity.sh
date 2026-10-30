@@ -110,7 +110,7 @@ fi
 
 # The node facts the controller reads from NetBox, from the inventory export
 # as the root decodes it, beside the module's inputs for the same node.
-console 'base64encode(jsonencode({ for n, m in local.machines : n => { class = m.class, disk = m.disk, tpm = m.tpm } }))' \
+console 'base64encode(jsonencode({ for n, m in local.machines : n => { class = m.class, disk = m.disk, tpm = m.tpm, address = m.address } }))' \
   | decode | jq --slurpfile all "$inputs" 'with_entries(select(.key as $k | $all[0] | has($k)))' >"$work/nodes.json"
 if [[ $(jq '[.[] | select(.class == null)] | length' "$work/nodes.json") -ne 0 ]]; then
   echo "a node of $root has no class in clusters/$site/inventory/machines.yaml" >&2

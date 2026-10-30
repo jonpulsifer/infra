@@ -40,6 +40,18 @@ resource "terraform_data" "install" {
   for_each = var.nodes
 
   input = each.value.install_generation
+
+  lifecycle {
+    # A static address outside the node prefix, or with no resolver, would
+    # cut the node off at its next apply.
+    precondition {
+      condition = !var.static_addresses || (
+        length(var.nameservers) > 0 &&
+        cidrhost("${each.value.address}/${local.node_prefix_length}", 0) == cidrhost(local.topology.K8S_NODE_CIDR, 0)
+      )
+      error_message = "With static_addresses, every node's address must be in K8S_NODE_CIDR and nameservers must name a resolver."
+    }
+  }
 }
 
 # The bootstrap control plane is configured first; talos_cluster bootstraps

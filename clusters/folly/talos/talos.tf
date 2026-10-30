@@ -110,6 +110,7 @@ locals {
     class_patches = [local.ephemeral_patch[class]]
     labels        = {}
     tpm_labels    = module.talos.render_inputs.tpm_labels
+    node_network  = module.talos.render_inputs.node_network
   } }
 }
 
@@ -145,6 +146,15 @@ module "talos" {
   } }
   tpm_nodes       = local.tpm_nodes
   encrypted_nodes = local.encrypted_nodes
+
+  # Every node carries its inventory address statically, so the Kubernetes
+  # network's DHCP holds no reservation for it. The resolvers are the
+  # anchors' DNS VIPs, as that network's DHCP hands out.
+  static_addresses = true
+  nameservers = [
+    module.anchor_topology.data.NS1_IP,
+    module.anchor_topology.data.NS2_IP,
+  ]
 
   cluster_patches      = local.cluster_patches
   controlplane_patches = local.controlplane_patches
